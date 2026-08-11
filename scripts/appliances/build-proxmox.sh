@@ -63,6 +63,36 @@ if grep -aE "ERROR: Installation failed|Auto-installation failed|unable to conti
 fi
 echo "==> installer reported success"
 
+# --------------------------------------------------------------------------
+# Post-install: make the image bootable somewhere OTHER than this build.
+#
+# The installer writes down the address it had HERE as static, and names the
+# NIC it saw HERE — neither is true in the next machine. Found by booting a
+# published image and reading its own console, which announced
+# `https://10.0.2.15:8006/`: the QEMU slirp address, on a libvirt network that
+# has no such subnet. See the spike section of docs/adr/0008.
+# --------------------------------------------------------------------------
+ROOT_PW=${ROOT_PW:-$(grep -oP 'root-password\s*=\s*"\K[^"]+' "$ANSWER" 2>/dev/null || echo delonix-admin)}
+SSH_PORT=${SSH_PORT:-$((22000 + RANDOM % 1000))}
+echo "==> post-install: DHCP, eth0, serial console (ssh on :$SSH_PORT)"
+qemu-system-x86_64 "${ACCEL[@]}" -m "$MEM" -smp 4 \
+  -drive file="$RAW",if=virtio,format=qcow2,cache=unsafe \
+  -netdev "user,id=n0,hostfwd=tcp::$SSH_PORT-:22" -device virtio-net-pci,netdev=n0 \
+  -display none -serial "file:$OUT/$PRODUCT-postinstall.log" &
+QEMU_PID=$!
+# The port accepting is NOT sshd answering: the QEMU hostfwd accepts a
+# connection whether or not anything listens inside. Wait for the banner.
+for _ in $(seq 1 120); do
+  if timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/$SSH_PORT && head -c 3 <&3" 2>/dev/null | grep -q SSH; then break; fi
+  sleep 5
+done
+if ! python3 "$HERE/proxmox_postinstall.py" "$SSH_PORT" "$ROOT_PW"; then
+  echo "!! post-install failed — the image would boot with a static IP from this build"
+  kill $QEMU_PID 2>/dev/null || true
+  exit 1
+fi
+wait $QEMU_PID 2>/dev/null || true
+
 echo "==> compressing"
 rm -f "$FINAL"
 qemu-img convert -O qcow2 -c -o compression_type=zstd "$RAW" "$FINAL"
