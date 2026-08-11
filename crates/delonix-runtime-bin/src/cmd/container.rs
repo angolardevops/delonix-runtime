@@ -2286,8 +2286,14 @@ fn ensure_apparmor(profile: &str) -> Result<()> {
     if profile == "delonix-default" {
         const PROFILE: &str =
             include_str!("../../../delonix-runtime-bin/data/apparmor-delonix-default");
-        let path = std::env::temp_dir().join("delonix-default.aa");
-        std::fs::write(&path, PROFILE)?;
+        // Unique name + O_EXCL + 0600, not a fixed path under a world-writable
+        // `/tmp`: this file is handed to `apparmor_parser`, which loads a KERNEL
+        // security policy from it. Whoever pre-creates the predictable path owns
+        // the file and can rewrite it between our write and that read. Exactly
+        // the class already fixed in `delonix-net::bpf` for the BPF object, and
+        // the reason `write_private_temp` exists.
+        let path =
+            delonix_runtime_core::write_private_temp("delonix-default.aa", PROFILE.as_bytes())?;
         let out = std::process::Command::new("apparmor_parser")
             .arg("-r")
             .arg(&path)
@@ -2296,14 +2302,35 @@ fn ensure_apparmor(profile: &str) -> Result<()> {
                 Error::Invalid(
                     "apparmor_parser unavailable (AppArmor not supported on this host?)".into(),
                 )
-            })?;
+            });
+        let _ = std::fs::remove_file(&path);
+        let out = out?;
         if !out.status.success() {
             return Err(Error::Invalid(format!(
                 "failed to load AppArmor profile: {}",
                 String::from_utf8_lossy(&out.stderr).trim()
             )));
         }
+        return Ok(());
     }
+    // ANY other name used to fall through to `Ok(())`, which meant a container
+    // asked to run under a profile that does not exist started happily and came
+    // out UNCONFINED — measured. A confinement flag that silently does nothing is
+    // worse than no flag: the operator believes the container is confined. Same
+    // fail-closed rule the sibling `--security-opt seccomp=<profile>` already
+    // follows, and what Docker and Podman both do.
+    if !runtime::apparmor_enabled() {
+        return Err(Error::Invalid(super::po::tf(
+            "--apparmor {p}: AppArmor is not enabled on this host, so nothing would confine this \
+             container",
+            &[("p", profile)],
+        )));
+    }
+    // Whether the profile is LOADED cannot be checked here: the kernel's list is
+    // root-only (measured: `Permission denied` for an ordinary user), so a
+    // preflight over it would refuse every profile in rootless — including the
+    // ones that work. The kernel answers at the transition instead, and the
+    // container now refuses to start unconfined (`apply_apparmor`).
     Ok(())
 }
 
@@ -3007,6 +3034,21 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     c.cap_drop = cap_drop;
     // userns: on by default in rootless; `--no-userns` disables it; `--userns`
     // forces it (useful if it ever stops being the default in rootless).
+    //
+    // In ROOTLESS the flag is refused rather than obeyed, and this is not
+    // paternalism: without privileges the user namespace is what GRANTS the
+    // capabilities every other namespace needs, so turning it off cannot produce
+    // a container — it produces `clone failed: EPERM`, which is what this used to
+    // answer (measured). An errno is a true statement about the syscall and a
+    // useless one about the flag the operator typed.
+    if no_userns && rootless {
+        return Err(Error::Invalid(super::po::t(
+            "--no-userns cannot work without privileges: in rootless mode the user namespace is \
+             what grants the privileges the other namespaces need, so disabling it can only fail \
+             with EPERM. Drop the flag, or run the engine as root",
+        )
+        .to_string()));
+    }
     c.userns = (rootless || userns) && !no_userns;
     // `--security-opt seccomp=unconfined` / `apparmor=<profile>` (docker-style).
     let mut apparmor_profile = apparmor;
@@ -4063,11 +4105,30 @@ fn run_supervised(
         loop {
             let started = runtime::create_with(store, c, rootfs, spec);
             if first {
-                // signal the parent: 1 = started, 0 = failed (and the parent returns an error)
+                // Handshake: 1 byte of status, and — when it failed — the REASON
+                // right behind it.
+                //
+                // It used to be the byte alone, and the parent answered "the
+                // container did not start (see the error above)" with nothing
+                // above: `create_with`'s error was computed here and dropped on
+                // the floor. Measured with `run -d --no-userns`, where the
+                // foreground path says `clone failed: EPERM` and the detached one
+                // said nothing at all. The comment below already asserted the
+                // error "still has to reach the user" — it just had no code
+                // making that true.
+                //
+                // Through the PIPE rather than an `eprintln!` here: this is a
+                // forked child whose stderr is about to become /dev/null, and the
+                // parent is the process whose error the caller is reading.
                 let b = [u8::from(started.is_ok())];
-                // SAFETY: writes 1 byte to the write-end and closes it.
+                // SAFETY: writes the status byte, then the reason, then closes.
                 unsafe {
                     libc::write(wr, b.as_ptr() as *const libc::c_void, 1);
+                    if let Err(e) = &started {
+                        let msg = e.to_string();
+                        let bytes = msg.as_bytes();
+                        libc::write(wr, bytes.as_ptr() as *const libc::c_void, bytes.len());
+                    }
                     libc::close(wr);
                     // Only NOW release stdio: until here a `create_with` error
                     // still has to reach the user.
@@ -4134,13 +4195,35 @@ fn run_supervised(
     let mut b = [0u8; 1];
     // SAFETY: reads 1 byte; 0 = EOF (supervisor died before signaling).
     let n = unsafe { libc::read(rd, b.as_mut_ptr() as *mut libc::c_void, 1) };
-    unsafe { libc::close(rd) };
     if n != 1 || b[0] != 1 {
+        // Drain the reason the supervisor sent behind the status byte. Empty
+        // only when it died before it could say anything — and THAT is the one
+        // case where there is genuinely nothing to report but the fact itself.
+        let mut reason = Vec::new();
+        let mut buf = [0u8; 512];
+        loop {
+            // SAFETY: reads into our own buffer until EOF.
+            let k = unsafe { libc::read(rd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+            if k <= 0 {
+                break;
+            }
+            reason.extend_from_slice(&buf[..k as usize]);
+        }
+        unsafe { libc::close(rd) };
+        let reason = String::from_utf8_lossy(&reason).trim().to_string();
         return Err(Error::Runtime {
             context: "supervisor",
-            message: super::po::t("the container did not start (see the error above)").into(),
+            message: if reason.is_empty() {
+                super::po::t(
+                    "the container did not start, and the supervisor died before saying why",
+                )
+                .to_string()
+            } else {
+                reason
+            },
         });
     }
+    unsafe { libc::close(rd) };
     println!("{id}");
     Ok(())
 }

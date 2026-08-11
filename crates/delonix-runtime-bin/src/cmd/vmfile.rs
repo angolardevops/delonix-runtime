@@ -481,6 +481,7 @@ pub(crate) fn build(
     tag: &str,
     compress: bool,
     network: bool,
+    verbose: bool,
 ) -> Result<()> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| Error::Invalid(format!("{}: {e}", path.display())))?;
@@ -499,6 +500,11 @@ pub(crate) fn build(
     // stage, and that absence is the honest answer rather than a guess.
     let base_meta = store.get(&vf.final_stage().from).ok();
 
+    // One live line per step, folded output, and a ✗ that unfolds it — the
+    // shape a CI log has, because a build IS a pipeline and reading it as a
+    // wall of virt-customize output is how a failure hides in plain sight.
+    let mut prog = super::output::Progress::new().with_verbose(verbose);
+
     for (i, stage) in vf.stages.iter().enumerate() {
         let label = stage
             .name
@@ -516,10 +522,15 @@ pub(crate) fn build(
                 ],
             )
         );
+        // OUTSIDE the step below on purpose: resolving the base prints a line
+        // of its own (which base was used, and whether it was already here),
+        // and a spinner rewriting its line underneath another writer produces
+        // neither of the two.
         let base = resolve_base(store, &stage.from, &built)?;
         let disk = work_dir.join(format!("{label}.qcow2"));
         // Flatten: no backing file in the artifact, so the result does not
         // depend on a base still being on this machine later.
+        prog.step(super::po::t("preparing the disk"), "📦");
         super::vmimage::run_tool(
             "qemu-img",
             &[
@@ -536,6 +547,7 @@ pub(crate) fn build(
             // property rather than a step you can misplace.
             super::vmimage::run_tool("qemu-img", &["resize", &disk.to_string_lossy(), size])?;
         }
+        prog.ok();
 
         let ops = stage_ops(stage, context, &built, &work_dir, &label)?;
         if !ops.is_empty() {
@@ -544,7 +556,15 @@ pub(crate) fn build(
                 args.push("--no-network".into());
             }
             let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+            prog.step(
+                &super::po::tf(
+                    "{n} steps inside the guest",
+                    &[("n", &ops.len().to_string())],
+                ),
+                "🔧",
+            );
             super::vmimage::run_tool("virt-customize", &argv)?;
+            prog.ok();
         }
         if let Some(n) = &stage.name {
             built.insert(n.clone(), disk.clone());
@@ -553,7 +573,14 @@ pub(crate) fn build(
     }
 
     let final_disk = last.expect("parse guarantees >= 1 stage");
+    if compress {
+        prog.step(super::po::t("compacting the image"), "🗜");
+    }
     let out = finalize(&work_dir, &final_disk, compress)?;
+    prog.ok();
+    // Closed before the tag goes to stdout: the last step's line must not land
+    // after the one piece of output a script reads.
+    drop(prog);
     let data = std::fs::read(&out)?;
     let digest = format!("sha256:{}", super::vmimage::hex_sha256(&data));
     let size = data.len() as u64;
@@ -788,10 +815,6 @@ fn finalize(work_dir: &std::path::Path, disk: &std::path::Path, compress: bool) 
     if !compress {
         return Ok(disk.to_path_buf());
     }
-    eprintln!(
-        "{}",
-        super::po::t("compacting the image (sparsify + zstd compression)...")
-    );
     if let Err(e) =
         super::vmimage::run_tool("virt-sparsify", &["--in-place", &disk.to_string_lossy()])
     {

@@ -50,6 +50,7 @@ pub mod color {
     pub const YELLOW: &str = "\x1b[33m"; // warning
     pub const RED: &str = "\x1b[31m"; // error
     pub const GRAY: &str = "\x1b[90m"; // secondary (timestamps, details)
+    pub const GREEN: &str = "\x1b[32m"; // a step that finished
     pub const BOLD: &str = "\x1b[1m";
 }
 
@@ -533,6 +534,68 @@ pub struct Progress {
     msg: String,
     icon: String,
     spin: Option<SpinnerHandle>,
+    started: std::time::Instant,
+    verbose: bool,
+}
+
+/// Output of the tools a step runs, held back while the step is running.
+///
+/// A CI log reads as one line per step because the hundreds of lines each step
+/// produces are behind a fold — the answer to "what is it doing, and did it
+/// work" is not in them, right up until the step fails, when it is *only* in
+/// them. This is that fold: [`capture_line`] diverts a tool's output here, and
+/// the step decides whether anyone ever sees it.
+///
+/// Bounded on purpose: a runaway tool must not turn a progress display into a
+/// memory leak, and the tail is the part that explains a failure anyway.
+static CAPTURE: std::sync::Mutex<Option<Vec<String>>> = std::sync::Mutex::new(None);
+const CAPTURE_MAX: usize = 500;
+
+/// Offers a line to the fold. `true` when it was taken (the caller must not
+/// print it), `false` when no step is collecting and the caller owns it —
+/// which is what keeps every command that does NOT use `Progress` printing
+/// exactly as it did before.
+pub fn capture_line(s: &str) -> bool {
+    let mut g = match CAPTURE.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+    match g.as_mut() {
+        Some(v) => {
+            if v.len() == CAPTURE_MAX {
+                v.remove(0);
+            }
+            v.push(s.to_string());
+            true
+        }
+        None => false,
+    }
+}
+
+fn capture_start() {
+    let mut g = match CAPTURE.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+    *g = Some(Vec::new());
+}
+
+fn capture_take() -> Vec<String> {
+    let mut g = match CAPTURE.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+    g.take().unwrap_or_default()
+}
+
+/// `1.2s` / `1m03s` — the shape a CI step timer has.
+pub fn fmt_elapsed(d: std::time::Duration) -> String {
+    let s = d.as_secs();
+    if s >= 60 {
+        format!("{}m{:02}s", s / 60, s % 60)
+    } else {
+        format!("{:.1}s", d.as_secs_f64())
+    }
 }
 
 struct SpinnerHandle {
@@ -552,7 +615,18 @@ impl Progress {
             msg: String::new(),
             icon: String::new(),
             spin: None,
+            started: std::time::Instant::now(),
+            // The escape hatch out of the fold, for the run where the collapsed
+            // line is exactly what you do not want. Also honoured by `--verbose`
+            // where the command has one.
+            verbose: std::env::var("DELONIX_VERBOSE").is_ok_and(|v| v != "0"),
         }
+    }
+
+    /// Streams every step's output instead of folding it away.
+    pub fn with_verbose(mut self, verbose: bool) -> Self {
+        self.verbose = self.verbose || verbose;
+        self
     }
 
     /// Opens a step and starts the spinner (on a TTY). `icon` is the ending emoji.
@@ -560,7 +634,16 @@ impl Progress {
         self.close_line('✗'); // closes a previous step left open
         self.msg = msg.to_string();
         self.icon = icon.to_string();
-        if !self.tty {
+        self.started = std::time::Instant::now();
+        // Verbose keeps the tools' output on screen, and a spinner rewriting
+        // its line underneath a stream of output produces neither.
+        if !self.verbose {
+            capture_start();
+        }
+        if !self.tty || self.verbose {
+            // Without a spinner the step still has to ANNOUNCE itself, or a
+            // minutes-long step is a silent terminal.
+            eprintln!(" {} {msg} {icon}", paint(color::YELLOW, "•"));
             return;
         }
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -573,7 +656,7 @@ impl Progress {
                 // a longer frame). No `\n` — the line is rewritten in-place.
                 eprint!(
                     "\r {} {msg} {icon}\x1b[K",
-                    SPIN_FRAMES[i % SPIN_FRAMES.len()]
+                    paint(color::YELLOW, SPIN_FRAMES[i % SPIN_FRAMES.len()])
                 );
                 let _ = std::io::stderr().flush();
                 i += 1;
@@ -603,11 +686,26 @@ impl Progress {
         } else if self.msg.is_empty() {
             return; // nothing open
         }
-        if self.tty {
+        let folded = capture_take();
+        let took = dim(&fmt_elapsed(self.started.elapsed()));
+        let mark_s = match mark {
+            '✓' => paint(color::GREEN, "✓"),
+            '✗' => paint(color::RED, "✗"),
+            other => other.to_string(),
+        };
+        if self.tty && !self.verbose {
             // `\r` + clear the spinner line, then the final line.
-            eprintln!("\r {mark} {} {}\x1b[K", self.msg, self.icon);
+            eprintln!("\r {mark_s} {} {} {took}\x1b[K", self.msg, self.icon);
         } else if !self.msg.is_empty() {
-            eprintln!(" {mark} {} {}", self.msg, self.icon);
+            eprintln!(" {mark_s} {} {} {took}", self.msg, self.icon);
+        }
+        // A FAILED step always unfolds. Hiding the output of the one thing that
+        // broke is the single case where the fold costs more than it saves —
+        // and it is the case the reader is in when they care at all.
+        if mark == '✗' && !folded.is_empty() {
+            for l in &folded {
+                eprintln!("   {}", dim(l));
+            }
         }
         let _ = had_spinner;
         self.msg.clear();

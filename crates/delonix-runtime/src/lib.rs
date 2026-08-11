@@ -1876,12 +1876,72 @@ pub fn in_userns() -> bool {
 /// Requests the transition to an AppArmor profile on the next `execve`
 /// (`aa_change_onexec`). Best-effort: if AppArmor is not available,
 /// it proceeds without MAC confinement.
-fn apply_apparmor(profile: &str) {
+/// Requests the AppArmor transition for the next `execve`, and says whether the
+/// KERNEL accepted it.
+///
+/// It used to discard both errors, so `--apparmor <name>` with a profile that is
+/// not loaded produced a container that started happily and came out
+/// **unconfined** — measured. A confinement flag that silently does nothing is
+/// worse than no flag, because the operator believes the container is confined.
+///
+/// The check has to be HERE and not in the CLI: the list of loaded profiles
+/// (`/sys/kernel/security/apparmor/profiles`) is not readable without privileges
+/// — measured on this host, `Permission denied` for an ordinary user — so a CLI
+/// preflight based on it would refuse every profile in rootless, including the
+/// valid ones. The kernel is the authority, and this write is where it answers.
+fn apply_apparmor(profile: &str) -> std::result::Result<(), String> {
     let cmd = format!("exec {profile}");
     // Recent kernels: /proc/self/attr/apparmor/exec; old ones: /proc/self/attr/exec.
-    if std::fs::write("/proc/self/attr/apparmor/exec", &cmd).is_err() {
-        let _ = std::fs::write("/proc/self/attr/exec", &cmd);
+    if std::fs::write("/proc/self/attr/apparmor/exec", &cmd).is_ok() {
+        return Ok(());
     }
+    if let Err(e) = std::fs::write("/proc/self/attr/exec", &cmd) {
+        // Two different failures wearing the same errno, and telling them apart
+        // is the difference between a useful message and a wild goose chase.
+        // Measured inside a rootless container: `/proc/self/attr/apparmor/`
+        // contains only `current` — there is no `exec` to write, so no
+        // transition is possible at all, and "is the profile loaded?" would send
+        // the operator looking in the wrong place.
+        let no_path = !std::path::Path::new("/proc/self/attr/apparmor/exec").exists()
+            && !std::path::Path::new("/proc/self/attr/exec").exists();
+        return Err(if no_path {
+            "this namespace does not expose an AppArmor transition file              (/proc/self/attr/[apparmor/]exec) — AppArmor confinement is not available to an              unprivileged container on this kernel"
+                .to_string()
+        } else {
+            format!("the kernel rejected the profile ({e}) — is it loaded?")
+        });
+    }
+    Ok(())
+}
+
+/// Is `profile` actually loaded into the kernel?
+///
+/// `--apparmor <name>` used to be accepted for ANY name: measured, a container
+/// asked to run under a profile that does not exist started happily and came out
+/// `unconfined`. That is worse than not having the flag — a confinement flag
+/// that silently does nothing leaves the operator believing the container is
+/// confined. Docker and Podman both refuse, and this repo already refuses the
+/// sibling case (`--security-opt seccomp=<profile>`).
+///
+/// `unconfined` is always allowed: it is the documented way to ask for NO
+/// profile, and it is not a name to look up.
+pub fn apparmor_profile_loaded(profile: &str) -> bool {
+    if profile == "unconfined" {
+        return true;
+    }
+    let Ok(list) = std::fs::read_to_string("/sys/kernel/security/apparmor/profiles") else {
+        return false; // AppArmor not enabled/readable — nothing can be confined
+    };
+    // Each line is `<name> (<mode>)`; the name can itself contain spaces in a
+    // child profile (`foo//bar`), so split on the LAST ` (`.
+    list.lines()
+        .filter_map(|l| l.rsplit_once(" ("))
+        .any(|(name, _)| name == profile)
+}
+
+/// `true` when AppArmor is enabled on this host at all.
+pub fn apparmor_enabled() -> bool {
+    std::path::Path::new("/sys/kernel/security/apparmor/profiles").exists()
 }
 
 /// `true` if SELinux is the active LSM (mounted at `/sys/fs/selinux`). On hosts
@@ -2444,7 +2504,17 @@ fn container_init(
         }
     }
     if let Some(p) = apparmor {
-        apply_apparmor(p); // MAC confinement (AppArmor) — transitions on the execve
+        // MAC confinement (AppArmor) — transitions on the execve. Fatal: running
+        // unconfined when confinement was asked for is the failure this refuses
+        // to hand over silently. 126 is the same code the confinement check
+        // above uses for "could not be made safe".
+        if let Err(e) = apply_apparmor(p) {
+            eprintln!(
+                "delonix: --apparmor {p}: {e}. The container would run UNCONFINED, so it is not \
+                 being started."
+            );
+            return 126;
+        }
     }
     if let Some(c) = selinux {
         apply_selinux(c); // MAC confinement (SELinux) — only on SELinux hosts
@@ -3326,6 +3396,7 @@ fn try_delegated_base(base: &str, c: &Container, pid: i32, move_self: bool) -> b
             let _ = std::fs::write(format!("{leaf}/io.max"), format!("{dev} {limits}"));
         }
     }
+    warn_unapplied_limits(&leaf, c);
     // 3) Only now does the container enter the leaf.
     if std::fs::write(format!("{leaf}/cgroup.procs"), pid.to_string()).is_err() {
         // Do not leave the empty leaf behind — see `abandon_leaf`.
@@ -3333,6 +3404,43 @@ fn try_delegated_base(base: &str, c: &Container, pid: i32, move_self: bool) -> b
         return false;
     }
     true
+}
+
+/// Says which requested limits did NOT land, and how to make them land.
+///
+/// The three writes above are best-effort by necessity: a controller the parent
+/// cgroup does not delegate simply has no file to write, and no unprivileged
+/// engine — Podman included — can conjure one. What was missing is the operator
+/// finding out. Measured on this host: `--device-read-bps 1mb` returned 0, said
+/// nothing, and left `io.max` not merely unset but ABSENT — a bandwidth cap
+/// somebody put there to protect a node, that does not exist.
+///
+/// A warning and not a refusal, deliberately: the same command line DOES work
+/// under `systemd-run --user --scope -p Delegate=yes` and as root, so refusing
+/// would break the flag on the hosts where it is honoured. It is checked by
+/// looking for the FILE after writing, not by predicting from
+/// `cgroup.controllers` — the controller can be listed and the write still not
+/// take, which is the trap this repo already documented once for delegation.
+fn warn_unapplied_limits(leaf: &str, c: &Container) {
+    let mut missing: Vec<&str> = Vec::new();
+    if c.cpuset.is_some() && !std::path::Path::new(&format!("{leaf}/cpuset.cpus")).exists() {
+        missing.push("--cpuset");
+    }
+    if c.io_weight.is_some() && !std::path::Path::new(&format!("{leaf}/io.weight")).exists() {
+        missing.push("--io-weight");
+    }
+    if c.io_max.is_some() && !std::path::Path::new(&format!("{leaf}/io.max")).exists() {
+        missing.push("--device-read-bps/--device-write-bps/--device-read-iops/--device-write-iops");
+    }
+    if missing.is_empty() {
+        return;
+    }
+    eprintln!(
+        "delonix: warning: {} had no effect — this cgroup does not delegate the controller they \
+         need, so the limit is NOT in place. `delonix system setup` diagnoses it; \
+         `systemd-run --user --scope -p Delegate=yes -- delonix run ...` applies it now.",
+        missing.join(", ")
+    );
 }
 
 /// Removes a leaf this function created but could not use.
@@ -4819,7 +4927,14 @@ pub fn exec_with(
                     };
                     apply_env(&container.name, &exec_env);
                     if let Some(p) = &container.apparmor {
-                        apply_apparmor(p); // same MAC confinement as the init process
+                        // Same MAC confinement as the init process, and equally
+                        // fatal: an `exec` that silently escapes the container's
+                        // profile is a hole in the confinement of a container
+                        // that IS confined.
+                        if let Err(e) = apply_apparmor(p) {
+                            eprintln!("delonix: exec --apparmor {p}: {e}. Not running unconfined.");
+                            std::process::exit(126);
+                        }
                     }
                     // `--user` (CRI `RunAsUser`/`RunAsUserName`): the `exec` runs as the
                     // SAME user as the init process — it is what the CRI conformance

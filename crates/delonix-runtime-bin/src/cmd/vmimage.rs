@@ -724,7 +724,18 @@ pub fn run(action: VmImageCmd) -> Result<()> {
                         &[("flags", &used.join(", "))],
                     ).to_string()));
                 }
-                return super::vmfile::build(&store, &path, &context, &tag, !no_compress, network);
+                // This path (`image vm build -f VMfile`) has no `--verbose` of
+                // its own; `DELONIX_VERBOSE` still unfolds it, which is what
+                // `Progress::new` reads.
+                return super::vmfile::build(
+                    &store,
+                    &path,
+                    &context,
+                    &tag,
+                    !no_compress,
+                    network,
+                    false,
+                );
             }
             if network {
                 return Err(Error::Invalid(super::po::t(
@@ -1150,6 +1161,23 @@ pub(crate) fn download_url_base(store: &VmImageStore, url: &str) -> Result<PathB
 /// Debian only `SHA512SUMS`, Rocky a per-file BSD-format `.CHECKSUM` — and that
 /// knowledge already lives in the three functions below. This is the one place
 /// that picks between them.
+/// The stored VM image a VM's base disk came from, when it is one of ours.
+///
+/// A `Vm` records the base disk it was given, never the image name, so the way
+/// back is to ask each image where its qcow2 lives and compare. Cheap (the
+/// store is a directory of JSON) and it never guesses: a disk given by
+/// `--url-img` or by hand belongs to no image of ours, and `None` says exactly
+/// that instead of picking the closest-looking one.
+pub(crate) fn image_of_disk(disk: &str) -> Option<VmImage> {
+    let store = VmImageStore::open(super::util::state_root()).ok()?;
+    let want = std::path::Path::new(disk);
+    store
+        .list()
+        .ok()?
+        .into_iter()
+        .find(|i| store.qcow2_path(&i.name) == want)
+}
+
 /// The base image DELONIX publishes for a `FROM <distro>:<release>`, when there
 /// is one.
 ///
@@ -3851,21 +3879,51 @@ pub(crate) fn run_tool(bin: &str, args: &[&str]) -> Result<()> {
     // status 1`).
     let mut child = Command::new(bin)
         .args(args)
+        // stdout too, and not for the diagnosis: virt-customize narrates its
+        // work there (`[ 2.1] Running: …`), so leaving it inherited meant every
+        // one of those lines went straight to the terminal THROUGH a step that
+        // was supposed to be holding them. Measured: the spinner line and the
+        // guest's narration fighting over the same row.
+        .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(not_found)?;
+    // Read on its own thread — two pipes read in sequence deadlock as soon as
+    // the one not being read fills its buffer.
+    let out_reader = child.stdout.take().map(|o| {
+        std::thread::spawn(move || {
+            for line in std::io::BufReader::new(o)
+                .lines()
+                .map_while(std::result::Result::ok)
+            {
+                // Outside a step this stays on stdout, exactly where it has
+                // always gone — only the fold changes it.
+                if !super::output::capture_line(&line) {
+                    println!("{line}");
+                }
+            }
+        })
+    });
     let mut tail: std::collections::VecDeque<String> = std::collections::VecDeque::new();
     if let Some(err) = child.stderr.take() {
         for line in std::io::BufReader::new(err)
             .lines()
             .map_while(std::result::Result::ok)
         {
-            eprintln!("{line}");
+            // Offered to the step fold first: inside a `Progress` step the
+            // tool's output belongs behind it, and outside one it prints as it
+            // always did (`capture_line` says which).
+            if !super::output::capture_line(&line) {
+                eprintln!("{line}");
+            }
             if tail.len() == 60 {
                 tail.pop_front();
             }
             tail.push_back(line);
         }
+    }
+    if let Some(t) = out_reader {
+        let _ = t.join();
     }
     let status = child.wait().map_err(|e| Error::Runtime {
         context: "vm build",

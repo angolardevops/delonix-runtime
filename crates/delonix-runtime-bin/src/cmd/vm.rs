@@ -503,6 +503,9 @@ pub enum VmCmd {
         /// produces a different image depending on when it ran.
         #[arg(long)]
         network: bool,
+        /// Show each step's own output instead of folding it behind the step line (a failed step unfolds either way).
+        #[arg(short = 'v', long)]
+        verbose: bool,
     },
     /// Pull a golden VM image from an OCI registry.
     ///
@@ -609,10 +612,9 @@ pub enum VmCmd {
         /// VM name (`vm ls`) or an IP/hostname to go to directly.
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         target: String,
-        /// Login user. Defaults to `delonix` — the account the golden images
-        /// create and the one cloud-init injects `--ssh-key` into.
-        #[arg(short = 'l', long = "user", default_value = "delonix")]
-        user: String,
+        /// Login user. Default: `delonix` on cloud-init images, `root` on appliances (which have no `delonix` account).
+        #[arg(short = 'l', long = "user")]
+        user: Option<String>,
         /// Private key to authenticate with (`ssh -i`).
         #[arg(value_hint = clap::ValueHint::FilePath, short = 'i', long = "identity")]
         identity: Option<PathBuf>,
@@ -1258,17 +1260,33 @@ pub fn run(action: VmCmd) -> Result<()> {
                 "{}",
                 super::po::tf("Creating VM '{name}'…", &[("name", &cfg.name)])
             );
+            // Same live display as `vm build`: a spinner while a stage runs, a
+            // green tick and how long it took when it ends. The engine reports
+            // only that a stage STARTED, so each report closes the previous one
+            // — correct here because a stage that failed never reaches the next
+            // (and the one left open closes with ✗ on the way out, from `Drop`).
+            let prog = std::cell::RefCell::new(super::output::Progress::new());
             let render = |s: delonix_vm::CreateStage| {
                 use delonix_vm::CreateStage::*;
-                let step = match s {
-                    Disk => super::po::t("preparing the overlay disk"),
-                    Network => super::po::t("configuring the network"),
-                    Define => super::po::t("defining the domain"),
-                    Start => super::po::t("starting the VM"),
+                let (step, icon) = match s {
+                    Disk => (super::po::t("preparing the overlay disk"), "💽"),
+                    Network => (super::po::t("configuring the network"), "🌐"),
+                    Define => (super::po::t("defining the domain"), "📋"),
+                    Start => (super::po::t("starting the VM"), "▶"),
                 };
-                eprintln!("  → {step}");
+                let mut p = prog.borrow_mut();
+                p.ok();
+                p.step(step, icon);
             };
-            let vm = match delonix_vm::create_with(&base, &cfg, &render) {
+            let created = delonix_vm::create_with(&base, &cfg, &render);
+            // The last stage has no successor to close it, so it is closed here
+            // — before anything else prints, or the tick lands after the line
+            // that says the VM is up.
+            if created.is_ok() {
+                prog.borrow_mut().ok();
+            }
+            drop(prog);
+            let vm = match created {
                 Ok(vm) => vm,
                 Err(e) => {
                     // Best-effort, and it must never mask the real error: the
@@ -1304,10 +1322,10 @@ pub fn run(action: VmCmd) -> Result<()> {
                     std::time::Duration::from_secs(boot_timeout),
                 );
             }
-            let ip = delonix_vm::status(&base, &vm.name)
-                .ok()
-                .and_then(|v| v.ip.clone());
-            print_vm_next_steps(&vm.name, ip.as_deref(), injected_key);
+            let fresh = delonix_vm::status(&base, &vm.name).ok();
+            let ip = fresh.as_ref().and_then(|v| v.ip.clone());
+            let ssh_user = fresh.as_ref().map(|v| default_ssh_user(v));
+            print_vm_next_steps(&vm.name, ip.as_deref(), injected_key, ssh_user);
             Ok(())
         }
         VmCmd::Build {
@@ -1316,6 +1334,7 @@ pub fn run(action: VmCmd) -> Result<()> {
             context,
             no_compress,
             network,
+            verbose,
         } => {
             // The VMfile path only — this group has no golden-recipe flags, so
             // there is nothing to disambiguate. `-f` absent means
@@ -1331,7 +1350,15 @@ pub fn run(action: VmCmd) -> Result<()> {
                     &[("path", &path.display().to_string())],
                 )));
             }
-            super::vmfile::build(&store, &path, &context, &tag, !no_compress, network)
+            super::vmfile::build(
+                &store,
+                &path,
+                &context,
+                &tag,
+                !no_compress,
+                network,
+                verbose,
+            )
         }
         VmCmd::Pull {
             source,
@@ -1451,7 +1478,13 @@ pub fn run(action: VmCmd) -> Result<()> {
             user,
             identity,
             command,
-        } => cmd_ssh(&base, &target, &user, identity.as_deref(), &command),
+        } => cmd_ssh(
+            &base,
+            &target,
+            user.as_deref(),
+            identity.as_deref(),
+            &command,
+        ),
         VmCmd::Vnc { name } => cmd_vnc(&base, &name),
         VmCmd::Status { name } => {
             // No argument: the reconciled state of ALL (consistent with
@@ -1963,16 +1996,16 @@ fn looks_like_address(s: &str) -> bool {
 fn cmd_ssh(
     base: &std::path::Path,
     target: &str,
-    user: &str,
+    user: Option<&str>,
     identity: Option<&std::path::Path>,
     command: &[String],
 ) -> Result<()> {
     // The store decides, and the address heuristic only breaks the tie when it
     // has nothing — same order as `vm convert`, and for the same reason: a name
     // the user has is worth more than a shape that looks like an address.
-    let host = match delonix_vm::status(base, target) {
+    let (host, vm) = match delonix_vm::status(base, target) {
         Ok(vm) => match vm.ip.as_deref().filter(|s| !s.is_empty()) {
-            Some(ip) => ip.to_string(),
+            Some(ip) => (ip.to_string(), Some(vm)),
             None => {
                 return Err(Error::Invalid(super::po::tf(
                     "VM '{name}' has no IP yet — it is '{status}'. A VM only gets one once it has \
@@ -1982,9 +2015,28 @@ fn cmd_ssh(
                 )));
             }
         },
-        Err(_) if looks_like_address(target) => target.to_string(),
+        Err(_) if looks_like_address(target) => (target.to_string(), None),
         Err(e) => return Err(e),
     };
+    // An explicit `-l` always wins; otherwise the IMAGE decides, because the
+    // answer is a property of the guest and not of this command.
+    let user = match (user, vm.as_ref()) {
+        (Some(u), _) => u.to_string(),
+        (None, Some(vm)) => default_ssh_user(vm).to_string(),
+        (None, None) => GUEST_SSH_USER.to_string(),
+    };
+    // An appliance authenticates with a PASSWORD set when the image was built,
+    // and nothing on this host knows it — so say where it came from instead of
+    // leaving a bare prompt. Reported live: three `Permission denied` for
+    // `delonix@…` against a Proxmox guest that has no `delonix` account at all.
+    if user == "root" && command.is_empty() {
+        eprintln!(
+            "{}",
+            super::po::t(
+                "appliance image: logging in as root with the password set when the image was built (`root-password` in scripts/appliances/answer-*.toml; the published images use `delonix-admin`)"
+            )
+        );
+    }
 
     let mut cmd = std::process::Command::new("ssh");
     if let Some(key) = identity {
@@ -2079,7 +2131,22 @@ fn cmd_vnc(base: &std::path::Path, name: &str) -> Result<()> {
 /// wrong username. Hit while validating `vm create --url-img`.
 const GUEST_SSH_USER: &str = "delonix";
 
-fn print_vm_next_steps(name: &str, ip: Option<&str>, has_key: bool) {
+/// The account to log into a VM as, when the caller did not say.
+///
+/// An appliance is somebody else's operating system: it has `root` and whatever
+/// its installer created, and no `delonix` — nothing here ever ran cloud-init
+/// on it. Defaulting to `delonix` there produces a password prompt for an
+/// account that does not exist, which is indistinguishable from a wrong
+/// password. Reported exactly that way against a Proxmox VE guest: three
+/// `Permission denied` in a row, for a user the image never had.
+fn default_ssh_user(vm: &delonix_runtime_core::Vm) -> &'static str {
+    match super::vmimage::image_of_disk(&vm.disk).and_then(|i| i.cloud_init) {
+        Some(false) => "root",
+        _ => GUEST_SSH_USER,
+    }
+}
+
+fn print_vm_next_steps(name: &str, ip: Option<&str>, has_key: bool, ssh_user: Option<&str>) {
     let mut rows = vec![
         (
             format!("delonix vm console {name}"),
@@ -2098,14 +2165,30 @@ fn print_vm_next_steps(name: &str, ip: Option<&str>, has_key: bool) {
             super::po::t("stop it (keeps the disk)"),
         ),
     ];
+    // Second row, not last: it is what most people want first, and it is the
+    // one piece of the block they cannot derive themselves.
     if has_key {
-        // Second row, not last: it is what most people want first, and it is
-        // the one piece of the block they cannot derive themselves.
         rows.insert(
             1,
             (
-                format!("ssh {GUEST_SSH_USER}@{}", ip.unwrap_or("<ip>")),
+                format!(
+                    "ssh {}@{}",
+                    ssh_user.unwrap_or(GUEST_SSH_USER),
+                    ip.unwrap_or("<ip>")
+                ),
                 super::po::t("log in with the key you injected"),
+            ),
+        );
+    } else if ssh_user == Some("root") {
+        // An appliance gets no injected key, and the row was therefore omitted
+        // entirely — leaving the reader to guess a username (`delonix`, which
+        // does not exist there) and a password. Naming the account is half the
+        // answer; `vm ssh` prints where the password comes from.
+        rows.insert(
+            1,
+            (
+                format!("delonix vm ssh {name} -l root"),
+                super::po::t("log in (appliance: root + the password from the image build)"),
             ),
         );
     }
@@ -2132,8 +2215,8 @@ fn cmd_console(base: &std::path::Path, name: &str, escape: Option<&str>) -> Resu
     eprintln!(
         "{}",
         super::po::tf(
-            "Console of '{name}'. To return to the host: press Ctrl+]  (exit/logout only restarts the session — autologin re-enters).",
-            &[("name", name)],
+            "Console of '{name}'. To return to the host: press Ctrl+{key}  (exit/logout only restarts the session — autologin re-enters).",
+            &[("name", name), ("key", &esc.letter.to_string())],
         )
     );
     let backend = vm.backend.as_str();
@@ -2174,7 +2257,11 @@ fn cmd_console(base: &std::path::Path, name: &str, escape: Option<&str>) -> Resu
             });
         }
         let status = std::process::Command::new("virsh")
-            .args(["-c", &uri, "console", "--force", "--", name])
+            // `-e` is a GLOBAL virsh option, not a `console` one — it has to come
+            // before the subcommand or virsh takes it as the domain's.
+            .args([
+                "-c", &uri, "-e", &esc.spec, "console", "--force", "--", name,
+            ])
             .status()
             .map_err(|e| Error::Runtime {
                 context: "virsh console",
@@ -2197,9 +2284,66 @@ fn cmd_console(base: &std::path::Path, name: &str, escape: Option<&str>) -> Resu
             &[("name", name)],
         )));
     }
-    let r = console_bridge(&sock);
+    let r = console_bridge(&sock, esc.byte);
     eprintln!("{}", super::po::t("Back to the host shell."));
     r
+}
+
+/// The key that detaches a console: the byte a terminal really sends, the
+/// spelling `virsh -e` wants, and the letter to print to a human.
+pub(crate) struct Escape {
+    pub byte: u8,
+    pub spec: String,
+    pub letter: char,
+}
+
+/// Which key detaches the console: `--escape`, then `$DELONIX_CONSOLE_ESCAPE`,
+/// then `^]`.
+///
+/// The default is `^]` because that is what telnet, virsh and every serial
+/// console before them used — but it is NOT typeable on every keyboard, and
+/// that is the reason this is configurable at all. On a Portuguese layout `]`
+/// is `AltGr+9`, and `Ctrl+AltGr+9` does not produce 0x1d: the console opens,
+/// works, and cannot be left except by killing the terminal. Reported exactly
+/// that way. `delonix vm console x -e ^X` (or the env var, once, in a profile)
+/// gives back a key the keyboard can actually press.
+fn resolve_escape(flag: Option<&str>) -> Result<Escape> {
+    let raw = flag
+        .map(str::to_string)
+        .or_else(|| std::env::var("DELONIX_CONSOLE_ESCAPE").ok())
+        .unwrap_or_else(|| "^]".to_string());
+    let byte = escape_byte(&raw).ok_or_else(|| {
+        Error::Invalid(super::po::tf(
+            "invalid console escape '{raw}' — give ONE control key, as `^X` (or `X`)",
+            &[("raw", &raw)],
+        ))
+    })?;
+    // Back to the printable letter from the control byte, so what is announced
+    // is what the user must press whichever of the two forms they wrote.
+    let letter = (byte | 0x40) as char;
+    Ok(Escape {
+        byte,
+        spec: format!("^{letter}"),
+        letter,
+    })
+}
+
+/// `^X`/`X` -> the control byte (`Ctrl` clears the top three bits). `None` for
+/// anything that is not one control key, `^@` included: that byte is NUL, which
+/// no terminal sends for a keypress, and accepting it would silently install an
+/// escape that can never fire.
+pub(crate) fn escape_byte(spec: &str) -> Option<u8> {
+    let s = spec.trim();
+    let c = match (s.len(), s.starts_with('^')) {
+        (1, false) => s.chars().next()?,
+        (2, true) => s.chars().nth(1)?,
+        _ => return None,
+    };
+    if !c.is_ascii() {
+        return None;
+    }
+    let b = (c.to_ascii_uppercase() as u8) & 0x1f;
+    (b != 0).then_some(b)
 }
 
 /// The host pty libvirt wired the domain's serial port to (`/dev/pts/N`).
@@ -2266,7 +2410,7 @@ impl Drop for RawTty {
 
 /// Connects stdin/stdout to the console socket, byte by byte, until `Ctrl-]`
 /// (0x1d) on stdin — the same escape key as `telnet`.
-fn console_bridge(sock: &std::path::Path) -> Result<()> {
+fn console_bridge(sock: &std::path::Path, escape: u8) -> Result<()> {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
     let stream = UnixStream::connect(sock).map_err(|e| Error::Runtime {
@@ -2275,9 +2419,7 @@ fn console_bridge(sock: &std::path::Path) -> Result<()> {
     })?;
     use std::os::unix::io::AsRawFd;
     let _raw = RawTty::enable();
-    eprintln!(
-        "[connected — detach with Ctrl-]; the console returns here when the VM powers off]\r"
-    );
+    eprintln!("[connected — the console returns here when you detach or the VM powers off]\r");
 
     // Bidirectional bridge with `poll()` on a single thread: reacts to stdin AND
     // to the socket, and — the point of the fix — RETURNS to the host when the
@@ -2318,7 +2460,7 @@ fn console_bridge(sock: &std::path::Path) -> Result<()> {
             match std::io::stdin().read(&mut buf) {
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
-                    if buf[..n].contains(&0x1d) {
+                    if buf[..n].contains(&escape) {
                         break;
                     }
                     if wr.write_all(&buf[..n]).is_err() {
