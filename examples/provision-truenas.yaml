@@ -1,0 +1,58 @@
+# Provisioning storage on a TrueNAS appliance from a `kind: Volume` (ADR-0009).
+#
+# The `provision:` block is OPTIONAL. A `kind: Volume` without it behaves
+# exactly as it always has — see `storage.yaml` for the consume-only form.
+#
+# What this makes on the NAS: the dataset, its quota, the owner/mode on its
+# mountpoint, and an NFS export restricted to the networks listed. What delonix
+# mounts afterwards is the SAME path as ever — `server` and `share` are derived
+# from what the appliance reported, never written down twice.
+#
+#   delonix stack apply -f examples/provision-truenas.yaml
+#
+# To DESTROY what was provisioned (irreversible, and on another machine):
+#
+#   delonix volumes rm dados --destroy-remote
+#
+# Without that flag, `volumes rm` removes only the local volume and leaves the
+# dataset alone. And it is refused outright for a volume that merely mounts a
+# share somebody else made — there is no claim of ownership to act on.
+apiVersion: delonix.io/v1
+kind: Secret
+metadata:
+  name: nas-cred
+spec:
+  # For production use `fromEnvFile:` or `delonix secret create` — this is
+  # cleartext in the file, and the apply warns you about it.
+  stringData:
+    password: delonix-admin
+---
+apiVersion: delonix.io/v1
+kind: Volume
+metadata:
+  name: dados
+spec:
+  provision:
+    truenas:
+      url: https://192.168.122.83
+      # Preferred: `apiKeySecret: <name>`, with the key under `apiKey`. An API
+      # key is revocable on the appliance without touching any account.
+      username: truenas_admin
+      passwordSecret: nas-cred
+      # A stock TrueNAS serves a certificate this host cannot verify.
+      insecureTLS: true
+      dataset: tank/dados
+      # Minimum 1 GiB — that is what the appliance enforces, and anything below
+      # it is refused with a sentence rather than silently rounded up.
+      quota: 2G
+      owner:
+        uid: 1000
+        gid: 1000
+        mode: "0770"      # quoted: a bare 0770 in YAML is the decimal 770
+      share:
+        # Required and non-empty: the NAS reads an empty list as "any network
+        # may mount this". Drop the whole `share:` block to provision the
+        # dataset without exporting it at all.
+        networks: ["192.168.122.0/24"]
+        maprootUser: root
+        maprootGroup: root
