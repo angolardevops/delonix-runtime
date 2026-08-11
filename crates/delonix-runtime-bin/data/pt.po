@@ -8053,3 +8053,91 @@ msgstr "repor o estado (recusa enquanto houver um container ou VM a correr)"
 
 msgid "restore anyway, accepting that the running workloads lose their registry"
 msgstr "repor à mesma, aceitando que os workloads a correr percam o registo"
+
+# --- prune por-recurso: container/image/volumes ---
+msgid "Remove every stopped container and the rootfs debris they left behind."
+msgstr "Remove todos os containers parados e o lixo de rootfs que deixaram para trás."
+
+msgid "Remove every stopped container and the rootfs debris they left behind.\n\nAlso sweeps what no `rm` will ever reach: **orphan rootfs directories** (containers killed by SIGKILL/crash with no registry entry left), empty cgroups, orphan ingress refs and host ports held by processes that are already gone. Images and volumes are untouched — see `image prune` and `volumes prune`."
+msgstr "Remove todos os containers parados e o lixo de rootfs que deixaram para trás.\n\nVarre também o que nenhum `rm` alcança: **directórios de rootfs órfãos** (containers mortos por SIGKILL/crash sem entrada no registo), cgroups vazios, refs de ingress órfãs e portas do host seguras por processos que já morreram. Imagens e volumes ficam intocados — ver `image prune` e `volumes prune`."
+
+msgid "Remove unused images and the CAS blobs nobody references any more."
+msgstr "Remove imagens sem uso e os blobs do CAS que já ninguém referencia."
+
+msgid "Remove unused images and the CAS blobs nobody references any more.\n\nBy default only the DANGLING ones (no tag); `--all` also drops tagged images that no container uses. Containers and volumes are untouched — see `container prune` and `volumes prune`."
+msgstr "Remove imagens sem uso e os blobs do CAS que já ninguém referencia.\n\nPor omissão só as PENDURADAS (sem tag); com `--all` remove também imagens com tag que nenhum container usa. Containers e volumes ficam intocados — ver `container prune` e `volumes prune`."
+
+msgid "DESTROY every local volume that nothing references."
+msgstr "DESTRÓI todos os volumes locais que ninguém referencia."
+
+msgid "DESTROY every local volume that nothing references.\n\n**This deletes data.** It only takes a volume that is unreferenced by any container (running OR stopped), is not a share carved out of another volume, was not provisioned on a remote NAS, and uses the `local` driver. Anything else is kept and the reason is printed — a prune that silently skips is worse than one that refuses."
+msgstr "DESTRÓI todos os volumes locais que ninguém referencia.\n\n**Isto apaga dados.** Só leva um volume que nenhum container referencie (a correr OU parado), que não seja uma partilha recortada de outro volume, que não tenha sido provisionado numa NAS remota, e que use o driver `local`. Tudo o resto fica, e a razão é impressa — um prune que salta em silêncio é pior que um que recusa."
+
+msgid "remove every stopped container, and the rootfs debris no `rm` ever reaches"
+msgstr "remove todos os containers parados, e o lixo de rootfs que nenhum `rm` alcança"
+
+msgid "drop the dangling images and the blobs nobody references"
+msgstr "deita fora as imagens penduradas e os blobs que ninguém referencia"
+
+msgid "also drop tagged images no container uses"
+msgstr "deita fora também as imagens com tag que nenhum container usa"
+
+msgid "DESTROY every local volume nothing references — the data does not come back"
+msgstr "DESTRÓI todos os volumes locais que ninguém referencia — os dados não voltam"
+
+msgid "`container prune` removes every stopped container — pass --force to confirm when not on a terminal"
+msgstr "`container prune` remove todos os containers parados — passa --force para confirmar fora de um terminal"
+
+msgid "Also removes orphan rootfs directories, empty cgroups and stale host ports. Continue? [y/N]"
+msgstr "Remove também directórios de rootfs órfãos, cgroups vazios e portas do host presas. Continuar? [s/N]"
+
+msgid "removed: {c} container(s), {d} orphan dir(s), {g} cgroup(s), {p} orphan port(s) — {size} freed"
+msgstr "removidos: {c} container(s), {d} directório(s) órfão(s), {g} cgroup(s), {p} porta(s) órfã(s) — {size} libertados"
+
+msgid "`image prune` removes unused images and unreferenced blobs — pass --force to confirm when not on a terminal"
+msgstr "`image prune` remove imagens sem uso e blobs não referenciados — passa --force para confirmar fora de um terminal"
+
+msgid "With --all this ALSO removes TAGGED images that no container uses."
+msgstr "Com --all remove TAMBÉM imagens COM TAG que nenhum container usa."
+
+msgid "Removes unused images and the CAS blobs nobody references. Continue? [y/N]"
+msgstr "Remove imagens sem uso e os blobs do CAS que ninguém referencia. Continuar? [s/N]"
+
+msgid "removed: {i} image(s), {b} blob(s) — {size} freed"
+msgstr "removidas: {i} imagem(ns), {b} blob(s) — {size} libertados"
+
+msgid "`volumes prune` DESTROYS the data of every unreferenced volume — pass --force to confirm when not on a terminal"
+msgstr "`volumes prune` DESTRÓI os dados de todos os volumes sem referências — passa --force para confirmar fora de um terminal"
+
+msgid "This will DESTROY the data of {n} volume(s): {list}"
+msgstr "Isto vai DESTRUIR os dados de {n} volume(s): {list}"
+
+msgid "The data cannot be recovered afterwards. Continue? [y/N]"
+msgstr "Os dados não se recuperam depois. Continuar? [s/N]"
+
+msgid "no unreferenced volume to remove"
+msgstr "nenhum volume sem referências para remover"
+
+msgid "kept {name}: {reason}"
+msgstr "mantido {name}: {reason}"
+
+msgid "a share carved out of volume '{parent}' — remove the parent, or use `volumes rm`"
+msgstr "é uma partilha recortada do volume '{parent}' — remove o pai, ou usa `volumes rm`"
+
+msgid "provisioned on a remote NAS — use `volumes rm [--destroy-remote]` so the dataset is not left orphaned"
+msgstr "provisionado numa NAS remota — usa `volumes rm [--destroy-remote]` para o dataset não ficar órfão"
+
+msgid "network driver '{driver}' — declared infrastructure, remove it with `volumes rm`"
+msgstr "driver de rede '{driver}' — infraestrutura declarada, remove-o com `volumes rm`"
+
+msgid "volume '{name}' could not be removed: {err}"
+msgstr "não foi possível remover o volume '{name}': {err}"
+
+msgid "removed: {v} volume(s) — {size} freed"
+msgstr "removidos: {v} volume(s) — {size} libertados"
+
+msgid "part of the tree was unreadable from outside the user namespace (rootless subuid): the freed figure is a lower bound"
+msgstr "parte da árvore era ilegível de fora do user namespace (subuid rootless): o valor libertado é um limite inferior"
+
+msgid "its tree holds the share volume(s) {list} — remove those first"
+msgstr "a sua árvore contém a(s) partilha(s) {list} — remove essas primeiro"

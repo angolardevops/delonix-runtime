@@ -171,6 +171,7 @@ Commands:
   load       Load an image from an archive (the counterpart of `save`)
   save       Save an image to a portable archive (`docker save`&#x27;s counterpart)
   apply      Apply the `kind: Image` documents of a manifest
+  prune      Remove unused images and the CAS blobs nobody references any more
   dash       Dashboard (KPIs + table) of images — interactive TUI, or `--once` snapshot
   build      (only with `--vm`) Build a VM image
   convert    Convert a VM disk to the format another ecosystem imports (only with `--vm`)
@@ -196,6 +197,7 @@ COMMAND MAP:
   Configure    tag · login · logout
   Storage      export · save · load
   Declarative  apply
+  Maintenance  prune
   Dashboards   dash
   Advanced     ls-remote · vm · import · convert · init · build
 

@@ -1638,6 +1638,18 @@ pub enum ContainerCmd {
         #[arg(short, long)]
         force: bool,
     },
+    /// Remove every stopped container and the rootfs debris they left behind.
+    ///
+    /// Also sweeps what no `rm` will ever reach: **orphan rootfs directories**
+    /// (containers killed by SIGKILL/crash with no registry entry left), empty
+    /// cgroups, orphan ingress refs and host ports held by processes that are
+    /// already gone. Images and volumes are untouched — see `image prune` and
+    /// `volumes prune`.
+    Prune {
+        /// Skip the confirmation prompt (REQUIRED when stdin is not a terminal).
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
     /// Suspend a container's processes (cgroup v2 freezer).
     ///
     /// The state stays in memory, unlike `stop`. Resume with `unpause`.
@@ -2029,6 +2041,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
         ContainerCmd::Rm { ids, force } => {
             for_each_id(&ids, |id| cmd_rm(&images, &store, id, force))
         }
+        ContainerCmd::Prune { force } => cmd_prune(&images, &store, force),
         ContainerCmd::Exec {
             interactive,
             tty,
@@ -4970,6 +4983,77 @@ fn purge_container_dir(images: &ImageStore, id: &str) {
             &[("path", &path.display().to_string())],
         ));
     }
+}
+
+/// `container prune` — the container half of `system prune`, on its own.
+///
+/// It exists because the global prune was all-or-nothing: an operator who only
+/// wanted the stopped containers gone also had every unused image and CAS blob
+/// swept out from under them, with no way to say no to that half. The sweep
+/// itself is not reimplemented here — it is the same `prune::sweep_containers`
+/// that `system prune` calls, so the two can never disagree about what a
+/// stopped container leaves behind.
+fn cmd_prune(images: &ImageStore, store: &Store, force: bool) -> Result<()> {
+    let doomed = super::prune::doomed_containers(store)?;
+    let preview = (!doomed.is_empty()).then(|| {
+        super::po::tf(
+            "This will remove {n} stopped container(s): {list}",
+            &[
+                ("n", &doomed.len().to_string()),
+                ("list", &doomed.join(", ")),
+            ],
+        )
+    });
+    if !super::prune::confirm(
+        force,
+        super::po::t(
+            "`container prune` removes every stopped container — pass --force to confirm when not \
+             on a terminal",
+        ),
+        preview,
+        super::po::t(
+            "Also removes orphan rootfs directories, empty cgroups and stale host ports. Continue? \
+             [y/N]",
+        ),
+    )? {
+        return Ok(());
+    }
+
+    let c = super::prune::sweep_containers(images, store)?;
+    if c.slirps > 0 {
+        println!(
+            "{}",
+            super::po::tf(
+                "net: {n} orphan slirp(s) reaped",
+                &[("n", &c.slirps.to_string())]
+            )
+        );
+    }
+    if c.refs > 0 {
+        println!(
+            "{}",
+            super::po::tf(
+                "net: {n} orphan ingress ref(s) reaped",
+                &[("n", &c.refs.to_string())]
+            )
+        );
+    }
+    println!(
+        "{}",
+        super::po::tf(
+            "removed: {c} container(s), {d} orphan dir(s), {g} cgroup(s), {p} orphan port(s) — \
+             {size} freed",
+            &[
+                ("c", &c.containers.to_string()),
+                ("d", &c.dirs.to_string()),
+                ("g", &c.cgroups.to_string()),
+                ("p", &c.ports.to_string()),
+                ("size", &c.freed.fmt()),
+            ]
+        )
+    );
+    super::prune::note_partial(c.freed);
+    Ok(())
 }
 
 pub(crate) fn cmd_rm(images: &ImageStore, store: &Store, id: &str, force: bool) -> Result<()> {

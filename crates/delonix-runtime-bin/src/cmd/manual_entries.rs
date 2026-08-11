@@ -236,6 +236,15 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["container stop", "container ps", "volumes rm"],
     },
     Entry {
+        path: "container prune",
+        group: "Maintenance",
+        examples: &[
+            ("remove every stopped container, and the rootfs debris no `rm` ever reaches", "delonix container prune"),
+            ("in CI, where there is no terminal to confirm at", "delonix container prune -f"),
+        ],
+        see_also: &["container rm", "container ps", "image prune", "system prune"],
+    },
+    Entry {
         path: "container run",
         group: "Lifecycle",
         examples: &[
@@ -503,6 +512,15 @@ pub static ENTRIES: &[Entry] = &[
             ("remove it even though a container still references it", "delonix image rm -f odoo:16"),
         ],
         see_also: &["image ls", "container rm", "system prune"],
+    },
+    Entry {
+        path: "image prune",
+        group: "Maintenance",
+        examples: &[
+            ("drop the dangling images and the blobs nobody references", "delonix image prune"),
+            ("also drop tagged images no container uses", "delonix image prune -a -f"),
+        ],
+        see_also: &["image rm", "image ls", "container prune", "system prune"],
     },
     Entry {
         path: "image describe",
@@ -2103,6 +2121,15 @@ pub static ENTRIES: &[Entry] = &[
             ("force it past a live reference — this DESTROYS the data of whatever still uses it", "delonix volumes rm -f pgdata"),
         ],
         see_also: &["volumes ls", "volumes snapshot create", "container rm", "sharevolume rm"],
+    },
+    Entry {
+        path: "volumes prune",
+        group: "Maintenance",
+        examples: &[
+            ("DESTROY every local volume nothing references — the data does not come back", "delonix volumes prune"),
+            ("in CI, where there is no terminal to confirm at", "delonix volumes prune -f"),
+        ],
+        see_also: &["volumes rm", "volumes ls", "volumes snapshot create", "system prune"],
     },
     Entry {
         path: "volumes describe",
