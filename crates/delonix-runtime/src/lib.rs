@@ -1421,6 +1421,29 @@ fn setup_rootfs(
         bind_devices("", rootfs, devices); // --device (host's real nodes)
     }
     // Volumes and bind mounts: injected BEFORE pivot_root, over the rootfs.
+    //
+    // A source that does not exist is reported BY NAME, and all of them at
+    // once, before anything is mounted.
+    //
+    // Found in production: a container with five bind mounts stopped starting
+    // and said only `failed to prepare the rootfs: ENOENT: No such file or
+    // directory`. The cause was one `-v` whose host path had been removed (a
+    // git worktree), and the only way to learn WHICH was to read the JSON
+    // record by hand — for a condition the engine already knows. `bind_volume`
+    // returns a bare errno and has no room to say more, so the check belongs
+    // here, before the loop.
+    let missing: Vec<&str> = mounts
+        .iter()
+        .filter(|m| !m.source.is_empty() && !std::path::Path::new(&m.source).exists())
+        .map(|m| m.source.as_str())
+        .collect();
+    if !missing.is_empty() {
+        eprintln!(
+            "delonix: these bind-mount sources no longer exist on the host:\n  {}",
+            missing.join("\n  ")
+        );
+        return Err(nix::errno::Errno::ENOENT);
+    }
     for m in mounts {
         bind_volume(rootfs, m)?;
     }
@@ -6245,5 +6268,51 @@ mod tests {
         // Ilegível/vazio: mantém a resposta histórica, para um ambiente
         // inesperado não trocar de modo de execução em silêncio.
         assert!(super_::initial_uid_map(""));
+    }
+
+    #[test]
+    fn uma_origem_de_bind_que_desapareceu_e_nomeada() {
+        // Reproduz o caso que apareceu num host real: um container com varios
+        // bind mounts deixou de arrancar e o motor disse apenas
+        // `failed to prepare the rootfs: ENOENT` — para uma condicao que ele
+        // sabe. A logica e a mesma do preflight de `setup_rootfs`.
+        let existe = std::env::temp_dir();
+        let ausente = existe.join(format!("dlx-nao-existe-{}", std::process::id()));
+        assert!(!ausente.exists(), "a premissa do teste");
+
+        let mounts = [
+            Mount {
+                source: existe.to_string_lossy().into_owned(),
+                target: "/a".into(),
+                readonly: false,
+                propagation: None,
+            },
+            Mount {
+                source: ausente.to_string_lossy().into_owned(),
+                target: "/b".into(),
+                readonly: true,
+                propagation: None,
+            },
+        ];
+        let missing: Vec<&str> = mounts
+            .iter()
+            .filter(|m| !m.source.is_empty() && !std::path::Path::new(&m.source).exists())
+            .map(|m| m.source.as_str())
+            .collect();
+        assert_eq!(missing.len(), 1, "so o ausente conta");
+        assert!(missing[0].contains("dlx-nao-existe"));
+
+        // Uma origem VAZIA nao e um caminho em falta — ha mounts sintetizados
+        // sem source, e trata-los como ausentes recusaria containers validos.
+        let vazio = [Mount {
+            source: String::new(),
+            target: "/c".into(),
+            readonly: false,
+            propagation: None,
+        }];
+        assert!(vazio
+            .iter()
+            .find(|m| !m.source.is_empty() && !std::path::Path::new(&m.source).exists())
+            .is_none());
     }
 }
