@@ -23,6 +23,13 @@
 //! concludes the exact opposite of the truth. [`Client::wait_task`] reads the
 //! right field, and [`task_verdict`] is a pure function with a test for it.
 //!
+//! The lifecycle is implemented and was watched running: `boot` creates the VM
+//! on the node and starts it, `is_running` reads its state, and `stop` stops
+//! AND destroys it — the same meaning libvirt gives it here, since a VM left
+//! behind on a node after `delonix vm rm` is an orphan nobody is looking for.
+//! See `tests/live.rs`, which is skipped with an audible line when no node is
+//! configured.
+//!
 //! # Two things this backend deliberately does NOT do
 //!
 //! * **It never touches a local disk.** `manages_own_storage()` is `true`, so
@@ -221,6 +228,116 @@ impl Client {
         self.send(self.http.post(self.url(path)).form(form), authed)
     }
 
+    /// The next free VM id on the CLUSTER.
+    ///
+    /// `/cluster/nextid` is the node's own answer, and asking is the only
+    /// correct way: ids are cluster-wide, and picking one locally races with
+    /// anything else creating a VM. It can still be taken between the answer
+    /// and the create — Proxmox rejects that with a clear "already exists",
+    /// which is the right failure and not one to paper over with a retry that
+    /// might land on somebody else's id.
+    pub fn next_vmid(&self) -> Result<u32> {
+        let body = self.get("/cluster/nextid")?;
+        let w: Wrapped<serde_json::Value> = parse(&body, "/cluster/nextid")?;
+        w.data
+            .as_str()
+            .and_then(|s| s.parse().ok())
+            .or_else(|| w.data.as_u64().map(|n| n as u32))
+            .ok_or_else(|| {
+                Error::Invalid(format!(
+                    "proxmox: could not read a VM id from /cluster/nextid: {}",
+                    w.data
+                ))
+            })
+    }
+
+    /// Creates a VM with a fresh disk on `storage`.
+    pub fn create_vm(
+        &self,
+        vmid: u32,
+        name: &str,
+        cfg: &VmConfig,
+        storage: &str,
+        gib: u32,
+    ) -> Result<()> {
+        let mem = mem_mib(&cfg.memory).to_string();
+        let cores = cfg.vcpus.max(1).to_string();
+        let scsi0 = format!("{storage}:{gib}");
+        let vmid_s = vmid.to_string();
+        let body = self.post_form(
+            &format!("/nodes/{}/qemu", self.node),
+            &[
+                ("vmid", vmid_s.as_str()),
+                ("name", name),
+                ("memory", mem.as_str()),
+                ("cores", cores.as_str()),
+                ("ostype", "l26"),
+                ("scsihw", "virtio-scsi-single"),
+                ("scsi0", scsi0.as_str()),
+                // A NIC on the node's default bridge. `virtio` alone is the
+                // model; the shape `model=virtio` is REFUSED by the API
+                // ("value 'model' does not have a value in the enumeration"),
+                // measured during the spike.
+                ("net0", "virtio,bridge=vmbr0"),
+            ],
+            true,
+        )?;
+        self.wait_upid(&body, "create")
+    }
+
+    /// Clones a template into a new VM.
+    pub fn clone_template(&self, template: u32, vmid: u32, name: &str) -> Result<()> {
+        let newid = vmid.to_string();
+        let body = self.post_form(
+            &format!("/nodes/{}/qemu/{template}/clone", self.node),
+            &[("newid", newid.as_str()), ("name", name), ("full", "1")],
+            true,
+        )?;
+        self.wait_upid(&body, "clone")
+    }
+
+    pub fn start(&self, vmid: u32) -> Result<()> {
+        let body = self.post_form(
+            &format!("/nodes/{}/qemu/{vmid}/status/start", self.node),
+            &[],
+            true,
+        )?;
+        self.wait_upid(&body, "start")
+    }
+
+    pub fn stop(&self, vmid: u32) -> Result<()> {
+        let body = self.post_form(
+            &format!("/nodes/{}/qemu/{vmid}/status/stop", self.node),
+            &[],
+            true,
+        )?;
+        self.wait_upid(&body, "stop")
+    }
+
+    pub fn destroy(&self, vmid: u32) -> Result<()> {
+        let body = self.send(
+            self.http
+                .delete(self.url(&format!("/nodes/{}/qemu/{vmid}", self.node))),
+            true,
+        )?;
+        self.wait_upid(&body, "destroy")
+    }
+
+    /// Reads the UPID out of a response and waits for that task.
+    ///
+    /// Every one of these endpoints answers with a task id and not a result —
+    /// returning here would report a VM created before anything exists.
+    fn wait_upid(&self, body: &str, what: &str) -> Result<()> {
+        let w: Wrapped<serde_json::Value> = parse(body, what)?;
+        let upid = w.data.as_str().ok_or_else(|| {
+            Error::Invalid(format!(
+                "proxmox: {what} did not answer with a task id: {}",
+                truncate_chars(body, 200)
+            ))
+        })?;
+        self.wait_task(upid)
+    }
+
     /// Waits for a Proxmox task (`UPID:…`) to finish, and reports ITS verdict.
     ///
     /// Returning when the POST succeeds would report a VM created before
@@ -344,6 +461,64 @@ pub fn validate_node_name(node: &str) -> Result<()> {
     }
 }
 
+/// What `cfg.disk` names on the far side.
+#[derive(Debug, PartialEq)]
+enum DiskSpec {
+    /// `template:<vmid>` — clone this template.
+    Template(u32),
+    /// `<storage>:<gib>` — a fresh empty disk.
+    New { storage: String, gib: u32 },
+}
+
+/// Parses `cfg.disk` for the Proxmox backend.
+///
+/// Refused rather than guessed. The likeliest mistake is a LOCAL path — the
+/// habit every other backend teaches — and it means nothing on a node
+/// elsewhere; silently treating it as a storage name would create a VM with a
+/// disk somewhere nobody asked for.
+fn parse_disk_spec(disk: &str) -> Result<DiskSpec> {
+    let bad = || {
+        Error::Invalid(format!(
+            "proxmox: '{disk}' does not name anything on the node — use `template:<vmid>` to              clone a template, or `<storage>:<size-in-GiB>` for a fresh disk (e.g. `local-lvm:8`).              A local path has no meaning on a remote node"
+        ))
+    };
+    let (head, tail) = disk.split_once(':').ok_or_else(bad)?;
+    if disk.contains('/') {
+        return Err(bad());
+    }
+    if head == "template" {
+        return tail.parse().map(DiskSpec::Template).map_err(|_| bad());
+    }
+    let gib: u32 = tail.parse().map_err(|_| bad())?;
+    if head.is_empty() || gib == 0 {
+        return Err(bad());
+    }
+    Ok(DiskSpec::New {
+        storage: head.to_string(),
+        gib,
+    })
+}
+
+/// The vmid out of the handle `boot` stored (`proxmox:<node>:<vmid>`). Pure, so
+/// the "not ours" case is testable without a node.
+fn vmid_from_handle(handle: &str) -> Option<u32> {
+    handle
+        .strip_prefix("proxmox:")
+        .and_then(|r| r.rsplit_once(':'))
+        .and_then(|(_, id)| id.parse().ok())
+}
+
+/// `"2G"`/`"512M"`/`"2048"` → MiB. Proxmox takes memory in MiB.
+fn mem_mib(memory: &str) -> u64 {
+    let t = memory.trim();
+    let (num, mult) = match t.chars().last() {
+        Some('G') | Some('g') => (&t[..t.len() - 1], 1024),
+        Some('M') | Some('m') => (&t[..t.len() - 1], 1),
+        _ => (t, 1),
+    };
+    num.trim().parse::<u64>().unwrap_or(1024) * mult
+}
+
 // ===========================================================================
 // The backend
 // ===========================================================================
@@ -353,6 +528,22 @@ impl ProxmoxBackend {
         Ok(Self {
             client: Client::connect(target)?,
         })
+    }
+
+    /// The node-side id of a VM this backend created, out of the handle `boot`
+    /// stored (`proxmox:<node>:<vmid>`).
+    ///
+    /// NOT the name: two VMs on a node may share one, and every `qm` call takes
+    /// the id. A record without the handle was not created by this backend —
+    /// saying so beats guessing an id.
+    fn vmid_of(&self, vm: &Vm) -> Result<u32> {
+        vmid_from_handle(&vm.api_socket)
+            .ok_or_else(|| {
+                Error::Invalid(format!(
+                    "VM '{}' has no Proxmox handle in its record (found {:?}) — it was not                      created by this backend",
+                    vm.name, vm.api_socket
+                ))
+            })
     }
 }
 
@@ -377,25 +568,56 @@ impl VmBackend for ProxmoxBackend {
         false
     }
 
+    /// Creates the VM on the node and starts it.
+    ///
+    /// `disk` is `cfg.disk` verbatim (see `manages_own_storage`) and names
+    /// something on the FAR side, in one of two forms:
+    ///
+    /// * **`template:<vmid>`** — clone that template. This is the Proxmox way
+    ///   of getting a VM with an OS in it, and the one to reach for.
+    /// * **`<storage>:<size-in-GiB>`** — a fresh empty disk (`local-lvm:8`).
+    ///   Useful for a VM that will boot from something else, and it is what
+    ///   makes the lifecycle testable without a template on the node.
+    ///
+    /// Refused rather than guessed: anything else fails naming both forms. A
+    /// local path is the most likely mistake, and it has no meaning here.
     fn boot(
         &self,
         _vmdir: &Path,
-        _cfg: &VmConfig,
-        _disk: &str,
-        _on: &dyn Fn(CreateStage),
+        cfg: &VmConfig,
+        disk: &str,
+        on: &dyn Fn(CreateStage),
     ) -> Result<Boot> {
-        Err(Error::Invalid(
-            "the Proxmox backend cannot create VMs yet — `boot` is not implemented. The API \
-             lifecycle is proven (ADR-0008) but the create path has not been written or \
-             validated, and this engine does not ship a backend it has not watched boot a VM"
-                .into(),
-        ))
+        let vmid = self.client.next_vmid()?;
+        on(CreateStage::Define);
+        match parse_disk_spec(disk)? {
+            DiskSpec::Template(src) => self.client.clone_template(src, vmid, &cfg.name)?,
+            DiskSpec::New { storage, gib } => {
+                self.client.create_vm(vmid, &cfg.name, cfg, &storage, gib)?
+            }
+        }
+        on(CreateStage::Start);
+        self.client.start(vmid)?;
+        // The vmid is what every later call addresses, and the name is not: two
+        // VMs on a node may share a name, and `qm` takes the id. It goes in
+        // `api_socket`, the field a backend uses for its own handle — the
+        // alternative was inventing a field on `Vm` for one backend.
+        Ok(Boot {
+            pid: None,
+            tap: String::new(),
+            mac: String::new(),
+            api_socket: format!("proxmox:{}:{vmid}", self.client.node),
+            ip: None,
+        })
     }
 
     fn is_running(&self, vm: &Vm) -> bool {
+        let Ok(vmid) = self.vmid_of(vm) else {
+            return false;
+        };
         let Ok(body) = self.client.get(&format!(
-            "/nodes/{}/qemu/{}/status/current",
-            self.client.node, vm.name
+            "/nodes/{}/qemu/{vmid}/status/current",
+            self.client.node
         )) else {
             return false;
         };
@@ -418,10 +640,19 @@ impl VmBackend for ProxmoxBackend {
         None
     }
 
-    fn stop(&self, _vmdir: &Path, _vm: &Vm) -> Result<()> {
-        Err(Error::Invalid(
-            "the Proxmox backend cannot stop VMs yet — it cannot create them either".into(),
-        ))
+    /// Stops the VM and removes it from the node.
+    ///
+    /// Both halves, because that is what `stop` means for every other backend
+    /// here: libvirt undefines the domain so nothing is left behind, and a VM
+    /// left `stopped` on a Proxmox node after `delonix vm rm` would be an
+    /// orphan nobody is looking for. The order matters — a running VM cannot be
+    /// destroyed, and asking anyway gets a task failure that reads like a bug.
+    fn stop(&self, _vmdir: &Path, vm: &Vm) -> Result<()> {
+        let vmid = self.vmid_of(vm)?;
+        if self.is_running(vm) {
+            self.client.stop(vmid)?;
+        }
+        self.client.destroy(vmid)
     }
 }
 
@@ -527,5 +758,69 @@ mod tests {
         let body = format!("{}é", "A".repeat(399));
         assert_eq!(truncate_chars(&body, 400).len(), 399);
         assert_eq!(truncate_chars("olá", 4000), "olá");
+    }
+
+    #[test]
+    fn o_disco_de_um_no_remoto_nao_e_um_caminho_local() {
+        assert_eq!(
+            parse_disk_spec("template:9000").unwrap(),
+            DiskSpec::Template(9000)
+        );
+        assert_eq!(
+            parse_disk_spec("local-lvm:8").unwrap(),
+            DiskSpec::New {
+                storage: "local-lvm".into(),
+                gib: 8
+            }
+        );
+        // The likeliest mistake: a local path, which every other backend takes
+        // and which means nothing on a node elsewhere. Treating it as a storage
+        // name would create a disk somewhere nobody asked for.
+        for bad in [
+            "/var/lib/delonix/vm-images/x.qcow2",
+            "./x.qcow2",
+            "local-lvm:/tmp/x",
+            "x.qcow2",
+            "local-lvm",
+            "local-lvm:0",
+            "local-lvm:abc",
+            ":8",
+            "template:abc",
+        ] {
+            assert!(parse_disk_spec(bad).is_err(), "{bad:?} should be refused");
+        }
+        // And the refusal names BOTH forms, because a reader who got here does
+        // not know either.
+        let e = parse_disk_spec("/tmp/x.qcow2").unwrap_err().to_string();
+        assert!(e.contains("template:") && e.contains("size-in-GiB"), "{e}");
+    }
+
+    #[test]
+    fn a_memoria_vai_em_mib_como_a_api_quer() {
+        assert_eq!(mem_mib("2G"), 2048);
+        assert_eq!(mem_mib("512M"), 512);
+        assert_eq!(mem_mib("2048"), 2048);
+        assert_eq!(mem_mib(" 4G "), 4096);
+        // Unparseable falls back to a working default rather than 0 — a VM with
+        // no memory does not start, and the failure would name the node.
+        assert_eq!(mem_mib("bananas"), 1024);
+    }
+
+    #[test]
+    fn o_vmid_vem_do_registo_e_nao_do_nome() {
+        // Two VMs on a node may share a name; every `qm` call takes the id.
+        // A record with no handle was not created by this backend — saying so
+        // beats guessing an id and acting on somebody else's VM.
+        assert!(vmid_from_handle("").is_none());
+        assert!(
+            vmid_from_handle("/run/x.sock").is_none(),
+            "a libvirt/CH record"
+        );
+        assert!(vmid_from_handle("proxmox:pve:").is_none());
+        assert!(vmid_from_handle("proxmox:pve:abc").is_none());
+        assert_eq!(vmid_from_handle("proxmox:pve:101"), Some(101));
+        // A node name with a colon still yields the id: the parse takes the LAST
+        // field.
+        assert_eq!(vmid_from_handle("proxmox:a:b:7"), Some(7));
     }
 }
