@@ -4,6 +4,60 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.47.2 — `delonix vm ssh`
+
+Uma release de uma coisa só.
+
+## O IP e o utilizador são o que custa
+
+```bash
+delonix vm ssh dev                                  # nome → o IP vem do registo
+delonix vm ssh dev -- systemctl is-system-running   # corre e volta
+delonix vm ssh 192.168.122.50 -l root -i ~/.ssh/k   # endereço directo
+```
+
+Não é açúcar por cima do `ssh`. Resolve as duas coisas que quem acabou de criar
+uma VM **não tem**:
+
+**O IP.** Vive no registo, e só lá chega bem depois do `create` — uma VM em nat
+recebe o lease DHCP muito mais tarde. Sem isto é um `vm ls`, copiar, colar.
+
+**O utilizador.** Por omissão `delonix`, e não o da distro. É a parte que mais
+tempo faz perder: numa cloud image de Ubuntu o palpite natural é `ubuntu@`, essa
+conta **existe**, **não** tem a chave, e responde `Permission denied
+(publickey)` — que se lê como chave partida quando é só o nome errado.
+
+Uma VM sem IP diz o que se passa, em vez de deixar o `ssh` falhar por outra
+razão:
+
+```
+error invalid argument: VM 'demovm' has no IP yet — it is 'Running'. A VM only
+gets one once it has booted AND its network came up; watch it with
+`delonix vm console demovm`
+```
+
+## O desempate nome-vs-endereço
+
+O store decide **primeiro**; a forma do argumento só desempata quando ele não
+tem nada. `valid_vm_name` permite pontos, portanto uma VM pode chamar-se `a.b` —
+tratar isso como endereço só porque *parece* um seria escolher pelo utilizador.
+
+## Detalhes que a revisão deste repo pede
+
+* `--` antes do destino: um nome começado por `-` seria lido como opção (a mesma
+  defesa que o `ssh`/`scp` do `cluster apply` ganhou na primeira auditoria).
+* `exec` e não `spawn`+`wait`: entrega o terminal inteiro ao `ssh` (pty, escape,
+  shell interactiva) e não há nada a fazer depois. Só retorna em falha.
+* `StrictHostKeyChecking=no` **dito em voz alta e não escondido**: uma VM é
+  recriada no mesmo endereço a toda a hora, e a chave de host mudar é a NORMA
+  aqui, não um ataque. É uma conveniência de laboratório, e o `vm ssh` não é a
+  ferramenta para uma máquina que não é tua.
+
+Validado ao vivo: resolveu um nome para `192.168.122.83` e ligou-se de facto; a
+VM sem IP e o nome inexistente dão as duas mensagens certas.
+
+---
+
 ## v0.47.1 — o que a v0.47.0 levou consigo, e três verificações que passaram a existir
 
 Uma release pequena, de correcções e de gates. Nada aqui muda um schema nem uma
