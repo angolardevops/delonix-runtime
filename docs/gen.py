@@ -117,6 +117,8 @@ SOURCE_FILES = {
     "completion": "complete.rs",
     "schema": "schema.rs",
     "init": "init.rs",
+    "backup": "rbackup.rs",
+    "restore": "rbackup.rs",
 }
 SOURCE_BASE_URL = (
     "https://github.com/angolardevops/delonix-runtime/blob/main/"
@@ -1006,6 +1008,48 @@ user units + <code>loginctl enable-linger</code>; root → system units), com <c
             "status": {"examples": [("Ver o que está instalado", "delonix net boot status")]},
             "disable": {"examples": [("Remover as units de boot", "delonix net boot disable")]},
         },
+    },
+    "backup": {
+        "title": "delonix backup",
+        "tagline": "Backup de UM recurso — container, pod, vm ou stack — em tar.gz.",
+        "intro": """Não confundir com o <code>system backup</code>, que leva o NÓ inteiro. Aqui o arquivo leva o
+registo do recurso e os DADOS dos volumes que ele usa — não a imagem nem o rootfs, porque um rootfs
+medido são 435 MB contra 1,5 KB de registo, e a imagem é endereçada por conteúdo e volta a
+descarregar-se. A VM é a excepção: o overlay dela É o estado dela, por isso viaja (a base dourada
+não). <b>Não é um checkpoint</b> — a memória não é guardada; o que volta é a mesma configuração e os
+mesmos dados em disco. O destino pode ser uma pasta ou um <code>volume:&lt;nome&gt;</code>, que é como o
+arquivo vai parar a um NAS. Sendo o motor daemonless, o agendamento instala um <b>temporizador de
+utilizador do systemd</b>: o <code>--max-for-day N</code> espaça N corridas pelo dia, e o
+<code>--cron</code> traduz a expressão de crontab — recusando o que não conseguir exprimir em vez de
+aproximar.""",
+        "subs": {},
+        "examples": [
+            ('O registo e os dados dos volumes, aqui mesmo', 'delonix backup container db'),
+            ('Para um NAS, através de um volume nomeado', 'delonix backup container db --to volume:nas-backups'),
+            ('Duas vezes por dia, guardando os dois mais recentes', 'delonix backup container db --max-for-day 2 --to /srv/backups'),
+            ('Ou no horário que quiseres, em sintaxe de crontab', 'delonix backup stack loja --cron "30 3 * * 1" --to /srv/backups'),
+            ('Uma stack inteira: cada membro e cada volume, o partilhado uma só vez', 'delonix backup stack loja --to /srv/backups'),
+            ('Uma VM (pára-a primeiro — copiar o disco a quente apanha um filesystem rasgado)', 'delonix backup vm dev --to /srv/backups'),
+            ('Ver o que entraria, sem escrever nada', 'delonix backup pod api --dry-run'),
+        ],
+    },
+    "restore": {
+        "title": "delonix restore",
+        "tagline": "Repõe um recurso a partir de um arquivo do `delonix backup`.",
+        "intro": """Desempacota para uma pasta de trabalho ANTES de tocar em seja o que for — um arquivo
+truncado custa então zero, ao passo que desempacotar por cima dos dados vivos destruía-os sem ter
+nada para repor. Recusa-se enquanto o recurso estiver a correr (com <code>--force</code> pára-o,
+repõe, e volta a arrancá-lo). Se o recurso já não existir, é <b>recriado</b>: a imagem volta a
+descarregar-se, o rootfs é preparado como o <code>run</code> faria, e o registo volta ao sítio. Os
+volumes vêm primeiro e o recurso depois — ao contrário, um container arrancava contra um volume
+vazio.""",
+        "subs": {},
+        "examples": [
+            ('Repor os dados (recusa enquanto estiver a correr)', 'delonix restore container container-db-20260811-205312.tar.gz'),
+            ('Parar, repor e arrancar de novo', 'delonix restore container ./container-db-20260811-205312.tar.gz --force'),
+            ('Pelo nome nu, a partir da pasta onde os backups vivem', 'delonix restore stack stack-loja-20260811-210000 --from /srv/backups'),
+            ('O que tocaria, sem lhe tocar', 'delonix restore vm vm-dev-20260811-210109.tar.gz --dry-run'),
+        ],
     },
     "system": {
         "title": "delonix system",

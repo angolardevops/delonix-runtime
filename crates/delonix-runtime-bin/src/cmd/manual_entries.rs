@@ -1740,6 +1740,30 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["dash", "system events", "container stats", "image ls"],
     },
     Entry {
+        path: "backup",
+        group: "Configure",
+        examples: &[
+            ("the record and the volumes' data — not the image, which restore pulls back", "delonix backup container db"),
+            ("somewhere that is not here (a directory, or a named volume on a NAS)", "delonix backup container db --to volume:nas-backups"),
+            ("twice a day on a systemd user timer, keeping the newest two", "delonix backup container db --max-for-day 2 --to /srv/backups"),
+            ("or on your own schedule, in crontab syntax", "delonix backup stack loja --cron \"30 3 * * 1\" --to /srv/backups"),
+            ("a VM: its overlay disk IS its state, so stop it first", "delonix backup vm dev --to /srv/backups"),
+            ("see what would go in, without writing anything", "delonix backup pod api --dry-run"),
+        ],
+        see_also: &["restore", "system backup", "volumes snapshot", "vm snapshot"],
+    },
+    Entry {
+        path: "restore",
+        group: "Configure",
+        examples: &[
+            ("put the data back (refuses while it is running — that would corrupt it)", "delonix restore container container-db-20260811-205312.tar.gz"),
+            ("stop it, restore, start it again", "delonix restore container ./container-db-20260811-205312.tar.gz --force"),
+            ("from the directory the backups live in, by bare name", "delonix restore stack stack-loja-20260811-210000 --from /srv/backups"),
+            ("what it would touch, without touching it", "delonix restore vm vm-dev-20260811-210109.tar.gz --dry-run"),
+        ],
+        see_also: &["backup", "system restore", "container start", "vm start"],
+    },
+    Entry {
         path: "system backup",
         group: "Configure",
         examples: &[
