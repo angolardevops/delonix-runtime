@@ -1,0 +1,20 @@
+[package]
+name = "delonix-truenas"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+delonix-runtime-core = { path = "../delonix-runtime-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Same client, same feature set, same TLS stack as `delonix-image`'s registry
+# code — already in the tree, so this adds no supply-chain surface. It lives
+# HERE and not in `delonix-volume` on purpose: that crate has three
+# dependencies and a motor crate does not grow an HTTP client (ADR-0009).
+reqwest = { version = "0.12", default-features = false, features = [
+    "blocking",
+    "rustls-tls-webpki-roots",
+    "json",
+] }
