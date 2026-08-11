@@ -158,6 +158,8 @@ Commands:
   df       Disk usage by area (images, containers, volumes, VM images)
   events   Engine events (create/start/die/remove/…), from oldest to most recent
   info     Engine state: rootless?, cgroup delegation, network infra, counts
+  backup   Save this node&#x27;s state into one archive
+  restore  Put a node&#x27;s state back from a `system backup` archive
   setup    Diagnose — and, with `--delegate`, fix — cgroup delegation
   virt     Host virtualization: hypervisor, KVM, virtio — and what there is to tune
   prune    Reclaim space taken by what nothing uses any more
@@ -174,7 +176,7 @@ Options:
 
 COMMAND MAP:
   Inspect      events · info · df
-  Configure    setup · virt
+  Configure    setup · backup · restore · virt
   Maintenance  prune · thermal
   Dashboards   monitor
 

@@ -41,6 +41,54 @@ pub enum SystemCmd {
     },
     /// Disk usage by area (images, containers, volumes, VM images).
     Df,
+    /// Save this node's state into one archive.
+    ///
+    /// By default it packs what CANNOT be reconstructed: the registries, IPAM,
+    /// secrets, `auth.json`, cluster PKI, HTTPRoute config and the event log.
+    /// The heavy, re-obtainable areas are opt-in, and the live plumbing of a
+    /// running node (pidfiles, sockets, locks) never travels — a resurrected
+    /// `holder.pid` makes the engine report a holder that does not exist.
+    Backup {
+        /// Where to write the archive (default: `delonix-backup-<UTC>.tar.gz`
+        /// in the current directory). Always created 0600.
+        #[arg(short, long)]
+        output: Option<String>,
+        /// Also pack the volumes' DATA, via the same mapped snapshot
+        /// `volumes snapshot` uses. This is the only area that can be hundreds
+        /// of GiB.
+        #[arg(long)]
+        volumes: bool,
+        /// Also pack the OCI images (blobs, layers and index) — content-addressed
+        /// cache that a registry can serve again.
+        #[arg(long)]
+        images: bool,
+        /// Also pack the VM disk images (gigabytes of qcow2 that `vm pull`
+        /// re-fetches). Their metadata always travels.
+        #[arg(long = "vm-images")]
+        vm_images: bool,
+        /// Also pack the vault MASTER KEY. Without it the secrets restore onto
+        /// another node as bytes that never decrypt; with it, the archive IS
+        /// the vault.
+        #[arg(long = "include-master-key")]
+        include_master_key: bool,
+    },
+    /// Put a node's state back from a `system backup` archive.
+    ///
+    /// Destructive on purpose: the covered set becomes exactly what the archive
+    /// holds. It verifies the whole archive BEFORE touching anything, refuses a
+    /// format it does not know, refuses to run over live workloads without
+    /// `--force`, and proves afterwards that the restored secrets decrypt.
+    Restore {
+        /// The archive written by `system backup`.
+        archive: String,
+        /// Restore even with containers/VMs still running (their registry is
+        /// replaced underneath them).
+        #[arg(short = 'f', long)]
+        force: bool,
+        /// Say what would change and stop, without writing anything.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+    },
     /// Host virtualization: hypervisor, KVM, virtio — and what there is to tune.
     Virt {
         /// Apply the recommended tuning (needs root).
@@ -103,6 +151,27 @@ pub fn run(action: SystemCmd) -> Result<()> {
         SystemCmd::Info => cmd_info(),
         SystemCmd::Setup { delegate } => cmd_setup(delegate),
         SystemCmd::Df => cmd_df(),
+        SystemCmd::Backup {
+            output,
+            volumes,
+            images,
+            vm_images,
+            include_master_key,
+        } => super::backup::cmd_backup(
+            output,
+            super::backup::Scope {
+                volumes,
+                images,
+                vm_images,
+                master_key: include_master_key,
+            },
+            &state_root(),
+        ),
+        SystemCmd::Restore {
+            archive,
+            force,
+            dry_run,
+        } => super::backup::cmd_restore(&archive, force, dry_run, &state_root()),
         SystemCmd::Prune { all, force } => cmd_prune(all, force),
         SystemCmd::Monitor {
             interval,
