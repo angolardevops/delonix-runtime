@@ -282,6 +282,9 @@ pub enum VolumeCmd {
     Inspect {
         #[arg(add = ArgValueCandidates::new(super::complete::volumes))]
         name: String,
+        /// Output format: `table` (default, the historical text) or `json` (ADR-0005)
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: output::OutputFormat,
     },
     /// Readable detail of one or more volumes, `kubectl describe` style.
     ///
@@ -370,7 +373,7 @@ pub fn run(action: VolumeCmd) -> Result<()> {
             Ok(())
         }
         VolumeCmd::Ls { output } => cmd_ls(&store, output),
-        VolumeCmd::Inspect { name } => cmd_inspect(&store, &name),
+        VolumeCmd::Inspect { name, output } => cmd_inspect(&store, &name, output),
         VolumeCmd::Describe { names } => cmd_describe(&store, &names),
         VolumeCmd::Rm {
             name,
@@ -705,9 +708,46 @@ fn describe_one(_store: &VolumeStore, v: &delonix_volume::Volume) {
     d.print();
 }
 
-fn cmd_inspect(store: &VolumeStore, name: &str) -> Result<()> {
+/// The machine view of a volume (`inspect -o json`).
+///
+/// `cli-stability.md` publishes «the JSON output of `inspect`» as a stable
+/// contract — fields may be ADDED, never removed nor retyped. Of the five
+/// `inspect` commands only `container` actually emitted JSON; this one printed
+/// aligned text, so the promise did not hold where an operator would go looking
+/// for it. The text stays the default (changing it would break every script
+/// reading it today); `-o json` is the machine path.
+///
+/// `usage_bytes` is `Option` and that is the whole point: a subtree this
+/// process cannot read (the NORMAL case for a rootless volume owned by a mapped
+/// subuid) must never serialize as `0`. Zero reads as "empty volume" and is
+/// exactly how a full disk went unnoticed here before. `null` means UNKNOWN,
+/// and `usage_unreadable_dirs` says how much was skipped.
+#[derive(serde::Serialize)]
+struct VolumeInspect<'a> {
+    name: &'a str,
+    driver: &'a str,
+    mountpoint: &'a str,
+    created_unix: u64,
+    usage_bytes: Option<u64>,
+    usage_unreadable_dirs: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quota_bytes: Option<u64>,
+}
+
+fn cmd_inspect(store: &VolumeStore, name: &str, format: output::OutputFormat) -> Result<()> {
     let v = store.inspect(name)?;
     let usage = measured_usage(std::path::Path::new(&v.mountpoint));
+    if format == output::OutputFormat::Json {
+        return output::print_json(&[VolumeInspect {
+            name: &v.name,
+            driver: &v.driver,
+            mountpoint: &v.mountpoint,
+            created_unix: v.created_unix,
+            usage_bytes: usage.is_complete().then_some(usage.bytes),
+            usage_unreadable_dirs: usage.unreadable,
+            quota_bytes: v.quota_bytes,
+        }]);
+    }
     println!("{:<13}{}", format!("{}:", super::po::t("name")), v.name);
     println!("{:<13}{}", format!("{}:", super::po::t("driver")), v.driver);
     println!(
@@ -790,17 +830,27 @@ pub(crate) fn measured_usage(path: &std::path::Path) -> delonix_volume::Usage {
     let mapped = match delonix_runtime::reexec_mapped(&["__duusage", &p, &o]) {
         Some(true) => std::fs::read_to_string(&out)
             .ok()
-            .and_then(|s| s.trim().parse::<u64>().ok())
-            .map(|bytes| delonix_volume::Usage {
-                bytes,
-                unreadable: 0,
-            }),
+            .and_then(|s| parse_duusage(&s)),
         // `Some(false)` = the mapped child failed; `None` = no rootless/subid
         // helpers at all. Either way we cannot improve on `direct`.
         _ => None,
     };
     let _ = std::fs::remove_file(&out);
     mapped.unwrap_or(direct)
+}
+
+/// Parses the `<bytes> <unreadable>` line `__duusage` writes.
+///
+/// **PURE**, and strict on purpose: a line it cannot fully understand yields
+/// `None`, so the caller keeps the direct (incomplete) measurement instead of
+/// inventing a complete one. Being lenient here — taking the byte count and
+/// assuming zero unreadable — is precisely how an incomplete walk came to report
+/// itself as authoritative.
+fn parse_duusage(s: &str) -> Option<delonix_volume::Usage> {
+    let mut it = s.split_whitespace();
+    let bytes = it.next()?.parse::<u64>().ok()?;
+    let unreadable = it.next()?.parse::<u64>().ok()?;
+    Some(delonix_volume::Usage { bytes, unreadable })
 }
 
 /// Renders a measured usage for humans, with the quota denominator when there is
@@ -1092,7 +1142,33 @@ pub(crate) fn cmd_rm_with(
 
 #[cfg(test)]
 mod tests {
-    use super::{fmt_usage, VolumeSpec};
+    use super::{fmt_usage, parse_duusage, VolumeSpec};
+
+    /// The mapped walk sees far more than the direct one — root in the userns
+    /// even reads a `chmod 000` directory owned by a mapped uid — but it does not
+    /// see EVERYTHING: a subtree outside the mapping still comes back
+    /// incomplete. Dropping the unreadable count on the way back made such a
+    /// measurement assert it was complete, which is the bug `Usage` exists to
+    /// prevent.
+    #[test]
+    fn o_duusage_traz_de_volta_a_incompletude_e_nao_so_os_bytes() {
+        let u = parse_duusage("4096 2\n").expect("linha válida");
+        assert_eq!(u.bytes, 4096);
+        assert_eq!(u.unreadable, 2);
+        assert!(
+            !u.is_complete(),
+            "2 dirs por ler não é uma medição completa"
+        );
+
+        let ok = parse_duusage("120\u{20}0").expect("linha válida");
+        assert!(ok.is_complete());
+
+        // Strict: anything it cannot fully parse keeps the caller on the direct
+        // measurement instead of fabricating a complete one.
+        assert!(parse_duusage("4096").is_none(), "sem o 2.º campo, recusa");
+        assert!(parse_duusage("").is_none());
+        assert!(parse_duusage("abc def").is_none());
+    }
 
     #[test]
     fn volumespec_aceita_options_legado_e_mountoptions_canonico() {

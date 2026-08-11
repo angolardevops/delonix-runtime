@@ -65,9 +65,25 @@ pub fn rmtree(path: &Path) -> Result<()> {
 /// reports the child's exit status; `outfile` is left world-readable (0644) so
 /// the parent — which does not own the subuid — can read it back, the same
 /// arrangement `__buildtar` already uses.
+///
+/// **The line carries `<bytes> <unreadable>`, not just the bytes.** Owning the
+/// subuids removes the EACCES this exists for, and it removes a lot more than
+/// that — root in the userns holds `CAP_DAC_OVERRIDE` there, so it reads even a
+/// `chmod 000` directory owned by a mapped uid (measured: `du` refuses that tree
+/// and this walk reports it correctly and in full). What it does NOT cover is a
+/// subtree outside the mapping, or a mount this process cannot enter. In those
+/// cases `measure` returns a non-zero `unreadable` — and reporting only the byte
+/// count made the parent reconstruct `unreadable: 0`, an INCOMPLETE walk
+/// asserting it was complete. That is the exact bug the `Usage` type was
+/// introduced to kill, reintroduced by the mechanism added to fix it.
+///
+/// Honest about the evidence: this is fixed from reading the code and covered by
+/// `parse_duusage`'s unit test. It was NOT reproduced live — every tree that can
+/// be built on this host is inside the mapping, which is precisely why the
+/// mapped walk sees all of it.
 pub fn duusage(path: &Path, out: &Path) -> Result<()> {
     let u = delonix_volume::measure(path);
-    let mut line = u.bytes.to_string();
+    let mut line = format!("{} {}", u.bytes, u.unreadable);
     line.push('\n');
     std::fs::write(out, line.as_bytes()).map_err(io_err("__duusage"))?;
     use std::os::unix::fs::PermissionsExt;
