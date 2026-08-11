@@ -187,7 +187,7 @@ fn force_microvm_backend(name: &str, block: &mut serde_yaml::Value) -> Result<()
 }
 
 fn mismatch(name: &str, ty: &str, other: &str) -> Error {
-    Error::Invalid(super::po::tf(
+    Error::NotFound(super::po::tf(
         "workload '{name}': type: {type} must not carry a '{other}:' block",
         &[("name", name), ("type", ty), ("other", other)],
     ))
@@ -292,8 +292,9 @@ fn owner<'a>(ds: &'a [Box<dyn ComputeDriver>], name: &str) -> Result<&'a dyn Com
             found = Some(d.as_ref());
         }
     }
-    found
-        .ok_or_else(|| Error::Invalid(super::po::tf("no such workload: {name}", &[("name", name)])))
+    found.ok_or_else(|| {
+        Error::NotFound(super::po::tf("no such workload: {name}", &[("name", name)]))
+    })
 }
 
 /// `delonix workload` — one surface over both compute types (ADR-0002, Phase 2a).
