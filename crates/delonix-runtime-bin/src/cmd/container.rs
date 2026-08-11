@@ -5691,7 +5691,7 @@ impl UpdateOpts {
 
     /// `--net-burst` alone: a burst without a rate configures nothing.
     ///
-    /// It is NOT counted in [`is_empty`] on purpose — it is not a change by
+    /// It is NOT counted in `is_empty` on purpose — it is not a change by
     /// itself. But answering it with «nothing to do: pass at least one change»
     /// tells someone who DID pass a flag that they passed none, and the list of
     /// suggestions did not even mention `--net-burst`. `run` already answers
