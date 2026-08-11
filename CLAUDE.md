@@ -3444,6 +3444,56 @@ físicos, não de um manifesto de volume); e um segundo alvo (o bloco é nomeado
 entra como chave irmã, não como um `type:` a manter sincronizado).
 
 
+## Os appliances Proxmox, e o que «OK» não prova (2026-08-11)
+
+Dois defeitos nas quatro imagens Proxmox publicadas, os dois encontrados a
+ARRANCAR uma imagem e a olhar para ela — não a ler código:
+
+1. **Levavam um IP ESTÁTICO do ambiente de build.** O `source = "from-dhcp"` do
+   answer file quer dizer «obtém a configuração por DHCP DURANTE a instalação e
+   grava-a como estática», não «usa DHCP no boot». Uma VM arrancada por
+   `delonix vm create --backend libvirt` subia com `10.0.2.15` — o endereço do
+   slirp do QEMU — e ficava inalcançável. A consola do próprio convidado
+   anunciava-o (`https://10.0.2.15:8006/`); andei cinco iterações a adivinhar
+   (nome da interface, config de rede) antes de olhar. **`--vnc` +
+   `virsh screenshot` é a ferramenta para isto**, e deu a resposta em 30s.
+2. **Sem `console=ttyS0`**, um convidado que falhe a rede não é observável de
+   todo sem dispositivo gráfico — que é o que fez a diagnose do defeito 1
+   demorar uma hora.
+
+`scripts/appliances/proxmox_postinstall.py` (SSH + pexpect, na janela em que o
+endereço antigo ainda é válido) reescreve o `interfaces` para DHCP, força
+`net.ifnames=0` (**o DHCP sozinho não chega**: a bridge nomeia uma porta física,
+e `ens18` num hypervisor é `enp0s3` no seguinte — `eth0` é o único nome
+verdadeiro em todo o lado), acrescenta a consola série com getty, e regenera as
+host keys do SSH no 1.º boot (foram geradas no build, logo todas as imagens
+apresentariam a MESMA identidade).
+
+**Três erros meus nesta série, e os três são da mesma família — afirmar sem
+medir:**
+
+- **`dpkg-reconfigure openssh-server` fica pendurado** (a unit ficou em
+  `activating` para sempre) e, enquanto pendura, o sshd não tem host keys e
+  RECUSA arrancar. Um passo de endurecimento que derruba o serviço é pior que a
+  exposição que fechava. `ssh-keygen -A` faz o mesmo num instante.
+- **PBS/PMG/PDM não trazem cliente DHCP.** O instalador configura estático e
+  nunca precisa de um; escrever `inet dhcp` sem `dhclient` dá uma bridge que
+  sobe, com o `eth0` lá dentro, e **zero IPv4** — enquanto o
+  `networking.service` reporta `Finished`. O PVE funciona porque, sendo
+  hypervisor, traz o cliente: **validei um dos quatro e generalizei**. O
+  post-install passa a garantir o cliente e a **falhar fechado** se não o
+  conseguir instalar.
+- **O meu script de correcção dizia `OK` a olhar para o `rc` do post-install, e
+  não para o resultado.** Era o relato desonesto que este repo persegue, escrito
+  por mim. Um script que corrige imagens tem de as ARRANCAR e confirmar o que
+  interessa (IP por DHCP numa rede que não a do build, e o serviço a responder)
+  antes de substituir seja o que for — e não substituir quando falha.
+
+**Regra que fica**: uma correcção de imagem só está feita quando a imagem
+corrigida arranca noutro ambiente que não aquele onde foi corrigida. O `rc` de
+um script de build não é evidência de nada.
+
+
 ## Regra de ouro: fronteira com o PaaS
 
 Este código **não pode depender de nada privado**. Antes de qualquer commit:
