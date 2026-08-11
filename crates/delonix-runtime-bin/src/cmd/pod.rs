@@ -288,7 +288,7 @@ pub(crate) fn remove_pod(name: &str, force: bool) -> Result<()> {
     let (images, store) = open_stores()?;
     let members = members_of(&store, name)?;
     if members.is_empty() {
-        return Err(Error::Invalid(format!(
+        return Err(Error::NotFound(format!(
             "no such pod: {name} (see `delonix pod ls`)"
         )));
     }
@@ -517,7 +517,7 @@ fn describe(names: &[String]) -> Result<()> {
     for name in names {
         let mut members = members_of(&store, name)?;
         if members.is_empty() {
-            return Err(Error::Invalid(format!(
+            return Err(Error::NotFound(format!(
                 "no such pod: {name} (see `delonix pod ls`)"
             )));
         }
@@ -547,7 +547,7 @@ fn logs(pod: &str, container_short: Option<&str>, follow: bool) -> Result<()> {
     let (images, store) = open_stores()?;
     let members = members_of(&store, pod)?;
     if members.is_empty() {
-        return Err(Error::Invalid(format!(
+        return Err(Error::NotFound(format!(
             "no such pod: {pod} (see `delonix pod ls`)"
         )));
     }

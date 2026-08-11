@@ -309,7 +309,7 @@ fn load_record(root: &Path, namespace: &str, name: &str) -> Result<(ShareRecord,
             return Ok((rec, true));
         }
     }
-    Err(Error::Invalid(format!(
+    Err(Error::NotFound(format!(
         "no such sharevolume: {name} in namespace {namespace} (see `delonix sharevolume ls`)"
     )))
 }
