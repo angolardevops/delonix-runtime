@@ -34,6 +34,7 @@ pub mod pki;
 pub mod po;
 pub mod pod;
 pub mod provision;
+pub mod prune;
 pub mod reconcile;
 pub mod remote;
 pub mod scaffold;

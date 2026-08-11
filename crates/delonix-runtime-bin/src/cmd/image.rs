@@ -274,6 +274,19 @@ pub enum ImageCmd {
         #[arg(short = 'f', long)]
         force: bool,
     },
+    /// Remove unused images and the CAS blobs nobody references any more.
+    ///
+    /// By default only the DANGLING ones (no tag); `--all` also drops tagged
+    /// images that no container uses. Containers and volumes are untouched —
+    /// see `container prune` and `volumes prune`.
+    Prune {
+        /// Skip the confirmation prompt (REQUIRED when stdin is not a terminal).
+        #[arg(short = 'f', long)]
+        force: bool,
+        /// Also remove unused images that DO have a tag (not just the dangling ones).
+        #[arg(short, long)]
+        all: bool,
+    },
     /// Export an OCI runtime bundle (rootfs + config.json) for `runc`/`crun`.
     Export {
         #[arg(add = ArgValueCandidates::new(super::complete::images))]
@@ -729,6 +742,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
             }
         }
         ImageCmd::Rm { image, force } => cmd_rm(&images, &store, &image, force),
+        ImageCmd::Prune { force, all } => cmd_prune(&images, &store, force, all),
         ImageCmd::Export { image, dir } => cmd_export(&images, &image, &dir),
         ImageCmd::Save { image, output } => cmd_save(&images, &image, &output),
         ImageCmd::Load { input } => cmd_load(&images, &input),
@@ -895,6 +909,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
             .into(),
         )),
         ImageCmd::Rm { .. }
+        | ImageCmd::Prune { .. }
         | ImageCmd::Export { .. }
         | ImageCmd::Save { .. }
         | ImageCmd::Load { .. }
@@ -1281,6 +1296,52 @@ fn describe_one(images: &ImageStore, img: &delonix_image::Image) {
     }
     d.list("Env", &c.env);
     d.print();
+}
+
+/// `image prune` — the image half of `system prune`, on its own.
+///
+/// The reason it exists is the concrete one an SRE hits: wanting the disk back
+/// from images alone meant running the global prune, which ALSO removes every
+/// stopped container. Same sweep as `system prune` (`prune::sweep_images`), so
+/// "unused" cannot come to mean two different things depending on which command
+/// you typed.
+fn cmd_prune(
+    images: &ImageStore,
+    store: &delonix_runtime_core::Store,
+    force: bool,
+    all: bool,
+) -> Result<()> {
+    // The preview only fires for `--all`, and it earns its place: the default
+    // takes only untagged leftovers, while `--all` takes images someone pulled
+    // on purpose and merely is not running right now.
+    let preview = all.then(|| {
+        super::po::t("With --all this ALSO removes TAGGED images that no container uses.")
+            .to_string()
+    });
+    if !super::prune::confirm(
+        force,
+        super::po::t(
+            "`image prune` removes unused images and unreferenced blobs — pass --force to confirm \
+             when not on a terminal",
+        ),
+        preview,
+        super::po::t("Removes unused images and the CAS blobs nobody references. Continue? [y/N]"),
+    )? {
+        return Ok(());
+    }
+    let i = super::prune::sweep_images(images, store, all)?;
+    println!(
+        "{}",
+        super::po::tf(
+            "removed: {i} image(s), {b} blob(s) — {size} freed",
+            &[
+                ("i", &i.images.to_string()),
+                ("b", &i.blobs.to_string()),
+                ("size", &i.freed.fmt()),
+            ]
+        )
+    );
+    Ok(())
 }
 
 /// `image rm` — refuses while a container still references the image.
