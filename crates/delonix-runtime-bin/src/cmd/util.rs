@@ -24,11 +24,38 @@ pub(crate) fn open_stores() -> Result<(ImageStore, Store)> {
 
 /// Resolve a local image; if missing, pull it from the registry.
 pub(crate) fn resolve_or_pull(images: &ImageStore, reference: &str) -> Result<Image> {
+    resolve_or_pull_with_creds(images, reference, None)
+}
+
+/// Like [`resolve_or_pull`], with credentials supplied by the CALLER instead of
+/// read from the machine's credential vault.
+///
+/// The vault (`delonix image login`) is per-MACHINE state: it works, and it is
+/// exactly what a manifest cannot carry. A `kind: Image` naming a private
+/// registry had no way to say which credential to use, so applying it on a
+/// fresh host failed with an authentication error about a registry the manifest
+/// never mentioned a credential for — the manifest was not self-contained, and
+/// nothing in it said so.
+///
+/// `None` keeps the vault path byte-for-byte, which is what every existing
+/// caller gets.
+pub(crate) fn resolve_or_pull_with_creds(
+    images: &ImageStore,
+    reference: &str,
+    creds: Option<(String, String)>,
+) -> Result<Image> {
     match images.resolve(reference) {
         Ok(img) => Ok(img),
         Err(_) => {
             eprintln!("a puxar {reference}…");
-            delonix_image::pull_from_registry(images, reference)
+            match creds {
+                None => delonix_image::pull_from_registry(images, reference),
+                Some(c) => delonix_image::registry::pull_from_registry_with_creds(
+                    images,
+                    reference,
+                    Some(c),
+                ),
+            }
         }
     }
 }

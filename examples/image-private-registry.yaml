@@ -1,0 +1,30 @@
+# Pulling from a PRIVATE registry with a credential the manifest names.
+#
+# Without `pullSecret`, a pull uses the machine's credential vault
+# (`delonix image login`) — per-MACHINE state that a manifest cannot carry. A
+# `kind: Image` naming a private registry therefore applied cleanly on the host
+# where someone had logged in, and failed on every other one with an
+# authentication error about a registry the manifest never mentioned a
+# credential for. Naming a Secret makes the document self-contained.
+#
+#   REGISTRY_USER=… REGISTRY_TOKEN=… delonix stack apply -f examples/image-private-registry.yaml
+apiVersion: delonix.io/v1
+kind: Secret
+metadata:
+  name: registry-cred
+spec:
+  # From the environment: nothing secret is written into the manifest, and this
+  # is the shape a CI job has. See `secret-from-env.yaml`.
+  fromEnv:
+    username: REGISTRY_USER
+    password: REGISTRY_TOKEN
+---
+apiVersion: delonix.io/v1
+kind: Image
+metadata:
+  name: app
+spec:
+  pull: ghcr.io/angolardevops/private-app:1.0
+  # Only meaningful with `pull:` — a `build:` produces the image locally and
+  # authenticates nowhere, so a pullSecret there is refused rather than ignored.
+  pullSecret: registry-cred

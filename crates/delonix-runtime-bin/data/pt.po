@@ -7864,3 +7864,10 @@ msgstr "segredo vazio — usa --from-literal CHAVE=valor, --from-env VAR e/ou --
 
 msgid "Take the value from an environment VARIABLE: `--from-env DB_PASSWORD` stores `$DB_PASSWORD` under that name, `--from-env password=PGPASSWORD` under `password`. Repeatable. The value never appears in argv, unlike `--from-literal`"
 msgstr "Tira o valor de uma VARIÁVEL de ambiente: `--from-env DB_PASSWORD` guarda `$DB_PASSWORD` com esse nome, `--from-env password=PGPASSWORD` com o nome `password`. Repetível. O valor nunca aparece no argv, ao contrário do `--from-literal`"
+
+# --- kind: Image · pullSecret ---
+msgid "Image '{image}': secret '{secret}' needs `username` and `password` (it has: {have})"
+msgstr "Image '{image}': o segredo '{secret}' precisa de `username` e `password` (tem: {have})"
+
+msgid "Image '{name}': pullSecret only applies to `pull:` — a `build:` produces the image locally and authenticates nowhere"
+msgstr "Image '{name}': o pullSecret só se aplica a `pull:` — um `build:` produz a imagem localmente e não autentica em lado nenhum"

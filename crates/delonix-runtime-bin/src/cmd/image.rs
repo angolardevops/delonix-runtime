@@ -23,6 +23,25 @@ use super::vmimage::Distro;
 struct ImageSpec {
     pull: Option<String>,
     build: Option<BuildSpec>,
+    /// `kind: Secret` holding `username`/`password` for the registry this image
+    /// is pulled from.
+    ///
+    /// Without it the pull uses the machine's credential vault
+    /// (`delonix image login`) — per-MACHINE state that a manifest cannot
+    /// carry. A `kind: Image` naming a private registry therefore applied
+    /// cleanly on the host where someone had logged in and failed on every
+    /// other one, with an authentication error about a registry the manifest
+    /// never mentioned a credential for. Naming a Secret makes the document
+    /// self-contained, which is the whole point of GitOps.
+    ///
+    /// Only meaningful with `pull:` — a `build:` produces an image locally and
+    /// authenticates nowhere.
+    #[serde(
+        default,
+        rename = "pullSecret",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pull_secret: Option<String>,
 }
 
 /// Dry-run: the spec with every `#[serde(default)]` materialized.
@@ -32,7 +51,7 @@ pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
 }
 
 /// Field names accepted in the `spec` of `kind: Image`, for the unknown-field warning.
-pub(crate) const IMAGE_SPEC_FIELDS: &[&str] = &["pull", "build"];
+pub(crate) const IMAGE_SPEC_FIELDS: &[&str] = &["pull", "build", "pullSecret"];
 
 /// Fields the reconciler compares for a `kind: Image`.
 ///
@@ -892,15 +911,64 @@ fn run_vm(action: ImageCmd) -> Result<()> {
     vmimage::run(mapped)
 }
 
+/// `(username, password)` out of a `kind: Secret`, for a registry pull.
+///
+/// The key names are the ones a registry credential is universally called, and
+/// a secret that has neither is refused NAMING what it has instead: the common
+/// mistake is a secret built for something else (a `token`, a `password` with
+/// no user) being pointed at a registry, and "unauthorized" from the far end
+/// would send the reader looking at the registry rather than at the secret.
+fn registry_creds_from_secret(image: &str, secret: &str) -> Result<(String, String)> {
+    let store = delonix_runtime_core::SecretStore::open(super::util::state_root())?;
+    let s = store.load(secret)?;
+    let user = s
+        .data
+        .get("username")
+        .or_else(|| s.data.get("user"))
+        .cloned();
+    let pass = s
+        .data
+        .get("password")
+        .or_else(|| s.data.get("token"))
+        .cloned();
+    match (user, pass) {
+        (Some(u), Some(p)) => Ok((u, p)),
+        _ => {
+            let mut have: Vec<&str> = s.data.keys().map(String::as_str).collect();
+            have.sort_unstable();
+            Err(Error::Invalid(super::po::tf(
+                "Image '{image}': secret '{secret}' needs `username` and `password` (it has: {have})",
+                &[("image", image), ("secret", secret), ("have", &have.join(", "))],
+            )))
+        }
+    }
+}
+
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let (images, _store) = open_stores()?;
     for doc in manifest::of_kind(docs, "Image") {
         let name = &doc.metadata.name;
         manifest::warn_unknown_fields(doc, IMAGE_SPEC_FIELDS);
         let spec: ImageSpec = manifest::spec_of(doc)?;
+        // WHERE the field applies is checked BEFORE the secret is resolved. The
+        // other order produced the wrong error: a `pullSecret` on a `build:`
+        // reported that the secret lacked `username`/`password`, sending the
+        // reader to fix a secret when the problem is a field in the wrong
+        // place. Refusing beats ignoring — the author believes the build is
+        // authenticating somewhere, and it is not.
+        if spec.pull_secret.is_some() && spec.pull.is_none() {
+            return Err(Error::Invalid(super::po::tf(
+                "Image '{name}': pullSecret only applies to `pull:` — a `build:` produces the image locally and authenticates nowhere",
+                &[("name", name)],
+            )));
+        }
+        let creds = match &spec.pull_secret {
+            Some(sref) => Some(registry_creds_from_secret(name, sref)?),
+            None => None,
+        };
         match (spec.pull, spec.build) {
             (Some(reference), None) => {
-                resolve_or_pull(&images, &reference)?;
+                super::util::resolve_or_pull_with_creds(&images, &reference, creds)?;
                 println!(
                     "{}",
                     super::po::tf(
