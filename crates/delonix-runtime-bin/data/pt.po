@@ -7793,6 +7793,7 @@ msgstr "Serve uma fatia da Docker Engine API num socket unix."
 msgid "Serve a slice of the Docker Engine API on a unix socket.\n\n`docker version`/`ps`/`images`/`info`/lifecycle mutations via `DOCKER_HOST=unix://<path>`."
 msgstr "Serve uma fatia da Docker Engine API num socket unix.\n\n`docker version`/`ps`/`images`/`info`/mutações de ciclo de vida via `DOCKER_HOST=unix://<caminho>`."
 
+
 # --- image vm rm ---
 msgid "no such VM image: {name} (see `delonix image vm ls`)"
 msgstr "não existe a imagem VM: {name} (ver `delonix image vm ls`)"
