@@ -896,7 +896,7 @@ impl NetworkStore {
             return Err(Error::Invalid(format!("invalid network name: '{name}'")));
         }
         if self.path(name).exists() {
-            return Err(Error::Invalid(format!("network '{name}' already exists")));
+            return Err(Error::Conflict(format!("network '{name}' already exists")));
         }
         let used: Vec<u8> = self
             .list()?
@@ -1136,7 +1136,7 @@ impl NetworkStore {
             return Err(Error::Invalid(format!("invalid network name: '{name}'")));
         }
         if self.path(name).exists() {
-            return Err(Error::Invalid(format!("network '{name}' already exists")));
+            return Err(Error::Conflict(format!("network '{name}' already exists")));
         }
         if vni == 0 || vni > 0x00ff_ffff {
             return Err(Error::Invalid("invalid VNI (1..16777215)".into()));
@@ -1223,7 +1223,7 @@ impl NetworkStore {
             return Err(Error::Invalid(format!("unknown driver: '{driver}'")));
         }
         if self.path(name).exists() {
-            return Err(Error::Invalid(format!("network '{name}' already exists")));
+            return Err(Error::Conflict(format!("network '{name}' already exists")));
         }
         if !link_exists(parent) {
             return Err(Error::Invalid(format!(

@@ -28,12 +28,70 @@ Concretamente, garante-se:
   `-p`, `-v`, `-e`, `--name`, `--rm`, `-i`, `-t`, `--net`, `--restart`,
   `--memory`, `--cpus`, `--entrypoint`, `-w`, `-u`, `--add-host`, `--wait`,
   `--health-*`.
-* **Os códigos de saída**: `run` em primeiro plano devolve o código do próprio
-  workload; `exec` o do comando; `healthcheck` sai 1 quando não saudável.
+* **Os códigos de saída** — ver a secção «Códigos de saída» abaixo.
 * **A saída JSON de `inspect`** — campos podem ser ACRESCENTADOS, nunca removidos
   nem com o tipo mudado.
 * **Os atalhos de topo** (`ps`, `run`, `exec`, `logs`, `rm`, `images`), que são
   literalmente o mesmo comando por reescrita de argv.
+
+## Códigos de saída
+
+> **Alteração de contrato na v0.49.0.** Até à v0.48.0 **toda** a falha do motor
+> era `1` — «não existe» e «rebentou» eram o mesmo número. Continua a valer que
+> `0` é sucesso e não-zero é falha, portanto um `if delonix …; then` não muda de
+> comportamento; o que muda é para quem testa `[ $? -eq 1 ]` **à espera de uma
+> falha específica**. Ver a nota de migração no fim desta secção.
+
+| código | significado |
+|---|---|
+| `0` | sucesso |
+| `1` | falha sem classe própria (o default de sempre) |
+| `2` | uso inválido (o do `clap`) — e, em `stack plan --detailed-exitcode`, «há alterações» |
+| `3` | o recurso existe mas **não está a correr** |
+| `4` | **não existe** esse recurso |
+| `5` | **conflito** — o nome já está tomado |
+
+`3` e `4` não são números inventados: são os códigos de estado do LSB que o
+`systemctl` ainda fala (`3` = o programa não está a correr, `4` = não há tal
+unidade). `5` não tem convenção por trás — é o número livre seguinte, abaixo da
+gama que a shell usa (`126`/`127`, e `128+N` para sinais).
+
+O que isto resolve é concreto: um reconciliador — o `Makefile`, o passo de CI, o
+ciclo em bash que conduz esta CLI — não conseguia separar «cria, porque falta»
+de «pára, porque falhou» sem ler a MENSAGEM de erro. E a mensagem é traduzida
+(`--l18n=pt`), portanto um script que faz `grep 'no such'` funciona na máquina
+onde foi escrito e deixa de classificar num nó com outra locale.
+
+```bash
+delonix container inspect web >/dev/null 2>&1
+case $? in
+  0) ;;                       # está lá
+  4) delonix container run -d --name web nginx ;;   # falta — cria
+  3) delonix container start web ;;                 # existe, parado — arranca
+  *) exit 1 ;;                # qualquer outra coisa: pára, não adivinhes
+esac
+```
+
+**O código de um `run`/`exec` continua a ser o do WORKLOAD, não o do motor.**
+`run` em primeiro plano devolve o código do processo do container, `exec` o do
+comando, e `healthcheck` sai `1` quando não saudável — as três promessas de
+sempre, inalteradas. A consequência a reter: um container que saia `4` sai `4`,
+logo **o `$?` de um `run`/`exec` nunca se lê como uma das classes acima** — esse
+número foi escolhido pelo workload, não pelo motor.
+
+**O que fica de fora**, e é honesto dizê-lo: uma pré-condição do host por
+satisfazer (uma sessão sem delegação de cgroup, por exemplo) não tem código
+próprio — o motor avisa e continua, portanto não há falha para classificar. E
+os grupos ainda não estáveis (ver a lista mais abaixo) podem responder `1` onde
+um comando estável já responde `4`: o `workload describe` de um nome que não
+existe é o caso conhecido.
+
+### Migrar
+
+* `if delonix …; then` / `|| exit 1` / `set -e` — **nada muda**.
+* `[ $? -eq 1 ]` a testar «este comando falhou» — passa a ser `[ $? -ne 0 ]`.
+* `[ $? -eq 1 ]` a testar «não existe» — passa a ser `[ $? -eq 4 ]`, que é o
+  teste que antes não havia maneira de escrever.
 
 ## Estável em conteúdo, não em formato
 

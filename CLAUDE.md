@@ -3107,6 +3107,69 @@ depois de "preparing the host". Acontecia em todo o host sem dispositivo VGA: qu
 servidor headless e praticamente toda a VM. Uma etiqueta cosmética de GPU nunca pode
 poder falhar uma instalação.
 
+## Códigos de saída com classe (v0.49.0) — «não existe» deixou de ser «rebentou»
+
+Medido antes de escrever código: `container inspect <inexistente>` → **1**,
+`volumes rm <inexistente>` → **1**, um erro genérico → **1**. Só o `clap` se
+distinguia (2). Portanto as duas respostas que um reconciliador mais precisa de
+separar — «cria, porque falta» e «pára, porque falhou» — eram o mesmo número, e o
+único sinal restante era a MENSAGEM. Que é **traduzida**: um script com
+`grep 'no such'` funciona na máquina onde foi escrito e deixa de classificar num
+nó com `--l18n=pt`. Parsear a mensagem era pior que não ter a informação.
+
+- **Um só sítio decide** — `cmd/exitcode.rs::for_error`, puro, a partir do TIPO
+  do erro. O `match` é **exaustivo de propósito**: uma variante nova de
+  `delonix_runtime_core::Error` pára a compilação aqui e obriga a decidir, que é
+  o contrário do que um `_ =>` faz (arquivar em «genérico» sem avisar ninguém).
+- **`3` e `4` não são inventados** — são os códigos do LSB que o `systemctl`
+  ainda fala (3 = não está a correr, 4 = não há tal unidade); `5` (conflito) é o
+  número livre seguinte. Nada colide com o `2` do clap (que é TAMBÉM o «há
+  alterações» do `stack plan --detailed-exitcode`), nem com o 126/127/128+N da
+  shell — há teste a exigi-lo.
+- **`run`/`exec` continuam a devolver o código do WORKLOAD**, e é a regressão
+  mais fácil de introduzir aqui: esses caminhos saem por
+  `propagate_exit_status`/`process::exit` e nunca passam por este módulo.
+  Confirmado ao vivo com um container real, incluindo `exit 4` e `exit 5` — um
+  workload que escolha um número que também é classe do motor mantém-no.
+- **O `for_each_id` tem caminho de saída PRÓPRIO** (sai antes de o `main` ver o
+  erro): sem o mesmo mapa lá, `rm a b` respondia 1 onde `rm a` diz 4. Um lote
+  todo da mesma classe mantém-na; um lote MISTO cai no genérico — escolher a
+  classe do primeiro faria o resultado depender da ordem em que os ids foram
+  escritos.
+
+**Dois erros mal etiquetados, encontrados a ligar isto** — e sem os corrigir a
+funcionalidade era decorativa:
+
+1. **`util::find` dizia `Invalid` para «não existe»**, e é o resolvedor de TODOS
+   os verbos de container (`inspect`/`stop`/`rm`/`logs`/`exec`/`port`/`wait`...).
+   Ou seja: o recurso mais usado do motor era o único que NÃO se classificava,
+   enquanto `volumes`/`network`/`secret`/`vm` já respondiam `NotFound`. Dizia
+   ainda a mesma coisa por outras palavras que o `Store::load` («container not
+   found: x» vs. «no such container: x»); passou a usar a redacção do store.
+   O caso AMBÍGUO (um prefixo que casa com três) fica `Invalid` — aí o passo
+   seguinte de quem chama é corrigir o argumento, não criar o recurso.
+2. **`Error::Conflict` tinha ZERO produtores.** O `delonix-mgmt` fazia match nele
+   (409) e ninguém o construía; as recusas reais de «já existe» diziam `Invalid`
+   e saíam 400/1. Publicar um código para uma variante que nada constrói seria
+   **um número que nunca pode voltar** — a mesma decoração do digest-pinning que
+   a auditoria #3 apanhou. As recusas foram movidas para onde pertenciam (os três
+   `create*` do `NetworkStore`, o `volumes snapshot create`), o que de caminho
+   corrige o HTTP para 409.
+
+**O que ficou de fora, e porquê**: «pré-condição do host por satisfazer» (uma
+sessão sem delegação de cgroup) **não é um erro** — o motor avisa e continua,
+logo não há nada para classificar, e dar-lhe um número era inventar a condição
+primeiro. `Invalid`/`Registry` ficam em 1: nenhum muda o que o reconciliador faz
+a seguir, e cada número novo é uma promessa para o resto do `0.x`. O `workload
+describe` de um nome inexistente continua em 1 (usa `Invalid`), e isso é
+**declarado** no `cli-stability.md` — o grupo `workload` está na lista dos que
+ainda não são estáveis.
+
+**A ligação só a bateria E2E prova.** Um teste unitário do mapa passa na mesma
+com o `main` a ignorá-lo, por isso o `scripts/e2e.sh` ganhou uma forma de
+expectativa NUMÉRICA (`check <nome> 4 …`) além do `ok`/`fail` — um `fail`
+continuaria verde se todas as classes voltassem a colapsar em 1.
+
 ## A classe «X não é Y» — varredura de 2026-08-05
 
 Pedido do utilizador ao ver que cinco bugs de uma série eram a mesma frase. Vale mais como
