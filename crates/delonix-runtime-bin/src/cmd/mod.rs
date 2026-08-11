@@ -10,6 +10,7 @@ pub mod dash;
 pub mod dependency;
 pub mod dockerapi;
 pub mod etcd;
+pub mod exitcode;
 pub mod firewall;
 pub mod flow;
 pub mod httproute;

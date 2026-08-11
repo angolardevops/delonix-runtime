@@ -318,6 +318,13 @@ serve-o directamente — mesmo contrato do <code>terraform plan -detailed-exitco
 </tr>
 </tbody>
 </table>
+<p>Desde a v0.49.0 uma falha pode vir CLASSIFICADA em vez de <code>1</code> — <code>4</code> se o
+manifesto nomear um recurso que não existe, por exemplo (a tabela completa está
+em <a href="cli-stability.md">cli-stability.md</a>). Os dois sinais positivos não mudam:
+<code>0</code> é «nada a fazer», <code>2</code> é «há alterações», e nenhum caminho de erro devolve
+<code>2</code>. Um gate escrito como «<code>0</code> passa, <code>2</code> falha por deriva, <strong>o resto</strong> falha
+por erro» continua correcto; um escrito com <code>elif [ $? -eq 1 ]</code> para o erro
+passa a precisar de <code>else</code>.</p>
 <pre><code class="language-yaml">  drift:
     runs-on: ubuntu-latest
     steps:

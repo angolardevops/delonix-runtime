@@ -58,6 +58,16 @@ pub enum Error {
 
     /// The desired state conflicts with the current state (e.g.: a resource with
     /// the same name but of a different `kind` already exists).
+    ///
+    /// Until exit codes were classified this variant had **zero producers** —
+    /// `delonix-mgmt` matched on it (409) and nothing ever built one, while the
+    /// real "already exists" refusals said `Error::Invalid` and came back as a
+    /// 400 and a generic exit 1. Publishing an exit code for a variant nobody
+    /// constructs would have been a number that can never be observed, so the
+    /// refusals were moved to where they belonged instead (`NetworkStore`'s
+    /// three `create*`, `volumes snapshot create`). Anything new that refuses
+    /// because the name is TAKEN belongs here, not in `Invalid`: the caller's
+    /// next move is different (adopt/skip vs. fix the argument).
     #[error("conflict: {0}")]
     Conflict(String),
 }

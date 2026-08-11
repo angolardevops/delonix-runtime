@@ -141,10 +141,19 @@ pub(crate) fn find(store: &Store, q: &str) -> Result<Container> {
     }
     let mut matches: Vec<Container> = all.into_iter().filter(|c| c.id.starts_with(q)).collect();
     match matches.len() {
-        0 => Err(Error::Invalid(format!(
-            "{}: {q}",
-            super::po::t("container not found")
-        ))),
+        // BUG FOUND while classifying exit codes: this said `Error::Invalid`,
+        // so EVERY container verb that resolves through here (`inspect`,
+        // `stop`, `rm`, `logs`, `exec`, `describe`, `port`, `wait`, ...)
+        // reported «it does not exist» as «your argument is wrong» and came
+        // back as the generic exit 1 — while `volumes`/`network`/`secret`/`vm`
+        // already answered `NotFound`. It also phrased the very same condition
+        // differently from `Store::load`, which has always said
+        // `no such container: <id>`. Both fixed by using that one wording.
+        //
+        // The AMBIGUOUS case below stays `Invalid` on purpose, and the
+        // difference is the caller's next move: a prefix matching three
+        // containers is a bad argument to fix, not a resource to create.
+        0 => Err(Error::NotFound(format!("container: {q}"))),
         1 => Ok(matches.remove(0)),
         _ => {
             let ids: Vec<&str> = matches

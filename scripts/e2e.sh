@@ -25,9 +25,13 @@ PFX="e2e$$"
 
 log() { printf '%s\n' "$*"; }
 
-# check <nome> <expectativa: ok|fail> <comando...>
+# check <nome> <expectativa: ok|fail|<n>> <comando...>
 #   ok   = esperamos RC=0
 #   fail = esperamos RC!=0 (testes de erro: a CLI tem de RECUSAR, não aceitar)
+#   <n>  = esperamos EXACTAMENTE esse RC. `fail` só prova que a CLI recusou; a
+#          CLASSE da recusa (3 parado / 4 inexistente / 5 conflito — ver
+#          docs/cli-stability.md) é a parte que um reconciliador lê, e um
+#          `fail` continuaria verde se todas voltassem a colapsar em 1.
 check() {
   local name="$1" expect="$2"; shift 2
   local out rc
@@ -35,8 +39,10 @@ check() {
   local verdict=FAIL
   if [[ "$expect" == "ok" ]]; then
     [[ $rc -eq 0 ]] && verdict=PASS
-  else
+  elif [[ "$expect" == "fail" ]]; then
     [[ $rc -ne 0 ]] && verdict=PASS
+  else
+    [[ $rc -eq "$expect" ]] && verdict=PASS
   fi
   python3 - "$name" "$verdict" "$rc" "$out" "$*" >>"$OUT/results.jsonl" <<'PY'
 import json,sys
@@ -112,6 +118,30 @@ check "vm rm de inexistente recusa" fail "$BIN" vm rm naoexiste-$PFX
 check "stack apply de ficheiro inexistente recusa" fail "$BIN" stack apply -f /nao/existe.yaml
 
 ########################################
+section "códigos de saída: a CLASSE da falha, não só que falhou"
+########################################
+# Medido antes de isto existir: «não existe» e «rebentou» eram ambos 1, logo um
+# reconciliador só os distinguia pela MENSAGEM — que é traduzida (`--l18n=pt`),
+# portanto o script deixava de classificar num nó com outra locale. O mapa vive
+# num sítio só (`cmd::exitcode`), mas a LIGAÇÃO (main.rs, `for_each_id`) só se
+# prova aqui: um teste unitário do mapa passa na mesma com o `main` a ignorá-lo.
+check "inexistente: container inspect diz 4" 4 "$BIN" container inspect naoexiste-$PFX
+check "inexistente: volumes inspect diz 4" 4 "$BIN" volumes inspect naoexiste-$PFX
+check "inexistente: network inspect diz 4" 4 "$BIN" network inspect naoexiste-$PFX
+check "inexistente: secret rm diz 4" 4 "$BIN" secret rm naoexiste-$PFX
+check "inexistente: vm rm diz 4" 4 "$BIN" vm rm naoexiste-$PFX
+# O lote tem caminho de saída PRÓPRIO (`for_each_id` sai antes de o `main` ver o
+# erro): sem a mesma classificação lá, `rm a b` respondia 1 onde `rm a` diz 4.
+check "inexistente: lote de ids mantém a classe" 4 \
+  "$BIN" container rm naoexiste1-$PFX naoexiste2-$PFX
+# A classe não pode depender da língua — é essa a razão de existir do número.
+check "inexistente em PT continua a dizer 4" 4 \
+  "$BIN" --l18n=pt container inspect naoexiste-$PFX
+# Convenções instaladas que NÃO podem ter mudado.
+check "uso inválido continua a ser o 2 do clap" 2 "$BIN" subcomando-que-nao-existe
+check "sucesso continua a ser 0" 0 "$BIN" container ps
+
+########################################
 section "volumes: ciclo de vida"
 ########################################
 VOL="vol-$PFX"
@@ -120,6 +150,11 @@ check "volumes create idempotente" ok "$BIN" volumes create "$VOL"
 check "volumes ls mostra-o" ok bash -c "'$BIN' volumes ls | grep -q '$VOL'"
 check "volumes inspect" ok "$BIN" volumes inspect "$VOL"
 check "volumes describe" ok "$BIN" volumes describe "$VOL"
+# Conflito (5): «o nome já está tomado» é uma resposta diferente de «o argumento
+# está errado» — quem reconcilia adopta/salta no primeiro caso e pára no segundo.
+check "snapshot create" ok "$BIN" volumes snapshot create "$VOL" --name s1
+check "snapshot já existente diz 5 (conflito)" 5 "$BIN" volumes snapshot create "$VOL" --name s1
+check "snapshot rm" ok "$BIN" volumes snapshot rm "$VOL" s1
 
 ########################################
 section "network: ciclo de vida"
@@ -186,6 +221,10 @@ if "$BIN" container inspect "$C" >/dev/null 2>&1; then
 
   check "container stop" ok "$BIN" container stop "$C"
   check "update num container parado recusa" fail "$BIN" container update "$C" --publish-add "$P2:80"
+  # Parado (3) é a terceira resposta que um reconciliador precisa: existe, logo
+  # não se cria — arranca-se. Antes era o mesmo 1 de «não existe» e de «rebentou».
+  check "exec num container parado diz 3" 3 "$BIN" container exec "$C" /bin/true
+  check "top num container parado diz 3" 3 "$BIN" container top "$C"
   check "container start" ok "$BIN" container start "$C"
   check "container rm -f" ok "$BIN" container rm -f "$C"
 else

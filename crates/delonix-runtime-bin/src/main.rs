@@ -429,7 +429,11 @@ fn main() {
     if raw.len() == 4 && raw[1] == "netns" && raw[2] == "run" {
         if let Err(e) = cmd::container::run_from_spec(std::path::Path::new(&raw[3])) {
             eprintln!("delonix: {}", cmd::po::t_dyn(&e.to_string()));
-            std::process::exit(1);
+            // Same classification as the normal path below. It matters most for
+            // `netns run` — the 2nd pass of `--net <custom-network>`, which IS
+            // the process that resolves the image and creates the container, so
+            // its failure class is the one a caller would want to read.
+            std::process::exit(cmd::exitcode::for_error(&e));
         }
         std::process::exit(0);
     }
@@ -447,7 +451,11 @@ fn main() {
     if raw.len() == 3 && raw[1] == "__rmtree" {
         if let Err(e) = cmd::mapped::rmtree(std::path::Path::new(&raw[2])) {
             eprintln!("delonix: {}", cmd::po::t_dyn(&e.to_string()));
-            std::process::exit(1);
+            // Same classification as the normal path below. It matters most for
+            // `netns run` — the 2nd pass of `--net <custom-network>`, which IS
+            // the process that resolves the image and creates the container, so
+            // its failure class is the one a caller would want to read.
+            std::process::exit(cmd::exitcode::for_error(&e));
         }
         std::process::exit(0);
     }
@@ -458,7 +466,11 @@ fn main() {
             std::path::Path::new(&raw[4]),
         ) {
             eprintln!("delonix: {}", cmd::po::t_dyn(&e.to_string()));
-            std::process::exit(1);
+            // Same classification as the normal path below. It matters most for
+            // `netns run` — the 2nd pass of `--net <custom-network>`, which IS
+            // the process that resolves the image and creates the container, so
+            // its failure class is the one a caller would want to read.
+            std::process::exit(cmd::exitcode::for_error(&e));
         }
         std::process::exit(0);
     }
@@ -467,7 +479,11 @@ fn main() {
             cmd::mapped::duusage(std::path::Path::new(&raw[2]), std::path::Path::new(&raw[3]))
         {
             eprintln!("delonix: {}", cmd::po::t_dyn(&e.to_string()));
-            std::process::exit(1);
+            // Same classification as the normal path below. It matters most for
+            // `netns run` — the 2nd pass of `--net <custom-network>`, which IS
+            // the process that resolves the image and creates the container, so
+            // its failure class is the one a caller would want to read.
+            std::process::exit(cmd::exitcode::for_error(&e));
         }
         std::process::exit(0);
     }
@@ -476,7 +492,11 @@ fn main() {
             cmd::mapped::buildtar(std::path::Path::new(&raw[2]), std::path::Path::new(&raw[3]))
         {
             eprintln!("delonix: {}", cmd::po::t_dyn(&e.to_string()));
-            std::process::exit(1);
+            // Same classification as the normal path below. It matters most for
+            // `netns run` — the 2nd pass of `--net <custom-network>`, which IS
+            // the process that resolves the image and creates the container, so
+            // its failure class is the one a caller would want to read.
+            std::process::exit(cmd::exitcode::for_error(&e));
         }
         std::process::exit(0);
     }
@@ -508,7 +528,14 @@ fn main() {
         // without a matching `pt.po` entry still degrades to the original text
         // (same graceful fallback `t_dyn` already guarantees everywhere else).
         cmd::output::error(&cmd::po::t_dyn(&e.to_string()));
-        std::process::exit(1);
+        // The class of the failure, not just "it failed" (see `cmd::exitcode`):
+        // «no such resource» (4) and «exists but is not running» (3) used to be
+        // the same 1 as a syscall dying halfway through, so the only way to tell
+        // them apart was to grep the message — which is TRANSLATED, so the grep
+        // stops working under `--l18n=pt`. Mapped in ONE place, from the error
+        // TYPE: a second decision site is how two answers to the same question
+        // start disagreeing.
+        std::process::exit(cmd::exitcode::for_error(&e));
     }
 }
 

@@ -166,12 +166,89 @@ image     pull  ls   rm    build (delonix build)
   <code>-p</code>, <code>-v</code>, <code>-e</code>, <code>--name</code>, <code>--rm</code>, <code>-i</code>, <code>-t</code>, <code>--net</code>, <code>--restart</code>,
   <code>--memory</code>, <code>--cpus</code>, <code>--entrypoint</code>, <code>-w</code>, <code>-u</code>, <code>--add-host</code>, <code>--wait</code>,
   <code>--health-*</code>.</li>
-<li><strong>Os códigos de saída</strong>: <code>run</code> em primeiro plano devolve o código do próprio
-  workload; <code>exec</code> o do comando; <code>healthcheck</code> sai 1 quando não saudável.</li>
+<li><strong>Os códigos de saída</strong> — ver a secção «Códigos de saída» abaixo.</li>
 <li><strong>A saída JSON de <code>inspect</code></strong> — campos podem ser ACRESCENTADOS, nunca removidos
   nem com o tipo mudado.</li>
 <li><strong>Os atalhos de topo</strong> (<code>ps</code>, <code>run</code>, <code>exec</code>, <code>logs</code>, <code>rm</code>, <code>images</code>), que são
   literalmente o mesmo comando por reescrita de argv.</li>
+</ul>
+<h2 id="codigos-de-saida">Códigos de saída</h2>
+<blockquote>
+<p><strong>Alteração de contrato na v0.49.0.</strong> Até à v0.48.0 <strong>toda</strong> a falha do motor
+era <code>1</code> — «não existe» e «rebentou» eram o mesmo número. Continua a valer que
+<code>0</code> é sucesso e não-zero é falha, portanto um <code>if delonix …; then</code> não muda de
+comportamento; o que muda é para quem testa <code>[ $? -eq 1 ]</code> <strong>à espera de uma
+falha específica</strong>. Ver a nota de migração no fim desta secção.</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>código</th>
+<th>significado</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0</code></td>
+<td>sucesso</td>
+</tr>
+<tr>
+<td><code>1</code></td>
+<td>falha sem classe própria (o default de sempre)</td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td>uso inválido (o do <code>clap</code>) — e, em <code>stack plan --detailed-exitcode</code>, «há alterações»</td>
+</tr>
+<tr>
+<td><code>3</code></td>
+<td>o recurso existe mas <strong>não está a correr</strong></td>
+</tr>
+<tr>
+<td><code>4</code></td>
+<td><strong>não existe</strong> esse recurso</td>
+</tr>
+<tr>
+<td><code>5</code></td>
+<td><strong>conflito</strong> — o nome já está tomado</td>
+</tr>
+</tbody>
+</table>
+<p><code>3</code> e <code>4</code> não são números inventados: são os códigos de estado do LSB que o
+<code>systemctl</code> ainda fala (<code>3</code> = o programa não está a correr, <code>4</code> = não há tal
+unidade). <code>5</code> não tem convenção por trás — é o número livre seguinte, abaixo da
+gama que a shell usa (<code>126</code>/<code>127</code>, e <code>128+N</code> para sinais).</p>
+<p>O que isto resolve é concreto: um reconciliador — o <code>Makefile</code>, o passo de CI, o
+ciclo em bash que conduz esta CLI — não conseguia separar «cria, porque falta»
+de «pára, porque falhou» sem ler a MENSAGEM de erro. E a mensagem é traduzida
+(<code>--l18n=pt</code>), portanto um script que faz <code>grep 'no such'</code> funciona na máquina
+onde foi escrito e deixa de classificar num nó com outra locale.</p>
+<pre><code class="language-bash">delonix container inspect web &gt;/dev/null 2&gt;&amp;1
+case $? in
+  0) ;;                       # está lá
+  4) delonix container run -d --name web nginx ;;   # falta — cria
+  3) delonix container start web ;;                 # existe, parado — arranca
+  *) exit 1 ;;                # qualquer outra coisa: pára, não adivinhes
+esac
+</code></pre>
+<p><strong>O código de um <code>run</code>/<code>exec</code> continua a ser o do WORKLOAD, não o do motor.</strong>
+<code>run</code> em primeiro plano devolve o código do processo do container, <code>exec</code> o do
+comando, e <code>healthcheck</code> sai <code>1</code> quando não saudável — as três promessas de
+sempre, inalteradas. A consequência a reter: um container que saia <code>4</code> sai <code>4</code>,
+logo <strong>o <code>$?</code> de um <code>run</code>/<code>exec</code> nunca se lê como uma das classes acima</strong> — esse
+número foi escolhido pelo workload, não pelo motor.</p>
+<p><strong>O que fica de fora</strong>, e é honesto dizê-lo: uma pré-condição do host por
+satisfazer (uma sessão sem delegação de cgroup, por exemplo) não tem código
+próprio — o motor avisa e continua, portanto não há falha para classificar. E
+os grupos ainda não estáveis (ver a lista mais abaixo) podem responder <code>1</code> onde
+um comando estável já responde <code>4</code>: o <code>workload describe</code> de um nome que não
+existe é o caso conhecido.</p>
+<h3 id="migrar">Migrar</h3>
+<ul>
+<li><code>if delonix …; then</code> / <code>|| exit 1</code> / <code>set -e</code> — <strong>nada muda</strong>.</li>
+<li><code>[ $? -eq 1 ]</code> a testar «este comando falhou» — passa a ser <code>[ $? -ne 0 ]</code>.</li>
+<li><code>[ $? -eq 1 ]</code> a testar «não existe» — passa a ser <code>[ $? -eq 4 ]</code>, que é o
+  teste que antes não havia maneira de escrever.</li>
 </ul>
 <h2 id="estavel-em-conteudo-nao-em-formato">Estável em conteúdo, não em formato</h2>
 <p><strong>As tabelas de <code>ls</code>/<code>ps</code>.</strong> As colunas podem mudar de largura, de ordem ou
