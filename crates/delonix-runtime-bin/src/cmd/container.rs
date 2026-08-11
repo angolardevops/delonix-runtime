@@ -3948,7 +3948,10 @@ fn cmd_ps(
 /// Apply `f` to each ID, continuing with the rest if one fails (docker
 /// semantics: `rm a b c` removes what it can and returns the first error at the end).
 fn for_each_id(ids: &[String], mut f: impl FnMut(&str) -> Result<()>) -> Result<()> {
-    let mut failed = false;
+    // Same reasoning as the i18n note below: exiting here bypasses `main.rs`, so
+    // the exit-code classification has to be applied here too or a batched
+    // command would answer 1 where the same command with ONE id answers 4.
+    let mut codes: Vec<i32> = Vec::new();
     for id in ids {
         if let Err(e) = f(id) {
             // Each failure exits HERE with the id's context; returning the error made
@@ -3958,11 +3961,11 @@ fn for_each_id(ids: &[String], mut f: impl FnMut(&str) -> Result<()>) -> Result<
             // `po::t_dyn` — every batched `stop`/`rm`/... failure stayed in EN
             // even under `--l18n=pt`, unlike a single-id failure of the same command.
             eprintln!("{id}: {}", super::po::t_dyn(&e.to_string()));
-            failed = true;
+            codes.push(super::exitcode::for_error(&e));
         }
     }
-    if failed {
-        std::process::exit(1);
+    if !codes.is_empty() {
+        std::process::exit(super::exitcode::merge(&codes));
     }
     Ok(())
 }
