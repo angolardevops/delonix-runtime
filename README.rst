@@ -15,7 +15,7 @@ Not a low-level OCI *runtime* (that's ``runc``/``crun``): Delonix is a full
 container **and** VM engine — build, run, network, firewall, store, and
 bootstrap Kubernetes clusters, from one binary.
 
-:Version: 0.47.2
+:Version: 0.48.0
 :License: Apache-2.0
 :Docs: https://angolardevops.github.io/delonix-runtime/
 :Repo: https://github.com/angolardevops/delonix-runtime
