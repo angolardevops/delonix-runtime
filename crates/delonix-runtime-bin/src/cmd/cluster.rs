@@ -44,11 +44,8 @@ struct SshSpec {
     /// so as not to break manifests written before this restructuring.
     #[serde(alias = "keyPath")]
     key: Option<PathBuf>,
-    // FIXME(RELATORIO FAIL#1): parsed but NOT YET wired to `conn_args()` — SSH
-    // always goes to port 22. Accepted and ignored on purpose (to not break manifests that
-    // set it); wiring it up or removing it from the schema is a pending decision, in a dedicated commit.
+    /// SSH port of every host in this cluster. `None` = the client's default (22).
     #[serde(default)]
-    #[allow(dead_code)]
     port: Option<u16>,
 }
 
@@ -416,6 +413,7 @@ fn target_for(host: &HostSpec, ssh: &SshSpec) -> SshTarget {
         host: host.ip.clone(),
         user: ssh.user.clone(),
         key: ssh.key.clone(),
+        port: ssh.port,
     }
 }
 
@@ -1287,6 +1285,7 @@ fn wait_for_vm_ssh_ready(vm_name: &str, ssh: &SshSpec, timeout: Duration) -> Res
             host: ip.clone(),
             user: ssh.user.clone(),
             key: ssh.key.clone(),
+            port: ssh.port,
         };
         if remote::ssh_check(&target, "true") {
             return Ok(ip);
@@ -1425,6 +1424,7 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
             host: lb_ip.clone(),
             user: ssh.user.clone(),
             key: ssh.key.clone(),
+            port: ssh.port,
         };
         let backend_ips: Vec<String> = control_plane.iter().map(|h| h.ip.clone()).collect();
         lb::ensure_haproxy(&lb_target, &backend_ips)?;
