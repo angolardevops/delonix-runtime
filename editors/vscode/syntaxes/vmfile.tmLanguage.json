@@ -1,0 +1,58 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "VMfile",
+  "scopeName": "source.vmfile",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#from" },
+    { "include": "#instruction" },
+    { "include": "#option" },
+    { "include": "#continuation" },
+    { "include": "#string" }
+  ],
+  "repository": {
+    "comment": {
+      "comment": "Only a whole line is a comment — the parser does the same, so that `RUN sed -i 's/#a/b/'` keeps its hash.",
+      "match": "^\\s*#.*$",
+      "name": "comment.line.number-sign.vmfile"
+    },
+    "from": {
+      "comment": "FROM <image> [AS <stage>] — the image is highlighted apart because it is the one argument that names something outside the file.",
+      "match": "^\\s*(?i:(from))\\s+(\\S+)(?:\\s+(?i:(as))\\s+(\\S+))?",
+      "captures": {
+        "1": { "name": "keyword.control.from.vmfile" },
+        "2": { "name": "string.unquoted.image.vmfile" },
+        "3": { "name": "keyword.control.as.vmfile" },
+        "4": { "name": "entity.name.type.stage.vmfile" }
+      }
+    },
+    "instruction": {
+      "comment": "Exactly the instructions cmd/vmfile.rs accepts. It fails closed on anything else, so this list must not grow past it.",
+      "match": "^\\s*(?i:(run|copy|env|user|password|rootpassword|cloudinit|sshkey|size|hostname|vcpus|memory|hypervisor|label))\\b",
+      "captures": { "1": { "name": "keyword.control.vmfile" } }
+    },
+    "option": {
+      "match": "--from=\\S+",
+      "name": "variable.parameter.vmfile"
+    },
+    "continuation": {
+      "match": "\\\\$",
+      "name": "constant.character.escape.continuation.vmfile"
+    },
+    "string": {
+      "patterns": [
+        {
+          "begin": "\"",
+          "end": "\"",
+          "name": "string.quoted.double.vmfile",
+          "patterns": [{ "match": "\\\\.", "name": "constant.character.escape.vmfile" }]
+        },
+        {
+          "begin": "'",
+          "end": "'",
+          "name": "string.quoted.single.vmfile"
+        }
+      ]
+    }
+  }
+}
