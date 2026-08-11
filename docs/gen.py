@@ -115,6 +115,7 @@ SOURCE_FILES = {
     "kube": "kube.rs",
     "netns": "netns.rs",
     "completion": "complete.rs",
+    "syntax": "main.rs",
     "schema": "schema.rs",
     "init": "init.rs",
     "backup": "rbackup.rs",
@@ -1199,6 +1200,23 @@ fica desactualizado à mão.""",
             ("Zsh", 'echo \'source <(delonix completion zsh)\' >> ~/.zshrc'),
         ],
     },
+    "syntax": {
+        "title": "delonix syntax",
+        "tagline": "Realce de sintaxe do VMfile para o vim/neovim e para o VS Code.",
+        "intro": """Um <code>VMfile</code> não tem extensão, como um Dockerfile, por isso nenhum
+editor o reconhece sozinho — e sem realce a instrução mal escrita que o parser recusa (ele falha
+FECHADO) parece igual a todo o resto até ao momento do build.<br><br>
+A gramática sai do BINÁRIO, não do repositório, pela mesma razão que as completions são geradas: a
+instalação documentada é <code>curl … | bash</code>, que não tem repositório de onde copiar, e uma
+gramática guardada noutro sítio afasta-se do parser que devia descrever. O
+<code>scripts/install.sh</code> instala-a sozinho onde encontrar um destes editores.""",
+        "subs": {},
+        "examples": [
+            ("vim/neovim — a sintaxe E o ftdetect que a activa", "delonix syntax vim --dir ~/.vim"),
+            ("VS Code, como directoria de extensão", "delonix syntax vscode --dir ~/.vscode/extensions/delonix.vmfile-0.1.0"),
+            ("Só a gramática, para a colocares onde quiseres", "delonix syntax vim > ~/.vim/syntax/vmfile.vim"),
+        ],
+    },
     "schema": {
         "title": "delonix schema · explain",
         "tagline": "O schema dos manifestos, gerado do próprio código — e a referência de campos.",
@@ -1500,6 +1518,16 @@ it's exposed for debugging and integration.""",
         "intro": """Prints the shell registration script. The engine is dynamic: the script asks
 the binary itself for suggestions in real time, from the SAME definition used for parsing — it
 never goes stale by hand.""",
+    },
+    "syntax": {
+        "tagline": "VMfile syntax highlighting for vim/neovim and VS Code.",
+        "intro": """A <code>VMfile</code> has no extension, like a Dockerfile, so no editor
+recognises it on its own — and without highlighting, the misspelled instruction the parser refuses
+(it fails CLOSED) looks like every other line until build time.<br><br>
+The grammar comes out of the BINARY, not the repository, for the same reason the completions are
+generated: the documented install is <code>curl … | bash</code>, which has no repository to copy
+from, and a grammar kept anywhere else drifts from the parser it is meant to describe.
+<code>scripts/install.sh</code> installs it wherever it finds one of these editors.""",
     },
     "schema": {
         "tagline": "The manifest schema, generated from the code — and the field reference.",
