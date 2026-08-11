@@ -419,6 +419,20 @@ pub enum ImageCmd {
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum VmSub {
+    /// Remove a local VM image (its disk and its metadata).
+    ///
+    /// **Refused while a VM still uses it**: a VM runs on a thin overlay whose
+    /// backing file IS the image, so deleting it makes that VM permanently
+    /// unreadable rather than freeing anything.
+    Rm {
+        /// Image name(s), as shown by `image vm ls`.
+        #[arg(required = true)]
+        names: Vec<String>,
+        /// Remove it even while VMs back onto it — **those VMs stop being
+        /// readable**.
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
     /// List the local VM images.
     Ls {
         /// Output format: `table` (default) or `json` (ADR-0005).
@@ -582,6 +596,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
     if let ImageCmd::Vm { action } = action {
         use super::vmimage::{self, VmImageCmd};
         return vmimage::run(match action {
+            VmSub::Rm { names, force } => VmImageCmd::Rm { names, force },
             VmSub::Ls { output } => VmImageCmd::Ls { output },
             VmSub::Describe { names } => VmImageCmd::Describe { names },
             VmSub::Pull {
