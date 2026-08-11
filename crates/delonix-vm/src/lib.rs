@@ -1617,8 +1617,27 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     if cfg.vnc {
         s.push_str("    <graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'/>\n");
     }
-    // Video: explicit model overrides; else the default virtio head when VNC is
-    // on. `"none"` suppresses the device entirely.
+    // Video: a display adapter is ALWAYS present unless explicitly suppressed
+    // with `video: none`.
+    //
+    // It used to appear only alongside `--vnc`, and that conflated two
+    // different things: **VNC is remote access to a screen; VGA is the machine
+    // HAVING one.** A domain with no display adapter at all is unusual — a
+    // plain `virt-install` always gives one — and guests exist that simply do
+    // not boot without it.
+    //
+    // Measured, and it cost hours: every Proxmox appliance image (the vendor's
+    // own installer output, before this repo touched it) boots into a
+    // `SeaBIOS → GRUB → reset` loop under `qemu -vga none`, never printing a
+    // single kernel line. With an adapter present, the same image boots and
+    // gets a DHCP lease. So `delonix vm create <appliance>` worked with `--vnc`
+    // and produced a machine that silently reset without it — the flag people
+    // reach for to LOOK at a guest was the thing making it work.
+    //
+    // The default model is `virtio` for a VNC domain (as before) and the plain
+    // `vga` otherwise: no guest driver needed, which is the point when nobody
+    // is going to connect and the adapter exists only so firmware and kernel
+    // find a console.
     match cfg.video.as_deref() {
         Some("none") => {}
         Some(m) => s.push_str(&format!(
@@ -1626,7 +1645,7 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
             xml_escape(m)
         )),
         None if cfg.vnc => s.push_str("    <video><model type='virtio' heads='1'/></video>\n"),
-        None => {}
+        None => s.push_str("    <video><model type='vga' heads='1'/></video>\n"),
     }
     // VFIO: PCI device passthrough (SR-IOV VF, GPU).
     for dev in &cfg.devices {
@@ -3522,5 +3541,51 @@ mod tests {
             !std::path::Path::new("local-lvm:vm-100-disk-0").exists(),
             "the test's premise is that this is not a local path"
         );
+    }
+
+    #[test]
+    fn um_dominio_tem_sempre_ecra_a_nao_ser_que_o_tirem() {
+        // The bug this closes: a display adapter only appeared with `--vnc`,
+        // and every Proxmox appliance image — the vendor's own, untouched —
+        // boots into a SeaBIOS→GRUB→reset loop with no adapter at all. So
+        // `vm create` worked with the flag people use to LOOK at a guest and
+        // silently produced a dead machine without it.
+        let base = VmConfig {
+            name: "v".into(),
+            disk: "/tmp/x.qcow2".into(),
+            ..Default::default()
+        };
+        let xml = libvirt_domain_xml(&base, "/tmp/x.qcow2", "");
+        assert!(
+            xml.contains("<video>"),
+            "a domain with no --vnc must still have a display adapter:\n{xml}"
+        );
+        assert!(
+            !xml.contains("<graphics"),
+            "…but no VNC server, which is what --vnc is for"
+        );
+
+        // With --vnc: both, and the virtio model as before.
+        let vnc = VmConfig {
+            vnc: true,
+            ..base.clone()
+        };
+        let xml = libvirt_domain_xml(&vnc, "/tmp/x.qcow2", "");
+        assert!(xml.contains("<graphics type='vnc'"));
+        assert!(xml.contains("<video><model type='virtio'"));
+
+        // `video: none` still suppresses it — an explicit choice stays honoured.
+        let none = VmConfig {
+            video: Some("none".into()),
+            ..base.clone()
+        };
+        assert!(!libvirt_domain_xml(&none, "/tmp/x.qcow2", "").contains("<video>"));
+
+        // An explicit model still wins over both defaults.
+        let qxl = VmConfig {
+            video: Some("qxl".into()),
+            ..base
+        };
+        assert!(libvirt_domain_xml(&qxl, "/tmp/x.qcow2", "").contains("type='qxl'"));
     }
 }
