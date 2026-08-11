@@ -1016,9 +1016,16 @@ user units + <code>loginctl enable-linger</code>; root → system units), com <c
 registo do recurso e os DADOS dos volumes que ele usa — não a imagem nem o rootfs, porque um rootfs
 medido são 435 MB contra 1,5 KB de registo, e a imagem é endereçada por conteúdo e volta a
 descarregar-se. A VM é a excepção: o overlay dela É o estado dela, por isso viaja (a base dourada
-não). <b>Não é um checkpoint</b> — a memória não é guardada; o que volta é a mesma configuração e os
-mesmos dados em disco. O destino pode ser uma pasta ou um <code>volume:&lt;nome&gt;</code>, que é como o
-arquivo vai parar a um NAS. Sendo o motor daemonless, o agendamento instala um <b>temporizador de
+não). <b>Nada tem de parar</b>: um container (ou todos os membros de um pod/stack, em conjunto) é
+mantido no <i>freezer</i> do cgroup v2 durante o snapshot — nenhum processo consegue escrever
+enquanto o <code>tar</code> lê, e o PID não muda; uma VM passa pelo snapshot externo do libvirt, a
+correr sobre um overlay temporário enquanto o disco real é copiado, e volta a assentar nele a
+seguir. A garantia é <b>consistência-de-falha</b>, exactamente o que uma falta de energia deixa —
+um sistema de ficheiros com jornal e qualquer base de dados com write-ahead log recuperam dela. O
+que NÃO é: a memória não é guardada, logo um processo não é retomado a meio (isso é CRIU) e uma
+aplicação que só tenha estado em RAM perde-o — <code>--stop</code> e <code>--quiesce</code> são as
+duas formas de pedir mais, e cada uma diz o que custa. O destino pode ser uma pasta ou um
+<code>volume:&lt;nome&gt;</code>, que é como o arquivo vai parar a um NAS. Sendo o motor daemonless, o agendamento instala um <b>temporizador de
 utilizador do systemd</b>: o <code>--max-for-day N</code> espaça N corridas pelo dia, e o
 <code>--cron</code> traduz a expressão de crontab — recusando o que não conseguir exprimir em vez de
 aproximar.""",
@@ -1029,7 +1036,9 @@ aproximar.""",
             ('Duas vezes por dia, guardando os dois mais recentes', 'delonix backup container db --max-for-day 2 --to /srv/backups'),
             ('Ou no horário que quiseres, em sintaxe de crontab', 'delonix backup stack loja --cron "30 3 * * 1" --to /srv/backups'),
             ('Uma stack inteira: cada membro e cada volume, o partilhado uma só vez', 'delonix backup stack loja --to /srv/backups'),
-            ('Uma VM (pára-a primeiro — copiar o disco a quente apanha um filesystem rasgado)', 'delonix backup vm dev --to /srv/backups'),
+            ('Uma VM A CORRER — o convidado não pára e o PID não muda', 'delonix backup vm dev --to /srv/backups'),
+            ('Consistência ao nível do filesystem do convidado (precisa do qemu-guest-agent lá dentro)', 'delonix backup vm dev --quiesce --to /srv/backups'),
+            ('Parar mesmo, para uma aplicação que só tem estado em RAM', 'delonix backup container cache --stop --to /srv/backups'),
             ('Ver o que entraria, sem escrever nada', 'delonix backup pod api --dry-run'),
         ],
     },

@@ -160,6 +160,15 @@ check "snapshot rm" ok "$BIN" volumes snapshot rm "$VOL" s1
 section "network: ciclo de vida"
 ########################################
 NET="net-$PFX"
+# A subnet abaixo é FIXA, e este script já foi interrompido a meio (um `timeout`
+# do lado de quem o corre): a rede fica para trás a segurar `10.253.0.0/16` e a
+# corrida seguinte falha em `network create` com um conflito que nada tem a ver
+# com o código — mais quatro falhas em cascata. Varrer o que só este script cria
+# (`net-e2e*`) antes de começar é o que torna a bateria repetível.
+for stale in $("$BIN" network ls 2>/dev/null | awk '/^net-e2e/{print $1}'); do
+  [[ "$stale" == "$NET" ]] && continue
+  "$BIN" network rm "$stale" >/dev/null 2>&1 && log "  (limpo: rede $stale de uma corrida anterior)"
+done
 # `/16` na gama 10.<200-254>, e não o `/24` que este teste usou durante meses: até
 # a v0.48.0 o `--subnet` era ACEITE e deitado fora com o driver bridge, por isso um
 # `/24` "passava" sem nunca ter sido aplicado. Fechado o bug, o teste que o
@@ -348,7 +357,10 @@ section "backup / restore por recurso"
 # O ciclo real: arquivar, DESTRUIR os dados, repor, e confirmar que voltaram. Um
 # `backup` que devolve 0 não prova nada — o que prova é o conteúdo do ficheiro
 # depois de ele ter sido apagado.
-BKDIR="$OUT/backups"; mkdir -p "$BKDIR"
+# Fresh per run: `$OUT` survives between runs, and a leftover archive would make
+# the "--dry-run wrote nothing" check fail for a reason that has nothing to do
+# with the code.
+BKDIR="$OUT/backups"; rm -rf "$BKDIR"; mkdir -p "$BKDIR"
 BKC="bk-$PFX"; BKV="bkvol-$PFX"
 "$BIN" volumes create "$BKV" >/dev/null 2>&1
 "$BIN" container run -d --name "$BKC" -v "$BKV":/data alpine:latest sleep 300 >/dev/null 2>&1

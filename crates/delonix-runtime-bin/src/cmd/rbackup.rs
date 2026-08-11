@@ -24,11 +24,26 @@
 //! travels and the golden base disk does not (that one is re-pullable, same
 //! argument as the image). The archive says which base it needs.
 //!
-//! **This is not a checkpoint.** Memory is not saved and `restore` does not
-//! resume mid-execution — that needs CRIU and is a different feature. What comes
-//! back is a resource with the same configuration and the same data on disk,
-//! which is what "the last state" means for everything that keeps its state
-//! where state belongs.
+//! # Nothing has to stop, and what that costs
+//!
+//! A backup that requires stopping the workload is a backup nobody takes in
+//! production, so neither kind stops:
+//!
+//! * a **container** (or every member of a pod/stack, together) is held in the
+//!   cgroup v2 freezer for the length of the snapshot — no process can issue a
+//!   write while `tar` reads, and the PID never changes; and
+//! * a **VM** goes through libvirt's external-snapshot dance, so the guest keeps
+//!   running on a temporary overlay while its real disk is copied, and is then
+//!   pivoted back (`delonix_vm::backup_disk_live`).
+//!
+//! **The guarantee is crash-consistency** — precisely what a power cut leaves
+//! behind. A journalling filesystem and any database with a write-ahead log
+//! recover from it; that is the same guarantee a storage-array or LVM snapshot
+//! gives, and it is what "backup" means for everyone who takes one hot. What it
+//! is NOT: memory is not saved, so a process is not resumed mid-execution (that
+//! is CRIU, a different feature), and an application holding state only in RAM
+//! loses it. `--stop` and `--quiesce` are the two ways to ask for more, and each
+//! says what it costs.
 //!
 //! # Scheduling in a daemonless engine
 //!
@@ -432,6 +447,168 @@ fn hostname() -> String {
         .unwrap_or_default()
 }
 
+/// Freezes running containers for the duration of a snapshot, and thaws them
+/// again — including when the snapshot fails, which is the whole point of it
+/// being a guard and not two calls.
+///
+/// # Why freeze instead of stop
+///
+/// A backup that requires stopping the workload is a backup nobody takes in
+/// production, so this engine's answer is the one it already gives everywhere
+/// else: do it hot, without changing the PID. The cgroup v2 freezer suspends
+/// every process in the container, so no new write can be issued while `tar`
+/// reads; `tar` reads through the same host page cache the container wrote to,
+/// so what lands in the archive is a point-in-time view of the volume.
+///
+/// **What that guarantees, stated precisely:** the archive is *crash-consistent*
+/// — exactly what a power cut would leave. A journalling filesystem and any
+/// database with a write-ahead log recover from it; an application that keeps
+/// state only in memory does not, and for those `--stop` is the option that
+/// exists. Claiming more than crash-consistency here would be the kind of
+/// promise that is only discovered to be false on the day it matters.
+///
+/// A container the operator had ALREADY paused is left paused: thawing it would
+/// be this command deciding to resume a workload it was only asked to archive.
+struct Freeze {
+    thaw: Vec<delonix_runtime_core::Container>,
+}
+
+impl Freeze {
+    /// Stops the containers instead of freezing them, restarting them after.
+    ///
+    /// For an application that keeps state only in RAM, a frozen process still
+    /// has that state in RAM and the archive still will not have it — the only
+    /// honest way to get it is to let the application shut down and write it.
+    fn stop(
+        containers: &[delonix_runtime_core::Container],
+        store: &delonix_runtime_core::Store,
+    ) -> Result<Stopped> {
+        let mut restart = Vec::new();
+        for c in containers {
+            if !matches!(c.status, delonix_runtime_core::Status::Running) {
+                continue;
+            }
+            super::container::cmd_stop(store, &c.id, 10)?;
+            restart.push(c.id.clone());
+        }
+        Ok(Stopped { restart })
+    }
+
+    fn hold(containers: &[delonix_runtime_core::Container]) -> Self {
+        let mut thaw = Vec::new();
+        for c in containers {
+            if !matches!(c.status, delonix_runtime_core::Status::Running) {
+                continue; // stopped: nothing writes, nothing to freeze
+            }
+            if delonix_runtime::is_frozen(c) {
+                continue; // already paused by the operator — leave it that way
+            }
+            match delonix_runtime::set_frozen(c, true) {
+                Ok(()) => thaw.push(c.clone()),
+                Err(e) => {
+                    // Do NOT refuse. The freezer needs a delegated cgroup, and on
+                    // a plain SSH session there is none (a documented property of
+                    // this host model, not a fault of the container). Refusing
+                    // would make backup impossible exactly where everything else
+                    // works; carrying on in silence would hand over an archive
+                    // whose consistency nobody can reason about. So: say it.
+                    eprintln!(
+                        "{}",
+                        po::tf(
+                            "warning: could not freeze '{name}' ({err}) — the archive is being \
+                             taken while it writes, so it is not a point-in-time view. A \
+                             delegated cgroup fixes this (`systemd-run --user --scope -p \
+                             Delegate=yes -- delonix backup ...`), or use --stop",
+                            &[("name", &c.name), ("err", &e.to_string())],
+                        )
+                    );
+                }
+            }
+        }
+        Freeze { thaw }
+    }
+}
+
+impl Drop for Freeze {
+    fn drop(&mut self) {
+        for c in &self.thaw {
+            if let Err(e) = delonix_runtime::set_frozen(c, false) {
+                // A container left frozen is a container that looks alive and
+                // answers nothing. This has to be loud even on the error path.
+                eprintln!(
+                    "{}",
+                    po::tf(
+                        "ERROR: '{name}' was left PAUSED and could not be resumed ({err}) — run \
+                         `delonix container unpause {name}`",
+                        &[("name", &c.name), ("err", &e.to_string())],
+                    )
+                );
+            }
+        }
+    }
+}
+
+/// Brings back a VM that `--stop` stopped, including on the error path.
+struct RestartVm {
+    root: PathBuf,
+    name: String,
+}
+
+impl Drop for RestartVm {
+    fn drop(&mut self) {
+        if let Err(e) = delonix_vm::start(&self.root, &self.name) {
+            eprintln!(
+                "{}",
+                po::tf(
+                    "ERROR: VM '{name}' was stopped for the backup and did not start again ({err}) \
+                     — run `delonix vm start {name}`",
+                    &[("name", &self.name), ("err", &e.to_string())],
+                )
+            );
+        }
+    }
+}
+
+/// The `--stop` counterpart of [`Freeze`]: restarts what it stopped.
+struct Stopped {
+    restart: Vec<String>,
+}
+
+impl Drop for Stopped {
+    fn drop(&mut self) {
+        if self.restart.is_empty() {
+            return;
+        }
+        // Reopened here rather than held: neither store is `Clone`, and a store
+        // is a path plus a `create_dir_all` — cheaper than threading a lifetime
+        // through a guard whose whole job is to run on the way out.
+        let Ok((images, store)) = super::util::open_stores() else {
+            eprintln!(
+                "{}",
+                po::tf(
+                    "ERROR: cannot reopen the stores to restart {ids} — run `delonix container start` on them",
+                    &[("ids", &self.restart.join(", "))],
+                )
+            );
+            return;
+        };
+        for id in &self.restart {
+            if let Err(e) = super::container::cmd_start(&images, &store, id) {
+                // Same reasoning as the thaw path: a workload this command
+                // stopped and failed to bring back has to be said out loud.
+                eprintln!(
+                    "{}",
+                    po::tf(
+                        "ERROR: '{id}' was stopped for the backup and did not start again ({err}) \
+                         — run `delonix container start {id}`",
+                        &[("id", id), ("err", &e.to_string())],
+                    )
+                );
+            }
+        }
+    }
+}
+
 /// The named volumes a set of mounts uses, as (volume name, data directory).
 ///
 /// A `Mount` records only the host PATH — the volume's name is not in it — so
@@ -462,6 +639,7 @@ fn write_container_archive(
     c: &delonix_runtime_core::Container,
     out: &Path,
     tmp: &Path,
+    stop: bool,
 ) -> Result<Meta> {
     let vols = volumes_of(root, &c.mounts);
     let f = std::fs::File::create(out)
@@ -484,6 +662,18 @@ fn write_container_archive(
     };
     append_bytes(&mut b, "backup.json", &to_json(&meta)?)?;
     append_bytes(&mut b, "config/container.json", &to_json(c)?)?;
+
+    // Held across EVERY volume, not one at a time: two volumes of the same
+    // workload snapshotted in separate freeze windows are two different instants,
+    // and an application that writes to both (data + WAL, say) would come back
+    // with them disagreeing.
+    let one = std::slice::from_ref(c);
+    let (_frozen, _stopped) = if stop {
+        let (_i, store) = super::util::open_stores()?;
+        (None, Some(Freeze::stop(one, &store)?))
+    } else {
+        (Some(Freeze::hold(one)), None)
+    };
 
     for (name, data) in &vols {
         // Through `__volsnap`, which reads from INSIDE the mapped userns. Walking
@@ -514,7 +704,14 @@ fn to_json<T: serde::Serialize>(v: &T) -> Result<Vec<u8>> {
 /// base is a golden image that `image vm pull` puts back. Carrying the base
 /// would multiply every archive by a gigabyte to hold bytes that are already
 /// content-addressed somewhere else.
-fn write_vm_archive(vm: &delonix_runtime_core::Vm, out: &Path) -> Result<Meta> {
+fn write_vm_archive(
+    root: &Path,
+    vm: &delonix_runtime_core::Vm,
+    out: &Path,
+    tmp: &Path,
+    quiesce: bool,
+    stop: bool,
+) -> Result<Meta> {
     let overlay = Path::new(&vm.overlay);
     if !overlay.is_file() {
         return Err(Error::Invalid(po::tf(
@@ -522,18 +719,32 @@ fn write_vm_archive(vm: &delonix_runtime_core::Vm, out: &Path) -> Result<Meta> {
             &[("name", &vm.name), ("path", &vm.overlay)],
         )));
     }
-    if matches!(vm.status, delonix_runtime_core::Status::Running) {
-        // A qcow2 copied out from under a live guest is a torn filesystem: the
-        // guest has writes in flight and its page cache is not on the disk. The
-        // engine already has the right primitive for a live VM, and saying so is
-        // better than producing an archive that restores into fsck.
-        return Err(Error::Invalid(po::tf(
-            "backup: VM '{name}' is running — copying its disk now would capture a torn \
-             filesystem. Stop it first (`delonix vm stop {name}`), or take a live checkpoint with \
-             `delonix vm snapshot {name} <label>`",
-            &[("name", &vm.name)],
-        )));
-    }
+
+    // A running guest has writes in flight, so copying its disk from under it
+    // captures a torn filesystem. Rather than refuse — a VM that has to be
+    // stopped to be backed up is a VM nobody backs up — the copy goes through
+    // libvirt's external-snapshot dance, which leaves the guest running and its
+    // PID unchanged. See `delonix_vm::backup_disk_live`.
+    let running = matches!(vm.status, delonix_runtime_core::Status::Running);
+    let staged = tmp.join("overlay.qcow2");
+    let mut _restart_vm = None;
+    let disk: &Path = if running && stop {
+        // Fully quiet: the guest shuts down and everything it had in RAM is
+        // written or lost by its own decision, not ours. The guard exists so a
+        // failure while writing the archive still brings the VM back — this
+        // command was asked to copy a disk, not to leave a machine off.
+        delonix_vm::stop(root, &vm.name)?;
+        _restart_vm = Some(RestartVm {
+            root: root.to_path_buf(),
+            name: vm.name.clone(),
+        });
+        overlay
+    } else if running {
+        delonix_vm::backup_disk_live(root, &vm.name, &staged, quiesce)?;
+        &staged
+    } else {
+        overlay
+    };
 
     let f = std::fs::File::create(out)
         .map_err(|e| Error::Invalid(format!("backup: {}: {e}", out.display())))?;
@@ -554,7 +765,7 @@ fn write_vm_archive(vm: &delonix_runtime_core::Vm, out: &Path) -> Result<Meta> {
     };
     append_bytes(&mut b, "backup.json", &to_json(&meta)?)?;
     append_bytes(&mut b, "config/vm.json", &to_json(vm)?)?;
-    b.append_path_with_name(overlay, "disk/overlay.qcow2")
+    b.append_path_with_name(disk, "disk/overlay.qcow2")
         .map_err(|e| Error::Invalid(format!("backup: overlay: {e}")))?;
     b.into_inner()
         .and_then(|enc| enc.finish())
@@ -588,6 +799,16 @@ pub struct BackupArgs {
     /// Print what would be archived, without writing anything.
     #[arg(long)]
     pub dry_run: bool,
+    /// Ask the guest agent to flush and freeze the filesystems first (VMs only; needs qemu-guest-agent inside the guest).
+    #[arg(long)]
+    pub quiesce: bool,
+    /// Stop the workload for the duration of the backup, instead of freezing it hot.
+    ///
+    /// Only worth it for an application that keeps state in memory and never
+    /// writes it down: freezing gives a crash-consistent archive, which anything
+    /// with a journal or a write-ahead log recovers from.
+    #[arg(long)]
+    pub stop: bool,
 }
 
 #[derive(Debug, clap::Args)]
@@ -661,13 +882,15 @@ pub fn cmd_backup(a: BackupArgs) -> Result<()> {
         Kind::Container => {
             let (_images, store) = super::util::open_stores()?;
             let c = super::util::find(&store, &a.name)?;
-            write_container_archive(&root, &c, &out, tmp.path())?
+            write_container_archive(&root, &c, &out, tmp.path(), a.stop)?
         }
         Kind::Vm => {
             let vm = load_vm(&root, &a.name)?;
-            write_vm_archive(&vm, &out)?
+            write_vm_archive(&root, &vm, &out, tmp.path(), a.quiesce, a.stop)?
         }
-        Kind::Pod | Kind::Stack => write_group_archive(&root, a.kind, &a.name, &out, tmp.path())?,
+        Kind::Pod | Kind::Stack => {
+            write_group_archive(&root, a.kind, &a.name, &out, tmp.path(), a.stop)?
+        }
     };
 
     let size = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
@@ -786,6 +1009,7 @@ fn write_group_archive(
     name: &str,
     out: &Path,
     tmp: &Path,
+    stop: bool,
 ) -> Result<Meta> {
     let members = group_members(root, kind, name)?;
     let (_images, store) = super::util::open_stores()?;
@@ -797,11 +1021,23 @@ fn write_group_archive(
         flate2::Compression::default(),
     ));
 
-    let mut all_vols: Vec<String> = Vec::new();
+    // Resolve every member BEFORE freezing anything, so a typo or a missing
+    // member fails without having suspended a single process.
     let mut records = Vec::new();
     for m in &members {
-        let c = super::util::find(&store, m)?;
-        records.push(c.clone());
+        records.push(super::util::find(&store, m)?);
+    }
+    // A pod or a stack is ONE application: all of its members are frozen for the
+    // whole pass. Freezing each in turn would archive the web tier at one instant
+    // and the database it had just written to at another.
+    let (_frozen, _stopped) = if stop {
+        (None, Some(Freeze::stop(&records, &store)?))
+    } else {
+        (Some(Freeze::hold(&records)), None)
+    };
+
+    let mut all_vols: Vec<String> = Vec::new();
+    for c in &records {
         for (vn, data) in volumes_of(root, &c.mounts) {
             if all_vols.contains(&vn) {
                 continue; // shared between members: archived once

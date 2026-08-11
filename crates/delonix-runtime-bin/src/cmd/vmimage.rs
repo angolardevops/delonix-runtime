@@ -1150,6 +1150,93 @@ pub(crate) fn download_url_base(store: &VmImageStore, url: &str) -> Result<PathB
 /// Debian only `SHA512SUMS`, Rocky a per-file BSD-format `.CHECKSUM` — and that
 /// knowledge already lives in the three functions below. This is the one place
 /// that picks between them.
+/// The base image DELONIX publishes for a `FROM <distro>:<release>`, when there
+/// is one.
+///
+/// `FROM ubuntu:24.04` used to mean one thing only: go to Canonical and fetch
+/// their cloud image. But the project publishes its own base for that same
+/// distro and release — `ghcr.io/angolardevops/delonix-vm-base:ubuntu-24.04`,
+/// built and validated here — so a recipe that names a distro should land on
+/// THAT, and reach the publisher only when the project has nothing to offer.
+/// The tag spelling needs no translation table: the official repositories
+/// already spell `<product>:<version>` as `<product>-<version>`
+/// (`official_tag_for`), which is exactly what a `FROM ubuntu:24.04` becomes.
+///
+/// The LOCAL copy is checked first, and it is not an optimization: a base
+/// already in `image --vm ls` makes the build cost nothing and reach nothing,
+/// which is the same reason `RUN` is offline by default — a build that touches
+/// the network gives a different image depending on when it ran.
+///
+/// Returns `None`, never an error, when the project publishes no such base or
+/// the registry cannot be reached. The caller still has the distro's own cloud
+/// image, and turning an unreachable ghcr (private package, no token, a plane)
+/// into a failed build would take away the path that works today.
+pub(crate) fn official_distro_base(
+    store: &VmImageStore,
+    distro: &str,
+    release: &str,
+) -> Option<PathBuf> {
+    let tag = format!("{distro}-{release}");
+    let local = format!("delonix-vm-base:{tag}");
+    let path = store.qcow2_path(&local);
+    if path.exists() {
+        eprintln!(
+            "{}",
+            super::po::tf(
+                "FROM {d}:{r}: official delonix base {local} (local)",
+                &[("d", distro), ("r", release), ("local", &local)],
+            )
+        );
+        return Some(path);
+    }
+    let source = format!("ghcr.io/angolardevops/delonix-vm-base:{tag}");
+    eprintln!(
+        "{}",
+        super::po::tf(
+            "FROM {d}:{r}: pulling the official delonix base {src}",
+            &[("d", distro), ("r", release), ("src", &source)],
+        )
+    );
+    let label = format!("[vm pull] {source}");
+    let last = std::cell::Cell::new(0u64);
+    let on_progress = move |done: u64, total: Option<u64>| {
+        let finished = total.map(|t| done >= t).unwrap_or(false);
+        if finished || done.wrapping_sub(last.get()) >= 2 * 1024 * 1024 {
+            last.set(done);
+            super::output::progress_bar(&label, done, total);
+        }
+    };
+    let (data, annotations) = delonix_image::registry::pull_oci_artifact_with_meta(
+        &state_root(),
+        &source,
+        Some(&on_progress),
+    )
+    .ok()?;
+    super::output::progress_done();
+    std::fs::write(&path, &data).ok()?;
+    let img = VmImage {
+        name: local.clone(),
+        tag: source.clone(),
+        digest: format!("sha256:{}", hex_sha256(&data)),
+        size: data.len() as u64,
+        ubuntu_release: None,
+        k8s_version: None,
+        created_unix: now_unix(),
+        kernel_version: None,
+        distro: None,
+        default_vcpus: None,
+        default_memory: None,
+        default_backend: None,
+        cloud_init: None,
+    };
+    // Same metadata path a plain `vm pull` takes, so the base lands in the
+    // store indistinguishable from one pulled by hand — including showing up
+    // in `image --vm ls` with its distro and kernel.
+    let img = apply_pulled_annotations(img, &annotations);
+    store.save(&img).ok()?;
+    Some(path)
+}
+
 pub(crate) fn download_base(
     store: &VmImageStore,
     distro: Distro,
@@ -3577,26 +3664,171 @@ pub(crate) fn customize_args(disk: &Path, ops: &[CustomizeOp]) -> Vec<String> {
 /// "No such file or directory" — a sentence that sends the reader looking for
 /// a missing *file*. Measured on a host without libguestfs, that is exactly
 /// what `vm build` printed after a 600 MB download had already succeeded.
-pub(crate) fn tool_package(bin: &str) -> Option<(&'static str, &'static str)> {
+pub(crate) fn tool_package(bin: &str) -> Option<(&'static str, &'static str, &'static str)> {
     match bin {
         "virt-customize" | "virt-sparsify" | "virt-copy-out" => {
-            Some(("libguestfs-tools", "guestfs-tools"))
+            Some(("libguestfs-tools", "guestfs-tools", "libguestfs"))
         }
-        "qemu-img" => Some(("qemu-utils", "qemu-img")),
-        "cloud-localds" => Some(("cloud-image-utils", "cloud-utils")),
-        "virsh" => Some(("libvirt-clients", "libvirt-client")),
+        "qemu-img" => Some(("qemu-utils", "qemu-img", "qemu-img")),
+        "cloud-localds" => Some(("cloud-image-utils", "cloud-utils", "cloud-image-utils")),
+        "virsh" => Some(("libvirt-clients", "libvirt-client", "libvirt")),
         _ => None,
     }
 }
 
+/// How the host installs software. Not cosmetic: an `apt install` printed on
+/// Fedora is not a smaller kind of help, it is an instruction that fails, and
+/// the reader has to translate it before they can act on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Family {
+    Debian,
+    RedHat,
+    Arch,
+    Suse,
+    Unknown,
+}
+
+/// Reads the family off `/etc/os-release`. Kept apart from [`family_of`] so the
+/// decision itself stays pure and testable — the file is the only thing here
+/// that needs a real host.
+pub(crate) fn host_family() -> Family {
+    std::fs::read_to_string("/etc/os-release").map_or(Family::Unknown, |s| family_of(&s))
+}
+
+/// `ID` first, then `ID_LIKE` — a derivative (Zorin, Mint, Alma, Manjaro)
+/// names its parent there, which is exactly the case where guessing from `ID`
+/// alone would produce the wrong package manager.
+pub(crate) fn family_of(os_release: &str) -> Family {
+    let field = |k: &str| -> String {
+        os_release
+            .lines()
+            .find_map(|l| l.strip_prefix(&format!("{k}=")))
+            .map(|v| v.trim_matches('"').to_ascii_lowercase())
+            .unwrap_or_default()
+    };
+    let hay = format!("{} {}", field("ID"), field("ID_LIKE"));
+    for (needle, fam) in [
+        ("debian", Family::Debian),
+        ("ubuntu", Family::Debian),
+        ("fedora", Family::RedHat),
+        ("rhel", Family::RedHat),
+        ("centos", Family::RedHat),
+        ("arch", Family::Arch),
+        ("suse", Family::Suse),
+    ] {
+        if hay.split_whitespace().any(|w| w == needle) {
+            return fam;
+        }
+    }
+    Family::Unknown
+}
+
+/// The one command that installs `pkg` on this host — and, when the family is
+/// unknown, all of them rather than a guess.
+pub(crate) fn install_cmd(f: Family, deb: &str, rpm: &str, arch: &str) -> String {
+    match f {
+        Family::Debian => format!("sudo apt install {deb}"),
+        Family::RedHat => format!("sudo dnf install {rpm}"),
+        Family::Arch => format!("sudo pacman -S {arch}"),
+        Family::Suse => format!("sudo zypper install {rpm}"),
+        Family::Unknown => format!(
+            "sudo apt install {deb}   (Debian/Ubuntu)\n  \
+             sudo dnf install {rpm}   (Fedora/RHEL/Rocky)\n  \
+             sudo pacman -S {arch}   (Arch)"
+        ),
+    }
+}
+
+/// Turns a tool's own last words into the fix for them.
+///
+/// A build that dies inside libguestfs prints something true and unusable —
+/// `supermin exited with error status 1`, `passt exited with status 1` — and
+/// then `virt-customize failed (exit Some(1))` on top. Everything needed to
+/// name the cause was on screen; nothing named it. Each arm below is a failure
+/// this engine has actually been debugged through on a real host, and the hint
+/// is what fixed it there.
+///
+/// `None` when nothing matches: inventing advice for an unrecognised failure
+/// would be worse than the bare exit code, because it sends the reader away
+/// from the output that does explain it.
+pub(crate) fn tool_failure_hint(tail: &str, f: Family) -> Option<String> {
+    let t = tail.to_ascii_lowercase();
+    // The host kernel is not readable, so supermin cannot copy it into the
+    // appliance. Debian and Ubuntu ship /boot/vmlinuz-* as 0600 root:root,
+    // which is why this is close to universal there and unheard of elsewhere.
+    if t.contains("supermin") && (t.contains("vmlinuz") || t.contains("kernel"))
+        || (t.contains("vmlinuz") && t.contains("permission denied"))
+    {
+        let mut m = String::from(
+            "libguestfs could not read the host kernel, so it could not build its appliance.\n\
+             Fix (the kernel is 0600 on Debian/Ubuntu, and has to be readable):\n  \
+             sudo chmod 0644 /boot/vmlinuz-*",
+        );
+        if f == Family::Debian || f == Family::Unknown {
+            m.push_str(
+                "\nTo survive the next kernel update, make it permanent:\n  \
+                 sudo tee /etc/kernel/postinst.d/statoverride >/dev/null <<'EOF'\n  \
+                 #!/bin/sh\n  \
+                 version=\"$1\"; [ -z \"$version\" ] && exit 0\n  \
+                 dpkg-statoverride --update --add root root 0644 \"/boot/vmlinuz-${version}\"\n  \
+                 EOF\n  sudo chmod +x /etc/kernel/postinst.d/statoverride",
+            );
+        }
+        return Some(m);
+    }
+    // `--network` only. passt is how libguestfs 1.52+ gives the appliance a
+    // network, and it is confined: the AppArmor profile Debian/Ubuntu ship
+    // allows writes under /tmp and $HOME only, while libguestfs puts passt's
+    // socket and pid file under $XDG_RUNTIME_DIR (/run/user/UID).
+    if t.contains("passt") {
+        let mut m = String::from(
+            "the appliance's network helper (passt) failed, so `--network` could not start.\n\
+             Most often its AppArmor profile forbids the runtime directory libguestfs uses.\n\
+             Point that directory somewhere the profile allows and retry:\n  \
+             mkdir -p /tmp/delonix-run && chmod 700 /tmp/delonix-run\n  \
+             XDG_RUNTIME_DIR=/tmp/delonix-run delonix vm build --network …",
+        );
+        if f == Family::Debian {
+            m.push_str(
+                "\nIf it still fails, the packaged passt is too old to talk to this qemu \
+                 (Ubuntu 24.04 ships the Feb-2024 build, which segfaults here); build a \
+                 current one: git clone https://passt.top/passt && cd passt && make",
+            );
+        }
+        m.push_str("\nOr build without it: drop `--network` (RUN steps then work offline).");
+        return Some(m);
+    }
+    // No KVM: works, but every build becomes software emulation and takes
+    // minutes instead of seconds — worth naming before someone concludes the
+    // tool is slow.
+    if t.contains("/dev/kvm") || t.contains("kvm: permission denied") {
+        return Some(String::from(
+            "no access to /dev/kvm — add yourself to the group that owns it and log in again:\n  \
+             sudo usermod -aG kvm $USER\n\
+             Until then everything runs under software emulation, which is very slow.",
+        ));
+    }
+    if t.contains("supermin") || t.contains("libguestfs") {
+        return Some(String::from(
+            "libguestfs could not start its appliance. To see its own diagnosis:\n  \
+             export LIBGUESTFS_DEBUG=1 LIBGUESTFS_TRACE=1\n  \
+             libguestfs-test-tool",
+        ));
+    }
+    None
+}
+
 pub(crate) fn run_tool(bin: &str, args: &[&str]) -> Result<()> {
-    let status = Command::new(bin).args(args).status().map_err(|e| {
+    use std::io::BufRead;
+
+    let not_found = |e: std::io::Error| -> Error {
         if e.kind() == std::io::ErrorKind::NotFound {
-            if let Some((deb, rpm)) = tool_package(bin) {
-                return Error::Invalid(super::po::tf(
-                    "`{bin}` is not installed. Install it with `sudo apt install {deb}` \
-                     (Debian/Ubuntu) or `sudo dnf install {rpm}` (Fedora/Rocky).",
-                    &[("bin", bin), ("deb", deb), ("rpm", rpm)],
+            let fam = host_family();
+            if let Some((deb, rpm, arch)) = tool_package(bin) {
+                return Error::Invalid(format!(
+                    "{}\n  {}",
+                    super::po::tf("`{bin}` is not installed.", &[("bin", bin)]),
+                    install_cmd(fam, deb, rpm, arch),
                 ));
             }
             return Error::Invalid(super::po::tf(
@@ -3608,12 +3840,48 @@ pub(crate) fn run_tool(bin: &str, args: &[&str]) -> Result<()> {
             "{}: {e}",
             super::po::tf("running {bin}", &[("bin", bin)])
         ))
+    };
+
+    // stderr is PIPED rather than inherited so that a failure can be explained
+    // instead of merely reported. The lines are echoed as they arrive — a build
+    // is long and the tool's own progress is the only sign of life — and the
+    // last of them are kept, because that is where libguestfs says what really
+    // went wrong (`supermin: … Permission denied`) one layer under the useless
+    // sentence it exits with (`virt-customize: error: … exited with error
+    // status 1`).
+    let mut child = Command::new(bin)
+        .args(args)
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(not_found)?;
+    let mut tail: std::collections::VecDeque<String> = std::collections::VecDeque::new();
+    if let Some(err) = child.stderr.take() {
+        for line in std::io::BufReader::new(err)
+            .lines()
+            .map_while(std::result::Result::ok)
+        {
+            eprintln!("{line}");
+            if tail.len() == 60 {
+                tail.pop_front();
+            }
+            tail.push_back(line);
+        }
+    }
+    let status = child.wait().map_err(|e| Error::Runtime {
+        context: "vm build",
+        message: e.to_string(),
     })?;
     if !status.success() {
-        return Err(Error::Invalid(super::po::tf(
+        let mut msg = super::po::tf(
             "{bin} failed (exit {code})",
             &[("bin", bin), ("code", &format!("{:?}", status.code()))],
-        )));
+        );
+        let joined = tail.iter().cloned().collect::<Vec<_>>().join("\n");
+        if let Some(hint) = tool_failure_hint(&joined, host_family()) {
+            msg.push_str("\n\n");
+            msg.push_str(&hint);
+        }
+        return Err(Error::Invalid(msg));
     }
     Ok(())
 }
@@ -4406,18 +4674,110 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
     /// broken path, not as «install this package». The mapping is the fix, so
     /// it is the mapping that gets the test.
     #[test]
-    fn ferramenta_ausente_nomeia_o_pacote_das_duas_familias() {
+    fn ferramenta_ausente_nomeia_o_pacote_das_tres_familias() {
         assert_eq!(
             super::tool_package("virt-customize"),
-            Some(("libguestfs-tools", "guestfs-tools"))
+            Some(("libguestfs-tools", "guestfs-tools", "libguestfs"))
         );
         assert_eq!(
             super::tool_package("qemu-img"),
-            Some(("qemu-utils", "qemu-img"))
+            Some(("qemu-utils", "qemu-img", "qemu-img"))
         );
         // Unknown tools still get a sentence, just without a package name —
         // never a silent fallthrough to the ENOENT text.
         assert_eq!(super::tool_package("whatever"), None);
+    }
+
+    /// A derivative names its parent in `ID_LIKE`, and that is precisely the
+    /// case where reading `ID` alone prints the wrong package manager: the host
+    /// this was written on is `ID=zorin`, which no table will ever list.
+    #[test]
+    fn familia_da_distro_segue_id_e_depois_id_like() {
+        use super::{family_of, Family};
+        assert_eq!(family_of("ID=ubuntu\nID_LIKE=debian\n"), Family::Debian);
+        assert_eq!(
+            family_of("ID=zorin\nID_LIKE=\"ubuntu debian\"\n"),
+            Family::Debian
+        );
+        assert_eq!(family_of("ID=fedora\n"), Family::RedHat);
+        assert_eq!(
+            family_of("ID=rocky\nID_LIKE=\"rhel centos fedora\"\n"),
+            Family::RedHat
+        );
+        assert_eq!(family_of("ID=arch\n"), Family::Arch);
+        assert_eq!(family_of("ID=manjaro\nID_LIKE=arch\n"), Family::Arch);
+        // Not recognised is not a licence to guess: the caller prints every
+        // family's command instead of one that may not exist here.
+        assert_eq!(family_of("ID=plan9\n"), Family::Unknown);
+        assert_eq!(family_of(""), Family::Unknown);
+    }
+
+    #[test]
+    fn install_cmd_usa_o_gestor_da_familia_e_lista_todos_quando_nao_sabe() {
+        use super::{install_cmd, Family};
+        assert_eq!(
+            install_cmd(
+                Family::Debian,
+                "libguestfs-tools",
+                "guestfs-tools",
+                "libguestfs"
+            ),
+            "sudo apt install libguestfs-tools"
+        );
+        assert_eq!(
+            install_cmd(
+                Family::RedHat,
+                "libguestfs-tools",
+                "guestfs-tools",
+                "libguestfs"
+            ),
+            "sudo dnf install guestfs-tools"
+        );
+        assert_eq!(
+            install_cmd(
+                Family::Arch,
+                "libguestfs-tools",
+                "guestfs-tools",
+                "libguestfs"
+            ),
+            "sudo pacman -S libguestfs"
+        );
+        let unknown = install_cmd(Family::Unknown, "a", "b", "c");
+        for cmd in ["apt install a", "dnf install b", "pacman -S c"] {
+            assert!(unknown.contains(cmd), "faltava {cmd} em: {unknown}");
+        }
+    }
+
+    /// Both failures below cost a full debugging session on a real host, and
+    /// both printed everything needed to name the cause without naming it. The
+    /// hint is the outcome of that session, so it is what gets the test.
+    #[test]
+    fn falhas_conhecidas_do_build_dizem_o_que_fazer() {
+        use super::{tool_failure_hint, Family};
+        // supermin cannot read the host kernel (Debian/Ubuntu ship it 0600).
+        let supermin = "supermin: build: 4284 files, after munging\n\
+                        cp: cannot open '/boot/vmlinuz-7.0.0-28-generic' for reading: Permission denied\n\
+                        supermin: cp -p '/boot/vmlinuz-7.0.0-28-generic' … command failed";
+        let h = tool_failure_hint(supermin, Family::Debian).expect("devia reconhecer o supermin");
+        assert!(h.contains("chmod 0644 /boot/vmlinuz-*"), "{h}");
+        // The permanent form is Debian-specific and must not be printed to a
+        // reader whose distro has no /etc/kernel/postinst.d.
+        assert!(h.contains("dpkg-statoverride"), "{h}");
+        assert!(!tool_failure_hint(supermin, Family::Arch)
+            .unwrap()
+            .contains("dpkg-statoverride"));
+
+        // passt: `--network` only.
+        let passt = "virt-customize: error: libguestfs error: passt exited with status 1";
+        let h = tool_failure_hint(passt, Family::Debian).expect("devia reconhecer o passt");
+        assert!(h.contains("XDG_RUNTIME_DIR"), "{h}");
+        assert!(h.contains("--network"), "{h}");
+
+        // An unrecognised failure gets NO invented advice.
+        assert_eq!(
+            tool_failure_hint("some unrelated explosion", Family::Debian),
+            None
+        );
     }
 
     /// Builds a `VmImage` with every field empty — the shape a `vm pull`

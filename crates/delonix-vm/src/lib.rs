@@ -2486,6 +2486,208 @@ pub fn restore(base: &Path, name: &str, snap: &str) -> Result<()> {
     backend_for(&vm)?.restore(&vmdir, &vm, snap)
 }
 
+/// The `blockcommit` that puts a VM back on its own disk after a live backup.
+///
+/// Pure, and separate, because of what the wrong version does: a bare
+/// `blockcommit --active --pivot` (no `--top`, no `--base`) commits the WHOLE
+/// backing chain and pivots the guest onto the BOTTOM of it — for every VM this
+/// engine creates, the shared golden image that every other VM uses as its
+/// backing file. It reports `Successfully pivoted`, the PID does not change, and
+/// the domain is now writing into an image other VMs read. Measured on a real
+/// VM, which is how it was found. Naming top and base merges only the temporary
+/// overlay, into this VM's own disk.
+fn blockcommit_argv(uri: &str, name: &str, dev: &str, top: &str, base: &str) -> Vec<String> {
+    [
+        "-c",
+        uri,
+        "blockcommit",
+        "--domain",
+        name,
+        "--path",
+        dev,
+        "--top",
+        top,
+        "--base",
+        base,
+        "--active",
+        "--pivot",
+        "--wait",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
+/// Copies a RUNNING VM's disk to `dest` without stopping it.
+///
+/// A VM that has to be stopped to be backed up is a VM nobody backs up, so this
+/// does the same thing every hypervisor-level backup tool does, using libvirt's
+/// own primitives:
+///
+/// 1. an **external snapshot** (`--disk-only --atomic`) redirects new writes to a
+///    temporary overlay and leaves the real disk read-only and quiet;
+/// 2. the now-quiet disk is copied; and
+/// 3. **`blockcommit --active --pivot`** merges what the guest wrote during the
+///    copy back into the real disk and puts the VM back on it.
+///
+/// The guest never pauses and its PID never changes.
+///
+/// **The temporary overlay is deleted only after the pivot succeeds.** Between
+/// steps 1 and 3 that file holds every write the guest has made, so removing it
+/// on the error path — the reflex, since it is "our" temp file — would destroy
+/// live data. If the pivot fails, the file stays and the error says where the VM
+/// is now running from.
+///
+/// `quiesce` asks the guest agent to flush and freeze its filesystems first,
+/// which upgrades the copy from crash-consistent to filesystem-consistent. It is
+/// opt-in because it FAILS on a guest without `qemu-guest-agent`, and failing a
+/// backup over a guest-side package that may not be installable is the wrong
+/// default.
+pub fn backup_disk_live(base: &Path, name: &str, dest: &Path, quiesce: bool) -> Result<()> {
+    let vm = load_vm(base, name)?;
+    if vm.backend != "libvirt" {
+        return Err(Error::Invalid(format!(
+            "live disk backup needs the libvirt backend (this VM runs on {}); stop it first, or \
+             use `delonix vm snapshot {name} <label>`",
+            vm.backend
+        )));
+    }
+    let uri = libvirt_domain_uri(name).ok_or_else(|| Error::VmNotFound(name.to_string()))?;
+
+    // The disk's TARGET (vda/sda), read from libvirt rather than assumed: it is
+    // what `snapshot-create-as` and `blockcommit` both address, and a wrong guess
+    // would act on a different disk of the same domain.
+    let blklist =
+        quiet("virsh", &["-c", uri, "domblklist", "--details", "--", name]).map_err(|e| {
+            Error::Invalid(format!("live backup: cannot list the disks of {name}: {e}"))
+        })?;
+    let target = blklist
+        .lines()
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split_whitespace().collect();
+            // type device target source
+            (f.len() >= 4 && f[0] == "file" && f[1] == "disk")
+                .then(|| (f[2].to_string(), f[3].to_string()))
+        })
+        .next()
+        .ok_or_else(|| {
+            Error::Invalid(format!(
+                "live backup: {name} has no file-backed disk to copy"
+            ))
+        })?;
+    let (dev, source) = target;
+
+    let tmp = PathBuf::from(format!("{source}.delonix-backup-{}", std::process::id()));
+    let tmp_s = tmp.to_string_lossy().to_string();
+    let snapname = format!("delonix-backup-{}", std::process::id());
+    let diskspec = format!("{dev},file={tmp_s}");
+
+    // The overlay is created HERE and handed to libvirt with `--reuse-external`,
+    // instead of letting `snapshot-create-as` create it. Measured on Ubuntu: the
+    // per-domain AppArmor profile (virt-aa-helper) only whitelists paths already
+    // in the domain XML, so QEMU asked to create a brand-new file gets
+    // `Permission denied` — even though the file would be in the user's own
+    // directory and QEMU runs as that user. Pre-creating it makes the path known
+    // before QEMU is asked to open it.
+    let fmt = quiet("qemu-img", &["info", "--output=json", "--", &source])
+        .ok()
+        .and_then(|j| {
+            j.split("\"format\":").nth(1).map(|t| {
+                t.trim_start()
+                    .trim_start_matches('"')
+                    .split('"')
+                    .next()
+                    .unwrap_or("qcow2")
+                    .to_string()
+            })
+        })
+        .unwrap_or_else(|| "qcow2".to_string());
+    quiet(
+        "qemu-img",
+        &[
+            "create", "-q", "-f", "qcow2", "-b", &source, "-F", &fmt, "--", &tmp_s,
+        ],
+    )
+    .map_err(|e| Error::Invalid(format!("live backup: cannot stage the overlay: {e}")))?;
+
+    let mut args = vec![
+        "-c",
+        uri,
+        "snapshot-create-as",
+        "--domain",
+        name,
+        "--name",
+        &snapname,
+        "--disk-only",
+        "--atomic",
+        "--no-metadata",
+        "--reuse-external",
+        "--diskspec",
+        &diskspec,
+    ];
+    if quiesce {
+        args.push("--quiesce");
+    }
+    quiet("virsh", &args).map_err(|e| {
+        Error::Invalid(format!(
+            "live backup: could not snapshot {name}: {e}{}",
+            if quiesce {
+                " (--quiesce needs qemu-guest-agent running INSIDE the guest)"
+            } else {
+                ""
+            }
+        ))
+    })?;
+
+    // From here on the guest writes to `tmp`, and `source` is quiet. Copy it, but
+    // do NOT return early on failure: the pivot has to happen either way, or the
+    // VM is left running on a temporary file.
+    let copied = std::fs::copy(&source, dest)
+        .map_err(|e| Error::Invalid(format!("live backup: copying {source}: {e}")));
+
+    // `--top` and `--base` are NOT optional here, and leaving them out is a
+    // disaster that reports success. A bare `blockcommit --active --pivot`
+    // commits the WHOLE chain and pivots the guest onto the bottom of it — which
+    // for every VM this engine creates is the shared golden image that every
+    // other VM uses as its backing file. Measured on a real VM: `Successfully
+    // pivoted`, PID unchanged, and the domain now writing straight into
+    // `vm-images/delonix-vm-base_*.qcow2`. Naming top and base merges only the
+    // temporary overlay, back into this VM's own disk.
+    let args = blockcommit_argv(uri, name, &dev, &tmp_s, &source);
+    let pivot = quiet(
+        "virsh",
+        &args.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+    );
+
+    match pivot {
+        Ok(_) => {
+            // Do not take "pivoted" for an answer: ASK where the domain writes.
+            // This check is what turns the failure above from silent corruption
+            // into a refusal, and it costs one `domblklist`.
+            let now = quiet("virsh", &["-c", uri, "domblklist", "--", name]).unwrap_or_default();
+            if !now.contains(source.as_str()) {
+                return Err(Error::Invalid(format!(
+                    "live backup: {name} pivoted onto the WRONG disk — it should be writing to \
+                     {source}. Stop it NOW (virsh -c {uri} destroy {name}) and check the chain \
+                     with qemu-img info before starting it again; its backing image may be \
+                     taking writes"
+                )));
+            }
+            // Only now is `tmp` genuinely spare.
+            let _ = std::fs::remove_file(&tmp);
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(dest); // the archive would be half a story
+            return Err(Error::Invalid(format!(
+                "live backup: {name} could NOT be put back on its own disk ({e}). It is still \
+                 running, but writing to {tmp_s}, which must not be deleted. Recover with: \
+                 virsh -c {uri} blockcommit --domain {name} --path {dev} --active --pivot --wait"
+            )));
+        }
+    }
+    copied.map(|_| ())
+}
+
 /// Lists VM `name`'s snapshot names (see [`VmBackend::snapshots`]).
 pub fn snapshots(base: &Path, name: &str) -> Result<Vec<String>> {
     let vm = load_vm(base, name)?;
@@ -2607,6 +2809,38 @@ pub fn list(base: &Path) -> Result<Vec<Vm>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn o_blockcommit_nomeia_sempre_o_topo_e_a_base() {
+        // MEASURED disaster, not a hypothetical. Without `--top`/`--base`, virsh
+        // committed the whole chain and left a live VM writing straight into
+        // `vm-images/delonix-vm-base_debian-bookworm.qcow2` — the image every
+        // other VM on the node uses as its backing file. It printed
+        // "Successfully pivoted" and the guest PID never changed.
+        let a = blockcommit_argv(
+            "qemu:///system",
+            "dev",
+            "vda",
+            "/vms/dev.qcow2.delonix-backup-1",
+            "/vms/dev.qcow2",
+        );
+        let top = a
+            .iter()
+            .position(|x| x == "--top")
+            .expect("--top is not optional");
+        let base = a
+            .iter()
+            .position(|x| x == "--base")
+            .expect("--base is not optional");
+        assert_eq!(a[top + 1], "/vms/dev.qcow2.delonix-backup-1");
+        // The base is the VM's OWN disk: that is what stops the commit from
+        // reaching the shared golden image underneath it.
+        assert_eq!(a[base + 1], "/vms/dev.qcow2");
+        assert!(a.contains(&"--active".to_string()) && a.contains(&"--pivot".to_string()));
+        // `--wait` too: without it virsh returns while the job is still running
+        // and the caller would delete the overlay out from under it.
+        assert!(a.contains(&"--wait".to_string()));
+    }
 
     #[test]
     fn parse_leases_latest_ip_escolhe_o_expiry_mais_recente() {
