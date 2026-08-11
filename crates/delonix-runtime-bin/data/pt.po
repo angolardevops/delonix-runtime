@@ -8453,3 +8453,17 @@ msgstr "--apparmor {p}: o AppArmor não está activo neste host, logo nada confi
 
 msgid "the container did not start, and the supervisor died before saying why"
 msgstr "o container não arrancou, e o supervisor morreu antes de dizer porquê"
+
+# Registo do backend Proxmox (ADR-0008, cmd/vmbackends.rs)
+
+msgid "warning: the Proxmox backend was configured but could not be registered: {err}"
+msgstr "aviso: o backend Proxmox estava configurado mas não pôde ser registado: {err}"
+
+msgid "DELONIX_PROXMOX_URL is set but DELONIX_PROXMOX_NODE is not — this backend addresses ONE node and never picks one for you (the name `GET /nodes` reports, e.g. `pve`)"
+msgstr "o DELONIX_PROXMOX_URL está definido mas o DELONIX_PROXMOX_NODE não — este backend endereça UM nó e nunca escolhe um por ti (o nome que o `GET /nodes` reporta, ex.: `pve`)"
+
+msgid "secret '{name}' has neither `tokenId`+`tokenSecret` nor `username`+`password`"
+msgstr "o segredo '{name}' não tem `tokenId`+`tokenSecret` nem `username`+`password`"
+
+msgid "DELONIX_PROXMOX_URL is set but no credential is: use DELONIX_PROXMOX_SECRET (a `kind: Secret` with `tokenId`+`tokenSecret`, preferred), or DELONIX_PROXMOX_TOKEN_ID with DELONIX_PROXMOX_TOKEN, or DELONIX_PROXMOX_USER with DELONIX_PROXMOX_PASSWORD"
+msgstr "o DELONIX_PROXMOX_URL está definido mas não há credencial nenhuma: usa o DELONIX_PROXMOX_SECRET (um `kind: Secret` com `tokenId`+`tokenSecret`, preferível), ou o DELONIX_PROXMOX_TOKEN_ID com o DELONIX_PROXMOX_TOKEN, ou o DELONIX_PROXMOX_USER com o DELONIX_PROXMOX_PASSWORD"
