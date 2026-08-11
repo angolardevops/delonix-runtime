@@ -782,6 +782,49 @@ if [ "$WITH_BINARY" = 1 ] && [ -x "$BIN_DIR/delonix" ]; then
   [ -z "$_comp_installed" ] && warn "no completion directory found — register it by hand: delonix completion bash >> ~/.bashrc"
 fi
 
+# --------------------------------------- realce de sintaxe do VMfile (editores)
+#
+# Um `VMfile` não tem extensão (como um Dockerfile), por isso nenhum editor o
+# reconhece sozinho. Sem realce, o erro que o parser recusa — ele falha FECHADO
+# numa instrução que não conhece — parece texto igual a todo o resto até ao
+# momento do build.
+#
+# Os ficheiros saem do BINÁRIO (`delonix syntax`), não deste script: o uso
+# documentado é `curl … | bash`, que não tem repositório de onde copiar, e uma
+# gramática guardada noutro sítio afasta-se do parser que devia descrever.
+#
+# Cada editor é best-effort e independente, como as completions: uma directoria
+# que não existe é a forma normal de dizer "este editor não está cá".
+if [ "$WITH_BINARY" = 1 ] && [ -x "$BIN_DIR/delonix" ]; then
+  _syn=""
+  # vim/neovim: leem `syntax/` + `ftdetect/` da sua própria directoria. As duas
+  # metades são precisas — o `ftdetect` é o que liga o filetype ao nome VMfile,
+  # e sem ele o `syntax/` fica instalado sem nunca ser aplicado a nada.
+  for _vdir in "$REAL_HOME/.vim" "$REAL_HOME/.config/nvim"; do
+    if [ -d "$_vdir" ] && "$BIN_DIR/delonix" syntax vim --dir "$_vdir" >/dev/null 2>&1; then
+      if [ "$(id -u)" = 0 ]; then
+        chown -R "$REAL_USER" "$_vdir/syntax" "$_vdir/ftdetect" 2>/dev/null || true
+      fi
+      _syn="$_syn $(basename "$_vdir")"
+    fi
+  done
+  # VS Code: uma extensão é uma directoria dentro de `extensions/`. Fica activa
+  # na próxima janela.
+  for _cdir in "$REAL_HOME/.vscode/extensions" "$REAL_HOME/.vscode-server/extensions"; do
+    if [ -d "$_cdir" ] && "$BIN_DIR/delonix" syntax vscode --dir "$_cdir/delonix.vmfile-0.1.0" >/dev/null 2>&1; then
+      if [ "$(id -u)" = 0 ]; then
+        chown -R "$REAL_USER" "$_cdir/delonix.vmfile-0.1.0" 2>/dev/null || true
+      fi
+      _syn="$_syn vscode"
+    fi
+  done
+  if [ -n "$_syn" ]; then
+    stepok binary "VMfile syntax ($_syn)"
+  else
+    warn "no editor directory found for the VMfile syntax — install it by hand: delonix syntax vim --dir ~/.vim"
+  fi
+fi
+
 # ------------------------------------------------------------------- manpages
 #
 # `man delonix-container-run` é como se lê um manual quando não se tem a CLI à
