@@ -351,6 +351,12 @@ Options:
   -n, --tail &lt;TAIL&gt;
           Show only the last N (default: all)
 
+  -o, --output &lt;OUTPUT&gt;
+          Output format: `table` (default) or `json` (ADR-0005). With `-f`, `json` streams ONE OBJECT PER LINE (JSONL) — a JSON array would never close on a stream
+          
+          [default: table]
+          [possible values: table, json]
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 

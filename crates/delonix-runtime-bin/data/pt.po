@@ -4753,6 +4753,9 @@ msgstr "Nome sob o qual o registar (`image vm ls`)"
 msgid "(only with `--vm`) With no argument, pull the official NO-Kubernetes golden instead of the Kubernetes one"
 msgstr "(só com `--vm`) Sem argumento, puxa a dourada oficial SEM Kubernetes em vez da de Kubernetes"
 
+msgid "Output format: `table` (default) or `json` (ADR-0005). With `-f`, `json` streams ONE OBJECT PER LINE (JSONL) — a JSON array would never close on a stream"
+msgstr "Formato de saída: `table` (por omissão) ou `json` (ADR-0005). Com `-f`, o `json` transmite UM OBJECTO POR LINHA (JSONL) — um array JSON nunca fecharia num fluxo contínuo"
+
 msgid "Output format: `table` (default) or `json` (ADR-0005)"
 msgstr "Formato de saída: `table` (por omissão) ou `json` (ADR-0005)"
 
