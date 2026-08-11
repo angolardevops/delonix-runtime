@@ -235,9 +235,7 @@ Arguments:
 
 Options:
   -l, --user &lt;USER&gt;
-          Login user. Defaults to `delonix` — the account the golden images create and the one cloud-init injects `--ssh-key` into
-          
-          [default: delonix]
+          Login user. Default: `delonix` on cloud-init images, `root` on appliances (which have no `delonix` account)
 
       --l18n &lt;en|pt&gt;
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -641,6 +639,9 @@ Arguments:
           
 
 Options:
+  -e, --escape &lt;ESCAPE&gt;
+          Key that detaches the console, as `^X` (default `^]`). Also settable via `$DELONIX_CONSOLE_ESCAPE`
+
       --l18n &lt;en|pt&gt;
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
@@ -788,6 +789,9 @@ Options:
 
       --network
           Give the guest network access during `RUN` (for `apt-get install` and friends). Off by default: a build that reaches the internet produces a different image depending on when it ran
+
+  -v, --verbose
+          Show each step&#x27;s own output instead of folding it behind the step line (a failed step unfolds either way)
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
