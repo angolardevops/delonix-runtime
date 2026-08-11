@@ -154,6 +154,14 @@ serve-o directamente — mesmo contrato do `terraform plan -detailed-exitcode`:
 | `2` | há alterações (= deriva, se o ficheiro não mudou) |
 | `1` | o comando falhou |
 
+Desde a v0.49.0 uma falha pode vir CLASSIFICADA em vez de `1` — `4` se o
+manifesto nomear um recurso que não existe, por exemplo (a tabela completa está
+em [cli-stability.md](cli-stability.md)). Os dois sinais positivos não mudam:
+`0` é «nada a fazer», `2` é «há alterações», e nenhum caminho de erro devolve
+`2`. Um gate escrito como «`0` passa, `2` falha por deriva, **o resto** falha
+por erro» continua correcto; um escrito com `elif [ $? -eq 1 ]` para o erro
+passa a precisar de `else`.
+
 ```yaml
   drift:
     runs-on: ubuntu-latest
