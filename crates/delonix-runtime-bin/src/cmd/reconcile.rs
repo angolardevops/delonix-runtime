@@ -461,6 +461,35 @@ pub fn decode_last_applied(raw: &str) -> Option<BTreeMap<String, String>> {
 
 #[cfg(test)]
 mod tests {
+
+    /// **A hot field that nobody compares never converges.**
+    ///
+    /// `hot_fields(k)` says «this one applies without recreating the resource»
+    /// and `converge` has an arm for it — but `diff_fields` iterates
+    /// `desired ∪ actual ∪ last`, so a field absent from the compared set never
+    /// produces a key, the arm is unreachable, and changing it in an applied
+    /// manifest is a NO-OP that `stack plan` reports as «no changes» with
+    /// `--detailed-exitcode` 0. A drift gate in CI passes over real drift.
+    ///
+    /// That is exactly what `netBps`/`netBurst` did until this test existed:
+    /// listed as hot, wired into `converge`, and missing from
+    /// `RECONCILED_CONTAINER_FIELDS`. It is the field-level twin of the
+    /// three-lists-must-agree lesson the AGENTS.md already records at the Kind
+    /// level — and, like that one, the symptom hid because every `apply` is
+    /// idempotent and converged by the wrong path.
+    #[test]
+    fn hot_fields_sao_um_subconjunto_dos_comparados() {
+        for (kind, compared) in super::super::stack::compared_fields_table() {
+            for hot in hot_fields(kind) {
+                assert!(
+                    compared.contains(hot),
+                    "{kind}: '{hot}' e hot mas nao esta nos campos comparados — \
+                     o braco do `converge` e inalcancavel e a mudanca no manifesto \
+                     e um no-op que reporta sucesso"
+                );
+            }
+        }
+    }
     use super::*;
 
     fn map(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {

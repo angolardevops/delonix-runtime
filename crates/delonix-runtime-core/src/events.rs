@@ -161,6 +161,37 @@ pub fn read_from(root: &Path, offset: u64) -> (Vec<Event>, u64) {
 
 #[cfg(test)]
 mod tests {
+
+    /// **The serialized shape of `Event` is a published contract.**
+    /// `system events -o json` hands this type straight to `serde_json`, and
+    /// `docs/cli-stability.md` promises the JSON output as stable. Without this
+    /// test a `rename` here — or a field quietly dropped — changes that output
+    /// with nothing to notice. The sibling `inspect` commands avoid the problem
+    /// by having a dedicated view struct; this one is the type itself, so the
+    /// guard has to live here.
+    #[test]
+    fn a_forma_serializada_e_um_contrato_publicado() {
+        let e = Event {
+            ts: 1,
+            kind: "container".into(),
+            action: "die".into(),
+            id: "abc".into(),
+            name: "web".into(),
+            detail: Some("exit=42".into()),
+        };
+        let v: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&e).unwrap()).unwrap();
+        let mut got: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+        got.sort_unstable();
+        assert_eq!(got, ["action", "detail", "id", "kind", "name", "ts"]);
+
+        // `detail` is the only optional one, and it has to VANISH rather than
+        // serialize as null — a consumer distinguishes "no detail" by absence.
+        let sem = Event { detail: None, ..e };
+        let v2: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&sem).unwrap()).unwrap();
+        assert!(v2.as_object().unwrap().get("detail").is_none());
+    }
     use super::*;
 
     fn tmp(tag: &str) -> PathBuf {

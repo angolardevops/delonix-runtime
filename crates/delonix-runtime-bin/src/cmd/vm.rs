@@ -1191,6 +1191,12 @@ pub fn run(action: VmCmd) -> Result<()> {
                 }
             }
             let injected_key = seed.is_none() && !ssh_keys.is_empty();
+            // Did the seed directory exist BEFORE this invocation? `vm create` is
+            // idempotent/auto-heal, so a re-create over a live VM must never have
+            // its seed cleaned up underneath it — only a directory this call
+            // brought into being is ours to remove. See `seed_to_clean` below.
+            let vmdir = state_root().join("vms").join(&name);
+            let vmdir_existed = vmdir.exists();
             let seed = match seed {
                 Some(s) => Some(s),
                 None if appliance => None,
@@ -1205,6 +1211,17 @@ pub fn run(action: VmCmd) -> Result<()> {
                     Some(iso.to_string_lossy().into_owned())
                 }
             };
+            // The seed is written BEFORE any backend is chosen, and everything
+            // between here and `create_with` can fail: an unknown/unavailable
+            // backend, `vm_admission_check` (no RAM on the host), the `--namespace`
+            // refusal on libvirt, `prepare_local_overlay`. Every one of those used
+            // to leave `<root>/vms/<name>/` behind — with `seed.iso` and a
+            // `user-data` holding the injected SSH public key — invisible to
+            // `vm ls` (no record) and unremovable by `vm rm` (which answers «no
+            // such VM»). One directory per attempt, and the most likely trigger is
+            // retrying the command that just failed. This repo has already had a
+            // 45 GiB disk-pressure incident from the same class of unreaped orphan.
+            let seed_to_clean = (!vmdir_existed).then(|| vmdir.clone());
             let cfg = VmConfig {
                 name,
                 disk,
@@ -1248,7 +1265,18 @@ pub fn run(action: VmCmd) -> Result<()> {
                 };
                 eprintln!("  → {step}");
             };
-            let vm = delonix_vm::create_with(&base, &cfg, &render)?;
+            let vm = match delonix_vm::create_with(&base, &cfg, &render) {
+                Ok(vm) => vm,
+                Err(e) => {
+                    // Best-effort, and it must never mask the real error: the
+                    // operator needs to read why the create failed, not why the
+                    // cleanup did.
+                    if let Some(dir) = &seed_to_clean {
+                        let _ = std::fs::remove_dir_all(dir);
+                    }
+                    return Err(e);
+                }
+            };
             eprintln!(
                 "{}",
                 super::po::tf("✓ VM '{name}' is up.", &[("name", &vm.name)])

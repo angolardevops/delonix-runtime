@@ -458,7 +458,7 @@ fn print_compared_fields() {
 
 /// The compared fields, per Kind — ONE source for the printed table and for the
 /// test that keeps it aligned with `CONVERGING_KINDS`.
-fn compared_fields_table() -> Vec<(&'static str, &'static [&'static str])> {
+pub(crate) fn compared_fields_table() -> Vec<(&'static str, &'static [&'static str])> {
     vec![
         ("Container", super::container::RECONCILED_CONTAINER_FIELDS),
         ("Volume", super::volume::RECONCILED_VOLUME_FIELDS),

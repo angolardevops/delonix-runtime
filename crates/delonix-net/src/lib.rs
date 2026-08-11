@@ -11,11 +11,16 @@
 //!   forwarding and `MASQUERADE`;
 //! - each container gets a `veth` (`eth0`) attached to the bridge, with a
 //!   deterministic IP derived from its id;
-//! - the per-container firewall is a `set` of blocked IPs in a dedicated `forward`
-//!   chain (table `ip delonix`) — reversible per element.
+//! - the per-container firewall is a chain of its OWN in table `ip dlxing`,
+//!   reached through a verdict map (`@fwmap`) keyed by IP — so dispatch costs
+//!   the same with one container as with fifty.
 //!
-//! The container attach is done CNI-style: the runtime creates the `netns`
-//! (`CLONE_NEWNET`); [`Net::attach`] configures it from the host, by PID.
+//! **The attach lives in [`infra`], not here.** This crate used to carry a
+//! `Net` manager that ran `ip`/`nft` directly in the calling process; that is
+//! gone (it could not work rootless, and with privilege it reached the HOST's
+//! network, outside the isolation). Today the runtime creates the `netns` and
+//! `infra::attach_container` asks the **holder** for the wiring over a control
+//! socket.
 
 use delonix_runtime_core::{Error, Result};
 use std::process::{Command, Stdio};
@@ -394,8 +399,6 @@ pub struct NetRate {
     pub burst_bytes: u64,
 }
 
-impl NetRate {}
-
 /// Separates a value with a `k`/`m`/`g`/`t` suffix from its multiplier (base 1000
 /// for network throughput, 1024 for buffer sizes). No suffix, mult. = 1.
 fn split_unit(s: &str, base: u64) -> (&str, u64) {
@@ -479,25 +482,6 @@ pub fn parse_net_rate(rate: &str, burst: Option<&str>) -> Result<NetRate> {
     })
 }
 
-/// Stable VIP of a service (FNV-1a hash → `10.90.a.b`), outside the container
-/// subnet so that traffic passes through the host (where nftables load-balances).
-pub fn service_vip(key: &str) -> String {
-    let mut h: u32 = 0x811c_9dc5;
-    for byte in key.bytes() {
-        h ^= byte as u32;
-        h = h.wrapping_mul(0x0100_0193);
-    }
-    let a = ((h >> 8) & 0xff) as u8;
-    let mut b = (h & 0xff) as u8;
-    if b < 2 {
-        b = 2;
-    }
-    if b == 255 {
-        b = 254;
-    }
-    format!("10.90.{a}.{b}")
-}
-
 /// **Preferred** IP (deterministic, pure) in an arbitrary `/16` (`<prefix>.A.B`),
 /// derived from the id. It's just the starting point: on its own it collides by the birthday
 /// paradox at ~300 containers (32 bits of the id → 16 bits of host). Real uniqueness comes from
@@ -571,14 +555,6 @@ pub fn alloc_ip_cidr(subnet: &str, id: &str) -> Option<String> {
     let n = u32::from_str_radix(hex, 16).unwrap_or(2);
     let offset = 2 + (n % usable);
     Some(u32_to_ipv4(net + offset))
-}
-
-/// The prefix length (`/24`) of a CIDR subnet, or `24` by default.
-pub fn cidr_prefix_len(subnet: &str) -> u32 {
-    subnet
-        .rsplit_once('/')
-        .and_then(|(_, p)| p.parse().ok())
-        .unwrap_or(24)
 }
 
 /// 32-bit FNV-1a hash (to derive a network's subnet/bridge from its name).
@@ -1584,27 +1560,6 @@ fn reg_io(e: &std::io::Error) -> Error {
         context: "slirp hostfwd",
         message: e.to_string(),
     }
-}
-
-/// A DNAT rule (published port): `host_port`/`proto` → `to` (ip:port).
-#[derive(Clone, Debug, Default, serde::Serialize)]
-pub struct DnatRule {
-    pub proto: String,
-    pub host_port: String,
-    pub to: String,
-}
-
-/// Summary of the Delonix firewall (`delonix` nft table) for panel #10.
-#[derive(Clone, Debug, Default, serde::Serialize)]
-pub struct FirewallSummary {
-    /// Published ports (DNAT host → container).
-    pub dnat: Vec<DnatRule>,
-    /// Blocked container IPs (per-element firewall).
-    pub blocked: Vec<String>,
-    /// Pairs of isolated bridges (forward drop) — `"a ✗ b"`.
-    pub isolation: Vec<String>,
-    /// Subnets with egress masquerade.
-    pub masquerade: Vec<String>,
 }
 
 /// An active network connection relevant to a container, from `conntrack`.

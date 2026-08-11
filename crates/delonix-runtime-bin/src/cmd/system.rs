@@ -615,8 +615,14 @@ fn cmd_events(
 /// SKIPPED rather than printed half-formed: a consumer reading line by line
 /// would take a truncated object as a parse error for the whole stream.
 fn print_event_line(e: &delonix_runtime_core::events::Event) {
-    if let Ok(s) = serde_json::to_string(e) {
-        println!("{s}");
+    match serde_json::to_string(e) {
+        Ok(s) => println!("{s}"),
+        // Unreachable today (`Event` is a u64 and five strings), and it says so
+        // instead of swallowing: a dropped audit record is exactly what an event
+        // log exists NOT to have, so if the type ever grows a field that can
+        // fail to serialize, the operator hears about it rather than reading a
+        // stream with a hole in it.
+        Err(err) => eprintln!("delonix: event skipped, it did not serialize: {err}"),
     }
 }
 
