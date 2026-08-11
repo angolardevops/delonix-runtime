@@ -8147,3 +8147,219 @@ msgstr "o --net-burst só faz sentido acompanhado do --net-bps"
 
 msgid "--net-burst only makes sense together with --net-rate"
 msgstr "o --net-burst só faz sentido acompanhado do --net-rate"
+
+#
+# backup / restore por recurso (delonix backup|restore <kind> <nome>)
+#
+msgid "Back up ONE resource (container/pod/vm/stack) to a tar.gz, on demand or on a schedule"
+msgstr "Faz backup de UM recurso (container/pod/vm/stack) para um tar.gz, a pedido ou agendado"
+
+msgid ""
+"Back up ONE resource (container/pod/vm/stack) to a tar.gz, on demand or on a schedule.\n"
+"\n"
+"The archive carries the record and the DATA of the volumes it uses — not the image and not the rootfs, which `restore` derives by pulling. A VM is the exception: its overlay disk IS its state, so that one travels."
+msgstr ""
+"Faz backup de UM recurso (container/pod/vm/stack) para um tar.gz, a pedido ou agendado.\n"
+"\n"
+"O arquivo leva o registo e os DADOS dos volumes que usa — não a imagem nem o rootfs, que o `restore` deriva descarregando-a. A VM é a excepção: o disco de overlay dela É o seu estado, por isso esse viaja."
+
+msgid "Restore a resource from an archive written by `delonix backup`"
+msgstr "Repõe um recurso a partir de um arquivo escrito pelo `delonix backup`"
+
+msgid "What to back up"
+msgstr "O que arquivar"
+
+msgid "Its name"
+msgstr "O nome dele"
+
+msgid "Where the archive goes: a directory, or `volume:<name>` for a named volume (default: the current directory)"
+msgstr "Onde fica o arquivo: uma pasta, ou `volume:<nome>` para um volume nomeado (por omissão: a pasta actual)"
+
+msgid "Take this many per day, on a systemd user timer, keeping the newest N"
+msgstr "Tantos por dia, num temporizador de utilizador do systemd, guardando os N mais recentes"
+
+msgid "Schedule with a crontab expression instead (`\"0 3 * * *\"`), translated to a systemd timer"
+msgstr "Agenda com uma expressão de crontab (`\"0 3 * * *\"`), traduzida para um temporizador do systemd"
+
+msgid "How many archives of this resource to keep (default: 7, or `--max-for-day` when scheduling)"
+msgstr "Quantos arquivos deste recurso guardar (por omissão: 7, ou o `--max-for-day` quando se agenda)"
+
+msgid "Print what would be archived, without writing anything"
+msgstr "Mostra o que seria arquivado, sem escrever nada"
+
+msgid "What to restore"
+msgstr "O que repor"
+
+msgid "The archive: a path, or the bare name of one in `--from`"
+msgstr "O arquivo: um caminho, ou o nome nu de um que esteja em `--from`"
+
+msgid "Where to look for the archive when it is named rather than a path"
+msgstr "Onde procurar o arquivo quando é nomeado em vez de um caminho"
+
+msgid "Restore even when the live resource has data that is not in the archive"
+msgstr "Repõe mesmo quando o recurso vivo tem dados que não estão no arquivo"
+
+msgid "Print what would be restored, without touching anything"
+msgstr "Mostra o que seria reposto, sem tocar em nada"
+
+#
+# backup / restore por recurso — mensagens de execução
+#
+msgid "{path} ({size})"
+msgstr "{path} ({size})"
+
+msgid "  volumes: {vols}"
+msgstr "  volumes: {vols}"
+
+msgid "  members: {m}"
+msgstr "  membros: {m}"
+
+msgid "  removed (over --keep {keep}): {path}"
+msgstr "  removido (acima do --keep {keep}): {path}"
+
+msgid "  scheduled: {cal}  (systemctl --user list-timers {unit}.timer)"
+msgstr "  agendado: {cal}  (systemctl --user list-timers {unit}.timer)"
+
+msgid "  note: this timer stops when you log out — `sudo loginctl enable-linger $USER` keeps it running"
+msgstr "  nota: este temporizador pára quando saíres da sessão — `sudo loginctl enable-linger $USER` mantém-no a correr"
+
+msgid "would write {path}\n  {what}\n  volumes: {vols}\n  keeping the newest {keep}"
+msgstr "escreveria {path}\n  {what}\n  volumes: {vols}\n  guardando os {keep} mais recentes"
+
+msgid "(none)"
+msgstr "(nenhum)"
+
+msgid "{path}\n  {kind} {name}, taken {when} on {host}"
+msgstr "{path}\n  {kind} {name}, tirado a {when} em {host}"
+
+msgid "  would replace the data of: {v}"
+msgstr "  substituiria os dados de: {v}"
+
+msgid "  needs base disk: {b}"
+msgstr "  precisa do disco base: {b}"
+
+msgid "  volume {v} restored"
+msgstr "  volume {v} reposto"
+
+msgid "  container {n} kept (its data was restored)"
+msgstr "  container {n} mantido (os dados dele foram repostos)"
+
+msgid "  container {n} recreated (start it with `delonix container start {n}`)"
+msgstr "  container {n} recriado (arranca-o com `delonix container start {n}`)"
+
+msgid "  {n} started again"
+msgstr "  {n} arrancado de novo"
+
+msgid "restored vm {name} (start it with `delonix vm start {name}`)"
+msgstr "vm {name} reposta (arranca-a com `delonix vm start {name}`)"
+
+msgid "backup: '{name}' is not a usable resource name"
+msgstr "backup: '{name}' não é um nome de recurso utilizável"
+
+msgid "backup: cannot use '{path}': {err}"
+msgstr "backup: não consigo usar '{path}': {err}"
+
+msgid "backup: cannot resolve '{path}': {err}"
+msgstr "backup: não consigo resolver '{path}': {err}"
+
+msgid "backup: cannot create a scratch directory"
+msgstr "backup: não consigo criar uma pasta de trabalho"
+
+msgid "backup: volume '{name}' has no data directory at {path}"
+msgstr "backup: o volume '{name}' não tem pasta de dados em {path}"
+
+msgid "backup: the overlay disk of VM '{name}' is not at {path} — nothing to archive"
+msgstr "backup: o disco de overlay da VM '{name}' não está em {path} — não há nada para arquivar"
+
+msgid "backup: systemd-run refused to install the timer (see its output above)"
+msgstr "backup: o systemd-run recusou instalar o temporizador (vê a saída dele acima)"
+
+msgid "backup archive {path}"
+msgstr "arquivo de backup {path}"
+
+msgid "backup archive {name} in {dir}"
+msgstr "arquivo de backup {name} em {dir}"
+
+msgid "restore: {path} holds a {got}, not a {want}"
+msgstr "restore: {path} contém um {got}, não um {want}"
+
+msgid "restore: {path} has no backup.json — it was not written by `delonix backup`"
+msgstr "restore: {path} não tem backup.json — não foi escrito pelo `delonix backup`"
+
+msgid "restore: the archive holds no container records"
+msgstr "restore: o arquivo não contém registo nenhum de container"
+
+msgid "restore: the archive claims volume '{v}' but does not carry it"
+msgstr "restore: o arquivo diz ter o volume '{v}' mas não o transporta"
+
+msgid "restore: VM '{name}' is running — stop it first (`delonix vm stop {name}`)"
+msgstr "restore: a VM '{name}' está a correr — pára-a primeiro (`delonix vm stop {name}`)"
+
+msgid "--max-for-day must be at least 1 (drop the flag to take no schedule at all)"
+msgstr "o --max-for-day tem de ser pelo menos 1 (tira a flag para não agendar de todo)"
+
+msgid "--cron takes 5 fields (minute hour day-of-month month day-of-week), got {n}: '{expr}'"
+msgstr "o --cron leva 5 campos (minuto hora dia-do-mês mês dia-da-semana), recebi {n}: '{expr}'"
+
+msgid "--cron: '{v}' is not a plain day-of-week number 0-7 (0 and 7 are both Sunday)"
+msgstr "--cron: '{v}' não é um número simples de dia-da-semana 0-7 (0 e 7 são ambos domingo)"
+
+msgid "--cron: day-of-week {v} is out of range (0-7)"
+msgstr "--cron: o dia-da-semana {v} está fora do intervalo (0-7)"
+
+msgid "--max-for-day {n} does not divide the day evenly — use 1, 2, 3, 4, 6, 8, 12 or 24, or give an explicit --cron"
+msgstr "o --max-for-day {n} não divide o dia por igual — usa 1, 2, 3, 4, 6, 8, 12 ou 24, ou dá um --cron explícito"
+
+msgid "--max-for-day {n} is more than 24 — this flag is per DAY, and that is more than once an hour. Use --cron for anything finer"
+msgstr "o --max-for-day {n} é mais do que 24 — esta flag é por DIA, e isso é mais do que de hora a hora. Usa o --cron para algo mais fino"
+
+msgid "--cron: '{v}' is not something this translator can express in the {what} field (names and @shortcuts are not supported — use numbers, *, lists, ranges or */N)"
+msgstr "--cron: '{v}' não é coisa que este tradutor consiga exprimir no campo {what} (nomes e @atalhos não são suportados — usa números, *, listas, intervalos ou */N)"
+
+msgid "backup: VM '{name}' is running — copying its disk now would capture a torn filesystem. Stop it first (`delonix vm stop {name}`), or take a live checkpoint with `delonix vm snapshot {name} <label>`"
+msgstr "backup: a VM '{name}' está a correr — copiar o disco dela agora apanharia um sistema de ficheiros rasgado. Pára-a primeiro (`delonix vm stop {name}`), ou tira um checkpoint ao vivo com `delonix vm snapshot {name} <rótulo>`"
+
+msgid "backup: cannot schedule — systemd-run is not available ({err}). Without it there is no daemonless way to run a timer; use your own cron entry calling this same command"
+msgstr "backup: não consigo agendar — o systemd-run não está disponível ({err}). Sem ele não há forma daemonless de correr um temporizador; usa uma entrada de cron tua a chamar este mesmo comando"
+
+msgid "backup: refusing to schedule with a relative path — a timer does not run from your current directory, and the archive would land somewhere else"
+msgstr "backup: recuso agendar com um caminho relativo — um temporizador não corre a partir da tua pasta actual, e o arquivo iria parar a outro sítio"
+
+msgid "restore: '{name}' is running — stop it first, or pass --force to have this command stop and restart it"
+msgstr "restore: '{name}' está a correr — pára-o primeiro, ou passa --force para este comando o parar e voltar a arrancar"
+
+msgid "restore: the base disk this overlay needs is missing: {base}. Pull it (`delonix image vm pull`) before restoring — an overlay without its base is unreadable"
+msgstr "restore: falta o disco base de que este overlay precisa: {base}. Descarrega-o (`delonix image vm pull`) antes de repor — um overlay sem a base dele é ilegível"
+
+#
+# exemplos do manual: backup / restore
+#
+msgid "the record and the volumes' data — not the image, which restore pulls back"
+msgstr "o registo e os dados dos volumes — não a imagem, que o restore volta a descarregar"
+
+msgid "somewhere that is not here (a directory, or a named volume on a NAS)"
+msgstr "algures que não aqui (uma pasta, ou um volume nomeado num NAS)"
+
+msgid "twice a day on a systemd user timer, keeping the newest two"
+msgstr "duas vezes por dia num temporizador de utilizador do systemd, guardando os dois mais recentes"
+
+msgid "or on your own schedule, in crontab syntax"
+msgstr "ou no teu próprio horário, em sintaxe de crontab"
+
+msgid "a VM: its overlay disk IS its state, so stop it first"
+msgstr "uma VM: o disco de overlay dela É o estado dela, por isso pára-a primeiro"
+
+msgid "see what would go in, without writing anything"
+msgstr "vê o que entraria, sem escrever nada"
+
+msgid "put the data back (refuses while it is running — that would corrupt it)"
+msgstr "repõe os dados (recusa enquanto estiver a correr — isso corrompia-os)"
+
+msgid "stop it, restore, start it again"
+msgstr "pára-o, repõe, e arranca-o de novo"
+
+msgid "from the directory the backups live in, by bare name"
+msgstr "a partir da pasta onde os backups vivem, pelo nome nu"
+
+msgid "what it would touch, without touching it"
+msgstr "o que tocaria, sem lhe tocar"

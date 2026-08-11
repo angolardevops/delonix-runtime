@@ -343,6 +343,48 @@ check "vm ls" ok "$BIN" vm ls
 check "vm create com disco inexistente recusa" fail "$BIN" vm create "vm-$PFX" --disk /nao/existe.qcow2
 
 ########################################
+section "backup / restore por recurso"
+########################################
+# O ciclo real: arquivar, DESTRUIR os dados, repor, e confirmar que voltaram. Um
+# `backup` que devolve 0 não prova nada — o que prova é o conteúdo do ficheiro
+# depois de ele ter sido apagado.
+BKDIR="$OUT/backups"; mkdir -p "$BKDIR"
+BKC="bk-$PFX"; BKV="bkvol-$PFX"
+"$BIN" volumes create "$BKV" >/dev/null 2>&1
+"$BIN" container run -d --name "$BKC" -v "$BKV":/data alpine:latest sleep 300 >/dev/null 2>&1
+"$BIN" container exec "$BKC" sh -c 'echo prova > /data/f.txt' >/dev/null 2>&1
+
+check "backup --dry-run não escreve nada" ok "$BIN" backup container "$BKC" --to "$BKDIR" --dry-run
+check "backup --dry-run mesmo não escreveu" ok bash -c "[[ -z \"\$(ls -A '$BKDIR')\" ]]"
+check "backup container" ok "$BIN" backup container "$BKC" --to "$BKDIR"
+check "o arquivo existe" ok bash -c "ls '$BKDIR'/container-$BKC-*.tar.gz >/dev/null"
+check "o arquivo leva os dados do volume" ok bash -c \
+  "tar tzf '$BKDIR'/container-$BKC-*.tar.gz | grep -q '^volumes/$BKV.tar.gz$'"
+check "e NÃO leva o rootfs (é derivável da imagem)" ok bash -c \
+  "! tar tzf '$BKDIR'/container-$BKC-*.tar.gz | grep -q '^rootfs/'"
+
+# Destruir para valer, e repor.
+"$BIN" container exec "$BKC" rm -f /data/f.txt >/dev/null 2>&1
+check "restore recusa-se com o container a correr" fail bash -c \
+  "'$BIN' restore container \$(ls '$BKDIR'/container-$BKC-*.tar.gz | head -1)"
+check "restore --force pára, repõe e arranca" ok bash -c \
+  "'$BIN' restore container \$(ls '$BKDIR'/container-$BKC-*.tar.gz | head -1) --force"
+check "os dados voltaram" ok bash -c \
+  "sleep 1; '$BIN' container exec '$BKC' cat /data/f.txt | grep -q prova"
+
+# Classes de saída: «não existe» tem de ser distinguível de «rebentou».
+check "backup de inexistente devolve 4" 4 "$BIN" backup container "nao-existe-$PFX" --to "$BKDIR"
+check "restore de arquivo inexistente devolve 4" 4 "$BIN" restore container "nao-existe-$PFX.tar.gz"
+check "restore com o kind trocado recusa" fail bash -c \
+  "'$BIN' restore vm \$(ls '$BKDIR'/container-$BKC-*.tar.gz | head -1)"
+check "--max-for-day que não divide o dia recusa" fail "$BIN" backup container "$BKC" --to "$BKDIR" --max-for-day 5
+check "--cron @daily recusa (não se aproxima)" fail "$BIN" backup container "$BKC" --to "$BKDIR" --cron "@daily"
+check "--cron com 4 campos recusa" fail "$BIN" backup container "$BKC" --to "$BKDIR" --cron "0 2 * *"
+
+"$BIN" container rm -f "$BKC" >/dev/null 2>&1
+"$BIN" volumes rm "$BKV" >/dev/null 2>&1
+
+########################################
 section "limpeza"
 ########################################
 "$BIN" container rm -f "$C" >/dev/null 2>&1
