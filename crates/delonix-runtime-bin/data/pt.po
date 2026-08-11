@@ -112,6 +112,15 @@ msgstr "Imprime o script de autocompletion do shell (bash/zsh/fish/...)."
 msgid "Target shell."
 msgstr "Shell alvo."
 
+msgid "VMfile syntax highlighting for an editor (vim/vscode)."
+msgstr "Realce de sintaxe do VMfile para um editor (vim/vscode)."
+
+msgid "Target editor."
+msgstr "Editor alvo."
+
+msgid "Write the editor's files into this directory instead of printing one to stdout."
+msgstr "Escreve os ficheiros do editor neste directório em vez de imprimir um no stdout."
+
 # ---- help: grupo ingress/egress (cmd/firewall.rs) --------------------------
 
 msgid "Allow inbound traffic to a container: `[proto/]port` from an optional CIDR."
@@ -5677,6 +5686,15 @@ msgstr "instalar todas as páginas para o `man delonix-container-run` funcionar 
 msgid "the top-level page"
 msgstr "a página de topo"
 
+msgid "vim/neovim — the syntax AND the ftdetect that activates it"
+msgstr "vim/neovim — a sintaxe E o ftdetect que a activa"
+
+msgid "VS Code, as an extension directory (active in the next window)"
+msgstr "VS Code, como directoria de extensão (activa na próxima janela)"
+
+msgid "just the grammar, to place it yourself"
+msgstr "só a gramática, para a colocares onde quiseres"
+
 msgid "what exists — names and key counts; the values are never printed"
 msgstr "o que existe — nomes e contagem de chaves; os valores nunca são impressos"
 
@@ -8363,3 +8381,45 @@ msgstr "a partir da pasta onde os backups vivem, pelo nome nu"
 
 msgid "what it would touch, without touching it"
 msgstr "o que tocaria, sem lhe tocar"
+
+#
+# backup a quente: congelar em vez de parar, e as guardas de reposição
+#
+msgid "warning: could not freeze '{name}' ({err}) — the archive is being taken while it writes, so it is not a point-in-time view. A delegated cgroup fixes this (`systemd-run --user --scope -p Delegate=yes -- delonix backup ...`), or use --stop"
+msgstr "aviso: não consegui congelar '{name}' ({err}) — o arquivo está a ser tirado enquanto ele escreve, logo não é uma vista de um instante só. Um cgroup delegado resolve isto (`systemd-run --user --scope -p Delegate=yes -- delonix backup ...`), ou usa --stop"
+
+msgid "ERROR: '{name}' was left PAUSED and could not be resumed ({err}) — run `delonix container unpause {name}`"
+msgstr "ERRO: '{name}' ficou EM PAUSA e não consegui retomá-lo ({err}) — corre `delonix container unpause {name}`"
+
+msgid "ERROR: '{id}' was stopped for the backup and did not start again ({err}) — run `delonix container start {id}`"
+msgstr "ERRO: '{id}' foi parado para o backup e não voltou a arrancar ({err}) — corre `delonix container start {id}`"
+
+msgid "ERROR: VM '{name}' was stopped for the backup and did not start again ({err}) — run `delonix vm start {name}`"
+msgstr "ERRO: a VM '{name}' foi parada para o backup e não voltou a arrancar ({err}) — corre `delonix vm start {name}`"
+
+msgid "ERROR: cannot reopen the stores to restart {ids} — run `delonix container start` on them"
+msgstr "ERRO: não consigo reabrir os registos para arrancar {ids} — corre-lhes `delonix container start`"
+
+msgid "Ask the guest agent to flush and freeze the filesystems first (VMs only; needs qemu-guest-agent inside the guest)"
+msgstr "Pede ao agente do convidado para esvaziar e congelar os sistemas de ficheiros primeiro (só VMs; precisa do qemu-guest-agent lá dentro)"
+
+msgid "Stop the workload for the duration of the backup, instead of freezing it hot"
+msgstr "Pára a carga durante o backup, em vez de a congelar a quente"
+
+msgid ""
+"Stop the workload for the duration of the backup, instead of freezing it hot.\n"
+"\n"
+"Only worth it for an application that keeps state in memory and never writes it down: freezing gives a crash-consistent archive, which anything with a journal or a write-ahead log recovers from."
+msgstr ""
+"Pára a carga durante o backup, em vez de a congelar a quente.\n"
+"\n"
+"Só compensa para uma aplicação que guarda estado em memória e nunca o escreve: congelar dá um arquivo consistente-com-falha, do qual qualquer coisa com jornal ou write-ahead log recupera."
+
+msgid "a RUNNING VM — the guest does not pause and its PID does not change"
+msgstr "uma VM A CORRER — o convidado não pára e o PID dele não muda"
+
+msgid "guest-filesystem consistency, if qemu-guest-agent is installed in it"
+msgstr "consistência do filesystem do convidado, se o qemu-guest-agent lá estiver instalado"
+
+msgid "actually stop it, for an application that keeps state only in RAM"
+msgstr "parar mesmo, para uma aplicação que só guarda estado em RAM"
