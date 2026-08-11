@@ -819,7 +819,11 @@ pub(crate) fn fmt_measured(u: delonix_volume::Usage, quota: Option<u64>) -> Stri
     fmt_usage(u.bytes, quota)
 }
 
-fn volsnap_run(mode: &str, data: &std::path::Path, tarball: &std::path::Path) -> Result<()> {
+pub(crate) fn volsnap_run(
+    mode: &str,
+    data: &std::path::Path,
+    tarball: &std::path::Path,
+) -> Result<()> {
     let d = data.to_string_lossy().to_string();
     let t = tarball.to_string_lossy().to_string();
     match delonix_runtime::reexec_mapped(&["__volsnap", mode, &d, &t]) {

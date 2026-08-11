@@ -1722,6 +1722,27 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["dash", "system events", "container stats", "image ls"],
     },
     Entry {
+        path: "system backup",
+        group: "Configure",
+        examples: &[
+            ("the registries, IPAM, secrets and PKI — everything that cannot be rebuilt", "delonix system backup"),
+            ("name the file yourself", "delonix system backup -o /mnt/nas/node-a.tar.gz"),
+            ("take the volumes' data with it (this is the part that can be hundreds of GiB)", "delonix system backup --volumes"),
+            ("to rebuild a node from scratch: without the key the secrets never decrypt there", "delonix system backup --volumes --include-master-key"),
+        ],
+        see_also: &["system restore", "volumes snapshot", "system df", "secret ls"],
+    },
+    Entry {
+        path: "system restore",
+        group: "Configure",
+        examples: &[
+            ("what it would change, without writing anything", "delonix system restore node-a.tar.gz --dry-run"),
+            ("put the state back (refuses while a container or VM is still running)", "delonix system restore node-a.tar.gz"),
+            ("restore anyway, accepting that the running workloads lose their registry", "delonix system restore node-a.tar.gz --force"),
+        ],
+        see_also: &["system backup", "container ls", "vm ls", "secret ls"],
+    },
+    Entry {
         path: "system df",
         group: "Inspect",
         examples: &[

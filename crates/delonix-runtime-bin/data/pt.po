@@ -7871,3 +7871,179 @@ msgstr "Image '{image}': o segredo '{secret}' precisa de `username` e `password`
 
 msgid "Image '{name}': pullSecret only applies to `pull:` — a `build:` produces the image locally and authenticates nowhere"
 msgstr "Image '{name}': o pullSecret só se aplica a `pull:` — um `build:` produz a imagem localmente e não autentica em lado nenhum"
+
+# --- system backup / system restore ---
+msgid "Save this node's state into one archive"
+msgstr "Salvaguarda o estado deste nó num só arquivo"
+
+msgid ""
+"Save this node's state into one archive.\n"
+"\n"
+"By default it packs what CANNOT be reconstructed: the registries, IPAM, secrets, `auth.json`, cluster PKI, HTTPRoute config and the event log. The heavy, re-obtainable areas are opt-in, and the live plumbing of a running node (pidfiles, sockets, locks) never travels — a resurrected `holder.pid` makes the engine report a holder that does not exist."
+msgstr ""
+"Salvaguarda o estado deste nó num só arquivo.\n"
+"\n"
+"Por omissão leva o que NÃO se reconstrói: os registos, o IPAM, os segredos, o `auth.json`, a PKI do cluster, a configuração do HTTPRoute e o registo de eventos. As áreas pesadas e re-obteníveis são opt-in, e o encanamento vivo de um nó a correr (pidfiles, sockets, locks) nunca viaja — um `holder.pid` ressuscitado faz o motor anunciar um holder que não existe."
+
+msgid "Put a node's state back from a `system backup` archive"
+msgstr "Repõe o estado de um nó a partir de um arquivo do `system backup`"
+
+msgid ""
+"Put a node's state back from a `system backup` archive.\n"
+"\n"
+"Destructive on purpose: the covered set becomes exactly what the archive holds. It verifies the whole archive BEFORE touching anything, refuses a format it does not know, refuses to run over live workloads without `--force`, and proves afterwards that the restored secrets decrypt."
+msgstr ""
+"Repõe o estado de um nó a partir de um arquivo do `system backup`.\n"
+"\n"
+"Destrutivo de propósito: o conjunto coberto passa a ser exactamente o que o arquivo tem. Verifica o arquivo INTEIRO antes de tocar seja no que for, recusa um formato que não conheça, recusa correr por cima de workloads vivos sem `--force`, e prova no fim que os segredos repostos decifram."
+
+msgid "Where to write the archive (default: `delonix-backup-<UTC>.tar.gz` in the current directory). Always created 0600"
+msgstr "Onde escrever o arquivo (omissão: `delonix-backup-<UTC>.tar.gz` no directório actual). Criado sempre a 0600"
+
+msgid "Also pack the volumes' DATA, via the same mapped snapshot `volumes snapshot` uses. This is the only area that can be hundreds of GiB"
+msgstr "Levar também os DADOS dos volumes, pelo mesmo snapshot mapeado que o `volumes snapshot` usa. É a única área que pode ter centenas de GiB"
+
+msgid "Also pack the OCI images (blobs, layers and index) — content-addressed cache that a registry can serve again"
+msgstr "Levar também as imagens OCI (blobs, layers e índice) — cache com endereço de conteúdo, que um registo volta a servir"
+
+msgid "Also pack the VM disk images (gigabytes of qcow2 that `vm pull` re-fetches). Their metadata always travels"
+msgstr "Levar também as imagens de disco de VM (gigabytes de qcow2 que o `vm pull` volta a obter). Os metadados delas viajam sempre"
+
+msgid "Also pack the vault MASTER KEY. Without it the secrets restore onto another node as bytes that never decrypt; with it, the archive IS the vault"
+msgstr "Levar também a CHAVE-MESTRA do cofre. Sem ela, os segredos repostos noutro nó são bytes que nunca decifram; com ela, o arquivo É o cofre"
+
+msgid "The archive written by `system backup`"
+msgstr "O arquivo escrito pelo `system backup`"
+
+msgid "Restore even with containers/VMs still running (their registry is replaced underneath them)"
+msgstr "Repor mesmo com containers/VMs ainda a correr (o registo deles é substituído por baixo)"
+
+msgid "Say what would change and stop, without writing anything"
+msgstr "Dizer o que mudaria e parar, sem escrever nada"
+
+msgid "backup format {got} is not supported by this build (it handles {want}) — restore it with the delonix version that wrote it ({ver})"
+msgstr "o formato de backup {got} não é suportado por esta build (trata o {want}) — repõe-no com a versão do delonix que o escreveu ({ver})"
+
+msgid "backup: refusing member '{rel}' — it escapes the target directory"
+msgstr "backup: recuso o membro '{rel}' — escapa do directório de destino"
+
+msgid "backup: refusing member '{rel}' — empty path"
+msgstr "backup: recuso o membro '{rel}' — caminho vazio"
+
+msgid "cannot read {dir}: {err} — a directory that cannot be read is not an empty one"
+msgstr "não consigo ler {dir}: {err} — um directório ilegível não é um directório vazio"
+
+msgid "no state root at {root} — nothing to back up"
+msgstr "não há raiz de estado em {root} — nada para salvaguardar"
+
+msgid "volume '{name}': data lives on the {driver} server, not on this node — only the registry entry travels"
+msgstr "volume '{name}': os dados vivem no servidor {driver}, não neste nó — só a entrada do registo viaja"
+
+msgid "{file} — {n} file(s), {size}"
+msgstr "{file} — {n} ficheiro(s), {size}"
+
+msgid "left out: {n} × {why}"
+msgstr "ficou de fora: {n} × {why}"
+
+msgid "volume data: {list}"
+msgstr "dados de volume: {list}"
+
+msgid "live plumbing of a running node (pids, sockets, locks)"
+msgstr "encanamento vivo de um nó a correr (pids, sockets, locks)"
+
+msgid "cache, rebuilt on demand"
+msgstr "cache, reconstruída quando for precisa"
+
+msgid "container rootfs, rebuilt from the image"
+msgstr "rootfs de container, reconstruído a partir da imagem"
+
+msgid "volume data (pass --volumes)"
+msgstr "dados de volume (passa --volumes)"
+
+msgid "OCI images (pass --images)"
+msgstr "imagens OCI (passa --images)"
+
+msgid "VM disk images (pass --vm-images)"
+msgstr "imagens de disco de VM (passa --vm-images)"
+
+msgid "the vault master key (pass --include-master-key)"
+msgstr "a chave-mestra do cofre (passa --include-master-key)"
+
+msgid "WARNING: this archive CONTAINS the vault master key. Anyone holding the file can decrypt every secret of this node — treat it as the secrets themselves (it is 0600; keep it that way, and encrypt it before it leaves the host)."
+msgstr "AVISO: este arquivo CONTÉM a chave-mestra do cofre. Quem tiver o ficheiro decifra todos os segredos deste nó — trata-o como os próprios segredos (está a 0600; mantém-no assim, e cifra-o antes de sair do host)."
+
+msgid "The secrets travel ENCRYPTED and the master key does NOT — restoring them onto a DIFFERENT node produces secrets that will never decrypt there. Pass --include-master-key if this archive has to rebuild a node from scratch."
+msgstr "Os segredos viajam CIFRADOS e a chave-mestra NÃO — repô-los num nó DIFERENTE produz segredos que nunca decifram lá. Passa --include-master-key se este arquivo tiver de reconstruir um nó do zero."
+
+msgid "Taken with the node live, so it is crash-consistent, not quiesced — stop the workloads first if the data needs a consistent point in time."
+msgstr "Tirado com o nó vivo, por isso é crash-consistent e não quiesced — pára os workloads primeiro se os dados precisarem de um ponto no tempo coerente."
+
+msgid "skipped {path}: {err}"
+msgstr "saltei {path}: {err}"
+
+msgid "backup: refusing member '{name}' — only regular files are restored"
+msgstr "backup: recuso o membro '{name}' — só ficheiros normais são repostos"
+
+msgid "backup: unknown member '{name}' — not a delonix backup"
+msgstr "backup: membro desconhecido '{name}' — não é um backup do delonix"
+
+msgid "backup: no manifest.json — not a delonix backup"
+msgstr "backup: sem manifest.json — não é um backup do delonix"
+
+msgid "backup: invalid volume name '{name}' in the archive"
+msgstr "backup: nome de volume inválido '{name}' no arquivo"
+
+msgid "backup of {host} taken {when} UTC, delonix {ver}"
+msgstr "backup de {host} tirado a {when} UTC, delonix {ver}"
+
+msgid "{n} file(s) to put back, {stale} registry entry(ies) to remove, {vol} volume(s) with data"
+msgstr "{n} ficheiro(s) a repor, {stale} entrada(s) de registo a remover, {vol} volume(s) com dados"
+
+msgid "{n} workload(s) still running ({list}) — a restore replaces the registry underneath them. Stop them first, or pass --force if you accept losing track of them."
+msgstr "{n} workload(s) ainda a correr ({list}) — uma reposição substitui-lhes o registo por baixo. Pára-os primeiro, ou passa --force se aceitares perder-lhes o rasto."
+
+msgid "--force: restoring with {n} workload(s) still running ({list}) — the engine will no longer describe them correctly"
+msgstr "--force: a repor com {n} workload(s) ainda a correr ({list}) — o motor deixa de os descrever correctamente"
+
+msgid "--dry-run: nothing was changed."
+msgstr "--dry-run: nada foi alterado."
+
+msgid "volume {name}: data restored"
+msgstr "volume {name}: dados repostos"
+
+msgid "volume '{name}' has data in the backup but no registry entry: {err}"
+msgstr "o volume '{name}' tem dados no backup mas não tem entrada no registo: {err}"
+
+msgid "restored {n} file(s) into {root}"
+msgstr "repostos {n} ficheiro(s) em {root}"
+
+msgid "{n} secret(s) restored and decrypted"
+msgstr "{n} segredo(s) repostos e decifrados"
+
+msgid "{n} secret(s) did not decrypt after the restore ({list}). The archive carries the secrets encrypted; the key that opens them is this node's master key, and it only travels with --include-master-key. Everything else was restored."
+msgstr "{n} segredo(s) não decifraram depois da reposição ({list}). O arquivo leva os segredos cifrados; a chave que os abre é a chave-mestra deste nó, e só viaja com --include-master-key. Todo o resto foi reposto."
+
+msgid "The OCI images were not in this archive: on a fresh node the restored containers have no rootfs until the images are pulled again."
+msgstr "As imagens OCI não vinham neste arquivo: num nó novo os containers repostos ficam sem rootfs até as imagens serem puxadas outra vez."
+
+# --- exemplos do manual: system backup / restore ---
+msgid "the registries, IPAM, secrets and PKI — everything that cannot be rebuilt"
+msgstr "os registos, o IPAM, os segredos e a PKI — tudo o que não se reconstrói"
+
+msgid "name the file yourself"
+msgstr "dar tu o nome ao ficheiro"
+
+msgid "take the volumes' data with it (this is the part that can be hundreds of GiB)"
+msgstr "levar também os dados dos volumes (é esta a parte que pode ter centenas de GiB)"
+
+msgid "to rebuild a node from scratch: without the key the secrets never decrypt there"
+msgstr "para reconstruir um nó do zero: sem a chave, os segredos nunca decifram lá"
+
+msgid "what it would change, without writing anything"
+msgstr "o que mudaria, sem escrever nada"
+
+msgid "put the state back (refuses while a container or VM is still running)"
+msgstr "repor o estado (recusa enquanto houver um container ou VM a correr)"
+
+msgid "restore anyway, accepting that the running workloads lose their registry"
+msgstr "repor à mesma, aceitando que os workloads a correr percam o registo"
