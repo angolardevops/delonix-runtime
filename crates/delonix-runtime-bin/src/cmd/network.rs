@@ -274,6 +274,9 @@ pub enum NetworkCmd {
     Inspect {
         #[arg(add = ArgValueCandidates::new(super::complete::networks))]
         name: String,
+        /// Output format: `table` (default, the historical text) or `json` (ADR-0005)
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: super::output::OutputFormat,
     },
     /// Readable detail of one or more networks, `kubectl describe` style.
     ///
@@ -318,7 +321,7 @@ pub fn run(action: NetworkCmd) -> Result<()> {
             println!("{}", net.name);
             Ok(())
         }
-        NetworkCmd::Inspect { name } => cmd_inspect(&store, &name),
+        NetworkCmd::Inspect { name, output } => cmd_inspect(&store, &name, output),
         NetworkCmd::Describe { names } => cmd_describe(&store, &names),
         NetworkCmd::Rm { name } => cmd_rm(&store, &name),
         NetworkCmd::Apply { file } => {
@@ -667,8 +670,45 @@ fn realize_overlay(net: &Network) -> Result<()> {
     Ok(())
 }
 
-fn cmd_inspect(store: &NetworkStore, name: &str) -> Result<()> {
+/// The machine view of a network (`inspect -o json`).
+///
+/// `Network` is not `Serialize` — its record is `key=value` lines with several
+/// writers — so this is a dedicated view struct, which is just as well: it makes
+/// the published contract explicit instead of leaking whatever the on-disk shape
+/// happens to be today. `cli-stability.md` already promised this output as
+/// stable; only `container inspect` was actually emitting it.
+#[derive(serde::Serialize)]
+struct NetworkInspect<'a> {
+    name: &'a str,
+    driver: &'a str,
+    bridge: &'a str,
+    subnet: &'a str,
+    gateway: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    vni: Option<u32>,
+    peers: &'a [String],
+}
+
+fn cmd_inspect(
+    store: &NetworkStore,
+    name: &str,
+    format: super::output::OutputFormat,
+) -> Result<()> {
     let n = store.get(name)?;
+    if format == super::output::OutputFormat::Json {
+        return super::output::print_json(&[NetworkInspect {
+            name: &n.name,
+            driver: &n.driver,
+            bridge: &n.bridge,
+            subnet: &n.subnet,
+            gateway: &n.gateway,
+            parent: n.parent.as_deref(),
+            vni: n.vni,
+            peers: &n.peers,
+        }]);
+    }
     println!("{}:     {}", super::po::t("name"), n.name);
     println!("driver:   {}", n.driver);
     println!("bridge:   {}", n.bridge);

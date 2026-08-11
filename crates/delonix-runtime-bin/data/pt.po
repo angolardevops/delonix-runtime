@@ -4756,6 +4756,9 @@ msgstr "(só com `--vm`) Sem argumento, puxa a dourada oficial SEM Kubernetes em
 msgid "Output format: `table` (default) or `json` (ADR-0005). With `-f`, `json` streams ONE OBJECT PER LINE (JSONL) — a JSON array would never close on a stream"
 msgstr "Formato de saída: `table` (por omissão) ou `json` (ADR-0005). Com `-f`, o `json` transmite UM OBJECTO POR LINHA (JSONL) — um array JSON nunca fecharia num fluxo contínuo"
 
+msgid "Output format: `table` (default, the historical text) or `json` (ADR-0005). Redaction applies to BOTH — `--reveal` is what unlocks the values, never the format"
+msgstr "Formato de saída: `table` (por omissão, o texto de sempre) ou `json` (ADR-0005). A redacção vale para AMBOS — quem destranca os valores é o `--reveal`, nunca o formato"
+
 msgid "Output format: `table` (default, the historical text) or `json` (ADR-0005)"
 msgstr "Formato de saída: `table` (por omissão, o texto de sempre) ou `json` (ADR-0005)"
 

@@ -54,6 +54,9 @@ pub enum SecretCmd {
         /// Reveal the VALUES in cleartext (dangerous — avoid on shared terminals).
         #[arg(long)]
         reveal: bool,
+        /// Output format: `table` (default, the historical text) or `json` (ADR-0005). Redaction applies to BOTH — `--reveal` is what unlocks the values, never the format
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: output::OutputFormat,
     },
     /// Set/update keys in a secret (creates it if it does not exist).
     Set {
@@ -216,6 +219,25 @@ fn valid_env_name(s: &str) -> bool {
     !s.is_empty()
         && !s.starts_with(|c: char| c.is_ascii_digit())
         && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// What a value renders as in `inspect` when it is not revealed.
+const REDACTED_VALUE: &str = "\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}";
+
+/// The machine view of a secret (`inspect -o json`).
+///
+/// `keys` is listed separately from `data` because it is the field automation
+/// actually wants: «does this secret carry the key my consumer looks for» is
+/// answerable without ever touching a value, revealed or not.
+#[derive(serde::Serialize)]
+struct SecretInspect<'a> {
+    name: &'a str,
+    keys: Vec<&'a str>,
+    data: std::collections::BTreeMap<&'a str, &'a str>,
+    /// Whether `data` holds real values or the redaction marker. Without this a
+    /// consumer cannot tell a redacted secret from one whose value genuinely is
+    /// the marker string.
+    revealed: bool,
 }
 
 /// Names accepted in the `kind: Secret` `spec`, for the unknown-field warning.
@@ -493,8 +515,28 @@ pub fn run(action: SecretCmd) -> Result<()> {
             }
             t.print();
         }
-        SecretCmd::Inspect { name, reveal } => {
+        SecretCmd::Inspect {
+            name,
+            reveal,
+            output,
+        } => {
             let s = store.load(&name)?;
+            if output == output::OutputFormat::Json {
+                // The SAME redaction rule as the text path, deliberately: a
+                // format flag must never be a way around it. Only `--reveal`
+                // unlocks a value, and it has to be typed on purpose.
+                let data: std::collections::BTreeMap<&str, &str> = s
+                    .data
+                    .iter()
+                    .map(|(k, v)| (k.as_str(), if reveal { v.as_str() } else { REDACTED_VALUE }))
+                    .collect();
+                return output::print_json(&[SecretInspect {
+                    name: &s.name,
+                    keys: s.data.keys().map(String::as_str).collect(),
+                    data,
+                    revealed: reveal,
+                }]);
+            }
             println!("Name:  {}", s.name);
             for (k, v) in &s.data {
                 // Redaction by default — the value only comes out with explicit --reveal.
@@ -623,7 +665,7 @@ pub fn run(action: SecretCmd) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_kv, read_env_keys, valid_env_name, FromEnv};
+    use super::{parse_kv, read_env_keys, valid_env_name, FromEnv, SecretInspect, REDACTED_VALUE};
     use std::collections::BTreeMap;
 
     #[test]
@@ -773,6 +815,35 @@ mod tests {
         // to refuse it — which is the second half of the same bug.
         for (_, var) in mapped.pairs() {
             assert!(valid_env_name(&var), "{var:?} should be accepted");
+        }
+    }
+
+    /// `-o json` must obey the SAME redaction as the text path. A format flag
+    /// that also unlocked values would make `--reveal` decorative, and the
+    /// leak would be silent — the JSON looks the same either way to whoever is
+    /// piping it somewhere.
+    #[test]
+    fn o_formato_json_nao_e_uma_via_para_contornar_a_redaccao() {
+        let data = BTreeMap::from([("senha".to_string(), "SUPERSECRETO".to_string())]);
+        for reveal in [false, true] {
+            let shown: BTreeMap<&str, &str> = data
+                .iter()
+                .map(|(k, v)| (k.as_str(), if reveal { v.as_str() } else { REDACTED_VALUE }))
+                .collect();
+            let out = serde_json::to_string(&SecretInspect {
+                name: "s",
+                keys: data.keys().map(String::as_str).collect(),
+                data: shown,
+                revealed: reveal,
+            })
+            .unwrap();
+            assert_eq!(
+                out.contains("SUPERSECRETO"),
+                reveal,
+                "o valor so pode aparecer com --reveal (reveal={reveal})"
+            );
+            // The key name is NOT a secret, and is what a consumer checks for.
+            assert!(out.contains("senha"));
         }
     }
 }
