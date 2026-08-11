@@ -156,13 +156,13 @@ connections/conntrack; <code>system events</code> the event stream.</p>
 
 Commands:
   df       Disk usage by area (images, containers, volumes, VM images)
-  events   Engine events (create/start/die/remove/…), from oldest to most recent. With no daemon, the log is a shared append-only file — each command appends its own line (see `delonix_runtime_core::events`)
+  events   Engine events (create/start/die/remove/…), from oldest to most recent
   info     Engine state: rootless?, cgroup delegation, network infra, counts
-  setup    Diagnose — and, with `--delegate`, fix — cgroup delegation, the prerequisite for `--memory`/`--cpus`/`--pids-limit` to mean anything
+  setup    Diagnose — and, with `--delegate`, fix — cgroup delegation
   virt     Host virtualization: hypervisor, KVM, virtio — and what there is to tune
-  prune    Reclaim space: remove stopped containers, unused images, CAS blobs nobody references, empty cgroups and — the biggest space saver — **orphan container directories** (from nodes/containers that died abruptly without `rm`, with no registry entry)
-  thermal  Thermal governor: lowers Delonix&#x27;s CPU budget when the CPU heats up and restores it when it cools down. Runs continuously (see `--once`)
-  monitor  Active network connections per container (via conntrack): who comes in, who goes out, and between containers. Refreshes continuously (see `--no-stream`)
+  prune    Reclaim space taken by what nothing uses any more
+  thermal  Thermal governor for Delonix&#x27;s CPU budget. Runs continuously (see `--once`)
+  monitor  Active network connections per container (via conntrack)
   help     Print this message or the help of the given subcommand(s)
 
 Options:
@@ -194,7 +194,8 @@ SEE ALSO:
 
   delonix › system</code></pre></div>
 <h2 id='thermal'><code>system thermal</code></h2>
-<p class='intro'>Thermal governor: lowers Delonix&#x27;s CPU budget when the CPU heats up and restores it when it cools down. Runs continuously (see <code>--once</code>)</p>
+<p class='intro'>Thermal governor for Delonix&#x27;s CPU budget. Runs continuously (see <code>--once</code>).</p>
+<p class='intro'>Lowers the budget when the CPU heats up and restores it when it cools down.</p>
 <div class='help'><pre><code>Usage: delonix system thermal [OPTIONS]
 
 Options:
@@ -243,7 +244,8 @@ SEE ALSO:
   delonix › system › thermal</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Temperatura e throttling do host</div><div class='cap lang-en'>Host temperature and throttling</div><pre><code>delonix system thermal</code></pre></div>
 <h2 id='monitor'><code>system monitor</code></h2>
-<p class='intro'>Active network connections per container (via conntrack): who comes in, who goes out, and between containers. Refreshes continuously (see <code>--no-stream</code>)</p>
+<p class='intro'>Active network connections per container (via conntrack).</p>
+<p class='intro'>Who comes in, who goes out, and between containers. Refreshes continuously (see <code>--no-stream</code>).</p>
 <div class='help'><pre><code>Usage: delonix system monitor [OPTIONS]
 
 Options:
@@ -305,8 +307,8 @@ SEE ALSO:
   delonix › system › virt</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>O que o host oferece de virtualização, e o que há para afinar</div><div class='cap lang-en'>What the host offers for virtualization, and what&#x27;s left to tune</div><pre><code>delonix system virt</code></pre></div><div class="ex"><div class='cap lang-pt'>Aplicar a afinação recomendada</div><div class='cap lang-en'>Apply the recommended tuning</div><pre><code>sudo delonix system virt --tune</code></pre></div>
 <h2 id='setup'><code>system setup</code></h2>
-<p class='intro'>Diagnose — and, with <code>--delegate</code>, fix — cgroup delegation, the prerequisite for <code>--memory</code>/<code>--cpus</code>/<code>--pids-limit</code> to mean anything.</p>
-<p class='intro'>Without it the flags are ACCEPTED and INERT: the container runs with no limit at all. That is the failure mode this command exists for, and it is invisible without asking.</p>
+<p class='intro'>Diagnose — and, with <code>--delegate</code>, fix — cgroup delegation.</p>
+<p class='intro'>It is the prerequisite for <code>--memory</code>/<code>--cpus</code>/<code>--pids-limit</code> to mean anything. Without it the flags are ACCEPTED and INERT: the container runs with no limit at all. That is the failure mode this command exists for, and it is invisible without asking.</p>
 <div class='help'><pre><code>Usage: delonix system setup [OPTIONS]
 
 Options:
@@ -335,7 +337,8 @@ SEE ALSO:
   delonix › system › setup</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Diagnosticar a delegação de cgroup — porque é que -m/--cpus não pegam</div><div class='cap lang-en'>Diagnose cgroup delegation — why -m/--cpus aren&#x27;t taking effect</div><pre><code>delonix system setup</code></pre></div><div class="ex"><div class='cap lang-pt'>A 1.ª correcção: um scope delegado (sem root, sem reboot, vale já)</div><div class='cap lang-en'>The 1st fix: a delegated scope (no root, no reboot, works right away)</div><pre><code>systemd-run --user --scope -p Delegate=yes -- delonix system setup</code></pre></div><div class="ex"><div class='cap lang-pt'>Só se a de cima ainda disser que falta o `cpu` (precisa de root, sobrevive ao reboot)</div><div class='cap lang-en'>Only if the one above still says `cpu` is missing (needs root, survives a reboot)</div><pre><code>sudo delonix system setup --delegate</code></pre></div>
 <h2 id='events'><code>system events</code></h2>
-<p class='intro'>Engine events (create/start/die/remove/…), from oldest to most recent. With no daemon, the log is a shared append-only file — each command appends its own line (see <code>delonix_runtime_core::events</code>)</p>
+<p class='intro'>Engine events (create/start/die/remove/…), from oldest to most recent.</p>
+<p class='intro'>With no daemon, the log is a shared append-only file — each command appends its own line (see <code>delonix_runtime_core::events</code>).</p>
 <div class='help'><pre><code>Usage: delonix system events [OPTIONS]
 
 Options:
@@ -368,7 +371,8 @@ SEE ALSO:
   delonix › system › events</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Ver o que o motor andou a fazer</div><div class='cap lang-en'>See what the engine has been doing</div><pre><code>delonix system events -n 20</code></pre></div><div class="ex"><div class='cap lang-pt'>Seguir em tempo real (Ctrl-C sai)</div><div class='cap lang-en'>Follow in real time (Ctrl-C to exit)</div><pre><code>delonix system events --follow</code></pre></div>
 <h2 id='prune'><code>system prune</code></h2>
-<p class='intro'>Reclaim space: remove stopped containers, unused images, CAS blobs nobody references, empty cgroups and — the biggest space saver — <strong>orphan container directories</strong> (from nodes/containers that died abruptly without <code>rm</code>, with no registry entry)</p>
+<p class='intro'>Reclaim space taken by what nothing uses any more.</p>
+<p class='intro'>Removes stopped containers, unused images, CAS blobs nobody references, empty cgroups and — the biggest space saver — <strong>orphan container directories</strong> (from nodes/containers that died abruptly without <code>rm</code>, with no registry entry).</p>
 <div class='help'><pre><code>Usage: delonix system prune [OPTIONS]
 
 Options:

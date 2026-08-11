@@ -164,12 +164,12 @@ need <code>CAP_NET_ADMIN</code> in the host's init-netns, outside the rootless m
 Commands:
   create    Create a network
   rm        Remove a network
-  describe  Readable detail of one or more networks, `kubectl describe` style (for humans; use `inspect` for the usual compact view)
+  describe  Readable detail of one or more networks, `kubectl describe` style
   inspect   Detail of a network
   ls        List the networks
   apply     Apply the `kind: Network` documents of a manifest (idempotent by name)
   dash      Dashboard (KPIs + table) of the networks — interactive TUI, or `--once` snapshot
-  node      WireGuard identity of THIS node, for the encrypted VXLAN overlay between nodes (`network create --driver overlay`). The private key stays 0600 in `&lt;root&gt;/wg/node.key`; the public one is what you hand out to the peers
+  node      WireGuard identity of THIS node, for the encrypted overlay between nodes
   help      Print this message or the help of the given subcommand(s)
 
 Options:
@@ -202,7 +202,8 @@ SEE ALSO:
 
   delonix › network</code></pre></div>
 <h2 id='describe'><code>network describe</code></h2>
-<p class='intro'>Readable detail of one or more networks, <code>kubectl describe</code> style (for humans; use <code>inspect</code> for the usual compact view)</p>
+<p class='intro'>Readable detail of one or more networks, <code>kubectl describe</code> style.</p>
+<p class='intro'>For humans; use <code>inspect</code> for the usual compact view.</p>
 <div class='help'><pre><code>Usage: delonix network describe [OPTIONS] &lt;NAMES&gt;...
 
 Arguments:
@@ -229,12 +230,13 @@ SEE ALSO:
   delonix › network › describe</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Detalhe de uma rede, estilo kubectl</div><div class='cap lang-en'>Network detail, kubectl-style</div><pre><code>delonix network describe minha-rede</code></pre></div>
 <h2 id='node'><code>network node</code></h2>
-<p class='intro'>WireGuard identity of THIS node, for the encrypted VXLAN overlay between nodes (<code>network create --driver overlay</code>). The private key stays 0600 in <code>&lt;root&gt;/wg/node.key</code>; the public one is what you hand out to the peers</p>
+<p class='intro'>WireGuard identity of THIS node, for the encrypted overlay between nodes.</p>
+<p class='intro'>The VXLAN overlay of <code>network create --driver overlay</code>. The private key stays 0600 in <code>&lt;root&gt;/wg/node.key</code>; the public one is what you hand out to the peers.</p>
 <div class='help'><pre><code>Usage: delonix network node [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   key   Print only the public key (for composing in scripts)
-  init  Generate the node key (if it does not exist yet) and print the public one with the context of what to do with it. Idempotent
+  init  Generate the node key and print the public one. Idempotent
   help  Print this message or the help of the given subcommand(s)
 
 Options:
@@ -313,7 +315,7 @@ Options:
           Host parent NIC (required for macvlan/ipvlan)
 
       --subnet &lt;SUBNET&gt;
-          Subnet (required for macvlan/ipvlan, e.g.: `192.168.1.0/24`)
+          Subnet. For `bridge`, `10.&lt;200-254&gt;.0.0/16` (only /16); required for macvlan/ipvlan, e.g. `192.168.1.0/24`. Omit it and a free one is picked
 
       --gateway &lt;GATEWAY&gt;
           Gateway (macvlan/ipvlan)

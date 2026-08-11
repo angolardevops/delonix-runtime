@@ -156,10 +156,10 @@ the given CIDRs). All on the same <code>ContainerFw</code>/nft as <code>ingress<
 
 Commands:
   ls      Show the outbound firewall (policy + rules)
-  show    Show a NETWORK&#x27;s egress policy: CIDR allowlist, FQDN hosts, and the IPs currently learnt from DNS for those hosts
+  show    Show a NETWORK&#x27;s egress policy
   allow   Allow outbound traffic from a container: `[proto/]port` to an optional CIDR
   deny    Deny outbound traffic from a container (same shape as `allow`)
-  host    Allow a network&#x27;s egress to a HOSTNAME (and `*.hostname`), learnt live from DNS answers — the FQDN allowlist nft/CIDR can&#x27;t express. Repeatable
+  host    Allow a network&#x27;s egress to a HOSTNAME (and `*.hostname`). Repeatable
   net     Govern a whole network&#x27;s egress to the Internet
   policy  Set the default outbound policy when no rule matches
   clear   Remove all outbound rules
@@ -400,7 +400,8 @@ SEE ALSO:
   delonix › net › egress › net</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Egress de uma rede em allowlist (só DNS + estes CIDRs)</div><div class='cap lang-en'>Network egress in allowlist mode (DNS + these CIDRs only)</div><pre><code>delonix net egress net backend allowlist --to 10.0.0.0/8,1.1.1.1/32</code></pre></div>
 <h2 id='host'><code>egress host</code></h2>
-<p class='intro'>Allow a network&#x27;s egress to a HOSTNAME (and <code>*.hostname</code>), learnt live from DNS answers — the FQDN allowlist nft/CIDR can&#x27;t express. Repeatable</p>
+<p class='intro'>Allow a network&#x27;s egress to a HOSTNAME (and <code>*.hostname</code>). Repeatable.</p>
+<p class='intro'>Learnt live from DNS answers — the FQDN allowlist nft/CIDR can&#x27;t express.</p>
 <div class='help'><pre><code>Usage: delonix net egress host [OPTIONS] &lt;NETWORK&gt; &lt;HOSTNAME&gt;
 
 Arguments:
@@ -440,7 +441,8 @@ set plus DNS and drops the rest. 100% rootless (no eBPF) — Cilium's FQDN polic
 Repeatable for several hostnames.</p></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Só deixar sair para o GitHub (e *.github.com), aprendido do DNS</div><div class='cap lang-en'>Only let traffic out to GitHub (and *.github.com), learned from DNS</div><pre><code>delonix net egress host backend github.com</code></pre></div>
 <h2 id='show'><code>egress show</code></h2>
-<p class='intro'>Show a NETWORK&#x27;s egress policy: CIDR allowlist, FQDN hosts, and the IPs currently learnt from DNS for those hosts</p>
+<p class='intro'>Show a NETWORK&#x27;s egress policy.</p>
+<p class='intro'>CIDR allowlist, FQDN hosts, and the IPs currently learnt from DNS for those hosts.</p>
 <div class='help'><pre><code>Usage: delonix net egress show [OPTIONS] &lt;NETWORK&gt;
 
 Arguments:

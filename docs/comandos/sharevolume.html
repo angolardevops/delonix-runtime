@@ -164,7 +164,7 @@ and doesn't compose with a subdirectory of a network mount.</p>
 <div class='help'><pre><code>Usage: delonix sharevolume [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  rm        Un-register a share volume. The underlying data (a subdirectory of the parent Storage) is PRESERVED unless `--purge-data` is passed
+  rm        Un-register a share volume
   describe  Human-readable detail of one share volume
   ls        List share volumes (parent storage, quota, live usage)
   apply     Apply the `kind: ShareVolume` documents of a manifest (idempotent)
@@ -325,7 +325,8 @@ Quota:          1.0 MiB
 Alert:          OVER QUOTA
 Consume with:   -v tenant-a:/path/in/container</code></pre></div></div>
 <h2 id='rm'><code>sharevolume rm</code></h2>
-<p class='intro'>Un-register a share volume. The underlying data (a subdirectory of the parent Storage) is PRESERVED unless <code>--purge-data</code> is passed</p>
+<p class='intro'>Un-register a share volume.</p>
+<p class='intro'>The underlying data (a subdirectory of the parent Storage) is PRESERVED unless <code>--purge-data</code> is passed.</p>
 <div class='help'><pre><code>Usage: delonix sharevolume rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:

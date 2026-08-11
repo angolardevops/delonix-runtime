@@ -588,8 +588,9 @@ pub enum VmCmd {
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: super::output::OutputFormat,
     },
-    /// Attach to the VM's serial console (interactive terminal) — works with no
-    /// IP (boot logs, login). Escape: Ctrl-] .
+    /// Attach to the VM's serial console (interactive terminal).
+    ///
+    /// Works with no IP (boot logs, login). Escape: Ctrl-] .
     Console {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: String,

@@ -160,14 +160,14 @@ for SSH, and runs the SAME bootstrap — one command, from zero to a cluster run
 <div class='help'><pre><code>Usage: delonix cluster [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  create   Create a local Kubernetes cluster **without a manifest and without Docker** (native kind mode): starts the `kindest/node` nodes in the Delonix engine itself and bootstraps them with `kubeadm`. No flags = 1 control-plane ready to use
+  create   Create a local Kubernetes cluster **without a manifest and without Docker**
   delete   Remove a kind-mode cluster (stops and deletes the nodes + kubeconfig)
-  kubeadm  Provision VMs (golden VM image) + `kubeadm` bootstrap — from zero to a working cluster, without writing a manifest by hand
-  init     Initialize a project with the cluster manifests (kind/vm/ssh) — files ALREADY FILLED IN (images included), ready to use without editing anything
+  kubeadm  Provision VMs (golden VM image) + `kubeadm` bootstrap
+  init     Initialize a project with the cluster manifests (kind/vm/ssh)
   ls       List the clusters and the state of their nodes [alias: list]
-  load     Load local images into a kind-mode cluster&#x27;s nodes, **without a registry** (the equivalent of `kind load docker-image`): packs each image from the local store and imports it into every running node&#x27;s containerd
+  load     Load local images into a kind-mode cluster&#x27;s nodes, **without a registry**
   apply    Apply the `kind: Cluster` document(s) of a manifest
-  kube     Generate a Kubernetes manifest from a container/pod already running locally (`kube generate`) — the &quot;ran it locally, now give me the YAML for k8s&quot; path (equivalent to `podman generate kube`)
+  kube     Generate a Kubernetes manifest from a container/pod already running locally
   help     Print this message or the help of the given subcommand(s)
 
 Options:
@@ -201,7 +201,8 @@ SEE ALSO:
 
   delonix › cluster</code></pre></div>
 <h2 id='kube'><code>cluster kube</code></h2>
-<p class='intro'>Generate a Kubernetes manifest from a container/pod already running locally (<code>kube generate</code>) — the &quot;ran it locally, now give me the YAML for k8s&quot; path (equivalent to <code>podman generate kube</code>)</p>
+<p class='intro'>Generate a Kubernetes manifest from a container/pod already running locally.</p>
+<p class='intro'><code>kube generate</code> — the &quot;ran it locally, now give me the YAML for k8s&quot; path (equivalent to <code>podman generate kube</code>).</p>
 <div class='help'><pre><code>Usage: delonix cluster kube [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
@@ -228,7 +229,8 @@ SEE ALSO:
   delonix › cluster › kube</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Gerar manifestos Kubernetes a partir de um recurso Delonix</div><div class='cap lang-en'>Generate Kubernetes manifests from a Delonix resource</div><pre><code>delonix cluster kube generate</code></pre></div>
 <h2 id='load'><code>cluster load</code></h2>
-<p class='intro'>Load local images into a kind-mode cluster&#x27;s nodes, <strong>without a registry</strong> (the equivalent of <code>kind load docker-image</code>): packs each image from the local store and imports it into every running node&#x27;s containerd</p>
+<p class='intro'>Load local images into a kind-mode cluster&#x27;s nodes, <strong>without a registry</strong>.</p>
+<p class='intro'>The equivalent of <code>kind load docker-image</code>: packs each image from the local store and imports it into every running node&#x27;s containerd.</p>
 <div class='help'><pre><code>Usage: delonix cluster load [OPTIONS] &lt;IMAGES&gt;...
 
 Arguments:
@@ -309,7 +311,8 @@ SEE ALSO:
   delonix › cluster › ls</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Que clusters existem neste host</div><div class='cap lang-en'>Which clusters exist on this host</div><pre><code>delonix cluster ls</code></pre></div>
 <h2 id='create'><code>cluster create</code></h2>
-<p class='intro'>Create a local Kubernetes cluster <strong>without a manifest and without Docker</strong> (native kind mode): starts the <code>kindest/node</code> nodes in the Delonix engine itself and bootstraps them with <code>kubeadm</code>. No flags = 1 control-plane ready to use</p>
+<p class='intro'>Create a local Kubernetes cluster <strong>without a manifest and without Docker</strong>.</p>
+<p class='intro'>Native kind mode: starts the <code>kindest/node</code> nodes in the Delonix engine itself and bootstraps them with <code>kubeadm</code>. No flags = 1 control-plane ready to use.</p>
 <div class='help'><pre><code>Usage: delonix cluster create [OPTIONS]
 
 Options:
@@ -370,7 +373,8 @@ SEE ALSO:
   delonix › cluster › create</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Cluster local em modo kind (containers como nós, sem Docker)</div><div class='cap lang-en'>Local cluster in kind mode (containers as nodes, no Docker)</div><pre><code>delonix cluster create --name lab</code></pre></div><div class="ex"><div class='cap lang-pt'>Com workers</div><div class='cap lang-en'>With workers</div><pre><code>delonix cluster create --name lab --workers 2</code></pre></div>
 <h2 id='init'><code>cluster init</code></h2>
-<p class='intro'>Initialize a project with the cluster manifests (kind/vm/ssh) — files ALREADY FILLED IN (images included), ready to use without editing anything</p>
+<p class='intro'>Initialize a project with the cluster manifests (kind/vm/ssh).</p>
+<p class='intro'>Files ALREADY FILLED IN (images included), ready to use without editing anything.</p>
 <div class='help'><pre><code>Usage: delonix cluster init [OPTIONS] [DIR]
 
 Arguments:
@@ -446,7 +450,8 @@ interpolation — command injection via the manifest was one of the CRITICAL fin
 project's offensive audit, with tests replicating the exploit.</p></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Bootstrap num manifesto `kind: Cluster`</div><div class='cap lang-en'>Bootstrap from a `kind: Cluster` manifest</div><pre><code>delonix cluster apply -f cloud.yaml</code></pre></div>
 <h2 id='kubeadm'><code>cluster kubeadm</code></h2>
-<p class='intro'>Provision VMs (golden VM image) + <code>kubeadm</code> bootstrap — from zero to a working cluster, without writing a manifest by hand</p>
+<p class='intro'>Provision VMs (golden VM image) + <code>kubeadm</code> bootstrap.</p>
+<p class='intro'>From zero to a working cluster, without writing a manifest by hand.</p>
 <div class='help'><pre><code>Usage: delonix cluster kubeadm [OPTIONS] --network &lt;NETWORK&gt;
 
 Options:
