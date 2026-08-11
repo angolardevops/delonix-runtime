@@ -1271,13 +1271,13 @@ pub fn run(action: VmCmd) -> Result<()> {
             // resolved against the official catalogue, one with a `/` is used
             // as given.
             let src = match source {
-                Some(s) => super::vmimage::resolve_official_ref(&s),
+                Some(s) => super::vmimage::resolve_official_ref(&s)?,
                 None => super::vmimage::default_pull_source(no_k8s).to_string(),
             };
             super::vmimage::cmd_pull(&store, &src, name)
         }
         VmCmd::LsRemote { source, no_k8s } => match source {
-            Some(s) => super::vmimage::cmd_ls_remote(&super::vmimage::resolve_official_ref(&s)),
+            Some(s) => super::vmimage::cmd_ls_remote(&super::vmimage::resolve_official_ref(&s)?),
             None if no_k8s => super::vmimage::cmd_ls_remote(
                 super::vmimage::default_pull_source(true)
                     .rsplit_once(':')

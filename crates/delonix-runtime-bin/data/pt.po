@@ -5093,3 +5093,9 @@ msgstr "Destino. Omite-o para um repositório OFICIAL: qual deles é decidido pe
 
 msgid "Publish a local VM image to an OCI registry. Omit the destination to publish to the OFFICIAL repository this image belongs in."
 msgstr "Publica uma imagem VM local num registo OCI. Omite o destino para publicar no repositório OFICIAL a que esta imagem pertence."
+
+msgid "no official repository has the tag '{tag}' — run `delonix image vm ls-remote` to see what is published"
+msgstr "nenhum repositório oficial tem a tag '{tag}' — corre `delonix image vm ls-remote` para ver o que está publicado"
+
+msgid "the tag '{tag}' exists in more than one official repository ({repos}) — name the one you mean"
+msgstr "a tag '{tag}' existe em mais do que um repositório oficial ({repos}) — indica qual deles queres"
