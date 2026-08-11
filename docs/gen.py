@@ -4715,16 +4715,25 @@ delonix vm create heavy --backend libvirt          # default when CH isn't insta
 
 
 def kinds_page():
-    body = [f"<h1>Kinds do manifesto</h1>{bi('p', 'Cada Kind com um template COMPLETO e funcional — '
-            'todos os campos, com os defaults e um comentário. Aplica um só com '
-            '<code>delonix &lt;grupo&gt; apply -f</code>, ou todos de uma vez com <code>delonix stack apply</code> '
-            '(ordem por dependência: Secret → Network → Volume → ShareVolume → Image → Vm → Container → '
-            'Pod → Ingress → FirewallPolicy → HTTPRoute → Tunnel).',
-            'Each Kind with a COMPLETE, functional template — '
-            'every field, with defaults and a comment. Apply just one with '
-            '<code>delonix &lt;group&gt; apply -f</code>, or all at once with <code>delonix stack apply</code> '
-            '(dependency order: Secret → Network → Volume → ShareVolume → Image → Vm → Container → '
-            'Pod → Ingress → FirewallPolicy → HTTPRoute → Tunnel).', cls='tagline')}"]
+    # O `bi(...)` sai da f-string de propósito. Uma expressão que se espalha por
+    # VÁRIAS LINHAS dentro de `{...}` só é válida a partir do Python 3.12
+    # (PEP 701); o runner do CI é mais antigo e responde `unterminated string
+    # literal`. Aqui parsava, lá não — e o gate do site só falhou no release.
+    tagline = bi(
+        'p',
+        'Cada Kind com um template COMPLETO e funcional — '
+        'todos os campos, com os defaults e um comentário. Aplica um só com '
+        '<code>delonix &lt;grupo&gt; apply -f</code>, ou todos de uma vez com <code>delonix stack apply</code> '
+        '(ordem por dependência: Secret → Network → Volume → ShareVolume → Image → Vm → Container → '
+        'Pod → Ingress → FirewallPolicy → HTTPRoute → Tunnel).',
+        'Each Kind with a COMPLETE, functional template — '
+        'every field, with defaults and a comment. Apply just one with '
+        '<code>delonix &lt;group&gt; apply -f</code>, or all at once with <code>delonix stack apply</code> '
+        '(dependency order: Secret → Network → Volume → ShareVolume → Image → Vm → Container → '
+        'Pod → Ingress → FirewallPolicy → HTTPRoute → Tunnel).',
+        cls='tagline',
+    )
+    body = [f"<h1>Kinds do manifesto</h1>{tagline}"]
     body.append(bi('p',
         "Desde a v0.47.0 o <code>apply</code> <strong>converge</strong>: o <code>stack plan</code> diz o "
         "que mudaria e porquê, e o <code>apply</code> reconfigura portas, volumes, redes, memória e CPU "
