@@ -401,8 +401,17 @@ msgstr "não consegui ler o qcow2 de"
 msgid "preparing the working image (flattened, no backing file)..."
 msgstr "a preparar imagem de trabalho (achatada, sem backing file)..."
 
-msgid "compacting the image (sparsify + zstd compression)..."
-msgstr "a compactar a imagem (sparsify + compressão zstd)..."
+msgid "compacting the image"
+msgstr "a compactar a imagem"
+
+msgid "preparing the disk"
+msgstr "a preparar o disco"
+
+msgid "{n} steps inside the guest"
+msgstr "{n} passos dentro do guest"
+
+msgid "Show each step's own output instead of folding it behind the step line (a failed step unfolds either way)."
+msgstr "Mostra o output de cada passo em vez de o dobrar atrás da linha do passo (um passo falhado abre à mesma)."
 
 msgid "virt-sparsify failed ({err}); compressing anyway"
 msgstr "virt-sparsify falhou ({err}); a comprimir na mesma"
@@ -2094,8 +2103,17 @@ msgstr "detalhes completos"
 msgid "stop it (keeps the disk)"
 msgstr "pára-a (mantém o disco)"
 
-msgid "Console of '{name}'. To return to the host: press Ctrl+]  (exit/logout only restarts the session — autologin re-enters)."
-msgstr "Consola de '{name}'. Para voltar ao host: prima Ctrl+]  (exit/logout apenas reinicia a sessão — o autologin volta a entrar)."
+msgid "Console of '{name}'. To return to the host: press Ctrl+{key}  (exit/logout only restarts the session — autologin re-enters)."
+msgstr "Consola de '{name}'. Para voltar ao host: prima Ctrl+{key}  (exit/logout apenas reinicia a sessão — o autologin volta a entrar)."
+
+msgid "invalid console escape '{raw}' — give ONE control key, as `^X` (or `X`)"
+msgstr "escape de consola inválido '{raw}' — indica UMA tecla de controlo, como `^X` (ou `X`)"
+
+msgid "appliance image: logging in as root with the password set when the image was built (`root-password` in scripts/appliances/answer-*.toml; the published images use `delonix-admin`)"
+msgstr "imagem appliance: entra como root com a password definida quando a imagem foi construída (`root-password` em scripts/appliances/answer-*.toml; as imagens publicadas usam `delonix-admin`)"
+
+msgid "log in (appliance: root + the password from the image build)"
+msgstr "entrar (appliance: root + a password da construção da imagem)"
 
 msgid "Back to the host shell."
 msgstr "De volta ao shell do host."
@@ -5123,8 +5141,11 @@ msgstr "Entra por SSH numa VM pelo NOME (o IP vem do registo) ou directamente nu
 msgid "VM name (`vm ls`) or an IP/hostname to go to directly."
 msgstr "Nome da VM (`vm ls`) ou um IP/hostname para onde ir directamente."
 
-msgid "Login user. Defaults to `delonix` — the account the golden images create and the one cloud-init injects `--ssh-key` into."
-msgstr "Utilizador de login. Por omissão `delonix` — a conta que as imagens douradas criam e aquela onde o cloud-init injecta a `--ssh-key`."
+msgid "Login user. Default: `delonix` on cloud-init images, `root` on appliances (which have no `delonix` account)."
+msgstr "Utilizador de login. Por omissão: `delonix` nas imagens cloud-init, `root` nas appliances (que não têm conta `delonix`)."
+
+msgid "Key that detaches the console, as `^X` (default `^]`). Also settable via `$DELONIX_CONSOLE_ESCAPE`."
+msgstr "Tecla que larga a consola, na forma `^X` (por omissão `^]`). Também definível por `$DELONIX_CONSOLE_ESCAPE`."
 
 msgid "Private key to authenticate with (`ssh -i`)."
 msgstr "Chave privada com que autenticar (`ssh -i`)."
@@ -5150,8 +5171,8 @@ msgstr "Entra por SSH numa VM pelo NOME (o IP vem do registo) ou directamente nu
 msgid "VM name (`vm ls`) or an IP/hostname to go to directly."
 msgstr "Nome da VM (`vm ls`) ou um IP/hostname para onde ir directamente."
 
-msgid "Login user. Defaults to `delonix` — the account the golden images create and the one cloud-init injects `--ssh-key` into."
-msgstr "Utilizador de login. Por omissão `delonix` — a conta que as imagens douradas criam e aquela onde o cloud-init injecta a `--ssh-key`."
+msgid "Login user. Default: `delonix` on cloud-init images, `root` on appliances (which have no `delonix` account)."
+msgstr "Utilizador de login. Por omissão: `delonix` nas imagens cloud-init, `root` nas appliances (que não têm conta `delonix`)."
 
 msgid "Private key to authenticate with (`ssh -i`)."
 msgstr "Chave privada com que autenticar (`ssh -i`)."
@@ -8423,3 +8444,12 @@ msgstr "consistência do filesystem do convidado, se o qemu-guest-agent lá esti
 
 msgid "actually stop it, for an application that keeps state only in RAM"
 msgstr "parar mesmo, para uma aplicação que só guarda estado em RAM"
+
+msgid "--no-userns cannot work without privileges: in rootless mode the user namespace is what grants the privileges the other namespaces need, so disabling it can only fail with EPERM. Drop the flag, or run the engine as root"
+msgstr "o --no-userns não pode funcionar sem privilégio: em modo rootless é o user namespace que concede os privilégios de que os outros namespaces precisam, logo desligá-lo só pode falhar com EPERM. Tira a flag, ou corre o motor como root"
+
+msgid "--apparmor {p}: AppArmor is not enabled on this host, so nothing would confine this container"
+msgstr "--apparmor {p}: o AppArmor não está activo neste host, logo nada confinaria este container"
+
+msgid "the container did not start, and the supervisor died before saying why"
+msgstr "o container não arrancou, e o supervisor morreu antes de dizer porquê"
