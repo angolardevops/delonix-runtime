@@ -7848,3 +7848,19 @@ msgstr "recusado enquanto uma VM a usa — a imagem é o ficheiro base dessa VM,
 
 msgid "remove it anyway, and lose those VMs"
 msgstr "remover à mesma, e perder essas VMs"
+
+# --- kind: Secret · fromEnv ---
+msgid "Secret '{name}': these environment variables are not set: {vars} — an unset variable would store an EMPTY secret, and the failure would only surface later as an authentication error"
+msgstr "Secret '{name}': estas variáveis de ambiente não estão definidas: {vars} — uma variável por definir guardaria um segredo VAZIO, e a falha só apareceria mais tarde como um erro de autenticação"
+
+msgid "Secret '{name}': '{var}' is not a valid environment variable name"
+msgstr "Secret '{name}': '{var}' não é um nome válido de variável de ambiente"
+
+msgid "Secret '{name}': empty — provide stringData, fromEnvFile and/or fromEnv"
+msgstr "Secret '{name}': vazio — indica stringData, fromEnvFile e/ou fromEnv"
+
+msgid "empty secret — use --from-literal KEY=value, --from-env VAR and/or --from-env-file"
+msgstr "segredo vazio — usa --from-literal CHAVE=valor, --from-env VAR e/ou --from-env-file"
+
+msgid "Take the value from an environment VARIABLE: `--from-env DB_PASSWORD` stores `$DB_PASSWORD` under that name, `--from-env password=PGPASSWORD` under `password`. Repeatable. The value never appears in argv, unlike `--from-literal`"
+msgstr "Tira o valor de uma VARIÁVEL de ambiente: `--from-env DB_PASSWORD` guarda `$DB_PASSWORD` com esse nome, `--from-env password=PGPASSWORD` com o nome `password`. Repetível. O valor nunca aparece no argv, ao contrário do `--from-literal`"

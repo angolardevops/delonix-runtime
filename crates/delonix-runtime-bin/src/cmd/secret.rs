@@ -37,6 +37,9 @@ pub enum SecretCmd {
         /// Load `KEY=value` lines from a file (e.g. `.env`), or `-` to read them from stdin (the value never touches argv/process list).
         #[arg(value_hint = clap::ValueHint::FilePath, long = "from-env-file")]
         from_env_file: Option<PathBuf>,
+        /// Take the value from an environment VARIABLE: `--from-env DB_PASSWORD` stores `$DB_PASSWORD` under that name, `--from-env password=PGPASSWORD` under `password`. Repeatable. The value never appears in argv, unlike `--from-literal`.
+        #[arg(long = "from-env")]
+        from_env: Vec<String>,
     },
     /// List the secrets (name + number of keys; values NEVER shown).
     Ls {
@@ -100,10 +103,88 @@ struct SecretSpec {
     /// manifest. Applied BEFORE `stringData` (inline overrides the file).
     #[serde(default, rename = "fromEnvFile")]
     from_env_file: Option<PathBuf>,
+    /// Keys read from the PROCESS's environment at apply time.
+    ///
+    /// `["DB_PASSWORD"]` takes `$DB_PASSWORD` and stores it under that name;
+    /// `{ password: DB_PASSWORD }` stores it under `password` instead — which is
+    /// what the consumers of a secret usually want, since `Storage`/`Tunnel`/
+    /// `provision` each look for a key by a fixed name.
+    ///
+    /// This is the form a CI job has: the value arrives as an environment
+    /// variable from the runner's own secret store, and there is no file to
+    /// point at and nothing to write into the manifest. Neither of the other
+    /// two shapes could express it.
+    #[serde(default, rename = "fromEnv")]
+    from_env: Option<FromEnv>,
+}
+
+/// `fromEnv:` accepts a list of names or a `key: ENV_VAR` mapping. Two shapes
+/// because the useful cases differ: a list is the shorthand when the key name
+/// and the variable name are the same, and the mapping is what you need when
+/// the consumer expects a fixed key (`password`) but the environment calls it
+/// something else (`PGPASSWORD`).
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum FromEnv {
+    Names(Vec<String>),
+    Mapped(BTreeMap<String, String>),
+}
+
+impl FromEnv {
+    /// `(secret key, environment variable)` pairs, in a stable order.
+    fn pairs(&self) -> Vec<(String, String)> {
+        match self {
+            FromEnv::Names(v) => v.iter().map(|n| (n.clone(), n.clone())).collect(),
+            FromEnv::Mapped(m) => m.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        }
+    }
+}
+
+/// Reads the named environment variables.
+///
+/// **A missing variable is an ERROR, not an empty value.** A secret quietly
+/// holding `""` because a CI job forgot to export something is worse than an
+/// apply that stops: the resource is created, the apply reports success, and
+/// whatever consumes it fails later with an authentication error that names
+/// nothing. All the missing names are reported at once, so a broken pipeline is
+/// fixed in one pass instead of one variable per run.
+fn read_env_keys(name: &str, from: &FromEnv) -> Result<BTreeMap<String, String>> {
+    let mut out = BTreeMap::new();
+    let mut missing = Vec::new();
+    for (key, var) in from.pairs() {
+        if !valid_env_name(&var) {
+            return Err(Error::Invalid(super::po::tf(
+                "Secret '{name}': '{var}' is not a valid environment variable name",
+                &[("name", name), ("var", &var)],
+            )));
+        }
+        match std::env::var(&var) {
+            Ok(v) => {
+                out.insert(key, v);
+            }
+            Err(_) => missing.push(var),
+        }
+    }
+    if !missing.is_empty() {
+        return Err(Error::Invalid(super::po::tf(
+            "Secret '{name}': these environment variables are not set: {vars} — an unset variable would store an EMPTY secret, and the failure would only surface later as an authentication error",
+            &[("name", name), ("vars", &missing.join(", "))],
+        )));
+    }
+    Ok(out)
+}
+
+/// A name that could be exported by a shell. Checked because the value goes to
+/// `std::env::var`, and a name with a `=` or a space names nothing — it would
+/// read as "not set" and be reported as a missing variable the user cannot fix.
+fn valid_env_name(s: &str) -> bool {
+    !s.is_empty()
+        && !s.starts_with(|c: char| c.is_ascii_digit())
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// Names accepted in the `kind: Secret` `spec`, for the unknown-field warning.
-pub(crate) const SECRET_SPEC_FIELDS: &[&str] = &["stringData", "fromEnvFile"];
+pub(crate) const SECRET_SPEC_FIELDS: &[&str] = &["stringData", "fromEnvFile", "fromEnv"];
 
 /// What a redacted value renders as. A fixed marker, and deliberately not
 /// something length-preserving like `****` — the LENGTH of a secret is itself a
@@ -143,6 +224,27 @@ pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
         serde_yaml::Value::from("fromEnvFile"),
         match &spec.from_env_file {
             Some(p) => serde_yaml::Value::from(p.display().to_string()),
+            None => serde_yaml::Value::Null,
+        },
+    );
+    // `fromEnv` shows WHICH key comes from WHICH variable, and no value: the
+    // pairing is exactly what a reader is checking before applying, and it is
+    // not itself a secret. The environment is NOT read here — a plan that
+    // resolved it would turn planning into a read of the caller's environment,
+    // and would report differently depending on who ran it.
+    out.insert(
+        serde_yaml::Value::from("fromEnv"),
+        match &spec.from_env {
+            Some(fe) => {
+                let mut m = serde_yaml::Mapping::new();
+                for (key, var) in fe.pairs() {
+                    m.insert(
+                        serde_yaml::Value::from(key),
+                        serde_yaml::Value::from(format!("${var}")),
+                    );
+                }
+                serde_yaml::Value::Mapping(m)
+            }
             None => serde_yaml::Value::Null,
         },
     );
@@ -196,6 +298,12 @@ pub fn apply(docs: &[ManifestDoc], base: &Path) -> Result<()> {
         if let Some(f) = &spec.from_env_file {
             data.extend(load_env_file(base, f)?);
         }
+        // Between the file and the inline block: the environment is more
+        // specific than a checked-in `.env`, and less specific than a value
+        // written in this very document.
+        if let Some(fe) = &spec.from_env {
+            data.extend(read_env_keys(name, fe)?);
+        }
         // Inline overrides the file. Warning: the values stay in cleartext in the manifest.
         if !spec.string_data.is_empty() {
             eprintln!(
@@ -209,7 +317,7 @@ pub fn apply(docs: &[ManifestDoc], base: &Path) -> Result<()> {
         }
         if data.is_empty() {
             return Err(Error::Invalid(super::po::tf(
-                "Secret '{name}': empty — provide stringData and/or fromEnvFile",
+                "Secret '{name}': empty — provide stringData, fromEnvFile and/or fromEnv",
                 &[("name", name)],
             )));
         }
@@ -264,6 +372,7 @@ pub fn run(action: SecretCmd) -> Result<()> {
             name,
             from_literal,
             from_env_file,
+            from_env,
         } => {
             if !valid_name(&name) {
                 return Err(Error::Invalid(super::po::tf(
@@ -275,6 +384,19 @@ pub fn run(action: SecretCmd) -> Result<()> {
             if let Some(f) = from_env_file {
                 // CLI: path relative to the CWD of whoever runs the command.
                 data.extend(load_env_file(Path::new("."), &f)?);
+            }
+            // Between the file and the literals, the same precedence the
+            // manifest uses.
+            if !from_env.is_empty() {
+                // `KEY=VAR` maps, a bare `VAR` keeps its own name.
+                let mut mapped = std::collections::BTreeMap::new();
+                for spec in &from_env {
+                    match parse_kv(spec) {
+                        Some((key, var)) => mapped.insert(key, var),
+                        None => mapped.insert(spec.clone(), spec.clone()),
+                    };
+                }
+                data.extend(read_env_keys(&name, &FromEnv::Mapped(mapped))?);
             }
             for lit in &from_literal {
                 let (k, v) = parse_kv(lit).ok_or_else(|| {
@@ -288,7 +410,7 @@ pub fn run(action: SecretCmd) -> Result<()> {
             if data.is_empty() {
                 return Err(Error::Invalid(
                     super::po::t(
-                        "empty secret — use --from-literal KEY=value and/or --from-env-file",
+                        "empty secret — use --from-literal KEY=value, --from-env VAR and/or --from-env-file",
                     )
                     .into(),
                 ));
@@ -463,7 +585,8 @@ pub fn run(action: SecretCmd) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_kv;
+    use super::{parse_kv, read_env_keys, valid_env_name, FromEnv};
+    use std::collections::BTreeMap;
 
     #[test]
     fn parse_kv_corta_no_primeiro_igual() {
@@ -508,5 +631,75 @@ mod tests {
         // Não falha, apesar de o ficheiro não existir — prova que não foi lido.
         let out = serde_yaml::to_string(&super::spec_with_defaults(&doc).unwrap()).unwrap();
         assert!(out.contains("/nao/existe/app.env"), "{out}");
+    }
+
+    #[test]
+    fn uma_variavel_por_definir_e_erro_e_nao_um_segredo_vazio() {
+        // The failure this refuses: a CI job forgets to export something, the
+        // secret is created holding "", the apply reports success, and whatever
+        // consumes it fails much later with an authentication error that names
+        // nothing. Stopping here is the only place the cause is still visible.
+        let var = format!("DLX_TEST_ABSENT_{}", std::process::id());
+        std::env::remove_var(&var);
+        let e = read_env_keys("s", &FromEnv::Names(vec![var.clone()])).unwrap_err();
+        let msg = e.to_string();
+        assert!(
+            msg.contains(&var),
+            "the error must name the variable: {msg}"
+        );
+
+        // Every missing name at once — a broken pipeline is fixed in one pass,
+        // not one variable per run.
+        let a = format!("DLX_TEST_A_{}", std::process::id());
+        let b = format!("DLX_TEST_B_{}", std::process::id());
+        let e = read_env_keys("s", &FromEnv::Names(vec![a.clone(), b.clone()])).unwrap_err();
+        let msg = e.to_string();
+        assert!(msg.contains(&a) && msg.contains(&b), "{msg}");
+    }
+
+    #[test]
+    fn o_mapeamento_guarda_sob_a_chave_que_o_consumidor_espera() {
+        // The reason the mapped shape exists: `Storage`/`Tunnel`/`provision`
+        // each look for a key by a FIXED name (`password`, `token`), and the
+        // environment rarely calls it that.
+        let var = format!("DLX_TEST_PW_{}", std::process::id());
+        std::env::set_var(&var, "s3cr3t");
+
+        let got = read_env_keys("s", &FromEnv::Names(vec![var.clone()])).unwrap();
+        assert_eq!(got.get(&var).map(String::as_str), Some("s3cr3t"));
+
+        let mut m = BTreeMap::new();
+        m.insert("password".to_string(), var.clone());
+        let got = read_env_keys("s", &FromEnv::Mapped(m)).unwrap();
+        assert_eq!(got.get("password").map(String::as_str), Some("s3cr3t"));
+        assert!(!got.contains_key(&var), "only the mapped key is stored");
+
+        // An empty value that was DELIBERATELY exported is kept: "set to
+        // nothing" is a different statement from "not set", and only the
+        // second is an error.
+        let empty = format!("DLX_TEST_EMPTY_{}", std::process::id());
+        std::env::set_var(&empty, "");
+        let got = read_env_keys("s", &FromEnv::Names(vec![empty.clone()])).unwrap();
+        assert_eq!(got.get(&empty).map(String::as_str), Some(""));
+
+        std::env::remove_var(&var);
+        std::env::remove_var(&empty);
+    }
+
+    #[test]
+    fn um_nome_de_variavel_invalido_e_recusado_e_nao_lido_como_ausente() {
+        // Without this check a name with a `=` or a space reads as "not set"
+        // and gets reported as a missing variable the user cannot possibly
+        // export — the error would point at the wrong thing.
+        for bad in ["", "1ABC", "A B", "A=B", "A-B", "A.B"] {
+            assert!(!valid_env_name(bad), "{bad:?} should be refused");
+        }
+        for ok in ["A", "_x", "DB_PASSWORD", "A1"] {
+            assert!(valid_env_name(ok), "{ok:?} should be accepted");
+        }
+        let e = read_env_keys("s", &FromEnv::Names(vec!["A B".into()])).unwrap_err();
+        assert!(e
+            .to_string()
+            .contains("not a valid environment variable name"));
     }
 }
