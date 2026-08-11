@@ -724,7 +724,112 @@ YAML
   rm -rf "$dir"
 }
 
-ALL=(holder_kill control_restart holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_holder_respawn scale abrupt_kill aggregate_ceiling delegated_scope disk_full write_failure stack_converge)
+# ---------------------------------------------------------------------------
+# truenas-destroy — o caminho destrutivo do provisionamento (ADR-0009)
+#
+# Precisa de uma appliance TrueNAS REAL, e SALTA com uma linha audivel sem ela:
+#
+#   DELONIX_CHAOS_TRUENAS_URL=https://192.168.122.83 \
+#   DELONIX_CHAOS_TRUENAS_USER=truenas_admin \
+#   DELONIX_CHAOS_TRUENAS_PASS=delonix-admin \
+#   DELONIX_CHAOS_TRUENAS_POOL=tank scripts/chaos.sh truenas_destroy
+#
+# O que prova, e o que falha se a correccao for revertida:
+#   * `volumes rm` SEM a flag nao pode destruir o dataset — tirar o guarda
+#     `if destroy_remote` faz o passo 2 falhar;
+#   * `--destroy-remote` num volume que nao provisionamos e RECUSADO e deixa o
+#     volume local intacto — tirar a exigencia do carimbo de posse faz o passo 4
+#     falhar (destruiria o dataset de outrem, ou removeria o volume local).
+# ---------------------------------------------------------------------------
+scen_truenas_destroy() {
+  head_ "truenas-destroy — o remoto so morre com a flag, e so o que e nosso"
+  local url="${DELONIX_CHAOS_TRUENAS_URL:-}"
+  local user="${DELONIX_CHAOS_TRUENAS_USER:-}"
+  local pass="${DELONIX_CHAOS_TRUENAS_PASS:-}"
+  local pool="${DELONIX_CHAOS_TRUENAS_POOL:-tank}"
+  if [ -z "$url" ] || [ -z "$user" ] || [ -z "$pass" ]; then
+    skip "truenas-destroy" "DELONIX_CHAOS_TRUENAS_URL/USER/PASS nao definidos"
+    return
+  fi
+  command -v curl >/dev/null 2>&1 || { skip "truenas-destroy" "sem curl"; return; }
+
+  local ds="$pool/dlxchaos-$$"
+  local dir="$SANDBOX/truenas-destroy"
+  rm -rf "$dir"; mkdir -p "$dir"
+  cat > "$dir/m.yaml" <<YAML
+apiVersion: delonix.io/v1
+kind: Secret
+metadata: { name: chaos-nas }
+spec:
+  stringData: { password: $pass }
+---
+apiVersion: delonix.io/v1
+kind: Volume
+metadata: { name: chaosvol }
+spec:
+  provision:
+    truenas:
+      url: $url
+      username: $user
+      passwordSecret: chaos-nas
+      insecureTLS: true
+      dataset: $ds
+      quota: 1G
+YAML
+  # A appliance responde ao dataset? (200 = existe, 404 = nao)
+  nas_code() {
+    curl -sk -u "$user:$pass" --max-time 15 -o /dev/null -w '%{http_code}' \
+      "$url/api/v2.0/pool/dataset/id/$(printf '%s' "$1" | sed 's|/|%2F|g')" 2>/dev/null
+  }
+
+  # 1. Provisionar.
+  if ! dlx stack apply -f "$dir/m.yaml" >/dev/null 2>&1; then
+    skip "truenas-destroy" "o apply falhou (appliance inalcancavel?)"
+    rm -rf "$dir"; return
+  fi
+  if [ "$(nas_code "$ds")" != "200" ]; then
+    bad "truenas-destroy" "o apply reportou sucesso sem criar $ds na NAS"
+    rm -rf "$dir"; return
+  fi
+
+  # 2. `rm` SEM a flag: o dataset TEM de sobreviver.
+  dlx volumes rm chaosvol >/dev/null 2>&1
+  if [ "$(nas_code "$ds")" = "200" ]; then
+    ok "truenas-destroy: rm sem a flag deixou o dataset em paz"
+  else
+    bad "truenas-destroy" "um rm normal destruiu o dataset na NAS"
+    rm -rf "$dir"; return
+  fi
+
+  # 3. Um volume que NAO provisionamos nao pode ser destruido por engano.
+  dlx volumes create chaosalheio >/dev/null 2>&1
+  if dlx volumes rm chaosalheio --destroy-remote >/dev/null 2>&1; then
+    bad "truenas-destroy" "--destroy-remote aceitou um volume sem provisionamento"
+  elif dlx volumes inspect chaosalheio >/dev/null 2>&1; then
+    ok "truenas-destroy: recusou o alheio E deixou o volume local intacto"
+  else
+    bad "truenas-destroy" "a recusa removeu o volume local na mesma"
+  fi
+  dlx volumes rm chaosalheio >/dev/null 2>&1
+
+  # 4. Com a flag e com o carimbo: o dataset morre mesmo.
+  dlx stack apply -f "$dir/m.yaml" >/dev/null 2>&1
+  dlx volumes rm chaosvol --destroy-remote >/dev/null 2>&1
+  if [ "$(nas_code "$ds")" = "404" ]; then
+    ok "truenas-destroy: --destroy-remote destruiu o dataset provisionado"
+  else
+    bad "truenas-destroy" "--destroy-remote nao destruiu $ds"
+  fi
+
+  # Limpeza best-effort, para um cenario abortado nao deixar datasets na NAS.
+  curl -sk -u "$user:$pass" -X DELETE -H 'Content-Type: application/json' \
+    --max-time 20 "$url/api/v2.0/pool/dataset/id/$(printf '%s' "$ds" | sed 's|/|%2F|g')" \
+    -d '{"recursive":true}' >/dev/null 2>&1
+  dlx volumes rm chaosvol >/dev/null 2>&1
+  rm -rf "$dir"
+}
+
+ALL=(holder_kill control_restart holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_holder_respawn scale abrupt_kill aggregate_ceiling delegated_scope disk_full write_failure stack_converge truenas_destroy)
 
 while [ $# -gt 0 ]; do
   case "$1" in
