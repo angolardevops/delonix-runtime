@@ -43,7 +43,11 @@
 
 use delonix_runtime_core::Vm;
 use delonix_runtime_core::{Error, Result};
-use delonix_vm::{Boot, CreateStage, VmBackend, VmConfig};
+// `mem_mib` comes from the engine and is NOT re-implemented here. The copy that
+// used to live in this file did not know the k8s `Gi`/`Mi` suffix the engine
+// tolerates, so `memory: 2Gi` meant 2 GiB on libvirt and Cloud Hypervisor and
+// 1 GiB here — silently, which is the failure this repo treats as its worst.
+use delonix_vm::{mem_mib, Boot, CreateStage, VmBackend, VmConfig};
 use serde::Deserialize;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -52,6 +56,27 @@ use std::time::{Duration, Instant};
 /// allocates a disk on slow storage is real work; what this guards against is a
 /// task that never reaches a terminal state, not a slow one.
 const TASK_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// Polling bounds for [`Client::wait_task`].
+///
+/// It was a flat 750 ms, which is the wrong answer at both ends of the range
+/// the same loop has to cover. A `start` finishes in well under a second and
+/// paid up to 750 ms of pure waiting for nothing; a create that allocates a
+/// disk can run for minutes, and at 750 ms a ten-minute task is 800 requests at
+/// the node — which is also 800 chances for a transient failure to abort a task
+/// that was going to succeed.
+///
+/// Backing off keeps the fast case fast (first answer at 150 ms, 5× sooner) and
+/// the slow case cheap: the same ten minutes costs ~190 requests instead of 800,
+/// measured by `um_backoff_responde_depressa_e_nao_martela_o_no`.
+const POLL_MIN: Duration = Duration::from_millis(150);
+const POLL_MAX: Duration = Duration::from_secs(4);
+
+/// Next polling interval: 1.5× up to [`POLL_MAX`]. Pure, so the claims above
+/// are arithmetic somebody can check rather than a promise in a comment.
+fn next_poll_wait(cur: Duration) -> Duration {
+    std::cmp::min(cur.mul_f32(1.5), POLL_MAX)
+}
 
 /// How the client authenticates against the node.
 #[derive(Debug, Clone)]
@@ -122,8 +147,15 @@ fn task_verdict(status: &str, exitstatus: Option<&str>) -> Option<std::result::R
     }
 }
 
+/// The backend is a thin handle over a SHARED client.
+///
+/// `Arc` and not an owned `Client` because the engine builds a backend per
+/// lookup — `backend_for` on every `is_running`, and `vm ls` calls that once
+/// per VM. Each construction used to mean a fresh `Client::connect`:
+/// authenticate, then `GET /nodes`. Listing ten VMs on a node was thirty round
+/// trips where twelve do. The registered factory clones this instead.
 pub struct ProxmoxBackend {
-    client: Client,
+    client: std::sync::Arc<Client>,
 }
 
 pub struct Client {
@@ -344,6 +376,7 @@ impl Client {
     /// anything exists — every lifecycle call here answers with a task id.
     pub fn wait_task(&self, upid: &str) -> Result<()> {
         let deadline = Instant::now() + TASK_TIMEOUT;
+        let mut wait = POLL_MIN;
         loop {
             let body = self.get(&format!(
                 "/nodes/{}/tasks/{}/status",
@@ -366,7 +399,8 @@ impl Client {
                     TASK_TIMEOUT.as_secs()
                 )));
             }
-            std::thread::sleep(Duration::from_millis(750));
+            std::thread::sleep(wait);
+            wait = next_poll_wait(wait);
         }
     }
 }
@@ -403,13 +437,24 @@ fn truncate_chars(s: &str, max: usize) -> &str {
 /// Percent-encodes the characters a UPID carries that are not path-safe. A UPID
 /// is `UPID:pve:0000…:root@pam:` — the colons are legal in a path segment, the
 /// `@` is not reliably so.
+///
+/// Encodes **bytes**, not chars. The first version mapped `other as u32`, which
+/// is right only below 0x80: a `ç` in a username would have produced `%E7`
+/// instead of its two UTF-8 bytes, and anything above 0xFF (`%1F600` for an
+/// emoji) is not percent-encoding at all — the server would read a path nobody
+/// wrote. A UPID comes back from the node with the account name inside it, so
+/// the input is not ours to assume ASCII.
 fn urlencode(s: &str) -> String {
-    s.chars()
-        .map(|c| match c {
-            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' | ':' => c.to_string(),
-            other => format!("%{:02X}", other as u32),
-        })
-        .collect()
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b':' => {
+                out.push(b as char)
+            }
+            other => out.push_str(&format!("%{other:02X}")),
+        }
+    }
+    out
 }
 
 /// The target URL, checked before any credential goes on the wire. Same two
@@ -479,7 +524,9 @@ enum DiskSpec {
 fn parse_disk_spec(disk: &str) -> Result<DiskSpec> {
     let bad = || {
         Error::Invalid(format!(
-            "proxmox: '{disk}' does not name anything on the node — use `template:<vmid>` to              clone a template, or `<storage>:<size-in-GiB>` for a fresh disk (e.g. `local-lvm:8`).              A local path has no meaning on a remote node"
+            "proxmox: '{disk}' does not name anything on the node — use `template:<vmid>` to \
+             clone a template, or `<storage>:<size-in-GiB>` for a fresh disk (e.g. \
+             `local-lvm:8`). A local path has no meaning on a remote node"
         ))
     };
     let (head, tail) = disk.split_once(':').ok_or_else(bad)?;
@@ -508,17 +555,6 @@ fn vmid_from_handle(handle: &str) -> Option<u32> {
         .and_then(|(_, id)| id.parse().ok())
 }
 
-/// `"2G"`/`"512M"`/`"2048"` → MiB. Proxmox takes memory in MiB.
-fn mem_mib(memory: &str) -> u64 {
-    let t = memory.trim();
-    let (num, mult) = match t.chars().last() {
-        Some('G') | Some('g') => (&t[..t.len() - 1], 1024),
-        Some('M') | Some('m') => (&t[..t.len() - 1], 1),
-        _ => (t, 1),
-    };
-    num.trim().parse::<u64>().unwrap_or(1024) * mult
-}
-
 // ===========================================================================
 // The backend
 // ===========================================================================
@@ -526,8 +562,19 @@ fn mem_mib(memory: &str) -> u64 {
 impl ProxmoxBackend {
     pub fn connect(target: &Target) -> Result<Self> {
         Ok(Self {
-            client: Client::connect(target)?,
+            client: std::sync::Arc::new(Client::connect(target)?),
         })
+    }
+
+    /// Another handle onto the SAME authenticated client. This is what a
+    /// registered factory hands out: building a backend must not re-authenticate.
+    pub fn sharing(client: std::sync::Arc<Client>) -> Self {
+        Self { client }
+    }
+
+    /// The shared client, to hand to [`Self::sharing`].
+    pub fn client(&self) -> std::sync::Arc<Client> {
+        self.client.clone()
     }
 
     /// The node-side id of a VM this backend created, out of the handle `boot`
@@ -537,13 +584,13 @@ impl ProxmoxBackend {
     /// the id. A record without the handle was not created by this backend —
     /// saying so beats guessing an id.
     fn vmid_of(&self, vm: &Vm) -> Result<u32> {
-        vmid_from_handle(&vm.api_socket)
-            .ok_or_else(|| {
-                Error::Invalid(format!(
-                    "VM '{}' has no Proxmox handle in its record (found {:?}) — it was not                      created by this backend",
-                    vm.name, vm.api_socket
-                ))
-            })
+        vmid_from_handle(&vm.api_socket).ok_or_else(|| {
+            Error::Invalid(format!(
+                "VM '{}' has no Proxmox handle in its record (found {:?}) — it was not created \
+                 by this backend",
+                vm.name, vm.api_socket
+            ))
+        })
     }
 }
 
@@ -654,6 +701,47 @@ impl VmBackend for ProxmoxBackend {
         }
         self.client.destroy(vmid)
     }
+}
+
+/// Registers this backend under the name `proxmox`, against `target`.
+///
+/// **This is the caller ADR-0008's decision 2 was waiting for.** The registry
+/// takes a closure precisely because a remote backend needs configuration, and
+/// `fn() -> Box<dyn VmBackend>` had nowhere to receive an endpoint, a node name
+/// and a credential.
+///
+/// **Connects once, lazily.** Registering does no I/O — a node that is
+/// unreachable costs nothing until somebody selects the backend — and the
+/// authenticated client is then SHARED by every later lookup. Without that,
+/// `vm ls` over ten VMs would authenticate ten times, because the engine builds
+/// a backend per `backend_for`.
+///
+/// Never auto-selectable: auto-detection asks `available()`, and the only
+/// honest answer here costs a network round trip to a node nobody named.
+pub fn register(target: Target) -> Result<()> {
+    // Fail on a malformed target HERE, at registration, rather than at the
+    // first `vm create`: the operator is looking at the configuration now.
+    validate_target_url(&target.base_url)?;
+    validate_node_name(&target.node)?;
+
+    let shared: std::sync::Mutex<Option<std::sync::Arc<Client>>> = std::sync::Mutex::new(None);
+    delonix_vm::register_backend(delonix_vm::BackendRegistration {
+        id: "proxmox",
+        aliases: &["pve"],
+        auto_selectable: false,
+        new: Box::new(move || {
+            let mut slot = shared.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(c) = slot.as_ref() {
+                return Ok(Box::new(ProxmoxBackend::sharing(c.clone())));
+            }
+            // A failed connect is NOT cached: a node that was down when the
+            // first VM was listed must not stay "down" for the rest of the
+            // process.
+            let c = std::sync::Arc::new(Client::connect(&target)?);
+            *slot = Some(c.clone());
+            Ok(Box::new(ProxmoxBackend::sharing(c)))
+        }),
+    })
 }
 
 #[cfg(test)]
@@ -795,15 +883,69 @@ mod tests {
         assert!(e.contains("template:") && e.contains("size-in-GiB"), "{e}");
     }
 
+    /// The backend reads `memory` through the ENGINE's parser, and the reason
+    /// is a measured divergence: the copy this crate used to carry did not know
+    /// the k8s `Gi`/`Mi` suffix, so the very same manifest meant 2 GiB on
+    /// libvirt and Cloud Hypervisor and 1 GiB here — with nothing said.
     #[test]
-    fn a_memoria_vai_em_mib_como_a_api_quer() {
+    fn a_memoria_le_se_como_nos_outros_backends() {
         assert_eq!(mem_mib("2G"), 2048);
         assert_eq!(mem_mib("512M"), 512);
         assert_eq!(mem_mib("2048"), 2048);
         assert_eq!(mem_mib(" 4G "), 4096);
-        // Unparseable falls back to a working default rather than 0 — a VM with
-        // no memory does not start, and the failure would name the node.
+        // What the local copy got wrong, and the whole point of sharing one.
+        assert_eq!(
+            mem_mib("2Gi"),
+            2048,
+            "o sufixo k8s dava 1024 na copia local"
+        );
+        assert_eq!(mem_mib("512Mi"), 512);
+        // Unparseable still falls back to something that boots — but the engine
+        // WARNS, which the silent copy did not.
         assert_eq!(mem_mib("bananas"), 1024);
+    }
+
+    /// A UPID comes back from the node with the account name inside it, so the
+    /// input is not ours to assume ASCII. `other as u32` was right only below
+    /// 0x80: a `ç` became `%E7` (one byte instead of its two UTF-8 bytes) and
+    /// anything above 0xFF produced `%1F600`, which is not percent-encoding at
+    /// all — the server reads a path nobody wrote.
+    #[test]
+    fn o_urlencode_codifica_bytes_e_nao_code_points() {
+        assert_eq!(urlencode("ç"), "%C3%A7");
+        assert_eq!(urlencode("😀"), "%F0%9F%98%80");
+        // Every escape is exactly two hex digits, which is what the grammar says.
+        let e = urlencode("UPID:pve:x:joão@pam:");
+        for part in e.split('%').skip(1) {
+            assert!(
+                part.len() >= 2 && part[..2].chars().all(|c| c.is_ascii_hexdigit()),
+                "escape mal formado em {e}"
+            );
+        }
+        assert!(e.contains("%40pam"), "{e}");
+    }
+
+    /// Both ends of the range the same loop covers. A flat interval is the
+    /// wrong answer at each: too slow for a `start`, and a hammering for a
+    /// create that runs for minutes.
+    #[test]
+    fn um_backoff_responde_depressa_e_nao_martela_o_no() {
+        assert_eq!(POLL_MIN, Duration::from_millis(150));
+        assert!(POLL_MIN < Duration::from_millis(750), "mais responsivo");
+
+        // Ten minutes of polling: count the requests, and cap the interval.
+        let (mut waited, mut reqs, mut w) = (Duration::ZERO, 0, POLL_MIN);
+        while waited < Duration::from_secs(600) {
+            waited += w;
+            reqs += 1;
+            w = next_poll_wait(w);
+            assert!(w <= POLL_MAX, "o intervalo nao pode crescer sem tecto");
+        }
+        assert!(
+            reqs < 250,
+            "a 750ms fixos eram 800 pedidos numa tarefa de 10 min; deram {reqs}"
+        );
+        assert_eq!(next_poll_wait(POLL_MAX), POLL_MAX, "estavel no tecto");
     }
 
     #[test]

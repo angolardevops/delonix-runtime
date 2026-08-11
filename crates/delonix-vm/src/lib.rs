@@ -202,7 +202,15 @@ pub fn exists(base: &Path, name: &str) -> bool {
 }
 
 /// Converts memory (`"2G"`/`"1024M"`/`"512"`/`"2Gi"`) to MiB.
-fn mem_mib(s: &str) -> u64 {
+/// `"2G"`/`"512M"`/`"2Gi"`/`"2048"` → MiB.
+///
+/// **Public because every backend has to read the SAME field the same way.**
+/// It was private, so `delonix-proxmox` grew its own copy — and the copy did
+/// not know the k8s `Gi`/`Mi` suffix this one tolerates, so `memory: 2Gi` meant
+/// 2 GiB on libvirt and Cloud Hypervisor and 1 GiB on Proxmox, silently. Same
+/// discipline as `fw_rule_tail` on the network side: one definition, shared by
+/// everyone who reads the format.
+pub fn mem_mib(s: &str) -> u64 {
     let t = s.trim();
     // Tolerates the k8s-style `i` suffix (Gi/Mi): "2Gi" == "2G", "512Mi" == "512M".
     let t = t.strip_suffix(['i', 'I']).unwrap_or(t);
@@ -582,93 +590,197 @@ fn unsupported_snapshot(backend: &str, op: &str) -> Error {
     ))
 }
 
+/// How a registered backend is built when somebody selects it.
+///
+/// A closure and not a `fn` pointer because a REMOTE backend needs
+/// configuration — an endpoint, a node name, a credential — and
+/// `fn() -> Box<dyn VmBackend>` has nowhere to receive it. That gap is
+/// precisely what kept ADR-0008's decision 2 from landing: a crate that
+/// depends on `delonix-vm` (as any backend must, for the trait) could not put
+/// itself into a `static` table here.
+///
+/// `Send + Sync` because the table is process-wide. It constrains the CLOSURE,
+/// not the trait: a backend implementation is untouched by this.
+///
+/// It returns `Result` so a backend whose construction can fail (a remote one
+/// authenticating) reports why, instead of a factory that must panic or lie.
+pub type BackendFactory = Box<dyn Fn() -> Result<Box<dyn VmBackend>> + Send + Sync>;
+
 /// One backend this build knows about: its canonical id (the value persisted in
 /// [`Vm::backend`]), the aliases accepted on input, and how to build one.
-///
-/// A constructor and not a stored instance because a [`VmBackend`] here is a
-/// stateless handle — both are unit structs, and boxing one per lookup costs
-/// nothing while keeping the table `'static`.
-struct RegisteredBackend {
-    id: &'static str,
+pub struct BackendRegistration {
+    /// Canonical id. Must equal what the built backend's [`VmBackend::id`]
+    /// returns — it is what gets persisted in the record and looked up later.
+    pub id: &'static str,
     /// Extra spellings accepted from a user; never repeats `id`.
-    aliases: &'static [&'static str],
-    new: fn() -> Box<dyn VmBackend>,
+    pub aliases: &'static [&'static str],
+    /// Whether auto-detection may pick this backend with nobody naming it.
+    ///
+    /// **A copy of [`VmBackend::auto_selectable`], and deliberately so**:
+    /// auto-detection has to answer this WITHOUT building the backend.
+    /// Construction is where a remote backend authenticates, so asking the
+    /// built object would make the walk do the network round trip the flag
+    /// exists to prevent. [`register_backend`] checks the two agree.
+    pub auto_selectable: bool,
+    pub new: BackendFactory,
 }
 
-fn new_cloud_hypervisor() -> Box<dyn VmBackend> {
-    Box::new(CloudHypervisorBackend)
+impl std::fmt::Debug for BackendRegistration {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BackendRegistration")
+            .field("id", &self.id)
+            .field("aliases", &self.aliases)
+            .field("auto_selectable", &self.auto_selectable)
+            .finish_non_exhaustive()
+    }
 }
 
-fn new_libvirt() -> Box<dyn VmBackend> {
-    Box::new(LibvirtBackend)
+fn builtin_backends() -> Vec<BackendRegistration> {
+    vec![
+        BackendRegistration {
+            id: "cloud-hypervisor",
+            aliases: &["ch", "cloudhypervisor"],
+            auto_selectable: true,
+            new: Box::new(|| Ok(Box::new(CloudHypervisorBackend))),
+        },
+        BackendRegistration {
+            id: "libvirt",
+            aliases: &["kvm", "qemu"],
+            auto_selectable: true,
+            new: Box::new(|| Ok(Box::new(LibvirtBackend))),
+        },
+    ]
 }
 
 /// Every registered backend. **Order matters**: it is the preference order of
-/// the auto-detection in [`select_backend`] (first one installed wins).
+/// the auto-detection in [`select_backend`] (first one installed wins), and the
+/// two local ones are seeded first so registering a third never changes what an
+/// existing host picks.
 ///
-/// This is a table, not a plugin system (ADR-0008): nothing loads a `.so`, and
-/// there is deliberately no public `register()` for an out-of-crate backend —
-/// a real Proxmox backend is blocked on a real target to spike against, and the
-/// extension point gets built in the same commit as its first caller, never
-/// before it (the `ComputeDriver` phase-2b rule this repo already follows).
-///
-/// What the table buys today is that the accepted names live in ONE place. They
-/// used to be spelled out by hand in three `match` arms and two error strings —
-/// so a backend added here would have left the errors naming a pair that no
-/// longer described reality.
-static BACKENDS: &[RegisteredBackend] = &[
-    RegisteredBackend {
-        id: "cloud-hypervisor",
-        aliases: &["ch", "cloudhypervisor"],
-        new: new_cloud_hypervisor,
-    },
-    RegisteredBackend {
-        id: "libvirt",
-        aliases: &["kvm", "qemu"],
-        new: new_libvirt,
-    },
-];
+/// This is a map populated at startup, **not a plugin system** (ADR-0008):
+/// nothing loads a `.so`, and the only way in is [`register_backend`], called
+/// by a process that already linked the backend's crate. On the day somebody
+/// proposes loading code at runtime, that is a new ADR.
+static BACKENDS: std::sync::OnceLock<std::sync::RwLock<Vec<BackendRegistration>>> =
+    std::sync::OnceLock::new();
 
-/// Looks a name up in [`BACKENDS`], canonical id or alias, case- and
-/// whitespace-insensitive. `None` for anything unregistered — including the
-/// empty string, which callers treat as "no opinion" rather than as an error.
-fn find_backend(name: &str) -> Option<&'static RegisteredBackend> {
+fn backends() -> &'static std::sync::RwLock<Vec<BackendRegistration>> {
+    BACKENDS.get_or_init(|| std::sync::RwLock::new(builtin_backends()))
+}
+
+/// Runs `f` over the registered backends. A helper because every reader needs
+/// the same lock, and a poisoned lock here must not take the process down: a
+/// panic in an unrelated thread is not a reason for `vm ls` to abort.
+fn with_backends<T>(f: impl FnOnce(&[BackendRegistration]) -> T) -> T {
+    let guard = backends().read().unwrap_or_else(|e| e.into_inner());
+    f(&guard)
+}
+
+/// Adds a backend to the registry. Idempotent by id: registering the same id
+/// twice REPLACES the entry, so a process that configures a target twice ends
+/// up with the last one rather than two that shadow each other.
+///
+/// The caller is a process that linked the backend's crate and knows its
+/// configuration — for a remote backend, that is where the endpoint and the
+/// credential come from. **Nothing here does I/O**: the factory is not called,
+/// so registering a node that is unreachable costs nothing until someone
+/// actually selects it.
+///
+/// Refused, rather than accepted and left to surprise someone later:
+///
+/// * an id or alias that collides with a DIFFERENT backend already registered —
+///   the loser would become unreachable by name, silently;
+/// * a `auto_selectable: true` on a backend that is not one of this crate's
+///   own. Auto-detection walks the table asking `available()`, and a remote
+///   backend cannot answer that without a network round trip (ADR-0008). A
+///   third-party backend is selected by name or not at all.
+pub fn register_backend(reg: BackendRegistration) -> Result<()> {
+    if reg.id.trim().is_empty() {
+        return Err(Error::Invalid("a backend registration needs an id".into()));
+    }
+    let builtin_ids: Vec<&str> = builtin_backends().iter().map(|b| b.id).collect();
+    if reg.auto_selectable && !builtin_ids.contains(&reg.id) {
+        return Err(Error::Invalid(format!(
+            "backend '{}' cannot be auto-selectable: auto-detection asks every candidate \
+             `available()`, and a backend registered from outside this crate may only be able to \
+             answer that over the network. Register it with `auto_selectable: false` and select it \
+             by name (`--backend {}`)",
+            reg.id, reg.id
+        )));
+    }
+    let mut guard = backends().write().unwrap_or_else(|e| e.into_inner());
+    // A name that already belongs to somebody else. Checked against every
+    // OTHER entry, so re-registering the same id (a reconfigured target) is
+    // fine while stealing another's alias is not.
+    for name in std::iter::once(&reg.id).chain(reg.aliases.iter()) {
+        let want = name.trim().to_lowercase();
+        if let Some(clash) = guard
+            .iter()
+            .find(|b| b.id != reg.id && (b.id == want || b.aliases.contains(&want.as_str())))
+        {
+            return Err(Error::Invalid(format!(
+                "backend '{}' cannot claim the name '{}': it already belongs to '{}'",
+                reg.id, name, clash.id
+            )));
+        }
+    }
+    guard.retain(|b| b.id != reg.id);
+    guard.push(reg);
+    Ok(())
+}
+
+/// `true` when `name` resolves to a registered backend (canonical id or alias),
+/// case- and whitespace-insensitive.
+///
+/// `#[cfg(test)]` on purpose: no production path needs "is it registered?"
+/// without also wanting the backend, and this repo does not keep a public
+/// helper waiting for its first caller (`publish_port_allow`, `Net`).
+#[cfg(test)]
+fn backend_is_registered(name: &str) -> bool {
     let want = name.trim().to_lowercase();
-    BACKENDS
-        .iter()
-        .find(|b| b.id == want || b.aliases.contains(&want.as_str()))
+    with_backends(|bs| {
+        bs.iter()
+            .any(|b| b.id == want || b.aliases.contains(&want.as_str()))
+    })
+}
+
+/// Builds the backend `name` resolves to, or `None` if nothing does.
+fn make_backend(name: &str) -> Option<Result<Box<dyn VmBackend>>> {
+    let want = name.trim().to_lowercase();
+    with_backends(|bs| {
+        bs.iter()
+            .find(|b| b.id == want || b.aliases.contains(&want.as_str()))
+            .map(|b| (b.new)())
+    })
 }
 
 /// The registered ids, for an error that names what IS accepted. Derived from
 /// the table so it cannot drift from it.
 fn registered_backend_ids() -> String {
-    BACKENDS
-        .iter()
-        .map(|b| format!("'{}'", b.id))
-        .collect::<Vec<_>>()
-        .join(", ")
+    with_backends(|bs| {
+        bs.iter()
+            .map(|b| format!("'{}'", b.id))
+            .collect::<Vec<_>>()
+            .join(", ")
+    })
 }
 
-/// Backend names this engine KNOWS but does not register, and why.
+/// Backend names this engine KNOWS but does not register itself, and why.
 ///
-/// The distinction is not pedantry. `delonix-proxmox` exists in this workspace,
-/// implements the trait, and had its API lifecycle proven against a real
-/// Proxmox VE 9.1 (ADR-0008) — what it does not have is a `boot`, because this
-/// engine does not ship a create path it has never watched run. Answering
-/// `--backend proxmox` with «unknown backend» told the operator the opposite of
-/// the truth: that the thing does not exist, rather than that it is not finished.
+/// The distinction is not pedantry. `delonix-proxmox` exists in this workspace
+/// and implements the trait — answering `--backend proxmox` with «unknown
+/// backend» told the operator the opposite of the truth: that the thing does
+/// not exist, rather than that this process did not configure it.
 ///
-/// This table is the honest middle: the name is recognised, the state is named,
-/// and the reader is pointed at the ADR that says what is missing. It is NOT a
-/// registration — nothing here can be selected, and adding a working backend
-/// means putting it in [`BACKENDS`], not here.
+/// Because it CAN be configured now, the text says what to do rather than what
+/// is missing. It is still not a registration: reaching this table means
+/// nothing registered the name, and the only way in is [`register_backend`].
 const KNOWN_UNREGISTERED: &[(&str, &str)] = &[(
     "proxmox",
-    "the Proxmox backend exists (crate `delonix-proxmox`) but is NOT wired up: its \
-     `boot` is unimplemented, so no VM can be created through it. Its API lifecycle is \
-     proven against a real node — see docs/adr/0008-proxmox-vm-backend.md for what is \
-     still missing (a registry the caller can populate, and credentials from a `kind: \
-     Secret`)",
+    "the Proxmox backend (crate `delonix-proxmox`) needs a node to talk to, so it is only \
+     available once one is configured. Set `DELONIX_PROXMOX_URL`, `DELONIX_PROXMOX_NODE` and a \
+     credential (`DELONIX_PROXMOX_TOKEN`, or a `kind: Secret` named by \
+     `DELONIX_PROXMOX_SECRET`) — see docs/adr/0008-proxmox-vm-backend.md",
 )];
 
 fn unknown_backend(name: &str) -> Error {
@@ -692,33 +804,55 @@ fn unknown_backend(name: &str) -> Error {
 /// names do so themselves, since an empty string is valid here but not in
 /// [`select_backend`]'s explicit-request arm).
 fn canonical_backend_name(s: &str) -> Option<&'static str> {
-    find_backend(s).map(|b| b.id)
+    let want = s.trim().to_lowercase();
+    with_backends(|bs| {
+        bs.iter()
+            .find(|b| b.id == want || b.aliases.contains(&want.as_str()))
+            .map(|b| b.id)
+    })
 }
 
 /// Selects a backend from an explicit request or by auto-detection (the first
-/// [`BACKENDS`] entry that is actually installed — today cloud-hypervisor, then
+/// registered entry that is actually installed — today cloud-hypervisor, then
 /// libvirt).
 pub fn select_backend(want: Option<&str>) -> Result<Box<dyn VmBackend>> {
     match want.map(str::trim) {
-        Some(other) if !other.is_empty() => match find_backend(other) {
-            Some(b) => Ok((b.new)()),
-            None => Err(unknown_backend(other)),
-        },
-        // `auto_selectable` first, and it is not an optimization: it is what
-        // keeps auto-detection from making a network request. `available()` of
-        // a remote backend can only answer by asking the far node.
-        _ => BACKENDS
-            .iter()
-            .map(|b| (b.new)())
-            .filter(|b| b.auto_selectable())
-            .find(|b| b.available())
-            .ok_or_else(|| {
-                Error::Invalid(
-                    "no VM backend available: install 'cloud-hypervisor' or 'libvirt'+'qemu'"
-                        .into(),
-                )
-            }),
+        Some(other) if !other.is_empty() => {
+            make_backend(other).unwrap_or_else(|| Err(unknown_backend(other)))
+        }
+        _ => with_backends(auto_detect),
     }
+}
+
+/// Auto-detection: the first registered entry that is auto-selectable AND
+/// installed.
+///
+/// **The `auto_selectable` filter reads the REGISTRATION and runs before
+/// anything is built**, and that order is the whole point. It used to be
+/// `.map(|b| (b.new)()).filter(|b| b.auto_selectable())` — every candidate was
+/// constructed and the wrong ones thrown away. For a local backend that is free
+/// (both are unit structs), which is why nothing ever noticed; for a remote one
+/// CONSTRUCTION is where authentication happens, so auto-detection made exactly
+/// the network round trip the flag exists to prevent.
+///
+/// Takes the entries rather than reading the registry, so a test can hand it a
+/// table where the skipped candidate is actually REACHED. Against the global
+/// registry it never is: this host has a local backend installed, the walk
+/// stops at the first one, and a test written that way passes whether the order
+/// is right or wrong.
+fn auto_detect(entries: &[BackendRegistration]) -> Result<Box<dyn VmBackend>> {
+    for e in entries.iter().filter(|b| b.auto_selectable) {
+        // A built-in constructor is infallible; a registered one that fails is
+        // not a reason to abort a walk whose next candidate may serve fine.
+        if let Ok(b) = (e.new)() {
+            if b.available() {
+                return Ok(b);
+            }
+        }
+    }
+    Err(Error::Invalid(
+        "no VM backend available: install 'cloud-hypervisor' or 'libvirt'+'qemu'".into(),
+    ))
 }
 
 /// Validates and normalizes a backend name for external callers (the CLI's
@@ -783,15 +917,15 @@ pub fn clear_default_backend(base: &Path) -> Result<()> {
 /// that knew a backend this one does not. Both deserve a sentence naming the
 /// VM and the value, not a guess.
 fn backend_for(vm: &Vm) -> Result<Box<dyn VmBackend>> {
-    match find_backend(&vm.backend) {
-        Some(b) => Ok((b.new)()),
-        None => Err(Error::Invalid(format!(
-            "vm '{}': its record names backend '{}', which this build does not know (it has {})",
+    make_backend(&vm.backend).unwrap_or_else(|| {
+        Err(Error::Invalid(format!(
+            "vm '{}': its record names backend '{}', which this process does not have registered \
+             (it has {})",
             vm.name,
             vm.backend,
             registered_backend_ids()
-        ))),
-    }
+        )))
+    })
 }
 
 // ===========================================================================
@@ -2209,10 +2343,13 @@ pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Res
     // On restart, honor the backend the VM already used; otherwise choose now.
     let backend: Box<dyn VmBackend> = match &restarting {
         Some(ex) => {
-            if backend_for(ex)?.is_running(ex) {
+            // Resolved ONCE. It used to be built twice, which is free for a
+            // local backend and a second authentication for a remote one.
+            let b = backend_for(ex)?;
+            if b.is_running(ex) {
                 return Ok(ex.clone()); // already running — idempotent
             }
-            backend_for(ex)?
+            b
         }
         None => {
             // Volumes ⇒ libvirt: only it materializes virtio-9p (Cloud Hypervisor
@@ -2285,7 +2422,8 @@ pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Res
     // what `boot` is handed. For a backend that owns its storage they are the
     // same string the caller wrote — this engine does not get to reinterpret a
     // name that means something on the far node.
-    let (disk_path, overlay) = if backend.manages_own_storage() {
+    let own_storage = backend.manages_own_storage();
+    let (disk_path, overlay) = if own_storage {
         (
             std::path::PathBuf::from(&cfg.disk),
             std::path::PathBuf::from(&cfg.disk),
@@ -2297,7 +2435,15 @@ pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Res
     let boot = match backend.boot(&vmdir, cfg, &overlay.to_string_lossy(), on) {
         Ok(b) => b,
         Err(e) => {
-            if restarting.is_none() {
+            // Clean up the overlay only when WE made it. With
+            // `manages_own_storage`, `overlay` IS `cfg.disk` verbatim — the name
+            // the caller wrote for something on the far node — and removing it
+            // means this engine deleting a file it did not create. For today's
+            // Proxmox backend that name is `local-lvm:8` and the unlink simply
+            // fails, but the rule cannot rest on the spelling a backend happens
+            // to use: a remote backend whose disk reference IS a local path
+            // would lose the user's base image on a failed boot.
+            if restarting.is_none() && !own_storage {
                 let _ = std::fs::remove_file(&overlay);
             }
             return Err(e);
@@ -3377,8 +3523,16 @@ mod tests {
         );
         assert!(e.contains("not available in this build"), "{e}");
         assert!(e.contains("0008"), "a mensagem tem de apontar o ADR: {e}");
-        // Continua a NAO ser seleccionavel.
-        assert!(find_backend("proxmox").is_none());
+        // A mensagem tem de dizer o que FAZER, e nao so o que falta: o backend
+        // pode ser configurado, e um operador que leia isto quer o passo
+        // seguinte, nao um relatorio de estado.
+        assert!(
+            e.contains("DELONIX_PROXMOX_URL"),
+            "tem de dizer como o configurar: {e}"
+        );
+        // E continua a NAO estar registado por omissao — quem nao configurou um
+        // no nao pode seleccionar um.
+        assert!(!backend_is_registered("proxmox"));
         // E um nome que nao existe mesmo continua a dizer que nao existe.
         let o = unknown_backend("naoexiste").to_string();
         assert!(o.contains("unknown VM backend"), "{o}");
@@ -3780,35 +3934,279 @@ mod tests {
         }
     }
 
+    /// A registry nobody can add to is a `match` with extra steps. This is the
+    /// half of ADR-0008's decision 2 that never landed: a crate that depends on
+    /// `delonix-vm` (as any backend must, for the trait) could not put itself
+    /// into a `static` table here.
+    ///
+    /// Registration is by CLOSURE and not by `fn` pointer for one concrete
+    /// reason: a remote backend needs an endpoint and a credential, and
+    /// `fn() -> Box<dyn VmBackend>` has nowhere to receive them.
     #[test]
-    fn a_auto_deteccao_salta_um_backend_nao_auto_selecionavel() {
-        // A remote backend cannot answer `available()` without a network round
-        // trip, so auto-detection must never reach it. Written against the
-        // predicate rather than the global registry, which has no remote entry
-        // to exercise yet — the filter is what would let one in.
-        let remote = FakeBackend {
-            id: "remote",
-            available: true,
-            own_storage: true,
-            auto: false,
-        };
-        let local = FakeBackend {
-            id: "local",
-            available: true,
-            own_storage: false,
-            auto: true,
-        };
-        let picked: Vec<&'static str> = [&remote, &local]
-            .into_iter()
-            .filter(|b| b.auto_selectable())
-            .filter(|b| b.available())
-            .map(|b| b.id())
-            .collect();
-        assert_eq!(
-            picked,
-            vec!["local"],
-            "auto-detection must not pick a backend that answers over the network"
+    fn um_backend_de_fora_pode_registar_se_e_passa_a_resolver_por_nome() {
+        // A name no other test uses: the registry is process-wide and the test
+        // harness is threaded.
+        let seen = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = seen.clone();
+        assert!(
+            select_backend(Some("fakeremote")).is_err(),
+            "antes de registar nao existe"
         );
+        register_backend(BackendRegistration {
+            id: "fakeremote",
+            aliases: &["fr"],
+            auto_selectable: false,
+            new: Box::new(move || {
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(Box::new(FakeBackend {
+                    id: "fakeremote",
+                    available: true,
+                    own_storage: true,
+                    auto: false,
+                }))
+            }),
+        })
+        .expect("registar");
+
+        // Registar NAO constroi: um no inalcancavel nao pode custar nada ate
+        // alguem o escolher.
+        assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+        assert_eq!(
+            select_backend(Some("fakeremote")).unwrap().id(),
+            "fakeremote"
+        );
+        assert_eq!(select_backend(Some("FR ")).unwrap().id(), "fakeremote");
+        assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 2);
+
+        // E um registo que o nomeia resolve — que e o que faltava para
+        // `is_running`/`stop` de uma VM criada por ele.
+        let mut vm = Vm::new(
+            "x".into(),
+            "local-lvm:8".into(),
+            "local-lvm:8".into(),
+            1,
+            "1G".into(),
+            String::new(),
+            String::new(),
+            String::new(),
+            "proxmox:pve:100".into(),
+        );
+        vm.backend = "fakeremote".into();
+        assert!(backend_for(&vm).is_ok());
+
+        // Idempotente por id: reconfigurar um alvo substitui, nunca duplica.
+        register_backend(BackendRegistration {
+            id: "fakeremote",
+            aliases: &["fr"],
+            auto_selectable: false,
+            new: Box::new(|| {
+                Ok(Box::new(FakeBackend {
+                    id: "fakeremote",
+                    available: true,
+                    own_storage: true,
+                    auto: false,
+                }))
+            }),
+        })
+        .expect("re-registar");
+        assert_eq!(
+            with_backends(|bs| bs.iter().filter(|b| b.id == "fakeremote").count()),
+            1
+        );
+        // Limpeza: o registo e do processo inteiro.
+        backends().write().unwrap().retain(|b| b.id != "fakeremote");
+    }
+
+    /// Two refusals, and each one is a name that would otherwise go missing in
+    /// silence.
+    #[test]
+    fn o_registo_recusa_roubar_um_nome_e_recusa_auto_deteccao_de_fora() {
+        // Stealing an alias would make the loser unreachable BY NAME, which is
+        // the same silent failure the `_ => CloudHypervisorBackend` default was.
+        let e = register_backend(BackendRegistration {
+            id: "impostor",
+            aliases: &["kvm"],
+            auto_selectable: false,
+            new: Box::new(|| Ok(Box::new(LibvirtBackend))),
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("kvm") && e.contains("libvirt"), "{e}");
+        assert!(!backend_is_registered("impostor"), "nao pode ter entrado");
+
+        // Auto-detection asks `available()`, and a backend from outside may only
+        // be able to answer that over the network (ADR-0008).
+        let e = register_backend(BackendRegistration {
+            id: "remoto",
+            aliases: &[],
+            auto_selectable: true,
+            new: Box::new(|| Ok(Box::new(LibvirtBackend))),
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("auto-selectable"), "{e}");
+        assert!(!backend_is_registered("remoto"));
+    }
+
+    /// The order used to be `.map(build).filter(auto_selectable)`: every
+    /// candidate was BUILT and the wrong ones thrown away. Free for a local
+    /// backend, which is why nothing noticed — and for a remote one,
+    /// construction is where authentication happens, so auto-detection made
+    /// exactly the network round trip the flag exists to prevent.
+    ///
+    /// **Written against `auto_detect` with its own table, and the first
+    /// version was not.** Registering the remote candidate in the GLOBAL
+    /// registry and calling `select_backend(None)` passed with the bug still
+    /// in: this host has a local backend installed, the walk stops at the first
+    /// entry, and the remote one is never reached either way. A test that
+    /// cannot reach the line it is about proves nothing.
+    #[test]
+    fn a_auto_deteccao_nao_constroi_um_backend_que_vai_descartar() {
+        let built = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = built.clone();
+        // The remote one FIRST, and no local backend after it that is available
+        // — so a walk that builds before filtering has to touch it.
+        let tabela = vec![
+            BackendRegistration {
+                id: "remoto",
+                aliases: &[],
+                auto_selectable: false,
+                new: Box::new(move || {
+                    counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Ok(Box::new(FakeBackend {
+                        id: "remoto",
+                        available: true,
+                        own_storage: true,
+                        auto: false,
+                    }))
+                }),
+            },
+            BackendRegistration {
+                id: "local",
+                aliases: &[],
+                auto_selectable: true,
+                new: Box::new(|| {
+                    Ok(Box::new(FakeBackend {
+                        id: "local",
+                        available: true,
+                        own_storage: false,
+                        auto: true,
+                    }))
+                }),
+            },
+        ];
+
+        assert_eq!(
+            auto_detect(&tabela).unwrap().id(),
+            "local",
+            "a auto-deteccao tem de escolher o local"
+        );
+        assert_eq!(
+            built.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "a auto-deteccao construiu um backend que o filtro ia descartar — \
+             num backend remoto isso e uma ligacao HTTP a um no que ninguem pediu"
+        );
+    }
+
+    // A test that used to live here (`a_auto_deteccao_salta_um_backend_nao_
+    // auto_selecionavel`) is gone rather than kept: it re-implemented the
+    // filter inside the assertion — `[remote, local].filter(auto_selectable)` —
+    // so it asserted that an iterator chain written in the test does what the
+    // test says. It could not have caught the ordering bug in `select_backend`
+    // because it never called it. `a_auto_deteccao_nao_constroi_um_backend_que_
+    // vai_descartar` above now drives the real `auto_detect`.
+
+    /// A failed boot must not delete a file this engine did not create.
+    ///
+    /// With `manages_own_storage`, `overlay` IS `cfg.disk` verbatim — the name
+    /// the caller wrote for something on the far node. The cleanup path removed
+    /// it unconditionally. For today's Proxmox backend that name is
+    /// `local-lvm:8` and the unlink simply fails, but the rule cannot rest on
+    /// the spelling a backend happens to use: a remote backend whose disk
+    /// reference IS a local path would lose the user's base image.
+    ///
+    /// **This test is only writable because the registry became populable** —
+    /// the `manages_own_storage` branch of `create_with` had no registered
+    /// backend that reached it, so it was never exercised at all.
+    #[test]
+    fn um_boot_falhado_nao_apaga_o_disco_de_um_backend_com_storage_propria() {
+        struct FailingRemote;
+        impl VmBackend for FailingRemote {
+            fn id(&self) -> &'static str {
+                "falharemoto"
+            }
+            fn available(&self) -> bool {
+                true
+            }
+            fn manages_own_storage(&self) -> bool {
+                true
+            }
+            fn auto_selectable(&self) -> bool {
+                false
+            }
+            fn boot(
+                &self,
+                _: &Path,
+                _: &VmConfig,
+                _: &str,
+                _: &dyn Fn(CreateStage),
+            ) -> Result<Boot> {
+                Err(Error::Invalid("the node refused".into()))
+            }
+            fn is_running(&self, _: &Vm) -> bool {
+                false
+            }
+            fn ip(&self, _: &Vm) -> Option<String> {
+                None
+            }
+            fn stop(&self, _: &Path, _: &Vm) -> Result<()> {
+                Ok(())
+            }
+        }
+        register_backend(BackendRegistration {
+            id: "falharemoto",
+            aliases: &[],
+            auto_selectable: false,
+            new: Box::new(|| Ok(Box::new(FailingRemote))),
+        })
+        .expect("registar");
+
+        let base = std::env::temp_dir().join(format!(
+            "delonix-own-storage-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+        // The victim: a real file whose NAME is what the backend was handed.
+        // A remote backend is free to accept a path — this engine does not get
+        // to reinterpret, nor to delete, a name that means something elsewhere.
+        let vitima = base.join("imagem-base.qcow2");
+        std::fs::write(&vitima, b"a imagem base do utilizador").unwrap();
+
+        let cfg = VmConfig {
+            name: "vremota".into(),
+            disk: vitima.to_string_lossy().into_owned(),
+            backend: Some("falharemoto".into()),
+            memory: "256M".into(),
+            ..Default::default()
+        };
+        let e = create_with(&base, &cfg, &|_| {}).unwrap_err();
+        assert!(e.to_string().contains("refused"), "{e}");
+        assert!(
+            vitima.exists(),
+            "o boot falhou e o motor apagou um ficheiro que nao criou"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+        backends()
+            .write()
+            .unwrap()
+            .retain(|b| b.id != "falharemoto");
     }
 
     #[test]

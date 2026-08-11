@@ -781,6 +781,7 @@ dependencies = [
  "delonix-image",
  "delonix-mgmt",
  "delonix-net",
+ "delonix-proxmox",
  "delonix-runtime",
  "delonix-runtime-core",
  "delonix-scan",
