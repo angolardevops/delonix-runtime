@@ -5176,3 +5176,1624 @@ msgstr "volume '{name}': o dataset {ds} já existia e foi adoptado — a quota d
 
 msgid "Subnet. For `bridge`, `10.<200-254>.0.0/16` (only /16); required for macvlan/ipvlan, e.g. `192.168.1.0/24`. Omit it and a free one is picked."
 msgstr "Subrede. Para `bridge`, `10.<200-254>.0.0/16` (só /16); obrigatória para macvlan/ipvlan, ex.: `192.168.1.0/24`. Sem ela, é escolhida uma livre."
+
+msgid "ALSO destroy the storage this volume was provisioned with on a remote NAS (`spec.provision`). Irreversible, and on another machine. Refused for a volume that only mounts a share someone else made."
+msgstr "Destrói TAMBÉM o armazenamento com que este volume foi provisionado numa NAS remota (`spec.provision`). Irreversível, e noutra máquina. Recusado para um volume que só monta uma partilha feita por outrem."
+
+# --- Provisionamento na NAS (kind: Volume, spec.provision — ADR-0009) ---
+msgid "provisioned"
+msgstr "provisionado"
+
+msgid "quota {size}"
+msgstr "quota {size}"
+
+msgid "{size} free"
+msgstr "{size} livres"
+
+msgid "no quota"
+msgstr "sem quota"
+
+msgid "free space unknown"
+msgstr "espaço livre desconhecido"
+
+msgid "destroyed the provisioned storage"
+msgstr "destruiu o armazenamento provisionado"
+
+msgid "spec.provision needs a target block (today: `truenas:`)"
+msgstr "spec.provision precisa de um bloco de destino (hoje: `truenas:`)"
+
+msgid "provision.truenas needs either `apiKeySecret` or `username` with a password"
+msgstr "provision.truenas precisa de `apiKeySecret` ou de `username` com uma password"
+
+msgid "provision.truenas: `username` needs `passwordSecret` (or `password`)"
+msgstr "provision.truenas: `username` precisa de `passwordSecret` (ou `password`)"
+
+msgid "provision.truenas.share.networks is empty — the NAS reads that as \"any network may mount this\". List the CIDRs that may, or drop the `share:` block to provision the dataset without exporting it"
+msgstr "provision.truenas.share.networks está vazio — a NAS lê isso como «qualquer rede pode montar isto». Lista os CIDRs que podem, ou tira o bloco `share:` para provisionar o dataset sem o exportar"
+
+msgid "this volume's storage was not provisioned by delonix — there is nothing here that is ours to destroy (a volume that only mounts an existing share leaves it alone)"
+msgstr "o armazenamento deste volume não foi provisionado pelo delonix — não há aqui nada que seja nosso para destruir (um volume que só monta uma partilha já existente deixa-a em paz)"
+
+msgid "secret '{name}' has none of the keys: {keys}"
+msgstr "o segredo '{name}' não tem nenhuma das chaves: {keys}"
+
+msgid "this volume was provisioned by '{kind}', which this build cannot destroy"
+msgstr "este volume foi provisionado por '{kind}', que esta build não sabe destruir"
+
+msgid "volume was provisioned on {url} without a `kind: Secret` (an inline password is not kept in the record) — destroy {dataset} on the NAS yourself, or re-apply with `apiKeySecret`/`passwordSecret` first"
+msgstr "o volume foi provisionado em {url} sem um `kind: Secret` (uma password inline não fica guardada no registo) — destrói {dataset} na NAS tu mesmo, ou volta a aplicar com `apiKeySecret`/`passwordSecret` primeiro"
+
+msgid "volume '{name}': spec.{kind} points at {given}, but spec.provision made {made} — remove the server/share from the block and let it be derived, or provision what you are mounting"
+msgstr "volume '{name}': spec.{kind} aponta para {given}, mas spec.provision criou {made} — tira o server/share do bloco e deixa-o ser derivado, ou provisiona aquilo que estás a montar"
+
+# --- Comentários dos EXEMPLOS do --help (v0.48.0) ---
+
+msgid "a web service in seconds — host port 8080 onto the container's 80"
+msgstr "um serviço web em segundos — porta 8080 do host na 80 do container"
+
+msgid "what is running, and for how long"
+msgstr "o que está a correr, e há quanto tempo"
+
+msgid "a shell inside it, without stopping anything"
+msgstr "uma shell lá dentro, sem parar nada"
+
+msgid "detached, published on the host, with a name of your own"
+msgstr "em segundo plano, publicado no host, com um nome à tua escolha"
+
+msgid "a database with a named volume and a network of its own, so the data outlives the container"
+msgstr "uma base de dados com um volume nomeado e uma rede própria, para os dados sobreviverem ao container"
+
+msgid "in the foreground, removed on exit — the shape for a one-off task"
+msgstr "em primeiro plano, removido à saída — a forma para uma tarefa pontual"
+
+msgid "with a memory and CPU cap, and a restart policy"
+msgstr "com tecto de memória e CPU, e uma política de reinício"
+
+msgid "the running ones"
+msgstr "os que estão a correr"
+
+msgid "all of them, stopped included"
+msgstr "todos, incluindo os parados"
+
+msgid "just the IDs, to feed another command"
+msgstr "só os IDs, para alimentar outro comando"
+
+msgid "bring a stopped container back, with the same ports, volumes and network"
+msgstr "trazer de volta um container parado, com as mesmas portas, volumes e rede"
+
+msgid "several at once"
+msgstr "vários de uma vez"
+
+msgid "SIGTERM, then SIGKILL if it does not leave"
+msgstr "SIGTERM, e depois SIGKILL se não sair"
+
+msgid "give it 30 seconds to shut down cleanly"
+msgstr "dar-lhe 30 segundos para desligar de forma limpa"
+
+msgid "SIGKILL, no waiting"
+msgstr "SIGKILL, sem esperar"
+
+msgid "any signal, by name or number — this one asks nginx to reload"
+msgstr "qualquer sinal, por nome ou número — este pede ao nginx que recarregue"
+
+msgid "block until it exits, then print the exit code"
+msgstr "bloqueia até ele sair, e depois imprime o código de saída"
+
+msgid "stop and start again, keeping the original configuration"
+msgstr "parar e arrancar de novo, mantendo a configuração original"
+
+msgid "remove a stopped container"
+msgstr "remover um container parado"
+
+msgid "force it even while running, and drop its anonymous volumes"
+msgstr "forçar mesmo a correr, e deitar fora os seus volumes anónimos"
+
+msgid "everything that has already exited"
+msgstr "tudo o que já saiu"
+
+msgid "freeze the processes — the state stays in memory, unlike stop"
+msgstr "congelar os processos — o estado fica em memória, ao contrário do stop"
+
+msgid "resume a frozen container"
+msgstr "retomar um container congelado"
+
+msgid "give it a new name — the ID does not change"
+msgstr "dar-lhe um nome novo — o ID não muda"
+
+msgid "publish a new port on a RUNNING container — the PID does not change"
+msgstr "publicar uma porta nova num container A CORRER — o PID não muda"
+
+msgid "swap a port in one command: removals run before additions"
+msgstr "trocar uma porta num só comando: as remoções correm antes das adições"
+
+msgid "raise the memory and CPU caps live"
+msgstr "subir os tectos de memória e CPU a quente"
+
+msgid "attach it to another network and cap that link's bandwidth"
+msgstr "ligá-lo a outra rede e limitar a banda dessa ligação"
+
+msgid "run a command inside a container that is already up"
+msgstr "correr um comando dentro de um container que já está de pé"
+
+msgid "an interactive shell"
+msgstr "uma shell interactiva"
+
+msgid "as another user, in another directory, with an extra variable"
+msgstr "como outro utilizador, noutro directório, com uma variável extra"
+
+msgid "a shell inside the container — tries bash, falls back to sh"
+msgstr "uma shell dentro do container — tenta bash, cai para sh"
+
+msgid "one command and out"
+msgstr "um comando e sai"
+
+msgid "re-attach to the output of a detached container (output only)"
+msgstr "voltar a ligar ao output de um container em segundo plano (só saída)"
+
+msgid "out of the container onto the host"
+msgstr "do container para o host"
+
+msgid "from the host into the container"
+msgstr "do host para dentro do container"
+
+msgid "turn what was written inside into a new image"
+msgstr "transformar o que foi escrito lá dentro numa imagem nova"
+
+msgid "everything the container has written"
+msgstr "tudo o que o container escreveu"
+
+msgid "follow it live"
+msgstr "segui-lo ao vivo"
+
+msgid "the last 50 lines with timestamps (needs --log-cri at run time)"
+msgstr "as últimas 50 linhas com timestamps (exige --log-cri no `run`)"
+
+msgid "the full record as JSON, for a script"
+msgstr "o registo completo em JSON, para um script"
+
+msgid "the readable detail — kubectl describe style"
+msgstr "o detalhe legível — ao estilo do kubectl describe"
+
+msgid "CPU, memory and PIDs of everything running, one sample"
+msgstr "CPU, memória e PIDs de tudo o que está a correr, uma amostra"
+
+msgid "just these two"
+msgstr "só estes dois"
+
+msgid "the processes inside the container"
+msgstr "os processos dentro do container"
+
+msgid "what changed relative to the image: A created/changed, D deleted"
+msgstr "o que mudou face à imagem: A criado/alterado, D apagado"
+
+msgid "which host ports reach this container"
+msgstr "que portas do host chegam a este container"
+
+msgid "run the image's HEALTHCHECK — exits 1 if unhealthy, so a script can gate on it"
+msgstr "correr o HEALTHCHECK da imagem — sai 1 se estiver doente, para um script poder travar nisso"
+
+msgid "interactive dashboard of the containers"
+msgstr "dashboard interactivo dos containers"
+
+msgid "one text snapshot, for a script or CI"
+msgstr "uma snapshot de texto, para um script ou CI"
+
+msgid "apply the kind: Container documents of the default manifest"
+msgstr "aplicar os documentos kind: Container do manifesto por omissão"
+
+msgid "from another file"
+msgstr "de outro ficheiro"
+
+msgid "scaffold a project already filled in, ready to run"
+msgstr "gerar um projecto já preenchido, pronto a correr"
+
+msgid "fetch an image from a registry"
+msgstr "obter uma imagem de um registo"
+
+msgid "what is on disk, and how much of it"
+msgstr "o que está em disco, e quanto ocupa"
+
+msgid "golden VM images live in a store of their own, next to the container ones"
+msgstr "as imagens VM douradas vivem num store próprio, ao lado das de container"
+
+msgid "the common case — repository and tag"
+msgstr "o caso comum — repositório e tag"
+
+msgid "a registry other than Docker Hub — write it out in the reference"
+msgstr "um registo que não a Docker Hub — escreve-o por extenso na referência"
+
+msgid "refuse the image unless it carries a cosign signature made by this key"
+msgstr "recusar a imagem a não ser que traga uma assinatura cosign feita por esta chave"
+
+msgid "what is on disk, newest first"
+msgstr "o que está em disco, do mais recente para o mais antigo"
+
+msgid "as JSON, for a script to read instead of a table meant for eyes"
+msgstr "em JSON, para um script ler em vez de uma tabela feita para olhos"
+
+msgid "tags, digest, size, layers and the OCI config (entrypoint/cmd/env/workdir) in one screen"
+msgstr "tags, digest, tamanho, layers e a config OCI (entrypoint/cmd/env/workdir) num só ecrã"
+
+msgid "several at once, to compare what two images actually run"
+msgstr "várias de uma vez, para comparar o que duas imagens correm de facto"
+
+msgid "the layers from base to top, with the digest and size of each"
+msgstr "as layers da base ao topo, com o digest e o tamanho de cada uma"
+
+msgid "where the size went, before deciding what to change in the Dockerfile"
+msgstr "para onde foi o tamanho, antes de decidir o que mudar no Dockerfile"
+
+msgid "the CVEs of an image, read from the layers on disk — nothing is executed"
+msgstr "os CVEs de uma imagem, lidos das layers em disco — nada é executado"
+
+msgid "the installed packages (SBOM) instead of the findings"
+msgstr "os pacotes instalados (SBOM) em vez dos achados"
+
+msgid "a CI gate: exit 1 if anything high or worse is found"
+msgstr "um gate de CI: sai 1 se for encontrado algo alto ou pior"
+
+msgid "refresh the local feed first — a scan is only as fresh as the database behind it"
+msgstr "actualizar primeiro o feed local — um scan só é tão fresco quanto a base de dados que o sustenta"
+
+msgid "check the cosign signature of an image you already have against the publisher's key"
+msgstr "verificar a assinatura cosign de uma imagem que já tens contra a chave do publicador"
+
+msgid "the gate to run before promoting a local build to production"
+msgstr "o gate a correr antes de promover um build local a produção"
+
+msgid "a second name for the same content — nothing is copied"
+msgstr "um segundo nome para o mesmo conteúdo — nada é copiado"
+
+msgid "the shape a locally-built image needs before it can be pushed to your registry"
+msgstr "a forma que uma imagem construída localmente tem de ter antes de poder ir para o teu registo"
+
+msgid "remove an image nothing is using"
+msgstr "remover uma imagem que ninguém está a usar"
+
+msgid "remove it even though a container still references it"
+msgstr "removê-la mesmo com um container ainda a referenciá-la"
+
+msgid "publish under the image's own reference"
+msgstr "publicar sob a referência da própria imagem"
+
+msgid "publish a locally-named image under another reference, without tagging it first"
+msgstr "publicar uma imagem de nome local sob outra referência, sem lhe pôr tag antes"
+
+msgid "move an image to another machine with no registry in between"
+msgstr "levar uma imagem para outra máquina sem registo pelo meio"
+
+msgid "pipe it straight into gzip instead of writing the plain archive"
+msgstr "canalizá-la directamente para o gzip em vez de escrever o arquivo simples"
+
+msgid "read back an archive written by `save`, `docker save` or `podman save`"
+msgstr "ler de volta um arquivo escrito pelo `save`, `docker save` ou `podman save`"
+
+msgid "a gzipped archive has to be gunzipped first"
+msgstr "um arquivo comprimido com gzip tem de ser descomprimido primeiro"
+
+msgid "an OCI runtime bundle (rootfs + config.json) that `runc` or `crun` runs directly"
+msgstr "um bundle OCI de runtime (rootfs + config.json) que o `runc` ou o `crun` correm directamente"
+
+msgid "the directory you then hand to another OCI runtime — this is a bundle to run, not an archive to ship"
+msgstr "o directório que depois entregas a outro runtime OCI — isto é um bundle para correr, não um arquivo para distribuir"
+
+msgid "apply only the `kind: Image` documents of `./delonix-manifest.yaml`, ignoring the other Kinds"
+msgstr "aplicar só os documentos `kind: Image` do `./delonix-manifest.yaml`, ignorando os outros Kinds"
+
+msgid "from a file of your own"
+msgstr "de um ficheiro teu"
+
+msgid "authenticate to a registry — the token comes from stdin, never from the argv, where it would land in the shell history and in /proc"
+msgstr "autenticar num registo — o token vem do stdin, nunca do argv, onde iria parar ao histórico da shell e ao /proc"
+
+msgid "the same for Docker Hub"
+msgstr "o mesmo para a Docker Hub"
+
+msgid "drop the stored credentials of a registry"
+msgstr "deitar fora as credenciais guardadas de um registo"
+
+msgid "a live view of the image store, htop-style"
+msgstr "uma vista ao vivo do store de imagens, ao estilo do htop"
+
+msgid "one snapshot, for a log or a terminal that is not a TTY"
+msgstr "uma snapshot, para um log ou um terminal que não é TTY"
+
+msgid "the same numbers as JSON, for a script or a Grafana datasource"
+msgstr "os mesmos números em JSON, para um script ou um datasource do Grafana"
+
+msgid "what golden images this node already has"
+msgstr "que imagens douradas este nó já tem"
+
+msgid "fetch the official Kubernetes golden — the source is known, so no argument is needed"
+msgstr "obter a dourada oficial de Kubernetes — a origem é conhecida, por isso não é preciso argumento"
+
+msgid "build one of your own from a `VMfile`"
+msgstr "construir uma tua a partir de um `VMfile`"
+
+msgid "distro, type (cloud-init or appliance), kernel and the vCPU/memory each image recommends"
+msgstr "distro, tipo (cloud-init ou appliance), kernel e os vCPU/memória que cada imagem recomenda"
+
+msgid "as JSON, for a script"
+msgstr "em JSON, para um script"
+
+msgid "everything recorded about a golden image, `kubectl describe`-style"
+msgstr "tudo o que está registado sobre uma imagem dourada, ao estilo do `kubectl describe`"
+
+msgid "two at once, to compare the bases before choosing one to build on"
+msgstr "duas de uma vez, para comparar as bases antes de escolher uma para construir por cima"
+
+msgid "the official Kubernetes golden (`ghcr.io/angolardevops/delonix-vm-k8s`) — no argument needed"
+msgstr "a dourada oficial de Kubernetes (`ghcr.io/angolardevops/delonix-vm-k8s`) — não é preciso argumento"
+
+msgid "the Kubernetes-free golden instead: the same base with `delonix` on board and rootless already set up"
+msgstr "em vez dela, a dourada sem Kubernetes: a mesma base com o `delonix` a bordo e o rootless já configurado"
+
+msgid "a specific published version"
+msgstr "uma versão publicada em concreto"
+
+msgid "under a local name of your own, so `vm create --disk base` finds it"
+msgstr "com um nome local teu, para o `vm create --disk base` a encontrar"
+
+msgid "which Kubernetes versions are published, before choosing one to pull"
+msgstr "que versões de Kubernetes estão publicadas, antes de escolher uma para puxar"
+
+msgid "the tags of the Kubernetes-free golden repo"
+msgstr "as tags do repositório da dourada sem Kubernetes"
+
+msgid "any other repository — the appliances, for instance"
+msgstr "qualquer outro repositório — as appliances, por exemplo"
+
+msgid "publish to the official repository this image belongs in — the destination is derived from its own metadata"
+msgstr "publicar no repositório oficial a que esta imagem pertence — o destino é derivado dos seus próprios metadados"
+
+msgid "publish to a registry of your own instead"
+msgstr "em vez disso, publicar num registo teu"
+
+msgid "register a disk this engine did not build, so `vm create --disk <name>` can use it"
+msgstr "registar um disco que este motor não construiu, para o `vm create --disk <nome>` o poder usar"
+
+msgid "an appliance that configures itself: `vm create` then attaches no NoCloud seed, which nothing in the guest would read"
+msgstr "uma appliance que se configura sozinha: o `vm create` deixa então de anexar um seed NoCloud, que nada no convidado leria"
+
+msgid "carry the vCPU and memory the product really needs, so a VM does not start at 1 vCPU"
+msgstr "levar os vCPU e a memória de que o produto precisa mesmo, para uma VM não arrancar com 1 vCPU"
+
+msgid "replace one already registered under the name, stored uncompressed"
+msgstr "substituir uma já registada com esse nome, guardada sem compressão"
+
+msgid "hand a Delonix image to VMware"
+msgstr "entregar uma imagem Delonix ao VMware"
+
+msgid "raw sectors: Proxmox VE's default on LVM/ZFS/Ceph, and the fallback anything else reads"
+msgstr "sectores em bruto: o default do Proxmox VE em LVM/ZFS/Ceph, e o recurso que tudo o resto lê"
+
+msgid "Hyper-V and Azure — `vhdx` and `vhd` are different formats, not two spellings of one"
+msgstr "Hyper-V e Azure — `vhdx` e `vhd` são formatos diferentes, não duas grafias do mesmo"
+
+msgid "compressed, which only qcow2 and vmdk can be"
+msgstr "comprimida, coisa que só qcow2 e vmdk podem ser"
+
+msgid "scaffold a `VMfile` in the current directory, ready for `image vm build`"
+msgstr "gerar um `VMfile` no directório actual, pronto para o `image vm build`"
+
+msgid "write it somewhere else, overwriting whatever is already there"
+msgstr "escrevê-lo noutro sítio, por cima do que já lá estiver"
+
+msgid "the built-in golden recipe, offline: the k8s packages are fetched and verified on the HOST, so the guest needs no DHCP or DNS"
+msgstr "a receita dourada embutida, offline: os pacotes do k8s são obtidos e verificados no HOST, por isso o convidado não precisa de DHCP nem de DNS"
+
+msgid "a golden with no Kubernetes at all — just `delonix` itself, rootless ready on first boot"
+msgstr "uma dourada sem Kubernetes nenhum — só o próprio `delonix`, rootless pronto no primeiro arranque"
+
+msgid "your own image from a `VMfile`, with network during `RUN` so a package can be installed"
+msgstr "uma imagem tua a partir de um `VMfile`, com rede durante o `RUN` para se poder instalar um pacote"
+
+msgid "extra packages on top of the golden recipe, without touching the code"
+msgstr "pacotes extra por cima da receita dourada, sem tocar no código"
+
+msgid "the same as `image vm ls-remote` — this spelling needs the group's `--vm` flag"
+msgstr "o mesmo que `image vm ls-remote` — esta grafia precisa da flag `--vm` do grupo"
+
+msgid "the same for the Kubernetes-free golden repo"
+msgstr "o mesmo para o repositório da dourada sem Kubernetes"
+
+msgid "the same as `image vm import` — this spelling needs the group's `--vm` flag"
+msgstr "o mesmo que `image vm import` — esta grafia precisa da flag `--vm` do grupo"
+
+msgid "the same as `image vm convert` — this spelling needs the group's `--vm` flag"
+msgstr "o mesmo que `image vm convert` — esta grafia precisa da flag `--vm` do grupo"
+
+msgid "the same as `image vm init` — this spelling needs the group's `--vm` flag"
+msgstr "o mesmo que `image vm init` — esta grafia precisa da flag `--vm` do grupo"
+
+msgid "the same as `image vm build` — this spelling needs the group's `--vm` flag"
+msgstr "o mesmo que `image vm build` — esta grafia precisa da flag `--vm` do grupo"
+
+msgid "read the manual for a command, the way you would any other tool"
+msgstr "ler o manual de um comando, como farias com qualquer outra ferramenta"
+
+msgid "install every page so `man delonix-container-run` works from anywhere"
+msgstr "instalar todas as páginas para o `man delonix-container-run` funcionar de qualquer lado"
+
+msgid "the top-level page"
+msgstr "a página de topo"
+
+msgid "what exists — names and key counts; the values are never printed"
+msgstr "o que existe — nomes e contagem de chaves; os valores nunca são impressos"
+
+msgid "create one without the value ever reaching argv or the shell history"
+msgstr "criar um sem o valor chegar alguma vez ao argv ou ao histórico da shell"
+
+msgid "hand it to a container, decrypted only at spawn — the registry keeps the name, never the value"
+msgstr "entregá-lo a um container, decifrado só no spawn — o registo guarda o nome, nunca o valor"
+
+msgid "from literal pairs — quick, but the value lands in your shell history"
+msgstr "a partir de pares literais — rápido, mas o valor vai parar ao histórico da tua shell"
+
+msgid "from a `.env` file, every key at once"
+msgstr "a partir de um ficheiro `.env`, todas as chaves de uma vez"
+
+msgid "from stdin — the dry form: the value touches neither argv nor the history"
+msgstr "a partir do stdin — a forma seca: o valor não toca no argv nem no histórico"
+
+msgid "the vault at a glance — name and number of keys, never a value"
+msgstr "o cofre num relance — nome e número de chaves, nunca um valor"
+
+msgid "which keys a secret carries, with the values redacted"
+msgstr "que chaves um segredo carrega, com os valores redigidos"
+
+msgid "the values in cleartext — avoid it on a shared terminal"
+msgstr "os valores em claro — evita-o num terminal partilhado"
+
+msgid "add or update one key and leave the rest untouched"
+msgstr "acrescentar ou actualizar uma chave e deixar o resto intocado"
+
+msgid "several keys at once — creates the secret if it does not exist yet"
+msgstr "várias chaves de uma vez — cria o segredo se ele ainda não existir"
+
+msgid "drop a single key, keeping the secret and everything else in it"
+msgstr "deitar fora uma única chave, mantendo o segredo e tudo o resto que ele tem"
+
+msgid "empty the whole secret in one go"
+msgstr "esvaziar o segredo inteiro de uma só vez"
+
+msgid "remove a secret for good — a container that names it fails loudly on the next start"
+msgstr "remover um segredo de vez — um container que o nomeie falha alto no arranque seguinte"
+
+msgid "re-encrypt every secret under a new host master key; the values are preserved"
+msgstr "voltar a cifrar todos os segredos com uma chave-mestra nova do host; os valores são preservados"
+
+msgid "create the `kind: Secret` documents of the manifest in this directory"
+msgstr "criar os documentos `kind: Secret` do manifesto deste directório"
+
+msgid "from a file of your own, so the vault is provisioned from git like everything else"
+msgstr "de um ficheiro teu, para o cofre ser provisionado a partir do git como tudo o resto"
+
+msgid "which pods exist and which containers each one holds"
+msgstr "que pods existem e que containers cada um segura"
+
+msgid "create one from a manifest — N containers on ONE IP, reaching each other over localhost"
+msgstr "criar um a partir de um manifesto — N containers num SÓ IP, a alcançarem-se por localhost"
+
+msgid "the logs of a chosen member"
+msgstr "os logs de um membro à escolha"
+
+msgid "N containers sharing one netns — same IP and `localhost` between them, like a k8s Pod"
+msgstr "N containers a partilhar uma netns — mesmo IP e `localhost` entre si, como um Pod do k8s"
+
+msgid "from the default manifest in the current directory"
+msgstr "do manifesto por omissão do directório actual"
+
+msgid "the pods, derived from the container labels — there is no separate store to drift"
+msgstr "os pods, derivados das labels dos containers — não há um store à parte para derivar"
+
+msgid "members, the shared IP and the status, kubectl style"
+msgstr "os membros, o IP partilhado e o estado, ao estilo do kubectl"
+
+msgid "several pods in one pass"
+msgstr "vários pods numa só passagem"
+
+msgid "stop and remove every member plus the shared netns — nothing is left holding the IP"
+msgstr "parar e remover todos os membros mais a netns partilhada — não fica nada a segurar o IP"
+
+msgid "kill the members that are still running"
+msgstr "matar os membros que ainda estão a correr"
+
+msgid "the first member's logs, which is what you usually want"
+msgstr "os logs do primeiro membro, que é o que normalmente se quer"
+
+msgid "a specific container inside the pod, by its short name"
+msgstr "um container específico dentro do pod, pelo seu nome curto"
+
+msgid "containers AND VMs in one table, so you stop guessing which group owns what"
+msgstr "containers E VMs numa só tabela, para deixares de adivinhar que grupo é dono de quê"
+
+msgid "stop something by name — routed to whichever backend owns it"
+msgstr "parar algo pelo nome — encaminhado para o backend que for dono dele"
+
+msgid "every workload of the node — containers and VMs — in a single table"
+msgstr "todos os workloads do nó — containers e VMs — numa só tabela"
+
+msgid "as JSON, with stable field names, for automation"
+msgstr "em JSON, com nomes de campo estáveis, para automação"
+
+msgid "the details of a workload, routed to the backend that owns the name"
+msgstr "os detalhes de um workload, encaminhados para o backend dono do nome"
+
+msgid "stop by exact name, container or VM — a name owned by both is refused, never guessed"
+msgstr "parar pelo nome exacto, container ou VM — um nome que ambos possuam é recusado, nunca adivinhado"
+
+msgid "remove a workload by name, whichever backend holds it"
+msgstr "remover um workload pelo nome, seja qual for o backend que o segura"
+
+msgid "force it even if it is still running or the backend cleanup refuses"
+msgstr "forçar mesmo que ainda esteja a correr ou que a limpeza do backend recuse"
+
+msgid "be the runtime a kubelet talks to, in place of containerd/CRI-O"
+msgstr "ser o runtime com que um kubelet fala, no lugar do containerd/CRI-O"
+
+msgid "answer a real docker CLI on a socket of your own"
+msgstr "responder a uma CLI docker a sério num socket teu"
+
+msgid "the CRI endpoint on the default socket — point the kubelet's `--container-runtime-endpoint` at it"
+msgstr "o endpoint CRI no socket por omissão — aponta-lhe o `--container-runtime-endpoint` do kubelet"
+
+msgid "a socket of your own"
+msgstr "um socket teu"
+
+msgid "a node-level bound on capabilities that holds even if the admission chain is misconfigured"
+msgstr "um limite de capabilities ao nível do nó, que se mantém mesmo com a cadeia de admission mal configurada"
+
+msgid "clamp instead of refusing, for a node whose PodSpecs you cannot change today"
+msgstr "cortar em vez de recusar, para um nó cujos PodSpecs não podes mudar hoje"
+
+msgid "the management API on the default unix socket, for a control-plane on this same host"
+msgstr "a API de gestão no socket unix por omissão, para um control-plane neste mesmo host"
+
+msgid "answer `docker ps`/`images`/`info` and the container lifecycle on a unix socket"
+msgstr "responder a `docker ps`/`images`/`info` e ao ciclo de vida do container num socket unix"
+
+msgid "a socket of your own, then `export DOCKER_HOST=unix:///tmp/delonix-docker.sock`"
+msgstr "um socket teu, e depois `export DOCKER_HOST=unix:///tmp/delonix-docker.sock`"
+
+msgid "see where the slice ends before third-party tooling hits a 404 mid-run"
+msgstr "ver onde acaba a fatia antes de uma ferramenta de terceiros levar com um 404 a meio"
+
+msgid "the schema generated from the code — point an editor at it and the manifest completes as you type"
+msgstr "o schema gerado a partir do código — aponta-lhe um editor e o manifesto completa-se à medida que escreves"
+
+msgid "one Kind only"
+msgstr "só um Kind"
+
+msgid "the whole schema, ready for `# yaml-language-server: $schema=./delonix.schema.json`"
+msgstr "o schema inteiro, pronto para `# yaml-language-server: $schema=./delonix.schema.json`"
+
+msgid "just one Kind's spec, when that is all you are editing"
+msgstr "só o spec de um Kind, quando é só isso que estás a editar"
+
+msgid "every field of a Kind, `kubectl explain` style, straight from the generated schema"
+msgstr "todos os campos de um Kind, ao estilo do `kubectl explain`, directamente do schema gerado"
+
+msgid "drill into one field instead of reading the whole Kind"
+msgstr "entrar num campo só, em vez de ler o Kind inteiro"
+
+msgid "a nested field of a pod member"
+msgstr "um campo aninhado de um membro de pod"
+
+msgid "look at this directory and start the right project for it, saying what it detected and why"
+msgstr "olhar para este directório e começar o projecto certo para ele, dizendo o que detectou e porquê"
+
+msgid "a directory other than the current one"
+msgstr "um directório que não o actual"
+
+msgid "override the guess when the detection picked the broader rule"
+msgstr "sobrepor o palpite quando a detecção escolheu a regra mais larga"
+
+msgid "regenerate on top of files that already exist"
+msgstr "regerar por cima de ficheiros que já existem"
+
+msgid "which build this is, and the commit it came from"
+msgstr "que build é esta, e de que commit veio"
+
+msgid "build and tag from the Dockerfile in this directory"
+msgstr "construir e etiquetar a partir do Dockerfile deste directório"
+
+msgid "a Delonixfile, or any other build file path"
+msgstr "um Delonixfile, ou qualquer outro caminho de ficheiro de build"
+
+msgid "a build secret, bind-mounted live for one `RUN` and structurally unable to reach a layer"
+msgstr "um segredo de build, bind-montado ao vivo durante um só `RUN` e estruturalmente incapaz de chegar a uma layer"
+
+msgid "cross-arch: resolves the right base image and stamps the arch into the result"
+msgstr "cross-arch: resolve a imagem base certa e carimba o arch no resultado"
+
+msgid "an htop-style live view of containers, VMs, networks and volumes"
+msgstr "uma vista ao vivo de containers, VMs, redes e volumes, ao estilo do htop"
+
+msgid "one text snapshot and exit — the default when stdout is not a terminal"
+msgstr "uma snapshot de texto e sai — o default quando o stdout não é um terminal"
+
+msgid "one JSON snapshot, for a script or a Grafana JSON datasource"
+msgstr "uma snapshot em JSON, para um script ou um datasource JSON do Grafana"
+
+msgid "bash, into the user's own completion directory"
+msgstr "bash, para o directório de completions do próprio utilizador"
+
+msgid "zsh, into a directory already on your fpath"
+msgstr "zsh, para um directório que já esteja no teu fpath"
+
+msgid "fish"
+msgstr "fish"
+
+msgid "who can reach what: the inbound policy, rules and published ports of every container on the SDN"
+msgstr "quem alcança o quê: a política de entrada, as regras e as portas publicadas de cada container da SDN"
+
+msgid "the state of the rootless plumbing every `--net <network>` container depends on"
+msgstr "o estado da plumbing rootless de que depende cada container com `--net <rede>`"
+
+msgid "live per-container traffic, redrawn every 2s"
+msgstr "tráfego por-container ao vivo, redesenhado a cada 2s"
+
+msgid "one public URL for a local port, with no account and no public IP on this host"
+msgstr "um URL público para uma porta local, sem conta e sem IP público neste host"
+
+msgid "holder and slirp pids, the bridge, and how many containers still hold a reference"
+msgstr "os pids do holder e do slirp, a bridge, e quantos containers ainda seguram uma referência"
+
+msgid "bring the plumbing up by hand — idempotent, so it is safe before debugging a path"
+msgstr "levantar a plumbing à mão — idempotente, por isso é seguro antes de depurar um caminho"
+
+msgid "look at the SDN from the inside of an attached netns"
+msgstr "olhar para a SDN de dentro de uma netns anexada"
+
+msgid "holder netns, the delonix0 bridge and the single slirp — idempotent, repeat it as often as you like"
+msgstr "a netns do holder, a bridge delonix0 e o slirp único — idempotente, repete-o as vezes que quiseres"
+
+msgid "it also hardens containers that are already running (IPv6 off in their netns) without restarting them"
+msgstr "também endurece os containers que já estão a correr (IPv6 desligado na netns deles) sem os reiniciar"
+
+msgid "the first thing to read when a container has no network"
+msgstr "a primeira coisa a ler quando um container não tem rede"
+
+msgid "the same facts as JSON, for a monitoring script"
+msgstr "os mesmos factos em JSON, para um script de monitorização"
+
+msgid "force the plumbing down — every container on the SDN loses its network until it is rebuilt, so this is an operator decision, never automatic"
+msgstr "forçar a plumbing abaixo — todos os containers da SDN perdem a rede até ela ser reconstruída, por isso esta é uma decisão do operador, nunca automática"
+
+msgid "the recovery after an in-place upgrade left a holder from the previous binary behind"
+msgstr "a recuperação depois de um upgrade in-place ter deixado para trás um holder do binário anterior"
+
+msgid "give a netns a veth on delonix0, with an address derived from its name"
+msgstr "dar a uma netns um veth na delonix0, com um endereço derivado do nome dela"
+
+msgid "pin the address instead, when something on the network already expects it"
+msgstr "em vez disso, fixar o endereço, quando algo na rede já conta com ele"
+
+msgid "destroy the netns and give its veth and address back to the pool"
+msgstr "destruir a netns e devolver o veth e o endereço dela à pool"
+
+msgid "the address the holder actually handed this netns"
+msgstr "o endereço que o holder entregou de facto a esta netns"
+
+msgid "the way out through the holder's bridge, when traffic leaves but never comes back"
+msgstr "a saída pela bridge do holder, para quando o tráfego sai mas nunca volta"
+
+msgid "host 8080 onto the container's 80 — the hostfwd and the DNAT in one step"
+msgstr "a 8080 do host na 80 do container — o hostfwd e o DNAT num só passo"
+
+msgid "a UDP service, with the container address spelled out instead of derived from the name"
+msgstr "um serviço UDP, com o endereço do container por extenso em vez de derivado do nome"
+
+msgid "take the host port back — the slirp hostfwd and the DNAT rule both go"
+msgstr "recuperar a porta do host — vão-se o hostfwd do slirp e a regra DNAT"
+
+msgid "install a default-deny inbound firewall with a single open port, straight at the ingress"
+msgstr "instalar uma firewall de entrada default-deny com uma única porta aberta, logo no ingress"
+
+msgid "take the container's firewall out of the ingress entirely"
+msgstr "tirar por completo a firewall do container do ingress"
+
+msgid "per-container RX/TX right now"
+msgstr "RX/TX por container agora mesmo"
+
+msgid "keep it on screen, redrawn every 2s"
+msgstr "manter no ecrã, redesenhado a cada 2s"
+
+msgid "one veth only, when you already know which container you are chasing"
+msgstr "só um veth, quando já sabes qual é o container que persegues"
+
+msgid "what is open on a container, and from where"
+msgstr "o que está aberto num container, e de onde"
+
+msgid "shut the door by default, so only the rules you write let anything in"
+msgstr "fechar a porta por omissão, para só as regras que escreveres deixarem entrar alguma coisa"
+
+msgid "then open Postgres to the SDN alone — nothing from the host's LAN"
+msgstr "e depois abrir o Postgres só à SDN — nada vindo da LAN do host"
+
+msgid "open the port the CONTAINER listens on — the DNAT has already rewritten the host port away by the time the rule is evaluated"
+msgstr "abrir a porta em que o CONTAINER escuta — quando a regra é avaliada, o DNAT já reescreveu a porta do host"
+
+msgid "Postgres, but only from the SDN"
+msgstr "Postgres, mas só a partir da SDN"
+
+msgid "leave a reason behind, so `ingress ls` explains itself to the next person"
+msgstr "deixar uma razão registada, para o `ingress ls` se explicar à próxima pessoa"
+
+msgid "every port from a single peer, when the rule is about the source and not the service"
+msgstr "todas as portas a partir de um só peer, quando a regra é sobre a origem e não sobre o serviço"
+
+msgid "close one port without touching the default policy"
+msgstr "fechar uma porta sem tocar na política por omissão"
+
+msgid "block one noisy peer from a port everyone else may use"
+msgstr "bloquear um peer barulhento numa porta que todos os outros podem usar"
+
+msgid "the last command for the same match wins — a later `allow` on this very rule re-opens it, no need to remove anything first"
+msgstr "o último comando para o mesmo match ganha — um `allow` posterior nesta mesma regra reabre-a, sem ser preciso remover nada antes"
+
+msgid "default-deny: only what `ingress allow` names gets in"
+msgstr "default-deny: só entra o que o `ingress allow` nomear"
+
+msgid "back to open, keeping the explicit rules already written"
+msgstr "de volta a aberto, mantendo as regras explícitas já escritas"
+
+msgid "host 8080 onto the container's 80"
+msgstr "a 8080 do host na 80 do container"
+
+msgid "the same number on both sides"
+msgstr "o mesmo número dos dois lados"
+
+msgid "a UDP service — rootless cannot bind host ports below 1024, so publish high and let a proxy own :53 if you need it"
+msgstr "um serviço UDP — em rootless não se faz bind de portas do host abaixo de 1024, por isso publica alto e deixa um proxy ser dono da :53 se precisares"
+
+msgid "give the host port back — the hostfwd and the DNAT go together, and the port stops being owned"
+msgstr "devolver a porta do host — o hostfwd e o DNAT vão juntos, e a porta deixa de ter dono"
+
+msgid "one container: policy, rules with their packet counters, and the ports published to it"
+msgstr "um container: a política, as regras com os contadores de pacotes, e as portas publicadas para ele"
+
+msgid "the whole node at once — a `--net host` container shows as `n/a`, because the firewall does not govern it"
+msgstr "o nó inteiro de uma vez — um container `--net host` aparece como `n/a`, porque a firewall não o governa"
+
+msgid "drop every rule written for that port, whatever the protocol"
+msgstr "deitar fora todas as regras escritas para essa porta, seja qual for o protocolo"
+
+msgid "only the rule that named this source"
+msgstr "só a regra que nomeou esta origem"
+
+msgid "wipe the inbound rules and keep the published ports — the DNAT is a different plane from the filter"
+msgstr "limpar as regras de entrada e manter as portas publicadas — o DNAT é um plano diferente do filtro"
+
+msgid "what a container is allowed to reach on its way out"
+msgstr "o que um container pode alcançar à saída"
+
+msgid "cut a whole network off the Internet in one command"
+msgstr "cortar uma rede inteira da Internet num só comando"
+
+msgid "let it out to one hostname only, learnt live from the DNS answers"
+msgstr "deixá-lo sair só para um hostname, aprendido ao vivo das respostas do DNS"
+
+msgid "let the app reach a database elsewhere on the SDN"
+msgstr "deixar a app alcançar uma base de dados noutro ponto da SDN"
+
+msgid "DNS out, which a default-deny policy would otherwise take away and leave nothing resolving"
+msgstr "DNS à saída, que de outra forma uma política default-deny tiraria, deixando nada a resolver"
+
+msgid "HTTPS anywhere, for a workload that has to talk to the outside"
+msgstr "HTTPS para qualquer lado, para um workload que tem de falar com o exterior"
+
+msgid "block SMTP, so a compromised app cannot send mail from this node"
+msgstr "bloquear SMTP, para uma app comprometida não poder enviar correio a partir deste nó"
+
+msgid "block a whole destination network without closing the rest of the world"
+msgstr "bloquear uma rede de destino inteira sem fechar o resto do mundo"
+
+msgid "deny by default: only what `egress allow` names gets out"
+msgstr "negar por omissão: só sai o que o `egress allow` nomear"
+
+msgid "back to open — note that a policy change never tears down flows already established, it only decides new ones"
+msgstr "de volta a aberto — nota que uma mudança de política nunca derruba fluxos já estabelecidos, só decide os novos"
+
+msgid "take a whole network off the Internet, containers and all"
+msgstr "tirar uma rede inteira da Internet, containers e tudo"
+
+msgid "allow nothing but DNS and the CIDRs you name"
+msgstr "não permitir nada além do DNS e dos CIDRs que nomeares"
+
+msgid "back to the default, unrestricted"
+msgstr "de volta ao default, sem restrições"
+
+msgid "let a network reach GitHub and its subdomains — the FQDN allowlist that nft and CIDRs cannot express on their own"
+msgstr "deixar uma rede alcançar o GitHub e os seus subdomínios — a allowlist de FQDN que o nft e os CIDRs não conseguem exprimir sozinhos"
+
+msgid "repeat it per name; the addresses are learnt as the DNS answers come back, so a CDN that renumbers keeps working"
+msgstr "repete por nome; os endereços aprendem-se à medida que as respostas do DNS chegam, por isso um CDN que muda de números continua a funcionar"
+
+msgid "one container's outbound policy and rules"
+msgstr "a política e as regras de saída de um container"
+
+msgid "every container's, side by side"
+msgstr "as de todos os containers, lado a lado"
+
+msgid "drop every outbound rule for that port, whatever the protocol"
+msgstr "apaga todas as regras de saída dessa porta, seja qual for o protocolo"
+
+msgid "only the rule that named this destination"
+msgstr "só a regra que nomeou este destino"
+
+msgid "a network's egress mode, its CIDR allowlist, and the addresses learnt so far for each allowed hostname"
+msgstr "o modo de egress de uma rede, a sua allowlist de CIDRs, e os endereços aprendidos até agora para cada hostname permitido"
+
+msgid "remove every outbound rule; the default policy stays as it was"
+msgstr "remove todas as regras de saída; a política por omissão fica como estava"
+
+msgid "is the proxy serving, and with which routes"
+msgstr "o proxy está a servir, e com que rotas"
+
+msgid "apply the HTTPRoutes of a manifest — it brings the proxy up, or reloads it in place"
+msgstr "aplica os HTTPRoutes de um manifesto — sobe o proxy, ou recarrega-o no lugar"
+
+msgid "tear it down and give the host ports back"
+msgstr "derruba-o e devolve as portas do host"
+
+msgid "proxy state and the routes in effect, read from the config the proxy is really serving — not from the manifest you last edited"
+msgstr "estado do proxy e as rotas em vigor, lidas da config que o proxy está mesmo a servir — não do manifesto que editaste por último"
+
+msgid "the routes from the manifest in this directory"
+msgstr "as rotas do manifesto neste directório"
+
+msgid "from a file of your own — a re-apply reloads by SIGHUP, same pid, no dropped connection"
+msgstr "de um ficheiro teu — um novo apply recarrega por SIGHUP, mesmo pid, sem ligação perdida"
+
+msgid "listeners and TLS are fixed when the proxy starts: changing a port means `httproute rm` and then this again"
+msgstr "listeners e TLS ficam fixos no arranque do proxy: mudar uma porta exige `httproute rm` e depois isto outra vez"
+
+msgid "stop the proxy and unpublish its ports — only the MANUAL routes go, the ones auto-registered by `container run --expose` survive"
+msgstr "pára o proxy e despublica as suas portas — só as rotas MANUAIS vão, as auto-registadas por `container run --expose` sobrevivem"
+
+msgid "a local port on the public internet, with no account and no public IP on this host"
+msgstr "uma porta local na internet pública, sem conta e sem IP público neste host"
+
+msgid "the tunnels and the public URLs they got"
+msgstr "os túneis e as URLs públicas que receberam"
+
+msgid "stop one when the demo is over"
+msgstr "pára um quando a demonstração acabar"
+
+msgid "the `kind: Tunnel` documents of the manifest here — idempotent, an unchanged tunnel is left alone"
+msgstr "os documentos `kind: Tunnel` do manifesto daqui — idempotente, um túnel inalterado fica como está"
+
+msgid "from a file, where the token comes from a `kind: Secret` instead of the shell history"
+msgstr "de um ficheiro, onde o token vem de um `kind: Secret` em vez do histórico da shell"
+
+msgid "pinggy needs no account and no extra binary — it is plain ssh, and the free URL is ephemeral"
+msgstr "o pinggy não precisa de conta nem de binário extra — é ssh puro, e a URL grátis é efémera"
+
+msgid "a name of your own, instead of the `tunnel-<port>` default"
+msgstr "um nome teu, em vez do `tunnel-<port>` por omissão"
+
+msgid "ngrok, with the authtoken read from a secret rather than typed into argv"
+msgstr "ngrok, com o authtoken lido de um segredo em vez de escrito no argv"
+
+msgid "a cloudflare quick tunnel — random trycloudflare.com URL, no account, `cloudflared` must be on PATH"
+msgstr "um quick tunnel da cloudflare — URL trycloudflare.com aleatória, sem conta, o `cloudflared` tem de estar no PATH"
+
+msgid "every tunnel, its state and the public URL the provider gave it"
+msgstr "todos os túneis, o estado de cada um e a URL pública que o fornecedor lhe deu"
+
+msgid "one tunnel in full: provider, local port, the agent's pid and the URL in effect"
+msgstr "um túnel por inteiro: fornecedor, porta local, o pid do agente e a URL em vigor"
+
+msgid "stop the provider's agent and forget the tunnel — the URL dies with it"
+msgstr "pára o agente do fornecedor e esquece o túnel — a URL morre com ele"
+
+msgid "make the containers running right now come back after a reboot"
+msgstr "faz os containers que estão a correr agora voltarem depois de um reboot"
+
+msgid "what is installed, and in which mode"
+msgstr "o que está instalado, e em que modo"
+
+msgid "undo it"
+msgstr "desfaz"
+
+msgid "one unit per RUNNING container; rootless installs user units and turns linger on, so they start without a login"
+msgstr "uma unit por container A CORRER; em rootless instala units de utilizador e liga o linger, para arrancarem sem login"
+
+msgid "bake a gentler policy into the units than the `always` default"
+msgstr "grava nas units uma política mais branda do que o `always` por omissão"
+
+msgid "disable and delete the generated units — what is running keeps running, it just no longer comes back by itself"
+msgstr "desactiva e apaga as units geradas — o que está a correr continua a correr, só deixa de voltar sozinho"
+
+msgid "which units exist, and whether they are user units with linger or system units"
+msgstr "que units existem, e se são units de utilizador com linger ou units de sistema"
+
+msgid "everything a manifest declares, in dependency order"
+msgstr "tudo o que um manifesto declara, por ordem de dependência"
+
+msgid "what would change, before anything changes"
+msgstr "o que mudaria, antes de mudar seja o que for"
+
+msgid "a complete project, files already filled in"
+msgstr "um projecto completo, com os ficheiros já preenchidos"
+
+msgid "a complete Python project — Delonixfile, manifest and README, runnable without editing anything"
+msgstr "um projecto Python completo — Delonixfile, manifesto e README, executável sem editar nada"
+
+msgid "which templates exist"
+msgstr "que templates existem"
+
+msgid "scaffold into a directory of its own, with the name and image you want"
+msgstr "gera num directório próprio, com o nome e a imagem que quiseres"
+
+msgid "generate, build and wait until it answers healthy"
+msgstr "gera, constrói e espera até responder saudável"
+
+msgid "what an apply would change — the machine is not touched"
+msgstr "o que um apply mudaria — a máquina não é tocada"
+
+msgid "a drift gate in CI: exit 2 means the machine no longer matches the file"
+msgstr "um gate de deriva em CI: saída 2 quer dizer que a máquina já não bate certo com o ficheiro"
+
+msgid "machine-readable, for a bot to comment on a pull request"
+msgstr "legível por máquina, para um bot comentar num pull request"
+
+msgid "which fields the plan compares, per Kind, and which it does not — answers why a change is not showing up"
+msgstr "que campos o plano compara, por Kind, e quais não compara — responde a porque é que uma mudança não aparece"
+
+msgid "converge the machine onto the manifest — creates what is missing and updates what drifted"
+msgstr "converge a máquina para o manifesto — cria o que falta e actualiza o que derivou"
+
+msgid "the full manifest with every default filled in, applying nothing"
+msgstr "o manifesto completo com todos os defaults preenchidos, sem aplicar nada"
+
+msgid "authorize the one recreation the plan asked for — a cold field cannot converge live"
+msgstr "autoriza a única recriação que o plano pediu — um campo frio não converge a quente"
+
+msgid "also remove what this stack owns and the file no longer declares"
+msgstr "remove também o que esta stack possui e o ficheiro já não declara"
+
+msgid "remove everything this stack owns, in the reverse of the creation order"
+msgstr "remove tudo o que esta stack possui, pela ordem inversa da criação"
+
+msgid "read the list first — nothing is removed"
+msgstr "lê a lista primeiro — nada é removido"
+
+msgid "when the file declares no Stack, say whose resources these are"
+msgstr "quando o ficheiro não declara nenhuma Stack, diz de quem são estes recursos"
+
+msgid "every resource the manifest composes, and whether it exists yet"
+msgstr "todos os recursos que o manifesto compõe, e se já existem"
+
+msgid "the manifest in this directory"
+msgstr "o manifesto neste directório"
+
+msgid "each declared resource in kubectl-describe style, confirmed against its store"
+msgstr "cada recurso declarado ao estilo do kubectl describe, confirmado contra o seu store"
+
+msgid "after an apply that died halfway, see exactly what did get created"
+msgstr "depois de um apply que morreu a meio, vê exactamente o que chegou a ser criado"
+
+msgid "block until everything declared is present and, where it has one, healthy"
+msgstr "bloqueia até tudo o que está declarado estar presente e, onde houver, saudável"
+
+msgid "give a slow image pull three minutes before failing the pipeline"
+msgstr "dá três minutos a um pull de imagem lento antes de chumbar o pipeline"
+
+msgid "resolve every cross-reference before an apply that has no rollback"
+msgstr "resolve todas as referências cruzadas antes de um apply que não tem rollback"
+
+msgid "the manifest in this directory, as a pre-commit check"
+msgstr "o manifesto neste directório, como verificação de pre-commit"
+
+msgid "a docker-compose.yml running natively — no daemon, no Docker"
+msgstr "um docker-compose.yml a correr nativamente — sem daemon, sem Docker"
+
+msgid "what belongs to this project"
+msgstr "o que pertence a este projecto"
+
+msgid "tear it down, named volumes included"
+msgstr "derruba tudo, volumes nomeados incluídos"
+
+msgid "build, then network, then volumes, then the containers in depends_on order"
+msgstr "build, depois rede, depois volumes, depois os containers pela ordem do depends_on"
+
+msgid "a compose file that lives somewhere else"
+msgstr "um ficheiro compose que vive noutro sítio"
+
+msgid "the resolved project, creating nothing"
+msgstr "o projecto resolvido, sem criar nada"
+
+msgid "two copies of the same file side by side, told apart by project name"
+msgstr "duas cópias do mesmo ficheiro lado a lado, distinguidas pelo nome do projecto"
+
+msgid "remove every container this project's up created"
+msgstr "remove todos os containers que o up deste projecto criou"
+
+msgid "and its named volumes — the data goes with them"
+msgstr "e os seus volumes nomeados — os dados vão com eles"
+
+msgid "a project whose name does not come from the directory"
+msgstr "um projecto cujo nome não vem do directório"
+
+msgid "the containers of this project, derived from their labels"
+msgstr "os containers deste projecto, derivados das suas labels"
+
+msgid "another project up on the same host"
+msgstr "outro projecto a correr no mesmo host"
+
+msgid "every service, one after another"
+msgstr "todos os serviços, um a seguir ao outro"
+
+msgid "one service only"
+msgstr "só um serviço"
+
+msgid "follow it live — the flag is --follow here, because -f is already the compose file"
+msgstr "segue ao vivo — aqui a flag é --follow, porque o -f já é o ficheiro compose"
+
+msgid "validate the file and print the project it resolves to"
+msgstr "valida o ficheiro e imprime o projecto para que resolve"
+
+msgid "a file elsewhere, under a project name of your own"
+msgstr "um ficheiro noutro sítio, com um nome de projecto teu"
+
+msgid "is this rootless, is the cgroup delegated, what is the network doing"
+msgstr "isto é rootless, o cgroup está delegado, o que está a rede a fazer"
+
+msgid "where the disk went"
+msgstr "para onde foi o disco"
+
+msgid "get it back, orphan container directories included"
+msgstr "recupera-o, directórios de container órfãos incluídos"
+
+msgid "engine state in one screen: rootless, cgroup delegation, network infra, counts"
+msgstr "estado do motor num ecrã: rootless, delegação de cgroup, infra de rede, contagens"
+
+msgid "the same screen in Portuguese"
+msgstr "o mesmo ecrã em português"
+
+msgid "what the engine did, oldest first — with no daemon this is a shared append-only log"
+msgstr "o que o motor fez, do mais antigo primeiro — sem daemon isto é um log partilhado só de acrescento"
+
+msgid "only the last twenty lines"
+msgstr "só as últimas vinte linhas"
+
+msgid "follow it live while you reproduce a crash in another terminal"
+msgstr "segue ao vivo enquanto reproduzes um crash noutro terminal"
+
+msgid "diagnose cgroup delegation — without it --memory and --cpus are accepted and inert"
+msgstr "diagnostica a delegação de cgroup — sem ela o --memory e o --cpus são aceites e ficam inertes"
+
+msgid "apply the fix instead of only reporting it (the system-wide drop-in needs root)"
+msgstr "aplica a correcção em vez de só a reportar (o drop-in do sistema inteiro precisa de root)"
+
+msgid "disk usage by area: images, containers, volumes and VM images"
+msgstr "uso de disco por área: imagens, containers, volumes e imagens VM"
+
+msgid "what the host offers a VM: hypervisor, KVM, virtio — and what is left to tune"
+msgstr "o que o host oferece a uma VM: hypervisor, KVM, virtio — e o que falta afinar"
+
+msgid "apply the recommended tuning (needs root)"
+msgstr "aplica a afinação recomendada (precisa de root)"
+
+msgid "reclaim space: stopped containers, unused images, unreferenced blobs, orphan rootfs directories"
+msgstr "recupera espaço: containers parados, imagens sem uso, blobs sem referência, directórios de rootfs órfãos"
+
+msgid "in CI, where there is no terminal to confirm at"
+msgstr "em CI, onde não há terminal para confirmar"
+
+msgid "also drop tagged images nobody uses, not just the dangling ones"
+msgstr "apaga também as imagens com tag que ninguém usa, não só as penduradas"
+
+msgid "who talks to whom, per container, live from conntrack"
+msgstr "quem fala com quem, por container, ao vivo a partir do conntrack"
+
+msgid "one sample and out — the shape for a script or a cron line"
+msgstr "uma amostra e sai — a forma certa para um script ou uma linha de cron"
+
+msgid "a slower refresh on a busy host"
+msgstr "um refresh mais lento num host ocupado"
+
+msgid "keep the engine's CPU budget in check when the machine heats up"
+msgstr "mantém o orçamento de CPU do motor sob controlo quando a máquina aquece"
+
+msgid "one reading and out, for cron"
+msgstr "uma leitura e sai, para o cron"
+
+msgid "cool down earlier, and never drop below half the CPU"
+msgstr "arrefece mais cedo, e nunca desce abaixo de metade do CPU"
+
+msgid "a local Kubernetes cluster with no manifest and no Docker"
+msgstr "um cluster Kubernetes local sem manifesto e sem Docker"
+
+msgid "what is up, node by node"
+msgstr "o que está de pé, nó a nó"
+
+msgid "from zero to VMs plus kubeadm — above one control-plane the load balancer comes with it"
+msgstr "do zero a VMs mais kubeadm — acima de um control-plane o load balancer vem com ele"
+
+msgid "a project with the cluster manifests already filled in"
+msgstr "um projecto com os manifestos do cluster já preenchidos"
+
+msgid "into a directory of its own, named, with the image you intend to run"
+msgstr "num directório próprio, com nome, e com a imagem que tencionas correr"
+
+msgid "regenerate over a scaffold you already edited"
+msgstr "regera por cima de um scaffold que já editaste"
+
+msgid "a single node: control-plane untainted, so it schedules everything"
+msgstr "um nó só: control-plane sem taint, para agendar tudo"
+
+msgid "one control-plane and two workers"
+msgstr "um control-plane e dois workers"
+
+msgid "your own CNI instead of kindnet — the node stays NotReady until you apply it"
+msgstr "o teu próprio CNI em vez do kindnet — o nó fica NotReady até o aplicares"
+
+msgid "pin the apiserver to the host port your kubeconfig already expects"
+msgstr "fixa o apiserver na porta do host que o teu kubeconfig já espera"
+
+msgid "clusters and the state of each node, derived from the container labels"
+msgstr "os clusters e o estado de cada nó, derivados das labels dos containers"
+
+msgid "stop and remove the nodes plus the kubeconfig"
+msgstr "pára e remove os nós mais o kubeconfig"
+
+msgid "the default cluster, when you never named one"
+msgstr "o cluster por omissão, quando nunca deste nome a nenhum"
+
+msgid "the image you just built, into every node, with no registry in between"
+msgstr "a imagem que acabaste de construir, para dentro de cada nó, sem registo pelo meio"
+
+msgid "several in one go"
+msgstr "várias de uma vez"
+
+msgid "say which cluster, when more than one is up"
+msgstr "diz qual é o cluster, quando há mais do que um de pé"
+
+msgid "the Kubernetes YAML for something you already have running locally"
+msgstr "o YAML de Kubernetes para algo que já tens a correr localmente"
+
+msgid "a kind: Pod out of a running container, straight to stdout"
+msgstr "um kind: Pod a partir de um container a correr, directo para o stdout"
+
+msgid "keep it in the repo as the starting point for a real deployment"
+msgstr "guarda-o no repo como ponto de partida para um deployment a sério"
+
+msgid "every member of a pod, as one manifest"
+msgstr "todos os membros de um pod, num só manifesto"
+
+msgid "bootstrap the hosts a manifest declares — idempotent, and with no state file to drift"
+msgstr "faz o bootstrap dos hosts que um manifesto declara — idempotente, e sem ficheiro de estado para derivar"
+
+msgid "VMs from the golden image plus kubeadm, without writing a manifest by hand"
+msgstr "VMs da imagem dourada mais kubeadm, sem escrever um manifesto à mão"
+
+msgid "HA: above one control-plane a HAProxy load balancer is provisioned and used as the endpoint"
+msgstr "HA: acima de um control-plane é provisionado um load balancer HAProxy e usado como endpoint"
+
+msgid "merge the kubeconfig into your own only after every node reports Ready"
+msgstr "funde o kubeconfig no teu só depois de todos os nós reportarem Ready"
+
+msgid "etcd on VMs of its own instead of stacked on the control-planes"
+msgstr "etcd em VMs próprias, em vez de empilhado nos control-planes"
+
+msgid "a named volume, so the data outlives the container that writes to it"
+msgstr "um volume nomeado, para os dados sobreviverem ao container que lhes escreve"
+
+msgid "what exists, with driver and mountpoint"
+msgstr "o que existe, com driver e mountpoint"
+
+msgid "how much disk one of them really holds, measured from inside the userns"
+msgstr "quanto disco um deles ocupa mesmo, medido de dentro do userns"
+
+msgid "a local named volume — the default driver"
+msgstr "um volume nomeado local — o driver por omissão"
+
+msgid "with a size cap, so one workload cannot fill the whole disk"
+msgstr "com um tecto de tamanho, para um workload não encher o disco todo"
+
+msgid "an NFS export straight as a volume, without the friendlier `storage` declaration"
+msgstr "um export NFS logo como volume, sem a declaração `storage`, que é mais amigável"
+
+msgid "every volume, with driver and mountpoint"
+msgstr "todos os volumes, com driver e mountpoint"
+
+msgid "as JSON, for a backup job or a monitoring script"
+msgstr "em JSON, para um job de backup ou um script de monitorização"
+
+msgid "driver, mountpoint, quota and the REAL usage — an unreadable directory is reported as unknown, never as zero"
+msgstr "driver, mountpoint, quota e o uso REAL — um directório ilegível é reportado como desconhecido, nunca como zero"
+
+msgid "a kubectl-style block, meant to be read rather than parsed"
+msgstr "um bloco ao estilo do kubectl, feito para ser lido e não parseado"
+
+msgid "several at once, to compare them side by side"
+msgstr "vários de uma vez, para os comparar lado a lado"
+
+msgid "remove a volume nothing references any more"
+msgstr "remove um volume que já ninguém referencia"
+
+msgid "force it past a live reference — this DESTROYS the data of whatever still uses it"
+msgstr "força por cima de uma referência viva — isto DESTRÓI os dados de quem ainda o usa"
+
+msgid "apply only the `kind: Volume` documents of a manifest, idempotent by name"
+msgstr "aplica só os documentos `kind: Volume` de um manifesto, idempotente por nome"
+
+msgid "the volumes of a shipped example, leaving the other kinds untouched"
+msgstr "os volumes de um exemplo publicado, deixando os outros kinds intactos"
+
+msgid "freeze the current contents of a volume as a tar.gz, safe in rootless"
+msgstr "congela o conteúdo actual de um volume num tar.gz, seguro em rootless"
+
+msgid "what has been kept, and when"
+msgstr "o que foi guardado, e quando"
+
+msgid "a point-in-time copy, named with the UTC timestamp"
+msgstr "uma cópia de um instante, nomeada com o timestamp UTC"
+
+msgid "a name of your own, so the restore reads clearly months later"
+msgstr "um nome teu, para o restore se ler com clareza meses depois"
+
+msgid "the snapshots of one volume"
+msgstr "os snapshots de um volume"
+
+msgid "of every volume — omit the name"
+msgstr "de todos os volumes — omite o nome"
+
+msgid "put the data back as it was — it REPLACES the contents, so stop the consumers first"
+msgstr "põe os dados como estavam — SUBSTITUI o conteúdo, por isso pára primeiro os consumidores"
+
+msgid "drop a snapshot you no longer keep, freeing the space it holds under the volume"
+msgstr "apaga um snapshot que já não guardas, libertando o espaço que ocupa dentro do volume"
+
+msgid "a bridge network of its own, where containers reach each other by name"
+msgstr "uma rede bridge própria, onde os containers se alcançam pelo nome"
+
+msgid "what exists, with driver, bridge and subnet"
+msgstr "o que existe, com driver, bridge e subnet"
+
+msgid "the detail of one, including whether it was physically realized"
+msgstr "o detalhe de uma, incluindo se foi fisicamente realizada"
+
+msgid "a live TUI of the networks and their traffic"
+msgstr "um TUI ao vivo das redes e do seu tráfego"
+
+msgid "one snapshot, for a pipe or a terminal without a TTY"
+msgstr "uma snapshot, para um pipe ou um terminal sem TTY"
+
+msgid "JSON, to feed a script or a dashboard"
+msgstr "JSON, para alimentar um script ou um dashboard"
+
+msgid "name, driver, bridge and subnet of each network"
+msgstr "nome, driver, bridge e subnet de cada rede"
+
+msgid "as JSON, to feed automation"
+msgstr "em JSON, para alimentar automação"
+
+msgid "create this node's WireGuard identity and print the public key to hand out"
+msgstr "cria a identidade WireGuard deste nó e imprime a chave pública para distribuir"
+
+msgid "the public key alone, for composing in a script"
+msgstr "só a chave pública, para compor num script"
+
+msgid "generate the key once and print what to do with it — idempotent, the private half stays 0600"
+msgstr "gera a chave uma vez e imprime o que fazer com ela — idempotente, a metade privada fica a 0600"
+
+msgid "just the public key, to paste into the peer configuration of another node"
+msgstr "só a chave pública, para colar na configuração de peer de outro nó"
+
+msgid "a bridge network — the default driver, and the one rootless really realizes"
+msgstr "uma rede bridge — o driver por omissão, e o único que o rootless realiza mesmo"
+
+msgid "pin the address space instead of letting the engine pick a free octet"
+msgstr "fixa o espaço de endereçamento em vez de deixar o motor escolher um octeto livre"
+
+msgid "an encrypted VXLAN overlay across nodes, realized in the rootless holder"
+msgstr "um overlay VXLAN cifrado entre nós, realizado no holder rootless"
+
+msgid "macvlan is registered but NOT realized without privilege — the warning says so instead of pretending"
+msgstr "o macvlan é registado mas NÃO é realizado sem privilégio — o aviso di-lo em vez de fingir"
+
+msgid "driver, bridge, subnet and gateway of one network"
+msgstr "driver, bridge, subnet e gateway de uma rede"
+
+msgid "a readable block instead of the compact view"
+msgstr "um bloco legível em vez da vista compacta"
+
+msgid "several networks in one go"
+msgstr "várias redes de uma vez"
+
+msgid "remove a network no container is attached to — both the record and the holder's bridge"
+msgstr "remove uma rede a que nenhum container está ligado — o registo e a bridge do holder"
+
+msgid "apply only the `kind: Network` documents of a manifest, idempotent by name"
+msgstr "aplica só os documentos `kind: Network` de um manifesto, idempotente por nome"
+
+msgid "the networks of a shipped example, leaving the other kinds alone"
+msgstr "as redes de um exemplo publicado, deixando os outros kinds em paz"
+
+msgid "a NAS export becomes a named volume any container can mount"
+msgstr "um export de um NAS torna-se um volume nomeado que qualquer container monta"
+
+msgid "what is mounted, and from where"
+msgstr "o que está montado, e de onde"
+
+msgid "the server, export and mount options really in use"
+msgstr "o servidor, o export e as opções de montagem mesmo em uso"
+
+msgid "a live TUI of storages and volumes, with usage per area"
+msgstr "um TUI ao vivo dos storages e volumes, com o uso por área"
+
+msgid "one snapshot, for CI or a terminal without a TTY"
+msgstr "uma snapshot, para CI ou um terminal sem TTY"
+
+msgid "JSON, to alert on a share filling up"
+msgstr "JSON, para alertar quando uma partilha está a encher"
+
+msgid "an NFS export from a NAS — mounting needs CAP_SYS_ADMIN, so root or a privileged session"
+msgstr "um export NFS de um NAS — montar precisa de CAP_SYS_ADMIN, logo root ou uma sessão privilegiada"
+
+msgid "an SMB share with the password read from the vault, never from the shell history"
+msgstr "uma partilha SMB com a password lida do cofre, nunca do histórico da shell"
+
+msgid "read-only, with extra mount options appended to the derived ones"
+msgstr "só de leitura, com opções de montagem extra acrescentadas às derivadas"
+
+msgid "WebDAV from a Nextcloud instance"
+msgstr "WebDAV de uma instância Nextcloud"
+
+msgid "the network storages, with type and mountpoint"
+msgstr "os storages de rede, com tipo e mountpoint"
+
+msgid "as JSON, for automation"
+msgstr "em JSON, para automação"
+
+msgid "server, export and the mount options actually derived for it"
+msgstr "servidor, export e as opções de montagem realmente derivadas para ele"
+
+msgid "unmount and unregister it — the DATA stays on the NAS, only the local mount goes"
+msgstr "desmonta e desregista — os DADOS ficam no NAS, só a montagem local desaparece"
+
+msgid "declare the shares in a manifest instead of typing credentials on the command line"
+msgstr "declara as partilhas num manifesto em vez de escrever credenciais na linha de comando"
+
+msgid "the storages of your own manifest"
+msgstr "os storages do teu próprio manifesto"
+
+msgid "carve isolated, individually-quota'd slices out of one NAS export"
+msgstr "talha fatias isoladas, cada uma com a sua quota, a partir de um só export de NAS"
+
+msgid "what slices exist, with parent storage, quota and live usage"
+msgstr "que fatias existem, com o storage pai, a quota e o uso ao vivo"
+
+msgid "how close one of them is to its quota"
+msgstr "quão perto uma delas está da sua quota"
+
+msgid "create or converge the slices declared in a manifest, idempotent"
+msgstr "cria ou converge as fatias declaradas num manifesto, idempotente"
+
+msgid "from your own manifest — this is how a share volume is created"
+msgstr "do teu próprio manifesto — é assim que se cria um share volume"
+
+msgid "parent storage, quota and measured usage of each slice"
+msgstr "storage pai, quota e uso medido de cada fatia"
+
+msgid "as JSON, to alert on a slice approaching its quota"
+msgstr "em JSON, para alertar quando uma fatia se aproxima da quota"
+
+msgid "quota, alert threshold and real usage of one slice"
+msgstr "quota, limiar de alerta e uso real de uma fatia"
+
+msgid "a slice owned by another namespace"
+msgstr "uma fatia que pertence a outra namespace"
+
+msgid "un-register the slice — the data on the NAS is PRESERVED"
+msgstr "desregista a fatia — os dados no NAS são PRESERVADOS"
+
+msgid "un-register and delete the underlying subdirectory as well"
+msgstr "desregista e apaga também o subdirectório por baixo"
+
+msgid "a slice owned by a namespace other than `default`"
+msgstr "uma fatia que pertence a uma namespace que não a `default`"
+
+msgid "see which pre-scoping records would move into the `default` namespace, changing nothing"
+msgstr "vê que registos anteriores ao scoping passariam para a namespace `default`, sem mudar nada"
+
+msgid "move the records — only the bookkeeping, the bytes stay exactly where they are"
+msgstr "move os registos — só a contabilidade, os bytes ficam exactamente onde estão"
+
+msgid "the official golden image, ready to boot without installing anything"
+msgstr "a imagem dourada oficial, pronta a arrancar sem instalar nada"
+
+msgid "a VM from it, waiting until it has a real IP"
+msgstr "uma VM a partir dela, esperando até ter um IP a sério"
+
+msgid "what is up, and the address each one got"
+msgstr "o que está de pé, e o endereço que cada uma recebeu"
+
+msgid "the boot log and a login, with no IP and no SSH yet"
+msgstr "o log de arranque e um login, ainda sem IP e sem SSH"
+
+msgid "from the local golden image, blocking until it answers on an address"
+msgstr "a partir da imagem dourada local, bloqueando até responder num endereço"
+
+msgid "with your key and hostname applied on the first boot, by cloud-init"
+msgstr "com a tua chave e o hostname aplicados no primeiro arranque, pelo cloud-init"
+
+msgid "a Kubernetes node on libvirt, on a NAT network so the IP is visible and routable"
+msgstr "um nó Kubernetes em libvirt, numa rede NAT para o IP ser visível e roteável"
+
+msgid "isolated from other namespaces — only cloud-hypervisor puts the tap in the SDN where that is enforced"
+msgstr "isolada das outras namespaces — só o cloud-hypervisor põe o tap na SDN, onde isso é imposto"
+
+msgid "boot a stopped VM again with the disk, vcpus, memory and backend of its last create — the overlay is reused, so its disk state survives"
+msgstr "arranca de novo uma VM parada com o disco, vcpus, memória e backend do último create — o overlay é reaproveitado, por isso o estado do disco sobrevive"
+
+msgid "give the host back its CPU and RAM, keeping the disk and the record — take any snapshot BEFORE this, the libvirt domain is undefined here"
+msgstr "devolve ao host o CPU e a RAM, guardando o disco e o registo — tira qualquer snapshot ANTES disto, aqui o domínio libvirt é undefined"
+
+msgid "a real reboot — `start` on an already-running VM does nothing, this one always cycles it"
+msgstr "um reboot a sério — o `start` numa VM já a correr não faz nada, este cicla-a sempre"
+
+msgid "stop it and delete the overlay and the record"
+msgstr "pára-a e apaga o overlay e o registo"
+
+msgid "drop the local state even when the libvirt cleanup fails, instead of leaving a record you cannot get rid of"
+msgstr "descarta o estado local mesmo quando a limpeza do libvirt falha, em vez de deixar um registo do qual não te consegues livrar"
+
+msgid "every VM, with vcpus, memory, state and the IP it got"
+msgstr "todas as VMs, com vcpus, memória, estado e o IP que receberam"
+
+msgid "also knock on 22/6443/10250/80/443 to see what already answers — live network I/O, so it is off by default"
+msgstr "bate também nas 22/6443/10250/80/443 para ver o que já responde — I/O de rede ao vivo, por isso está desligado por omissão"
+
+msgid "the same rows as JSON, for a script"
+msgstr "as mesmas linhas em JSON, para um script"
+
+msgid "one VM, with liveness and IP reconciled against the backend rather than read off a stale record"
+msgstr "uma VM, com a vivacidade e o IP reconciliados contra o backend em vez de lidos de um registo velho"
+
+msgid "the state of all of them at once"
+msgstr "o estado de todas elas de uma vez"
+
+msgid "everything the record holds about a VM, plus the live state, kubectl style"
+msgstr "tudo o que o registo guarda sobre uma VM, mais o estado ao vivo, ao estilo do kubectl"
+
+msgid "several at once, to compare how they were created"
+msgstr "várias de uma vez, para comparar como foram criadas"
+
+msgid "watch the boot and log in before there is any IP or SSH — Ctrl-] brings you back to the host"
+msgstr "vê o arranque e entra antes de haver IP ou SSH — Ctrl-] traz-te de volta ao host"
+
+msgid "the address to point a VNC client at, for a VM created with `--vnc` on libvirt"
+msgstr "o endereço para onde apontar um cliente VNC, para uma VM criada com `--vnc` em libvirt"
+
+msgid "which backend `vm create` will pick when nothing on the command line says otherwise"
+msgstr "que backend o `vm create` vai escolher quando nada na linha de comando disser o contrário"
+
+msgid "pin libvirt once, instead of passing `--backend` on every create — it is the backend with snapshots and a NAT address"
+msgstr "fixa o libvirt de uma vez, em vez de passar `--backend` em cada create — é o backend com snapshots e endereço NAT"
+
+msgid "hand the choice back to auto-detection"
+msgstr "devolve a escolha à auto-detecção"
+
+msgid "which published container ports a VM can actually get to, and the exact republish command for each one that is stuck on loopback"
+msgstr "a que portas publicadas de containers uma VM consegue mesmo chegar, e o comando exacto de republicação para cada uma que está presa no loopback"
+
+msgid "read the privileged plan before running any of it — without `--apply` this only prints"
+msgstr "lê o plano privilegiado antes de correr fosse o que for — sem `--apply` isto só imprime"
+
+msgid "establish it as root: the VM then reaches container IPs on that network directly, no published port needed"
+msgstr "estabelece-o como root: a VM passa a alcançar directamente os IPs de container dessa rede, sem precisar de porta publicada"
+
+msgid "route back a VM subnet the `virbr*` auto-detection did not find"
+msgstr "encaminha de volta uma subnet de VM que a auto-detecção de `virbr*` não encontrou"
+
+msgid "what the teardown would remove, without removing it"
+msgstr "o que o teardown removeria, sem o remover"
+
+msgid "actually tear the veth and the routes down, as root"
+msgstr "derruba mesmo o veth e as rotas, como root"
+
+msgid "build a bootable qcow2 from the `VMfile` in this directory"
+msgstr "constrói um qcow2 arrancável a partir do `VMfile` deste directório"
+
+msgid "let the guest reach a package mirror during `RUN` — offline is the default so the same recipe gives the same image tomorrow"
+msgstr "deixa o convidado alcançar um mirror de pacotes durante o `RUN` — offline é o default, para a mesma receita dar a mesma imagem amanhã"
+
+msgid "another recipe and another build context"
+msgstr "outra receita e outro contexto de build"
+
+msgid "the official Kubernetes golden image, with kubeadm and the CRI already installed"
+msgstr "a imagem dourada oficial de Kubernetes, com o kubeadm e o CRI já instalados"
+
+msgid "the Kubernetes-free golden instead — just the engine, rootless-ready"
+msgstr "a dourada sem Kubernetes — só o motor, pronto para rootless"
+
+msgid "one published tag in particular, under a local name of your own"
+msgstr "uma tag publicada em particular, com um nome local teu"
+
+msgid "which Kubernetes versions are published, before spending a pull on one"
+msgstr "que versões de Kubernetes estão publicadas, antes de gastar um pull numa delas"
+
+msgid "the tags of the Kubernetes-free golden"
+msgstr "as tags da dourada sem Kubernetes"
+
+msgid "any other OCI repository holding VM images"
+msgstr "qualquer outro repositório OCI com imagens VM"
+
+msgid "publish an image you built to a registry of your own"
+msgstr "publica uma imagem que construíste num registo teu"
+
+msgid "omit the target and it goes to the official repository the image's own metadata names"
+msgstr "omite o destino e vai para o repositório oficial que os metadados da própria imagem nomeiam"
+
+msgid "hand an image built here to VMware, flattened so there is no backing chain to carry with it"
+msgstr "entrega ao VMware uma imagem construída aqui, achatada para não levar cadeia de backing atrás"
+
+msgid "raw for Proxmox VE's LVM/ZFS/Ceph storage, written where you want it"
+msgstr "raw para o armazenamento LVM/ZFS/Ceph do Proxmox VE, escrito onde quiseres"
+
+msgid "back to qcow2 and compressed — only qcow2 and vmdk can, the rest are refused up front"
+msgstr "de volta a qcow2 e comprimido — só o qcow2 e o vmdk conseguem, os restantes são recusados à partida"
+
+msgid "Hyper-V and Azure take vhdx; the older vhd is a different format, not another spelling"
+msgstr "o Hyper-V e o Azure aceitam vhdx; o vhd mais antigo é outro formato, não outra grafia"
+
+msgid "a `kind: Vm` manifest already filled in, applicable as it is"
+msgstr "um manifesto `kind: Vm` já preenchido, aplicável tal como está"
+
+msgid "name the project and pin the image it should boot"
+msgstr "dá nome ao projecto e fixa a imagem que ele deve arrancar"
+
+msgid "a `VMfile` instead — the recipe for building your own qcow2, not for running an existing one"
+msgstr "um `VMfile`, em vez disso — a receita para construir o teu próprio qcow2, não para correr um já existente"
+
+msgid "generate into a directory of its own, overwriting what is there"
+msgstr "gera num directório próprio, por cima do que lá estiver"
+
+msgid "apply the `kind: Vm` documents of ./delonix-manifest.yaml — idempotent by name, so it creates or recovers"
+msgstr "aplica os documentos `kind: Vm` do ./delonix-manifest.yaml — idempotente por nome, por isso cria ou recupera"
+
+msgid "from a manifest of your own"
+msgstr "de um manifesto teu"
+
+msgid "a checkpoint of a RUNNING libvirt VM before an upgrade — memory and disk, so `restore` puts it back mid-flight"
+msgstr "um checkpoint de uma VM libvirt A CORRER antes de um upgrade — memória e disco, para o `restore` a repor a meio do voo"
+
+msgid "put the VM back exactly as it was when the checkpoint was taken"
+msgstr "põe a VM exactamente como estava quando o checkpoint foi tirado"
+
+msgid "which checkpoints a VM has, before reverting to one"
+msgstr "que checkpoints uma VM tem, antes de reverter para um"
+
+msgid "a live TUI of every VM — state, resources and problems, refreshed in place"
+msgstr "um TUI ao vivo de todas as VMs — estado, recursos e problemas, actualizado no lugar"
+
+msgid "one snapshot of text, for a terminal that is not interactive"
+msgstr "uma snapshot de texto, para um terminal que não é interactivo"
+
+msgid "the same numbers as JSON, for a script or a dashboard datasource"
+msgstr "os mesmos números em JSON, para um script ou um datasource de dashboard"
+
+msgid "a shell inside the VM — the IP comes from the record, so the name is enough"
+msgstr "uma shell dentro da VM — o IP vem do registo, por isso o nome chega"
+
+msgid "one command and out, instead of an interactive shell"
+msgstr "um comando e sai, em vez de uma shell interactiva"
+
+msgid "straight to an address, as another user"
+msgstr "directo para um endereço, como outro utilizador"
+
+
+msgid "volume '{name}': the dataset {ds} already existed and was adopted — its quota now follows this manifest"
+msgstr "volume '{name}': o dataset {ds} já existia e foi adoptado — a quota dele passa a seguir este manifesto"
+
+msgid "Subnet. For `bridge`, `10.<200-254>.0.0/16` (only /16); required for macvlan/ipvlan, e.g. `192.168.1.0/24`. Omit it and a free one is picked."
+msgstr "Subrede. Para `bridge`, `10.<200-254>.0.0/16` (só /16); obrigatória para macvlan/ipvlan, ex.: `192.168.1.0/24`. Sem ela, é escolhida uma livre."
+
+msgid "ALSO destroy the storage this volume was provisioned with on a remote NAS (`spec.provision`). Irreversible, and on another machine. Refused for a volume that only mounts a share someone else made"
+msgstr "Destrói TAMBÉM o armazenamento com que este volume foi provisionado numa NAS remota (`spec.provision`). Irreversível, e noutra máquina. Recusado para um volume que só monta uma partilha feita por outra pessoa"
