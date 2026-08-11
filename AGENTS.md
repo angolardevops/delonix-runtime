@@ -3603,6 +3603,33 @@ guest vivo, `console=tty0`) antes de comparar duas invocações que só diferiam
 numa flag.
 
 
+## `delonix_net::Net` foi APAGADO — e é breaking para quem usa a biblioteca
+
+O `pub struct Net` («The Delonix network manager») foi removido: 22 métodos
+públicos, 986 linhas, **zero chamadores no workspace**. Não era descuido, era
+uma arquitectura anterior ao holder — o `Net::attach_on` corria `ip link add` e
+`nft` DIRECTAMENTE no processo chamador, enquanto o caminho vivo
+(`infra::attach_container`) pede o mesmo ao holder pelo socket de controlo. Em
+rootless não podia funcionar; com privilégio mexia na rede do HOST, fora do
+isolamento. Mesma conclusão, e mesmo destino, que o `publish_port_allow`.
+
+**Zero chamadores no workspace não é o critério todo, e isto é a nota que
+interessa a quem vier a seguir**: o `delonix-net` é uma BIBLIOTECA, e o
+`delonix-paas` (privado) consome-a por tag de git em vários crates — usando
+precisamente o que foi apagado (`Net.apply_container_firewall`,
+`Net.firewall_summary`). Nada parte hoje, porque o pin é uma tag. O que muda é
+que **subir esse pin passa a exigir uma travessia do lado do PaaS**, e há um
+método sem substituto vivo: o `firewall_summary` (o `infra` tem
+`apply_firewall`/`clear_firewall`/`status`, mas nada que devolva o sumário
+DNAT/blocked/isolation/masquerade). Se ele for preciso outra vez, o sítio é o
+`infra`, contra a tabela `dlxing` — a `ip delonix` que o antigo lia já não
+existe.
+
+Saíram na mesma passagem os órfãos públicos que a remoção criou
+(`FirewallSummary`, `DnatRule`, `cidr_prefix_len`, `service_vip`) — o compilador
+não os assinala, porque `dead_code` só vê itens privados. **Ao apagar uma API
+pública, a cascata privada é do compilador; a pública tem de ser contada à mão.**
+
 ## Regra de ouro: fronteira com o PaaS
 
 Este código **não pode depender de nada privado**. Antes de qualquer commit:
