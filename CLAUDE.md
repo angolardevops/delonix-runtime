@@ -3493,6 +3493,19 @@ medir:**
 corrigida arranca noutro ambiente que não aquele onde foi corrigida. O `rc` de
 um script de build não é evidência de nada.
 
+**E a armadilha que custou mais tempo de todas, porque a correcção estava
+certa**: depois de um `systemctl poweroff` por SSH, o script esperava
+`sleep 12` e capturava o disco. **O SSH a fechar é o convidado a despedir-se,
+não a máquina a parar** — o `qemu-img convert` corria sobre uma imagem ainda
+aberta e capturava um filesystem a meio de ser escrito. Resultado: imagens que
+arrancavam e nunca chegavam à rede, para uma correcção que estava boa. Três
+hipóteses erradas antes de a encontrar (nome de interface, `/sbin/dhclient`,
+bridge sem membro), e a que acertou foi comparar o ciclo que PASSOU com o que
+falhou, em vez de olhar mais uma vez para dentro do convidado — que estava
+sempre bem. **Esperar por tempo em vez de por condição, na operação que captura
+o resultado.** O `build-proxmox.sh` já fazia `wait $QEMU_PID` e estava correcto;
+o erro era só dos scripts ad-hoc com `-daemonize` + `sleep`.
+
 
 ## Regra de ouro: fronteira com o PaaS
 
