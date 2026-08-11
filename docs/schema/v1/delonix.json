@@ -419,6 +419,32 @@
       },
       "type": "object"
     },
+    "OwnerSpec": {
+      "properties": {
+        "gid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mode": {
+          "description": "Octal, quoted (`\"0770\"`). A YAML `0770` unquoted is the decimal 770, and\nthat is not the mode anyone means — so it is parsed from a string and a\nbare number is refused by serde rather than misread.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "uid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "uid",
+        "gid"
+      ],
+      "type": "object"
+    },
     "PodCapabilities": {
       "properties": {
         "add": {
@@ -833,6 +859,127 @@
       ],
       "type": "object"
     },
+    "ProvisionSpec": {
+      "properties": {
+        "truenas": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrueNasSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ShareSpec": {
+      "properties": {
+        "maprootGroup": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "maprootUser": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "networks": {
+          "default": [],
+          "description": "CIDRs allowed to mount. **Required, and refused when empty**: the\nappliance reads an empty list as \"every network\", and a manifest that\nsays nothing about who may mount a share must not end up exporting it to\neverything that can reach the NAS.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "readOnly": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "TrueNasSpec": {
+      "properties": {
+        "apiKeySecret": {
+          "description": "`kind: Secret` holding the API key under the key `apiKey` (or `token`).\nPreferred over an account: a key is revocable on the appliance without\ntouching anyone's login.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dataset": {
+          "description": "Full ZFS path, `<pool>/<name>`. The pool has to exist: laying out\nphysical disks is not something a volume manifest should trigger.",
+          "type": "string"
+        },
+        "insecureTLS": {
+          "default": false,
+          "description": "Accept a certificate this host cannot verify — which a stock TrueNAS\nneeds, since it serves a self-signed one. Explicit because turning it on\nmeans another machine can answer in the appliance's name, taking the API\nkey with it.",
+          "type": "boolean"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OwnerSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "password": {
+          "description": "Literal password. Accepted for a throwaway lab and nothing else — it\nends up in whatever git repository the manifest lives in.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "passwordSecret": {
+          "description": "`kind: Secret` holding the account password under the key `password`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quota": {
+          "description": "Quota ON THE NAS (`\"10G\"`). Distinct from the volume's own `spec.quota`,\nwhich is a local accounting limit — for a network share the NAS is the\nonly place a limit can actually be enforced.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "share": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ShareSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "NFS export rules. Omit to provision the dataset WITHOUT exporting it —\nuseful when the export already exists and only the quota is managed here."
+        },
+        "url": {
+          "description": "`https://<nas>`. The scheme is the caller's: `http://` puts the API key\non the wire in the clear, which is a decision to make deliberately.",
+          "type": "string"
+        },
+        "username": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "url",
+        "dataset"
+      ],
+      "type": "object"
+    },
     "VolumeSpec": {
       "additionalProperties": false,
       "description": "`spec` of `kind: Volume` — mirrors the fields of `VolumeCmd::Create`.",
@@ -879,6 +1026,17 @@
           "description": "NFS export. One of the three network-share blocks — the block's NAME is\nthe type, so a type cannot contradict its own declaration (the same shape\n`kind: Workload` uses for `spec.container`/`spec.vm`)."
         },
         "options": {},
+        "provision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProvisionSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "OPTIONAL: create what the share block consumes, instead of requiring it\nto exist already (ADR-0009). Absent, this Kind behaves exactly as before."
+        },
         "quota": {
           "type": [
             "string",

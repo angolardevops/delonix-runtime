@@ -773,6 +773,7 @@ dependencies = [
  "delonix-runtime",
  "delonix-runtime-core",
  "delonix-scan",
+ "delonix-truenas",
  "delonix-vm",
  "delonix-volume",
  "flate2",
@@ -824,6 +825,16 @@ dependencies = [
  "serde",
  "serde_json",
  "tar",
+]
+
+[[package]]
+name = "delonix-truenas"
+version = "0.47.1"
+dependencies = [
+ "delonix-runtime-core",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
