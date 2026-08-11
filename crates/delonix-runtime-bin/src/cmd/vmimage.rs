@@ -371,6 +371,11 @@ fn vms_backed_by(root: &std::path::Path, image_qcow2: &std::path::Path) -> Vec<S
 pub(crate) fn cmd_rm(store: &VmImageStore, names: &[String], force: bool) -> Result<()> {
     let root = state_root();
     let mut failed = false;
+    // «Não existe» é uma CLASSE de saída (4), não o genérico. Um reconciliador
+    // usa o código para decidir entre «cria porque falta» e «pára porque
+    // falhou», e um lote onde tudo o que falhou foi por ausência tem de dizer
+    // isso — como o `container rm` já diz.
+    let mut missing = false;
     for name in names {
         // Fail on a name that does not exist (docker/`vm rm` parity), rather
         // than reporting success for a removal that removed nothing.
@@ -382,6 +387,7 @@ pub(crate) fn cmd_rm(store: &VmImageStore, names: &[String], force: bool) -> Res
                     &[("name", name)],
                 ));
                 failed = true;
+                missing = true;
                 continue;
             }
         };
@@ -420,9 +426,15 @@ pub(crate) fn cmd_rm(store: &VmImageStore, names: &[String], force: bool) -> Res
         println!("{}", img.name);
     }
     if failed {
-        return Err(Error::Invalid(
-            super::po::t("one or more VM images were not removed").into(),
-        ));
+        let msg: String = super::po::t("one or more VM images were not removed").into();
+        // A CLASSE da saída importa: um lote onde tudo o que falhou foi por
+        // ausência diz «não existe» (4), não o genérico (1) — é o que um
+        // reconciliador lê para decidir entre criar e parar.
+        return Err(if missing {
+            Error::NotFound(msg)
+        } else {
+            Error::Invalid(msg)
+        });
     }
     Ok(())
 }
