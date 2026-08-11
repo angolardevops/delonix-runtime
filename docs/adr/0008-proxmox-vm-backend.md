@@ -1,7 +1,7 @@
 # ADR-0008: Add a Proxmox VE backend as a separate crate, and make backends registrable
 
-- **Status:** **Accepted, in two phases** (2026-08-10) — phase 1 landed;
-  **phase 2 UNBLOCKED 2026-08-11 by a GO spike against a real appliance**
+- **Status:** **Accepted, both phases DONE** (phase 1 2026-08-10; phase 2
+  2026-08-11, `boot`/`stop` watched running against a real node)
 - **Date:** 2026-08-10
 - **Deciders:** Walter Angolar
 
@@ -267,3 +267,32 @@ the operator the crate does not exist, when it is sitting in the workspace. It
 now names the actual state and points here (`KNOWN_UNREGISTERED`, in
 `delonix-vm`). It remains **refused**: nothing about this makes an unfinished
 backend selectable.
+
+## Phase 2, done (2026-08-11)
+
+The storage/detection split landed first (`manages_own_storage`,
+`auto_selectable` — see the section above on why the trait blocked this), and
+then the backend itself. Watched running against a real Proxmox VE 9.1:
+
+```
+stage: Define · stage: Start
+created and started: handle=proxmox:pve:100
+is_running -> true · stop -> destroyed · is_running -> false
+VMs on the node afterwards: none
+```
+
+`cfg.disk` names something on the FAR side, in two forms — `template:<vmid>` to
+clone, `<storage>:<gib>` for a fresh disk — and anything else is refused naming
+both. The likeliest mistake is a local path, the habit every other backend
+teaches, and treating it as a storage name would create a disk nobody asked for.
+
+The vmid lives in the record (`api_socket` = `proxmox:<node>:<vmid>`), never the
+name: two VMs on a node may share one and every `qm` call takes the id. A record
+without that handle was not created by this backend and is refused rather than
+acted on.
+
+**Still open, and deliberately**: `ip()` returns `None` — reaching a guest's
+address needs the QEMU guest agent inside it, and inventing one from the config
+would be worse than saying nothing. Snapshots use the trait's fail-closed
+default; the API supports them (the spike exercised one) but nothing here has
+called it.
