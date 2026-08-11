@@ -5170,3 +5170,9 @@ msgstr "o volume foi provisionado em {url} sem um `kind: Secret` (uma password i
 
 msgid "volume '{name}': spec.{kind} points at {given}, but spec.provision made {made} — remove the server/share from the block and let it be derived, or provision what you are mounting"
 msgstr "volume '{name}': spec.{kind} aponta para {given}, mas spec.provision criou {made} — tira o server/share do bloco e deixa-o ser derivado, ou provisiona aquilo que estás a montar"
+
+msgid "volume '{name}': the dataset {ds} already existed and was adopted — its quota now follows this manifest"
+msgstr "volume '{name}': o dataset {ds} já existia e foi adoptado — a quota dele passa a seguir este manifesto"
+
+msgid "Subnet. For `bridge`, `10.<200-254>.0.0/16` (only /16); required for macvlan/ipvlan, e.g. `192.168.1.0/24`. Omit it and a free one is picked."
+msgstr "Subrede. Para `bridge`, `10.<200-254>.0.0/16` (só /16); obrigatória para macvlan/ipvlan, ex.: `192.168.1.0/24`. Sem ela, é escolhida uma livre."

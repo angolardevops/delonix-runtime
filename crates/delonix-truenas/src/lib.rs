@@ -136,6 +136,14 @@ pub struct NfsShareSpec {
 #[derive(Debug, Clone)]
 pub struct Provisioned {
     pub dataset: String,
+    /// `true` when the dataset ALREADY EXISTED and was adopted rather than
+    /// created. Surfaced because adoption is not free: `ensure_dataset` aligns
+    /// the quota of whatever it finds, so a manifest naming a dataset that
+    /// belongs to something else quietly re-caps it. Nothing on the NAS marks
+    /// a dataset as ours, so this cannot be prevented here — but it can be
+    /// said out loud, which is the difference between a documented behaviour
+    /// and a surprise.
+    pub adopted: bool,
     /// `/mnt/tank/…` on the appliance — the path an NFS export refers to.
     pub mountpoint: String,
     /// Bytes the NAS enforces. `None` = no quota (distinct from zero).
@@ -225,6 +233,7 @@ impl Client {
             .map_err(|e| {
                 Error::Invalid(format!("truenas: could not build the HTTP client: {e}"))
             })?;
+        validate_target_url(&target.base_url, true)?;
         let me = Self {
             http,
             base: target.base_url.trim_end_matches('/').to_string(),
@@ -282,7 +291,7 @@ impl Client {
             let detail = if detail.is_empty() {
                 String::new()
             } else {
-                format!(": {}", &detail[..detail.len().min(400)])
+                format!(": {}", truncate_chars(detail, 400))
             };
             return Err(Error::Invalid(format!(
                 "truenas: {} returned HTTP {}{detail}",
@@ -381,6 +390,7 @@ impl Client {
         validate_dataset_name(&spec.dataset)?;
         validate_quota(spec.quota)?;
         let existing = self.get_dataset(&spec.dataset)?;
+        let adopted = existing.is_some();
         let ds: Dataset = match existing {
             None => {
                 let mut payload = serde_json::json!({
@@ -434,6 +444,7 @@ impl Client {
             ))
         })?;
         Ok(Provisioned {
+            adopted,
             dataset: fresh.id,
             mountpoint,
             quota: fresh.quota.as_ref().and_then(Prop::as_bytes),
@@ -573,11 +584,30 @@ impl Client {
 // Pure helpers
 // ===========================================================================
 
+/// Truncates to at most `max` BYTES without ever splitting a character.
+///
+/// Slicing a `String` by a byte index panics when it lands inside a multi-byte
+/// character — and every string this is used on is a response body from the
+/// far end. A server that answers 159 bytes of ASCII followed by an `é` was
+/// enough to panic the client (measured), which turns any error path into a
+/// remote crash: exactly the wrong behaviour for the code that exists to
+/// REPORT what went wrong.
+fn truncate_chars(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let mut end = max;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 fn parse_json<T: for<'de> Deserialize<'de>>(body: &str, path: &str) -> Result<T> {
     serde_json::from_str(body).map_err(|e| {
         Error::Invalid(format!(
             "truenas: could not read the answer from {path}: {e} (body starts: {})",
-            &body[..body.len().min(160)]
+            truncate_chars(body, 160)
         ))
     })
 }
@@ -607,6 +637,56 @@ pub fn validate_quota(quota: Option<u64>) -> Result<()> {
             MIN_QUOTA_BYTES / (1024 * 1024 * 1024)
         ))),
     }
+}
+
+/// Checks the target URL before any credential is put on the wire.
+///
+/// **This is where a credential can leak.** The URL comes from a manifest and
+/// names where the API key or password is SENT — a `provision:` block pointing
+/// at an attacker's host makes this code read a secret out of the local vault
+/// and hand it over. That much is inherent to the feature (a NAS address has to
+/// be configurable, the same way `docker login` takes a registry), but two
+/// shapes are refused because they have no legitimate use here:
+///
+/// * **`http://` together with a credential** — the secret would go over the
+///   wire in the clear, readable by anything on the path. A plain-HTTP target
+///   is allowed only when there is nothing to leak.
+/// * **userinfo in the URL** (`https://user:pass@host/`) — a password in the
+///   manifest under another name, dodging `kind: Secret` entirely, and a
+///   classic way to make a URL read as one host while reaching another.
+pub fn validate_target_url(url: &str, has_credential: bool) -> Result<()> {
+    let (scheme, rest) = url.split_once("://").ok_or_else(|| {
+        Error::Invalid(format!(
+            "invalid TrueNAS url '{url}': it needs a scheme (https://…)"
+        ))
+    })?;
+    let scheme = scheme.to_ascii_lowercase();
+    if scheme != "https" && scheme != "http" {
+        return Err(Error::Invalid(format!(
+            "invalid TrueNAS url '{url}': only http:// and https:// are understood"
+        )));
+    }
+    let hostport = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if hostport.is_empty() {
+        return Err(Error::Invalid(format!(
+            "invalid TrueNAS url '{url}': it names no host"
+        )));
+    }
+    if hostport.contains('@') {
+        return Err(Error::Invalid(format!(
+            "invalid TrueNAS url '{url}': credentials in the URL are not accepted — use \
+             `apiKeySecret` or `passwordSecret` (a `kind: Secret`), which is also what keeps \
+             them out of the manifest"
+        )));
+    }
+    if scheme == "http" && has_credential {
+        return Err(Error::Invalid(format!(
+            "refusing to send a credential to '{url}' over plain http — it would go over the \
+             wire in the clear. Use https:// (with `insecureTLS: true` if the appliance serves \
+             its stock self-signed certificate)"
+        )));
+    }
+    Ok(())
 }
 
 /// A dataset name has to be a plain ZFS path, and this is a security boundary
@@ -710,6 +790,45 @@ mod tests {
         // A non-numeric parsed value is not a byte count either.
         let p: Prop = serde_json::from_str(r#"{"parsed":"1 GiB"}"#).unwrap();
         assert_eq!(p.as_bytes(), None);
+    }
+
+    #[test]
+    fn um_corpo_de_resposta_nao_pode_fazer_o_cliente_entrar_em_panico() {
+        // A response body is attacker-controlled on every error path. Slicing
+        // it by a byte index panics when the cut lands inside a character —
+        // measured: 159 bytes of ASCII plus one `é` was enough. The whole
+        // point of that code is to REPORT a failure, so crashing there turns
+        // any error into a remote denial of service.
+        let body = format!("{}é", "A".repeat(159));
+        assert_eq!(truncate_chars(&body, 160).len(), 159);
+        // A cut that lands exactly on a boundary keeps everything up to it.
+        assert_eq!(truncate_chars("abcdef", 3), "abc");
+        // Shorter than the limit is returned whole, multi-byte or not.
+        assert_eq!(truncate_chars("olá", 400), "olá");
+        // Every prefix length of a multi-byte string is safe.
+        let s = "ãéíõü".repeat(20);
+        for n in 0..=s.len() {
+            let _ = truncate_chars(&s, n);
+        }
+    }
+
+    #[test]
+    fn a_url_nao_pode_levar_a_credencial_para_onde_quer_que_seja() {
+        // Plain HTTP with a credential: it would go over the wire in the clear.
+        assert!(validate_target_url("http://nas.local", true).is_err());
+        // …and is fine when there is nothing to leak.
+        assert!(validate_target_url("http://nas.local", false).is_ok());
+        // Userinfo is a password in the manifest under another name, and a
+        // classic way to make a URL read as one host and reach another.
+        assert!(validate_target_url("https://user:pw@evil.example", true).is_err());
+        assert!(validate_target_url("https://nas.local@evil.example/", true).is_err());
+        // Shapes that carry no host, or a scheme this code does not speak.
+        assert!(validate_target_url("nas.local", true).is_err());
+        assert!(validate_target_url("https://", true).is_err());
+        assert!(validate_target_url("file:///etc/passwd", true).is_err());
+        // The legitimate ones.
+        assert!(validate_target_url("https://nas.local", true).is_ok());
+        assert!(validate_target_url("https://10.0.0.5:8443/", true).is_ok());
     }
 
     #[test]
