@@ -1042,16 +1042,20 @@ fn cmd_pull(images: &ImageStore, reference: &str, verify: Option<&std::path::Pat
     // transition to a NEW layer closes the previous bar's line, without
     // depending on the registry sending a Content-Length (chunked transfers
     // may not) to know when one layer ends and the next begins.
-    let last = std::cell::Cell::new((0usize, 0u64));
+    // `Mutex` and not `Cell`: the pull runs the layers in PARALLEL and every
+    // worker reports through here, so the callback has to be `Sync`. The lock
+    // is not a hot path — it is taken once per progress tick (every 2 MiB), not
+    // per byte.
+    let last = std::sync::Mutex::new((0usize, 0u64));
     let on_progress = move |layer: usize, layer_total: usize, done: u64, total: Option<u64>| {
-        let (last_layer, last_done) = last.get();
+        let (last_layer, last_done) = *last.lock().unwrap();
         if last_layer != 0 && last_layer != layer {
             super::output::progress_done();
         }
         let advanced = last_layer != layer || done.saturating_sub(last_done) >= 2 * 1024 * 1024;
         let finished = total.map(|t| done >= t).unwrap_or(false);
         if advanced || finished {
-            last.set((layer, done));
+            *last.lock().unwrap() = (layer, done);
             super::output::progress_bar(
                 &format!("[pull] layer {layer}/{layer_total}"),
                 done,
