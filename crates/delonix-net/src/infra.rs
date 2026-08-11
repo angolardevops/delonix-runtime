@@ -14,7 +14,8 @@
 //! **Known gotcha:** you CANNOT `nsenter --user --net` from the host
 //! (it gives `setgroups: Operation not permitted`). So all the configuration INSIDE the
 //! netns is done by the holder itself (already root in the userns) — hence the re-exec of the
-//! binary to [`holder_main`].
+//! binary to the holder entry point (`netns holder`/`netns pin`, intercepted in
+//! the bin's `main()` before clap parses anything).
 
 use crate::{run, run_ok, SLIRP_IP};
 use delonix_runtime_core::peer_cred::peer_uid;
@@ -91,7 +92,7 @@ fn control_sock_path() -> PathBuf {
 }
 
 /// Where the control socket lived BEFORE v0.34.2 (directly under `ingress_dir()`,
-/// i.e. derived from `DELONIX_ROOT`) — see [`runtime_dir`] for why it moved. Kept
+/// i.e. derived from `DELONIX_ROOT`) — see `runtime_dir` for why it moved. Kept
 /// for ONE purpose only: a holder started by a pre-v0.34.2 binary is still bound
 /// HERE, so finding this file lets [`stale_holder_message`] name the cause
 /// (in-place upgrade) instead of leaving the operator with a bare `ENOENT`.
@@ -234,11 +235,11 @@ fn runtime_dir() -> PathBuf {
     PathBuf::from("/run/delonix-net")
 }
 
-/// The `(env var, value)` pair that PINS [`runtime_dir`] for a child that will run
-/// with a different **uid view** than ours: the holder ([`start_holder`]) and the
+/// The `(env var, value)` pair that PINS `runtime_dir` for a child that will run
+/// with a different **uid view** than ours: the holder (`start_holder`) and the
 /// `--net <custom>` re-exec passes (`nsenter -U … ip netns exec`, see
 /// `cmd::container::reexec_into_netns`). Inside the holder's userns `geteuid()` is
-/// **0**, so a child left to compute [`runtime_dir`] on its own resolves
+/// **0**, so a child left to compute `runtime_dir` on its own resolves
 /// `/run/delonix-net` — a directory that does not exist — and every socket
 /// operation there fails with a bare `ENOENT`.
 ///
@@ -246,14 +247,14 @@ fn runtime_dir() -> PathBuf {
 /// <port>` failed with ``slirp api-socket … No such file or directory`` because the
 /// re-exec passed `DELONIX_ROOT` but not this. Until v0.34.1 the sockets lived under
 /// `ingress_dir()` (i.e. `DELONIX_ROOT`-derived), so pinning the root alone happened
-/// to be enough; moving them to [`runtime_dir`] made this a second, independent
+/// to be enough; moving them to `runtime_dir` made this a second, independent
 /// thing to pin. Returned as ONE pair precisely so no caller can pass a var/value
 /// mismatch, and so `grep runtime_dir_env` finds every child that needs it.
 pub fn runtime_dir_env() -> (&'static str, PathBuf) {
     (RUNTIME_DIR_ENV, runtime_dir())
 }
 
-/// Creates [`runtime_dir`] with restrictive permissions (`0700`) — defense in
+/// Creates `runtime_dir` with restrictive permissions (`0700`) — defense in
 /// depth alongside the control socket's own `0600`+`SO_PEERCRED` guard.
 fn ensure_runtime_dir() -> Result<()> {
     let dir = runtime_dir();
@@ -3218,7 +3219,7 @@ pub struct NetDef {
     pub prefix: String, // e.g.: "10.201"
     /// The network's egress intent, PERSISTED to survive the holder's
     /// respawn (the nft and the FQDN registry live in an ephemeral netns). Re-applied in
-    /// [`ensure_net_bridge`] when the bridge is recreated.
+    /// `ensure_net_bridge` when the bridge is recreated.
     #[serde(default)]
     pub egress: EgressState,
 }
@@ -3799,7 +3800,7 @@ pub fn set_egress_host(bridge: &str, suffix: &str) -> Result<()> {
 
 /// Enables/updates the L4 DDoS protection (per-source rate-limit + ct-count). `conn_rate`
 /// = new connections/second per IP; `conn_max` = concurrent connections per IP.
-/// best-effort in the holder (degrades if the kernel doesn't support it). See [`do_l4guard`].
+/// best-effort in the holder (degrades if the kernel doesn't support it). See `do_l4guard`.
 pub fn set_l4_guard(conn_rate: u32, conn_max: u32) -> Result<()> {
     control_send(&format!("l4guard {conn_rate} {conn_max}"))
 }
@@ -3839,7 +3840,7 @@ pub fn set_wg_peer(
 /// **Realizes an overlay network's VXLAN uplink** in the infra netns: bridge +
 /// VXLAN device (`<dev>`/`<vni>`) + peers' FDB (`dsts` = `wg_ip` if encrypted,
 /// otherwise `node_ip`). The gateway aligns the subnet to the one decided by the `NetworkStore`.
-/// Requires the holder up (`ensure_up` first). Idempotent. See [`do_vxlan`].
+/// Requires the holder up (`ensure_up` first). Idempotent. See `do_vxlan`.
 pub fn set_vxlan(dev: &str, vni: u32, bridge: &str, gateway: &str, dsts: &[String]) -> Result<()> {
     // Validates the destinations HERE, BEFORE interpolating them into the control-socket line
     // (the audit's valid_* discipline — validate before the `format!`/socket, not only

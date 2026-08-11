@@ -224,6 +224,30 @@ fn valid_env_name(s: &str) -> bool {
 /// What a value renders as in `inspect` when it is not revealed.
 const REDACTED_VALUE: &str = "\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}";
 
+/// Builds the machine view, applying the SAME redaction rule as the text path:
+/// a format flag must never be a way around it. Only `--reveal` unlocks a
+/// value, and it has to be typed on purpose.
+///
+/// This is a function and not three lines inline in `run()` for one reason: a
+/// test can call it. The first version of the test built a `SecretInspect` by
+/// re-implementing this `if reveal` inside the test body, which meant it proved
+/// that `serde_json` serializes a map — flipping the production line to
+/// `v.as_str()` unconditionally, the exact regression it existed to catch, left
+/// it green. A test that cannot fail is worse than no test: it is a claim of
+/// coverage over an uncovered path.
+fn inspect_view(s: &Secret, reveal: bool) -> SecretInspect<'_> {
+    SecretInspect {
+        name: &s.name,
+        keys: s.data.keys().map(String::as_str).collect(),
+        data: s
+            .data
+            .iter()
+            .map(|(k, v)| (k.as_str(), if reveal { v.as_str() } else { REDACTED_VALUE }))
+            .collect(),
+        revealed: reveal,
+    }
+}
+
 /// The machine view of a secret (`inspect -o json`).
 ///
 /// `keys` is listed separately from `data` because it is the field automation
@@ -522,20 +546,7 @@ pub fn run(action: SecretCmd) -> Result<()> {
         } => {
             let s = store.load(&name)?;
             if output == output::OutputFormat::Json {
-                // The SAME redaction rule as the text path, deliberately: a
-                // format flag must never be a way around it. Only `--reveal`
-                // unlocks a value, and it has to be typed on purpose.
-                let data: std::collections::BTreeMap<&str, &str> = s
-                    .data
-                    .iter()
-                    .map(|(k, v)| (k.as_str(), if reveal { v.as_str() } else { REDACTED_VALUE }))
-                    .collect();
-                return output::print_json(&[SecretInspect {
-                    name: &s.name,
-                    keys: s.data.keys().map(String::as_str).collect(),
-                    data,
-                    revealed: reveal,
-                }]);
+                return output::print_json(&[inspect_view(&s, reveal)]);
             }
             println!("Name:  {}", s.name);
             for (k, v) in &s.data {
@@ -665,7 +676,7 @@ pub fn run(action: SecretCmd) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_kv, read_env_keys, valid_env_name, FromEnv, SecretInspect, REDACTED_VALUE};
+    use super::{inspect_view, parse_kv, read_env_keys, valid_env_name, FromEnv, Secret};
     use std::collections::BTreeMap;
 
     #[test]
@@ -819,30 +830,29 @@ mod tests {
     }
 
     /// `-o json` must obey the SAME redaction as the text path. A format flag
-    /// that also unlocked values would make `--reveal` decorative, and the
-    /// leak would be silent — the JSON looks the same either way to whoever is
+    /// that also unlocked values would make `--reveal` decorative, and the leak
+    /// would be silent — the JSON looks the same either way to whoever is
     /// piping it somewhere.
+    ///
+    /// It calls `inspect_view`, the function PRODUCTION calls. The first
+    /// version of this test rebuilt the redaction inside the test body, so
+    /// reverting the production line left it green — it was asserting that
+    /// serde works. Caught in adversarial review of this same series.
     #[test]
     fn o_formato_json_nao_e_uma_via_para_contornar_a_redaccao() {
-        let data = BTreeMap::from([("senha".to_string(), "SUPERSECRETO".to_string())]);
+        let s = Secret {
+            name: "s".into(),
+            data: BTreeMap::from([("senha".to_string(), "SUPERSECRETO".to_string())]),
+            updated_unix: 0,
+        };
         for reveal in [false, true] {
-            let shown: BTreeMap<&str, &str> = data
-                .iter()
-                .map(|(k, v)| (k.as_str(), if reveal { v.as_str() } else { REDACTED_VALUE }))
-                .collect();
-            let out = serde_json::to_string(&SecretInspect {
-                name: "s",
-                keys: data.keys().map(String::as_str).collect(),
-                data: shown,
-                revealed: reveal,
-            })
-            .unwrap();
+            let out = serde_json::to_string(&inspect_view(&s, reveal)).unwrap();
             assert_eq!(
                 out.contains("SUPERSECRETO"),
                 reveal,
                 "o valor so pode aparecer com --reveal (reveal={reveal})"
             );
-            // The key name is NOT a secret, and is what a consumer checks for.
+            // A chave NAO e segredo, e e o que um consumidor verifica.
             assert!(out.contains("senha"));
         }
     }

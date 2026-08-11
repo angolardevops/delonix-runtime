@@ -8141,3 +8141,9 @@ msgstr "parte da árvore era ilegível de fora do user namespace (subuid rootles
 
 msgid "its tree holds the share volume(s) {list} — remove those first"
 msgstr "a sua árvore contém a(s) partilha(s) {list} — remove essas primeiro"
+
+msgid "--net-burst only makes sense together with --net-bps"
+msgstr "o --net-burst só faz sentido acompanhado do --net-bps"
+
+msgid "--net-burst only makes sense together with --net-rate"
+msgstr "o --net-burst só faz sentido acompanhado do --net-rate"

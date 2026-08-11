@@ -163,6 +163,15 @@ pub(crate) const RECONCILED_CONTAINER_FIELDS: &[&str] = &[
     "restartPolicy",
     "network",
     "hostname",
+    // These two were in `hot_fields("Container")` and in `converge`, and NOT
+    // here — so `diff_fields` (which iterates desired ∪ actual ∪ last) never saw
+    // the key, the two `converge` arms were unreachable, and changing `netBps`
+    // in an applied manifest was a no-op that `stack plan` reported as «no
+    // changes» with `--detailed-exitcode` 0. A drift gate in CI passed over real
+    // drift. Found in adversarial review; `hot_fields_sao_um_subconjunto_dos_comparados`
+    // now makes the three lists impossible to leave disagreeing.
+    "netBps",
+    "netBurst",
 ];
 
 /// Renders a persisted [`Mount`] back into the `source:/target[:ro]` form the
@@ -265,6 +274,15 @@ pub(crate) fn desired_container_fields(
     if let Some(h) = &spec.hostname {
         f.insert("hostname".into(), h.clone());
     }
+    // Only emitted when the manifest names them: an absent `netBps` means "no
+    // shaping asked for", not "shaping of zero", and emitting a default here
+    // would report drift on every plan for every container that never used it.
+    if let Some(b) = &spec.net_bps {
+        f.insert("netBps".into(), b.clone());
+    }
+    if let Some(b) = &spec.net_burst {
+        f.insert("netBurst".into(), b.clone());
+    }
     f
 }
 
@@ -340,6 +358,14 @@ pub(crate) fn actual_container_fields(
     );
     if let Some(h) = &c.hostname {
         f.insert("hostname".into(), h.clone());
+    }
+    // Mirrors `desired_container_fields`: absent means no shaping, and the two
+    // sides have to agree on that or every unshaped container reports drift.
+    if let Some(b) = &c.net_bps {
+        f.insert("netBps".into(), b.clone());
+    }
+    if let Some(b) = &c.net_burst {
+        f.insert("netBurst".into(), b.clone());
     }
     f
 }
@@ -5662,6 +5688,17 @@ impl UpdateOpts {
             && self.memory.is_none()
             && self.cpus.is_none()
     }
+
+    /// `--net-burst` alone: a burst without a rate configures nothing.
+    ///
+    /// It is NOT counted in [`is_empty`] on purpose — it is not a change by
+    /// itself. But answering it with «nothing to do: pass at least one change»
+    /// tells someone who DID pass a flag that they passed none, and the list of
+    /// suggestions did not even mention `--net-burst`. `run` already answers
+    /// this exact case to the point; the two should say the same thing.
+    fn burst_without_rate(&self) -> bool {
+        self.net_burst.is_some() && self.net_rate.is_none()
+    }
 }
 
 /// Next free interface index for an additional network. `eth0` is always the
@@ -5686,6 +5723,14 @@ fn next_extra_idx(c: &Container) -> u32 {
 /// lie about the real state. So there's no transactionality nor rollback; it
 /// fails fast and whatever went through stays (same semantics as `stack apply`).
 fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
+    // Checked BEFORE `is_empty`: someone who passed `--net-burst` alone did pass
+    // a flag, and «pass at least one change» would be answering a question they
+    // did not ask. Same sentence `run` gives for the same mistake.
+    if o.burst_without_rate() {
+        return Err(Error::Invalid(
+            "--net-burst only makes sense together with --net-rate".into(),
+        ));
+    }
     if o.is_empty() {
         return Err(Error::Invalid("nothing to do: pass at least one change (--publish-add/--publish-rm/--volume-add/--volume-rm/--net-connect/--net-disconnect/--net-rate/--net-rate-clear/--memory/--cpus)".into()));
     }
@@ -5837,21 +5882,31 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
         // zero, which `run` refuses. One flag, one meaning.
         let parsed = delonix_net::parse_net_rate(rate, o.net_burst.as_deref())?;
         infra::set_net_rate(&c.id, parsed.rate_bit, parsed.burst_bytes)?;
-        let burst_s = o
-            .net_burst
-            .clone()
-            .unwrap_or_else(|| parsed.burst_bytes.to_string());
+        // Persist what the OPERATOR wrote, and `None` when they wrote nothing —
+        // symmetric with `run`. Storing the computed number instead made the two
+        // paths read differently for the same effective setting: `run` showed
+        // `Rate limit: 10mbit` and `update` showed `10mbit (burst 125000)`, an
+        // unitless number where the old default at least said `32kb`. Same
+        // bucket in the kernel, two stories in `describe` — in the very commit
+        // whose thesis is «one flag, one meaning».
+        let burst_s = o.net_burst.clone();
         let (r, b) = (rate.clone(), burst_s.clone());
         store.update(&c.id, |cur| {
             cur.net_bps = Some(r.clone());
-            cur.net_burst = Some(b.clone());
+            cur.net_burst = b.clone();
             true
         })?;
+        // What is REPORTED is the burst actually programmed — echoed verbatim
+        // when the operator gave one, and formatted with a unit when it was
+        // derived. A bare `125000` reads like a setting nobody chose.
+        let burst_show = burst_s
+            .clone()
+            .unwrap_or_else(|| super::output::fmt_size(parsed.burst_bytes));
         println!(
             "{}",
             super::po::tf(
                 "{name}: bandwidth limited to {rate} (burst {burst_s})",
-                &[("name", &c.name), ("rate", rate), ("burst_s", &burst_s)],
+                &[("name", &c.name), ("rate", rate), ("burst_s", &burst_show)],
             )
         );
     }
