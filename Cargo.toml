@@ -12,6 +12,7 @@ members = [
     "crates/delonix-mgmt",
     "crates/delonix-scan",
     "crates/delonix-truenas",
+    "crates/delonix-proxmox",
 ]
 
 [workspace.package]
