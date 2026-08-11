@@ -132,12 +132,47 @@ enum FromEnv {
 
 impl FromEnv {
     /// `(secret key, environment variable)` pairs, in a stable order.
+    ///
+    /// Both sides go through [`env_var_name`], so a leading `$` never reaches
+    /// either the reader or the renderer.
     fn pairs(&self) -> Vec<(String, String)> {
         match self {
-            FromEnv::Names(v) => v.iter().map(|n| (n.clone(), n.clone())).collect(),
-            FromEnv::Mapped(m) => m.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+            FromEnv::Names(v) => v
+                .iter()
+                .map(|n| {
+                    let n = env_var_name(n);
+                    (n.clone(), n)
+                })
+                .collect(),
+            FromEnv::Mapped(m) => m
+                .iter()
+                .map(|(k, v)| (k.clone(), env_var_name(v)))
+                .collect(),
         }
     }
+}
+
+/// Strips a leading `$` from an environment variable name.
+///
+/// Two problems close here, and the second is the one that had a live bug.
+///
+/// A manifest written by hand naturally says `password: $PGPASSWORD` — the
+/// shell habit — and a name starting with `$` names nothing, so
+/// [`valid_env_name`] refused a spelling that reads as correct.
+///
+/// And [`spec_with_defaults`] RENDERS the variable with a `$`, so without this
+/// the output of `stack apply --dry-run` was not valid input to `apply`: each
+/// pass added another `$` (`$PGPASSWORD` → `$$PGPASSWORD`) and re-applying the
+/// printed spec was refused. That breaks the promise the dry-run exists to make
+/// — that it describes what WILL be applied — and with it the GitOps flow
+/// `docs/gitops.md` publishes (plan on the PR, apply on the merge).
+///
+/// Normalising HERE, in the one place both the reader ([`read_env_keys`]) and
+/// the renderer go through, is what keeps the two from drifting — the same
+/// generator-and-reader-share-the-format discipline as `fw_rule_tail`. There is
+/// no ambiguity to lose: a POSIX variable name can never begin with `$`.
+fn env_var_name(s: &str) -> String {
+    s.strip_prefix('$').unwrap_or(s).to_string()
 }
 
 /// Reads the named environment variables.
@@ -244,10 +279,7 @@ pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
                     // second pass produced `$$VAR`. A `--dry-run` that does not
                     // describe what will be applied is worse than none, and the
                     // field is already called `fromEnv`.
-                    m.insert(
-                        serde_yaml::Value::from(key),
-                        serde_yaml::Value::from(var),
-                    );
+                    m.insert(serde_yaml::Value::from(key), serde_yaml::Value::from(var));
                 }
                 serde_yaml::Value::Mapping(m)
             }
@@ -707,5 +739,40 @@ mod tests {
         assert!(e
             .to_string()
             .contains("not a valid environment variable name"));
+    }
+
+    /// The dry-run RENDERS the variable with a `$`, so its output has to be
+    /// valid INPUT — otherwise `stack apply --dry-run` does not describe what
+    /// will be applied, and the published GitOps flow (plan on the PR, apply on
+    /// the merge) breaks on the most sensitive Kind there is.
+    ///
+    /// Reverting `env_var_name` makes this fail: the pair comes back as
+    /// `$PGPASSWORD`, the render adds a second `$`, and the round-trip drifts
+    /// one `$` per pass.
+    #[test]
+    fn um_cifrao_a_frente_da_variavel_nao_se_acumula_no_round_trip() {
+        let mapped = FromEnv::Mapped(BTreeMap::from([(
+            "password".to_string(),
+            "$PGPASSWORD".to_string(),
+        )]));
+        assert_eq!(
+            mapped.pairs(),
+            vec![("password".to_string(), "PGPASSWORD".to_string())],
+            "the `$` is presentation, it is not part of the variable name"
+        );
+
+        // The list form normalises the KEY too — a secret key called
+        // `$DATABASE_URL` is not what anyone writing the shell habit meant.
+        let names = FromEnv::Names(vec!["$DATABASE_URL".to_string()]);
+        assert_eq!(
+            names.pairs(),
+            vec![("DATABASE_URL".to_string(), "DATABASE_URL".to_string())]
+        );
+
+        // And with it normalised, the name now passes the validator that used
+        // to refuse it — which is the second half of the same bug.
+        for (_, var) in mapped.pairs() {
+            assert!(valid_env_name(&var), "{var:?} should be accepted");
+        }
     }
 }
