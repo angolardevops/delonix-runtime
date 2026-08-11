@@ -1,0 +1,28 @@
+{
+  "name": "vmfile",
+  "displayName": "VMfile (delonix)",
+  "description": "Syntax highlighting for VMfile — delonix's recipe for a bootable VM image.",
+  "version": "0.1.0",
+  "publisher": "delonix",
+  "license": "Apache-2.0",
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "vmfile",
+        "aliases": ["VMfile", "vmfile"],
+        "filenames": ["VMfile"],
+        "filenamePatterns": ["VMfile.*", "*.VMfile", "*.vmfile"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "vmfile",
+        "scopeName": "source.vmfile",
+        "path": "./syntaxes/vmfile.tmLanguage.json"
+      }
+    ]
+  }
+}
