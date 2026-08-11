@@ -1764,7 +1764,7 @@ pub enum ContainerCmd {
         /// Bandwidth cap, in bit/s with a suffix (`10mbit`, `512kbit`, `1gbit`).
         #[arg(long = "net-rate", value_name = "RATE")]
         net_rate: Option<String>,
-        /// Burst for the bandwidth cap (default: `32kb`). Only with `--net-rate`.
+        /// Burst for the bandwidth cap (default: ~100 ms of throughput, at least 16 KiB). Only with `--net-rate`.
         #[arg(long = "net-burst", value_name = "BURST")]
         net_burst: Option<String>,
         /// Remove the bandwidth cap.
@@ -5577,53 +5577,6 @@ impl UpdateOpts {
     }
 }
 
-/// Converts a rate (`10mbit`, `512kbit`, `1gbit`, or raw bit/s) into bit/s.
-/// Pure function — the suffixes are decimal (k=1000), like `tc`, and NOT 1024:
-/// a `10mbit` that gave 10485760 bit/s would not be what `tc` programs.
-fn parse_rate_bits(s: &str) -> Result<u64> {
-    let t = s.trim().to_lowercase();
-    let t = t.strip_suffix("bit").unwrap_or(&t);
-    let (num, mult) = match t.strip_suffix('g') {
-        Some(n) => (n, 1_000_000_000u64),
-        None => match t.strip_suffix('m') {
-            Some(n) => (n, 1_000_000),
-            None => match t.strip_suffix('k') {
-                Some(n) => (n, 1_000),
-                None => (t, 1),
-            },
-        },
-    };
-    let v: f64 = num
-        .trim()
-        .parse()
-        .map_err(|_| Error::Invalid(format!("invalid rate: {s} (e.g. 10mbit, 512kbit, 1gbit)")))?;
-    if v <= 0.0 {
-        return Err(Error::Invalid(super::po::tf(
-            "rate must be positive: {s}",
-            &[("s", s)],
-        )));
-    }
-    Ok((v * mult as f64) as u64)
-}
-
-/// Converts a burst size (`32kb`, `1mb`, or raw bytes) into bytes.
-fn parse_burst_bytes(s: &str) -> Result<u64> {
-    let t = s.trim().to_lowercase();
-    let t = t.strip_suffix('b').unwrap_or(&t);
-    let (num, mult) = match t.strip_suffix('m') {
-        Some(n) => (n, 1_000_000u64),
-        None => match t.strip_suffix('k') {
-            Some(n) => (n, 1_000),
-            None => (t, 1),
-        },
-    };
-    let v: f64 = num
-        .trim()
-        .parse()
-        .map_err(|_| Error::Invalid(format!("invalid burst: {s} (e.g. 32kb, 1mb)")))?;
-    Ok((v * mult as f64) as u64)
-}
-
 /// Next free interface index for an additional network. `eth0` is always the
 /// primary network, so the extras start at 1 — and we reuse holes left by a
 /// `--net-disconnect` instead of always counting upward.
@@ -5789,10 +5742,18 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
                 &[("name", &c.name)],
             )));
         }
-        let bits = parse_rate_bits(rate)?;
-        let burst_s = o.net_burst.clone().unwrap_or_else(|| "32kb".to_string());
-        let burst = parse_burst_bytes(&burst_s)?;
-        infra::set_net_rate(&c.id, bits, burst)?;
+        // The SAME parser `run` uses (`cmd_run`'s `--net-bps` path). It used to
+        // be a private pair here, and the two had DRIFTED: this one read the
+        // burst in decimal (`32kb` = 32 000) and `run` in binary (32 768), so
+        // the same flag written the same way programmed a different bucket
+        // depending on which command applied it. It also accepted a burst of
+        // zero, which `run` refuses. One flag, one meaning.
+        let parsed = delonix_net::parse_net_rate(rate, o.net_burst.as_deref())?;
+        infra::set_net_rate(&c.id, parsed.rate_bit, parsed.burst_bytes)?;
+        let burst_s = o
+            .net_burst
+            .clone()
+            .unwrap_or_else(|| parsed.burst_bytes.to_string());
         let (r, b) = (rate.clone(), burst_s.clone());
         store.update(&c.id, |cur| {
             cur.net_bps = Some(r.clone());
@@ -6724,9 +6685,8 @@ mod tests {
     use super::{compose_io_max, parse_io_rate};
     use super::{
         container_ips, fmt_ports, fmt_status, next_extra_idx, normalize_container_spec,
-        parse_burst_bytes, parse_cri_log_line, parse_rate_bits, parse_signal, policy_supervised,
-        reexec_env, should_restart, unix_secs_to_rfc3339_prefix, valid_container_name,
-        ContainerSpec,
+        parse_cri_log_line, parse_signal, policy_supervised, reexec_env, should_restart,
+        unix_secs_to_rfc3339_prefix, valid_container_name, ContainerSpec,
     };
     use delonix_runtime_core::{Container, ExtraNet, Status};
 
@@ -6955,32 +6915,6 @@ mod tests {
 
     fn v(xs: &[&str]) -> Vec<String> {
         xs.iter().map(|s| s.to_string()).collect()
-    }
-
-    #[test]
-    fn taxas_usam_multiplos_decimais_como_o_tc() {
-        // k/m/g are 1000, not 1024 — it's what `tc` programs. A `10mbit` giving
-        // 10485760 bit/s would be a different limit than the one requested.
-        assert_eq!(parse_rate_bits("10mbit").unwrap(), 10_000_000);
-        assert_eq!(parse_rate_bits("512kbit").unwrap(), 512_000);
-        assert_eq!(parse_rate_bits("1gbit").unwrap(), 1_000_000_000);
-        assert_eq!(parse_rate_bits("1000").unwrap(), 1000);
-        assert_eq!(parse_rate_bits("  10MBIT ").unwrap(), 10_000_000);
-    }
-
-    #[test]
-    fn invalid_or_nonpositive_rate_is_rejected() {
-        assert!(parse_rate_bits("depressa").is_err());
-        assert!(parse_rate_bits("0").is_err());
-        assert!(parse_rate_bits("-5mbit").is_err());
-        assert!(parse_burst_bytes("grande").is_err());
-    }
-
-    #[test]
-    fn bursts_legiveis() {
-        assert_eq!(parse_burst_bytes("32kb").unwrap(), 32_000);
-        assert_eq!(parse_burst_bytes("1mb").unwrap(), 1_000_000);
-        assert_eq!(parse_burst_bytes("4096").unwrap(), 4096);
     }
 
     fn c_com_extras(idxs: &[u32]) -> Container {

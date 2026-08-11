@@ -560,7 +560,22 @@ fn parse_rate_bits(s: &str) -> Result<u64> {
     if !n.is_finite() || n <= 0.0 {
         return Err(Error::Invalid(format!("--net-bps must be positive: '{s}'")));
     }
-    Ok((n * mult as f64) as u64)
+    scaled(n, mult).ok_or_else(|| Error::Invalid(format!("--net-bps is out of range: '{s}'")))
+}
+
+/// `value * mult` as a `u64`, or `None` if it does not fit.
+///
+/// `as u64` on an `f64` is a SATURATING cast in Rust, so without this a
+/// `--net-bps 99999999999g` became `u64::MAX` — not a refusal, and not the limit
+/// asked for either. The same guard is in `delonix-volume::parse_size_bytes`,
+/// written there for a quota that reported itself as SET and could never be
+/// reached; it just was never carried over to its siblings here.
+fn scaled(value: f64, mult: u64) -> Option<u64> {
+    let scaled = value * mult as f64;
+    if !scaled.is_finite() || scaled >= u64::MAX as f64 {
+        return None;
+    }
+    Some(scaled as u64)
 }
 
 /// Human size in bytes (`256k`, `1m`, `4096`). Binary suffixes (k=1024, …);
@@ -573,7 +588,7 @@ fn parse_size_bytes(s: &str) -> Option<u64> {
     if !n.is_finite() || n < 0.0 {
         return None;
     }
-    Some((n * mult as f64) as u64)
+    scaled(n, mult)
 }
 
 /// Parses a bandwidth limit: a throughput (`--net-bps`) and an optional
@@ -3316,6 +3331,22 @@ mod tests {
         assert_eq!(r.tc_burst(), "32768");
         assert!(parse_net_rate("1mbit", Some("0")).is_err());
         assert!(parse_net_rate("1mbit", Some("bad")).is_err());
+    }
+
+    /// `as u64` on an `f64` SATURATES in Rust, so a value that does not fit
+    /// silently became `u64::MAX` — shaping the operator never asked for,
+    /// reported as applied. The same guard exists in
+    /// `delonix-volume::parse_size_bytes`; it was written there and never
+    /// carried over here. A value out of range is an input error, never a clamp.
+    #[test]
+    fn um_valor_fora_de_alcance_e_recusado_em_vez_de_saturar() {
+        assert!(parse_rate_bits("99999999999g").is_err());
+        assert!(parse_rate_bits("1e400").is_err());
+        // The largest sane values still parse — no over-eager rejection.
+        assert_eq!(parse_rate_bits("100g").unwrap(), 100_000_000_000);
+
+        assert_eq!(parse_size_bytes("99999999999t"), None);
+        assert_eq!(parse_size_bytes("1024t"), Some(1024 * 1024u64.pow(4)));
     }
 
     #[test]
