@@ -283,14 +283,17 @@ pub enum VolumeCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::volumes))]
         name: String,
     },
-    /// Readable detail of one or more volumes, `kubectl describe` style
-    /// (for humans; use `inspect` for the usual compact view).
+    /// Readable detail of one or more volumes, `kubectl describe` style.
+    ///
+    /// For humans; use `inspect` for the usual compact view.
     Describe {
         #[arg(required = true, add = ArgValueCandidates::new(super::complete::volumes))]
         names: Vec<String>,
     },
-    /// Remove a volume. Refuses while a container or a `kind: ShareVolume`
-    /// still references it (use `--force` to remove it anyway).
+    /// Remove a volume.
+    ///
+    /// Refuses while a container or a `kind: ShareVolume` still references it
+    /// (use `--force` to remove it anyway).
     Rm {
         #[arg(add = ArgValueCandidates::new(super::complete::volumes))]
         name: String,
@@ -461,6 +464,16 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         // is printed is what the appliance reports it is enforcing, not what
         // the manifest asked for.
         if let Some(p) = &provisioned {
+            // Adoption is not free: the quota of whatever was found gets
+            // aligned to the manifest. Nothing on the NAS marks a dataset as
+            // ours, so a name that belongs to something else is re-capped
+            // silently unless this says so.
+            if p.adopted {
+                super::output::warn(&super::po::tf(
+                    "volume '{name}': the dataset {ds} already existed and was adopted — its quota now follows this manifest",
+                    &[("name", name), ("ds", &p.share)],
+                ));
+            }
             println!(
                 "volume/{name}: {} {}:{} ({}, {})",
                 super::po::t("provisioned"),

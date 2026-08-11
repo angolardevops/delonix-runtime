@@ -246,6 +246,8 @@ pub(crate) struct Provisioned {
     /// Bytes the NAS says it enforces (`None` = unlimited).
     pub(crate) quota: Option<u64>,
     pub(crate) available: Option<u64>,
+    /// The dataset already existed and was ADOPTED, not created.
+    pub(crate) adopted: bool,
     /// Whether an NFS export was actually created. `provision:` with no
     /// `share:` provisions the dataset and publishes nothing — and a volume
     /// cannot mount what was never exported.
@@ -404,6 +406,7 @@ pub(crate) fn run_truenas(spec: &TrueNasSpec) -> Result<Provisioned> {
         share: p.mountpoint,
         quota: p.quota,
         available: p.available,
+        adopted: p.adopted,
         exported: spec.share.is_some(),
     })
 }
