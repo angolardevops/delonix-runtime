@@ -310,6 +310,18 @@ pub enum VolumeCmd {
         #[arg(long = "destroy-remote")]
         destroy_remote: bool,
     },
+    /// DESTROY every local volume that nothing references.
+    ///
+    /// **This deletes data.** It only takes a volume that is unreferenced by any
+    /// container (running OR stopped), is not a share carved out of another
+    /// volume, was not provisioned on a remote NAS, and uses the `local` driver.
+    /// Anything else is kept and the reason is printed — a prune that silently
+    /// skips is worse than one that refuses.
+    Prune {
+        /// Skip the confirmation prompt (REQUIRED when stdin is not a terminal).
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
     /// Apply the `kind: Volume` documents from a manifest (idempotent by name).
     Apply {
         #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
@@ -380,6 +392,7 @@ pub fn run(action: VolumeCmd) -> Result<()> {
             force,
             destroy_remote,
         } => cmd_rm_with(&store, &name, force, destroy_remote),
+        VolumeCmd::Prune { force } => cmd_prune(&store, force),
         VolumeCmd::Snapshot { action } => cmd_snapshot(&store, action),
         VolumeCmd::Apply { file } => {
             let path = manifest::resolve_path(file)?;
@@ -1047,6 +1060,74 @@ pub(crate) fn volume_refs(store: &VolumeStore, name: &str) -> VolumeRefs {
         }
     }
     out
+}
+
+/// `volumes prune` — destroys every LOCAL volume nothing references.
+///
+/// This is the most dangerous of the four prunes and the only one `system
+/// prune` deliberately does not include (nor does `docker system prune`):
+/// everything else here reclaims derived state that can be rebuilt, and this
+/// deletes the one thing that cannot.
+///
+/// So the decision is made by `prune::classify_volumes`, which is PURE and
+/// tested as data, and the four exclusions it applies are not caution in
+/// general — three of them are paths this engine has already been burned by:
+/// destroying a live container's data, destroying a parent `Storage` out from
+/// under every `kind: ShareVolume` carved into it, and orphaning a remote
+/// dataset by deleting the only record that pointed at it. The fourth (network
+/// drivers) is declared infrastructure, not debris.
+///
+/// A kept volume that LOOKS prunable prints why. A prune that quietly does
+/// nothing is the failure this repo calls dishonest reporting.
+fn cmd_prune(store: &VolumeStore, force: bool) -> Result<()> {
+    let facts = super::prune::volume_facts(store)?;
+    let (take, keep) = super::prune::classify_volumes(&facts);
+
+    for (v, why) in &keep {
+        if let Some(reason) = super::prune::keep_reason(why) {
+            println!(
+                "{}",
+                super::po::tf(
+                    "kept {name}: {reason}",
+                    &[("name", &v.name), ("reason", &reason)]
+                )
+            );
+        }
+    }
+    if take.is_empty() {
+        println!("{}", super::po::t("no unreferenced volume to remove"));
+        return Ok(());
+    }
+
+    let names: Vec<&str> = take.iter().map(|v| v.name.as_str()).collect();
+    if !super::prune::confirm(
+        force,
+        super::po::t(
+            "`volumes prune` DESTROYS the data of every unreferenced volume — pass --force to \
+             confirm when not on a terminal",
+        ),
+        Some(super::po::tf(
+            "This will DESTROY the data of {n} volume(s): {list}",
+            &[("n", &take.len().to_string()), ("list", &names.join(", "))],
+        )),
+        super::po::t("The data cannot be recovered afterwards. Continue? [y/N]"),
+    )? {
+        return Ok(());
+    }
+
+    let swept = super::prune::sweep_volumes(store, &take);
+    println!(
+        "{}",
+        super::po::tf(
+            "removed: {v} volume(s) — {size} freed",
+            &[
+                ("v", &swept.removed.len().to_string()),
+                ("size", &swept.freed.fmt()),
+            ]
+        )
+    );
+    super::prune::note_partial(swept.freed);
+    Ok(())
 }
 
 /// `storage rm`'s removal: the same reference check and mapped-tree removal as

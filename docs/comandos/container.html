@@ -185,6 +185,7 @@ Commands:
   update       **Reconfigure a RUNNING container without stopping it** — ports, volumes, networks, and bandwidth cap
   apply        Apply the `kind: Container` documents of a manifest (idempotent by name)
   init         Initialize a project with a Delonixfile + manifest
+  prune        Remove every stopped container and the rootfs debris they left behind
   dash         Dashboard (KPIs + table + problems) of the containers — interactive TUI, or `--once` for a text snapshot
   help         Print this message or the help of the given subcommand(s)
 
@@ -201,6 +202,7 @@ COMMAND MAP:
   Interact     commit · ssh · cp · exec · attach
   Configure    rename · update
   Declarative  init · apply
+  Maintenance  prune
   Dashboards   dash
 
 EXAMPLES:
