@@ -239,3 +239,31 @@ today is altered.
 **That decision belongs to this ADR and has not been taken.** Phase 2 is
 therefore: (a) decide and land the storage/detection split above; (b) then the
 backend. Writing (b) first would bake the wrong assumption into a crate.
+
+## Where this actually stands (2026-08-11, code review)
+
+Read against the code rather than against this document, three of those four
+things are already done and one is not:
+
+* `VmBackend::manages_own_storage()` and `auto_selectable()` **exist**, with
+  defaults, and `create_with`/`select_backend` **consult them** — the
+  storage/detection split of (a) landed.
+* `delonix-proxmox` **exists and implements the trait**, with the async-task
+  handling this ADR's spike identified.
+* `ProxmoxBackend::boot` is **deliberately unimplemented** and says so in its
+  own error: the engine does not ship a create path nobody has watched run.
+
+What is genuinely missing is the half of decision 2 that never landed: **the
+registry is a `static` table, so "a registry the caller populates" is not
+possible today.** A crate that depends on `delonix-vm` (as `delonix-proxmox`
+must, for the trait) cannot add itself to a `static` inside `delonix-vm`. Phase 2
+therefore needs, in order: a populatable registry whose entries can carry
+configuration (a Proxmox backend needs an endpoint and a token, and
+`fn() -> Box<dyn VmBackend>` cannot receive either), credentials resolved from a
+`kind: Secret` per decision 4, and only then `boot`, written against a live node.
+
+Until then `--backend proxmox` no longer answers «unknown backend» — which told
+the operator the crate does not exist, when it is sitting in the workspace. It
+now names the actual state and points here (`KNOWN_UNREGISTERED`, in
+`delonix-vm`). It remains **refused**: nothing about this makes an unfinished
+backend selectable.
