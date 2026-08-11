@@ -481,7 +481,7 @@ pub fn run(action: VmImageCmd) -> Result<()> {
             // the official catalogue; one with a `/` is used verbatim, so the
             // argument keeps meaning "somewhere of your own".
             let src = match source {
-                Some(s) => resolve_official_ref(&s),
+                Some(s) => resolve_official_ref(&s)?,
                 None => default_pull_source(no_k8s).to_string(),
             };
             cmd_pull(&store, &src, name)
@@ -489,7 +489,7 @@ pub fn run(action: VmImageCmd) -> Result<()> {
         VmImageCmd::LsRemote { source, no_k8s } => match source {
             // A bare name resolves against the official catalogue, so
             // `ls-remote appliances` needs no URL.
-            Some(s) => cmd_ls_remote(&resolve_official_ref(&s)),
+            Some(s) => cmd_ls_remote(&resolve_official_ref(&s)?),
             // `--no-k8s` predates the catalogue and still means "the base
             // images"; kept working rather than removed.
             None if no_k8s => cmd_ls_remote(
@@ -805,35 +805,88 @@ pub(crate) fn official_repo_for(img: &VmImage) -> Option<&'static OfficialRepo> 
 /// official repositories, so a pull of something the project publishes needs
 /// no URL. A reference WITH a `/` is a real one and is returned untouched —
 /// the parameter keeps meaning "a repository of your own".
-pub(crate) fn resolve_official_ref(reference: &str) -> String {
+pub(crate) fn resolve_official_ref_local(reference: &str) -> Option<String> {
     if reference.contains('/') {
-        return reference.to_string();
+        return Some(reference.to_string());
     }
     let name = reference.split(':').next().unwrap_or(reference);
-    // A bare product name is looked up by what the tags are called: the
-    // appliances repository tags its images `opnsense-26.1`, so `opnsense:26.1`
-    // and `opnsense-26.1` both point at the same artifact.
     for r in OFFICIAL_REPOS {
         if r.key == name {
-            return match r.default_tag {
+            return Some(match r.default_tag {
                 Some(tag) => format!(
                     "{}:{}",
                     r.repo,
                     reference.split_once(':').map_or(tag, |(_, t)| t)
                 ),
                 None => r.repo.to_string(),
-            };
+            });
         }
     }
-    // Not a repository key: treat it as a product tag in the appliances repo,
-    // where `<product>:<version>` is spelled `<product>-<version>`.
-    let appliances = OFFICIAL_REPOS
-        .iter()
-        .find(|r| r.key == "appliances")
-        .expect("appliances is in the table");
+    None
+}
+
+/// The tag a bare reference is asking for. `<product>:<version>` is spelled
+/// `<product>-<version>` in the official repositories, so both forms name the
+/// same artifact; anything else is already a tag.
+pub(crate) fn official_tag_candidate(reference: &str) -> String {
     match reference.split_once(':') {
-        Some((prod, ver)) => format!("{}:{prod}-{ver}", appliances.repo),
-        None => format!("{}:{reference}", appliances.repo),
+        Some((prod, ver)) => format!("{prod}-{ver}"),
+        None => reference.to_string(),
+    }
+}
+
+/// Resolves a reference to a full repository ref, asking the official
+/// repositories when the answer cannot be known locally.
+///
+/// [`resolve_official_ref_local`] settles what is decidable offline: anything
+/// with a `/` already names a repository, and a repository KEY (`k8s`, `base`,
+/// `appliances`) names one directly. Everything else is a bare tag, and the
+/// only honest way to place it is to look — the tag namespaces are not
+/// partitioned by any rule this code can derive. `rocky-9` lives in the base
+/// repository and `proxmox-ve-9.1` in the appliances one, and nothing in either
+/// string says so.
+///
+/// This used to fall back to the appliances repository for every bare tag. That
+/// is what turned `delonix vm pull rocky-9` into `no such image
+/// …/delonix-vm-appliances:rocky-9` — a 404 naming a repository the user had
+/// never typed, about an image that was published and public the whole time.
+/// The fallback was right when appliances were the only repository with product
+/// tags, and started lying the moment the base images shipped.
+pub(crate) fn resolve_official_ref(reference: &str) -> Result<String> {
+    if let Some(local) = resolve_official_ref_local(reference) {
+        return Ok(local);
+    }
+    let want = official_tag_candidate(reference);
+    let root = state_root();
+    let mut found: Vec<&str> = Vec::new();
+    let mut unreachable: Vec<String> = Vec::new();
+    for r in OFFICIAL_REPOS {
+        match delonix_image::registry::list_remote_tags(&root, r.repo) {
+            Ok(tags) if tags.iter().any(|t| t == &want) => found.push(r.repo),
+            Ok(_) => {}
+            // A repository we could not read is NOT a repository without the
+            // tag: a private package answers 404 exactly like a missing one.
+            // Reporting "nowhere" while one of the three never answered would
+            // be the same class of lie this function exists to remove.
+            Err(e) => unreachable.push(format!("{}: {e}", r.repo)),
+        }
+    }
+    match found.as_slice() {
+        [one] => Ok(format!("{one}:{want}")),
+        [] => {
+            let mut msg = super::po::tf(
+                "no official repository has the tag '{tag}' — run `delonix image vm ls-remote` to see what is published",
+                &[("tag", &want)],
+            );
+            for u in &unreachable {
+                msg.push_str(&format!("\n  unreachable — {u}"));
+            }
+            Err(Error::Invalid(msg))
+        }
+        many => Err(Error::Invalid(super::po::tf(
+            "the tag '{tag}' exists in more than one official repository ({repos}) — name the one you mean",
+            &[("tag", &want), ("repos", &many.join(", "))],
+        ))),
     }
 }
 
@@ -4520,19 +4573,35 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             "docker.io/library/alpine:latest",
             "localhost:5000/x:v1",
         ] {
-            assert_eq!(resolve_official_ref(as_is), as_is);
+            assert_eq!(resolve_official_ref_local(as_is).as_deref(), Some(as_is));
         }
         // Repository keys.
-        assert!(resolve_official_ref("appliances").ends_with("delonix-vm-appliances"));
+        assert!(resolve_official_ref_local("appliances")
+            .unwrap()
+            .ends_with("delonix-vm-appliances"));
         assert_eq!(
-            resolve_official_ref("k8s:1.35"),
-            "ghcr.io/angolardevops/delonix-vm-k8s:1.35"
+            resolve_official_ref_local("k8s:1.35").as_deref(),
+            Some("ghcr.io/angolardevops/delonix-vm-k8s:1.35")
         );
-        // A product name becomes the appliances repo's `<product>-<version>`.
-        assert_eq!(
-            resolve_official_ref("opnsense:26.1"),
-            "ghcr.io/angolardevops/delonix-vm-appliances:opnsense-26.1"
-        );
+    }
+
+    #[test]
+    fn um_tag_nu_nao_e_adivinhado_para_um_repositorio() {
+        // The bug this replaced: EVERY bare tag was assumed to live in the
+        // appliances repository, so `vm pull rocky-9` reported "no such image
+        // …/delonix-vm-appliances:rocky-9" for an image that was published,
+        // public, and in the base repository all along. `_local` now declines
+        // to answer, and the caller goes and looks.
+        for bare in ["rocky-9", "ubuntu-24.04", "opnsense:26.1", "proxmox-ve-9.1"] {
+            assert_eq!(
+                resolve_official_ref_local(bare),
+                None,
+                "{bare} must be discovered, not guessed"
+            );
+        }
+        // The `<product>:<version>` spelling still names the published tag.
+        assert_eq!(official_tag_candidate("opnsense:26.1"), "opnsense-26.1");
+        assert_eq!(official_tag_candidate("rocky-9"), "rocky-9");
     }
 
     #[test]
@@ -4543,10 +4612,16 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         img.distro = Some("opnsense".into());
         let tag = official_tag_for(&img, "opnsense:26.1");
         assert_eq!(tag, "opnsense-26.1");
-        let repo = official_repo_for(&img).unwrap();
+        // The TAG is what the two sides have to agree on without either knowing
+        // about the other: push derives it from the image's metadata, pull from
+        // the string the user typed. (The repository no longer has to match by
+        // construction — pull finds it by looking, which is why a base tag no
+        // longer lands in the appliances repo.)
+        assert_eq!(official_tag_candidate("opnsense:26.1"), tag);
         assert_eq!(
-            format!("{}:{}", repo.repo, tag),
-            resolve_official_ref("opnsense:26.1")
+            official_repo_for(&img).unwrap().key,
+            "appliances",
+            "an appliance is published to the appliances repository"
         );
         // A base image does not repeat the family in the tag.
         assert_eq!(
