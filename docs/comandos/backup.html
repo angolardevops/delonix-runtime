@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>delonix pod · Delonix Engine</title>
+<title>delonix backup · Delonix Engine</title>
 <script>(function(){try{
 var t=localStorage.getItem('delonix-docs-theme');
 if(t)document.documentElement.setAttribute('data-theme',t);
@@ -136,278 +136,85 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <h5><span class='lang-pt'>Documentação</span><span class='lang-en'>Docs</span></h5>
 <a href="../index.html"><span class='lang-pt'>Início</span><span class='lang-en'>Home</span></a><a href="../cheatsheet.html"><span class='lang-pt'>Cheatsheet</span><span class='lang-en'>Cheatsheet</span></a><a href="../kinds.html"><span class='lang-pt'>Kinds e templates</span><span class='lang-en'>Kinds &amp; templates</span></a><a href="../gitops.html"><span class='lang-pt'>GitOps e CI</span><span class='lang-en'>GitOps &amp; CI</span></a><a href="../estabilidade.html"><span class='lang-pt'>Promessa de estabilidade</span><span class='lang-en'>Stability promise</span></a><a href="../cloud.html"><span class='lang-pt'>cloud-init, cloud-img e CH</span><span class='lang-en'>cloud-init, cloud-img &amp; CH</span></a><a href="../labs.html"><span class='lang-pt'>Laboratórios</span><span class='lang-en'>Labs</span></a><a href="../arquitectura.html"><span class='lang-pt'>Arquitectura</span><span class='lang-en'>Architecture</span></a><a href="../c4.html"><span class='lang-pt'>Modelo C4 e system design</span><span class='lang-en'>C4 model &amp; system design</span></a><a href="../cri.html"><span class='lang-pt'>CRI — kubelet sem containerd</span><span class='lang-en'>CRI — kubelet without containerd</span></a><a href="../comparacao.html"><span class='lang-pt'>Delonix vs Docker vs Podman</span><span class='lang-en'>Delonix vs Docker vs Podman</span></a><a href="../tutorial-delonix-temp.html"><span class='lang-pt'>Projecto completo: Delonix Temp</span><span class='lang-en'>Full project: Delonix Temp</span></a>
 <h5><span class='lang-pt'>Referência CLI</span><span class='lang-en'>CLI reference</span></h5>
-<a href="../comandos/init.html">delonix init</a><a href="../comandos/container.html">delonix container</a><a href="../comandos/workload.html">delonix workload</a><a href="../comandos/pod.html" class="on">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/compose.html">delonix compose</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html">delonix net egress</a><a href="../comandos/httproute.html">delonix net httproute</a><a href="../comandos/tunnel.html">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix net boot</a><a href="../comandos/backup.html">delonix backup</a><a href="../comandos/restore.html">delonix restore</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a><a href="../comandos/schema.html">delonix schema · explain</a>
+<a href="../comandos/init.html">delonix init</a><a href="../comandos/container.html">delonix container</a><a href="../comandos/workload.html">delonix workload</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/compose.html">delonix compose</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html">delonix net egress</a><a href="../comandos/httproute.html">delonix net httproute</a><a href="../comandos/tunnel.html">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix net boot</a><a href="../comandos/backup.html" class="on">delonix backup</a><a href="../comandos/restore.html">delonix restore</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a><a href="../comandos/schema.html">delonix schema · explain</a>
 <h5><span class='lang-pt'>Projecto</span><span class='lang-en'>Project</span></h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
 </nav>
 <main>
-<h1>delonix pod</h1>
-<p class='tagline lang-pt'>Pods reais multi-container (create, ls, describe, rm, logs) — N containers como uma unidade.</p><p class='tagline lang-en'>Real multi-container pods (create, ls, describe, rm, logs) — N containers as one unit.</p>
-<p class='lang-pt'>Pods de verdade, ao estilo Kubernetes: N containers que <strong>partilham as
-namespaces do pod</strong> e se gerem como uma só unidade. Hoje partilham <strong>netns</strong>
-(o mesmo IP, alcançam-se por <code>localhost</code>), <strong>IPC</strong> (System V/POSIX) e
-<strong>UTS</strong> (o hostname). Tudo <em>rootless e daemonless</em>: o pod é uma netns SDN
-nomeada no holder (<code>pod-&lt;nome&gt;</code>, com IP na <code>delonix0</code>), e cada container
-junta-se a ela pelo re-exec <code>nsenter … ip netns exec</code> (a flag interna <code>--pod</code>);
-o 1.º container segura o IPC/UTS e os restantes fazem <code>setns</code> de
-<code>/proc/&lt;pid&gt;/ns/{ipc,uts}</code> — possível sem privilégio porque o re-exec já os põe no
-userns do holder. A <em>membership</em> não tem store novo: deriva do label
-<code>delonix.io/pod=&lt;nome&gt;</code> (como <code>cluster</code>/<code>stack</code>). Cria-se de um
-manifesto <code>kind: Pod</code> (o mesmo schema <code>spec.containers[]</code> do
-<code>kind: Container</code>, mas com N containers permitidos). <strong>Limitação conhecida:</strong>
-a namespace de <strong>PID</strong> (<code>shareProcessNamespace</code>, já no schema) ainda NÃO é
-partilhada — cada container mantém a sua própria árvore de processos; é a fatia seguinte.</p><p class='lang-en'>Real Kubernetes-style pods: N containers that <strong>share the pod's
-namespaces</strong> and are managed as a single unit. Today they share <strong>netns</strong>
-(same IP, reachable via <code>localhost</code>), <strong>IPC</strong> (System V/POSIX) and
-<strong>UTS</strong> (the hostname). All of it <em>rootless and daemonless</em>: the pod is a
-named SDN netns on the holder (<code>pod-&lt;name&gt;</code>, with an IP on
-<code>delonix0</code>), and each container joins it through the <code>nsenter … ip netns
-exec</code> re-exec (the internal <code>--pod</code> flag); the first container holds the
-IPC/UTS namespaces and the rest <code>setns</code> into <code>/proc/&lt;pid&gt;/ns/{ipc,uts}</code>
-— possible without privilege because the re-exec already places them in the holder's userns.
-<em>Membership</em> needs no new store: it derives from the <code>delonix.io/pod=&lt;name&gt;</code>
-label (like <code>cluster</code>/<code>stack</code>). Created from a <code>kind: Pod</code>
-manifest (the same <code>spec.containers[]</code> schema as <code>kind: Container</code>, but with
-N containers allowed). <strong>Known limitation:</strong> the <strong>PID</strong> namespace
-(<code>shareProcessNamespace</code>, already in the schema) is NOT shared yet — each container
-keeps its own process tree; that's the next slice.</p>
-<p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/pod.rs"><code>cmd/pod.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix pod [OPTIONS] &lt;COMMAND&gt;
-
-Commands:
-  create    Create a pod (N containers sharing a netns) from a manifest (`kind: Pod`)
-  rm        Remove a pod: stop/remove ALL its containers + the shared netns
-  describe  Details of one or more pods (containers + the shared IP), `kubectl` style
-  logs      Logs of a pod&#x27;s container (defaults to the first member)
-  ls        List the pods (derived from container labels)
-  help      Print this message or the help of the given subcommand(s)
-
-Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
-  -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)
-
-COMMAND MAP:
-  Lifecycle  create · rm
-  Inspect    ls · describe · logs
-
-EXAMPLES:
-  # which pods exist and which containers each one holds
-  delonix pod ls
-
-  # create one from a manifest — N containers on ONE IP, reaching each other
-  # over localhost
-  delonix pod create -f examples/pod-multi.yaml
-
-  # the logs of a chosen member
-  delonix pod logs web --container api
-
-SEE ALSO:
-  delonix pod create · delonix container run · delonix workload ls · delonix
-  stack apply
-
-  delonix › pod</code></pre></div>
-<h2 id='create'><code>pod create</code></h2>
-<p class='intro'>Create a pod (N containers sharing a netns) from a manifest (<code>kind: Pod</code>)</p>
-<div class='help'><pre><code>Usage: delonix pod create [OPTIONS]
-
-Options:
-  -f, --file &lt;FILE&gt;
-          
-
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
-  -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)
-
-EXAMPLES:
-  # N containers sharing one netns — same IP and `localhost` between them,
-  # like a k8s Pod
-  delonix pod create -f examples/pod-multi.yaml
-
-  # from the default manifest in the current directory
-  delonix pod create
-
-SEE ALSO:
-  delonix pod ls · delonix pod describe · delonix stack apply
-
-  delonix › pod › create</code></pre></div>
-<div class='lang-pt'><p>Idempotente (<em>garante-presente</em>): se o pod já tem containers, não
-faz nada. Também se pode aplicar pelo <code>delonix stack apply</code> (grupo <code>pods:</code> no
-<code>kind: Stack</code>) e pré-visualizar com <code>--dry-run</code>. Se a criação de um membro
-falha, o pod é desfeito por inteiro (sem meio-pod).</p></div><div class='lang-en'><p>Idempotent (<em>ensure-present</em>): if the pod already has
-containers, it does nothing. Can also be applied via <code>delonix stack apply</code> (the
-<code>pods:</code> group in <code>kind: Stack</code>) and previewed with <code>--dry-run</code>.
-If creating one member fails, the whole pod is torn down (no half-pod).</p></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Criar um pod (web + sidecar que fala por localhost) de um manifesto</div><div class='cap lang-en'>Create a pod (web + sidecar talking over localhost) from a manifest</div><pre><code>delonix pod create -f examples/pod-multi.yaml</code></pre></div>
-<h2 id='ls'><code>pod ls</code></h2>
-<p class='intro'>List the pods (derived from container labels)</p>
-<div class='help'><pre><code>Usage: delonix pod ls [OPTIONS]
-
-Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
-  -o, --output &lt;OUTPUT&gt;
-          Output format: `table` (default) or `json` (ADR-0005)
-          
-          [default: table]
-          [possible values: table, json]
-
-  -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)
-
-EXAMPLES:
-  # the pods, derived from the container labels — there is no separate store
-  # to drift
-  delonix pod ls
-
-  # as JSON, for a script
-  delonix pod ls -o json
-
-SEE ALSO:
-  delonix pod describe · delonix pod logs · delonix container ps
-
-  delonix › pod › ls</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Listar os pods (POD, CONTAINERS n/N, IP, STATUS)</div><div class='cap lang-en'>List pods (POD, CONTAINERS n/N, IP, STATUS)</div><pre><code>delonix pod ls</code></pre></div>
-<h2 id='describe'><code>pod describe</code></h2>
-<p class='intro'>Details of one or more pods (containers + the shared IP), <code>kubectl</code> style</p>
-<div class='help'><pre><code>Usage: delonix pod describe [OPTIONS] [NAMES]...
+<h1>delonix backup</h1>
+<p class='tagline'>Backup de UM recurso — container, pod, vm ou stack — em tar.gz.</p>
+<p>Não confundir com o <code>system backup</code>, que leva o NÓ inteiro. Aqui o arquivo leva o
+registo do recurso e os DADOS dos volumes que ele usa — não a imagem nem o rootfs, porque um rootfs
+medido são 435 MB contra 1,5 KB de registo, e a imagem é endereçada por conteúdo e volta a
+descarregar-se. A VM é a excepção: o overlay dela É o estado dela, por isso viaja (a base dourada
+não). <b>Não é um checkpoint</b> — a memória não é guardada; o que volta é a mesma configuração e os
+mesmos dados em disco. O destino pode ser uma pasta ou um <code>volume:&lt;nome&gt;</code>, que é como o
+arquivo vai parar a um NAS. Sendo o motor daemonless, o agendamento instala um <b>temporizador de
+utilizador do systemd</b>: o <code>--max-for-day N</code> espaça N corridas pelo dia, e o
+<code>--cron</code> traduz a expressão de crontab — recusando o que não conseguir exprimir em vez de
+aproximar.</p>
+<p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/rbackup.rs"><code>cmd/rbackup.rs</code></a></p>
+<div class='help'><pre><code>Usage: delonix backup [OPTIONS] &lt;KIND&gt; &lt;NAME&gt;
 
 Arguments:
-  [NAMES]...
+  &lt;KIND&gt;
+          What to back up
           
+          [possible values: container, pod, vm, stack]
+
+  &lt;NAME&gt;
+          Its name
 
 Options:
       --l18n &lt;en|pt&gt;
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
-  -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)
-
-EXAMPLES:
-  # members, the shared IP and the status, kubectl style
-  delonix pod describe web
-
-  # several pods in one pass
-  delonix pod describe web api
-
-SEE ALSO:
-  delonix pod ls · delonix pod logs · delonix container describe
-
-  delonix › pod › describe</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Detalhe estilo kubectl: containers + IP e netns partilhados</div><div class='cap lang-en'>kubectl-style detail: containers + shared IP and netns</div><pre><code>delonix pod describe web-app</code></pre></div>
-<h2 id='rm'><code>pod rm</code></h2>
-<p class='intro'>Remove a pod: stop/remove ALL its containers + the shared netns</p>
-<div class='help'><pre><code>Usage: delonix pod rm [OPTIONS] [NAMES]...
-
-Arguments:
-  [NAMES]...
+      --to &lt;TO&gt;
+          Where the archive goes: a directory, or `volume:&lt;name&gt;` for a named volume (default: the current directory)
           
+          [default: .]
 
-Options:
-  -f, --force
-          Force (kill) running containers
+      --max-for-day &lt;N&gt;
+          Take this many per day, on a systemd user timer, keeping the newest N
 
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+      --cron &lt;EXPR&gt;
+          Schedule with a crontab expression instead (`&quot;0 3 * * *&quot;`), translated to a systemd timer
+
+      --keep &lt;N&gt;
+          How many archives of this resource to keep (default: 7, or `--max-for-day` when scheduling)
+
+      --dry-run
+          Print what would be archived, without writing anything
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
 EXAMPLES:
-  # stop and remove every member plus the shared netns — nothing is left
-  # holding the IP
-  delonix pod rm web
+  # the record and the volumes&#x27; data — not the image, which restore pulls back
+  delonix backup container db
 
-  # kill the members that are still running
-  delonix pod rm -f web
+  # somewhere that is not here (a directory, or a named volume on a NAS)
+  delonix backup container db --to volume:nas-backups
 
-SEE ALSO:
-  delonix pod ls · delonix pod create · delonix container rm
+  # twice a day on a systemd user timer, keeping the newest two
+  delonix backup container db --max-for-day 2 --to /srv/backups
 
-  delonix › pod › rm</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Remover o pod: pára/remove TODOS os containers + a netns partilhada</div><div class='cap lang-en'>Remove the pod: stops/removes ALL containers + the shared netns</div><pre><code>delonix pod rm web-app</code></pre></div><div class="ex"><div class='cap lang-pt'>Forçar (mata os que estão a correr)</div><div class='cap lang-en'>Force (kills the ones still running)</div><pre><code>delonix pod rm -f web-app</code></pre></div>
-<h2 id='logs'><code>pod logs</code></h2>
-<p class='intro'>Logs of a pod&#x27;s container (defaults to the first member)</p>
-<div class='help'><pre><code>Usage: delonix pod logs [OPTIONS] &lt;POD&gt;
+  # or on your own schedule, in crontab syntax
+  delonix backup stack loja --cron &quot;30 3 * * 1&quot; --to /srv/backups
 
-Arguments:
-  &lt;POD&gt;
-          
+  # a VM: its overlay disk IS its state, so stop it first
+  delonix backup vm dev --to /srv/backups
 
-Options:
-      --container &lt;CONTAINER&gt;
-          Which container (its short name inside the pod). Default: the first
-
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
-  -f, --follow
-          
-
-  -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)
-
-EXAMPLES:
-  # the first member&#x27;s logs, which is what you usually want
-  delonix pod logs web
-
-  # a specific container inside the pod, by its short name
-  delonix pod logs web --container api
-
-  # follow it live
-  delonix pod logs -f web
+  # see what would go in, without writing anything
+  delonix backup pod api --dry-run
 
 SEE ALSO:
-  delonix pod describe · delonix pod ls · delonix container logs
+  delonix restore · delonix system backup · delonix volumes snapshot · delonix
+  vm snapshot
 
-  delonix › pod › logs</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Logs do 1.º container do pod</div><div class='cap lang-en'>Logs from the pod&#x27;s 1st container</div><pre><code>delonix pod logs web-app</code></pre></div><div class="ex"><div class='cap lang-pt'>Logs de um container específico (nome curto dentro do pod)</div><div class='cap lang-en'>Logs from a specific container (short name inside the pod)</div><pre><code>delonix pod logs web-app --container sidecar -f</code></pre></div>
-<h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
-<div class='callout lang-pt'><p>Cria um pod de 2 containers e confirma que partilham IP —
-alcançam-se por <code>localhost</code>, como no Kubernetes. Um pod cria-se sempre a
-partir de um manifesto: os membros, as portas e os volumes não cabem em flags sem
-reinventar metade do <code>kind: Pod</code>.</p>
-<pre><code>cat &gt; web-pod.yaml &lt;&lt;'YAML'
-apiVersion: delonix.io/v1
-kind: Pod
-metadata: { name: web-pod }
-spec:
-  network: minha-rede
-  containers:
-    - { name: nginx, image: nginx:alpine }
-    - { name: redis, image: redis:7-alpine }
-YAML
-delonix pod create -f web-pod.yaml
-delonix pod describe web-pod
-delonix pod logs web-pod</code></pre></div><div class='callout lang-en'><p>Create a 2-container pod and confirm they share an IP — reachable via
-<code>localhost</code> from each other, just like in Kubernetes. A pod is always created
-from a manifest: its members, ports and volumes do not fit in flags without reinventing
-half of <code>kind: Pod</code>.</p>
-<pre><code>cat &gt; web-pod.yaml &lt;&lt;'YAML'
-apiVersion: delonix.io/v1
-kind: Pod
-metadata: { name: web-pod }
-spec:
-  network: my-net
-  containers:
-    - { name: nginx, image: nginx:alpine }
-    - { name: redis, image: redis:7-alpine }
-YAML
-delonix pod create -f web-pod.yaml
-delonix pod describe web-pod
-delonix pod logs web-pod</code></pre></div>
-<h2><span class='lang-pt'>Desafio</span><span class='lang-en'>Challenge</span></h2>
-<div class='callout lang-pt'><p>Escreve o MESMO pod como um <code>kind: Pod</code> num
-manifesto e aplica-o com <code>stack apply</code>. Compara o <code>pod describe</code> resultante
-com o pod criado pela CLI — devem ter a mesma forma (netns/IPC/UTS partilhados).</p></div><div class='callout lang-en'><p>Write the SAME pod as a <code>kind: Pod</code> in a manifest and apply
-it with <code>stack apply</code>. Compare the resulting <code>pod describe</code> against the
-CLI-created pod — they should look the same (shared netns/IPC/UTS).</p></div>
+  delonix › backup</code></pre></div>
+<h2><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h2><div class="ex"><div class="cap">O registo e os dados dos volumes, aqui mesmo</div><pre><code>delonix backup container db</code></pre></div><div class="ex"><div class="cap">Para um NAS, através de um volume nomeado</div><pre><code>delonix backup container db --to volume:nas-backups</code></pre></div><div class="ex"><div class="cap">Duas vezes por dia, guardando os dois mais recentes</div><pre><code>delonix backup container db --max-for-day 2 --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Ou no horário que quiseres, em sintaxe de crontab</div><pre><code>delonix backup stack loja --cron &quot;30 3 * * 1&quot; --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Uma stack inteira: cada membro e cada volume, o partilhado uma só vez</div><pre><code>delonix backup stack loja --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Uma VM (pára-a primeiro — copiar o disco a quente apanha um filesystem rasgado)</div><pre><code>delonix backup vm dev --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Ver o que entraria, sem escrever nada</div><pre><code>delonix backup pod api --dry-run</code></pre></div>
 <footer><span class='lang-pt'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</span><span class='lang-en'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.</span></footer>
 </main>
 <aside class="toc" id="pagetoc"><div class="toc-inner"><h5><span class='lang-pt'>Nesta página</span><span class='lang-en'>On this page</span></h5><nav id="toc-nav"></nav></div></aside>
