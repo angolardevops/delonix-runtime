@@ -157,26 +157,26 @@ on.</p>
 
 Commands:
   pull       Pull an image from a registry. With `--vm`, no argument = the OFFICIAL Delonix golden VM image
-  push       Publish a local image to an OCI registry. Without `target`, publishes under the image&#x27;s own reference. With `--vm`, `target` is required
+  push       Publish a local image to an OCI registry
   rm         Remove a local image
-  describe   Human-readable detail of one or more images, `kubectl describe`-style (tags/digest/size/layers + the OCI config: entrypoint/cmd/env/workdir). With `--vm`, describes golden VM images
+  describe   Human-readable detail of one or more images, `kubectl describe`-style
   history    Layers of an image (digest + size), from base to top
   ls         List local images
-  scan       SBOM + CVE scan of an image (reads the layers from the CAS, without running anything). Pulls the image if missing. See `--sbom`, `--fail-on`, `--update`
+  scan       SBOM + CVE scan of an image
   verify     Verify the cosign signature of a local image against a public key
-  login      Authenticate to an OCI registry (stores the credentials in `&lt;root&gt;/auth.json`, docker/podman format). The password ALWAYS comes from stdin — never from an argument (it would end up in the shell history and in /proc)
+  login      Authenticate to an OCI registry
   logout     Remove the stored credentials of a registry
   tag        Give another name/tag to a local image (copies nothing — it&#x27;s just a new name for the same content)
   export     Export an OCI runtime bundle (rootfs + config.json) for `runc`/`crun`
-  load       Load an image from an archive produced by `delonix image save`, `docker save` or `podman save` (the counterpart of `save`)
-  save       Save an image to a portable archive (`docker save`&#x27;s counterpart) — the way to move an image to another machine with no registry. The archive is an OCI layout WITH the legacy `manifest.json`, so `delonix image load`, `docker load`, `podman load` and `ctr images import` all read it
-  apply      Apply the `kind: Image` documents of a manifest (`pull` idempotent by reference; `build` rebuilds and replaces the tag on each apply)
+  load       Load an image from an archive (the counterpart of `save`)
+  save       Save an image to a portable archive (`docker save`&#x27;s counterpart)
+  apply      Apply the `kind: Image` documents of a manifest
   dash       Dashboard (KPIs + table) of images — interactive TUI, or `--once` snapshot
-  build      (only with `--vm`) Build a VM image: the built-in golden recipe (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), or a `VMfile` of your own with `-f`
-  convert    (only with `--vm`) Convert a VM disk to the format another ecosystem imports — `qcow2`, `raw`, `vmdk`, `vdi`, `vhdx`, `vhd`
+  build      (only with `--vm`) Build a VM image
+  convert    Convert a VM disk to the format another ecosystem imports (only with `--vm`)
   import     (only with `--vm`) Register an existing disk image under a name
-  init       (only with `--vm`) Build the golden VM image (Ubuntu + kubeadm/kubelet/ kubectl + `delonix-cri`). Scaffold a `VMfile` (and a cloud-init) for building your own image
-  ls-remote  (only with `--vm`) List the tags available in a remote OCI repository — with no argument, the OFFICIAL Delonix golden image repo
+  init       (only with `--vm`) Scaffold a `VMfile` for building your own VM image
+  ls-remote  List the tags available in a remote OCI repository (only with `--vm`)
   vm         Golden VM images (`&lt;root&gt;/vm-images/`): ls/pull/push/build. Equivalent to `image --vm &lt;cmd&gt;` (old form, kept)
   help       Print this message or the help of the given subcommand(s)
 
@@ -215,7 +215,8 @@ SEE ALSO:
 
   delonix › image</code></pre></div>
 <h2 id='init'><code>image init</code></h2>
-<p class='intro'>(only with <code>--vm</code>) Build the golden VM image (Ubuntu + kubeadm/kubelet/ kubectl + <code>delonix-cri</code>). Scaffold a <code>VMfile</code> (and a cloud-init) for building your own image</p>
+<p class='intro'>(only with <code>--vm</code>) Scaffold a <code>VMfile</code> for building your own VM image.</p>
+<p class='intro'>Writes a <code>VMfile</code> (and a cloud-init) for building your own image. The built-in alternative is the golden VM image (Ubuntu + kubeadm/kubelet/kubectl + <code>delonix-cri</code>), built by <code>image --vm build</code> with no <code>-f</code>.</p>
 <div class='help'><pre><code>Usage: delonix image init [OPTIONS] [NAME]
 
 Arguments:
@@ -252,14 +253,14 @@ SEE ALSO:
 
 Commands:
   pull       Fetch a VM image from an OCI registry (single-blob artifact) — with no argument, the OFFICIAL Delonix image
-  push       Publish a local VM image to an OCI registry. Omit the destination to publish to the OFFICIAL repository the image belongs in
-  build      Build a VM image: the built-in golden recipe (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), or a `VMfile` of your own with `-f`
+  push       Publish a local VM image to an OCI registry
+  build      Build a VM image: the built-in golden recipe, or your own `VMfile`
   import     Register an existing disk image under a name, so `vm create --disk &lt;name&gt;` and `image vm push` can use it
-  init       Build the golden VM image (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`). Scaffold a `VMfile` (and a cloud-init) for building your own image
+  init       Scaffold a `VMfile` (and a cloud-init) for building your own image
   describe   Human-readable detail of one or more VM images, `kubectl describe`-style
   ls         List the local VM images
-  ls-remote  List the tags available in a remote OCI repository — with no argument, the OFFICIAL Delonix golden image repo (discover which k8s versions are published before `pull`/`--k8s-version`)
-  convert    Convert a VM disk to the format another ecosystem imports — `qcow2`, `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V, Azure). Flattened either way: the result is a standalone file
+  ls-remote  List the tags available in a remote OCI repository
+  convert    Convert a VM disk to the format another ecosystem imports
   help       Print this message or the help of the given subcommand(s)
 
 Options:
@@ -279,8 +280,8 @@ EXAMPLES:
   # what golden images this node already has
   delonix image vm ls
 
-  # fetch the official Kubernetes golden — the destination is known, so no
-  # argument is needed
+  # fetch the official Kubernetes golden — the source is known, so no argument
+  # is needed
   delonix image vm pull
 
   # build one of your own from a `VMfile`
@@ -319,7 +320,8 @@ SEE ALSO:
   delonix › image › logout</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Esquecer as credenciais desse registo</div><div class='cap lang-en'>Forget that registry&#x27;s credentials</div><pre><code>delonix image logout ghcr.io</code></pre></div>
 <h2 id='login'><code>image login</code></h2>
-<p class='intro'>Authenticate to an OCI registry (stores the credentials in <code>&lt;root&gt;/auth.json</code>, docker/podman format). The password ALWAYS comes from stdin — never from an argument (it would end up in the shell history and in /proc)</p>
+<p class='intro'>Authenticate to an OCI registry.</p>
+<p class='intro'>Stores the credentials in <code>&lt;root&gt;/auth.json</code>, docker/podman format. The password ALWAYS comes from stdin — never from an argument (it would end up in the shell history and in /proc).</p>
 <div class='help'><pre><code>Usage: delonix image login [OPTIONS] --username &lt;USERNAME&gt; &lt;REGISTRY&gt;
 
 Arguments:
@@ -353,7 +355,8 @@ SEE ALSO:
   delonix › image › login</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Autenticar num registo (a password vem do stdin, fora do histórico)</div><div class='cap lang-en'>Authenticate to a registry (the password comes from stdin, out of history)</div><pre><code>printf &#x27;%s&#x27; &quot;$GHCR_TOKEN&quot; | delonix image login ghcr.io --username aminhaorg</code></pre></div>
 <h2 id='load'><code>image load</code></h2>
-<p class='intro'>Load an image from an archive produced by <code>delonix image save</code>, <code>docker save</code> or <code>podman save</code> (the counterpart of <code>save</code>)</p>
+<p class='intro'>Load an image from an archive (the counterpart of <code>save</code>).</p>
+<p class='intro'>Reads archives produced by <code>delonix image save</code>, <code>docker save</code> or <code>podman save</code>.</p>
 <div class='help'><pre><code>Usage: delonix image load [OPTIONS] --input &lt;FILE&gt;
 
 Options:
@@ -379,7 +382,8 @@ SEE ALSO:
   delonix › image › load</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Importar esse tar do outro lado</div><div class='cap lang-en'>Import that tar on the other end</div><pre><code>delonix image load --input app-dev.tar</code></pre></div>
 <h2 id='save'><code>image save</code></h2>
-<p class='intro'>Save an image to a portable archive (<code>docker save</code>&#x27;s counterpart) — the way to move an image to another machine with no registry. The archive is an OCI layout WITH the legacy <code>manifest.json</code>, so <code>delonix image load</code>, <code>docker load</code>, <code>podman load</code> and <code>ctr images import</code> all read it</p>
+<p class='intro'>Save an image to a portable archive (<code>docker save</code>&#x27;s counterpart).</p>
+<p class='intro'>The way to move an image to another machine with no registry. The archive is an OCI layout WITH the legacy <code>manifest.json</code>, so <code>delonix image load</code>, <code>docker load</code>, <code>podman load</code> and <code>ctr images import</code> all read it.</p>
 <div class='help'><pre><code>Usage: delonix image save [OPTIONS] --output &lt;FILE&gt; &lt;IMAGE&gt;
 
 Arguments:
@@ -409,7 +413,8 @@ SEE ALSO:
   delonix › image › save</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Exportar para um tar (para levar para uma máquina sem rede)</div><div class='cap lang-en'>Export to a tar (to carry to a machine with no network)</div><pre><code>delonix image save app:dev --output app-dev.tar</code></pre></div>
 <h2 id='scan'><code>image scan</code></h2>
-<p class='intro'>SBOM + CVE scan of an image (reads the layers from the CAS, without running anything). Pulls the image if missing. See <code>--sbom</code>, <code>--fail-on</code>, <code>--update</code></p>
+<p class='intro'>SBOM + CVE scan of an image.</p>
+<p class='intro'>Reads the layers from the CAS, without running anything. Pulls the image if missing. See <code>--sbom</code>, <code>--fail-on</code>, <code>--update</code>.</p>
 <div class='help'><pre><code>Usage: delonix image scan [OPTIONS] [IMAGE]
 
 Arguments:
@@ -544,7 +549,8 @@ SEE ALSO:
   delonix › image › tag</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Dar um segundo nome à mesma imagem (não copia nada)</div><div class='cap lang-en'>Give the same image a second name (copies nothing)</div><pre><code>delonix image tag app:dev ghcr.io/aminhaorg/app:1.0</code></pre></div>
 <h2 id='describe'><code>image describe</code></h2>
-<p class='intro'>Human-readable detail of one or more images, <code>kubectl describe</code>-style (tags/digest/size/layers + the OCI config: entrypoint/cmd/env/workdir). With <code>--vm</code>, describes golden VM images</p>
+<p class='intro'>Human-readable detail of one or more images, <code>kubectl describe</code>-style.</p>
+<p class='intro'>Tags/digest/size/layers + the OCI config: entrypoint/cmd/env/workdir. With <code>--vm</code>, describes golden VM images.</p>
 <div class='help'><pre><code>Usage: delonix image describe [OPTIONS] &lt;NAMES&gt;...
 
 Arguments:
@@ -572,7 +578,8 @@ SEE ALSO:
   delonix › image › describe</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Camadas, config e digest de uma imagem</div><div class='cap lang-en'>An image&#x27;s layers, config and digest</div><pre><code>delonix image describe nginx:alpine</code></pre></div>
 <h2 id='ls-remote'><code>image ls-remote</code></h2>
-<p class='intro'>(only with <code>--vm</code>) List the tags available in a remote OCI repository — with no argument, the OFFICIAL Delonix golden image repo</p>
+<p class='intro'>List the tags available in a remote OCI repository (only with <code>--vm</code>).</p>
+<p class='intro'>With no argument, the OFFICIAL Delonix golden image repo.</p>
 <div class='help'><pre><code>Usage: delonix image ls-remote [OPTIONS] [SOURCE]
 
 Arguments:
@@ -763,7 +770,8 @@ SEE ALSO:
   delonix › image › export</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Bundle OCI runtime para correr com runc/crun</div><div class='cap lang-en'>OCI runtime bundle, to run with runc/crun</div><pre><code>delonix image export alpine:3.19 /tmp/bundle &amp;&amp; sudo runc run -b /tmp/bundle teste</code></pre></div>
 <h2 id='push'><code>image push</code></h2>
-<p class='intro'>Publish a local image to an OCI registry. Without <code>target</code>, publishes under the image&#x27;s own reference. With <code>--vm</code>, <code>target</code> is required</p>
+<p class='intro'>Publish a local image to an OCI registry.</p>
+<p class='intro'>Without <code>target</code>, publishes under the image&#x27;s own reference. With <code>--vm</code>, <code>target</code> is required.</p>
 <div class='help'><pre><code>Usage: delonix image push [OPTIONS] &lt;NAME&gt; [TARGET]
 
 Arguments:
@@ -794,7 +802,8 @@ SEE ALSO:
   delonix › image › push</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Publicar a imagem VM dourada como artefacto OCI (padrão ORAS)</div><div class='cap lang-en'>Publish the golden VM image as an OCI artifact (ORAS pattern)</div><pre><code>delonix image --vm push k8s-golden ghcr.io/angolardevops/delonix-vm-k8s:1.34</code></pre></div>
 <h2 id='build'><code>image build</code></h2>
-<p class='intro'>(only with <code>--vm</code>) Build a VM image: the built-in golden recipe (Ubuntu + kubeadm/kubelet/kubectl + <code>delonix-cri</code>), or a <code>VMfile</code> of your own with <code>-f</code></p>
+<p class='intro'>(only with <code>--vm</code>) Build a VM image.</p>
+<p class='intro'>The built-in golden recipe (Ubuntu + kubeadm/kubelet/kubectl + <code>delonix-cri</code>), or a <code>VMfile</code> of your own with <code>-f</code>.</p>
 <div class='help'><pre><code>Usage: delonix image build [OPTIONS] --tag &lt;TAG&gt; [CONTEXT]
 
 Arguments:
@@ -871,7 +880,8 @@ SEE ALSO:
   delonix › image › build</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Construir a imagem VM dourada (descarrega Ubuntu, valida SHA256SUMS, virt-customize)</div><div class='cap lang-en'>Build the golden VM image (downloads Ubuntu, verifies SHA256SUMS, virt-customize)</div><pre><code>delonix image --vm build -t k8s-golden --k8s-version 1.34</code></pre></div>
 <h2 id='apply'><code>image apply</code></h2>
-<p class='intro'>Apply the <code>kind: Image</code> documents of a manifest (<code>pull</code> idempotent by reference; <code>build</code> rebuilds and replaces the tag on each apply)</p>
+<p class='intro'>Apply the <code>kind: Image</code> documents of a manifest.</p>
+<p class='intro'><code>pull</code> is idempotent by reference; <code>build</code> rebuilds and replaces the tag on each apply.</p>
 <div class='help'><pre><code>Usage: delonix image apply [OPTIONS]
 
 Options:

@@ -5129,54 +5129,107 @@ msgstr ""
 msgid "provisioned"
 msgstr "provisionado"
 
-msgid "quota {size}"
-msgstr "quota {size}"
+msgid "SSH into a VM by NAME (its IP comes from the record) or straight to an address. With a trailing command, runs it and returns instead of opening a shell."
+msgstr "Entra por SSH numa VM pelo NOME (o IP vem do registo) ou directamente num endereço. Com um comando no fim, corre-o e volta em vez de abrir uma shell."
 
-msgid "{size} free"
-msgstr "{size} livres"
+msgid "VM name (`vm ls`) or an IP/hostname to go to directly."
+msgstr "Nome da VM (`vm ls`) ou um IP/hostname para onde ir directamente."
 
-msgid "no quota"
-msgstr "sem quota"
+msgid "Login user. Defaults to `delonix` — the account the golden images create and the one cloud-init injects `--ssh-key` into."
+msgstr "Utilizador de login. Por omissão `delonix` — a conta que as imagens douradas criam e aquela onde o cloud-init injecta a `--ssh-key`."
 
-msgid "free space unknown"
-msgstr "espaço livre desconhecido"
+msgid "Private key to authenticate with (`ssh -i`)."
+msgstr "Chave privada com que autenticar (`ssh -i`)."
 
-msgid "destroyed the provisioned storage"
-msgstr "destruiu o armazenamento provisionado"
+msgid "Command to run instead of an interactive shell."
+msgstr "Comando a correr em vez de uma shell interactiva."
 
-msgid "spec.provision needs a target block (today: `truenas:`)"
-msgstr "spec.provision precisa de um bloco de destino (hoje: `truenas:`)"
+msgid ""
+"SSH into a VM by NAME (its IP comes from the record) or straight to an address. With a trailing command, runs it and returns instead of opening a shell.\n"
+"\n"
+"`delonix vm ssh dev` · `delonix vm ssh dev -- systemctl status` · `delonix vm ssh 192.168.122.50 -l root`"
+msgstr ""
+"Entra por SSH numa VM pelo NOME (o IP vem do registo) ou directamente num endereço. Com um comando no fim, corre-o e volta em vez de abrir uma shell.\n"
+"\n"
+"`delonix vm ssh dev` · `delonix vm ssh dev -- systemctl status` · `delonix vm ssh 192.168.122.50 -l root`"
 
-msgid "provision.truenas needs either `apiKeySecret` or `username` with a password"
-msgstr "provision.truenas precisa de `apiKeySecret` ou de `username` com uma password"
+# --- `delonix man` / o --help como manual (v0.48.0) ---
 
-msgid "provision.truenas: `username` needs `passwordSecret` (or `password`)"
-msgstr "provision.truenas: `username` precisa de `passwordSecret` (ou `password`)"
+msgid "Manual pages in roff, generated from this binary — one per command."
+msgstr "Páginas de manual em roff, geradas a partir deste binário — uma por comando."
 
-msgid "provision.truenas.share.networks is empty — the NAS reads that as \"any network may mount this\". List the CIDRs that may, or drop the `share:` block to provision the dataset without exporting it"
-msgstr "provision.truenas.share.networks está vazio — a NAS lê isso como «qualquer rede pode montar isto». Lista os CIDRs que podem, ou tira o bloco `share:` para provisionar o dataset sem o exportar"
+msgid "Command to document (e.g. `container run`). With none, the top-level page."
+msgstr "Comando a documentar (ex.: `container run`). Sem nenhum, a página de topo."
 
-msgid "this volume's storage was not provisioned by delonix — there is nothing here that is ours to destroy (a volume that only mounts an existing share leaves it alone)"
-msgstr "o armazenamento deste volume não foi provisionado pelo delonix — não há aqui nada que seja nosso para destruir (um volume que só monta uma partilha já existente deixa-a em paz)"
+msgid "Write EVERY page as `<dir>/man1/delonix*.1` instead of printing one to stdout."
+msgstr "Escreve TODAS as páginas em `<dir>/man1/delonix*.1` em vez de imprimir uma no stdout."
 
-msgid "secret '{name}' has none of the keys: {keys}"
-msgstr "o segredo '{name}' não tem nenhuma das chaves: {keys}"
+msgid "With `--dir`, also write the gzip-friendly index (`delonix-man-pages.txt`) listing what was generated."
+msgstr "Com `--dir`, escreve também o índice (`delonix-man-pages.txt`) com o que foi gerado."
 
-msgid "this volume was provisioned by '{kind}', which this build cannot destroy"
-msgstr "este volume foi provisionado por '{kind}', que esta build não sabe destruir"
+msgid "Delonix Runtime Manual"
+msgstr "Manual do Delonix Runtime"
 
-msgid "volume was provisioned on {url} without a `kind: Secret` (an inline password is not kept in the record) — destroy {dataset} on the NAS yourself, or re-apply with `apiKeySecret`/`passwordSecret` first"
-msgstr "o volume foi provisionado em {url} sem um `kind: Secret` (uma password inline não fica guardada no registo) — destrói {dataset} na NAS tu mesmo, ou volta a aplicar com `apiKeySecret`/`passwordSecret` primeiro"
+msgid "{n} manual page(s) written to {dir}"
+msgstr "{n} página(s) de manual escritas em {dir}"
 
-msgid "volume '{name}': spec.{kind} points at {given}, but spec.provision made {made} — remove the server/share from the block and let it be derived, or provision what you are mounting"
-msgstr "volume '{name}': spec.{kind} aponta para {given}, mas spec.provision criou {made} — tira o server/share do bloco e deixa-o ser derivado, ou provisiona aquilo que estás a montar"
+msgid "install them with: sudo cp {dir}/*.1 /usr/local/share/man/man1/ && sudo mandb"
+msgstr "instala-as com: sudo cp {dir}/*.1 /usr/local/share/man/man1/ && sudo mandb"
 
-msgid "volume '{name}': the dataset {ds} already existed and was adopted — its quota now follows this manifest"
-msgstr "volume '{name}': o dataset {ds} já existia e foi adoptado — a quota dele passa a seguir este manifesto"
+msgid "no such command: {cmd} (see `delonix --help`)"
+msgstr "não existe o comando: {cmd} (vê `delonix --help`)"
 
-msgid "Subnet. For `bridge`, `10.<200-254>.0.0/16` (only /16); required for macvlan/ipvlan, e.g. `192.168.1.0/24`. Omit it and a free one is picked."
-msgstr "Subrede. Para `bridge`, `10.<200-254>.0.0/16` (só /16); obrigatória para macvlan/ipvlan, ex.: `192.168.1.0/24`. Sem ela, é escolhida uma livre."
+# Cabeçalhos e categorias do COMMAND MAP. Maiúsculas por serem títulos de
+# secção do `--help`, no mesmo registo do `Usage:`/`Commands:` do clap.
 
+msgid "COMMAND MAP"
+msgstr "MAPA DE COMANDOS"
+
+msgid "EXAMPLES"
+msgstr "EXEMPLOS"
+
+msgid "SEE ALSO"
+msgstr "VER TAMBÉM"
+
+msgid "Lifecycle"
+msgstr "Ciclo de vida"
+
+msgid "Create"
+msgstr "Criar"
+
+msgid "Inspect"
+msgstr "Inspeccionar"
+
+msgid "Interact"
+msgstr "Interagir"
+
+msgid "Configure"
+msgstr "Configurar"
+
+msgid "Networking"
+msgstr "Rede"
+
+msgid "Storage"
+msgstr "Armazenamento"
+
+msgid "Declarative"
+msgstr "Declarativo"
+
+msgid "Maintenance"
+msgstr "Manutenção"
+
+msgid "Dashboards"
+msgstr "Painéis"
+
+msgid "Advanced"
+msgstr "Avançado"
+
+msgid "Other"
+msgstr "Outros"
+
+# Da sessão paralela do TrueNAS (ADR-0009): sem esta entrada o gate estrito de
+# i18n fica vermelho e nada mais se consegue validar. Acrescentada aqui só para
+# desbloquear — a flag é deles.
 msgid "ALSO destroy the storage this volume was provisioned with on a remote NAS (`spec.provision`). Irreversible, and on another machine. Refused for a volume that only mounts a share someone else made."
 msgstr "Destrói TAMBÉM o armazenamento com que este volume foi provisionado numa NAS remota (`spec.provision`). Irreversível, e noutra máquina. Recusado para um volume que só monta uma partilha feita por outrem."
 
@@ -6797,3 +6850,946 @@ msgstr "Subrede. Para `bridge`, `10.<200-254>.0.0/16` (só /16); obrigatória pa
 
 msgid "ALSO destroy the storage this volume was provisioned with on a remote NAS (`spec.provision`). Irreversible, and on another machine. Refused for a volume that only mounts a share someone else made"
 msgstr "Destrói TAMBÉM o armazenamento com que este volume foi provisionado numa NAS remota (`spec.provision`). Irreversível, e noutra máquina. Recusado para um volume que só monta uma partilha feita por outra pessoa"
+
+# about curto + long_about dos 37 comandos cuja descricao foi encurtada
+
+msgid "Initialize a project with a Delonixfile + manifest."
+msgstr "Inicializa um projecto com um Delonixfile + manifesto."
+
+msgid ""
+"Files ALREADY FILLED IN (images included), ready to use without editing anything."
+msgstr ""
+"Ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada."
+
+msgid ""
+"Initialize a project with a Delonixfile + manifest."
+"\n"
+"\n"
+"Files ALREADY FILLED IN (images included), ready to use without editing anything."
+msgstr ""
+"Inicializa um projecto com um Delonixfile + manifesto."
+"\n"
+"\n"
+"Ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada."
+
+msgid "Stop then start one or more containers."
+msgstr "Pára e depois arranca um ou mais containers."
+
+msgid ""
+"Reuses the persistent rootfs and the original run configuration, like `start`."
+msgstr ""
+"Reaproveita o rootfs persistente e a configuração original de execução, tal como o `start`."
+
+msgid ""
+"Stop then start one or more containers."
+"\n"
+"\n"
+"Reuses the persistent rootfs and the original run configuration, like `start`."
+msgstr ""
+"Pára e depois arranca um ou mais containers."
+"\n"
+"\n"
+"Reaproveita o rootfs persistente e a configuração original de execução, tal como o `start`."
+
+msgid "Suspend a container's processes (cgroup v2 freezer)."
+msgstr "Suspende os processos de um container (freezer do cgroup v2)."
+
+msgid ""
+"The state stays in memory, unlike `stop`. Resume with `unpause`."
+msgstr ""
+"O estado fica em memória, ao contrário do `stop`. Retoma-se com `unpause`."
+
+msgid ""
+"Suspend a container's processes (cgroup v2 freezer)."
+"\n"
+"\n"
+"The state stays in memory, unlike `stop`. Resume with `unpause`."
+msgstr ""
+"Suspende os processos de um container (freezer do cgroup v2)."
+"\n"
+"\n"
+"O estado fica em memória, ao contrário do `stop`. Retoma-se com `unpause`."
+
+msgid "Copy files between the host and a container."
+msgstr "Copia ficheiros entre o host e um container."
+
+msgid ""
+"Exactly one side is `container:/path` (e.g. `delonix container cp web:/etc/nginx.conf .`)."
+msgstr ""
+"Exactamente um dos lados é `container:/caminho` (ex.: `delonix container cp web:/etc/nginx.conf .`)."
+
+msgid ""
+"Copy files between the host and a container."
+"\n"
+"\n"
+"Exactly one side is `container:/path` (e.g. `delonix container cp web:/etc/nginx.conf .`)."
+msgstr ""
+"Copia ficheiros entre o host e um container."
+"\n"
+"\n"
+"Exactamente um dos lados é `container:/caminho` (ex.: `delonix container cp web:/etc/nginx.conf .`)."
+
+msgid ""
+"Human-readable detail of one or more containers, `kubectl describe`-style."
+msgstr ""
+"Detalhe legível de um ou mais containers, ao estilo do `kubectl describe`."
+
+msgid "For humans; use `inspect` for script-consumable JSON."
+msgstr "Para humanos; usa o `inspect` para JSON consumível por scripts."
+
+msgid ""
+"Human-readable detail of one or more containers, `kubectl describe`-style."
+"\n"
+"\n"
+"For humans; use `inspect` for script-consumable JSON."
+msgstr ""
+"Detalhe legível de um ou mais containers, ao estilo do `kubectl describe`."
+"\n"
+"\n"
+"Para humanos; usa o `inspect` para JSON consumível por scripts."
+
+msgid "Resource usage (CPU/memory/PIDs) of the running containers."
+msgstr "Uso de recursos (CPU/memória/PIDs) dos containers a correr."
+
+msgid ""
+"One sample and exits (no stream). With no IDs, shows all running ones."
+msgstr ""
+"Uma amostra e sai (sem stream). Sem IDs, mostra todos os que estão a correr."
+
+msgid ""
+"Resource usage (CPU/memory/PIDs) of the running containers."
+"\n"
+"\n"
+"One sample and exits (no stream). With no IDs, shows all running ones."
+msgstr ""
+"Uso de recursos (CPU/memória/PIDs) dos containers a correr."
+"\n"
+"\n"
+"Uma amostra e sai (sem stream). Sem IDs, mostra todos os que estão a correr."
+
+msgid "List the tags available in a remote OCI repository (only with `--vm`)."
+msgstr "Lista as tags disponíveis num repositório OCI remoto (só com `--vm`)."
+
+msgid "With no argument, the OFFICIAL Delonix golden image repo."
+msgstr "Sem argumento, o repositório OFICIAL da imagem dourada do Delonix."
+
+msgid ""
+"List the tags available in a remote OCI repository (only with `--vm`)."
+"\n"
+"\n"
+"With no argument, the OFFICIAL Delonix golden image repo."
+msgstr ""
+"Lista as tags disponíveis num repositório OCI remoto (só com `--vm`)."
+"\n"
+"\n"
+"Sem argumento, o repositório OFICIAL da imagem dourada do Delonix."
+
+msgid "Load an image from an archive (the counterpart of `save`)."
+msgstr "Carrega uma imagem a partir de um arquivo (o par do `save`)."
+
+msgid ""
+"Reads archives produced by `delonix image save`, `docker save` or `podman save`."
+msgstr ""
+"Lê arquivos produzidos pelo `delonix image save`, `docker save` ou `podman save`."
+
+msgid ""
+"Load an image from an archive (the counterpart of `save`)."
+"\n"
+"\n"
+"Reads archives produced by `delonix image save`, `docker save` or `podman save`."
+msgstr ""
+"Carrega uma imagem a partir de um arquivo (o par do `save`)."
+"\n"
+"\n"
+"Lê arquivos produzidos pelo `delonix image save`, `docker save` ou `podman save`."
+
+msgid "Apply the `kind: Image` documents of a manifest."
+msgstr "Aplica os documentos `kind: Image` de um manifesto."
+
+msgid ""
+"`pull` is idempotent by reference; `build` rebuilds and replaces the tag on each apply."
+msgstr ""
+"O `pull` é idempotente por referência; o `build` reconstrói e substitui a tag em cada apply."
+
+msgid ""
+"Apply the `kind: Image` documents of a manifest."
+"\n"
+"\n"
+"`pull` is idempotent by reference; `build` rebuilds and replaces the tag on each apply."
+msgstr ""
+"Aplica os documentos `kind: Image` de um manifesto."
+"\n"
+"\n"
+"O `pull` é idempotente por referência; o `build` reconstrói e substitui a tag em cada apply."
+
+msgid ""
+"Omit the destination to publish to the OFFICIAL repository the image belongs in."
+msgstr ""
+"Omite o destino para publicar no repositório OFICIAL a que a imagem pertence."
+
+msgid ""
+"Publish a local VM image to an OCI registry."
+"\n"
+"\n"
+"Omit the destination to publish to the OFFICIAL repository the image belongs in."
+msgstr ""
+"Publica uma imagem VM local num registo OCI."
+"\n"
+"\n"
+"Omite o destino para publicar no repositório OFICIAL a que a imagem pertence."
+
+msgid ""
+"Scaffold a `VMfile` (and a cloud-init) for building your own image."
+"\n"
+"\n"
+"Build the golden VM image (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`)."
+msgstr ""
+"Cria um `VMfile` (e um cloud-init) para construíres a tua própria imagem."
+"\n"
+"\n"
+"Constrói a imagem VM dourada (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`)."
+
+msgid "Build a VM image: the built-in golden recipe, or your own `VMfile`."
+msgstr "Constrói uma imagem VM: a receita dourada embutida, ou um `VMfile` teu."
+
+msgid ""
+"The golden recipe is Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`; build a `VMfile` of your own with `-f`."
+msgstr ""
+"A receita dourada é Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`; constrói um `VMfile` teu com `-f`."
+
+msgid ""
+"Build a VM image: the built-in golden recipe, or your own `VMfile`."
+"\n"
+"\n"
+"The golden recipe is Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`; build a `VMfile` of your own with `-f`."
+msgstr ""
+"Constrói uma imagem VM: a receita dourada embutida, ou um `VMfile` teu."
+"\n"
+"\n"
+"A receita dourada é Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`; constrói um `VMfile` teu com `-f`."
+
+msgid "Publish a local image to an OCI registry."
+msgstr "Publica uma imagem local num registo OCI."
+
+msgid ""
+"Without `target`, publishes under the image's own reference. With `--vm`, `target` is required."
+msgstr ""
+"Sem `target`, publica sob a referência da própria imagem. Com `--vm`, o `target` é obrigatório."
+
+msgid ""
+"Publish a local image to an OCI registry."
+"\n"
+"\n"
+"Without `target`, publishes under the image's own reference. With `--vm`, `target` is required."
+msgstr ""
+"Publica uma imagem local num registo OCI."
+"\n"
+"\n"
+"Sem `target`, publica sob a referência da própria imagem. Com `--vm`, o `target` é obrigatório."
+
+msgid ""
+"Convert a VM disk to the format another ecosystem imports (only with `--vm`)."
+msgstr ""
+"Converte um disco de VM para o formato que outro ecossistema importa (só com `--vm`)."
+
+msgid "`qcow2`, `raw`, `vmdk`, `vdi`, `vhdx`, `vhd`."
+msgstr "`qcow2`, `raw`, `vmdk`, `vdi`, `vhdx`, `vhd`."
+
+msgid ""
+"Convert a VM disk to the format another ecosystem imports (only with `--vm`)."
+"\n"
+"\n"
+"`qcow2`, `raw`, `vmdk`, `vdi`, `vhdx`, `vhd`."
+msgstr ""
+"Converte um disco de VM para o formato que outro ecossistema importa (só com `--vm`)."
+"\n"
+"\n"
+"`qcow2`, `raw`, `vmdk`, `vdi`, `vhdx`, `vhd`."
+
+msgid "Bootstrap a project with a VM manifest."
+msgstr "Arranca um projecto com um manifesto de VM."
+
+msgid ""
+"Bootstrap a project with a VM manifest."
+"\n"
+"\n"
+"Files ALREADY FILLED IN (images included), ready to use without editing anything."
+msgstr ""
+"Arranca um projecto com um manifesto de VM."
+"\n"
+"\n"
+"Ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada."
+
+msgid "Pull a golden VM image from an OCI registry."
+msgstr "Puxa uma imagem VM dourada de um registo OCI."
+
+msgid ""
+"With no argument, the OFFICIAL Delonix image (ready for `vm create`/`cluster kubeadm`)."
+msgstr ""
+"Sem argumento, a imagem OFICIAL do Delonix (pronta para `vm create`/`cluster kubeadm`)."
+
+msgid ""
+"Pull a golden VM image from an OCI registry."
+"\n"
+"\n"
+"With no argument, the OFFICIAL Delonix image (ready for `vm create`/`cluster kubeadm`)."
+msgstr ""
+"Puxa uma imagem VM dourada de um registo OCI."
+"\n"
+"\n"
+"Sem argumento, a imagem OFICIAL do Delonix (pronta para `vm create`/`cluster kubeadm`)."
+
+msgid "Apply the `kind: Vm` documents of a manifest."
+msgstr "Aplica os documentos `kind: Vm` de um manifesto."
+
+msgid ""
+"`delonix_vm::create` is already idempotent by name — creates or auto-recovers."
+msgstr ""
+"O `delonix_vm::create` já é idempotente por nome — cria ou recupera automaticamente."
+
+msgid ""
+"Apply the `kind: Vm` documents of a manifest."
+"\n"
+"\n"
+"`delonix_vm::create` is already idempotent by name — creates or auto-recovers."
+msgstr ""
+"Aplica os documentos `kind: Vm` de um manifesto."
+"\n"
+"\n"
+"O `delonix_vm::create` já é idempotente por nome — cria ou recupera automaticamente."
+
+msgid ""
+"Unified compute layer over containers AND VMs: ls/stop/rm (ADR-0002)."
+msgstr ""
+"Camada de computação unificada sobre containers E VMs: ls/stop/rm (ADR-0002)."
+
+msgid "Creation stays declarative — see `kind: Workload` (`stack apply`)."
+msgstr "A criação continua declarativa — ver `kind: Workload` (`stack apply`)."
+
+msgid ""
+"Unified compute layer over containers AND VMs: ls/stop/rm (ADR-0002)."
+"\n"
+"\n"
+"Creation stays declarative — see `kind: Workload` (`stack apply`)."
+msgstr ""
+"Camada de computação unificada sobre containers E VMs: ls/stop/rm (ADR-0002)."
+"\n"
+"\n"
+"A criação continua declarativa — ver `kind: Workload` (`stack apply`)."
+
+msgid "Readable detail of one or more volumes, `kubectl describe` style."
+msgstr "Detalhe legível de um ou mais volumes, ao estilo do `kubectl describe`."
+
+msgid "For humans; use `inspect` for the usual compact view."
+msgstr "Para humanos; usa o `inspect` para a vista compacta do costume."
+
+msgid ""
+"Readable detail of one or more volumes, `kubectl describe` style."
+"\n"
+"\n"
+"For humans; use `inspect` for the usual compact view."
+msgstr ""
+"Detalhe legível de um ou mais volumes, ao estilo do `kubectl describe`."
+"\n"
+"\n"
+"Para humanos; usa o `inspect` para a vista compacta do costume."
+
+msgid ""
+"Refuses while a container or a `kind: ShareVolume` still references it (use `--force` to remove it anyway)."
+msgstr ""
+"Recusa enquanto um container ou um `kind: ShareVolume` ainda lhe fizerem referência (usa `--force` para o remover à mesma)."
+
+msgid ""
+"Remove a volume."
+"\n"
+"\n"
+"Refuses while a container or a `kind: ShareVolume` still references it (use `--force` to remove it anyway)."
+msgstr ""
+"Remove um volume."
+"\n"
+"\n"
+"Recusa enquanto um container ou um `kind: ShareVolume` ainda lhe fizerem referência (usa `--force` para o remover à mesma)."
+
+msgid "Generate the node key and print the public one. Idempotent."
+msgstr "Gera a chave do nó e imprime a pública. Idempotente."
+
+msgid ""
+"Generated only if it does not exist yet, and printed with the context of what to do with it."
+msgstr ""
+"Só é gerada se ainda não existir, e é impressa com o contexto do que fazer com ela."
+
+msgid ""
+"Generate the node key and print the public one. Idempotent."
+"\n"
+"\n"
+"Generated only if it does not exist yet, and printed with the context of what to do with it."
+msgstr ""
+"Gera a chave do nó e imprime a pública. Idempotente."
+"\n"
+"\n"
+"Só é gerada se ainda não existir, e é impressa com o contexto do que fazer com ela."
+
+msgid "Readable detail of one or more networks, `kubectl describe` style."
+msgstr "Detalhe legível de uma ou mais redes, ao estilo do `kubectl describe`."
+
+msgid ""
+"Readable detail of one or more networks, `kubectl describe` style."
+"\n"
+"\n"
+"For humans; use `inspect` for the usual compact view."
+msgstr ""
+"Detalhe legível de uma ou mais redes, ao estilo do `kubectl describe`."
+"\n"
+"\n"
+"Para humanos; usa o `inspect` para a vista compacta do costume."
+
+msgid "Apply the `kind: Secret` documents from a manifest."
+msgstr "Aplica os documentos `kind: Secret` de um manifesto."
+
+msgid ""
+"Declarative — creates the secret without needing `secret create` on the CLI."
+msgstr ""
+"Declarativo — cria o segredo sem precisar do `secret create` na CLI."
+
+msgid ""
+"Apply the `kind: Secret` documents from a manifest."
+"\n"
+"\n"
+"Declarative — creates the secret without needing `secret create` on the CLI."
+msgstr ""
+"Aplica os documentos `kind: Secret` de um manifesto."
+"\n"
+"\n"
+"Declarativo — cria o segredo sem precisar do `secret create` na CLI."
+
+msgid "An isolated, individually-quota'd slice of a `Storage`."
+msgstr "Uma fatia isolada, com quota própria, de um `Storage`."
+
+msgid ""
+"Multiple container/vm/pod share ONE NAS export without seeing each other's data."
+msgstr ""
+"Vários container/vm/pod partilham UMA exportação de NAS sem verem os dados uns dos outros."
+
+msgid ""
+"An isolated, individually-quota'd slice of a `Storage`."
+"\n"
+"\n"
+"Multiple container/vm/pod share ONE NAS export without seeing each other's data."
+msgstr ""
+"Uma fatia isolada, com quota própria, de um `Storage`."
+"\n"
+"\n"
+"Vários container/vm/pod partilham UMA exportação de NAS sem verem os dados uns dos outros."
+
+msgid "Un-register a share volume."
+msgstr "Retira do registo um volume de partilha."
+
+msgid ""
+"The underlying data (a subdirectory of the parent Storage) is PRESERVED unless `--purge-data` is passed."
+msgstr ""
+"Os dados por baixo (um subdirectório do Storage pai) são PRESERVADOS a menos que passes `--purge-data`."
+
+msgid ""
+"Un-register a share volume."
+"\n"
+"\n"
+"The underlying data (a subdirectory of the parent Storage) is PRESERVED unless `--purge-data` is passed."
+msgstr ""
+"Retira do registo um volume de partilha."
+"\n"
+"\n"
+"Os dados por baixo (um subdirectório do Storage pai) são PRESERVADOS a menos que passes `--purge-data`."
+
+msgid "Field reference for a Kind, `kubectl explain` style."
+msgstr "Referência de campos de um Kind, ao estilo do `kubectl explain`."
+
+msgid "From the SAME generated schema, so it cannot drift from the code."
+msgstr "A partir do MESMO schema gerado, por isso não pode divergir do código."
+
+msgid ""
+"`delonix explain Container` · `delonix explain Container.ports` · `delonix explain Pod.containers.image`"
+msgstr ""
+"`delonix explain Container` · `delonix explain Container.ports` · `delonix explain Pod.containers.image`"
+
+msgid ""
+"Field reference for a Kind, `kubectl explain` style."
+"\n"
+"\n"
+"From the SAME generated schema, so it cannot drift from the code."
+"\n"
+"\n"
+"`delonix explain Container` · `delonix explain Container.ports` · `delonix explain Pod.containers.image`"
+msgstr ""
+"Referência de campos de um Kind, ao estilo do `kubectl explain`."
+"\n"
+"\n"
+"A partir do MESMO schema gerado, por isso não pode divergir do código."
+"\n"
+"\n"
+"`delonix explain Container` · `delonix explain Container.ports` · `delonix explain Pod.containers.image`"
+
+msgid "Stack detail in `kubectl describe` style."
+msgstr "Detalhe da stack ao estilo do `kubectl describe`."
+
+msgid ""
+"Each resource DECLARED in the manifest and whether or not it is present on the machine."
+msgstr ""
+"Cada recurso DECLARADO no manifesto e se está ou não presente na máquina."
+
+msgid ""
+"**The stack has no state of its own** — there is no registry of \"stacks\", only a manifest and the resources it creates. That is why this `describe` always starts from the file and goes to confirm each resource against the respective store, instead of inventing a new registry that would drift out of sync (the same reason `cluster ls` derives its state from the container labels)."
+msgstr ""
+"**A stack não tem estado próprio** — não há registo de \"stacks\", só um manifesto e os recursos que ele cria. É por isso que este `describe` parte sempre do ficheiro e vai confirmar cada recurso ao store respectivo, em vez de inventar um registo novo que ficaria dessincronizado (a mesma razão pela qual o `cluster ls` deriva o estado das labels dos containers)."
+
+msgid ""
+"The column that matters is PRESENCE: an `apply` is fail-fast and without rollback, so a half-applied stack is a normal state and this is exactly what it shows."
+msgstr ""
+"A coluna que interessa é a PRESENÇA: um `apply` é fail-fast e sem rollback, por isso uma stack meio aplicada é um estado normal e é exactamente isso que ele mostra."
+
+msgid ""
+"Stack detail in `kubectl describe` style."
+"\n"
+"\n"
+"Each resource DECLARED in the manifest and whether or not it is present on the machine."
+"\n"
+"\n"
+"**The stack has no state of its own** — there is no registry of \"stacks\", only a manifest and the resources it creates. That is why this `describe` always starts from the file and goes to confirm each resource against the respective store, instead of inventing a new registry that would drift out of sync (the same reason `cluster ls` derives its state from the container labels)."
+"\n"
+"\n"
+"The column that matters is PRESENCE: an `apply` is fail-fast and without rollback, so a half-applied stack is a normal state and this is exactly what it shows."
+msgstr ""
+"Detalhe da stack ao estilo do `kubectl describe`."
+"\n"
+"\n"
+"Cada recurso DECLARADO no manifesto e se está ou não presente na máquina."
+"\n"
+"\n"
+"**A stack não tem estado próprio** — não há registo de \"stacks\", só um manifesto e os recursos que ele cria. É por isso que este `describe` parte sempre do ficheiro e vai confirmar cada recurso ao store respectivo, em vez de inventar um registo novo que ficaria dessincronizado (a mesma razão pela qual o `cluster ls` deriva o estado das labels dos containers)."
+"\n"
+"\n"
+"A coluna que interessa é a PRESENÇA: um `apply` é fail-fast e sem rollback, por isso uma stack meio aplicada é um estado normal e é exactamente isso que ele mostra."
+
+msgid "Creates/starts every service."
+msgstr "Cria/arranca todos os serviços."
+
+msgid ""
+"Build, then network, then volume, then containers in `depends_on` order (gated on the declared condition)."
+msgstr ""
+"Primeiro o build, depois a rede, depois o volume, depois os containers por ordem de `depends_on` (condicionados à condição declarada)."
+
+msgid ""
+"Creates/starts every service."
+"\n"
+"\n"
+"Build, then network, then volume, then containers in `depends_on` order (gated on the declared condition)."
+msgstr ""
+"Cria/arranca todos os serviços."
+"\n"
+"\n"
+"Primeiro o build, depois a rede, depois o volume, depois os containers por ordem de `depends_on` (condicionados à condição declarada)."
+
+msgid "Diagnose — and, with `--delegate`, fix — cgroup delegation."
+msgstr "Diagnostica — e, com `--delegate`, corrige — a delegação de cgroup."
+
+msgid ""
+"It is the prerequisite for `--memory`/`--cpus`/`--pids-limit` to mean anything. Without it the flags are ACCEPTED and INERT: the container runs with no limit at all. That is the failure mode this command exists for, and it is invisible without asking."
+msgstr ""
+"É o pré-requisito para que `--memory`/`--cpus`/`--pids-limit` signifiquem alguma coisa. Sem ela as flags são ACEITES e INERTES: o container corre sem limite nenhum. É esse o modo de falha para que este comando existe, e é invisível sem perguntar."
+
+msgid ""
+"Diagnose — and, with `--delegate`, fix — cgroup delegation."
+"\n"
+"\n"
+"It is the prerequisite for `--memory`/`--cpus`/`--pids-limit` to mean anything. Without it the flags are ACCEPTED and INERT: the container runs with no limit at all. That is the failure mode this command exists for, and it is invisible without asking."
+msgstr ""
+"Diagnostica — e, com `--delegate`, corrige — a delegação de cgroup."
+"\n"
+"\n"
+"É o pré-requisito para que `--memory`/`--cpus`/`--pids-limit` signifiquem alguma coisa. Sem ela as flags são ACEITES e INERTES: o container corre sem limite nenhum. É esse o modo de falha para que este comando existe, e é invisível sem perguntar."
+
+msgid ""
+"Thermal governor for Delonix's CPU budget. Runs continuously (see `--once`)."
+msgstr ""
+"Governador térmico do orçamento de CPU do Delonix. Corre continuamente (ver `--once`)."
+
+msgid ""
+"Lowers the budget when the CPU heats up and restores it when it cools down."
+msgstr ""
+"Baixa o orçamento quando o CPU aquece e repõe-no quando arrefece."
+
+msgid ""
+"Thermal governor for Delonix's CPU budget. Runs continuously (see `--once`)."
+"\n"
+"\n"
+"Lowers the budget when the CPU heats up and restores it when it cools down."
+msgstr ""
+"Governador térmico do orçamento de CPU do Delonix. Corre continuamente (ver `--once`)."
+"\n"
+"\n"
+"Baixa o orçamento quando o CPU aquece e repõe-no quando arrefece."
+
+msgid "Initialize a project with the cluster manifests (kind/vm/ssh)."
+msgstr "Inicializa um projecto com os manifestos de cluster (kind/vm/ssh)."
+
+msgid ""
+"Initialize a project with the cluster manifests (kind/vm/ssh)."
+"\n"
+"\n"
+"Files ALREADY FILLED IN (images included), ready to use without editing anything."
+msgstr ""
+"Inicializa um projecto com os manifestos de cluster (kind/vm/ssh)."
+"\n"
+"\n"
+"Ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada."
+
+msgid "Provision VMs (golden VM image) + `kubeadm` bootstrap."
+msgstr "Provisiona VMs (imagem VM dourada) + bootstrap com `kubeadm`."
+
+msgid "From zero to a working cluster, without writing a manifest by hand."
+msgstr "Do zero a um cluster a funcionar, sem escrever um manifesto à mão."
+
+msgid ""
+"Provision VMs (golden VM image) + `kubeadm` bootstrap."
+"\n"
+"\n"
+"From zero to a working cluster, without writing a manifest by hand."
+msgstr ""
+"Provisiona VMs (imagem VM dourada) + bootstrap com `kubeadm`."
+"\n"
+"\n"
+"Do zero a um cluster a funcionar, sem escrever um manifesto à mão."
+
+msgid "Allow a network's egress to a HOSTNAME (and `*.hostname`). Repeatable."
+msgstr "Permite a saída de uma rede para um HOSTNAME (e `*.hostname`). Repetível."
+
+msgid ""
+"Learnt live from DNS answers — the FQDN allowlist nft/CIDR can't express."
+msgstr ""
+"Aprendido ao vivo das respostas de DNS — a allowlist de FQDN que nft/CIDR não conseguem exprimir."
+
+msgid ""
+"Allow a network's egress to a HOSTNAME (and `*.hostname`). Repeatable."
+"\n"
+"\n"
+"Learnt live from DNS answers — the FQDN allowlist nft/CIDR can't express."
+msgstr ""
+"Permite a saída de uma rede para um HOSTNAME (e `*.hostname`). Repetível."
+"\n"
+"\n"
+"Aprendido ao vivo das respostas de DNS — a allowlist de FQDN que nft/CIDR não conseguem exprimir."
+
+msgid "Show a NETWORK's egress policy."
+msgstr "Mostra a política de saída de uma REDE."
+
+msgid ""
+"CIDR allowlist, FQDN hosts, and the IPs currently learnt from DNS for those hosts."
+msgstr ""
+"Allowlist de CIDR, hosts FQDN, e os IPs actualmente aprendidos do DNS para esses hosts."
+
+msgid ""
+"Show a NETWORK's egress policy."
+"\n"
+"\n"
+"CIDR allowlist, FQDN hosts, and the IPs currently learnt from DNS for those hosts."
+msgstr ""
+"Mostra a política de saída de uma REDE."
+"\n"
+"\n"
+"Allowlist de CIDR, hosts FQDN, e os IPs actualmente aprendidos do DNS para esses hosts."
+
+msgid "Install + enable systemd units for the RUNNING containers."
+msgstr "Instala + activa unidades systemd para os containers A CORRER."
+
+msgid ""
+"So they come back up when the host boots. Rootless uses user units + linger."
+msgstr ""
+"Para voltarem a subir quando o host arranca. Em rootless usa unidades de utilizador + linger."
+
+msgid ""
+"Install + enable systemd units for the RUNNING containers."
+"\n"
+"\n"
+"So they come back up when the host boots. Rootless uses user units + linger."
+msgstr ""
+"Instala + activa unidades systemd para os containers A CORRER."
+"\n"
+"\n"
+"Para voltarem a subir quando o host arranca. Em rootless usa unidades de utilizador + linger."
+
+msgid "Serve the MANAGEMENT API (HTTP+JSON) on a unix socket."
+msgstr "Serve a API de GESTÃO (HTTP+JSON) num socket unix."
+
+msgid "The surface an external control-plane consumes to operate the engine."
+msgstr "A superfície que um control-plane externo consome para operar o motor."
+
+msgid ""
+"Serve the MANAGEMENT API (HTTP+JSON) on a unix socket."
+"\n"
+"\n"
+"The surface an external control-plane consumes to operate the engine."
+msgstr ""
+"Serve a API de GESTÃO (HTTP+JSON) num socket unix."
+"\n"
+"\n"
+"A superfície que um control-plane externo consome para operar o motor."
+
+msgid "Runtime summary/KPI dashboard (interactive htop-style TUI)."
+msgstr "Painel de resumo/KPIs do runtime (TUI interactivo ao estilo do htop)."
+
+msgid "Global, or per group (`container dash`, `vm dash`, ...)."
+msgstr "Global, ou por grupo (`container dash`, `vm dash`, ...)."
+
+msgid ""
+"Runtime summary/KPI dashboard (interactive htop-style TUI)."
+"\n"
+"\n"
+"Global, or per group (`container dash`, `vm dash`, ...)."
+msgstr ""
+"Painel de resumo/KPIs do runtime (TUI interactivo ao estilo do htop)."
+"\n"
+"\n"
+"Global, ou por grupo (`container dash`, `vm dash`, ...)."
+
+# `vm console`: about curto + long_about
+
+msgid "Attach to the VM's serial console (interactive terminal)."
+msgstr "Liga-te à consola série da VM (terminal interactivo)."
+
+msgid "Works with no IP (boot logs, login). Escape: Ctrl-] ."
+msgstr "Funciona sem IP nenhum (logs de arranque, login). Escape: Ctrl-] ."
+
+msgid ""
+"Attach to the VM's serial console (interactive terminal)."
+"\n"
+"\n"
+"Works with no IP (boot logs, login). Escape: Ctrl-] ."
+msgstr ""
+"Liga-te à consola série da VM (terminal interactivo)."
+"\n"
+"\n"
+"Funciona sem IP nenhum (logs de arranque, login). Escape: Ctrl-] ."
+
+# ---------------------------------------------------------------------------
+# `about` encurtado (a lista `Commands:` do comando pai deixa de ser um
+# parágrafo por linha): cada doc-comment passou a ter uma primeira frase
+# curta + o detalhe num 2.º parágrafo. O clap faz do 1.º parágrafo o `about`
+# e do doc-comment INTEIRO o `long_about`, por isso são duas entradas por
+# comando — e as duas têm de estar aqui, senão o `--help` fica em EN.
+# ---------------------------------------------------------------------------
+
+msgid "Start the right project for THIS directory."
+msgstr "Arranca o projecto certo para ESTA pasta."
+
+msgid "Start the right project for THIS directory.\n\nDetects and dispatches to `stack init`/`vm init` with the matching template, saying what it detected and why."
+msgstr "Arranca o projecto certo para ESTA pasta.\n\nDetecta e despacha para o `stack init`/`vm init` com o template adequado, dizendo o que detectou e porquê."
+
+msgid "(Re)start stopped/crashed containers. Always detached."
+msgstr "(Re)arranca containers parados/caídos. Sempre desanexado."
+
+msgid "(Re)start stopped/crashed containers. Always detached.\n\nReuses the persistent rootfs (writes made inside the container survive, like in docker) and the same network/ports/volumes as the original `run`."
+msgstr "(Re)arranca containers parados/caídos. Sempre desanexado.\n\nReaproveita o rootfs persistente (o que foi escrito lá dentro sobrevive, como no docker) e a mesma rede/portas/volumes do `run` original."
+
+msgid "Send a signal to one or more containers (default SIGKILL)."
+msgstr "Envia um sinal a um ou mais containers (por omissão SIGKILL)."
+
+msgid "Send a signal to one or more containers (default SIGKILL).\n\nUnlike `stop`, does not wait or force a `Stopped` status: the real outcome (e.g. `Crashed` for a `KILL`) is picked up on the next observation."
+msgstr "Envia um sinal a um ou mais containers (por omissão SIGKILL).\n\nAo contrário do `stop`, não espera nem força o estado `Stopped`: o desfecho real (ex.: `Crashed` para um `KILL`) é apanhado na observação seguinte."
+
+msgid "Interactive shell inside a container (shortcut for `exec -t`)."
+msgstr "Shell interactiva dentro de um container (atalho para `exec -t`)."
+
+msgid "Interactive shell inside a container (shortcut for `exec -t`).\n\nWith no command, it tries `bash` and falls back to `sh`, which exists in any image."
+msgstr "Shell interactiva dentro de um container (atalho para `exec -t`).\n\nSem comando, tenta o `bash` e cai para o `sh`, que existe em qualquer imagem."
+
+msgid "Re-attach to a running container's output stream (output only)."
+msgstr "Volta a ligar-se ao fluxo de saída de um container a correr (só saída)."
+
+msgid "Re-attach to a running container's output stream (output only).\n\nSame log file `logs -f` reads. Unlike `docker attach`, this is OUTPUT-ONLY: a detached container's stdin has nowhere to go (this engine keeps no live conduit to it once started, unlike a persistent per-container shim) — `-i`/`--stdin` is refused with a clear error instead of silently doing nothing."
+msgstr "Volta a ligar-se ao fluxo de saída de um container a correr (só saída).\n\nO mesmo ficheiro de log que o `logs -f` lê. Ao contrário do `docker attach`, isto é SÓ-SAÍDA: o stdin de um container desanexado não tem para onde ir (este motor não guarda um canal vivo para ele depois de arrancado, ao contrário de um shim persistente por container) — `-i`/`--stdin` é recusado com um erro claro em vez de não fazer nada em silêncio."
+
+msgid "Apply the `kind: Container` documents of a manifest (idempotent by name)."
+msgstr "Aplica os documentos `kind: Container` de um manifesto (idempotente por nome)."
+
+msgid "Apply the `kind: Container` documents of a manifest (idempotent by name).\n\nAn existing container with that name is neither recreated nor checked for spec drift, see `cmd::manifest`."
+msgstr "Aplica os documentos `kind: Container` de um manifesto (idempotente por nome).\n\nUm container existente com esse nome não é recriado nem verificado quanto a deriva de spec, ver `cmd::manifest`."
+
+msgid "Human-readable detail of one or more images, `kubectl describe`-style."
+msgstr "Detalhe legível de uma ou mais imagens, ao estilo `kubectl describe`."
+
+msgid "Human-readable detail of one or more images, `kubectl describe`-style.\n\nTags/digest/size/layers + the OCI config: entrypoint/cmd/env/workdir. With `--vm`, describes golden VM images."
+msgstr "Detalhe legível de uma ou mais imagens, ao estilo `kubectl describe`.\n\nTags/digest/tamanho/layers + o config OCI: entrypoint/cmd/env/workdir. Com `--vm`, descreve imagens VM douradas."
+
+msgid "SBOM + CVE scan of an image."
+msgstr "SBOM + scan de CVE de uma imagem."
+
+msgid "SBOM + CVE scan of an image.\n\nReads the layers from the CAS, without running anything. Pulls the image if missing. See `--sbom`, `--fail-on`, `--update`."
+msgstr "SBOM + scan de CVE de uma imagem.\n\nLê os layers do CAS, sem correr nada. Puxa a imagem se faltar. Ver `--sbom`, `--fail-on`, `--update`."
+
+msgid "Save an image to a portable archive (`docker save`'s counterpart)."
+msgstr "Guarda uma imagem num arquivo portátil (o equivalente ao `docker save`)."
+
+msgid "Save an image to a portable archive (`docker save`'s counterpart).\n\nThe way to move an image to another machine with no registry. The archive is an OCI layout WITH the legacy `manifest.json`, so `delonix image load`, `docker load`, `podman load` and `ctr images import` all read it."
+msgstr "Guarda uma imagem num arquivo portátil (o equivalente ao `docker save`).\n\nA forma de levar uma imagem para outra máquina sem registo. O arquivo é um OCI layout COM o `manifest.json` legado, por isso `delonix image load`, `docker load`, `podman load` e `ctr images import` leem-no todos."
+
+msgid "Authenticate to an OCI registry."
+msgstr "Autentica num registo OCI."
+
+msgid "Authenticate to an OCI registry.\n\nStores the credentials in `<root>/auth.json`, docker/podman format. The password ALWAYS comes from stdin — never from an argument (it would end up in the shell history and in /proc)."
+msgstr "Autentica num registo OCI.\n\nGuarda as credenciais em `<root>/auth.json`, formato docker/podman. A password vem SEMPRE do stdin — nunca de um argumento (ficaria no histórico da shell e no /proc)."
+
+msgid "List the tags available in a remote OCI repository."
+msgstr "Lista as tags disponíveis num repositório OCI remoto."
+
+msgid "List the tags available in a remote OCI repository.\n\nWith no argument, the OFFICIAL Delonix golden image repo (discover which k8s versions are published before `pull`/`--k8s-version`)."
+msgstr "Lista as tags disponíveis num repositório OCI remoto.\n\nSem argumento, o repositório OFICIAL da imagem dourada do Delonix (descobre que versões de k8s estão publicadas antes de um `pull`/`--k8s-version`)."
+
+msgid "Convert a VM disk to the format another ecosystem imports."
+msgstr "Converte um disco de VM para o formato que outro ecossistema importa."
+
+msgid "Convert a VM disk to the format another ecosystem imports.\n\n`qcow2`, `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V, Azure). Flattened either way: the result is a standalone file."
+msgstr "Converte um disco de VM para o formato que outro ecossistema importa.\n\n`qcow2`, `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V, Azure). Achatado em qualquer dos casos: o resultado é um ficheiro autónomo."
+
+msgid "(only with `--vm`) Scaffold a `VMfile` for building your own VM image."
+msgstr "(só com `--vm`) Gera o esqueleto de um `VMfile` para construíres a tua própria imagem VM."
+
+msgid "(only with `--vm`) Scaffold a `VMfile` for building your own VM image.\n\nWrites a `VMfile` (and a cloud-init) for building your own image. The built-in alternative is the golden VM image (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), built by `image --vm build` with no `-f`."
+msgstr "(só com `--vm`) Gera o esqueleto de um `VMfile` para construíres a tua própria imagem VM.\n\nEscreve um `VMfile` (e um cloud-init) para construíres a tua própria imagem. A alternativa embutida é a imagem VM dourada (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), construída pelo `image --vm build` sem `-f`."
+
+msgid "(only with `--vm`) Build a VM image."
+msgstr "(só com `--vm`) Constrói uma imagem VM."
+
+msgid "(only with `--vm`) Build a VM image.\n\nThe built-in golden recipe (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), or a `VMfile` of your own with `-f`."
+msgstr "(só com `--vm`) Constrói uma imagem VM.\n\nA receita dourada embutida (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), ou um `VMfile` teu com `-f`."
+
+msgid "List the tags available in a remote OCI repository.\n\nWith no argument, the OFFICIAL Delonix golden image repo (discover which k8s versions are published before `pull`)."
+msgstr "Lista as tags disponíveis num repositório OCI remoto.\n\nSem argumento, o repositório OFICIAL da imagem dourada do Delonix (descobre que versões de k8s estão publicadas antes de um `pull`)."
+
+msgid "Convert a VM disk to the format another ecosystem imports.\n\n`qcow2`, `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V, Azure). Flattened either way, so the result is a standalone file with no backing chain. This engine's own two backends already share `qcow2`/`raw`; the rest exist so an image built here is importable elsewhere without a backend per product."
+msgstr "Converte um disco de VM para o formato que outro ecossistema importa.\n\n`qcow2`, `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V, Azure). Achatado em qualquer dos casos, por isso o resultado é um ficheiro autónomo, sem cadeia de backing. Os dois backends deste motor já partilham `qcow2`/`raw`; os restantes existem para que uma imagem construída aqui seja importável noutro lado sem um backend por produto."
+
+msgid "Get or set the default VM backend."
+msgstr "Lê ou fixa o backend de VM por omissão."
+
+msgid "Get or set the default VM backend.\n\nUsed by `vm create` when neither `--backend` nor `DELONIX_VM_BACKEND` is given — above the engine's own auto-detection heuristic. With no flag, prints the current default (`none` if auto-detection decides)."
+msgstr "Lê ou fixa o backend de VM por omissão.\n\nUsado pelo `vm create` quando não vem nem `--backend` nem `DELONIX_VM_BACKEND` — acima da heurística de auto-detecção do próprio motor. Sem flag nenhuma, imprime o que está fixado (`none` = decide a auto-detecção)."
+
+msgid "SSH into a VM by NAME, or straight to an address."
+msgstr "Entra por SSH numa VM pelo NOME, ou directamente num endereço."
+
+msgid "SSH into a VM by NAME, or straight to an address.\n\nThe name is enough — its IP comes from the record. With a trailing command, runs it and returns instead of opening a shell.\n\n`delonix vm ssh dev` · `delonix vm ssh dev -- systemctl status` · `delonix vm ssh 192.168.122.50 -l root`"
+msgstr "Entra por SSH numa VM pelo NOME, ou directamente num endereço.\n\nO nome chega — o IP vem do registo. Com um comando no fim, corre-o e volta em vez de abrir uma shell.\n\n`delonix vm ssh dev` · `delonix vm ssh dev -- systemctl status` · `delonix vm ssh 192.168.122.50 -l root`"
+
+msgid "Which published ports a VM can actually reach, and how to fix the rest."
+msgstr "Que portas publicadas uma VM alcança de facto, e como corrigir as restantes."
+
+msgid "Which published ports a VM can actually reach, and how to fix the rest.\n\nA port published to the default `127.0.0.1` is invisible to a VM — this lists the libvirt gateways, reads each port's LIVE bind, and for every loopback-only one prints the exact republish command."
+msgstr "Que portas publicadas uma VM alcança de facto, e como corrigir as restantes.\n\nUma porta publicada no `127.0.0.1` por omissão é invisível para uma VM — isto lista os gateways do libvirt, lê o bind VIVO de cada porta e, para cada uma que esteja só no loopback, imprime o comando exacto de republicação."
+
+msgid "EXPERIMENTAL (root): give a libvirt VM DIRECT IP reachability to a container SDN network."
+msgstr "EXPERIMENTAL (root): dá a uma VM libvirt alcançabilidade DIRECTA por IP a uma rede SDN de containers."
+
+msgid "EXPERIMENTAL (root): give a libvirt VM DIRECT IP reachability to a container SDN network.\n\nA veth from the host into the holder netns, plus routes. Defaults to a DRY-RUN; add `--apply` (as root) to establish it."
+msgstr "EXPERIMENTAL (root): dá a uma VM libvirt alcançabilidade DIRECTA por IP a uma rede SDN de containers.\n\nUm veth do host para dentro da netns do holder, mais rotas. Por omissão é DRY-RUN; acrescenta `--apply` (como root) para a estabelecer."
+
+msgid "Human-readable detail of one or more VMs, `kubectl describe` style."
+msgstr "Detalhe legível de uma ou mais VMs, ao estilo `kubectl describe`."
+
+msgid "Human-readable detail of one or more VMs, `kubectl describe` style.\n\nFor humans; use `status` for the usual compact view. Includes the LIVE state — `delonix_vm::status` reconciles liveness/IP with the backend."
+msgstr "Detalhe legível de uma ou mais VMs, ao estilo `kubectl describe`.\n\nPara humanos; usa `status` para a vista compacta de sempre. Inclui o estado AO VIVO — `delonix_vm::status` reconcilia liveness/IP com o backend."
+
+msgid "Start an existing, stopped VM — idempotent (already running = no-op)."
+msgstr "Arranca uma VM existente e parada — idempotente (já a correr = sem efeito)."
+
+msgid "Start an existing, stopped VM — idempotent (already running = no-op).\n\nReboots with the base disk/vcpus/memory/network/backend recorded at its last `create`/`start`, reusing the same overlay (disk state preserved). Does NOT restore anything that only ever existed as a `vm create` flag (custom kernel/seed/volumes/static IP/VNC/advanced libvirt knobs) — a VM using those needs the original `vm create` invocation instead (also idempotent/auto-heal)."
+msgstr "Arranca uma VM existente e parada — idempotente (já a correr = sem efeito).\n\nReinicia com o disco base/vcpus/memória/rede/backend gravados no último `create`/`start`, reaproveitando o mesmo overlay (o estado do disco preserva-se). NÃO restaura o que só alguma vez existiu como flag do `vm create` (kernel/seed/volumes/IP estático/VNC/opções avançadas do libvirt) — uma VM que precise disso precisa do `vm create` original (também idempotente/auto-recuperação)."
+
+msgid "Take a named snapshot of a VM."
+msgstr "Tira um snapshot com nome de uma VM."
+
+msgid "Take a named snapshot of a VM.\n\nlibvirt: a running VM's snapshot is a system checkpoint — memory + disk; `restore` reverts to it. Not yet supported on the cloud-hypervisor backend."
+msgstr "Tira um snapshot com nome de uma VM.\n\nlibvirt: o snapshot de uma VM a correr é um checkpoint de sistema — memória + disco; o `restore` volta a ele. Ainda não suportado no backend cloud-hypervisor."
+
+msgid "WireGuard identity of THIS node, for the encrypted overlay between nodes."
+msgstr "Identidade WireGuard DESTE nó, para o overlay cifrado entre nós."
+
+msgid "WireGuard identity of THIS node, for the encrypted overlay between nodes.\n\nThe VXLAN overlay of `network create --driver overlay`. The private key stays 0600 in `<root>/wg/node.key`; the public one is what you hand out to the peers."
+msgstr "Identidade WireGuard DESTE nó, para o overlay cifrado entre nós.\n\nO overlay VXLAN do `network create --driver overlay`. A chave privada fica 0600 em `<root>/wg/node.key`; a pública é o que se distribui aos peers."
+
+msgid "Initializes a COMPLETE project: Delonixfile + manifest + cluster + README."
+msgstr "Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + README."
+
+msgid "Initializes a COMPLETE project: Delonixfile + manifest + cluster + README.\n\nFiles ALREADY FILLED IN (images included), ready to use without editing anything."
+msgstr "Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + README.\n\nFicheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada."
+
+msgid "List the structure the manifest composes, and whether each resource exists."
+msgstr "Lista a estrutura que o manifesto compõe, e se cada recurso existe."
+
+msgid "List the structure the manifest composes, and whether each resource exists.\n\nContainers, volumes, networks, ... — the tabular summary of `describe`."
+msgstr "Lista a estrutura que o manifesto compõe, e se cada recurso existe.\n\nContainers, volumes, redes, ... — o resumo tabular do `describe`."
+
+msgid "Validates the manifest WITHOUT touching anything (dry-run)."
+msgstr "Valida o manifesto SEM tocar em nada (dry-run)."
+
+msgid "Validates the manifest WITHOUT touching anything (dry-run).\n\nResolves the cross-references (`Container.network`/`.volumes`, `Vm.network`, `Ingress/Egress.target`) against what the manifest declares PLUS what already exists in the stores. Exits with an error if any reference is left unresolved — it is the safety net against an `apply` that would only fail halfway through (fail-fast, no rollback)."
+msgstr "Valida o manifesto SEM tocar em nada (dry-run).\n\nResolve as referências cruzadas (`Container.network`/`.volumes`, `Vm.network`, `Ingress/Egress.target`) contra o que o manifesto declara MAIS o que já existe nos stores. Sai com erro se ficar alguma referência por resolver — é a rede de segurança contra um `apply` que só falharia a meio (fail-fast, sem rollback)."
+
+msgid "Removes every container this project's `up` created."
+msgstr "Remove todos os containers que o `up` deste projecto criou."
+
+msgid "Removes every container this project's `up` created.\n\nAnd, with `-v`, its named volumes. Networks/volumes marked `external: true` are NEVER removed."
+msgstr "Remove todos os containers que o `up` deste projecto criou.\n\nE, com `-v`, os seus volumes nomeados. Redes/volumes marcados `external: true` NUNCA são removidos."
+
+msgid "Engine events (create/start/die/remove/…), from oldest to most recent."
+msgstr "Eventos do motor (create/start/die/remove/…), do mais antigo ao mais recente."
+
+msgid "Engine events (create/start/die/remove/…), from oldest to most recent.\n\nWith no daemon, the log is a shared append-only file — each command appends its own line (see `delonix_runtime_core::events`)."
+msgstr "Eventos do motor (create/start/die/remove/…), do mais antigo ao mais recente.\n\nSem daemon, o registo é um log append-only partilhado — cada comando acrescenta a sua linha (ver `delonix_runtime_core::events`)."
+
+msgid "Reclaim space taken by what nothing uses any more."
+msgstr "Recupera o espaço ocupado pelo que já ninguém usa."
+
+msgid "Reclaim space taken by what nothing uses any more.\n\nRemoves stopped containers, unused images, CAS blobs nobody references, empty cgroups and — the biggest space saver — **orphan container directories** (from nodes/containers that died abruptly without `rm`, with no registry entry)."
+msgstr "Recupera o espaço ocupado pelo que já ninguém usa.\n\nRemove containers parados, imagens sem uso, blobs do CAS que ninguém referencia, cgroups vazios e — o que mais espaço liberta — **directórios de containers órfãos** (de nós/containers que morreram abruptamente sem `rm`, sem entrada no registo)."
+
+msgid "Active network connections per container (via conntrack)."
+msgstr "Ligações de rede activas por container (via conntrack)."
+
+msgid "Active network connections per container (via conntrack).\n\nWho comes in, who goes out, and between containers. Refreshes continuously (see `--no-stream`)."
+msgstr "Ligações de rede activas por container (via conntrack).\n\nQuem entra, quem sai, e entre containers. Actualiza em contínuo (ver `--no-stream`)."
+
+msgid "Kubernetes clusters: `kubeadm` bootstrap, VM provisioning, manifest generation."
+msgstr "Clusters Kubernetes: bootstrap `kubeadm`, provisionamento de VMs, geração de manifestos."
+
+msgid "Kubernetes clusters: `kubeadm` bootstrap, VM provisioning, manifest generation.\n\nIdempotent `kubeadm` bootstrap over SSH (`kind: Cluster`), full VM provisioning, or generating a k8s manifest from a running container/pod (`cluster kube generate`)."
+msgstr "Clusters Kubernetes: bootstrap `kubeadm`, provisionamento de VMs, geração de manifestos.\n\nBootstrap `kubeadm` idempotente sobre SSH (`kind: Cluster`), provisionamento completo de VMs, ou geração de um manifesto k8s a partir de um container/pod já a correr (`cluster kube generate`)."
+
+msgid "Create a local Kubernetes cluster **without a manifest and without Docker**."
+msgstr "Cria um cluster Kubernetes local **sem manifesto e sem Docker**."
+
+msgid "Create a local Kubernetes cluster **without a manifest and without Docker**.\n\nNative kind mode: starts the `kindest/node` nodes in the Delonix engine itself and bootstraps them with `kubeadm`. No flags = 1 control-plane ready to use."
+msgstr "Cria um cluster Kubernetes local **sem manifesto e sem Docker**.\n\nModo kind nativo: arranca os nós `kindest/node` no próprio motor Delonix e faz o bootstrap com `kubeadm`. Sem flags = 1 control-plane pronto a usar."
+
+msgid "Load local images into a kind-mode cluster's nodes, **without a registry**."
+msgstr "Carrega imagens locais nos nós de um cluster em modo kind, **sem registo**."
+
+msgid "Load local images into a kind-mode cluster's nodes, **without a registry**.\n\nThe equivalent of `kind load docker-image`: packs each image from the local store and imports it into every running node's containerd."
+msgstr "Carrega imagens locais nos nós de um cluster em modo kind, **sem registo**.\n\nO equivalente ao `kind load docker-image`: empacota cada imagem do store local e importa-a no containerd de cada nó a correr."
+
+msgid "Generate a Kubernetes manifest from a container/pod already running locally."
+msgstr "Gera um manifesto Kubernetes a partir de um container/pod já a correr localmente."
+
+msgid "Generate a Kubernetes manifest from a container/pod already running locally.\n\n`kube generate` — the \"ran it locally, now give me the YAML for k8s\" path (equivalent to `podman generate kube`)."
+msgstr "Gera um manifesto Kubernetes a partir de um container/pod já a correr localmente.\n\n`kube generate` — o caminho \"correu localmente, agora dá-me o YAML para k8s\" (equivalente ao `podman generate kube`)."
+
+msgid "Expose a local port to the public internet (`kind: Tunnel`)."
+msgstr "Expõe uma porta local à internet pública (`kind: Tunnel`)."
+
+msgid "Expose a local port to the public internet (`kind: Tunnel`).\n\nVia pinggy/ngrok/cloudflare — pair with `httproute`'s listening port to route by Host header behind ONE public URL."
+msgstr "Expõe uma porta local à internet pública (`kind: Tunnel`).\n\nVia pinggy/ngrok/cloudflare — junta-o à porta de escuta do `httproute` para rotear pelo header Host atrás de UMA só URL pública."
+
+msgid "Serve a slice of the Docker Engine API on a unix socket."
+msgstr "Serve uma fatia da Docker Engine API num socket unix."
+
+msgid "Serve a slice of the Docker Engine API on a unix socket.\n\n`docker version`/`ps`/`images`/`info`/lifecycle mutations via `DOCKER_HOST=unix://<path>`."
+msgstr "Serve uma fatia da Docker Engine API num socket unix.\n\n`docker version`/`ps`/`images`/`info`/mutações de ciclo de vida via `DOCKER_HOST=unix://<caminho>`."
+

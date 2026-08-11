@@ -1822,9 +1822,10 @@ pub enum ContainerCmd {
         #[arg(short, long)]
         interactive: bool,
     },
-    /// Apply the `kind: Container` documents of a manifest (idempotent by
-    /// name — an existing container with that name is neither recreated nor
-    /// checked for spec drift, see `cmd::manifest`).
+    /// Apply the `kind: Container` documents of a manifest (idempotent by name).
+    ///
+    /// An existing container with that name is neither recreated nor checked
+    /// for spec drift, see `cmd::manifest`.
     Apply {
         #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,

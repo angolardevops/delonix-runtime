@@ -158,33 +158,33 @@ Docker.</p>
 <div class='help'><pre><code>Usage: delonix container [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  kill         Send a signal to one or more containers (default SIGKILL) — unlike `stop`, does not wait or force a `Stopped` status: the real outcome (e.g. `Crashed` for a `KILL`) is picked up on the next observation
-  pause        Suspend a container&#x27;s processes (cgroup v2 freezer) — the state stays in memory, unlike `stop`. Resume with `unpause`
-  restart      Stop then start one or more containers (reuses the persistent rootfs and the original run configuration, like `start`)
+  kill         Send a signal to one or more containers (default SIGKILL)
+  pause        Suspend a container&#x27;s processes (cgroup v2 freezer)
+  restart      Stop then start one or more containers
   rm           Remove one or more containers
   run          Run a container from an image (pulls it if missing)
-  start        (Re)start stopped/crashed containers, reusing the persistent rootfs (writes made inside the container survive, like in docker) and the same network/ports/volumes as the original `run`. Always detached
+  start        (Re)start stopped/crashed containers. Always detached
   stop         Stop one or more containers (SIGTERM, then SIGKILL)
   unpause      Resume a container suspended with `pause`
   wait         Block until one or more containers exit, then print their exit code (one per line, in the order given)
-  describe     Human-readable detail of one or more containers, `kubectl describe`-style (for humans; use `inspect` for script-consumable JSON)
+  describe     Human-readable detail of one or more containers, `kubectl describe`-style
   diff         Files changed relative to the image: `A` = created/changed, `D` = deleted
   healthcheck  Run the image&#x27;s `HEALTHCHECK` inside the container. Exits with 1 if `unhealthy` — usable in a script/CI
   inspect      Show the full spec of one or more containers (Store JSON)
   logs         Show the logs (detached containers)
   port         Published ports of a container (`hostPort/proto -&gt; containerPort`)
   ps           List containers [alias: ls]
-  stats        Resource usage (CPU/memory/PIDs) of the running containers — one sample and exits (no stream). With no IDs, shows all running ones
+  stats        Resource usage (CPU/memory/PIDs) of the running containers
   top          Processes running inside a container (read from `cgroup.procs`)
-  attach       Re-attach to a running container&#x27;s output stream (same log file `logs -f` reads). Unlike `docker attach`, this is OUTPUT-ONLY: a detached container&#x27;s stdin has nowhere to go (this engine keeps no live conduit to it once started, unlike a persistent per-container shim) — `-i`/`--stdin` is refused with a clear error instead of silently doing nothing
+  attach       Re-attach to a running container&#x27;s output stream (output only)
   commit       Create an image from a container&#x27;s CURRENT rootfs state (whatever was written inside becomes a new layer)
-  cp           Copy files between the host and a container. Exactly one side is `container:/path` (e.g. `delonix container cp web:/etc/nginx.conf .`)
+  cp           Copy files between the host and a container
   exec         Execute a command inside a running container
-  ssh          Interactive shell inside a container (shortcut for `exec -t`): with no command, it tries `bash` and falls back to `sh`, which exists in any image
+  ssh          Interactive shell inside a container (shortcut for `exec -t`)
   rename       Give a container a new name
   update       **Reconfigure a RUNNING container without stopping it** — ports, volumes, networks, and bandwidth cap
-  apply        Apply the `kind: Container` documents of a manifest (idempotent by name — an existing container with that name is neither recreated nor checked for spec drift, see `cmd::manifest`)
-  init         Initialize a project with a Delonixfile + manifest — files ALREADY FILLED IN (images included), ready to use without editing anything
+  apply        Apply the `kind: Container` documents of a manifest (idempotent by name)
+  init         Initialize a project with a Delonixfile + manifest
   dash         Dashboard (KPIs + table + problems) of the containers — interactive TUI, or `--once` for a text snapshot
   help         Print this message or the help of the given subcommand(s)
 
@@ -553,7 +553,8 @@ SEE ALSO:
   delonix › container › ps</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Listar (alias `ls` também funciona)</div><div class='cap lang-en'>List (the `ls` alias also works)</div><pre><code>delonix container ls -a</code></pre></div><div class="ex"><div class='cap lang-pt'>Compor com stop/rm</div><div class='cap lang-en'>Compose with stop/rm</div><pre><code>delonix container rm -f $(delonix container ps -aq)</code></pre></div>
 <h2 id='start'><code>container start</code></h2>
-<p class='intro'>(Re)start stopped/crashed containers, reusing the persistent rootfs (writes made inside the container survive, like in docker) and the same network/ports/volumes as the original <code>run</code>. Always detached</p>
+<p class='intro'>(Re)start stopped/crashed containers. Always detached.</p>
+<p class='intro'>Reuses the persistent rootfs (writes made inside the container survive, like in docker) and the same network/ports/volumes as the original <code>run</code>.</p>
 <div class='help'><pre><code>Usage: delonix container start [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
@@ -763,7 +764,8 @@ SEE ALSO:
   delonix › container › inspect</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Spec completa em JSON</div><div class='cap lang-en'>Full spec as JSON</div><pre><code>delonix container inspect web | jq .[0].ports</code></pre></div>
 <h2 id='stats'><code>container stats</code></h2>
-<p class='intro'>Resource usage (CPU/memory/PIDs) of the running containers — one sample and exits (no stream). With no IDs, shows all running ones</p>
+<p class='intro'>Resource usage (CPU/memory/PIDs) of the running containers.</p>
+<p class='intro'>One sample and exits (no stream). With no IDs, shows all running ones.</p>
 <div class='help'><pre><code>Usage: delonix container stats [OPTIONS] [IDS]...
 
 Arguments:
@@ -797,7 +799,8 @@ cgroup delegation (rootless with no <code>Delegate=yes</code>), memory falls bac
 init's VmRSS, marked with <code>~</code>.</p></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Uma amostra de todos os que correm</div><div class='cap lang-en'>One sample of everything running</div><pre><code>delonix container stats</code></pre></div>
 <h2 id='apply'><code>container apply</code></h2>
-<p class='intro'>Apply the <code>kind: Container</code> documents of a manifest (idempotent by name — an existing container with that name is neither recreated nor checked for spec drift, see <code>cmd::manifest</code>)</p>
+<p class='intro'>Apply the <code>kind: Container</code> documents of a manifest (idempotent by name).</p>
+<p class='intro'>An existing container with that name is neither recreated nor checked for spec drift, see <code>cmd::manifest</code>.</p>
 <div class='help'><pre><code>Usage: delonix container apply [OPTIONS]
 
 Options:
@@ -823,7 +826,8 @@ SEE ALSO:
   delonix › container › apply</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Aplicar só os `kind: Container` de um manifesto</div><div class='cap lang-en'>Apply just the `kind: Container` entries from a manifest</div><pre><code>delonix container apply -f delonix-manifest.yaml</code></pre></div>
 <h2 id='init'><code>container init</code></h2>
-<p class='intro'>Initialize a project with a Delonixfile + manifest — files ALREADY FILLED IN (images included), ready to use without editing anything</p>
+<p class='intro'>Initialize a project with a Delonixfile + manifest.</p>
+<p class='intro'>Files ALREADY FILLED IN (images included), ready to use without editing anything.</p>
 <div class='help'><pre><code>Usage: delonix container init [OPTIONS] [DIR]
 
 Arguments:
@@ -864,7 +868,8 @@ SEE ALSO:
   delonix › container › init</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Scaffold de um projecto completo, pronto a usar</div><div class='cap lang-en'>Scaffold a complete, ready-to-use project</div><pre><code>delonix container init myapp &amp;&amp; cd myapp</code></pre></div>
 <h2 id='kill'><code>container kill</code></h2>
-<p class='intro'>Send a signal to one or more containers (default SIGKILL) — unlike <code>stop</code>, does not wait or force a <code>Stopped</code> status: the real outcome (e.g. <code>Crashed</code> for a <code>KILL</code>) is picked up on the next observation</p>
+<p class='intro'>Send a signal to one or more containers (default SIGKILL).</p>
+<p class='intro'>Unlike <code>stop</code>, does not wait or force a <code>Stopped</code> status: the real outcome (e.g. <code>Crashed</code> for a <code>KILL</code>) is picked up on the next observation.</p>
 <div class='help'><pre><code>Usage: delonix container kill [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
@@ -932,7 +937,8 @@ with no supervisor shows <code>Crashed</code>/137, a known architectural limit (
 that process's real parent).</p></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Bloqueia até sair, imprime o exit code</div><div class='cap lang-en'>Blocks until it exits, prints the exit code</div><pre><code>delonix container wait web</code></pre></div>
 <h2 id='restart'><code>container restart</code></h2>
-<p class='intro'>Stop then start one or more containers (reuses the persistent rootfs and the original run configuration, like <code>start</code>)</p>
+<p class='intro'>Stop then start one or more containers.</p>
+<p class='intro'>Reuses the persistent rootfs and the original run configuration, like <code>start</code>.</p>
 <div class='help'><pre><code>Usage: delonix container restart [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
@@ -1012,7 +1018,8 @@ SEE ALSO:
   delonix › container › port</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Portas publicadas deste container</div><div class='cap lang-en'>This container&#x27;s published ports</div><pre><code>delonix container port web</code></pre></div>
 <h2 id='pause'><code>container pause</code></h2>
-<p class='intro'>Suspend a container&#x27;s processes (cgroup v2 freezer) — the state stays in memory, unlike <code>stop</code>. Resume with <code>unpause</code></p>
+<p class='intro'>Suspend a container&#x27;s processes (cgroup v2 freezer).</p>
+<p class='intro'>The state stays in memory, unlike <code>stop</code>. Resume with <code>unpause</code>.</p>
 <div class='help'><pre><code>Usage: delonix container pause [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
@@ -1087,7 +1094,8 @@ SEE ALSO:
   delonix › container › commit</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Cria uma imagem a partir do rootfs actual do container</div><div class='cap lang-en'>Creates an image from the container&#x27;s current rootfs</div><pre><code>delonix container commit web minha-app:debug</code></pre></div>
 <h2 id='ssh'><code>container ssh</code></h2>
-<p class='intro'>Interactive shell inside a container (shortcut for <code>exec -t</code>): with no command, it tries <code>bash</code> and falls back to <code>sh</code>, which exists in any image</p>
+<p class='intro'>Interactive shell inside a container (shortcut for <code>exec -t</code>).</p>
+<p class='intro'>With no command, it tries <code>bash</code> and falls back to <code>sh</code>, which exists in any image.</p>
 <div class='help'><pre><code>Usage: delonix container ssh [OPTIONS] &lt;ID&gt; [COMMAND]...
 
 Arguments:
@@ -1190,7 +1198,8 @@ SEE ALSO:
   delonix › container › diff</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Ficheiros alterados relativos à imagem (A/D)</div><div class='cap lang-en'>Files changed relative to the image (A/D)</div><pre><code>delonix container diff web</code></pre></div>
 <h2 id='cp'><code>container cp</code></h2>
-<p class='intro'>Copy files between the host and a container. Exactly one side is <code>container:/path</code> (e.g. <code>delonix container cp web:/etc/nginx.conf .</code>)</p>
+<p class='intro'>Copy files between the host and a container.</p>
+<p class='intro'>Exactly one side is <code>container:/path</code> (e.g. <code>delonix container cp web:/etc/nginx.conf .</code>).</p>
 <div class='help'><pre><code>Usage: delonix container cp [OPTIONS] &lt;SRC&gt; &lt;DST&gt;
 
 Arguments:
@@ -1220,7 +1229,8 @@ SEE ALSO:
   delonix › container › cp</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Do container para o host</div><div class='cap lang-en'>From the container to the host</div><pre><code>delonix container cp web:/etc/nginx.conf .</code></pre></div><div class="ex"><div class='cap lang-pt'>Do host para o container</div><div class='cap lang-en'>From the host to the container</div><pre><code>delonix container cp ./nginx.conf web:/etc/nginx.conf</code></pre></div>
 <h2 id='describe'><code>container describe</code></h2>
-<p class='intro'>Human-readable detail of one or more containers, <code>kubectl describe</code>-style (for humans; use <code>inspect</code> for script-consumable JSON)</p>
+<p class='intro'>Human-readable detail of one or more containers, <code>kubectl describe</code>-style.</p>
+<p class='intro'>For humans; use <code>inspect</code> for script-consumable JSON.</p>
 <div class='help'><pre><code>Usage: delonix container describe [OPTIONS] &lt;IDS&gt;...
 
 Arguments:
@@ -1322,7 +1332,8 @@ immediately (<code>memory.max</code>/<code>cpu.max</code>) — no waiting for a
 <code>restart</code>.</p></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Troca uma porta a QUENTE, sem reiniciar</div><div class='cap lang-en'>Hot-swap a port, no restart</div><pre><code>delonix container update web --publish-add 9090:80</code></pre></div><div class="ex"><div class='cap lang-pt'>Liga a uma rede nova + limite de banda</div><div class='cap lang-en'>Connect to a new network + bandwidth limit</div><pre><code>delonix container update web --net-connect backend --net-rate 10mbit</code></pre></div><div class="ex"><div class='cap lang-pt'>Sobe o limite de memória/CPU a QUENTE, sem reiniciar</div><div class='cap lang-en'>Raise the memory/CPU limit on the fly, no restart</div><pre><code>delonix container update web --memory 512M --cpus 2</code></pre></div>
 <h2 id='attach'><code>container attach</code></h2>
-<p class='intro'>Re-attach to a running container&#x27;s output stream (same log file <code>logs -f</code> reads). Unlike <code>docker attach</code>, this is OUTPUT-ONLY: a detached container&#x27;s stdin has nowhere to go (this engine keeps no live conduit to it once started, unlike a persistent per-container shim) — <code>-i</code>/<code>--stdin</code> is refused with a clear error instead of silently doing nothing</p>
+<p class='intro'>Re-attach to a running container&#x27;s output stream (output only).</p>
+<p class='intro'>Same log file <code>logs -f</code> reads. Unlike <code>docker attach</code>, this is OUTPUT-ONLY: a detached container&#x27;s stdin has nowhere to go (this engine keeps no live conduit to it once started, unlike a persistent per-container shim) — <code>-i</code>/<code>--stdin</code> is refused with a clear error instead of silently doing nothing.</p>
 <div class='help'><pre><code>Usage: delonix container attach [OPTIONS] &lt;ID&gt;
 
 Arguments:

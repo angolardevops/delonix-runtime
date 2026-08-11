@@ -159,27 +159,27 @@ Commands:
   create           Create (or auto-recover) a VM
   restart          Stop (if running) then start — always a real reboot, unlike `start`. Same recovered-fields limits as `start`
   rm               Remove the VM (stops + deletes overlay/state)
-  start            Start an existing, stopped VM — idempotent (already running = no-op). Reboots with the base disk/vcpus/memory/network/backend recorded at its last `create`/`start`, reusing the same overlay (disk state preserved). Does NOT restore anything that only ever existed as a `vm create` flag (custom kernel/seed/volumes/static IP/VNC/advanced libvirt knobs) — a VM using those needs the original `vm create` invocation instead (also idempotent/auto-heal)
+  start            Start an existing, stopped VM — idempotent (already running = no-op)
   stop             Stop the VM (preserves disk/record)
-  describe         Human-readable detail of one or more VMs, `kubectl describe` style (for humans; use `status` for the usual compact view). Includes the LIVE state — `delonix_vm::status` reconciles liveness/IP with the backend
+  describe         Human-readable detail of one or more VMs, `kubectl describe` style
   ls               List the VMs
   status           Current state (reconciles liveness/IP with the backend)
-  console          Attach to the VM&#x27;s serial console (interactive terminal) — works with no IP (boot logs, login). Escape: Ctrl-] 
-  ssh              SSH into a VM by NAME (its IP comes from the record) or straight to an address. With a trailing command, runs it and returns instead of opening a shell
+  console          Attach to the VM&#x27;s serial console (interactive terminal)
+  ssh              SSH into a VM by NAME, or straight to an address
   vnc              Print the VNC address of a graphical VM (created with `--vnc`, libvirt)
-  default-backend  Get or set the default VM backend, used by `vm create` when neither `--backend` nor `DELONIX_VM_BACKEND` is given — above the engine&#x27;s own auto-detection heuristic. With no flag, prints the current default (`none` if auto-detection decides)
-  bridge           EXPERIMENTAL (root): give a libvirt VM DIRECT IP reachability to a container SDN network (veth from the host into the holder netns + routes). Defaults to a DRY-RUN; add `--apply` (as root) to establish it
-  reach            Which published ports a VM can actually reach, and how to fix the ones it cannot. A port published to the default `127.0.0.1` is invisible to a VM — this lists the libvirt gateways, reads each port&#x27;s LIVE bind, and for every loopback-only one prints the exact republish command
+  default-backend  Get or set the default VM backend
+  bridge           EXPERIMENTAL (root): give a libvirt VM DIRECT IP reachability to a container SDN network
+  reach            Which published ports a VM can actually reach, and how to fix the rest
   unbridge         Tear down a `vm bridge` (dry-run without `--apply`)
   build            Build a qcow2 VM image from a `VMfile`
-  convert          Convert a VM disk to the format another ecosystem imports — `qcow2`, `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V, Azure). Flattened either way, so the result is a standalone file with no backing chain. This engine&#x27;s own two backends already share `qcow2`/`raw`; the rest exist so an image built here is importable elsewhere without a backend per product
-  ls-remote        List the tags available in a remote OCI repository — with no argument, the OFFICIAL Delonix golden image repo (discover which k8s versions are published before `pull`)
-  pull             Pull a golden VM image from an OCI registry — with no argument, the OFFICIAL Delonix image (ready for `vm create`/`cluster kubeadm`)
+  convert          Convert a VM disk to the format another ecosystem imports
+  ls-remote        List the tags available in a remote OCI repository
+  pull             Pull a golden VM image from an OCI registry
   push             Push a local golden VM image to an OCI registry (`vm push &lt;name&gt; &lt;target&gt;`)
-  apply            Apply the `kind: Vm` documents of a manifest (`delonix_vm::create` is already idempotent by name — creates or auto-recovers)
-  init             Bootstrap a project with a VM manifest — files ALREADY FILLED IN (images included), ready to use without editing anything
+  apply            Apply the `kind: Vm` documents of a manifest
+  init             Bootstrap a project with a VM manifest
   restore          Revert the VM to a named snapshot
-  snapshot         Take a named snapshot (libvirt: a running VM&#x27;s snapshot is a system checkpoint — memory + disk; `restore` reverts to it). Not yet supported on the cloud-hypervisor backend
+  snapshot         Take a named snapshot of a VM
   snapshots        List the VM&#x27;s snapshots
   dash             Dashboard (KPIs + table) of the VMs — interactive TUI, or `--once` snapshot
   help             Print this message or the help of the given subcommand(s)
@@ -221,7 +221,8 @@ SEE ALSO:
 
   delonix › vm</code></pre></div>
 <h2 id='ssh'><code>vm ssh</code></h2>
-<p class='intro'>SSH into a VM by NAME (its IP comes from the record) or straight to an address. With a trailing command, runs it and returns instead of opening a shell.</p>
+<p class='intro'>SSH into a VM by NAME, or straight to an address.</p>
+<p class='intro'>The name is enough — its IP comes from the record. With a trailing command, runs it and returns instead of opening a shell.</p>
 <p class='intro'><code>delonix vm ssh dev</code> · <code>delonix vm ssh dev -- systemctl status</code> · <code>delonix vm ssh 192.168.122.50 -l root</code></p>
 <div class='help'><pre><code>Usage: delonix vm ssh [OPTIONS] &lt;TARGET&gt; [COMMAND]...
 
@@ -264,7 +265,8 @@ SEE ALSO:
   delonix › vm › ssh</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Entrar numa VM pelo NOME — o IP vem do registo, e o utilizador por omissão é `delonix` (não o da distro, que existe e não tem a chave)</div><div class='cap lang-en'>Enter a VM by NAME — the IP comes from the record, and the default user is `delonix` (not the distro&#x27;s own, which exists and does not carry the key)</div><pre><code>delonix vm ssh dev</code></pre></div><div class="ex"><div class='cap lang-pt'>Correr um comando e voltar, em vez de abrir uma shell</div><div class='cap lang-en'>Run a command and return, instead of opening a shell</div><pre><code>delonix vm ssh dev -- systemctl is-system-running</code></pre></div><div class="ex"><div class='cap lang-pt'>Ir directamente a um endereço, com outro utilizador e outra chave</div><div class='cap lang-en'>Go straight to an address, with a different user and key</div><pre><code>delonix vm ssh 192.168.122.50 -l root -i ~/.ssh/id_ed25519</code></pre></div>
 <h2 id='convert'><code>vm convert</code></h2>
-<p class='intro'>Convert a VM disk to the format another ecosystem imports — <code>qcow2</code>, <code>raw</code>, <code>vmdk</code> (VMware), <code>vdi</code> (VirtualBox), <code>vhdx</code>/<code>vhd</code> (Hyper-V, Azure). Flattened either way, so the result is a standalone file with no backing chain. This engine&#x27;s own two backends already share <code>qcow2</code>/<code>raw</code>; the rest exist so an image built here is importable elsewhere without a backend per product</p>
+<p class='intro'>Convert a VM disk to the format another ecosystem imports.</p>
+<p class='intro'><code>qcow2</code>, <code>raw</code>, <code>vmdk</code> (VMware), <code>vdi</code> (VirtualBox), <code>vhdx</code>/<code>vhd</code> (Hyper-V, Azure). Flattened either way, so the result is a standalone file with no backing chain. This engine&#x27;s own two backends already share <code>qcow2</code>/<code>raw</code>; the rest exist so an image built here is importable elsewhere without a backend per product.</p>
 <div class='help'><pre><code>Usage: delonix vm convert [OPTIONS] --to &lt;TO&gt; &lt;SOURCE&gt;
 
 Arguments:
@@ -317,7 +319,8 @@ SEE ALSO:
 delonix vm convert minha-base --to vdi         # VirtualBox
 delonix vm convert minha-base --to vhdx        # Hyper-V / Azure</code></pre></div><div class="ex"><div class="cap">Comprimir — só `qcow2` e `vmdk` o sabem fazer; nos outros é recusado com a lista, em vez de entregue ao qemu-img para falhar lá</div><pre><code>delonix vm convert minha-base --to qcow2 --compress</code></pre></div>
 <h2 id='default-backend'><code>vm default-backend</code></h2>
-<p class='intro'>Get or set the default VM backend, used by <code>vm create</code> when neither <code>--backend</code> nor <code>DELONIX_VM_BACKEND</code> is given — above the engine&#x27;s own auto-detection heuristic. With no flag, prints the current default (<code>none</code> if auto-detection decides)</p>
+<p class='intro'>Get or set the default VM backend.</p>
+<p class='intro'>Used by <code>vm create</code> when neither <code>--backend</code> nor <code>DELONIX_VM_BACKEND</code> is given — above the engine&#x27;s own auto-detection heuristic. With no flag, prints the current default (<code>none</code> if auto-detection decides).</p>
 <div class='help'><pre><code>Usage: delonix vm default-backend [OPTIONS]
 
 Options:
@@ -402,7 +405,8 @@ SEE ALSO:
   delonix › vm › restore</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Voltar ao checkpoint</div><div class='cap lang-en'>Roll back to the checkpoint</div><pre><code>delonix vm restore dev antes-do-upgrade</code></pre></div>
 <h2 id='snapshot'><code>vm snapshot</code></h2>
-<p class='intro'>Take a named snapshot (libvirt: a running VM&#x27;s snapshot is a system checkpoint — memory + disk; <code>restore</code> reverts to it). Not yet supported on the cloud-hypervisor backend</p>
+<p class='intro'>Take a named snapshot of a VM.</p>
+<p class='intro'>libvirt: a running VM&#x27;s snapshot is a system checkpoint — memory + disk; <code>restore</code> reverts to it. Not yet supported on the cloud-hypervisor backend.</p>
 <div class='help'><pre><code>Usage: delonix vm snapshot [OPTIONS] &lt;NAME&gt; &lt;SNAPSHOT&gt;
 
 Arguments:
@@ -456,7 +460,8 @@ SEE ALSO:
   delonix › vm › restart</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Reinício forçado (pára e volta a arrancar)</div><div class='cap lang-en'>Forced restart (stops and boots again)</div><pre><code>delonix vm restart dev</code></pre></div>
 <h2 id='start'><code>vm start</code></h2>
-<p class='intro'>Start an existing, stopped VM — idempotent (already running = no-op). Reboots with the base disk/vcpus/memory/network/backend recorded at its last <code>create</code>/<code>start</code>, reusing the same overlay (disk state preserved). Does NOT restore anything that only ever existed as a <code>vm create</code> flag (custom kernel/seed/volumes/static IP/VNC/advanced libvirt knobs) — a VM using those needs the original <code>vm create</code> invocation instead (also idempotent/auto-heal)</p>
+<p class='intro'>Start an existing, stopped VM — idempotent (already running = no-op).</p>
+<p class='intro'>Reboots with the base disk/vcpus/memory/network/backend recorded at its last <code>create</code>/<code>start</code>, reusing the same overlay (disk state preserved). Does NOT restore anything that only ever existed as a <code>vm create</code> flag (custom kernel/seed/volumes/static IP/VNC/advanced libvirt knobs) — a VM using those needs the original <code>vm create</code> invocation instead (also idempotent/auto-heal).</p>
 <div class='help'><pre><code>Usage: delonix vm start [OPTIONS] &lt;NAME&gt;
 
 Arguments:
@@ -481,7 +486,8 @@ SEE ALSO:
   delonix › vm › start</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Voltar a arrancar uma VM parada, sem repetir as flags do create</div><div class='cap lang-en'>Boot a stopped VM again, without repeating the create flags</div><pre><code>delonix vm start dev</code></pre></div>
 <h2 id='describe'><code>vm describe</code></h2>
-<p class='intro'>Human-readable detail of one or more VMs, <code>kubectl describe</code> style (for humans; use <code>status</code> for the usual compact view). Includes the LIVE state — <code>delonix_vm::status</code> reconciles liveness/IP with the backend</p>
+<p class='intro'>Human-readable detail of one or more VMs, <code>kubectl describe</code> style.</p>
+<p class='intro'>For humans; use <code>status</code> for the usual compact view. Includes the LIVE state — <code>delonix_vm::status</code> reconciles liveness/IP with the backend.</p>
 <div class='help'><pre><code>Usage: delonix vm describe [OPTIONS] &lt;NAMES&gt;...
 
 Arguments:
@@ -538,7 +544,8 @@ SEE ALSO:
   delonix › vm › unbridge</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Fechar a ponte VM↔container</div><div class='cap lang-en'>Close the VM↔container bridge</div><pre><code>sudo delonix vm unbridge minha-rede</code></pre></div>
 <h2 id='bridge'><code>vm bridge</code></h2>
-<p class='intro'>EXPERIMENTAL (root): give a libvirt VM DIRECT IP reachability to a container SDN network (veth from the host into the holder netns + routes). Defaults to a DRY-RUN; add <code>--apply</code> (as root) to establish it</p>
+<p class='intro'>EXPERIMENTAL (root): give a libvirt VM DIRECT IP reachability to a container SDN network.</p>
+<p class='intro'>A veth from the host into the holder netns, plus routes. Defaults to a DRY-RUN; add <code>--apply</code> (as root) to establish it.</p>
 <div class='help'><pre><code>Usage: delonix vm bridge [OPTIONS] &lt;NETWORK&gt;
 
 Arguments:
@@ -577,7 +584,8 @@ SEE ALSO:
   delonix › vm › bridge</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Ver o plano SEM aplicar (o default é dry-run)</div><div class='cap lang-en'>See the plan WITHOUT applying it (dry-run is the default)</div><pre><code>delonix vm bridge minha-rede</code></pre></div><div class="ex"><div class='cap lang-pt'>Aplicar mesmo — precisa de root, é a excepção deliberada ao rootless</div><div class='cap lang-en'>Actually apply it — needs root, the deliberate exception to rootless</div><pre><code>sudo delonix vm bridge minha-rede --apply</code></pre></div>
 <h2 id='reach'><code>vm reach</code></h2>
-<p class='intro'>Which published ports a VM can actually reach, and how to fix the ones it cannot. A port published to the default <code>127.0.0.1</code> is invisible to a VM — this lists the libvirt gateways, reads each port&#x27;s LIVE bind, and for every loopback-only one prints the exact republish command</p>
+<p class='intro'>Which published ports a VM can actually reach, and how to fix the rest.</p>
+<p class='intro'>A port published to the default <code>127.0.0.1</code> is invisible to a VM — this lists the libvirt gateways, reads each port&#x27;s LIVE bind, and for every loopback-only one prints the exact republish command.</p>
 <div class='help'><pre><code>Usage: delonix vm reach [OPTIONS]
 
 Options:
@@ -624,7 +632,8 @@ SEE ALSO:
   delonix › vm › vnc</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Abrir o ecrã gráfico da VM</div><div class='cap lang-en'>Open the VM&#x27;s graphical screen</div><pre><code>delonix vm vnc dev</code></pre></div>
 <h2 id='console'><code>vm console</code></h2>
-<p class='intro'>Attach to the VM&#x27;s serial console (interactive terminal) — works with no IP (boot logs, login). Escape: Ctrl-]</p>
+<p class='intro'>Attach to the VM&#x27;s serial console (interactive terminal).</p>
+<p class='intro'>Works with no IP (boot logs, login). Escape: Ctrl-] .</p>
 <div class='help'><pre><code>Usage: delonix vm console [OPTIONS] &lt;NAME&gt;
 
 Arguments:
@@ -682,7 +691,8 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Publicar a tua imagem como artefacto OCI</div><div class='cap lang-en'>Publish your image as an OCI artifact</div><pre><code>printf &#x27;%s&#x27; &quot;$GHCR_TOKEN&quot; | delonix image login ghcr.io --username aminhaorg
 delonix vm push minha-base:1.0 ghcr.io/aminhaorg/minha-base:1.0</code></pre></div>
 <h2 id='ls-remote'><code>vm ls-remote</code></h2>
-<p class='intro'>List the tags available in a remote OCI repository — with no argument, the OFFICIAL Delonix golden image repo (discover which k8s versions are published before <code>pull</code>)</p>
+<p class='intro'>List the tags available in a remote OCI repository.</p>
+<p class='intro'>With no argument, the OFFICIAL Delonix golden image repo (discover which k8s versions are published before <code>pull</code>).</p>
 <div class='help'><pre><code>Usage: delonix vm ls-remote [OPTIONS] [SOURCE]
 
 Arguments:
@@ -715,7 +725,8 @@ SEE ALSO:
   delonix › vm › ls-remote</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Que versões existem publicadas, antes de puxar</div><div class='cap lang-en'>Which versions are published, before pulling</div><pre><code>delonix vm ls-remote</code></pre></div><div class="ex"><div class='cap lang-pt'>As tags de um repositório teu</div><div class='cap lang-en'>The tags of a repository of yours</div><pre><code>delonix vm ls-remote ghcr.io/aminhaorg/base</code></pre></div>
 <h2 id='pull'><code>vm pull</code></h2>
-<p class='intro'>Pull a golden VM image from an OCI registry — with no argument, the OFFICIAL Delonix image (ready for <code>vm create</code>/<code>cluster kubeadm</code>)</p>
+<p class='intro'>Pull a golden VM image from an OCI registry.</p>
+<p class='intro'>With no argument, the OFFICIAL Delonix image (ready for <code>vm create</code>/<code>cluster kubeadm</code>).</p>
 <div class='help'><pre><code>Usage: delonix vm pull [OPTIONS] [SOURCE]
 
 Arguments:
@@ -798,7 +809,8 @@ SEE ALSO:
   delonix › vm › build</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Construir a partir do VMfile do directório actual</div><div class='cap lang-en'>Build from the current directory&#x27;s VMfile</div><pre><code>delonix vm build -t minha-base:1.0 .</code></pre></div><div class="ex"><div class='cap lang-pt'>VMfile noutro caminho, sem compressão (build mais rápido, imagem maior)</div><div class='cap lang-en'>VMfile at another path, no compression (faster build, larger image)</div><pre><code>delonix vm build -t minha-base:dev -f receitas/VMfile --no-compress .</code></pre></div><div class="ex"><div class='cap lang-pt'>Com rede no convidado — precisa disto para `apt-get install` num RUN (o build deixa de ser reproduzível: o resultado passa a depender do dia)</div><div class='cap lang-en'>With guest networking — needed for `apt-get install` in a RUN (the build stops being reproducible: the result now depends on the day)</div><pre><code>delonix vm build --network -t minha-base:1.0 .</code></pre></div>
 <h2 id='init'><code>vm init</code></h2>
-<p class='intro'>Bootstrap a project with a VM manifest — files ALREADY FILLED IN (images included), ready to use without editing anything</p>
+<p class='intro'>Bootstrap a project with a VM manifest.</p>
+<p class='intro'>Files ALREADY FILLED IN (images included), ready to use without editing anything.</p>
 <div class='help'><pre><code>Usage: delonix vm init [OPTIONS] [DIR]
 
 Arguments:
@@ -1125,7 +1137,8 @@ SEE ALSO:
   delonix › vm › rm</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix vm rm node1</code></pre></div>
 <h2 id='apply'><code>vm apply</code></h2>
-<p class='intro'>Apply the <code>kind: Vm</code> documents of a manifest (<code>delonix_vm::create</code> is already idempotent by name — creates or auto-recovers)</p>
+<p class='intro'>Apply the <code>kind: Vm</code> documents of a manifest.</p>
+<p class='intro'><code>delonix_vm::create</code> is already idempotent by name — creates or auto-recovers.</p>
 <div class='help'><pre><code>Usage: delonix vm apply [OPTIONS]
 
 Options:

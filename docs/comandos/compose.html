@@ -169,8 +169,8 @@ philosophy as <code>stack describe</code>.</p>
 <div class='help'><pre><code>Usage: delonix compose [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  down    Removes every container this project&#x27;s `up` created (and, with `-v`, its named volumes). Networks/volumes marked `external: true` are NEVER removed
-  up      Creates/starts every service — build, then network, then volume, then containers in `depends_on` order (gated on the declared condition)
+  down    Removes every container this project&#x27;s `up` created
+  up      Creates/starts every service
   config  Validates and prints the resolved project, without creating anything (`docker compose config` equivalent)
   logs    Logs of one service (default: every service, one after another)
   ps      Containers of this project (derived from labels)
@@ -211,7 +211,8 @@ precisa de semântica própria de limpeza, ainda por desenhar). <code>working_di
 (via <code>container run -w/--workdir</code>, novo) e uma porta sem host explícito (<code>ports:
 ["80"]</code>) GANHA uma porta livre real do host, em vez de recusar.</p>
 <h2 id='up'><code>compose up</code></h2>
-<p class='intro'>Creates/starts every service — build, then network, then volume, then containers in <code>depends_on</code> order (gated on the declared condition)</p>
+<p class='intro'>Creates/starts every service.</p>
+<p class='intro'>Build, then network, then volume, then containers in <code>depends_on</code> order (gated on the declared condition).</p>
 <div class='help'><pre><code>Usage: delonix compose up [OPTIONS]
 
 Options:
@@ -351,7 +352,8 @@ SEE ALSO:
   delonix › compose › config</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Valida e imprime o projecto resolvido (equivalente a `docker compose config`)</div><div class='cap lang-en'>Validates and prints the resolved project (equivalent to `docker compose config`)</div><pre><code>delonix compose config</code></pre></div>
 <h2 id='down'><code>compose down</code></h2>
-<p class='intro'>Removes every container this project&#x27;s <code>up</code> created (and, with <code>-v</code>, its named volumes). Networks/volumes marked <code>external: true</code> are NEVER removed</p>
+<p class='intro'>Removes every container this project&#x27;s <code>up</code> created.</p>
+<p class='intro'>And, with <code>-v</code>, its named volumes. Networks/volumes marked <code>external: true</code> are NEVER removed.</p>
 <div class='help'><pre><code>Usage: delonix compose down [OPTIONS]
 
 Options:

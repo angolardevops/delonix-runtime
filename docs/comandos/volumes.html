@@ -154,8 +154,8 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 
 Commands:
   create    Create a named volume
-  rm        Remove a volume. Refuses while a container or a `kind: ShareVolume` still references it (use `--force` to remove it anyway)
-  describe  Readable detail of one or more volumes, `kubectl describe` style (for humans; use `inspect` for the usual compact view)
+  rm        Remove a volume
+  describe  Readable detail of one or more volumes, `kubectl describe` style
   inspect   Details of a volume (includes real on-disk usage)
   ls        List the volumes
   apply     Apply the `kind: Volume` documents from a manifest (idempotent by name)
@@ -227,7 +227,8 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Tirar e listar snapshots de um volume</div><div class='cap lang-en'>Take and list a volume&#x27;s snapshots</div><pre><code>delonix volumes snapshot create dados antes-da-migracao
 delonix volumes snapshot ls dados</code></pre></div><div class="ex"><div class='cap lang-pt'>Voltar a um snapshot (o conteúdo actual do volume é substituído)</div><div class='cap lang-en'>Roll back to a snapshot (the volume&#x27;s current contents are replaced)</div><pre><code>delonix volumes snapshot restore dados antes-da-migracao</code></pre></div><div class="ex"><div class='cap lang-pt'>Apagar um snapshot que já não serve</div><div class='cap lang-en'>Delete a snapshot that is no longer useful</div><pre><code>delonix volumes snapshot rm dados antes-da-migracao</code></pre></div>
 <h2 id='describe'><code>volumes describe</code></h2>
-<p class='intro'>Readable detail of one or more volumes, <code>kubectl describe</code> style (for humans; use <code>inspect</code> for the usual compact view)</p>
+<p class='intro'>Readable detail of one or more volumes, <code>kubectl describe</code> style.</p>
+<p class='intro'>For humans; use <code>inspect</code> for the usual compact view.</p>
 <div class='help'><pre><code>Usage: delonix volumes describe [OPTIONS] &lt;NAMES&gt;...
 
 Arguments:
@@ -355,7 +356,8 @@ SEE ALSO:
   delonix › volumes › inspect</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix volumes inspect dados</code></pre></div>
 <h2 id='rm'><code>volumes rm</code></h2>
-<p class='intro'>Remove a volume. Refuses while a container or a <code>kind: ShareVolume</code> still references it (use <code>--force</code> to remove it anyway)</p>
+<p class='intro'>Remove a volume.</p>
+<p class='intro'>Refuses while a container or a <code>kind: ShareVolume</code> still references it (use <code>--force</code> to remove it anyway).</p>
 <div class='help'><pre><code>Usage: delonix volumes rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
