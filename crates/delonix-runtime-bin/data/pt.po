@@ -5099,3 +5099,29 @@ msgstr "nenhum repositório oficial tem a tag '{tag}' — corre `delonix image v
 
 msgid "the tag '{tag}' exists in more than one official repository ({repos}) — name the one you mean"
 msgstr "a tag '{tag}' existe em mais do que um repositório oficial ({repos}) — indica qual deles queres"
+
+# `vm ssh` (v0.47.2)
+
+msgid "SSH into a VM by NAME (its IP comes from the record) or straight to an address. With a trailing command, runs it and returns instead of opening a shell."
+msgstr "Entra por SSH numa VM pelo NOME (o IP vem do registo) ou directamente num endereço. Com um comando no fim, corre-o e volta em vez de abrir uma shell."
+
+msgid "VM name (`vm ls`) or an IP/hostname to go to directly."
+msgstr "Nome da VM (`vm ls`) ou um IP/hostname para onde ir directamente."
+
+msgid "Login user. Defaults to `delonix` — the account the golden images create and the one cloud-init injects `--ssh-key` into."
+msgstr "Utilizador de login. Por omissão `delonix` — a conta que as imagens douradas criam e aquela onde o cloud-init injecta a `--ssh-key`."
+
+msgid "Private key to authenticate with (`ssh -i`)."
+msgstr "Chave privada com que autenticar (`ssh -i`)."
+
+msgid "Command to run instead of an interactive shell."
+msgstr "Comando a correr em vez de uma shell interactiva."
+
+msgid ""
+"SSH into a VM by NAME (its IP comes from the record) or straight to an address. With a trailing command, runs it and returns instead of opening a shell.\n"
+"\n"
+"`delonix vm ssh dev` · `delonix vm ssh dev -- systemctl status` · `delonix vm ssh 192.168.122.50 -l root`"
+msgstr ""
+"Entra por SSH numa VM pelo NOME (o IP vem do registo) ou directamente num endereço. Com um comando no fim, corre-o e volta em vez de abrir uma shell.\n"
+"\n"
+"`delonix vm ssh dev` · `delonix vm ssh dev -- systemctl status` · `delonix vm ssh 192.168.122.50 -l root`"
