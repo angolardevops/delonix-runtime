@@ -4669,8 +4669,41 @@ pub fn exec_with(
 
     // 1st fork: the child stays single-threaded.
     // SAFETY: the child only does simple syscalls and `_exit`.
+    // The container's cgroup, resolved in the PARENT while `/proc/<pid>/cgroup`
+    // is still readable in the host context.
+    let exec_cgroup = live_cgroup(container);
     match unsafe { fork() }.map_err(syserr("fork"))? {
         ForkResult::Child => {
+            // JOIN THE CONTAINER'S CGROUP, before the setns — while this process
+            // still sees the HOST's `/sys/fs/cgroup`, which is where the cgroup
+            // lives.
+            //
+            // BUG FIXED HERE, measured: an `exec` used to stay in the cgroup of
+            // whoever ran the command, so it escaped EVERY limit the container
+            // has. With `-m 128M` on the container (`memory.max = 134217728`), a
+            // process started by `container exec` allocated 300 MB and was never
+            // killed — memory the HOST paid for, on a container that was supposed
+            // to be capped, and invisible to the container's own stats. `docker
+            // exec` joins the cgroup; this did not.
+            //
+            // Best-effort with a LOUD warning rather than a hard failure: a host
+            // without cgroup delegation has no limits on the container either, so
+            // refusing here would break `exec` where nothing was being enforced
+            // anyway. Silence is what is not acceptable — the caller has to know
+            // the process is running uncapped.
+            let procs = format!("{exec_cgroup}/cgroup.procs");
+            if std::path::Path::new(&procs).exists() {
+                if let Err(e) = std::fs::write(&procs, b"0") {
+                    eprintln!(
+                        "delonix: warning: this exec is NOT in the container's cgroup \
+                         ({procs}: {e}) — it runs without the container's memory/CPU limits"
+                    );
+                }
+            }
+            // The container's `--ulimit`s, for the same reason: they are
+            // per-PROCESS (not per-cgroup), so a fresh process starts with the
+            // caller's. Measured: init had `nofile 1234`, the exec `1048576`.
+            apply_ulimits(&container.ulimits);
             for (ns, fd) in &fds {
                 // SAFETY: valid inherited fd; `OwnedFd` closes it after the `setns`.
                 let owned = unsafe { OwnedFd::from_raw_fd(*fd) };
