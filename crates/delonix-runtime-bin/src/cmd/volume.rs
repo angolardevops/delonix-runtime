@@ -286,7 +286,7 @@ pub enum VolumeCmd {
     /// Readable detail of one or more volumes, `kubectl describe` style
     /// (for humans; use `inspect` for the usual compact view).
     Describe {
-        #[arg(required = true)]
+        #[arg(required = true, add = ArgValueCandidates::new(super::complete::volumes))]
         names: Vec<String>,
     },
     /// Remove a volume. Refuses while a container or a `kind: ShareVolume`
@@ -298,10 +298,15 @@ pub enum VolumeCmd {
         /// is still using it.
         #[arg(short = 'f', long)]
         force: bool,
+        /// ALSO destroy the storage this volume was provisioned with on a
+        /// remote NAS (`spec.provision`). Irreversible, and on another machine.
+        /// Refused for a volume that only mounts a share someone else made.
+        #[arg(long = "destroy-remote")]
+        destroy_remote: bool,
     },
     /// Apply the `kind: Volume` documents from a manifest (idempotent by name).
     Apply {
-        #[arg(short = 'f', long = "file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
     },
     /// Point-in-time snapshots of a volume (tar.gz under the volume; safe in rootless).
@@ -364,7 +369,11 @@ pub fn run(action: VolumeCmd) -> Result<()> {
         VolumeCmd::Ls { output } => cmd_ls(&store, output),
         VolumeCmd::Inspect { name } => cmd_inspect(&store, &name),
         VolumeCmd::Describe { names } => cmd_describe(&store, &names),
-        VolumeCmd::Rm { name, force } => cmd_rm(&store, &name, force),
+        VolumeCmd::Rm {
+            name,
+            force,
+            destroy_remote,
+        } => cmd_rm_with(&store, &name, force, destroy_remote),
         VolumeCmd::Snapshot { action } => cmd_snapshot(&store, action),
         VolumeCmd::Apply { file } => {
             let path = manifest::resolve_path(file)?;
@@ -472,8 +481,12 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         let derived_share;
         let effective_share = match (&provisioned, spec.net_share()?) {
             // Provisioned and NOT separately declared: the share block is
-            // built from what the NAS reported.
-            (Some(p), None) => {
+            // built from what the NAS reported — but ONLY when an export was
+            // actually asked for. `provision:` with no `share:` provisions the
+            // dataset and exports nothing, so deriving a mount here would try
+            // to mount an export that does not exist and fail with the NAS
+            // refusing a path it never published.
+            (Some(p), None) if p.exported => {
                 derived_share = super::storage::NetShareSpec {
                     server: p.server.clone(),
                     share: p.share.clone(),
@@ -503,6 +516,9 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                 }
                 Some((kind, block))
             }
+            // Provisioned without an export: nothing to mount, so the volume
+            // is whatever the manifest otherwise says (a plain local one).
+            (Some(_), None) => None,
             (None, other) => other,
         };
         let (driver, device, options) = match effective_share {
@@ -522,6 +538,25 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             ),
         };
         create_volume(&store, name, &driver, device, options, spec.quota.clone())?;
+        // Stamp WHO provisioned this and where. It is the ownership mark that
+        // `--destroy-remote` needs: without it there is no claim, and a volume
+        // that merely mounts a share made by someone else can never take that
+        // share down with it. References only — the secret is named, not copied.
+        if let Some(t) = spec.provision.as_ref().and_then(|p| p.truenas.as_ref()) {
+            let prov = serde_json::to_string(&super::provision::Provenance::of(t))
+                .map_err(|e| Error::Invalid(format!("could not record the provisioning: {e}")))?;
+            // Same mechanism the reconciler already uses to stamp
+            // `delonix.io/last-applied` on this very Kind — no second way to
+            // write a volume's metadata.
+            store.set_metadata(
+                name,
+                &[],
+                &[(
+                    super::provision::PROVENANCE_ANNOTATION.to_string(),
+                    Some(prov),
+                )],
+            )?;
+        }
         println!("volume/{name}: {}", super::po::t("ensured"));
     }
     Ok(())
@@ -974,6 +1009,22 @@ pub(crate) fn cmd_rm_storage(store: &VolumeStore, name: &str) -> Result<()> {
 /// data belongs to a SUBUID, and without the hook the removal failed with a bare
 /// `Permission denied` and the volume could not be deleted by ANY command.
 pub(crate) fn cmd_rm(store: &VolumeStore, name: &str, force: bool) -> Result<()> {
+    cmd_rm_with(store, name, force, false)
+}
+
+/// `cmd_rm`, plus the option to destroy the storage this volume was
+/// PROVISIONED with on a remote NAS.
+///
+/// `destroy_remote` defaults to false everywhere and always will: removing a
+/// volume is a local operation, and taking someone's dataset down with it is
+/// not something to infer. ADR-0009 puts it behind its own flag for the same
+/// reason `--purge-data` exists on a share volume.
+pub(crate) fn cmd_rm_with(
+    store: &VolumeStore,
+    name: &str,
+    force: bool,
+    destroy_remote: bool,
+) -> Result<()> {
     // `inspect` first: a volume with no record at all is a plain NotFound, and
     // must stay one (`rm` of something absent is an error, docker parity).
     let vol = store.inspect(name)?;
@@ -999,6 +1050,19 @@ pub(crate) fn cmd_rm(store: &VolumeStore, name: &str, force: bool) -> Result<()>
                 &[("name", name), ("who", &who.join("; "))],
             )));
         }
+    }
+    // The remote goes FIRST, and the local record LAST. The record is the only
+    // thing that says WHICH dataset on WHICH appliance belongs to this volume;
+    // deleting it first and then failing to reach the NAS would leave a dataset
+    // orphaned with nothing left anywhere pointing at it. Same rule the v0.37.0
+    // audit wrote down after `volumes rm` deleted the bookkeeping ahead of the
+    // data: destroy in order, and take the accounting down last.
+    if destroy_remote {
+        let what = super::provision::destroy_remote(&vol.annotations)?;
+        println!(
+            "volume/{name}: {} {what}",
+            super::po::t("destroyed the provisioned storage"),
+        );
     }
     store.remove_with(name, Some(&delonix_runtime::remove_tree_mapped))?;
     delonix_runtime_core::events::emit(

@@ -122,6 +122,118 @@ pub(crate) struct ShareSpec {
     pub(crate) read_only: bool,
 }
 
+/// Annotation that records WHO provisioned a volume's storage, and where.
+///
+/// This is the ownership mark, and it is what makes destroying the remote side
+/// possible without ever being able to destroy someone else's data: a dataset
+/// that this engine did not create carries no such annotation, so
+/// `volumes rm --destroy-remote` has nothing to act on and says so. It holds
+/// only REFERENCES — a URL, a dataset path, the NAME of a secret. No credential
+/// is written here; the secret is resolved again at destroy time, which also
+/// means a rotated key just works.
+pub(crate) const PROVENANCE_ANNOTATION: &str = "delonix.io/provisioned-by";
+
+/// The stored form of [`PROVENANCE_ANNOTATION`].
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct Provenance {
+    /// Which target provisioned it — `"truenas"` today. Present so a record
+    /// written by a build that knows a second vendor is REFUSED here by name
+    /// rather than misread as a TrueNAS one.
+    pub(crate) kind: String,
+    pub(crate) url: String,
+    pub(crate) dataset: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) api_key_secret: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) password_secret: Option<String>,
+    #[serde(default)]
+    pub(crate) insecure_tls: bool,
+}
+
+impl Provenance {
+    pub(crate) fn of(spec: &TrueNasSpec) -> Self {
+        Self {
+            kind: "truenas".into(),
+            url: spec.url.clone(),
+            dataset: spec.dataset.clone(),
+            api_key_secret: spec.api_key_secret.clone(),
+            username: spec.username.clone(),
+            password_secret: spec.password_secret.clone(),
+            insecure_tls: spec.insecure_tls,
+        }
+    }
+
+    /// Rebuilds a spec good enough to authenticate and destroy.
+    ///
+    /// A literal `password:` is deliberately NOT carried across: it would have
+    /// to be stored in the record to come back, and a credential in a record is
+    /// exactly what `kind: Secret` exists to avoid. A volume provisioned with an
+    /// inline password therefore cannot have its remote destroyed by name — it
+    /// says so, and names the fix, rather than failing with "unauthorized".
+    fn to_spec(&self) -> Result<TrueNasSpec> {
+        if self.api_key_secret.is_none() && self.password_secret.is_none() {
+            return Err(Error::Invalid(po::tf(
+                "volume was provisioned on {url} without a `kind: Secret` (an inline password is not kept in the record) — destroy {dataset} on the NAS yourself, or re-apply with `apiKeySecret`/`passwordSecret` first",
+                &[("url", &self.url), ("dataset", &self.dataset)],
+            )));
+        }
+        Ok(TrueNasSpec {
+            url: self.url.clone(),
+            api_key_secret: self.api_key_secret.clone(),
+            username: self.username.clone(),
+            password: None,
+            password_secret: self.password_secret.clone(),
+            insecure_tls: self.insecure_tls,
+            dataset: self.dataset.clone(),
+            quota: None,
+            owner: None,
+            share: None,
+        })
+    }
+}
+
+/// **Destroys the storage a volume was provisioned with.** Irreversible, and on
+/// another machine.
+///
+/// Refuses anything it did not provision itself: with no [`PROVENANCE_ANNOTATION`]
+/// there is no claim of ownership, and a volume that merely MOUNTS a share
+/// somebody else made must never take that share down with it.
+pub(crate) fn destroy_remote(
+    annotations: &std::collections::BTreeMap<String, String>,
+) -> Result<String> {
+    let raw = annotations.get(PROVENANCE_ANNOTATION).ok_or_else(|| {
+        Error::Invalid(po::t(
+            "this volume's storage was not provisioned by delonix — there is nothing here that is ours to destroy (a volume that only mounts an existing share leaves it alone)",
+        ).to_string())
+    })?;
+    let prov: Provenance = serde_json::from_str(raw).map_err(|e| {
+        Error::Invalid(format!(
+            "the provisioning record on this volume could not be read ({e}) — refusing to \
+             destroy anything on a target it does not name"
+        ))
+    })?;
+    if prov.kind != "truenas" {
+        return Err(Error::Invalid(po::tf(
+            "this volume was provisioned by '{kind}', which this build cannot destroy",
+            &[("kind", &prov.kind)],
+        )));
+    }
+    let spec = prov.to_spec()?;
+    delonix_truenas::validate_dataset_name(&spec.dataset)?;
+    let client = delonix_truenas::Client::connect(&delonix_truenas::Target {
+        base_url: spec.url.clone(),
+        auth: auth_of(&spec)?,
+        insecure_tls: spec.insecure_tls,
+    })?;
+    // Recursive: a dataset provisioned here is the whole of what was made, and
+    // leaving children behind would leave the pool holding data with nothing
+    // left pointing at it.
+    client.remove_dataset(&spec.dataset, true)?;
+    Ok(format!("{}:{}", host_of_url(&spec.url)?, spec.dataset))
+}
+
 /// What provisioning produced, for the caller to turn into a mount.
 pub(crate) struct Provisioned {
     /// Host to mount from — the NAS, derived from `url` so it cannot disagree
@@ -134,6 +246,10 @@ pub(crate) struct Provisioned {
     /// Bytes the NAS says it enforces (`None` = unlimited).
     pub(crate) quota: Option<u64>,
     pub(crate) available: Option<u64>,
+    /// Whether an NFS export was actually created. `provision:` with no
+    /// `share:` provisions the dataset and publishes nothing — and a volume
+    /// cannot mount what was never exported.
+    pub(crate) exported: bool,
 }
 
 /// The API key or account password, from a `kind: Secret` when named.
@@ -288,6 +404,7 @@ pub(crate) fn run_truenas(spec: &TrueNasSpec) -> Result<Provisioned> {
         share: p.mountpoint,
         quota: p.quota,
         available: p.available,
+        exported: spec.share.is_some(),
     })
 }
 

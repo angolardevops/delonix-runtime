@@ -5125,3 +5125,48 @@ msgstr ""
 "Entra por SSH numa VM pelo NOME (o IP vem do registo) ou directamente num endereço. Com um comando no fim, corre-o e volta em vez de abrir uma shell.\n"
 "\n"
 "`delonix vm ssh dev` · `delonix vm ssh dev -- systemctl status` · `delonix vm ssh 192.168.122.50 -l root`"
+# --- Provisionamento na NAS (kind: Volume, spec.provision — ADR-0009) ---
+msgid "provisioned"
+msgstr "provisionado"
+
+msgid "quota {size}"
+msgstr "quota {size}"
+
+msgid "{size} free"
+msgstr "{size} livres"
+
+msgid "no quota"
+msgstr "sem quota"
+
+msgid "free space unknown"
+msgstr "espaço livre desconhecido"
+
+msgid "destroyed the provisioned storage"
+msgstr "destruiu o armazenamento provisionado"
+
+msgid "spec.provision needs a target block (today: `truenas:`)"
+msgstr "spec.provision precisa de um bloco de destino (hoje: `truenas:`)"
+
+msgid "provision.truenas needs either `apiKeySecret` or `username` with a password"
+msgstr "provision.truenas precisa de `apiKeySecret` ou de `username` com uma password"
+
+msgid "provision.truenas: `username` needs `passwordSecret` (or `password`)"
+msgstr "provision.truenas: `username` precisa de `passwordSecret` (ou `password`)"
+
+msgid "provision.truenas.share.networks is empty — the NAS reads that as \"any network may mount this\". List the CIDRs that may, or drop the `share:` block to provision the dataset without exporting it"
+msgstr "provision.truenas.share.networks está vazio — a NAS lê isso como «qualquer rede pode montar isto». Lista os CIDRs que podem, ou tira o bloco `share:` para provisionar o dataset sem o exportar"
+
+msgid "this volume's storage was not provisioned by delonix — there is nothing here that is ours to destroy (a volume that only mounts an existing share leaves it alone)"
+msgstr "o armazenamento deste volume não foi provisionado pelo delonix — não há aqui nada que seja nosso para destruir (um volume que só monta uma partilha já existente deixa-a em paz)"
+
+msgid "secret '{name}' has none of the keys: {keys}"
+msgstr "o segredo '{name}' não tem nenhuma das chaves: {keys}"
+
+msgid "this volume was provisioned by '{kind}', which this build cannot destroy"
+msgstr "este volume foi provisionado por '{kind}', que esta build não sabe destruir"
+
+msgid "volume was provisioned on {url} without a `kind: Secret` (an inline password is not kept in the record) — destroy {dataset} on the NAS yourself, or re-apply with `apiKeySecret`/`passwordSecret` first"
+msgstr "o volume foi provisionado em {url} sem um `kind: Secret` (uma password inline não fica guardada no registo) — destrói {dataset} na NAS tu mesmo, ou volta a aplicar com `apiKeySecret`/`passwordSecret` primeiro"
+
+msgid "volume '{name}': spec.{kind} points at {given}, but spec.provision made {made} — remove the server/share from the block and let it be derived, or provision what you are mounting"
+msgstr "volume '{name}': spec.{kind} aponta para {given}, mas spec.provision criou {made} — tira o server/share do bloco e deixa-o ser derivado, ou provisiona aquilo que estás a montar"
