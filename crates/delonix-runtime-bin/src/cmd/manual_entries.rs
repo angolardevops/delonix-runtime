@@ -735,6 +735,19 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["image vm ls", "image vm import", "vm create"],
     },
     Entry {
+        path: "image vm rm",
+        group: "Lifecycle",
+        examples: &[
+            ("remove an image no VM backs onto", "delonix image vm rm rocky-9"),
+            (
+                "refused while a VM uses it — the image is that VM's backing file, so removing it makes the VM unreadable rather than freeing anything",
+                "delonix image vm rm proxmox-ve:9.1",
+            ),
+            ("remove it anyway, and lose those VMs", "delonix image vm rm -f proxmox-ve:9.1"),
+        ],
+        see_also: &["image vm ls", "vm rm", "system df"],
+    },
+    Entry {
         path: "image vm ls",
         group: "Inspect",
         examples: &[

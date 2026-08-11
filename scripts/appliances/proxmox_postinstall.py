@@ -95,7 +95,15 @@ EOF
 # net.ifnames=0 makes the NIC eth0 in every hypervisor, which is what the
 # bridge above names. console=ttyS0 makes the guest observable when the network
 # does not come up — the failure this whole script exists because of.
-sed -i 's|^GRUB_CMDLINE_LINUX_DEFAULT=.*|GRUB_CMDLINE_LINUX_DEFAULT="quiet net.ifnames=0 biosdevname=0 console=tty0 console=ttyS0,115200"|' /etc/default/grub
+#
+# NO `console=tty0`, and this cost hours: with it, a domain created WITHOUT a
+# graphics device (`delonix vm create` with no `--vnc`, which is the default)
+# boots into a GRUB → "Booting…" → GRUB reboot loop. Read off the serial
+# console: the kernel comes up, finds the console it was told to use does not
+# exist, and resets. The guest must not depend on there being a VGA adapter —
+# `ttyS0` is always there (libvirt always gives the domain a serial pty),
+# `tty0` is not.
+sed -i 's|^GRUB_CMDLINE_LINUX_DEFAULT=.*|GRUB_CMDLINE_LINUX_DEFAULT="quiet net.ifnames=0 biosdevname=0 console=ttyS0,115200"|' /etc/default/grub
 grep -q 'GRUB_TERMINAL' /etc/default/grub || echo 'GRUB_TERMINAL="console serial"' >> /etc/default/grub
 update-grub 2>&1 | tail -2
 
