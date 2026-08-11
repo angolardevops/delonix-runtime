@@ -548,43 +548,109 @@ fn unsupported_snapshot(backend: &str, op: &str) -> Error {
     ))
 }
 
-/// Normalizes any accepted alias (`ch`, `cloudhypervisor`, `kvm`, `qemu`, …)
-/// to the canonical backend id (`"cloud-hypervisor"`/`"libvirt"`). `None` for
-/// an empty string (the "no opinion" case, distinct from an unknown name —
-/// callers that need to reject unknown names do so themselves, since an empty
-/// string is valid here but not in [`select_backend`]'s explicit-request arm).
-fn canonical_backend_name(s: &str) -> Option<&'static str> {
-    match s.trim().to_lowercase().as_str() {
-        "cloud-hypervisor" | "ch" | "cloudhypervisor" => Some("cloud-hypervisor"),
-        "libvirt" | "kvm" | "qemu" => Some("libvirt"),
-        _ => None,
-    }
+/// One backend this build knows about: its canonical id (the value persisted in
+/// [`Vm::backend`]), the aliases accepted on input, and how to build one.
+///
+/// A constructor and not a stored instance because a [`VmBackend`] here is a
+/// stateless handle — both are unit structs, and boxing one per lookup costs
+/// nothing while keeping the table `'static`.
+struct RegisteredBackend {
+    id: &'static str,
+    /// Extra spellings accepted from a user; never repeats `id`.
+    aliases: &'static [&'static str],
+    new: fn() -> Box<dyn VmBackend>,
 }
 
-/// Selects a backend from an explicit request or by auto-detection
-/// (prefers cloud-hypervisor if installed; otherwise libvirt).
+fn new_cloud_hypervisor() -> Box<dyn VmBackend> {
+    Box::new(CloudHypervisorBackend)
+}
+
+fn new_libvirt() -> Box<dyn VmBackend> {
+    Box::new(LibvirtBackend)
+}
+
+/// Every registered backend. **Order matters**: it is the preference order of
+/// the auto-detection in [`select_backend`] (first one installed wins).
+///
+/// This is a table, not a plugin system (ADR-0008): nothing loads a `.so`, and
+/// there is deliberately no public `register()` for an out-of-crate backend —
+/// a real Proxmox backend is blocked on a real target to spike against, and the
+/// extension point gets built in the same commit as its first caller, never
+/// before it (the `ComputeDriver` phase-2b rule this repo already follows).
+///
+/// What the table buys today is that the accepted names live in ONE place. They
+/// used to be spelled out by hand in three `match` arms and two error strings —
+/// so a backend added here would have left the errors naming a pair that no
+/// longer described reality.
+static BACKENDS: &[RegisteredBackend] = &[
+    RegisteredBackend {
+        id: "cloud-hypervisor",
+        aliases: &["ch", "cloudhypervisor"],
+        new: new_cloud_hypervisor,
+    },
+    RegisteredBackend {
+        id: "libvirt",
+        aliases: &["kvm", "qemu"],
+        new: new_libvirt,
+    },
+];
+
+/// Looks a name up in [`BACKENDS`], canonical id or alias, case- and
+/// whitespace-insensitive. `None` for anything unregistered — including the
+/// empty string, which callers treat as "no opinion" rather than as an error.
+fn find_backend(name: &str) -> Option<&'static RegisteredBackend> {
+    let want = name.trim().to_lowercase();
+    BACKENDS
+        .iter()
+        .find(|b| b.id == want || b.aliases.contains(&want.as_str()))
+}
+
+/// The registered ids, for an error that names what IS accepted. Derived from
+/// the table so it cannot drift from it.
+fn registered_backend_ids() -> String {
+    BACKENDS
+        .iter()
+        .map(|b| format!("'{}'", b.id))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn unknown_backend(name: &str) -> Error {
+    Error::Invalid(format!(
+        "unknown VM backend: '{}' (use {})",
+        name.trim(),
+        registered_backend_ids()
+    ))
+}
+
+/// Normalizes any accepted alias (`ch`, `cloudhypervisor`, `kvm`, `qemu`, …)
+/// to the canonical backend id. `None` for an empty string (the "no opinion"
+/// case, distinct from an unknown name — callers that need to reject unknown
+/// names do so themselves, since an empty string is valid here but not in
+/// [`select_backend`]'s explicit-request arm).
+fn canonical_backend_name(s: &str) -> Option<&'static str> {
+    find_backend(s).map(|b| b.id)
+}
+
+/// Selects a backend from an explicit request or by auto-detection (the first
+/// [`BACKENDS`] entry that is actually installed — today cloud-hypervisor, then
+/// libvirt).
 pub fn select_backend(want: Option<&str>) -> Result<Box<dyn VmBackend>> {
     match want.map(str::trim) {
-        Some(other) if !other.is_empty() => match canonical_backend_name(other) {
-            Some("cloud-hypervisor") => Ok(Box::new(CloudHypervisorBackend)),
-            Some(_) => Ok(Box::new(LibvirtBackend)),
-            None => Err(Error::Invalid(format!(
-                "unknown VM backend: '{other}' (use 'cloud-hypervisor' or 'libvirt')"
-            ))),
+        Some(other) if !other.is_empty() => match find_backend(other) {
+            Some(b) => Ok((b.new)()),
+            None => Err(unknown_backend(other)),
         },
-        _ => {
-            let ch = CloudHypervisorBackend;
-            if ch.available() {
-                return Ok(Box::new(ch));
-            }
-            let lv = LibvirtBackend;
-            if lv.available() {
-                return Ok(Box::new(lv));
-            }
-            Err(Error::Invalid(
-                "no VM backend available: install 'cloud-hypervisor' or 'libvirt'+'qemu'".into(),
-            ))
-        }
+        _ => BACKENDS
+            .iter()
+            .map(|b| (b.new)())
+            .find(|b| b.available())
+            .ok_or_else(|| {
+                Error::Invalid(
+                    "no VM backend available: install 'cloud-hypervisor' or 'libvirt'+'qemu'"
+                        .into(),
+                )
+            }),
     }
 }
 
@@ -593,12 +659,7 @@ pub fn select_backend(want: Option<&str>) -> Result<Box<dyn VmBackend>> {
 /// acceptance rules as [`select_backend`]'s explicit-request arm, without
 /// needing to construct a [`VmBackend`] just to validate a string.
 pub fn valid_backend_name(s: &str) -> Result<&'static str> {
-    canonical_backend_name(s).ok_or_else(|| {
-        Error::Invalid(format!(
-            "unknown VM backend: '{}' (use 'cloud-hypervisor' or 'libvirt')",
-            s.trim()
-        ))
-    })
+    canonical_backend_name(s).ok_or_else(|| unknown_backend(s))
 }
 
 /// File that persists the machine-wide default backend (`<base>/vm-default-backend`,
@@ -641,10 +702,28 @@ pub fn clear_default_backend(base: &Path) -> Result<()> {
 }
 
 /// The backend that started an already-persisted VM (for liveness/stop).
-fn backend_for(vm: &Vm) -> Box<dyn VmBackend> {
-    match vm.backend.as_str() {
-        "libvirt" => Box::new(LibvirtBackend),
-        _ => Box::new(CloudHypervisorBackend),
+///
+/// Resolved through [`BACKENDS`], and **fail-closed**: it used to end in
+/// `_ => CloudHypervisorBackend`, which is the worst place in this crate for a
+/// silent default. Unlike [`select_backend`], which answers "what should run
+/// this?", this one answers "what IS running this?" — and getting that wrong
+/// does not fail, it LIES: `is_running` on a live libvirt VM through the Cloud
+/// Hypervisor backend reports it stopped, and `stop` then tears down the record
+/// of a guest that is still up.
+///
+/// `vm.backend` is written by `create` from `valid_backend_name`, so a record
+/// this cannot resolve means the file was hand-edited or written by a build
+/// that knew a backend this one does not. Both deserve a sentence naming the
+/// VM and the value, not a guess.
+fn backend_for(vm: &Vm) -> Result<Box<dyn VmBackend>> {
+    match find_backend(&vm.backend) {
+        Some(b) => Ok((b.new)()),
+        None => Err(Error::Invalid(format!(
+            "vm '{}': its record names backend '{}', which this build does not know (it has {})",
+            vm.name,
+            vm.backend,
+            registered_backend_ids()
+        ))),
     }
 }
 
@@ -2012,10 +2091,10 @@ pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Res
     // On restart, honor the backend the VM already used; otherwise choose now.
     let backend: Box<dyn VmBackend> = match &restarting {
         Some(ex) => {
-            if backend_for(ex).is_running(ex) {
+            if backend_for(ex)?.is_running(ex) {
                 return Ok(ex.clone()); // already running — idempotent
             }
-            backend_for(ex)
+            backend_for(ex)?
         }
         None => {
             // Volumes ⇒ libvirt: only it materializes virtio-9p (Cloud Hypervisor
@@ -2191,7 +2270,7 @@ fn remove_inner(base: &Path, name: &str, force: bool) -> Result<()> {
     let st = store(base)?;
     let existed = match st.load(name) {
         Ok(vm) => {
-            if let Err(e) = backend_for(&vm).stop(&vmdir, &vm) {
+            if let Err(e) = backend_for(&vm).and_then(|b| b.stop(&vmdir, &vm)) {
                 if !force {
                     return Err(e); // record intact — the rm can be retried
                 }
@@ -2257,7 +2336,7 @@ pub fn stop(base: &Path, name: &str) -> Result<()> {
         }
         Err(e) => return Err(e),
     };
-    backend_for(&vm).stop(&vmdir, &vm)?;
+    backend_for(&vm)?.stop(&vmdir, &vm)?;
     vm.status = Status::Stopped;
     vm.pid = None;
     vm.started_unix = None;
@@ -2281,7 +2360,7 @@ pub fn snapshot(base: &Path, name: &str, snap: &str) -> Result<()> {
     }
     let vmdir = vms_dir(base);
     let vm = load_vm(base, name)?;
-    backend_for(&vm).snapshot(&vmdir, &vm, snap)
+    backend_for(&vm)?.snapshot(&vmdir, &vm, snap)
 }
 
 /// Reverts VM `name` to the named snapshot (see [`VmBackend::restore`]).
@@ -2291,13 +2370,13 @@ pub fn restore(base: &Path, name: &str, snap: &str) -> Result<()> {
     }
     let vmdir = vms_dir(base);
     let vm = load_vm(base, name)?;
-    backend_for(&vm).restore(&vmdir, &vm, snap)
+    backend_for(&vm)?.restore(&vmdir, &vm, snap)
 }
 
 /// Lists VM `name`'s snapshot names (see [`VmBackend::snapshots`]).
 pub fn snapshots(base: &Path, name: &str) -> Result<Vec<String>> {
     let vm = load_vm(base, name)?;
-    backend_for(&vm).snapshots(&vm)
+    backend_for(&vm)?.snapshots(&vm)
 }
 
 /// Reconstructs the subset of [`VmConfig`] reliably recoverable from a
@@ -2351,7 +2430,7 @@ pub fn restart(base: &Path, name: &str) -> Result<Vm> {
         Error::NotFound(n) => Error::VmNotFound(n),
         e => e,
     })?;
-    if backend_for(&vm).is_running(&vm) {
+    if backend_for(&vm)?.is_running(&vm) {
         stop(base, name)?;
     }
     create(base, &config_from(&vm))
@@ -2371,8 +2450,14 @@ pub fn status(base: &Path, name: &str) -> Result<Vm> {
     // load->mutate->save with no lock, racing the background metrics refresh
     // (dash/delonix-mgmt) against a concurrent `vm start/stop/create` on the
     // same VM: a narrow but real lost-update window on the IP/status field.
+    // The backend is resolved BEFORE the lock: the closure returns `bool`
+    // (changed / unchanged) and has nowhere to put an error, and a record this
+    // build cannot resolve is not something to discover halfway through a
+    // read-modify-write. `load()` above already read the record, so this costs
+    // nothing extra.
+    let named = st.load(name)?;
+    let backend = backend_for(&named)?;
     st.update(name, |vm| {
-        let backend = backend_for(vm);
         let old_ip = vm.ip.clone();
         let was_running = vm.status == Status::Running;
         if backend.is_running(vm) {
@@ -2927,6 +3012,47 @@ mod tests {
             "cloud-hypervisor"
         );
         assert!(select_backend(Some("xpto")).is_err());
+    }
+
+    /// `backend_for` answers "what IS running this?", and a wrong answer does
+    /// not fail — it LIES. It used to end in `_ => CloudHypervisorBackend`, so a
+    /// record naming anything else got the wrong backend silently: `is_running`
+    /// on a live libvirt VM would report it stopped.
+    #[test]
+    fn backend_for_recusa_um_registo_com_backend_desconhecido() {
+        let mut vm = Vm::new(
+            "db".into(),
+            "/base.qcow2".into(),
+            "/overlay.qcow2".into(),
+            1,
+            "1G".into(),
+            "ingress".into(),
+            "nat".into(),
+            "52:54:00:aa:bb:cc".into(),
+            String::new(),
+        );
+
+        for known in ["libvirt", "cloud-hypervisor", "kvm", "CH", " libvirt "] {
+            vm.backend = known.into();
+            assert!(
+                backend_for(&vm).is_ok(),
+                "'{known}' está registado e tem de resolver"
+            );
+        }
+
+        // O que ANTES caía em cloud-hypervisor em silêncio.
+        for unknown in ["hyperv", "proxmox", "", "cloud-hypervisr"] {
+            vm.backend = unknown.into();
+            let msg = match backend_for(&vm) {
+                Ok(_) => panic!("'{unknown}' não está registado e resolveu na mesma"),
+                Err(e) => e.to_string(),
+            };
+            assert!(msg.contains("db"), "a mensagem tem de nomear a VM: {msg}");
+            assert!(
+                msg.contains("libvirt") && msg.contains("cloud-hypervisor"),
+                "e tem de dizer o que É aceite: {msg}"
+            );
+        }
     }
 
     #[test]
