@@ -13,10 +13,29 @@ pub struct SshTarget {
     pub host: String,
     pub user: String,
     pub key: Option<PathBuf>,
+    /// SSH port. `None` = the client's default (22).
+    ///
+    /// `ssh.port` was in the `kind: Cluster` schema, was parsed, and reached
+    /// nothing — every connection went to 22 regardless. A bastion on a
+    /// non-standard port failed with a timeout that named no cause; worse, if
+    /// something else answered on 22 (another service, another machine behind
+    /// NAT) the bootstrap would run against the wrong host. Accepted-and-ignored
+    /// is the failure mode this project refuses by policy — same family as
+    /// `--security-opt seccomp=`, `-v :z` and `--network-alias`.
+    pub port: Option<u16>,
 }
 
 impl SshTarget {
-    fn conn_args(&self) -> Vec<String> {
+    /// Connection arguments shared by `ssh` and `scp`.
+    ///
+    /// `port_flag` is the port option **of the tool this argv is for**: `-p` for
+    /// `ssh`, `-P` for `scp`. They are genuinely different, and this is the trap
+    /// worth naming: `-p` handed to `scp` is not a port at all, it is "preserve
+    /// modification times" — the copy would still go to 22, and the only symptom
+    /// would be that it worked everywhere except where the port matters. Asking
+    /// the caller makes the difference visible at each call site instead of
+    /// hidden in here.
+    fn conn_args(&self, port_flag: &str) -> Vec<String> {
         let mut a = vec![
             "-o".to_string(),
             "BatchMode=yes".to_string(),
@@ -25,6 +44,10 @@ impl SshTarget {
             "-o".to_string(),
             "ConnectTimeout=10".to_string(),
         ];
+        if let Some(p) = self.port {
+            a.push(port_flag.to_string());
+            a.push(p.to_string());
+        }
         if let Some(k) = &self.key {
             a.push("-i".to_string());
             a.push(k.to_string_lossy().into_owned());
@@ -45,7 +68,7 @@ fn shell_quote(s: &str) -> String {
 /// estar em sudoers sem password; `BatchMode=yes` recusa qualquer prompt
 /// interactivo, incluindo de password). Devolve `(sucesso, stdout+stderr)`.
 fn ssh_run_raw(t: &SshTarget, cmd: &str) -> Result<(bool, String)> {
-    let mut args = t.conn_args();
+    let mut args = t.conn_args("-p");
     // `--` separa opções de argumentos posicionais — defesa em profundidade
     // contra um `host` que comece por `-` ser interpretado como flag do
     // `ssh` (ex.: `-oProxyCommand=...`). `valid_endpoint` (cmd::cluster) já
@@ -86,7 +109,7 @@ pub fn ssh_run(t: &SshTarget, cmd: &str) -> Result<String> {
 /// copia para `/tmp` e move com um `ssh_run` a seguir, como faz
 /// `cmd::cluster::prepare_host` para o `delonix-cri`).
 pub fn scp_to(t: &SshTarget, local: &Path, remote_path: &str) -> Result<()> {
-    let mut args = t.conn_args();
+    let mut args = t.conn_args("-P");
     args.push("--".to_string());
     args.push(local.to_string_lossy().into_owned());
     args.push(format!("{}:{}", t.user_host(), remote_path));
@@ -105,11 +128,53 @@ pub fn scp_to(t: &SshTarget, local: &Path, remote_path: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::shell_quote;
+    use super::{shell_quote, SshTarget};
 
     #[test]
     fn shell_quote_escapa_plicas() {
         assert_eq!(shell_quote("echo hi"), "'echo hi'");
         assert_eq!(shell_quote("echo 'hi'"), "'echo '\\''hi'\\'''");
+    }
+
+    fn alvo(port: Option<u16>) -> SshTarget {
+        SshTarget {
+            host: "10.0.0.5".into(),
+            user: "delonix".into(),
+            key: None,
+            port,
+        }
+    }
+
+    /// `ssh.port` was in the schema and reached nothing. Without a port the argv
+    /// has to stay byte-for-byte what it always was — every cluster already out
+    /// there omits it, and a change there would be a change for everybody.
+    #[test]
+    fn sem_porta_o_argv_fica_exactamente_como_estava() {
+        let a = alvo(None);
+        assert_eq!(
+            a.conn_args("-p"),
+            vec![
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "StrictHostKeyChecking=accept-new",
+                "-o",
+                "ConnectTimeout=10"
+            ]
+        );
+        assert_eq!(a.conn_args("-p"), a.conn_args("-P"));
+    }
+
+    /// The one that matters: `ssh` takes `-p`, `scp` takes `-P`, and `-p` given
+    /// to `scp` is "preserve modification times" — it would connect to 22 and
+    /// report success, so the symptom would appear only where the port is not
+    /// the default. This test is what stops the two call sites from being
+    /// "simplified" back into one.
+    #[test]
+    fn a_flag_da_porta_do_scp_nao_e_a_do_ssh() {
+        let a = alvo(Some(2222));
+        assert!(a.conn_args("-p").windows(2).any(|w| w == ["-p", "2222"]));
+        assert!(a.conn_args("-P").windows(2).any(|w| w == ["-P", "2222"]));
+        assert!(!a.conn_args("-P").iter().any(|x| x == "-p"));
     }
 }
