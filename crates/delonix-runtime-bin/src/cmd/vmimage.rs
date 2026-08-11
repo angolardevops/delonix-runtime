@@ -281,6 +281,17 @@ impl VmImageStore {
         Ok(out)
     }
 
+    /// Deletes only the metadata. Separate from the disk on purpose: the
+    /// caller removes the disk FIRST and this LAST, so a failure never leaves a
+    /// multi-gigabyte file that no command can see.
+    pub fn remove_meta(&self, name: &str) -> Result<()> {
+        match std::fs::remove_file(self.meta_path(name)) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     pub fn get(&self, name: &str) -> Result<VmImage> {
         let bytes = std::fs::read(self.meta_path(name))
             .map_err(|_| Error::NotFound(format!("imagem VM '{name}'")))?;
@@ -288,11 +299,154 @@ impl VmImageStore {
     }
 }
 
+/// Every VM overlay that backs onto `image`, by name.
+///
+/// Read from the DISK and not from the registry: `qemu-img` reports what the
+/// overlay actually points at, while a record only says what it was created
+/// with. A VM whose registry entry was hand-edited, or one made outside this
+/// engine, still holds the image open — and it is the ones nobody remembers
+/// that this check exists for.
+///
+/// An overlay `qemu-img` cannot OPEN is reported as a USER, not skipped: not
+/// knowing what it points at is precisely when refusing to delete the base is
+/// right. Measured, because the first version of this comment claimed more than
+/// it delivered: `qemu-img info` does NOT fail on a file that is not a qcow2 —
+/// it reads it as `raw` and reports no backing file, which is the correct
+/// answer for a raw disk. It fails when it cannot read the file at all
+/// (permissions, or a file that goes away mid-scan), and that is the case this
+/// branch exists for.
+fn vms_backed_by(root: &std::path::Path, image_qcow2: &std::path::Path) -> Vec<String> {
+    let want = std::fs::canonicalize(image_qcow2).unwrap_or_else(|_| image_qcow2.to_path_buf());
+    let mut users = Vec::new();
+    let Ok(entries) = std::fs::read_dir(root.join("vms")) else {
+        return users;
+    };
+    for e in entries.flatten() {
+        let p = e.path();
+        if p.extension().and_then(|x| x.to_str()) != Some("qcow2") {
+            continue;
+        }
+        let name = p
+            .file_stem()
+            .and_then(|x| x.to_str())
+            .unwrap_or("?")
+            .to_string();
+        let out = std::process::Command::new("qemu-img")
+            .args(["info", "--output=json", "--"])
+            .arg(&p)
+            .output();
+        match out {
+            Ok(o) if o.status.success() => {
+                let backing = serde_json::from_slice::<serde_json::Value>(&o.stdout)
+                    .ok()
+                    .and_then(|v| {
+                        v.get("backing-filename")
+                            .and_then(|b| b.as_str())
+                            .map(str::to_string)
+                    });
+                if let Some(b) = backing {
+                    let b =
+                        std::fs::canonicalize(&b).unwrap_or_else(|_| std::path::PathBuf::from(&b));
+                    if b == want {
+                        users.push(name);
+                    }
+                }
+            }
+            // Could not open it at all → assume it might point here.
+            _ => users.push(format!("{name} (unreadable)")),
+        }
+    }
+    users.sort();
+    users
+}
+
+/// Removes VM images. **Disk first, metadata LAST.**
+///
+/// The order is the rule the v0.37.0 audit wrote down after `volumes rm` did it
+/// backwards: the metadata is the only thing that makes the image visible, so
+/// deleting it first and then failing on the disk leaves gigabytes on the
+/// filesystem that no command lists and nobody will ever find. This way a
+/// failed delete leaves the image exactly as it was — still listed, still
+/// usable, and still removable.
+pub(crate) fn cmd_rm(store: &VmImageStore, names: &[String], force: bool) -> Result<()> {
+    let root = state_root();
+    let mut failed = false;
+    for name in names {
+        // Fail on a name that does not exist (docker/`vm rm` parity), rather
+        // than reporting success for a removal that removed nothing.
+        let img = match store.get(name) {
+            Ok(i) => i,
+            Err(_) => {
+                super::output::error(&super::po::tf(
+                    "no such VM image: {name} (see `delonix image vm ls`)",
+                    &[("name", name)],
+                ));
+                failed = true;
+                continue;
+            }
+        };
+        let qcow2 = store.qcow2_path(&img.name);
+        let users = vms_backed_by(&root, &qcow2);
+        if !users.is_empty() {
+            if !force {
+                super::output::error(&super::po::tf(
+                    "VM image '{name}' is the backing file of: {vms} — remove those VMs first (`delonix vm rm <name>`), or pass --force to make them unreadable",
+                    &[("name", name), ("vms", &users.join(", "))],
+                ));
+                failed = true;
+                continue;
+            }
+            super::output::warn(&super::po::tf(
+                "VM image '{name}': {vms} back onto it and will become unreadable",
+                &[("name", name), ("vms", &users.join(", "))],
+            ));
+        }
+        // Disk first.
+        match std::fs::remove_file(&qcow2) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                super::output::error(&super::po::tf(
+                    "VM image '{name}': could not remove its disk ({err}) — the image is untouched",
+                    &[("name", name), ("err", &e.to_string())],
+                ));
+                failed = true;
+                continue;
+            }
+        }
+        // Bookkeeping last: until this line the image is still listed, which is
+        // what makes a failure above recoverable.
+        store.remove_meta(&img.name)?;
+        println!("{}", img.name);
+    }
+    if failed {
+        return Err(Error::Invalid(
+            super::po::t("one or more VM images were not removed").into(),
+        ));
+    }
+    Ok(())
+}
+
 // A CLI enum parsed once per invocation, not a hot path — the same
 // justification the sibling command enums already carry.
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum VmImageCmd {
+    /// Remove a local VM image (its disk and its metadata).
+    ///
+    /// **Refused while a VM still uses it.** A VM created from an image runs on
+    /// a thin overlay whose backing file IS that image: deleting it out from
+    /// under a live overlay does not free the VM, it makes it permanently
+    /// unreadable. `--force` overrides, and says what it is breaking.
+    Rm {
+        /// Image name(s), as shown by `image vm ls`.
+        #[arg(required = true)]
+        names: Vec<String>,
+        /// Remove it even while VMs back onto it — **those VMs stop being
+        /// readable**, and there is no way back.
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
     /// List the local VM images.
     Ls {
         /// Output format: `table` (default) or `json` (ADR-0005).
@@ -459,6 +613,7 @@ pub enum VmImageCmd {
 pub fn run(action: VmImageCmd) -> Result<()> {
     let store = VmImageStore::open(state_root())?;
     match action {
+        VmImageCmd::Rm { names, force } => cmd_rm(&store, &names, force),
         VmImageCmd::Ls { output } => cmd_ls(&store, output),
         VmImageCmd::Describe { names } => cmd_describe(&store, &names),
         VmImageCmd::Push { name, target } => cmd_push(&store, &name, target.as_deref()),
@@ -4634,5 +4789,97 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             official_tag_for(&bare_img(), "delonix-vm-base:ubuntu-24.04"),
             "ubuntu-24.04"
         );
+    }
+
+    #[test]
+    fn uma_imagem_em_uso_por_uma_vm_e_detectada_pelo_disco() {
+        // The guard that matters: a VM runs on a thin overlay whose backing
+        // file IS the image. Deleting the image does not free the VM — it makes
+        // it permanently unreadable. The check reads the OVERLAY, not the
+        // registry, because a VM made outside this engine (or a record edited
+        // by hand) holds the image open just the same.
+        let Ok(dir) = tempdir_for_test("vmsbacked") else {
+            return; // no writable temp dir: nothing to assert about
+        };
+        let base = dir.join("base.qcow2");
+        let vms = dir.join("vms");
+        std::fs::create_dir_all(&vms).unwrap();
+        let mk = |args: &[&std::ffi::OsStr]| {
+            std::process::Command::new("qemu-img")
+                .args(args)
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        };
+        use std::ffi::OsStr;
+        if !mk(&[
+            OsStr::new("create"),
+            OsStr::new("-f"),
+            OsStr::new("qcow2"),
+            base.as_os_str(),
+            OsStr::new("1M"),
+        ]) {
+            return; // qemu-img absent: this host cannot run the check either
+        }
+        let overlay = vms.join("uservm.qcow2");
+        assert!(mk(&[
+            OsStr::new("create"),
+            OsStr::new("-f"),
+            OsStr::new("qcow2"),
+            OsStr::new("-b"),
+            base.as_os_str(),
+            OsStr::new("-F"),
+            OsStr::new("qcow2"),
+            overlay.as_os_str(),
+        ]));
+
+        assert_eq!(vms_backed_by(&dir, &base), vec!["uservm".to_string()]);
+
+        // An unrelated image is NOT reported as used — a guard that says
+        // everything is in use is the same as no guard, because the first
+        // thing anyone does is reach for --force.
+        let other = dir.join("other.qcow2");
+        assert!(mk(&[
+            OsStr::new("create"),
+            OsStr::new("-f"),
+            OsStr::new("qcow2"),
+            other.as_os_str(),
+            OsStr::new("1M"),
+        ]));
+        assert!(vms_backed_by(&dir, &other).is_empty());
+
+        // A file that is not a qcow2 at all is read as `raw` with no backing
+        // file — measured — so it is correctly NOT a user. This assertion is
+        // here because the first version of the test assumed the opposite and
+        // failed, which is what sent me to measure it.
+        std::fs::write(vms.join("plain.qcow2"), b"not a qcow2").unwrap();
+        assert!(vms_backed_by(&dir, &other).is_empty());
+
+        // An overlay that cannot be OPENED counts as a user: not knowing what
+        // it points at is exactly when refusing to delete the base is right.
+        let locked = vms.join("locked.qcow2");
+        std::fs::write(&locked, b"x").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+            // Root reads regardless of the mode, so the case is unobservable there.
+            if std::fs::read(&locked).is_err() {
+                let users = vms_backed_by(&dir, &other);
+                assert!(
+                    users.iter().any(|u| u.contains("locked")),
+                    "an unopenable overlay must be reported, got {users:?}"
+                );
+            }
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A writable scratch directory for a test, or `Err` if there is none.
+    fn tempdir_for_test(tag: &str) -> std::io::Result<std::path::PathBuf> {
+        let d = std::env::temp_dir().join(format!("dlx-test-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&d)?;
+        Ok(d)
     }
 }

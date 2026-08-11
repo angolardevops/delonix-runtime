@@ -7793,3 +7793,57 @@ msgstr "Serve uma fatia da Docker Engine API num socket unix."
 msgid "Serve a slice of the Docker Engine API on a unix socket.\n\n`docker version`/`ps`/`images`/`info`/lifecycle mutations via `DOCKER_HOST=unix://<path>`."
 msgstr "Serve uma fatia da Docker Engine API num socket unix.\n\n`docker version`/`ps`/`images`/`info`/mutações de ciclo de vida via `DOCKER_HOST=unix://<caminho>`."
 
+# --- image vm rm ---
+msgid "no such VM image: {name} (see `delonix image vm ls`)"
+msgstr "não existe a imagem VM: {name} (ver `delonix image vm ls`)"
+
+msgid "VM image '{name}' is the backing file of: {vms} — remove those VMs first (`delonix vm rm <name>`), or pass --force to make them unreadable"
+msgstr "a imagem VM '{name}' é o ficheiro base de: {vms} — remove essas VMs primeiro (`delonix vm rm <nome>`), ou passa --force para as tornar ilegíveis"
+
+msgid "VM image '{name}': {vms} back onto it and will become unreadable"
+msgstr "imagem VM '{name}': {vms} assentam nela e vão ficar ilegíveis"
+
+msgid "VM image '{name}': could not remove its disk ({err}) — the image is untouched"
+msgstr "imagem VM '{name}': não consegui remover o disco ({err}) — a imagem fica intacta"
+
+msgid "one or more VM images were not removed"
+msgstr "uma ou mais imagens VM não foram removidas"
+
+msgid "Remove a local VM image (its disk and its metadata)"
+msgstr "Remove uma imagem VM local (o disco e os metadados)"
+
+msgid "Image name(s), as shown by `image vm ls`"
+msgstr "Nome(s) da imagem, como aparecem em `image vm ls`"
+
+msgid "Remove it even while VMs back onto it — **those VMs stop being readable**, and there is no way back"
+msgstr "Remove mesmo com VMs assentes nela — **essas VMs deixam de ser legíveis**, e não há volta"
+
+msgid "Remove it even while VMs back onto it — **those VMs stop being readable**"
+msgstr "Remove mesmo com VMs assentes nela — **essas VMs deixam de ser legíveis**"
+
+msgid ""
+"Remove a local VM image (its disk and its metadata).\n"
+"\n"
+"**Refused while a VM still uses it.** A VM created from an image runs on a thin overlay whose backing file IS that image: deleting it out from under a live overlay does not free the VM, it makes it permanently unreadable. `--force` overrides, and says what it is breaking."
+msgstr ""
+"Remove uma imagem VM local (o disco e os metadados).\n"
+"\n"
+"**Recusado enquanto uma VM ainda a usa.** Uma VM criada a partir de uma imagem corre sobre um overlay fino cujo ficheiro base É essa imagem: apagá-la debaixo de um overlay vivo não liberta a VM, torna-a ilegível para sempre. O `--force` ultrapassa, e diz o que está a partir."
+
+msgid ""
+"Remove a local VM image (its disk and its metadata).\n"
+"\n"
+"**Refused while a VM still uses it**: a VM runs on a thin overlay whose backing file IS the image, so deleting it makes that VM permanently unreadable rather than freeing anything."
+msgstr ""
+"Remove uma imagem VM local (o disco e os metadados).\n"
+"\n"
+"**Recusado enquanto uma VM ainda a usa**: uma VM corre sobre um overlay fino cujo ficheiro base É a imagem, por isso apagá-la torna essa VM ilegível para sempre em vez de libertar seja o que for."
+
+msgid "remove an image no VM backs onto"
+msgstr "remover uma imagem em que nenhuma VM assenta"
+
+msgid "refused while a VM uses it — the image is that VM's backing file, so removing it makes the VM unreadable rather than freeing anything"
+msgstr "recusado enquanto uma VM a usa — a imagem é o ficheiro base dessa VM, por isso removê-la torna a VM ilegível em vez de libertar seja o que for"
+
+msgid "remove it anyway, and lose those VMs"
+msgstr "remover à mesma, e perder essas VMs"
