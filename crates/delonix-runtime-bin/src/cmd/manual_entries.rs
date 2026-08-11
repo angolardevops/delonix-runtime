@@ -1730,6 +1730,16 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["dash", "storage ls", "system df"],
     },
     Entry {
+        path: "syntax",
+        group: "",
+        examples: &[
+            ("vim/neovim — the syntax AND the ftdetect that activates it", "delonix syntax vim --dir ~/.vim"),
+            ("VS Code, as an extension directory (active in the next window)", "delonix syntax vscode --dir ~/.vscode/extensions/delonix.vmfile-0.1.0"),
+            ("just the grammar, to place it yourself", "delonix syntax vim > ~/.vim/syntax/vmfile.vim"),
+        ],
+        see_also: &["vm init", "vm build", "completion"],
+    },
+    Entry {
         path: "system",
         group: "",
         examples: &[
@@ -1747,7 +1757,9 @@ pub static ENTRIES: &[Entry] = &[
             ("somewhere that is not here (a directory, or a named volume on a NAS)", "delonix backup container db --to volume:nas-backups"),
             ("twice a day on a systemd user timer, keeping the newest two", "delonix backup container db --max-for-day 2 --to /srv/backups"),
             ("or on your own schedule, in crontab syntax", "delonix backup stack loja --cron \"30 3 * * 1\" --to /srv/backups"),
-            ("a VM: its overlay disk IS its state, so stop it first", "delonix backup vm dev --to /srv/backups"),
+            ("a RUNNING VM — the guest does not pause and its PID does not change", "delonix backup vm dev --to /srv/backups"),
+            ("guest-filesystem consistency, if qemu-guest-agent is installed in it", "delonix backup vm dev --quiesce --to /srv/backups"),
+            ("actually stop it, for an application that keeps state only in RAM", "delonix backup container cache --stop --to /srv/backups"),
             ("see what would go in, without writing anything", "delonix backup pod api --dry-run"),
         ],
         see_also: &["restore", "system backup", "volumes snapshot", "vm snapshot"],

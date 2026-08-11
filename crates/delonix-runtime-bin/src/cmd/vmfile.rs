@@ -6,9 +6,12 @@
 //! image is a disk that has to boot, so the verbs differ where the substrate
 //! differs:
 //!
-//! * `FROM` names a **cloud image**, not an OCI image — a distro's published
-//!   qcow2 (`ubuntu:24.04`), an absolute URL, or a VM image already in the local
-//!   store. Downloaded and checksum-verified, never taken on trust.
+//! * `FROM` names a **bootable disk**, not an OCI filesystem — `ubuntu:24.04`,
+//!   an absolute URL, or a VM image already in the local store. A distro
+//!   reference resolves to the base DELONIX publishes for it
+//!   (`delonix-vm-base:ubuntu-24.04`, local copy first, then ghcr) and falls
+//!   back to the distro's own published qcow2 when the project has none.
+//!   Either way it is checksum-verified, never taken on trust.
 //! * There is no `CMD`/`ENTRYPOINT`: a VM boots an init, it does not run a
 //!   process. `CLOUDINIT` is the equivalent — it is how a cloud image is told
 //!   what to be.
@@ -326,7 +329,11 @@ pub(crate) fn classify_base(from: &str) -> Base {
         // Anything else with a colon is a local tag (`my-image:1.0`), which is
         // the far more common shape — treating it as an unknown distro would
         // turn a working reference into an error.
-        if matches!(d, "ubuntu" | "debian" | "rocky") {
+        // `fedora` joined the list when the official base repository started
+        // publishing `fedora-42`: the downloader already knew the layout
+        // (`Distro::Fedora`), so leaving it out only meant `FROM fedora:42`
+        // resolved as a local tag and failed with "no such local VM image".
+        if matches!(d, "ubuntu" | "debian" | "rocky" | "fedora") {
             return Base::Distro {
                 distro: d.to_string(),
                 release: r.to_string(),
@@ -351,9 +358,11 @@ pub(crate) fn scaffold(name: &str) -> String {
 # Builds as written. Delete what you do not need.
 
 # The base. Three forms:
-#   ubuntu:24.04 | debian:bookworm | rocky:9   published cloud image (verified)
-#   https://…/whatever.qcow2                   any absolute URL
-#   my-other-image:1.0                         one already in `delonix vm ls`
+#   ubuntu:24.04 | debian:bookworm            the official delonix base for that
+#   rocky:9      | fedora:42                  distro (ghcr), or the distro's own
+#                                             cloud image when there is none
+#   https://…/whatever.qcow2                  any absolute URL
+#   my-other-image:1.0                        one already in `delonix vm ls`
 FROM ubuntu:24.04
 
 # The disk a cloud image ships with is small (a couple of GB). Grow it BEFORE
@@ -623,11 +632,28 @@ fn resolve_base(
     }
     match classify_base(from) {
         Base::Distro { distro, release } => {
+            // The project's own base for this distro/release wins over the
+            // distro's cloud image: it is the one this engine builds, tests and
+            // publishes, and when it is already local the build reaches nothing
+            // at all. Falls through to the publisher when there is no official
+            // base or the registry cannot be reached — see
+            // `vmimage::official_distro_base`.
+            if let Some(p) = super::vmimage::official_distro_base(store, &distro, &release) {
+                return Ok(p);
+            }
             let d = match distro.as_str() {
                 "ubuntu" => Distro::Ubuntu,
                 "debian" => Distro::Debian,
+                "fedora" => Distro::Fedora,
                 _ => Distro::Rocky,
             };
+            eprintln!(
+                "{}",
+                super::po::tf(
+                    "FROM {d}:{r}: no official delonix base for it — falling back to the distro's own cloud image",
+                    &[("d", &distro), ("r", &release)],
+                )
+            );
             super::vmimage::download_base(store, d, &release)
         }
         Base::Url(url) => super::vmimage::download_url_base(store, &url),

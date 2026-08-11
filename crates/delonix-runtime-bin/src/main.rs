@@ -26,6 +26,13 @@ enum CompShell {
     Powershell,
 }
 
+/// Editors `delonix syntax` can hand a VMfile grammar to.
+#[derive(Clone, Copy, ValueEnum)]
+enum SyntaxEditor {
+    Vim,
+    Vscode,
+}
+
 #[derive(Parser)]
 #[command(
     name = "delonix",
@@ -210,6 +217,14 @@ enum Cmd {
         /// Target shell.
         shell: CompShell,
     },
+    /// VMfile syntax highlighting for an editor (vim/vscode).
+    Syntax {
+        /// Target editor.
+        editor: SyntaxEditor,
+        /// Write the editor's files into this directory instead of printing one to stdout.
+        #[arg(value_hint = clap::ValueHint::DirPath, long)]
+        dir: Option<std::path::PathBuf>,
+    },
     /// Manual pages in roff, generated from this binary — one per command.
     Man(cmd::man::ManArgs),
     /// (internal) The embedded L7 reverse-proxy that serves the `kind: HTTPRoute`.
@@ -374,6 +389,7 @@ fn run() -> Result<()> {
         Cmd::IngressProxy { config } => cmd::ingress_proxy::run(&config),
         Cmd::Dash { once, json } => cmd::dash::run(cmd::dash::DashScope::Global, once, json),
         Cmd::Completion { shell } => cmd_completion(shell),
+        Cmd::Syntax { editor, dir } => cmd_syntax(editor, dir.as_deref()),
         Cmd::Man(args) => cmd::man::run(args),
     }
 }
@@ -396,6 +412,56 @@ fn cmd_completion(shell: CompShell) -> Result<()> {
     let mut buf = Vec::new();
     completer.write_registration("COMPLETE", "delonix", "delonix", "delonix", &mut buf)?;
     let _ = std::io::stdout().write_all(&buf);
+    Ok(())
+}
+
+/// `delonix syntax <editor>` — the VMfile grammar, from the binary that owns
+/// the format.
+///
+/// Carried inside the binary (`include_str!`) for the same two reasons the
+/// completions are generated rather than shipped as files: the documented
+/// install is `curl … | bash`, which has no repository to copy from, and a
+/// grammar kept anywhere else drifts from the parser it is supposed to
+/// describe. The files under `editors/` are the source of both.
+///
+/// With `--dir` it writes every file that editor needs (vim also needs the
+/// `ftdetect` half, or the syntax is never applied to anything); without it,
+/// it prints the one file that IS the highlighting, so
+/// `delonix syntax vim > ~/.vim/syntax/vmfile.vim` does what it reads like.
+fn cmd_syntax(editor: SyntaxEditor, dir: Option<&std::path::Path>) -> Result<()> {
+    const VIM_SYNTAX: &str = include_str!("../../../editors/vim/syntax/vmfile.vim");
+    const VIM_FTDETECT: &str = include_str!("../../../editors/vim/ftdetect/vmfile.vim");
+    const VSCODE_GRAMMAR: &str =
+        include_str!("../../../editors/vscode/syntaxes/vmfile.tmLanguage.json");
+    const VSCODE_PACKAGE: &str = include_str!("../../../editors/vscode/package.json");
+    const VSCODE_LANGCFG: &str =
+        include_str!("../../../editors/vscode/language-configuration.json");
+
+    let files: &[(&str, &str)] = match editor {
+        SyntaxEditor::Vim => &[
+            ("syntax/vmfile.vim", VIM_SYNTAX),
+            ("ftdetect/vmfile.vim", VIM_FTDETECT),
+        ],
+        SyntaxEditor::Vscode => &[
+            ("syntaxes/vmfile.tmLanguage.json", VSCODE_GRAMMAR),
+            ("package.json", VSCODE_PACKAGE),
+            ("language-configuration.json", VSCODE_LANGCFG),
+        ],
+    };
+    let Some(dir) = dir else {
+        print!("{}", files[0].1);
+        return Ok(());
+    };
+    for (rel, body) in files {
+        let path = dir.join(rel);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, body)?;
+        // stdout stays clean for a caller that redirects it; the list of what
+        // was written is progress, not output.
+        eprintln!("{}", path.display());
+    }
     Ok(())
 }
 

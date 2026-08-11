@@ -594,6 +594,9 @@ pub enum VmCmd {
     Console {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: String,
+        /// Key that detaches the console, as `^X` (default `^]`). Also settable via `$DELONIX_CONSOLE_ESCAPE`.
+        #[arg(short = 'e', long = "escape")]
+        escape: Option<String>,
     },
     /// SSH into a VM by NAME, or straight to an address.
     ///
@@ -1292,7 +1295,7 @@ pub fn run(action: VmCmd) -> Result<()> {
             // Dynamic boot: --console attaches to the serial console (watch the
             // boot live); --wait shows a spinner until the VM gets an IP.
             if console {
-                return cmd_console(&base, &vm.name);
+                return cmd_console(&base, &vm.name, None);
             }
             if wait {
                 wait_for_boot(
@@ -1442,7 +1445,7 @@ pub fn run(action: VmCmd) -> Result<()> {
             Ok(())
         }
         VmCmd::Describe { names } => cmd_describe(&base, &names),
-        VmCmd::Console { name } => cmd_console(&base, &name),
+        VmCmd::Console { name, escape } => cmd_console(&base, &name, escape.as_deref()),
         VmCmd::Ssh {
             target,
             user,
@@ -2113,7 +2116,7 @@ fn print_vm_next_steps(name: &str, ip: Option<&str>, has_key: bool) {
 }
 
 /// local tty (raw mode); libvirt: delegates to `virsh console` (which does it).
-fn cmd_console(base: &std::path::Path, name: &str) -> Result<()> {
+fn cmd_console(base: &std::path::Path, name: &str, escape: Option<&str>) -> Result<()> {
     let vm = delonix_vm::status(base, name)?;
     if !matches!(vm.status, delonix_runtime_core::Status::Running) {
         return Err(Error::Invalid(super::po::tf(
@@ -2121,6 +2124,7 @@ fn cmd_console(base: &std::path::Path, name: &str) -> Result<()> {
             &[("name", name)],
         )));
     }
+    let esc = resolve_escape(escape)?;
     // The golden image auto-logs-in on ttyS0, so inside the console `exit`/`logout`
     // just re-trigger the getty and loop forever — the ONLY way back to the host
     // is the escape key. Spelling it out (in the user's language) fixes the
@@ -2149,6 +2153,26 @@ fn cmd_console(base: &std::path::Path, name: &str) -> Result<()> {
         // concurrent viewer to protect; `--force` (built for exactly this) takes
         // over the stale session instead of refusing forever.
         let uri = delonix_vm::libvirt_uri(name);
+        // A serial console is a pty, and a pty keeps NO history: everything the
+        // guest printed before you attached — the boot log, the `login:` prompt —
+        // is already gone. Attaching to a VM that finished booting therefore
+        // lands on a BLANK screen, and a blank screen reads as "the console is
+        // broken".
+        //
+        // BUG FIXED HERE, reproduced on a Proxmox VE guest: `vm console pve`
+        // showed nothing but the two virsh banners, while a VNC screenshot of
+        // the same VM showed a healthy `pve login:`. Nothing was broken — the
+        // getty had said its piece a minute earlier and had no reason to speak
+        // again. One newline makes it repaint the prompt, which is the whole
+        // difference between "doesn't enter the VM" and a login. It is sent
+        // slightly LATE on purpose: virsh has to own the pty first, or the
+        // answer is written into a pty nobody is reading yet.
+        if let Some(pty) = console_pty(&uri, name) {
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(600));
+                nudge_serial(&pty);
+            });
+        }
         let status = std::process::Command::new("virsh")
             .args(["-c", &uri, "console", "--force", "--", name])
             .status()
@@ -2176,6 +2200,38 @@ fn cmd_console(base: &std::path::Path, name: &str) -> Result<()> {
     let r = console_bridge(&sock);
     eprintln!("{}", super::po::t("Back to the host shell."));
     r
+}
+
+/// The host pty libvirt wired the domain's serial port to (`/dev/pts/N`).
+/// `virsh ttyconsole` answers this directly, so there is no XML to parse.
+/// `None` when libvirt cannot say — the console still opens, it just does not
+/// get the nudge below.
+fn console_pty(uri: &str, name: &str) -> Option<std::path::PathBuf> {
+    let out = std::process::Command::new("virsh")
+        .args(["-c", uri, "ttyconsole", "--", name])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!p.is_empty()).then(|| std::path::PathBuf::from(p))
+}
+
+/// Sends one carriage return to a serial console, to make whatever is listening
+/// on the other end (a getty, a shell) repaint its prompt for a viewer who
+/// arrived after it was printed. Harmless in both cases: at a `login:` it
+/// re-prompts, at a shell it runs an empty command.
+///
+/// Best-effort by design — a console that cannot be nudged is still a console,
+/// so every failure here is silent rather than turned into an error the user
+/// can do nothing about.
+fn nudge_serial(pty: &std::path::Path) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().write(true).open(pty) {
+        let _ = f.write_all(b"\r");
+        let _ = f.flush();
+    }
 }
 
 /// Saves stdin's tty mode and restores it on `Drop` (even on Ctrl-C, panic,
@@ -2233,6 +2289,11 @@ fn console_bridge(sock: &std::path::Path) -> Result<()> {
         message: e.to_string(),
     })?;
     let mut rd = stream;
+    // Same reason as the libvirt path (see `nudge_serial`): the pty/socket has
+    // no history, so a viewer who attaches after the boot finished sees nothing
+    // until the getty is given a reason to reprint its prompt.
+    let _ = wr.write_all(b"\r");
+    let _ = wr.flush();
     let (in_fd, sock_fd) = (std::io::stdin().as_raw_fd(), rd.as_raw_fd());
     let mut buf = [0u8; 4096];
     'bridge: loop {
