@@ -159,6 +159,7 @@ Commands:
   inspect   Details of a volume (includes real on-disk usage)
   ls        List the volumes
   apply     Apply the `kind: Volume` documents from a manifest (idempotent by name)
+  prune     DESTROY every local volume that nothing references
   snapshot  Point-in-time snapshots of a volume (tar.gz under the volume; safe in rootless)
   help      Print this message or the help of the given subcommand(s)
 
@@ -173,7 +174,7 @@ COMMAND MAP:
   Lifecycle    create · rm
   Inspect      ls · inspect · describe
   Declarative  apply
-  Maintenance  snapshot
+  Maintenance  prune · snapshot
 
 EXAMPLES:
   # a named volume, so the data outlives the container that writes to it

@@ -204,266 +204,90 @@ fn cmd_monitor(interval: u64, no_stream: bool) -> Result<()> {
 
 /// `system prune` — reclaims disk space.
 ///
-/// Order matters: stopped containers first (they free images and blobs),
-/// then whatever is no longer referenced. The step that frees the most is **4**,
-/// the orphan directories — the real problem measured on this machine: **88
-/// container directories on disk against 4 in the registry (~36 GiB)**. They come from
-/// cluster nodes and containers that died from SIGKILL/crash/closed-session **without
-/// `rm`**, so nobody ever swept them. The normal `container rm` never
-/// catches them (they aren't in the registry); only an explicit GC like this one.
+/// Since the per-resource prunes exist, this is the COMPOSITION of them and no
+/// longer a second implementation: it calls the same `prune::sweep_*` that
+/// `container prune`/`image prune` call. Duplicating a destructive sweep is how
+/// two answers to the same question start to diverge.
+///
+/// The order is not a preference: containers first (removing them is what makes
+/// their images and blobs unreferenced), then images, then the empty `dlx-*`
+/// networks. **Volumes are deliberately not here** — `docker system prune`
+/// leaves them alone too, and removing a volume destroys data that nothing else
+/// in this sweep does.
 fn cmd_prune(all: bool, force: bool) -> Result<()> {
-    use std::collections::HashSet;
     let (images, store) = open_stores()?;
 
     // CONFIRM FIRST. This is destructive well beyond what its name suggests: the
-    // help leads with "unused images", but step 1 below removes EVERY stopped
-    // container — including ones merely `Created` and not yet started — with no
-    // prompt at all. Docker asks. An operator who types `delonix system prune`
-    // expecting a disk cleanup should not discover afterwards that a stopped
-    // container they were about to `start` is gone.
-    //
-    // Only when stdin is a TTY: in a script/CI there is nobody to answer, and
-    // blocking forever would be worse than the old behaviour — there, `--force`
-    // is required instead, so an unattended prune is always explicit.
-    if !force {
-        let doomed: Vec<String> = store
-            .list()?
-            .into_iter()
-            .filter(|c| !c.pid.map(delonix_runtime::is_alive).unwrap_or(false))
-            .map(|c| c.name)
-            .collect();
-        let tty = unsafe { libc::isatty(libc::STDIN_FILENO) } == 1;
-        if !tty {
-            return Err(delonix_runtime_core::Error::Invalid(
-                super::po::t(
-                    "`system prune` removes every stopped container and unreferenced data — pass \
-                     --force to confirm when not on a terminal",
-                )
-                .into(),
-            ));
-        }
-        if !doomed.is_empty() {
-            println!(
-                "{}",
-                super::po::tf(
-                    "This will remove {n} stopped container(s): {list}",
-                    &[
-                        ("n", &doomed.len().to_string()),
-                        ("list", &doomed.join(", ")),
-                    ],
-                )
-            );
-        }
-        print!(
-            "{} ",
-            super::po::t(
-                "Also removes unused images, CAS blobs and orphan directories. Continue? [y/N]"
-            )
-        );
-        use std::io::Write as _;
-        let _ = std::io::stdout().flush();
-        let mut answer = String::new();
-        if std::io::stdin().read_line(&mut answer).is_err()
-            || !matches!(answer.trim().to_lowercase().as_str(), "y" | "yes")
-        {
-            println!("{}", super::po::t("aborted"));
-            return Ok(());
-        }
+    // help leads with "unused images", but the container sweep removes EVERY
+    // stopped container — including ones merely `Created` and not yet started.
+    // Docker asks. An operator who types `delonix system prune` expecting a disk
+    // cleanup should not discover afterwards that a stopped container they were
+    // about to `start` is gone.
+    let doomed = super::prune::doomed_containers(&store)?;
+    let preview = (!doomed.is_empty()).then(|| {
+        super::po::tf(
+            "This will remove {n} stopped container(s): {list}",
+            &[
+                ("n", &doomed.len().to_string()),
+                ("list", &doomed.join(", ")),
+            ],
+        )
+    });
+    if !super::prune::confirm(
+        force,
+        super::po::t(
+            "`system prune` removes every stopped container and unreferenced data — pass --force \
+             to confirm when not on a terminal",
+        ),
+        preview,
+        super::po::t(
+            "Also removes unused images, CAS blobs and orphan directories. Continue? [y/N]",
+        ),
+    )? {
+        return Ok(());
     }
 
-    // Orphan slirps (dead target) — the SAFE reaper (never the fail-open
-    // `reap_orphan_hostfwds`; see the history of the reaper that deleted live ports).
-    let reaped = delonix_net::reap_orphan_slirp();
-    if reaped > 0 {
+    let c = super::prune::sweep_containers(&images, &store)?;
+    if c.slirps > 0 {
         println!(
             "{}",
             super::po::tf(
                 "net: {n} orphan slirp(s) reaped",
-                &[("n", &reaped.to_string())]
+                &[("n", &c.slirps.to_string())]
             )
         );
     }
-
-    // 1) stopped containers (in the registry).
-    let mut rmc = 0usize;
-    for c in store.list()? {
-        if c.pid.map(delonix_runtime::is_alive).unwrap_or(false) {
-            continue;
-        }
-        let _ = delonix_runtime::remove(&store, &c, true);
-        let _ = images.unmount_rootfs(&c.id);
-        images.remove_container_dir(&c.id);
-        rmc += 1;
-    }
-
-    // Ids still alive AFTER step 1 — the basis for deciding what is orphan.
-    let live_ids: HashSet<String> = store.list()?.iter().map(|c| c.id.clone()).collect();
-
-    // 1b) orphan ingress ref markers — the "16 refs with 3 live
-    //     containers" leak. A container that dies from SIGKILL/crash without `rm` leaves its
-    //     ref marker holding the shared infra forever. `live` = ids
-    //     of running containers + the CRI pods (`cri-*`) and VMs (`vm-*`), managed
-    //     by other stores — preserved, never reaped here. The reaper frees
-    //     only the markers with no live owner and tears down the infra if it becomes empty; it NEVER
-    //     touches a live id.
-    let mut live_refs: HashSet<String> = store
-        .list()?
-        .iter()
-        .filter(|c| c.pid.map(delonix_runtime::is_alive).unwrap_or(false))
-        .map(|c| c.id.clone())
-        .collect();
-    for id in delonix_net::infra::attached_refs() {
-        if id.starts_with("cri-") || id.starts_with("vm-") {
-            live_refs.insert(id);
-        }
-    }
-    let reaped_refs = delonix_net::infra::reap_orphan_refs(&live_refs);
-    if reaped_refs > 0 {
+    if c.refs > 0 {
         println!(
             "{}",
             super::po::tf(
                 "net: {n} orphan ingress ref(s) reaped",
-                &[("n", &reaped_refs.to_string())]
+                &[("n", &c.refs.to_string())]
             )
         );
     }
+    let i = super::prune::sweep_images(&images, &store, all)?;
+    let rmn = super::prune::sweep_networks(&store)?;
 
-    // 2) dangling images (no tag), or all unused ones with `-a`.
-    let in_use: HashSet<String> = store.list()?.iter().map(|c| c.image.clone()).collect();
-    let mut rmi = 0usize;
-    for img in images.list()? {
-        let dangling =
-            img.repo_tags.is_empty() || img.repo_tags.iter().all(|t| t.contains("<none>"));
-        let used = in_use.contains(&img.id) || img.repo_tags.iter().any(|t| in_use.contains(t));
-        if (dangling || all) && !used {
-            if img.repo_tags.is_empty() {
-                let _ = images.remove(&img.id);
-            } else {
-                for t in &img.repo_tags {
-                    let _ = images.remove(t);
-                }
-            }
-            rmi += 1;
-        }
-    }
-
-    // 3) CAS blobs that nobody references anymore.
-    let mut referenced: HashSet<String> = HashSet::new();
-    for img in images.list()? {
-        referenced.insert(delonix_image::cas::strip(&img.id).to_string());
-        for l in &img.layers {
-            referenced.insert(delonix_image::cas::strip(l).to_string());
-        }
-    }
-    let (mut rmb, mut freed) = (0usize, 0u64);
-    let blobs_dir = images.root().join("blobs").join("sha256");
-    if let Ok(rd) = std::fs::read_dir(&blobs_dir) {
-        for e in rd.flatten() {
-            let name = e.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') || referenced.contains(&name) {
-                continue;
-            }
-            freed += e.metadata().map(|m| m.len()).unwrap_or(0);
-            let _ = std::fs::remove_file(e.path());
-            rmb += 1;
-        }
-    }
-
-    // 4) orphan container DIRECTORIES — the big space reclaimer.
-    //
-    // A `<containers>/<id>/` whose `<id>` is no longer in the registry: the container
-    // died without `rm`. We use `remove_tree_mapped` and not `remove_dir_all` because
-    // the rootfs may hold SUBUID files (written by a rootless container)
-    // that the real user cannot delete directly — it is exactly the path that
-    // this series' `__rmtree` came to actually support.
-    let containers_dir = images.root().join("containers");
-    let (mut rmd, mut freed_dirs) = (0usize, 0u64);
-    for path in orphan_container_dirs(&containers_dir, &live_ids) {
-        freed_dirs += dir_size(&path);
-        delonix_runtime::remove_tree_mapped(&path);
-        rmd += 1;
-    }
-
-    // 5) orphan EMPTY cgroups in delonix.slice.
-    let live_cg: HashSet<String> = live_ids.iter().map(|id| format!("delonix-{id}")).collect();
-    let mut rmg = 0usize;
-    if let Ok(rd) = std::fs::read_dir(delonix_runtime_core::DELONIX_SLICE) {
-        for e in rd.flatten() {
-            let name = e.file_name().to_string_lossy().into_owned();
-            // `remove_dir` (not `_all`): only removes if EMPTY — a cgroup
-            // with processes inside refuses, and rightly so.
-            if name.starts_with("delonix-")
-                && !live_cg.contains(&name)
-                && std::fs::remove_dir(e.path()).is_ok()
-            {
-                rmg += 1;
-            }
-        }
-    }
-
-    // 6) orphan hostfwds in the ingress — host ports held by containers that already
-    //    died (e.g.: slirp left a hostfwd behind). `live_ports` = the
-    //    host ports published by LIVE containers; the reaper removes all the
-    //    others. Here it is SAFE (unlike the PaaS reaper case on a
-    //    shared ingress): this root's `store` IS the source of truth about who
-    //    publishes on the ingress.
-    let live_ports: HashSet<u32> = store
-        .list()?
-        .iter()
-        .filter(|c| c.pid.map(delonix_runtime::is_alive).unwrap_or(false))
-        .flat_map(|c| c.ports.iter())
-        .filter_map(|p| {
-            delonix_net::parse_publish(p)
-                .ok()
-                .and_then(|(hp, _, _)| hp.parse::<u32>().ok())
-        })
-        .collect();
-    // Safe to assert authoritative here, and only here: this root's `store` IS
-    // the source of truth for who publishes on this ingress, and `store.list()`
-    // above propagates its error rather than yielding an empty list on failure.
-    let rmh = delonix_net::infra::reap_orphan_hostfwds(
-        delonix_net::infra::AuthoritativeLivePorts::new(&live_ports),
-    );
-    // 7) orphan slirps (dead target) — already reaped at the top by `reap_orphan_slirp`.
-
-    // 8) EMPTY `dlx-*` networks — auto-created for clusters that have been deleted
-    //    (a user network, without the prefix, is NEVER touched here). Frees the
-    //    subnet/bridge for reuse.
-    let attached: HashSet<String> = store
-        .list()?
-        .iter()
-        .filter_map(|c| c.network.clone())
-        .collect();
-    let mut rmn = 0usize;
-    if let Ok(nstore) = delonix_net::NetworkStore::open(super::util::state_root()) {
-        if let Ok(nets) = nstore.list() {
-            for n in nets {
-                if n.name.starts_with("dlx-") && !attached.contains(&n.name) {
-                    let _ = nstore.remove(&n.name);
-                    delonix_net::infra::network_remove(&n.name);
-                    rmn += 1;
-                }
-            }
-        }
-    }
-
-    let total = freed + freed_dirs;
+    let mut total = c.freed;
+    total.add(i.freed);
     println!(
         "{}",
         super::po::tf(
             "removed: {c} container(s), {d} orphan dir(s), {i} image(s), {b} blob(s), {g} cgroup(s), {p} orphan port(s), {n} orphan network(s) — {size} freed",
             &[
-                ("c", &rmc.to_string()),
-                ("d", &rmd.to_string()),
-                ("i", &rmi.to_string()),
-                ("b", &rmb.to_string()),
-                ("g", &rmg.to_string()),
-                ("p", &rmh.to_string()),
+                ("c", &c.containers.to_string()),
+                ("d", &c.dirs.to_string()),
+                ("i", &i.images.to_string()),
+                ("b", &i.blobs.to_string()),
+                ("g", &c.cgroups.to_string()),
+                ("p", &c.ports.to_string()),
                 ("n", &rmn.to_string()),
-                ("size", &super::output::fmt_size(total)),
+                ("size", &total.fmt()),
             ]
         )
     );
+    super::prune::note_partial(total);
     Ok(())
 }
 
@@ -676,31 +500,6 @@ fn cmd_events(follow: bool, tail: Option<usize>) -> Result<()> {
     }
 }
 
-/// **PURE** — subdirectories (name = id) of `containers_dir` whose id is NOT in
-/// `live` (registered containers): the orphans to reap. The reapable core of step 4
-/// of `prune`, isolated from `remove_tree_mapped` (which needs subuid) so it can
-/// be tested dry, without privilege. Only directories count — registry
-/// entries are `<id>.json` files and never enter here. **It never returns a live
-/// id.**
-fn orphan_container_dirs(
-    containers_dir: &std::path::Path,
-    live: &std::collections::HashSet<String>,
-) -> Vec<std::path::PathBuf> {
-    let mut out = Vec::new();
-    if let Ok(rd) = std::fs::read_dir(containers_dir) {
-        for e in rd.flatten() {
-            if !e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                continue;
-            }
-            let id = e.file_name().to_string_lossy().into_owned();
-            if !live.contains(&id) {
-                out.push(e.path());
-            }
-        }
-    }
-    out
-}
-
 /// Recursive sum of a directory's size (apparent, like `du`).
 /// Recursive disk usage of a directory, `du`-style — the number behind
 /// `system df` and the `system prune` reclaim figures.
@@ -866,84 +665,6 @@ fn cmd_info() -> Result<()> {
 #[allow(dead_code)]
 fn store_only() -> Result<Store> {
     Store::open(Store::default_root())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::orphan_container_dirs;
-    use std::collections::HashSet;
-    use std::path::PathBuf;
-
-    /// Unique temp dir (without depending on the `tempfile` crate).
-    fn tmp_dir(tag: &str) -> PathBuf {
-        // SAFETY: getpid() has no preconditions.
-        let uniq = format!(
-            "delonix-prune-{tag}-{}-{}",
-            unsafe { libc::getpid() },
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        );
-        let d = std::env::temp_dir().join(uniq);
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
-
-    /// STRESS test of the orphan-rootfs reaper: create→destroy of N container
-    /// directories at the disk level, crossed with the "Store" (set of live
-    /// ids). Asserts that the reaper catches ALL the orphans (containers killed without
-    /// `rm`), preserves the live ones, and that after deleting them ZERO orphans remain.
-    /// Runs without privilege — it tests the DECISION (`orphan_container_dirs`), not
-    /// `remove_tree_mapped` (which needs subuid).
-    #[test]
-    fn stress_reaper_rootfs_orfaos_deixa_zero() {
-        const N: usize = 300;
-        let root = tmp_dir("rootfs");
-        let containers = root.join("containers");
-        std::fs::create_dir_all(&containers).unwrap();
-
-        // N dead container directories + M live ones, and some `<id>.json`
-        // files (registry entries) that are NOT directories and must be
-        // ignored by the reaper.
-        for i in 0..N {
-            std::fs::create_dir_all(containers.join(format!("dead{i}"))).unwrap();
-        }
-        let live: HashSet<String> = (0..5).map(|i| format!("alive{i}")).collect();
-        for id in &live {
-            let d = containers.join(id);
-            std::fs::create_dir_all(&d).unwrap();
-            std::fs::write(d.join("rootfs-marker"), b"x").unwrap();
-        }
-        std::fs::write(containers.join("alive0.json"), b"{}").unwrap();
-        std::fs::write(containers.join("dead0.json"), b"{}").unwrap();
-
-        // The reaper sees exactly the N orphans (none live, no files).
-        let orphans = orphan_container_dirs(&containers, &live);
-        assert_eq!(
-            orphans.len(),
-            N,
-            "todos os `dead*` são órfãos, ficheiros ignorados"
-        );
-        for id in &live {
-            let p = containers.join(id);
-            assert!(!orphans.contains(&p), "container vivo NUNCA é reapado");
-        }
-
-        // Delete them and reconfirm: ZERO orphans remain, the live ones intact.
-        for p in &orphans {
-            std::fs::remove_dir_all(p).unwrap();
-        }
-        assert!(
-            orphan_container_dirs(&containers, &live).is_empty(),
-            "após o reap, zero directórios órfãos"
-        );
-        for id in &live {
-            assert!(containers.join(id).is_dir(), "vivo preservado no disco");
-        }
-
-        let _ = std::fs::remove_dir_all(&root);
-    }
 }
 
 /// Is this cgroup a LOGIN session scope — the case where the system-wide
