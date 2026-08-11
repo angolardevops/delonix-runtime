@@ -33,12 +33,28 @@ desconhecido dê erro, e outro que os dois de omissão continuem a resolver.
 ## Fase 2 — um backend remoto, e o que ele tem de provar
 
 **Não se escreve um backend que nunca se viu arrancar uma VM.** É a mesma regra
-do spike GO/NO-GO do kind, e a razão de a fase 2 estar bloqueada: não há host
-Proxmox neste sandbox. O alvo previsto é o appliance `proxmox-ve:9.1` construído
-neste repo — quando um correr algures alcançável, começa-se por um spike contra
-ele, não por um merge.
+do spike GO/NO-GO do kind — e **o spike já correu (2026-08-11): é GO.** O
+appliance `proxmox-ve:9.1` deste repo, arrancado como o `verify-boot.sh` arranca
+os outros (QEMU + hostfwd), serve a API e completou o ciclo inteiro: criar,
+arrancar (`status: running`), snapshot, parar, destruir. A tabela
+método↔operação e os achados estão no fim do [ADR-0008](../../../docs/adr/0008-proxmox-vm-backend.md).
 
-Quando chegar essa altura:
+**O que saber antes do primeiro pedido**, e que custa uma sessão a descobrir
+sozinho: **quase tudo no Proxmox é uma TAREFA assíncrona.** Um create, um start,
+um snapshot e um destroy respondem `UPID:pve:…` — uma string, não um resultado.
+O desfecho lê-se em `/nodes/{n}/tasks/{upid}/status`, e a forma é uma armadilha:
+
+```json
+{"status": "stopped", "exitstatus": "OK"}
+```
+
+`status: stopped` quer dizer que a **tarefa acabou**, não que falhou — o
+veredicto está no `exitstatus`. Quem leia o `status` como resultado conclui
+exactamente o contrário da verdade. É a mesma classe de armadilha que o
+`delonix-truenas` já trata (`wait_job`): partilha-se a DISCIPLINA, não o código
+— os payloads não têm nada em comum.
+
+E ainda:
 
 - **Crate próprio** (`delonix-proxmox`), a depender de `delonix-vm`. O
   `delonix-vm` tem QUATRO dependências e **não ganha nenhuma** — um cliente HTTP

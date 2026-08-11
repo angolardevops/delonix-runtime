@@ -1,7 +1,7 @@
 # ADR-0008: Add a Proxmox VE backend as a separate crate, and make backends registrable
 
-- **Status:** **Accepted, in two phases** (2026-08-10) — phase 1 lands now,
-  phase 2 is blocked on a real target
+- **Status:** **Accepted, in two phases** (2026-08-10) — phase 1 landed;
+  **phase 2 UNBLOCKED 2026-08-11 by a GO spike against a real appliance**
 - **Date:** 2026-08-10
 - **Deciders:** Walter Angolar
 
@@ -17,6 +17,9 @@ guardrail #6 (no silent failure) broken in the one place a user is most likely
 to typo. The registry closes that with a named error, and it is the change that
 makes any third backend possible — Firecracker included. Small, pure, and
 provable without a Proxmox host.
+
+**Phase 2 — the Proxmox backend. UNBLOCKED (2026-08-11): the spike ran, and it
+is a GO.** See "Spike result" at the end. What follows is the original text.
 
 **Phase 2 — the Proxmox backend, deferred.** Not rejected: **blocked on a real
 target**, the same way the kind spike was blocked and said so. This ADR itself
@@ -130,3 +133,62 @@ testable against recorded responses; the backend is not testable end-to-end
 here, and that limit must be stated in the release notes rather than implied
 away. The appliance image built in this same series (`proxmox-ve:9.1`) is the
 obvious test target and should be used as one.
+
+## Spike result (2026-08-11) — GO
+
+Run against the `proxmox-ve:9.1` appliance this repo builds, booted the same way
+`scripts/appliances/verify-boot.sh` boots the others (QEMU with a hostfwd), and
+driven through the real REST API as `root@pam`. **Every method the `VmBackend`
+trait declares has a Proxmox operation behind it, and the lifecycle was
+exercised end to end** — a VM created, started (`status: running`, `pid: 1425`),
+snapshotted, stopped and destroyed, with the node's VM list empty at the end.
+
+| `VmBackend` | Proxmox | shape |
+|---|---|---|
+| `boot` | `POST /nodes/{n}/qemu` then `.../status/start` | UPID |
+| `is_running` | `GET .../status/current` → `status`/`qmpstatus`/`pid` | sync |
+| `stop` | `POST .../status/stop` then `DELETE .../qemu/{vmid}` | UPID |
+| `snapshot` | `POST .../snapshot` | UPID |
+| `snapshots` | `GET .../snapshot` | sync |
+| `restore` | `POST .../snapshot/{name}/rollback` | UPID — **not exercised** |
+| `ip` | `GET .../agent/network-get-interfaces` | needs the guest agent |
+
+**The finding that matters most for whoever writes this backend: almost
+everything is an asynchronous task.** A create, a start, a snapshot and a
+destroy each answer with a bare `UPID:pve:…` string, not a result. The outcome
+is read separately at `/nodes/{n}/tasks/{upid}/status`, and its shape is a trap:
+
+```json
+{"status": "stopped", "exitstatus": "OK", "type": "qmsnapshot"}
+```
+
+`status: stopped` means **the task finished**, not that it failed — the verdict
+lives in `exitstatus`. A client that reads `status` as the result concludes the
+exact opposite of the truth. This is the same class of trap the TrueNAS
+provisioner already handles (`delonix-truenas`'s `wait_job`), and the two should
+share the discipline, not the code: the payloads have nothing in common.
+
+Two smaller findings, both worth knowing before writing the first request:
+
+* **`net0=virtio,bridge=vmbr0` is refused** — `duplicate key in comma-separated
+  list property: model`, and spelling it `model=virtio,…` is refused too. The
+  NIC syntax needs its own pass; the spike proceeded without a network, which
+  the lifecycle does not need.
+* **`GET .../snapshot` includes a pseudo-entry named `current`**, which is not a
+  snapshot. Listing it as one would report a snapshot nobody took.
+
+**Two defects in the appliance itself, found on the way** (they belong to
+`scripts/appliances/`, not to the backend):
+
+1. **The published Proxmox images carry a STATIC IP from the build environment.**
+   `source = "from-dhcp"` in the answer file means "get the configuration by
+   DHCP *during installation* and write it down as static" — not "use DHCP at
+   boot". A VM booted by `delonix vm create --backend libvirt` therefore comes up
+   with `10.0.2.15`, the QEMU slirp address, and is unreachable on a libvirt NAT
+   network. Confirmed by screenshot of the guest's own console.
+2. **No serial console**: the Proxmox installer does not add `console=ttyS0` to
+   grub, so a guest that fails to reach the network cannot be observed at all
+   without a graphics device. `delonix vm create --vnc` was what made the
+   diagnosis possible — worth remembering as the tool for this.
+
+Both affect all four Proxmox appliances.
