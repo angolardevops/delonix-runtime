@@ -162,6 +162,11 @@ def main() -> int:
     print("\n==> post-install applied; powering off")
     ssh.sendline("systemctl poweroff")
     ssh.expect([pexpect.EOF, pexpect.TIMEOUT], timeout=120)
+    # NOTE for the caller: SSH closing is the GUEST saying goodbye, not the VM
+    # being off. Capturing the disk on a timer after this point reads a
+    # filesystem that is still being written — measured: it produced images that
+    # booted and never reached the network, for a fix that was correct. Wait for
+    # the hypervisor PROCESS to exit before touching the image.
     return 0
 
 
