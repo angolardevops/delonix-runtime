@@ -4498,8 +4498,8 @@ msgstr "Regista automaticamente a porta HTTP deste container no proxy L7 sob o s
 msgid "Bandwidth cap, in bit/s with a suffix (`10mbit`, `512kbit`, `1gbit`)"
 msgstr "Tecto de largura de banda, em bit/s com sufixo (`10mbit`, `512kbit`, `1gbit`)"
 
-msgid "Burst for the bandwidth cap (default: `32kb`). Only with `--net-rate`"
-msgstr "Burst do tecto de largura de banda (por omissão: `32kb`). Só com `--net-rate`"
+msgid "Burst for the bandwidth cap (default: ~100 ms of throughput, at least 16 KiB). Only with `--net-rate`"
+msgstr "Burst do tecto de largura de banda (por omissão: ~100 ms de débito, no mínimo 16 KiB). Só com `--net-rate`"
 
 msgid "Burst for the bandwidth cap. Only with `--net-bps`"
 msgstr "Burst do tecto de largura de banda. Só com `--net-bps`"
