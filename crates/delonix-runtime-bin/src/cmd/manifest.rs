@@ -584,8 +584,17 @@ pub fn spec_of<T: for<'de> Deserialize<'de>>(doc: &ManifestDoc) -> Result<T> {
 /// inside a block — `serverr:` in a `spec.nfs` — was swallowed and simply became
 /// "no server". The blocks only appeared when `kind: Storage` folded into
 /// `kind: Volume`; before that there was nothing nested to get wrong.
+/// `block` may name a NESTED path with dots (`provision.truenas`) — a block can
+/// itself hold a block, and the vendor key of `spec.provision` is one.
 pub fn warn_unknown_fields_in(doc: &ManifestDoc, block: &str, known: &[&str]) {
-    let Some(serde_yaml::Value::Mapping(m)) = doc.spec.get(block) else {
+    let mut cur = &doc.spec;
+    for seg in block.split('.') {
+        match cur.get(seg) {
+            Some(v) => cur = v,
+            None => return,
+        }
+    }
+    let serde_yaml::Value::Mapping(m) = cur else {
         return;
     };
     for (k, _) in m {

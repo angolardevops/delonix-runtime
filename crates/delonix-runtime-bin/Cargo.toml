@@ -17,6 +17,9 @@ delonix-runtime = { path = "../delonix-runtime" }
 delonix-image = { path = "../delonix-image" }
 delonix-vm = { path = "../delonix-vm" }
 delonix-volume = { path = "../delonix-volume" }
+# Provisioning on a NAS (ADR-0009). Only the bin depends on it — a motor crate
+# does not grow an HTTP client.
+delonix-truenas = { path = "../delonix-truenas" }
 delonix-scan = { path = "../delonix-scan" }
 delonix-cri = { path = "../delonix-cri" }
 delonix-mgmt = { path = "../delonix-mgmt" }

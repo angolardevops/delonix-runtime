@@ -11,10 +11,11 @@ members = [
     "crates/delonix-cri",
     "crates/delonix-mgmt",
     "crates/delonix-scan",
+    "crates/delonix-truenas",
 ]
 
 [workspace.package]
-version = "0.47.1"
+version = "0.47.2"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/angolardevops/delonix-runtime"

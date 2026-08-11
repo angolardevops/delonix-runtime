@@ -167,6 +167,7 @@ Commands:
   default-backend  Get or set the default VM backend, used by `vm create` when neither `--backend` nor `DELONIX_VM_BACKEND` is given — above the engine&#x27;s own auto-detection heuristic. With no flag, prints the current default (`none` if auto-detection decides)
   ls               List the VMs
   console          Attach to the VM&#x27;s serial console (interactive terminal) — works with no IP (boot logs, login). Escape: Ctrl-] 
+  ssh              SSH into a VM by NAME (its IP comes from the record) or straight to an address. With a trailing command, runs it and returns instead of opening a shell
   vnc              Print the VNC address of a graphical VM (created with `--vnc`, libvirt)
   status           Current state (reconciles liveness/IP with the backend)
   reach            Which published ports a VM can actually reach, and how to fix the ones it cannot. A port published to the default `127.0.0.1` is invisible to a VM — this lists the libvirt gateways, reads each port&#x27;s LIVE bind, and for every loopback-only one prints the exact republish command
@@ -186,6 +187,33 @@ Commands:
 Options:
       --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
   -h, --help          Print help</code></pre></div>
+<h2 id='ssh'><code>vm ssh</code></h2>
+<p class='intro'>SSH into a VM by NAME (its IP comes from the record) or straight to an address. With a trailing command, runs it and returns instead of opening a shell.</p>
+<p class='intro'><code>delonix vm ssh dev</code> · <code>delonix vm ssh dev -- systemctl status</code> · <code>delonix vm ssh 192.168.122.50 -l root</code></p>
+<div class='help'><pre><code>Usage: delonix vm ssh [OPTIONS] &lt;TARGET&gt; [COMMAND]...
+
+Arguments:
+  &lt;TARGET&gt;
+          VM name (`vm ls`) or an IP/hostname to go to directly
+
+  [COMMAND]...
+          Command to run instead of an interactive shell
+
+Options:
+  -l, --user &lt;USER&gt;
+          Login user. Defaults to `delonix` — the account the golden images create and the one cloud-init injects `--ssh-key` into
+          
+          [default: delonix]
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -i, --identity &lt;IDENTITY&gt;
+          Private key to authenticate with (`ssh -i`)
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Entrar numa VM pelo NOME — o IP vem do registo, e o utilizador por omissão é `delonix` (não o da distro, que existe e não tem a chave)</div><div class='cap lang-en'>Enter a VM by NAME — the IP comes from the record, and the default user is `delonix` (not the distro&#x27;s own, which exists and does not carry the key)</div><pre><code>delonix vm ssh dev</code></pre></div><div class="ex"><div class='cap lang-pt'>Correr um comando e voltar, em vez de abrir uma shell</div><div class='cap lang-en'>Run a command and return, instead of opening a shell</div><pre><code>delonix vm ssh dev -- systemctl is-system-running</code></pre></div><div class="ex"><div class='cap lang-pt'>Ir directamente a um endereço, com outro utilizador e outra chave</div><div class='cap lang-en'>Go straight to an address, with a different user and key</div><pre><code>delonix vm ssh 192.168.122.50 -l root -i ~/.ssh/id_ed25519</code></pre></div>
 <h2 id='convert'><code>vm convert</code></h2>
 <p class='intro'>Convert a VM disk to the format another ecosystem imports — <code>qcow2</code>, <code>raw</code>, <code>vmdk</code> (VMware), <code>vdi</code> (VirtualBox), <code>vhdx</code>/<code>vhd</code> (Hyper-V, Azure). Flattened either way, so the result is a standalone file with no backing chain. This engine&#x27;s own two backends already share <code>qcow2</code>/<code>raw</code>; the rest exist so an image built here is importable elsewhere without a backend per product</p>
 <div class='help'><pre><code>Usage: delonix vm convert [OPTIONS] --to &lt;TO&gt; &lt;SOURCE&gt;

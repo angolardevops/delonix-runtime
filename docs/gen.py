@@ -437,6 +437,14 @@ O <code>create</code> é idempotente (cria ou auto-recupera) e suporta cloud-ini
 <code>--hostname</code>, <code>--ssh-key</code> e <code>--user-data</code> geram um ISO NoCloud
 automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para provisionar nós.""",
         "subs": {
+            "ssh": {"examples": [
+                ('Entrar numa VM pelo NOME — o IP vem do registo, e o utilizador '
+                 'por omissão é `delonix` (não o da distro, que existe e não tem a chave)',
+                 'delonix vm ssh dev'),
+                ('Correr um comando e voltar, em vez de abrir uma shell',
+                 'delonix vm ssh dev -- systemctl is-system-running'),
+                ('Ir directamente a um endereço, com outro utilizador e outra chave',
+                 'delonix vm ssh 192.168.122.50 -l root -i ~/.ssh/id_ed25519')]},
             "convert": {"examples": [
                 ('Levar uma imagem construída aqui para outro ecossistema',
                  'delonix vm convert minha-base --to vmdk        # VMware\n'
@@ -2198,6 +2206,12 @@ EXAMPLES_EN = {
     ],
     ("vm", "init"): ["Project with a manifest, ready to run", "Scaffold a VMfile to BUILD your image"],
     ("vm", "dash"): ["VMs-only dashboard (htop-style; `q` to quit)", "Snapshot for a script or for Grafana"],
+    ("vm", "ssh"): [
+        "Enter a VM by NAME — the IP comes from the record, and the default user is "
+        "`delonix` (not the distro's own, which exists and does not carry the key)",
+        "Run a command and return, instead of opening a shell",
+        "Go straight to an address, with a different user and key",
+    ],
     ("vm", "create"): [
         "VM from the golden image, with an SSH key — the name is POSITIONAL",
         "With no `--disk`, it uses the local golden VM image — if there is exactly one",

@@ -34,6 +34,10 @@ pub(crate) struct VolumeSpec {
     /// WebDAV (Nextcloud, ownCloud).
     #[serde(default)]
     webdav: Option<super::storage::NetShareSpec>,
+    /// OPTIONAL: create what the share block consumes, instead of requiring it
+    /// to exist already (ADR-0009). Absent, this Kind behaves exactly as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provision: Option<super::provision::ProvisionSpec>,
 }
 
 impl VolumeSpec {
@@ -88,6 +92,8 @@ pub(crate) const VOLUME_SPEC_FIELDS: &[&str] = &[
     "nfs",
     "cifs",
     "webdav",
+    // Optional provisioning of what the share block consumes.
+    "provision",
 ];
 
 /// Fields the reconciler compares for a `kind: Volume`. `quota` is the only one
@@ -418,7 +424,88 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         // The credentials file is written here and only here: computing the
         // mount is pure precisely so a `plan`/`--dry-run` can describe it
         // without creating anything.
-        let (driver, device, options) = match spec.net_share()? {
+        // Provisioning runs FIRST and its result feeds the mount below: the
+        // `server` is the NAS that was just provisioned and the `share` is the
+        // mountpoint it reported. Deriving both means the mount cannot end up
+        // pointing at a different machine, or at a path the appliance does not
+        // actually use, the way a second hand-written `nfs:` block could.
+        let provisioned = match &spec.provision {
+            Some(p) => {
+                super::provision::warn_unknown(doc);
+                match &p.truenas {
+                    Some(t) => Some(super::provision::run_truenas(t)?),
+                    None => {
+                        return Err(delonix_runtime_core::Error::Invalid(
+                            super::po::t("spec.provision needs a target block (today: `truenas:`)")
+                                .into(),
+                        ))
+                    }
+                }
+            }
+            None => None,
+        };
+        // Report the NAS side as soon as it exists, BEFORE the local mount is
+        // attempted. The mount needs CAP_SYS_ADMIN and fails in a plain
+        // rootless session — and an apply that dies there having silently
+        // created a dataset, a quota and an export on somebody's NAS would
+        // leave the operator with no idea that anything was made at all. What
+        // is printed is what the appliance reports it is enforcing, not what
+        // the manifest asked for.
+        if let Some(p) = &provisioned {
+            println!(
+                "volume/{name}: {} {}:{} ({}, {})",
+                super::po::t("provisioned"),
+                p.server,
+                p.share,
+                match p.quota {
+                    Some(b) =>
+                        super::po::tf("quota {size}", &[("size", &super::output::fmt_size(b))]),
+                    None => super::po::t("no quota").to_string(),
+                },
+                match p.available {
+                    Some(b) =>
+                        super::po::tf("{size} free", &[("size", &super::output::fmt_size(b))]),
+                    None => super::po::t("free space unknown").to_string(),
+                },
+            );
+        }
+        let derived_share;
+        let effective_share = match (&provisioned, spec.net_share()?) {
+            // Provisioned and NOT separately declared: the share block is
+            // built from what the NAS reported.
+            (Some(p), None) => {
+                derived_share = super::storage::NetShareSpec {
+                    server: p.server.clone(),
+                    share: p.share.clone(),
+                    username: None,
+                    password: None,
+                    password_secret: None,
+                    read_only: false,
+                    mount_options: None,
+                };
+                Some(("nfs", &derived_share))
+            }
+            // Both: the explicit block wins for credentials and mount options,
+            // but it must not name a DIFFERENT export — that is two answers to
+            // where the data lives, and picking one silently is how a volume
+            // ends up mounted somewhere nothing was provisioned.
+            (Some(p), Some((kind, block))) => {
+                if block.server != p.server || block.share != p.share {
+                    return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+                        "volume '{name}': spec.{kind} points at {given}, but spec.provision made {made} — remove the server/share from the block and let it be derived, or provision what you are mounting",
+                        &[
+                            ("name", name),
+                            ("kind", kind),
+                            ("given", &format!("{}:{}", block.server, block.share)),
+                            ("made", &format!("{}:{}", p.server, p.share)),
+                        ],
+                    )));
+                }
+                Some((kind, block))
+            }
+            (None, other) => other,
+        };
+        let (driver, device, options) = match effective_share {
             Some((kind, block)) => {
                 // A typo inside the block would otherwise be swallowed: the
                 // top-level warning only looks at the spec's own keys, and a
