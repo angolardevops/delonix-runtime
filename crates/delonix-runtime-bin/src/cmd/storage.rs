@@ -76,6 +76,9 @@ pub enum StorageCmd {
     Inspect {
         #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::storages))]
         name: String,
+        /// Output format: `table` (default, the historical text) or `json` (ADR-0005)
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: output::OutputFormat,
     },
     /// Remove (and unmount) a storage. The DATA stays on the NAS — only the
     /// local mount is torn down, like docker.
@@ -441,6 +444,24 @@ fn resolve_password(password: Option<String>, secret: Option<String>) -> Result<
     })
 }
 
+/// The machine view of a network storage (`inspect -o json`).
+///
+/// A `Storage` is a volume with a network driver, so the fields are the
+/// volume's — but the usage measurement is deliberately NOT here: it lives on
+/// the NAS, and walking a remote mount to answer an `inspect` would turn a
+/// metadata read into network I/O of unbounded cost.
+#[derive(serde::Serialize)]
+struct StorageInspect<'a> {
+    name: &'a str,
+    driver: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    device: Option<&'a str>,
+    mountpoint: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    options: Option<&'a str>,
+    created_unix: u64,
+}
+
 pub fn run(action: StorageCmd) -> Result<()> {
     let store = VolumeStore::open(state_root())?;
     match action {
@@ -510,8 +531,18 @@ pub fn run(action: StorageCmd) -> Result<()> {
             }
             t.print();
         }
-        StorageCmd::Inspect { name } => {
+        StorageCmd::Inspect { name, output } => {
             let v = store.inspect(&name)?;
+            if output == output::OutputFormat::Json {
+                return output::print_json(&[StorageInspect {
+                    name: &v.name,
+                    driver: &v.driver,
+                    device: v.device.as_deref(),
+                    mountpoint: &v.mountpoint,
+                    options: v.options.as_deref(),
+                    created_unix: v.created_unix,
+                }]);
+            }
             let mut d = output::Describe::new();
             d.field("Name", &v.name);
             d.field("Type", &v.driver);
