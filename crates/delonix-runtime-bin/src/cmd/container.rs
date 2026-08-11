@@ -3327,7 +3327,31 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             // trap in this file.
             c.ip = attached_ip.clone();
         } else {
-            let ip = infra::container_ip(pn);
+            // The address the pod REALLY got, carried on the member's labels by
+            // `pod::create_pod` (`POD_IP_LABEL`) straight from the attach.
+            //
+            // BUG FIXED: this used to be `infra::container_ip(pn)`, whose own
+            // doc-comment says "on the DEFAULT ingress network (10.200.A.B)" —
+            // it derives the address from the netns name in a FIXED prefix and
+            // never looks at the network the pod is actually on. For a pod on a
+            // custom network the value was simply wrong, and it is what gets
+            // persisted as `c.ip` and therefore what the internal DNS serves.
+            // Measured: pod `p1` on network `audit` really held 10.250.0.2 while
+            // its record said 10.200.0.2 — the address of a DIFFERENT pod on the
+            // default bridge — so resolving `p1-a` handed callers the wrong
+            // workload. `container_ip_on(prefix, id)` (the network-aware sibling)
+            // existed all along; the sixth instance in this repo of the right
+            // helper being there and never called.
+            // The label KEY comes from the constant the writer uses, never a
+            // second copy of the string: a literal here would keep working until
+            // the day someone renames it there, and then fail silently by
+            // falling back to the wrong-prefix guess this fix exists to remove.
+            let pod_ip_prefix = format!("{}=", super::pod::POD_IP_LABEL);
+            let ip = opts_copy
+                .labels
+                .iter()
+                .find_map(|l| l.strip_prefix(&pod_ip_prefix).map(str::to_string))
+                .unwrap_or_else(|| infra::container_ip(pn));
             return reexec_into_netns(&id, pn, &ip, &opts_copy, false);
         }
     }
