@@ -22,13 +22,18 @@ pub enum ServeCmd {
         #[arg(long, value_name = "MODE")]
         cap_ceiling_mode: Option<String>,
     },
-    /// Serve the MANAGEMENT API (HTTP+JSON) on a unix socket — the surface an external control-plane consumes to operate the engine.
+    /// Serve the MANAGEMENT API (HTTP+JSON) on a unix socket.
+    ///
+    /// The surface an external control-plane consumes to operate the engine.
     Api {
         /// Socket address (default: `$DELONIX_API_ADDR` or `unix:///run/delonix-mgmt.sock`).
         #[arg(long)]
         addr: Option<String>,
     },
-    /// Serve a slice of the Docker Engine API on a unix socket — `docker version`/`ps`/`images`/`info`/lifecycle mutations via `DOCKER_HOST=unix://<path>`.
+    /// Serve a slice of the Docker Engine API on a unix socket.
+    ///
+    /// `docker version`/`ps`/`images`/`info`/lifecycle mutations via
+    /// `DOCKER_HOST=unix://<path>`.
     DockerApi {
         /// Socket address (default: `$DELONIX_DOCKER_ADDR` or `unix:///run/delonix-docker.sock`).
         #[arg(long)]

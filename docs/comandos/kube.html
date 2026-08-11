@@ -155,18 +155,53 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+COMMAND MAP:
+  Declarative  generate
+
+EXAMPLES:
+  # the Kubernetes YAML for something you already have running locally
+  delonix cluster kube generate web
+
+SEE ALSO:
+  delonix container describe · delonix pod describe · delonix stack apply
+
+  delonix › cluster › kube</code></pre></div>
 <h2 id='generate'><code>kube generate</code></h2>
 <p class='intro'>Generates a <code>kind: Pod</code> from a container (or from every member of a pod) and prints it to stdout</p>
 <div class='help'><pre><code>Usage: delonix cluster kube generate [OPTIONS] &lt;NAME&gt;
 
 Arguments:
-  &lt;NAME&gt;  
+  &lt;NAME&gt;
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # a kind: Pod out of a running container, straight to stdout
+  delonix cluster kube generate web
+
+  # keep it in the repo as the starting point for a real deployment
+  delonix cluster kube generate web &gt; pod.yaml
+
+  # every member of a pod, as one manifest
+  delonix cluster kube generate api-pod
+
+SEE ALSO:
+  delonix container describe · delonix pod describe · delonix container apply
+  · delonix stack apply
+
+  delonix › cluster › kube › generate</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Pod a partir de um container</div><div class='cap lang-en'>Pod from a container</div><pre><code>delonix cluster kube generate web &gt; web-pod.yaml</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Exporta um container já a correr localmente para um manifesto

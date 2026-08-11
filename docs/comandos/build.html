@@ -175,17 +175,55 @@ it; root mode still has no cache). No real BuildKit (no <code>RUN --mount=secret
 <div class='help'><pre><code>Usage: delonix build [OPTIONS] --tag &lt;TAG&gt; [CONTEXT]
 
 Arguments:
-  [CONTEXT]  Build context (default: `.`) — root for `COPY` [default: .]
+  [CONTEXT]
+          Build context (default: `.`) — root for `COPY`
+          
+          [default: .]
 
 Options:
-  -f, --file &lt;FILE&gt;            Path of the Dockerfile (default: `&lt;context&gt;/Dockerfile`)
-      --l18n &lt;en|pt&gt;           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -t, --tag &lt;TAG&gt;              Tag of the resulting image (`repo:tag`)
-      --build-arg &lt;BUILD_ARG&gt;  Build-time variable (`KEY=VALUE`), repeatable — only takes effect for a name the Dockerfile actually declares with `ARG KEY[=default]` (an override with no matching `ARG` is silently ignored, same as Docker)
-      --no-cache               Bypasses the layer cache entirely (neither reads nor writes it) — same as Docker&#x27;s `--no-cache`
-      --secret &lt;SECRET&gt;        `id=&lt;name&gt;,src=&lt;path&gt;` — a secret a `RUN --mount=type=secret,id=&lt;name&gt;` can bind-mount for the duration of that one instruction (never baked into a layer). Repeatable
-      --platform &lt;PLATFORM&gt;    `linux/&lt;arch&gt;` (e.g. `linux/arm64`) — cross-arch build. Resolves the correct-arch base image and stamps it into the result; actually running a foreign-arch `RUN` needs the host&#x27;s own binfmt_misc/qemu-user-static already registered (not managed by delonix — a clear preflight error names the missing interpreter instead of a confusing mid-build failure)
-  -h, --help                   Print help</code></pre></div>
+  -f, --file &lt;FILE&gt;
+          Path of the Dockerfile (default: `&lt;context&gt;/Dockerfile`)
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -t, --tag &lt;TAG&gt;
+          Tag of the resulting image (`repo:tag`)
+
+      --build-arg &lt;BUILD_ARG&gt;
+          Build-time variable (`KEY=VALUE`), repeatable — only takes effect for a name the Dockerfile actually declares with `ARG KEY[=default]` (an override with no matching `ARG` is silently ignored, same as Docker)
+
+      --no-cache
+          Bypasses the layer cache entirely (neither reads nor writes it) — same as Docker&#x27;s `--no-cache`
+
+      --secret &lt;SECRET&gt;
+          `id=&lt;name&gt;,src=&lt;path&gt;` — a secret a `RUN --mount=type=secret,id=&lt;name&gt;` can bind-mount for the duration of that one instruction (never baked into a layer). Repeatable
+
+      --platform &lt;PLATFORM&gt;
+          `linux/&lt;arch&gt;` (e.g. `linux/arm64`) — cross-arch build. Resolves the correct-arch base image and stamps it into the result; actually running a foreign-arch `RUN` needs the host&#x27;s own binfmt_misc/qemu-user-static already registered (not managed by delonix — a clear preflight error names the missing interpreter instead of a confusing mid-build failure)
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # build and tag from the Dockerfile in this directory
+  delonix build -t myapp:v1 .
+
+  # a Delonixfile, or any other build file path
+  delonix build -t myapp:v1 -f Delonixfile .
+
+  # a build secret, bind-mounted live for one `RUN` and structurally unable to
+  # reach a layer
+  delonix build -t myapp:v1 --secret id=npmrc,src=/home/me/.npmrc .
+
+  # cross-arch: resolves the right base image and stamps the arch into the
+  # result
+  delonix build -t myapp:v1 --platform linux/arm64 .
+
+SEE ALSO:
+  delonix image ls · delonix image push · delonix container run · delonix init
+
+  delonix › build</code></pre></div>
 <h2><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h2><div class="ex"><div class='cap lang-pt'>Build com tag</div><div class='cap lang-en'>Build with a tag</div><pre><code>delonix build -t minha-app:1.0 .</code></pre></div><div class="ex"><div class='cap lang-pt'>Delonixfile explícito</div><div class='cap lang-en'>Explicit Delonixfile</div><pre><code>delonix build -t api:dev -f Delonixfile ./servico</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Escreve um <code>Delonixfile</code> multi-stage pequeno e constrói-o

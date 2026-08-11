@@ -84,10 +84,12 @@ const KNOWN_UNSUPPORTED_SERVICE: &[(&str, &str)] = &[
 
 #[derive(Subcommand)]
 pub enum ComposeCmd {
-    /// Creates/starts every service — build, then network, then volume, then
-    /// containers in `depends_on` order (gated on the declared condition).
+    /// Creates/starts every service.
+    ///
+    /// Build, then network, then volume, then containers in `depends_on` order
+    /// (gated on the declared condition).
     Up {
-        #[arg(short = 'f', long = "file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
         #[arg(short = 'p', long = "project-name")]
         project: Option<String>,
@@ -102,11 +104,12 @@ pub enum ComposeCmd {
         #[arg(short = 'd', long = "detach")]
         detach: bool,
     },
-    /// Removes every container this project's `up` created (and, with `-v`,
-    /// its named volumes). Networks/volumes marked `external: true` are NEVER
-    /// removed.
+    /// Removes every container this project's `up` created.
+    ///
+    /// And, with `-v`, its named volumes. Networks/volumes marked
+    /// `external: true` are NEVER removed.
     Down {
-        #[arg(short = 'f', long = "file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
         #[arg(short = 'p', long = "project-name")]
         project: Option<String>,
@@ -115,7 +118,7 @@ pub enum ComposeCmd {
     },
     /// Containers of this project (derived from labels).
     Ps {
-        #[arg(short = 'f', long = "file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
         #[arg(short = 'p', long = "project-name")]
         project: Option<String>,
@@ -123,7 +126,7 @@ pub enum ComposeCmd {
     /// Logs of one service (default: every service, one after another).
     Logs {
         service: Option<String>,
-        #[arg(short = 'f', long = "file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
         #[arg(short = 'p', long = "project-name")]
         project: Option<String>,
@@ -136,7 +139,7 @@ pub enum ComposeCmd {
     /// Validates and prints the resolved project, without creating anything
     /// (`docker compose config` equivalent).
     Config {
-        #[arg(short = 'f', long = "file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
         #[arg(short = 'p', long = "project-name")]
         project: Option<String>,

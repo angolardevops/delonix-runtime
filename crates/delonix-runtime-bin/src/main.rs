@@ -49,10 +49,13 @@ struct Cli {
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum Cmd {
-    /// Start the right project for THIS directory: detects and dispatches to `stack
-    /// init`/`vm init` with the matching template, saying what it detected and why.
+    /// Start the right project for THIS directory.
+    ///
+    /// Detects and dispatches to `stack init`/`vm init` with the matching
+    /// template, saying what it detected and why.
     Init {
         /// Project directory (default: the current one).
+        #[arg(value_hint = clap::ValueHint::DirPath)]
         dir: Option<std::path::PathBuf>,
         /// Force a template instead of the detected one (`stack init -t list` shows them).
         #[arg(short = 't', long)]
@@ -96,6 +99,7 @@ enum Cmd {
         action: cmd::vm::VmCmd,
     },
     /// Unified compute layer over containers AND VMs: ls/stop/rm (ADR-0002).
+    ///
     /// Creation stays declarative — see `kind: Workload` (`stack apply`).
     Workload {
         #[command(subcommand)]
@@ -121,8 +125,10 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::storage::StorageCmd,
     },
-    /// An isolated, individually-quota'd slice of a `Storage` — multiple
-    /// container/vm/pod share ONE NAS export without seeing each other's data.
+    /// An isolated, individually-quota'd slice of a `Storage`.
+    ///
+    /// Multiple container/vm/pod share ONE NAS export without seeing each
+    /// other's data.
     Sharevolume {
         #[command(subcommand)]
         action: cmd::sharevolume::ShareVolumeCmd,
@@ -136,8 +142,9 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::schema::SchemaCmd,
     },
-    /// Field reference for a Kind, `kubectl explain` style — from the SAME
-    /// generated schema, so it cannot drift from the code.
+    /// Field reference for a Kind, `kubectl explain` style.
+    ///
+    /// From the SAME generated schema, so it cannot drift from the code.
     ///
     /// `delonix explain Container` · `delonix explain Container.ports` ·
     /// `delonix explain Pod.containers.image`
@@ -160,8 +167,11 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::system::SystemCmd,
     },
-    /// Idempotent `kubeadm` bootstrap over SSH (`kind: Cluster`), full VM provisioning, or
-    /// generating a k8s manifest from a running container/pod (`cluster kube generate`).
+    /// Kubernetes clusters: `kubeadm` bootstrap, VM provisioning, manifest generation.
+    ///
+    /// Idempotent `kubeadm` bootstrap over SSH (`kind: Cluster`), full VM
+    /// provisioning, or generating a k8s manifest from a running
+    /// container/pod (`cluster kube generate`).
     Cluster {
         #[command(subcommand)]
         action: cmd::cluster::ClusterCmd,
@@ -176,7 +186,9 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::serve::ServeCmd,
     },
-    /// Runtime summary/KPI dashboard (interactive htop-style TUI) — global, or per group (`container dash`, `vm dash`, ...).
+    /// Runtime summary/KPI dashboard (interactive htop-style TUI).
+    ///
+    /// Global, or per group (`container dash`, `vm dash`, ...).
     Dash {
         /// Print ONE text snapshot and exit (no TUI) — for scripts/CI; the default when stdout is not a terminal.
         #[arg(long)]
@@ -190,13 +202,15 @@ enum Cmd {
         /// Target shell.
         shell: CompShell,
     },
+    /// Manual pages in roff, generated from this binary — one per command.
+    Man(cmd::man::ManArgs),
     /// (internal) The embedded L7 reverse-proxy that serves the `kind: HTTPRoute`.
     /// NOT for manual use — `stack apply` launches it inside the holder's netns
     /// (see `cmd::httproute`/`cmd::ingress_proxy`).
     #[command(hide = true)]
     IngressProxy {
         /// JSON file with the `ProxyConfig` (listeners + already-resolved routes).
-        #[arg(long)]
+        #[arg(value_hint = clap::ValueHint::FilePath, long)]
         config: std::path::PathBuf,
     },
 }
@@ -277,6 +291,25 @@ fn expand_alias(argv: &mut Vec<String>) {
     argv.insert(1, group.to_string());
 }
 
+/// The fully-dressed `Command`: parsed from the derive, translated if the
+/// session is Portuguese, then given the manual.
+///
+/// Extracted from `run` because `delonix man` renders the SAME tree to roff.
+/// Building it a second time by hand there is how a manpage ends up describing
+/// a CLI that no longer exists — the whole reason the pages are generated.
+pub fn build_command() -> clap::Command {
+    let mut command = <Cli as clap::CommandFactory>::command();
+    if cmd::output::is_pt() {
+        // Help source in EN; in pt, rewrite about/help via the pt.po catalog.
+        command = cmd::po::translate_help(command);
+    }
+    // The manual (COMMAND MAP / EXAMPLES / SEE ALSO) goes on AFTER the
+    // translation, not before: the map's category labels are built here, and a
+    // pass that rewrote help strings afterwards would have to know to leave
+    // this tail alone. Order is the cheap way to make that impossible.
+    cmd::manual::apply(command)
+}
+
 fn run() -> Result<()> {
     // Language BEFORE the clap parse: the help is generated DURING the parse,
     // so the decision has to come from a peek at the argv/environment (`--l18n`
@@ -285,11 +318,7 @@ fn run() -> Result<()> {
     if let Some(l) = cmd::po::peek_lang() {
         cmd::output::set_lang(&l);
     }
-    let mut command = <Cli as clap::CommandFactory>::command();
-    if cmd::output::is_pt() {
-        // Help source in EN; in pt, rewrite about/help via the pt.po catalog.
-        command = cmd::po::translate_help(command);
-    }
+    let command = build_command();
     let mut argv: Vec<String> = std::env::args().collect();
     expand_alias(&mut argv);
     let cli = match <Cli as clap::FromArgMatches>::from_arg_matches(&command.get_matches_from(argv))
@@ -335,6 +364,7 @@ fn run() -> Result<()> {
         Cmd::IngressProxy { config } => cmd::ingress_proxy::run(&config),
         Cmd::Dash { once, json } => cmd::dash::run(cmd::dash::DashScope::Global, once, json),
         Cmd::Completion { shell } => cmd_completion(shell),
+        Cmd::Man(args) => cmd::man::run(args),
     }
 }
 
@@ -559,6 +589,29 @@ mod help_i18n_tests {
             "{} descrição(ões) de comando sem entrada no pt.po:\n  {}",
             missing.len(),
             missing.join("\n  ")
+        );
+    }
+
+    /// Os comentários dos exemplos do manual são texto de utilizador como
+    /// qualquer outro: sob `--l18n=pt` um bloco EXEMPLOS em inglês seria a
+    /// única coisa por traduzir no ecrã. As LINHAS DE COMANDO não entram —
+    /// `delonix container run -d` escreve-se igual em todas as línguas, e
+    /// pedir tradução para elas é como um catálogo ganha ruído.
+    #[test]
+    fn todo_o_comentario_de_exemplo_tem_traducao_pt() {
+        let mut sem: Vec<String> = Vec::new();
+        for e in crate::cmd::manual::ENTRIES {
+            for (comment, _) in e.examples {
+                if !crate::cmd::po::has_pt_translation(comment) {
+                    sem.push(format!("{}: {comment}", e.path));
+                }
+            }
+        }
+        assert!(
+            sem.is_empty(),
+            "{} comentário(s) de exemplo sem entrada no pt.po:\n  {}",
+            sem.len(),
+            sem.join("\n  ")
         );
     }
 

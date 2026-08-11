@@ -53,6 +53,15 @@ pub fn login(root: &Path, registry: &str, user: &str, password: &str) -> Result<
     Ok(())
 }
 
+/// Hosts with stored credentials, in the canonical form `logout` expects.
+///
+/// Read-only and never fails: the caller is shell autocompletion for
+/// `image logout`, which must stay silent on a missing/corrupt file rather
+/// than error in the middle of the user's prompt.
+pub fn hosts(root: &Path) -> Vec<String> {
+    read(root).auths.into_keys().collect()
+}
+
 /// Removes the credentials for `registry`. Returns `true` if they existed.
 pub fn logout(root: &Path, registry: &str) -> Result<bool> {
     let host = canonical_host(registry);

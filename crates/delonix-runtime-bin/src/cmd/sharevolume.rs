@@ -179,7 +179,7 @@ pub(crate) fn converge_doc(doc: &ManifestDoc) -> Result<()> {
 pub enum ShareVolumeCmd {
     /// Apply the `kind: ShareVolume` documents of a manifest (idempotent).
     Apply {
-        #[arg(short, long)]
+        #[arg(value_hint = clap::ValueHint::FilePath, short, long)]
         file: Option<PathBuf>,
     },
     /// List share volumes (parent storage, quota, live usage).
@@ -190,19 +190,23 @@ pub enum ShareVolumeCmd {
     },
     /// Human-readable detail of one share volume.
     Describe {
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::sharevolumes))]
         name: String,
         /// Namespace that owns the share (default `default`).
-        #[arg(long, short = 'n')]
+        #[arg(long, short = 'n', add = clap_complete::engine::ArgValueCandidates::new(super::complete::namespaces))]
         namespace: Option<String>,
     },
-    /// Un-register a share volume. The underlying data (a subdirectory of
-    /// the parent Storage) is PRESERVED unless `--purge-data` is passed.
+    /// Un-register a share volume.
+    ///
+    /// The underlying data (a subdirectory of the parent Storage) is PRESERVED
+    /// unless `--purge-data` is passed.
     Rm {
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::sharevolumes))]
         name: String,
         #[arg(long = "purge-data")]
         purge_data: bool,
         /// Namespace that owns the share (default `default`).
-        #[arg(long, short = 'n')]
+        #[arg(long, short = 'n', add = clap_complete::engine::ArgValueCandidates::new(super::complete::namespaces))]
         namespace: Option<String>,
     },
     /// Move the pre-scoping share records into the `default` namespace.
@@ -331,6 +335,20 @@ fn list_all(root: &Path) -> Result<Vec<ShareRecord>> {
     }
     out.sort_by(|a, b| (&a.namespace, &a.name).cmp(&(&b.namespace, &b.name)));
     Ok(out)
+}
+
+/// Share volume names, for shell autocompletion (`cmd::complete::sharevolumes`).
+///
+/// Goes through `list_all` on purpose: the records are split across one
+/// directory per namespace PLUS the legacy flat ones, and a completer with its
+/// own copy of that layout would quietly stop offering half of them the day it
+/// changes. Never fails — a TAB with no store yet is "no suggestions".
+pub(crate) fn completion_names() -> Vec<String> {
+    list_all(&state_root())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|r| r.name)
+        .collect()
 }
 
 /// Moves the pre-scoping share records into the `default` namespace.

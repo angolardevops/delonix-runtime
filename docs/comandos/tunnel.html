@@ -167,38 +167,119 @@ its own domain needs the Cloudflare API, not implemented yet).</p>
 <div class='help'><pre><code>Usage: delonix net tunnel [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  apply     Apply the `kind: Tunnel` documents of a manifest (idempotent)
   expose    One-shot expose of a local port, no manifest needed
-  ls        List tunnels (state + public URL)
-  describe  Human-readable detail of one tunnel
   rm        Stop and remove a tunnel
+  describe  Human-readable detail of one tunnel
+  ls        List tunnels (state + public URL)
+  apply     Apply the `kind: Tunnel` documents of a manifest (idempotent)
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+COMMAND MAP:
+  Lifecycle    expose · rm
+  Inspect      ls · describe
+  Declarative  apply
+
+EXAMPLES:
+  # a local port on the public internet, with no account and no public IP on
+  # this host
+  delonix net tunnel expose --provider pinggy --local-port 8080
+
+  # the tunnels and the public URLs they got
+  delonix net tunnel ls
+
+  # stop one when the demo is over
+  delonix net tunnel rm demo
+
+SEE ALSO:
+  delonix net httproute apply · delonix net ingress publish · delonix secret
+  create · delonix stack apply
+
+  delonix › net › tunnel</code></pre></div>
 <h2 id='apply'><code>tunnel apply</code></h2>
 <p class='intro'>Apply the <code>kind: Tunnel</code> documents of a manifest (idempotent)</p>
 <div class='help'><pre><code>Usage: delonix net tunnel apply [OPTIONS]
 
 Options:
-  -f, --file &lt;FILE&gt;   
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+  -f, --file &lt;FILE&gt;
+          
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # the `kind: Tunnel` documents of the manifest here — idempotent, an
+  # unchanged tunnel is left alone
+  delonix net tunnel apply
+
+  # from a file, where the token comes from a `kind: Secret` instead of the
+  # shell history
+  delonix net tunnel apply -f delonix-manifest.yaml
+
+SEE ALSO:
+  delonix net tunnel expose · delonix net tunnel ls · delonix secret create ·
+  delonix stack apply
+
+  delonix › net › tunnel › apply</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Declarar o túnel num manifesto kind: Tunnel</div><div class='cap lang-en'>Declare the tunnel in a kind: Tunnel manifest</div><pre><code>delonix net tunnel apply -f tunel.yaml</code></pre></div>
 <h2 id='expose'><code>tunnel expose</code></h2>
 <p class='intro'>One-shot expose of a local port, no manifest needed</p>
 <div class='help'><pre><code>Usage: delonix net tunnel expose [OPTIONS] --provider &lt;PROVIDER&gt; --local-port &lt;LOCAL_PORT&gt;
 
 Options:
-      --l18n &lt;en|pt&gt;                 Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --name &lt;NAME&gt;                  Name (default: `tunnel-&lt;port&gt;`)
-      --provider &lt;PROVIDER&gt;          `pinggy` | `ngrok` | `cloudflare`
-      --local-port &lt;LOCAL_PORT&gt;      
-      --hostname &lt;HOSTNAME&gt;          
-      --token &lt;TOKEN&gt;                
-      --token-secret &lt;TOKEN_SECRET&gt;  
-  -h, --help                         Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --name &lt;NAME&gt;
+          Name (default: `tunnel-&lt;port&gt;`)
+
+      --provider &lt;PROVIDER&gt;
+          `pinggy` | `ngrok` | `cloudflare`
+
+      --local-port &lt;LOCAL_PORT&gt;
+          
+
+      --hostname &lt;HOSTNAME&gt;
+          
+
+      --token &lt;TOKEN&gt;
+          
+
+      --token-secret &lt;TOKEN_SECRET&gt;
+          
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # pinggy needs no account and no extra binary — it is plain ssh, and the
+  # free URL is ephemeral
+  delonix net tunnel expose --provider pinggy --local-port 8080
+
+  # a name of your own, instead of the `tunnel-&lt;port&gt;` default
+  delonix net tunnel expose --name demo --provider pinggy --local-port 8080
+
+  # ngrok, with the authtoken read from a secret rather than typed into argv
+  delonix net tunnel expose --provider ngrok --local-port 8080 --token-secret ngrok-token
+
+  # a cloudflare quick tunnel — random trycloudflare.com URL, no account,
+  # `cloudflared` must be on PATH
+  delonix net tunnel expose --provider cloudflare --local-port 8080
+
+SEE ALSO:
+  delonix net tunnel ls · delonix net tunnel rm · delonix net tunnel apply ·
+  delonix net httproute apply
+
+  delonix › net › tunnel › expose</code></pre></div>
 <div class='lang-pt'><p>Validado ao vivo nesta mesma sessão: tráfego HTTPS real da internet
 chegou a um servidor local através do tunnel (HTTP 200) usando exactamente este comando.</p></div><div class='lang-en'><p>Validated live in this very session: real HTTPS traffic from the
 internet reached a local server through the tunnel (HTTP 200) using exactly this command.</p></div>
@@ -208,8 +289,21 @@ internet reached a local server through the tunnel (HTTP 200) using exactly this
 <div class='help'><pre><code>Usage: delonix net tunnel ls [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # every tunnel, its state and the public URL the provider gave it
+  delonix net tunnel ls
+
+SEE ALSO:
+  delonix net tunnel describe · delonix net tunnel expose · delonix net tunnel
+  rm
+
+  delonix › net › tunnel › ls</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Listar túneis (estado + URL pública)</div><div class='cap lang-en'>List tunnels (status + public URL)</div><pre><code>delonix net tunnel ls</code></pre><div class="out"><pre><code>NAME    PROVIDER   LOCAL PORT   PUBLIC URL                                    STATUS    UPTIME
 test1   pinggy          18234   https://oxipg-197-148-40-67.free.pinggy.net   Running   Up 34 seconds</code></pre></div></div>
 <h2 id='describe'><code>tunnel describe</code></h2>
@@ -217,22 +311,49 @@ test1   pinggy          18234   https://oxipg-197-148-40-67.free.pinggy.net   Ru
 <div class='help'><pre><code>Usage: delonix net tunnel describe [OPTIONS] &lt;NAME&gt;
 
 Arguments:
-  &lt;NAME&gt;  
+  &lt;NAME&gt;
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # one tunnel in full: provider, local port, the agent&#x27;s pid and the URL in
+  # effect
+  delonix net tunnel describe demo
+
+SEE ALSO:
+  delonix net tunnel ls · delonix net tunnel rm · delonix net tunnel expose
+
+  delonix › net › tunnel › describe</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Detalhe de um túnel</div><div class='cap lang-en'>Tunnel detail</div><pre><code>delonix net tunnel describe demo</code></pre></div>
 <h2 id='rm'><code>tunnel rm</code></h2>
 <p class='intro'>Stop and remove a tunnel</p>
 <div class='help'><pre><code>Usage: delonix net tunnel rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
-  &lt;NAME&gt;  
+  &lt;NAME&gt;
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # stop the provider&#x27;s agent and forget the tunnel — the URL dies with it
+  delonix net tunnel rm demo
+
+SEE ALSO:
+  delonix net tunnel ls · delonix net tunnel expose · delonix net tunnel apply
+
+  delonix › net › tunnel › rm</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Parar e remover (mata o processo agente a sério)</div><div class='cap lang-en'>Stop and remove (really kills the agent process)</div><pre><code>delonix net tunnel rm demo</code></pre><div class="out"><pre><code>tunnel/demo: removed</code></pre></div></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Uma porta local, uma URL pública — sem conta, sem router.</p>

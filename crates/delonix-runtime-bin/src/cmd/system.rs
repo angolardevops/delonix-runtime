@@ -13,9 +13,10 @@ use super::util::{open_stores, state_root};
 
 #[derive(Subcommand)]
 pub enum SystemCmd {
-    /// Engine events (create/start/die/remove/…), from oldest to most
-    /// recent. With no daemon, the log is a shared append-only file — each
-    /// command appends its own line (see `delonix_runtime_core::events`).
+    /// Engine events (create/start/die/remove/…), from oldest to most recent.
+    ///
+    /// With no daemon, the log is a shared append-only file — each command
+    /// appends its own line (see `delonix_runtime_core::events`).
     Events {
         /// Follow continuously (Ctrl-C to exit).
         #[arg(short, long)]
@@ -26,12 +27,12 @@ pub enum SystemCmd {
     },
     /// Engine state: rootless?, cgroup delegation, network infra, counts.
     Info,
-    /// Diagnose — and, with `--delegate`, fix — cgroup delegation, the
-    /// prerequisite for `--memory`/`--cpus`/`--pids-limit` to mean anything.
+    /// Diagnose — and, with `--delegate`, fix — cgroup delegation.
     ///
-    /// Without it the flags are ACCEPTED and INERT: the container runs with no
-    /// limit at all. That is the failure mode this command exists for, and it
-    /// is invisible without asking.
+    /// It is the prerequisite for `--memory`/`--cpus`/`--pids-limit` to mean
+    /// anything. Without it the flags are ACCEPTED and INERT: the container
+    /// runs with no limit at all. That is the failure mode this command exists
+    /// for, and it is invisible without asking.
     Setup {
         /// Apply the fix instead of only reporting it. Writing the system-wide
         /// drop-in needs root; the per-session remedy never does.
@@ -46,10 +47,12 @@ pub enum SystemCmd {
         #[arg(long)]
         tune: bool,
     },
-    /// Reclaim space: remove stopped containers, unused images, CAS blobs
-    /// nobody references, empty cgroups and — the biggest space saver
-    /// — **orphan container directories** (from nodes/containers that died
-    /// abruptly without `rm`, with no registry entry).
+    /// Reclaim space taken by what nothing uses any more.
+    ///
+    /// Removes stopped containers, unused images, CAS blobs nobody
+    /// references, empty cgroups and — the biggest space saver — **orphan
+    /// container directories** (from nodes/containers that died abruptly
+    /// without `rm`, with no registry entry).
     Prune {
         /// Skip the confirmation prompt (REQUIRED when stdin is not a terminal).
         #[arg(short = 'f', long)]
@@ -58,8 +61,10 @@ pub enum SystemCmd {
         #[arg(short, long)]
         all: bool,
     },
-    /// Active network connections per container (via conntrack): who comes in,
-    /// who goes out, and between containers. Refreshes continuously (see `--no-stream`).
+    /// Active network connections per container (via conntrack).
+    ///
+    /// Who comes in, who goes out, and between containers. Refreshes
+    /// continuously (see `--no-stream`).
     Monitor {
         /// Milliseconds between refreshes (minimum 300).
         #[arg(long, default_value_t = 1000)]
@@ -68,8 +73,11 @@ pub enum SystemCmd {
         #[arg(long = "no-stream")]
         no_stream: bool,
     },
-    /// Thermal governor: lowers Delonix's CPU budget when the CPU heats
-    /// up and restores it when it cools down. Runs continuously (see `--once`).
+    /// Thermal governor for Delonix's CPU budget. Runs continuously (see
+    /// `--once`).
+    ///
+    /// Lowers the budget when the CPU heats up and restores it when it cools
+    /// down.
     Thermal {
         /// Temperature (°C) at or above which it cools down.
         #[arg(long, default_value_t = 85)]

@@ -745,10 +745,65 @@ UNIT
   warn "user@.service limits take effect on the NEXT login (or: systemctl restart user@$(id -u "$REAL_USER").service, which kills that user's running workloads)"
 fi
 
-# ------------------------------------------------------------ completion (bash)
-if [ "$WITH_BINARY" = 1 ] && [ -d /etc/bash_completion.d ] && [ -x "$BIN_DIR/delonix" ]; then
-  "$BIN_DIR/delonix" completion bash 2>/dev/null | $SUDO tee /etc/bash_completion.d/delonix >/dev/null \
-    && stepok binary "bash completion" || true
+# ------------------------------------------------ completion (bash/zsh/fish)
+#
+# Era só bash. A completion deste motor é DINÂMICA (`clap_complete`'s engine):
+# o script registado apenas chama o binário de volta, por isso o mesmo mecanismo
+# serve as três shells e sugere nomes de containers/imagens/volumes/VMs reais,
+# lidos do estado em disco — não uma lista congelada na instalação.
+#
+# Cada shell é best-effort e independente: um host sem zsh não é motivo para
+# falhar a instalação, e um directório em falta é a forma normal de dizer "esta
+# shell não está cá".
+if [ "$WITH_BINARY" = 1 ] && [ -x "$BIN_DIR/delonix" ]; then
+  _comp_installed=""
+  if [ -d /etc/bash_completion.d ]; then
+    "$BIN_DIR/delonix" completion bash 2>/dev/null | $SUDO tee /etc/bash_completion.d/delonix >/dev/null \
+      && _comp_installed="bash"
+  fi
+  for _zdir in /usr/share/zsh/site-functions /usr/local/share/zsh/site-functions; do
+    if [ -d "$_zdir" ]; then
+      # O ficheiro TEM de se chamar `_delonix`: o zsh procura a função de
+      # completion pelo nome do ficheiro no `fpath`, e um nome diferente é
+      # carregado por ninguém — falha silenciosa clássica desta integração.
+      "$BIN_DIR/delonix" completion zsh 2>/dev/null | $SUDO tee "$_zdir/_delonix" >/dev/null \
+        && _comp_installed="$_comp_installed zsh"
+      break
+    fi
+  done
+  for _fdir in /usr/share/fish/vendor_completions.d /usr/local/share/fish/vendor_completions.d; do
+    if [ -d "$_fdir" ]; then
+      "$BIN_DIR/delonix" completion fish 2>/dev/null | $SUDO tee "$_fdir/delonix.fish" >/dev/null \
+        && _comp_installed="$_comp_installed fish"
+      break
+    fi
+  done
+  [ -n "$_comp_installed" ] && stepok binary "completion ($_comp_installed)"
+  [ -z "$_comp_installed" ] && warn "no completion directory found — register it by hand: delonix completion bash >> ~/.bashrc"
+fi
+
+# ------------------------------------------------------------------- manpages
+#
+# `man delonix-container-run` é como se lê um manual quando não se tem a CLI à
+# frente. As páginas são GERADAS pelo próprio binário (`delonix man --dir`), por
+# isso são sempre as deste binário e não as de uma versão anterior que ficou no
+# sistema.
+#
+# `mandb` a seguir, senão o `man` não as encontra por nome até ao próximo cron
+# diário — e "instalei e não funciona" é indistinguível de não ter instalado.
+if [ "$WITH_BINARY" = 1 ] && [ -x "$BIN_DIR/delonix" ]; then
+  case "$BIN_DIR" in
+    "$REAL_HOME"/*) _mandir="$REAL_HOME/.local/share/man"; _mansudo="" ;;
+    *)              _mandir="/usr/local/share/man";        _mansudo="$SUDO" ;;
+  esac
+  if $_mansudo mkdir -p "$_mandir/man1" 2>/dev/null \
+     && "$BIN_DIR/delonix" man --dir "$TMP/man" >/dev/null 2>&1 \
+     && $_mansudo cp "$TMP"/man/man1/*.1 "$_mandir/man1/" 2>/dev/null; then
+    stepok binary "man pages -> $_mandir/man1"
+    $_mansudo mandb -q >/dev/null 2>&1 || true
+  else
+    warn "could not install the man pages (generate them by hand: delonix man --dir ~/.local/share/man)"
+  fi
 fi
 
 # ------------------------------------------------- delegação de cgroup (limites)

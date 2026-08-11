@@ -173,15 +173,16 @@ pub enum ImageCmd {
         /// Verify the cosign signature with this public key (PEM) AFTER the
         /// pull, and fail if it does not match. Without this, a pull is not
         /// authenticated beyond the registry's own digest.
-        #[arg(long, value_name = "PEM")]
+        #[arg(value_hint = clap::ValueHint::FilePath, long, value_name = "PEM")]
         verify: Option<PathBuf>,
         /// (only with `--vm`) With no argument, pull the official
         /// NO-Kubernetes golden instead of the Kubernetes one.
         #[arg(long)]
         no_k8s: bool,
     },
-    /// (only with `--vm`) List the tags available in a remote OCI repository
-    /// — with no argument, the OFFICIAL Delonix golden image repo.
+    /// List the tags available in a remote OCI repository (only with `--vm`).
+    ///
+    /// With no argument, the OFFICIAL Delonix golden image repo.
     LsRemote {
         source: Option<String>,
         /// With no argument, list the official NO-Kubernetes golden's repo
@@ -196,9 +197,10 @@ pub enum ImageCmd {
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: super::output::OutputFormat,
     },
-    /// Human-readable detail of one or more images, `kubectl describe`-style
-    /// (tags/digest/size/layers + the OCI config: entrypoint/cmd/env/workdir).
-    /// With `--vm`, describes golden VM images.
+    /// Human-readable detail of one or more images, `kubectl describe`-style.
+    ///
+    /// Tags/digest/size/layers + the OCI config:
+    /// entrypoint/cmd/env/workdir. With `--vm`, describes golden VM images.
     Describe {
         #[arg(required = true, add = ArgValueCandidates::new(super::complete::images))]
         names: Vec<String>,
@@ -220,13 +222,16 @@ pub enum ImageCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::images))]
         image: String,
         /// Public key in PEM.
-        #[arg(value_name = "PEM")]
+        #[arg(value_hint = clap::ValueHint::FilePath, value_name = "PEM")]
         key: PathBuf,
     },
-    /// SBOM + CVE scan of an image (reads the layers from the CAS, without running anything).
-    /// Pulls the image if missing. See `--sbom`, `--fail-on`, `--update`.
+    /// SBOM + CVE scan of an image.
+    ///
+    /// Reads the layers from the CAS, without running anything. Pulls the
+    /// image if missing. See `--sbom`, `--fail-on`, `--update`.
     Scan {
         /// Image to scan (optional with `--update`).
+        #[arg(add = ArgValueCandidates::new(super::complete::images))]
         image: Option<String>,
         /// List the SBOM (installed packages) instead of scanning.
         #[arg(long)]
@@ -254,35 +259,44 @@ pub enum ImageCmd {
     Export {
         #[arg(add = ArgValueCandidates::new(super::complete::images))]
         image: String,
+        #[arg(value_hint = clap::ValueHint::DirPath)]
         dir: PathBuf,
     },
-    /// Save an image to a portable archive (`docker save`'s counterpart) — the
-    /// way to move an image to another machine with no registry. The archive is
-    /// an OCI layout WITH the legacy `manifest.json`, so `delonix image load`,
-    /// `docker load`, `podman load` and `ctr images import` all read it.
+    /// Save an image to a portable archive (`docker save`'s counterpart).
+    ///
+    /// The way to move an image to another machine with no registry. The
+    /// archive is an OCI layout WITH the legacy `manifest.json`, so `delonix
+    /// image load`, `docker load`, `podman load` and `ctr images import` all
+    /// read it.
     Save {
         #[arg(add = ArgValueCandidates::new(super::complete::images))]
         image: String,
         /// Destination file. Use `-o /dev/stdout` to pipe (e.g. into `gzip`).
-        #[arg(short = 'o', long = "output", value_name = "FILE")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'o', long = "output", value_name = "FILE")]
         output: PathBuf,
     },
-    /// Load an image from an archive produced by `delonix image save`,
-    /// `docker save` or `podman save` (the counterpart of `save`).
+    /// Load an image from an archive (the counterpart of `save`).
+    ///
+    /// Reads archives produced by `delonix image save`, `docker save` or
+    /// `podman save`.
     Load {
         /// Archive to read (`.tar`; a `.tar.gz` must be gunzipped first).
-        #[arg(short = 'i', long = "input", value_name = "FILE")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'i', long = "input", value_name = "FILE")]
         input: PathBuf,
     },
-    /// Apply the `kind: Image` documents of a manifest (`pull` idempotent
-    /// by reference; `build` rebuilds and replaces the tag on each apply).
+    /// Apply the `kind: Image` documents of a manifest.
+    ///
+    /// `pull` is idempotent by reference; `build` rebuilds and replaces the
+    /// tag on each apply.
     Apply {
-        #[arg(short = 'f', long = "file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
     },
-    /// Authenticate to an OCI registry (stores the credentials in `<root>/auth.json`,
-    /// docker/podman format). The password ALWAYS comes from stdin — never from an
-    /// argument (it would end up in the shell history and in /proc).
+    /// Authenticate to an OCI registry.
+    ///
+    /// Stores the credentials in `<root>/auth.json`, docker/podman format.
+    /// The password ALWAYS comes from stdin — never from an argument (it
+    /// would end up in the shell history and in /proc).
     Login {
         /// Registry (e.g. `ghcr.io`, `docker.io`).
         registry: String,
@@ -293,15 +307,20 @@ pub enum ImageCmd {
         password_stdin: bool,
     },
     /// Remove the stored credentials of a registry.
-    Logout { registry: String },
+    Logout {
+        #[arg(add = ArgValueCandidates::new(super::complete::registries))]
+        registry: String,
+    },
     /// Golden VM images (`<root>/vm-images/`): ls/pull/push/build.
     /// Equivalent to `image --vm <cmd>` (old form, kept).
     Vm {
         #[command(subcommand)]
         action: VmSub,
     },
-    /// Publish a local image to an OCI registry. Without `target`, publishes under
-    /// the image's own reference. With `--vm`, `target` is required.
+    /// Publish a local image to an OCI registry.
+    ///
+    /// Without `target`, publishes under the image's own reference. With
+    /// `--vm`, `target` is required.
     Push {
         #[arg(add = ArgValueCandidates::new(super::complete::images))]
         name: String,
@@ -309,44 +328,51 @@ pub enum ImageCmd {
     },
     /// (only with `--vm`) Register an existing disk image under a name.
     Import(super::vmimage::ImportArgs),
-    /// (only with `--vm`) Convert a VM disk to the format another ecosystem
-    /// imports — `qcow2`, `raw`, `vmdk`, `vdi`, `vhdx`, `vhd`.
+    /// Convert a VM disk to the format another ecosystem imports (only with
+    /// `--vm`).
+    ///
+    /// `qcow2`, `raw`, `vmdk`, `vdi`, `vhdx`, `vhd`.
     Convert {
+        #[arg(add = ArgValueCandidates::new(super::complete::vm_images))]
         source: String,
         #[arg(long = "to", value_enum)]
         to: super::vmimage::ConvertFormat,
-        #[arg(short = 'o', long = "output")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'o', long = "output")]
         output: Option<PathBuf>,
         /// Compress the output. Only `qcow2` and `vmdk` can — refused for the
         /// others rather than handed to `qemu-img` to fail on.
         #[arg(long)]
         compress: bool,
     },
-    /// (only with `--vm`) Build the golden VM image (Ubuntu + kubeadm/kubelet/
-    /// kubectl + `delonix-cri`).
-    /// Scaffold a `VMfile` (and a cloud-init) for building your own image.
+    /// (only with `--vm`) Scaffold a `VMfile` for building your own VM image.
+    ///
+    /// Writes a `VMfile` (and a cloud-init) for building your own image. The
+    /// built-in alternative is the golden VM image (Ubuntu +
+    /// kubeadm/kubelet/kubectl + `delonix-cri`), built by `image --vm build`
+    /// with no `-f`.
     Init {
         /// Name to use in the scaffold (image tag, hostname, account).
         #[arg(default_value = "myimage")]
         name: String,
         /// Where to write it (default: the current directory).
-        #[arg(short = 'd', long)]
+        #[arg(value_hint = clap::ValueHint::DirPath, short = 'd', long)]
         dir: Option<PathBuf>,
         /// Overwrite an existing `VMfile`.
         #[arg(long)]
         force: bool,
     },
-    /// (only with `--vm`) Build a VM image: the built-in golden recipe
-    /// (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), or a `VMfile`
-    /// of your own with `-f`.
+    /// (only with `--vm`) Build a VM image.
+    ///
+    /// The built-in golden recipe (Ubuntu + kubeadm/kubelet/kubectl +
+    /// `delonix-cri`), or a `VMfile` of your own with `-f`.
     Build {
         #[arg(short = 't', long = "tag")]
         tag: String,
         /// Build from a `VMfile` instead of the built-in golden recipe.
-        #[arg(short = 'f', long = "file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
         /// Build context — the directory `COPY` reads from.
-        #[arg(default_value = ".")]
+        #[arg(value_hint = clap::ValueHint::DirPath, default_value = ".")]
         context: PathBuf,
         #[arg(long, value_enum, default_value = "ubuntu")]
         distro: Distro,
@@ -365,7 +391,7 @@ pub enum ImageCmd {
         extra_packages: Vec<String>,
         #[arg(long = "extra-run")]
         extra_run: Vec<String>,
-        #[arg(long)]
+        #[arg(value_hint = clap::ValueHint::FilePath, long)]
         cri_bin: Option<PathBuf>,
         /// Do not compress the final qcow2 (larger, but with no decompression
         /// cost on backing-file reads at runtime).
@@ -382,7 +408,7 @@ pub enum ImageCmd {
         /// Build a golden image with NO Kubernetes — just `delonix` itself.
         #[arg(long)]
         no_k8s: bool,
-        #[arg(long)]
+        #[arg(value_hint = clap::ValueHint::FilePath, long)]
         delonix_bin: Option<PathBuf>,
     },
 }
@@ -401,7 +427,7 @@ pub enum VmSub {
     },
     /// Human-readable detail of one or more VM images, `kubectl describe`-style.
     Describe {
-        #[arg(required = true)]
+        #[arg(required = true, add = ArgValueCandidates::new(super::complete::vm_images))]
         names: Vec<String>,
     },
     /// Fetch a VM image from an OCI registry (single-blob artifact) — with
@@ -416,9 +442,10 @@ pub enum VmSub {
         #[arg(long)]
         no_k8s: bool,
     },
-    /// List the tags available in a remote OCI repository — with no
-    /// argument, the OFFICIAL Delonix golden image repo (discover which
-    /// k8s versions are published before `pull`/`--k8s-version`).
+    /// List the tags available in a remote OCI repository.
+    ///
+    /// With no argument, the OFFICIAL Delonix golden image repo (discover
+    /// which k8s versions are published before `pull`/`--k8s-version`).
     LsRemote {
         source: Option<String>,
         /// With no `source`, list the official NO-Kubernetes golden's repo
@@ -426,53 +453,62 @@ pub enum VmSub {
         #[arg(long)]
         no_k8s: bool,
     },
-    /// Publish a local VM image to an OCI registry. Omit the destination to
-    /// publish to the OFFICIAL repository the image belongs in.
+    /// Publish a local VM image to an OCI registry.
+    ///
+    /// Omit the destination to publish to the OFFICIAL repository the image
+    /// belongs in.
     Push {
+        #[arg(add = ArgValueCandidates::new(super::complete::vm_images))]
         name: String,
         target: Option<String>,
     },
     /// Register an existing disk image under a name, so `vm create --disk
     /// <name>` and `image vm push` can use it.
     Import(super::vmimage::ImportArgs),
-    /// Convert a VM disk to the format another ecosystem imports — `qcow2`,
-    /// `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V,
-    /// Azure). Flattened either way: the result is a standalone file.
+    /// Convert a VM disk to the format another ecosystem imports.
+    ///
+    /// `qcow2`, `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd`
+    /// (Hyper-V, Azure). Flattened either way: the result is a standalone
+    /// file.
     Convert {
+        #[arg(add = ArgValueCandidates::new(super::complete::vm_images))]
         source: String,
         #[arg(long = "to", value_enum)]
         to: super::vmimage::ConvertFormat,
-        #[arg(short = 'o', long = "output")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'o', long = "output")]
         output: Option<PathBuf>,
         /// Compress the output. Only `qcow2` and `vmdk` can — refused for the
         /// others rather than handed to `qemu-img` to fail on.
         #[arg(long)]
         compress: bool,
     },
-    /// Build the golden VM image (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`).
     /// Scaffold a `VMfile` (and a cloud-init) for building your own image.
+    ///
+    /// Build the golden VM image (Ubuntu + kubeadm/kubelet/kubectl +
+    /// `delonix-cri`).
     Init {
         /// Name to use in the scaffold (image tag, hostname, account).
         #[arg(default_value = "myimage")]
         name: String,
         /// Where to write it (default: the current directory).
-        #[arg(short = 'd', long)]
+        #[arg(value_hint = clap::ValueHint::DirPath, short = 'd', long)]
         dir: Option<PathBuf>,
         /// Overwrite an existing `VMfile`.
         #[arg(long)]
         force: bool,
     },
-    /// Build a VM image: the built-in golden recipe
-    /// (Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`), or a `VMfile`
-    /// of your own with `-f`.
+    /// Build a VM image: the built-in golden recipe, or your own `VMfile`.
+    ///
+    /// The golden recipe is Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`;
+    /// build a `VMfile` of your own with `-f`.
     Build {
         #[arg(short = 't', long = "tag")]
         tag: String,
         /// Build from a `VMfile` instead of the built-in golden recipe.
-        #[arg(short = 'f', long = "file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
         /// Build context — the directory `COPY` reads from.
-        #[arg(default_value = ".")]
+        #[arg(value_hint = clap::ValueHint::DirPath, default_value = ".")]
         context: PathBuf,
         #[arg(long, value_enum, default_value = "ubuntu")]
         distro: Distro,
@@ -491,7 +527,7 @@ pub enum VmSub {
         extra_packages: Vec<String>,
         #[arg(long = "extra-run")]
         extra_run: Vec<String>,
-        #[arg(long)]
+        #[arg(value_hint = clap::ValueHint::FilePath, long)]
         cri_bin: Option<PathBuf>,
         /// Do not compress the final qcow2 (larger, but with no decompression
         /// cost on backing-file reads at runtime).
@@ -508,7 +544,7 @@ pub enum VmSub {
         /// Build a golden image with NO Kubernetes — just `delonix` itself.
         #[arg(long)]
         no_k8s: bool,
-        #[arg(long)]
+        #[arg(value_hint = clap::ValueHint::FilePath, long)]
         delonix_bin: Option<PathBuf>,
     },
 }

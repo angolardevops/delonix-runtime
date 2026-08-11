@@ -162,110 +162,301 @@ need <code>CAP_NET_ADMIN</code> in the host's init-netns, outside the rootless m
 <div class='help'><pre><code>Usage: delonix network [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  dash      Dashboard (KPIs + table) of the networks — interactive TUI, or `--once` snapshot
-  ls        List the networks
-  node      WireGuard identity of THIS node, for the encrypted VXLAN overlay between nodes (`network create --driver overlay`). The private key stays 0600 in `&lt;root&gt;/wg/node.key`; the public one is what you hand out to the peers
   create    Create a network
-  inspect   Detail of a network
-  describe  Readable detail of one or more networks, `kubectl describe` style (for humans; use `inspect` for the usual compact view)
   rm        Remove a network
+  describe  Readable detail of one or more networks, `kubectl describe` style (for humans; use `inspect` for the usual compact view)
+  inspect   Detail of a network
+  ls        List the networks
   apply     Apply the `kind: Network` documents of a manifest (idempotent by name)
+  dash      Dashboard (KPIs + table) of the networks — interactive TUI, or `--once` snapshot
+  node      WireGuard identity of THIS node, for the encrypted VXLAN overlay between nodes (`network create --driver overlay`). The private key stays 0600 in `&lt;root&gt;/wg/node.key`; the public one is what you hand out to the peers
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+COMMAND MAP:
+  Lifecycle    create · rm
+  Inspect      ls · inspect · describe
+  Declarative  apply
+  Dashboards   dash
+  Advanced     node
+
+EXAMPLES:
+  # a bridge network of its own, where containers reach each other by name
+  delonix network create app
+
+  # what exists, with driver, bridge and subnet
+  delonix network ls
+
+  # the detail of one, including whether it was physically realized
+  delonix network describe app
+
+SEE ALSO:
+  delonix container run · delonix net ingress · delonix net httproute ·
+  delonix pod create
+
+  delonix › network</code></pre></div>
 <h2 id='describe'><code>network describe</code></h2>
 <p class='intro'>Readable detail of one or more networks, <code>kubectl describe</code> style (for humans; use <code>inspect</code> for the usual compact view)</p>
 <div class='help'><pre><code>Usage: delonix network describe [OPTIONS] &lt;NAMES&gt;...
 
 Arguments:
-  &lt;NAMES&gt;...  
+  &lt;NAMES&gt;...
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # a readable block instead of the compact view
+  delonix network describe app
+
+  # several networks in one go
+  delonix network describe app backend
+
+SEE ALSO:
+  delonix network inspect · delonix network ls · delonix container describe
+
+  delonix › network › describe</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Detalhe de uma rede, estilo kubectl</div><div class='cap lang-en'>Network detail, kubectl-style</div><pre><code>delonix network describe minha-rede</code></pre></div>
 <h2 id='node'><code>network node</code></h2>
 <p class='intro'>WireGuard identity of THIS node, for the encrypted VXLAN overlay between nodes (<code>network create --driver overlay</code>). The private key stays 0600 in <code>&lt;root&gt;/wg/node.key</code>; the public one is what you hand out to the peers</p>
 <div class='help'><pre><code>Usage: delonix network node [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  init  Generate the node key (if it does not exist yet) and print the public one with the context of what to do with it. Idempotent
   key   Print only the public key (for composing in scripts)
+  init  Generate the node key (if it does not exist yet) and print the public one with the context of what to do with it. Idempotent
   help  Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+COMMAND MAP:
+  Inspect    key
+  Configure  init
+
+EXAMPLES:
+  # create this node&#x27;s WireGuard identity and print the public key to hand out
+  delonix network node init
+
+  # the public key alone, for composing in a script
+  delonix network node key
+
+SEE ALSO:
+  delonix network create · delonix network inspect · delonix net netns status
+
+  delonix › network › node</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>A chave WireGuard DESTE nó, para dar aos pares do overlay</div><div class='cap lang-en'>This node&#x27;s WireGuard key, to hand out to the overlay&#x27;s peers</div><pre><code>delonix network node init</code></pre></div><div class="ex"><div class='cap lang-pt'>Só a chave pública, para compor num script</div><div class='cap lang-en'>Just the public key, for composing in a script</div><pre><code>delonix network node key</code></pre></div>
 <h2 id='dash'><code>network dash</code></h2>
 <p class='intro'>Dashboard (KPIs + table) of the networks — interactive TUI, or <code>--once</code> snapshot</p>
 <div class='help'><pre><code>Usage: delonix network dash [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --once          
-      --json          
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --once
+          
+
+      --json
+          
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # a live TUI of the networks and their traffic
+  delonix network dash
+
+  # one snapshot, for a pipe or a terminal without a TTY
+  delonix network dash --once
+
+  # JSON, to feed a script or a dashboard
+  delonix network dash --json
+
+SEE ALSO:
+  delonix dash · delonix network ls · delonix system monitor
+
+  delonix › network › dash</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Dashboard só das redes</div><div class='cap lang-en'>Networks-only dashboard</div><pre><code>delonix network dash</code></pre></div>
 <h2 id='create'><code>network create</code></h2>
 <p class='intro'>Create a network</p>
 <div class='help'><pre><code>Usage: delonix network create [OPTIONS] &lt;NAME&gt;
 
 Arguments:
-  &lt;NAME&gt;  
+  &lt;NAME&gt;
+          
 
 Options:
-      --driver &lt;DRIVER&gt;    `bridge` (default, filtered by the firewall) | `macvlan` | `ipvlan` (NOT filtered, see warning) | `overlay` (inter-node VXLAN) [default: bridge]
-      --l18n &lt;en|pt&gt;       Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --parent &lt;PARENT&gt;    Host parent NIC (required for macvlan/ipvlan)
-      --subnet &lt;SUBNET&gt;    Subnet (required for macvlan/ipvlan, e.g.: `192.168.1.0/24`)
-      --gateway &lt;GATEWAY&gt;  Gateway (macvlan/ipvlan) [default: &quot;&quot;]
-      --vni &lt;VNI&gt;          VXLAN Network Identifier (required for overlay)
-      --peer &lt;PEERS&gt;       Peer node (`&lt;ip&gt;` or `&lt;ip&gt;=&lt;wg_pubkey&gt;=&lt;wg_ip&gt;`), repeatable (overlay)
-      --wg-ip &lt;WG_IP&gt;      WireGuard tunnel IP of this node (encrypted overlay)
-  -h, --help               Print help</code></pre></div>
+      --driver &lt;DRIVER&gt;
+          `bridge` (default, filtered by the firewall) | `macvlan` | `ipvlan` (NOT filtered, see warning) | `overlay` (inter-node VXLAN)
+          
+          [default: bridge]
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --parent &lt;PARENT&gt;
+          Host parent NIC (required for macvlan/ipvlan)
+
+      --subnet &lt;SUBNET&gt;
+          Subnet (required for macvlan/ipvlan, e.g.: `192.168.1.0/24`)
+
+      --gateway &lt;GATEWAY&gt;
+          Gateway (macvlan/ipvlan)
+          
+          [default: &quot;&quot;]
+
+      --vni &lt;VNI&gt;
+          VXLAN Network Identifier (required for overlay)
+
+      --peer &lt;PEERS&gt;
+          Peer node (`&lt;ip&gt;` or `&lt;ip&gt;=&lt;wg_pubkey&gt;=&lt;wg_ip&gt;`), repeatable (overlay)
+
+      --wg-ip &lt;WG_IP&gt;
+          WireGuard tunnel IP of this node (encrypted overlay)
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # a bridge network — the default driver, and the one rootless really
+  # realizes
+  delonix network create app
+
+  # pin the address space instead of letting the engine pick a free octet
+  delonix network create backend --subnet 10.220.0.0/16
+
+  # an encrypted VXLAN overlay across nodes, realized in the rootless holder
+  delonix network create mesh --driver overlay --vni 42 --peer 10.0.0.7 --wg-ip 10.42.0.1
+
+  # macvlan is registered but NOT realized without privilege — the warning
+  # says so instead of pretending
+  delonix network create lan --driver macvlan --parent eth0 --subnet 192.168.1.0/24
+
+SEE ALSO:
+  delonix network ls · delonix network rm · delonix network node init ·
+  delonix container run
+
+  delonix › network › create</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Rede bridge para um grupo de serviços</div><div class='cap lang-en'>Bridge network for a group of services</div><pre><code>delonix network create backend</code></pre></div><div class="ex"><div class='cap lang-pt'>Overlay cifrado entre nós (VXLAN + WireGuard)</div><div class='cap lang-en'>Encrypted overlay between nodes (VXLAN + WireGuard)</div><pre><code>delonix network create mesh --driver overlay --vni 42 --peer 10.0.0.2</code></pre></div>
 <h2 id='ls'><code>network ls</code></h2>
 <p class='intro'>List the networks</p>
 <div class='help'><pre><code>Usage: delonix network ls [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;     Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -o, --output &lt;OUTPUT&gt;  Output format: `table` (default) or `json` (ADR-0005) [default: table] [possible values: table, json]
-  -h, --help             Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -o, --output &lt;OUTPUT&gt;
+          Output format: `table` (default) or `json` (ADR-0005)
+          
+          [default: table]
+          [possible values: table, json]
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # name, driver, bridge and subnet of each network
+  delonix network ls
+
+  # as JSON, to feed automation
+  delonix network ls -o json
+
+SEE ALSO:
+  delonix network inspect · delonix network describe · delonix network dash
+
+  delonix › network › ls</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix network ls</code></pre></div>
 <h2 id='inspect'><code>network inspect</code></h2>
 <p class='intro'>Detail of a network</p>
 <div class='help'><pre><code>Usage: delonix network inspect [OPTIONS] &lt;NAME&gt;
 
 Arguments:
-  &lt;NAME&gt;  
+  &lt;NAME&gt;
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # driver, bridge, subnet and gateway of one network
+  delonix network inspect app
+
+SEE ALSO:
+  delonix network describe · delonix network ls · delonix net ingress ls
+
+  delonix › network › inspect</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix network inspect backend</code></pre></div>
 <h2 id='rm'><code>network rm</code></h2>
 <p class='intro'>Remove a network</p>
 <div class='help'><pre><code>Usage: delonix network rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
-  &lt;NAME&gt;  
+  &lt;NAME&gt;
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # remove a network no container is attached to — both the record and the
+  # holder&#x27;s bridge
+  delonix network rm app
+
+SEE ALSO:
+  delonix network ls · delonix network create · delonix container update
+
+  delonix › network › rm</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix network rm backend</code></pre></div>
 <h2 id='apply'><code>network apply</code></h2>
 <p class='intro'>Apply the <code>kind: Network</code> documents of a manifest (idempotent by name)</p>
 <div class='help'><pre><code>Usage: delonix network apply [OPTIONS]
 
 Options:
-  -f, --file &lt;FILE&gt;   
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+  -f, --file &lt;FILE&gt;
+          
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # apply only the `kind: Network` documents of a manifest, idempotent by name
+  delonix network apply -f delonix-manifest.yaml
+
+  # the networks of a shipped example, leaving the other kinds alone
+  delonix network apply -f examples/network.yaml
+
+SEE ALSO:
+  delonix stack apply · delonix stack plan · delonix network create · delonix
+  volumes apply
+
+  delonix › network › apply</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix network apply -f delonix-manifest.yaml</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Cria uma rede própria e confirma a descoberta por nome (DNS interno)

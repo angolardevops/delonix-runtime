@@ -352,17 +352,19 @@ pub enum VmCmd {
         #[arg(long)]
         json: bool,
     },
-    /// Bootstrap a project with a VM manifest — files ALREADY FILLED IN (images
-    /// included), ready to use without editing anything.
+    /// Bootstrap a project with a VM manifest.
+    ///
+    /// Files ALREADY FILLED IN (images included), ready to use without editing
+    /// anything.
     Init {
         /// Project directory (default: the current one).
-        #[arg(default_value = ".")]
+        #[arg(value_hint = clap::ValueHint::DirPath, default_value = ".")]
         dir: PathBuf,
         /// Project name (default: the directory name).
         #[arg(long)]
         name: Option<String>,
         /// Image to use. Omit = fills in with the default image.
-        #[arg(long)]
+        #[arg(long, add = ArgValueCandidates::new(super::complete::images))]
         image: Option<String>,
         /// Overwrite existing files.
         #[arg(long)]
@@ -394,7 +396,7 @@ pub enum VmCmd {
         url_img: Option<String>,
         /// Base disk (qcow2/raw) — becomes a per-VM overlay. Omit to use the
         /// local golden VM image (if there is exactly one; `image --vm ls`).
-        #[arg(long)]
+        #[arg(long, add = ArgValueCandidates::new(super::complete::vm_images))]
         disk: Option<String>,
         /// vCPUs (default: 1, or the image's `VCPUS` — see `HYPERVISOR`/`VCPUS`
         /// in `delonix vm init --vmfile` — when `--disk` names a local image).
@@ -406,7 +408,7 @@ pub enum VmCmd {
         memory: Option<String>,
         /// Ingress network for the tap (default: the system ingress network; a
         /// custom network must be created first with `delonix network create`).
-        #[arg(long, default_value = "ingress")]
+        #[arg(long, default_value = "ingress", add = ArgValueCandidates::new(super::complete::networks))]
         network: String,
         /// Isolation namespace (default `default`): VMs of different namespaces do not reach each other. Requires `--backend cloud-hypervisor`
         //
@@ -416,7 +418,7 @@ pub enum VmCmd {
         // paragraph would silently come out untranslated under `--l18n=pt`.
         // The nuance (why libvirt is refused) is in the error the user actually
         // hits, in `vm_namespace_supported`, and in the release notes.
-        #[arg(long)]
+        #[arg(long, add = ArgValueCandidates::new(super::complete::namespaces))]
         namespace: Option<String>,
         /// Kernel for direct boot.
         #[arg(long)]
@@ -443,7 +445,7 @@ pub enum VmCmd {
         ssh_keys: Vec<String>,
         /// Your own cloud-init `user-data` (fully replaces the default-generated
         /// one) — full control for whoever needs it.
-        #[arg(long)]
+        #[arg(value_hint = clap::ValueHint::FilePath, long)]
         user_data: Option<PathBuf>,
         /// `no`|`on-failure`|`always`.
         #[arg(long)]
@@ -488,10 +490,10 @@ pub enum VmCmd {
         #[arg(short = 't', long = "tag")]
         tag: String,
         /// The `VMfile` (default: `<context>/VMfile`).
-        #[arg(short = 'f', long = "file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
         /// Build context — the directory `COPY` reads from.
-        #[arg(default_value = ".")]
+        #[arg(value_hint = clap::ValueHint::DirPath, default_value = ".")]
         context: PathBuf,
         /// Do not compress the final qcow2.
         #[arg(long)]
@@ -502,8 +504,10 @@ pub enum VmCmd {
         #[arg(long)]
         network: bool,
     },
-    /// Pull a golden VM image from an OCI registry — with no argument, the
-    /// OFFICIAL Delonix image (ready for `vm create`/`cluster kubeadm`).
+    /// Pull a golden VM image from an OCI registry.
+    ///
+    /// With no argument, the OFFICIAL Delonix image (ready for
+    /// `vm create`/`cluster kubeadm`).
     Pull {
         /// OCI reference (default: the official Delonix image).
         source: Option<String>,
@@ -516,9 +520,10 @@ pub enum VmCmd {
         #[arg(long)]
         no_k8s: bool,
     },
-    /// List the tags available in a remote OCI repository — with no
-    /// argument, the OFFICIAL Delonix golden image repo (discover which
-    /// k8s versions are published before `pull`).
+    /// List the tags available in a remote OCI repository.
+    ///
+    /// With no argument, the OFFICIAL Delonix golden image repo (discover
+    /// which k8s versions are published before `pull`).
     LsRemote {
         source: Option<String>,
         /// With no `source`, list the official NO-Kubernetes golden's repo
@@ -528,34 +533,38 @@ pub enum VmCmd {
     },
     /// Push a local golden VM image to an OCI registry (`vm push <name> <target>`).
     Push {
+        #[arg(add = ArgValueCandidates::new(super::complete::vm_images))]
         name: String,
         /// Destination. Omit it to publish to the OFFICIAL repository this
         /// image belongs in (decided from the image's own metadata).
         target: Option<String>,
     },
-    /// Convert a VM disk to the format another ecosystem imports — `qcow2`,
-    /// `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd` (Hyper-V,
-    /// Azure). Flattened either way, so the result is a standalone file with
-    /// no backing chain. This engine's own two backends already share
-    /// `qcow2`/`raw`; the rest exist so an image built here is importable
-    /// elsewhere without a backend per product.
+    /// Convert a VM disk to the format another ecosystem imports.
+    ///
+    /// `qcow2`, `raw`, `vmdk` (VMware), `vdi` (VirtualBox), `vhdx`/`vhd`
+    /// (Hyper-V, Azure). Flattened either way, so the result is a standalone
+    /// file with no backing chain. This engine's own two backends already
+    /// share `qcow2`/`raw`; the rest exist so an image built here is
+    /// importable elsewhere without a backend per product.
     Convert {
         /// A local VM image name (`vm ls`) or a literal `.qcow2`/`.raw` path.
+        #[arg(add = ArgValueCandidates::new(super::complete::vm_images))]
         source: String,
         #[arg(long = "to", value_enum)]
         to: super::vmimage::ConvertFormat,
         /// Destination file (default: alongside the source, with the new extension).
-        #[arg(short = 'o', long = "output")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'o', long = "output")]
         output: Option<PathBuf>,
         /// Compress the output. Only `qcow2` and `vmdk` can — refused for the
         /// others rather than handed to `qemu-img` to fail on.
         #[arg(long)]
         compress: bool,
     },
-    /// Get or set the default VM backend, used by `vm create` when neither
-    /// `--backend` nor `DELONIX_VM_BACKEND` is given — above the engine's own
-    /// auto-detection heuristic. With no flag, prints the current default
-    /// (`none` if auto-detection decides).
+    /// Get or set the default VM backend.
+    ///
+    /// Used by `vm create` when neither `--backend` nor `DELONIX_VM_BACKEND`
+    /// is given — above the engine's own auto-detection heuristic. With no
+    /// flag, prints the current default (`none` if auto-detection decides).
     DefaultBackend {
         /// Set the persisted default (`cloud-hypervisor` or `libvirt`).
         #[arg(long)]
@@ -585,9 +594,10 @@ pub enum VmCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: String,
     },
-    /// SSH into a VM by NAME (its IP comes from the record) or straight to an
-    /// address. With a trailing command, runs it and returns instead of opening
-    /// a shell.
+    /// SSH into a VM by NAME, or straight to an address.
+    ///
+    /// The name is enough — its IP comes from the record. With a trailing
+    /// command, runs it and returns instead of opening a shell.
     ///
     /// `delonix vm ssh dev` · `delonix vm ssh dev -- systemctl status` ·
     /// `delonix vm ssh 192.168.122.50 -l root`
@@ -600,7 +610,7 @@ pub enum VmCmd {
         #[arg(short = 'l', long = "user", default_value = "delonix")]
         user: String,
         /// Private key to authenticate with (`ssh -i`).
-        #[arg(short = 'i', long = "identity")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'i', long = "identity")]
         identity: Option<PathBuf>,
         /// Command to run instead of an interactive shell.
         #[arg(trailing_var_arg = true)]
@@ -617,14 +627,17 @@ pub enum VmCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: Option<String>,
     },
-    /// Which published ports a VM can actually reach, and how to fix the ones
-    /// it cannot. A port published to the default `127.0.0.1` is invisible to a
-    /// VM — this lists the libvirt gateways, reads each port's LIVE bind, and
-    /// for every loopback-only one prints the exact republish command.
+    /// Which published ports a VM can actually reach, and how to fix the rest.
+    ///
+    /// A port published to the default `127.0.0.1` is invisible to a VM —
+    /// this lists the libvirt gateways, reads each port's LIVE bind, and for
+    /// every loopback-only one prints the exact republish command.
     Reach,
     /// EXPERIMENTAL (root): give a libvirt VM DIRECT IP reachability to a
-    /// container SDN network (veth from the host into the holder netns + routes).
-    /// Defaults to a DRY-RUN; add `--apply` (as root) to establish it.
+    /// container SDN network.
+    ///
+    /// A veth from the host into the holder netns, plus routes. Defaults to a
+    /// DRY-RUN; add `--apply` (as root) to establish it.
     Bridge {
         #[arg(add = ArgValueCandidates::new(super::complete::networks))]
         network: String,
@@ -642,8 +655,9 @@ pub enum VmCmd {
         #[arg(long)]
         apply: bool,
     },
-    /// Human-readable detail of one or more VMs, `kubectl describe` style (for
-    /// humans; use `status` for the usual compact view). Includes the LIVE
+    /// Human-readable detail of one or more VMs, `kubectl describe` style.
+    ///
+    /// For humans; use `status` for the usual compact view. Includes the LIVE
     /// state — `delonix_vm::status` reconciles liveness/IP with the backend.
     Describe {
         #[arg(required = true, add = ArgValueCandidates::new(super::complete::vms))]
@@ -656,6 +670,7 @@ pub enum VmCmd {
         name: String,
     },
     /// Start an existing, stopped VM — idempotent (already running = no-op).
+    ///
     /// Reboots with the base disk/vcpus/memory/network/backend recorded at
     /// its last `create`/`start`, reusing the same overlay (disk state
     /// preserved). Does NOT restore anything that only ever existed as a
@@ -681,9 +696,11 @@ pub enum VmCmd {
         #[arg(long, short = 'f')]
         force: bool,
     },
-    /// Take a named snapshot (libvirt: a running VM's snapshot is a system
-    /// checkpoint — memory + disk; `restore` reverts to it). Not yet supported
-    /// on the cloud-hypervisor backend.
+    /// Take a named snapshot of a VM.
+    ///
+    /// libvirt: a running VM's snapshot is a system checkpoint — memory +
+    /// disk; `restore` reverts to it. Not yet supported on the
+    /// cloud-hypervisor backend.
     Snapshot {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: String,
@@ -702,10 +719,12 @@ pub enum VmCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: String,
     },
-    /// Apply the `kind: Vm` documents of a manifest (`delonix_vm::create` is
-    /// already idempotent by name — creates or auto-recovers).
+    /// Apply the `kind: Vm` documents of a manifest.
+    ///
+    /// `delonix_vm::create` is already idempotent by name — creates or
+    /// auto-recovers.
     Apply {
-        #[arg(short = 'f', long = "file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
     },
 }

@@ -153,11 +153,32 @@ never goes stale by hand.</p>
 <div class='help'><pre><code>Usage: delonix completion [OPTIONS] &lt;SHELL&gt;
 
 Arguments:
-  &lt;SHELL&gt;  Target shell [possible values: bash, zsh, fish, elvish, powershell]
+  &lt;SHELL&gt;
+          Target shell
+          
+          [possible values: bash, zsh, fish, elvish, powershell]
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # bash, into the user&#x27;s own completion directory
+  delonix completion bash &gt; ~/.local/share/bash-completion/completions/delonix
+
+  # zsh, into a directory already on your fpath
+  delonix completion zsh &gt; ~/.zfunc/_delonix
+
+  # fish
+  delonix completion fish &gt; ~/.config/fish/completions/delonix.fish
+
+SEE ALSO:
+  delonix version · delonix init · delonix dash
+
+  delonix › completion</code></pre></div>
 <h2><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h2><div class="ex"><div class='cap lang-pt'>Bash (persistente)</div><div class='cap lang-en'>Bash (persistent)</div><pre><code>echo &#x27;source &lt;(delonix completion bash)&#x27; &gt;&gt; ~/.bashrc</code></pre></div><div class="ex"><div class='cap lang-pt'>Zsh</div><div class='cap lang-en'>Zsh</div><pre><code>echo &#x27;source &lt;(delonix completion zsh)&#x27; &gt;&gt; ~/.zshrc</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Autocompletion real, gerado a partir da MESMA definição da CLI —

@@ -425,25 +425,29 @@ fn target_for(host: &HostSpec, ssh: &SshSpec) -> SshTarget {
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum ClusterCmd {
-    /// Initialize a project with the cluster manifests (kind/vm/ssh) — files ALREADY FILLED IN (images
-    /// included), ready to use without editing anything.
+    /// Initialize a project with the cluster manifests (kind/vm/ssh).
+    ///
+    /// Files ALREADY FILLED IN (images included), ready to use without editing
+    /// anything.
     Init {
         /// Project directory (default: the current one).
-        #[arg(default_value = ".")]
+        #[arg(value_hint = clap::ValueHint::DirPath, default_value = ".")]
         dir: PathBuf,
         /// Project name (default: the directory name).
         #[arg(long)]
         name: Option<String>,
         /// Image to use. Omit = fills in with the default image.
-        #[arg(long)]
+        #[arg(long, add = ArgValueCandidates::new(super::complete::images))]
         image: Option<String>,
         /// Overwrite existing files.
         #[arg(long)]
         force: bool,
     },
-    /// Create a local Kubernetes cluster **without a manifest and without Docker** (native
-    /// kind mode): starts the `kindest/node` nodes in the Delonix engine itself and
-    /// bootstraps them with `kubeadm`. No flags = 1 control-plane ready to use.
+    /// Create a local Kubernetes cluster **without a manifest and without Docker**.
+    ///
+    /// Native kind mode: starts the `kindest/node` nodes in the Delonix engine
+    /// itself and bootstraps them with `kubeadm`. No flags = 1 control-plane
+    /// ready to use.
     Create {
         /// Cluster name (prefix of the nodes and the kubeconfig). Omit = invents
         /// one (Angolan king + place), so two `create`s in a row do not collide.
@@ -461,7 +465,7 @@ pub enum ClusterCmd {
         #[arg(long, default_value_t = 1)]
         control_planes: u32,
         /// Node image (default: `kindest/node` pinned by digest).
-        #[arg(long)]
+        #[arg(long, add = ArgValueCandidates::new(super::complete::images))]
         image: Option<String>,
         #[arg(long, default_value = "10.244.0.0/16")]
         pod_subnet: String,
@@ -480,31 +484,34 @@ pub enum ClusterCmd {
         #[arg(long, default_value = "delonix", add = ArgValueCandidates::new(super::complete::clusters))]
         name: String,
     },
-    /// Load local images into a kind-mode cluster's nodes, **without a registry**
-    /// (the equivalent of `kind load docker-image`): packs each image from the
+    /// Load local images into a kind-mode cluster's nodes, **without a registry**.
+    ///
+    /// The equivalent of `kind load docker-image`: packs each image from the
     /// local store and imports it into every running node's containerd.
     Load {
         /// Images to load (`repo:tag`, as they appear in `delonix image ls`).
-        #[arg(required = true, num_args = 1..)]
+        #[arg(required = true, num_args = 1.., add = ArgValueCandidates::new(super::complete::images))]
         images: Vec<String>,
         /// Cluster name. Omit when there is only one — with several, this says which.
         #[arg(long, add = ArgValueCandidates::new(super::complete::clusters))]
         name: Option<String>,
     },
-    /// Generate a Kubernetes manifest from a container/pod already running
-    /// locally (`kube generate`) — the "ran it locally, now give me the YAML
-    /// for k8s" path (equivalent to `podman generate kube`).
+    /// Generate a Kubernetes manifest from a container/pod already running locally.
+    ///
+    /// `kube generate` — the "ran it locally, now give me the YAML for k8s"
+    /// path (equivalent to `podman generate kube`).
     Kube {
         #[command(subcommand)]
         action: super::kube::KubeCmd,
     },
     /// Apply the `kind: Cluster` document(s) of a manifest.
     Apply {
-        #[arg(short = 'f', long = "file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
     },
-    /// Provision VMs (golden VM image) + `kubeadm` bootstrap — from zero to
-    /// a working cluster, without writing a manifest by hand.
+    /// Provision VMs (golden VM image) + `kubeadm` bootstrap.
+    ///
+    /// From zero to a working cluster, without writing a manifest by hand.
     Kubeadm {
         /// Cluster name (used for `<name>-cp1`/`<name>-w1` VM names and the
         /// kubeconfig context). Omit for an auto-generated Angolan name
@@ -518,14 +525,14 @@ pub enum ClusterCmd {
         workers: u32,
         /// Tag of the golden VM image (`delonix image --vm ls`). Omit = uses the
         /// only local image that exists.
-        #[arg(long = "vm-image")]
+        #[arg(long = "vm-image", add = ArgValueCandidates::new(super::complete::vm_images))]
         vm_image: Option<String>,
         /// Already-created network (`delonix network create`) — no magic default.
-        #[arg(long)]
+        #[arg(long, add = ArgValueCandidates::new(super::complete::networks))]
         network: String,
         /// Private SSH key to use. Omit = generates a new ed25519 pair in
         /// `<root>/clusters/<name>/id_ed25519`.
-        #[arg(long = "ssh-key")]
+        #[arg(value_hint = clap::ValueHint::FilePath, long = "ssh-key")]
         ssh_key: Option<PathBuf>,
         #[arg(long, default_value_t = 2)]
         vcpus: u32,

@@ -14,8 +14,10 @@ use super::util::open_stores;
 
 #[derive(Subcommand)]
 pub enum BootCmd {
-    /// Install + enable systemd units for the RUNNING containers, so they come
-    /// back up when the host boots. Rootless uses user units + linger.
+    /// Install + enable systemd units for the RUNNING containers.
+    ///
+    /// So they come back up when the host boots. Rootless uses user units +
+    /// linger.
     Enable {
         /// Restart policy baked into the units (`no|on-failure[:max]|always|unless-stopped`).
         #[arg(long, default_value = "always")]

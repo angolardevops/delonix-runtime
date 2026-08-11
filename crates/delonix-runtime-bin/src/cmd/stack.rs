@@ -65,17 +65,19 @@ fn stack_kind_name(path: &Path) -> Option<String> {
 
 #[derive(Subcommand)]
 pub enum StackCmd {
-    /// Initializes a COMPLETE project: Delonixfile + manifest + cluster + README — files ALREADY FILLED IN (images
-    /// included), ready to use without editing anything.
+    /// Initializes a COMPLETE project: Delonixfile + manifest + cluster + README.
+    ///
+    /// Files ALREADY FILLED IN (images included), ready to use without
+    /// editing anything.
     Init {
         /// Project directory (default: the current one).
-        #[arg(default_value = ".")]
+        #[arg(value_hint = clap::ValueHint::DirPath, default_value = ".")]
         dir: PathBuf,
         /// Project name (default: the directory name).
         #[arg(long)]
         name: Option<String>,
         /// Image to use. Omit = fills in with the default image.
-        #[arg(long)]
+        #[arg(long, add = clap_complete::engine::ArgValueCandidates::new(super::complete::images))]
         image: Option<String>,
         /// Overwrites already existing files.
         #[arg(long)]
@@ -90,7 +92,7 @@ pub enum StackCmd {
     },
     /// Applies all the manifest Kinds (Network → Volume → Image → Vm → Container).
     Apply {
-        #[arg(short = 'f', long = "file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
         /// Don't apply anything — print the full manifest with every default
         /// filled in (like `kubectl apply --dry-run=client -o yaml`). Stacks are
@@ -113,7 +115,7 @@ pub enum StackCmd {
     /// touched. Removal happens in the REVERSE of the creation order, so a
     /// network is not pulled from under the containers still attached to it.
     Destroy {
-        #[arg(short = 'f', long = "file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
         /// Stack name. Default: a `kind: Stack`'s name, else the manifest's directory.
         #[arg(long)]
@@ -129,7 +131,7 @@ pub enum StackCmd {
     /// alone while a field removed from the manifest is reverted). With the
     /// manifest unchanged, whatever it prints IS drift.
     Plan {
-        #[arg(short = 'f', long = "file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
         /// Stack name (owner of the resources). Default: a `kind: Stack`'s name,
         /// else the manifest's directory.
@@ -147,15 +149,18 @@ pub enum StackCmd {
         #[arg(long = "fields")]
         fields: bool,
     },
-    /// List the structure the manifest composes (containers, volumes,
-    /// networks, ...) and whether each resource exists — the tabular summary
-    /// of `describe`.
+    /// List the structure the manifest composes, and whether each resource exists.
+    ///
+    /// Containers, volumes, networks, ... — the tabular summary of
+    /// `describe`.
     Ls {
-        #[arg(short = 'f', long = "file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
     },
-    /// Stack detail in `kubectl describe` style: each resource DECLARED in the
-    /// manifest and whether or not it is present on the machine.
+    /// Stack detail in `kubectl describe` style.
+    ///
+    /// Each resource DECLARED in the manifest and whether or not it is present
+    /// on the machine.
     ///
     /// **The stack has no state of its own** — there is no registry of "stacks", only
     /// a manifest and the resources it creates. That is why this `describe` always
@@ -167,7 +172,7 @@ pub enum StackCmd {
     /// rollback, so a half-applied stack is a normal state and this is exactly
     /// what it shows.
     Describe {
-        #[arg(short = 'f', long = "file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
     },
     /// Blocks until every declared resource is present and, where it has one, healthy.
@@ -176,19 +181,21 @@ pub enum StackCmd {
     /// created things, which is not the same as the stack working. Exits non-zero
     /// on timeout, naming exactly what did not come up.
     Wait {
-        #[arg(short = 'f', long = "file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
         /// Give up after this many seconds (default 120).
         #[arg(long, default_value_t = 120)]
         timeout: u64,
     },
-    /// Validates the manifest WITHOUT touching anything (dry-run): resolves the
-    /// cross-references (`Container.network`/`.volumes`, `Vm.network`, `Ingress/Egress.
-    /// target`) against what the manifest declares PLUS what already exists in the stores.
-    /// Exits with an error if any reference is left unresolved — it is the safety
-    /// net against an `apply` that would only fail halfway through (fail-fast, no rollback).
+    /// Validates the manifest WITHOUT touching anything (dry-run).
+    ///
+    /// Resolves the cross-references (`Container.network`/`.volumes`,
+    /// `Vm.network`, `Ingress/Egress.target`) against what the manifest
+    /// declares PLUS what already exists in the stores. Exits with an error if
+    /// any reference is left unresolved — it is the safety net against an
+    /// `apply` that would only fail halfway through (fail-fast, no rollback).
     Validate {
-        #[arg(short = 'f', long = "file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
     },
 }

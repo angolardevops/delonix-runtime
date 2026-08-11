@@ -66,10 +66,10 @@ use super::util::{open_stores, prepare_rootfs, resolve_or_pull_platform};
 #[derive(Args)]
 pub struct BuildArgs {
     /// Build context (default: `.`) — root for `COPY`.
-    #[arg(default_value = ".")]
+    #[arg(value_hint = clap::ValueHint::DirPath, default_value = ".")]
     context: PathBuf,
     /// Path of the Dockerfile (default: `<context>/Dockerfile`).
-    #[arg(short = 'f', long = "file")]
+    #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
     file: Option<PathBuf>,
     /// Tag of the resulting image (`repo:tag`).
     #[arg(short = 't', long = "tag")]

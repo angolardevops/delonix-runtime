@@ -154,31 +154,76 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 
 Commands:
   create    Create a named volume
-  ls        List the volumes
-  inspect   Details of a volume (includes real on-disk usage)
-  describe  Readable detail of one or more volumes, `kubectl describe` style (for humans; use `inspect` for the usual compact view)
   rm        Remove a volume. Refuses while a container or a `kind: ShareVolume` still references it (use `--force` to remove it anyway)
+  describe  Readable detail of one or more volumes, `kubectl describe` style (for humans; use `inspect` for the usual compact view)
+  inspect   Details of a volume (includes real on-disk usage)
+  ls        List the volumes
   apply     Apply the `kind: Volume` documents from a manifest (idempotent by name)
   snapshot  Point-in-time snapshots of a volume (tar.gz under the volume; safe in rootless)
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+COMMAND MAP:
+  Lifecycle    create · rm
+  Inspect      ls · inspect · describe
+  Declarative  apply
+  Maintenance  snapshot
+
+EXAMPLES:
+  # a named volume, so the data outlives the container that writes to it
+  delonix volumes create pgdata
+
+  # what exists, with driver and mountpoint
+  delonix volumes ls
+
+  # how much disk one of them really holds, measured from inside the userns
+  delonix volumes inspect pgdata
+
+SEE ALSO:
+  delonix container run · delonix storage · delonix sharevolume · delonix
+  volumes snapshot
+
+  delonix › volumes</code></pre></div>
 <h2 id='snapshot'><code>volumes snapshot</code></h2>
 <p class='intro'>Point-in-time snapshots of a volume (tar.gz under the volume; safe in rootless)</p>
 <div class='help'><pre><code>Usage: delonix volumes snapshot [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   create   Create a snapshot NOW (default name: UTC timestamp)
+  rm       Delete a snapshot
   ls       List the snapshots of a volume
   restore  Restore a snapshot INTO the volume (replaces the current data — stop the consumers first)
-  rm       Delete a snapshot
   help     Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+COMMAND MAP:
+  Lifecycle    create · rm
+  Inspect      ls
+  Maintenance  restore
+
+EXAMPLES:
+  # freeze the current contents of a volume as a tar.gz, safe in rootless
+  delonix volumes snapshot create pgdata
+
+  # what has been kept, and when
+  delonix volumes snapshot ls pgdata
+
+SEE ALSO:
+  delonix volumes inspect · delonix volumes rm · delonix vm snapshot
+
+  delonix › volumes › snapshot</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Tirar e listar snapshots de um volume</div><div class='cap lang-en'>Take and list a volume&#x27;s snapshots</div><pre><code>delonix volumes snapshot create dados antes-da-migracao
 delonix volumes snapshot ls dados</code></pre></div><div class="ex"><div class='cap lang-pt'>Voltar a um snapshot (o conteúdo actual do volume é substituído)</div><div class='cap lang-en'>Roll back to a snapshot (the volume&#x27;s current contents are replaced)</div><pre><code>delonix volumes snapshot restore dados antes-da-migracao</code></pre></div><div class="ex"><div class='cap lang-pt'>Apagar um snapshot que já não serve</div><div class='cap lang-en'>Delete a snapshot that is no longer useful</div><pre><code>delonix volumes snapshot rm dados antes-da-migracao</code></pre></div>
 <h2 id='describe'><code>volumes describe</code></h2>
@@ -186,67 +231,190 @@ delonix volumes snapshot ls dados</code></pre></div><div class="ex"><div class='
 <div class='help'><pre><code>Usage: delonix volumes describe [OPTIONS] &lt;NAMES&gt;...
 
 Arguments:
-  &lt;NAMES&gt;...  
+  &lt;NAMES&gt;...
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # a kubectl-style block, meant to be read rather than parsed
+  delonix volumes describe pgdata
+
+  # several at once, to compare them side by side
+  delonix volumes describe pgdata backups
+
+SEE ALSO:
+  delonix volumes inspect · delonix volumes ls · delonix sharevolume describe
+
+  delonix › volumes › describe</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Detalhe de um volume (uso, quota, montagens)</div><div class='cap lang-en'>Volume detail (usage, quota, mounts)</div><pre><code>delonix volumes describe dados</code></pre></div>
 <h2 id='create'><code>volumes create</code></h2>
 <p class='intro'>Create a named volume</p>
 <div class='help'><pre><code>Usage: delonix volumes create [OPTIONS] &lt;NAME&gt;
 
 Arguments:
-  &lt;NAME&gt;  
+  &lt;NAME&gt;
+          
 
 Options:
-      --driver &lt;DRIVER&gt;    `local` (default) or `nfs` [default: local]
-      --l18n &lt;en|pt&gt;       Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --device &lt;DEVICE&gt;    Device/export (`nfs` driver)
-      --options &lt;OPTIONS&gt;  Additional mount options (`nfs` driver)
-      --quota &lt;QUOTA&gt;      Quota (e.g. `2g`) — only applied if `--quota` is given
-  -h, --help               Print help</code></pre></div>
+      --driver &lt;DRIVER&gt;
+          `local` (default) or `nfs`
+          
+          [default: local]
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --device &lt;DEVICE&gt;
+          Device/export (`nfs` driver)
+
+      --options &lt;OPTIONS&gt;
+          Additional mount options (`nfs` driver)
+
+      --quota &lt;QUOTA&gt;
+          Quota (e.g. `2g`) — only applied if `--quota` is given
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # a local named volume — the default driver
+  delonix volumes create pgdata
+
+  # with a size cap, so one workload cannot fill the whole disk
+  delonix volumes create pgdata --quota 20g
+
+  # an NFS export straight as a volume, without the friendlier `storage`
+  # declaration
+  delonix volumes create backups --driver nfs --device 10.0.0.5:/mnt/pool/backups --options vers=4.1,soft
+
+SEE ALSO:
+  delonix volumes ls · delonix volumes inspect · delonix storage create ·
+  delonix container run
+
+  delonix › volumes › create</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Com quota e driver nfs disponíveis</div><div class='cap lang-en'>With quota and the nfs driver available</div><pre><code>delonix volumes create dados --quota 10G</code></pre></div>
 <h2 id='ls'><code>volumes ls</code></h2>
 <p class='intro'>List the volumes</p>
 <div class='help'><pre><code>Usage: delonix volumes ls [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;     Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -o, --output &lt;OUTPUT&gt;  Output format: `table` (default) or `json` (ADR-0005) [default: table] [possible values: table, json]
-  -h, --help             Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -o, --output &lt;OUTPUT&gt;
+          Output format: `table` (default) or `json` (ADR-0005)
+          
+          [default: table]
+          [possible values: table, json]
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # every volume, with driver and mountpoint
+  delonix volumes ls
+
+  # as JSON, for a backup job or a monitoring script
+  delonix volumes ls -o json
+
+SEE ALSO:
+  delonix volumes inspect · delonix volumes describe · delonix storage ls ·
+  delonix system df
+
+  delonix › volumes › ls</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix volumes ls</code></pre></div>
 <h2 id='inspect'><code>volumes inspect</code></h2>
 <p class='intro'>Details of a volume (includes real on-disk usage)</p>
 <div class='help'><pre><code>Usage: delonix volumes inspect [OPTIONS] &lt;NAME&gt;
 
 Arguments:
-  &lt;NAME&gt;  
+  &lt;NAME&gt;
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # driver, mountpoint, quota and the REAL usage — an unreadable directory is
+  # reported as unknown, never as zero
+  delonix volumes inspect pgdata
+
+SEE ALSO:
+  delonix volumes describe · delonix volumes ls · delonix sharevolume describe
+
+  delonix › volumes › inspect</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix volumes inspect dados</code></pre></div>
 <h2 id='rm'><code>volumes rm</code></h2>
 <p class='intro'>Remove a volume. Refuses while a container or a <code>kind: ShareVolume</code> still references it (use <code>--force</code> to remove it anyway)</p>
 <div class='help'><pre><code>Usage: delonix volumes rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
-  &lt;NAME&gt;  
+  &lt;NAME&gt;
+          
 
 Options:
-  -f, --force         Remove it even with live references — DESTROYS the data of whatever is still using it
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+  -f, --force
+          Remove it even with live references — DESTROYS the data of whatever is still using it
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --destroy-remote
+          ALSO destroy the storage this volume was provisioned with on a remote NAS (`spec.provision`). Irreversible, and on another machine. Refused for a volume that only mounts a share someone else made
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # remove a volume nothing references any more
+  delonix volumes rm pgdata
+
+  # force it past a live reference — this DESTROYS the data of whatever still
+  # uses it
+  delonix volumes rm -f pgdata
+
+SEE ALSO:
+  delonix volumes ls · delonix volumes snapshot create · delonix container rm
+  · delonix sharevolume rm
+
+  delonix › volumes › rm</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix volumes rm dados</code></pre></div>
 <h2 id='apply'><code>volumes apply</code></h2>
 <p class='intro'>Apply the <code>kind: Volume</code> documents from a manifest (idempotent by name)</p>
 <div class='help'><pre><code>Usage: delonix volumes apply [OPTIONS]
 
 Options:
-  -f, --file &lt;FILE&gt;   
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+  -f, --file &lt;FILE&gt;
+          
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # apply only the `kind: Volume` documents of a manifest, idempotent by name
+  delonix volumes apply -f delonix-manifest.yaml
+
+  # the volumes of a shipped example, leaving the other kinds untouched
+  delonix volumes apply -f examples/volume.yaml
+
+SEE ALSO:
+  delonix stack apply · delonix stack plan · delonix volumes create · delonix
+  storage apply
+
+  delonix › volumes › apply</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix volumes apply -f delonix-manifest.yaml</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Prova que um volume nomeado sobrevive a um restart do container —

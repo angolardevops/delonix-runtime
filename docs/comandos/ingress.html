@@ -158,117 +158,312 @@ is refused.</p>
 <div class='help'><pre><code>Usage: delonix net ingress [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
+  ls         Show the inbound firewall (policy + rules) and published ports
   allow      Allow inbound traffic to a container: `[proto/]port` from an optional CIDR
   deny       Deny inbound traffic to a container (same shape as `allow`)
   policy     Set the default inbound policy when no rule matches
   publish    Publish a host port to the container (DNAT through the ingress)
   unpublish  Remove a published host port
-  ls         Show the inbound firewall (policy + rules) and published ports
-  rm         Remove inbound rule(s) matching `[proto/]port` (all protos if none given)
   clear      Remove all inbound rules (keeps published ports)
+  rm         Remove inbound rule(s) matching `[proto/]port` (all protos if none given)
   help       Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+COMMAND MAP:
+  Inspect      ls
+  Configure    allow · deny · policy
+  Networking   publish · unpublish
+  Maintenance  rm · clear
+
+EXAMPLES:
+  # what is open on a container, and from where
+  delonix net ingress ls web
+
+  # shut the door by default, so only the rules you write let anything in
+  delonix net ingress policy db deny
+
+  # then open Postgres to the SDN alone — nothing from the host&#x27;s LAN
+  delonix net ingress allow db tcp/5432 --from 10.200.0.0/16
+
+SEE ALSO:
+  delonix net egress ls · delonix net ingress publish · delonix container run
+  · delonix net httproute apply
+
+  delonix › net › ingress</code></pre></div>
 <h2 id='clear'><code>ingress clear</code></h2>
 <p class='intro'>Remove all inbound rules (keeps published ports)</p>
 <div class='help'><pre><code>Usage: delonix net ingress clear [OPTIONS] &lt;CONTAINER&gt;
 
 Arguments:
-  &lt;CONTAINER&gt;  
+  &lt;CONTAINER&gt;
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # wipe the inbound rules and keep the published ports — the DNAT is a
+  # different plane from the filter
+  delonix net ingress clear web
+
+SEE ALSO:
+  delonix net ingress rm · delonix net ingress unpublish · delonix net egress
+  clear
+
+  delonix › net › ingress › clear</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Limpar a firewall inteira desse container</div><div class='cap lang-en'>Clear that container&#x27;s whole firewall</div><pre><code>delonix net ingress clear web</code></pre></div>
 <h2 id='rm'><code>ingress rm</code></h2>
 <p class='intro'>Remove inbound rule(s) matching <code>[proto/]port</code> (all protos if none given)</p>
 <div class='help'><pre><code>Usage: delonix net ingress rm [OPTIONS] &lt;CONTAINER&gt; &lt;PORT&gt;
 
 Arguments:
-  &lt;CONTAINER&gt;  
-  &lt;PORT&gt;       `tcp/5432`, `5432` (any proto), or `*` (all ports)
+  &lt;CONTAINER&gt;
+          
+
+  &lt;PORT&gt;
+          `tcp/5432`, `5432` (any proto), or `*` (all ports)
 
 Options:
-      --from &lt;FROM&gt;   Only rules from this source CIDR (default: any recorded source)
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --from &lt;FROM&gt;
+          Only rules from this source CIDR (default: any recorded source)
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # drop every rule written for that port, whatever the protocol
+  delonix net ingress rm web 8080
+
+  # only the rule that named this source
+  delonix net ingress rm db tcp/5432 --from 10.200.0.15/32
+
+SEE ALSO:
+  delonix net ingress clear · delonix net ingress allow · delonix net ingress
+  ls
+
+  delonix › net › ingress › rm</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Tirar UMA regra, sem limpar as outras</div><div class='cap lang-en'>Remove ONE rule, without clearing the others</div><pre><code>delonix net ingress rm web tcp/80</code></pre></div>
 <h2 id='unpublish'><code>ingress unpublish</code></h2>
 <p class='intro'>Remove a published host port</p>
 <div class='help'><pre><code>Usage: delonix net ingress unpublish [OPTIONS] &lt;CONTAINER&gt; &lt;HOST_PORT&gt;
 
 Arguments:
-  &lt;CONTAINER&gt;  
-  &lt;HOST_PORT&gt;  
+  &lt;CONTAINER&gt;
+          
+
+  &lt;HOST_PORT&gt;
+          
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # give the host port back — the hostfwd and the DNAT go together, and the
+  # port stops being owned
+  delonix net ingress unpublish web 8080
+
+SEE ALSO:
+  delonix net ingress publish · delonix net ingress ls
+
+  delonix › net › ingress › unpublish</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Deixar de publicar uma porta</div><div class='cap lang-en'>Stop publishing a port</div><pre><code>delonix net ingress unpublish 8080</code></pre></div>
 <h2 id='allow'><code>ingress allow</code></h2>
 <p class='intro'>Allow inbound traffic to a container: <code>[proto/]port</code> from an optional CIDR</p>
 <div class='help'><pre><code>Usage: delonix net ingress allow [OPTIONS] &lt;CONTAINER&gt; &lt;PORT&gt;
 
 Arguments:
-  &lt;CONTAINER&gt;  
-  &lt;PORT&gt;       `tcp/5432`, `udp/53`, `5432` (any proto), or `tcp/*` (all ports)
+  &lt;CONTAINER&gt;
+          
+
+  &lt;PORT&gt;
+          `tcp/5432`, `udp/53`, `5432` (any proto), or `tcp/*` (all ports)
 
 Options:
-      --from &lt;FROM&gt;   Only from this source CIDR (default: anywhere)
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --note &lt;NOTE&gt;   Free-form note kept with the rule
-  -h, --help          Print help</code></pre></div>
+      --from &lt;FROM&gt;
+          Only from this source CIDR (default: anywhere)
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --note &lt;NOTE&gt;
+          Free-form note kept with the rule
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # open the port the CONTAINER listens on — the DNAT has already rewritten
+  # the host port away by the time the rule is evaluated
+  delonix net ingress allow web tcp/80
+
+  # Postgres, but only from the SDN
+  delonix net ingress allow db tcp/5432 --from 10.200.0.0/16
+
+  # leave a reason behind, so `ingress ls` explains itself to the next person
+  delonix net ingress allow api tcp/8080 --note &quot;public API&quot;
+
+  # every port from a single peer, when the rule is about the source and not
+  # the service
+  delonix net ingress allow db tcp/* --from 10.200.0.15/32
+
+SEE ALSO:
+  delonix net ingress deny · delonix net ingress policy · delonix net ingress
+  ls · delonix net ingress rm
+
+  delonix › net › ingress › allow</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Deixar entrar Postgres só da própria SDN</div><div class='cap lang-en'>Only let Postgres in from the SDN itself</div><pre><code>delonix net ingress allow db tcp/5432 --from 10.219.0.0/16</code></pre></div>
 <h2 id='deny'><code>ingress deny</code></h2>
 <p class='intro'>Deny inbound traffic to a container (same shape as <code>allow</code>)</p>
 <div class='help'><pre><code>Usage: delonix net ingress deny [OPTIONS] &lt;CONTAINER&gt; &lt;PORT&gt;
 
 Arguments:
-  &lt;CONTAINER&gt;  
-  &lt;PORT&gt;       
+  &lt;CONTAINER&gt;
+          
+
+  &lt;PORT&gt;
+          
 
 Options:
-      --from &lt;FROM&gt;   
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --note &lt;NOTE&gt;   
-  -h, --help          Print help</code></pre></div>
+      --from &lt;FROM&gt;
+          
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --note &lt;NOTE&gt;
+          
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # close one port without touching the default policy
+  delonix net ingress deny web tcp/8080
+
+  # block one noisy peer from a port everyone else may use
+  delonix net ingress deny api tcp/8080 --from 10.200.0.99/32
+
+  # the last command for the same match wins — a later `allow` on this very
+  # rule re-opens it, no need to remove anything first
+  delonix net ingress deny db tcp/5432
+
+SEE ALSO:
+  delonix net ingress allow · delonix net ingress rm · delonix net ingress
+  policy
+
+  delonix › net › ingress › deny</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Bloquear uma porta específica</div><div class='cap lang-en'>Block a specific port</div><pre><code>delonix net ingress deny web tcp/22</code></pre></div>
 <h2 id='policy'><code>ingress policy</code></h2>
 <p class='intro'>Set the default inbound policy when no rule matches</p>
 <div class='help'><pre><code>Usage: delonix net ingress policy [OPTIONS] &lt;CONTAINER&gt; &lt;POLICY&gt;
 
 Arguments:
-  &lt;CONTAINER&gt;  
-  &lt;POLICY&gt;     [possible values: allow, deny]
+  &lt;CONTAINER&gt;
+          
+
+  &lt;POLICY&gt;
+          [possible values: allow, deny]
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # default-deny: only what `ingress allow` names gets in
+  delonix net ingress policy db deny
+
+  # back to open, keeping the explicit rules already written
+  delonix net ingress policy db allow
+
+SEE ALSO:
+  delonix net ingress allow · delonix net ingress ls · delonix net egress
+  policy
+
+  delonix › net › ingress › policy</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Default-deny (allowlist)</div><div class='cap lang-en'>Default-deny (allowlist)</div><pre><code>delonix net ingress policy db deny</code></pre></div>
 <h2 id='publish'><code>ingress publish</code></h2>
 <p class='intro'>Publish a host port to the container (DNAT through the ingress)</p>
 <div class='help'><pre><code>Usage: delonix net ingress publish [OPTIONS] &lt;CONTAINER&gt; &lt;SPEC&gt;
 
 Arguments:
-  &lt;CONTAINER&gt;  
-  &lt;SPEC&gt;       `hostPort:containerPort[/tcp|udp]` or just `port`
+  &lt;CONTAINER&gt;
+          
+
+  &lt;SPEC&gt;
+          `hostPort:containerPort[/tcp|udp]` or just `port`
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # host 8080 onto the container&#x27;s 80
+  delonix net ingress publish web 8080:80
+
+  # the same number on both sides
+  delonix net ingress publish web 8443
+
+  # a UDP service — rootless cannot bind host ports below 1024, so publish
+  # high and let a proxy own :53 if you need it
+  delonix net ingress publish dns 5353:53/udp
+
+SEE ALSO:
+  delonix net ingress unpublish · delonix net ingress ls · delonix container
+  update · delonix net httproute apply
+
+  delonix › net › ingress › publish</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Publicar uma porta pelo ingress (DNAT)</div><div class='cap lang-en'>Publish a port via ingress (DNAT)</div><pre><code>delonix net ingress publish web 8080:80</code></pre></div>
 <h2 id='ls'><code>ingress ls</code></h2>
 <p class='intro'>Show the inbound firewall (policy + rules) and published ports</p>
 <div class='help'><pre><code>Usage: delonix net ingress ls [OPTIONS] [CONTAINER]
 
 Arguments:
-  [CONTAINER]  Container to inspect (omit to list every container&#x27;s inbound state)
+  [CONTAINER]
+          Container to inspect (omit to list every container&#x27;s inbound state)
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # one container: policy, rules with their packet counters, and the ports
+  # published to it
+  delonix net ingress ls web
+
+  # the whole node at once — a `--net host` container shows as `n/a`, because
+  # the firewall does not govern it
+  delonix net ingress ls
+
+SEE ALSO:
+  delonix net egress ls · delonix net ingress allow · delonix net flow
+
+  delonix › net › ingress › ls</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Ver regras + publishes</div><div class='cap lang-en'>See rules + publishes</div><pre><code>delonix net ingress ls db</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Fecha tudo por omissão e abre só uma porta — o modelo

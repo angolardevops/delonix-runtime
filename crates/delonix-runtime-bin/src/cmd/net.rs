@@ -41,9 +41,10 @@ pub enum NetCmd {
         #[command(subcommand)]
         action: super::httproute::HttpRouteCmd,
     },
-    /// Expose a local port to the public internet via pinggy/ngrok/cloudflare
-    /// (`kind: Tunnel`) — pair with `httproute`'s listening port to route by
-    /// Host header behind ONE public URL.
+    /// Expose a local port to the public internet (`kind: Tunnel`).
+    ///
+    /// Via pinggy/ngrok/cloudflare — pair with `httproute`'s listening port to
+    /// route by Host header behind ONE public URL.
     Tunnel {
         #[command(subcommand)]
         action: super::tunnel::TunnelCmd,

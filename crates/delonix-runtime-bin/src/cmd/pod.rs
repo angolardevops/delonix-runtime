@@ -55,7 +55,7 @@ fn pod_ip(members: &[Container], netns: &str) -> String {
 pub enum PodCmd {
     /// Create a pod (N containers sharing a netns) from a manifest (`kind: Pod`).
     Create {
-        #[arg(short = 'f', long = "file")]
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
     },
     /// List the pods (derived from container labels).
@@ -65,9 +65,13 @@ pub enum PodCmd {
         output: output::OutputFormat,
     },
     /// Details of one or more pods (containers + the shared IP), `kubectl` style.
-    Describe { names: Vec<String> },
+    Describe {
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::pods))]
+        names: Vec<String>,
+    },
     /// Remove a pod: stop/remove ALL its containers + the shared netns.
     Rm {
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::pods))]
         names: Vec<String>,
         /// Force (kill) running containers.
         #[arg(long, short)]
@@ -75,6 +79,7 @@ pub enum PodCmd {
     },
     /// Logs of a pod's container (defaults to the first member).
     Logs {
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::pods))]
         pod: String,
         /// Which container (its short name inside the pod). Default: the first.
         #[arg(long)]

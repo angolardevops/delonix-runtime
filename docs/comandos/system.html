@@ -155,50 +155,154 @@ connections/conntrack; <code>system events</code> the event stream.</p>
 <div class='help'><pre><code>Usage: delonix system [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
+  df       Disk usage by area (images, containers, volumes, VM images)
   events   Engine events (create/start/die/remove/…), from oldest to most recent. With no daemon, the log is a shared append-only file — each command appends its own line (see `delonix_runtime_core::events`)
   info     Engine state: rootless?, cgroup delegation, network infra, counts
   setup    Diagnose — and, with `--delegate`, fix — cgroup delegation, the prerequisite for `--memory`/`--cpus`/`--pids-limit` to mean anything
-  df       Disk usage by area (images, containers, volumes, VM images)
   virt     Host virtualization: hypervisor, KVM, virtio — and what there is to tune
   prune    Reclaim space: remove stopped containers, unused images, CAS blobs nobody references, empty cgroups and — the biggest space saver — **orphan container directories** (from nodes/containers that died abruptly without `rm`, with no registry entry)
-  monitor  Active network connections per container (via conntrack): who comes in, who goes out, and between containers. Refreshes continuously (see `--no-stream`)
   thermal  Thermal governor: lowers Delonix&#x27;s CPU budget when the CPU heats up and restores it when it cools down. Runs continuously (see `--once`)
+  monitor  Active network connections per container (via conntrack): who comes in, who goes out, and between containers. Refreshes continuously (see `--no-stream`)
   help     Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+COMMAND MAP:
+  Inspect      events · info · df
+  Configure    setup · virt
+  Maintenance  prune · thermal
+  Dashboards   monitor
+
+EXAMPLES:
+  # is this rootless, is the cgroup delegated, what is the network doing
+  delonix system info
+
+  # where the disk went
+  delonix system df
+
+  # get it back, orphan container directories included
+  delonix system prune -f
+
+SEE ALSO:
+  delonix dash · delonix system events · delonix container stats · delonix
+  image ls
+
+  delonix › system</code></pre></div>
 <h2 id='thermal'><code>system thermal</code></h2>
 <p class='intro'>Thermal governor: lowers Delonix&#x27;s CPU budget when the CPU heats up and restores it when it cools down. Runs continuously (see <code>--once</code>)</p>
 <div class='help'><pre><code>Usage: delonix system thermal [OPTIONS]
 
 Options:
-      --high &lt;HIGH&gt;          Temperature (°C) at or above which it cools down [default: 85]
-      --l18n &lt;en|pt&gt;         Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --low &lt;LOW&gt;            Temperature (°C) below which it restores [default: 70]
-      --floor &lt;FLOOR&gt;        Minimum CPU percentage it drops to [default: 40]
-      --interval &lt;INTERVAL&gt;  Seconds between readings [default: 5]
-      --once                 One reading and exit (for cron/scripts, instead of the loop)
-  -h, --help                 Print help</code></pre></div>
+      --high &lt;HIGH&gt;
+          Temperature (°C) at or above which it cools down
+          
+          [default: 85]
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --low &lt;LOW&gt;
+          Temperature (°C) below which it restores
+          
+          [default: 70]
+
+      --floor &lt;FLOOR&gt;
+          Minimum CPU percentage it drops to
+          
+          [default: 40]
+
+      --interval &lt;INTERVAL&gt;
+          Seconds between readings
+          
+          [default: 5]
+
+      --once
+          One reading and exit (for cron/scripts, instead of the loop)
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # keep the engine&#x27;s CPU budget in check when the machine heats up
+  delonix system thermal
+
+  # one reading and out, for cron
+  delonix system thermal --once
+
+  # cool down earlier, and never drop below half the CPU
+  delonix system thermal --high 75 --floor 50
+
+SEE ALSO:
+  delonix system monitor · delonix container update · delonix system info
+
+  delonix › system › thermal</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Temperatura e throttling do host</div><div class='cap lang-en'>Host temperature and throttling</div><pre><code>delonix system thermal</code></pre></div>
 <h2 id='monitor'><code>system monitor</code></h2>
 <p class='intro'>Active network connections per container (via conntrack): who comes in, who goes out, and between containers. Refreshes continuously (see <code>--no-stream</code>)</p>
 <div class='help'><pre><code>Usage: delonix system monitor [OPTIONS]
 
 Options:
-      --interval &lt;INTERVAL&gt;  Milliseconds between refreshes (minimum 300) [default: 1000]
-      --l18n &lt;en|pt&gt;         Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --no-stream            One sample and exit (without clearing the screen or repeating)
-  -h, --help                 Print help</code></pre></div>
+      --interval &lt;INTERVAL&gt;
+          Milliseconds between refreshes (minimum 300)
+          
+          [default: 1000]
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --no-stream
+          One sample and exit (without clearing the screen or repeating)
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # who talks to whom, per container, live from conntrack
+  delonix system monitor
+
+  # one sample and out — the shape for a script or a cron line
+  delonix system monitor --no-stream
+
+  # a slower refresh on a busy host
+  delonix system monitor --interval 3000
+
+SEE ALSO:
+  delonix dash · delonix network ls · delonix system events · delonix
+  container stats
+
+  delonix › system › monitor</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Acompanhar os eventos ao vivo</div><div class='cap lang-en'>Follow events live</div><pre><code>delonix system monitor</code></pre></div>
 <h2 id='virt'><code>system virt</code></h2>
 <p class='intro'>Host virtualization: hypervisor, KVM, virtio — and what there is to tune</p>
 <div class='help'><pre><code>Usage: delonix system virt [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --tune          Apply the recommended tuning (needs root)
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --tune
+          Apply the recommended tuning (needs root)
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # what the host offers a VM: hypervisor, KVM, virtio — and what is left to
+  # tune
+  delonix system virt
+
+  # apply the recommended tuning (needs root)
+  delonix system virt --tune
+
+SEE ALSO:
+  delonix vm create · delonix vm status · delonix system info
+
+  delonix › system › virt</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>O que o host oferece de virtualização, e o que há para afinar</div><div class='cap lang-en'>What the host offers for virtualization, and what&#x27;s left to tune</div><pre><code>delonix system virt</code></pre></div><div class="ex"><div class='cap lang-pt'>Aplicar a afinação recomendada</div><div class='cap lang-en'>Apply the recommended tuning</div><pre><code>sudo delonix system virt --tune</code></pre></div>
 <h2 id='setup'><code>system setup</code></h2>
 <p class='intro'>Diagnose — and, with <code>--delegate</code>, fix — cgroup delegation, the prerequisite for <code>--memory</code>/<code>--cpus</code>/<code>--pids-limit</code> to mean anything.</p>
@@ -213,43 +317,135 @@ Options:
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
   -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)</code></pre></div>
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # diagnose cgroup delegation — without it --memory and --cpus are accepted
+  # and inert
+  delonix system setup
+
+  # apply the fix instead of only reporting it (the system-wide drop-in needs
+  # root)
+  delonix system setup --delegate
+
+SEE ALSO:
+  delonix system info · delonix container run · delonix container update ·
+  delonix cluster create
+
+  delonix › system › setup</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Diagnosticar a delegação de cgroup — porque é que -m/--cpus não pegam</div><div class='cap lang-en'>Diagnose cgroup delegation — why -m/--cpus aren&#x27;t taking effect</div><pre><code>delonix system setup</code></pre></div><div class="ex"><div class='cap lang-pt'>A 1.ª correcção: um scope delegado (sem root, sem reboot, vale já)</div><div class='cap lang-en'>The 1st fix: a delegated scope (no root, no reboot, works right away)</div><pre><code>systemd-run --user --scope -p Delegate=yes -- delonix system setup</code></pre></div><div class="ex"><div class='cap lang-pt'>Só se a de cima ainda disser que falta o `cpu` (precisa de root, sobrevive ao reboot)</div><div class='cap lang-en'>Only if the one above still says `cpu` is missing (needs root, survives a reboot)</div><pre><code>sudo delonix system setup --delegate</code></pre></div>
 <h2 id='events'><code>system events</code></h2>
 <p class='intro'>Engine events (create/start/die/remove/…), from oldest to most recent. With no daemon, the log is a shared append-only file — each command appends its own line (see <code>delonix_runtime_core::events</code>)</p>
 <div class='help'><pre><code>Usage: delonix system events [OPTIONS]
 
 Options:
-  -f, --follow        Follow continuously (Ctrl-C to exit)
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -n, --tail &lt;TAIL&gt;   Show only the last N (default: all)
-  -h, --help          Print help</code></pre></div>
+  -f, --follow
+          Follow continuously (Ctrl-C to exit)
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -n, --tail &lt;TAIL&gt;
+          Show only the last N (default: all)
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # what the engine did, oldest first — with no daemon this is a shared
+  # append-only log
+  delonix system events
+
+  # only the last twenty lines
+  delonix system events -n 20
+
+  # follow it live while you reproduce a crash in another terminal
+  delonix system events -f
+
+SEE ALSO:
+  delonix system info · delonix container logs · delonix system monitor
+
+  delonix › system › events</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Ver o que o motor andou a fazer</div><div class='cap lang-en'>See what the engine has been doing</div><pre><code>delonix system events -n 20</code></pre></div><div class="ex"><div class='cap lang-pt'>Seguir em tempo real (Ctrl-C sai)</div><div class='cap lang-en'>Follow in real time (Ctrl-C to exit)</div><pre><code>delonix system events --follow</code></pre></div>
 <h2 id='prune'><code>system prune</code></h2>
 <p class='intro'>Reclaim space: remove stopped containers, unused images, CAS blobs nobody references, empty cgroups and — the biggest space saver — <strong>orphan container directories</strong> (from nodes/containers that died abruptly without <code>rm</code>, with no registry entry)</p>
 <div class='help'><pre><code>Usage: delonix system prune [OPTIONS]
 
 Options:
-  -f, --force         Skip the confirmation prompt (REQUIRED when stdin is not a terminal)
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -a, --all           Also remove unused images that DO have a tag (not just the dangling ones)
-  -h, --help          Print help</code></pre></div>
+  -f, --force
+          Skip the confirmation prompt (REQUIRED when stdin is not a terminal)
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -a, --all
+          Also remove unused images that DO have a tag (not just the dangling ones)
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # reclaim space: stopped containers, unused images, unreferenced blobs,
+  # orphan rootfs directories
+  delonix system prune
+
+  # in CI, where there is no terminal to confirm at
+  delonix system prune -f
+
+  # also drop tagged images nobody uses, not just the dangling ones
+  delonix system prune -a -f
+
+SEE ALSO:
+  delonix system df · delonix image rm · delonix container rm · delonix
+  volumes ls
+
+  delonix › system › prune</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Recuperar espaço (GC)</div><div class='cap lang-en'>Reclaim space (GC)</div><pre><code>delonix system prune</code></pre></div>
 <h2 id='df'><code>system df</code></h2>
 <p class='intro'>Disk usage by area (images, containers, volumes, VM images)</p>
 <div class='help'><pre><code>Usage: delonix system df [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # disk usage by area: images, containers, volumes and VM images
+  delonix system df
+
+SEE ALSO:
+  delonix system prune · delonix image ls · delonix volumes ls · delonix
+  system info
+
+  delonix › system › df</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Uso de disco</div><div class='cap lang-en'>Disk usage</div><pre><code>delonix system df</code></pre></div>
 <h2 id='info'><code>system info</code></h2>
 <p class='intro'>Engine state: rootless?, cgroup delegation, network infra, counts</p>
 <div class='help'><pre><code>Usage: delonix system info [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # engine state in one screen: rootless, cgroup delegation, network infra,
+  # counts
+  delonix system info
+
+  # the same screen in Portuguese
+  delonix system info --l18n pt
+
+SEE ALSO:
+  delonix system setup · delonix system df · delonix system virt · delonix
+  dash
+
+  delonix › system › info</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix system info</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Enche disco com lixo (containers parados) e depois recupera-o.</p>

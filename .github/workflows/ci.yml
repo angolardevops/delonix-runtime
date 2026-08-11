@@ -108,6 +108,28 @@ jobs:
             git --no-pager diff --stat -- docs/
             exit 1
           fi
+      - name: As manpages geram, e o roff é válido
+        # As páginas NÃO são commitadas: são geradas pelo binário (`delonix man
+        # --dir`, que é o que o `install.sh` corre) a partir da mesma árvore
+        # `clap::Command` que serve o `--help`. Commitá-las era uma segunda
+        # cópia da superfície da CLI, e a única com nada a vigiá-la.
+        #
+        # O que se verifica aqui é o que pode partir em silêncio: um escape roff
+        # errado não falha a geração — a linha simplesmente DESAPARECE da página
+        # renderizada. Por isso o `groff -z`, que só imprime avisos, com `-ww`
+        # (todos) e o resultado tratado como erro.
+        run: |
+          sudo apt-get install -y groff-base
+          ./target/release/delonix man --dir /tmp/dlxman --index
+          n=$(ls /tmp/dlxman/man1/*.1 | wc -l)
+          echo "geradas $n páginas"
+          [ "$n" -ge 200 ] || { echo "::error::só $n páginas — a árvore não foi percorrida"; exit 1; }
+          rc=0
+          for f in /tmp/dlxman/man1/*.1; do
+            out=$(groff -mandoc -ww -z "$f" 2>&1) || { echo "::error file=$f::groff falhou"; rc=1; }
+            if [ -n "$out" ]; then echo "::error file=$f::roff inválido"; echo "$out" | head -5; rc=1; fi
+          done
+          exit $rc
       - name: Nenhum exemplo depreciado, e todas as referências resolvem
         run: |
           rc=0

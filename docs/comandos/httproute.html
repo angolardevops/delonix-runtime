@@ -163,38 +163,109 @@ to give several backends a single public URL.</p>
 <div class='help'><pre><code>Usage: delonix net httproute [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  ls     State of the proxy + active routes (from the config in effect)
   apply  Apply the HTTPRoutes of a manifest (brings up/reloads the proxy)
+  ls     State of the proxy + active routes (from the config in effect)
   rm     Stop the proxy and unpublish the ports (teardown)
   help   Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # is the proxy serving, and with which routes
+  delonix net httproute ls
+
+  # apply the HTTPRoutes of a manifest — it brings the proxy up, or reloads it
+  # in place
+  delonix net httproute apply -f delonix-manifest.yaml
+
+  # tear it down and give the host ports back
+  delonix net httproute rm
+
+SEE ALSO:
+  delonix net ingress publish · delonix net tunnel expose · delonix stack
+  apply · delonix container run
+
+  delonix › net › httproute</code></pre></div>
 <h2 id='apply'><code>httproute apply</code></h2>
 <p class='intro'>Apply the HTTPRoutes of a manifest (brings up/reloads the proxy)</p>
 <div class='help'><pre><code>Usage: delonix net httproute apply [OPTIONS]
 
 Options:
-  -f, --file &lt;FILE&gt;   Manifest file (default `./delonix-manifest.yaml`)
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+  -f, --file &lt;FILE&gt;
+          Manifest file (default `./delonix-manifest.yaml`)
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # the routes from the manifest in this directory
+  delonix net httproute apply
+
+  # from a file of your own — a re-apply reloads by SIGHUP, same pid, no
+  # dropped connection
+  delonix net httproute apply -f examples/httproute.yaml
+
+  # listeners and TLS are fixed when the proxy starts: changing a port means
+  # `httproute rm` and then this again
+  delonix net httproute apply -f examples/httproute.yaml
+
+SEE ALSO:
+  delonix net httproute ls · delonix net httproute rm · delonix stack apply ·
+  delonix secret create
+
+  delonix › net › httproute › apply</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Aplicar as HTTPRoutes de um manifesto (sobe/recarrega o proxy)</div><div class='cap lang-en'>Apply the HTTPRoutes from a manifest (brings up/reloads the proxy)</div><pre><code>delonix net httproute apply -f delonix-manifest.yaml</code></pre></div>
 <h2 id='ls'><code>httproute ls</code></h2>
 <p class='intro'>State of the proxy + active routes (from the config in effect)</p>
 <div class='help'><pre><code>Usage: delonix net httproute ls [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # proxy state and the routes in effect, read from the config the proxy is
+  # really serving — not from the manifest you last edited
+  delonix net httproute ls
+
+SEE ALSO:
+  delonix net httproute apply · delonix net httproute rm · delonix net ingress
+  ls
+
+  delonix › net › httproute › ls</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Estado do proxy + rotas activas</div><div class='cap lang-en'>Proxy status + active routes</div><pre><code>delonix net httproute ls</code></pre></div>
 <h2 id='rm'><code>httproute rm</code></h2>
 <p class='intro'>Stop the proxy and unpublish the ports (teardown)</p>
 <div class='help'><pre><code>Usage: delonix net httproute rm [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # stop the proxy and unpublish its ports — only the MANUAL routes go, the
+  # ones auto-registered by `container run --expose` survive
+  delonix net httproute rm
+
+SEE ALSO:
+  delonix net httproute apply · delonix net httproute ls · delonix container
+  rm
+
+  delonix › net › httproute › rm</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Parar o proxy e despublicar as portas</div><div class='cap lang-en'>Stop the proxy and unpublish the ports</div><pre><code>delonix net httproute rm</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Um proxy L7, duas apps, uma porta — routing por <code>Host</code>.</p>

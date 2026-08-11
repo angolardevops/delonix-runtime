@@ -154,38 +154,102 @@ boots, with no daemon.</p>
 <div class='help'><pre><code>Usage: delonix net boot [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  enable   Install + enable systemd units for the RUNNING containers, so they come back up when the host boots. Rootless uses user units + linger
   disable  Disable + remove the generated boot units
+  enable   Install + enable systemd units for the RUNNING containers, so they come back up when the host boots. Rootless uses user units + linger
   status   Show boot-persistence status (installed units + mode)
   help     Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # make the containers running right now come back after a reboot
+  delonix net boot enable
+
+  # what is installed, and in which mode
+  delonix net boot status
+
+  # undo it
+  delonix net boot disable
+
+SEE ALSO:
+  delonix container run · delonix container start · delonix system info
+
+  delonix › net › boot</code></pre></div>
 <h2 id='enable'><code>boot enable</code></h2>
 <p class='intro'>Install + enable systemd units for the RUNNING containers, so they come back up when the host boots. Rootless uses user units + linger</p>
 <div class='help'><pre><code>Usage: delonix net boot enable [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;       Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-      --restart &lt;RESTART&gt;  Restart policy baked into the units (`no|on-failure[:max]|always|unless-stopped`) [default: always]
-  -h, --help               Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --restart &lt;RESTART&gt;
+          Restart policy baked into the units (`no|on-failure[:max]|always|unless-stopped`)
+          
+          [default: always]
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # one unit per RUNNING container; rootless installs user units and turns
+  # linger on, so they start without a login
+  delonix net boot enable
+
+  # bake a gentler policy into the units than the `always` default
+  delonix net boot enable --restart on-failure:3
+
+SEE ALSO:
+  delonix net boot status · delonix net boot disable · delonix container run
+
+  delonix › net › boot › enable</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Persistir os que correm agora</div><div class='cap lang-en'>Persist the ones running now</div><pre><code>delonix net boot enable</code></pre></div>
 <h2 id='status'><code>boot status</code></h2>
 <p class='intro'>Show boot-persistence status (installed units + mode)</p>
 <div class='help'><pre><code>Usage: delonix net boot status [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # which units exist, and whether they are user units with linger or system
+  # units
+  delonix net boot status
+
+SEE ALSO:
+  delonix net boot enable · delonix net boot disable · delonix container ps
+
+  delonix › net › boot › status</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Ver o que está instalado</div><div class='cap lang-en'>See what&#x27;s installed</div><pre><code>delonix net boot status</code></pre></div>
 <h2 id='disable'><code>boot disable</code></h2>
 <p class='intro'>Disable + remove the generated boot units</p>
 <div class='help'><pre><code>Usage: delonix net boot disable [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # disable and delete the generated units — what is running keeps running, it
+  # just no longer comes back by itself
+  delonix net boot disable
+
+SEE ALSO:
+  delonix net boot enable · delonix net boot status
+
+  delonix › net › boot › disable</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Remover as units de boot</div><div class='cap lang-en'>Remove the boot units</div><pre><code>delonix net boot disable</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Faz um container sobreviver a um reboot do host, sem daemon

@@ -151,8 +151,10 @@ pub enum EgressCmd {
         #[arg(long)]
         to: Option<String>,
     },
-    /// Allow a network's egress to a HOSTNAME (and `*.hostname`), learnt live from
-    /// DNS answers — the FQDN allowlist nft/CIDR can't express. Repeatable.
+    /// Allow a network's egress to a HOSTNAME (and `*.hostname`). Repeatable.
+    ///
+    /// Learnt live from DNS answers — the FQDN allowlist nft/CIDR can't
+    /// express.
     Host {
         #[arg(add = ArgValueCandidates::new(super::complete::networks))]
         network: String,
@@ -175,8 +177,10 @@ pub enum EgressCmd {
         #[arg(long)]
         to: Option<String>,
     },
-    /// Show a NETWORK's egress policy: CIDR allowlist, FQDN hosts, and the IPs
-    /// currently learnt from DNS for those hosts.
+    /// Show a NETWORK's egress policy.
+    ///
+    /// CIDR allowlist, FQDN hosts, and the IPs currently learnt from DNS for
+    /// those hosts.
     Show {
         #[arg(add = ArgValueCandidates::new(super::complete::networks))]
         network: String,
