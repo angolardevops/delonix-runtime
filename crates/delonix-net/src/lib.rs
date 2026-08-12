@@ -858,6 +858,32 @@ impl Network {
         }
     }
 
+    /// Builds a user network from an ARBITRARY prefix.
+    ///
+    /// O nome da bridge usa o hash do NOME e não o octeto — que é exactamente a
+    /// fórmula autoritativa do plano físico (`dlxn{:08x}` no registo do holder).
+    /// Uma rede com CIDR livre não tem octeto para pôr no nome, e usar o hash
+    /// fecha de caminho a divergência que este repo já documentou: o
+    /// `NetworkStore` a imprimir um dispositivo que não existe no host. As redes
+    /// LEGADAS mantêm a fórmula antiga, para o nome delas não mudar debaixo dos
+    /// pés de quem já as tem.
+    fn user_with_cidr(name: &str, cidr: Cidr) -> Self {
+        Network {
+            name: name.to_string(),
+            bridge: format!("dlxn{:08x}", fnv32(name)),
+            gateway: cidr.gateway().unwrap_or_else(|| cidr.to_string_cidr()),
+            prefix: cidr.to_string_cidr(),
+            subnet: cidr.to_string_cidr(),
+            driver: DRIVER_BRIDGE.to_string(),
+            parent: None,
+            vni: None,
+            peers: Vec::new(),
+            wg_ip: None,
+            labels: std::collections::BTreeMap::new(),
+            annotations: std::collections::BTreeMap::new(),
+        }
+    }
+
     /// Builds a user network with a given base octet (`10.<base>.0.0/16`).
     /// The bridge name comes from [`bridge_name`] — the SAME formula the physical
     /// plane uses, so what `network ls`/`inspect` print is the device that really
@@ -978,6 +1004,13 @@ impl NetworkStore {
         let mut kv = std::collections::HashMap::new();
         for line in trimmed.lines() {
             if let Some((k, v)) = line.split_once('=') {
+                // `cidr=` é a forma nova e ganha ao `base=`: uma rede escrita
+                // com prefixo livre não tem octeto que a descreva.
+                if k.trim() == "cidr" {
+                    if let Some(c) = Cidr::parse(v.trim()) {
+                        return Ok(Network::user_with_cidr(name, c));
+                    }
+                }
                 kv.insert(k.trim(), v.trim().to_string());
             }
         }
@@ -1148,6 +1181,76 @@ impl NetworkStore {
             return Err(unsupported("outside the workload address space"));
         }
         Ok(parsed[1])
+    }
+
+    /// Valida um `--subnet` ARBITRÁRIO e devolve-o como prefixo.
+    ///
+    /// Três perguntas, e cada uma recusa por uma razão diferente porque os
+    /// enganos são diferentes:
+    ///
+    /// 1. **é um prefixo?** — o `Cidr::parse` responde;
+    /// 2. **é privado?** — só 10/8, 172.16/12 e 192.168/16. Uma rede de
+    ///    workloads num espaço público faria este motor entregar endereços de
+    ///    outra pessoa aos containers, e o sintoma seria tráfego a desaparecer
+    ///    para um destino que existe mesmo na internet;
+    /// 3. **cabe lá uma rede?** — o `usable_for_network` (/8–/28).
+    ///
+    /// A sobreposição com redes existentes é verificada por quem tem a lista, no
+    /// `create` — aqui não há acesso ao store, e ir buscá-lo tornaria esta
+    /// função impossível de testar sem um.
+    pub fn validate_subnet(subnet: &str) -> Result<Cidr> {
+        let porque = |why: &str| {
+            Error::Invalid(format!(
+                "subnet '{subnet}': {why}. Use a private range — `10.0.0.0/8`, \
+                 `172.16.0.0/12` or `192.168.0.0/16` — with a prefix between /8 \
+                 and /28, or omit --subnet to let the engine pick a free one"
+            ))
+        };
+        let c = Cidr::parse(subnet).ok_or_else(|| porque("not an IPv4 prefix"))?;
+        if subnet.split_once('/').is_none() {
+            return Err(porque("no prefix length"));
+        }
+        let privado = [("10.0.0.0/8"), ("172.16.0.0/12"), ("192.168.0.0/16")]
+            .iter()
+            .filter_map(|r| Cidr::parse(r))
+            .any(|r| r.len <= c.len && r.contains(c.base));
+        if !privado {
+            return Err(porque("outside the private address space (RFC 1918)"));
+        }
+        c.usable_for_network().map_err(|e| porque(&e))?;
+        Ok(c)
+    }
+
+    /// Cria uma rede com um prefixo ARBITRÁRIO, recusando sobreposições.
+    ///
+    /// A sobreposição é verificada AQUI e não no `validate_subnet` porque é a
+    /// única pergunta que precisa de saber o que mais existe — e entregar duas
+    /// redes que partilham endereços é a falha que não dá erro nenhum: dá dois
+    /// containers com o mesmo IP e uma rede que funciona para um deles.
+    pub fn create_with_cidr(&self, name: &str, cidr: Cidr) -> Result<Network> {
+        if name.is_empty() || name == DEFAULT_NET {
+            return Err(Error::Invalid(
+                "'bridge' is the default network (reserved)".into(),
+            ));
+        }
+        if let Ok(existente) = self.get(name) {
+            return Ok(existente);
+        }
+        for outra in self.list().unwrap_or_default() {
+            if let Some(c) = Cidr::parse(&outra.subnet) {
+                if c.overlaps(&cidr) {
+                    return Err(Error::Conflict(format!(
+                        "subnet {} overlaps network '{}' ({})",
+                        cidr.to_string_cidr(),
+                        outra.name,
+                        outra.subnet
+                    )));
+                }
+            }
+        }
+        std::fs::create_dir_all(&self.dir)?;
+        std::fs::write(self.path(name), format!("cidr={}\n", cidr.to_string_cidr()))?;
+        self.get(name)
     }
 
     /// Creates a user network with an **explicit base octet** (`10.{base}.0.0/16`).
