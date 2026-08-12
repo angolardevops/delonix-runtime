@@ -3052,7 +3052,6 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
         assert_eq!(spec.libvirt_xml_overlay, vec!["<serial/>".to_string()]);
     }
 
-    #[test]
     /// O buraco que isto fecha: o hoist copia as sub-chaves que conhece e
     /// depois APAGA o grupo, por isso uma mal escrita desaparecia sem aviso —
     /// medido num container, onde `resources: {memoria: 128M}` deu um container
@@ -3079,6 +3078,7 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
         assert!(unknown_group_keys(&v).is_empty());
     }
 
+    #[test]
     fn normalize_vm_spec_forma_plana_explicita_ganha_ao_grupo() {
         // A field set BOTH at the flat top level and inside a group — the
         // explicit flat value wins (unambiguous precedence, not "whichever

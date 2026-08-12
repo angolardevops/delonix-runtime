@@ -7237,7 +7237,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn sub_chave_desconhecida_no_grupo_e_reportada() {
         use super::unknown_group_keys;
         let v: serde_yaml::Value = serde_yaml::from_str(
@@ -7261,6 +7260,7 @@ mod tests {
         assert_eq!(unknown_group_keys(&agrupado), vec!["env.ficheiros"]);
     }
 
+    #[test]
     fn normalize_container_spec_forma_plana_explicita_ganha_ao_grupo() {
         let mixed: serde_yaml::Value = serde_yaml::from_str(
             "image: nginx\nmemory: 2G\nresources:\n  memory: 512M\n  cpus: \"4.0\"\n",
