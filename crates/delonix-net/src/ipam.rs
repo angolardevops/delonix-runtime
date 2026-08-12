@@ -184,18 +184,22 @@ fn probe_free(
     preferred: &str,
     used: &std::collections::HashSet<&str>,
 ) -> Option<String> {
-    // starting host = the last two octets of the preferred one as u16 (a*256+b).
-    let start: u32 = preferred
-        .rsplit('.')
-        .take(2)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .filter_map(|o| o.parse::<u32>().ok())
-        .fold(0u32, |acc, o| (acc << 8) | (o & 0xff));
-    for k in 0..0x1_0000u32 {
-        let host = (start + k) & 0xffff;
-        let cand = format!("{prefix}.{}.{}", (host >> 8) & 0xff, host & 0xff);
+    // Sonda LINEAR sobre o espaço de hosts do prefixo, a partir do preferido —
+    // o mesmo que a versão anterior fazia, mas sobre o prefixo real em vez de um
+    // /16 assumido. Num /16 percorre exactamente os mesmos 65536 candidatos.
+    let net = crate::Cidr::parse(prefix)?;
+    let inicio = crate::Cidr::parse_addr(preferred).unwrap_or(net.base);
+    let tamanho = net.size();
+    // O ciclo é sobre o TAMANHO do prefixo e não sobre um 0x10000 fixo: num /22
+    // dar 65536 voltas seria percorrer 64× o mesmo espaço, e num /8 pararia a
+    // meio e reportaria «cheio» com endereços livres de sobra — o erro mais
+    // caro que este ciclo poderia ter.
+    for k in 0..tamanho {
+        // Envolve DENTRO do prefixo: sair dele e voltar a entrar produziria
+        // candidatos de outra rede, que o `valid_ip_in_subnet` recusaria em
+        // silêncio, gastando o ciclo inteiro sem nunca encontrar nada.
+        let desloc = (inicio.wrapping_sub(net.base).wrapping_add(k)) % tamanho;
+        let cand = crate::Cidr::fmt_u32(net.base + desloc);
         if crate::valid_ip_in_subnet(prefix, &cand) && !used.contains(cand.as_str()) {
             return Some(cand);
         }
@@ -278,6 +282,60 @@ pub fn prefix_of(ip: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// **Esgotar um prefixo por inteiro** — a prova anti-colisão que um /16
+    /// nunca dá, porque ninguém enche 65 mil endereços num teste.
+    ///
+    /// Num /28 há 16 endereços e 13 utilizáveis. A sonda tem de devolver os 13,
+    /// todos distintos e todos dentro, e depois dizer que não há mais — em vez
+    /// de repetir um (colisão silenciosa: dois containers com o mesmo IP, e a
+    /// rede a funcionar para um deles) ou de devolver um de fora.
+    #[test]
+    fn esgotar_um_28_da_13_enderecos_distintos_e_depois_nada() {
+        let cidr = "192.168.1.0/28";
+        let net = crate::Cidr::parse(cidr).unwrap();
+        let mut usados: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for i in 0..13 {
+            let refs: std::collections::HashSet<&str> = usados.iter().map(String::as_str).collect();
+            let preferido = crate::derive_ip_in(cidr, &format!("{i:08x}"));
+            let ip = probe_free(cidr, &preferido, &refs)
+                .unwrap_or_else(|| panic!("sem endereço à {i}.ª volta, com {} usados", refs.len()));
+            let a = crate::Cidr::parse_addr(&ip).unwrap();
+            assert!(net.contains(a), "{ip} fora do prefixo");
+            assert_ne!(a, net.base);
+            assert_ne!(a, net.base + 1);
+            assert_ne!(a, net.last());
+            assert!(usados.insert(ip.clone()), "REPETIU {ip}");
+        }
+        assert_eq!(usados.len(), 13);
+        // E agora está mesmo cheio.
+        let refs: std::collections::HashSet<&str> = usados.iter().map(String::as_str).collect();
+        assert_eq!(
+            probe_free(cidr, "192.168.1.5", &refs),
+            None,
+            "devolveu um endereço de um /28 cheio"
+        );
+    }
+
+    /// A sonda percorre o espaço do PREFIXO, e não 0x10000 fixo.
+    ///
+    /// Com o ciclo antigo, um /8 parava a meio e reportava «cheio» com milhões
+    /// de endereços livres; e num /22 dava 64 voltas ao mesmo espaço. Aqui
+    /// verifica-se o que importa: a partir de um preferido perto do FIM, a sonda
+    /// envolve para o princípio em vez de desistir.
+    #[test]
+    fn a_sonda_envolve_dentro_do_prefixo_em_vez_de_sair_ou_desistir() {
+        let cidr = "192.168.1.0/28";
+        // tudo ocupado excepto o .2 (o primeiro utilizável)
+        let ocupados: Vec<String> = (3..=14).map(|i| format!("192.168.1.{i}")).collect();
+        let refs: std::collections::HashSet<&str> = ocupados.iter().map(String::as_str).collect();
+        // parte do fim: só encontra se envolver.
+        assert_eq!(
+            probe_free(cidr, "192.168.1.14", &refs).as_deref(),
+            Some("192.168.1.2")
+        );
+    }
+
     use super::*;
 
     /// Isolates the registry in a tmpdir (via `DELONIX_ROOT`) so as not to touch the
