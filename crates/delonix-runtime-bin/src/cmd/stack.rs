@@ -197,6 +197,9 @@ pub enum StackCmd {
     Validate {
         #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
+        /// Fail (exit != 0) when a field was ignored, instead of only warning about it — for CI.
+        #[arg(long)]
+        strict: bool,
     },
 }
 
@@ -253,7 +256,7 @@ pub fn run(action: StackCmd) -> Result<()> {
         StackCmd::Wait { file, timeout } => wait(file, timeout),
         StackCmd::Ls { file } => ls(file),
         StackCmd::Describe { file } => describe(file),
-        StackCmd::Validate { file } => validate(file),
+        StackCmd::Validate { file, strict } => validate(file, strict),
     }
 }
 
@@ -1382,18 +1385,40 @@ fn converge_and_stamp(
 }
 
 /// `stack validate` — dry-run: only runs `validate_graph` and reports, without applying.
-fn validate(file: Option<PathBuf>) -> Result<()> {
+fn validate(file: Option<PathBuf>, strict: bool) -> Result<()> {
     let path = manifest::resolve_path(file)?;
     let docs = manifest::load(&path)?;
     let issues = validate_graph(&docs);
+    // Fields the load has just warned about. Saying `OK` on the line after
+    // `unknown field 'resources.memoria' — ignored` was the engine contradicting
+    // itself inside two lines: the reference graph WAS fine, and the manifest
+    // still did not mean what it says. The count makes the verdict match what
+    // was printed; `--strict` turns it into an exit code for a pipeline.
+    let ignored = manifest::unknown_field_warnings();
     if issues.is_empty() {
+        if ignored == 0 {
+            println!(
+                "{}",
+                super::po::tf(
+                    "stack validate: OK — {n} document(s), all references resolved",
+                    &[("n", &docs.len().to_string())],
+                )
+            );
+            return Ok(());
+        }
         println!(
             "{}",
             super::po::tf(
-                "stack validate: OK — {n} document(s), all references resolved",
-                &[("n", &docs.len().to_string())],
+                "stack validate: {n} document(s), all references resolved — but {w} field(s) were ignored (see the warnings above)",
+                &[("n", &docs.len().to_string()), ("w", &ignored.to_string())],
             )
         );
+        if strict {
+            return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+                "{w} ignored field(s) — refused by --strict",
+                &[("w", &ignored.to_string())],
+            )));
+        }
         Ok(())
     } else {
         for i in &issues {
