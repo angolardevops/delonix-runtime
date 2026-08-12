@@ -1,12 +1,14 @@
 # ADR-0013: Routed topologies — external gateway/DNS, subnets and VLANs, without leaving rootless
 
-**Status: Proposed.** Nothing here is implemented. It exists so the first line of code is written
-against a decided boundary rather than discovered halfway.
+**Status: Accepted (2026-08-12).** Nothing here is implemented yet. It exists so the first line of
+code is written against a decided boundary rather than discovered halfway. Tier B's GO/NO-GO spike
+has been run — see "Spike result" — and its answer changed what tier B is.
 
 ## Decision taken
 
 Split the request into three tiers by the PRIVILEGE each one needs, and ship them in that order,
-because the first is free, the second is a real dataplane, and the third is not rootless at all:
+because the first is free, the second turned out to be an exemption rather than a dataplane (the
+spike below), and the third is not rootless at all:
 
 | Tier | What it buys | Privilege | Verdict |
 |---|---|---|---|
@@ -83,10 +85,10 @@ MAY go, the existing `fwcont` chains decide whether it goes. A route never impli
 namespace boundary crossed by a route still needs a `kind: Dependency` or an explicit policy — the
 same way a container on a shared bridge is still isolated by namespace today.
 
-**Spike before code** (this is the GO/NO-GO): prove in the holder's netns, rootless, that two
-bridges with distinct CIDRs forward between each other with `ip route` + the existing nft chains
-intact, and that a workload on one reaches a workload on the other ONLY when a policy allows it.
-If the forwarding needs anything the holder cannot do unprivileged, tier B moves to tier C.
+**The spike this gated on has been run** — see "Spike result" below. Its answer is that the
+forwarding ALREADY exists and an explicit pairwise drop is what closes it, so tier B never needed
+the dataplane this section was written to justify. What is left of the design is the document shape
+above and the composition rule; the mechanism it compiles to is one line of `nft`.
 
 ### Tier C — 802.1Q and physical NICs
 
