@@ -218,10 +218,7 @@ pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<Con
         match st.load(name) {
             Ok(vm) => {
                 matches!(vm.status, delonix_runtime_core::Status::Running)
-                    && vm
-                        .pid
-                        .map(delonix_runtime::is_alive)
-                        .unwrap_or(false)
+                    && vm.pid.map(delonix_runtime::is_alive).unwrap_or(false)
             }
             Err(_) => false,
         }
