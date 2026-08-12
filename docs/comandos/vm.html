@@ -459,7 +459,7 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Reinício forçado (pára e volta a arrancar)</div><div class='cap lang-en'>Forced restart (stops and boots again)</div><pre><code>delonix vm restart dev</code></pre></div>
 <h2 id='start'><code>vm start</code></h2>
 <p class='intro'>Start an existing, stopped VM — idempotent (already running = no-op).</p>
-<p class='intro'>Reboots with the base disk/vcpus/memory/network/backend recorded at its last <code>create</code>/<code>start</code>, reusing the same overlay (disk state preserved). Does NOT restore anything that only ever existed as a <code>vm create</code> flag (custom kernel/seed/volumes/static IP/VNC/advanced libvirt knobs) — a VM using those needs the original <code>vm create</code> invocation instead (also idempotent/auto-heal).</p>
+<p class='intro'>Reboots with everything recorded at its last <code>create</code>/<code>start</code> — base disk/vcpus/memory/network/backend AND the boot shape (custom kernel/seed/volumes/static IP/VNC/TPM/CPU topology/extra disks and NICs/advanced libvirt knobs) — reusing the same overlay, so disk state is preserved. A VM created before the engine persisted that shape has none recorded; re-run its original <code>vm create</code> (idempotent) once to stamp it.</p>
 <div class='help'><pre><code>Usage: delonix vm start [OPTIONS] &lt;NAME&gt;
 
 Arguments:

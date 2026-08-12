@@ -14,11 +14,67 @@ use super::manifest::{self, ManifestDoc};
 use super::output;
 use super::util::state_root;
 
+/// `spec.build` of a `kind: Vm` — the declarative face of `delonix vm build`.
+///
+/// The fields are the flags of that command, one for one, so the two paths
+/// cannot describe different builds. Nothing here is a second implementation:
+/// `apply` calls the SAME `vmfile::build`.
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+pub(crate) struct VmBuildSpec {
+    /// Build context (default `.`), resolved relative to the MANIFEST's folder
+    /// and not to the shell's working directory — the same rule
+    /// `Secret.fromEnvFile` already follows, so a manifest means the same thing
+    /// from wherever it is applied.
+    #[serde(default = "default_build_context")]
+    context: String,
+    /// The `VMfile` (default `<context>/VMfile`).
+    #[serde(default)]
+    file: Option<String>,
+    /// Tag for the produced image (default `<metadata.name>:latest`), which is
+    /// then used as the VM's disk.
+    #[serde(default)]
+    tag: Option<String>,
+    /// Compress the result with zstd (default `true`) — the image is the
+    /// read-only backing file of every VM created from it, so it is read far
+    /// more often than written.
+    #[serde(default = "default_true")]
+    compress: bool,
+    /// Give the build network access. **Off by default**, like the CLI: a build
+    /// that reaches the internet produces a different image depending on the
+    /// day.
+    #[serde(default)]
+    network: bool,
+}
+
+fn default_build_context() -> String {
+    ".".to_string()
+}
+
+fn default_true() -> bool {
+    true
+}
+
 /// `spec` for `kind: Vm` — mirrors `delonix_vm::VmConfig` (minus `name`, which
 /// comes from `metadata.name`).
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 pub(crate) struct VmSpec {
+    /// The base disk: a VM image name in the store, or a path.
+    ///
+    /// Optional ONLY because [`build`](Self::build) can produce it. Exactly one
+    /// of the two — a `kind: Vm` with neither has no disk to boot, and one with
+    /// both is two answers to the same question (see [`VmSpec::resolve_disk`]).
+    #[serde(default)]
     disk: String,
+    /// Build the base disk from a `VMfile`, instead of naming one that already
+    /// exists — the same shape `kind: Image` has (`pull:` or `build:`), applied
+    /// to VMs.
+    ///
+    /// Without it, a project whose VM image is built from a `VMfile` needed two
+    /// commands and a hand-copied tag between them: `delonix vm build -t x` and
+    /// then a manifest saying `disk: x`. The tag was written in two places and
+    /// nothing kept them in step.
+    #[serde(default)]
+    build: Option<VmBuildSpec>,
     #[serde(default = "default_vcpus")]
     vcpus: u32,
     #[serde(default = "default_memory")]
@@ -161,6 +217,7 @@ struct VmVolumeSpec {
 /// test `manifest::tests::examples_nao_tem_campos_desconhecidos`.
 pub(crate) const VM_SPEC_FIELDS: &[&str] = &[
     "disk",
+    "build",
     "vcpus",
     "memory",
     "network",
@@ -1005,11 +1062,67 @@ pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
     delonix_vm::remove_force(&state_root(), name)
 }
 
-pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
+/// The disk a `kind: Vm` boots from, BUILDING it first when the manifest says to.
+///
+/// Fail-closed on both sides of the exclusivity, and the two errors say
+/// different things because the mistakes are different: neither field is a
+/// manifest with nothing to boot, and both is a manifest whose two answers
+/// cannot be reconciled — silently letting `disk` win would make the `build:`
+/// block look honoured while it was ignored, which is the failure mode this
+/// repo keeps removing.
+///
+/// `manifest_dir` and not the process's working directory: a manifest has to
+/// mean the same thing from wherever it is applied.
+fn resolve_vm_disk(name: &str, spec: &VmSpec, manifest_dir: &std::path::Path) -> Result<String> {
+    let declared = !spec.disk.trim().is_empty();
+    match (&spec.build, declared) {
+        (Some(_), true) => Err(Error::Invalid(super::po::tf(
+            "Vm '{name}': `disk` and `build` are both set — a VM boots ONE disk. Keep `build` to \
+             produce it, or `disk` to name one that already exists",
+            &[("name", name)],
+        ))),
+        (None, false) => Err(Error::Invalid(super::po::tf(
+            "Vm '{name}': needs `disk` (an existing image) or `build` (produce one from a VMfile)",
+            &[("name", name)],
+        ))),
+        (None, true) => Ok(spec.disk.clone()),
+        (Some(b), false) => {
+            let context = manifest_dir.join(&b.context);
+            let file = match &b.file {
+                Some(f) => context.join(f),
+                None => context.join("VMfile"),
+            };
+            if !file.exists() {
+                return Err(Error::Invalid(super::po::tf(
+                    "Vm '{name}': no VMfile at {path}",
+                    &[("name", name), ("path", &file.display().to_string())],
+                )));
+            }
+            let tag = b.tag.clone().unwrap_or_else(|| format!("{name}:latest"));
+            let store = super::vmimage::VmImageStore::open(state_root())?;
+            output::announced(
+                &super::po::tf("building {tag}", &[("tag", &tag)]),
+                "🔨",
+                || {
+                    super::vmfile::build(
+                        &store, &file, &context, &tag, b.compress, b.network, false,
+                    )
+                },
+            )?;
+            Ok(tag)
+        }
+    }
+}
+
+/// `base` é a pasta do MANIFESTO (não o cwd), como em `secret::apply`: é
+/// relativamente a ela que o `spec.build.context` se resolve, para um manifesto
+/// querer dizer o mesmo seja de onde for aplicado.
+pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
     let base = state_root();
     for doc in manifest::of_kind(docs, "Vm") {
         let name = &doc.metadata.name;
         let spec: VmSpec = vm_spec_of(doc)?;
+        let disk = resolve_vm_disk(name, &spec, base_dir)?;
 
         // Resolve each volume (Volume/Storage name → host directory) and
         // ensure a network Storage is mounted before sharing it.
@@ -1042,7 +1155,11 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
 
         let cfg = VmConfig {
             name: name.clone(),
-            disk: spec.disk,
+            // `disk` e não `spec.disk`: é o resolvido por `resolve_vm_disk`, que
+            // é a tag produzida quando o manifesto traz `build:`. Usar o campo
+            // cru aqui compila, não avisa de nada relevante, e faz a VM arrancar
+            // de uma string vazia com o `build:` a parecer honrado.
+            disk,
             vcpus: spec.vcpus,
             memory: spec.memory,
             network: spec.network,
@@ -1693,7 +1810,8 @@ pub fn run(action: VmCmd) -> Result<()> {
         VmCmd::Apply { file } => {
             let path = manifest::resolve_path(file)?;
             let docs = manifest::load(&path)?;
-            apply(&docs)
+            let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+            apply(&docs, dir)
         }
     }
 }
@@ -2924,6 +3042,42 @@ pub(crate) fn init_for(
 
 #[cfg(test)]
 mod tests {
+
+    /// Exactamente um de `disk`/`build`, e as duas recusas dizem coisas
+    /// diferentes porque os enganos são diferentes: nenhum é um manifesto sem
+    /// nada para arrancar, os dois é um manifesto com duas respostas que não se
+    /// conciliam. Deixar o `disk` ganhar em silêncio faria o bloco `build:`
+    /// parecer honrado enquanto era ignorado.
+    #[test]
+    fn um_kind_vm_precisa_de_exactamente_um_de_disk_ou_build() {
+        let dir = std::path::Path::new(".");
+        let spec = |y: &str| -> super::VmSpec { serde_yaml::from_str(y).unwrap() };
+
+        let e = super::resolve_vm_disk("v", &spec("disk: img\nbuild: {tag: x}"), dir).unwrap_err();
+        assert!(e.to_string().contains("both"), "{e}");
+
+        let e = super::resolve_vm_disk("v", &spec("vcpus: 1"), dir).unwrap_err();
+        assert!(e.to_string().contains("needs"), "{e}");
+
+        // Só `disk`: passa tal e qual, sem tocar em disco nenhum.
+        assert_eq!(
+            super::resolve_vm_disk("v", &spec("disk: minha-imagem"), dir).unwrap(),
+            "minha-imagem"
+        );
+    }
+
+    /// O `context` resolve-se contra a pasta do MANIFESTO e não contra o cwd —
+    /// um manifesto tem de querer dizer o mesmo seja de onde for aplicado. Aqui
+    /// prova-se pelo caminho que a recusa NOMEIA quando o VMfile falta.
+    #[test]
+    fn o_contexto_do_build_e_relativo_ao_manifesto_e_nao_ao_cwd() {
+        let spec: super::VmSpec = serde_yaml::from_str("build: {context: sub}").unwrap();
+        let e = super::resolve_vm_disk("v", &spec, std::path::Path::new("/tmp/proj"))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("/tmp/proj/sub/VMfile"), "{e}");
+    }
+
     use super::{
         build_meta_data, build_user_data, fmt_vm_gpu, fmt_vm_status, fmt_vm_uptime,
         looks_like_address, manifest, normalize_vm_spec, parse_ip_gateways, parse_ss_binds,

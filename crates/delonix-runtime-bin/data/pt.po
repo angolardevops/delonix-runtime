@@ -8500,3 +8500,17 @@ msgstr "'wg' não está disponível neste host — instala wireguard-tools (Debi
 # levantar o holder inteiro, e era o único silêncio do pod sem uma linha.
 msgid "pod network"
 msgstr "rede do pod"
+
+# `kind: Vm` com bloco `build:` (o mesmo princípio do `kind: Image`): recusas
+# fail-closed dos dois lados da exclusividade, e a linha de progresso do build.
+msgid "Vm '{name}': `disk` and `build` are both set — a VM boots ONE disk. Keep `build` to produce it, or `disk` to name one that already exists"
+msgstr "Vm '{name}': tem `disk` E `build` — uma VM arranca de UM disco. Fica com o `build` para o produzir, ou com o `disk` para nomear um que já existe"
+
+msgid "Vm '{name}': needs `disk` (an existing image) or `build` (produce one from a VMfile)"
+msgstr "Vm '{name}': precisa de `disk` (uma imagem existente) ou de `build` (produzir uma a partir de um VMfile)"
+
+msgid "Vm '{name}': no VMfile at {path}"
+msgstr "Vm '{name}': não há VMfile em {path}"
+
+msgid "building {tag}"
+msgstr "a construir {tag}"
