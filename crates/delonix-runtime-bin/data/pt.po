@@ -2041,8 +2041,8 @@ msgstr "VM a consultar (omite para o estado de TODAS)."
 msgid "Human-readable detail of one or more VMs, `kubectl describe` style (for humans; use `status` for the usual compact view). Includes the LIVE state — `delonix_vm::status` reconciles liveness/IP with the backend."
 msgstr "Detalhe legível de uma ou mais VMs, ao estilo `kubectl describe` (para humanos; use `status` para a vista compacta de sempre). Inclui o estado AO VIVO — `delonix_vm::status` reconcilia liveness/IP com o backend."
 
-msgid "Stop the VM (preserves disk/record)."
-msgstr "Pára a VM (preserva disco/registo)."
+msgid "Stop the VM (preserves disk, record and snapshots)."
+msgstr "Pára a VM (preserva disco, registo e snapshots)."
 
 msgid "Start an existing, stopped VM — idempotent (already running = no-op). Reboots with everything recorded at its last `create`/`start` — base disk/vcpus/memory/network/backend AND the boot shape (custom kernel/seed/volumes/static IP/VNC/TPM/CPU topology/extra disks and NICs/advanced libvirt knobs) — reusing the same overlay, so disk state is preserved. A VM created before the engine persisted that shape has none recorded; re-run its original `vm create` (idempotent) once to stamp it"
 msgstr "Arranca uma VM existente e parada — idempotente (já a correr = sem efeito). Reinicia com tudo o que ficou gravado no último `create`/`start` — disco base/vcpus/memória/rede/backend E a forma de arranque (kernel/seed/volumes/IP estático/VNC/TPM/topologia de CPU/discos e placas de rede extra/opções avançadas do libvirt) — reaproveitando o mesmo overlay, pelo que o estado do disco se preserva. Uma VM criada antes de o motor passar a guardar essa forma não a tem gravada; corre uma vez o `vm create` original (idempotente) para a carimbar"
@@ -6775,8 +6775,8 @@ msgstr "isolada das outras namespaces — só o cloud-hypervisor põe o tap na S
 msgid "boot a stopped VM again with the disk, vcpus, memory and backend of its last create — the overlay is reused, so its disk state survives"
 msgstr "arranca de novo uma VM parada com o disco, vcpus, memória e backend do último create — o overlay é reaproveitado, por isso o estado do disco sobrevive"
 
-msgid "give the host back its CPU and RAM, keeping the disk and the record — take any snapshot BEFORE this, the libvirt domain is undefined here"
-msgstr "devolve ao host o CPU e a RAM, guardando o disco e o registo — tira qualquer snapshot ANTES disto, aqui o domínio libvirt é undefined"
+msgid "give the host back its CPU and RAM, keeping the disk, the record and the snapshots — the libvirt domain is undefined here, so its snapshot metadata is preserved on our side and given back on the next start"
+msgstr "devolve ao host o CPU e a RAM, guardando o disco, o registo e os snapshots — aqui o domínio libvirt é undefined, por isso os metadados dos snapshots ficam preservados do nosso lado e são devolvidos no arranque seguinte"
 
 msgid "a real reboot — `start` on an already-running VM does nothing, this one always cycles it"
 msgstr "um reboot a sério — o `start` numa VM já a correr não faz nada, este cicla-a sempre"
@@ -7796,8 +7796,8 @@ msgstr "Arranca uma VM existente e parada — idempotente (já a correr = sem ef
 msgid "Take a named snapshot of a VM."
 msgstr "Tira um snapshot com nome de uma VM."
 
-msgid "Take a named snapshot of a VM.\n\nlibvirt: a running VM's snapshot is a system checkpoint — memory + disk; `restore` reverts to it. Not yet supported on the cloud-hypervisor backend."
-msgstr "Tira um snapshot com nome de uma VM.\n\nlibvirt: o snapshot de uma VM a correr é um checkpoint de sistema — memória + disco; o `restore` volta a ele. Ainda não suportado no backend cloud-hypervisor."
+msgid "Take a named snapshot of a VM.\n\nlibvirt: a running VM's snapshot is a system checkpoint — memory + disk; `restore` reverts to it, and it survives a `vm stop`/`vm start` (the state never leaves the disk; the metadata is preserved and given back with the domain). Not yet supported on the cloud-hypervisor backend."
+msgstr "Tira um snapshot com nome de uma VM.\n\nlibvirt: o snapshot de uma VM a correr é um checkpoint de sistema — memória + disco; o `restore` volta a ele, e sobrevive a um `vm stop`/`vm start` (o estado nunca sai do disco; os metadados são preservados e devolvidos com o domínio). Ainda não suportado no backend cloud-hypervisor."
 
 msgid "WireGuard identity of THIS node, for the encrypted overlay between nodes."
 msgstr "Identidade WireGuard DESTE nó, para o overlay cifrado entre nós."
