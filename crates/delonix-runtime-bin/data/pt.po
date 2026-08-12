@@ -8517,3 +8517,31 @@ msgstr "Vm '{name}': não há VMfile em {path}"
 
 msgid "building {tag}"
 msgstr "a construir {tag}"
+
+# `network route` (ADR-0013, camada B): uma rota é UM elemento no verdict map.
+msgid "Open a DIRECTED path from one network to another (ADR-0013 tier B)"
+msgstr "Abre um caminho DIRIGIDO de uma rede para outra (ADR-0013, camada B)"
+
+msgid "Open a DIRECTED path from one network to another (ADR-0013 tier B).\n\nNetworks are isolated from each other by default. A route says a packet MAY cross; it does not say it is allowed — the per-workload firewall still decides, and a namespace boundary still needs its own policy."
+msgstr "Abre um caminho DIRIGIDO de uma rede para outra (ADR-0013, camada B).\n\nAs redes estão isoladas umas das outras por omissão. Uma rota diz que um pacote PODE atravessar; não diz que é permitido — a firewall por-workload continua a decidir, e uma fronteira de namespace continua a precisar da sua própria política."
+
+msgid "Source network (the side that may initiate)"
+msgstr "Rede de origem (o lado que pode iniciar)"
+
+msgid "Destination network"
+msgstr "Rede de destino"
+
+msgid "Close the path instead of opening it"
+msgstr "Fecha o caminho em vez de o abrir"
+
+msgid "route open: {from} -> {to}"
+msgstr "rota aberta: {from} -> {to}"
+
+msgid "route closed: {from} -> {to}"
+msgstr "rota fechada: {from} -> {to}"
+
+msgid "open a DIRECTED path: web may reach db, db may not reach web"
+msgstr "abre um caminho DIRIGIDO: a web alcança a db, a db não alcança a web"
+
+msgid "close it again"
+msgstr "voltar a fechá-lo"
