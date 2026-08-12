@@ -99,13 +99,32 @@ fn cria_arranca_e_destroi_contra_um_no_real() {
         "a guest with no agent must yield no address, not a failure"
     );
 
-    // Destroy, and prove the node no longer has it: `stop` here means gone, the
-    // same as libvirt undefining a domain — a VM left behind after
-    // `delonix vm rm` is an orphan nobody is looking for.
+    // Só parar: o `stop` PÁRA e não remove, desde que os dois verbos foram
+    // separados (era o `vm stop` a apagar o disco). O domínio continua definido.
     b.stop(std::path::Path::new("/tmp"), &vm).expect("stop");
     assert!(
         !b.is_running(&vm),
-        "the VM must not be running after stop+destroy"
+        "a VM tem de ficar parada depois do stop"
+    );
+    assert!(
+        b.client().config(vmid).is_ok(),
+        "o `stop` REMOVEU a VM — parar e destruir são verbos diferentes"
+    );
+
+    // E agora destruir, provando que o nó deixou de a ter: uma VM deixada para
+    // trás depois de um `delonix vm rm` é um órfão que ninguém procura.
+    //
+    // A asserção é a CONFIG deixar de existir, e não `!is_running`, que era o
+    // que estava aqui: `is_running` é falso para uma VM destruída E para uma
+    // apenas parada, por isso não conseguia distinguir as duas — exactamente o
+    // que este bloco diz que prova. Com o `stop` a deixar de destruir, o teste
+    // passou a deixar a VM no nó e a passar na mesma; medido, duas corridas
+    // deixaram dois órfãos (`dlxlive*`, stopped) no nó real.
+    b.destroy(std::path::Path::new("/tmp"), &vm)
+        .expect("destroy");
+    assert!(
+        b.client().config(vmid).is_err(),
+        "a VM continua definida no nó depois do destroy — é um órfão"
     );
 
     // A record this backend did not create is refused rather than acted on.
@@ -115,4 +134,53 @@ fn cria_arranca_e_destroi_contra_um_no_real() {
         b.stop(std::path::Path::new("/tmp"), &alien).is_err(),
         "a record with no Proxmox handle must be refused"
     );
+}
+
+/// `ip()` ATRAVÉS do backend, contra um convidado com o agente REAL a correr.
+///
+/// O teste acima cria uma VM sem sistema operativo, logo sem agente: ali `ip()`
+/// devolver `None` é o comportamento certo e não prova nada sobre o caminho
+/// feliz — que era, até aqui, o único por exercitar do trait inteiro.
+///
+/// Aponta para uma VM preparada à parte (`DELONIX_PROXMOX_TEST_AGENT_VMID`) com
+/// o `qemu-guest-agent` instalado e DUAS NICs, porque é o segundo NIC que
+/// levanta a única pergunta que uma NIC só não levanta: qual dos endereços sai.
+///
+/// Como se prepara uma, se for preciso repetir: arrancar a appliance
+/// `proxmox-ve:9.1` deste repo sobre um overlay, importar uma cloud image
+/// (`download-url` com `content=import` + `qm set --scsi0 …,import-from=…`),
+/// dar-lhe `--net0`/`--net1` e um drive de cloud-init, e lá dentro
+/// `apt install qemu-guest-agent`.
+#[test]
+fn o_ip_vem_do_agente_de_um_convidado_a_serio() {
+    let Some(t) = target() else {
+        eprintln!("SKIP: DELONIX_PROXMOX_TEST_URL is not set");
+        return;
+    };
+    let Ok(vmid) = std::env::var("DELONIX_PROXMOX_TEST_AGENT_VMID") else {
+        eprintln!("SKIP: DELONIX_PROXMOX_TEST_AGENT_VMID is not set");
+        return;
+    };
+    let b = ProxmoxBackend::connect(&t).expect("connect");
+    let vm = delonix_runtime_core::Vm::new(
+        "agenttest".into(),
+        String::new(),
+        String::new(),
+        1,
+        "2G".into(),
+        String::new(),
+        String::new(),
+        String::new(),
+        format!("proxmox:{}:{vmid}", t.node),
+    );
+    let ip = b
+        .ip(&vm)
+        .expect("o agente está vivo — `ip()` tinha de devolver um endereço");
+    eprintln!("  ip() = {ip}");
+    assert!(!ip.starts_with("127."), "loopback: {ip}");
+    assert!(
+        !ip.starts_with("169.254."),
+        "link-local (DHCP falhado): {ip}"
+    );
+    assert!(ip.parse::<std::net::Ipv4Addr>().is_ok(), "não é IPv4: {ip}");
 }
