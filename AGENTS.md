@@ -3222,7 +3222,13 @@ checklist para quem mexer aqui do que como lista de correcções:
   anunciava «not local», ia à Docker Hub buscar `library/<nome>` e morria num **401**. Recusa
   agora com o nome da alternativa; percorrer o sistema de ficheiros de um convidado é outro
   caminho de SBOM, e um scan que em silêncio não faz nada útil é a falha que o comando existe
-  para evitar (v0.47.0).
+  para evitar (v0.47.0);
+- **um nome de imagem VM não é um caminho de disco** — e o `kind: Vm` tratava-o como se fosse.
+  O `resolve_vm_disk` devolvia `spec.disk` CRU enquanto o `vm create` consultava o
+  `VmImageStore`, por isso a MESMA string funcionava como `--disk` e respondia
+  `image not found` como `spec.disk`. Ver a secção «O manifesto de VM resolvia a imagem de
+  outra maneira que a CLI» abaixo — a divergência de resolução é a raiz, o erro visível era o
+  menor dos dois sintomas.
 
 **Achado vivo da varredura (v0.42.2)**: `delonix system info` reportava `cgroup2 delegated: yes`
 incondicionalmente, por ler os ficheiros do cgroup raiz do host — o comando que se corre para
@@ -3333,6 +3339,46 @@ natureza da golden k8s — documentadas no README dos scripts, para mudar no pri
 `write:packages` — o token do `gh` deste host tem só `gist,read:org,repo,workflow`, e o
 `GITHUB_TOKEN` não cria packages novos de user, ver a lição da golden); e um workflow de CI que
 reconstrua estas imagens como o `vm-image.yml` já faz para a golden.
+
+## O manifesto de VM resolvia a imagem de outra maneira que a CLI (2026-08-12)
+
+Medido: `delonix vm create x --disk delonix-vm-base:ubuntu-24.04` funcionava e o MESMO nome em
+`kind: Vm`/`spec.disk` respondia `error invalid argument: image not found: …` (exit 4). A raiz é
+uma só — o `resolve_vm_disk` devolvia `spec.disk` cru e nunca consultava o `VmImageStore`,
+enquanto o `cmd_create` fazia `store.get` → `store.qcow2_path` e guardava o `image_meta`. O motor
+canonicaliza o `cfg.disk` no sistema de ficheiros, logo um nome de imagem nunca podia lá chegar.
+
+**O erro era o menor dos dois sintomas.** Sem `image_meta`, o `apply` também não sabia que a
+imagem é um APPLIANCE, e por isso gerava-lhe um seed de cloud-init que a CLI recusa em voz alta:
+com o qcow2 do OPNsense por caminho absoluto (o contorno natural do primeiro sintoma), a CLI
+respondia «this image is an appliance and does not run cloud-init, so these would be silently
+ignored» e o manifesto respondia `vm/lab-fwtest: ensured`, rc=0, com um `<disk device='cdrom'>`
+e um `seed.iso` anexados. O caminho declarativo fazia exactamente o aceite-e-ignorado que a CLI
+existe para impedir — e a mesma raiz mantinha os defaults da imagem (`VCPUS`/`MEMORY`/
+`HYPERVISOR`) sem efeito nenhum por manifesto.
+
+- **Uma função para os dois** — `resolve_image_ref(store, referência) -> (caminho, Option<VmImage>)`,
+  chamada pelo `vm create`, pelo `resolve_vm_disk` (nos DOIS ramos: o `disk:` e o `build:`, que
+  devolvia a tag que acabara de produzir e por isso também não arrancava) e pelo
+  `desired_vm_fields`. Recebe o store em vez de o abrir, para a resolução se poder provar contra
+  uma pasta temporária em vez de depender das imagens que o host por acaso tenha.
+- **`spec.vcpus`/`spec.memory` passaram a `Option`** — com `#[serde(default = "…")]` «omitido» e
+  «1» são a mesma coisa, e o default da imagem nunca poderia aplicar-se. É a mesma correcção que
+  as flags do clap já tinham levado (`default_value_t` fora por esta razão exacta). O `--dry-run`
+  passa a imprimir `vcpus: null` quando não é declarado, ao lado dos outros opcionais: com o
+  efectivo a depender da imagem, imprimir `1` seria mentira.
+- **O reconciliador tinha de andar no mesmo passo, ou trocava um bug por outro pior.** O `apply`
+  grava o CAMINHO e os defaults da imagem; um `desired_vm_fields` a comparar o nome cru proporia
+  um `Replace` em cada corrida — e um `Replace` de VM é recusado sem `--replace` precisamente
+  porque deita fora o disco overlay. Os dois lados passam agora pelas mesmas duas funções, pela
+  mesma ordem, e o `desired` nunca constrói (calcular um plano não pode criar).
+- **Validado ao vivo** com `DELONIX_ROOT` isolado, contra o XML escrito em `vms/<nome>.xml` e não
+  contra o que o comando disse: appliance → zero `cdrom`, zero `seed`, `2 vCPU`/`2 GiB` vindos da
+  imagem; cloud image de controlo → `cdrom` com o `seed.iso` e os `4 vCPU` que ela recomenda;
+  `stack plan` a seguir ao `apply` diz `1 unchanged` (rc=0). **Armadilha do próprio auditor**: a
+  primeira verificação foi `virsh dumpxml | grep -c cdrom`, e o `dumpxml` FALHAVA (domínio noutro
+  URI) — `grep -c` sobre nada devolve `0`, que se lê como «não tem cdrom». Um zero que vem de uma
+  medição falhada não é um zero.
 
 ## A subnet de uma rede passou a valer, e o que isso abriu (v0.47.0)
 

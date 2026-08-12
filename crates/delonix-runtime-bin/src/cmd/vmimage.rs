@@ -71,7 +71,7 @@ pub struct VmImage {
     /// `delonix_vm::valid_backend_name`. Same rule as `default_vcpus` — wins
     /// over the engine's own auto-detection heuristic but never over an
     /// explicit `--backend`/`DELONIX_VM_BACKEND`/persisted default (see
-    /// `cmd::vm::resolve_disk_and_defaults`).
+    /// `cmd::vm::resolve_vm_defaults`, fed by `cmd::vm::resolve_image_ref`).
     #[serde(default)]
     pub default_backend: Option<String>,
     /// Whether the guest runs cloud-init. `None` (every image built before

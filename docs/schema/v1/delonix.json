@@ -2354,8 +2354,12 @@
           ]
         },
         "memory": {
-          "default": "1G",
-          "type": "string"
+          "default": null,
+          "description": "RAM (`512M`, `2G`, …). Optional for the same reason as\n[`vcpus`](Self::vcpus); the fallback when neither the manifest nor the\nimage says anything is `1G`.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "netMode": {
           "description": "Canonical `netMode`; `net_mode` stays accepted (back-compat).",
@@ -2415,10 +2419,14 @@
         },
         "user_data": {},
         "vcpus": {
-          "default": 1,
+          "default": null,
+          "description": "vCPUs. **Optional so that \"omitted\" and \"1\" are different things**: an\nimage built from a `VMfile` records its own `VCPUS`/`MEMORY`, and those\nonly apply where the manifest said nothing. `default_value_t` had to go\nfrom the CLI flags for exactly this reason — the declarative path is the\nsame problem. Nothing is declared ⇒ [`resolve_vm_defaults`] falls back\nto 1.",
           "format": "uint32",
           "minimum": 0,
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "video": {
           "description": "Video model (`virtio`|`qxl`|`vga`|`none`).",
