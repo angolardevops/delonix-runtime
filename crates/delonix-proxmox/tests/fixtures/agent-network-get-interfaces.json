@@ -1,0 +1,94 @@
+{
+ "data": {
+  "result": [
+   {
+    "name": "lo",
+    "hardware-address": "00:00:00:00:00:00",
+    "ip-addresses": [
+     {
+      "ip-address-type": "ipv4",
+      "ip-address": "127.0.0.1",
+      "prefix": 8
+     },
+     {
+      "ip-address-type": "ipv6",
+      "prefix": 128,
+      "ip-address": "::1"
+     }
+    ],
+    "statistics": {
+     "rx-bytes": 6480,
+     "rx-errs": 0,
+     "rx-packets": 80,
+     "rx-dropped": 0,
+     "tx-packets": 80,
+     "tx-errs": 0,
+     "tx-bytes": 6480,
+     "tx-dropped": 0
+    }
+   },
+   {
+    "statistics": {
+     "tx-dropped": 0,
+     "tx-bytes": 2208,
+     "tx-packets": 21,
+     "tx-errs": 0,
+     "rx-dropped": 0,
+     "rx-errs": 0,
+     "rx-packets": 55,
+     "rx-bytes": 10879
+    },
+    "ip-addresses": [
+     {
+      "ip-address": "10.0.2.17",
+      "prefix": 24,
+      "ip-address-type": "ipv4"
+     },
+     {
+      "ip-address-type": "ipv6",
+      "prefix": 64,
+      "ip-address": "fec0::be24:11ff:fe97:9d4f"
+     },
+     {
+      "prefix": 64,
+      "ip-address": "fe80::be24:11ff:fe97:9d4f",
+      "ip-address-type": "ipv6"
+     }
+    ],
+    "hardware-address": "bc:24:11:97:9d:4f",
+    "name": "eth0"
+   },
+   {
+    "hardware-address": "bc:24:11:67:61:66",
+    "name": "eth1",
+    "ip-addresses": [
+     {
+      "ip-address-type": "ipv4",
+      "ip-address": "10.0.2.16",
+      "prefix": 24
+     },
+     {
+      "prefix": 64,
+      "ip-address": "fec0::be24:11ff:fe67:6166",
+      "ip-address-type": "ipv6"
+     },
+     {
+      "prefix": 64,
+      "ip-address": "fe80::be24:11ff:fe67:6166",
+      "ip-address-type": "ipv6"
+     }
+    ],
+    "statistics": {
+     "tx-errs": 0,
+     "tx-packets": 352,
+     "tx-bytes": 37835,
+     "tx-dropped": 0,
+     "rx-bytes": 436197,
+     "rx-packets": 371,
+     "rx-errs": 0,
+     "rx-dropped": 0
+    }
+   }
+  ]
+ }
+}
