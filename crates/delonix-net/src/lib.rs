@@ -556,10 +556,54 @@ impl Cidr {
         1u32.checked_shl(32 - self.len as u32).unwrap_or(u32::MAX)
     }
 
-    /// The gateway: the FIRST usable address. Derived and not stored, which is
-    /// what keeps the two from ever disagreeing.
-    pub fn gateway(&self) -> String {
-        Self::fmt_u32(self.base + 1)
+    /// The gateway: the FIRST usable address — `None` when the prefix has none.
+    ///
+    /// **It returns an `Option` because the honest answer is sometimes «there
+    /// isn't one», and the first version of this could not say that.** It was
+    /// `base + 1` unconditionally, and that is wrong twice:
+    ///
+    /// * on a `/32` (one address) and a `/31` (RFC 3021 point-to-point, two
+    ///   addresses and no room for a gateway), `base + 1` lands OUTSIDE the
+    ///   prefix or on the peer. Measured: `10.0.0.0/32` answered `10.0.0.1`;
+    /// * on `255.255.255.255/32` it **overflowed** — a panic in debug, and in
+    ///   release a silent wrap to `0.0.0.0`, which is the dangerous half: a
+    ///   network whose gateway is the null address, configured without a word.
+    ///
+    /// `checked_add` and the length guard together make both impossible. A
+    /// caller that needs a gateway has to handle the `None`, which is the point.
+    pub fn gateway(&self) -> Option<String> {
+        // A gateway needs the network address, itself, and at least one host —
+        // so /31 and /32 are excluded by arithmetic, not by taste.
+        if self.len >= 31 {
+            return None;
+        }
+        self.base.checked_add(1).map(Self::fmt_u32)
+    }
+
+    /// The last address of the prefix (the broadcast, on a /24 and wider).
+    pub fn last(&self) -> u32 {
+        self.base | !Self::mask(self.len)
+    }
+
+    /// Is this prefix usable as a WORKLOAD network here?
+    ///
+    /// Separate from `parse` on purpose: parsing answers «is this a prefix»,
+    /// this answers «can a network live in it», and conflating the two would
+    /// make the type unusable for reading a peer's address or a route.
+    ///
+    /// The floor is /28 (16 addresses: network, gateway, 13 hosts, broadcast) —
+    /// below that a network cannot hold enough workloads to be worth declaring,
+    /// and the ceiling is /8 so one network cannot swallow a whole private
+    /// range by typo.
+    pub fn usable_for_network(&self) -> std::result::Result<(), String> {
+        if !(8..=28).contains(&self.len) {
+            return Err(format!(
+                "prefix /{} is outside the usable range /8–/28 (a /29 or smaller has no room for \
+                 a gateway plus hosts; wider than /8 swallows a whole private range)",
+                self.len
+            ));
+        }
+        Ok(())
     }
 
     pub fn contains(&self, ip: u32) -> bool {
@@ -1790,6 +1834,112 @@ pub fn list_connections(ip2name: &std::collections::HashMap<String, String>) -> 
 #[cfg(test)]
 mod tests {
 
+    /// **Exaustivo sobre TODOS os prefixos**, que é a única forma de garantir que
+    /// a aritmética de máscara não tem um buraco algures no meio: um erro de
+    /// shift não aparece no /16 que toda a gente testa, aparece no /31.
+    ///
+    /// Cinco invariantes que um prefixo tem SEMPRE de respeitar:
+    #[test]
+    fn invariantes_de_todos_os_prefixos_de_0_a_32() {
+        for len in 0u8..=32 {
+            for base_s in [
+                "0.0.0.0",
+                "10.0.0.0",
+                "172.16.0.0",
+                "192.168.1.0",
+                "255.255.255.255",
+            ] {
+                let c = Cidr::parse(&format!("{base_s}/{len}")).expect("prefixo válido");
+
+                // 1. contém a sua própria base e o seu próprio último endereço.
+                assert!(c.contains(c.base), "{c:?} não contém a base");
+                assert!(c.contains(c.last()), "{c:?} não contém o último");
+
+                // 2. o último nunca é menor que a base.
+                assert!(c.last() >= c.base, "{c:?} last < base");
+
+                // 3. sobrepõe-se consigo próprio, sempre (reflexivo).
+                assert!(c.overlaps(&c), "{c:?} não se sobrepõe a si mesmo");
+
+                // 4. o gateway, quando existe, está DENTRO do prefixo — foi
+                //    exactamente isto que falhou no /31 e no /32.
+                if let Some(gw) = c.gateway() {
+                    let g = Cidr::parse_addr(&gw).expect("gateway parseável");
+                    assert!(c.contains(g), "{c:?} gateway {gw} fora do prefixo");
+                    assert!(c.len <= 30, "{c:?} não devia ter gateway");
+                }
+
+                // 5. round-trip: o texto que imprime volta a dar o mesmo prefixo.
+                let volta = Cidr::parse(&c.to_string_cidr()).expect("round-trip");
+                assert_eq!(volta, c, "round-trip mudou {c:?}");
+            }
+        }
+    }
+
+    /// O caso que rebentou a implementação anterior, isolado para não voltar:
+    /// no topo do espaço de endereços, `base + 1` transborda. Em debug era
+    /// pânico; em RELEASE era um wrap silencioso para `0.0.0.0` — uma rede com
+    /// o endereço nulo por gateway, configurada sem uma palavra.
+    #[test]
+    fn o_topo_do_espaco_de_enderecos_nao_transborda() {
+        let topo = Cidr::parse("255.255.255.255/32").unwrap();
+        assert_eq!(topo.gateway(), None, "um /32 não tem gateway");
+        assert_eq!(topo.last(), u32::MAX);
+        // E um /30 lá no topo, onde ainda há gateway mas o +1 anda perto do fim.
+        let quase = Cidr::parse("255.255.255.252/30").unwrap();
+        assert_eq!(quase.gateway().as_deref(), Some("255.255.255.253"));
+    }
+
+    /// `/31` (RFC 3021, ponto-a-ponto) e `/32` são prefixos VÁLIDOS — o `parse`
+    /// tem de os aceitar, porque servem para ler o endereço de um par ou uma
+    /// rota — mas não são redes de workloads. As duas perguntas são separadas
+    /// de propósito, e juntá-las tornaria o tipo inútil para o resto.
+    #[test]
+    fn parse_aceita_o_que_nao_serve_como_rede_e_a_validacao_e_que_recusa() {
+        for s in ["10.0.0.1/32", "10.0.0.0/31", "10.0.0.0/30", "10.0.0.0/0"] {
+            assert!(Cidr::parse(s).is_some(), "parse recusou {s}");
+            assert!(
+                Cidr::parse(s).unwrap().usable_for_network().is_err(),
+                "{s} não devia servir como rede de workloads"
+            );
+        }
+        for s in [
+            "10.0.0.0/8",
+            "10.210.0.0/16",
+            "172.20.4.0/22",
+            "192.168.1.0/28",
+        ] {
+            assert!(
+                Cidr::parse(s).unwrap().usable_for_network().is_ok(),
+                "{s} devia servir"
+            );
+        }
+    }
+
+    /// Sobreposição, exaustiva num espaço pequeno: um /24 partido em dois /25
+    /// não se sobrepõe entre si, mas cada um sobrepõe-se ao pai — e a relação é
+    /// simétrica em TODOS os casos. É o erro de fencepost com todas as
+    /// combinações, não com a que calhou escrever.
+    #[test]
+    fn sobreposicao_e_simetrica_e_hierarquica_em_todo_o_espaco() {
+        let pai = Cidr::parse("192.168.0.0/24").unwrap();
+        let mut filhos = Vec::new();
+        for i in (0..256).step_by(16) {
+            filhos.push(Cidr::parse(&format!("192.168.0.{i}/28")).unwrap());
+        }
+        for (i, a) in filhos.iter().enumerate() {
+            assert!(pai.overlaps(a) && a.overlaps(&pai), "{a:?} vs pai");
+            for (j, b) in filhos.iter().enumerate() {
+                let esperado = i == j;
+                assert_eq!(a.overlaps(b), esperado, "{a:?} vs {b:?}");
+                assert_eq!(a.overlaps(b), b.overlaps(a), "assimétrico: {a:?} {b:?}");
+            }
+        }
+        // E um vizinho de outro espaço nunca se sobrepõe.
+        let outro = Cidr::parse("192.168.1.0/24").unwrap();
+        assert!(!pai.overlaps(&outro) && !outro.overlaps(&pai));
+    }
+
     /// A forma LEGADA continua a querer dizer o que sempre quis.
     ///
     /// Todo o registo escrito antes disto guarda um octeto (`210`) ou dois
@@ -1803,7 +1953,7 @@ mod tests {
         assert_eq!(legado.to_string_cidr(), "10.210.0.0/16");
         assert_eq!(legado, Cidr::parse("10.210.0.0/16").unwrap());
         // E o gateway continua a ser o `.0.1` que sempre foi.
-        assert_eq!(legado.gateway(), "10.210.0.1");
+        assert_eq!(legado.gateway().as_deref(), Some("10.210.0.1"));
     }
 
     /// Os bits de host são LIMPOS, não recusados: `10.210.5.7/16` é como se
@@ -1845,7 +1995,7 @@ mod tests {
     fn tamanho_e_pertenca() {
         let c = Cidr::parse("172.20.4.0/22").unwrap();
         assert_eq!(c.size(), 1024);
-        assert_eq!(c.gateway(), "172.20.4.1");
+        assert_eq!(c.gateway().as_deref(), Some("172.20.4.1"));
         assert!(c.contains(Cidr::parse_addr("172.20.5.9").unwrap()));
         assert!(!c.contains(Cidr::parse_addr("172.20.8.1").unwrap()));
         // Um /32 é um endereço só, e não deve rebentar no shift.
