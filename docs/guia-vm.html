@@ -224,8 +224,8 @@ e <strong>nunca ganha um endereço visível</strong> — o <code>vm create</code
 </table>
 <p><strong>Para trabalho a sério com VMs, use libvirt.</strong> É o que este guia usa em todo o
 laboratório. O Cloud Hypervisor serve microVMs Linux que precisem de estar na mesma
-rede dos contentores — e traz o problema descrito em
-<a href="#a-vm-diz-running-e-nunca-arrancou">Armadilhas</a>.</p>
+rede dos contentores — e traz a distinção descrita em
+<a href="#em-cloud-hypervisor-o-endereço-é-calculado--não-observado">Armadilhas</a>.</p>
 <pre><code class="language-bash">delonix vm default-backend --set libvirt   # fixa a escolha, uma vez
 delonix vm default-backend                 # consulta
 </code></pre>
@@ -270,9 +270,10 @@ delonix vm rm dev         # pára e apaga overlay + registo
 delonix vm rm dev --force # descarta o registo local mesmo se o libvirt falhar
 </code></pre>
 <blockquote>
-<p><strong><code>stop</code> faz <code>undefine</code> do domínio libvirt.</strong> Consequência que apanha muita
-gente: <strong>os instantâneos desaparecem</strong>. Ver
-<a href="#stop-apaga-os-instantâneos-sem-o-dizer">Armadilhas</a>.</p>
+<p><strong><code>stop</code> faz <code>undefine</code> do domínio libvirt</strong> — para não deixar domínios órfãos.
+Uma VM parada não tem, portanto, domínio a quem o <code>virsh</code> possa perguntar seja o
+que for. Os instantâneos <strong>sobrevivem</strong> (desde a v0.51.x — ver
+<a href="#stop-apagava-os-instantâneos-sem-o-dizer--corrigido-na-v051x">Armadilhas</a>).</p>
 </blockquote>
 <p><code>start</code> reconstrói a VM a partir do registo persistido, mas <strong>só recupera</strong> disco,
 vCPU, memória, rede e motor. Kernel próprio, <em>seed</em> de cloud-init, volumes 9p,
@@ -928,7 +929,8 @@ virsh -c qemu:///system net-undefine labnet
 <h2 id="10-armadilhas-medidas">10. Armadilhas medidas</h2>
 <p>Cada uma custou tempo real durante a montagem deste laboratório.</p>
 <h3 id="stop-apagava-os-instantaneos-sem-o-dizer-corrigido-na-v051x"><code>stop</code> apagava os instantâneos, sem o dizer — corrigido na v0.51.x</h3>
-<p>Era isto, e foi medido aqui:</p>
+<p>Era isto, e foi medido aqui — <strong>os comandos abaixo são os da versão antiga</strong> (hoje
+são <code>vm snapshot create</code>/<code>ls</code>/<code>restore</code>), ficam só para registo:</p>
 <pre><code>$ delonix vm snapshot lab-probe base-limpa
 base-limpa
 $ delonix vm stop lab-probe &amp;&amp; delonix vm start lab-probe
@@ -987,18 +989,35 @@ E: Unable to locate package bind9-utils
 primeiro arranque. A VM já tem a rede NAT do libvirt, com internet e DNS a funcionar
 (verificado: <code>HTTP/1.1 200 OK</code> de <code>archive.ubuntu.com</code>), e a configuração fica
 declarada no manifesto, à vista de quem o ler.</p>
-<h3 id="vm-pull-nao-retoma-numa-ligacao-lenta"><code>vm pull</code> não retoma numa ligação lenta</h3>
+<h3 id="vm-pull-numa-ligacao-que-cai-a-meio-corrigido-na-v0510"><code>vm pull</code> numa ligação que cai a meio <em>(corrigido na v0.51.0)</em></h3>
+<p>Durante a montagem deste laboratório, um <code>vm pull</code> de 276 MiB morreu assim:</p>
 <pre><code>$ time delonix vm pull ghcr.io/angolardevops/delonix-vm-base:debian-bookworm
 error registry error: blob read: request or response body error
 real 8m19s
 </code></pre>
-<p>A ligação deste host ao <code>ghcr.io</code> dá <strong>416 KB/s</strong> (medido com <code>curl</code>: 22,9 MB em
-55 s). Os 276 MiB precisavam de ~11 minutos e o cliente desistiu antes. Como não há
-retomada, tentar outra vez recomeça no byte zero — abaixo de ~600 KB/s a imagem nunca
-acaba.</p>
-<p><code>delonix vm ls-remote</code> funciona bem na mesma ligação, porque lê só manifestos.
-<strong>Numa ligação lenta, traga as imagens por outro meio</strong> e registe-as com
-<code>delonix image vm import</code>.</p>
+<p>Não era o relógio — o tecto é de 4 horas desde a v0.47.1 — era a ligação a cair. O
+que tornava isto grave é que <strong>não havia retomada</strong>: a tentativa seguinte recomeçava
+no byte zero, portanto numa ligação má a imagem podia nunca acabar, por mais vezes
+que se tentasse.</p>
+<p>Hoje o descarregamento de um blob <strong>retoma com <code>Range: bytes=&lt;n&gt;-</code></strong>, com 5
+tentativas e uma linha por retomada. Costurar dois intervalos é seguro pela mesma
+razão de sempre: o digest do manifesto é verificado no fim, portanto ou os bytes
+batem certo ou são descartados. Coberto por
+<code>blob_retoma_uma_ligacao_cortada_a_meio</code> e por
+<code>blob_recomeca_quando_o_servidor_ignora_o_range</code>.</p>
+<p><strong>A retomada é dentro da mesma invocação</strong> — cobre a ligação a cair, não o processo a
+ser morto. Matar um <code>vm pull</code> a meio e voltar a lançá-lo continua a começar do
+princípio.</p>
+<blockquote>
+<p>Uma nota de honestidade sobre a medição original: quando isto falhou, a ligação
+deste host ao <code>ghcr.io</code> dava <strong>416 KB/s</strong>; horas depois, a mesma medição deu
+<strong>9,7 MB/s</strong> e a imagem inteira desceu em menos de 75 s. O defeito era real e a
+correcção é a certa, mas os 416 KB/s eram um mau momento da rede — não uma
+característica do host.</p>
+</blockquote>
+<p><code>delonix vm ls-remote</code> funciona bem mesmo em ligações fracas, porque lê só
+manifestos. Se a rede for genuinamente má, traga as imagens por outro meio e
+registe-as com <code>delonix image vm import</code>.</p>
 <h3 id="um-apply-por-ficheiro-um-stack-por-directorio">Um <code>apply</code> por ficheiro, um <em>stack</em> por directório</h3>
 <p>O nome do <em>stack</em> vem do <strong>directório</strong> do manifesto (a menos que haja um <code>kind:
 Stack</code> com nome, ou <code>--name</code>). Os seis ficheiros do laboratório são, para o motor, o
@@ -1029,20 +1048,21 @@ lá dentro leva <strong>30 a 60 s</strong> a ter o SSH a aceitar ligações. Nã
 <em>script</em>, espere pela condição em vez de por um tempo fixo:</p>
 <pre><code class="language-bash">until delonix vm ssh lab-dns -- true 2&gt;/dev/null; do sleep 5; done
 </code></pre>
-<h3 id="nomear-a-imagem-e-apontar-lhe-o-caminho-nao-sao-a-mesma-coisa">Nomear a imagem e apontar-lhe o caminho não são a mesma coisa</h3>
-<pre><code># por nome — recusado, correctamente
-$ delonix stack apply -f appliance.yaml     # spec.disk: opnsense:26.1
-error: hostname, sshKeys: this image is an appliance and does not run cloud-init,
-so these would be silently ignored
-
-# pelo caminho do mesmo ficheiro — passa, e leva um CD-ROM que o guest ignora
-$ delonix stack apply -f appliance.yaml     # spec.disk: /.../opnsense_26.1.qcow2
-vm/lab-fwtest: ensured
+<h3 id="nomeie-a-imagem-em-vez-de-apontar-ao-ficheiro">Nomeie a imagem, em vez de apontar ao ficheiro</h3>
+<p>Durante a montagem deste laboratório, um <em>appliance</em> declarado pelo <strong>caminho</strong> do
+<code>qcow2</code> escapava à recusa de cloud-init que o mesmo <em>appliance</em> declarado pelo
+<strong>nome</strong> recebia — e levava um CD-ROM de <em>seed</em> que o convidado nunca lê. Hoje as
+duas formas são recusadas do mesmo modo:</p>
+<pre><code># por nome                    spec.disk: opnsense:26.1
+# pelo caminho do ficheiro    spec.disk: /.../opnsense_26.1.qcow2
+error invalid argument: hostname, sshKeys: this image is an appliance and does not
+run cloud-init, so these would be silently ignored — configure it on first boot
+(console or web UI), or pass your own `--seed` if you know the guest reads one
 </code></pre>
-<p>Os metadados de uma imagem (é <em>appliance</em>? que vCPU/memória recomenda? que motor?)
-estão associados ao <strong>nome</strong> no registo local. Um caminho para um <code>qcow2</code> não traz
-nenhum. <strong>Nomeie sempre a imagem</strong> — <code>delonix image vm ls</code> mostra os nomes
-disponíveis.</p>
+<p>Continua a valer a pena <strong>nomear a imagem</strong>: é ao nome que estão associados os
+metadados que o motor usa sem lhos pedir — se é <em>appliance</em>, e que vCPU, memória e
+motor a imagem recomenda (o <code>resolve_vm_defaults</code>). <code>delonix image vm ls</code> mostra os
+nomes disponíveis.</p>
 <hr />
 <h2 id="referencia-rapida">Referência rápida</h2>
 <pre><code class="language-bash"># ciclo de vida
@@ -1063,7 +1083,7 @@ delonix vm build -t &lt;tag&gt; [--network] . · vm convert &lt;src&gt; --to &lt
 delonix vm init --vmfile
 
 # instantâneos (libvirt, VM a correr)
-delonix vm snapshot &lt;n&gt; &lt;s&gt; · snapshots &lt;n&gt; · restore &lt;n&gt; &lt;s&gt;
+delonix vm snapshot create|ls|restore|rm &lt;n&gt; [&lt;s&gt;]
 
 # declarativo
 delonix stack validate|plan|apply -f &lt;f&gt; [--dry-run] [--replace K/n] [--detailed-exitcode]
