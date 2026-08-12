@@ -4,6 +4,150 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.50.0 — o plano de nomes passa a isolar como o dataplane já isolava, e o manifesto deixa de engolir o que não entende
+
+Dois fios neste ciclo, e são o mesmo fio visto de dois lados: **uma resposta
+afirmativa sobre trabalho que não foi feito**. Um resolvedor que devolve o
+endereço de um inquilino a quem não lhe pode tocar; um `validate` que diz `OK`
+sobre um campo que vai deitar fora. Nenhum deles falha — é isso que os torna
+caros.
+
+## O DNS responde o que o dataplane deixaria passar (ADR-0011)
+
+A revisão de rede mediu um buraco sem equivalente do lado do dataplane: o
+firewall isola namespaces nas duas direcções, e o **plano de nomes não isolava
+nada**.
+
+```
+client(teamA) → ping   webb(teamB)                  → 100% packet loss   (correcto)
+client(teamA) → lookup webb                         → 10.250.198.79      (fuga)
+client(teamA) → lookup webb.teamB.delonix.internal  → 10.250.198.79      (fuga)
+```
+
+Um inquilino enumerava a existência e o endereço exacto de cada workload de
+todos os outros. O `dns_server_main` **tinha** o endereço de quem pergunta — vem
+do `recv_from` — e deitava-o ao chão antes de decidir.
+
+Agora o resolvedor decide com esse endereço, e a política não é nova: é a que já
+está persistida nas regras de firewall.
+
+| alvo | resolve? | porquê |
+|---|---|---|
+| mesma namespace | sim | o dataplane aceita |
+| namespace `default` | sim | alcançável de qualquer uma, por desenho |
+| outra namespace | **não → NXDOMAIN** | o dataplane descarta |
+| outra namespace, com um allow de entrada que cobre o cliente | sim | um `kind: Dependency` abriu-a de propósito |
+
+A última linha é o que mantém o `kind: Dependency` utilizável: uma dependência
+atravessa a fronteira numa direcção, e um resolvedor que recusasse o nome
+deixaria a funcionalidade a funcionar só por IP — a mesma forma «aceite e depois
+ignorado» que este repositório continua a ter de remover.
+
+Derivar a resposta das regras que já existem é o ponto. Uma allowlist separada
+para o DNS seria uma segunda fonte de verdade sobre alcançabilidade, e as duas
+divergiam na primeira vez que alguém mexesse numa.
+
+**Os nomes passam a ser únicos por (namespace, nome).** Uma namespace que não é
+um espaço de nomes contradiz o próprio nome — e sem isto o âmbito acima nunca
+poderia ser exercido, porque dois inquilinos não podiam ambos ter `db`.
+
+## DNS de produção — três respostas erradas com cara de resposta certa
+
+- **Um serviço morto continuava a atender pelo nome.** O registo ficava no
+  índice depois de o workload morrer, por isso o nome resolvia para um endereço
+  que já não atendia ninguém.
+- **Os aliases nunca atenderam.** Estavam aceites na spec e não chegavam ao
+  resolvedor.
+- **O AAAA ia à internet perguntar por um container nosso** — e voltava
+  `SERVFAIL`. Um nome interno não tem AAAA; perguntá-lo lá fora era, além de
+  errado, uma fuga do nome para um resolvedor externo.
+- **Cinco segundos até à primeira retentativa** no `resolv.conf` gerado: um
+  arranque em que a primeira query se perde ficava cinco segundos parado, o que
+  em produção lê-se como aplicação pendurada.
+
+## Um pod em rede custom gravava o IP de OUTRA rede
+
+E o DNS servia-o. O membro do pod ligado a uma rede própria registava o endereço
+da rede errada, por isso o nome resolvia para algo inalcançável — o pior sintoma
+possível, um nome que resolve e uma ligação que fica pendurada.
+
+Na mesma família: com nomes por namespace, a regra «o mais recente ganha» do
+store passou a poder escolher o recurso de **outro inquilino**, e uma referência
+de VM morta era imortal — o `prune` não a limpava e o remédio que imprimia não
+existia.
+
+## O manifesto: o campo mal escrito deixa de passar em silêncio
+
+O guarda de campos desconhecidos existia por Kind e era chamado do `apply` de
+cada grupo; o `stack.rs` nunca o chamou. Medido com um campo inventado no spec
+de cada um dos 16 Kinds:
+
+| comando | antes | agora |
+|---|---|---|
+| `stack validate` | 3/16 | **16/16** |
+| `stack plan` | 3/16 | **16/16** |
+| `stack apply --dry-run` | 6/16 | **16/16** |
+
+Enquanto isso, `delonix secret apply -f` no MESMO ficheiro respondia
+`unknown field 'x' in spec — ignored`. O mesmo manifesto era verificado ou não
+consoante o comando que lhe tocasse. Passa a haver uma lista
+(`manifest::spec_fields_for`) e um sítio que a consulta (`manifest::load`), por
+onde todos os caminhos passam — incluindo o `Cluster`, que era o último de fora.
+
+**E uma sub-chave mal escrita dentro de um grupo desaparecia.** O hoist copia as
+que conhece e a seguir apaga o grupo, por isso a prova era destruída antes de
+alguém a poder ver. Medido num container real:
+
+```yaml
+resources:
+  memoria: 128M      # o campo é `memory`
+```
+
+→ `created`, exit 0, nenhum aviso, e `memory_max: "max"`: sem limite nenhum.
+Agora é reportado com o caminho exacto (`resources.memoria`), nos três comandos.
+
+O `env: {KEY: value}` e o `network:` plano ficam de fora de propósito: ali cada
+chave é dado do utilizador, não um nome de campo.
+
+## `stack validate` deixa de dizer OK sobre o que ignorou
+
+Imprimia o aviso e, na linha seguinte, `OK`. As duas frases eram verdadeiras e
+juntas mentiam. Agora o veredicto condiz, e `--strict` transforma-o em exit code
+para a CI que quer que o erro de escrita pare o pipeline. Um manifesto limpo
+imprime exactamente o que imprimia antes.
+
+## `kind: Vm` deixa de ser um `type: object` para o editor
+
+A linha que a doc manda pôr no topo do manifesto —
+`# yaml-language-server: $schema=…` — cobria 4 dos 17 Kinds. O `Vm` era o pior
+buraco: a maior spec do manifesto (34 campos) e aquela sobre a qual o editor
+nada dizia. São agora cinco, com `additionalProperties: false`. Os 59 documentos
+de `examples/` validam contra o schema publicado.
+
+## Documentação
+
+- **Appliances**: a tabela dizia «web UI, console» para todas. Passa a dar o
+  endereço e a porta de cada produto — as quatro do Proxmox deixam de estar numa
+  linha só, e as portas são a tabela `CASES` do `verify-boot.sh`, ou seja aquela
+  em que cada imagem foi provada a responder antes de ser publicada. Com as duas
+  ressalvas que custavam uma sessão de depuração: o OPNsense não responde na WAN
+  por desenho, e o TrueNAS foi provado na :80 mas o provisionamento fala na :443.
+- **Três campos** que o motor aceita e nenhum exemplo mostrava — `addHost`,
+  `hostAliases`, `pullSecret`. A página `kinds` é gerada a partir de
+  `examples/`: o que não está lá não existe para quem lê.
+
+## Breaking, estreito
+
+Um manifesto ou script que resolva um nome **através de uma fronteira de
+namespace** sem um `kind: Dependency` que a abra passa a receber `NXDOMAIN` em
+vez do endereço. Era a fuga; deixa de o ser. Um nome único no nó continua a
+funcionar como antes.
+
+Nada mais muda de comportamento: os avisos novos do manifesto são avisos, e o
+exit code do `validate` só muda com `--strict`.
+
+---
+
 ## v0.49.0 — backup e restauro por recurso, a quente, e um `--pivot` que dava a VM à imagem dourada
 
 Ciclo grande, e o fio que o atravessa é o de sempre neste projecto: a classe de
