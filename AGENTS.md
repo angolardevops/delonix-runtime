@@ -126,7 +126,14 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
 - `delonix volumes` — create/ls/rm/inspect, wrapper fino sobre `VolumeStore`.
 - `delonix network` — ls/create/rm/inspect. **Dois stores em paralelo, deliberado**:
   `NetworkStore` (registo declarativo rico — drivers bridge/macvlan/ipvlan/overlay) e
-  `infra::{network_create_with,network_remove}` (plano físico do holder netns rootless). Para os
+  `infra::{network_create_with,network_remove}` (plano físico do holder netns rootless).
+  **O nome da bridge tem UMA fórmula, `delonix_net::bridge_name`, e o plano físico é a
+  autoridade** — é o `NetDef` que nomeia o dispositivo que o holder cria, e o `NetworkStore` só o
+  RELATA (`ls`/`inspect`/`describe`). Tinha a sua própria (`dlxn{base:02x}{hash:04x}` contra
+  `dlxn{hash:08x}`) e imprimia um dispositivo que não existe no host — medido em `lab-net`:
+  `dlxne9623e` na CLI, `dlxn0536623e` no netns. Mesma família do `ingress ls` a dizer `allow` sobre
+  uma porta bloqueada. Nada há a migrar: a bridge do `NetworkStore` é recalculada a cada `get` (o
+  registo guarda `base=`), ao contrário do `NetDef`, que a persiste. Para os
   drivers `bridge` E `overlay`, `network create` orquestra os dois em conjunto — o `overlay` sobe
   o plano físico no holder (bridge + uplink VXLAN `dlxvx<vni>` a masterizá-la + FDB dos pares +
   WireGuard se cifrado, ver `realize_overlay`/`infra::set_vxlan`), porque é realizável sem

@@ -567,6 +567,26 @@ fn fnv32(s: &str) -> u32 {
     h
 }
 
+/// The bridge device name of a user network — **the single formula**, shared by
+/// the two stores that talk about the same device (the same
+/// generator-and-reader-share-the-format discipline as `fw_rule_tail`/
+/// `antispoof_rule_args`).
+///
+/// The authority is the physical plane: `infra::network_create{,_with}` writes
+/// this into the `NetDef` and it is that name the holder actually creates the
+/// link with (`netadd`/`link_exists`/`resolve_net`). The declarative
+/// `NetworkStore` only ever REPORTS it (`network ls`/`inspect`/`describe`), and
+/// it derives it here rather than recomputing — it had its own formula
+/// (`dlxn{base:02x}{hash:04x}`) and printed a device that does not exist on the
+/// host, in the very column an operator reads to go and debug the device.
+///
+/// Note this deliberately does NOT depend on the base octet: the name alone is
+/// unique in both stores, and adding the base is what made the two diverge.
+/// 12 chars, comfortably inside IFNAMSIZ (15).
+pub(crate) fn bridge_name(name: &str) -> String {
+    format!("dlxn{:08x}", fnv32(name))
+}
+
 /// The name of the default network (the `delonix0` bridge, `docker0` style).
 pub const DEFAULT_NET: &str = "bridge";
 
@@ -658,9 +678,11 @@ impl Network {
     }
 
     /// Builds a user network with a given base octet (`10.<base>.0.0/16`).
-    /// The bridge name includes the base + a hash of the name (unique, ≤ 15 chars).
+    /// The bridge name comes from [`bridge_name`] — the SAME formula the physical
+    /// plane uses, so what `network ls`/`inspect` print is the device that really
+    /// exists in the holder netns.
     fn user_with_base(name: &str, base: u8) -> Self {
-        let bridge = format!("dlxn{:02x}{:04x}", base, fnv32(name) & 0xffff);
+        let bridge = bridge_name(name);
         Network {
             name: name.to_string(),
             bridge,
@@ -2079,6 +2101,61 @@ mod tests {
             "a base escolhida ({base}) colide com algo já usado"
         );
         assert!(base != 88 && base != 90);
+    }
+
+    /// The two stores that name the same bridge MUST agree, in both directions.
+    ///
+    /// Regression for a measured bug: `network ls`/`inspect` printed
+    /// `dlxne9623e` for `lab-net` while the device the holder had actually
+    /// created — and that the `NetDef`, `resolve_net`, `vm bridge` and the
+    /// egress view all use — was `dlxn0536623e`. Two independent formulas for
+    /// the same thing, so the column an operator reads to go and debug the
+    /// device sent them to a device that is not there.
+    ///
+    /// The literal is the ground truth captured on a live host (kaeso-sys-01,
+    /// network `lab-net`, `ip -br link show` inside the holder netns), NOT a
+    /// value computed from the code under test. Without it this test would be
+    /// tautological the moment both sides call the same helper: it is what
+    /// makes a change to the shared formula itself fail here, rather than
+    /// silently renaming every bridge in the fleet.
+    #[test]
+    fn o_nome_da_bridge_e_o_mesmo_nos_dois_stores() {
+        // The measured device name, byte for byte.
+        assert_eq!(bridge_name("lab-net"), "dlxn0536623e");
+
+        for name in ["lab-net", "frontend", "a", "kaeso-net", "com-hifen_e_under"] {
+            let expected = bridge_name(name);
+            // Physical-plane direction: the `NetDef` that gets serialized to
+            // disk and whose `bridge` the holder creates the link with. Asserted
+            // through the real constructor, not through `bridge_name` again —
+            // otherwise this side of the comparison proves nothing.
+            assert_eq!(
+                infra::NetDef::new(name, "10.201").bridge,
+                expected,
+                "network '{name}': the physical plane disagrees with the store"
+            );
+            // `NetworkStore` direction: the declarative record REPORTS the name.
+            // Swept across the whole base space because the old formula folded
+            // the base into the name — a single base would have hidden it.
+            for base in 100..=239u8 {
+                assert_eq!(
+                    Network::user_with_base(name, base).bridge,
+                    expected,
+                    "network '{name}' (base {base}): the store disagrees with the physical plane"
+                );
+            }
+            // An overlay is realized physically too, and inherits the same name.
+            assert_eq!(
+                Network::overlay_with_base(name, 201, 42, vec![], None).bridge,
+                expected
+            );
+            // IFNAMSIZ, the reason the name is a hash and not the network's own.
+            assert!(expected.starts_with("dlxn") && expected.len() <= 15);
+        }
+
+        // The default network is not hashed — the two stores name it with their
+        // own constant, and those must not drift apart either.
+        assert_eq!(Network::default_bridge().bridge, infra::INFRA_BRIDGE);
     }
 
     #[test]
