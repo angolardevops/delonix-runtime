@@ -194,6 +194,9 @@ pub enum ImageCmd {
         /// authenticated beyond the registry's own digest.
         #[arg(value_hint = clap::ValueHint::FilePath, long, value_name = "PEM")]
         verify: Option<PathBuf>,
+        /// (only with `--vm`) Local name (default: derived from the reference).
+        #[arg(long)]
+        name: Option<String>,
         /// (only with `--vm`) With no argument, pull the official
         /// NO-Kubernetes golden instead of the Kubernetes one.
         #[arg(long)]
@@ -703,13 +706,33 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
         ImageCmd::Pull {
             image,
             verify,
-            no_k8s: _,
+            name,
+            no_k8s,
         } => {
             // Unlike `--vm pull` (defaults to the official golden image), a
             // plain container-image pull has no sensible default — `image`
             // only became `Option<String>` so the SAME struct could serve
-            // both paths at the clap level (see `run_vm`'s mapping). `no_k8s`
-            // only matters in `--vm` mode too — ignored here.
+            // both paths at the clap level (see `run_vm`'s mapping).
+            //
+            // `--name`/`--no-k8s` belong to the `--vm` half of that shared
+            // struct. They used to be silently discarded here, which is the
+            // failure this engine refuses to ship: the caller believes the
+            // image was stored under the name they asked for. Name the flag
+            // and the alternative instead.
+            if name.is_some() {
+                return Err(Error::Invalid(
+                    super::po::t(
+                        "`--name` only applies to VM images (`image --vm pull`) — to give a \
+                         container image another reference, pull it and then `image tag`",
+                    )
+                    .into(),
+                ));
+            }
+            if no_k8s {
+                return Err(Error::Invalid(
+                    super::po::t("`--no-k8s` only applies to VM images (`image --vm pull`)").into(),
+                ));
+            }
             let image = image.ok_or_else(|| {
                 Error::Invalid(super::po::t("`image pull <reference>`: the reference is required").into())
             })?;
@@ -833,13 +856,19 @@ fn run_vm(action: ImageCmd) -> Result<()> {
         // `source`, so clap itself rejected the no-arg invocation before this
         // code ever ran. Both are now `Option<String>`; `vmimage::run`
         // applies the actual default.
+        // `--name` used to be dropped on the floor here: `vm pull` and `image
+        // vm pull` both took it, and only this legacy third spelling answered
+        // `unexpected argument '--name'`. Three entry points to one command
+        // that disagree on their flags is how a documented example stops
+        // working depending on which of them the reader happened to copy.
         ImageCmd::Pull {
             image,
             verify: _,
+            name,
             no_k8s,
         } => VmImageCmd::Pull {
             source: image,
-            name: None,
+            name,
             no_k8s,
         },
         ImageCmd::LsRemote { source, no_k8s } => VmImageCmd::LsRemote { source, no_k8s },

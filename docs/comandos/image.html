@@ -659,6 +659,9 @@ Options:
       --verify &lt;PEM&gt;
           Verify the cosign signature with this public key (PEM) AFTER the pull, and fail if it does not match. Without this, a pull is not authenticated beyond the registry&#x27;s own digest
 
+      --name &lt;NAME&gt;
+          (only with `--vm`) Local name (default: derived from the reference)
+
       --no-k8s
           (only with `--vm`) With no argument, pull the official NO-Kubernetes golden instead of the Kubernetes one
 
