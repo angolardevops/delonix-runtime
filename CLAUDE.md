@@ -3393,6 +3393,24 @@ existe para impedir — e a mesma raiz mantinha os defaults da imagem (`VCPUS`/`
   URI) — `grep -c` sobre nada devolve `0`, que se lê como «não tem cdrom». Um zero que vem de uma
   medição falhada não é um zero.
 
+**Resíduo fechado a seguir: a recusa era contornável pelo CAMINHO.** O MESMO appliance com o mesmo
+`hostname:`/`sshKeys:` recusava por `disk: opnsense:26.1` e era **aceite** por
+`disk: /…/vm-images/opnsense_26.1.qcow2` — rc=0, `ensured`, e o `seed.iso` outra vez anexado. E o
+caminho absoluto é precisamente o contorno que alguém tenta depois de levar `image not found` com o
+nome, ou seja: a verificação era furada pela jogada que o próprio bug anterior ensinava. Os defaults
+da imagem tinham a mesma assimetria. **`resolve_image_ref` passou a fazer a busca inversa** — se o
+`store.get` falhar e a referência for um caminho, procura a entrada do store cujo qcow2 É esse
+ficheiro (`image_at_path`, canonicalizado dos dois lados, o mesmo idioma do `vms_backed_by` a um
+ficheiro de distância). Devolve **`qcow2_path(nome)` e não o caminho canónico**, para as duas
+grafias darem a MESMA string: duas strings para a mesma imagem lêem-se como deriva, e uma deriva de
+`Vm` é um `Replace`, que deita fora o overlay. Um qcow2 **fora** do store continua a resolver-se a
+si próprio sem metadados — não é lacuna, é o que se sabe dele: nada neste host regista o que um
+disco arbitrário é, logo não há flag de appliance para ler nem defaults para aplicar. Validado ao
+vivo com `DELONIX_ROOT` isolado (as duas grafias recusam com o mesmo texto); a igualdade das duas
+strings resolvidas é prova de **teste unitário** e não ao vivo — fabricar um registo de VM à mão
+para ver o plano deu um `vm ls` vazio (o store salta em silêncio um JSON a que faltem campos), e um
+proxy que falha não é medição.
+
 ## A subnet de uma rede passou a valer, e o que isso abriu (v0.47.0)
 
 Pedido: poder passar CIDRs ao criar VMs/redes (`vpc_cidr`, `public_subnets_cidr`,
