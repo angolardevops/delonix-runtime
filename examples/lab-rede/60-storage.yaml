@@ -36,7 +36,19 @@ spec:
       insecureTLS: true
       dataset: labpool/lab-dados
       quota: 2G          # mínimo aceite pela appliance: 1 GiB
+      # Dono e modo do dataset. Sem isto o dataset é do root da appliance com
+      # modo 0755, e um cliente que o monte vê-o mas não escreve nele.
+      owner:
+        uid: 1000
+        gid: 1000
+        mode: "0770"
       share:
         networks:
           - 10.50.0.0/24
           - 192.168.122.0/24
+        # O NFS faz root-squash por omissão: o root do cliente chega à NAS como
+        # `nobody`. Mapeá-lo para root é o `no_root_squash` clássico — cómodo
+        # num laboratório, e uma cedência real de segurança fora dele: quem for
+        # root numa máquina que possa montar isto é root nos dados.
+        maprootUser: root
+        maprootGroup: root
