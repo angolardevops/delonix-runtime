@@ -1002,6 +1002,16 @@ fn refuse_unallowed(changes: &[Change], replace: &[String]) -> Result<()> {
     )))
 }
 
+/// How many documents of each Kind the manifest carries — a layer with none is
+/// announced as skipped instead of pretending to have done work.
+fn count_of_kinds(docs: &[manifest::ManifestDoc]) -> std::collections::BTreeMap<String, usize> {
+    let mut m = std::collections::BTreeMap::new();
+    for d in docs {
+        *m.entry(d.kind.clone()).or_insert(0) += 1;
+    }
+    m
+}
+
 fn apply(file: Option<PathBuf>, replace: Vec<String>, do_prune: bool) -> Result<()> {
     // `--replace` is the flag that AUTHORIZES a destructive recreate, so a value
     // it cannot possibly match is refused here rather than ignored. Accepting
@@ -1073,23 +1083,34 @@ fn apply(file: Option<PathBuf>, replace: Vec<String>, do_prune: bool) -> Result<
     // Secrets first: `Storage.passwordSecret` and `Container.secret` reference them.
     // `base` = the manifest folder, so `fromEnvFile` resolves next to it.
     let base = path.parent().unwrap_or_else(|| std::path::Path::new("."));
-    super::secret::apply(&docs, base)?;
-    super::network::apply(&docs)?;
-    super::volume::apply(&docs)?;
+    // One LAYER per Kind, in the order below, each announced before it runs and
+    // ticked with the time it took — the shape a CI log has, because that is what
+    // an apply is: a pipeline whose stages depend on the previous one.
+    //
+    // No spinner and no fold here, deliberately: each layer prints its own
+    // per-resource lines (`container/web: created`), which are the record of what
+    // happened. A spinner would fight them for the same row, and folding them
+    // would hide the one thing worth keeping. The animation belongs where a step
+    // is SILENT for seconds — see `Progress` in `vm build`/`vm create`.
+    let mut layers = super::output::Layers::new(count_of_kinds(&docs));
+    layers.run("Secret", "🔑", || super::secret::apply(&docs, base))?;
+    layers.run("Network", "🌐", || super::network::apply(&docs))?;
+    layers.run("Volume", "💽", || super::volume::apply(&docs))?;
     // ShareVolume right after Storage: it carves subdirectories out of an
     // already-mounted Storage, so the parent must exist first.
-    super::sharevolume::apply(&docs)?;
-    super::image::apply(&docs)?;
-    super::vm::apply(&docs)?;
-    super::container::apply(&docs)?;
-    super::pod::apply(&docs)?;
-    super::firewall::apply(&docs)?;
+    layers.run("ShareVolume", "📂", || super::sharevolume::apply(&docs))?;
+    layers.run("Image", "📦", || super::image::apply(&docs))?;
+    layers.run("Vm", "🖥", || super::vm::apply(&docs))?;
+    layers.run("Container", "📦", || super::container::apply(&docs))?;
+    layers.run("Pod", "🧩", || super::pod::apply(&docs))?;
+    layers.run("FirewallPolicy", "🧱", || super::firewall::apply(&docs))?;
     // HTTPRoute LAST: it needs the backend containers already created (with IP) to
     // resolve the routes; brings up/reloads the L7 reverse-proxy.
-    super::httproute::apply(&docs)?;
+    layers.run("HTTPRoute", "🔀", || super::httproute::apply(&docs))?;
     // Tunnel LAST of all: its `localPort` is typically the HTTPRoute proxy's own
     // listening port (see `cmd::tunnel`'s module doc) — must already be up.
-    super::tunnel::apply(&docs)?;
+    layers.run("Tunnel", "🌍", || super::tunnel::apply(&docs))?;
+    layers.done();
 
     // Everything that exists is now created; converge what differs, and stamp
     // ownership + the applied spec on all of it. The stamp is what makes the
