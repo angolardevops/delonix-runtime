@@ -107,6 +107,26 @@ impl HostSpec {
     }
 }
 
+/// Field names accepted in the `spec` of `kind: Cluster`, for the unknown-field
+/// guard (`manifest::spec_fields_for`). Cluster was the last Kind outside it:
+/// its sub-specs are nested, which is why it was skipped, but the TOP level is
+/// as flat as any other and a typo there was ignored in silence like the rest.
+/// Kept aligned with `ClusterSpec` by `manifest::examples_nao_tem_campos_desconhecidos`.
+pub(crate) const CLUSTER_SPEC_FIELDS: &[&str] = &[
+    "cni",
+    "controlPlane",
+    "controlPlaneEndpoint",
+    "etcd",
+    "k8sVersion",
+    "kind",
+    "mode",
+    "podSubnet",
+    "serviceSubnet",
+    "ssh",
+    "vm",
+    "workers",
+];
+
 #[derive(Debug, Deserialize)]
 struct ClusterSpec {
     /// **The discriminator**: `kind` (containers here), `vm` (golden VMs) or

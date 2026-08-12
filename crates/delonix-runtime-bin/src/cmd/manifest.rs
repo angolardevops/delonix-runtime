@@ -321,7 +321,8 @@ pub(crate) fn spec_fields_for(kind: &str) -> Option<&'static [&'static str]> {
         "ShareVolume" => Some(crate::cmd::sharevolume::SHAREVOLUME_SPEC_FIELDS),
         "Workload" => Some(crate::cmd::workload::WORKLOAD_SPEC_FIELDS),
         "Stack" => Some(STACK_SPEC_FIELDS),
-        _ => None, // `Cluster` nests its specs; outside this guard.
+        "Cluster" => Some(crate::cmd::cluster::CLUSTER_SPEC_FIELDS),
+        _ => None,
     }
 }
 
