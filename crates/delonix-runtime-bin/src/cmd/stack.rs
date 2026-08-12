@@ -263,9 +263,10 @@ pub fn run(action: StackCmd) -> Result<()> {
 /// The stack Kinds, in the SAME order as `apply` — whoever reads `describe` sees
 /// the order in which things are created, which is half the diagnosis when an
 /// apply stops halfway.
-const KINDS: [&str; 12] = [
+const KINDS: [&str; 13] = [
     "Secret",
     "Network",
+    "NetworkRoute",
     "Volume",
     // Carved out of a Volume, so it comes after one. It was APPLIED by
     // `stack apply` and missing from this list, which meant `ls`, `describe`
@@ -1129,6 +1130,9 @@ fn apply(file: Option<PathBuf>, replace: Vec<String>, do_prune: bool) -> Result<
     let mut layers = super::output::Layers::new(count_of_kinds(&docs));
     layers.run("Secret", "🔑", || super::secret::apply(&docs, base))?;
     layers.run("Network", "🌐", || super::network::apply(&docs))?;
+    // Logo a seguir às redes: uma rota nomeia DUAS que têm de existir, e nada
+    // do que vem abaixo depende dela para ser criado.
+    layers.run("NetworkRoute", "🔗", || super::netroute::apply(&docs))?;
     layers.run("Volume", "💽", || super::volume::apply(&docs))?;
     // ShareVolume right after Storage: it carves subdirectories out of an
     // already-mounted Storage, so the parent must exist first.
@@ -1599,6 +1603,26 @@ fn validate_graph_with(
     }
 
     let mut issues = Vec::new();
+
+    // Uma rota nomeia DUAS redes, e nomear uma que não existe é o mesmo engano
+    // que o `vm init` cometia: um manifesto que se recusa a si próprio. Ambas
+    // as pontas são verificadas, e a mensagem diz QUAL delas falta.
+    for doc in docs.iter().filter(|d| d.kind == "NetworkRoute") {
+        if let Ok(spec) = manifest::spec_of::<super::netroute::NetworkRouteSpec>(doc) {
+            for (lado, rede) in [("from", &spec.from), ("to", &spec.to)] {
+                if !networks.contains(rede) {
+                    issues.push(super::po::tf(
+                        "NetworkRoute '{name}' → {side} network '{net}' is not declared nor does it exist",
+                        &[
+                            ("name", &doc.metadata.name),
+                            ("side", lado),
+                            ("net", rede),
+                        ],
+                    ));
+                }
+            }
+        }
+    }
 
     // Duplicates within the manifest (same Kind + name) — the `apply` would create one
     // and skip the other; better to warn than to blindly apply one of the two.

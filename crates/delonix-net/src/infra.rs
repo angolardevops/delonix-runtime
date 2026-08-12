@@ -422,6 +422,8 @@ pub fn ingress_table_ruleset() -> String {
         "table ip {INGRESS_TABLE} {{\n\
          \x20 set {DLXALL_SET} {{ type ipv4_addr; }}\n\
          \x20 map {FWMAP} {{ type ipv4_addr : verdict; }}\n\
+         \x20 set {DLXBR_SET} {{ type ifname; }}\n\
+         \x20 map {NETPAIR_MAP} {{ type ifname . ifname : verdict; }}\n\
          \x20 chain fwguard {{ type filter hook forward priority -20;\n\
          {guard}\
          \x20 }}\n\
@@ -431,7 +433,11 @@ pub fn ingress_table_ruleset() -> String {
          \x20 }}\n\
          \x20 chain pre {{ type nat hook prerouting priority -100; }}\n\
          \x20 chain post {{ type nat hook postrouting priority 100; oifname \"tap0\" masquerade; }}\n\
-         \x20 chain fwdeny {{ type filter hook forward priority -10; }}\n\
+         \x20 chain fwdeny {{ type filter hook forward priority -10;\n\
+         \x20\x20 ct state established,related accept\n\
+         \x20\x20 iifname . oifname vmap @{NETPAIR_MAP}\n\
+         \x20\x20 iifname @{DLXBR_SET} oifname @{DLXBR_SET} counter drop\n\
+         \x20 }}\n\
          \x20 chain dlxinput {{ type filter hook input priority 0;\n\
          \x20\x20 ct state established,related accept\n\
          \x20\x20 iifname \"lo\" accept\n\
@@ -447,6 +453,7 @@ pub fn ingress_table_ruleset() -> String {
          \x20\x20 oifname \"tap0\" accept\n\
          \x20\x20 iifname \"tap0\" accept\n\
          \x20\x20 iifname \"delonix0\" oifname \"delonix0\" accept\n\
+         \x20\x20 iifname . oifname vmap @{NETPAIR_MAP}\n\
          \x20 }}\n\
          }}\n"
     )
@@ -1352,6 +1359,11 @@ fn handle_control(line: &str) -> String {
     }
     let res = match parts.as_slice() {
         ["ping"] => Ok(()),
+        // ADR-0013 tier B: a declared route between two networks. One ELEMENT in
+        // the exemption map — the spike proved the forwarding already exists and
+        // an explicit pair drop is what closes it, so opening a path is not a
+        // dataplane, it is an exemption.
+        ["netroute", op, a, b] => do_netroute(op, a, b),
         // 5 tokens = `default` namespace (compat with the old client); 6 = namespaced.
         ["attach", netns, ip, bridge, gateway] => do_attach(netns, ip, bridge, gateway, "default"),
         ["attach", netns, ip, bridge, gateway, ns] => do_attach(netns, ip, bridge, gateway, ns),
@@ -1480,68 +1492,29 @@ fn ensure_net_bridge(bridge: &str, gateway: &str) -> Result<()> {
         );
         let _ = std::fs::write("/proc/sys/net/ipv6/conf/all/forwarding", "1");
     }
-    // INTRA-network connectivity: containers on the SAME bridge talk to each other (Docker/
-    // user-network model, like `delonix0`). Without this rule, the `forward`'s `policy drop`
-    // cut ALL intra-bridge traffic of the created networks (`dlxn*`) —
-    // services on the same network (incl. within a tenant) couldn't reach each other. The
-    // fine micro-segmentation is done later with `kind:NetworkPolicy`. Idempotent.
-    let fchain = crate::capture("nft", &["list", "chain", "ip", INGRESS_TABLE, "forward"])
-        .unwrap_or_default();
-    let self_accept = format!("iifname \"{bridge}\" oifname \"{bridge}\" accept");
-    if !fchain.contains(&self_accept) {
+    // Isolation, in TWO element additions instead of a mesh.
+    //
+    // What used to be here: an `iifname X oifname X accept` per bridge, plus a
+    // loop over every OTHER delonix bridge emitting `iifname "<a>" oifname
+    // "<b>" drop` for both directions — so creating the n-th network appended
+    // 2(n-1) rules, and every forwarded packet walked all of them. Measured on
+    // a live host: 8 bridges, 73 rules.
+    //
+    // Now the chain is fixed (see `base_ruleset`): a vmap lookup for the
+    // exemptions, then one counter-carrying drop for any pair of delonix
+    // bridges. A network joins the model by adding itself to the set and its own
+    // self-pair to the map. Both are idempotent (`nft add element` on an
+    // existing element is a no-op), which is what makes this safe to re-run on
+    // every `network create` exactly like the loop it replaces.
+    //
+    // The `counter` is new and deliberate: the mesh carried none, so «did these
+    // two networks ever try to talk» had no answer at all — the one question
+    // this rule exists to be asked. Every other rule this engine emits has one.
+    for (target, element) in isolation_elements(bridge) {
         run_ok(
             "nft",
-            &[
-                "add",
-                "rule",
-                "ip",
-                INGRESS_TABLE,
-                "forward",
-                "iifname",
-                bridge,
-                "oifname",
-                bridge,
-                "accept",
-            ],
+            &["add", "element", "ip", INGRESS_TABLE, target, &element],
         );
-    }
-    // inter-network isolation: forward drop between this bridge and the other delonix ones.
-    let listed =
-        crate::capture("ip", &["-o", "link", "show", "type", "bridge"]).unwrap_or_default();
-    let fwd = crate::capture("nft", &["list", "chain", "ip", INGRESS_TABLE, "fwdeny"])
-        .unwrap_or_default();
-    for line in listed.lines() {
-        let other = line
-            .split(':')
-            .nth(1)
-            .map(|s| s.trim().split('@').next().unwrap_or("").trim())
-            .unwrap_or("");
-        if other.is_empty()
-            || other == bridge
-            || (other != INFRA_BRIDGE && !other.starts_with("dlxn"))
-        {
-            continue; // only isolate against delonix0 and other dlxn* networks
-        }
-        for (a, b) in [(bridge, other), (other, bridge)] {
-            let needle = format!("iifname \"{a}\" oifname \"{b}\" drop");
-            if !fwd.contains(&needle) {
-                run_ok(
-                    "nft",
-                    &[
-                        "add",
-                        "rule",
-                        "ip",
-                        INGRESS_TABLE,
-                        "fwdeny",
-                        "iifname",
-                        a,
-                        "oifname",
-                        b,
-                        "drop",
-                    ],
-                );
-            }
-        }
     }
     // the network's DHCP server (for VMs/clients that request an IP).
     start_dhcp(bridge, &prefix_of(gateway));
@@ -2896,6 +2869,113 @@ fn fw_chain_name(ip: &str) -> String {
 /// independent of how many containers exist.
 pub const FWMAP: &str = "fwmap";
 
+/// Every delonix bridge (`delonix0` and each `dlxn*`), as an nft set.
+///
+/// The pair `DLXBR_SET`/`NETPAIR_MAP` replaces what used to be a MESH: one
+/// `iifname "<a>" oifname "<b>" drop` per ORDERED PAIR of bridges, re-emitted
+/// against every existing network each time a new one was created. Measured on a
+/// live host before the change: **8 bridges, 73 rules**, all of them walked
+/// linearly for every forwarded packet.
+///
+/// Now isolation is TWO rules regardless of how many networks exist — the same
+/// move `FWMAP` already made for the per-container dispatch, for the same reason
+/// and with the same shape.
+pub const DLXBR_SET: &str = "dlxbr";
+
+/// Ordered interface pairs that are EXEMPT from the isolation drop.
+///
+/// Today it holds only `<bridge> . <bridge> : accept` — a network talking to
+/// itself, which is what the old mesh expressed with one `accept` rule per
+/// bridge. It is also, deliberately, exactly where a declared route between two
+/// networks lands (ADR-0013 tier B): opening a path is adding one element here,
+/// not building a dataplane. The spike that proved that is in the ADR.
+pub const NETPAIR_MAP: &str = "netpair";
+
+/// The nft ELEMENTS that put `bridge` under the isolation model, as
+/// `(set-or-map, element)` pairs.
+///
+/// Pure on purpose — the mesh it replaces was emitted by a loop of `run_ok`
+/// calls buried in `network_create_with`, which meant the one part worth
+/// checking (does a new network end up isolated from the others?) could only be
+/// verified by bringing up a holder. This can be asserted in a unit test.
+///
+/// Two elements per bridge, and nothing per PAIR: that is the whole point.
+/// Adds or removes ONE exemption for the ordered pair `(a, b)`.
+///
+/// Direction is the point: `from: web, to: db` opens web→db and NOT db→web, the
+/// same asymmetry `kind: Dependency` already gives between containers. The
+/// return traffic flows because `fwdeny` accepts `established,related` before
+/// consulting the map — it has to be stated there and not left to the `forward`
+/// chain, which runs at priority 0, AFTER this one at -10. That is the exact
+/// trap the v0.37.1 `policy deny` fix already paid for once.
+fn do_netroute(op: &str, a: &str, b: &str) -> Result<()> {
+    for name in [a, b] {
+        // These reach nft as an element; a name that is not a bridge we made is
+        // refused rather than interpolated.
+        if !(name == INFRA_BRIDGE || name.starts_with("dlxn"))
+            || !name.chars().all(|c| c.is_ascii_alphanumeric())
+        {
+            return Err(Error::Runtime {
+                context: "netroute",
+                message: format!("not a delonix bridge: {name}"),
+            });
+        }
+    }
+    if a == b {
+        // The self-pair is what `isolation_elements` installs to keep intra-network
+        // traffic open; a route onto itself would either be a no-op or, on removal,
+        // silently cut a network off from itself.
+        return Err(Error::Runtime {
+            context: "netroute",
+            message: "a route from a network to itself is not a route".to_string(),
+        });
+    }
+    let verb = match op {
+        "add" => "add",
+        "del" => "delete",
+        other => {
+            return Err(Error::Runtime {
+                context: "netroute",
+                message: format!("unknown netroute op: {other}"),
+            })
+        }
+    };
+    let element = format!("{{ \"{a}\" . \"{b}\" : accept }}");
+    // NOT `run_ok`, which discards the outcome, and NOT `capture`, which is
+    // lenient by design (it answers `Ok` even when the command failed — noted in
+    // CLAUDE.md, and it has already fooled a probe in this repo). A route that
+    // reports success without being installed is precisely the class of lie this
+    // engine keeps removing.
+    let out = std::process::Command::new("nft")
+        .args([verb, "element", "ip", INGRESS_TABLE, NETPAIR_MAP, &element])
+        .output()
+        .map_err(|e| Error::Runtime {
+            context: "netroute",
+            message: format!("nft: {e}"),
+        })?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(Error::Runtime {
+            context: "netroute",
+            message: format!(
+                "nft {verb} element {a} -> {b}: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+        })
+    }
+}
+
+pub(crate) fn isolation_elements(bridge: &str) -> Vec<(&'static str, String)> {
+    vec![
+        (DLXBR_SET, format!("{{ \"{bridge}\" }}")),
+        (
+            NETPAIR_MAP,
+            format!("{{ \"{bridge}\" . \"{bridge}\" : accept }}"),
+        ),
+    ]
+}
+
 /// Head of a container's firewall chain, emitted ONCE per chain (not per IP,
 /// unlike [`fw_chain_body`] — conntrack state is a property of the flow, not of
 /// which address it entered by).
@@ -3687,6 +3767,26 @@ pub fn holder_serves_netns(id: &str) -> bool {
 /// **Attaches a container to an ingress network** (`net`=`ingress` or a private
 /// network name): ensures the infra is up (ref-count++), resolves the bridge/gateway and asks
 /// the holder for the netns + `veth` + IP. Returns `(netns, ip)`. On failure it undoes the ref-count.
+/// Opens (or closes) a declared path from network `from` to network `to`.
+///
+/// ADR-0013 tier B. DIRECTED: `from → to` only, the same asymmetry
+/// `kind: Dependency` gives between containers — the return traffic of a
+/// conversation `from` started flows (established), but `to` cannot initiate.
+///
+/// **A route says where a packet MAY go; it never says it is allowed.** The
+/// per-workload `fwcont` chains still decide, and a namespace boundary crossed
+/// by a route still needs an explicit policy. That rule is the whole reason this
+/// composes with what exists instead of undermining it.
+pub fn network_route(from: &str, to: &str, add: bool) -> Result<()> {
+    let (bridge_from, _, _) = resolve_net(from)?;
+    let (bridge_to, _, _) = resolve_net(to)?;
+    ensure_up()?;
+    control_send(&format!(
+        "netroute {} {bridge_from} {bridge_to}",
+        if add { "add" } else { "del" }
+    ))
+}
+
 pub fn attach_container(id: &str, net: &str, namespace: &str) -> Result<(String, String)> {
     let (bridge, prefix, gateway) = resolve_net(net)?;
     let ip = crate::ipam::allocate(&prefix, id)?; // unique lease (anti-collision), stable per id
@@ -5623,6 +5723,83 @@ pub fn dhcp_ip6_for_mac(_net: &str, mac: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+
+    /// **Um `accept` NÃO é terminal entre base chains**, e esquecê-lo partiu o
+    /// tráfego dentro da própria rede.
+    ///
+    /// A isenção no `fwdeny` (prioridade -10) impede o drop DALI, mas o pacote
+    /// segue para a `forward` (prioridade 0), que tem `policy drop` — e a malha
+    /// antiga tratava disso com um `accept` por bridge NESSA chain. Ao mover a
+    /// isenção só para o `fwdeny`, dois containers da MESMA rede deixaram de se
+    /// alcançar: medido ao vivo, 100% de perda. O mesmo mapa tem de ser
+    /// consultado nas DUAS chains, e é essa a asserção aqui.
+    #[test]
+    fn a_isencao_e_consultada_nas_duas_chains_porque_accept_nao_e_terminal() {
+        let rs = ingress_table_ruleset();
+        assert_eq!(
+            rs.matches("vmap @netpair").count(),
+            2,
+            "a isenção tem de ser consultada no fwdeny E na forward: {rs}"
+        );
+        // E a da `forward` tem de vir depois do accept do delonix0, que é o
+        // caso equivalente já tratado à mão para a bridge de infra.
+        let fwd = rs.find("chain forward").expect("sem chain forward");
+        assert!(
+            rs[fwd..].contains("vmap @netpair"),
+            "a forward não consulta a isenção: {rs}"
+        );
+    }
+
+    /// O isolamento passa a custar DOIS elementos por rede, e nada por PAR.
+    ///
+    /// A malha que isto substitui emitia `2(n-1)` regras ao criar a n-ésima
+    /// rede — medido num host vivo: 8 bridges, 73 regras, todas percorridas
+    /// linearmente por cada pacote encaminhado. E não era testável: nascia de um
+    /// ciclo de `run_ok` dentro do `network_create_with`, por isso a única
+    /// pergunta que interessa (uma rede nova fica isolada das outras?) só se
+    /// respondia levantando um holder.
+    #[test]
+    fn uma_rede_entra_no_isolamento_com_dois_elementos_e_zero_por_par() {
+        let e = isolation_elements("dlxnabc123");
+        assert_eq!(e.len(), 2, "{e:?}");
+        // Ela própria no conjunto das bridges — é o que a faz cair no drop
+        // contra QUALQUER outra, sem uma regra por par.
+        assert_eq!(e[0].0, DLXBR_SET);
+        assert!(e[0].1.contains("dlxnabc123"), "{:?}", e[0]);
+        // E o par consigo mesma isento — o tráfego intra-rede, que a malha
+        // exprimia com um `accept` por bridge.
+        assert_eq!(e[1].0, NETPAIR_MAP);
+        assert!(e[1].1.contains("accept"), "{:?}", e[1]);
+        assert!(
+            e[1].1.matches("dlxnabc123").count() == 2,
+            "o par tem de ser (ela, ela): {:?}",
+            e[1]
+        );
+        // O custo NÃO depende de quantas redes já existem.
+        assert_eq!(isolation_elements("dlxnzzz999").len(), 2);
+    }
+
+    /// As duas regras fixas do `fwdeny`, e a ordem entre elas.
+    ///
+    /// A isenção tem de ser consultada ANTES do drop, senão o tráfego dentro da
+    /// própria rede era cortado — foi exactamente o que a malha teve de resolver
+    /// com um `accept` por bridge. E o drop leva `counter`, que a malha não
+    /// tinha: sem ele «este par alguma vez tentou falar?» não tem resposta.
+    #[test]
+    fn o_fwdeny_consulta_a_isencao_antes_de_dropar_e_o_drop_conta() {
+        let rs = ingress_table_ruleset();
+        let isencao = rs
+            .find("vmap @netpair")
+            .expect("falta a consulta de isenção");
+        let drop = rs
+            .find("iifname @dlxbr oifname @dlxbr counter drop")
+            .expect("falta o drop com contador");
+        assert!(isencao < drop, "a isenção tem de vir antes do drop");
+        // E o par set/map tem de estar DECLARADO, senão a chain não carrega.
+        assert!(rs.contains("set dlxbr"), "{rs}");
+        assert!(rs.contains("map netpair"), "{rs}");
+    }
+
     /// Os verbos read-only são o que mantém o nó OBSERVÁVEL enquanto uma
     /// mutação está presa: podem ser servidos fora do worker serializado porque
     /// não tocam na fábrica de netns/veth/nft.

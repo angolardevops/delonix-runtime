@@ -215,6 +215,38 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
 
 #[derive(Subcommand)]
 pub enum NetworkCmd {
+    /// 802.1Q VLAN on a physical NIC — **the one command here that needs root**.
+    ///
+    /// Dry-run by default: it prints the plan and changes nothing until
+    /// `--apply`. Everything else in this engine is rootless; a VLAN interface
+    /// on a host NIC needs CAP_NET_ADMIN in the host's netns, which no
+    /// unprivileged user has (see ADR-0013 tier C).
+    Vlan {
+        /// Parent NIC on the host (e.g. `eth0`).
+        parent: String,
+        /// VLAN id, 1-4094.
+        id: u16,
+        /// Remove the VLAN interface instead of creating it.
+        #[arg(long)]
+        rm: bool,
+        /// Actually run it (as root). Without this it is a dry-run.
+        #[arg(long)]
+        apply: bool,
+    },
+    /// Open a DIRECTED path from one network to another (ADR-0013 tier B).
+    ///
+    /// Networks are isolated from each other by default. A route says a packet
+    /// MAY cross; it does not say it is allowed — the per-workload firewall
+    /// still decides, and a namespace boundary still needs its own policy.
+    Route {
+        /// Source network (the side that may initiate).
+        from: String,
+        /// Destination network.
+        to: String,
+        /// Close the path instead of opening it.
+        #[arg(long)]
+        rm: bool,
+    },
     /// Dashboard (KPIs + table) of the networks — interactive TUI, or `--once` snapshot.
     Dash {
         #[arg(long)]
@@ -302,6 +334,27 @@ pub fn run(action: NetworkCmd) -> Result<()> {
     match action {
         NetworkCmd::Dash { once, json } => {
             super::dash::run(super::dash::DashScope::Networks, once, json)
+        }
+        NetworkCmd::Vlan {
+            parent,
+            id,
+            rm,
+            apply,
+        } => super::vlan::run(&parent, id, rm, apply),
+        NetworkCmd::Route { from, to, rm } => {
+            delonix_net::infra::network_route(&from, &to, !rm)?;
+            println!(
+                "{}",
+                super::po::tf(
+                    if rm {
+                        "route closed: {from} -> {to}"
+                    } else {
+                        "route open: {from} -> {to}"
+                    },
+                    &[("from", &from), ("to", &to)],
+                )
+            );
+            Ok(())
         }
         NetworkCmd::Ls { output } => cmd_ls(&store, output),
         NetworkCmd::Node { action } => cmd_node(action),
