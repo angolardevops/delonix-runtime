@@ -226,11 +226,13 @@ pub(crate) fn safe_key(key: &str) -> String {
 /// building all of that for every record just to compare two strings is most of
 /// the cost of a lookup, and it is thrown away for every record but one. See
 /// [`Store::load`].
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Clone)]
 struct Ident {
     id: String,
     #[serde(default)]
     name: String,
+    #[serde(default = "crate::default_namespace")]
+    namespace: String,
     #[serde(default)]
     created_unix: u64,
 }
@@ -342,12 +344,23 @@ impl Store {
     /// processes mutate the store concurrently, a stale or divergent index is a
     /// worse failure than a linear scan. The ordering semantics are unchanged:
     /// newest first, first match wins.
+    /// Also accepts the qualified `<namespace>/<name>` form, and REFUSES a bare
+    /// name that exists in several namespaces.
+    ///
+    /// Names became unique per (namespace, name) rather than globally
+    /// (ADR-0011 §3), which is what lets two tenants both own `db`. That made
+    /// the old "newest match wins" tie-break unsafe for NAMES: `ingress deny db`
+    /// or an `apply` touching `db` would silently pick a tenant. Prefix-of-id
+    /// ambiguity keeps the historical tie-break — it is a typo to fix, not two
+    /// legitimate owners.
     pub fn load(&self, id_or_name: &str) -> Result<Container> {
         let exact = self.path(id_or_name);
         if exact.exists() {
             return Ok(serde_json::from_slice(&fs::read(exact)?)?);
         }
+        let qualified = id_or_name.split_once('/');
         let mut hits: Vec<Ident> = Vec::new();
+        let mut named: Vec<Ident> = Vec::new();
         for entry in fs::read_dir(&self.root)? {
             let path = entry?.path();
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
@@ -357,9 +370,40 @@ impl Store {
             let Ok(idt) = serde_json::from_slice::<Ident>(&bytes) else {
                 continue;
             };
-            if idt.id.starts_with(id_or_name) || idt.name == id_or_name {
-                hits.push(idt);
+            match qualified {
+                Some((ns, name)) => {
+                    if idt.namespace == ns && idt.name == name {
+                        named.push(idt);
+                    }
+                }
+                None => {
+                    if idt.name == id_or_name {
+                        named.push(idt.clone());
+                    }
+                    if idt.id.starts_with(id_or_name) {
+                        hits.push(idt);
+                    }
+                }
             }
+        }
+        // An exact name wins over an id prefix, as it always has — but only when
+        // it names ONE container.
+        if named.len() > 1 {
+            let mut opts: Vec<String> = named
+                .iter()
+                .map(|i| format!("{}/{}", i.namespace, i.name))
+                .collect();
+            opts.sort();
+            return Err(Error::Invalid(format!(
+                "container name '{id_or_name}' exists in several namespaces ({}) — qualify it as <namespace>/<name>",
+                opts.join(", ")
+            )));
+        }
+        if let Some(hit) = named.first() {
+            return Ok(serde_json::from_slice(&fs::read(self.path(&hit.id))?)?);
+        }
+        if qualified.is_some() {
+            return Err(Error::NotFound(format!("container: {id_or_name}")));
         }
         // Same tie-break as before (`list()` sorts newest-first and the old loop
         // returned the first match), so an ambiguous prefix keeps resolving to
@@ -898,6 +942,64 @@ mod tests {
         );
         assert!(store.load(evil_key).is_ok());
 
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// REGRESSION (ADR-0011 §3): once names are unique per NAMESPACE rather
+    /// than globally, two tenants may legitimately both own `db`. The old
+    /// "newest match wins" tie-break would then hand `ingress deny db` — or any
+    /// `apply` naming it — whichever was created last, i.e. silently pick a
+    /// tenant. It must refuse and name both instead.
+    #[test]
+    fn um_nome_em_duas_namespaces_e_recusado_nao_adivinhado() {
+        let root = tmp_dir("store-ns-names");
+        let store = Store::open(&root).unwrap();
+        let mk = |id: &str, ns: &str| {
+            let mut c = Container::new(
+                id.to_string(),
+                "db".to_string(),
+                "alpine".into(),
+                vec!["sh".into()],
+                "0".into(),
+            );
+            c.namespace = ns.to_string();
+            c
+        };
+        store.save(&mk("aaa1", "teamA")).unwrap();
+        store.save(&mk("bbb2", "teamB")).unwrap();
+
+        let err = store.load("db").unwrap_err().to_string();
+        assert!(
+            err.contains("teamA/db") && err.contains("teamB/db"),
+            "{err}"
+        );
+        // The qualified form is exact, in both directions.
+        assert_eq!(store.load("teamA/db").unwrap().id, "aaa1");
+        assert_eq!(store.load("teamB/db").unwrap().id, "bbb2");
+        // The id keeps working, and a qualified miss is NotFound, not ambiguity.
+        assert_eq!(store.load("bbb2").unwrap().namespace, "teamB");
+        assert!(matches!(store.load("teamC/db"), Err(Error::NotFound(_))));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// The other half of the contract: a name that is unique on the node — every
+    /// node not using namespaces — must resolve exactly as it always did.
+    #[test]
+    fn um_nome_unico_continua_a_resolver_como_sempre() {
+        let root = tmp_dir("store-ns-unique");
+        let store = Store::open(&root).unwrap();
+        let mut c = Container::new(
+            "aaa1".into(),
+            "web".into(),
+            "alpine".into(),
+            vec!["sh".into()],
+            "0".into(),
+        );
+        c.namespace = "teamA".into();
+        store.save(&c).unwrap();
+        assert_eq!(store.load("web").unwrap().id, "aaa1");
+        assert_eq!(store.load("teamA/web").unwrap().id, "aaa1");
+        assert!(matches!(store.load("nope"), Err(Error::NotFound(_))));
         let _ = fs::remove_dir_all(&root);
     }
 
