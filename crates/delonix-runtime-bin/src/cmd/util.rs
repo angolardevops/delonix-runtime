@@ -216,6 +216,30 @@ pub(crate) fn prepare_rootfs(images: &ImageStore, img: &Image, id: &str) -> Resu
     }
 }
 
+/// Silences the engine's cgroup-delegation warning in every process spawned
+/// from here on, on the grounds that it has ALREADY been printed once.
+///
+/// Call it only AFTER something has actually had the chance to warn. The
+/// question «does this session have delegation» cannot be answered here and the
+/// attempt to do so is a trap worth recording: `cgroup_limits_apply()` reports
+/// `yes` in the CLI's own process while a container that re-execs into the
+/// holder's userns has no delegation at all and warns — measured, the two
+/// disagree on this very host. A guard that tested the parent and then silenced
+/// the children would suppress a warning that is TRUE, which is strictly worse
+/// than printing it three times.
+///
+/// So the process that knows is the one that tried: let the first child warn,
+/// and silence its peers, which share its environment by construction.
+///
+/// SAFETY: callers are single-threaded at this point (between two container
+/// spawns; a `Progress` spinner thread is joined when its step closes). The
+/// value is read by re-exec'd CHILD processes, not by another thread here.
+pub fn silence_cgroup_warning() {
+    unsafe {
+        std::env::set_var("DELONIX_NO_CGROUP_WARN", "1");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

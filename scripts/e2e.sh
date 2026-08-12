@@ -379,6 +379,43 @@ check "workload ls" ok "$BIN" workload ls
 check "workload ls -o json" ok "$BIN" workload ls -o json
 check "workload describe inexistente recusa" fail "$BIN" workload describe "nao-existe-$PFX"
 check "pod ls" ok "$BIN" pod ls
+
+# Um pod REAL de dois membros, pelo aviso que só um pod multi-membro revela.
+#
+# O aviso de cgroup é sobre a SESSÃO, não sobre um container, e o motor dedup'a-o
+# com um `Once` — que vê UM processo. Cada membro de um pod entra por re-exec
+# (`--pod`), logo é o seu próprio processo e recomeça o `Once`: o mesmo bloco de
+# oito linhas saía uma vez POR MEMBRO (medido: 3× num pod de 3).
+#
+# «No máximo um», e não «exactamente um», de propósito: num host COM delegação de
+# cgroup não há aviso nenhum e exigir 1 falharia ali por razão errada. O que nunca
+# pode voltar é a repetição por membro — que é o que um pod de 2 já expõe.
+PODY="$OUT/pod-$PFX.yaml"
+cat >"$PODY" <<YAML
+apiVersion: delonix.io/v1
+kind: Pod
+metadata:
+  name: p$PFX
+spec:
+  containers:
+    - name: a
+      image: $IMG
+      command: ["sleep", "120"]
+    - name: b
+      image: $IMG
+      command: ["sleep", "120"]
+YAML
+if "$BIN" pod create -f "$PODY" >/dev/null 2>"$OUT/pod-$PFX.err"; then
+  check "pod create: o aviso de cgroup não se repete por membro" ok bash -c "
+    n=\$(grep -c 'cgroup delegation' '$OUT/pod-$PFX.err' || true)
+    [ \"\$n\" -le 1 ] || { echo \"o aviso saiu \$n vezes (um por membro)\"; exit 1; }
+  "
+  check "pod ls mostra-o" ok bash -c "'$BIN' pod ls | grep -q 'p$PFX'"
+  check "pod describe" ok "$BIN" pod describe "p$PFX"
+  check "pod rm -f" ok "$BIN" pod rm -f "p$PFX"
+else
+  skip "pod create + aviso de cgroup" "o pod create falhou (holder/SDN indisponível)"
+fi
 check "secret ls" ok "$BIN" secret ls
 check "secret inspect inexistente recusa" fail "$BIN" secret inspect "nao-existe-$PFX"
 
