@@ -66,11 +66,28 @@ Every image ships with a **known, public** password — they are in this
 repository. Change them on first boot; do not expose one of these to an
 untrusted network as-is.
 
-| Product | Account | Password | Where |
+| Product | Account | Password | Web UI (`<ip>` is the VM's address) |
 |---|---|---|---|
-| OPNsense | `root` | `opnsense` (vendor default) | console, web UI on the LAN interface |
-| Proxmox (all four) | `root` | `delonix-admin` | web UI, console |
-| TrueNAS SCALE | `truenas_admin` | `delonix-admin` | web UI, console |
+| OPNsense | `root` | `opnsense` (vendor default) | `https://192.168.1.1/` — **LAN only**, see below |
+| Proxmox VE | `root` | `delonix-admin` | `https://<ip>:8006/` |
+| Proxmox Backup Server | `root` | `delonix-admin` | `https://<ip>:8007/` |
+| Proxmox Mail Gateway | `root` | `delonix-admin` | `https://<ip>:8006/` |
+| Proxmox Datacenter Manager | `root` | `delonix-admin` | `https://<ip>:8443/` |
+| TrueNAS SCALE | `truenas_admin` | `delonix-admin` | `http://<ip>/` — API at `https://<ip>/api/v2.0` |
+
+Every account above also works on the console. The ports are not a guess: they
+are the `CASES` table of `verify-boot.sh`, which is the port each image was
+proved to answer on before it was published.
+
+**OPNsense does not answer on the WAN, by design.** Its web UI listens on the
+LAN interface (`vtnet0`, `192.168.1.1/24`) while the WAN takes DHCP, so a probe
+from the WAN side is refused — that is a firewall behaving correctly, not a
+broken image. It is also why `verify-boot.sh` leaves it out.
+
+**TrueNAS was proved on :80, but `kind: Volume` provisioning talks to :443.**
+The appliance's factory certificate is not verifiable from anywhere else, so
+that path needs `insecureTLS: true` — or a certificate you install yourself.
+See `examples/provision-truenas.yaml`.
 
 The Proxmox and TrueNAS passwords are set by the answer file / RPC call, so
 changing them for your own builds is an edit to `answer-*.toml` or the
