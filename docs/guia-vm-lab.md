@@ -147,13 +147,19 @@ delonix vm dash --once # KPIs + tabela
 ```
 
 ```
-NAME        VCPUS   MEMORY   STATUS    IP                UPTIME          PORTS OPEN
-lab-probe       1   1G       Running   192.168.122.190   Up 33 seconds   22
+NAME      IMAGE                          BACKEND   VCPUS  MEMORY  STATUS   IP             UPTIME        PORTS OPEN
+lab-dns   delonix-vm-base_ubuntu-24.04   libvirt       1  1G      Running  192.168.122.2  Up 2 minutes  22
 ```
 
 `--ports` faz ligações TCP verdadeiras e por isso está desligado por omissão —
 distingue *«a VM tem endereço»* de *«a VM serve alguma coisa»*, que não é a mesma
 pergunta.
+
+> A tabela mede as colunas pelo conteúdo e **omite as que ficam totalmente vazias**.
+> Se nenhuma VM tiver nenhuma daquelas portas aberta, a coluna `PORTS OPEN`
+> desaparece — não é a flag a falhar. Para uma saída de forma estável, use
+> `-o json`, onde o campo `ports_open` está sempre presente quando se pede
+> `--ports`.
 
 `status` reconcilia com o motor em vez de reler o registo; `describe` mostra o
 registo inteiro, incluindo o caminho do *overlay* e o seu tamanho real em disco.
@@ -865,31 +871,38 @@ nenhum.
 **Trate os instantâneos como válidos apenas enquanto a VM não parar.** Para pontos de
 restauro que sobrevivam, copie o `qcow2` do *overlay* com a VM parada.
 
-### A VM diz `Running` e nunca arrancou
+### Em Cloud Hypervisor, o endereço é calculado — não observado
 
-Só no Cloud Hypervisor:
+Nesse motor o endereço vem de aritmética sobre o MAC, antes de o sistema arrancar
+(é o que permite pôr a VM debaixo do isolamento de *namespaces* antes de ela
+existir). Em libvirt vem de um *lease* real, que só é entregue a um convidado que
+arrancou o suficiente para o pedir.
+
+A diferença importa quando o convidado **não** arranca. Até à v0.51.0 o `--wait`
+devolvia em 62 ms a anunciar `is up` sobre uma VM cujo firmware falhava antes do
+kernel. Hoje espera e diz o que sabe:
 
 ```
-$ delonix vm create lab-ch --backend cloud-hypervisor --network lab-net --wait --boot-timeout 120
-✓ VM 'lab-ch' is up.
-info vm 'lab-ch' is up — ip 10.233.254.141
-real 0m0.062s                     ← 62 milissegundos
+$ delonix vm create prova-ch --backend cloud-hypervisor --network lab-net \
+      --wait --boot-timeout 60
+prova-ch
+warning vm 'prova-ch' is running but never answered at 10.233.254.240 — that
+address is computed from the MAC, not observed, so it exists whether or not the
+guest booted; `delonix vm console prova-ch` to watch the boot
+real 1m0.322s
 ```
 
-Nesse motor o endereço não é observado, é **calculado** a partir do MAC antes de o
-sistema arrancar. Logo o `--wait` não tem por que esperar, e o `--boot-timeout` fica
-sem uso. A realidade daquela VM:
+O aviso é a informação toda: o processo corre, o endereço existe, e **ninguém
+respondeu nele**. A VM daquele teste tinha o *overlay* com 448 KiB — não escreveu um
+byte — e `ip neigh` a dar `FAILED` a partir de um contentor da mesma rede.
 
-- consola série: o firmware a falhar (`... not set EFI variable ...`), nunca um kernel
-- *overlay* com 448 KiB — o sistema não escreveu nada
-- de um contentor na mesma rede: `ip neigh` → `FAILED`, 100 % de perda
+**Um `--wait` que esgota o tempo continua a sair 0**, portanto num *script* verifique
+o aviso ou sonde por si (`delonix vm ls --ports`, um `ssh`).
 
-**Um endereço previsto não é uma VM viva.** Confirme sempre com uma sonda real:
-`delonix vm ls --ports`, um `ssh`, ou a consola.
-
-Como controlo: a golden `delonix-vm-k8s:1.34` no mesmo motor, rede e firmware
-**arranca** o kernel — portanto a rede está boa e o que varia é a imagem. As imagens
+Sobre a imagem, com um controlo: a golden `delonix-vm-k8s:1.34` **arranca** o kernel
+no mesmo motor, rede e firmware — logo a rede está boa e o que varia é a imagem. As
 `delonix-vm-base:*` não arrancam com o `hypervisor-fw` que o instalador coloca.
+**Para VMs em Cloud Hypervisor, use a golden.**
 
 ### `vm build --network` esbarra no host
 
