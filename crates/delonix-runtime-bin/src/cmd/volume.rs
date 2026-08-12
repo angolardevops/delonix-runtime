@@ -445,7 +445,6 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let store = VolumeStore::open(state_root())?;
     for doc in manifest::of_kind(docs, "Volume") {
         let name = &doc.metadata.name;
-        manifest::warn_unknown_fields(doc, VOLUME_SPEC_FIELDS);
         let spec: VolumeSpec = manifest::spec_of(doc)?;
         // A network share (`spec.nfs`/`cifs`/`webdav`) IS this volume's driver
         // and device — the friendly declaration that `kind: Storage` used to own.

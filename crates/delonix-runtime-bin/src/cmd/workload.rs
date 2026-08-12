@@ -46,7 +46,6 @@ struct WorkloadSpec {
 /// that does not match the `type` is an explicit error — never silently ignored,
 /// never defaulted (guardrail: no silent failure).
 pub fn lower_workload(doc: &ManifestDoc) -> Result<ManifestDoc> {
-    super::manifest::warn_unknown_fields(doc, WORKLOAD_SPEC_FIELDS);
     let spec: WorkloadSpec = super::manifest::spec_of(doc)?;
     let name = doc.metadata.name.clone();
     let ty = spec.workload_type.trim().to_ascii_lowercase();

@@ -82,7 +82,6 @@ pub fn lower_dependencies(docs: &[ManifestDoc]) -> Result<Vec<ManifestDoc>> {
     let mut namespaces: std::collections::BTreeMap<String, Option<String>> = Default::default();
 
     for doc in manifest::of_kind(docs, "Dependency") {
-        manifest::warn_unknown_fields(doc, DEPENDENCY_SPEC_FIELDS);
         let spec: DependencySpec = manifest::spec_of(doc)?;
         let name = &doc.metadata.name;
         if spec.from.trim().is_empty() {

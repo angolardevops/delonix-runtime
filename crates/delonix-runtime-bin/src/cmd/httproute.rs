@@ -330,7 +330,6 @@ pub fn validate_spec(name: &str, spec: &HttpRouteSpec) -> Result<()> {
 pub fn parse_and_validate(docs: &[ManifestDoc]) -> Result<Vec<(String, HttpRouteSpec)>> {
     let mut out = Vec::new();
     for doc in manifest::of_kind(docs, "HTTPRoute") {
-        manifest::warn_unknown_fields(doc, HTTP_ROUTE_SPEC_FIELDS);
         let spec: HttpRouteSpec = manifest::spec_of(doc)?;
         validate_spec(&doc.metadata.name, &spec)?;
         out.push((doc.metadata.name.clone(), spec));
@@ -338,7 +337,6 @@ pub fn parse_and_validate(docs: &[ManifestDoc]) -> Result<Vec<(String, HttpRoute
     // `kind: Ingress` (k8s-shaped) compiles to the SAME L7 proxy — the k8s
     // Ingress IS the reverse-proxy, so it shares HTTPRoute's whole pipeline.
     for doc in manifest::of_kind(docs, "Ingress") {
-        manifest::warn_unknown_fields(doc, INGRESS_SPEC_FIELDS);
         let spec = ingress_spec_of(doc)?;
         validate_spec(&doc.metadata.name, &spec)?;
         out.push((doc.metadata.name.clone(), spec));

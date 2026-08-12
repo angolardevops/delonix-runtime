@@ -400,7 +400,6 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         // the spelling" is misleading — the spelling is right, the concept is
         // the one that does not exist here.
         reject_vpc_vocabulary(doc)?;
-        manifest::warn_unknown_fields(doc, NETWORK_SPEC_FIELDS);
         let spec: NetworkSpec = manifest::spec_of(doc)?;
         if let Ok(existing) = store.get(name) {
             // "Ensure present" still means we do not renumber a live network —

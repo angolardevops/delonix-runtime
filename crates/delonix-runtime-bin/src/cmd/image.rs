@@ -963,7 +963,6 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let (images, _store) = open_stores()?;
     for doc in manifest::of_kind(docs, "Image") {
         let name = &doc.metadata.name;
-        manifest::warn_unknown_fields(doc, IMAGE_SPEC_FIELDS);
         let spec: ImageSpec = manifest::spec_of(doc)?;
         // WHERE the field applies is checked BEFORE the secret is resolved. The
         // other order produced the wrong error: a `pullSecret` on a `build:`

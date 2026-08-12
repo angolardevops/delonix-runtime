@@ -213,7 +213,6 @@ pub const STACK_SPEC_FIELDS: &[&str] = &[
 /// order (Secret → Network → Volume → Storage → Image → Vm → Container → firewall
 /// → route → Dependency). Each child inherits the Stack's namespace by default.
 fn expand_stack(doc: &ManifestDoc) -> Result<Vec<ManifestDoc>> {
-    warn_unknown_fields(doc, STACK_SPEC_FIELDS);
     let spec: StackSpec = spec_of(doc)?;
     let ns = &doc.metadata.namespace;
     // ADR-0011 §4: deliberately NOT derived from the stack name. Doing that
@@ -288,6 +287,89 @@ pub(crate) fn kind_honors_namespace(kind: &str) -> bool {
     )
 }
 
+/// The accepted `spec` field names of a Kind — the list each group's `apply`
+/// used to consult on its own, now in ONE place so every entry point consults
+/// the same one.
+///
+/// BUG THIS CLOSES, measured across all 16 Kinds with an invented field in the
+/// spec: `stack validate` warned about 3 of them, `stack plan` about 3, and
+/// `stack apply --dry-run` about 6 — while `delonix secret apply -f` on the very
+/// same file answered `unknown field 'x' in spec — ignored (check the
+/// spelling)`. The guard existed per Kind and was called from each group's
+/// `apply`; `stack.rs` never called it once. So the same file was checked or not
+/// depending on which command touched it, and the command whose entire job is to
+/// answer «is this manifest right?» was the one that answered least.
+///
+/// `None` for a Kind with no flat list of its own (`Cluster` nests its specs).
+pub(crate) fn spec_fields_for(kind: &str) -> Option<&'static [&'static str]> {
+    match kind {
+        "Container" => Some(crate::cmd::container::CONTAINER_SPEC_FIELDS),
+        "Pod" => Some(crate::cmd::container::POD_SPEC_FIELDS),
+        "Vm" => Some(crate::cmd::vm::VM_SPEC_FIELDS),
+        "Volume" => Some(crate::cmd::volume::VOLUME_SPEC_FIELDS),
+        "Storage" => Some(crate::cmd::storage::STORAGE_SPEC_FIELDS),
+        "Network" => Some(crate::cmd::network::NETWORK_SPEC_FIELDS),
+        "Image" => Some(crate::cmd::image::IMAGE_SPEC_FIELDS),
+        "Secret" => Some(crate::cmd::secret::SECRET_SPEC_FIELDS),
+        // `Ingress` is the k8s-shaped L7 Ingress (→ HTTPRoute); the L4 firewall
+        // keeps `Egress`/`FirewallPolicy`.
+        "Ingress" => Some(crate::cmd::httproute::INGRESS_SPEC_FIELDS),
+        "Egress" | "FirewallPolicy" => Some(crate::cmd::firewall::FW_SPEC_FIELDS),
+        "HTTPRoute" => Some(crate::cmd::httproute::HTTP_ROUTE_SPEC_FIELDS),
+        "Dependency" => Some(crate::cmd::dependency::DEPENDENCY_SPEC_FIELDS),
+        "Tunnel" => Some(crate::cmd::tunnel::TUNNEL_SPEC_FIELDS),
+        "ShareVolume" => Some(crate::cmd::sharevolume::SHAREVOLUME_SPEC_FIELDS),
+        "Workload" => Some(crate::cmd::workload::WORKLOAD_SPEC_FIELDS),
+        "Stack" => Some(STACK_SPEC_FIELDS),
+        _ => None, // `Cluster` nests its specs; outside this guard.
+    }
+}
+
+/// [`spec_fields_for`], but for a document — because one Kind can be written in
+/// two schemas.
+///
+/// A `kind: Container` whose spec has `containers:` IS the Kubernetes Pod
+/// schema, still accepted on the old Kind. Checking it against the Container
+/// list would flag `containers`, `initContainers` and the rest as unknown — the
+/// guard shouting at a manifest the engine handles perfectly. This is the same
+/// choice `container::apply` was already making inline before the guard moved
+/// here.
+pub(crate) fn spec_fields_for_doc(doc: &ManifestDoc) -> Option<&'static [&'static str]> {
+    if doc.kind == "Container" && doc.spec.get("containers").is_some() {
+        return Some(crate::cmd::container::POD_SPEC_FIELDS);
+    }
+    spec_fields_for(&doc.kind)
+}
+
+/// Warns about every unknown `spec` key of one document — the top-level ones and
+/// the ones nested inside a grouped form.
+///
+/// Both live here for the same reason: a check that only runs where the spec is
+/// DESERIALIZED runs only on `apply`, and `validate` — the command whose whole
+/// job is to answer «is this right?» — stays silent. Measured before the move:
+/// `resources.memoria` was reported by `apply --dry-run` and not by `validate`,
+/// on the very same file.
+fn check_unknown_fields(doc: &ManifestDoc) {
+    if let Some(fields) = spec_fields_for_doc(doc) {
+        warn_unknown_fields(doc, fields);
+    }
+    let nested = match doc.kind.as_str() {
+        "Container" => crate::cmd::container::unknown_group_keys(&doc.spec),
+        "Vm" => crate::cmd::vm::unknown_group_keys(&doc.spec),
+        _ => Vec::new(),
+    };
+    for key in nested {
+        super::output::warn(&super::po::tf(
+            "{kind} '{name}': unknown field '{key}' in spec — ignored (check the spelling)",
+            &[
+                ("kind", &doc.kind),
+                ("name", &doc.metadata.name),
+                ("key", &key),
+            ],
+        ));
+    }
+}
+
 pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
     let text = std::fs::read_to_string(path).map_err(|e| {
         Error::Invalid(format!(
@@ -350,6 +432,14 @@ pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
         // A grouped `kind: Stack` expands into its constituent resource docs
         // (which then flow through the normal per-Kind apply). The Stack doc
         // itself does not survive — it becomes its parts.
+        // The guard runs on the document AS WRITTEN, here, because two Kinds do
+        // not survive this loop: a `Workload` lowers to a synthetic
+        // `Container`/`Vm` and a `Stack` becomes its children. Checking at the
+        // end (which is where this first landed) meant those two — and
+        // `Dependency`, lowered further down — were the only Kinds to LOSE the
+        // warning they already had. Measured: `Dependency` and `Workload` warned
+        // before the move and went silent after it.
+        check_unknown_fields(&doc);
         if doc.kind == "Stack" {
             // A Stack's children are built HERE, so they never passed through the
             // loop's own lowering — a `kind: Stack` with an `egress:` group would
@@ -357,6 +447,9 @@ pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
             // they would be dropped in silence. Lower each child on its way out.
             for mut child in expand_stack(&doc)? {
                 lower_legacy_kind(&mut child)?;
+                // The child's spec is the user's own text, moved from inside the
+                // Stack — a typo there is as invisible as anywhere else.
+                check_unknown_fields(&child);
                 docs.push(child);
             }
         } else if doc.kind == "Workload" {
@@ -384,6 +477,14 @@ pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
         docs.retain(|d| d.kind != "Dependency");
         docs.extend(lowered);
     }
+    // The unknown-field guard, for EVERY document and therefore for every
+    // command that reads a manifest — `validate`, `plan`, `apply`, and each
+    // group's own `apply`, which all arrive here. See `spec_fields_for` for what
+    // this replaces and why one place instead of fifteen.
+    //
+    // After the lowering on purpose: by now `Egress` is already `FirewallPolicy`
+    // and the two share one list, so a Kind is checked against the fields it will
+    // actually be parsed with rather than the ones it was written as.
     Ok(docs)
 }
 
@@ -968,31 +1069,7 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
     #[test]
     fn examples_nao_tem_campos_desconhecidos() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
-        let fields_for = |kind: &str| -> Option<&'static [&'static str]> {
-            match kind {
-                "Container" => Some(crate::cmd::container::CONTAINER_SPEC_FIELDS),
-                "Pod" => Some(crate::cmd::container::POD_SPEC_FIELDS),
-                "Vm" => Some(crate::cmd::vm::VM_SPEC_FIELDS),
-                "Volume" => Some(crate::cmd::volume::VOLUME_SPEC_FIELDS),
-                "Storage" => Some(crate::cmd::storage::STORAGE_SPEC_FIELDS),
-                "Network" => Some(crate::cmd::network::NETWORK_SPEC_FIELDS),
-                "Image" => Some(crate::cmd::image::IMAGE_SPEC_FIELDS),
-                "Secret" => Some(crate::cmd::secret::SECRET_SPEC_FIELDS),
-                // `Ingress` is now the k8s-shaped L7 Ingress (→ HTTPRoute); the
-                // L4 firewall keeps `Egress`/`FirewallPolicy`.
-                "Ingress" => Some(crate::cmd::httproute::INGRESS_SPEC_FIELDS),
-                // `Egress` continua aqui, e tem de continuar: este teste lê os
-                // ficheiros CRUS, antes do `load`, e é lá que o Kind antigo
-                // ainda existe. Os outros ramos por `kind: Egress` foram
-                // apagados porque correm DEPOIS do load, onde ele já não chega.
-                "Egress" | "FirewallPolicy" => Some(crate::cmd::firewall::FW_SPEC_FIELDS),
-                "HTTPRoute" => Some(crate::cmd::httproute::HTTP_ROUTE_SPEC_FIELDS),
-                "Dependency" => Some(crate::cmd::dependency::DEPENDENCY_SPEC_FIELDS),
-                "Tunnel" => Some(crate::cmd::tunnel::TUNNEL_SPEC_FIELDS),
-                "ShareVolume" => Some(crate::cmd::sharevolume::SHAREVOLUME_SPEC_FIELDS),
-                _ => None, // Cluster has its own nested specs; outside this guard.
-            }
-        };
+        let fields_for = |kind: &str| -> Option<&'static [&'static str]> { spec_fields_for(kind) };
         for entry in std::fs::read_dir(&dir).expect("examples/ existe") {
             let path = entry.unwrap().path();
             if path.extension().and_then(|e| e.to_str()) != Some("yaml") {

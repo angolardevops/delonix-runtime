@@ -115,7 +115,6 @@ pub fn run(action: PodCmd) -> Result<()> {
 /// Applies the `kind: Pod` documents of a manifest.
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     for doc in manifest::of_kind(docs, "Pod") {
-        manifest::warn_unknown_fields(doc, container::POD_SPEC_FIELDS);
         let spec: PodSpec = manifest::spec_of(doc)?;
         create_pod(&doc.metadata.name, doc.metadata.namespace.clone(), spec)?;
     }

@@ -3901,6 +3901,9 @@ msgstr "Storage '{name}': o spec tem de ser uma mapping"
 msgid "a volume declares more than one network share ({kinds}) — a volume is one mount"
 msgstr "um volume declara mais do que uma partilha de rede ({kinds}) — um volume é uma montagem"
 
+msgid "{kind} '{name}': unknown field '{key}' in spec — ignored (check the spelling)"
+msgstr "{kind} '{name}': campo desconhecido '{key}' no spec — ignorado (verifica a ortografia)"
+
 msgid "{kind} '{name}': unknown field '{key}' in spec.{block} — ignored (check the spelling)"
 msgstr "{kind} '{name}': campo desconhecido '{key}' em spec.{block} — ignorado (verifica a escrita)"
 
