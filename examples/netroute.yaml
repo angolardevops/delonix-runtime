@@ -1,0 +1,85 @@
+# kind: NetworkRoute — caminho DIRIGIDO entre duas REDES (ADR-0013 tier B).
+#
+# Redes são isoladas umas das outras por omissão. Isto declara que uma pode
+# alcançar a outra. Dirigido, como o `kind: Dependency` entre containers: `from`
+# inicia, e o retorno dessa conversa flui (established); `to` NÃO inicia de volta.
+#
+# ┌─ A REGRA QUE FAZ ISTO COMPOR-SE, e não minar o isolamento ──────────────────┐
+# │ Uma rota diz que o pacote PODE atravessar. Nunca diz que é PERMITIDO.       │
+# │ As chains `fwcont` por workload continuam a decidir, e uma fronteira de     │
+# │ namespace atravessada por uma rota continua a precisar da sua política.     │
+# └─────────────────────────────────────────────────────────────────────────────┘
+#
+# São duas perguntas em série, e é por isso que são dois Kinds e não um:
+#
+#   fwdeny (-10)  ← NetworkRoute:   as duas redes têm caminho?   senão: drop
+#   fwcont  (-5)  ← FirewallPolicy: este workload aceita isto?   senão: drop
+#
+# Sem a rota, o `api` nem é alcançável do `web` (redes diferentes). Com a rota e
+# sem a Dependency abaixo, o caminho existe e o `api` continua a decidir sozinho
+# quem aceita. Este ficheiro declara as duas coisas de propósito — tirar uma
+# delas e reaplicar é a melhor forma de ver a diferença.
+#
+# Por baixo é UM elemento no verdict map `@netpair` do holder (uma isenção ao
+# drop par-a-par entre bridges), não um dataplane novo. Custo constante: não
+# cresce com o número de redes.
+#
+# Documento próprio, e não um campo `routes:` dentro do `kind: Network`, porque
+# uma rota é uma RELAÇÃO e não pertence a nenhuma das pontas — exprimível dos
+# dois lados é como dois documentos passam a discordar sobre a mesma rota, o bug
+# que o `FirewallPolicy` já paga ao RECUSAR duas políticas para o mesmo alvo e
+# direcção.
+#
+# O `via:` que aparece no rascunho do ADR-0013 NÃO existe: o spike mostrou que o
+# encaminhamento já lá estava e que fechar é que era explícito, por isso o que
+# sobrou foi `from`/`to`. Os campos aceites são só esses dois.
+#
+# Aplicar com `delonix stack apply -f netroute.yaml`.
+# Imperativo equivalente:  delonix network route <from> <to>   (e `--rm` para fechar)
+---
+apiVersion: delonix.io/v1
+kind: Network
+metadata: { name: frontend }
+spec:
+  driver: bridge
+---
+apiVersion: delonix.io/v1
+kind: Network
+metadata: { name: backend }
+spec:
+  driver: bridge
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata: { name: web }
+spec:
+  image: "alpine:3.19"
+  network: frontend
+  command: ["sleep", "infinity"]
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata: { name: api }
+spec:
+  image: "alpine:3.19"
+  network: backend
+  command: ["sleep", "infinity"]
+---
+# 1ª pergunta: HÁ CAMINHO? — frontend alcança backend, e não o contrário.
+apiVersion: delonix.io/v1
+kind: NetworkRoute
+metadata: { name: frontend-to-backend }
+spec:
+  from: frontend
+  to: backend
+---
+# 2ª pergunta: É PERMITIDO? — a rota não abriu o `api` a ninguém; isto abre-o
+# ao `web` e só a ele (default-deny no `api` + um allow para o `web`).
+apiVersion: delonix.io/v1
+kind: Dependency
+metadata: { name: web-knows-api }
+spec:
+  from: web
+  to: api
+  ports: ["8080"]
+  proto: tcp

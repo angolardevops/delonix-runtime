@@ -750,6 +750,58 @@ a DB, a DB não fica acessível aos outros apps de uma rede partilhada (`cmd/dep
   `kind: Ingress` explícito **e** de `Dependency` avisa (o Dependency é autoritativo e substitui a
   direção de entrada). Remover a `Dependency` **não** desprotege o `to` ("garante presente").
 
+## Caminho entre REDES (`kind: NetworkRoute` / `network route`, ADR-0013 tier B)
+
+O grão acima do `Dependency`: aquele liga dois **workloads**, este liga duas **redes**. Redes são
+isoladas umas das outras por omissão; um `NetworkRoute` declara que uma pode alcançar a outra.
+Dirigido, com a mesma assimetria — `from` inicia, o retorno flui (established), `to` não inicia de
+volta. Superfície: `delonix network route <from> <to>` (`--rm` fecha) + `kind: NetworkRoute` com
+**só dois campos**, `from`/`to`. Módulo `cmd/netroute.rs`, dataplane em `infra::network_route`.
+
+**A regra que o faz compor-se com o isolamento em vez de o minar, e é a única coisa a reter daqui:
+uma rota diz que o pacote PODE atravessar; nunca diz que é PERMITIDO.** As chains `fwcont` por
+workload continuam a decidir, e uma fronteira de namespace atravessada por uma rota continua a
+precisar da sua `Dependency` ou política. São duas perguntas em série, em duas chains diferentes,
+e é por isso que são dois Kinds e não um campo de um só:
+
+```
+fwdeny (-10)  ← NetworkRoute:   as duas redes têm caminho?    senão: drop
+fwcont  (-5)  ← FirewallPolicy: este workload aceita isto?    senão: drop
+```
+
+Quem os funde perde a capacidade de exprimir «há caminho mas está fechado», que é o estado normal
+de uma rede segmentada — a mesma separação que a AWS faz entre route table e security group.
+
+- **Isolamento entre redes não é a AUSÊNCIA de rota — é um drop par-a-par explícito**, e foi o
+  spike do ADR que o mediu (dentro do holder o `ip_forward` já é 1, as rotas das duas bridges já lá
+  estão, e as quatro chains do `forward` são `policy accept`). Por isso ABRIR um caminho é uma
+  **isenção**, não um dataplane: um elemento no verdict map `@netpair`. Custo constante — a malha
+  antiga eram 73 regras para 8 bridges, todas percorridas por pacote; hoje são duas regras
+  independentemente de quantas redes existam (o mesmo movimento que o `@fwmap` já fizera).
+- **A isenção é consultada nas DUAS chains** (`fwdeny` -10 e `forward` 0), e esquecê-lo já partiu
+  o tráfego DENTRO da própria rede: um `accept` **não é terminal entre base chains**, logo isentar
+  só no `fwdeny` deixava o pacote seguir para a `forward`, que tem `policy drop` — 100% de perda,
+  medido. Há teste a exigir as duas ocorrências (`a_isencao_e_consultada_nas_duas_chains_...`).
+- **Documento próprio e não um campo `routes:` no `kind: Network`**: uma rota é uma RELAÇÃO e não
+  pertence a nenhuma das pontas. Exprimível dos dois lados é como dois documentos passam a
+  discordar sobre a mesma rota — o bug que o `FirewallPolicy` já paga ao RECUSAR duas políticas
+  para o mesmo (alvo, direcção).
+- **O `via:` do rascunho do ADR não existe.** O spike tornou-o desnecessário e o que sobrou foram
+  `from`/`to`; quem copiar o YAML do ADR escreve um campo que o motor não conhece.
+- **Não tem estado próprio a ler**: `presence_of` classifica-o como `declarative` (`-`), a par de
+  `Ingress`/`FirewallPolicy`/`HTTPRoute`/`Dependency`. **A ausência desse braço foi um bug real** —
+  caía no `_ => ("?", "unsupported kind")`, impresso pelo `ls`/`describe` sobre um recurso que o
+  `apply` cria, e tratado como eternamente pendente pelo `wait`.
+- **Estado a 2026-08-12 (HEAD `f42ebfb`)**: está em `KINDS` mas **não** em `CONVERGING_KINDS`, e o
+  caminho declarativo só ABRE (`netroute::apply` chama sempre `network_route(.., true)`) — tirar a
+  rota do manifesto e reaplicar não a fecha, e o plano não o diz. Fechar é só pela CLI
+  (`network route --rm`). Uma isenção ao isolamento que o manifesto abre e não consegue fechar é a
+  mesma armadilha «garante presente» que o `Dependency` já documenta no teardown, e num Kind de
+  segurança custa mais. **Está a ser fechado no branch `netroute-reversivel`** (leitura de volta do
+  `@netpair` + `desired`/`actual`); quem lá chegar primeiro, actualiza este parágrafo.
+- Exemplo: `examples/netroute.yaml` — declara a rota **e** a `Dependency`, de propósito: tirar uma
+  delas e reaplicar é a forma mais rápida de ver que as duas perguntas são mesmo independentes.
+
 ## Isolamento de namespace (`metadata.namespace` / `--namespace`)
 
 Namespace lógico de **isolamento** (default `default`), estilo k8s: containers de namespaces
