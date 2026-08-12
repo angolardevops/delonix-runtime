@@ -27,17 +27,35 @@ pub const WORKLOAD_SPEC_FIELDS: &[&str] = &["type", "container", "vm", "pod", "m
 /// The `spec` of a `kind: Workload`: a `type` discriminator plus the single
 /// type-named block that holds the underlying spec, kept raw until the target
 /// Kind re-deserializes it.
-#[derive(Debug, Deserialize)]
-struct WorkloadSpec {
+/// The four blocks are `serde_yaml::Value` because the lowering hands them to
+/// the target Kind to re-deserialize, and holding them raw is what keeps this
+/// type from restating a spec it does not own.
+///
+/// For the SCHEMA that is not good enough: `Value` describes as «anything», so
+/// an editor would have nothing to say inside the block that carries the entire
+/// workload. `#[schemars(with = ...)]` names the type the block actually IS —
+/// still derived from the real spec, never a second copy of its fields. That is
+/// also the truth of the lowering: `spec.container` is re-read as a
+/// `ContainerSpec`, so anything the schema would accept here and that type would
+/// reject is a manifest that fails at apply.
+///
+/// `microvm` maps to `VmSpec` for the same reason it lowers to `kind: Vm` — it
+/// is a `VmSpec` with the backend forced to `cloud-hypervisor` (ADR-0006).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct WorkloadSpec {
     #[serde(rename = "type", default)]
     workload_type: String,
     #[serde(default)]
+    #[schemars(with = "Option<super::container::ContainerSpec>")]
     container: Option<serde_yaml::Value>,
     #[serde(default)]
+    #[schemars(with = "Option<super::vm::VmSpec>")]
     vm: Option<serde_yaml::Value>,
     #[serde(default)]
+    #[schemars(with = "Option<super::container::PodSpec>")]
     pod: Option<serde_yaml::Value>,
     #[serde(default)]
+    #[schemars(with = "Option<super::vm::VmSpec>")]
     microvm: Option<serde_yaml::Value>,
 }
 

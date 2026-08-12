@@ -27,7 +27,7 @@ use super::manifest::{self, ManifestDoc};
 use delonix_runtime_core::{Error, Result};
 
 /// `spec` of `kind: Dependency`.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
 pub struct DependencySpec {
     /// Container/VM that INITIATES the connection (the one that "knows"). Gains access to `to`.
     pub from: String,

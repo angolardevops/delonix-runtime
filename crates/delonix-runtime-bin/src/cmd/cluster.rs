@@ -36,7 +36,7 @@ use super::{etcd, k8s_recipes, kubeadm_config, lb, vm as vm_cmd, vmimage};
 /// provisioning before (see AGENTS.md's "sem teste end-to-end real" note).
 pub(crate) const DELONIX_CRI_SOCKET: &str = "unix:///run/delonix-cri.sock";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct SshSpec {
     #[serde(default = "default_ssh_user")]
     user: String,
@@ -68,7 +68,7 @@ fn default_ssh_user() -> String {
     "delonix".to_string()
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct EtcdSpec {
     #[serde(default = "default_etcd_mode")]
     mode: String,
@@ -92,7 +92,7 @@ fn default_etcd_mode() -> String {
     "stacked".to_string()
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 struct HostSpec {
     /// `address` is the canonical name in the templates; `ip` stays for
     /// compatibility with earlier manifests.
@@ -127,8 +127,8 @@ pub(crate) const CLUSTER_SPEC_FIELDS: &[&str] = &[
     "workers",
 ];
 
-#[derive(Debug, Deserialize)]
-struct ClusterSpec {
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct ClusterSpec {
     /// **The discriminator**: `kind` (containers here), `vm` (golden VMs) or
     /// `ssh` (remote hosts already live). One Kind, three paths — the common
     /// fields (k8sVersion/podSubnet/cni) are shared, the specific ones live in
@@ -194,7 +194,7 @@ fn default_cni() -> String {
 /// The nodes of a role. **Unifies the three modes**: `kind`/`vm` say how many
 /// (`replicas`), `ssh` says which ones (`hosts`) — because there the machines already exist
 /// and we do not create them.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct NodesSpec {
     #[serde(default)]
     replicas: Option<u32>,
@@ -214,7 +214,7 @@ impl NodesSpec {
 }
 
 /// `spec.kind` block — only read in `mode: kind`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct KindModeSpec {
     #[serde(default = "default_node_image")]
     image: String,
@@ -236,7 +236,7 @@ fn default_node_image() -> String {
 }
 
 /// `spec.vm` block — only read in `mode: vm`.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct VmModeSpec {
     image: Option<String>,
     network: Option<String>,

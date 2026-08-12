@@ -45,8 +45,8 @@ use super::manifest::{self, ManifestDoc};
 use super::output;
 use super::util::state_root;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct TunnelSpec {
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+pub(crate) struct TunnelSpec {
     /// `pinggy` | `ngrok` | `cloudflare`.
     provider: String,
     #[serde(rename = "localPort")]

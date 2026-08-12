@@ -112,7 +112,7 @@ pub fn run(action: HttpRouteCmd) -> Result<()> {
 }
 
 /// `spec` for `kind: HTTPRoute`.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
 pub struct HttpRouteSpec {
     /// Entry points (ports where the proxy listens). Default: `[{port: 80}]`,
     /// plus an implicit `{port: 443, tls: true}` if `spec.tls` is defined.
@@ -127,7 +127,7 @@ pub struct HttpRouteSpec {
 }
 
 /// An entry point (proxy listen port).
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
 pub struct Entrypoint {
     pub port: u16,
     /// `true` = terminate TLS on this port (requires `spec.tls`). Default `false`.
@@ -136,7 +136,7 @@ pub struct Entrypoint {
 }
 
 /// Proxy TLS configuration.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
 pub struct TlsSpec {
     /// `selfSigned` (default) or `secretRef`.
     #[serde(default)]
@@ -149,7 +149,7 @@ pub struct TlsSpec {
 
 /// A routing rule: matches by `host` (optional — empty = any Host) and
 /// dispatches by path prefix to a backend.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
 pub struct RouteRule {
     /// Host name to match (e.g.: `loja.exemplo.ao`). Empty/omitted = any Host.
     #[serde(default)]
@@ -160,7 +160,7 @@ pub struct RouteRule {
 }
 
 /// A path prefix and the backend it forwards to.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
 pub struct PathRule {
     /// Path prefix (e.g.: `/`, `/api`). Default `/`.
     #[serde(default = "default_path")]
@@ -173,7 +173,7 @@ fn default_path() -> String {
 }
 
 /// The destination of a path: a container (by name) and the port it listens on.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
 pub struct Backend {
     /// Name of the backend container (resolved to the record's IP at apply time).
     pub service: String,
@@ -380,8 +380,8 @@ pub(crate) const INGRESS_SPEC_FIELDS: &[&str] = &[
     "entrypoints",
 ];
 
-#[derive(Debug, Deserialize, Serialize)]
-struct IngressSpec {
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+pub(crate) struct IngressSpec {
     #[serde(default)]
     rules: Vec<IngressRule>,
     /// k8s TLS block (a LIST). v1 uses a SINGLE cert (no SNI) — the first entry wins.
@@ -399,7 +399,7 @@ struct IngressSpec {
     entrypoints: Vec<Entrypoint>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct IngressRule {
     #[serde(default)]
     host: Option<String>,
@@ -407,13 +407,13 @@ struct IngressRule {
     http: Option<IngressHttp>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct IngressHttp {
     #[serde(default)]
     paths: Vec<IngressPath>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct IngressPath {
     #[serde(default = "default_path")]
     path: String,
@@ -425,18 +425,18 @@ struct IngressPath {
     backend: IngressBackend,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct IngressBackend {
     service: IngressServiceRef,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct IngressServiceRef {
     name: String,
     port: IngressServicePort,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct IngressServicePort {
     #[serde(default)]
     number: Option<u16>,
@@ -504,7 +504,7 @@ fn ingress_to_httproute(name: &str, ing: IngressSpec) -> Result<HttpRouteSpec> {
     })
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct IngressTls {
     #[serde(default)]
     #[allow(dead_code)]

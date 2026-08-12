@@ -44,8 +44,8 @@ use super::manifest::{self, ManifestDoc};
 use super::output;
 use super::util::state_root;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct ShareVolumeSpec {
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+pub(crate) struct ShareVolumeSpec {
     /// Name of an existing `kind: Storage` (a network-backed `delonix-volume`).
     #[serde(rename = "storageRef")]
     storage_ref: String,
