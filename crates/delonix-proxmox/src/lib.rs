@@ -1654,4 +1654,31 @@ mod tests {
         // field.
         assert_eq!(vmid_from_handle("proxmox:a:b:7"), Some(7));
     }
+
+    /// O parser contra uma resposta REAL, e não contra uma escrita à mão.
+    ///
+    /// Capturada de um `qemu-guest-agent` 7.2.22 a correr num convidado Debian
+    /// bookworm com DUAS NICs, dentro da appliance `proxmox-ve:9.1` que este
+    /// repo constrói, por
+    /// `GET /nodes/pve/qemu/100/agent/network-get-interfaces`.
+    ///
+    /// Os casos escritos à mão acima cobrem as REGRAS (loopback, IPv6,
+    /// link-local); este cobre a FORMA — que é o que nenhuma amostra inventada
+    /// pode garantir. Trouxe três coisas que o exemplo do doc-comment não tem:
+    /// um bloco `statistics` por interface, as chaves em ordem VARIÁVEL entre
+    /// interfaces (o `eth0` traz `statistics` antes de `ip-addresses`), e um
+    /// IPv6 `fec0::` site-local a par do `fe80::`.
+    ///
+    /// A escolha é o `eth0` e não o `eth1`: a ordem é a que o agente reporta, e
+    /// medida ao vivo 12 vezes seguidas ela não variou — que é o que torna o
+    /// `ip()` de um convidado multi-NIC determinístico em vez de oscilante,
+    /// a única pergunta que um segundo NIC levanta e uma NIC só nunca revela.
+    #[test]
+    fn o_parser_contra_um_agente_a_serio_com_duas_nics() {
+        let v: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/agent-network-get-interfaces.json"
+        ))
+        .expect("a resposta gravada tem de ser JSON válido");
+        assert_eq!(parse_agent_ip(&v).as_deref(), Some("10.0.2.17"));
+    }
 }
