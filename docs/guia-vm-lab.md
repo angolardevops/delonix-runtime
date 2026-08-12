@@ -5,7 +5,7 @@ binário real e a saída mostrada é a que se obteve. O que não foi possível p
 está identificado como tal, com a razão — um guia que promete o que não verificou é
 pior do que um guia incompleto.
 
-- **Versão do motor:** `delonix 0.51.0`
+- **Versão do motor:** `delonix 0.52.0` (as correcções assinaladas entraram na 0.51.x)
 - **Host de validação:** Ubuntu, 32 vCPU, 30 GiB RAM, rootless, libvirt + Cloud
   Hypervisor instalados
 - **Data:** 12 de Agosto de 2026
