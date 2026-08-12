@@ -3788,3 +3788,60 @@ informal de "hypervisor").
   fixou "hyperv" = hypervisor genérico); expor `generate_seed_iso` como comando standalone fora de
   `vm create`; propagar `default_vcpus`/`default_memory`/`default_backend` a `cluster kubeadm`/
   `kind: Vm` (manifesto) — hoje só o `vm create` via CLI os lê.
+
+## A bateria mede o `--help` de tudo e EXECUTA 23% (medido 2026-08-12)
+
+Primeira passagem do roteiro de auditoria (`.claude/skills/delonix-auditoria`), e o número que
+importa saiu logo do mapa da superfície, antes de qualquer achado: a CLI tem **245 comandos, 218
+folhas invocáveis**; o `scripts/e2e.sh` verifica o `--help` de **100%** delas (um ciclo dinâmico
+percorre a árvore) e **executa 51 — 23%**. Os 167 restantes têm o contrato verificado e nunca são
+corridos, concentrados em `net` (45), `image` (31) e `vm` (24).
+
+**198/198 verde lê-se como «a CLI foi testada», e o que foi testado é sobretudo o texto de ajuda.**
+Foi em `net` que os dois achados abaixo apareceram, ao primeiro contacto, os dois em comandos que
+a bateria nunca executava.
+
+**Achado 1 — o `ENOENT` de um spawn, outra vez.** `network node init`/`key` devolviam
+``system call `spawn` failed: No such file or directory (os error 2)`` quando falta o `wg`: não
+nomeia a ferramenta, não diz o pacote, e a frase manda procurar um caminho quando falta um
+binário. É a classe já catalogada («o ENOENT de um `Command::status()` não é um ficheiro em
+falta»), que a v0.45.0 corrigira no `vmimage::tool_package` e **reapareceu noutro sítio** — e o
+remédio estava a duas funções de distância (`cmd::network` já recusava o overlay cifrado a nomear
+`wireguard-tools`). Corrigido **na origem** (`delonix-net::wg`, o `map_err` dos dois spawns), para
+qualquer chamador herdar, em vez de o repetir no `cmd_node`.
+
+**Achado 2 — `network create --driver overlay --wg-ip` reportava SUCESSO sobre uma rede por
+realizar.** rc=**0**, o nome no stdout, e o erro accionável rebaixado a *warning* que prometia
+reconciliar «no próximo `network create`». Medido: o segundo create dá **conflict (5)**, porque
+`create_overlay` não é idempotente — a promessa era falsa e a rede ficava `Realized=False` sem
+comando que a salvasse. **O ficheiro já continha o argumento contra si próprio**: o braço `bridge`
+faz rollback do registo com um comentário a descrever exactamente este sintoma, e o comentário do
+`overlay` admite que ele, ao contrário do macvlan/ipvlan, **é realizável em rootless**. Estava no
+bucket errado; passou ao padrão do `bridge` (rollback + propagar o erro).
+
+**Gate** em `scripts/e2e.sh` (secção network), verificado pela regra do repo — 4/4 com a correcção,
+**1/4 com ela revertida**. E o que passou nos dois é a lição: `check … 1 …` **não distinguia nada**,
+porque o errno cru também saía 1 — o gate que apanha isto é o da MENSAGEM (contém
+`wireguard-tools`, não contém `No such file`). Um gate por exit code teria ficado verde sobre o
+bug. Salta com `SKIP` num host que TENHA `wg`, porque aí o caminho de falha não existe e um verde
+não exercitaria nada.
+
+**Por fechar, medido e não corrigido:**
+- **`scripts/e2e.sh` não isola o estado** — nenhuma referência a `DELONIX_ROOT`, ao contrário do
+  `chaos.sh`, que redirecciona os dois roots e o avisa no cabeçalho. Corre contra o estado real da
+  máquina. Isolar de fora funciona (foi como esta auditoria correu), mas forçá-lo por omissão
+  partiria os checks que dependem de estado real (imagens no store, holder) — é trabalho com
+  análise, não uma linha.
+- **`delonix backup`/`restore` não aparecem no `CLAUDE.md`** (a única ocorrência da palavra é uma
+  frase incidental sobre exit codes), apesar de terem página de documentação e checks no
+  `e2e.sh`. Num guia que documenta tudo o resto, é o grupo que um SRE procura primeiro.
+- **Os 167 comandos nunca executados.** É a fatia com melhor retorno da próxima sessão.
+
+**Armadilhas do próprio auditor, todas apanhadas nesta passagem** (e todas já catalogadas — o que
+prova que a lista serve): `$?` depois de um pipe ia reportar `rc=0` onde era 1 (era o `$?` do
+`head`); um `grep "delonix <grupo>"` deu três grupos como não documentados e era falso; as páginas
+`docs/comandos/netns.html` pareciam stale e têm o `Usage:` correcto lá dentro; um `head -3` no
+`git status` escondeu dois ficheiros; e classificar `init` como comando de leitura gerou scaffold
+na raiz do repo (`README.md`, `VMfile`, `cloud-init/`, `cluster-kind.yaml`,
+`delonix-manifest.yaml` — todos removidos, nada tracked tocado). De passagem ficou provado que o
+scaffold **não sobrescreve**: `already exists, skipped (use --force to overwrite)`.

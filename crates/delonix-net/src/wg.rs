@@ -23,12 +23,33 @@ fn rt(ctx: &'static str, e: impl std::fmt::Display) -> Error {
     }
 }
 
+/// The `wg` binary is missing from the host.
+///
+/// The raw `ENOENT` of a spawn is NOT a missing file — it is the TOOL not being
+/// there, and "No such file or directory" sends the reader looking for a path.
+/// `network node init`/`key` used to surface exactly that errno, while the
+/// encrypted-overlay path two functions away (`cmd::network`, `wg::available`)
+/// already refused with an actionable message. Fixed at the boundary so every
+/// caller of this module inherits it. Same class as `vmimage::tool_package`.
+fn missing_wg() -> Error {
+    Error::Invalid(
+        "'wg' is not available on this host — install wireguard-tools (Debian/Ubuntu: \
+         `apt install wireguard-tools`; Fedora/RHEL: `dnf install wireguard-tools`; \
+         Arch: `pacman -S wireguard-tools`). It is only needed for WireGuard node keys \
+         and encrypted overlay networks"
+            .into(),
+    )
+}
+
 /// Runs `prog args`; returns stdout (trimmed) or an error with the stderr.
 fn out(prog: &str, args: &[&str]) -> Result<String> {
-    let o = Command::new(prog)
-        .args(args)
-        .output()
-        .map_err(|e| rt("spawn", e))?;
+    let o = Command::new(prog).args(args).output().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            missing_wg()
+        } else {
+            rt("spawn", e)
+        }
+    })?;
     if !o.status.success() {
         return Err(Error::Runtime {
             context: "cmd",
@@ -57,7 +78,13 @@ pub fn pubkey(private: &str) -> Result<String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|e| rt("spawn wg pubkey", e))?;
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                missing_wg()
+            } else {
+                rt("spawn wg pubkey", e)
+            }
+        })?;
     child
         .stdin
         .take()
