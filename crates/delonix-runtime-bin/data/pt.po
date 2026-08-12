@@ -8558,3 +8558,12 @@ msgstr "que checkpoints uma VM tem, antes de voltar a um deles — também com a
 
 msgid "drop a checkpoint you no longer need — its state leaves the disk with it"
 msgstr "deita fora um checkpoint que já não precisas — o estado dele sai do disco com ele"
+
+msgid "(only with `--vm`) Local name (default: derived from the reference)."
+msgstr "(só com `--vm`) Nome local (default: derivado da referência)."
+
+msgid "`--name` only applies to VM images (`image --vm pull`) — to give a container image another reference, pull it and then `image tag`"
+msgstr "`--name` só se aplica a imagens VM (`image --vm pull`) — para dar outra referência a uma imagem de container, faz o pull e depois `image tag`"
+
+msgid "`--no-k8s` only applies to VM images (`image --vm pull`)"
+msgstr "`--no-k8s` só se aplica a imagens VM (`image --vm pull`)"
