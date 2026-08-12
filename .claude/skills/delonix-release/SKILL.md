@@ -27,9 +27,38 @@ glibc 2.35). O trabalho local é: notas → bump → tag → monitorizar → val
    por vezes coincide em string com ela, causando "2 matches" no `old_string`.
    Inclui sempre `[workspace.package]\nversion = "X.Y.Z"` como contexto do
    `old_string` para apontar só à linha 17.
-4. **Documentação da CLI** (só se a superfície de comandos mudou): o site de
-   docs embebe o `--help` real — depois de a release publicar, descarregar o
-   binário publicado e regenerar. Armadilha: o `gen.py` importa o módulo
+4. **Documentação da CLI — SEMPRE, e ANTES da tag.** Esta linha dizia «só se a
+   superfície de comandos mudou» e **essa leitura custou uma tag falhada na
+   v0.51.0**: a superfície não mudou (245 comandos, 218 folhas, remapeadas e
+   confirmadas), mas o `docs/index.html` embebe o **número da versão** no pill
+   do cabeçalho — duas linhas — por isso **todo o bump o desactualiza**. O CI
+   tem um gate («O site publicado tem de ser o gerado») que regenera com o
+   binário da tag e falha a release inteira com `docs/index.html | 4 ++--`.
+
+   O gate corre-se localmente numa linha, e é obrigatório **antes** de cortar a
+   tag — nunca depois de a release publicar:
+
+   ```bash
+   cargo build --release -p delonix-runtime-bin
+   python3 docs/gen.py "$PWD/target/release/delonix"
+   git diff --quiet -- docs/ && echo "gate passa" || git diff --stat -- docs/
+   ```
+
+   **Passa o binário como argv[1], sempre.** O `gen.py` **ignora o `PATH`** e cai
+   em `target/release/delonix` fixo — um binário de release velho ali gera a
+   documentação da versão ERRADA e o diff parece confirmar o problema quando o
+   está a criar. (No CI o `PATH=$PWD/target/release` é inofensivo porque esse
+   binário acabou de ser compilado da própria tag.)
+
+   Se o gate falhar, **não adivinhes a causa**: três hipóteses plausíveis foram
+   testadas e refutadas antes de se encontrar a verdadeira — versão do `markdown`
+   (venv com a 3.3.6 do CI: zero diff), output não-determinístico por
+   `PYTHONHASHSEED` (cinco corridas: zero diff), e o binário embeber commit/data
+   (o `index.html` não contém nenhum dos dois). O que resolveu foi comparar
+   `git show <tag>:docs/index.html` com o gerado, linha a linha.
+
+   O resto continua a valer: depois de a release publicar, o site pode ser
+   regenerado com o binário publicado. Armadilha: o `gen.py` importa o módulo
    `markdown` e o pip do sistema está bloqueado (PEP 668) — usar um venv
    descartável. Armadilha maior: `gen.py` aceita um **2.º argumento** com o
    caminho do `delonixctl` (cliente PaaS privado, gera as páginas irmãs desse
