@@ -34,7 +34,69 @@ use schemars::generate::SchemaSettings;
 /// A Kind missing from this list is reported as «no typed schema» rather than
 /// omitted — a schema that silently covers half the manifest would validate a
 /// typo into looking correct, which is worse than not validating at all.
-const TYPED_KINDS: &[&str] = &["Container", "Pod", "Volume", "Network", "Vm"];
+/// `Storage` is the one Kind deliberately NOT here, and not for lack of
+/// attention. It has no spec type of its own: `kind: Storage` is rewritten into
+/// `kind: Volume` with an `nfs:`/`cifs:`/`webdav:` block (`lower_storage`),
+/// reading the raw `Value`. Typing it would mean authoring a struct that exists
+/// only to be described — a second, hand-maintained copy of fields the
+/// `NetShareSpec` already owns, which is the exact arrangement ADR-0007 exists
+/// to abolish. So it stays untyped and [`no_typed_schema`] names the spelling to
+/// use instead.
+const TYPED_KINDS: &[&str] = &[
+    "Container",
+    "Pod",
+    "Volume",
+    "Network",
+    "Vm",
+    "Secret",
+    "Image",
+    "Tunnel",
+    "ShareVolume",
+    "Dependency",
+    "HTTPRoute",
+    "Ingress",
+    "FirewallPolicy",
+    "Egress",
+    "Workload",
+    "Cluster",
+    "Stack",
+];
+
+/// Fields of NESTED types that serde accepts under a second name, as
+/// `(def, canonical, alias)`.
+///
+/// **schemars does not see `#[serde(alias = ...)]`** — only `rename`. At the TOP
+/// level of a Kind that costs nothing, because the accept list injected below
+/// comes from the `*_SPEC_FIELDS` constants and those already carry both
+/// spellings (`sshKeys` and `ssh_keys` are both in `VM_SPEC_FIELDS`). A nested
+/// type has no such list, so nothing put the second spelling anywhere.
+///
+/// Found by validating `examples/` against the generated schema, which rejected
+/// `examples/cluster-ssh.yaml` — a published, working manifest — with «'ip' is a
+/// required property», five times over. `address` is the CANONICAL name in the
+/// templates and `ip` is the compatibility spelling, so the schema was demanding
+/// the one nobody is told to write.
+const NESTED_ALIASES: &[(&str, &str, &str)] =
+    &[("HostSpec", "ip", "address"), ("SshSpec", "key", "keyPath")];
+
+/// The refusal for a Kind with no typed spec.
+///
+/// Shared by `schema print --kind` and `explain` so the two cannot drift, and it
+/// carries a DIRECTED hint where there is one: told only «no typed schema for
+/// Storage», a reader looks for the bug in their manifest, when the answer is
+/// that the Kind has a current spelling and this is not it.
+fn no_typed_schema(kind: &str) -> Error {
+    let hint = if kind.eq_ignore_ascii_case("Storage") {
+        " — `kind: Storage` is the deprecated spelling: write `kind: Volume` with an \
+         `nfs:`/`cifs:`/`webdav:` block, which is what it is rewritten to at load"
+    } else {
+        ""
+    };
+    Error::Invalid(format!(
+        "no typed schema for '{kind}'{hint} — Kinds with one: {}",
+        TYPED_KINDS.join(", ")
+    ))
+}
 
 #[derive(Subcommand)]
 pub enum SchemaCmd {
@@ -55,28 +117,42 @@ pub enum SchemaCmd {
 fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
     let mut generator = SchemaSettings::draft2020_12().into_generator();
     let mut branches = Vec::new();
-    let mut strict: Vec<(String, &[&str])> = Vec::new();
+    let mut strict: Vec<(String, &str, &[&str])> = Vec::new();
     for kind in TYPED_KINDS {
         if let Some(k) = only {
             if !k.eq_ignore_ascii_case(kind) {
                 continue;
             }
         }
-        let (spec, accepted) = match *kind {
+        // The middle element is the `$defs` key schemars will generate, which is
+        // the Rust TYPE name and not the Kind. It used to be guessed as
+        // `format!("{kind}Spec")` further down, and the guess held only while
+        // every typed Kind happened to be named after its struct. It stops
+        // holding here — `FirewallPolicy` is `FwDocSpec`, `HTTPRoute` is
+        // `HttpRouteSpec` — and the failure mode was silent: the strictness loop
+        // did `continue` on a miss, so the Kind entered the schema WITHOUT
+        // `additionalProperties: false` and nothing said so. That is the exact
+        // shape this schema exists to abolish, so the name is now written down
+        // next to the type it belongs to, and a miss is a hard error.
+        let (spec, def_name, accepted) = match *kind {
             "Container" => (
                 generator.subschema_for::<super::container::ContainerSpec>(),
+                "ContainerSpec",
                 super::container::CONTAINER_SPEC_FIELDS,
             ),
             "Pod" => (
                 generator.subschema_for::<super::container::PodSpec>(),
+                "PodSpec",
                 super::container::POD_SPEC_FIELDS,
             ),
             "Volume" => (
                 generator.subschema_for::<super::volume::VolumeSpec>(),
+                "VolumeSpec",
                 super::volume::VOLUME_SPEC_FIELDS,
             ),
             "Network" => (
                 generator.subschema_for::<super::network::NetworkSpec>(),
+                "NetworkSpec",
                 super::network::NETWORK_SPEC_FIELDS,
             ),
             // `Vm` joins the typed Kinds: it is the largest spec in the manifest
@@ -87,11 +163,71 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
             // exist in a valid manifest and not in the struct.
             "Vm" => (
                 generator.subschema_for::<super::vm::VmSpec>(),
+                "VmSpec",
                 super::vm::VM_SPEC_FIELDS,
+            ),
+            "Secret" => (
+                generator.subschema_for::<super::secret::SecretSpec>(),
+                "SecretSpec",
+                super::secret::SECRET_SPEC_FIELDS,
+            ),
+            "Image" => (
+                generator.subschema_for::<super::image::ImageSpec>(),
+                "ImageSpec",
+                super::image::IMAGE_SPEC_FIELDS,
+            ),
+            "Tunnel" => (
+                generator.subschema_for::<super::tunnel::TunnelSpec>(),
+                "TunnelSpec",
+                super::tunnel::TUNNEL_SPEC_FIELDS,
+            ),
+            "ShareVolume" => (
+                generator.subschema_for::<super::sharevolume::ShareVolumeSpec>(),
+                "ShareVolumeSpec",
+                super::sharevolume::SHAREVOLUME_SPEC_FIELDS,
+            ),
+            "Dependency" => (
+                generator.subschema_for::<super::dependency::DependencySpec>(),
+                "DependencySpec",
+                super::dependency::DEPENDENCY_SPEC_FIELDS,
+            ),
+            "HTTPRoute" => (
+                generator.subschema_for::<super::httproute::HttpRouteSpec>(),
+                "HttpRouteSpec",
+                super::httproute::HTTP_ROUTE_SPEC_FIELDS,
+            ),
+            "Ingress" => (
+                generator.subschema_for::<super::httproute::IngressSpec>(),
+                "IngressSpec",
+                super::httproute::INGRESS_SPEC_FIELDS,
+            ),
+            // One struct, two Kinds: `FirewallPolicy` and the legacy `Egress`
+            // share `FwDocSpec` whole — which is why they were merged. Both are
+            // listed so a document written either way gets checked; the schema
+            // describes what is ACCEPTED, and `Egress` still is.
+            "FirewallPolicy" | "Egress" => (
+                generator.subschema_for::<super::firewall::FwDocSpec>(),
+                "FwDocSpec",
+                super::firewall::FW_SPEC_FIELDS,
+            ),
+            "Workload" => (
+                generator.subschema_for::<super::workload::WorkloadSpec>(),
+                "WorkloadSpec",
+                super::workload::WORKLOAD_SPEC_FIELDS,
+            ),
+            "Cluster" => (
+                generator.subschema_for::<super::cluster::ClusterSpec>(),
+                "ClusterSpec",
+                super::cluster::CLUSTER_SPEC_FIELDS,
+            ),
+            "Stack" => (
+                generator.subschema_for::<super::manifest::StackSpec>(),
+                "StackSpec",
+                super::manifest::STACK_SPEC_FIELDS,
             ),
             _ => continue,
         };
-        strict.push((kind.to_string(), accepted));
+        strict.push((kind.to_string(), def_name, accepted));
         // `kind: Container` has TWO valid spec shapes: the flat one, and the
         // k8s Pod shape (`spec.containers[]`, still limited to one container).
         // `container::apply` picks between them by the presence of
@@ -110,13 +246,50 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
         }));
     }
     if branches.is_empty() {
-        return Err(Error::Invalid(format!(
-            "no typed schema for '{}' — Kinds with one: {}",
-            only.unwrap_or("?"),
-            TYPED_KINDS.join(", ")
-        )));
+        return Err(no_typed_schema(only.unwrap_or("?")));
     }
     let mut defs = generator.take_definitions(false);
+    // Teach the schema the second spelling of every aliased nested field (see
+    // `NESTED_ALIASES`). The alias gets the SAME subschema as the canonical
+    // field — they deserialize into one place, so describing them differently
+    // would be describing something the engine cannot do — and a REQUIRED field
+    // becomes «one of the two», rather than dropping the requirement, which
+    // would let a host entry with neither spelling validate clean and then fail
+    // at apply.
+    for (def_name, canonical, alias) in NESTED_ALIASES {
+        let Some(obj) = defs.get_mut(*def_name).and_then(|d| d.as_object_mut()) else {
+            continue;
+        };
+        let Some(sub) = obj
+            .get("properties")
+            .and_then(|p| p.get(*canonical))
+            .cloned()
+        else {
+            continue;
+        };
+        if let Some(props) = obj.get_mut("properties").and_then(|p| p.as_object_mut()) {
+            props.insert((*alias).to_string(), sub);
+        }
+        let required = obj
+            .get("required")
+            .and_then(|r| r.as_array())
+            .cloned()
+            .unwrap_or_default();
+        if required.iter().any(|x| x.as_str() == Some(*canonical)) {
+            let rest: Vec<_> = required
+                .into_iter()
+                .filter(|x| x.as_str() != Some(*canonical))
+                .collect();
+            obj.insert("required".into(), serde_json::Value::Array(rest));
+            obj.insert(
+                "anyOf".into(),
+                serde_json::json!([
+                    { "required": [canonical] },
+                    { "required": [alias] },
+                ]),
+            );
+        }
+    }
     // **A typo in a field name is the number-one mistake when writing a
     // manifest**, and without this the schema does not catch it: JSON Schema
     // allows unknown properties unless told otherwise, so `restartPolicyy`
@@ -130,10 +303,16 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
     // deserialized, so those keys exist in a valid manifest and do not exist in
     // the struct. Deriving strictness from the struct alone would flag correct
     // manifests — a false positive, which is worse than the gap it closes.
-    for (kind, accepted) in &strict {
-        let def_name = format!("{}Spec", if kind == "Pod" { "Pod" } else { kind });
-        let Some(obj) = defs.get_mut(&def_name).and_then(|d| d.as_object_mut()) else {
-            continue;
+    for (kind, def_name, accepted) in &strict {
+        let Some(obj) = defs.get_mut(*def_name).and_then(|d| d.as_object_mut()) else {
+            // Loud on purpose. The previous `continue` here meant a Kind whose
+            // struct name did not match the guess got NO strictness at all and
+            // said nothing — a typo in one of its fields would then validate
+            // clean, which is the single thing this block exists to prevent.
+            return Err(Error::Invalid(format!(
+                "internal: kind '{kind}' names `{def_name}` in $defs and it is not there — \
+                 the schema would accept unknown fields for it"
+            )));
         };
         if let Some(props) = obj.get_mut("properties").and_then(|p| p.as_object_mut()) {
             for name in *accepted {
@@ -154,19 +333,29 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
             // same way as the Container case — by validating `examples/` against
             // the generated schema, where `examples/vm.yaml` was rejected for a
             // shape the engine accepts.
-            let dual_shaped: &[&str] = match kind.as_str() {
-                "Container" => &["network", "env"],
-                "Vm" => &["network"],
+            // `Dependency.to` is the same duality by a different mechanism: a
+            // `deserialize_with = "string_or_vec"` that takes `to: db` as well
+            // as `to: [db, cache]`. schemars describes the DECLARED type
+            // (`Vec<String>`) and cannot see the custom deserializer, so the
+            // scalar form — the one `examples/dependency.yaml` uses — would be
+            // rejected for a shape the engine accepts.
+            //
+            // The SECOND shape is named per field rather than assumed to be an
+            // object: `to:` widens to a plain string, and widening it to an
+            // object instead would have kept rejecting the very form the example
+            // uses while looking like it had been handled.
+            let dual_shaped: &[(&str, &str)] = match kind.as_str() {
+                "Container" => &[("network", "object"), ("env", "object")],
+                "Vm" => &[("network", "object")],
+                "Dependency" => &[("to", "string")],
                 _ => &[],
             };
-            {
-                for dual in dual_shaped.iter().copied() {
-                    if let Some(existing) = props.get(dual).cloned() {
-                        props.insert(
-                            dual.to_string(),
-                            serde_json::json!({ "anyOf": [existing, { "type": "object" }] }),
-                        );
-                    }
+            for (dual, other) in dual_shaped.iter().copied() {
+                if let Some(existing) = props.get(dual).cloned() {
+                    props.insert(
+                        dual.to_string(),
+                        serde_json::json!({ "anyOf": [existing, { "type": other }] }),
+                    );
                 }
             }
         }
@@ -226,12 +415,7 @@ pub fn explain(path: &str) -> Result<()> {
     let canon = TYPED_KINDS
         .iter()
         .find(|k| k.eq_ignore_ascii_case(kind))
-        .ok_or_else(|| {
-            Error::Invalid(format!(
-                "no typed schema for '{kind}' — Kinds with one: {}",
-                TYPED_KINDS.join(", ")
-            ))
-        })?;
+        .ok_or_else(|| no_typed_schema(kind))?;
     let doc = manifest_schema(Some(canon))?;
     let defs = doc.get("$defs").cloned().unwrap_or(serde_json::json!({}));
     // The spec sits inside the `if/then` branch built above.
@@ -285,6 +469,15 @@ fn deref(node: serde_json::Value, defs: &serde_json::Value) -> serde_json::Value
         }
         None => node,
     };
+    // Only when the node has no `properties` of its own. An `anyOf` NEXT TO
+    // properties is a constraint on one object (`NESTED_ALIASES` writes one to
+    // say «either `ip` or `address`»), not a choice between two shapes —
+    // following it there would throw the whole object away and answer from a
+    // bare `{"required": [...]}`, which is how `explain Cluster.controlPlane`
+    // would have started reporting a type with no fields.
+    if node.get("properties").is_some() {
+        return node;
+    }
     match node
         .get("anyOf")
         .and_then(|a| a.as_array())
@@ -412,10 +605,96 @@ mod tests {
     /// worse than not validating.
     #[test]
     fn um_kind_sem_schema_tipado_e_recusado_com_a_lista_dos_que_tem() {
-        let e = manifest_schema(Some("Cluster")).unwrap_err().to_string();
+        // `Storage` é agora o único caso, e de propósito: não tem spec própria
+        // (é reescrito para `kind: Volume`), por isso a recusa tem de dizer o
+        // que escrever em vez dele — senão lê-se como «ninguém chegou lá».
+        let e = manifest_schema(Some("Storage")).unwrap_err().to_string();
         assert!(e.contains("Container"), "{e}");
-        assert!(explain("Cluster").is_err());
+        assert!(
+            e.contains("kind: Volume"),
+            "sem a alternativa dirigida: {e}"
+        );
+        assert!(explain("Storage").is_err());
         assert!(explain("Container.naoexiste").is_err());
+    }
+
+    /// A estritez tem de valer para TODOS os Kinds tipados, e a verificação é
+    /// derivada do `allOf` em vez de uma lista à mão — foi uma lista à mão
+    /// (`["ContainerSpec", "VolumeSpec", "NetworkSpec"]`) que deixou doze Kinds
+    /// entrarem no schema sem ninguém dar por isso.
+    ///
+    /// Antes disto o nome da definição era ADIVINHADO (`format!("{kind}Spec")`)
+    /// e um erro de palpite fazia `continue` em silêncio: o Kind ficava sem
+    /// `additionalProperties: false` e um typo num dos seus campos validava
+    /// limpo. `FirewallPolicy`/`FwDocSpec` e `HTTPRoute`/`HttpRouteSpec` são
+    /// exactamente os nomes em que o palpite deixa de bater.
+    #[test]
+    fn todo_o_kind_tipado_recusa_um_campo_desconhecido() {
+        let s = manifest_schema(None).unwrap();
+        let defs = &s["$defs"];
+        let branches = s["allOf"].as_array().unwrap();
+        assert_eq!(branches.len(), TYPED_KINDS.len());
+        for b in branches {
+            let kind = b["if"]["properties"]["kind"]["const"].as_str().unwrap();
+            let spec = deref(b["then"]["properties"]["spec"].clone(), defs);
+            assert_eq!(
+                spec["additionalProperties"],
+                serde_json::Value::Bool(false),
+                "{kind} aceita campos desconhecidos — um typo validaria limpo"
+            );
+        }
+    }
+
+    /// **schemars não vê `#[serde(alias = ...)]`**, só `rename`. No topo de um
+    /// Kind isso não custa nada (a lista de aceites já carrega as duas grafias),
+    /// mas um tipo ANINHADO não tem lista nenhuma — e o `HostSpec` tem o
+    /// agravante de o campo ser obrigatório.
+    ///
+    /// Encontrado a validar os `examples/` contra o schema gerado, que recusava
+    /// o `examples/cluster-ssh.yaml` — publicado e a funcionar — cinco vezes com
+    /// «'ip' is a required property». `address` é o nome CANÓNICO nos templates,
+    /// por isso o schema exigia justamente o que ninguém é mandado escrever.
+    #[test]
+    fn um_alias_de_campo_aninhado_e_aceite_sem_deixar_de_exigir_um_dos_dois() {
+        let s = manifest_schema(Some("Cluster")).unwrap();
+        let host = &s["$defs"]["HostSpec"];
+        for grafia in ["ip", "address"] {
+            assert!(
+                host["properties"].get(grafia).is_some(),
+                "`{grafia}` não está no schema do HostSpec"
+            );
+        }
+        // Não basta tirar o `required`: um host sem NENHUMA das duas grafias
+        // validaria limpo e só falhava no apply.
+        assert!(
+            !host["required"]
+                .as_array()
+                .is_some_and(|r| r.iter().any(|x| x == "ip")),
+            "`ip` continua obrigatório — o `address` do exemplo seria recusado"
+        );
+        let alts = host["anyOf"]
+            .as_array()
+            .expect("faltam as duas alternativas");
+        assert_eq!(alts.len(), 2, "{host:#?}");
+    }
+
+    /// O `deref` seguia SEMPRE um `anyOf`. Com a correcção acima o `HostSpec`
+    /// passou a ter um `anyOf` ao lado das `properties` — que é uma restrição
+    /// sobre um objecto, não uma escolha entre duas formas — e segui-lo deitava
+    /// o objecto inteiro fora, respondendo a partir de um `{"required": [...]}`
+    /// nu: um tipo sem campos nenhuns.
+    #[test]
+    fn um_anyof_ao_lado_de_properties_e_restricao_e_nao_uma_uniao() {
+        let s = manifest_schema(Some("Cluster")).unwrap();
+        let defs = &s["$defs"];
+        let host = deref(defs["HostSpec"].clone(), defs);
+        assert!(
+            host.get("properties").is_some(),
+            "o objecto foi deitado fora ao seguir o anyOf: {host:#?}"
+        );
+        // E a forma que o `anyOf` REALMENTE descreve — duas grafias do spec de
+        // um `kind: Container` — continua a ser atravessada.
+        assert!(explain("Container.ports").is_ok());
     }
 
     /// Walking into a list steps THROUGH the item type: the user thinks
@@ -432,24 +711,6 @@ mod tests {
         assert_eq!(type_of(&opt).unwrap(), "string");
         let arr = serde_json::json!({ "type": "array", "items": { "type": "string" } });
         assert_eq!(type_of(&arr).unwrap(), "array<string>");
-    }
-
-    /// A typo in a field name is the number-one mistake when writing a
-    /// manifest, and JSON Schema allows unknown properties unless told
-    /// otherwise — without this the schema would validate `restartPolicyy`
-    /// clean and the field would then do nothing at apply time. The engine
-    /// already refuses to be silent about it (`warn_unknown_fields`); the
-    /// schema has to be exactly as strict.
-    #[test]
-    fn o_schema_recusa_um_campo_desconhecido() {
-        let s = manifest_schema(None).unwrap();
-        for kind in ["ContainerSpec", "VolumeSpec", "NetworkSpec"] {
-            assert_eq!(
-                s["$defs"][kind]["additionalProperties"],
-                serde_json::Value::Bool(false),
-                "{kind} accepts unknown fields — a typo would validate clean"
-            );
-        }
     }
 
     /// ...but not at the cost of a FALSE POSITIVE, which would be worse than

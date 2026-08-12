@@ -19,8 +19,8 @@ use super::vmimage::Distro;
 
 /// `spec` of `kind: Image` — either `pull: <ref>` or `build: {...}` (mutually
 /// exclusive; clear error if both are missing).
-#[derive(Debug, Deserialize, Serialize)]
-struct ImageSpec {
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+pub(crate) struct ImageSpec {
     pull: Option<String>,
     build: Option<BuildSpec>,
     /// `kind: Secret` holding `username`/`password` for the registry this image
@@ -151,8 +151,8 @@ pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Res
     Ok(())
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-struct BuildSpec {
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+pub(crate) struct BuildSpec {
     #[serde(default = "default_context")]
     context: PathBuf,
     file: Option<PathBuf>,

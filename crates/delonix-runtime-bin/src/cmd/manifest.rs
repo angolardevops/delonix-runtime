@@ -146,8 +146,25 @@ pub fn canonical_kind(kind: &str) -> &str {
 /// into the individual docs, which then flow through the normal per-Kind apply,
 /// in dependency order. Each child inherits the Stack's namespace unless it sets
 /// its own. The Stack doc itself does not survive the load (it becomes its parts).
-#[derive(Debug, Deserialize)]
-struct StackSpec {
+/// The schema this type generates is deliberately SHALLOW, and the limit is
+/// worth stating because it is invisible from the outside.
+///
+/// Each group is a list of [`StackItem`], whose `spec` is a raw `Value` that the
+/// child Kind re-deserializes later. One item type serves all fifteen groups, so
+/// there is no per-group type to point `#[schemars(with = ...)]` at the way
+/// `WorkloadSpec` can — typing the insides would mean fifteen new item types.
+///
+/// What this DOES buy is the mistake people actually make: a typo in a GROUP
+/// name. `contaienrs:` is silently dropped today — `expand_stack` reads the
+/// groups it knows and never looks at the rest — so the stack applies, reports
+/// success, and is missing every container in it. `additionalProperties: false`
+/// over `STACK_SPEC_FIELDS` catches that in the editor.
+///
+/// What it does NOT buy: the children's own specs are unchecked here. The
+/// per-Kind branches key on a document's `kind`, and a Stack's children have no
+/// `kind` of their own until `load` gives them one.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct StackSpec {
     #[serde(default)]
     secrets: Vec<StackItem>,
     #[serde(default)]
@@ -181,12 +198,16 @@ struct StackSpec {
 }
 
 /// One entry inside a `kind: Stack` group: a name + the resource's own `spec`.
-#[derive(Debug, Deserialize)]
-struct StackItem {
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct StackItem {
     name: String,
     #[serde(default)]
     namespace: Option<String>,
+    /// Left as «anything» in the schema on purpose: this is a different Kind's
+    /// spec depending on which group the item sits in, and narrowing it to one
+    /// of them would reject the other fourteen.
     #[serde(default)]
+    #[schemars(with = "serde_json::Value")]
     spec: serde_yaml::Value,
 }
 

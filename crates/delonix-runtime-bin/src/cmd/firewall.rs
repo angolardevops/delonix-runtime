@@ -913,8 +913,8 @@ fn egress_net(network: &str, mode: EgressMode, to: Option<String>) -> Result<()>
 /// the other direction untouched, so an `Ingress` and an `Egress` doc compose
 /// on the same container. Allowlist by default (`defaultPolicy: deny`), like a
 /// k8s NetworkPolicy.
-#[derive(Deserialize, Serialize)]
-struct FwDocSpec {
+#[derive(Deserialize, Serialize, schemars::JsonSchema)]
+pub(crate) struct FwDocSpec {
     /// `ingress`|`egress` — only for `kind: FirewallPolicy` (the direction comes
     /// from the Kind for the legacy `Egress`). Captured so the dry-run round-trip
     /// preserves it; `apply` reads it directly from `doc.spec`.
@@ -949,7 +949,7 @@ struct FwDocSpec {
 
 /// `spec.rateLimit` — the ingress L4 DDoS protection (global). `{connRate: 0,
 /// connMax: 0}` explicitly TURNS OFF the guard (clear_l4_guard).
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, schemars::JsonSchema)]
 struct RateLimitSpec {
     /// New connections per second allowed.
     #[serde(default, rename = "connRate")]
@@ -972,7 +972,7 @@ pub(crate) const FW_SPEC_FIELDS: &[&str] = &[
     "rateLimit",
 ];
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, schemars::JsonSchema)]
 struct FwDocRule {
     /// `tcp`/`udp`/`any` (default `any`).
     #[serde(default)]

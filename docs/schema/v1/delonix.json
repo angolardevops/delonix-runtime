@@ -1,5 +1,130 @@
 {
   "$defs": {
+    "Backend": {
+      "description": "The destination of a path: a container (by name) and the port it listens on.",
+      "properties": {
+        "port": {
+          "description": "Container port where the service listens.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "service": {
+          "description": "Name of the backend container (resolved to the record's IP at apply time).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "service",
+        "port"
+      ],
+      "type": "object"
+    },
+    "BuildSpec": {
+      "properties": {
+        "buildArgs": {
+          "default": [],
+          "description": "`ARG` overrides (`KEY=VALUE`) — same semantics as the CLI's `--build-arg`:\nonly takes effect for a name the Dockerfile actually declares.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "context": {
+          "default": ".",
+          "type": "string"
+        },
+        "file": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "noCache": {
+          "default": false,
+          "description": "Bypasses the layer cache — same as the CLI's `--no-cache`.",
+          "type": "boolean"
+        },
+        "platform": {
+          "default": null,
+          "description": "`linux/<arch>` — same as the CLI's `--platform`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "secrets": {
+          "default": [],
+          "description": "`id=<name>,src=<path>` entries — same as the CLI's repeatable `--secret`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tag": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tag"
+      ],
+      "type": "object"
+    },
+    "ClusterSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "cni": {
+          "default": "default",
+          "description": "`default` = the image's CNI (kindnet); `none` = install none.",
+          "type": "string"
+        },
+        "controlPlane": {
+          "$ref": "#/$defs/NodesSpec"
+        },
+        "controlPlaneEndpoint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "etcd": {
+          "$ref": "#/$defs/EtcdSpec"
+        },
+        "k8sVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/KindModeSpec"
+        },
+        "mode": {
+          "default": "kind",
+          "description": "**The discriminator**: `kind` (containers here), `vm` (golden VMs) or\n`ssh` (remote hosts already live). One Kind, three paths — the common\nfields (k8sVersion/podSubnet/cni) are shared, the specific ones live in\nthe mode's block.",
+          "type": "string"
+        },
+        "podSubnet": {
+          "default": "10.244.0.0/16",
+          "type": "string"
+        },
+        "serviceSubnet": {
+          "default": "10.96.0.0/12",
+          "type": "string"
+        },
+        "ssh": {
+          "$ref": "#/$defs/SshSpec"
+        },
+        "vm": {
+          "$ref": "#/$defs/VmModeSpec"
+        },
+        "workers": {
+          "$ref": "#/$defs/NodesSpec"
+        }
+      },
+      "type": "object"
+    },
     "ContainerSpec": {
       "additionalProperties": false,
       "description": "`spec` for `kind: Container` — mirrors `ContainerCmd::Run` (minus `name`,\nwhich comes from `metadata.name`). **`detach` defaults to `true`** (unlike the\nCLI, where the default is `false`): an `apply`/`stack apply` run in the\nforeground would block waiting for the process to exit — dangerous for a\ndeclarative command. Pass `detach: false` explicitly in the YAML if you want\nthe synchronous behavior of the interactive `run`.",
@@ -325,6 +450,87 @@
       },
       "type": "object"
     },
+    "DependencySpec": {
+      "additionalProperties": false,
+      "description": "`spec` of `kind: Dependency`.",
+      "properties": {
+        "from": {
+          "description": "Container/VM that INITIATES the connection (the one that \"knows\"). Gains access to `to`.",
+          "type": "string"
+        },
+        "ports": {
+          "default": [],
+          "description": "Ports of `to` opened to `from` (e.g. `[\"5432\"]`). Empty = any port.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "proto": {
+          "default": null,
+          "description": "`tcp`/`udp`/`any` (default `any`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "to": {
+          "anyOf": [
+            {
+              "default": [],
+              "description": "Target(s) that `from` gets to reach (and which become protected: only the\ndeclared `from`s reach them). Accepts a single name (`to: db`) or a list.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "required": [
+        "from"
+      ],
+      "type": "object"
+    },
+    "Entrypoint": {
+      "description": "An entry point (proxy listen port).",
+      "properties": {
+        "port": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tls": {
+          "default": false,
+          "description": "`true` = terminate TLS on this port (requires `spec.tls`). Default `false`.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "port"
+      ],
+      "type": "object"
+    },
+    "EtcdSpec": {
+      "properties": {
+        "hosts": {
+          "description": "Only meaningful with `mode: \"external\"` — the dedicated etcd hosts\ndelonix bootstraps its own CA + cluster on. Reuses `HostSpec` verbatim\n(same shape `controlPlane.hosts`/`workers.hosts` already use).",
+          "items": {
+            "$ref": "#/$defs/HostSpec"
+          },
+          "type": "array"
+        },
+        "mode": {
+          "default": "stacked",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "ExtraDiskSpec": {
       "description": "One entry of `spec.extraDisks`.",
       "properties": {
@@ -405,6 +611,162 @@
       ],
       "type": "object"
     },
+    "FromEnv": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      ],
+      "description": "`fromEnv:` accepts a list of names or a `key: ENV_VAR` mapping. Two shapes\nbecause the useful cases differ: a list is the shorthand when the key name\nand the variable name are the same, and the mapping is what you need when\nthe consumer expects a fixed key (`password`) but the environment calls it\nsomething else (`PGPASSWORD`)."
+    },
+    "FwDocRule": {
+      "properties": {
+        "action": {
+          "default": null,
+          "description": "`allow` (default) or `deny`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "from": {
+          "default": null,
+          "description": "Source CIDR (ingress) — the other end of inbound traffic.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fromWorkload": {
+          "default": null,
+          "description": "Source **by workload name** (ingress), resolved to that container's SDN\naddress at apply time.\n\nExists because **a container's IP is not stable**: it comes from the SDN\nand changes on a restart. A policy written as a CIDR is therefore a policy\nthat silently stops matching the workload it was written for — the same\nlesson `vm bridge` already paid for, where the follow-up recorded is\nexactly \"discovery by NAME, so as not to depend on dynamic IPs\".\n\nA NAME and not a permissive `from` that also accepts names: a value that\nfails to parse as a CIDR falling back to \"treat it as a name\" would be a\nsilent reinterpretation on a security field, which is the one place this\nengine refuses to guess.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "note": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "port": {
+          "description": "Port, range `n-m`, or `*`.",
+          "type": "string"
+        },
+        "proto": {
+          "default": null,
+          "description": "`tcp`/`udp`/`any` (default `any`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "to": {
+          "default": null,
+          "description": "Destination CIDR (egress) — the other end of outbound traffic.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "toWorkload": {
+          "default": null,
+          "description": "Destination by workload name (egress). Same reasoning as\n[`FwDocRule::from_workload`].",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "port"
+      ],
+      "type": "object"
+    },
+    "FwDocSpec": {
+      "additionalProperties": false,
+      "description": "A `kind: Ingress`/`Egress` document. Each doc is the DESIRED STATE of one\ndirection (inbound for `Ingress`, outbound for `Egress`) for its `target`\ncontainer — applying it REPLACES that direction's rules and policy, leaving\nthe other direction untouched, so an `Ingress` and an `Egress` doc compose\non the same container. Allowlist by default (`defaultPolicy: deny`), like a\nk8s NetworkPolicy.",
+      "properties": {
+        "allowCidrs": {
+          "default": [],
+          "description": "CIDRs allowed when `defaultPolicy: deny` (egress allowlist, besides\nDNS). Translates to `set_egress_policy_net_allowlist`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "defaultPolicy": {
+          "default": null,
+          "description": "`allow` or `deny` when no rule matches. Default `deny` (allowlist).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "direction": {
+          "description": "`ingress`|`egress` — only for `kind: FirewallPolicy` (the direction comes\nfrom the Kind for the legacy `Egress`). Captured so the dry-run round-trip\npreserves it; `apply` reads it directly from `doc.spec`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fqdnAllowlist": {
+          "default": [],
+          "description": "FQDNs allowed (and `*.fqdn`), learnt LIVE from DNS (DNS-snooping).\nTranslates to `set_egress_host` per host.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "rateLimit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RateLimitSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "L4 protection (conn-rate/conn-max) — **GLOBAL** to the rootless ingress, not\nper-network (the engine API `set_l4_guard` is global). Translates to `set_l4_guard`."
+        },
+        "rules": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FwDocRule"
+          },
+          "type": "array"
+        },
+        "scope": {
+          "default": null,
+          "description": "`container` (default) or `network`. In `network` (only `Egress`), the `target`\nis a NETWORK NAME and the per-network egress policy + CIDR/FQDN allowlist +\nL4 rate-limit apply — not per-container L4 rules.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "description": "`container` (default): container name. `network`: network name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target"
+      ],
+      "type": "object"
+    },
     "HostAlias": {
       "description": "k8s `hostAliases[]` entry: one IP, N hostnames.",
       "properties": {
@@ -422,6 +784,297 @@
       "required": [
         "ip"
       ],
+      "type": "object"
+    },
+    "HostSpec": {
+      "anyOf": [
+        {
+          "required": [
+            "ip"
+          ]
+        },
+        {
+          "required": [
+            "address"
+          ]
+        }
+      ],
+      "properties": {
+        "address": {
+          "description": "`address` is the canonical name in the templates; `ip` stays for\ncompatibility with earlier manifests.",
+          "type": "string"
+        },
+        "hostname": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ip": {
+          "description": "`address` is the canonical name in the templates; `ip` stays for\ncompatibility with earlier manifests.",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "HttpRouteSpec": {
+      "additionalProperties": false,
+      "description": "`spec` for `kind: HTTPRoute`.",
+      "properties": {
+        "entrypoints": {
+          "default": [],
+          "description": "Entry points (ports where the proxy listens). Default: `[{port: 80}]`,\nplus an implicit `{port: 443, tls: true}` if `spec.tls` is defined.",
+          "items": {
+            "$ref": "#/$defs/Entrypoint"
+          },
+          "type": "array"
+        },
+        "rules": {
+          "default": [],
+          "description": "Routing rules (by Host and/or path prefix). Required and non-empty.",
+          "items": {
+            "$ref": "#/$defs/RouteRule"
+          },
+          "type": "array"
+        },
+        "tls": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TlsSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "TLS configuration (optional). Without it, the proxy only serves HTTP."
+        }
+      },
+      "type": "object"
+    },
+    "ImageSpec": {
+      "additionalProperties": false,
+      "description": "`spec` of `kind: Image` — either `pull: <ref>` or `build: {...}` (mutually\nexclusive; clear error if both are missing).",
+      "properties": {
+        "build": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BuildSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pull": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pullSecret": {
+          "description": "`kind: Secret` holding `username`/`password` for the registry this image\nis pulled from.\n\nWithout it the pull uses the machine's credential vault\n(`delonix image login`) — per-MACHINE state that a manifest cannot\ncarry. A `kind: Image` naming a private registry therefore applied\ncleanly on the host where someone had logged in and failed on every\nother one, with an authentication error about a registry the manifest\nnever mentioned a credential for. Naming a Secret makes the document\nself-contained, which is the whole point of GitOps.\n\nOnly meaningful with `pull:` — a `build:` produces an image locally and\nauthenticates nowhere.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "IngressBackend": {
+      "properties": {
+        "service": {
+          "$ref": "#/$defs/IngressServiceRef"
+        }
+      },
+      "required": [
+        "service"
+      ],
+      "type": "object"
+    },
+    "IngressHttp": {
+      "properties": {
+        "paths": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/IngressPath"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "IngressPath": {
+      "properties": {
+        "backend": {
+          "$ref": "#/$defs/IngressBackend"
+        },
+        "path": {
+          "default": "/",
+          "type": "string"
+        },
+        "pathType": {
+          "default": null,
+          "description": "`Prefix` (default) | `Exact` | `ImplementationSpecific`. The proxy matches\nby prefix; `Exact` is accepted but treated as prefix (documented limitation).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "backend"
+      ],
+      "type": "object"
+    },
+    "IngressRule": {
+      "properties": {
+        "host": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "http": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IngressHttp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "IngressServicePort": {
+      "properties": {
+        "name": {
+          "default": null,
+          "description": "Named ports are not supported — use `number`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "number": {
+          "default": null,
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "IngressServiceRef": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "port": {
+          "$ref": "#/$defs/IngressServicePort"
+        }
+      },
+      "required": [
+        "name",
+        "port"
+      ],
+      "type": "object"
+    },
+    "IngressSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "defaultBackend": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IngressBackend"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Catch-all backend when no rule matches (→ a `host: any, path: /` route)."
+        },
+        "entrypoints": {
+          "default": [],
+          "description": "delonix extension: listener ports. Omit → 80 (+ 443 when `tls` is set).",
+          "items": {
+            "$ref": "#/$defs/Entrypoint"
+          },
+          "type": "array"
+        },
+        "ingressClassName": {
+          "default": null,
+          "description": "Accepted for k8s fidelity; the embedded proxy is the only ingress class.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rules": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/IngressRule"
+          },
+          "type": "array"
+        },
+        "tls": {
+          "default": [],
+          "description": "k8s TLS block (a LIST). v1 uses a SINGLE cert (no SNI) — the first entry wins.",
+          "items": {
+            "$ref": "#/$defs/IngressTls"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "IngressTls": {
+      "properties": {
+        "hosts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "secretName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "KindModeSpec": {
+      "description": "`spec.kind` block — only read in `mode: kind`.",
+      "properties": {
+        "apiServerPort": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "image": {
+          "default": "kindest/node:v1.34.0@sha256:7416a61b42b1662ca6ca89f02028ac133a309a2a30ba309614e8ec94d976dc5a",
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "NetShareSpec": {
@@ -523,6 +1176,27 @@
       },
       "type": "object"
     },
+    "NodesSpec": {
+      "description": "The nodes of a role. **Unifies the three modes**: `kind`/`vm` say how many\n(`replicas`), `ssh` says which ones (`hosts`) — because there the machines already exist\nand we do not create them.",
+      "properties": {
+        "hosts": {
+          "items": {
+            "$ref": "#/$defs/HostSpec"
+          },
+          "type": "array"
+        },
+        "replicas": {
+          "default": null,
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "OwnerSpec": {
       "properties": {
         "gid": {
@@ -546,6 +1220,23 @@
       "required": [
         "uid",
         "gid"
+      ],
+      "type": "object"
+    },
+    "PathRule": {
+      "description": "A path prefix and the backend it forwards to.",
+      "properties": {
+        "backend": {
+          "$ref": "#/$defs/Backend"
+        },
+        "path": {
+          "default": "/",
+          "description": "Path prefix (e.g.: `/`, `/api`). Default `/`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "backend"
       ],
       "type": "object"
     },
@@ -978,6 +1669,82 @@
       },
       "type": "object"
     },
+    "RateLimitSpec": {
+      "description": "`spec.rateLimit` — the ingress L4 DDoS protection (global). `{connRate: 0,\nconnMax: 0}` explicitly TURNS OFF the guard (clear_l4_guard).",
+      "properties": {
+        "connMax": {
+          "default": 0,
+          "description": "Maximum concurrent connections.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "connRate": {
+          "default": 0,
+          "description": "New connections per second allowed.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "RouteRule": {
+      "description": "A routing rule: matches by `host` (optional — empty = any Host) and\ndispatches by path prefix to a backend.",
+      "properties": {
+        "host": {
+          "default": null,
+          "description": "Host name to match (e.g.: `loja.exemplo.ao`). Empty/omitted = any Host.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "paths": {
+          "default": [],
+          "description": "Sub-rules by path prefix. Required and non-empty.",
+          "items": {
+            "$ref": "#/$defs/PathRule"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "SecretSpec": {
+      "additionalProperties": false,
+      "description": "`spec` of `kind: Secret` — a bag of key/value pairs encrypted at-rest,\nconsumed by `Container.secret` (env/files) and `Storage.passwordSecret`\n(`password` key). Closes the \"no CLI\" gap: the secret is declared in YAML\ninstead of `delonix secret create`.",
+      "properties": {
+        "fromEnv": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FromEnv"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Keys read from the PROCESS's environment at apply time.\n\n`[\"DB_PASSWORD\"]` takes `$DB_PASSWORD` and stores it under that name;\n`{ password: DB_PASSWORD }` stores it under `password` instead — which is\nwhat the consumers of a secret usually want, since `Storage`/`Tunnel`/\n`provision` each look for a key by a fixed name.\n\nThis is the form a CI job has: the value arrives as an environment\nvariable from the runner's own secret store, and there is no file to\npoint at and nothing to write into the manifest. Neither of the other\ntwo shapes could express it."
+        },
+        "fromEnvFile": {
+          "default": null,
+          "description": "Path to a `KEY=value` file (e.g. `.env`) — keeps the values OUT of the\nmanifest. Applied BEFORE `stringData` (inline overrides the file).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stringData": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Inline `KEY: value` pairs. **Plaintext in the manifest** — convenient for\ndev, but the value stays in cleartext in the file; for production prefer\n`fromEnvFile` (outside version control) or the CLI's `secret create`. Warned at apply.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "ShareSpec": {
       "properties": {
         "maprootGroup": {
@@ -1003,6 +1770,214 @@
         "readOnly": {
           "default": false,
           "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "ShareVolumeSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "alertPct": {
+          "default": null,
+          "description": "Usage percentage above which `ls`/`describe` flag a WARN (default 90).",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "quota": {
+          "default": null,
+          "description": "Human size (`5G`, `500M`, ...). Omit = unlimited (still measured/shown).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "storageRef": {
+          "description": "Name of an existing `kind: Storage` (a network-backed `delonix-volume`).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "storageRef"
+      ],
+      "type": "object"
+    },
+    "SshSpec": {
+      "properties": {
+        "key": {
+          "description": "`keyPath` is the canonical name (the one in the templates); `key` stays accepted\nso as not to break manifests written before this restructuring.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "keyPath": {
+          "description": "`keyPath` is the canonical name (the one in the templates); `key` stays accepted\nso as not to break manifests written before this restructuring.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "port": {
+          "default": null,
+          "description": "SSH port of every host in this cluster. `None` = the client's default (22).",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "user": {
+          "default": "delonix",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "StackItem": {
+      "description": "One entry inside a `kind: Stack` group: a name + the resource's own `spec`.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "spec": {
+          "default": null,
+          "description": "Left as «anything» in the schema on purpose: this is a different Kind's\nspec depending on which group the item sits in, and narrowing it to one\nof them would reject the other fourteen."
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "StackSpec": {
+      "additionalProperties": false,
+      "description": "A grouped `kind: Stack` — bundles resources of several Kinds in ONE document\n(k8s-Service-like: everything for an app in one place). Expanded at load time\ninto the individual docs, which then flow through the normal per-Kind apply,\nin dependency order. Each child inherits the Stack's namespace unless it sets\nits own. The Stack doc itself does not survive the load (it becomes its parts).\nThe schema this type generates is deliberately SHALLOW, and the limit is\nworth stating because it is invisible from the outside.\n\nEach group is a list of [`StackItem`], whose `spec` is a raw `Value` that the\nchild Kind re-deserializes later. One item type serves all fifteen groups, so\nthere is no per-group type to point `#[schemars(with = ...)]` at the way\n`WorkloadSpec` can — typing the insides would mean fifteen new item types.\n\nWhat this DOES buy is the mistake people actually make: a typo in a GROUP\nname. `contaienrs:` is silently dropped today — `expand_stack` reads the\ngroups it knows and never looks at the rest — so the stack applies, reports\nsuccess, and is missing every container in it. `additionalProperties: false`\nover `STACK_SPEC_FIELDS` catches that in the editor.\n\nWhat it does NOT buy: the children's own specs are unchecked here. The\nper-Kind branches key on a document's `kind`, and a Stack's children have no\n`kind` of their own until `load` gives them one.",
+      "properties": {
+        "containers": {
+          "items": {
+            "$ref": "#/$defs/StackItem"
+          },
+          "type": "array"
+        },
+        "dependencies": {
+          "items": {
+            "$ref": "#/$defs/StackItem"
+          },
+          "type": "array"
+        },
+        "egress": {
+          "items": {
+            "$ref": "#/$defs/StackItem"
+          },
+          "type": "array"
+        },
+        "firewallPolicies": {
+          "items": {
+            "$ref": "#/$defs/StackItem"
+          },
+          "type": "array"
+        },
+        "httpRoutes": {
+          "items": {
+            "$ref": "#/$defs/StackItem"
+          },
+          "type": "array"
+        },
+        "images": {
+          "items": {
+            "$ref": "#/$defs/StackItem"
+          },
+          "type": "array"
+        },
+        "ingress": {
+          "items": {
+            "$ref": "#/$defs/StackItem"
+          },
+          "type": "array"
+        },
+        "networks": {
+          "items": {
+            "$ref": "#/$defs/StackItem"
+          },
+          "type": "array"
+        },
+        "pods": {
+          "items": {
+            "$ref": "#/$defs/StackItem"
+          },
+          "type": "array"
+        },
+        "secrets": {
+          "items": {
+            "$ref": "#/$defs/StackItem"
+          },
+          "type": "array"
+        },
+        "shareVolumes": {
+          "items": {
+            "$ref": "#/$defs/StackItem"
+          },
+          "type": "array"
+        },
+        "storage": {
+          "items": {
+            "$ref": "#/$defs/StackItem"
+          },
+          "type": "array"
+        },
+        "tunnels": {
+          "items": {
+            "$ref": "#/$defs/StackItem"
+          },
+          "type": "array"
+        },
+        "vms": {
+          "items": {
+            "$ref": "#/$defs/StackItem"
+          },
+          "type": "array"
+        },
+        "volumes": {
+          "items": {
+            "$ref": "#/$defs/StackItem"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "TlsSpec": {
+      "description": "Proxy TLS configuration.",
+      "properties": {
+        "mode": {
+          "default": null,
+          "description": "`selfSigned` (default) or `secretRef`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "secretRef": {
+          "default": null,
+          "description": "Name of a `kind: Secret` with the `tls.crt`/`tls.key` keys (PEM). Used\nwhen `mode: secretRef`.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -1082,6 +2057,98 @@
         "url",
         "dataset"
       ],
+      "type": "object"
+    },
+    "TunnelSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "hostname": {
+          "default": null,
+          "description": "Custom/reserved hostname — provider-dependent support (see module doc).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "localPort": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "provider": {
+          "description": "`pinggy` | `ngrok` | `cloudflare`.",
+          "type": "string"
+        },
+        "token": {
+          "default": null,
+          "description": "Literal provider token (pinggy pro token / ngrok authtoken). Prefer\n`tokenSecretRef` for anything checked into a manifest.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tokenSecretRef": {
+          "default": null,
+          "description": "Pull the token from a `kind: Secret`'s `token` key — same convention\nas `storage`'s `--password-secret`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "provider",
+        "localPort"
+      ],
+      "type": "object"
+    },
+    "VmModeSpec": {
+      "description": "`spec.vm` block — only read in `mode: vm`.",
+      "properties": {
+        "bootTimeout": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "image": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "memory": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "network": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sshKey": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "vcpus": {
+          "default": null,
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "VmSpec": {
@@ -1427,6 +2494,61 @@
         }
       },
       "type": "object"
+    },
+    "WorkloadSpec": {
+      "additionalProperties": false,
+      "description": "The `spec` of a `kind: Workload`: a `type` discriminator plus the single\ntype-named block that holds the underlying spec, kept raw until the target\nKind re-deserializes it.\nThe four blocks are `serde_yaml::Value` because the lowering hands them to\nthe target Kind to re-deserialize, and holding them raw is what keeps this\ntype from restating a spec it does not own.\n\nFor the SCHEMA that is not good enough: `Value` describes as «anything», so\nan editor would have nothing to say inside the block that carries the entire\nworkload. `#[schemars(with = ...)]` names the type the block actually IS —\nstill derived from the real spec, never a second copy of its fields. That is\nalso the truth of the lowering: `spec.container` is re-read as a\n`ContainerSpec`, so anything the schema would accept here and that type would\nreject is a manifest that fails at apply.\n\n`microvm` maps to `VmSpec` for the same reason it lowers to `kind: Vm` — it\nis a `VmSpec` with the backend forced to `cloud-hypervisor` (ADR-0006).",
+      "properties": {
+        "container": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContainerSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "microvm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VmSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "pod": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PodSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "default": "",
+          "type": "string"
+        },
+        "vm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VmSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1529,6 +2651,234 @@
         "properties": {
           "spec": {
             "$ref": "#/$defs/VmSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Secret"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "$ref": "#/$defs/SecretSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Image"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "$ref": "#/$defs/ImageSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Tunnel"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "$ref": "#/$defs/TunnelSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "ShareVolume"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "$ref": "#/$defs/ShareVolumeSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Dependency"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "$ref": "#/$defs/DependencySpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "HTTPRoute"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "$ref": "#/$defs/HttpRouteSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Ingress"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "$ref": "#/$defs/IngressSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "FirewallPolicy"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "$ref": "#/$defs/FwDocSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Egress"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "$ref": "#/$defs/FwDocSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Workload"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "$ref": "#/$defs/WorkloadSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Cluster"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "$ref": "#/$defs/ClusterSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Stack"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "$ref": "#/$defs/StackSpec"
           }
         }
       }
