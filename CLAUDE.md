@@ -3409,7 +3409,25 @@ checklist para quem mexer aqui do que como lista de correcções:
   `VmImageStore`, por isso a MESMA string funcionava como `--disk` e respondia
   `image not found` como `spec.disk`. Ver a secção «O manifesto de VM resolvia a imagem de
   outra maneira que a CLI» abaixo — a divergência de resolução é a raiz, o erro visível era o
-  menor dos dois sintomas.
+  menor dos dois sintomas;
+- **um marcador de presença `-` não é «ausente»** — o `stack wait` decidia prontidão com
+  `present == "yes" && ready_status(...)`, e os Kinds declarativos (`Ingress`/`FirewallPolicy`/
+  `HTTPRoute`/`Dependency`) não têm store nenhum: o `presence` devolve-lhes `-` e **nunca**
+  `"yes"`. Logo QUALQUER manifesto com um deles esgotava o `--timeout` inteiro e saía com erro
+  sobre uma stack inteiramente a correr — o comando escrito para substituir o `sleep` da CI a
+  ser precisamente o que a CI não podia usar. Medido antes da correcção, com os dois roots
+  isolados: **5,015 s e rc=1** sobre um manifesto que não declara um único recurso com estado.
+  O `ready_status` ao lado já tinha a intenção certa no doc-comment («Only the Kinds that HAVE a
+  runtime state are judged on it»); faltava a decisão a montante distinguir «ausente» de «sem
+  presença observável», e é isso que o `is_pending` (puro) passou a fazer. **O `?` continua
+  pendente de propósito**: é também o que um store ilegível devolve, e dar «pronto» a um
+  desconhecido é o mesmo defeito ao contrário — por isso o Kind que faltava foi corrigido no
+  `presence` e não a relaxar o `is_pending`. De caminho, o achado gémeo: **`NetworkRoute` estava
+  em `KINDS` e era APLICADO pelo `stack apply` sem braço no `presence`**, logo caía no
+  `_ => ("?", "unsupported kind")` — o `stack ls`/`describe` a chamarem «kind não suportado» a
+  um recurso que o apply cria. **E `stack wait` tinha ZERO checks no `scripts/e2e.sh`** — o
+  balde dos «comandos nunca executados» a pagar-se outra vez, e é onde a próxima varredura deve
+  ir primeiro (v0.53.0).
 
 **Achado vivo da varredura (v0.42.2)**: `delonix system info` reportava `cgroup2 delegated: yes`
 incondicionalmente, por ler os ficheiros do cgroup raiz do host — o comando que se corre para
