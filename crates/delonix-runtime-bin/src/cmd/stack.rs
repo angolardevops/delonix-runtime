@@ -1022,23 +1022,22 @@ fn presence(
         // applied to a target container, not resources with state. The `apply`
         // always applies them (idempotent); here we only note the nature.
         //
-        // `NetworkRoute` belongs here for the same reason, and its absence was a
-        // real bug: it is in `KINDS` and `stack apply` DOES apply it, but with no
-        // arm it fell through to `_ => ("?", "unsupported kind")` — printed by
-        // `ls`/`describe` about a resource the apply creates, and treated as
-        // never-ready by `wait`. It is realized as one element of the holder's
-        // `@netpair` verdict map and `delonix-net` exposes only the write
-        // (`infra::network_route`), so there is nothing to read back.
-        "Ingress" | "FirewallPolicy" | "HTTPRoute" | "Dependency" | "NetworkRoute" => {
+        // `NetworkRoute` was briefly listed here too, for the same reason — and
+        // it no longer belongs: it gained a record of its own (`infra::RouteDef`)
+        // when it became convergent, so there IS something to read back. Leaving
+        // it in this arm made the one below unreachable, which `clippy` caught
+        // and the tests did not: a route would report `-` (ready, nothing to
+        // observe) whether or not it existed.
+        "Ingress" | "FirewallPolicy" | "HTTPRoute" | "Dependency" => {
             ("-".into(), super::po::t("declarative").into())
         }
+        // Declared vs. live are different questions for a route, and the answer
+        // names which. Before any of this it fell through to `?`/`unsupported
+        // kind` — `stack ls` could not say anything about a path it had opened.
+        "NetworkRoute" => super::netroute::presence_of(doc),
         // A share has a record of its own, keyed by (namespace, name) — the
         // namespace comes from the document, which is why `load_record` takes
         // both and why guessing it is not an option.
-        // Declared vs. live are different questions for a route, and the answer
-        // names which. Before this it fell through to `?`/`unsupported kind` —
-        // `stack ls` could not say anything at all about a path it had opened.
-        "NetworkRoute" => super::netroute::presence_of(doc),
         "ShareVolume" => super::sharevolume::presence_of(&root, doc),
         // A tunnel's record says whether an agent was started; the public URL
         // is status and deliberately not part of "is it there".
