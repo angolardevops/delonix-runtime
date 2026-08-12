@@ -79,6 +79,12 @@ fn holder_pid_path() -> PathBuf {
 fn control_pid_path() -> PathBuf {
     ingress_dir().join("control.pid")
 }
+/// Where the control plane's stderr goes. Lives next to the pidfiles, in the
+/// PERSISTENT state dir and not the ephemeral socket dir: a control plane that
+/// died is exactly the case where the file has to outlive the process.
+fn control_log_path() -> PathBuf {
+    ingress_dir().join("control.log")
+}
 fn slirp_pid_path() -> PathBuf {
     ingress_dir().join("slirp.pid")
 }
@@ -805,7 +811,24 @@ fn start_control(pin: i32) -> Result<i32> {
         .env("DELONIX_INTERNAL", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        // NOT `/dev/null`, and the difference is diagnosability. The control
+        // process runs the DNS server, the RA emitter and the DHCP threads; a
+        // panic in any of them used to go to the void, so the service degraded
+        // with no line anywhere — measured during the DNS review, where it was
+        // the single biggest reason a diagnosis took as long as it did.
+        // Inherit is wrong here (unlike the pin): the control plane is
+        // RESTARTABLE and long-lived, so it would hold the stderr of whichever
+        // short-lived CLI happened to start it. A file is the thing that
+        // survives. Appends, because the reason a control plane DIED is worth
+        // more than the log of the one that replaced it.
+        .stderr(
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(control_log_path())
+                .map(Stdio::from)
+                .unwrap_or_else(|_| Stdio::null()),
+        )
         .spawn()
         .map_err(|e| Error::Runtime {
             context: "spawn nsenter (control)",
@@ -4675,8 +4698,14 @@ fn dns_server_main() {
         DNS_INFLIGHT.fetch_add(1, Ordering::Relaxed);
         let q = buf[..n].to_vec();
         let sock2 = sock.clone();
+        // The client's address decides WHAT it may resolve (ADR-0011). It was
+        // available here all along and thrown away.
+        let client = match peer.ip() {
+            std::net::IpAddr::V4(a) => Some(a.octets()),
+            std::net::IpAddr::V6(_) => None,
+        };
         std::thread::spawn(move || {
-            if let Some(r) = handle_dns(&q) {
+            if let Some(r) = handle_dns(&q, client) {
                 let _ = sock2.send_to(&r, peer);
             }
             DNS_INFLIGHT.fetch_sub(1, Ordering::Relaxed);
@@ -4766,7 +4795,8 @@ fn negative_reply(q: &[u8], qend: usize, rcode: u8) -> Vec<u8> {
 
 /// Response to a DNS query: answers AUTHORITATIVELY for names we know and for
 /// our own zone (positively, or with NODATA/NXDOMAIN); forwards the rest.
-fn handle_dns(q: &[u8]) -> Option<Vec<u8>> {
+/// `client` is the query's source address — it scopes what may be resolved.
+fn handle_dns(q: &[u8], client: Option<[u8; 4]>) -> Option<Vec<u8>> {
     // parse the 1st question (offset 12): labels until 0x00, then QTYPE+QCLASS.
     let mut i = 12usize;
     let mut name = String::new();
@@ -4793,7 +4823,7 @@ fn handle_dns(q: &[u8]) -> Option<Vec<u8>> {
                       // Only the address types (and our own zone) need the index consulted; an
                       // `MX` for an external domain must not pay for a lookup that cannot match.
     let resolved = if qtype == QTYPE_A || qtype == QTYPE_AAAA || is_internal_zone(&name) {
-        dns_resolve(&name)
+        dns_resolve_for(&name, client)
     } else {
         None
     };
@@ -4913,6 +4943,84 @@ fn dns_index_vm_key(name: &str) -> String {
     format!("vm:{name}")
 }
 
+/// The default (shared) namespace. Reachable from every namespace by design —
+/// see ADR-0011 §5 for why that stays true and why it is not the leak.
+const NS_DEFAULT: &str = "default";
+
+/// One resolvable name, with everything needed to decide WHO may resolve it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DnsEntry {
+    ip: [u8; 4],
+    ns: String,
+    /// Inbound-allow CIDRs already persisted in the workload's firewall — i.e.
+    /// what a `kind: Dependency` opened. Carried here so the resolver can mirror
+    /// the dataplane instead of keeping a second, drift-prone opinion about
+    /// reachability (ADR-0011 §1).
+    allow_in: Vec<(u32, u32)>,
+}
+
+/// The built index: names to entries, plus the reverse map used to place the
+/// CLIENT (its source address is all we get from `recv_from`).
+#[derive(Default)]
+struct DnsIndex {
+    by_key: std::collections::HashMap<String, DnsEntry>,
+    ns_of_ip: std::collections::HashMap<[u8; 4], String>,
+}
+
+/// Parses `a.b.c.d/len` into `(network, mask)`. A bare address is `/32`.
+fn parse_cidr(s: &str) -> Option<(u32, u32)> {
+    let s = s.trim();
+    if s.is_empty() || s == "*" {
+        return Some((0, 0)); // any
+    }
+    let (addr, len) = match s.split_once('/') {
+        Some((a, l)) => (a, l.parse::<u32>().ok()?),
+        None => (s, 32),
+    };
+    if len > 32 {
+        return None;
+    }
+    let o = parse_v4(addr)?;
+    let mask = if len == 0 { 0 } else { u32::MAX << (32 - len) };
+    Some((u32::from_be_bytes(o) & mask, mask))
+}
+
+fn cidr_contains(cidr: (u32, u32), ip: [u8; 4]) -> bool {
+    let (net, mask) = cidr;
+    u32::from_be_bytes(ip) & mask == net
+}
+
+/// The CIDR of an inbound `allow`, as far as NAME VISIBILITY is concerned —
+/// `None` when the rule must not widen it.
+///
+/// A rule allowing the whole world (`0.0.0.0/0`, `*`, empty) is a port-level
+/// decision — "this port is open" — and NOT "publish this name to every
+/// tenant". Letting it through would quietly restore the global visibility
+/// ADR-0011 removes, through the single most common firewall rule there is.
+/// Kept here, next to the parsing, so the index and the tests cannot disagree
+/// about it.
+fn scoping_allow_cidr(src: &str) -> Option<(u32, u32)> {
+    parse_cidr(src).filter(|(_, mask)| *mask != 0)
+}
+
+/// May a client sitting in `client_ns` (at `client_ip`) resolve this entry?
+/// PURE — the whole point of ADR-0011 is a decision that mirrors the dataplane,
+/// and a decision worth trusting is one that can be tested as a table.
+fn dns_scope_allows(entry: &DnsEntry, client_ns: &str, client_ip: [u8; 4]) -> bool {
+    // Same namespace: the dataplane accepts (`@dlxns_<ns>`).
+    if entry.ns.eq_ignore_ascii_case(client_ns) {
+        return true;
+    }
+    // The shared namespace is reachable from anywhere, by design.
+    if entry.ns.eq_ignore_ascii_case(NS_DEFAULT) {
+        return true;
+    }
+    // Explicitly opened for this client — `kind: Dependency`. Without this, a
+    // dependency that crosses namespaces would work by address and not by name,
+    // which is the "accepted and then ignored" shape this repo keeps removing.
+    entry.allow_in.iter().any(|c| cidr_contains(*c, client_ip))
+}
+
 /// Parses `ip -o neigh show` output into `(lowercased line, ip)` pairs — same
 /// substring-match semantics `neigh_ip_local` always used, just decomposed so
 /// the table is fetched ONCE per index build instead of once per VM per query.
@@ -4937,9 +5045,9 @@ fn neigh_table_lookup(table: &[(String, String)], mac: &str) -> Option<String> {
 /// Builds the full ingress-DNS index from disk (containers + VMs). Real
 /// filesystem/subprocess I/O — called at most once per `DNS_INDEX_TTL` by
 /// [`dns_index`], never directly from a query.
-fn build_dns_index() -> std::collections::HashMap<String, [u8; 4]> {
-    let mut idx = std::collections::HashMap::new();
-    // containers: <base>/containers/*.json (name + ip [+ namespace])
+fn build_dns_index() -> DnsIndex {
+    let mut idx = DnsIndex::default();
+    // containers: <base>/containers/*.json (name + ip [+ namespace + firewall])
     if let Ok(rd) = std::fs::read_dir(base_root().join("containers")) {
         for e in rd.flatten() {
             let Ok(v) = serde_json::from_slice::<serde_json::Value>(
@@ -4953,12 +5061,51 @@ fn build_dns_index() -> std::collections::HashMap<String, [u8; 4]> {
             let Some(ip) = v["ip"].as_str().and_then(parse_v4) else {
                 continue;
             };
-            let ns = v["namespace"].as_str().unwrap_or("default");
-            // Bare key: first container written for a given name wins (same
-            // arbitrary-but-deterministic-per-build tie-break the old
-            // directory-order scan had when names collide across namespaces).
-            idx.entry(name.clone()).or_insert(ip);
-            idx.entry(dns_index_ns_key(&name, ns)).or_insert(ip);
+            let ns = v["namespace"].as_str().unwrap_or(NS_DEFAULT).to_string();
+            // What an explicit inbound `allow` opened for this workload — the
+            // only thing that lets a client in ANOTHER namespace resolve it
+            // (ADR-0011 §1). Read straight from the persisted firewall so there
+            // is no second opinion about reachability to drift from.
+            let allow_in: Vec<(u32, u32)> = v["firewall"]["rules"]
+                .as_array()
+                .map(|rules| {
+                    rules
+                        .iter()
+                        .filter(|r| {
+                            r["dir"].as_str().unwrap_or("in") == "in"
+                                && r["action"].as_str().unwrap_or("allow") == "allow"
+                        })
+                        .filter_map(|r| scoping_allow_cidr(r["src"].as_str().unwrap_or_default()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let entry = DnsEntry {
+                ip,
+                ns: ns.clone(),
+                allow_in,
+            };
+            // Bare key: with names now unique per (namespace, name), a bare
+            // collision is possible ON PURPOSE — two tenants may both own `db`.
+            // Both are indexed under the namespaced key, and the scope check is
+            // what picks the right one for the asker; the bare key keeps only
+            // the first as a fallback for clients we cannot place.
+            idx.by_key.entry(name.clone()).or_insert(entry.clone());
+            idx.by_key
+                .entry(dns_index_ns_key(&name, &ns))
+                .or_insert(entry.clone());
+            // Reverse map: the client is identified by its source address.
+            idx.ns_of_ip.entry(ip).or_insert(ns.clone());
+            // A pod resolves by its OWN name too (ADR-0011 §6): every member
+            // shares the address, and the pod is the thing that owns it. The
+            // name comes from the label the creator writes, not from parsing
+            // the netns name.
+            if let Some(pod) = v["labels"]["delonix.io/pod"].as_str() {
+                let pod = pod.to_lowercase();
+                idx.by_key.entry(pod.clone()).or_insert(entry.clone());
+                idx.by_key
+                    .entry(dns_index_ns_key(&pod, &ns))
+                    .or_insert(entry);
+            }
         }
     }
     // VMs: <base>/vms/*.json (name + mac) → IP via the neigh table (fetched once).
@@ -4993,26 +5140,44 @@ fn build_dns_index() -> std::collections::HashMap<String, [u8; 4]> {
                     neigh_table_lookup(table, mac).as_deref().and_then(parse_v4)
                 });
             if let Some(ip) = ip {
-                idx.entry(dns_index_vm_key(&name)).or_insert(ip);
+                let ns = v["namespace"].as_str().unwrap_or(NS_DEFAULT).to_string();
+                idx.by_key
+                    .entry(dns_index_vm_key(&name))
+                    .or_insert(DnsEntry {
+                        ip,
+                        ns: ns.clone(),
+                        allow_in: Vec::new(),
+                    });
+                idx.ns_of_ip.entry(ip).or_insert(ns);
             }
         }
     }
     idx
 }
 
-fn dns_index() -> std::sync::Arc<std::collections::HashMap<String, [u8; 4]>> {
-    type Cache = std::sync::Mutex<
-        Option<(
-            std::time::Instant,
-            std::sync::Arc<std::collections::HashMap<String, [u8; 4]>>,
-        )>,
-    >;
-    static CACHE: std::sync::OnceLock<Cache> = std::sync::OnceLock::new();
-    let cell = CACHE.get_or_init(|| std::sync::Mutex::new(None));
-    let mut guard = cell.lock().unwrap();
+/// Shortest gap between two forced rebuilds triggered by an unplaceable client.
+/// A rebuild is a directory scan, so an unknown source must not be able to turn
+/// DNS traffic into filesystem load; 200ms is far below the TTL and still makes
+/// a container that started milliseconds ago resolvable on its FIRST lookup.
+const DNS_INDEX_MIN_REBUILD: std::time::Duration = std::time::Duration::from_millis(200);
+
+type DnsCache = std::sync::Mutex<Option<(std::time::Instant, std::sync::Arc<DnsIndex>)>>;
+
+fn dns_index_cell() -> &'static DnsCache {
+    static CACHE: std::sync::OnceLock<DnsCache> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+fn dns_index() -> std::sync::Arc<DnsIndex> {
+    dns_index_within(DNS_INDEX_TTL)
+}
+
+/// The index, rebuilt if the cached one is older than `max_age`.
+fn dns_index_within(max_age: std::time::Duration) -> std::sync::Arc<DnsIndex> {
+    let mut guard = dns_index_cell().lock().unwrap();
     let fresh = guard
         .as_ref()
-        .map(|(built_at, _)| built_at.elapsed() < DNS_INDEX_TTL)
+        .map(|(built_at, _)| built_at.elapsed() < max_age)
         .unwrap_or(false);
     if !fresh {
         *guard = Some((
@@ -5023,17 +5188,64 @@ fn dns_index() -> std::sync::Arc<std::collections::HashMap<String, [u8; 4]>> {
     guard.as_ref().unwrap().1.clone()
 }
 
-fn dns_resolve(name: &str) -> Option<[u8; 4]> {
+/// Which namespace a querying address belongs to. An address we cannot place is
+/// scoped to the shared namespace — NEVER to the old unrestricted behaviour,
+/// which is the leak this exists to close.
+///
+/// "Not in the index" is also what a container started INSIDE the TTL window
+/// looks like, and the first thing a workload does is resolve; so an unplaceable
+/// client buys one forced rebuild before we answer. Without it the isolation
+/// would surface as start-up flakiness, and flaky isolation gets turned off.
+fn dns_client_ns(client: Option<[u8; 4]>) -> String {
+    let Some(ip) = client else {
+        return NS_DEFAULT.to_string();
+    };
+    if let Some(ns) = dns_index().ns_of_ip.get(&ip) {
+        return ns.clone();
+    }
+    if let Some(ns) = dns_index_within(DNS_INDEX_MIN_REBUILD).ns_of_ip.get(&ip) {
+        return ns.clone();
+    }
+    NS_DEFAULT.to_string()
+}
+
+/// Resolves a name FOR A GIVEN CLIENT. `client` is the query's source address;
+/// `None` means "caller could not tell", which is scoped like `default`.
+///
+/// BUG FIXED (ADR-0011): this used to take the name alone. The server had the
+/// source address all along — `recv_from` returns it — and dropped it, so any
+/// tenant could enumerate and address every workload of every other tenant by
+/// name while the dataplane correctly refused the packets. Measured before the
+/// fix: `client`@teamA resolved `webb`@teamB to its exact address, and the
+/// resulting connection then hung, which is the worst of both outcomes.
+fn dns_resolve_for(name: &str, client: Option<[u8; 4]>) -> Option<[u8; 4]> {
     let (cname, want_ns) = parse_internal_name(name)?;
     let idx = dns_index();
+    let client_ns = dns_client_ns(client);
+    let client_ip = client.unwrap_or([0, 0, 0, 0]);
+    let visible = |e: &DnsEntry| dns_scope_allows(e, &client_ns, client_ip);
+
     if let Some(ns) = &want_ns {
-        if let Some(ip) = idx.get(&dns_index_ns_key(&cname, ns)) {
-            return Some(*ip);
-        }
-    } else if let Some(ip) = idx.get(&cname) {
-        return Some(*ip);
+        // Fully-qualified: the namespace is named, so it must BE the one asked
+        // for — and the asker must be allowed to see it.
+        return idx
+            .by_key
+            .get(&dns_index_ns_key(&cname, ns))
+            .filter(|e| visible(e))
+            .map(|e| e.ip);
     }
-    idx.get(&dns_index_vm_key(&cname)).copied()
+    // Bare name: the asker's OWN namespace first. This is what makes two tenants
+    // able to both own `db` and each get their own.
+    if let Some(e) = idx.by_key.get(&dns_index_ns_key(&cname, &client_ns)) {
+        return Some(e.ip);
+    }
+    if let Some(e) = idx.by_key.get(&cname).filter(|e| visible(e)) {
+        return Some(e.ip);
+    }
+    idx.by_key
+        .get(&dns_index_vm_key(&cname))
+        .filter(|e| visible(e))
+        .map(|e| e.ip)
 }
 
 fn parse_v4(s: &str) -> Option<[u8; 4]> {
@@ -6133,6 +6345,85 @@ Inter-|   Receive                                                |  Transmit
             dns_action(QTYPE_A, "web.delonix.io", Some(IP)),
             DnsAction::Answer(IP)
         );
+    }
+
+    fn entry(ns: &str, allow: &[&str]) -> DnsEntry {
+        DnsEntry {
+            ip: IP,
+            ns: ns.into(),
+            allow_in: allow.iter().filter_map(|c| scoping_allow_cidr(c)).collect(),
+        }
+    }
+
+    #[test]
+    fn a_tenant_cannot_resolve_another_tenants_workload() {
+        // THE leak (measured before the fix): `client`@teamA resolved
+        // `webb`@teamB to its exact address while the dataplane correctly
+        // dropped the packets — a name that resolves and a connection that
+        // hangs, which is the worst of both outcomes.
+        let webb = entry("teamB", &[]);
+        assert!(!dns_scope_allows(&webb, "teamA", [10, 250, 0, 5]));
+        assert!(dns_scope_allows(&webb, "teamB", [10, 250, 0, 5]));
+        // Case must not be a way around it.
+        assert!(dns_scope_allows(&webb, "TEAMB", [10, 250, 0, 5]));
+    }
+
+    #[test]
+    fn the_shared_namespace_stays_reachable_from_everywhere() {
+        // ADR-0011 §5: `default` is the shared space you get by not naming one.
+        // It is reachable from any namespace on the dataplane, so the resolver
+        // says so too — and that is NOT the leak, because teamA still cannot
+        // see teamB (asserted above).
+        let shared = entry("default", &[]);
+        for asker in ["default", "teamA", "teamB"] {
+            assert!(dns_scope_allows(&shared, asker, [10, 250, 0, 5]));
+        }
+    }
+
+    #[test]
+    fn an_explicit_dependency_makes_the_name_resolvable_across_namespaces() {
+        // A `kind: Dependency` opens the boundary in one direction. Without
+        // this, it would work by address and not by name — the "accepted and
+        // then ignored" shape this repo keeps removing.
+        let db = entry("teamB", &["10.250.0.5/32"]);
+        assert!(dns_scope_allows(&db, "teamA", [10, 250, 0, 5]));
+        // ...and ONLY for the address the dependency actually named.
+        assert!(!dns_scope_allows(&db, "teamA", [10, 250, 0, 6]));
+        // A subnet-wide allow works the same way.
+        let wide = entry("teamB", &["10.250.0.0/24"]);
+        assert!(dns_scope_allows(&wide, "teamA", [10, 250, 0, 200]));
+        assert!(!dns_scope_allows(&wide, "teamA", [10, 250, 1, 1]));
+    }
+
+    #[test]
+    fn an_allow_from_anywhere_does_not_republish_the_name_to_every_tenant() {
+        // `0.0.0.0/0` is a port-level decision ("this port is open to the
+        // world"), not "publish this name to all tenants". Letting it through
+        // here would quietly restore the global visibility the ADR removes, via
+        // the single most common firewall rule there is.
+        let e = entry("teamB", &["0.0.0.0/0", "*", ""]);
+        assert!(
+            e.allow_in.is_empty(),
+            "world-wide allows must not be indexed"
+        );
+        assert!(!dns_scope_allows(&e, "teamA", [10, 250, 0, 5]));
+    }
+
+    #[test]
+    fn parse_cidr_handles_the_forms_the_firewall_actually_stores() {
+        assert_eq!(
+            parse_cidr("10.0.0.1"),
+            Some((u32::from_be_bytes([10, 0, 0, 1]), u32::MAX))
+        );
+        assert_eq!(parse_cidr("10.0.0.0/8").map(|c| c.1), Some(0xff00_0000));
+        assert_eq!(parse_cidr("0.0.0.0/0"), Some((0, 0)));
+        assert_eq!(parse_cidr("*"), Some((0, 0)));
+        assert_eq!(parse_cidr("10.0.0.0/33"), None);
+        assert_eq!(parse_cidr("nonsense"), None);
+        // /24 boundary, both sides
+        let c = parse_cidr("192.168.1.0/24").unwrap();
+        assert!(cidr_contains(c, [192, 168, 1, 255]));
+        assert!(!cidr_contains(c, [192, 168, 2, 0]));
     }
 
     #[test]

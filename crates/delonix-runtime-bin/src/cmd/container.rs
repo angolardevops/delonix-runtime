@@ -2952,14 +2952,29 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
              resolution, letting a container hijack that domain node-wide)"
         )));
     }
-    // UNIQUE name, like docker ("name is already in use"). Without this, several
-    // containers with the same name got created: `find` resolves to the first, and
-    // an `rm <name>` only caught that one — the rest were left orphaned and invisible
-    // to management by name (seen the hard way: 2x `loja-app` + 2x `loja-db`).
-    if let Some(dup) = store.list()?.iter().find(|c| c.name == cname) {
+    // UNIQUE name WITHIN THE NAMESPACE, like k8s. Without uniqueness at all,
+    // several containers with the same name got created: `find` resolves to the
+    // first, and an `rm <name>` only caught that one — the rest were left
+    // orphaned and invisible to management by name (seen the hard way: 2x
+    // `loja-app` + 2x `loja-db`).
+    //
+    // It used to be unique GLOBALLY, which made a namespace something that was
+    // not a name space: `--name web -n teamA` refused `web` in `teamB`, so two
+    // teams could not both own `db`/`web`/`api` — exactly the names everyone
+    // uses — and had to hand-prefix what the namespace already said (ADR-0011
+    // §3). The pair is the boundary the rest of the model already draws.
+    if let Some(dup) = store
+        .list()?
+        .iter()
+        .find(|c| c.name == cname && c.namespace == namespace)
+    {
         return Err(Error::Invalid(super::po::tf(
-            "the name '{name}' is already in use by container {id} — pick another or remove it first",
-            &[("name", cname.as_str()), ("id", dup.short_id())],
+            "the name '{name}' is already in use in namespace '{ns}' by container {id} — pick another or remove it first",
+            &[
+                ("name", cname.as_str()),
+                ("ns", namespace.as_str()),
+                ("id", dup.short_id()),
+            ],
         )));
     }
     // `max` = no memory cap (cgroup v2); in k8s the pod's cgroup already limits.

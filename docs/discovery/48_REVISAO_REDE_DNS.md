@@ -11,11 +11,12 @@ medido, não deduzido**; onde não houve medição, está dito.
 
 ---
 
-> **Estado (2026-08-11, mesma sessão).** A1, A2, A4 e A5 estão **CORRIGIDOS e
-> validados ao vivo** — ver «Validação das correcções» no fim. A3, A6, A7 e A9
-> continuam **abertos por decisão**: são modelo, não bug, e mudá-los é breaking;
-> pertencem a um ADR. Esta nota é mantida a par das correcções de propósito —
-> uma tabela de achados que não acompanha o que já foi fechado passa a mentir
+> **Estado (2026-08-12).** Fechados e validados ao vivo: **A1, A2, A4, A5**
+> (1.ª passagem) e **A3, A6, A7, A8, A10** (2.ª passagem, sob ADR-0011). **A9
+> fecha por decisão consciente** — o `default` continua aberto, e a razão está
+> no ADR §5. Um achado **novo (A11)** apareceu ao validar, é PRÉ-EXISTENTE e
+> fica aberto com a medição feita. Esta nota é mantida a par das correcções de
+> propósito — uma tabela de achados que não acompanha o que foi fechado mente
 > nos dois sentidos, como o `AUDITORIA-E2E.md` fez durante semanas.
 
 ## A1 — CRÍTICO ✅ CORRIGIDO. A descoberta de serviço está partida para aplicações reais
@@ -79,7 +80,7 @@ do upstream, não nosso. O comportamento observável coincide; o custo e a fuga 
 **Correcção**: NXDOMAIN autoritativo para qualquer `.delonix.internal` que o
 índice não conheça, sem nunca reencaminhar esse sufixo.
 
-## A3 — CRÍTICO ⏸ ABERTO (decisão de modelo). O DNS ignora a namespace de quem pergunta
+## A3 — CRÍTICO ✅ CORRIGIDO (ADR-0011). O DNS ignora a namespace de quem pergunta
 
 O dataplane isola (medido: `client`@teamA → `webb`@teamB = 100 % de perda), mas o
 plano de nomes não isola nada:
@@ -147,7 +148,7 @@ efémera é entregue ao cliente. É o vector Kaminsky clássico. O anti-spoofing
 bridge dificulta-o mas não o fecha, e a correcção é uma linha: `connect()` no
 socket faz o kernel recusar tudo o que não venha do upstream.
 
-## A6 — GRAVE (modelo). Nomes de container são GLOBAIS, não por-namespace
+## A6 — GRAVE ✅ CORRIGIDO (ADR-0011). Nomes de container são GLOBAIS, não por-namespace
 
 ```
 run --name web --namespace teamA   → ok
@@ -160,7 +161,7 @@ de terem ambas um `db`/`web`/`api` — precisamente os nomes que toda a gente us
 e força prefixos manuais (`loja-api`, `banco-api`) que reinventam à mão a
 namespace que já foi declarada.
 
-## A7 — GAP. `stack` não é fronteira de isolamento nenhuma
+## A7 — GAP ✅ FECHADO (aviso; ver ADR-0011 §4 para o que NÃO se fez). `stack` não é fronteira de isolamento nenhuma
 
 Duas stacks distintas, sem `namespace` declarada, caem ambas em `default` e
 alcançam-se e resolvem-se sem barreira (medido: 0 % de perda, nome resolvido):
@@ -176,14 +177,14 @@ do compose (onde um projecto tem rede própria por omissão). As opções são
 derivar a namespace do nome da stack quando não é declarada, ou documentar
 explicitamente que isolar é declarar `namespace`.
 
-## A8 — GAP. Um Pod não tem nome DNS
+## A8 — GAP ✅ CORRIGIDO. Um Pod não tem nome DNS
 
 `nslookup p1` → SERVFAIL. Só os membros (`p1-a`, `p1-b`) resolvem — e resolvem
 para o IP errado (A4). O k8s dá nome ao Pod e, sobretudo, um **Service** com nome
 estável à frente de N réplicas. Sem isso não há descoberta de serviço estável:
 o consumidor tem de conhecer o nome de um membro concreto.
 
-## A9 — MENOR. O `default` é assimétrico, e é o oposto do default seguro
+## A9 — MENOR ✅ FECHADO POR DECISÃO (ADR-0011 §5). O `default` é assimétrico, e é o oposto do default seguro
 
 Já documentado como limitação v1: `default` é alcançável de dentro de qualquer
 namespace mas não alcança para dentro delas. A prática cloud-native (k8s
@@ -192,7 +193,7 @@ com abertura explícita. Hoje quem não declara `namespace` fica numa SDN plana 
 aberta, que é o caso por omissão — portanto o estado por omissão é o menos
 seguro. Mudar isto é breaking e merece decisão própria (ADR).
 
-## A10 — MENOR. Observabilidade e MTU
+## A10 — MENOR ✅ CORRIGIDO (stderr; o MTU fica). Observabilidade e MTU
 
 - O stderr do processo de controlo vai para `/dev/null` (confirmado em
   `/proc/<pid>/fd/2`). Um pânico numa thread de DNS é invisível: o serviço
@@ -285,4 +286,78 @@ falhava em `bad address`, e o nome apontava para o outro pod.
 passar; os dois testes de decisão do DNS **falham com a correcção revertida**
 (verificado explicitamente, conforme a regra do repo).
 
-A3, A6, A7 e A9 continuam abertos de propósito — são modelo, não bug.
+---
+
+## Validação da 2.ª passagem (A3, A6, A7, A8, A10 — sob ADR-0011)
+
+Nó novo (`/tmp/dxd`), com o cenário que a auditoria não conseguia montar antes:
+**dois inquilinos com o MESMO nome**, coisa que a unicidade global proibia.
+
+**A6 — dois `db` coexistem** (o segundo era recusado), e cada inquilino resolve
+o seu:
+
+```
+db  ns=teamA  ip=10.250.229.6
+db  ns=teamB  ip=10.250.194.118
+
+app(teamA) → nslookup db  → 10.250.229.6     (o seu)
+app(teamB) → nslookup db  → 10.250.194.118   (o seu)
+```
+
+**A3 — a fuga fechou**, e fechou com precisão de endereço e não de namespace:
+
+```
+app(teamA)   → db.teamB.delonix.internal   → NXDOMAIN
+  (depois de `ingress allow teamB/db 5432 --from <ip do app>`)
+app(teamA)   → db.teamB.delonix.internal   → 10.250.194.118   ← a Dependency abre
+outro(teamA) → db.teamB.delonix.internal   → NXDOMAIN         ← e SÓ para o endereço nomeado
+```
+
+O vizinho da MESMA namespace, não coberto pelo allow, continua sem ver — é a
+diferença entre espelhar a política e abrir a fronteira.
+
+**A6 no caminho destrutivo**, que é onde adivinhar custa caro:
+
+```
+net ingress allow db 5432 …        → recusa: «exists in several namespaces
+                                      (teamA/db, teamB/db) — qualify it»
+net ingress allow teamB/db 5432 …  → aplica, no db certo
+```
+
+Isto veio de um gap que a própria mudança criou e que só a validação ao vivo
+mostrou: `util::find` passou a recusar nomes ambíguos, mas `Store::load` — por
+onde o firewall e os manifestos resolvem — continuava com «o mais recente
+ganha». Um `ingress deny db` teria escolhido um inquilino em silêncio. Corrigido
+no `Store::load`, com teste.
+
+**A8 — o pod resolve pelo próprio nome**: `nslookup web` → `10.250.0.2` (dava
+SERVFAIL). **A10** — o log do controlo existe e foi USADO nesta sessão para
+excluir um pânico em segundos, que era exactamente o que faltava na 1.ª
+passagem.
+
+**Sem regressão**: externos resolvem (`example.com` → 104.20.23.154);
+`getaddrinfo` por nome funciona (`wget http://db:5432/` → conecta a
+`10.250.229.6`); 20 resoluções seguidas em **68 ms**.
+
+## A11 — ABERTO, PRÉ-EXISTENTE. A 1.ª resolução após criar um pod falha, às vezes
+
+Encontrado a validar. Logo depois de um `pod create`, a primeira query DNS de um
+container **já existente** pode dar timeout (5,04 s); as seguintes respondem em
+~30 ms. A rede não está partida (ping ao gateway a 0,127 ms) e o servidor está
+vivo (um `dig` de dentro do holder responde em 1 ms na mesma janela) — o que
+falha é o pedido do container.
+
+**Medido nos dois binários, com o MESMO cenário**, porque a primeira leitura foi
+«a regressão é minha» a partir de uma amostra de UM, que é o erro de método que
+este ficheiro já documenta noutro sítio:
+
+| binário | falhas |
+|---|---|
+| com estas correcções | **0 / 10** |
+| `main` (sem elas) | **2 / 10** |
+
+Portanto é pré-existente e intermitente, e não há evidência de que este trabalho
+o agrave. **Não corrigido aqui de propósito**: a causa está no dataplane (a
+suspeita é a janela em que o `pod create` reaplica regras e o conntrack do UDP
+em voo), é outra causa-raiz, e merece a sua própria investigação em vez de um
+palpite no fim de uma sessão.
