@@ -1,0 +1,1220 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Guia de VMs e laboratório de rede · Delonix Engine</title>
+<script>(function(){try{
+var t=localStorage.getItem('delonix-docs-theme');
+if(t)document.documentElement.setAttribute('data-theme',t);
+var l=localStorage.getItem('delonix-docs-lang');
+if(l)document.documentElement.setAttribute('data-lang',l);
+}catch(e){}})();</script>
+<style>
+:root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;
+--bg:#ffffff;--side:#f7f8fa;--code-bg:#0f172a;--code-ink:#e2e8f0;--radius:10px;
+--tok-key:#0550ae;--tok-string:#116329;--tok-comment:#6e7781;--tok-flag:#953800;
+--tok-cmd:#8250df;--tok-ph:#6e7781;--tok-head:#c2410c;--tok-sep:#6e7781}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
+--bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea;
+--tok-key:#79c0ff;--tok-string:#7ee787;--tok-comment:#8b949e;--tok-flag:#ffa657;
+--tok-cmd:#d2a8ff;--tok-ph:#8b949e;--tok-head:#ff9a5a;--tok-sep:#8b949e}}
+:root[data-theme="dark"]{--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;
+--bg:#0d1117;--side:#10151c;--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea;
+--tok-key:#79c0ff;--tok-string:#7ee787;--tok-comment:#8b949e;--tok-flag:#ffa657;
+--tok-cmd:#d2a8ff;--tok-ph:#8b949e;--tok-head:#ff9a5a;--tok-sep:#8b949e}
+*{box-sizing:border-box}body{margin:0;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Ubuntu,
+sans-serif;color:var(--ink);background:var(--bg)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.layout{display:grid;grid-template-columns:270px minmax(0,1fr) 240px;max-width:1600px;
+margin:0 auto;min-height:100vh}
+nav.side{width:270px;background:var(--side);border-right:1px solid var(--line);
+padding:1.2rem 1rem 3rem;position:sticky;top:0;height:100vh;overflow-y:auto}
+nav.side .brand{display:flex;align-items:center;gap:.55rem;font-weight:700;font-size:1.12rem;
+margin-bottom:1.1rem;color:var(--ink)}
+nav.side .brand .dot{width:26px;height:26px;border-radius:7px;background:var(--accent);
+display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:.85rem}
+nav.side h5{margin:1.3rem 0 .3rem;font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;
+color:var(--muted)}
+nav.side a{display:block;padding:.28rem .55rem;border-radius:6px;color:var(--ink);font-size:.93rem}
+nav.side a:hover{background:var(--accent-soft);text-decoration:none}
+nav.side a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+nav.side .brand .toggles{display:flex;align-items:center;gap:.4rem;margin-left:auto}
+.theme-toggle{appearance:none;border:1px solid var(--line);background:var(--bg);color:var(--ink);
+border-radius:8px;width:30px;height:30px;flex-shrink:0;display:inline-flex;align-items:center;
+justify-content:center;cursor:pointer;font-size:.95rem;line-height:1}
+.theme-toggle:hover{border-color:var(--accent)}
+.theme-toggle .i-sun{display:none}
+:root[data-theme="dark"] .theme-toggle .i-moon{display:none}
+:root[data-theme="dark"] .theme-toggle .i-sun{display:inline}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .theme-toggle .i-moon{display:none}
+:root:not([data-theme="light"]) .theme-toggle .i-sun{display:inline}}
+.lang-toggle{appearance:none;border:1px solid var(--line);background:var(--bg);color:var(--ink);
+border-radius:8px;height:30px;padding:0 .55rem;flex-shrink:0;display:inline-flex;align-items:center;
+justify-content:center;cursor:pointer;font-size:.72rem;font-weight:700;letter-spacing:.02em;line-height:1}
+.lang-toggle:hover{border-color:var(--accent)}
+.lang-toggle .lbl-pt{display:none}
+:root[data-lang="en"] .lang-toggle .lbl-en{display:none}
+:root[data-lang="en"] .lang-toggle .lbl-pt{display:inline}
+.lang-en{display:none}
+:root[data-lang="en"] .lang-en{display:inline}
+:root[data-lang="en"] .lang-pt{display:none}
+p.lang-en,p.lang-pt,div.lang-en,div.lang-pt{display:none}
+:root[data-lang="en"] p.lang-en,:root[data-lang="en"] div.lang-en{display:block}
+:root:not([data-lang="en"]) p.lang-pt,:root:not([data-lang="en"]) div.lang-pt{display:block}
+main{min-width:0;padding:2.2rem 3rem 5rem;max-width:860px;margin:0 auto}
+main h1{font-size:1.9rem;margin:.2rem 0 .4rem}
+main h2{font-size:1.35rem;margin-top:2.4rem;padding-bottom:.35rem;border-bottom:1px solid var(--line)}
+main h3{font-size:1.05rem;margin-top:1.6rem}
+.tagline{color:var(--muted);font-size:1.05rem;margin-top:0}
+p.intro{font-size:1.02rem;margin:1rem 0}
+p.src-link{margin:.7rem 0 0;font-size:.85rem;color:var(--muted)}
+p.src-link a{font-weight:600}
+code{background:var(--accent-soft);padding:.1em .35em;border-radius:5px;font-size:.9em}
+pre{background:var(--code-bg);color:var(--code-ink);padding:1rem 1.2rem;border-radius:var(--radius);
+overflow-x:auto;font-size:.86rem;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+pre code{background:none;padding:0;color:inherit;font-size:inherit}
+.help pre{border-left:4px solid var(--accent)}
+.tok-key{color:var(--tok-key)}.tok-string{color:var(--tok-string)}
+.tok-comment{color:var(--tok-comment);font-style:italic}
+.tok-flag{color:var(--tok-flag)}.tok-cmd{color:var(--tok-cmd);font-weight:600}
+.tok-ph{color:var(--tok-ph);font-style:italic}.tok-head{color:var(--tok-head);font-weight:700}
+.tok-sep{color:var(--tok-sep)}
+.ex{margin:.9rem 0}.ex .cap{font-size:.88rem;color:var(--muted);margin-bottom:.25rem}
+.ex .out,div.out{margin-top:.4rem}
+.ex .out pre,div.out pre{background:transparent;border:1px dashed var(--line);color:var(--muted);
+padding:.7rem 1rem;font-size:.82rem}
+.ex .out::before,div.out::before{content:"→ resultado";display:block;font-size:.75rem;color:var(--muted);
+margin-bottom:.15rem;letter-spacing:.03em;text-transform:uppercase}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+td,th{border:1px solid var(--line);padding:.5rem .7rem;text-align:left;vertical-align:top}
+th{background:var(--side)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem;margin:1.4rem 0}
+.card{border:1px solid var(--line);border-radius:var(--radius);padding:1rem 1.1rem}
+.card b{display:block;margin-bottom:.25rem}.card a{font-weight:600}
+.card p{margin:.2rem 0 0;font-size:.88rem;color:var(--muted)}
+.arch{display:flex;flex-direction:column;gap:.6rem;margin:1.4rem 0}
+.arch .row{display:flex;gap:.6rem;flex-wrap:wrap}
+.arch .box{flex:1;min-width:150px;border:1.5px solid var(--accent);border-radius:8px;
+padding:.55rem .8rem;font-size:.85rem;background:var(--accent-soft)}
+.arch .box.mut{border-color:var(--line);background:var(--side)}
+.arch .box b{display:block;font-size:.9rem}
+.pill{display:inline-block;background:var(--accent);color:#fff;border-radius:99px;
+padding:.05rem .6rem;font-size:.75rem;font-weight:600;vertical-align:middle}
+.tag{display:inline-block;border-radius:6px;padding:.1rem .5rem;font-size:.82rem;font-weight:600}
+.tag.ok{background:#d8f3dc;color:#1b4332}.tag.mid{background:#fff3bf;color:#5c4a00}
+.tag.no{background:#ffe3e3;color:#7a1420}
+@media (prefers-color-scheme: dark){.tag.ok{background:#0f3d24;color:#8fe3ac}
+.tag.mid{background:#453800;color:#ffe066}.tag.no{background:#4a1015;color:#ffa8a8}}
+.callout{border:1.5px solid var(--accent);border-radius:var(--radius);padding:1rem 1.2rem;margin:1.4rem 0;
+background:var(--accent-soft)}
+.callout.warn{border-color:#e03131;background:#fff0f0}
+.callout.warn b{color:#c92a2a}
+@media (prefers-color-scheme: dark){.callout.warn{background:#3a1414}.callout.warn b{color:#ff8787}}
+.callout p:first-child{margin-top:0}.callout p:last-child{margin-bottom:0}
+footer{margin-top:4rem;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line);padding-top:1rem}
+aside.toc{padding:2.2rem 1.2rem 3rem 0;position:sticky;top:0;height:100vh;overflow-y:auto;font-size:.82rem}
+aside.toc .toc-inner{border-left:1px solid var(--line);padding-left:1rem}
+aside.toc h5{margin:0 0 .5rem;font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+aside.toc a{display:block;padding:.2rem 0;color:var(--muted);line-height:1.4}
+aside.toc a:hover{color:var(--accent);text-decoration:none}
+@media (max-width:1200px){.layout{grid-template-columns:270px minmax(0,1fr)}aside.toc{display:none}}
+@media (max-width:840px){.layout{display:block}nav.side{width:100%;height:auto;position:static}
+main{padding:1.4rem 1.2rem 4rem;max-width:none}}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="side">
+<div class="brand"><span class="dot">▲</span> Delonix Engine
+<div class="toggles">
+<button class="lang-toggle" type="button" aria-label="Switch language / Mudar idioma" title="EN / PT">
+<span class="lbl-en">EN</span><span class="lbl-pt">PT</span></button>
+<button class="theme-toggle" type="button" aria-label="Alternar tema claro/escuro" title="Tema claro/escuro">
+<span class="i-moon">🌙</span><span class="i-sun">☀️</span></button>
+</div></div>
+<h5><span class='lang-pt'>Documentação</span><span class='lang-en'>Docs</span></h5>
+<a href="index.html"><span class='lang-pt'>Início</span><span class='lang-en'>Home</span></a><a href="cheatsheet.html"><span class='lang-pt'>Cheatsheet</span><span class='lang-en'>Cheatsheet</span></a><a href="kinds.html"><span class='lang-pt'>Kinds e templates</span><span class='lang-en'>Kinds &amp; templates</span></a><a href="gitops.html"><span class='lang-pt'>GitOps e CI</span><span class='lang-en'>GitOps &amp; CI</span></a><a href="estabilidade.html"><span class='lang-pt'>Promessa de estabilidade</span><span class='lang-en'>Stability promise</span></a><a href="cloud.html"><span class='lang-pt'>cloud-init, cloud-img e CH</span><span class='lang-en'>cloud-init, cloud-img &amp; CH</span></a><a href="labs.html"><span class='lang-pt'>Laboratórios</span><span class='lang-en'>Labs</span></a><a href="guia-vm.html" class="on"><span class='lang-pt'>Guia de VMs e lab de rede</span><span class='lang-en'>VM &amp; network lab guide</span></a><a href="arquitectura.html"><span class='lang-pt'>Arquitectura</span><span class='lang-en'>Architecture</span></a><a href="c4.html"><span class='lang-pt'>Modelo C4 e system design</span><span class='lang-en'>C4 model &amp; system design</span></a><a href="cri.html"><span class='lang-pt'>CRI — kubelet sem containerd</span><span class='lang-en'>CRI — kubelet without containerd</span></a><a href="comparacao.html"><span class='lang-pt'>Delonix vs Docker vs Podman</span><span class='lang-en'>Delonix vs Docker vs Podman</span></a><a href="tutorial-delonix-temp.html"><span class='lang-pt'>Projecto completo: Delonix Temp</span><span class='lang-en'>Full project: Delonix Temp</span></a>
+<h5><span class='lang-pt'>Referência CLI</span><span class='lang-en'>CLI reference</span></h5>
+<a href="comandos/init.html">delonix init</a><a href="comandos/container.html">delonix container</a><a href="comandos/workload.html">delonix workload</a><a href="comandos/pod.html">delonix pod</a><a href="comandos/image.html">delonix image</a><a href="comandos/build.html">delonix build</a><a href="comandos/vm.html">delonix vm</a><a href="comandos/volumes.html">delonix volumes</a><a href="comandos/network.html">delonix network</a><a href="comandos/stack.html">delonix stack</a><a href="comandos/compose.html">delonix compose</a><a href="comandos/cluster.html">delonix cluster</a><a href="comandos/secret.html">delonix secret</a><a href="comandos/storage.html">delonix storage</a><a href="comandos/sharevolume.html">delonix sharevolume</a><a href="comandos/ingress.html">delonix net ingress</a><a href="comandos/egress.html">delonix net egress</a><a href="comandos/httproute.html">delonix net httproute</a><a href="comandos/tunnel.html">delonix net tunnel</a><a href="comandos/flow.html">delonix net flow</a><a href="comandos/boot.html">delonix net boot</a><a href="comandos/backup.html">delonix backup</a><a href="comandos/restore.html">delonix restore</a><a href="comandos/system.html">delonix system</a><a href="comandos/dash.html">delonix dash</a><a href="comandos/docker-api.html">delonix serve docker-api</a><a href="comandos/kube.html">delonix cluster kube</a><a href="comandos/netns.html">delonix net netns</a><a href="comandos/completion.html">delonix completion</a><a href="comandos/syntax.html">delonix syntax</a><a href="comandos/schema.html">delonix schema · explain</a>
+<h5><span class='lang-pt'>Projecto</span><span class='lang-en'>Project</span></h5>
+<a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
+<a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
+</nav>
+<main>
+<h1 id="delonix-vm-guia-do-administrador-e-um-laboratorio-de-rede-completo"><code>delonix vm</code> — guia do administrador, e um laboratório de rede completo</h1>
+<p><strong>Para quem administra sistemas e redes.</strong> Cada comando aqui foi executado contra o
+binário real e a saída mostrada é a que se obteve. O que não foi possível provar
+está identificado como tal, com a razão — um guia que promete o que não verificou é
+pior do que um guia incompleto.</p>
+<ul>
+<li><strong>Versão do motor:</strong> <code>delonix 0.51.0</code></li>
+<li><strong>Host de validação:</strong> Ubuntu, 32 vCPU, 30 GiB RAM, rootless, libvirt + Cloud
+  Hypervisor instalados</li>
+<li><strong>Data:</strong> 12 de Agosto de 2026</li>
+</ul>
+<p>Índice:</p>
+<ol>
+<li><a href="#1-antes-de-começar">Antes de começar</a></li>
+<li><a href="#2-cheatsheet-o-ciclo-de-vida">Cheatsheet: o ciclo de vida</a></li>
+<li><a href="#3-cheatsheet-inspecção">Cheatsheet: inspecção</a></li>
+<li><a href="#4-cheatsheet-acesso">Cheatsheet: acesso</a></li>
+<li><a href="#5-cheatsheet-imagens">Cheatsheet: imagens</a></li>
+<li><a href="#6-cheatsheet-instantâneos">Cheatsheet: instantâneos</a></li>
+<li><a href="#7-kind-vm--a-vm-declarada"><code>kind: Vm</code> — a VM declarada</a></li>
+<li><a href="#8-kind-network--e-a-fronteira-que-engana-toda-a-gente"><code>kind: Network</code> — e a fronteira que engana toda a gente</a></li>
+<li><a href="#9-o-laboratório-completo">O laboratório completo</a></li>
+<li><a href="#10-armadilhas-medidas">Armadilhas medidas</a></li>
+</ol>
+<hr />
+<h2 id="1-antes-de-comecar">1. Antes de começar</h2>
+<h3 id="o-que-o-host-precisa-de-ter">O que o host precisa de ter</h3>
+<pre><code class="language-bash">delonix system info
+</code></pre>
+<pre><code>Delonix Runtime 0.51.0
+  state root:         /home/walter/.local/share/delonix
+  mode:               rootless (daemonless)
+  cgroup2 delegated:  yes
+  network infra:      up (holder pid 71944)
+</code></pre>
+<p>Para VMs, além disto: <code>libvirt</code> (com o utilizador no grupo <code>libvirt</code>), <code>qemu-img</code> e
+<code>cloud-localds</code>. Sem acesso ao libvirt de sistema, uma VM cai em modo <em>user</em> (SLIRP)
+e <strong>nunca ganha um endereço visível</strong> — o <code>vm create</code> avisa quando isso acontece.</p>
+<h3 id="os-dois-motores-e-quando-cada-um-serve">Os dois motores, e quando cada um serve</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th><strong>libvirt</strong></th>
+<th><strong>Cloud Hypervisor</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Onde vive a VM</td>
+<td><code>virbr*</code>, na rede do host</td>
+<td>SDN do motor, dentro do <em>holder</em></td>
+</tr>
+<tr>
+<td>Endereço</td>
+<td>DHCP do libvirt, <strong>observado</strong></td>
+<td>calculado do MAC, <strong>previsto</strong></td>
+</tr>
+<tr>
+<td>Consola gráfica (<code>--vnc</code>)</td>
+<td>sim</td>
+<td>não</td>
+</tr>
+<tr>
+<td>Instantâneos</td>
+<td>sim</td>
+<td>não (recusa explícita)</td>
+</tr>
+<tr>
+<td>Appliances (OPNsense, TrueNAS, Proxmox)</td>
+<td>sim</td>
+<td><strong>não arrancam</strong></td>
+</tr>
+<tr>
+<td>Imagens <code>delonix-vm-base:*</code></td>
+<td>sim</td>
+<td><strong>não arrancam</strong> neste host</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Para trabalho a sério com VMs, use libvirt.</strong> É o que este guia usa em todo o
+laboratório. O Cloud Hypervisor serve microVMs Linux que precisem de estar na mesma
+rede dos contentores — e traz o problema descrito em
+<a href="#a-vm-diz-running-e-nunca-arrancou">Armadilhas</a>.</p>
+<pre><code class="language-bash">delonix vm default-backend --set libvirt   # fixa a escolha, uma vez
+delonix vm default-backend                 # consulta
+</code></pre>
+<p>Precedência efectiva, da mais forte para a mais fraca: <code>--backend</code> explícito → o
+<code>HYPERVISOR</code> gravado na imagem → <code>DELONIX_VM_BACKEND</code> → <code>vm default-backend</code> →
+detecção automática.</p>
+<hr />
+<h2 id="2-cheatsheet-o-ciclo-de-vida">2. Cheatsheet: o ciclo de vida</h2>
+<h3 id="criar">Criar</h3>
+<pre><code class="language-bash">delonix vm create dev \
+  --disk delonix-vm-base:ubuntu-24.04 \
+  --backend libvirt --net-mode nat \
+  --vcpus 1 --memory 1G \
+  --hostname dev --ssh-key @$HOME/.ssh/id_ed25519.pub \
+  --wait --boot-timeout 180
+</code></pre>
+<pre><code>Creating VM 'dev'…
+ ✓ preparing the overlay disk 💽 0.0s
+ ✓ configuring the network 🌐 0.1s
+ ✓ defining the domain 📋 0.0s
+ ✓ starting the VM ▶ 0.8s
+✓ VM 'dev' is up.
+info vm 'dev' is up — ip 192.168.122.190
+</code></pre>
+<p><strong>Medido: 11,5 s</strong> do comando ao endereço atribuído; o SSH aceitou ligação poucos
+segundos depois, já com o <em>hostname</em> aplicado e a chave instalada pelo cloud-init.</p>
+<p>O disco base torna-se um <em>overlay</em> por VM — a imagem original nunca é escrita, o que
+permite dezenas de VMs a partir de uma cópia só.</p>
+<p><strong>Há admissão de recursos</strong>, e é uma boa notícia para quem corre isto a sério:</p>
+<pre><code>error system call `VM admission` failed: host protection: VM 'lab-nas' asks for
+6144 MiB but the host only has 7181 MiB available (reserve 2048 MiB). Stop
+VMs/containers, reduce the memory, or lower DELONIX_VM_RESERVE_MIB (at your own risk).
+</code></pre>
+<p>A recusa acontece <strong>antes de criar seja o que for</strong> e reserva 2 GiB para o host. Foi
+accionada duas vezes durante a montagem do laboratório e evitou levar a máquina a
+<em>swap</em>.</p>
+<h3 id="parar-arrancar-reiniciar-remover">Parar, arrancar, reiniciar, remover</h3>
+<pre><code class="language-bash">delonix vm stop dev       # 0,4 s — preserva disco e registo
+delonix vm start dev      # 0,9 s — mesmo overlay, disco preservado
+delonix vm restart dev    # 1,3 s — sempre um arranque real
+delonix vm rm dev         # pára e apaga overlay + registo
+delonix vm rm dev --force # descarta o registo local mesmo se o libvirt falhar
+</code></pre>
+<blockquote>
+<p><strong><code>stop</code> faz <code>undefine</code> do domínio libvirt.</strong> Consequência que apanha muita
+gente: <strong>os instantâneos desaparecem</strong>. Ver
+<a href="#stop-apaga-os-instantâneos-sem-o-dizer">Armadilhas</a>.</p>
+</blockquote>
+<p><code>start</code> reconstrói a VM a partir do registo persistido, mas <strong>só recupera</strong> disco,
+vCPU, memória, rede e motor. Kernel próprio, <em>seed</em> de cloud-init, volumes 9p,
+endereço fixo, VNC e as opções avançadas de libvirt só existem como argumentos do
+<code>vm create</code> e <strong>não sobrevivem</strong>. Uma VM que dependa deles volta pelo <code>vm create</code>
+original — que também é idempotente.</p>
+<hr />
+<h2 id="3-cheatsheet-inspeccao">3. Cheatsheet: inspecção</h2>
+<pre><code class="language-bash">delonix vm ls          # tabela
+delonix vm ls --ports  # + sonda TCP real a 22/6443/10250/80/443
+delonix vm ls -o json  # para script
+delonix vm status [nome]
+delonix vm describe &lt;nome&gt;...
+delonix vm dash --once # KPIs + tabela
+</code></pre>
+<pre><code>NAME      IMAGE                          BACKEND   VCPUS  MEMORY  STATUS   IP             UPTIME        PORTS OPEN
+lab-dns   delonix-vm-base_ubuntu-24.04   libvirt       1  1G      Running  192.168.122.2  Up 2 minutes  22
+</code></pre>
+<p><code>--ports</code> faz ligações TCP verdadeiras e por isso está desligado por omissão —
+distingue <em>«a VM tem endereço»</em> de <em>«a VM serve alguma coisa»</em>, que não é a mesma
+pergunta.</p>
+<blockquote>
+<p>A tabela mede as colunas pelo conteúdo e <strong>omite as que ficam totalmente vazias</strong>.
+Se nenhuma VM tiver nenhuma daquelas portas aberta, a coluna <code>PORTS OPEN</code>
+desaparece — não é a flag a falhar. Para uma saída de forma estável, use
+<code>-o json</code>, onde o campo <code>ports_open</code> está sempre presente quando se pede
+<code>--ports</code>.</p>
+</blockquote>
+<p><code>status</code> reconcilia com o motor em vez de reler o registo; <code>describe</code> mostra o
+registo inteiro, incluindo o caminho do <em>overlay</em> e o seu tamanho real em disco.</p>
+<hr />
+<h2 id="4-cheatsheet-acesso">4. Cheatsheet: acesso</h2>
+<pre><code class="language-bash">delonix vm ssh dev                        # o nome basta — o IP vem do registo
+delonix vm ssh dev -- systemctl status    # um comando e sai
+delonix vm ssh 192.168.122.50 -l root     # directo a um endereço
+delonix vm console dev                    # consola série (voltar: Ctrl+])
+delonix vm vnc dev                        # só para VMs criadas com --vnc
+</code></pre>
+<p>O utilizador por omissão é <code>delonix</code> numa imagem cloud-init e <code>root</code> num
+<em>appliance</em> — o comando escolhe sozinho.</p>
+<p><code>console</code> precisa de um terminal real; sem ele diz-lo em vez de bloquear:</p>
+<pre><code>error: Cannot run interactive console without a controlling TTY
+</code></pre>
+<p><strong>A consola é o que salva quando não há rede.</strong> Foi ela que permitiu configurar o
+OPNsense do laboratório, que arranca sem endereço utilizável.</p>
+<hr />
+<h2 id="5-cheatsheet-imagens">5. Cheatsheet: imagens</h2>
+<pre><code class="language-bash">delonix image vm ls          # o que está local
+delonix vm ls-remote         # o que há publicado, sem descarregar nada
+delonix vm pull &lt;ref&gt;        # trazer
+delonix vm build -t &lt;tag&gt; .  # construir a partir de um VMfile
+delonix vm convert &lt;src&gt; --to qcow2|raw|vmdk|vdi|vhdx|vhd
+</code></pre>
+<p><code>ls-remote</code> lê só manifestos (poucos KB) e mostra os três repositórios oficiais:
+<code>delonix-vm-k8s</code> (nós Kubernetes), <code>delonix-vm-base</code> (Ubuntu 24.04/26.04, Debian
+bookworm, Rocky 9, Fedora 42) e <code>delonix-vm-appliances</code> (OPNsense, TrueNAS, os
+quatro produtos Proxmox).</p>
+<p><strong><code>convert</code> — os seis formatos foram convertidos e verificados com <code>file(1)</code>:</strong></p>
+<table>
+<thead>
+<tr>
+<th><code>--to</code></th>
+<th><code>file(1)</code> confirmou</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>raw</code></td>
+<td><code>data</code></td>
+</tr>
+<tr>
+<td><code>vmdk</code></td>
+<td><code>VMware4 disk image</code></td>
+</tr>
+<tr>
+<td><code>vdi</code></td>
+<td><code>VirtualBox Disk Image</code></td>
+</tr>
+<tr>
+<td><code>vhdx</code></td>
+<td><code>Microsoft Disk Image eXtended</code></td>
+</tr>
+<tr>
+<td><code>vhd</code></td>
+<td><code>Microsoft Disk Image, Virtual Server</code></td>
+</tr>
+</tbody>
+</table>
+<p>Uma imagem construída aqui é importável por VMware, VirtualBox e Hyper-V — sem que
+este motor tenha um backend para nenhum deles.</p>
+<h3 id="vm-build-imagem-a-partir-de-um-vmfile"><code>vm build</code> — imagem a partir de um <code>VMfile</code></h3>
+<pre><code class="language-bash">delonix vm init --vmfile     # gera VMfile + cloud-init/user-data.yaml
+delonix vm build -t app:1.0 .
+</code></pre>
+<pre><code>[1/1] stage-1: FROM ubuntu:24.04
+FROM ubuntu:24.04: official delonix base delonix-vm-base:ubuntu-24.04 (local)
+ ✓ preparing the disk 📦 1.7s
+ ✓ 2 steps inside the guest 🔧 2.5s
+ ✓ compacting the image 🗜 7.2s
+</code></pre>
+<p><strong>Medido: 12 s.</strong> O <code>VMfile</code> tem gramática de Dockerfile (<code>FROM</code>, <code>RUN</code>, <code>COPY</code>,
+<code>ENV</code>) mais o que só faz sentido numa VM: <code>SIZE</code>, <code>VCPUS</code>, <code>MEMORY</code>, <code>HYPERVISOR</code>,
+<code>SSHKEY</code>, <code>USER</code>. Suporta multi-estágio, onde cada estágio é um disco inteiro.</p>
+<p><strong><code>RUN</code> corre sem rede por omissão</strong>, de propósito: um build que vai à internet dá
+uma imagem diferente conforme o dia em que correu. Para instalar pacotes há
+<code>--network</code> — que <strong>neste host não funciona</strong> (ver
+<a href="#vm-build---network-esbarra-no-host">Armadilhas</a>).</p>
+<hr />
+<h2 id="6-cheatsheet-instantaneos">6. Cheatsheet: instantâneos</h2>
+<p>Os quatro verbos vivem no grupo <code>vm snapshot</code>, e funcionam com a VM <strong>a correr ou
+parada</strong>:</p>
+<pre><code class="language-bash">delonix vm snapshot create  dev antes-da-actualizacao
+delonix vm snapshot ls      dev
+delonix vm snapshot restore dev antes-da-actualizacao
+delonix vm snapshot rm      dev antes-da-actualizacao
+</code></pre>
+<blockquote>
+<p>Até à v0.51.0 estes eram três comandos planos (<code>vm snapshot</code>, <code>vm snapshots</code>,
+<code>vm restore</code>), e não havia forma de apagar um instantâneo pela CLI. A forma
+antiga foi removida sem alias: falha com <code>unrecognized subcommand</code>.</p>
+</blockquote>
+<p>Com a VM <strong>a correr</strong> é um ponto de restauro de sistema: memória <em>e</em> disco. Com ela
+<strong>parada</strong> é só do disco — e a VM continua parada. Restaurar um instantâneo tirado a
+correr traz a VM de volta a correr, memória incluída, e o comando di-lo.</p>
+<p>No <strong>Cloud Hypervisor</strong> os instantâneos são do disco e exigem a VM parada: o vmm a
+correr segura o <code>qcow2</code> em exclusivo e o CH não tem API de instantâneo de disco ao
+vivo. Os verbos que escrevem recusam com erro que diz o que fazer; o <code>ls</code> responde
+sempre.</p>
+<p>Provado escrevendo um ficheiro depois do instantâneo e restaurando:</p>
+<pre><code>--- restore para base-limpa
+real 0m1.394s
+--- a marca ainda existe?
+cat: /root/marca.txt: No such file or directory
+AUSENTE (restore reverteu)
+</code></pre>
+<p><strong>1,4 s</strong> para reverter uma VM inteira.</p>
+<hr />
+<h2 id="7-kind-vm-a-vm-declarada">7. <code>kind: Vm</code> — a VM declarada</h2>
+<pre><code class="language-yaml">apiVersion: delonix.io/v1
+kind: Vm
+metadata:
+  name: dev
+spec:
+  disk: delonix-vm-base:ubuntu-24.04   # nome de imagem OU caminho para um qcow2
+  vcpus: 1
+  memory: 1G
+  backend: libvirt
+  netMode: nat
+  hostname: dev
+  sshKeys:
+    - &quot;@/home/walter/.ssh/id_ed25519.pub&quot;
+</code></pre>
+<pre><code class="language-bash">delonix stack validate -f vm.yaml            # referências resolvem?
+delonix stack apply -f vm.yaml --dry-run     # o spec com todos os defaults
+delonix stack apply -f vm.yaml               # aplicar
+delonix stack plan -f vm.yaml                # o que mudaria
+delonix explain Vm.spec                      # todos os campos, gerados do código
+</code></pre>
+<p>O ciclo declarativo foi exercitado de ponta a ponta:</p>
+<pre><code>$ delonix stack apply -f vm.yaml            # 2.ª vez
+vm/lab-mani: ensured                        # idempotente
+
+$ delonix stack plan -f vm.yaml --detailed-exitcode
+  =   Vm/lab-mani
+Summary: 1 unchanged                        # rc=0
+
+# memória 1G → 2G no ficheiro
+$ delonix stack plan -f vm.yaml
+  -/+ Vm/lab-mani  — does not converge live: memory
+        memory: 1G → 2G
+Summary: 1 to replace                       # rc=2 com --detailed-exitcode
+
+$ delonix stack apply -f vm.yaml
+  ✗ Vm/lab-mani: does not converge live: memory — pass `--replace Vm/lab-mani`
+error: stack apply refused: 1 resource(s) need an explicit decision (nothing was changed)
+
+$ delonix stack apply -f vm.yaml --replace Vm/lab-mani
+Vm/lab-mani: recreating                     # e a memória passou mesmo a 2G
+</code></pre>
+<p>Repare em <strong>«nothing was changed»</strong>: a recusa acontece antes da primeira alteração,
+não a meio. É o que permite pôr <code>stack plan --detailed-exitcode</code> num <em>pipeline</em> como
+detector de desvio de configuração.</p>
+<h3 id="o-que-o-reconciliador-compara-e-o-que-nao">O que o reconciliador compara — e o que não</h3>
+<p>O motor <strong>diz-lho</strong>, em vez de deixar descobrir:</p>
+<pre><code>Vm 'lab-nas': Converged=False (FieldsNotCompared) — declared but NOT applied to an
+existing VM: extraNics, libvirtXmlOverlay, netMode — the reconciler compares only
+disk, vcpus, memory, network, backend.
+</code></pre>
+<p>Mudar placas de rede, XML injectado ou modo de rede num manifesto <strong>não altera uma
+VM que já existe</strong>. Ou se recria (<code>--replace</code>, que deita fora o disco), ou se usa
+<code>vm create</code>. Vale a pena repetir porque é silencioso na prática: o <code>apply</code> diz
+<code>ensured</code> e a VM continua como estava.</p>
+<h3 id="campos-que-valem-a-pena-conhecer">Campos que valem a pena conhecer</h3>
+<table>
+<thead>
+<tr>
+<th>Campo</th>
+<th>Para quê</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>extraNics[]</code></td>
+<td>placas adicionais — <code>type</code> (<code>network</code>/<code>bridge</code>/<code>user</code>), <code>source</code>, <code>mac</code></td>
+</tr>
+<tr>
+<td><code>extraDisks[]</code></td>
+<td>discos além do overlay</td>
+</tr>
+<tr>
+<td><code>volumes[]</code></td>
+<td>montar um <code>kind: Volume</code> dentro da VM, por virtio-9p</td>
+</tr>
+<tr>
+<td><code>ip</code></td>
+<td>reserva DHCP na rede libvirt (só <code>netMode: nat</code>)</td>
+</tr>
+<tr>
+<td><code>userData</code></td>
+<td>cloud-init próprio — <strong>substitui</strong> o gerado</td>
+</tr>
+<tr>
+<td><code>vnc</code>, <code>video</code>, <code>tpm</code>, <code>cpuModel</code>, <code>cpuTopology</code>, <code>bootOrder</code>, <code>machine</code></td>
+<td>equivalentes tipados do XML libvirt</td>
+</tr>
+<tr>
+<td><code>libvirtXmlOverlay[]</code></td>
+<td>XML cru antes de <code>&lt;/devices&gt;</code></td>
+</tr>
+<tr>
+<td><code>libvirtXml</code></td>
+<td>substitui o <code>&lt;domain&gt;</code> inteiro</td>
+</tr>
+</tbody>
+</table>
+<p>Os dois últimos <strong>não são validados</strong> e podem nomear qualquer caminho do host — só
+para manifestos de confiança. O laboratório usa <code>libvirtXmlOverlay</code> uma vez, e a
+<a href="#o-nas-precisa-de-um-disco-com-número-de-série">razão</a> é instrutiva.</p>
+<p><strong><code>mac</code> fixo é mais do que uma conveniência.</strong> Dentro do sistema, <code>enp1s0</code> e <code>enp2s0</code>
+dependem da ordem em que o PCI enumera as placas, e isso não é um contrato. Todas as
+VMs do laboratório casam a configuração de rede por MAC:</p>
+<pre><code class="language-yaml">network:
+  version: 2
+  ethernets:
+    lab0:
+      match: { macaddress: &quot;52:54:00:5a:b0:10&quot; }
+      set-name: lab0
+      addresses: [10.50.0.10/24]
+</code></pre>
+<hr />
+<h2 id="8-kind-network-e-a-fronteira-que-engana-toda-a-gente">8. <code>kind: Network</code> — e a fronteira que engana toda a gente</h2>
+<pre><code class="language-yaml">apiVersion: delonix.io/v1
+kind: Network
+metadata:
+  name: lab-net
+spec:
+  driver: bridge
+  subnet: 10.233.0.0/16
+</code></pre>
+<pre><code>$ delonix network describe lab-net
+Name:           lab-net
+Driver:         bridge
+Bridge:         dlxne9623e
+Subnet:         10.233.0.0/16
+Gateway:        10.233.0.1
+</code></pre>
+<h3 id="uma-rede-kind-network-nao-e-uma-rede-de-vm">Uma rede <code>kind: Network</code> <strong>não</strong> é uma rede de VM</h3>
+<p>Esta é a confusão que mais tempo custa, por isso vale medi-la:</p>
+<pre><code>$ delonix network ls
+NAME        DRIVER   BRIDGE       SUBNET
+lab-net     bridge   dlxne9623e   10.233.0.0/16
+
+$ virsh -c qemu:///system net-list --all
+ Name      State    Autostart
+ default   active   yes
+ labnet    active   yes            ← a rede que as VMs libvirt usam
+                                     (lab-net NÃO aparece)
+</code></pre>
+<p>Usar uma na outra falha, e a mensagem do delonix não ajuda:</p>
+<pre><code>$ delonix vm create x --backend libvirt --net-mode nat --bridge lab-net
+error system call `vm` failed: failed to start the libvirt domain (KVM/permissions/image?)
+
+$ virsh start x     # a causa verdadeira
+error: Network not found: no network with matching name 'lab-net'
+</code></pre>
+<p><strong>A regra, em duas linhas:</strong></p>
+<ul>
+<li><code>delonix network create</code> / <code>kind: Network</code> → redes de <strong>contentores</strong> (SDN do
+  motor, rootless, dentro do <em>holder</em>).</li>
+<li>VMs <strong>libvirt</strong> usam redes <strong>libvirt</strong>, criadas com <code>virsh net-define</code>. O
+  <code>--bridge</code>/<code>spec.bridge</code> nomeia uma delas.</li>
+</ul>
+<p>Uma VM <strong>Cloud Hypervisor</strong> é a excepção: entra mesmo na SDN dos contentores
+(<code>--network lab-net</code> deu-lhe <code>10.233.254.141</code>). Só que esses endereços vivem dentro
+do <em>holder</em> e não são alcançáveis a partir do host — só de outro contentor da mesma
+rede.</p>
+<p>Para atravessar a fronteira há <code>delonix vm bridge</code>, que <strong>exige root</strong> e diz o que
+vai fazer antes de o fazer:</p>
+<pre><code>$ delonix vm bridge lab-net          # sem --apply: só imprime o plano
+warning DRY-RUN — the plan below needs root. Review it, then re-run with `--apply`:
+  ip link add vbh72a57c1d type veth peer name vbs72a57c1d
+  ip link set vbs72a57c1d netns 71944
+  nsenter -t 71944 -n -- ip link set vbs72a57c1d master dlxn0536623e up
+  ip addr add 10.233.255.254/16 dev vbh72a57c1d
+  sysctl -w net.ipv4.ip_forward=1
+  iptables -I FORWARD -s 192.168.122.0/24 -d 10.233.0.0/16 -j ACCEPT
+  ...
+</code></pre>
+<p><code>delonix vm unbridge &lt;rede&gt;</code> imprime o desfazer, regra a regra. Um comando
+privilegiado que mostra o plano e sabe reverter é raro; use o <em>dry-run</em> como
+documentação.</p>
+<p>Sem privilégio, <code>delonix vm reach</code> responde à pergunta prática — que portas
+publicadas é que as VMs alcançam de facto:</p>
+<pre><code>$ delonix vm reach
+VM network gateway(s): 192.168.122.1, 10.10.100.1
+warning Published on loopback only — NOT reachable from VMs:
+CONTAINER             HOST PORT   BOUND TO
+kaeso-db18            5433        127.0.0.1 (host only)
+  fix: DELONIX_PUBLISH_ADDR=192.168.122.1 delonix net ingress publish &lt;c&gt; &lt;port&gt;
+</code></pre>
+<hr />
+<h2 id="9-o-laboratorio-completo">9. O laboratório completo</h2>
+<p>Uma rede de empresa em miniatura: DNS autoritativo, DHCP, autenticação de
+utilizadores, um posto de trabalho, armazenamento em NAS e uma firewall.</p>
+<p>Ficheiros em <a href="../examples/lab-rede/"><code>examples/lab-rede/</code></a>. Tudo o que se segue foi
+executado; as saídas são as reais.</p>
+<h3 id="topologia">Topologia</h3>
+<pre><code>                    ┌───────────────────────── labnet — 10.50.0.0/24 ──┐
+                    │  (rede libvirt isolada, SEM DHCP próprio)         │
+                    │                                                  │
+  ┌──────────┐      │  ┌────────────┐  ┌────────────┐  ┌────────────┐  │
+  │ internet │──NAT─┼──│ lab-dns    │  │ lab-dhcp   │  │ lab-samba  │  │
+  └──────────┘ default│ 10.50.0.10  │  │ 10.50.0.11 │  │ 10.50.0.12 │  │
+                    │  │ BIND 9     │  │ ISC DHCP   │  │ Samba      │  │
+                    │  └────────────┘  └────────────┘  └────────────┘  │
+                    │                                                  │
+                    │  ┌────────────┐  ┌────────────┐  ┌────────────┐  │
+                    │  │ lab-cli    │  │ lab-nas    │  │ lab-fw     │  │
+                    │  │ 10.50.0.50 │  │ 10.50.0.20 │  │10.50.0.254 │  │
+                    │  │ (por DHCP) │  │ TrueNAS    │  │ OPNsense   │  │
+                    │  └────────────┘  └────────────┘  └────────────┘  │
+                    └──────────────────────────────────────────────────┘
+</code></pre>
+<p>Cada VM tem <strong>duas placas</strong>, e a razão é prática: a <code>default</code> dá saída para a
+internet, que o cloud-init precisa para instalar os pacotes no primeiro arranque; a
+<code>labnet</code> é a LAN do laboratório, isolada, para o <code>lab-dhcp</code> poder servir sem
+competir com o DHCP do libvirt. <strong>Dois servidores de DHCP no mesmo domínio de
+difusão entregam a resposta de quem chegar primeiro</strong> — é das avarias mais difíceis
+de diagnosticar, e vale a pena não a construir de propósito.</p>
+<table>
+<thead>
+<tr>
+<th>Nome</th>
+<th>Papel</th>
+<th>Endereço</th>
+<th>Memória</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lab-dns</code></td>
+<td>BIND 9, zona <code>lab.ngola</code></td>
+<td>10.50.0.10</td>
+<td>1 GiB</td>
+</tr>
+<tr>
+<td><code>lab-dhcp</code></td>
+<td>ISC DHCP</td>
+<td>10.50.0.11</td>
+<td>1 GiB</td>
+</tr>
+<tr>
+<td><code>lab-samba</code></td>
+<td>Samba, autenticação e partilha</td>
+<td>10.50.0.12</td>
+<td>1 GiB</td>
+</tr>
+<tr>
+<td><code>lab-cli</code></td>
+<td>posto de trabalho</td>
+<td>10.50.0.50 (por DHCP)</td>
+<td>1 GiB</td>
+</tr>
+<tr>
+<td><code>lab-nas</code></td>
+<td>TrueNAS SCALE</td>
+<td>10.50.0.20</td>
+<td>4 GiB</td>
+</tr>
+<tr>
+<td><code>lab-fw</code></td>
+<td>OPNsense</td>
+<td>10.50.0.254</td>
+<td>2 GiB</td>
+</tr>
+</tbody>
+</table>
+<h3 id="passo-0-a-rede-do-laboratorio">Passo 0 — a rede do laboratório</h3>
+<p>O <code>kind: Network</code> não serve aqui (secção 8): é preciso uma rede <strong>libvirt</strong>, e
+<strong>sem DHCP</strong>, para o <code>lab-dhcp</code> ser o único a servir.</p>
+<pre><code class="language-bash">cat &gt; /tmp/labnet.xml &lt;&lt;'EOF'
+&lt;network&gt;
+  &lt;name&gt;labnet&lt;/name&gt;
+  &lt;bridge name='virbrlab' stp='on' delay='0'/&gt;
+  &lt;ip address='10.50.0.1' netmask='255.255.255.0'&gt;
+  &lt;/ip&gt;
+&lt;/network&gt;
+EOF
+virsh -c qemu:///system net-define /tmp/labnet.xml
+virsh -c qemu:///system net-start labnet
+virsh -c qemu:///system net-autostart labnet
+</code></pre>
+<p>Sem <code>&lt;forward&gt;</code> a rede é <strong>isolada</strong>: as VMs falam entre si e com o host, e não saem
+por esta placa. Sem bloco <code>&lt;dhcp&gt;</code> o libvirt não serve endereços nela.</p>
+<blockquote>
+<p>O host fica <strong>membro desta LAN</strong> — tem <code>10.50.0.1</code> na <code>virbrlab</code>. É cómodo para
+diagnosticar e convém saber, porque significa que a firewall do laboratório não
+está entre o host e as VMs.</p>
+</blockquote>
+<h3 id="passo-1-preparar-e-aplicar">Passo 1 — preparar e aplicar</h3>
+<p>Os manifestos trazem <code>SSH_KEY_PLACEHOLDER</code>, para poderem ser partilhados sem a chave
+de ninguém lá dentro:</p>
+<pre><code class="language-bash">cd examples/lab-rede
+mkdir -p /tmp/labrun/cloud-init
+KEY=$(cat ~/.ssh/id_ed25519.pub)
+for n in dns dhcp samba cliente; do
+  sed &quot;s|SSH_KEY_PLACEHOLDER|$KEY|&quot; cloud-init/$n.yaml &gt; /tmp/labrun/cloud-init/$n.yaml
+done
+for f in 10-dns 20-dhcp 30-samba 40-cliente; do
+  sed &quot;s|./cloud-init/|/tmp/labrun/cloud-init/|&quot; $f.yaml &gt; /tmp/labrun/$f.yaml
+done
+
+delonix stack apply -f /tmp/labrun/10-dns.yaml
+delonix stack apply -f /tmp/labrun/20-dhcp.yaml
+delonix stack apply -f /tmp/labrun/30-samba.yaml
+delonix stack apply -f /tmp/labrun/40-cliente.yaml
+</code></pre>
+<p>Cada <code>apply</code> responde em cerca de <strong>1 s</strong>; o cloud-init leva depois <strong>2 a 4 minutos</strong>
+a instalar e configurar os serviços. Acompanhar com:</p>
+<pre><code class="language-bash">delonix vm ssh lab-dns -- cloud-init status
+</code></pre>
+<blockquote>
+<p><strong>Não use <code>--prune</code> com estes ficheiros.</strong> O nome do <em>stack</em> vem do <strong>directório</strong>
+do manifesto, portanto os seis ficheiros são o mesmo <em>stack</em>: um <code>apply --prune</code>
+de um deles vê as outras cinco VMs como órfãs e apaga-as. Ou se junta tudo num
+ficheiro multi-documento, ou se usa <code>--name</code>, ou não se usa <code>--prune</code>.</p>
+</blockquote>
+<h3 id="passo-2-dns">Passo 2 — DNS</h3>
+<pre><code>$ delonix vm ssh lab-dns -- 'ip -4 -o addr show | grep -v &quot; lo &quot;; systemctl is-active named'
+2: enp1s0  inet 192.168.122.2/24 ...      ← saída para a internet
+3: lab0    inet 10.50.0.10/24 ...         ← a LAN, por MAC
+active
+
+$ dig +short @10.50.0.10 nas.lab.ngola A       →  10.50.0.20
+$ dig +short @10.50.0.10 -x 10.50.0.20         →  nas.lab.ngola.
+$ dig +short @10.50.0.10 one.one.one.one A     →  1.1.1.1   (recursão)
+</code></pre>
+<p>Zona directa, zona inversa e reencaminhamento. O BIND escuta <strong>só</strong> em <code>127.0.0.1</code> e
+<code>10.50.0.10</code> e só aceita consultas de <code>10.50.0.0/24</code> — um resolvedor aberto na
+internet é dos contributos mais fáceis de dar, sem querer, a um ataque de
+amplificação.</p>
+<h3 id="passo-3-dhcp">Passo 3 — DHCP</h3>
+<pre><code>$ delonix vm ssh lab-dhcp -- 'systemctl is-active isc-dhcp-server; sudo ss -ulnp | grep -c &quot;:67&quot;'
+active
+1
+</code></pre>
+<p>O <code>INTERFACESv4="lab0"</code> limita o serviço à placa do laboratório. A reserva por MAC
+dá ao cliente sempre o mesmo endereço, o que mantém estáveis os registos de DNS e as
+regras de firewall.</p>
+<h3 id="passo-4-samba">Passo 4 — Samba</h3>
+<pre><code>$ delonix vm ssh lab-samba -- 'systemctl is-active smbd; sudo pdbedit -L'
+active
+ana:1001:
+</code></pre>
+<p>Modo <em>standalone</em>, não controlador de domínio Active Directory — um AD DC exige ser
+também o DNS da zona, e aqui o DNS é o <code>lab-dns</code>. Trocar isso obriga a desligar o
+BIND e entregar a zona ao Samba: uma decisão de arquitectura que merece ser tomada de
+propósito, e não por arrasto.</p>
+<h3 id="passo-5-o-cliente-prova-tudo-junto">Passo 5 — o cliente prova tudo junto</h3>
+<pre><code>$ delonix vm ssh lab-cli -- '...'
+
+===== 1. DHCP: o endereço veio do lab-dhcp?
+10.50.0.50/24                          ← exactamente a reserva por MAC
+ADDRESS=192.168.122.14                 ← a outra placa, servida pelo libvirt
+ADDRESS=10.50.0.50
+
+===== 2. DNS: o lab-dns resolve a zona?
+10.50.0.12
+dc.lab.ngola.
+
+===== 3. SAMBA: autenticação real
+    Sharename       Type      Comment
+    publico         Disk
+    IPC$            IPC       IPC Service (Samba do lab.ngola)
+</code></pre>
+<p>E escrita autenticada de facto, ponta a ponta:</p>
+<pre><code>$ smbclient //10.50.0.12/publico -U ana%... -c &quot;put /tmp/prova.txt prova.txt; ls&quot;
+putting file /tmp/prova.txt as \prova.txt (56.6 kb/s)
+  prova.txt    A    58   Wed Aug 12 15:13:52 2026
+
+# no servidor:
+-rwxr--r-- 1 ana labusers 58 Aug 12 15:13 prova.txt
+ficheiro criado pelo lab-cli em 2026-08-12T15:13:52+00:00
+</code></pre>
+<p>O ficheiro chegou com dono <code>ana</code> e grupo <code>labusers</code> — a autenticação foi mesmo
+exercida, não contornada por acesso de convidado (<code>map to guest = never</code>).</p>
+<h3 id="passo-6-o-nas">Passo 6 — o NAS</h3>
+<pre><code class="language-bash"># o disco de dados tem de existir antes
+mkdir -p ~/.local/share/delonix/vms/labdata
+qemu-img create -f qcow2 ~/.local/share/delonix/vms/labdata/nas-dados.qcow2 10G
+
+delonix stack apply -f 50-nas.yaml
+</code></pre>
+<p>O TrueNAS serviu a interface <strong>80 s</strong> depois do arranque. A API responde com a conta
+<code>truenas_admin</code> (não <code>root</code>):</p>
+<pre><code>$ curl -sk -u truenas_admin:... https://&lt;nas&gt;/api/v2.0/system/info
+version: 25.10.5   hostname: truenas   memória: 5.8 GiB   cores: 2
+</code></pre>
+<h4 id="o-nas-precisa-de-um-disco-com-numero-de-serie">O NAS precisa de um disco com número de série</h4>
+<p>A primeira tentativa de criar a <em>pool</em> falhou:</p>
+<pre><code>[EINVAL] pool_create.topology: Disks have duplicate serial numbers: None (vda, vdb).
+</code></pre>
+<p>Os discos virtio saem sem número de série e o TrueNAS recusa juntar dois discos
+indistinguíveis. O <code>extraDisks</code> não tem campo para o definir — é o caso para que o
+escape-hatch de XML existe:</p>
+<pre><code class="language-yaml">libvirtXmlOverlay:
+  - |
+    &lt;disk type='file' device='disk'&gt;
+      &lt;driver name='qemu' type='qcow2'/&gt;
+      &lt;source file='.../nas-dados.qcow2'/&gt;
+      &lt;target dev='vdb' bus='virtio'/&gt;
+      &lt;serial&gt;LABDATA01&lt;/serial&gt;
+    &lt;/disk&gt;
+</code></pre>
+<p>Criar a <em>pool</em> é um passo único, feito na interface web ou pela API:</p>
+<pre><code class="language-bash">curl -sk -u truenas_admin:&lt;pass&gt; -H 'Content-Type: application/json' \
+  -X POST https://&lt;nas&gt;/api/v2.0/pool \
+  -d '{&quot;name&quot;:&quot;labpool&quot;,&quot;topology&quot;:{&quot;data&quot;:[{&quot;type&quot;:&quot;STRIPE&quot;,&quot;disks&quot;:[&quot;vdb&quot;]}]}}'
+# → labpool  ONLINE  9.5 GiB
+</code></pre>
+<h4 id="provisionar-armazenamento-a-partir-do-manifesto">Provisionar armazenamento a partir do manifesto</h4>
+<p>A partir daqui o <code>kind: Volume</code> faz o resto <strong>sem ninguém abrir a interface web</strong>:</p>
+<pre><code class="language-yaml">kind: Volume
+metadata: { name: lab-dados }
+spec:
+  provision:
+    truenas:
+      url: https://&lt;nas&gt;
+      username: truenas_admin
+      passwordSecret: nas-cred
+      insecureTLS: true
+      dataset: labpool/lab-dados
+      quota: 2G
+      owner: { uid: 1000, gid: 1000, mode: &quot;0770&quot; }
+      share:
+        networks: [10.50.0.0/24, 192.168.122.0/24]
+        maprootUser: root
+</code></pre>
+<pre><code>$ delonix stack apply -f 60-storage.yaml
+volume/lab-dados: provisioned 192.168.122.116:/mnt/labpool/lab-dados (quota 2.00 GiB, 2.00 GiB free)
+</code></pre>
+<p>Confirmado do lado da NAS: <code>quota: 2 GiB</code>, export NFS activo com exactamente as duas
+redes declaradas. E montado a partir do cliente:</p>
+<pre><code>$ delonix vm ssh lab-cli -- 'sudo mount -t nfs &lt;nas&gt;:/mnt/labpool/lab-dados /mnt/nas; df -h /mnt/nas'
+&lt;nas&gt;:/mnt/labpool/lab-dados  2.0G  0  2.0G  0%  /mnt/nas    ← a quota é real
+
+$ ... | sudo tee /mnt/nas/do-cliente.txt
+# e no dataset ZFS da NAS:
+do-cliente.txt  58B  uid=0     used: 96 KiB   quota: 2 GiB
+</code></pre>
+<p>Três notas que valem o tempo que custaram:</p>
+<ol>
+<li><strong>O <code>apply</code> termina com erro no host, e o provisionamento está feito.</strong> O
+   <code>mount -t nfs</code> local precisa de <code>CAP_SYS_ADMIN</code>, que uma sessão <em>rootless</em> não
+   tem. O relatório do provisionamento sai <strong>antes</strong> do erro, de propósito — um
+   <code>apply</code> que morresse calado deixaria o administrador sem saber que já existe um
+   dataset, uma quota e um export na NAS.</li>
+<li><strong>Sem <code>nfs-common</code> no cliente, o <code>mount</code> falha e a escrita segue para o disco
+   local</strong>, com ar de sucesso. Foi o que aconteceu na primeira tentativa. O
+   manifesto do cliente instala-o.</li>
+<li><strong>NFS faz <em>root-squash</em>.</strong> Sem <code>owner:</code> e <code>maprootUser</code>, monta-se e não se
+   escreve. O <code>maprootUser: root</code> é o <code>no_root_squash</code> clássico: cómodo num
+   laboratório, e uma cedência real fora dele.</li>
+</ol>
+<p><strong>Os dados sobrevivem à recriação da VM.</strong> A dada altura foi preciso reduzir a
+memória do NAS, o que obriga a <code>--replace</code> — que deita fora o disco do sistema. A
+<em>pool</em> estava no disco de dados, que é externo:</p>
+<pre><code>$ curl ... /api/v2.0/pool/import_find
+[{&quot;name&quot;: &quot;labpool&quot;, &quot;guid&quot;: &quot;10428492264621109666&quot;, &quot;status&quot;: &quot;ONLINE&quot;}]
+</code></pre>
+<p>Importada e o <code>stack apply</code> do armazenamento voltou a correr tal e qual. É um bom
+argumento para manter os dados fora do disco do sistema.</p>
+<h3 id="passo-7-a-firewall">Passo 7 — a firewall</h3>
+<pre><code class="language-bash">delonix stack apply -f 70-firewall.yaml
+</code></pre>
+<p><strong>A ordem das placas é o que decide os papéis</strong>, e é fácil trocá-la sem dar por isso:
+o OPNsense chama LAN à primeira (<code>vtnet0</code>) e WAN à segunda (<code>vtnet1</code>). Por isso, ao
+contrário das outras VMs, aqui a placa primária é a <code>labnet</code>:</p>
+<pre><code class="language-yaml">netMode: nat
+bridge: labnet          # primária → vtnet0 → LAN
+extraNics:
+  - { type: network, source: default }   # segunda → vtnet1 → WAN
+</code></pre>
+<p>Uma firewall com a WAN em <code>vtnet0</code> fica com as regras invertidas — a proteger a
+internet do laboratório.</p>
+<p>O OPNsense é um <em>appliance</em>: não corre cloud-init, e o motor <strong>recusa</strong>
+<code>hostname</code>/<code>sshKeys</code> em vez de os aceitar e ignorar. Configura-se pela consola:</p>
+<pre><code>$ delonix vm console lab-fw
+ LAN (vtnet0)    -&gt; v4: 192.168.1.1/24        ← o valor de fábrica
+ WAN (vtnet1)    -&gt; v4/DHCP4: 192.168.122.5/24
+
+  2) Set interface IP address
+</code></pre>
+<p>Opção <code>2</code> → LAN → sem DHCP → <code>10.50.0.254</code> → <code>24</code> → sem gateway → <strong>não</strong> activar o
+servidor DHCP (quem serve DHCP neste laboratório é o <code>lab-dhcp</code>).</p>
+<p>Feito isto, a partir da LAN:</p>
+<pre><code>$ delonix vm ssh lab-dns -- 'ping -c3 10.50.0.254; curl -sk -o /dev/null -w &quot;%{http_code}&quot; https://10.50.0.254/'
+3 packets transmitted, 3 received, 0% packet loss
+rtt min/avg/max/mdev = 0.276/0.306/0.366/0.042 ms
+200
+</code></pre>
+<p>E pela WAN, como deve ser:</p>
+<pre><code>$ curl -sk --max-time 8 https://192.168.122.5/     → HTTP 000
+</code></pre>
+<p>A administração responde na LAN e não responde na WAN. Que é, afinal, o que se pede
+a uma firewall.</p>
+<h3 id="executar-por-fases">Executar por fases</h3>
+<p>O laboratório inteiro pede cerca de <strong>10 GiB</strong> de RAM. Num host partilhado, arranque
+por grupos — a admissão de recursos do motor recusa antes de criar seja o que for,
+mas mais vale não chegar lá:</p>
+<pre><code class="language-bash"># `vm start` leva UMA VM de cada vez — `start a b` dá &quot;unexpected argument&quot;.
+# Fase A — infra-estrutura de rede (2 GiB)
+for v in lab-dns lab-dhcp; do delonix vm start $v; done
+
+# Fase B — identidade e posto de trabalho (+2 GiB)
+for v in lab-samba lab-cli; do delonix vm start $v; done
+
+# Fase C — armazenamento (4 GiB)
+delonix vm stop lab-samba &amp;&amp; delonix vm start lab-nas
+
+# Fase D — perímetro (2 GiB)
+delonix vm start lab-fw
+
+delonix vm ls                            # o que está de pé
+delonix vm dash                          # painel interactivo
+</code></pre>
+<p>Para desmontar tudo:</p>
+<pre><code class="language-bash">for v in lab-dns lab-dhcp lab-samba lab-cli lab-nas lab-fw; do delonix vm rm $v; done
+virsh -c qemu:///system net-destroy labnet
+virsh -c qemu:///system net-undefine labnet
+</code></pre>
+<hr />
+<h2 id="10-armadilhas-medidas">10. Armadilhas medidas</h2>
+<p>Cada uma custou tempo real durante a montagem deste laboratório.</p>
+<h3 id="stop-apagava-os-instantaneos-sem-o-dizer-corrigido-na-v051x"><code>stop</code> apagava os instantâneos, sem o dizer — corrigido na v0.51.x</h3>
+<p>Era isto, e foi medido aqui:</p>
+<pre><code>$ delonix vm snapshot lab-probe base-limpa
+base-limpa
+$ delonix vm stop lab-probe &amp;&amp; delonix vm start lab-probe
+$ delonix vm snapshots lab-probe
+                                  ← vazio, rc=0
+$ delonix vm restore lab-probe base-limpa
+error: Domain snapshot not found: no domain snapshot with matching name 'base-limpa'
+</code></pre>
+<p><code>stop</code> faz <code>virsh undefine --managed-save --snapshots-metadata --nvram</code> para não
+deixar domínios órfãos, e o <code>--snapshots-metadata</code> levava a contabilidade dos
+instantâneos. A medição que resolveu isto: <strong>o <code>qemu-img snapshot -l</code> mostrava-os
+intactos no <code>qcow2</code> depois do <code>stop</code></strong> — o <code>undefine</code> não apaga o instantâneo, apaga
+só o que aponta para ele.</p>
+<p>Hoje o <code>stop</code> guarda o <code>snapshot-dumpxml</code> de cada um em <code>vms/&lt;vm&gt;/snapshots/</code> e o
+arranque seguinte devolve-os ao libvirt. <strong>Um instantâneo sobrevive a <code>stop</code>/<code>start</code></strong>,
+e o <code>vm snapshot ls</code> de uma VM parada lista-os. O que fica da armadilha é a regra:
+nunca perguntar ao libvirt por uma VM parada — ele só conhece domínios definidos.</p>
+<h3 id="em-cloud-hypervisor-o-endereco-e-calculado-nao-observado">Em Cloud Hypervisor, o endereço é calculado — não observado</h3>
+<p>Nesse motor o endereço vem de aritmética sobre o MAC, antes de o sistema arrancar
+(é o que permite pôr a VM debaixo do isolamento de <em>namespaces</em> antes de ela
+existir). Em libvirt vem de um <em>lease</em> real, que só é entregue a um convidado que
+arrancou o suficiente para o pedir.</p>
+<p>A diferença importa quando o convidado <strong>não</strong> arranca. Até à v0.51.0 o <code>--wait</code>
+devolvia em 62 ms a anunciar <code>is up</code> sobre uma VM cujo firmware falhava antes do
+kernel. Hoje espera e diz o que sabe:</p>
+<pre><code>$ delonix vm create prova-ch --backend cloud-hypervisor --network lab-net \
+      --wait --boot-timeout 60
+prova-ch
+warning vm 'prova-ch' is running but never answered at 10.233.254.240 — that
+address is computed from the MAC, not observed, so it exists whether or not the
+guest booted; `delonix vm console prova-ch` to watch the boot
+real 1m0.322s
+</code></pre>
+<p>O aviso é a informação toda: o processo corre, o endereço existe, e <strong>ninguém
+respondeu nele</strong>. A VM daquele teste tinha o <em>overlay</em> com 448 KiB — não escreveu um
+byte — e <code>ip neigh</code> a dar <code>FAILED</code> a partir de um contentor da mesma rede.</p>
+<p><strong>Um <code>--wait</code> que esgota o tempo continua a sair 0</strong>, portanto num <em>script</em> verifique
+o aviso ou sonde por si (<code>delonix vm ls --ports</code>, um <code>ssh</code>).</p>
+<p>Sobre a imagem, com um controlo: a golden <code>delonix-vm-k8s:1.34</code> <strong>arranca</strong> o kernel
+no mesmo motor, rede e firmware — logo a rede está boa e o que varia é a imagem. As
+<code>delonix-vm-base:*</code> não arrancam com o <code>hypervisor-fw</code> que o instalador coloca.
+<strong>Para VMs em Cloud Hypervisor, use a golden.</strong></p>
+<h3 id="vm-build-network-esbarra-no-host"><code>vm build --network</code> esbarra no host</h3>
+<pre><code>virt-customize: error: libguestfs error: passt exited with status 1
+</code></pre>
+<p>O erro traz o remédio, e é meio caminho:</p>
+<pre><code class="language-bash">mkdir -p /tmp/delonix-run &amp;&amp; chmod 700 /tmp/delonix-run
+XDG_RUNTIME_DIR=/tmp/delonix-run delonix vm build --network -t img:1.0 .
+</code></pre>
+<p>Passa o problema de AppArmor, mas neste host o <code>passt</code> continua sem dar resolução de
+nomes ao <em>appliance</em>:</p>
+<pre><code>W: Failed to fetch http://archive.ubuntu.com/... Temporary failure resolving
+E: Unable to locate package bind9-utils
+</code></pre>
+<p><strong>Alternativa usada no laboratório, e melhor por si só:</strong> instalar pelo cloud-init no
+primeiro arranque. A VM já tem a rede NAT do libvirt, com internet e DNS a funcionar
+(verificado: <code>HTTP/1.1 200 OK</code> de <code>archive.ubuntu.com</code>), e a configuração fica
+declarada no manifesto, à vista de quem o ler.</p>
+<h3 id="vm-pull-nao-retoma-numa-ligacao-lenta"><code>vm pull</code> não retoma numa ligação lenta</h3>
+<pre><code>$ time delonix vm pull ghcr.io/angolardevops/delonix-vm-base:debian-bookworm
+error registry error: blob read: request or response body error
+real 8m19s
+</code></pre>
+<p>A ligação deste host ao <code>ghcr.io</code> dá <strong>416 KB/s</strong> (medido com <code>curl</code>: 22,9 MB em
+55 s). Os 276 MiB precisavam de ~11 minutos e o cliente desistiu antes. Como não há
+retomada, tentar outra vez recomeça no byte zero — abaixo de ~600 KB/s a imagem nunca
+acaba.</p>
+<p><code>delonix vm ls-remote</code> funciona bem na mesma ligação, porque lê só manifestos.
+<strong>Numa ligação lenta, traga as imagens por outro meio</strong> e registe-as com
+<code>delonix image vm import</code>.</p>
+<h3 id="um-apply-por-ficheiro-um-stack-por-directorio">Um <code>apply</code> por ficheiro, um <em>stack</em> por directório</h3>
+<p>O nome do <em>stack</em> vem do <strong>directório</strong> do manifesto (a menos que haja um <code>kind:
+Stack</code> com nome, ou <code>--name</code>). Os seis ficheiros do laboratório são, para o motor, o
+mesmo <em>stack</em>:</p>
+<pre><code>$ delonix stack plan -f 50-nas.yaml
+  -/+ Vm/lab-nas    — does not converge live: memory
+  -   Vm/lab-samba  — no longer declared in the manifest
+  -   Vm/lab-dns    — no longer declared in the manifest
+  -   Vm/lab-cli    — no longer declared in the manifest
+</code></pre>
+<p>Sem <code>--prune</code> nada é removido — e é por isso que essa opção existe e nunca é o
+comportamento por omissão. Mas o plano mostra bem o risco.</p>
+<h3 id="-replace-deita-fora-o-disco"><code>--replace</code> deita fora o disco</h3>
+<p>Está escrito na recusa (<code>--replace, which discards the disk</code>) e vale a pena repetir,
+porque a alteração que o desencadeia costuma ser inócua — mudar <code>memory: 6G</code> para
+<code>4G</code> recria a VM e perde o disco do sistema. Dados importantes ficam num disco
+separado (foi o que salvou a <em>pool</em> do NAS) ou num volume.</p>
+<h3 id="um-apply-que-diz-ensured-pode-nao-ter-mudado-nada">Um <code>apply</code> que diz <code>ensured</code> pode não ter mudado nada</h3>
+<p>Mudar <code>extraNics</code>, <code>libvirtXmlOverlay</code> ou <code>netMode</code> num manifesto de uma VM <strong>que já
+existe</strong> não tem efeito: o reconciliador compara apenas <code>disk</code>, <code>vcpus</code>, <code>memory</code>,
+<code>network</code> e <code>backend</code>. O motor diz-lo no bloco <code>Conditions</code> do fim — que é fácil não
+ler quando a linha anterior diz <code>ensured</code>.</p>
+<h3 id="delonix-vm-ssh-logo-a-seguir-a-start-recusa-ligacao"><code>delonix vm ssh</code> logo a seguir a <code>start</code> recusa ligação</h3>
+<pre><code>ssh: connect to host 192.168.122.14 port 22: Connection refused
+</code></pre>
+<p>O <code>vm start</code> devolve em menos de um segundo — define o domínio e arranca-o. O sistema
+lá dentro leva <strong>30 a 60 s</strong> a ter o SSH a aceitar ligações. Não é avaria; num
+<em>script</em>, espere pela condição em vez de por um tempo fixo:</p>
+<pre><code class="language-bash">until delonix vm ssh lab-dns -- true 2&gt;/dev/null; do sleep 5; done
+</code></pre>
+<h3 id="nomear-a-imagem-e-apontar-lhe-o-caminho-nao-sao-a-mesma-coisa">Nomear a imagem e apontar-lhe o caminho não são a mesma coisa</h3>
+<pre><code># por nome — recusado, correctamente
+$ delonix stack apply -f appliance.yaml     # spec.disk: opnsense:26.1
+error: hostname, sshKeys: this image is an appliance and does not run cloud-init,
+so these would be silently ignored
+
+# pelo caminho do mesmo ficheiro — passa, e leva um CD-ROM que o guest ignora
+$ delonix stack apply -f appliance.yaml     # spec.disk: /.../opnsense_26.1.qcow2
+vm/lab-fwtest: ensured
+</code></pre>
+<p>Os metadados de uma imagem (é <em>appliance</em>? que vCPU/memória recomenda? que motor?)
+estão associados ao <strong>nome</strong> no registo local. Um caminho para um <code>qcow2</code> não traz
+nenhum. <strong>Nomeie sempre a imagem</strong> — <code>delonix image vm ls</code> mostra os nomes
+disponíveis.</p>
+<hr />
+<h2 id="referencia-rapida">Referência rápida</h2>
+<pre><code class="language-bash"># ciclo de vida
+delonix vm create &lt;n&gt; --disk &lt;img&gt; --backend libvirt --net-mode nat \
+                      --vcpus N --memory NG --hostname &lt;h&gt; \
+                      --ssh-key @~/.ssh/id_ed25519.pub --wait
+delonix vm start|stop|restart|rm &lt;n&gt;          # rm -f força
+
+# inspecção
+delonix vm ls [--ports] [-o json] · status [n] · describe &lt;n&gt;... · dash [--once]
+
+# acesso
+delonix vm ssh &lt;n&gt; [-l user] [-- cmd] · console &lt;n&gt; · vnc &lt;n&gt;
+
+# imagens
+delonix image vm ls · vm ls-remote · vm pull &lt;ref&gt; · vm push &lt;n&gt; &lt;alvo&gt;
+delonix vm build -t &lt;tag&gt; [--network] . · vm convert &lt;src&gt; --to &lt;fmt&gt;
+delonix vm init --vmfile
+
+# instantâneos (libvirt, VM a correr)
+delonix vm snapshot &lt;n&gt; &lt;s&gt; · snapshots &lt;n&gt; · restore &lt;n&gt; &lt;s&gt;
+
+# declarativo
+delonix stack validate|plan|apply -f &lt;f&gt; [--dry-run] [--replace K/n] [--detailed-exitcode]
+delonix explain Vm.spec · delonix schema print
+
+# rede
+delonix network create|ls|describe|rm · vm reach
+delonix vm bridge &lt;rede&gt; [--apply] · vm unbridge &lt;rede&gt;    # root
+</code></pre>
+<p><strong>Códigos de saída:</strong> <code>0</code> sucesso · <code>1</code> erro genérico · <code>2</code> argumentos inválidos (ou
+«há alterações» no <code>plan --detailed-exitcode</code>) · <code>4</code> não existe · <code>5</code> conflito.</p>
+<footer><span class='lang-pt'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</span><span class='lang-en'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.</span></footer>
+</main>
+<aside class="toc" id="pagetoc"><div class="toc-inner"><h5><span class='lang-pt'>Nesta página</span><span class='lang-en'>On this page</span></h5><nav id="toc-nav"></nav></div></aside>
+</div>
+<script>(function(){
+function esc(s){return s.replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
+
+function tokBash(line){
+  var out='',last=0,m;
+  var re=/(#.*$)|("(?:[^"\\]|\\.)*")|('(?:[^'\\]|\\.)*')|(--?[A-Za-z][\w-]*)|\b(delonix|delonixctl|dlx)\b/g;
+  while((m=re.exec(line))){
+    out+=esc(line.slice(last,m.index));
+    if(m[1])out+='<span class="tok-comment">'+esc(m[1])+'</span>';
+    else if(m[2]||m[3])out+='<span class="tok-string">'+esc(m[0])+'</span>';
+    else if(m[4])out+='<span class="tok-flag">'+esc(m[0])+'</span>';
+    else if(m[5])out+='<span class="tok-cmd">'+esc(m[0])+'</span>';
+    last=re.lastIndex;
+  }
+  return out+esc(line.slice(last));
+}
+function highlightBash(text){return text.split('\n').map(tokBash).join('\n');}
+
+function highlightFlagsPh(line){
+  var out='',last=0,m;
+  var re=/(--?[A-Za-z][\w-]*)|(<[^>]+>)|(\[[^\]]+\])/g;
+  while((m=re.exec(line))){
+    out+=esc(line.slice(last,m.index));
+    if(m[1])out+='<span class="tok-flag">'+esc(m[0])+'</span>';
+    else out+='<span class="tok-ph">'+esc(m[0])+'</span>';
+    last=re.lastIndex;
+  }
+  return out+esc(line.slice(last));
+}
+function highlightHelp(text){
+  return text.split('\n').map(function(line){
+    var mm=line.match(/^(Usage|Commands|Options|Arguments|Examples):(.*)$/);
+    if(mm)return '<span class="tok-head">'+mm[1]+':</span>'+highlightFlagsPh(mm[2]);
+    return highlightFlagsPh(line);
+  }).join('\n');
+}
+function highlightYaml(text){
+  return text.split('\n').map(function(line){
+    if(/^\s*#/.test(line))return '<span class="tok-comment">'+esc(line)+'</span>';
+    if(/^---\s*$/.test(line))return '<span class="tok-sep">'+esc(line)+'</span>';
+    var m=line.match(/^(\s*(?:- )?)([A-Za-z0-9_.-]+)(:)(.*)$/);
+    if(m){
+      var rest=m[4],restHtml=esc(rest);
+      var sm=rest.match(/^(\s*)("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s#][^#]*?)(\s*(#.*)?)$/);
+      if(sm&&sm[2])restHtml=esc(sm[1])+'<span class="tok-string">'+esc(sm[2])+'</span>'+esc(sm[3]||'');
+      return esc(m[1])+'<span class="tok-key">'+esc(m[2])+'</span>'+esc(m[3])+restHtml;
+    }
+    return esc(line);
+  }).join('\n');
+}
+
+function highlightAll(){
+  document.querySelectorAll('pre > code').forEach(function(code){
+    if(code.dataset.hl)return;
+    code.dataset.hl='1';
+    var pre=code.parentElement;
+    if(pre.closest('.out'))return;
+    var text=code.textContent,html;
+    var isHelp=pre.parentElement&&pre.parentElement.classList.contains('help');
+    if(isHelp)html=highlightHelp(text);
+    else if(/^apiVersion:|\nkind:\s/.test(text))html=highlightYaml(text);
+    else if(pre.closest('.ex')||/^(delonix|delonixctl|dlx)\b/.test(text.trim()))html=highlightBash(text);
+    else return;
+    code.innerHTML=html;
+  });
+}
+
+function visibleHeadingText(h){
+  // A heading pode conter os dois <span class="lang-pt/lang-en"> do bi() —
+  // h.textContent junta os dois, mesmo com um deles escondido por CSS. Usa
+  // só o do idioma activo à data da construção do índice.
+  var lang=document.documentElement.getAttribute('data-lang')||'pt';
+  var want=lang==='en'?'lang-en':'lang-pt';
+  var pick=h.querySelector(':scope > .'+want);
+  return (pick?pick.textContent:h.textContent).trim();
+}
+function isVisibleForLang(el,lang){
+  // Páginas como o index duplicam a secção INTEIRA por idioma (dois <h2>
+  // separados, um por língua) em vez de um <h2> só com dois spans — sem
+  // este filtro o índice listava as duas línguas ao mesmo tempo.
+  var wrap=el.closest('.lang-pt, .lang-en');
+  if(!wrap)return true;
+  return lang==='en'?wrap.classList.contains('lang-en'):wrap.classList.contains('lang-pt');
+}
+function buildToc(){
+  var main=document.querySelector('main'),nav=document.getElementById('toc-nav'),
+      aside=document.getElementById('pagetoc');
+  if(!main||!nav)return;
+  var lang=document.documentElement.getAttribute('data-lang')||'pt';
+  var heads=[].slice.call(main.querySelectorAll('h2')).filter(function(h){
+    return isVisibleForLang(h,lang);
+  });
+  nav.innerHTML='';
+  if(heads.length<2){if(aside)aside.style.display='none';return;}
+  if(aside)aside.style.display='';
+  var used={};
+  heads.forEach(function(h){
+    var label=visibleHeadingText(h);
+    if(!h.id){
+      var slug=label.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')||'sec';
+      while(used[slug])slug+='-x';
+      used[slug]=1;h.id=slug;
+    }
+    var a=document.createElement('a');
+    a.href='#'+h.id;a.textContent=label;
+    nav.appendChild(a);
+  });
+}
+
+function initThemeToggle(){
+  var KEY='delonix-docs-theme',btn=document.querySelector('.theme-toggle');
+  if(!btn)return;
+  btn.addEventListener('click',function(){
+    var sys=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
+    var eff=document.documentElement.getAttribute('data-theme')||sys;
+    var next=eff==='dark'?'light':'dark';
+    document.documentElement.setAttribute('data-theme',next);
+    try{localStorage.setItem(KEY,next);}catch(e){}
+  });
+}
+
+function initLangToggle(){
+  var KEY='delonix-docs-lang',btn=document.querySelector('.lang-toggle');
+  if(!btn)return;
+  btn.addEventListener('click',function(){
+    var eff=document.documentElement.getAttribute('data-lang')||'pt';
+    var next=eff==='en'?'pt':'en';
+    document.documentElement.setAttribute('data-lang',next);
+    try{localStorage.setItem(KEY,next);}catch(e){}
+    buildToc();
+  });
+}
+
+document.addEventListener('DOMContentLoaded',function(){
+  initThemeToggle();initLangToggle();buildToc();highlightAll();
+});
+})();</script>
+</body>
+</html>
