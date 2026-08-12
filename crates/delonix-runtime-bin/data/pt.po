@@ -8552,3 +8552,43 @@ msgstr "networkroute/{name}: {from} -> {to} aberta"
 
 msgid "NetworkRoute '{name}' → {side} network '{net}' is not declared nor does it exist"
 msgstr "NetworkRoute '{name}' → a rede {side} '{net}' não está declarada nem existe"
+
+# `network vlan` (ADR-0013, camada C) — o ÚNICO comando de rede que precisa de root.
+msgid "802.1Q VLAN on a physical NIC — **the one command here that needs root**"
+msgstr "VLAN 802.1Q sobre uma NIC física — **o único comando aqui que precisa de root**"
+
+msgid "Parent NIC on the host (e.g. `eth0`)"
+msgstr "NIC pai no host (ex.: `eth0`)"
+
+msgid "VLAN id, 1-4094"
+msgstr "Id de VLAN, 1-4094"
+
+msgid "Remove the VLAN interface instead of creating it"
+msgstr "Remove a interface VLAN em vez de a criar"
+
+msgid "Actually run it (as root). Without this it is a dry-run"
+msgstr "Executa mesmo (como root). Sem isto é um dry-run"
+
+msgid "VLAN {dev} up"
+msgstr "VLAN {dev} no ar"
+
+msgid "VLAN {dev} removed"
+msgstr "VLAN {dev} removida"
+
+msgid "VLAN id {id}: must be 1-4094 (0 and 4095 are reserved by 802.1Q)"
+msgstr "Id de VLAN {id}: tem de ser 1-4094 (0 e 4095 são reservados pelo 802.1Q)"
+
+msgid "invalid parent NIC '{nic}'"
+msgstr "NIC pai inválida: '{nic}'"
+
+msgid "see the plan — this is the ONE network command that needs root, so it changes nothing until you say so"
+msgstr "ver o plano — este é o ÚNICO comando de rede que precisa de root, por isso não muda nada até tu mandares"
+
+msgid "run it for real, as root"
+msgstr "executar a sério, como root"
+
+msgid "take it back out"
+msgstr "voltar a tirá-la"
+
+msgid "802.1Q VLAN on a physical NIC — **the one command here that needs root**.\n\nDry-run by default: it prints the plan and changes nothing until `--apply`. Everything else in this engine is rootless; a VLAN interface on a host NIC needs CAP_NET_ADMIN in the host's netns, which no unprivileged user has (see ADR-0013 tier C)."
+msgstr "VLAN 802.1Q sobre uma NIC física — **o único comando aqui que precisa de root**.\n\nDry-run por omissão: imprime o plano e não muda nada até haver `--apply`. Todo o resto deste motor é rootless; uma interface VLAN numa NIC do host precisa de CAP_NET_ADMIN na netns do host, que nenhum utilizador sem privilégio tem (ver ADR-0013, camada C)."

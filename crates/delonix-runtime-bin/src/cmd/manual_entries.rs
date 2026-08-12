@@ -1248,6 +1248,16 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["network ls", "network rm", "network node init", "container run"],
     },
     Entry {
+        path: "network vlan",
+        group: "Lifecycle",
+        examples: &[
+            ("see the plan — this is the ONE network command that needs root, so it changes nothing until you say so", "delonix network vlan eth0 100"),
+            ("run it for real, as root", "sudo delonix network vlan eth0 100 --apply"),
+            ("take it back out", "sudo delonix network vlan eth0 100 --rm --apply"),
+        ],
+        see_also: &["network create", "network route", "vm bridge"],
+    },
+    Entry {
         path: "network route",
         group: "Lifecycle",
         examples: &[
