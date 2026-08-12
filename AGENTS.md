@@ -3309,6 +3309,9 @@ checklist para quem mexer aqui do que como lista de correcções:
   respondia lista vazia com rc=0 e o `vm restore` dizia «não existe». Corolário do mesmo
   achado: **uma lista vazia com rc=0 não é «não há»** — pode ser «perguntei ao sítio errado»,
   e aqui o sítio errado era o libvirt, que só sabe de domínios definidos (v0.51.x);
+- **uma ligação cortada a meio não é um download perdido**, e **o `Content-Length` de um 206 não
+  é o tamanho do blob** (é o do FRAGMENTO) — ver a secção «O pull de um blob recomeçava do zero»
+  abaixo (v0.51.0+);
 - **um `read` que FALHA não é uma resposta vazia** — o cliente do socket de controlo fazia
   `let _ = s.read_to_string(&mut resp)`, descartando o erro, por isso um timeout de leitura e um
   holder que respondesse nada eram indistinguíveis: os dois davam ``system call `ingress control`
@@ -4140,6 +4143,68 @@ prova que a lista serve): `$?` depois de um pipe ia reportar `rc=0` onde era 1 (
 na raiz do repo (`README.md`, `VMfile`, `cloud-init/`, `cluster-kind.yaml`,
 `delonix-manifest.yaml` — todos removidos, nada tracked tocado). De passagem ficou provado que o
 scaffold **não sobrescreve**: `already exists, skipped (use --force to overwrite)`.
+
+## O pull de um blob recomeçava do zero, logo numa ligação lenta nunca acabava (2026-08-12)
+
+Bug report real, medido pelo utilizador: `vm pull` de uma imagem de 276 MiB morreu ao fim de
+**8m19s** com ``blob read: request or response body error``, e a ligação deste host ao ghcr media
+**416 KB/s** (22,9 MB em 55s, confirmado à parte com `curl` a seguir o redirect). O que torna isto
+pior do que uma falha lenta: **não havia retomada** — a tentativa seguinte recomeçava no byte zero,
+por isso numa ligação abaixo de ~600 KB/s a imagem **nunca** acabava de descarregar, por mais vezes
+que se tentasse. E é o primeiro comando que um administrador corre.
+
+**A atribuição do relato ao timeout estava desactualizada, e vale registar porquê**: o tecto já é
+de **4 horas** desde a v0.47.1 (`transfer_client`, escrito depois de a publicação de imagens VM ter
+falhado exactamente por isto). 8m19s não é 4h — logo a causa é a ligação a cair a meio, não o
+relógio. A conclusão do relato mantém-se de pé na mesma, e mais forte: contra uma queda de
+conexão, um tecto maior não faz nada e só a retomada resolve.
+
+- **A correcção vive no ÚNICO sítio por onde os dois caminhos passam** —
+  `Client::blob_with_progress_capped`. `pull_from_registry_with_creds` (layers de container) e
+  `pull_oci_artifact` (artefacto VM de blob único) chamam-lhe ambos, por isso não há uma segunda
+  cópia da lógica a divergir. 5 tentativas com backoff (1-8s), `Range: bytes=<n>-` a partir do que
+  já está em memória, e uma linha de `warn` por retomada — sem ela, um pull lento a retomar é
+  indistinguível de um bloqueio, que é metade da queixa original.
+- **O que torna seguro costurar dois ranges é o mesmo que no `stream_download`**: todos os
+  chamadores verificam o digest no fim (config contra o manifesto, layers contra o que o CAS
+  devolve, artefacto por comparação explícita). Bytes de duas respostas ou dão o hash publicado ou
+  são descartados.
+- **Três formas de um servidor NÃO honrar o range, e só uma é retomada**: 206 no offset pedido
+  (retoma); 206 noutro offset (**respondeu a outra pergunta** — colar duplicaria o prefixo, e a
+  corrupção só apareceria no digest, depois de o download inteiro estar pago); 200 (ignorou o
+  header). As duas últimas recomeçam do zero. `parse_content_range` é puro e testado — é o
+  guarda que impede a primeira.
+- **`content_length()` numa resposta 206 é o tamanho do FRAGMENTO, não do blob.** Usá-lo faria a
+  barra reiniciar contra um total a encolher. Numa retomada o tamanho inteiro vem do `/<total>` do
+  `Content-Range`.
+- **Um EOF limpo aquém do tamanho anunciado também é retomado.** Antes o blob voltava truncado e
+  quem o apanhava era a verificação de digest do chamador — a reportar *corrupção* pelo que era uma
+  ligação cortada.
+- **Retry só do que faz sentido retentar**: uma falha a ABRIR a ligação só é retentada quando já há
+  bytes em mãos (aí a URL e o token eram bons há segundos, logo é transporte). Na primeira
+  tentativa, o mesmo erro é muito mais provavelmente um 403/404, e cinco tentativas só atrasariam
+  uma resposta que o chamador já tem. Um `NotFound` nunca é retentado.
+
+**2.º bug, encontrado ao ligar isto, e é relato falso**: o callback de progresso reporta o
+**acumulado** do blob, e o adaptador do pull PARALELO somava-o ao agregado como se fosse um delta
+de cada chunk. Os bytes anunciados cresciam com o **quadrado** do tamanho da layer — medido, uma
+layer de 300 000 bytes anunciava **1 416 160**. `pull_oci_artifact` lê o mesmo callback
+correctamente (compara `done` com o total), portanto os dois consumidores de um só callback
+discordavam sobre o significado do argumento — a família
+gerador-e-leitor-partilham-o-formato já catalogada aqui (`fw_rule_tail`).
+
+**Validado ao vivo com o BINÁRIO** (não só por teste unitário), contra um registo OCI local que
+corta a ligação a meio do blob, com `DELONIX_ROOT` isolado: duas quedas num blob de 6 MB, retomadas
+em 3 000 000 e 4 500 000 bytes, o servidor a confirmar que cada pedido levou **só o que faltava**, e
+o ficheiro final a bater com o digest publicado. E o caminho de desistência: um servidor que corta
+SEMPRE falha em 15s com `gave up after 5 attempts with 5812500 of 6000000 bytes`, sem gravar nada.
+Testes que **falham com a correcção revertida** — os três de retomada com `BLOB_ATTEMPTS = 1`, e o
+do progresso agregado com o adaptador antigo (é preciso uma layer de vários chunks de 64 KiB: com
+uma layer de um chunk só, o adaptador errado acerta por acidente).
+
+**Gap encontrado de passagem, não corrigido** (fora do âmbito): `vm pull` e `image vm pull` aceitam
+`--name`, a forma legada `image --vm pull` não — divergência entre os três pontos de entrada que o
+resto do grupo mantém alinhados.
 
 ## `delonix backup` / `restore` — o grupo que faltava a este guia
 
