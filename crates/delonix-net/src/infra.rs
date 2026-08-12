@@ -1227,7 +1227,7 @@ const CONTROL_WORK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 fn is_readonly_verb(line: &str) -> bool {
     matches!(
         line.split_whitespace().next().unwrap_or(""),
-        "ping" | "has-netns" | "fwstats" | "egress-show"
+        "ping" | "has-netns" | "fwstats" | "egress-show" | "netroute-show"
     )
 }
 
@@ -1355,6 +1355,14 @@ fn handle_control(line: &str) -> String {
             &["list", "chain", "ip", INGRESS_TABLE, &fw_chain_name(ip)],
         )
         .unwrap_or_default();
+        return format!("ok {}\n", hex_encode(listing.as_bytes()));
+    }
+    // Query: the LIVE exemption map, for `stack ls`/`network route ls`. Read-only
+    // and hex-encoded for the same reason as `fwstats` — an nft listing is not
+    // one line.
+    if let ["netroute-show"] = parts.as_slice() {
+        let listing = crate::capture("nft", &["list", "map", "ip", INGRESS_TABLE, NETPAIR_MAP])
+            .unwrap_or_default();
         return format!("ok {}\n", hex_encode(listing.as_bytes()));
     }
     let res = match parts.as_slice() {
@@ -1541,6 +1549,21 @@ fn ensure_net_bridge(bridge: &str, gateway: &str) -> Result<()> {
         if let Some(def) = network_list().into_iter().find(|d| d.bridge == bridge) {
             if def.egress.policy.is_some() || !def.egress.hosts.is_empty() {
                 let _ = apply_egress_from_state(bridge, &def.egress);
+            }
+        }
+        // Same reason, same place: a declared route is one element of an
+        // EPHEMERAL verdict map, so without this a holder respawn silently
+        // closes every path the manifest opened — and the plan, reading the
+        // record, would keep saying everything is fine.
+        //
+        // `bridge_name` and not `resolve_net`: the latter does I/O and requires
+        // the OTHER end to still exist, while an element of `@netpair` is just
+        // an `ifname` string. A route must come back even if its far end has not
+        // been recreated yet.
+        for r in route_list() {
+            let (bf, bt) = (crate::bridge_name(&r.from), crate::bridge_name(&r.to));
+            if bf == bridge || bt == bridge {
+                let _ = do_netroute("add", &bf, &bt);
             }
         }
     }
@@ -3185,6 +3208,63 @@ pub fn parse_fwmap_elements(listing: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Parses `nft list map ip dlxing netpair` into the ORDERED interface pairs that
+/// are exempt from the isolation drop.
+///
+/// **Drops the self-pairs.** `isolation_elements` installs `<b> . <b> : accept`
+/// for every network, so a listing of a node with three networks and no routes
+/// still has three elements. Counting those as routes would report every network
+/// as having a path to itself — which `do_netroute` refuses to even create, for
+/// the same reason.
+///
+/// Text and not `-j`, and per-element rather than a plain split on `,`: the same
+/// two decisions (and the same trailing-comma trap) as `parse_fwmap_elements`
+/// right above. Pure and tested.
+pub fn parse_netpair_elements(listing: &str) -> Vec<(String, String)> {
+    let Some(rest) = listing.split_once("elements = {").map(|(_, r)| r) else {
+        return Vec::new();
+    };
+    let body = rest.split_once('}').map(|(b, _)| b).unwrap_or(rest);
+    body.split(',')
+        .filter_map(|entry| {
+            let (key, _verdict) = entry.split_once(':')?;
+            let (a, b) = key.split_once(" . ")?;
+            let a = a.trim().trim_matches('"').to_string();
+            let b = b.trim().trim_matches('"').to_string();
+            (!a.is_empty() && !b.is_empty() && a != b).then_some((a, b))
+        })
+        .collect()
+}
+
+/// The routes the dataplane is ACTUALLY serving right now, as network names.
+///
+/// This is the LIVE view, for `stack ls` and `network route ls` — deliberately
+/// NOT what the reconciler plans against (see [`RouteDef`] for why a plan reading
+/// an ephemeral map would report drift forever on an idle node).
+///
+/// An `Err` here means "could not ask", never "there are none": a holder that is
+/// down, or an older one that does not know the verb, must not read as an empty
+/// dataplane.
+pub fn network_routes_live() -> Result<Vec<(String, String)>> {
+    let body = control_query("netroute-show")?;
+    let listing = hex_decode(body.trim())
+        .and_then(|b| String::from_utf8(b).ok())
+        .ok_or_else(|| Error::Runtime {
+            context: "netroute",
+            message: "could not decode the holder's reply".to_string(),
+        })?;
+    // The map is keyed by BRIDGE; the caller thinks in network names.
+    let by_bridge: std::collections::HashMap<String, String> = network_list()
+        .into_iter()
+        .map(|d| (d.bridge, d.name))
+        .collect();
+    let name_of = |b: &str| by_bridge.get(b).cloned().unwrap_or_else(|| b.to_string());
+    Ok(parse_netpair_elements(&listing)
+        .into_iter()
+        .map(|(a, b)| (name_of(&a), name_of(&b)))
+        .collect())
+}
+
 /// Applies a container's firewall in `dlxing` (runs in the holder): ensures the chain
 /// `fw<hash>`, points every one of the container's addresses at it through the `fwmap`
 /// verdict map, and rebuilds the body. `hex` is the `ContainerFw` JSON in hexadecimal
@@ -3601,6 +3681,131 @@ fn netdef_path(name: &str) -> PathBuf {
     networks_dir().join(format!("{}.json", sanitize(name)))
 }
 
+/// A declared path between two networks, PERSISTED.
+///
+/// The route itself lives as one element of the `@netpair` verdict map, and that
+/// map is in the holder's netns — which is EPHEMERAL: it is born on demand and
+/// dies with the last container. So the map cannot be the source of truth for a
+/// plan. On an idle node a live probe would answer "empty", the reconciler would
+/// read "the route is gone", and `stack plan --detailed-exitcode` would return 2
+/// forever — a CI drift gate red every day over a route that is exactly as it
+/// should be.
+///
+/// This is the same problem [`EgressState`] already has and already solves the
+/// same way: persist the intent, and re-apply it in `ensure_net_bridge` when the
+/// bridge is recreated. No new mechanism.
+///
+/// The honest cost, so nobody discovers it later: if someone deletes the element
+/// by hand (`nft delete element`), the plan still says `NoOp`. The LIVE state is
+/// what `stack ls` shows, and the holder puts the route back from here when the
+/// bridge is reborn.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct RouteDef {
+    pub from: String,
+    pub to: String,
+    /// Ownership (`delonix.io/stack`) — what makes a route prunable. Without a
+    /// place to stamp it, a route could never be removed by the manifest that
+    /// declared it, which is the entire defect this record closes.
+    #[serde(default)]
+    pub labels: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    pub annotations: std::collections::BTreeMap<String, String>,
+}
+
+fn routes_dir() -> PathBuf {
+    ingress_dir().join("routes")
+}
+
+/// One file per ORDERED pair. The pair is the identity of a route — not a name
+/// someone chose for it — so it is what keys the file.
+fn routedef_path(from: &str, to: &str) -> PathBuf {
+    routes_dir().join(format!("{}--{}.json", sanitize(from), sanitize(to)))
+}
+
+/// Every declared route on this node. The enumeration is what makes `--prune`
+/// possible: without it the reconciler cannot know what exists to consider
+/// removing.
+pub fn route_list() -> Vec<RouteDef> {
+    let mut v = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(routes_dir()) {
+        for e in rd.flatten() {
+            if let Ok(def) =
+                serde_json::from_slice::<RouteDef>(&std::fs::read(e.path()).unwrap_or_default())
+            {
+                v.push(def);
+            }
+        }
+    }
+    v
+}
+
+pub fn route_get(from: &str, to: &str) -> Option<RouteDef> {
+    serde_json::from_slice(&std::fs::read(routedef_path(from, to)).ok()?).ok()
+}
+
+/// Records ownership on a route. Mirrors `NetworkStore::set_metadata`, including
+/// its refusal of a value with a newline.
+pub fn route_set_metadata(
+    from: &str,
+    to: &str,
+    labels: &[(String, Option<String>)],
+    annotations: &[(String, Option<String>)],
+) -> Result<()> {
+    let mut def = route_get(from, to)
+        .ok_or_else(|| Error::NotFound(format!("no such route: {from} -> {to}")))?;
+    for (k, v) in labels {
+        match v {
+            Some(v) => {
+                def.labels.insert(k.clone(), v.clone());
+            }
+            None => {
+                def.labels.remove(k);
+            }
+        }
+    }
+    for (k, v) in annotations {
+        match v {
+            Some(v) => {
+                def.annotations.insert(k.clone(), v.clone());
+            }
+            None => {
+                def.annotations.remove(k);
+            }
+        }
+    }
+    write_routedef(&def)
+}
+
+fn write_routedef(def: &RouteDef) -> Result<()> {
+    let _ = std::fs::create_dir_all(routes_dir());
+    let json = serde_json::to_vec_pretty(def).map_err(|e| Error::Runtime {
+        context: "netroute",
+        message: e.to_string(),
+    })?;
+    // `write_atomic`, not `fs::write` — the same lesson already paid for by the
+    // network registry: a reader must never see a half-written record.
+    delonix_runtime_core::write_atomic(&routedef_path(&def.from, &def.to), &json).map_err(|e| {
+        Error::Runtime {
+            context: "netroute",
+            message: e.to_string(),
+        }
+    })
+}
+
+/// Drops every route naming this network.
+///
+/// Without this, removing a network leaves its route records behind, and because
+/// `bridge_name` is DETERMINISTIC, recreating a network with the same name would
+/// silently reopen the pair on the next holder respawn — an exemption to the
+/// isolation model coming back from the dead with nobody asking for it.
+fn routes_forget_network(name: &str) {
+    for r in route_list() {
+        if r.from == name || r.to == name {
+            let _ = std::fs::remove_file(routedef_path(&r.from, &r.to));
+        }
+    }
+}
+
 /// Gateway (= ingress) de um prefixo — o PRIMEIRO endereço utilizável.
 ///
 /// Era `{prefix}.0.1`, o que só é o primeiro utilizável num /16: para um
@@ -3707,6 +3912,9 @@ pub fn network_remove(name: &str) {
         let _ = control_send(&format!("netdel {}", def.bridge));
     }
     let _ = std::fs::remove_file(netdef_path(name));
+    // A route outlives neither of its ends. See `routes_forget_network` for what
+    // leaving them behind would do on the next respawn.
+    routes_forget_network(name);
 }
 
 /// Deletes a link the holder owns, by name — the counterpart of the VXLAN
@@ -3801,6 +4009,14 @@ pub fn holder_serves_netns(id: &str) -> bool {
 /// per-workload `fwcont` chains still decide, and a namespace boundary crossed
 /// by a route still needs an explicit policy. That rule is the whole reason this
 /// composes with what exists instead of undermining it.
+///
+/// **The record is written HERE, and not in the declarative layer**, so that
+/// `delonix network route` (imperative) and `kind: NetworkRoute` (declarative)
+/// leave the same trace. Two writers of the same fact is how the engine ends up
+/// with two truths — the defect this repo keeps rediscovering.
+///
+/// Dataplane first, record second: if the `nft` element fails, no record is left
+/// claiming a path that was never opened.
 pub fn network_route(from: &str, to: &str, add: bool) -> Result<()> {
     let (bridge_from, _, _) = resolve_net(from)?;
     let (bridge_to, _, _) = resolve_net(to)?;
@@ -3808,7 +4024,22 @@ pub fn network_route(from: &str, to: &str, add: bool) -> Result<()> {
     control_send(&format!(
         "netroute {} {bridge_from} {bridge_to}",
         if add { "add" } else { "del" }
-    ))
+    ))?;
+    if add {
+        // Keeps whatever ownership is already stamped: re-applying a route must
+        // not silently orphan it from its stack.
+        if route_get(from, to).is_none() {
+            write_routedef(&RouteDef {
+                from: from.to_string(),
+                to: to.to_string(),
+                labels: Default::default(),
+                annotations: Default::default(),
+            })?;
+        }
+    } else {
+        let _ = std::fs::remove_file(routedef_path(from, to));
+    }
+    Ok(())
 }
 
 pub fn attach_container(id: &str, net: &str, namespace: &str) -> Result<(String, String)> {
@@ -6470,6 +6701,37 @@ Inter-|   Receive                                                |  Transmit
         let mine: Vec<_> = els.iter().filter(|(_, c)| c == "fwaaaaaaaa").collect();
         assert_eq!(mine.len(), 2, "both addresses of the multi-homed container");
         assert!(parse_fwmap_elements("map fwmap { type ipv4_addr : verdict }").is_empty());
+    }
+
+    /// Uma rede sempre tem um par consigo própria — `isolation_elements` instala
+    /// `<b> . <b> : accept` para manter o tráfego intra-rede aberto.
+    ///
+    /// Se o parser os contasse, um nó com três redes e ZERO rotas declaradas
+    /// reportaria três rotas, e cada rede apareceria com um caminho para si
+    /// mesma. Pior do que ruído: o reconciliador leria essas «rotas» como
+    /// existentes e o plano proporia removê-las — um `--prune` a fechar o
+    /// tráfego dentro de cada rede.
+    #[test]
+    fn parse_netpair_ignora_os_auto_pares() {
+        let listing = "table ip dlxing {\n\tmap netpair {\n\t\ttype ifname . ifname : verdict\n\
+                       \t\telements = { \"dlxnaaaa\" . \"dlxnaaaa\" : accept,\n\
+                       \t\t             \"dlxnbbbb\" . \"dlxnbbbb\" : accept,\n\
+                       \t\t             \"dlxnaaaa\" . \"dlxnbbbb\" : accept }\n\t}\n}\n";
+        let els = parse_netpair_elements(listing);
+        assert_eq!(
+            els.len(),
+            1,
+            "só o par entre redes distintas é rota: {els:?}"
+        );
+        // E é o ÚLTIMO elemento, o que não tem vírgula à frente — o mesmo que um
+        // split ingénuo perderia.
+        assert_eq!(els[0], ("dlxnaaaa".to_string(), "dlxnbbbb".to_string()));
+        // A direcção importa: a rota é dirigida, logo o par invertido não está lá.
+        assert!(!els.contains(&("dlxnbbbb".into(), "dlxnaaaa".into())));
+        // Um mapa sem elementos não é um mapa por ler.
+        assert!(
+            parse_netpair_elements("map netpair { type ifname . ifname : verdict }").is_empty()
+        );
     }
 
     /// RF-NET-11 — the IPv6 bypass, reproduced live before this fix: with the firewall
