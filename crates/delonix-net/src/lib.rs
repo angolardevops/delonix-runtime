@@ -187,28 +187,24 @@ fn link_exists(name: &str) -> bool {
 /// (e.g.: prefix `10.88`): 4 octets, first two == prefix, not the gateway
 /// (`prefix.0.1`), the network (`prefix.0.0`) or the broadcast (`prefix.255.255`).
 pub fn valid_ip_in_subnet(prefix: &str, ip: &str) -> bool {
-    let oct: Vec<&str> = ip.split('.').collect();
-    if oct.len() != 4 {
+    // `prefix` chega aqui em DUAS formas e ambas têm de continuar a valer: a
+    // legada de dois octetos (`10.210`, que sempre quis dizer `10.210.0.0/16`) e
+    // um CIDR a sério. O `Cidr::parse` resolve as duas, por isso não há aqui um
+    // caminho novo — há o mesmo caminho a saber mais.
+    let Some(net) = Cidr::parse(prefix) else {
         return false;
-    }
-    let nums: Vec<u16> = match oct
-        .iter()
-        .map(|o| o.parse::<u16>())
-        .collect::<std::result::Result<_, _>>()
-    {
-        Ok(v) => v,
-        Err(_) => return false,
     };
-    if nums.iter().any(|&n| n > 255) {
+    let Some(addr) = Cidr::parse_addr(ip) else {
+        return false;
+    };
+    if !net.contains(addr) {
         return false;
     }
-    let pfx = format!("{}.{}", nums[0], nums[1]);
-    if pfx != prefix {
-        return false;
-    }
-    let host = (nums[2], nums[3]);
-    // excludes network (.0.0), gateway (.0.1) and broadcast (.255.255).
-    !(host == (0, 0) || host == (0, 1) || host == (255, 255))
+    // Exclui a rede, o gateway e o broadcast. No `/16` isto é exactamente o que
+    // a versão anterior excluía à mão (`.0.0`, `.0.1`, `.255.255`) — a regra
+    // geral não é uma mudança de comportamento, é a mesma regra dita de uma
+    // forma que também serve um /22.
+    addr != net.base && addr != net.base.wrapping_add(1) && addr != net.last()
 }
 
 /// Deterministic IP in `10.88.A.B`, derived from the id (avoids .0/.1/.255).
@@ -621,7 +617,7 @@ impl Cidr {
         format!("{}/{}", Self::fmt_u32(self.base), self.len)
     }
 
-    fn fmt_u32(v: u32) -> String {
+    pub(crate) fn fmt_u32(v: u32) -> String {
         let b = v.to_be_bytes();
         format!("{}.{}.{}.{}", b[0], b[1], b[2], b[3])
     }
@@ -647,6 +643,17 @@ impl Cidr {
 pub fn derive_ip_in(prefix: &str, id: &str) -> String {
     let hex = &id[..id.len().min(8)];
     let n = u32::from_str_radix(hex, 16).unwrap_or(2);
+    // O caminho do /16 fica BYTE A BYTE como estava, e isso é deliberado: toda a
+    // rede que existe hoje tem leases derivados desta fórmula exacta, e a
+    // generalização não tem nada a ganhar em mexer na base instalada. A fórmula
+    // geral abaixo NÃO é equivalente a esta (o clamp do último octeto não é o
+    // mesmo que o resto da divisão sobre o espaço todo) — por isso as duas
+    // coexistem em vez de uma fingir ser a outra.
+    if let Some(net) = Cidr::parse(prefix) {
+        if net.len != 16 {
+            return derive_ip_general(&net, n);
+        }
+    }
     let a = ((n >> 8) & 0xff) as u8;
     let mut b = (n & 0xff) as u8;
     if b < 2 {
@@ -656,6 +663,22 @@ pub fn derive_ip_in(prefix: &str, id: &str) -> String {
         b = 254;
     }
     format!("{prefix}.{a}.{b}")
+}
+
+/// O preferido para um prefixo de tamanho arbitrário.
+///
+/// Salta a rede e o gateway (os dois primeiros) e o broadcast (o último), e
+/// distribui o resto pelo espaço utilizável. Num prefixo pequeno de mais para
+/// ter hosts devolve o próprio gateway — o `valid_ip_in_subnet` recusa-o a
+/// seguir e o `probe_free` também não encontra nada, que é a resposta correcta:
+/// não há endereço para dar, e é o `allocate` que o diz com um erro.
+fn derive_ip_general(net: &Cidr, n: u32) -> String {
+    let uteis = net.size().saturating_sub(3); // rede + gateway + broadcast
+    if uteis == 0 {
+        return Cidr::fmt_u32(net.base.wrapping_add(1));
+    }
+    let off = n % uteis;
+    Cidr::fmt_u32(net.base + 2 + off)
 }
 
 /// IP of a container in `prefix`'s `/16`, to **recompute** the IP from the
@@ -1833,6 +1856,65 @@ pub fn list_connections(ip2name: &std::collections::HashMap<String, String>) -> 
 
 #[cfg(test)]
 mod tests {
+
+    /// **A base instalada não pode mexer-se.** Toda a rede que existe hoje tem
+    /// leases derivados da fórmula do /16, e a generalização não tem nada a
+    /// ganhar em mudá-la. Este teste fixa a fórmula ANTIGA, valor a valor, para
+    /// que uma generalização futura não a "arrume" sem dar por isso.
+    #[test]
+    fn o_16_continua_byte_a_byte_como_estava() {
+        // ids escolhidos para tocar os três ramos do clamp: b<2, b normal, b=255.
+        for (id, esperado) in [
+            ("00000000", "10.210.0.2"),   // b=0 -> 2
+            ("00000001", "10.210.0.2"),   // b=1 -> 2
+            ("0000010f", "10.210.1.15"),  // normal
+            ("000000ff", "10.210.0.254"), // b=255 -> 254
+            ("abcdef12", "10.210.239.18"),
+        ] {
+            assert_eq!(derive_ip_in("10.210", id), esperado, "id={id}");
+        }
+    }
+
+    /// E os prefixos que não são /16 passam a funcionar — com as MESMAS
+    /// exclusões (rede, gateway, broadcast), que é o que torna a regra geral a
+    /// mesma regra e não outra.
+    #[test]
+    fn um_prefixo_arbitrario_aloca_dentro_de_si_e_respeita_as_exclusoes() {
+        for cidr in ["172.20.4.0/22", "192.168.1.0/28", "10.0.0.0/8"] {
+            let net = Cidr::parse(cidr).unwrap();
+            for id in ["00000000", "deadbeef", "0000000a", "ffffffff"] {
+                let ip = derive_ip_in(cidr, id);
+                let a = Cidr::parse_addr(&ip).unwrap_or_else(|| panic!("{ip} não parseia"));
+                assert!(net.contains(a), "{cidr}: {ip} fora do prefixo");
+                assert_ne!(a, net.base, "{cidr}: {ip} é o endereço de rede");
+                assert_ne!(a, net.base + 1, "{cidr}: {ip} é o gateway");
+                assert_ne!(a, net.last(), "{cidr}: {ip} é o broadcast");
+                assert!(valid_ip_in_subnet(cidr, &ip), "{cidr}: {ip} recusado");
+            }
+        }
+    }
+
+    /// As exclusões continuam a ser as três, e nem uma a mais — um teste que só
+    /// verificasse «está dentro» deixaria passar o gateway a ser entregue a um
+    /// container, que é uma colisão que só aparece quando a rede deixa de
+    /// funcionar para todos.
+    #[test]
+    fn a_rede_o_gateway_e_o_broadcast_sao_os_unicos_excluidos() {
+        let cidr = "192.168.1.0/28"; // 16 endereços: fácil de enumerar por inteiro
+        let net = Cidr::parse(cidr).unwrap();
+        let mut aceites = 0;
+        for a in net.base..=net.last() {
+            let ip = Cidr::fmt_u32(a);
+            let ok = valid_ip_in_subnet(cidr, &ip);
+            let deve = a != net.base && a != net.base + 1 && a != net.last();
+            assert_eq!(ok, deve, "{ip}");
+            aceites += ok as u32;
+        }
+        assert_eq!(aceites, 13, "um /28 tem 16 endereços menos os 3 reservados");
+        // E um endereço de FORA nunca é aceite, por muito parecido que seja.
+        assert!(!valid_ip_in_subnet(cidr, "192.168.2.5"));
+        assert!(!valid_ip_in_subnet(cidr, "192.168.1.16"));
+    }
 
     /// **Exaustivo sobre TODOS os prefixos**, que é a única forma de garantir que
     /// a aritmética de máscara não tem um buraco algures no meio: um erro de
