@@ -528,6 +528,37 @@ pub fn uptime_from_starttime(starttime_jiffies: u64) -> Option<u64> {
 /// A layer with nothing to do says so instead of claiming a tick it did not
 /// earn — «0 resources» is information, and a green ✓ over no work is the kind
 /// of quiet lie this engine keeps removing.
+/// Announces one labelled unit of work, runs it, and closes it with the time it
+/// took — `✗` on failure, so the error is attributed to the unit that produced
+/// it rather than to the run as a whole.
+///
+/// **No spinner, and that is the whole difference from [`Progress`].** This is
+/// for work that prints its OWN lines: a per-resource record (`container/web:
+/// created`), or a nested `Progress` of its own. An animation rewriting its line
+/// would fight them for the same row, and folding them away would hide the one
+/// part worth keeping. `Progress` is for the opposite case — a step that is
+/// SILENT for seconds, where the line it draws is the only thing there is.
+///
+/// The two callers are `Layers::run` (one Kind of a `stack apply`) and
+/// `pod create` (one member). They share this instead of each printing its own
+/// pair, because a `•` that a later `✓` has to match is exactly the kind of
+/// agreement that drifts when it is written twice.
+pub fn announced<T, F>(label: &str, icon: &str, f: F) -> delonix_runtime_core::Result<T>
+where
+    F: FnOnce() -> delonix_runtime_core::Result<T>,
+{
+    eprintln!(" {} {label} {icon}", paint(color::YELLOW, "•"));
+    let t0 = std::time::Instant::now();
+    let r = f();
+    let mark = if r.is_ok() {
+        paint(color::GREEN, "✓")
+    } else {
+        paint(color::RED, "✗")
+    };
+    eprintln!(" {mark} {label} {icon} {}", dim(&fmt_elapsed(t0.elapsed())));
+    r
+}
+
 pub struct Layers {
     counts: std::collections::BTreeMap<String, usize>,
     started: std::time::Instant,
@@ -562,26 +593,7 @@ impl Layers {
             return f(); // nothing declared: no line, no tick, no noise
         }
         self.ran += 1;
-        eprintln!(" {} {kind} ({n}) {icon}", paint(color::YELLOW, "•"));
-        let t0 = std::time::Instant::now();
-        match f() {
-            Ok(()) => {
-                eprintln!(
-                    " {} {kind} ({n}) {icon} {}",
-                    paint(color::GREEN, "✓"),
-                    dim(&fmt_elapsed(t0.elapsed()))
-                );
-                Ok(())
-            }
-            Err(e) => {
-                eprintln!(
-                    " {} {kind} ({n}) {icon} {}",
-                    paint(color::RED, "✗"),
-                    dim(&fmt_elapsed(t0.elapsed()))
-                );
-                Err(e)
-            }
-        }
+        announced(&format!("{kind} ({n})"), icon, f)
     }
 
     /// The total, once every layer has run.
@@ -695,6 +707,33 @@ struct SpinnerHandle {
 /// Spinner frames (braille, like `kind`/`spinnies`).
 const SPIN_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
+/// Waits `quiet_for` out, giving up early if the step closed first.
+/// `true` = the work proved slow enough to be worth drawing.
+///
+/// Shared by BOTH ways a step announces itself — the spinner on a TTY and the
+/// single line off one. They had drifted apart, which is the whole defect this
+/// exists to prevent: one honoured the threshold and the other did not, so the
+/// closing line's rule («nothing was announced below the threshold») held on one
+/// path and not the other.
+///
+/// Waited in SLICES, never in one `sleep(quiet_for)`: `close_line` joins this
+/// thread, so a single long sleep would make every fast step block until the
+/// threshold elapsed — the delay meant to REMOVE chrome would have added latency
+/// to every `run` instead. Caught by measurement: the step reported 0.8s inside
+/// a run whose total was 0.3s, which is impossible unless the wait was the step.
+fn wait_out(stop: &std::sync::atomic::AtomicBool, quiet_for: std::time::Duration) -> bool {
+    let mut waited = std::time::Duration::ZERO;
+    while waited < quiet_for {
+        if stop.load(std::sync::atomic::Ordering::Relaxed) {
+            return false;
+        }
+        let slice = std::time::Duration::from_millis(20).min(quiet_for - waited);
+        std::thread::sleep(slice);
+        waited += slice;
+    }
+    !stop.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 impl Progress {
     pub fn new() -> Self {
         // SAFETY: isatty has no preconditions; 2 = stderr.
@@ -744,35 +783,47 @@ impl Progress {
         if !self.verbose {
             capture_start();
         }
-        if !self.tty || self.verbose {
-            // Without a spinner the step still has to ANNOUNCE itself, or a
-            // minutes-long step is a silent terminal.
-            eprintln!(" {} {msg} {icon}", paint(color::YELLOW, "•"));
-            return;
-        }
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (s2, msg, icon) = (stop.clone(), self.msg.clone(), self.icon.clone());
         let quiet_for = self.threshold;
-        let handle = std::thread::spawn(move || {
-            use std::io::Write;
-            // Nothing is drawn until the work proves it is slow enough to be
-            // worth a line (`step_after`); zero for an ordinary `step`.
-            // Waited in SLICES, never in one `sleep(quiet_for)`: `close_line`
-            // joins this thread, so a single long sleep would make every fast
-            // step block until the threshold elapsed — the delay meant to REMOVE
-            // chrome would have added latency to every `run` instead. Caught by
-            // measurement: the step reported 0.8s inside a run whose total was
-            // 0.3s, which is impossible unless the wait was the step.
-            let mut waited = std::time::Duration::ZERO;
-            while waited < quiet_for {
-                if s2.load(std::sync::atomic::Ordering::Relaxed) {
+        if !self.tty || self.verbose {
+            // Without a spinner the step still has to ANNOUNCE itself, or a
+            // minutes-long step is a silent terminal.
+            //
+            // With no threshold that is immediate, as it always was. With one,
+            // the announcement WAITS it out exactly like the spinner does —
+            // which this branch used to skip, printing the bullet at once while
+            // `close_line` suppresses the closing line for anything faster than
+            // the threshold, on the stated reasoning that «under the threshold
+            // the step never announced itself». That is true on a TTY, where the
+            // spinner thread waits the threshold out before drawing anything,
+            // and false here.
+            //
+            // So off a TTY a fast step opened a line that nothing ever closed.
+            // Measured on `container run` with the image already in the store:
+            // one `•`, zero `✓` — in CI, in a pipe, in any redirect, which is
+            // where a stale «in progress» is least likely to be noticed and most
+            // likely to be read later. The fast path was meant to keep the
+            // output it always had; instead it gained a line that never resolves.
+            if quiet_for.is_zero() {
+                eprintln!(" {} {msg} {icon}", paint(color::YELLOW, "•"));
+                return;
+            }
+            let handle = std::thread::spawn(move || {
+                if !wait_out(&s2, quiet_for) {
                     return;
                 }
-                let slice = std::time::Duration::from_millis(20).min(quiet_for - waited);
-                std::thread::sleep(slice);
-                waited += slice;
-            }
-            if s2.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!(" {} {msg} {icon}", paint(color::YELLOW, "•"));
+            });
+            self.spin = Some(SpinnerHandle {
+                stop,
+                handle: Some(handle),
+            });
+            return;
+        }
+        let handle = std::thread::spawn(move || {
+            use std::io::Write;
+            if !wait_out(&s2, quiet_for) {
                 return;
             }
             let mut i = 0usize;

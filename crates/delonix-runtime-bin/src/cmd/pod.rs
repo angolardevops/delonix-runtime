@@ -187,9 +187,15 @@ fn create_pod(name: &str, namespace: Option<String>, spec: PodSpec) -> Result<()
     let netns = pod_netns_name(name);
     let ns = namespace.clone().unwrap_or_else(|| "default".to_string());
     let net = pod_network(&spec.network);
-    let (_, ip) = infra::attach_container(&netns, net, &ns).map_err(|e| Error::Runtime {
-        context: "pod",
-        message: format!("failed to create the pod netns '{netns}': {e}"),
+    // Announced because it is the one phase that belongs to the POD rather than
+    // to any member, and it is silent: it may have to bring the whole holder up
+    // (`ensure_up`), which is seconds. Until now the first thing a `pod create`
+    // printed was a container id from somewhere inside member one.
+    let (_, ip) = output::announced(super::po::t("pod network"), "🌐", || {
+        infra::attach_container(&netns, net, &ns).map_err(|e| Error::Runtime {
+            context: "pod",
+            message: format!("failed to create the pod netns '{netns}': {e}"),
+        })
     })?;
     apply_pod_namespace_isolation(&netns, &ip, &ns);
 
@@ -207,7 +213,15 @@ fn create_pod(name: &str, namespace: Option<String>, spec: PodSpec) -> Result<()
     let count = members.len();
     let first = members.remove(0);
     let first_name = first.name.clone().unwrap_or_else(|| format!("{name}-c0"));
-    if let Err(e) = container::cmd_run(&images, &store, first) {
+    // One announced line per MEMBER, by name. `cmd_run` already draws its own
+    // delayed spinner over the silent phase (unpacking an image), but that line
+    // says only «unpacking the image» — measured on a three-container pod it
+    // appeared three times, identical and anonymous, with nothing tying any of
+    // them to a member. Naming the member is what makes a slow pod readable:
+    // the question is never «is something unpacking», it is «which one».
+    if let Err(e) = output::announced(&first_name, "📦", || {
+        container::cmd_run(&images, &store, first)
+    }) {
         let _ = remove_pod(name, true);
         return Err(e);
     }
@@ -215,7 +229,13 @@ fn create_pod(name: &str, namespace: Option<String>, spec: PodSpec) -> Result<()
     let infra_pid = store.load(&first_name).ok().and_then(|c| c.pid);
     for mut opts in members {
         opts.pod_infra_pid = infra_pid;
-        if let Err(e) = container::cmd_run(&images, &store, opts) {
+        let member_name = opts
+            .name
+            .clone()
+            .unwrap_or_else(|| format!("{name}-<unnamed>"));
+        if let Err(e) = output::announced(&member_name, "📦", || {
+            container::cmd_run(&images, &store, opts)
+        }) {
             let _ = remove_pod(name, true);
             return Err(e);
         }
