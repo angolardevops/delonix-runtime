@@ -825,7 +825,15 @@ fn describe_one(n: &Network) {
 }
 
 pub(crate) fn cmd_rm(store: &NetworkStore, name: &str) -> Result<()> {
+    // Read the VXLAN device name BEFORE the record goes: it is derived from the
+    // `vni`, which only the store record carries. Removing the uplink first
+    // also avoids the state that leaked before — a device mastered on a bridge
+    // that has just been deleted.
+    let uplink = store.get(name).ok().and_then(|n| n.vxlan_dev());
     store.remove(name)?;
+    if let Some(dev) = uplink {
+        infra::vxlan_remove(&dev);
+    }
     infra::network_remove(name);
     println!("{name}");
     Ok(())
