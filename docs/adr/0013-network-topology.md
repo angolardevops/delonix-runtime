@@ -1,0 +1,140 @@
+# ADR-0013: Routed topologies — external gateway/DNS, subnets and VLANs, without leaving rootless
+
+**Status: Proposed.** Nothing here is implemented. It exists so the first line of code is written
+against a decided boundary rather than discovered halfway.
+
+## Decision taken
+
+Split the request into three tiers by the PRIVILEGE each one needs, and ship them in that order,
+because the first is free, the second is a real dataplane, and the third is not rootless at all:
+
+| Tier | What it buys | Privilege | Verdict |
+|---|---|---|---|
+| **A — the address space becomes real** | arbitrary CIDRs, several subnets, a declared gateway/DNS | none (rootless) | **GO**, unblocked |
+| **B — routing between networks** | subnet ↔ subnet, namespace ↔ namespace through a declared path | none (all inside the holder's netns) | **GO after a spike** |
+| **C — 802.1Q VLANs on a physical NIC** | trunk to a real switch, `macvlan`/`ipvlan` realized | `CAP_NET_ADMIN` in the **host's** init-netns | **opt-in privileged**, never the default |
+
+Tier C is the one that cannot be made rootless, and saying so up front is the point of this ADR.
+
+## Context — five things measured, not assumed (2026-08-12)
+
+1. **A network's registry entry is ONE OCTET.** `~/.local/share/delonix/networks/kaeso-net`
+   contains the single line `210`. Everything else — the bridge name, the `10.<n>.0.0/16` space,
+   the `.0.1` gateway, the IPAM range — is DERIVED from it. There is no CIDR stored anywhere.
+2. **`--subnet` only started meaning anything in v0.47.0**, and only to pick that octet: the
+   accepted space is `10.<200-254>.0.0/16` and nothing else. `172.20.0.0/16` or a `/20` are
+   refused, naming the form that works.
+3. **`--gateway` is already fail-closed**, and correctly: a bridge network's gateway is the first
+   address of its subnet, and passing a different one is refused rather than ignored. So
+   "point this network at MY gateway" is **new semantics**, not the relaxation of a check.
+4. **DNS is a thread inside the holder** (`infra::dns_server_main`), answering A records for
+   `<name>.<ns>.delonix.internal` and forwarding the rest. There is no per-network resolver, no
+   forwarder list, and no way to say "this subnet resolves against 10.0.0.53".
+5. **There is no 802.1Q anywhere in the tree.** `macvlan`/`ipvlan` exist in the declarative store
+   and `network create` WARNS that they were not realized (`Realized=False`,
+   `reason=DriverNotImplemented`) rather than pretending. The reason is privilege, not missing
+   code, and that distinction is why tier C is separate.
+
+And one fact about the layer above: cross-namespace isolation today is **nftables chains
+per workload** (`fwcont`, verdict map by IP). It decides whether a packet is allowed. It does not
+route, and it has no notion of a path between two subnets.
+
+## Decision
+
+### Tier A — the address space becomes real
+
+The registry stops being an octet and becomes a record with a CIDR. This is the change everything
+else waits on, and it is the one with no privilege question at all: the holder already owns its
+netns, and giving its bridge `172.20.4.0/22` instead of `10.210.0.0/16` needs nothing it does not
+already have.
+
+* `spec.subnet` accepts any private CIDR that does not overlap an existing network, `/16` to `/28`.
+* `spec.gateway` may name an address inside that subnet that is NOT the derived `.1` — which is
+  what "an external gateway" means for a rootless SDN: the holder keeps routing, and the named
+  address is where it forwards to.
+* `spec.dnsServers: []` — the resolvers handed to workloads on this network, replacing the
+  holder's forwarder for them. The internal `.delonix.internal` zone keeps being answered locally;
+  the ADR's rule is that a declared external resolver **adds** a forwarder and never removes the
+  internal zone, because losing service discovery is not a networking option.
+* **Migration is the hard part, and it is decided:** a record holding a bare octet is read as
+  `10.<octet>.0.0/16` — which is exactly what it always meant — and rewritten on the next write.
+  No flag day. This is the same promotion the `base=<n>` line already does.
+
+### Tier B — routing between networks
+
+A `kind: Network` gains no routing field. Instead a new document type describes the PATH, because
+a route is a relationship and belongs to neither end:
+
+```yaml
+kind: NetworkRoute        # name provisional
+spec:
+  from: frontend          # network or namespace
+  to: backend
+  via: gateway-vm         # optional: a workload that forwards (a firewall appliance)
+```
+
+Rationale: putting `routes:` inside a `kind: Network` makes the same relationship expressible from
+both sides, and two documents that disagree about one route is the class of bug this repo already
+paid for with `FirewallPolicy` (two policies for the same target/direction are REFUSED for exactly
+this reason).
+
+**Composition with what exists is the whole risk**, and the rule is: routing decides where a packet
+MAY go, the existing `fwcont` chains decide whether it goes. A route never implies an allow. A
+namespace boundary crossed by a route still needs a `kind: Dependency` or an explicit policy — the
+same way a container on a shared bridge is still isolated by namespace today.
+
+**Spike before code** (this is the GO/NO-GO): prove in the holder's netns, rootless, that two
+bridges with distinct CIDRs forward between each other with `ip route` + the existing nft chains
+intact, and that a workload on one reaches a workload on the other ONLY when a policy allows it.
+If the forwarding needs anything the holder cannot do unprivileged, tier B moves to tier C.
+
+### Tier C — 802.1Q and physical NICs
+
+`kind: Network` gains `vlan: <1-4094>` and `parent: <nic>`, realized as `ip link add link <nic>
+name <nic>.<vlan> type vlan`. **This needs `CAP_NET_ADMIN` in the host's init-netns and there is no
+rootless path to it** — the same wall `macvlan`/`ipvlan` already hit, and the same one `vm bridge`
+already crossed deliberately.
+
+So it follows the `vm bridge` precedent exactly, and that precedent is the decision:
+
+* a separate, explicitly privileged command — never a flag that silently escalates;
+* **dry-run by default**, printing the plan; `--apply` to execute;
+* refuses under an unprivileged uid with the reason, rather than degrading;
+* a `delonix-runtime-sec` pass before merge, because it puts the host's physical NIC in reach.
+
+## Alternatives considered
+
+**Give the holder `CAP_NET_ADMIN` on the host and do everything in one tier.** Rejected: it makes
+the engine privileged by default to serve the minority of installs that need a trunk port, and
+the daemonless/rootless default is the product.
+
+**Model VLANs as another `driver:` value on `kind: Network`.** Rejected: `driver` already means
+"how the dataplane is built" (bridge/macvlan/ipvlan/overlay), and a VLAN is orthogonal — an
+802.1Q tag on a bridge network is a coherent thing to want. `vlan:` is a property, not a driver.
+
+**Keep the octet and add a CIDR beside it.** Rejected for the reason this repo keeps rediscovering:
+two fields that must agree eventually disagree. The octet becomes derived from the CIDR, or it goes.
+
+## Consequences
+
+* The IPAM stops being arithmetic on one octet and becomes allocation inside an arbitrary prefix —
+  including overlap detection between networks, which does not exist today.
+* `network ls`/`inspect` gain CIDR, gateway and resolvers; the JSON contract only ever ADDS fields
+  (ADR-0005), so this is additive.
+* The reconciler already compares `subnet` (`RECONCILED_NETWORK_FIELDS`), so a widened subnet field
+  is comparable on day one — but changing a live network's CIDR is a COLD field and must land in
+  the recreate path, never a silent in-place edit.
+* Tier C splits the product's promise: most of `delonix network` stays rootless, one command is not.
+  That must be visible in `--help` and in `docs/cli-stability.md`, not discovered at runtime.
+
+## What this ADR does NOT decide
+
+The `via:` forwarding appliance. Sending a subnet's traffic through a workload (an OPNsense VM, a
+firewall container) changes where masquerade happens — today everything leaves under one
+`oifname "tap0"` masquerade, and a gateway appliance that sees every packet with a single source
+address is a gateway whose own per-source rules are useless. That is its own ADR, and it depends
+on tier B being real first.
+
+Also undecided: IPv6. The engine currently DISABLES it per container by design (v0.37.1, it was a
+complete bypass of the policy model). A routed topology is where v6 stops being avoidable, and
+re-enabling it is a security decision, not a networking one.
