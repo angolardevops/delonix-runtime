@@ -79,6 +79,7 @@ fn filled_spec(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
     use crate::cmd;
     match doc.kind.as_str() {
         "Network" => cmd::network::spec_with_defaults(doc),
+        "NetworkRoute" => cmd::netroute::spec_with_defaults(doc),
         "Volume" => cmd::volume::spec_with_defaults(doc),
         // Secret DOES get a round-trip, and its values are redacted on the way
         // (`secret::spec_with_defaults`). It used to be the one Kind skipped
@@ -338,6 +339,7 @@ pub(crate) fn spec_fields_for(kind: &str) -> Option<&'static [&'static str]> {
         "Egress" | "FirewallPolicy" => Some(crate::cmd::firewall::FW_SPEC_FIELDS),
         "HTTPRoute" => Some(crate::cmd::httproute::HTTP_ROUTE_SPEC_FIELDS),
         "Dependency" => Some(crate::cmd::dependency::DEPENDENCY_SPEC_FIELDS),
+        "NetworkRoute" => Some(crate::cmd::netroute::NETWORK_ROUTE_SPEC_FIELDS),
         "Tunnel" => Some(crate::cmd::tunnel::TUNNEL_SPEC_FIELDS),
         "ShareVolume" => Some(crate::cmd::sharevolume::SHAREVOLUME_SPEC_FIELDS),
         "Workload" => Some(crate::cmd::workload::WORKLOAD_SPEC_FIELDS),

@@ -482,6 +482,120 @@ pub fn parse_net_rate(rate: &str, burst: Option<&str>) -> Result<NetRate> {
     })
 }
 
+/// A network's address space, as a real prefix instead of the two octets of a
+/// hardcoded `/16`.
+///
+/// **Why this type exists (ADR-0013 tier A).** Everything about a network used
+/// to be derived from ONE octet: the record on disk held `210`, the bridge was
+/// named from it, the gateway was `10.<n>.0.1`, and the IPAM allocated inside
+/// `10.<n>.0.0/16` because that was the only shape there was. `--subnet` could
+/// only ever pick which octet. That is a fine default and a poor contract: a
+/// network engineer has an address plan, and «any /16 you like as long as it is
+/// `10.<200-254>`» does not meet it.
+///
+/// Kept deliberately small — no dependency, no `ipnet` crate (this repo does not
+/// grow its supply chain for arithmetic), and no IPv6: v6 is DISABLED by design
+/// in this engine (v0.37.1, it was a complete bypass of the policy model) and
+/// re-enabling it is a security decision, not a widening of this struct.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Cidr {
+    /// Network address, host bits already cleared.
+    pub base: u32,
+    pub len: u8,
+}
+
+impl Cidr {
+    /// Parses `a.b.c.d/len`, and ALSO the legacy two-octet form (`10.210`),
+    /// which every record written before this meant as `10.210.0.0/16`.
+    ///
+    /// Accepting the old form here is what makes the migration a non-event:
+    /// a record holding a bare octet keeps meaning exactly what it always meant,
+    /// and is rewritten in the new shape on the next write. Same promotion the
+    /// `base=<n>` line already does.
+    pub fn parse(s: &str) -> Option<Self> {
+        let s = s.trim();
+        let (addr, len) = match s.split_once('/') {
+            Some((a, l)) => (a, l.parse::<u8>().ok()?),
+            // Legacy `10.210` — two octets, always a /16.
+            None if s.split('.').count() == 2 => (s, 16),
+            None => return None,
+        };
+        if len > 32 {
+            return None;
+        }
+        let mut oct = [0u8; 4];
+        let parts: Vec<&str> = addr.split('.').collect();
+        if parts.is_empty() || parts.len() > 4 {
+            return None;
+        }
+        for (i, p) in parts.iter().enumerate() {
+            oct[i] = p.parse::<u8>().ok()?;
+        }
+        let raw = u32::from_be_bytes(oct);
+        // Host bits are CLEARED rather than rejected: `10.210.5.7/16` is how
+        // people write «the /16 that address is in», and refusing it would be
+        // pedantry that helps nobody.
+        let mask = Self::mask(len);
+        Some(Self {
+            base: raw & mask,
+            len,
+        })
+    }
+
+    fn mask(len: u8) -> u32 {
+        if len == 0 {
+            0
+        } else {
+            u32::MAX << (32 - len)
+        }
+    }
+
+    /// How many addresses the prefix holds, saturating — a `/0` does not fit in
+    /// a `u32` and nothing here ever wants one.
+    pub fn size(&self) -> u32 {
+        1u32.checked_shl(32 - self.len as u32).unwrap_or(u32::MAX)
+    }
+
+    /// The gateway: the FIRST usable address. Derived and not stored, which is
+    /// what keeps the two from ever disagreeing.
+    pub fn gateway(&self) -> String {
+        Self::fmt_u32(self.base + 1)
+    }
+
+    pub fn contains(&self, ip: u32) -> bool {
+        ip & Self::mask(self.len) == self.base
+    }
+
+    /// Do the two prefixes share any address? The question `network create` has
+    /// to answer before handing out a second network that overlaps the first.
+    pub fn overlaps(&self, other: &Cidr) -> bool {
+        let shorter = self.len.min(other.len);
+        self.base & Self::mask(shorter) == other.base & Self::mask(shorter)
+    }
+
+    pub fn to_string_cidr(&self) -> String {
+        format!("{}/{}", Self::fmt_u32(self.base), self.len)
+    }
+
+    fn fmt_u32(v: u32) -> String {
+        let b = v.to_be_bytes();
+        format!("{}.{}.{}.{}", b[0], b[1], b[2], b[3])
+    }
+
+    /// Parses a dotted address into a `u32`.
+    pub fn parse_addr(ip: &str) -> Option<u32> {
+        let p: Vec<&str> = ip.trim().split('.').collect();
+        if p.len() != 4 {
+            return None;
+        }
+        let mut o = [0u8; 4];
+        for (i, x) in p.iter().enumerate() {
+            o[i] = x.parse::<u8>().ok()?;
+        }
+        Some(u32::from_be_bytes(o))
+    }
+}
+
 /// **Preferred** IP (deterministic, pure) in an arbitrary `/16` (`<prefix>.A.B`),
 /// derived from the id. It's just the starting point: on its own it collides by the birthday
 /// paradox at ~300 containers (32 bits of the id → 16 bits of host). Real uniqueness comes from
@@ -1675,6 +1789,83 @@ pub fn list_connections(ip2name: &std::collections::HashMap<String, String>) -> 
 
 #[cfg(test)]
 mod tests {
+
+    /// A forma LEGADA continua a querer dizer o que sempre quis.
+    ///
+    /// Todo o registo escrito antes disto guarda um octeto (`210`) ou dois
+    /// (`10.210`), e significava `10.210.0.0/16`. Se esta leitura mudasse, cada
+    /// rede existente passava a apontar para outro espaço de endereços — a pior
+    /// migração possível, e silenciosa.
+    #[test]
+    fn a_forma_legada_de_dois_octetos_e_um_slash_16() {
+        let legado = Cidr::parse("10.210").expect("dois octetos");
+        assert_eq!(legado.len, 16);
+        assert_eq!(legado.to_string_cidr(), "10.210.0.0/16");
+        assert_eq!(legado, Cidr::parse("10.210.0.0/16").unwrap());
+        // E o gateway continua a ser o `.0.1` que sempre foi.
+        assert_eq!(legado.gateway(), "10.210.0.1");
+    }
+
+    /// Os bits de host são LIMPOS, não recusados: `10.210.5.7/16` é como se
+    /// escreve «o /16 onde este endereço está», e recusá-lo era pedantismo.
+    #[test]
+    fn os_bits_de_host_sao_limpos_em_vez_de_recusados() {
+        assert_eq!(
+            Cidr::parse("10.210.5.7/16").unwrap().to_string_cidr(),
+            "10.210.0.0/16"
+        );
+        assert_eq!(
+            Cidr::parse("192.168.1.130/25").unwrap().to_string_cidr(),
+            "192.168.1.128/25"
+        );
+    }
+
+    /// A pergunta que o `network create` tem de responder antes de entregar uma
+    /// segunda rede: partilham algum endereço?
+    ///
+    /// O caso que engana é o de prefixos de tamanho DIFERENTE — um `/24` dentro
+    /// de um `/16` não tem a mesma base e sobrepõe-se na mesma. Comparar as
+    /// bases só funciona depois de as mascarar pelo prefixo mais CURTO.
+    #[test]
+    fn sobreposicao_apanha_um_prefixo_dentro_de_outro() {
+        let dezasseis = Cidr::parse("10.210.0.0/16").unwrap();
+        let dentro = Cidr::parse("10.210.7.0/24").unwrap();
+        assert!(dezasseis.overlaps(&dentro), "um /24 dentro de um /16");
+        assert!(dentro.overlaps(&dezasseis), "e é simétrico");
+
+        let fora = Cidr::parse("10.211.0.0/16").unwrap();
+        assert!(!dezasseis.overlaps(&fora));
+        // Adjacentes não se sobrepõem, que é o erro de fencepost clássico.
+        let a = Cidr::parse("192.168.0.0/25").unwrap();
+        let b = Cidr::parse("192.168.0.128/25").unwrap();
+        assert!(!a.overlaps(&b), "adjacentes não se sobrepõem");
+    }
+
+    #[test]
+    fn tamanho_e_pertenca() {
+        let c = Cidr::parse("172.20.4.0/22").unwrap();
+        assert_eq!(c.size(), 1024);
+        assert_eq!(c.gateway(), "172.20.4.1");
+        assert!(c.contains(Cidr::parse_addr("172.20.5.9").unwrap()));
+        assert!(!c.contains(Cidr::parse_addr("172.20.8.1").unwrap()));
+        // Um /32 é um endereço só, e não deve rebentar no shift.
+        assert_eq!(Cidr::parse("10.0.0.1/32").unwrap().size(), 1);
+    }
+
+    #[test]
+    fn recusa_o_que_nao_e_um_prefixo() {
+        for mau in [
+            "",
+            "10.210.0.0/33",
+            "10.300.0.0/16",
+            "abc",
+            "10.1.1.1.1/8",
+            "/16",
+        ] {
+            assert!(Cidr::parse(mau).is_none(), "aceitou {mau:?}");
+        }
+    }
+
     /// `create` still writes the LEGACY form (the bare base octet), which has
     /// nowhere to put a key. Stamping ownership has to upgrade it to `base=<n>`
     /// on the way — and the upgrade must be invisible, i.e. the network keeps the
