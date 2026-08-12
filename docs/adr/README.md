@@ -21,6 +21,7 @@ never rewritten — supersede them with a new one.
 | [0008](0008-proxmox-vm-backend.md) | Add a Proxmox VE backend as a separate crate, and make backends registrable | **Accepted, in 2 phases** — the registry now, the Proxmox backend blocked on a real host |
 | [0009](0009-truenas-storage-provisioner.md) | Provision TrueNAS datasets over its API, as a separate crate | **Accepted** — with a `runtime-sec` pass and a chaos scenario for the destructive path |
 | [0010](0010-remote-management-api.md) | What it would take for the management API to be remote | **Rejected** — the API stays local; remoteness belongs to the PaaS |
+| [0012](0012-vm-reboot-convergence.md) | A third convergence class for VMs: reboot, between update and replace | **Proposed** — deliberately after the production launch |
 
 ## Roadmap (from `AGENTS.md` "Universal Runtime" — each phase needs its own accepted ADR)
 
