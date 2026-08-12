@@ -20,6 +20,10 @@ delonix-volume = { path = "../delonix-volume" }
 # Provisioning on a NAS (ADR-0009). Only the bin depends on it — a motor crate
 # does not grow an HTTP client.
 delonix-truenas = { path = "../delonix-truenas" }
+# The Proxmox VM backend (ADR-0008). Same reason it lives outside `delonix-vm`,
+# and the bin is where its target (endpoint, node, credential) is known — so
+# this is the process that registers it.
+delonix-proxmox = { path = "../delonix-proxmox" }
 delonix-scan = { path = "../delonix-scan" }
 delonix-cri = { path = "../delonix-cri" }
 delonix-mgmt = { path = "../delonix-mgmt" }

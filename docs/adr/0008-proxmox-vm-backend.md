@@ -1,7 +1,8 @@
 # ADR-0008: Add a Proxmox VE backend as a separate crate, and make backends registrable
 
-- **Status:** **Accepted, both phases DONE** (phase 1 2026-08-10; phase 2
-  2026-08-11, `boot`/`stop` watched running against a real node)
+- **Status:** **Accepted, fully implemented** (phase 1 2026-08-10; phase 2
+  2026-08-11; decision 2's populable registry and its first caller 2026-08-11,
+  the whole lifecycle watched running through the CLI against a real node)
 - **Date:** 2026-08-10
 - **Deciders:** Walter Angolar
 
@@ -252,6 +253,8 @@ things are already done and one is not:
   handling this ADR's spike identified.
 * `ProxmoxBackend::boot` is **deliberately unimplemented** and says so in its
   own error: the engine does not ship a create path nobody has watched run.
+  *(Superseded the same day — see "Phase 2, done" below: `boot` was written and
+  watched running against a real node.)*
 
 What is genuinely missing is the half of decision 2 that never landed: **the
 registry is a `static` table, so "a registry the caller populates" is not
@@ -267,6 +270,215 @@ the operator the crate does not exist, when it is sitting in the workspace. It
 now names the actual state and points here (`KNOWN_UNREGISTERED`, in
 `delonix-vm`). It remains **refused**: nothing about this makes an unfinished
 backend selectable.
+
+## Decision 2 landed (2026-08-11) — the registry takes a closure
+
+The paragraph above was right that the `static` table was the blocker, and one
+sentence of it explains the whole shape of the fix: `fn() -> Box<dyn VmBackend>`
+has nowhere to receive an endpoint, a node name and a credential. So a
+registration carries a **closure**, and the closure is where a caller's
+configuration lives:
+
+```rust
+pub type BackendFactory = Box<dyn Fn() -> Result<Box<dyn VmBackend>> + Send + Sync>;
+pub fn register_backend(reg: BackendRegistration) -> Result<()>;
+```
+
+`Send + Sync` constrains the CLOSURE, not the trait — no backend implementation
+changed, and the skill's "do not touch the trait" holds literally.
+
+Four properties, each one a refusal or an ordering that a plainer map would not
+have:
+
+* **Registering does no I/O.** The factory is not called, so a node that is
+  unreachable — or simply not there — costs nothing until somebody selects the
+  backend by name.
+* **`auto_selectable` is a field of the REGISTRATION, not just a method on the
+  built backend.** Auto-detection has to answer it *without building*, because
+  construction is where a remote backend authenticates. The old
+  `select_backend` did `.map(build).filter(auto_selectable)` — it built every
+  candidate and threw the wrong ones away, which for a remote backend is
+  precisely the network round trip the flag exists to prevent. Free for the two
+  local backends, which is why nothing noticed.
+* **A third-party registration may not be auto-selectable at all**, and asking
+  for it is refused by name. Auto-detection asks `available()`, and a backend
+  from outside this crate may only be able to answer that over the network.
+* **Names are owned.** An id or alias already belonging to a different backend
+  is refused: the loser would become unreachable by name, silently, which is the
+  same class of failure as the `_ => CloudHypervisorBackend` default this ADR
+  removed. Re-registering the *same* id replaces it, so reconfiguring a target
+  does not leave two entries shadowing each other.
+
+**The first caller is `delonix-runtime-bin`** (`cmd/vmbackends.rs`), called once
+from `run()`. It reads `DELONIX_PROXMOX_URL` / `_NODE` and a credential — a
+`kind: Secret` named by `DELONIX_PROXMOX_SECRET` first, per decision 4 — and
+registers the backend. Environment and not a manifest field because `create_with`
+resolves the backend itself and never receives a target: the registration has to
+be in place *before* the engine is asked.
+
+A misconfigured target is **reported and skipped, not fatal**: a typo in
+`DELONIX_PROXMOX_TOKEN` must not stop `delonix container ls` from running. The
+name then stays unregistered and `--backend proxmox` says how to configure it,
+which is the state the operator is actually in.
+
+`ProxmoxBackend` now holds an `Arc<Client>`, and the registered factory clones
+it. Without that, every `backend_for` — which is once per VM in `vm ls` — meant
+a fresh authenticate plus `GET /nodes`: listing ten VMs was thirty round trips
+where twelve do.
+
+**Watched running end to end through the CLI**, against the `proxmox-ve:9.1`
+appliance this repo builds:
+
+```
+$ delonix vm create pvedemo --backend proxmox --disk local-lvm:1 --memory 512M
+ ✓ defining the domain 📋 0.4s      ✓ starting the VM ▶ 0.8s
+$ delonix vm ls    → pvedemo  1  512M  Running
+$ delonix vm rm pvedemo
+$ GET /nodes/pve/qemu → {"data":[]}
+```
+
+### Three defects the same pass found and fixed
+
+1. **`create_with` deleted `cfg.disk` when a boot failed.** The cleanup was
+   `remove_file(&overlay)`, and with `manages_own_storage` the overlay IS
+   `cfg.disk` verbatim — the name the caller wrote for something on the far
+   node. For today's backend that name is `local-lvm:8` and the unlink simply
+   fails, but the rule cannot rest on the spelling a backend happens to use: a
+   remote backend whose disk reference is a local path would lose the user's
+   base image. **This branch had never been exercised by anything** — no
+   registered backend reached it, which is what a registry nobody can add to
+   costs.
+2. **`mem_mib` was re-implemented in `delonix-proxmox`, and the copy was
+   wrong.** It did not know the k8s `Gi`/`Mi` suffix the engine tolerates, so
+   `memory: 2Gi` meant 2 GiB on libvirt and Cloud Hypervisor and **1 GiB** on
+   Proxmox — silently, and the copy did not warn on an unparseable value either.
+   The engine's `mem_mib` is now `pub` and shared: one definition for everyone
+   who reads the field, the same discipline as `fw_rule_tail`.
+3. **`urlencode` encoded code points, not bytes.** `other as u32` is right only
+   below 0x80: a `ç` in an account name became `%E7` instead of its two UTF-8
+   bytes, and anything above 0xFF produced `%1F600`, which is not
+   percent-encoding at all. A UPID comes back from the node with the account
+   name inside it, so the input was never ours to assume ASCII.
+
+**A method note worth more than any of the three.** The first test written for
+defect (1)'s sibling — the auto-detection ordering — registered the remote
+candidate in the global registry and called `select_backend(None)`. It passed
+with the bug still in: this host has a local backend installed, the walk stops
+at the first entry, and the remote one is never reached either way. The fix was
+to extract `auto_detect(&[BackendRegistration])` and hand the test a table where
+the skipped candidate is actually reached. Each of the three fixes was then
+verified by reverting it and watching its test fail.
+
+### The guest agent (2026-08-12)
+
+`ip()` no longer returns a flat `None`. Two halves, and only one of them is
+this side's to control:
+
+* **The channel**, which is the host side: `create_vm` sends `agent=1`, adding
+  the virtio-serial port the agent talks over. Without it the node does not even
+  try — every `/agent/…` call answers "not running" no matter what the guest
+  has installed. Measured: the setting comes back in the VM's config, and the
+  live test now asserts it on the VM the backend itself created.
+  `clone_template` deliberately does NOT force it: a clone inherits the
+  template's configuration, and overriding would contradict a choice somebody
+  made about that template.
+* **The agent**, which is the image's: `parse_agent_ip` reads
+  `data.result[].ip-addresses[]` and takes the first IPv4 that is not loopback,
+  not IPv6 and **not `169.254.0.0/16`** — that last one is what an interface has
+  when DHCP *failed*, so reporting it would say "the VM has an address" when the
+  truth is the opposite. `lo` is skipped by name *and* 127/8 by value, because
+  it is the first entry the agent returns and "the first IPv4" would be
+  loopback for every guest there is.
+
+**`None` is a first-class answer, not a failure.** A guest with no agent makes
+the node reply HTTP 500 `"QEMU guest agent is not running"` (measured), which is
+the ordinary case for a plain cloud image; `vm ls` calls `ip()` for every VM on
+every listing, so it costs a `None` and a `debug` line, never a warning. The
+`debug` line is there because "no agent" and "the token lost its permissions"
+both show up as an empty IP column, and only one of those is fine.
+
+**What was NOT validated live, and why.** The parser was driven with recorded
+answers, not with an agent talking. Getting one needed a nested guest with
+`qemu-guest-agent` installed: the node boots and has egress, and a Debian
+genericcloud image was downloaded onto it and booted as VM 901 — but that image
+does not ship the agent, and installing it into a guest two levels down was
+costing more than the evidence was worth. What IS live: the channel on a
+backend-created VM, and `ip()` answering `None` quietly for a guest with no
+agent. What is not: an actual address coming back.
+
+**A correction this pass owes the reader.** The note above saying
+`net0=virtio,bridge=vmbr0` is *refused* by the API was wrong, and wrong in a way
+worth naming: it was an artefact of the spike's `curl -d`, which does not
+URL-encode. `reqwest`'s `.form()` does, and the node accepts the same string —
+measured, the resulting config reads `net0 = virtio=BC:24:11:F4:F9:9C,bridge=vmbr0`.
+The backend had been sending it correctly all along; only the ADR was wrong.
+
+### Closing the rest (2026-08-12)
+
+The list above was the open one; this closes it. Two of the items turned out to
+be data-loss bugs rather than gaps.
+
+**`vm stop` was destroying the guest's disk.** `stop` and `destroy` are the same
+operation on a local backend — libvirt undefines the domain and
+`<root>/vms/<name>.qcow2`, which the *engine* owns, is untouched — and they are
+not the same remotely, where the only call that frees the VM also frees its
+disk. This backend implemented `stop` as "stop and destroy" for a good reason (a
+VM left behind after `vm rm` is an orphan) wired to the wrong verb: the engine
+calls `stop` for `vm stop` too, and the CLI's own next-steps block promises
+`stop it (keeps the disk)`. `VmBackend::destroy` is new, defaults to `stop` so
+both local backends are byte-for-byte unchanged, and `remove_inner` calls it.
+
+**`vm start` on a stopped remote VM built a second one.** `boot` asks the node
+for the next free id, so the record was rewritten to a fresh VM with an empty
+disk and the original was orphaned — data still on the node, nothing pointing at
+it. `VmBackend::resume` is new, defaults to `Ok(None)` (both local backends'
+`boot` is already idempotent through the per-VM overlay), and the Proxmox one
+starts the vmid its record names, answering `None` only when the node no longer
+has it.
+
+**Fields are refused by name.** `refuse_unsupported` runs before anything is
+created and names every field this backend cannot honour, grouped by why: the
+guest is on another machine (`kernel`, `initrd`, `firmware`, `cmdline`, `seed`,
+`devices`, `volumes`), Proxmox owns the QEMU knobs itself (`hugepages`,
+`cpuAffinity`, `machine`, `cpuModel`, `cpuTopology`, `tpm`, `video`,
+`bootOrder`), or there is no domain XML here at all (`libvirtXml*`). Several are
+reported together — fixing them one error at a time is one create attempt per
+field.
+
+This immediately caught a real case: **the CLI generates a NoCloud seed ISO
+unconditionally**, which is a file on this host and unreadable from a node
+elsewhere, so a plain `vm create --backend proxmox` failed on a seed nobody
+asked for. The CLI now skips it for a backend that owns its storage
+(`delonix_vm::backend_manages_own_storage`) and refuses `--hostname`/`--ssh-key`/
+`--user-data` there with the reason — the same shape the appliance-image refusal
+right above it already uses.
+
+**Snapshots** are implemented (`snapshot`/`restore`/`snapshots`), with
+`vmstate=1` so a snapshot of a running VM is a system checkpoint like the
+libvirt backend's, and with the API's pseudo-entry `current` filtered out of the
+listing *and* refused as a name — otherwise `vm restore <vm> current` would look
+like a supported thing to do.
+
+**Networking** takes a bridge (`VmConfig.bridge`, falling back to the target's,
+falling back to `vmbr0`) and a VLAN tag from the target. The tag lives with the
+target because it describes how the node is cabled, not the VM; an out-of-range
+value is an **error**, never a `None`, because dropping it would put the VM on
+the untagged network while the operator believes it is isolated.
+
+**The ticket expires** (2 h) and this client is shared for the life of the
+process, so `send_authed` re-authenticates once on a 401 — only for password
+auth, since an API token that gets a 401 was revoked and retrying it forever is
+how a credential gets locked out.
+
+Watched running through the CLI against the real node: `create` → `stop` (vmid
+100 **still on the node**) → `start` (same handle, no second VM) → `snapshot` →
+`snapshots` → `restore` → `rm` (node empty). Each of the three bug fixes was
+reverted one at a time and its test fails.
+
+### Still open, deliberately
+
+A second NIC, and an address from an agent (see above — the parser runs against
+recorded answers).
 
 ## Phase 2, done (2026-08-11)
 

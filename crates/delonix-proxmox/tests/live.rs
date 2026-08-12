@@ -26,6 +26,8 @@ fn target() -> Option<Target> {
             password: std::env::var("DELONIX_PROXMOX_TEST_PASS").ok()?,
         },
         insecure_tls: true,
+        bridge: None,
+        vlan: None,
     })
 }
 
@@ -77,6 +79,25 @@ fn cria_arranca_e_destroi_contra_um_no_real() {
     );
 
     assert!(b.is_running(&vm), "the VM must be running after boot");
+
+    // The agent CHANNEL has to be on the VM this backend created: without it
+    // the node never even tries, and `ip()` could not work no matter what the
+    // guest has installed.
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let node_cfg = b.client().config(vmid).expect("read the config back");
+    assert!(
+        node_cfg.get("agent").is_some(),
+        "the VM was created without the guest-agent channel: {node_cfg}"
+    );
+
+    // And `ip()` on a guest with no agent answers None — quietly. This is the
+    // ORDINARY case (a plain cloud image has no agent), and `vm ls` calls it
+    // for every VM on every listing, so it must not be an error.
+    assert_eq!(
+        b.ip(&vm),
+        None,
+        "a guest with no agent must yield no address, not a failure"
+    );
 
     // Destroy, and prove the node no longer has it: `stop` here means gone, the
     // same as libvirt undefining a domain — a VM left behind after

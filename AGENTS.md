@@ -4017,6 +4017,113 @@ Saíram na mesma passagem os órfãos públicos que a remoção criou
 não os assinala, porque `dead_code` só vê itens privados. **Ao apagar uma API
 pública, a cascata privada é do compilador; a pública tem de ser contada à mão.**
 
+## O registo de backends de VM, e o backend Proxmox (ADR-0008, fechado 2026-08-11)
+
+`backend_for` era um `match` privado sobre dois literais. A tabela estática que o
+substituiu resolveu o `_ => CloudHypervisorBackend` (mentia sobre o que estava a correr) mas
+deixou metade da decisão 2 por fazer: **um crate que depende do `delonix-vm` — como qualquer
+backend tem de depender, pelo trait — não se consegue pôr dentro de um `static` que vive lá.**
+Por isso o `delonix-proxmox` esteve no workspace, implementado e provado contra um nó real, **sem
+um único chamador**.
+
+- **Uma registration leva um CLOSURE** (`BackendFactory = Box<dyn Fn() -> Result<Box<dyn
+  VmBackend>> + Send + Sync>`), e é essa a forma toda: um backend remoto precisa de endpoint,
+  nome de nó e credencial, e um `fn() -> Box<dyn VmBackend>` não tem onde os receber. O
+  `Send + Sync` prende o CLOSURE, **não o trait** — nenhuma implementação mudou.
+- **Registar não faz I/O.** A factory não é chamada, logo um nó inalcançável custa zero até
+  alguém escolher o backend pelo nome.
+- **`auto_selectable` é campo da REGISTRATION e não só método do backend construído.** A
+  auto-detecção tem de responder a isso *sem construir*, porque construir é onde um backend
+  remoto se autentica. O `select_backend` antigo fazia `.map(build).filter(auto_selectable)` —
+  construía todos e deitava fora os errados, que é exactamente a ida à rede que a flag existe
+  para evitar. Grátis nos dois backends locais, que é a razão de ninguém ter reparado.
+- **Nomes têm dono**: um id/alias que já é de OUTRO backend é recusado (o perdedor ficava
+  inalcançável por nome, em silêncio); re-registar o MESMO id substitui, para reconfigurar um
+  alvo não deixar duas entradas a sombrear-se.
+- **O primeiro chamador é o `-bin`** (`cmd/vmbackends.rs`, chamado uma vez do `run()`):
+  `DELONIX_PROXMOX_URL`/`_NODE` + credencial (`kind: Secret` via `DELONIX_PROXMOX_SECRET`
+  primeiro). Env e não campo de manifesto porque o `create_with` resolve o backend sozinho e
+  **nunca recebe um alvo** — a registration tem de estar feita antes de o motor ser chamado. Um
+  alvo mal configurado **avisa e segue**: um typo no token não pode parar um `container ls`.
+- **`ProxmoxBackend` segura um `Arc<Client>`** e a factory clona-o. Sem isso, cada
+  `backend_for` — uma vez por VM no `vm ls` — era autenticar + `GET /nodes` outra vez: listar
+  dez VMs eram trinta round-trips onde doze chegam.
+- **Validado ao vivo pela CLI** contra o appliance `proxmox-ve:9.1` deste repo: `vm create
+  --backend proxmox --disk local-lvm:1` → `vm ls` Running → `vm rm` → nó vazio.
+
+**Três defeitos que a mesma passagem encontrou**, e o primeiro só existia porque ninguém podia
+alcançar o ramo: (1) o `create_with` **apagava o `cfg.disk`** num boot falhado — com
+`manages_own_storage` o `overlay` É o `cfg.disk` verbatim, e o motor removia um ficheiro que não
+criou (hoje `local-lvm:8`, logo o unlink falha, mas a regra não pode assentar na grafia que um
+backend calha usar); (2) o `mem_mib` estava **reimplementado** no `delonix-proxmox` e a cópia não
+conhecia o sufixo k8s — `memory: 2Gi` dava 2 GiB em libvirt/CH e **1 GiB** em Proxmox, em
+silêncio (agora o do motor é `pub` e partilhado, disciplina do `fw_rule_tail`); (3) o
+`urlencode` codificava code points e não bytes (`ç` → `%E7` em vez de `%C3%A7`, e acima de 0xFF
+saía `%1F600`, que não é percent-encoding nenhum — e um UPID traz o nome da conta lá dentro).
+
+**Guest agent (`ip()`)**: são duas metades e só uma é nossa. O **canal** é o `agent=1` que o
+`create_vm` manda (sem ele o nó nem tenta — toda a chamada `/agent/…` responde «not running»,
+haja o que houver no convidado); o **agente** é do lado da imagem. O `parse_agent_ip` toma o
+primeiro IPv4 que não seja loopback, IPv6 nem **`169.254.0.0/16`** — este último é o que uma
+interface tem quando o DHCP FALHOU, e reportá-lo diria «a VM tem endereço» quando a verdade é o
+contrário. O `lo` é saltado pelo nome **e** o 127/8 pelo valor, porque é a primeira entrada que o
+agente devolve: «o primeiro IPv4» seria loopback em todos os convidados. **`None` é resposta de
+primeira classe**, não falha — um convidado sem agente faz o nó responder HTTP 500 «QEMU guest
+agent is not running» (medido), o `vm ls` chama isto por VM em cada listagem, logo custa um `None`
+e uma linha de `debug` (nunca um aviso; mas `debug` e não nada, porque «sem agente» e «o token
+perdeu permissões» dão os dois uma coluna IP vazia). O `clone_template` **não** força o `agent=1`:
+um clone herda a config do template, e sobrepor contradiria uma escolha de quem o fez.
+**Não validado ao vivo**: um endereço a vir mesmo de um agente — precisava de um convidado
+aninhado com o `qemu-guest-agent` instalado, e o custo passou o valor da prova. Validado ao vivo
+está o canal numa VM criada pelo backend, e o `ip()` a devolver `None` em silêncio.
+
+**`stop` e `destroy` são a MESMA operação num backend local e NÃO num remoto** — e confundi-los
+apagava dados. Localmente o disco é do motor (o `undefine` do libvirt não toca no
+`<root>/vms/<name>.qcow2`); num nó remoto a única chamada que liberta a VM liberta o disco com
+ela. O backend Proxmox lia `stop` como «parar e destruir» por uma razão certa (uma VM deixada
+para trás depois de um `vm rm` é um órfão) ligada ao verbo errado: o motor chama `stop` também
+para o `vm stop`, e o bloco de próximos-passos da própria CLI promete `stop it (keeps the disk)`.
+O `VmBackend::destroy` é novo, **por omissão é o `stop`** (os dois locais ficam byte-a-byte
+iguais) e o `remove_inner` passou a chamá-lo.
+
+**`vm start` de uma VM remota parada criava uma SEGUNDA.** O `boot` pede ao nó o próximo id livre,
+logo o registo passava a apontar para uma VM nova de disco vazio e a original ficava órfã — os
+dados lá, e nada a apontar-lhes. O `VmBackend::resume` é novo, por omissão `Ok(None)` (o `boot`
+dos locais já é idempotente pelo overlay), e o do Proxmox arranca o vmid que o registo nomeia.
+
+**Campos recusados PELO NOME** (`refuse_unsupported`, antes de criar seja o que for), agrupados
+pelo porquê: o convidado está noutra máquina (`kernel`/`initrd`/`firmware`/`cmdline`/`seed`/
+`devices`/`volumes`), o Proxmox é dono dos botões do QEMU (`hugepages`/`cpuAffinity`/`machine`/
+`cpuModel`/`cpuTopology`/`tpm`/`video`/`bootOrder`), ou não há XML de domínio nenhum
+(`libvirtXml*`). Vários são reportados JUNTOS — corrigi-los um erro de cada vez é uma tentativa de
+create por campo. **Apanhou logo um caso real**: a CLI gerava um seed NoCloud SEMPRE, que é um
+ficheiro deste host e ilegível num nó remoto, por isso um `vm create --backend proxmox` simples
+falhava por um seed que ninguém pediu. A CLI passa a saltá-lo para um backend com storage própria
+(`backend_manages_own_storage`) e a recusar `--hostname`/`--ssh-key`/`--user-data` aí — o mesmo
+formato da recusa de imagem-appliance que já estava mesmo por cima.
+
+**Snapshots** implementados com `vmstate=1` (checkpoint de sistema, como o libvirt), e o
+pseudo-registo `current` da API filtrado da listagem **e** recusado como nome — senão
+`vm restore <vm> current` parecia coisa suportada. **Rede**: bridge (`VmConfig.bridge` → alvo →
+`vmbr0`) e VLAN do alvo (descreve como o NÓ está cablado, não a VM); uma etiqueta fora de gama é
+**erro**, nunca um `None` — descartá-la punha a VM na rede sem tag com o operador a julgá-la
+isolada. **O ticket expira** (2 h) e o cliente é partilhado pelo processo todo, por isso o
+`send_authed` reautentica uma vez num 401 — só com password: um API token que leva 401 foi
+revogado, e repetir para sempre é como uma credencial fica bloqueada.
+
+**Correcção**: a nota que dizia o `net0=virtio,bridge=vmbr0` recusado pela API estava errada — era
+artefacto do `curl -d` do spike, que não faz URL-encoding. O `.form()` do reqwest faz, e o nó
+aceita (medido: `net0 = virtio=BC:24:11:F4:F9:9C,bridge=vmbr0` na config). O backend sempre mandou
+bem; só o documento estava mal.
+
+**A nota de método vale mais que os três.** O primeiro teste da ordenação da auto-detecção
+registava o candidato remoto no registo GLOBAL e chamava `select_backend(None)` — e **passava com
+o bug lá dentro**: este host tem um backend local instalado, a passagem pára na primeira entrada,
+e o remoto nunca é alcançado. Um teste que não consegue chegar à linha de que trata não prova
+nada. A correcção foi extrair `auto_detect(&[BackendRegistration])` e dar-lhe uma tabela onde o
+candidato saltado é mesmo alcançado. Os três defeitos foram depois verificados pela regra do
+repo: revertidos um a um, cada teste falha.
+
 ## Regra de ouro: fronteira com o PaaS
 
 Este código **não pode depender de nada privado**. Antes de qualquer commit:
@@ -4034,7 +4141,7 @@ Este código **não pode depender de nada privado**. Antes de qualquer commit:
    genuína (fica aqui). O broker de control-plane que decide QUANDO publicar portas
    (`Router`, multi-tenant) ficou no lado privado (`delonix-overlay`, em `delonix-paas`).
 
-## Arquitetura (10 crates)
+## Arquitetura (12 crates)
 
 | Crate | Responsabilidade |
 |---|---|
@@ -4042,7 +4149,9 @@ Este código **não pode depender de nada privado**. Antes de qualquer commit:
 | `delonix-runtime` / `delonix-runtime-bin` | runtime de containers (clone/namespaces/cgroups, create/stop/exec, reconcile_status) + a CLI `delonix` completa (container/image/build/vm/volumes/network — ver secção "CLI" acima) |
 | `delonix-net` | SDN rootless: holder netns + bridge + slirp único, DNAT/firewall nft, compat CNI, overlay WireGuard inter-nó |
 | `delonix-image` | imagens OCI: pull/registry/build, buildpacks CNB, registo interno, verificação de assinatura |
-| `delonix-vm` | microVMs declarativas — trait `VmBackend` (Cloud Hypervisor ou libvirt) |
+| `delonix-vm` | microVMs declarativas — trait `VmBackend` + o **registo** de backends (Cloud Hypervisor e libvirt vêm semeados; um terceiro entra por `register_backend`) |
+| `delonix-proxmox` | backend `VmBackend` remoto contra a API de UM nó Proxmox VE (ADR-0008). Fora do `delonix-vm` porque um cliente HTTP não entra num crate de motor; registado pelo `-bin`, que é quem conhece o alvo |
+| `delonix-truenas` | provisionar dataset/quota/partilha numa NAS pela API (ADR-0009) — mesma razão de crate à parte |
 | `delonix-volume` | volumes nomeados e bind mounts |
 | `delonix-cri` | servidor CRI (`runtime.v1`) — permite ao Delonix servir de runtime a um `kubelet` |
 | `delonix-mgmt` | API de gestão LOCAL (HTTP+JSON num socket unix, só o próprio uid) para um control-plane externo, mais o registo Prometheus partilhado e os spans OpenTelemetry. Não é remota, e o `cli-stability.md` diz que não se deve construir automação sobre ela — ver ADR-0010 |
