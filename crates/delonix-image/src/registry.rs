@@ -110,6 +110,26 @@ fn scheme_for(host: &str) -> &'static str {
     }
 }
 
+/// Start offset and whole size declared by a `Content-Range` response header
+/// (`bytes <start>-<end>/<total>`, RFC 9110); the size is `None` for the `*`
+/// form, which a server may send when it will resume but will not commit to a
+/// total.
+///
+/// Pure, and separate, because it is the check that makes stitching two ranges
+/// safe to attempt at all: appending the body of a 206 that starts somewhere
+/// OTHER than where we stopped produces a blob that is corrupt in a way only
+/// the final digest would catch — after the whole download has been paid for.
+fn parse_content_range(v: &str) -> Option<(u64, Option<u64>)> {
+    let (range, total) = v
+        .trim()
+        .strip_prefix("bytes")?
+        .trim_start()
+        .split_once('/')?;
+    let start = range.split('-').next()?.trim().parse().ok()?;
+    let total = total.trim();
+    Some((start, (total != "*").then(|| total.parse().ok()).flatten()))
+}
+
 /// The target architecture in OCI vocabulary (`amd64`, `arm64`, ...).
 fn target_arch() -> &'static str {
     match std::env::consts::ARCH {
@@ -131,17 +151,40 @@ struct Client {
 }
 
 impl Client {
-    fn send_once(&self, url: &str, accept: &str) -> reqwest::Result<reqwest::blocking::Response> {
+    fn send_once(
+        &self,
+        url: &str,
+        accept: &str,
+        from: Option<u64>,
+    ) -> reqwest::Result<reqwest::blocking::Response> {
         let mut req = self.http.get(url).header(reqwest::header::ACCEPT, accept);
         if let Some(t) = &self.token {
             req = req.bearer_auth(t);
+        }
+        if let Some(off) = from {
+            req = req.header(reqwest::header::RANGE, format!("bytes={off}-"));
         }
         req.send()
     }
 
     /// GET with Bearer authentication; on 401, obtains a token and retries (once).
     fn fetch(&mut self, url: &str, accept: &str) -> Result<reqwest::blocking::Response> {
-        let resp = self.send_once(url, accept).map_err(reg_err)?;
+        self.fetch_range(url, accept, None)
+    }
+
+    /// [`Self::fetch`] with an optional `Range: bytes=<from>-` — the resume of
+    /// a partial blob (see [`Self::blob_with_progress_capped`]). Going through
+    /// the same 401→token→retry path matters here and is not incidental: a
+    /// registry token is short-lived (ghcr's is minutes), so on a slow link the
+    /// token that opened the transfer can well be expired by the time an
+    /// interrupted download is resumed.
+    fn fetch_range(
+        &mut self,
+        url: &str,
+        accept: &str,
+        from: Option<u64>,
+    ) -> Result<reqwest::blocking::Response> {
+        let resp = self.send_once(url, accept, from).map_err(reg_err)?;
         if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
             let www = resp
                 .headers()
@@ -150,7 +193,7 @@ impl Client {
                 .unwrap_or("")
                 .to_string();
             self.token = Some(self.get_token(&www, None)?);
-            let resp = self.send_once(url, accept).map_err(reg_err)?;
+            let resp = self.send_once(url, accept, from).map_err(reg_err)?;
             return self.check(resp, url);
         }
         self.check(resp, url)
@@ -309,6 +352,12 @@ impl Client {
     /// send one) grew `buf` until the machine OOMed. Both are fixed here:
     /// the up-front reservation is capped regardless of the claimed total,
     /// and the loop aborts once the ACTUAL bytes read exceed the limit.
+    /// How many times a single blob may be (re)opened. Same budget as
+    /// `stream_download`'s, for the same reason: enough to ride out a link that
+    /// drops a connection every few minutes, not so many that a genuinely
+    /// broken transfer takes all afternoon to say so.
+    const BLOB_ATTEMPTS: u32 = 5;
+
     fn blob_with_progress_capped(
         &mut self,
         digest: &str,
@@ -323,31 +372,131 @@ impl Client {
             self.repo,
             digest
         );
-        let mut resp = self.fetch(&url, "*/*")?;
-        let total = resp.content_length();
-        let reserve = total.unwrap_or(0).min(max_bytes) as usize;
-        let mut buf: Vec<u8> = Vec::with_capacity(reserve);
-        let mut chunk = [0u8; 65536];
-        let mut done: u64 = 0;
-        loop {
-            let n = resp
-                .read(&mut chunk)
-                .map_err(|e| Error::Registry(format!("blob read: {e}")))?;
-            if n == 0 {
-                break;
+        // Kept ACROSS attempts: this is what "resume" means here. A blob is
+        // buffered whole in memory (a property of this function since it was
+        // written), so what a retry continues from is this vector, not a file.
+        let mut buf: Vec<u8> = Vec::new();
+        // Size of the WHOLE blob. Not `content_length()` on a resumed request:
+        // a 206's Content-Length is the length of the FRAGMENT, so taking it
+        // would make the progress bar restart against a shrinking total. On a
+        // resume the whole size comes from the `/<total>` of Content-Range.
+        let mut total: Option<u64> = None;
+        let mut last_err = String::new();
+
+        for attempt in 1..=Self::BLOB_ATTEMPTS {
+            let from = (!buf.is_empty()).then_some(buf.len() as u64);
+            if attempt > 1 {
+                // Backoff, and a line saying what is happening: without it a
+                // resumed pull on a slow link is indistinguishable from a hang,
+                // which is the complaint that started this.
+                std::thread::sleep(Duration::from_secs(1 << (attempt - 2).min(3)));
+                tracing::warn!(
+                    have = buf.len(),
+                    attempt,
+                    "resuming blob {digest} after: {last_err}"
+                );
             }
-            done += n as u64;
-            if done > max_bytes {
-                return Err(Error::Registry(format!(
-                    "blob {digest} exceeds the {max_bytes}-byte limit — aborted"
-                )));
+            let mut resp = match self.fetch_range(&url, "*/*", from) {
+                Ok(r) => r,
+                // Retry a failed OPEN only while resuming. Getting here with
+                // bytes in hand means the URL and the token were good moments
+                // ago, so this is transport. On the FIRST request the same
+                // error is far more likely to be a 403/404/no-such-repo, and
+                // retrying those just delays an answer the caller already has.
+                Err(e) => {
+                    if from.is_none() || matches!(e, Error::NotFound(_)) {
+                        return Err(e);
+                    }
+                    last_err = e.to_string();
+                    continue;
+                }
+            };
+
+            // Did the server actually honour the range? Three ways it may not,
+            // and only the first is a resume: 206 at the offset asked for; 206
+            // at a DIFFERENT offset (it answered another question — appending
+            // would silently corrupt the blob, caught only by the digest at the
+            // very end, after the whole download); or 200, meaning it ignored
+            // the header and is sending the whole thing again.
+            let mut restart = true;
+            if let Some(off) = from {
+                if resp.status().as_u16() == 206 {
+                    let cr = resp
+                        .headers()
+                        .get(reqwest::header::CONTENT_RANGE)
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(parse_content_range);
+                    if let Some((start, whole)) = cr {
+                        if start == off {
+                            restart = false;
+                            if whole.is_some() {
+                                total = whole;
+                            }
+                        }
+                    }
+                }
+                if restart {
+                    tracing::warn!(
+                        "registry ignored the Range request for {digest} — restarting from zero"
+                    );
+                }
             }
-            buf.extend_from_slice(&chunk[..n]);
-            if let Some(p) = progress {
-                p(done, total);
+            if restart {
+                buf.clear();
+                total = resp.content_length();
+                if let Some(t) = total {
+                    buf.reserve(t.min(max_bytes) as usize);
+                }
             }
+
+            let mut chunk = [0u8; 65536];
+            let mut broke = false;
+            loop {
+                let n = match resp.read(&mut chunk) {
+                    // Whatever is in `buf` stays: the next attempt continues
+                    // from there instead of throwing away minutes of transfer.
+                    Err(e) => {
+                        last_err = format!("blob read: {e}");
+                        broke = true;
+                        break;
+                    }
+                    Ok(n) => n,
+                };
+                if n == 0 {
+                    break;
+                }
+                if buf.len() as u64 + n as u64 > max_bytes {
+                    return Err(Error::Registry(format!(
+                        "blob {digest} exceeds the {max_bytes}-byte limit — aborted"
+                    )));
+                }
+                buf.extend_from_slice(&chunk[..n]);
+                if let Some(p) = progress {
+                    p(buf.len() as u64, total);
+                }
+            }
+            if broke {
+                continue;
+            }
+            // A clean EOF short of the announced size is a cut connection that
+            // did not bother to error — resume it too. Without this the blob
+            // came back truncated and only the caller's digest check noticed,
+            // reporting corruption for what was really a dropped transfer.
+            if let Some(t) = total {
+                if (buf.len() as u64) < t {
+                    last_err = format!("connection closed at {} of {t} bytes", buf.len());
+                    continue;
+                }
+            }
+            return Ok(buf);
         }
-        Ok(buf)
+
+        Err(Error::Registry(format!(
+            "blob {digest}: gave up after {} attempts with {} of {} bytes — last error: {last_err}",
+            Self::BLOB_ATTEMPTS,
+            buf.len(),
+            total.map(|t| t.to_string()).unwrap_or_else(|| "?".into()),
+        )))
     }
 
     // ---- push (write): blobs + manifest -------------------------------------
@@ -897,7 +1046,22 @@ pub fn pull_from_registry_with_creds_full(
                         // layers in flight there is no single "layer i of n" to
                         // report, and per-layer bytes would make the bar jump
                         // backwards. `done` is every byte pulled so far.
-                        let adapter = |chunk: u64, _blob_total: Option<u64>| {
+                        //
+                        // BUG FOUND: `blob_with_progress` reports the RUNNING
+                        // TOTAL for its blob, and this adapter was adding that
+                        // running total into the aggregate on every tick, as if
+                        // it were a delta. The reported bytes grew with the
+                        // SQUARE of the layer size — a 100 MiB layer in 64 KiB
+                        // chunks announced tens of GiB pulled. `pull_oci_artifact`
+                        // reads the same callback correctly (it compares `done`
+                        // against the total), so the two consumers of one
+                        // callback disagreed about what its argument meant.
+                        // `Cell` and not an atomic: this closure is built per
+                        // blob and only ever called by the worker that owns it.
+                        let seen = std::cell::Cell::new(0u64);
+                        let adapter = |done: u64, _blob_total: Option<u64>| {
+                            let chunk = done.saturating_sub(seen.get());
+                            seen.set(done);
                             let acc = done_bytes
                                 .fetch_add(chunk, std::sync::atomic::Ordering::Relaxed)
                                 + chunk;
@@ -1294,8 +1458,8 @@ pub fn pull_oci_artifact_with_meta(
 #[cfg(test)]
 mod tests {
     use super::{
-        layer_media_type, parse_reference, pull_from_registry_with_creds, pull_oci_artifact,
-        push_oci_artifact, sha256_hex, with_prefix, Client,
+        layer_media_type, parse_content_range, parse_reference, pull_from_registry_with_creds,
+        pull_oci_artifact, push_oci_artifact, sha256_hex, with_prefix, Client,
     };
 
     fn test_client(host: &str, repo: &str) -> Client {
@@ -2042,5 +2206,280 @@ mod tests {
             m, m2,
             "round-trip do manifesto tem de preservar a estrutura"
         );
+    }
+
+    // ---- resume of an interrupted blob --------------------------------------
+
+    #[test]
+    fn parse_content_range_le_o_inicio_e_o_total() {
+        assert_eq!(
+            parse_content_range("bytes 100-199/200"),
+            Some((100, Some(200)))
+        );
+        // A server that resumes but will not commit to a total.
+        assert_eq!(parse_content_range("bytes 100-199/*"), Some((100, None)));
+        assert_eq!(parse_content_range("  bytes  0-9/10 "), Some((0, Some(10))));
+        // Anything that is not a byte range must NOT be read as one: an
+        // unparseable header is the case where the offset cannot be confirmed,
+        // and appending there is what corrupts a blob.
+        assert_eq!(parse_content_range("items 1-2/3"), None);
+        assert_eq!(parse_content_range("bytes */200"), None);
+        assert_eq!(parse_content_range(""), None);
+    }
+
+    /// How the fake registry answers the SECOND request for a blob.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Resume {
+        /// 206 from exactly the requested offset (a well-behaved registry).
+        Honour,
+        /// 200 with the whole body — the range header was ignored.
+        Ignore,
+        /// 206 announcing an offset that is NOT the one asked for. Appending
+        /// this would corrupt the blob, so it must restart from zero.
+        WrongOffset,
+    }
+
+    /// A blob endpoint that DROPS the first connection halfway through the
+    /// body, and serves the remainder on the next request according to `mode`.
+    /// This is the failure measured live on a slow link: not a timeout, a
+    /// connection that dies mid-transfer.
+    fn serve_flaky_blob(
+        payload: Vec<u8>,
+        cut_at: usize,
+        mode: Resume,
+    ) -> (u16, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use std::io::{Read, Write};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let requests = std::sync::Arc::new(AtomicUsize::new(0));
+        let counter = requests.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut s) = stream else { continue };
+                let mut head = Vec::new();
+                let mut byte = [0u8; 1];
+                while !head.ends_with(b"\r\n\r\n") {
+                    match s.read(&mut byte) {
+                        Ok(0) | Err(_) => break,
+                        Ok(_) => head.push(byte[0]),
+                    }
+                }
+                let head = String::from_utf8_lossy(&head).to_lowercase();
+                let n = counter.fetch_add(1, Ordering::SeqCst);
+                let total = payload.len();
+                let from: usize = head
+                    .lines()
+                    .find(|l| l.starts_with("range:"))
+                    .and_then(|l| l.split('=').nth(1))
+                    .and_then(|v| v.trim().trim_end_matches('-').parse().ok())
+                    .unwrap_or(0);
+
+                if n == 0 {
+                    // Announce the full length, then hang up early.
+                    let _ = s.write_all(
+                        format!("HTTP/1.1 200 OK\r\ncontent-length: {total}\r\n\r\n").as_bytes(),
+                    );
+                    let _ = s.write_all(&payload[..cut_at]);
+                    let _ = s.flush();
+                    continue; // drops the stream: EOF before the body ended
+                }
+                match mode {
+                    Resume::Honour => {
+                        let _ = s.write_all(
+                            format!(
+                                "HTTP/1.1 206 Partial Content\r\ncontent-range: bytes {from}-{}/{total}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                                total - 1,
+                                total - from
+                            )
+                            .as_bytes(),
+                        );
+                        let _ = s.write_all(&payload[from..]);
+                    }
+                    Resume::Ignore => {
+                        let _ = s.write_all(
+                            format!("HTTP/1.1 200 OK\r\ncontent-length: {total}\r\nconnection: close\r\n\r\n").as_bytes(),
+                        );
+                        let _ = s.write_all(&payload);
+                    }
+                    Resume::WrongOffset => {
+                        // Claims to start at 0 while sending everything: a
+                        // client that appended blindly would end up with the
+                        // prefix twice.
+                        let _ = s.write_all(
+                            format!(
+                                "HTTP/1.1 206 Partial Content\r\ncontent-range: bytes 0-{}/{total}\r\ncontent-length: {total}\r\nconnection: close\r\n\r\n",
+                                total - 1
+                            )
+                            .as_bytes(),
+                        );
+                        let _ = s.write_all(&payload);
+                    }
+                }
+                let _ = s.flush();
+            }
+        });
+        (port, requests)
+    }
+
+    /// The bug this closes, measured live: `vm pull` of a 276 MiB image died
+    /// after 8m19s with `blob read: request or response body error`, and the
+    /// next attempt started again from byte zero — so on a link slower than the
+    /// transfer, the image could never finish downloading, no matter how many
+    /// times it was retried.
+    #[test]
+    fn blob_retoma_uma_ligacao_cortada_a_meio() {
+        let payload: Vec<u8> = (0..40_000u32).map(|i| (i % 251) as u8).collect();
+        let (port, requests) = serve_flaky_blob(payload.clone(), 12_345, Resume::Honour);
+        let mut c = test_client(&format!("127.0.0.1:{port}"), "resume");
+
+        let got = c
+            .blob_with_progress_capped("sha256:whatever", None, 1 << 20)
+            .expect("uma ligação cortada a meio tem de ser retomada, não abandonada");
+
+        assert_eq!(got, payload, "os bytes costurados têm de bater com o blob");
+        assert_eq!(
+            requests.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "devia ter bastado UM pedido de retomada — não um download inteiro de novo"
+        );
+    }
+
+    /// A registry that ignores `Range` must not produce a corrupt blob: the
+    /// only safe reading of a 200 is "it is sending the whole thing again".
+    #[test]
+    fn blob_recomeca_quando_o_servidor_ignora_o_range() {
+        let payload: Vec<u8> = (0..30_000u32).map(|i| (i % 97) as u8).collect();
+        let (port, _) = serve_flaky_blob(payload.clone(), 9_000, Resume::Ignore);
+        let mut c = test_client(&format!("127.0.0.1:{port}"), "ignore-range");
+
+        let got = c.blob_with_progress_capped("sha256:whatever", None, 1 << 20);
+        assert_eq!(got.unwrap(), payload);
+    }
+
+    /// A 206 that starts somewhere OTHER than where we stopped answers a
+    /// different question. Appending it would duplicate the prefix — corruption
+    /// that only the caller's digest check would catch, at the end of the whole
+    /// download. It has to restart instead.
+    #[test]
+    fn blob_recomeca_quando_o_206_vem_do_offset_errado() {
+        let payload: Vec<u8> = (0..30_000u32).map(|i| (i % 131) as u8).collect();
+        let (port, _) = serve_flaky_blob(payload.clone(), 7_000, Resume::WrongOffset);
+        let mut c = test_client(&format!("127.0.0.1:{port}"), "wrong-offset");
+
+        let got = c
+            .blob_with_progress_capped("sha256:whatever", None, 1 << 20)
+            .expect("devia recomeçar do zero, não colar no sítio errado");
+        assert_eq!(
+            got, payload,
+            "colar um 206 do offset errado duplicaria o prefixo"
+        );
+    }
+
+    /// The progress callback reports the RUNNING TOTAL for the blob, and both
+    /// consumers must read it that way. The parallel pull's adapter used to add
+    /// it in as if it were a per-chunk delta, so the bytes it announced grew
+    /// with the square of the layer size.
+    #[test]
+    fn o_progresso_de_um_blob_e_acumulado_e_nunca_passa_do_total() {
+        let payload: Vec<u8> = (0..50_000u32).map(|i| (i % 251) as u8).collect();
+        let (port, _) = serve_flaky_blob(payload.clone(), 20_000, Resume::Honour);
+        let mut c = test_client(&format!("127.0.0.1:{port}"), "progresso");
+
+        let ticks = std::cell::RefCell::new(Vec::<u64>::new());
+        let seen_total = std::cell::Cell::new(None);
+        let cb = |done: u64, total: Option<u64>| {
+            ticks.borrow_mut().push(done);
+            if total.is_some() {
+                seen_total.set(total);
+            }
+        };
+        let got = c
+            .blob_with_progress_capped("sha256:whatever", Some(&cb), 1 << 20)
+            .unwrap();
+
+        assert_eq!(got.len(), payload.len());
+        let ticks = ticks.into_inner();
+        assert!(ticks.windows(2).all(|w| w[1] >= w[0]), "{ticks:?}");
+        assert_eq!(ticks.last().copied(), Some(payload.len() as u64));
+        assert_eq!(
+            seen_total.get(),
+            Some(payload.len() as u64),
+            "o total tem de ser o do BLOB INTEIRO, não o do fragmento de um 206"
+        );
+    }
+
+    /// The other half of the same contract, on the consumer side: the parallel
+    /// pull's aggregate must not announce more bytes than were transferred. The
+    /// layer here is deliberately several 64 KiB read-chunks long — with a
+    /// single-chunk layer the old adapter (which added the running total in as
+    /// if it were a delta) gave the right answer by accident.
+    #[test]
+    fn o_progresso_agregado_do_pull_nao_inventa_bytes() {
+        let (port, _blob_gets, _handle) = serve_anon_registry();
+        let tmp = std::env::temp_dir().join(format!(
+            "delonix-image-progress-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let mut c = test_client(&format!("127.0.0.1:{port}"), "progresso-agregado");
+        let config_bytes =
+            br#"{"architecture":"amd64","os":"linux","rootfs":{"type":"layers","diff_ids":[]}}"#
+                .to_vec();
+        let config_digest = format!("sha256:{}", sha256_hex(&config_bytes));
+        c.push_blob(&config_digest, &config_bytes).unwrap();
+
+        let layer_bytes: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
+        let layer_digest = format!("sha256:{}", sha256_hex(&layer_bytes));
+        c.push_blob(&layer_digest, &layer_bytes).unwrap();
+
+        let manifest = serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "config": {
+                "mediaType": "application/vnd.oci.image.config.v1+json",
+                "size": config_bytes.len(),
+                "digest": config_digest,
+            },
+            "layers": [{
+                "mediaType": "application/vnd.oci.image.layer.v1.tar",
+                "size": layer_bytes.len(),
+                "digest": layer_digest,
+            }],
+        });
+        c.push_manifest(
+            "tag",
+            &serde_json::to_vec(&manifest).unwrap(),
+            "application/vnd.oci.image.manifest.v1+json",
+        )
+        .unwrap();
+
+        let store = crate::ImageStore::open(&tmp).unwrap();
+        let peak = std::sync::atomic::AtomicU64::new(0);
+        let cb = |_l: usize, _lt: usize, done: u64, _t: Option<u64>| {
+            peak.fetch_max(done, std::sync::atomic::Ordering::Relaxed);
+        };
+        super::pull_from_registry_with_creds_full(
+            &store,
+            &format!("127.0.0.1:{port}/progresso-agregado:tag"),
+            None,
+            None,
+            Some(&cb),
+        )
+        .expect("o pull devia ter sucesso");
+
+        let real = layer_bytes.len() as u64;
+        assert_eq!(
+            peak.load(std::sync::atomic::Ordering::Relaxed),
+            real,
+            "o agregado tem de ser os bytes REALMENTE transferidos (a layer), \
+             não a soma dos totais parciais"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
