@@ -246,16 +246,30 @@ uma imagem diferente conforme o dia em que correu. Para instalar pacotes há
 
 ## 6. Cheatsheet: instantâneos
 
-Só no motor libvirt, e **só com a VM a correr** — `stop` faz `undefine` do domínio.
+Os quatro verbos vivem no grupo `vm snapshot`, e funcionam com a VM **a correr ou
+parada**:
 
 ```bash
-delonix vm snapshot dev antes-da-actualizacao
-delonix vm snapshots dev
-delonix vm restore dev antes-da-actualizacao
+delonix vm snapshot create  dev antes-da-actualizacao
+delonix vm snapshot ls      dev
+delonix vm snapshot restore dev antes-da-actualizacao
+delonix vm snapshot rm      dev antes-da-actualizacao
 ```
 
-Com a VM a correr é um ponto de restauro **de sistema**: memória *e* disco. Provado
-escrevendo um ficheiro depois do instantâneo e restaurando:
+> Até à v0.51.0 estes eram três comandos planos (`vm snapshot`, `vm snapshots`,
+> `vm restore`), e não havia forma de apagar um instantâneo pela CLI. A forma
+> antiga foi removida sem alias: falha com `unrecognized subcommand`.
+
+Com a VM **a correr** é um ponto de restauro de sistema: memória *e* disco. Com ela
+**parada** é só do disco — e a VM continua parada. Restaurar um instantâneo tirado a
+correr traz a VM de volta a correr, memória incluída, e o comando di-lo.
+
+No **Cloud Hypervisor** os instantâneos são do disco e exigem a VM parada: o vmm a
+correr segura o `qcow2` em exclusivo e o CH não tem API de instantâneo de disco ao
+vivo. Os verbos que escrevem recusam com erro que diz o que fazer; o `ls` responde
+sempre.
+
+Provado escrevendo um ficheiro depois do instantâneo e restaurando:
 
 ```
 --- restore para base-limpa
@@ -265,8 +279,7 @@ cat: /root/marca.txt: No such file or directory
 AUSENTE (restore reverteu)
 ```
 
-**1,4 s** para reverter uma VM inteira. No Cloud Hypervisor o comando recusa com
-erro claro em vez de fingir.
+**1,4 s** para reverter uma VM inteira.
 
 ---
 
@@ -851,7 +864,9 @@ virsh -c qemu:///system net-undefine labnet
 
 Cada uma custou tempo real durante a montagem deste laboratório.
 
-### `stop` apaga os instantâneos, sem o dizer
+### `stop` apagava os instantâneos, sem o dizer — corrigido na v0.51.x
+
+Era isto, e foi medido aqui:
 
 ```
 $ delonix vm snapshot lab-probe base-limpa
@@ -864,12 +879,15 @@ error: Domain snapshot not found: no domain snapshot with matching name 'base-li
 ```
 
 `stop` faz `virsh undefine --managed-save --snapshots-metadata --nvram` para não
-deixar domínios órfãos — e o `--snapshots-metadata` leva os instantâneos. O `vm
-snapshots` devolve lista vazia com sucesso, indistinguível de uma VM que nunca teve
-nenhum.
+deixar domínios órfãos, e o `--snapshots-metadata` levava a contabilidade dos
+instantâneos. A medição que resolveu isto: **o `qemu-img snapshot -l` mostrava-os
+intactos no `qcow2` depois do `stop`** — o `undefine` não apaga o instantâneo, apaga
+só o que aponta para ele.
 
-**Trate os instantâneos como válidos apenas enquanto a VM não parar.** Para pontos de
-restauro que sobrevivam, copie o `qcow2` do *overlay* com a VM parada.
+Hoje o `stop` guarda o `snapshot-dumpxml` de cada um em `vms/<vm>/snapshots/` e o
+arranque seguinte devolve-os ao libvirt. **Um instantâneo sobrevive a `stop`/`start`**,
+e o `vm snapshot ls` de uma VM parada lista-os. O que fica da armadilha é a regra:
+nunca perguntar ao libvirt por uma VM parada — ele só conhece domínios definidos.
 
 ### Em Cloud Hypervisor, o endereço é calculado — não observado
 
