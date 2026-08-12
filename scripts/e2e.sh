@@ -393,8 +393,22 @@ check "explain Kind inexistente recusa" fail "$BIN" explain NaoExiste
 check "explain campo inexistente recusa" fail "$BIN" explain Container.naoExiste
 # O schema publicado tem de ser o gerado — o mesmo contrato do teste em Rust,
 # aqui contra o binário desta árvore.
-check "schema publicado == gerado" ok bash -c \
-  "'$BIN' schema print | diff -q - '$(cd "$(dirname "$0")/.." && pwd)/docs/schema/v1/delonix.json'"
+#
+# O ficheiro só existe se o script correr de dentro do checkout (deriva a raiz
+# de `$0`). Correr de outro sítio — o caminho normal para exercitar a bateria
+# numa VM descartável, que é onde ela SE consegue correr, já que os runners
+# alojados bloqueiam userns — dava um FAIL cujo output era
+# `diff: //docs/…: No such file or directory`. Isso não é «o schema divergiu»,
+# é «não foi possível comparar», e confundir os dois é a mesma classe de erro
+# que o resto deste motor persegue: uma medição que não se pôde fazer não é um
+# resultado negativo.
+SCHEMA_PUB="$(cd "$(dirname "$0")/.." && pwd)/docs/schema/v1/delonix.json"
+if [[ -f "$SCHEMA_PUB" ]]; then
+  check "schema publicado == gerado" ok bash -c \
+    "'$BIN' schema print | diff -q - '$SCHEMA_PUB'"
+else
+  skip "schema publicado == gerado" "sem checkout à mão ($SCHEMA_PUB não existe)"
+fi
 
 INITDIR="$OUT/init-$PFX"; mkdir -p "$INITDIR"
 check "init detecta e gera" ok "$BIN" init "$INITDIR"

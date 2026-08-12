@@ -3305,6 +3305,38 @@ com o `main` a ignorá-lo, por isso o `scripts/e2e.sh` ganhou uma forma de
 expectativa NUMÉRICA (`check <nome> 4 …`) além do `ok`/`fail` — um `fail`
 continuaria verde se todas as classes voltassem a colapsar em 1.
 
+## O isolamento de namespace é INERTE sem `br_netfilter` (medido 2026-08-12)
+
+Encontrado ao correr o arnês de caos e a bateria E2E **dentro de uma VM descartável** — que é a
+única forma de os correr, porque os runners alojados do GitHub bloqueiam userns não privilegiados
+e o job do Chaos fica **verde a saltar tudo** (`skipped: Corre o arnês de caos`, `skipped: Bateria
+E2E da CLI`). Um verde por ausência de execução é indistinguível de um verde por sucesso se só se
+olhar para o topo.
+
+**A medição**: numa VM feita da NOSSA `delonix-vm-base:ubuntu-24.04`, os dois cenários de
+isolamento FALHAM — `teamA alcança teamB`. Carregado o `br_netfilter` e postos os dois
+`bridge-nf-call-*` a 1, os mesmos dois PASSAM, sem mais nada mudado. O host de desenvolvimento
+passa porque o `install.sh` os aplica por omissão (`WITH_TUNE=1`).
+
+**Porquê**: o isolamento vive em chains nftables no hook `forward`; o tráfego entre dois
+containers da MESMA bridge só lá chega se o `br_netfilter` o levar à camada IP. Sem o módulo as
+chains são instaladas, os sets `@dlxall`/`@dlxns_*` são preenchidos, **todos os comandos reportam
+sucesso** — e a fronteira não existe. É a forma mais cara de falha silenciosa que este motor pode
+ter, porque a coisa que falha é uma propriedade de segurança que se lê como aplicada. O
+`infra.rs:333` já reconhecia a dependência **num comentário**; nada a verificava.
+
+**Corrigido onde é inequivocamente nosso**: a receita `rootless_customization_steps` passa a
+escrever `/etc/modules-load.d/delonix.conf` e `/etc/sysctl.d/99-delonix-bridge.conf` (ficheiros, e
+não `modprobe`/`sysctl -w`: o `virt-customize` corre contra um convidado offline). O `install.sh`
+já o fazia, mas justificava-o pelo **Kubernetes** — por isso uma imagem para rootless-only não
+tinha razão para o herdar, e não herdava. Teste a exigir os dois sysctls nas quatro distros.
+
+**Por decidir, e é decisão de política, não de código**: o motor continua sem verificar isto em
+runtime. Um `container run --namespace` num host sem o módulo (um `install.sh --no-tune`, um
+container, uma distro sem ele) continua a anunciar isolamento que não existe. Avisar é o mínimo;
+recusar seria fail-closed a sério e parte quem hoje corre assim — sem isolamento real, mas a
+correr. Merece a sua própria sessão.
+
 ## A classe «X não é Y» — varredura de 2026-08-05
 
 Pedido do utilizador ao ver que cinco bugs de uma série eram a mesma frase. Vale mais como
