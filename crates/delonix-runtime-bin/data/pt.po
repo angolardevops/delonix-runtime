@@ -4063,6 +4063,11 @@ msgstr "esgotou o tempo ao fim de {secs}s à espera de {n} recurso(s)"
 msgid "{kind}/{name}: {message}"
 msgstr "{kind}/{name}: {message}"
 
+# coluna STATUS do `stack ls`/`describe` para os Kinds sem presenca observavel
+# (Ingress/FirewallPolicy/HTTPRoute/Dependency/NetworkRoute) — era literal cru
+msgid "declarative"
+msgstr "declarativo"
+
 # help dos comandos introduzidos nesta serie e que ainda so falavam EN
 # (medido: 103 dos 232 subcomandos ficam em EN sob `--l18n=pt`; estes sao os
 # que esta serie acrescentou, e por isso os que lhe cabem)
