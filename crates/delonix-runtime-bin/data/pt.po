@@ -2130,8 +2130,8 @@ msgstr "Alcançáveis a partir de VMs:"
 msgid "Published on loopback only — NOT reachable from VMs:"
 msgstr "Publicados só em loopback — NÃO alcançáveis a partir de VMs:"
 
-msgid "  fix: re-publish bound to the VM gateway — `delonix ingress unpublish <c> <port>`, then `DELONIX_PUBLISH_ADDR={gw} delonix ingress publish <c> <port>` (reachable from VMs on that network, not the external LAN)"
-msgstr "  correção: re-publica ligado ao gateway da VM — `delonix ingress unpublish <c> <porta>`, depois `DELONIX_PUBLISH_ADDR={gw} delonix ingress publish <c> <porta>` (alcançável pelas VMs dessa rede, não pela LAN externa)"
+msgid "  fix: re-publish bound to the VM gateway — `delonix net ingress unpublish <c> <port>`, then `DELONIX_PUBLISH_ADDR={gw} delonix net ingress publish <c> <port>` (reachable from VMs on that network, not the external LAN)"
+msgstr "  correção: re-publica ligado ao gateway da VM — `delonix net ingress unpublish <c> <porta>`, depois `DELONIX_PUBLISH_ADDR={gw} delonix net ingress publish <c> <porta>` (alcançável pelas VMs dessa rede, não pela LAN externa)"
 
 msgid "no running container publishes a port — nothing for a VM to reach yet"
 msgstr "nenhum container em execução publica uma porta — nada para uma VM alcançar ainda"
@@ -3235,8 +3235,8 @@ msgstr "tunnel '{name}': provider '{provider}' desconhecido (pinggy|ngrok|cloudf
 msgid "(determining URL...)"
 msgstr "(a determinar URL...)"
 
-msgid "(URL not confirmed yet — see `delonix tunnel describe` / the log)"
-msgstr "(URL ainda não confirmada — ver `delonix tunnel describe` / o log)"
+msgid "(URL not confirmed yet — see `delonix net tunnel describe` / the log)"
+msgstr "(URL ainda não confirmada — ver `delonix net tunnel describe` / o log)"
 
 msgid "{bin}: {e} (is it installed and in PATH?)"
 msgstr "{bin}: {e} (está instalado e no PATH?)"

@@ -1,4 +1,4 @@
-//! `delonix tunnel` (`kind: Tunnel`) — exposes ONE local TCP port to the
+//! `delonix net tunnel` (`kind: Tunnel`) — exposes ONE local TCP port to the
 //! public internet via a 3rd-party tunnel provider (`pinggy`/`ngrok`/
 //! `cloudflare`). Deliberately single-purpose: Tunnel's only job is the
 //! outbound transport (no account/router/public IP needed on this host).
@@ -308,7 +308,7 @@ fn resolve_token(literal: Option<String>, secret_ref: Option<String>) -> Result<
     // getopt) but still permutes: a token of `-oProxyCommand=<cmd>` is parsed
     // as an ssh OPTION regardless of position, executing an attacker's shell
     // command via `/bin/sh -c` before any network connection is even made —
-    // local RCE as whoever runs `delonix tunnel apply/expose`. Rejecting a
+    // local RCE as whoever runs `delonix net tunnel apply/expose`. Rejecting a
     // leading `-` here protects every provider's use of the token (pinggy's
     // ssh argv AND ngrok's `--authtoken <value>`), not just the one call site
     // that happened to be exploitable today.
@@ -425,7 +425,7 @@ fn apply_one(name: &str, spec: &TunnelSpec) -> Result<()> {
         "tunnel/{name}: {} — {}",
         super::po::t("running"),
         rec.public_url.as_deref().unwrap_or(super::po::t(
-            "(URL not confirmed yet — see `delonix tunnel describe` / the log)"
+            "(URL not confirmed yet — see `delonix net tunnel describe` / the log)"
         ))
     );
     Ok(())
@@ -796,7 +796,7 @@ fn cmd_describe(name: &str) -> Result<()> {
     let store = record_store()?;
     let rec = store.load(name).map_err(|e| match e {
         Error::NotFound(n) => {
-            Error::Invalid(format!("no such tunnel: {n} (see `delonix tunnel ls`)"))
+            Error::Invalid(format!("no such tunnel: {n} (see `delonix net tunnel ls`)"))
         }
         e => e,
     })?;
@@ -826,7 +826,7 @@ fn cmd_rm(name: &str) -> Result<()> {
     let store = record_store()?;
     let rec = store.load(name).map_err(|e| match e {
         Error::NotFound(n) => {
-            Error::Invalid(format!("no such tunnel: {n} (see `delonix tunnel ls`)"))
+            Error::Invalid(format!("no such tunnel: {n} (see `delonix net tunnel ls`)"))
         }
         e => e,
     })?;
