@@ -795,17 +795,42 @@ de uma rede segmentada — a mesma separação que a AWS faz entre route table e
   para o mesmo (alvo, direcção).
 - **O `via:` do rascunho do ADR não existe.** O spike tornou-o desnecessário e o que sobrou foram
   `from`/`to`; quem copiar o YAML do ADR escreve um campo que o motor não conhece.
-- **Não tem estado próprio a ler**: `presence_of` classifica-o como `declarative` (`-`), a par de
-  `Ingress`/`FirewallPolicy`/`HTTPRoute`/`Dependency`. **A ausência desse braço foi um bug real** —
-  caía no `_ => ("?", "unsupported kind")`, impresso pelo `ls`/`describe` sobre um recurso que o
-  `apply` cria, e tratado como eternamente pendente pelo `wait`.
-- **Estado a 2026-08-12 (HEAD `f42ebfb`)**: está em `KINDS` mas **não** em `CONVERGING_KINDS`, e o
-  caminho declarativo só ABRE (`netroute::apply` chama sempre `network_route(.., true)`) — tirar a
-  rota do manifesto e reaplicar não a fecha, e o plano não o diz. Fechar é só pela CLI
-  (`network route --rm`). Uma isenção ao isolamento que o manifesto abre e não consegue fechar é a
-  mesma armadilha «garante presente» que o `Dependency` já documenta no teardown, e num Kind de
-  segurança custa mais. **Está a ser fechado no branch `netroute-reversivel`** (leitura de volta do
-  `@netpair` + `desired`/`actual`); quem lá chegar primeiro, actualiza este parágrafo.
+- **Já tem estado próprio, e é isso que o torna reversível.** Esta entrada dizia «não tem estado
+  próprio a ler» e que o `presence_of` o classificava como `declarative` (`-`) — deixou de ser
+  verdade: ganhou um registo (`infra::RouteDef`, em `<root>/ingress/routes/<from>--<to>.json`), o
+  `presence` responde `yes`/`no` com o estado vivo ao lado, e saiu da lista `DECLARATIVOS` do
+  `wait` (deixá-lo lá daria por pronta uma rota que ainda não existe). **A ausência do braço no
+  `presence` foi um bug real** — caía no `_ => ("?", "unsupported kind")`.
+- **FECHADO (a entrada anterior descrevia o defeito e pedia esta actualização).** Está agora em
+  `CONVERGING_KINDS`, com `desired`/`actual`, posse por `delonix.io/stack` e braço no
+  `destroy_one`: tirar a rota do manifesto e correr `apply --prune` **fecha-a**, e o `destroy`
+  também. Uma rota criada à mão não leva carimbo e sobrevive aos dois.
+  - **O `actual` vem do REGISTO e não do `@netpair`**, e a razão inverteu o desenho óbvio: o mapa
+    vive na netns EFÉMERA do holder, que nasce a pedido e morre com o último container — num nó
+    ocioso a sonda devolve vazio, o plano lê «a rota desapareceu» e o `--detailed-exitcode` fica em
+    2 para sempre, com o gate de deriva em CI vermelho todos os dias. É o problema que o
+    `EgressState` já tinha, com a mesma resposta: persistir e repor no `ensure_net_bridge`. O custo
+    é dito onde se paga — apagar o elemento à mão continua a ler-se como `NoOp`, e o estado vivo é
+    o que o `stack ls` mostra.
+  - **A reposição usa `bridge_name` (puro) e não o `resolve_net`**: aquele faz I/O e exigiria a
+    outra ponta já recriada, quando um elemento do `@netpair` é só uma string `ifname`. Validado ao
+    vivo — a rota voltou com a bridge do outro lado ainda inexistente, que é o caso normal (as
+    bridges renascem uma de cada vez, à medida que os workloads se ligam).
+  - **A identidade é o PAR, não o `metadata.name`.** Com o nome do documento, renomeá-lo dava
+    `Create`+`Delete` para o MESMO elemento nft — e como o `--prune` corre em último, fecharia o
+    caminho que o próprio apply acabara de abrir. Daí a recusa de dois documentos para o mesmo par.
+  - **`network_remove` esquece as rotas da rede**, e apaga o ELEMENTO além do registo: o
+    `bridge_name` é determinístico, logo deixar o par no mapa fazia o caminho REABRIR sozinho na
+    próxima rede com o mesmo nome. Foi medido depois de um `destroy` — a primeira versão fechava só
+    metade.
+  - Cenário de caos `stack_netroute`, que corre o CICLO (cada passo isolado devolve 0 mesmo com o
+    defeito). **Lição de método**: a primeira reversão que tentei — `ownable: false` — deixava-o
+    VERDE, porque o `stamp` corre para todo Kind convergente e a rota fica com dono na mesma; o que
+    o `ownable` governa é a ADOPÇÃO, coberta por teste unitário. A reversão que vale é tirá-lo do
+    `CONVERGING_KINDS`, e aí falha com o sintoma exacto («após o prune esperava-se só a rota
+    imperativa, há 2»).
+- **Continua por fazer**: as isenções do `@netpair` não têm `counter`, por isso «esta rota passou
+  tráfego?» continua sem resposta — o ADR-0013 já o assinalava e mantém-se.
 - Exemplo: `examples/netroute.yaml` — declara a rota **e** a `Dependency`, de propósito: tirar uma
   delas e reaplicar é a forma mais rápida de ver que as duas perguntas são mesmo independentes.
 
