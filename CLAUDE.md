@@ -1118,6 +1118,15 @@ nó não faz nenhuma instalação**, só `kubeadm init`/`kubeadm join`.
     validado de ponta a ponta neste sandbox (mesma ligação de saída lenta) — verificação SHA256
     coberta por teste unitário com a linha real capturada ao vivo, URL/redirect confirmados com
     `curl -I` contra as 3 versões major.
+  - **`fedora` no `vm-image.yml` (2026-08-12)** — a distro existia no motor desde o ciclo do
+    `--distro fedora` e **nunca chegou ao workflow**, por isso a imagem Fedora não era publicável
+    de todo. `fedora_release` traz release E build (`42-1.1`, que o nome do artefacto do
+    fabricante carrega e a versão não determina), mas a **tag OCI leva só o major**
+    (`fedora-42`): `fedora-42-1.1` não diz nada a mais a quem a lê e desalinhava-se das irmãs.
+    O job ganhou também o passo do **passt actual + `XDG_RUNTIME_DIR`** — sem ele NENHUMA
+    variante `--no-k8s` constrói no runner, porque essas instalam pacotes dentro do appliance e
+    o passt do Ubuntu 24.04 é o mesmo que falha aqui (ver a secção do Fedora, mais abaixo).
+    **NÃO validado em CI por mim**: disparar o workflow publica imagens e é decisão do dono.
 - **`push`/`pull`**: publicam/obtêm a imagem como artefacto OCI de blob único (config vazio + 1
   layer, padrão ORAS/Helm) via `delonix_image::registry::{push_oci_artifact,pull_oci_artifact}`
   (`crates/delonix-image/src/registry.rs`) — generaliza o `Client`/auth/upload já usado por
