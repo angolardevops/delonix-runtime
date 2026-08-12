@@ -718,12 +718,13 @@ pub enum VmCmd {
     },
     /// Start an existing, stopped VM — idempotent (already running = no-op).
     ///
-    /// Reboots with the base disk/vcpus/memory/network/backend recorded at
-    /// its last `create`/`start`, reusing the same overlay (disk state
-    /// preserved). Does NOT restore anything that only ever existed as a
-    /// `vm create` flag (custom kernel/seed/volumes/static IP/VNC/advanced
-    /// libvirt knobs) — a VM using those needs the original `vm create`
-    /// invocation instead (also idempotent/auto-heal).
+    /// Reboots with everything recorded at its last `create`/`start` — base
+    /// disk/vcpus/memory/network/backend AND the boot shape (custom
+    /// kernel/seed/volumes/static IP/VNC/TPM/CPU topology/extra disks and
+    /// NICs/advanced libvirt knobs) — reusing the same overlay, so disk state
+    /// is preserved. A VM created before the engine persisted that shape has
+    /// none recorded; re-run its original `vm create` (idempotent) once to
+    /// stamp it.
     Start {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: String,

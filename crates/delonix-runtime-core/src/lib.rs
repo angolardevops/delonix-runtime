@@ -849,6 +849,168 @@ impl Container {
     }
 }
 
+/// CPU topology of a VM (`<topology sockets cores threads/>`).
+///
+/// These four shapes ([`CpuTopology`], [`ExtraDisk`], [`ExtraNic`], [`VmVolume`])
+/// live HERE and not in `delonix-vm` for one reason: they are part of what
+/// [`Vm`] persists, and `delonix-runtime-core` cannot depend on `delonix-vm`
+/// (the dependency runs the other way). `delonix-vm` re-exports them, so
+/// `delonix_vm::CpuTopology` and friends keep resolving.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+pub struct CpuTopology {
+    pub sockets: u32,
+    pub cores: u32,
+    pub threads: u32,
+}
+
+/// An extra disk attached to the VM (beyond the main overlay + cloud-init seed).
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+pub struct ExtraDisk {
+    /// Host path of the disk image.
+    pub source: String,
+    /// `"disk"` (default) or `"cdrom"`.
+    #[serde(default)]
+    pub device: String,
+    /// Bus: `"virtio"` (default), `"sata"`, `"scsi"`, `"ide"`.
+    #[serde(default)]
+    pub bus: String,
+    /// Image format: `"qcow2"` (default) or `"raw"`.
+    #[serde(default)]
+    pub format: String,
+    /// Mount read-only.
+    #[serde(default)]
+    pub read_only: bool,
+    /// Explicit target dev (e.g. `"vdb"`); auto-assigned when `None`.
+    #[serde(default)]
+    pub target: Option<String>,
+}
+
+/// An extra network interface beyond the VM's primary one.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+pub struct ExtraNic {
+    /// `"network"` (libvirt network), `"bridge"` (host bridge) or `"user"`.
+    #[serde(default)]
+    pub kind: String,
+    /// Network/bridge name (for `network`/`bridge`).
+    #[serde(default)]
+    pub source: Option<String>,
+    /// NIC model: `"virtio"` (default), `"e1000"`, `"rtl8139"`, …
+    #[serde(default)]
+    pub model: String,
+    /// Fixed MAC (auto/random when `None`).
+    #[serde(default)]
+    pub mac: Option<String>,
+}
+
+/// A host directory shared into the VM via virtio-9p.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+pub struct VmVolume {
+    /// 9p tag (short, unique in the VM) — the guest mounts by this tag.
+    pub tag: String,
+    /// Directory ON THE HOST to share (resolved by the bin).
+    pub source: String,
+    /// Mount point INSIDE the guest (e.g. `/mnt/dados`).
+    pub mount_path: String,
+    /// Mount read-only.
+    #[serde(default)]
+    pub read_only: bool,
+}
+
+/// Everything a VM was booted WITH that the flat [`Vm`] fields do not already
+/// carry — the boot shape, as opposed to the lifecycle state (pid, status, ip).
+///
+/// **Why this exists.** `VmConfig` has ~30 fields and the `Vm` record used to
+/// persist ten of them. Everything else existed only for the duration of a
+/// `vm create` and died with it, which had two consequences, both measured:
+/// `vm start`/`restart` silently rebooted a DIFFERENT machine than the one the
+/// operator had created (no TPM, no CPU topology, no extra disks — its own
+/// `--help` documented the loss), and the declarative reconciler could not
+/// compare what the registry did not remember, so a `kind: Vm` accepted 36
+/// spec fields and converged five.
+///
+/// This is the fifth time this engine has paid for the same rule, so it is
+/// worth stating plainly: **state needed to RECONSTRUCT a resource has to be
+/// persisted, not merely used at creation.** (Before: `-v` mounts, `-p` on a
+/// custom network, extra networks, `Container.pod`.)
+///
+/// Every field is `#[serde(default)]` and the whole block is skipped when
+/// empty, so a record written before this existed keeps deserializing and a VM
+/// that uses none of it does not grow a byte on disk.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+pub struct VmBootSpec {
+    /// Kernel for *direct boot* (vmlinux/bzImage).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kernel: Option<String>,
+    /// Initrd/initramfs (with `kernel`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initrd: Option<String>,
+    /// Firmware (alternative to the kernel: rust-hypervisor-fw/EDK2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub firmware: Option<String>,
+    /// Kernel command line (with `kernel`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cmdline: Option<String>,
+    /// cloud-init *seed* ISO (NoCloud) — secondary disk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<String>,
+    /// Backs the VM memory with *hugepages*.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hugepages: bool,
+    /// CPU affinity (NUMA/pinning) — host CPU list all vCPUs are pinned to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_affinity: Option<String>,
+    /// Host bridge (`net_mode = "bridge"`) or libvirt network (`"nat"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bridge: Option<String>,
+    /// Volumes/Storage shared into the VM via virtio-9p.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub volumes: Vec<VmVolume>,
+    /// VNC graphical console (libvirt only).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub vnc: bool,
+    /// Static IP — libvirt `nat` mode only (a DHCP reservation).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub static_ip: Option<String>,
+    /// Machine type (`<os><type machine=…>`), default `q35`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
+    /// CPU mode/model (`host-passthrough`, `host-model`, or a named model).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_model: Option<String>,
+    /// CPU topology.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_topology: Option<CpuTopology>,
+    /// Emulated TPM 2.0.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub tpm: bool,
+    /// Video model (`virtio`/`qxl`/`vga`/`none`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub video: Option<String>,
+    /// OS boot device order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub boot_order: Vec<String>,
+    /// Extra disks beyond the main overlay + cloud-init seed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_disks: Vec<ExtraDisk>,
+    /// Extra network interfaces beyond the primary one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_nics: Vec<ExtraNic>,
+    /// Raw libvirt XML fragments injected before `</devices>`. **UNVALIDATED**.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub libvirt_xml_overlay: Vec<String>,
+    /// FULL `<domain>` override used verbatim. **UNVALIDATED**.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub libvirt_xml: Option<String>,
+}
+
+impl VmBootSpec {
+    /// Nothing to persist — the common case (a VM created from a golden image
+    /// with no advanced knob). Lets the whole block be skipped on write.
+    pub fn is_empty(&self) -> bool {
+        self == &VmBootSpec::default()
+    }
+}
+
 /// A microVM (Cloud Hypervisor) — the unit of `kind: VM`. SIBLING model of the
 /// [`Container`]: a VM has no rootfs/cgroup/seccomp/init-pid, so it does not make
 /// sense to overload the `Container`. Persisted via [`store::JsonStore`]
@@ -921,6 +1083,11 @@ pub struct Vm {
     /// restarted 5 minutes ago should show an uptime of 5 minutes, not 1 day.
     #[serde(default)]
     pub started_unix: Option<u64>,
+    /// The boot shape this VM was created with — see [`VmBootSpec`] for why it
+    /// is persisted at all. Absent in every record written before it existed,
+    /// which is not the same as "this VM has none": see `config_from`.
+    #[serde(default, skip_serializing_if = "VmBootSpec::is_empty")]
+    pub boot: VmBootSpec,
 }
 
 /// Default backend for VMs persisted before multi-backend support.
@@ -967,6 +1134,10 @@ impl Vm {
             backend: default_vm_backend(),
             devices: Vec::new(),
             started_unix: None,
+            // Filled in by `delonix_vm::create_with` from the `VmConfig` that
+            // is booting this VM; empty here so `Vm::new` keeps its signature
+            // (nine positional arguments is already too many).
+            boot: VmBootSpec::default(),
         }
     }
 }
@@ -1072,6 +1243,56 @@ mod tests {
         let old: Vm = serde_json::from_value(v).unwrap();
         assert!(old.labels.is_empty() && old.annotations.is_empty());
         assert_eq!(old.name, "db");
+    }
+
+    /// The same promise for the boot shape: a record written before
+    /// [`VmBootSpec`] existed has no `boot` key, and must still load. Empty
+    /// there means UNKNOWN, not "this VM had no kernel/TPM/volumes" — which is
+    /// why `vm start` leaves such a VM alone instead of rebooting it with
+    /// defaults it never asked for.
+    #[test]
+    fn registo_de_vm_sem_a_forma_de_arranque_continua_a_desserializar() {
+        let mut vm = Vm::new(
+            "dev".into(),
+            "base.qcow2".into(),
+            "dev.qcow2".into(),
+            4,
+            "8G".into(),
+            "ingress".into(),
+            "nat".into(),
+            "52:54:00:00:00:02".into(),
+            String::new(),
+        );
+        vm.boot.tpm = true;
+        vm.boot.kernel = Some("/boot/vmlinuz".into());
+        let mut v: serde_json::Value = serde_json::to_value(&vm).unwrap();
+        v.as_object_mut().unwrap().remove("boot");
+        let old: Vm = serde_json::from_value(v).unwrap();
+        assert!(old.boot.is_empty());
+        assert_eq!(old.vcpus, 4);
+    }
+
+    /// A VM that uses none of the advanced knobs must not grow a byte on disk:
+    /// the whole block is skipped when empty. Without this, every record on
+    /// every host would gain twenty-one null/false keys for nothing.
+    #[test]
+    fn a_forma_de_arranque_vazia_nao_e_escrita() {
+        let vm = Vm::new(
+            "simples".into(),
+            "base.qcow2".into(),
+            "s.qcow2".into(),
+            1,
+            "1G".into(),
+            "ingress".into(),
+            "tap0".into(),
+            "52:54:00:00:00:03".into(),
+            String::new(),
+        );
+        let v: serde_json::Value = serde_json::to_value(&vm).unwrap();
+        assert!(
+            v.as_object().unwrap().get("boot").is_none(),
+            "a forma de arranque vazia não devia ser serializada: {v}"
+        );
     }
 
     #[test]
