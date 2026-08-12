@@ -455,6 +455,15 @@ msgstr "a porta {hp} do host precisa de privilégio para o bind — em rootless 
 msgid "the name '{name}' is already in use by container {id} — pick another or remove it first"
 msgstr "o nome '{name}' já está em uso pelo container {id} — escolhe outro ou remove-o primeiro"
 
+msgid "the name '{name}' is already in use in namespace '{ns}' by container {id} — pick another or remove it first"
+msgstr "o nome '{name}' já está em uso na namespace '{ns}' pelo container {id} — escolhe outro ou remove-o primeiro"
+
+msgid "this name exists in several namespaces — qualify it as <namespace>/<name>"
+msgstr "este nome existe em várias namespaces — qualifica-o como <namespace>/<nome>"
+
+msgid "this stack declares no namespace, so its resources land in the shared 'default' — everything else in 'default' can reach them. Set metadata.namespace to isolate it"
+msgstr "esta stack não declara namespace, por isso os recursos ficam na 'default' partilhada — tudo o resto em 'default' alcança-os. Define metadata.namespace para a isolar"
+
 msgid "net: {n} orphan slirp(s) reaped"
 msgstr "rede: {n} slirp(s) órfão(s) reapado(s)"
 
