@@ -215,6 +215,24 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
 
 #[derive(Subcommand)]
 pub enum NetworkCmd {
+    /// 802.1Q VLAN on a physical NIC — **the one command here that needs root**.
+    ///
+    /// Dry-run by default: it prints the plan and changes nothing until
+    /// `--apply`. Everything else in this engine is rootless; a VLAN interface
+    /// on a host NIC needs CAP_NET_ADMIN in the host's netns, which no
+    /// unprivileged user has (see ADR-0013 tier C).
+    Vlan {
+        /// Parent NIC on the host (e.g. `eth0`).
+        parent: String,
+        /// VLAN id, 1-4094.
+        id: u16,
+        /// Remove the VLAN interface instead of creating it.
+        #[arg(long)]
+        rm: bool,
+        /// Actually run it (as root). Without this it is a dry-run.
+        #[arg(long)]
+        apply: bool,
+    },
     /// Open a DIRECTED path from one network to another (ADR-0013 tier B).
     ///
     /// Networks are isolated from each other by default. A route says a packet
@@ -317,6 +335,12 @@ pub fn run(action: NetworkCmd) -> Result<()> {
         NetworkCmd::Dash { once, json } => {
             super::dash::run(super::dash::DashScope::Networks, once, json)
         }
+        NetworkCmd::Vlan {
+            parent,
+            id,
+            rm,
+            apply,
+        } => super::vlan::run(&parent, id, rm, apply),
         NetworkCmd::Route { from, to, rm } => {
             delonix_net::infra::network_route(&from, &to, !rm)?;
             println!(
