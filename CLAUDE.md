@@ -3690,6 +3690,40 @@ um clone herda a config do template, e sobrepor contradiria uma escolha de quem 
 aninhado com o `qemu-guest-agent` instalado, e o custo passou o valor da prova. Validado ao vivo
 está o canal numa VM criada pelo backend, e o `ip()` a devolver `None` em silêncio.
 
+**`stop` e `destroy` são a MESMA operação num backend local e NÃO num remoto** — e confundi-los
+apagava dados. Localmente o disco é do motor (o `undefine` do libvirt não toca no
+`<root>/vms/<name>.qcow2`); num nó remoto a única chamada que liberta a VM liberta o disco com
+ela. O backend Proxmox lia `stop` como «parar e destruir» por uma razão certa (uma VM deixada
+para trás depois de um `vm rm` é um órfão) ligada ao verbo errado: o motor chama `stop` também
+para o `vm stop`, e o bloco de próximos-passos da própria CLI promete `stop it (keeps the disk)`.
+O `VmBackend::destroy` é novo, **por omissão é o `stop`** (os dois locais ficam byte-a-byte
+iguais) e o `remove_inner` passou a chamá-lo.
+
+**`vm start` de uma VM remota parada criava uma SEGUNDA.** O `boot` pede ao nó o próximo id livre,
+logo o registo passava a apontar para uma VM nova de disco vazio e a original ficava órfã — os
+dados lá, e nada a apontar-lhes. O `VmBackend::resume` é novo, por omissão `Ok(None)` (o `boot`
+dos locais já é idempotente pelo overlay), e o do Proxmox arranca o vmid que o registo nomeia.
+
+**Campos recusados PELO NOME** (`refuse_unsupported`, antes de criar seja o que for), agrupados
+pelo porquê: o convidado está noutra máquina (`kernel`/`initrd`/`firmware`/`cmdline`/`seed`/
+`devices`/`volumes`), o Proxmox é dono dos botões do QEMU (`hugepages`/`cpuAffinity`/`machine`/
+`cpuModel`/`cpuTopology`/`tpm`/`video`/`bootOrder`), ou não há XML de domínio nenhum
+(`libvirtXml*`). Vários são reportados JUNTOS — corrigi-los um erro de cada vez é uma tentativa de
+create por campo. **Apanhou logo um caso real**: a CLI gerava um seed NoCloud SEMPRE, que é um
+ficheiro deste host e ilegível num nó remoto, por isso um `vm create --backend proxmox` simples
+falhava por um seed que ninguém pediu. A CLI passa a saltá-lo para um backend com storage própria
+(`backend_manages_own_storage`) e a recusar `--hostname`/`--ssh-key`/`--user-data` aí — o mesmo
+formato da recusa de imagem-appliance que já estava mesmo por cima.
+
+**Snapshots** implementados com `vmstate=1` (checkpoint de sistema, como o libvirt), e o
+pseudo-registo `current` da API filtrado da listagem **e** recusado como nome — senão
+`vm restore <vm> current` parecia coisa suportada. **Rede**: bridge (`VmConfig.bridge` → alvo →
+`vmbr0`) e VLAN do alvo (descreve como o NÓ está cablado, não a VM); uma etiqueta fora de gama é
+**erro**, nunca um `None` — descartá-la punha a VM na rede sem tag com o operador a julgá-la
+isolada. **O ticket expira** (2 h) e o cliente é partilhado pelo processo todo, por isso o
+`send_authed` reautentica uma vez num 401 — só com password: um API token que leva 401 foi
+revogado, e repetir para sempre é como uma credencial fica bloqueada.
+
 **Correcção**: a nota que dizia o `net0=virtio,bridge=vmbr0` recusado pela API estava errada — era
 artefacto do `curl -d` do spike, que não faz URL-encoding. O `.form()` do reqwest faz, e o nó
 aceita (medido: `net0 = virtio=BC:24:11:F4:F9:9C,bridge=vmbr0` na config). O backend sempre mandou
