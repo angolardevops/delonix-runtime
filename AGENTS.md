@@ -1952,22 +1952,47 @@ Como `vm console <nome>` é um comando de um único operador, uma sessão presa
 da tua PRÓPRIA ligação anterior é o caso esmagadoramente comum, não um
 segundo espectador real a proteger.
 
-### `vm snapshot`/`restore`/`snapshots` — checkpoint de sistema first-class (libvirt)
+### `vm snapshot create|ls|rm|restore` — checkpoint de sistema first-class (libvirt)
 
 Snapshot/restore como métodos de 1.ª classe do `VmBackend` (antes só existiam como
 nada — o trait tinha `boot/stop/is_running/ip`, ver a matriz da descoberta Fase 1).
-`vm snapshot <vm> <nome>` / `vm restore <vm> <nome>` / `vm snapshots <vm>`, com as
-funções de motor `delonix_vm::{snapshot,restore,snapshots}` (espelham `stop`/`status`:
-`load_vm` + `backend_for` + dispatch).
+Funções de motor `delonix_vm::{snapshot,restore,snapshots,delete_snapshot}` (espelham
+`stop`/`status`: `load_vm` + `backend_for` + dispatch).
 
+- **BREAKING na v0.51.x, corte limpo sem aliases**: os três comandos PLANOS
+  (`vm snapshot <vm> <n>` / `vm snapshots <vm>` / `vm restore <vm> <n>`) deram lugar ao
+  grupo **`vm snapshot create|ls|rm|restore`** — os mesmos quatro verbos, pela mesma
+  ordem, do `volumes snapshot` que já existia (um checkpoint é um checkpoint; quem
+  aprendeu um não devia ter de aprender o outro). O motivo directo foi não haver **forma
+  nenhuma de APAGAR** um snapshot pela CLI — a única saída era o `virsh snapshot-delete`,
+  e era a própria mensagem de erro do motor que o mandava fazer. O grupo `vm` está
+  declarado NÃO estável no `docs/cli-stability.md`, e a forma antiga falha **alto**
+  (`unrecognized subcommand`, rc=2), nunca em silêncio.
 - **libvirt**: `virsh snapshot-create-as --domain <vm> --name <n> --atomic` — de uma VM
   **a correr** é um checkpoint de SISTEMA (memória **+** disco), e `restore`
   (`snapshot-revert`) volta a ele. Argv puro e testado (`libvirt_snapshot_argv`/
   `libvirt_revert_argv`, via `--domain`/`--name`, nunca posicional → um nome validado
   não vira opção). Nome do snapshot validado com `valid_vm_name` (recusa `..`/`-`
-  inicial/injecção). **Armadilha a reter**: `vm stop` faz *undefine* do domínio
-  (para não deixar órfãos), por isso **o snapshot exige a VM a correr** — parar
-  primeiro dá "failed to get domain" (fail-closed, reporta o erro, não finge). 
+  inicial/injecção).
+- **Os quatro verbos funcionam com a VM PARADA** (v0.51.x) — e isto era a limitação que
+  restava: o `stop` faz *undefine* do domínio, e sem domínio o virsh respondia
+  `failed to get domain`, uma frase que manda procurar uma VM que está ali no `vm ls`.
+  `with_stopped_domain` **define o domínio só durante o comando**, a partir do
+  `vms/<vm>.xml` que o último `boot` escreveu — o mesmo ficheiro que o libvirt tinha,
+  seclabel DAC incluído, em vez de derivar uma descrição que depois teria de bater
+  certo com o `boot` à mão — devolve os metadados preservados, corre o verbo, volta a
+  guardá-los e desfaz o domínio. Por isso o `stop` **deixou de apagar o `<vm>.xml`**.
+  Um snapshot tirado assim é **só do disco** (`state=shutoff`), que é o honesto para uma
+  VM sem memória para capturar, e a VM **continua parada**. A ÚNICA excepção em que o
+  domínio fica definido é um `restore` de um checkpoint tirado a correr: o revert repõe
+  a memória, logo o convidado fica a correr — desfazer o domínio por baixo de uma VM viva
+  não é limpeza, é matá-la. Nesse caso avisa (`note: … is RUNNING again`) e o `restore`
+  público reconcilia o registo chamando o `status` que já existe, em vez de escrever um
+  segundo reconciliador que possa discordar dele.
+- **A CLASSE da falha é a mesma esteja a VM parada ou a correr** — `Error::NotFound`
+  (**4**) para um snapshot que não existe, `Error::Conflict` (**5**) para um nome já
+  usado. Antes, as duas saíam como **1** genérico com a resposta crua do virsh, em que
+  «domain moment off1 already exists» usa uma palavra (`moment`) que esta CLI nunca diz.
 - **O snapshot SOBREVIVE a um `vm stop`/`vm start` (v0.51.x)** — e até aqui não sobrevivia,
   em silêncio. Bug report real, reproduzido antes de qualquer código: `snapshot` → `stop`
   → `start` deixava `vm snapshots` **VAZIO com rc=0** e o `vm restore` a responder
@@ -1989,16 +2014,14 @@ funções de motor `delonix_vm::{snapshot,restore,snapshots}` (espelham `stop`/`
     snapshot foi tirado. `snapshot_xml_with_uuid` reescreve-o (puro, testado) — em TODAS as
     ocorrências, que são duas no ficheiro real; substituir só a primeira dá o mesmo erro pela
     ocorrência que ficou.
-  - **`vm snapshots` de uma VM parada lê os preservados** — perguntar ao libvirt por um
-    domínio que não existe devolve lista vazia, indistinguível de «nunca teve snapshot». E o
-    `vm restore` de uma VM parada diz que a VM está parada e manda arrancá-la, em vez do
-    «failed to get domain» cru, que manda procurar uma VM que está ali no `vm ls`.
-  - **Gate**: secção nova no `scripts/e2e.sh` que corre o CICLO (snapshot → stop → start →
-    restore) contra uma VM libvirt real, e salta com linha audível sem virsh/libvirt.
-    Verificado pela regra do repo: **9/9 com a correcção, 4/9 com ela revertida**. Tinha de
-    ser o ciclo — antes da correcção cada comando devolvia 0 por si. E a recusa com a VM
-    parada verifica-se pela MENSAGEM: o erro cru também saía 1, logo um `fail` ficava verde
-    por cima do relato errado.
+  - **`vm snapshot ls` de uma VM parada lê os preservados** — perguntar ao libvirt por um
+    domínio que não existe devolve lista vazia, indistinguível de «nunca teve snapshot».
+  - **Gate**: secção nova no `scripts/e2e.sh` que corre o CICLO (create → stop → start →
+    restore, mais os quatro verbos com a VM PARADA e as classes 4/5) contra uma VM libvirt
+    real, e salta com linha audível sem virsh/libvirt. Hoje **20/20**; a versão que cobria só
+    o ciclo original foi verificada pela regra do repo em **9/9 com a correcção e 4/9 com ela
+    revertida**. Tinha de ser o ciclo — antes da correcção cada comando devolvia 0 por si. E
+    o `rm` confirma-se com `qemu-img snapshot -l`: sair da LISTA não é sair do disco.
 - **Cloud Hypervisor**: **fail-closed**, não implementado (`unsupported_snapshot`) — o
   restore do CH relança um vmm novo (ciclo diferente do revert in-place do libvirt) e
   precisa de `ch-remote`; deferido, com erro claro que aponta para o backend libvirt em

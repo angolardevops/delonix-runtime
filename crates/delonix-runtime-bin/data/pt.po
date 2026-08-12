@@ -8523,3 +8523,38 @@ msgstr "Vm '{name}': não há VMfile em {path}"
 
 msgid "building {tag}"
 msgstr "a construir {tag}"
+
+# vm snapshot: o grupo (create/ls/rm/restore) que substituiu os três comandos planos
+msgid "Point-in-time snapshots of a VM (checkpoints in the VM's own disk)"
+msgstr "Snapshots pontuais de uma VM (checkpoints no disco da própria VM)"
+
+msgid "Point-in-time snapshots of a VM (checkpoints in the VM's own disk).\n\nlibvirt: a snapshot of a RUNNING VM is a system checkpoint — memory + disk — and of a stopped one it is disk-only; either survives a `vm stop`/`vm start`. Not yet supported on the cloud-hypervisor backend."
+msgstr "Snapshots pontuais de uma VM (checkpoints no disco da própria VM).\n\nlibvirt: o snapshot de uma VM A CORRER é um checkpoint de sistema — memória + disco — e o de uma parada é só do disco; qualquer deles sobrevive a um `vm stop`/`vm start`. Ainda não suportado no backend cloud-hypervisor."
+
+msgid "Take a named snapshot (memory + disk if the VM is running, disk-only if it is stopped)"
+msgstr "Tira um snapshot com nome (memória + disco se a VM estiver a correr, só disco se estiver parada)"
+
+msgid "Delete a snapshot (its state in the disk goes with it)"
+msgstr "Apaga um snapshot (o estado dele no disco vai atrás)"
+
+msgid "Revert the VM to a named snapshot.\n\nA checkpoint taken while the VM was running brings it back RUNNING, memory and all — including one given to a stopped VM."
+msgstr "Volta a VM a um snapshot com nome.\n\nUm checkpoint tirado com a VM a correr traz-na de volta A CORRER, memória incluída — mesmo quando dado a uma VM parada."
+
+msgid "Snapshot name (see `vm snapshot ls`)"
+msgstr "Nome do snapshot (ver `vm snapshot ls`)"
+
+# vm snapshot: exemplos do manual
+msgid "a checkpoint before an upgrade — of a RUNNING VM it takes the memory too"
+msgstr "um checkpoint antes de um upgrade — de uma VM A CORRER leva também a memória"
+
+msgid "of a RUNNING libvirt VM: memory and disk, so a restore puts it back mid-flight"
+msgstr "de uma VM libvirt A CORRER: memória e disco, por isso um restore põe-na de volta a meio do voo"
+
+msgid "of a stopped one: disk-only, and the VM stays stopped"
+msgstr "de uma parada: só o disco, e a VM continua parada"
+
+msgid "which checkpoints a VM has, before reverting to one — also with the VM stopped"
+msgstr "que checkpoints uma VM tem, antes de voltar a um deles — também com a VM parada"
+
+msgid "drop a checkpoint you no longer need — its state leaves the disk with it"
+msgstr "deita fora um checkpoint que já não precisas — o estado dele sai do disco com ele"

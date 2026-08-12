@@ -492,25 +492,45 @@ if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
   SVM="snap-$PFX"; SDISK="$OUT/$SVM.qcow2"
   qemu-img create -f qcow2 "$SDISK" 64M >/dev/null 2>&1
   if "$BIN" vm create "$SVM" --disk "$SDISK" --backend libvirt --memory 256M >/dev/null 2>&1; then
-    check "vm snapshot" ok "$BIN" vm snapshot "$SVM" s1
-    check "vm snapshots nomeia-o com a VM a correr" ok bash -c \
-      "'$BIN' vm snapshots '$SVM' | grep -qx s1"
+    check "vm snapshot create" ok "$BIN" vm snapshot create "$SVM" s1
+    check "vm snapshot ls nomeia-o com a VM a correr" ok bash -c \
+      "'$BIN' vm snapshot ls '$SVM' | grep -qx s1"
     check "vm stop" ok "$BIN" vm stop "$SVM"
     check "o snapshot sobrevive ao stop" ok bash -c \
-      "'$BIN' vm snapshots '$SVM' | grep -qx s1"
-    check "restore com a VM parada aponta para o start" ok bash -c \
-      "'$BIN' vm restore '$SVM' s1 2>&1 | grep -q 'vm start'"
-    # E não o erro cru do virsh para uma VM parada — «failed to get domain»
-    # manda procurar uma VM que existe e está ali no `vm ls`. Medido: era esta
-    # a resposta antes da correcção. Um `grep 'Domain snapshot not found'` seria
-    # inútil AQUI (o virsh nem chega a olhar para o snapshot sem domínio) —
-    # passaria também com o bug, pela razão errada.
-    check "e não devolve o erro cru do virsh" ok bash -c \
-      "! '$BIN' vm restore '$SVM' s1 2>&1 | grep -q 'failed to get domain'"
+      "'$BIN' vm snapshot ls '$SVM' | grep -qx s1"
     check "vm start" ok "$BIN" vm start "$SVM"
     check "o libvirt volta a conhecer o snapshot" ok bash -c \
       "virsh -c qemu:///system snapshot-list '$SVM' --name | grep -qx s1"
-    check "vm restore depois do start" ok "$BIN" vm restore "$SVM" s1
+    check "vm snapshot restore depois do start" ok "$BIN" vm snapshot restore "$SVM" s1
+
+    # Com a VM PARADA os três verbos continuam a funcionar — o domínio libvirt
+    # não existe nesse estado, e é definido só o tempo do comando.
+    check "vm stop (2.ª vez)" ok "$BIN" vm stop "$SVM"
+    check "snapshot create com a VM parada" ok "$BIN" vm snapshot create "$SVM" s2
+    check "e a VM CONTINUA parada" ok bash -c \
+      "! virsh -c qemu:///system domstate '$SVM' >/dev/null 2>&1"
+    check "o novo aparece no ls" ok bash -c \
+      "'$BIN' vm snapshot ls '$SVM' | grep -qx s2"
+    check "restore de um snapshot offline não arranca a VM" ok bash -c \
+      "'$BIN' vm snapshot restore '$SVM' s2 && ! virsh -c qemu:///system domstate '$SVM' >/dev/null 2>&1"
+    # s1 foi tirado com a VM a correr: restaurá-lo TEM de a trazer de volta.
+    check "restore de um snapshot vivo traz a VM de volta a correr" ok bash -c \
+      "'$BIN' vm snapshot restore '$SVM' s1 && '$BIN' vm status '$SVM' | grep -q Running"
+    check "vm snapshot rm" ok "$BIN" vm snapshot rm "$SVM" s2
+    # Sair da LISTA não é sair do disco — o `qemu-img` é a única testemunha de
+    # que o estado se foi mesmo, e o caminho do overlay vem do próprio motor
+    # (`system info`), nunca de um default assumido aqui.
+    SROOT=$("$BIN" system info 2>/dev/null | awk '/state root:/{print $3}')
+    check "e sai mesmo do disco, não só da lista" ok bash -c \
+      "! qemu-img snapshot -l '$SROOT/vms/$SVM.qcow2' 2>/dev/null | grep -qw s2 && ! '$BIN' vm snapshot ls '$SVM' | grep -qx s2"
+
+    # A CLASSE da falha, que é o que um reconciliador lê (docs/cli-stability.md).
+    check "restore de um snapshot inexistente diz 4" 4 "$BIN" vm snapshot restore "$SVM" naoexiste
+    check "rm de um snapshot inexistente diz 4" 4 "$BIN" vm snapshot rm "$SVM" naoexiste
+    check "create com nome já usado diz 5 (conflito)" 5 "$BIN" vm snapshot create "$SVM" s1
+    # A quebra da v0.51.x tem de falhar ALTO, nunca em silêncio.
+    check "a forma antiga 'vm snapshots' já não existe" fail "$BIN" vm snapshots "$SVM"
+    check "a forma antiga 'vm restore' já não existe" fail "$BIN" vm restore "$SVM" s1
     "$BIN" vm rm -f "$SVM" >/dev/null 2>&1
   else
     skip "vm: snapshot sobrevive a stop/start" "o vm create falhou neste host"

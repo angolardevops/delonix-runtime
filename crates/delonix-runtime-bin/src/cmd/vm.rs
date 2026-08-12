@@ -810,30 +810,14 @@ pub enum VmCmd {
         #[arg(long, short = 'f')]
         force: bool,
     },
-    /// Take a named snapshot of a VM.
+    /// Point-in-time snapshots of a VM (checkpoints in the VM's own disk).
     ///
-    /// libvirt: a running VM's snapshot is a system checkpoint — memory +
-    /// disk; `restore` reverts to it, and it survives a `vm stop`/`vm start`
-    /// (the state never leaves the disk; the metadata is preserved and given
-    /// back with the domain). Not yet supported on the cloud-hypervisor
-    /// backend.
+    /// libvirt: a snapshot of a RUNNING VM is a system checkpoint — memory +
+    /// disk — and of a stopped one it is disk-only; either survives a `vm
+    /// stop`/`vm start`. Not yet supported on the cloud-hypervisor backend.
     Snapshot {
-        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
-        name: String,
-        /// Snapshot name.
-        snapshot: String,
-    },
-    /// Revert the VM to a named snapshot.
-    Restore {
-        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
-        name: String,
-        /// Snapshot name to revert to.
-        snapshot: String,
-    },
-    /// List the VM's snapshots.
-    Snapshots {
-        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
-        name: String,
+        #[command(subcommand)]
+        action: VmSnapshotCmd,
     },
     /// Apply the `kind: Vm` documents of a manifest.
     ///
@@ -842,6 +826,49 @@ pub enum VmCmd {
     Apply {
         #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
+    },
+}
+
+/// The `vm snapshot` group. Deliberately the SAME four verbs, in the same
+/// order, as `volumes snapshot` — a checkpoint is a checkpoint, and a user who
+/// learned one should not have to learn the other.
+///
+/// This replaced the flat `vm snapshot <vm> <snap>` / `vm snapshots <vm>` /
+/// `vm restore <vm> <snap>` in a **clean break, without aliases** (the `vm`
+/// group is declared unstable in `docs/cli-stability.md`, and this repo's rule
+/// for a break is to fail loudly — the old forms now say «unrecognized
+/// subcommand» instead of doing something almost right).
+#[derive(Subcommand)]
+pub enum VmSnapshotCmd {
+    /// Take a named snapshot (memory + disk if the VM is running, disk-only if
+    /// it is stopped).
+    Create {
+        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
+        vm: String,
+        /// Snapshot name.
+        snapshot: String,
+    },
+    /// List the VM's snapshots.
+    Ls {
+        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
+        vm: String,
+    },
+    /// Delete a snapshot (its state in the disk goes with it).
+    Rm {
+        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
+        vm: String,
+        /// Snapshot name (see `vm snapshot ls`).
+        snapshot: String,
+    },
+    /// Revert the VM to a named snapshot.
+    ///
+    /// A checkpoint taken while the VM was running brings it back RUNNING,
+    /// memory and all — including one given to a stopped VM.
+    Restore {
+        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
+        vm: String,
+        /// Snapshot name to revert to.
+        snapshot: String,
     },
 }
 
@@ -1951,22 +1978,29 @@ pub fn run(action: VmCmd) -> Result<()> {
             println!("{name}");
             Ok(())
         }
-        VmCmd::Snapshot { name, snapshot } => {
-            delonix_vm::snapshot(&base, &name, &snapshot)?;
-            println!("{snapshot}");
-            Ok(())
-        }
-        VmCmd::Restore { name, snapshot } => {
-            delonix_vm::restore(&base, &name, &snapshot)?;
-            println!("{name}");
-            Ok(())
-        }
-        VmCmd::Snapshots { name } => {
-            for s in delonix_vm::snapshots(&base, &name)? {
-                println!("{s}");
+        VmCmd::Snapshot { action } => match action {
+            VmSnapshotCmd::Create { vm, snapshot } => {
+                delonix_vm::snapshot(&base, &vm, &snapshot)?;
+                println!("{snapshot}");
+                Ok(())
             }
-            Ok(())
-        }
+            VmSnapshotCmd::Ls { vm } => {
+                for s in delonix_vm::snapshots(&base, &vm)? {
+                    println!("{s}");
+                }
+                Ok(())
+            }
+            VmSnapshotCmd::Rm { vm, snapshot } => {
+                delonix_vm::delete_snapshot(&base, &vm, &snapshot)?;
+                println!("{snapshot}");
+                Ok(())
+            }
+            VmSnapshotCmd::Restore { vm, snapshot } => {
+                delonix_vm::restore(&base, &vm, &snapshot)?;
+                println!("{vm}");
+                Ok(())
+            }
+        },
         VmCmd::Rm { name, force } => {
             let res = if force {
                 delonix_vm::remove_force(&base, &name)
