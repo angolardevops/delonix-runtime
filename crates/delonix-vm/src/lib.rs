@@ -472,6 +472,22 @@ pub trait VmBackend {
     fn is_running(&self, vm: &Vm) -> bool;
     /// Current IP of the VM (may change/resolve later via DHCP).
     fn ip(&self, vm: &Vm) -> Option<String>;
+
+    /// Is [`VmBackend::ip`] a PREDICTION rather than an OBSERVATION?
+    ///
+    /// Default `false`: libvirt reads a real DHCP lease, so an address there is
+    /// evidence that the guest booted far enough to ask for one. Cloud
+    /// Hypervisor overrides it — its address is computed from the MAC before
+    /// the guest runs at all, so it is evidence of nothing.
+    ///
+    /// Whoever waits for a boot needs this to know when "it has an IP" is an
+    /// answer and when it is only an arithmetic identity. It lives on the
+    /// backend rather than in a `backend.contains("cloud-hypervisor")` at the
+    /// call site for the reason ADR-0008 gives: the knowledge belongs to the
+    /// backend that does the predicting.
+    fn ip_is_predicted(&self) -> bool {
+        false
+    }
     /// Stops the VM and frees the network resources. Returns `Err` when the backend
     /// REFUSED the cleanup (e.g. libvirt) — the caller decides whether to abort (so as not to
     /// delete the local record of a VM that is still defined in the hypervisor) or
@@ -847,6 +863,13 @@ impl VmBackend for CloudHypervisorBackend {
         infra::dhcp_ip_for_mac(&vm.network, &vm.mac)
     }
 
+    /// Computed from the MAC, and available before the guest has booted — see
+    /// [`infra::dhcp_lease_ip`], and [`VmBackend::ip_is_predicted`] for why
+    /// anyone waiting on a boot needs to be told.
+    fn ip_is_predicted(&self) -> bool {
+        true
+    }
+
     fn stop(&self, _vmdir: &Path, vm: &Vm) -> Result<()> {
         if let Some(pid) = vm.pid {
             if pid > 0 {
@@ -878,16 +901,36 @@ fn default_ch_firmware() -> Option<String> {
             return Some(p);
         }
     }
-    for p in [
-        "/usr/local/share/delonix/hypervisor-fw",
-        "/usr/share/delonix/hypervisor-fw",
-    ] {
+    for p in DEFAULT_CH_FIRMWARES {
         if Path::new(p).exists() {
             return Some(p.to_string());
         }
     }
     None
 }
+
+/// Where [`default_ch_firmware`] looks, in order. **The EDK2 build comes
+/// first, and the order is the whole point.**
+///
+/// Measured 2026-08-12, not assumed: under `rust-hypervisor-fw` NO image this
+/// project builds boots in Cloud Hypervisor. The `delonix-vm-base:*` ones leave
+/// the overlay at 448 KiB — the guest never wrote a byte — and the k8s golden
+/// dies in the Secure Boot shim (`import_mok_state() failed: Unsupported`, read
+/// off the serial console) without ever reaching a kernel. With the EDK2
+/// `CLOUDHV.fd` the same images boot and get an address on the SDN:
+/// ubuntu-24.04 in 7.8s, ubuntu-26.04 and debian-bookworm in 5s, rocky-9 in
+/// 32s, the golden in 7s (fedora-42 does not, and does not under libvirt
+/// either — a separate problem, see AGENTS.md).
+///
+/// `hypervisor-fw` stays in the list rather than being dropped: it is ~150 KB,
+/// it starts faster where it works, and a VM on a host that only has it must
+/// keep booting the way it did.
+const DEFAULT_CH_FIRMWARES: [&str; 4] = [
+    "/usr/local/share/delonix/CLOUDHV.fd",
+    "/usr/share/delonix/CLOUDHV.fd",
+    "/usr/local/share/delonix/hypervisor-fw",
+    "/usr/share/delonix/hypervisor-fw",
+];
 
 /// Path of the UNIX socket of the serial console of a Cloud Hypervisor VM
 /// (`<base>/vms/<name>.console`). `delonix vm console` connects here.
@@ -2863,6 +2906,18 @@ pub fn status(base: &Path, name: &str) -> Result<Vm> {
     })
 }
 
+/// Does this VM's recorded IP come from a PREDICTION rather than an
+/// observation? See [`VmBackend::ip_is_predicted`].
+///
+/// `false` for a record whose backend this build cannot resolve: the caller is
+/// a boot wait, and the useful default there is the one that does not go and
+/// probe an address nobody can vouch for.
+pub fn ip_is_predicted(vm: &Vm) -> bool {
+    backend_for(vm)
+        .map(|b| b.ip_is_predicted())
+        .unwrap_or(false)
+}
+
 /// Lists all VMs, with reconciled state.
 pub fn list(base: &Path) -> Result<Vec<Vm>> {
     let st = store(base)?;
@@ -2876,6 +2931,46 @@ pub fn list(base: &Path) -> Result<Vec<Vm>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn o_edk2_vem_antes_do_hypervisor_fw_na_procura_de_firmware() {
+        // The order IS the fix. A host that has both (the installer fetches
+        // both) and picks `hypervisor-fw` boots none of this project's images
+        // in Cloud Hypervisor — measured, see DEFAULT_CH_FIRMWARES. The failure
+        // is also the quietest kind: the VMM process runs, the record says
+        // Running, and the guest never executed an instruction.
+        let edk2 = DEFAULT_CH_FIRMWARES
+            .iter()
+            .position(|p| p.ends_with("CLOUDHV.fd"))
+            .expect("the EDK2 firmware must be in the search path");
+        let rhf = DEFAULT_CH_FIRMWARES
+            .iter()
+            .position(|p| p.ends_with("hypervisor-fw"))
+            .expect("rust-hypervisor-fw stays as a fallback");
+        assert!(
+            edk2 < rhf,
+            "EDK2 must be preferred: {DEFAULT_CH_FIRMWARES:?}"
+        );
+    }
+
+    #[test]
+    fn so_o_cloud_hypervisor_preve_o_ip_em_vez_de_o_observar() {
+        // The whole point of the flag, and the reason it is checked here rather
+        // than trusted: a backend that predicts an address without declaring it
+        // makes `vm create --wait` announce "is up" in 60ms over a guest that
+        // may never boot (MEASURED, 2026-08-12, on an image whose firmware
+        // fails before the kernel). libvirt reads a real DHCP lease, so there
+        // an address IS evidence; Cloud Hypervisor computes one from the MAC
+        // before the guest runs, so there it is evidence of nothing.
+        assert!(
+            CloudHypervisorBackend.ip_is_predicted(),
+            "CH computes the lease from the MAC — it must say so"
+        );
+        assert!(
+            !LibvirtBackend.ip_is_predicted(),
+            "libvirt observes a real lease — declaring it predicted would send `--wait` probing for no reason"
+        );
+    }
 
     #[test]
     fn o_blockcommit_nomeia_sempre_o_topo_e_a_base() {

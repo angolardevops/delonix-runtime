@@ -3194,6 +3194,12 @@ checklist para quem mexer aqui do que como lista de correcções:
   (`vmimage::tool_package`, v0.45.0);
 - **`/sys/fs/cgroup/cgroup.subtree_control` conter `memory`** não é «a MINHA sessão tem
   delegação» — é do cgroup RAIZ do host, e contém-no sempre (v0.42.2, ver abaixo);
+- **um lease PREVISTO não é uma VM VIVA** — em cloud-hypervisor o IP não é observado, é
+  calculado do MAC (`infra::dhcp_lease_ip`, deliberado e correcto: é o que põe o endereço debaixo
+  do isolamento de namespace ANTES de o convidado arrancar). O efeito colateral era o `vm create
+  --wait` não ter por que esperar: devolvia em **0,062 s** a anunciar `is up` sobre uma VM cujo
+  firmware falha antes do kernel, com o `--boot-timeout` sem nada em que se gastar (medido
+  2026-08-12, v0.50.0). Ver a secção «O `--wait` de uma VM CH» abaixo;
 - **um rootfs já extraído não é um rootfs a extrair** — a 2.ª passagem do re-exec de
   `--net <rede-custom>` reextraía a imagem INTEIRA para o caminho que a 1.ª acabara de encher.
   Medido com `pgvector:pg16` (10 296 entradas, 431 MB): 1 526 ms com `--net none` contra
@@ -3648,6 +3654,77 @@ erradas (nome de interface, `/sbin/dhclient`, bridge sem membro, captura com o
 guest vivo, `console=tty0`) antes de comparar duas invocações que só diferiam
 numa flag.
 
+
+## O `--wait` de uma VM CH esperava por um número que já sabia (2026-08-12)
+
+Medido, e o número é o achado: `vm create --backend cloud-hypervisor --network lab-net --wait
+--boot-timeout 120` devolvia em **0,062 s** com `✓ VM 'x' is up.` e `vm 'x' is up — ip
+10.233.254.141`, enquanto a consola série mostrava o firmware a falhar antes de qualquer kernel, o
+overlay ficava em 448 KiB (o SO nunca escreveu nada), o processo girava a 100% de CPU e o
+`ip neigh` desse endereço, de um container na mesma SDN, dava `FAILED`.
+
+A causa não é um bug do IP: em CH o endereço é DERIVADO do MAC (`infra::dhcp_lease_ip`), e isso é
+deliberado — é o que permite pôr o endereço de uma VM debaixo do isolamento de namespace no
+`vm_attach`, antes de o convidado existir para o pedir. O bug é o `--wait` ter tomado esse número
+por resposta. **Ter um IP só é a resposta toda onde o IP foi OBSERVADO**; em libvirt vem de um
+lease real (logo prova que o convidado arrancou o suficiente para o pedir), em CH é aritmética.
+
+- **Quem sabe é o backend**: `VmBackend::ip_is_predicted()` (default `false`, CH devolve `true`),
+  em vez de um `backend.contains("cloud-hypervisor")` no sítio da chamada — a razão do ADR-0008.
+  Teste que exige os dois em desacordo, para um backend novo não herdar a resposta errada.
+- **`infra::sdn_reachable`** pergunta de DENTRO do netns do holder, que é o único sítio onde a SDN
+  existe. **ARP e não ICMP**: um appliance que deita fora pings tem de responder ARP pelo seu
+  próprio endereço, ou não usava a rede de todo; e o iproute2 já é dependência dura deste motor,
+  ao contrário do `ping`. `ip neigh replace … nud probe` obriga o kernel a solicitar e a assentar
+  em `REACHABLE` ou `FAILED`; em `FAILED` re-arma, porque «ainda não» é a resposta normal enquanto
+  um convidado arranca. **Medido ao vivo**: host real → `REACHABLE` em <0,5 s; endereço livre no
+  mesmo /16 → `PROBE` durante ~3 s e depois `FAILED` — é por causa deste atraso que a sonda corre
+  em fatias de 2 s dentro do ciclo, com o `--boot-timeout` a mandar.
+- **`None` ≠ `Some(false)`**: sem holder ou sem `ip(8)` a pergunta não se PÔDE fazer, e aí a CLI
+  diz `ip {ip}, which could not be verified from here` em vez de escolher uma das duas.
+- **`✓ VM 'x' is up.` passou a `started.`** — nesse ponto o que aconteceu foi um processo VMM
+  existir. Quem tem direito a dizer «is up» é o `--wait`, depois de ir ver.
+
+**Validado ao vivo**: o repro passou de 0,062 s/`is up` para 26 s e `is running but never answered
+at 10.233.254.162 — that address is computed from the MAC, not observed`; e o caminho libvirt (IP
+observado) ficou intacto, `is up — ip 192.168.122.77` em 15,6 s sem sondar nada.
+
+**Por decidir, e deliberadamente não mexido**: um `--wait` que esgota o tempo continua a sair
+**0**. Era o comportamento anterior para o caso «ainda a arrancar» e mudá-lo por arrasto tornaria
+um script silenciosamente diferente; mas um `--wait` que não viu a VM a responder e devolve
+sucesso é da mesma família de relato desonesto, e merece a sua própria decisão.
+
+### O firmware do CH: nenhuma imagem arrancava, e era isso que o `--wait` tapava
+
+Encontrado a fechar a validação do ponto acima. Com o **`rust-hypervisor-fw`** que o `install.sh`
+punha, **nenhuma imagem deste projecto arranca em Cloud Hypervisor**: as `delonix-vm-base:*` não
+passam do firmware, e a golden `delonix-vm-k8s:1.34` morre no shim de Secure Boot
+(`import_mok_state() failed: Unsupported`, lido na consola série) sem chegar ao kernel. Com o
+**EDK2 `CLOUDHV.fd`** (fork `cloud-hypervisor/edk2`, asset `releases/latest/download/CLOUDHV.fd`)
+arrancam e ganham IP na SDN — medido: ubuntu-24.04 **7,8 s**, ubuntu-26.04 e debian-bookworm
+**5 s**, rocky-9 **32 s**, golden **7 s**.
+
+- **O instalador passa a buscar os dois** e o motor prefere o EDK2 —
+  `delonix_vm::DEFAULT_CH_FIRMWARES`, com teste a exigir a ORDEM. Um host que tenha ambos e
+  escolha o `hypervisor-fw` volta ao silêncio de origem, e é o pior silêncio que há: processo a
+  correr, registo a dizer `Running`, convidado sem ter executado uma instrução. O
+  `rust-hypervisor-fw` fica como recurso (~150 KB, mais rápido onde funcione, e tirá-lo mudaria o
+  comportamento de uma VM que hoje dependa dele).
+- **Num host já instalado o firmware não aparece sozinho**: `sudo curl -fsSL -o
+  /usr/local/share/delonix/CLOUDHV.fd https://github.com/cloud-hypervisor/edk2/releases/latest/download/CLOUDHV.fd`
+  (ou correr o `install.sh` outra vez). Sem checksum publicado a montante, tal como o
+  `cloud-hypervisor-static` e o `hypervisor-fw` — o mesmo risco já documentado e aceite.
+- **Corrige duas notas deste ficheiro**. A que dizia que a golden é «libvirt-only» já estava
+  corrigida em parte; o que faltava era que o problema NUNCA foi da imagem, era do firmware
+  instalado — e vale para todas, não só para a golden. E o caso `Some(true)` da sonda, que a
+  secção acima dava por provado só contra um container, **está agora provado através de uma VM**:
+  `is up — ip 10.233.254.177` em 7,8 s, confirmado à parte por ARP (`REACHABLE` com o MAC real do
+  convidado), pelo kernel na consola série, e por 3/3 ICMP de um container na mesma rede.
+- **`delonix-vm-base:fedora-42` continua a não arrancar, e não é do backend**: em CH com EDK2 o
+  GRUB anuncia `Booting 'Fedora Linux (6.14.0-63.fc42.x86_64)'` e o firmware leva um `#PF` de
+  escrita a carregar o kernel (igual com `CLOUDHV_EFI.fd`, igual com 2 GiB); e **em libvirt a
+  mesma imagem também não ganha IP em 90 s**. É o controlo em libvirt que faz disto um problema
+  da imagem, e não uma conclusão sobre o Cloud Hypervisor tirada de uma amostra de um.
 
 ## `delonix_net::Net` foi APAGADO — e é breaking para quem usa a biblioteca
 

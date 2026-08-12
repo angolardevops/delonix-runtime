@@ -4032,6 +4032,88 @@ pub fn dhcp_ip_for_mac(net: &str, mac: &str) -> Option<String> {
     dhcp_lease_ip(&prefix, mac)
 }
 
+/// Whether the guest at `ip` ANSWERS on the SDN — asked from INSIDE the
+/// holder's netns, which is the only place that network exists.
+///
+/// Why this has to exist: [`dhcp_ip_for_mac`] does not observe an address, it
+/// COMPUTES one, and it can do so before the guest has executed a single
+/// instruction. So "the record has an IP" becomes true a fraction of a second
+/// after `create` and says nothing whatsoever about the guest — a lease that
+/// was PREDICTED is not a VM that is ALIVE. Same class as the ones already
+/// catalogued in AGENTS.md: a socket file is not a listener, a pidfile is not
+/// reachability, `container.userns` is not "in a different userns".
+///
+/// The probe is ARP and not ICMP on purpose: it needs no cooperation from the
+/// guest's firewall (an appliance that drops pings still has to answer ARP for
+/// its own address, or it could not use the network at all), and iproute2 is
+/// already a hard dependency of this engine where `ping` is not. `nud probe`
+/// makes the kernel solicit the address and settle on `REACHABLE` or `FAILED`;
+/// on `FAILED` the entry is re-armed, because "not yet" is the normal answer
+/// while a guest is still booting.
+///
+/// `None` means the question could not be ASKED (holder down, unknown network,
+/// no `nsenter`/`ip`) — which is NOT `Some(false)`, and a caller must report
+/// neither reachable nor unreachable for it.
+pub fn sdn_reachable(net: &str, ip: &str, mac: &str, timeout: std::time::Duration) -> Option<bool> {
+    let (bridge, _prefix, _gw) = resolve_net(net).ok()?;
+    let holder = read_pid(&holder_pid_path()).filter(|&p| pid_alive(p))?;
+    // `-m` as well as `-U -n`, as everywhere else that reaches into the holder:
+    // the netns is entered through the holder's own user namespace, where this
+    // uid maps to 0 and therefore has CAP_NET_ADMIN over that netns.
+    let join = |args: &[&str]| -> Vec<String> {
+        let mut v: Vec<String> = [
+            "-t",
+            &holder.to_string(),
+            "-U",
+            "-m",
+            "-n",
+            "--preserve-credentials",
+            "--",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        v.extend(args.iter().map(|s| s.to_string()));
+        v
+    };
+    let arm = || -> Option<()> {
+        let a = join(&[
+            "ip", "neigh", "replace", ip, "lladdr", mac, "dev", &bridge, "nud", "probe",
+        ]);
+        // `status()` and not `capture()`: this command prints nothing, so its
+        // exit code is the only signal there is — and a missing `nsenter`/`ip`
+        // has to answer "cannot ask" rather than "not reachable".
+        Command::new("nsenter")
+            .args(&a)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .ok()
+            .filter(|s| s.success())
+            .map(|_| ())
+    };
+    arm()?;
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let a = join(&["ip", "-4", "neigh", "show", ip, "dev", &bridge]);
+        let refs: Vec<&str> = a.iter().map(String::as_str).collect();
+        // The OUTPUT is what gets read, never the `Result`: `capture` is
+        // lenient by design and returns `Ok` for a command that failed.
+        let out = crate::capture("nsenter", &refs).unwrap_or_default();
+        if out.contains("REACHABLE") {
+            return Some(true);
+        }
+        if std::time::Instant::now() >= deadline {
+            return Some(false);
+        }
+        if out.contains("FAILED") || out.trim().is_empty() {
+            let _ = arm();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(400));
+    }
+}
+
 /// **Publishes a port through the ingress** (the container's bind): `add_hostfwd` on the
 /// single slirp (host → tap0) + DNAT on the `pre` chain (tap0 → container). `spec` is
 /// `hostPort:contPort[/tcp|udp]`. This is WHERE the ingress firewall's parameterizable

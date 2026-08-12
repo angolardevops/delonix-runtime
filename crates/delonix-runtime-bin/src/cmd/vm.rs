@@ -1632,9 +1632,13 @@ pub fn run(action: VmCmd) -> Result<()> {
                     return Err(e);
                 }
             };
+            // "started" and not "is up": everything that has happened by this
+            // point is that the VMM process exists. Whether the guest booted is
+            // what `--wait` goes and finds out, and it is the only thing
+            // entitled to say "is up".
             eprintln!(
                 "{}",
-                super::po::tf("✓ VM '{name}' is up.", &[("name", &vm.name)])
+                super::po::tf("✓ VM '{name}' started.", &[("name", &vm.name)])
             );
             println!("{}", vm.name);
             // Honest signal instead of a silent `IP <none>`: a libvirt VM that
@@ -2302,23 +2306,70 @@ fn fmt_open_ports(ip: Option<&str>) -> String {
 /// up and the boot advanced. Only makes sense in modes with a visible IP (CH,
 /// or libvirt nat/bridge); in user-mode (libvirt session, SLIRP) there's never
 /// an IP, so it warns and points to the console instead of waiting in vain.
+///
+/// "Has an IP" is only the whole answer where the address was OBSERVED. On
+/// Cloud Hypervisor it is computed from the MAC before the guest runs (see
+/// [`delonix_vm::ip_is_predicted`]), so this used to return in ~60ms announcing
+/// a VM that never booted, with `--boot-timeout` having nothing to spend
+/// itself on — measured, on an image whose firmware fails before the kernel.
+/// There the address is the START of the question and the answer is an ARP
+/// probe on the SDN.
 fn wait_for_boot(base: &std::path::Path, name: &str, timeout: std::time::Duration) {
     let start = std::time::Instant::now();
     let deadline = start + timeout;
     let frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
     let tty = super::output::color_enabled();
     let mut i = 0usize;
+    // The address that exists but has never answered — decides which sentence
+    // the timeout gets to print. "Still booting" is the right thing to say to
+    // someone with no IP yet; to someone whose VM is running at a silent
+    // address it hides the one fact that matters.
+    let mut silent_at: Option<String> = None;
     loop {
         if let Ok(vm) = delonix_vm::status(base, name) {
             if let Some(ip) = vm.ip.clone().filter(|s| !s.is_empty()) {
-                if tty {
-                    eprint!("\r\x1b[K");
+                let up = if delonix_vm::ip_is_predicted(&vm) {
+                    // Sliced rather than handed the whole remaining budget so
+                    // the spinner keeps turning and the outer deadline stays
+                    // the one in charge.
+                    match delonix_net::infra::sdn_reachable(
+                        &vm.network,
+                        &ip,
+                        &vm.mac,
+                        std::time::Duration::from_secs(2),
+                    ) {
+                        Some(true) => true,
+                        Some(false) => {
+                            silent_at = Some(ip.clone());
+                            false
+                        }
+                        // Cannot ask (holder down, no `ip(8)`) — and the reason
+                        // will not change by asking again. Say so instead of
+                        // spending the timeout, and instead of claiming either.
+                        None => {
+                            if tty {
+                                eprint!("\r\x1b[K");
+                            }
+                            super::output::info(&super::po::tf(
+                                "vm '{name}' started — ip {ip}, which could not be verified from here",
+                                &[("name", name), ("ip", &ip)],
+                            ));
+                            return;
+                        }
+                    }
+                } else {
+                    true
+                };
+                if up {
+                    if tty {
+                        eprint!("\r\x1b[K");
+                    }
+                    super::output::info(&super::po::tf(
+                        "vm '{name}' is up — ip {ip}",
+                        &[("name", name), ("ip", &ip)],
+                    ));
+                    return;
                 }
-                super::output::info(&super::po::tf(
-                    "vm '{name}' is up — ip {ip}",
-                    &[("name", name), ("ip", &ip)],
-                ));
-                return;
             }
             // libvirt user-mode never gives an IP: after a short start, steer
             // toward the console instead of waiting the whole timeout in vain.
@@ -2344,10 +2395,16 @@ fn wait_for_boot(base: &std::path::Path, name: &str, timeout: std::time::Duratio
             if tty {
                 eprint!("\r\x1b[K");
             }
-            super::output::warn(&super::po::tf(
-                "vm '{name}' still booting after the timeout — `delonix vm console {name}` to watch",
-                &[("name", name)],
-            ));
+            match &silent_at {
+                Some(ip) => super::output::warn(&super::po::tf(
+                    "vm '{name}' is running but never answered at {ip} — that address is computed from the MAC, not observed, so it exists whether or not the guest booted; `delonix vm console {name}` to watch the boot",
+                    &[("name", name), ("ip", ip)],
+                )),
+                None => super::output::warn(&super::po::tf(
+                    "vm '{name}' still booting after the timeout — `delonix vm console {name}` to watch",
+                    &[("name", name)],
+                )),
+            }
             return;
         }
         if tty {
