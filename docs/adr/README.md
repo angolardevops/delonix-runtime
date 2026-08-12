@@ -22,6 +22,7 @@ never rewritten — supersede them with a new one.
 | [0009](0009-truenas-storage-provisioner.md) | Provision TrueNAS datasets over its API, as a separate crate | **Accepted** — with a `runtime-sec` pass and a chaos scenario for the destructive path |
 | [0010](0010-remote-management-api.md) | What it would take for the management API to be remote | **Rejected** — the API stays local; remoteness belongs to the PaaS |
 | [0012](0012-vm-reboot-convergence.md) | A third convergence class for VMs: reboot, between update and replace | **Proposed** — deliberately after the production launch |
+| [0013](0013-network-topology.md) | Routed topologies — external gateway/DNS, subnets and VLANs, without leaving rootless | **Proposed** — tier A/B rootless, tier C privileged |
 
 ## Roadmap (from `CLAUDE.md` "Universal Runtime" — each phase needs its own accepted ADR)
 
