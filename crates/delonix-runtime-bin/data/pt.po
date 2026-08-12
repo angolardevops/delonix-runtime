@@ -2986,6 +2986,9 @@ msgstr "stack validate: {n} documento(s), todas as referências resolvidas — m
 msgid "{w} ignored field(s) — refused by --strict"
 msgstr "{w} campo(s) ignorado(s) — recusado por --strict"
 
+msgid "unpacking the image"
+msgstr "a descompactar a imagem"
+
 msgid "{n} layer(s) in {t}"
 msgstr "{n} camada(s) em {t}"
 
