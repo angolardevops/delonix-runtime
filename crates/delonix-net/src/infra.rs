@@ -3247,6 +3247,25 @@ pub struct NetDef {
     pub egress: EgressState,
 }
 
+impl NetDef {
+    /// The single construction site of a network's physical definition — this is
+    /// the record whose `bridge` the holder actually creates the link with, so
+    /// it is the AUTHORITY on the device's name (see [`crate::bridge_name`]).
+    ///
+    /// `network_create` and `network_create_with` differ only in how they arrive
+    /// at the prefix; having them build the struct twice is how a second formula
+    /// gets in. Kept pure (no I/O) so the agreement with the declarative
+    /// `NetworkStore` is testable without touching the environment.
+    pub(crate) fn new(name: &str, prefix: &str) -> Self {
+        NetDef {
+            name: name.to_string(),
+            bridge: crate::bridge_name(name),
+            prefix: prefix.to_string(),
+            egress: EgressState::default(),
+        }
+    }
+}
+
 /// A network's egress policy, stored in the [`NetDef`].
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct EgressState {
@@ -3543,12 +3562,7 @@ pub fn network_create(name: &str) -> Result<NetDef> {
         .map(|o| format!("10.{o}"))
         .find(|p| !used.contains(p))
         .ok_or_else(|| Error::Invalid("no free /16 prefixes for ingress networks".into()))?;
-    let def = NetDef {
-        name: name.to_string(),
-        bridge: format!("dlxn{:08x}", crate::fnv32(name)),
-        prefix,
-        egress: EgressState::default(),
-    };
+    let def = NetDef::new(name, &prefix);
     std::fs::create_dir_all(networks_dir()).map_err(|e| Error::Runtime {
         context: "networks dir",
         message: e.to_string(),
@@ -3568,12 +3582,7 @@ pub fn network_create_with(name: &str, prefix: &str) -> Result<NetDef> {
     if let Some(def) = network_get(name) {
         return Ok(def);
     }
-    let def = NetDef {
-        name: name.to_string(),
-        bridge: format!("dlxn{:08x}", crate::fnv32(name)),
-        prefix: prefix.to_string(),
-        egress: EgressState::default(),
-    };
+    let def = NetDef::new(name, prefix);
     std::fs::create_dir_all(networks_dir()).map_err(|e| Error::Runtime {
         context: "networks dir",
         message: e.to_string(),
