@@ -8674,3 +8674,34 @@ msgstr "DELONIX_PROXMOX_VLAN: '{v}' não é uma etiqueta de VLAN (1-4094)"
 
 msgid "{flags}: a cloud-init seed is a file on THIS host and the VM runs on another machine, so it could never be read — configure the guest through the node's own cloud-init, or use a local backend"
 msgstr "{flags}: um seed de cloud-init é um ficheiro DESTE host e a VM corre noutra máquina, logo nunca poderia ser lido — configura o convidado pelo cloud-init do próprio nó, ou usa um backend local"
+
+# kind: NetworkRoute — reversibilidade declarativa (ADR-0013 camada B)
+msgid "open"
+msgstr "aberta"
+
+msgid "declared, not live"
+msgstr "declarada, não activa"
+
+msgid "declared, holder unreachable"
+msgstr "declarada, holder inalcançável"
+
+msgid "invalid spec"
+msgstr "spec inválida"
+
+msgid "NetworkRoute '{name}': the path {from} -> {to} is declared by more than one document — a route is identified by its pair, not by its name"
+msgstr "NetworkRoute '{name}': o caminho {from} -> {to} é declarado por mais do que um documento — uma rota é identificada pelo seu par, não pelo nome"
+
+msgid "changing `target` or `direction` cannot be undone automatically — the previous target keeps its rules, because a policy has no record of its own (it lives on the target's). Clear them by hand with `delonix net ingress clear <old-target>` (or `net egress clear`), then apply again"
+msgstr "mudar o `target` ou a `direction` não se desfaz automaticamente — o alvo anterior fica com as suas regras, porque uma política não tem registo próprio (vive no do alvo). Limpa-as à mão com `delonix net ingress clear <alvo-antigo>` (ou `net egress clear`), e aplica outra vez"
+
+msgid "an image is shared content-addressed cache, owned by no stack"
+msgstr "uma imagem é cache partilhada com endereço de conteúdo, e não pertence a stack nenhuma"
+
+msgid "routes live in the proxy's shared config, with no per-document provenance"
+msgstr "as rotas vivem na configuração partilhada do proxy, sem proveniência por documento"
+
+msgid "a tunnel has no labels to stamp ownership on"
+msgstr "um túnel não tem labels onde carimbar a posse"
+
+msgid "a share has no record of its own to stamp ownership on"
+msgstr "uma partilha não tem registo próprio onde carimbar a posse"

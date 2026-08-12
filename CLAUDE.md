@@ -468,16 +468,23 @@ mudar o PID** e o caminho declarativo nunca lhe chamou — 5.ª ocorrência do p
   a meio deixaria a stack meio convergida E com erro). `--prune` nunca por omissão, e corre em
   ÚLTIMO lugar. `destroy` usa a ordem INVERSA de `KINDS`, **derivada** e não escrita 2.ª vez.
 - **`--detailed-exitcode`** (0/2/1) — contrato do `terraform plan`, para um gate de deriva em CI.
-- **Âmbito: 11 dos 12 Kinds convergem** (`CONVERGING_KINDS`) — Network/Volume/ShareVolume/Image/
-  Vm/Container/Pod/FirewallPolicy/HTTPRoute/Ingress/Tunnel. A Fase C fechou os três que a v1
-  deixara de fora (HTTPRoute/Ingress por proveniência no `resolve_config`, Tunnel por separar o
-  spec do status); **esta linha dizia 8 e estava desactualizada pela própria sessão que os
-  acrescentou** — a lista autoritativa é a constante, e `stack plan --fields` imprime-a.
+- **Âmbito: 12 dos 13 Kinds convergem** (`CONVERGING_KINDS`) — Network/NetworkRoute/Volume/
+  ShareVolume/Image/Vm/Container/Pod/FirewallPolicy/HTTPRoute/Ingress/Tunnel. **Esta linha já
+  esteve errada duas vezes** (dizia 8, depois 11 de 12 quando o `KINDS` já tinha 13) — a lista
+  autoritativa é a constante, e `stack plan --fields` imprime-a.
   **Só o `Secret` fica** «garante presente», e por uma razão que não é falta de atenção: o estado
   são valores cifrados, e um plano não os decifra para comparar. O plano marca-o `!` — **nunca o
   omite** (um plano que esconde um recurso lê-se como «sem alterações») — e o `--fields` diz o
   obstáculo concreto, porque «ainda não converge» lê-se como «ninguém chegou lá». O `Cluster`
   fica fora do próprio `KINDS` por ser um procedimento remoto e não um recurso local.
+- **Dois gates novos, e cada um nasceu de um Kind que escapou.** O teste das três listas exigia a
+  razão genérica para os CONVERGENTES e nunca a específica para os outros — foi por aí que a
+  `NetworkRoute` entrou, aplicada e validada mas fora do `CONVERGING_KINDS`, a imprimir `!` com uma
+  frase que se lê como «ninguém chegou lá» quando o que acontecia era uma EXCEPÇÃO ao isolamento
+  entre redes que o manifesto não conseguia fechar. Agora um Kind ou converge ou escreve o
+  obstáculo. O gate irmão (`TEARDOWN_KINDS`/`no_teardown_reason`) exige que um Kind convergente
+  tenha teardown ou diga porquê — senão o `--prune` promete-o e o `destroy_one` recusa-o **a meio**,
+  depois de já ter removido o resto na ordem de teardown.
 - **`Desired.ownable`** separa «converge» de «é possuível». Uma `Image` é cache partilhada com
   endereço de conteúdo (o mesmo `alpine:latest` serve todas as stacks — carimbá-la para uma e
   removê-la quando essa deixasse de a declarar tirava-a debaixo das outras); uma `FirewallPolicy`
