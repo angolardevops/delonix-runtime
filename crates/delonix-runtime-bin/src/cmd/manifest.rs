@@ -359,6 +359,7 @@ fn check_unknown_fields(doc: &ManifestDoc) {
         _ => Vec::new(),
     };
     for key in nested {
+        count_unknown_field_warning();
         super::output::warn(&super::po::tf(
             "{kind} '{name}': unknown field '{key}' in spec — ignored (check the spelling)",
             &[
@@ -714,6 +715,7 @@ pub fn warn_unknown_fields_in(doc: &ManifestDoc, block: &str, known: &[&str]) {
         if known.contains(&key) {
             continue;
         }
+        count_unknown_field_warning();
         super::output::warn(&super::po::tf(
             "{kind} '{name}': unknown field '{key}' in spec.{block} — ignored (check the spelling)",
             &[
@@ -726,8 +728,28 @@ pub fn warn_unknown_fields_in(doc: &ManifestDoc, block: &str, known: &[&str]) {
     }
 }
 
+/// How many unknown-field warnings this process has emitted.
+///
+/// Exists so a command can REPORT what it warned about instead of ending on a
+/// bare `OK`: `stack validate` printed the warning and then declared the
+/// manifest fine on the next line, which is the same "says yes about work it did
+/// not do" this engine removes everywhere else. `--strict` turns the count into
+/// an exit code, for a CI that wants the typo to stop the pipeline.
+pub static UNKNOWN_FIELD_WARNINGS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// The count so far.
+pub fn unknown_field_warnings() -> usize {
+    UNKNOWN_FIELD_WARNINGS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub(crate) fn count_unknown_field_warning() {
+    UNKNOWN_FIELD_WARNINGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
 pub fn warn_unknown_fields(doc: &ManifestDoc, known: &[&str]) {
     for key in unknown_fields(doc, known) {
+        count_unknown_field_warning();
         eprintln!(
             "{}",
             super::po::tf(
@@ -1060,6 +1082,29 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
         // `memroy` (typo) is flagged; `image`/`restartPolicy` (canonical) are not.
         assert_eq!(unknown, vec!["memroy".to_string()]);
         let _ = std::fs::remove_file(&p);
+    }
+
+    /// O `validate` dizia `OK` na linha a seguir a avisar que um campo tinha
+    /// sido ignorado. O contador é o que permite ao veredicto condizer com o que
+    /// foi impresso — e ao `--strict` transformá-lo em exit code.
+    #[test]
+    fn campo_ignorado_e_contado() {
+        let dir = std::env::temp_dir().join(format!("dlx-warncount-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("m.yaml");
+        std::fs::write(
+            &p,
+            "apiVersion: delonix.io/v1\nkind: Network\nmetadata:\n  name: n\nspec:\n  campoInexistente: 1\n",
+        )
+        .unwrap();
+        let antes = super::unknown_field_warnings();
+        super::load(&p).unwrap();
+        assert_eq!(
+            super::unknown_field_warnings(),
+            antes + 1,
+            "carregar um manifesto com um campo inventado tem de contar UM aviso"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Drift-guard: each file in `examples/` must parse without A single

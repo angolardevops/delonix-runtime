@@ -2977,6 +2977,15 @@ msgstr "kind não suportado"
 msgid "stack apply aborted: {n} unresolved reference(s) (fix the manifest or use `stack validate`)"
 msgstr "stack apply abortado: {n} referência(s) por resolver (corrige o manifesto ou usa `stack validate`)"
 
+msgid "Fail (exit != 0) when a field was ignored, instead of only warning about it — for CI."
+msgstr "Falha (exit != 0) quando um campo foi ignorado, em vez de apenas avisar — para CI."
+
+msgid "stack validate: {n} document(s), all references resolved — but {w} field(s) were ignored (see the warnings above)"
+msgstr "stack validate: {n} documento(s), todas as referências resolvidas — mas {w} campo(s) foram ignorados (ver os avisos acima)"
+
+msgid "{w} ignored field(s) — refused by --strict"
+msgstr "{w} campo(s) ignorado(s) — recusado por --strict"
+
 msgid "stack validate: OK — {n} document(s), all references resolved"
 msgstr "stack validate: OK — {n} documento(s), todas as referências resolvidas"
 
