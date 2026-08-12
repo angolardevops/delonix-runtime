@@ -1114,6 +1114,20 @@ pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
 /// image, so the declarative path generated a cloud-init seed for a guest that
 /// reads none while the CLI refused the same request.
 ///
+/// **A PATH into the store is the same image as its name, and has to answer the
+/// same.** Naming `opnsense:26.1` refused `hostname`/`sshKeys` on an appliance
+/// while spelling out `…/vm-images/opnsense_26.1.qcow2` accepted them and
+/// attached a seed the guest never reads — and the absolute path is precisely
+/// the workaround someone reaches for when a name is not accepted, so the check
+/// was contournable by the very move the earlier bug taught. Same for the
+/// image's `VCPUS`/`MEMORY`/`HYPERVISOR`: they applied under one spelling and
+/// not the other. So the lookup falls back to [`image_at_path`].
+///
+/// A qcow2 that is NOT in the store still resolves to itself with no metadata,
+/// and that is honest rather than a gap: nothing on this machine records what
+/// an arbitrary disk is, so there is no appliance flag to read and no defaults
+/// to apply. What is fixed is a store image referred to by its own path.
+///
 /// Never builds anything: `desired` (a plan) calls this too, and computing a
 /// plan cannot create.
 ///
@@ -1123,13 +1137,44 @@ pub(crate) fn resolve_image_ref(
     store: &super::vmimage::VmImageStore,
     reference: &str,
 ) -> (String, Option<super::vmimage::VmImage>) {
-    match store.get(reference) {
-        Ok(meta) => (
+    if let Ok(meta) = store.get(reference) {
+        return (
             store.qcow2_path(reference).to_string_lossy().into_owned(),
             Some(meta),
-        ),
-        Err(_) => (reference.to_string(), None),
+        );
     }
+    if let Some((path, meta)) = image_at_path(store, reference) {
+        return (path, Some(meta));
+    }
+    (reference.to_string(), None)
+}
+
+/// The store entry whose qcow2 IS this path, or `None`.
+///
+/// Compares CANONICALIZED paths and not strings — the same reason
+/// `vms_backed_by` does it a file away: `./x.qcow2`, `~/…/x.qcow2` and a path
+/// through a symlinked home are one file, and a string compare would call them
+/// three. A reference that cannot be canonicalized (a name, a disk that means
+/// something on a remote node, a tag not built yet) simply is not a local path
+/// and falls through — which is why this can run on every reference without
+/// deciding anything about the ones it does not recognise.
+///
+/// Returns `qcow2_path(name)` and NOT the canonical path, so that naming an
+/// image and pointing at it produce the very same string. Two spellings that
+/// resolved to two strings would read as drift to the reconciler, and a `Vm`
+/// drift is a `Replace` — which throws the overlay disk away.
+fn image_at_path(
+    store: &super::vmimage::VmImageStore,
+    reference: &str,
+) -> Option<(String, super::vmimage::VmImage)> {
+    let want = std::fs::canonicalize(reference).ok()?;
+    for img in store.list().ok()? {
+        let p = store.qcow2_path(&img.name);
+        if std::fs::canonicalize(&p).is_ok_and(|c| c == want) {
+            return Some((p.to_string_lossy().into_owned(), img));
+        }
+    }
+    None
 }
 
 /// The cloud-init fields a manifest/CLI asked for, when the image runs no
@@ -3348,6 +3393,58 @@ mod tests {
             !meta.uses_cloud_init(),
             "sem isto o apply não distingue um appliance de uma cloud image"
         );
+    }
+
+    /// **O resíduo do bug acima**: o MESMO appliance, referido pelo caminho do
+    /// seu próprio qcow2 em vez do nome, não trazia metadados nenhuns — logo a
+    /// recusa de cloud-init não disparava e os defaults da imagem não se
+    /// aplicavam. E o caminho absoluto é exactamente o contorno natural de quem
+    /// levou `image not found` com o nome, ou seja: a verificação era
+    /// contornável pela jogada que o próprio bug anterior ensinava.
+    ///
+    /// As duas grafias têm de devolver a MESMA string, senão trocar de uma para
+    /// a outra lê-se como deriva — e uma deriva de `Vm` é um `Replace`, que
+    /// deita fora o disco overlay.
+    #[test]
+    fn o_caminho_do_qcow2_de_uma_imagem_do_store_resolve_como_o_nome() {
+        let (_tmp, store) = store_de_teste("caminho-do-store");
+        let mut img = imagem_de_teste("opnsense:26.1");
+        img.cloud_init = Some(false);
+        img.default_vcpus = Some(2);
+        img.default_memory = Some("2G".into());
+        store.save(&img).unwrap();
+        // O ficheiro tem de EXISTIR: a correspondência é por caminho
+        // canonicalizado, e canonicalizar exige o ficheiro no disco.
+        let qcow2 = store.qcow2_path("opnsense:26.1");
+        std::fs::write(&qcow2, b"").unwrap();
+
+        let por_nome = super::resolve_image_ref(&store, "opnsense:26.1");
+        let por_caminho = super::resolve_image_ref(&store, &qcow2.to_string_lossy());
+
+        assert_eq!(
+            por_caminho.0, por_nome.0,
+            "duas grafias da mesma imagem, duas strings: deriva eterna no plano"
+        );
+        let meta = por_caminho
+            .1
+            .expect("um caminho para dentro do store é a imagem do store");
+        assert!(
+            !meta.uses_cloud_init(),
+            "sem isto o appliance volta a aceitar hostname/sshKeys e ganha um seed que nunca lê"
+        );
+        assert_eq!(
+            meta.default_vcpus,
+            Some(2),
+            "e os defaults da imagem também"
+        );
+
+        // Um qcow2 que NÃO é do store continua a resolver-se a si próprio, sem
+        // metadados — é o que se sabe dele, e é honesto dizê-lo.
+        let fora = std::path::Path::new(&_tmp).join("alheio.qcow2");
+        std::fs::write(&fora, b"").unwrap();
+        let (disk, meta) = super::resolve_image_ref(&store, &fora.to_string_lossy());
+        assert_eq!(disk, fora.to_string_lossy());
+        assert!(meta.is_none(), "nada neste host diz o que este disco é");
     }
 
     /// A recusa que a CLI já fazia, agora também pelo manifesto — e a nomear os
