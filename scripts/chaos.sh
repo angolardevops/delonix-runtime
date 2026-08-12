@@ -725,6 +725,94 @@ YAML
 }
 
 # ---------------------------------------------------------------------------
+# stack-netroute — o manifesto FECHA a excepção que abre (ADR-0013 camada B)
+#
+# Uma `kind: NetworkRoute` é a excepção ao isolamento entre redes. Antes desta
+# série era aplicada e nunca convergia: tirá-la do ficheiro e correr
+# `apply --prune` NÃO a fechava, e o plano dizia «sem alterações». O git dizia
+# fechado e o nó estava aberto.
+#
+# O que este cenário exige, e porque é o CICLO e não um comando de cada vez:
+# cada passo isolado devolve 0 mesmo com o defeito presente. O que distingue é
+# o estado do dataplane DEPOIS de o manifesto deixar de declarar a rota.
+scen_stack_netroute() {
+  head_ "stack-netroute — o prune e o destroy fecham mesmo a rota"
+  local dir="$SANDBOX/stack-netroute"
+  rm -rf "$dir"; mkdir -p "$dir"
+  cat > "$dir/m.yaml" <<'YAML'
+apiVersion: delonix.io/v1
+kind: Network
+metadata: { name: nrweb }
+spec: { driver: bridge }
+---
+apiVersion: delonix.io/v1
+kind: Network
+metadata: { name: nrdb }
+spec: { driver: bridge }
+---
+apiVersion: delonix.io/v1
+kind: NetworkRoute
+metadata: { name: web-reaches-db }
+spec: { from: nrweb, to: nrdb }
+YAML
+  # Sem a rota — o mesmo ficheiro menos o último documento.
+  head -n -5 "$dir/m.yaml" > "$dir/sem.yaml"
+
+  dlx stack apply -f "$dir/m.yaml" >/dev/null 2>&1
+  local pin; pin=$(holder_pid)
+  [ -z "$pin" ] && { skip "stack-netroute" "holder nao arrancou"; return; }
+
+  # Conta os pares ENTRE REDES no mapa vivo. Os auto-pares (`<b> . <b>`) são o
+  # isolamento intra-rede e não são rotas — contá-los diria «há rota» sempre.
+  npairs() {
+    nsenter -t "$pin" -U -m -n -- nft list map ip dlxing netpair 2>/dev/null \
+      | grep -oE '"[^"]+" \. "[^"]+"' | awk -F'" \\. "' '{gsub(/"/,""); if ($1 != $2) print}' | wc -l
+  }
+
+  # 1. A rota existe no dataplane, não só no relato do comando.
+  if [ "$(npairs)" -lt 1 ]; then
+    bad "stack-netroute" "o apply reportou sucesso e nao ha rota no @netpair"
+    dlx stack destroy -f "$dir/m.yaml" >/dev/null 2>&1; rm -rf "$dir"; return
+  fi
+  # 2. Um manifesto inalterado nada tem a propor.
+  if ! dlx stack plan -f "$dir/m.yaml" --detailed-exitcode >/dev/null 2>&1; then
+    bad "stack-netroute" "um manifesto inalterado propos alteracoes"
+  fi
+
+  # 3. O CONTROLO: uma rota criada à mão não leva carimbo e tem de sobreviver a
+  #    um prune. Um apply que apaga o que não criou é a falha que destroi a
+  #    confianca na ferramenta.
+  dlx network route nrdb nrweb >/dev/null 2>&1
+
+  # 4. O passo que não existia: tirar a rota do manifesto FECHA-A.
+  cp "$dir/sem.yaml" "$dir/m.yaml"
+  dlx stack apply -f "$dir/m.yaml" --prune >/dev/null 2>&1
+  local depois; depois=$(npairs)
+  if [ "$depois" -ne 1 ]; then
+    bad "stack-netroute" "apos o prune esperava-se so a rota imperativa, ha $depois"
+  elif ! dlx stack plan -f "$dir/m.yaml" --detailed-exitcode >/dev/null 2>&1; then
+    bad "stack-netroute" "o plano continua a propor alteracoes depois do prune"
+  else
+    ok "stack-netroute: o prune fechou a declarada e poupou a imperativa"
+  fi
+
+  # 5. O destroy leva as redes, e uma rota não sobrevive a nenhuma das pontas —
+  #    nem no registo nem no mapa. Deixar o elemento la reabriria o caminho
+  #    sozinho na proxima rede com o mesmo nome (`bridge_name` e deterministico).
+  dlx stack destroy -f "$dir/m.yaml" >/dev/null 2>&1
+  local sobra; sobra=$(npairs)
+  local regs; regs=$(ls "$SANDBOX/root/ingress/routes" 2>/dev/null | wc -l)
+  if [ "$sobra" -ne 0 ]; then
+    bad "stack-netroute" "o destroy deixou $sobra par(es) orfaos no @netpair"
+  elif [ "$regs" -ne 0 ]; then
+    bad "stack-netroute" "o destroy deixou $regs registo(s) de rota para tras"
+  else
+    ok "stack-netroute: destroy sem orfaos no mapa nem no registo"
+  fi
+  rm -rf "$dir"
+}
+
+# ---------------------------------------------------------------------------
 # truenas-destroy — o caminho destrutivo do provisionamento (ADR-0009)
 #
 # Precisa de uma appliance TrueNAS REAL, e SALTA com uma linha audivel sem ela:
@@ -829,7 +917,7 @@ YAML
   rm -rf "$dir"
 }
 
-ALL=(holder_kill control_restart holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_holder_respawn scale abrupt_kill aggregate_ceiling delegated_scope disk_full write_failure stack_converge truenas_destroy)
+ALL=(holder_kill control_restart holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_holder_respawn scale abrupt_kill aggregate_ceiling delegated_scope disk_full write_failure stack_converge stack_netroute truenas_destroy)
 
 while [ $# -gt 0 ]; do
   case "$1" in
