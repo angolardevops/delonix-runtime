@@ -191,9 +191,44 @@ reiniciar uma VM sem ser pedido (é interrupção de serviço, não perda de dad
 gate — um `--reboot` a par do `--replace`? E o que faz o `--detailed-exitcode` com uma mudança que
 o utilizador ainda não autorizou.
 
-## Medição por fazer, que precisa de autorização
+## As três medições que faltavam — feitas (2026-08-12, com autorização)
 
-Provar o VXLAN ao vivo exige `network create --driver overlay` — que muta o netns do holder onde
-correm os 4 containers de produção deste host. **Não o fiz.** A classificação «realizado» acima
-assenta no caminho de código e na validação registada no `CLAUDE.md`, não numa medição desta
-sessão. Com autorização, é uma rede descartável e um `network rm` a seguir.
+**Bateria E2E: 264 PASS, 0 FAIL, 0 SKIP.** O `scripts/e2e.sh` é seguro num host de produção por
+construção — prefixo único por PID em tudo o que cria, manifesto próprio, e o `stack destroy` só
+leva o que a stack possui. Linha de base tirada antes e comparada depois: containers, redes, VMs e
+PIDs do holder **idênticos**.
+
+**VXLAN provado ao vivo.** A classificação «realizado» deixou de assentar em leitura de código.
+Uma rede overlay descartável (`--vni 4242`, dois pares em TEST-NET-3) produziu, dentro do netns do
+holder:
+
+```
+dlxvx1092: ... master dlxn98b86f58
+    vxlan id 4242 ... dstport 4789 nolearning
+bridge fdb: 00:00:00:00:00:00 dst 203.0.113.7 self permanent
+            00:00:00:00:00:00 dst 203.0.113.9 self permanent
+bridge:     dlxn98b86f58  UP  10.211.0.1/16
+```
+
+Device real, masterizado na bridge da rede, FDB semeado com os dois pares, e a bridge com endereço
+— é a ela que um container se liga. **Uma correcção de nome pelo caminho**: o device é
+`dlxvx{vni:04x}`, hexadecimal — 4242 decimal é `dlxvx1092`. A minha primeira sonda procurou o nome
+decimal, não encontrou nada, e por um momento pareceu que o overlay não subia.
+
+**Bug encontrado por fazer esta prova** (`2253b9e`): o `network rm` levava o registo e a bridge e
+deixava o **uplink VXLAN órfão** — UP, com o FDB dos pares, sem master. Um vazamento por cada ciclo
+create/rm, que só morria com o holder. Corrigido e provado nos dois sentidos.
+
+**`stack apply` real.** Não usei a VM `lab` do utilizador: um apply de um `kind: Vm` arranca uma VM
+parada, e arrancar máquina alheia não é o mesmo que carimbá-la. Criei uma VM minha por apply real,
+e o segundo apply sobre ela — já existente — imprimiu:
+
+```
+vm/fase0-apply-probe: ensured
+Conditions (attention — missing prerequisites):
+  Vm 'fase0-apply-probe': Converged=False (FieldsNotCompared) — declared but NOT
+  applied to an existing VM: cpuTopology, machine, tpm, vnc — ...
+```
+
+Antes destas correcções o mesmo comando dizia `ensured` e mais nada. Tudo removido a seguir
+(`stack destroy`), estado final idêntico à linha de base, incluindo os registos de VM em disco.
