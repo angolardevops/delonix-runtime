@@ -1,0 +1,44 @@
+#cloud-config
+# lab-cli — o posto de trabalho. Não leva endereço fixo na placa do lab: é o
+# `lab-dhcp` que lho entrega, e é isso que este cliente serve para PROVAR.
+hostname: lab-cli
+fqdn: cli.lab.ngola
+
+users:
+  - name: delonix
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    ssh_authorized_keys:
+      - SSH_KEY_PLACEHOLDER
+
+package_update: true
+packages:
+  - smbclient
+  - cifs-utils
+  # Sem isto, `mount -t nfs` falha com "you might need a /sbin/mount.<type>
+  # helper" — e o que se segue e pior que o erro: quem escreve no ponto de
+  # montagem passa a escrever no disco LOCAL, com ar de sucesso.
+  - nfs-common
+  - bind9-dnsutils
+
+write_files:
+  - path: /etc/netplan/60-lab.yaml
+    permissions: "0600"
+    content: |
+      network:
+        version: 2
+        ethernets:
+          lab0:
+            match:
+              macaddress: "52:54:00:5a:b0:13"
+            set-name: lab0
+            dhcp4: true
+            # A rota por omissão continua a ser a da eth0 (NAT), senão o
+            # cliente perdia a internet para uma LAN que ainda não encaminha.
+            dhcp4-overrides:
+              use-routes: false
+              use-dns: false
+
+runcmd:
+  - netplan apply

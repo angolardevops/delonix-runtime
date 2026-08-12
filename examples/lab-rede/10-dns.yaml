@@ -1,0 +1,17 @@
+# lab-dns — DNS autoritativo (BIND 9) da zona lab.ngola
+apiVersion: delonix.io/v1
+kind: Vm
+metadata:
+  name: lab-dns
+spec:
+  disk: DISK_PLACEHOLDER
+  vcpus: 1
+  memory: 1G
+  backend: libvirt
+  netMode: nat
+  userData: ./cloud-init/dns.yaml
+  extraNics:
+    - type: network
+      source: labnet
+      model: virtio
+      mac: "52:54:00:5a:b0:10"

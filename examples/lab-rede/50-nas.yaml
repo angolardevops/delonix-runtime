@@ -1,0 +1,48 @@
+# lab-nas — TrueNAS SCALE, o armazenamento do laboratório
+#
+#   1) o disco de dados tem de existir ANTES do apply:
+#        mkdir -p ~/.local/share/delonix/vms/labdata
+#        qemu-img create -f qcow2 ~/.local/share/delonix/vms/labdata/nas-dados.qcow2 10G
+#   2) delonix stack apply -f 50-nas.yaml
+#
+# O disco de sistema da imagem tem 20 GiB e é só isso: sistema. O TrueNAS
+# recusa criar uma pool no disco onde está instalado, por isso um NAS sem um
+# segundo disco arranca, serve a interface e não consegue guardar nada — é o
+# `extraDisks` abaixo que o torna um NAS de facto.
+#
+# NOTA (appliance por manifesto): o TrueNAS não corre cloud-init. A CLI recusa
+# `--hostname`/`--ssh-key` para um appliance; o manifesto ainda não faz essa
+# verificação e anexa-lhe um CD-ROM de seed que o guest ignora. Por isso não há
+# aqui `hostname:` nem `sshKeys:` — configura-se pela interface web, que é como
+# um appliance se configura.
+apiVersion: delonix.io/v1
+kind: Vm
+metadata:
+  name: lab-nas
+spec:
+  disk: /home/walter/.local/share/delonix/vm-images/truenas-scale_25.10.qcow2
+  vcpus: 2
+  memory: 4G
+  backend: libvirt
+  netMode: nat
+  # O disco de dados entra por `libvirtXmlOverlay` e não por `extraDisks`, e a
+  # razão é concreta: o TrueNAS recusa criar uma pool com discos sem número de
+  # série ("Disks have duplicate serial numbers: None (vda, vdb)"), e o
+  # `extraDisks` não tem campo para o definir. O overlay é o escape-hatch para
+  # exactamente este caso — XML cru, injectado antes de `</devices>`.
+  #
+  # Fragmentos de XML NÃO são validados: podem nomear qualquer caminho do host.
+  # Só num manifesto de confiança.
+  libvirtXmlOverlay:
+    - |
+      <disk type='file' device='disk'>
+        <driver name='qemu' type='qcow2'/>
+        <source file='/home/walter/.local/share/delonix/vms/labdata/nas-dados.qcow2'/>
+        <target dev='vdb' bus='virtio'/>
+        <serial>LABDATA01</serial>
+      </disk>
+  extraNics:
+    - type: network
+      source: labnet
+      model: virtio
+      mac: "52:54:00:5a:b0:20"
