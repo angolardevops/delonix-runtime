@@ -828,7 +828,19 @@ fn describe(file: Option<PathBuf>) -> Result<()> {
         t.print();
     }
 
-    print_missing_conditions(&docs);
+    // Same source as `plan` and `apply` — a describe that showed a different
+    // set of conditions than the plan of the same manifest would be a third
+    // answer to one question. `build_plan` is read-only (the reconciler is
+    // pure; `actual_of` only reads the stores, which this command already did).
+    match build_plan(&docs, &stack_name(&path, None)) {
+        Ok(changes) => print_missing_conditions(&changes),
+        // A describe is a read: if the plan cannot be built, say so and still
+        // print everything above rather than failing the whole command.
+        Err(e) => super::output::warn(&super::po::tf(
+            "could not evaluate prerequisites: {err}",
+            &[("err", &e.to_string())],
+        )),
+    }
     Ok(())
 }
 
@@ -839,25 +851,32 @@ fn describe(file: Option<PathBuf>) -> Result<()> {
 /// surface of "what is missing for this to really work". Shared by `describe`
 /// AND by the end of `apply`: whoever runs `apply` (the real creation flow)
 /// MUST see this right then, not only if they happen to run `describe` afterwards.
-fn print_missing_conditions(docs: &[manifest::ManifestDoc]) {
-    let env = super::conditions::Env::probe();
+/// Reads the conditions off the PLAN, not off the documents.
+///
+/// It used to recompute them from the docs with a second `Env::probe()` in the
+/// same run, which was already wasteful and became wrong the moment a condition
+/// depended on anything the plan knows and a document alone does not. The VM
+/// «declared but not applied» warning is exactly that: it only makes sense once
+/// the resource exists, so it is attached in `build_plan` where the action is
+/// known — and this function silently did not show it, meaning the warning
+/// appeared in `stack plan` and vanished in `stack apply`, which is the command
+/// most people actually run. One source, both commands.
+fn print_missing_conditions(changes: &[Change]) {
     let mut header = false;
-    for doc in docs {
-        for c in super::conditions::conditions_for(doc, &env) {
-            if !c.ok {
-                if !header {
-                    eprintln!();
-                    eprintln!(
-                        "{}",
-                        super::po::t("Conditions (attention — missing prerequisites):")
-                    );
-                    header = true;
-                }
+    for change in changes {
+        for c in &change.conditions {
+            if !header {
+                eprintln!();
                 eprintln!(
-                    "  {} '{}': {}=False ({}) — {}",
-                    doc.kind, doc.metadata.name, c.kind, c.reason, c.message
+                    "{}",
+                    super::po::t("Conditions (attention — missing prerequisites):")
                 );
+                header = true;
             }
+            eprintln!(
+                "  {} '{}': {}=False ({}) — {}",
+                change.kind, change.name, c.kind, c.reason, c.message
+            );
         }
     }
 }
@@ -1142,7 +1161,7 @@ fn apply(file: Option<PathBuf>, replace: Vec<String>, do_prune: bool) -> Result<
     // After creating everything, say what was created but will NOT work as it
     // appears without a host prerequisite (network mount in rootless, etc.) —
     // it is here, in the real creation flow, that the user needs to know it.
-    print_missing_conditions(&docs);
+    print_missing_conditions(&changes);
     Ok(())
 }
 
