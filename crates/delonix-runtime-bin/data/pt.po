@@ -3941,6 +3941,9 @@ msgstr "Container '{name}': `spec.containers[]` num `kind: Container` é a forma
 msgid "{flags}: this image is an appliance and does not run cloud-init, so these would be silently ignored — configure it on first boot (console or web UI), or pass your own `--seed` if you know the guest reads one"
 msgstr "{flags}: esta imagem é um appliance e não corre cloud-init, por isso seriam ignorados em silêncio — configura-o no primeiro arranque (consola ou interface web), ou passa o teu próprio `--seed` se souberes que o convidado lê um"
 
+msgid "vm/{name}: volumes are attached but NOT mounted — this image runs no cloud-init, so mount them inside the guest"
+msgstr "vm/{name}: os volumes ficam ligados mas NÃO montados — esta imagem não corre cloud-init, por isso monta-os dentro do convidado"
+
 msgid "importing {source} as '{tag}'..."
 msgstr "a importar {source} como '{tag}'..."
 

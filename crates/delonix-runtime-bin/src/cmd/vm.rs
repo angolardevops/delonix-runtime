@@ -75,10 +75,19 @@ pub(crate) struct VmSpec {
     /// nothing kept them in step.
     #[serde(default)]
     build: Option<VmBuildSpec>,
-    #[serde(default = "default_vcpus")]
-    vcpus: u32,
-    #[serde(default = "default_memory")]
-    memory: String,
+    /// vCPUs. **Optional so that "omitted" and "1" are different things**: an
+    /// image built from a `VMfile` records its own `VCPUS`/`MEMORY`, and those
+    /// only apply where the manifest said nothing. `default_value_t` had to go
+    /// from the CLI flags for exactly this reason — the declarative path is the
+    /// same problem. Nothing is declared ⇒ [`resolve_vm_defaults`] falls back
+    /// to 1.
+    #[serde(default)]
+    vcpus: Option<u32>,
+    /// RAM (`512M`, `2G`, …). Optional for the same reason as
+    /// [`vcpus`](Self::vcpus); the fallback when neither the manifest nor the
+    /// image says anything is `1G`.
+    #[serde(default)]
+    memory: Option<String>,
     #[serde(default = "default_network")]
     network: String,
     kernel: Option<String>,
@@ -977,14 +986,41 @@ pub(crate) fn unconverged_fields_condition(
     ))
 }
 
-fn desired_vm_fields(spec: &VmSpec) -> std::collections::BTreeMap<String, String> {
+/// **The same resolution `apply` performs, or four of the five fields read as
+/// drift for ever.** `apply` records the qcow2 PATH and the image's
+/// `VCPUS`/`MEMORY`/`HYPERVISOR`; a plan comparing the raw name and the bare
+/// manifest defaults would propose a `Replace` on every single run — and a VM
+/// `Replace` is refused without `--replace` precisely because it throws the
+/// overlay disk away. So the two sides go through [`resolve_image_ref`] and
+/// [`resolve_vm_defaults`], the same two functions, in the same order.
+///
+/// It never BUILDS, even when the manifest says `build:` — computing a plan
+/// cannot create anything (the rule `mount_to_spec` already follows). Before
+/// the first apply the tag names nothing local and falls through as itself,
+/// which reads as a `Create`; that is exactly what it is.
+fn desired_vm_fields(
+    store: &super::vmimage::VmImageStore,
+    name: &str,
+    spec: &VmSpec,
+) -> std::collections::BTreeMap<String, String> {
+    let reference = match &spec.build {
+        Some(b) => b.tag.clone().unwrap_or_else(|| format!("{name}:latest")),
+        None => spec.disk.clone(),
+    };
+    let (disk, meta) = resolve_image_ref(store, &reference);
+    let (vcpus, memory, backend) = resolve_vm_defaults(
+        spec.vcpus,
+        spec.memory.clone(),
+        spec.backend.clone(),
+        meta.as_ref(),
+    );
     let mut f = std::collections::BTreeMap::new();
-    f.insert("disk".into(), spec.disk.clone());
-    f.insert("vcpus".into(), spec.vcpus.to_string());
-    f.insert("memory".into(), spec.memory.clone());
+    f.insert("disk".into(), disk);
+    f.insert("vcpus".into(), vcpus.to_string());
+    f.insert("memory".into(), memory);
     f.insert("network".into(), spec.network.clone());
-    if let Some(b) = &spec.backend {
-        f.insert("backend".into(), b.clone());
+    if let Some(b) = backend {
+        f.insert("backend".into(), b);
     }
     f
 }
@@ -995,7 +1031,11 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     Ok(super::reconcile::Desired {
         kind: "Vm".into(),
         name: doc.metadata.name.clone(),
-        fields: desired_vm_fields(&spec),
+        fields: desired_vm_fields(
+            &super::vmimage::VmImageStore::open(state_root())?,
+            &doc.metadata.name,
+            &spec,
+        ),
         converges: true,
         ownable: true,
     })
@@ -1062,6 +1102,61 @@ pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
     delonix_vm::remove_force(&state_root(), name)
 }
 
+/// Looks a disk REFERENCE up in the VM image store: a name this engine knows
+/// becomes the qcow2 path the engine boots, and brings the image's metadata
+/// with it; anything else (a path, a file downloaded from a URL) passes through
+/// untouched.
+///
+/// **One function because the two callers diverged.** `vm create` has always
+/// done this and the manifest never did, so the very same string worked as
+/// `--disk` and answered `image not found` as `spec.disk` — and, worse, the
+/// metadata it never fetched is what tells an appliance apart from a cloud
+/// image, so the declarative path generated a cloud-init seed for a guest that
+/// reads none while the CLI refused the same request.
+///
+/// Never builds anything: `desired` (a plan) calls this too, and computing a
+/// plan cannot create.
+///
+/// Takes the store instead of opening one so the lookup itself is testable
+/// against a store made in a temp directory, without a real image on the host.
+pub(crate) fn resolve_image_ref(
+    store: &super::vmimage::VmImageStore,
+    reference: &str,
+) -> (String, Option<super::vmimage::VmImage>) {
+    match store.get(reference) {
+        Ok(meta) => (
+            store.qcow2_path(reference).to_string_lossy().into_owned(),
+            Some(meta),
+        ),
+        Err(_) => (reference.to_string(), None),
+    }
+}
+
+/// The cloud-init fields a manifest/CLI asked for, when the image runs no
+/// cloud-init at all (an appliance: OPNsense, Proxmox, TrueNAS). Each pair is
+/// `(was it given, what the caller wrote)` — the CLI names flags, the manifest
+/// names spec fields, and the error quotes back whichever the caller actually
+/// typed.
+///
+/// Refuse rather than drop: silently ignoring an option the caller passed is
+/// the failure this repo names as its worst.
+fn refuse_cloud_init_on_appliance(asked: &[(bool, &str)]) -> Result<()> {
+    let given: Vec<&str> = asked
+        .iter()
+        .filter(|(g, _)| *g)
+        .map(|(_, label)| *label)
+        .collect();
+    if given.is_empty() {
+        return Ok(());
+    }
+    Err(Error::Invalid(super::po::tf(
+        "{flags}: this image is an appliance and does not run cloud-init, so these would be \
+         silently ignored — configure it on first boot (console or web UI), or pass your own \
+         `--seed` if you know the guest reads one",
+        &[("flags", &given.join(", "))],
+    )))
+}
+
 /// The disk a `kind: Vm` boots from, BUILDING it first when the manifest says to.
 ///
 /// Fail-closed on both sides of the exclusivity, and the two errors say
@@ -1073,7 +1168,18 @@ pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
 ///
 /// `manifest_dir` and not the process's working directory: a manifest has to
 /// mean the same thing from wherever it is applied.
-fn resolve_vm_disk(name: &str, spec: &VmSpec, manifest_dir: &std::path::Path) -> Result<String> {
+///
+/// Returns the disk AND the image's metadata when the reference names one of
+/// ours (see [`resolve_image_ref`]) — the `build:` branch resolves the tag it
+/// just produced through the same lookup, so the two branches hand `apply` the
+/// same two things and a built image's `VCPUS`/`MEMORY`/`HYPERVISOR` apply
+/// exactly like a named one's.
+fn resolve_vm_disk(
+    store: &super::vmimage::VmImageStore,
+    name: &str,
+    spec: &VmSpec,
+    manifest_dir: &std::path::Path,
+) -> Result<(String, Option<super::vmimage::VmImage>)> {
     let declared = !spec.disk.trim().is_empty();
     match (&spec.build, declared) {
         (Some(_), true) => Err(Error::Invalid(super::po::tf(
@@ -1085,7 +1191,7 @@ fn resolve_vm_disk(name: &str, spec: &VmSpec, manifest_dir: &std::path::Path) ->
             "Vm '{name}': needs `disk` (an existing image) or `build` (produce one from a VMfile)",
             &[("name", name)],
         ))),
-        (None, true) => Ok(spec.disk.clone()),
+        (None, true) => Ok(resolve_image_ref(store, &spec.disk)),
         (Some(b), false) => {
             let context = manifest_dir.join(&b.context);
             let file = match &b.file {
@@ -1099,17 +1205,16 @@ fn resolve_vm_disk(name: &str, spec: &VmSpec, manifest_dir: &std::path::Path) ->
                 )));
             }
             let tag = b.tag.clone().unwrap_or_else(|| format!("{name}:latest"));
-            let store = super::vmimage::VmImageStore::open(state_root())?;
             output::announced(
                 &super::po::tf("building {tag}", &[("tag", &tag)]),
                 "🔨",
-                || {
-                    super::vmfile::build(
-                        &store, &file, &context, &tag, b.compress, b.network, false,
-                    )
-                },
+                || super::vmfile::build(store, &file, &context, &tag, b.compress, b.network, false),
             )?;
-            Ok(tag)
+            // The tag, resolved: the engine canonicalizes `cfg.disk` on this
+            // filesystem, so handing it `myvm:latest` answered «image not
+            // found» — a `build:` block that did all the work and then could
+            // not boot what it had produced.
+            Ok(resolve_image_ref(store, &tag))
         }
     }
 }
@@ -1119,10 +1224,20 @@ fn resolve_vm_disk(name: &str, spec: &VmSpec, manifest_dir: &std::path::Path) ->
 /// querer dizer o mesmo seja de onde for aplicado.
 pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
     let base = state_root();
+    let images = super::vmimage::VmImageStore::open(&base)?;
     for doc in manifest::of_kind(docs, "Vm") {
         let name = &doc.metadata.name;
         let spec: VmSpec = vm_spec_of(doc)?;
-        let disk = resolve_vm_disk(name, &spec, base_dir)?;
+        let (disk, image_meta) = resolve_vm_disk(&images, name, &spec, base_dir)?;
+        // The image's own `VCPUS`/`MEMORY`/`HYPERVISOR`, applied only where the
+        // manifest said nothing — the same precedence, through the same
+        // function, as the CLI `vm create`.
+        let (vcpus, memory, backend) = resolve_vm_defaults(
+            spec.vcpus,
+            spec.memory.clone(),
+            spec.backend.clone(),
+            image_meta.as_ref(),
+        );
 
         // Resolve each volume (Volume/Storage name → host directory) and
         // ensure a network Storage is mounted before sharing it.
@@ -1138,8 +1253,35 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
         // so the declarative path used to leave a volume-less `kind: Vm` offline.
         // The seed also carries hostname/sshKeys/userData (CLI parity) and the
         // 9p volume mounts.
+        //
+        // EXCEPT for an appliance (`cloud_init: false` in the image's metadata —
+        // OPNsense, Proxmox, TrueNAS), for the reason the CLI already refuses
+        // it: the seed would be an ISO nothing reads, on a CD-ROM that changes
+        // the guest's device list for no reason. This path used to attach one,
+        // AND accept the cloud-init fields the CLI names and rejects — the same
+        // "accepted and ignored" the refusal exists to prevent, arrived at from
+        // the declarative side.
+        let appliance = image_meta.as_ref().is_some_and(|m| !m.uses_cloud_init());
+        if appliance && spec.seed.is_none() {
+            refuse_cloud_init_on_appliance(&[
+                (spec.hostname.is_some(), "hostname"),
+                (!spec.ssh_keys.is_empty(), "sshKeys"),
+                (spec.user_data.is_some(), "userData"),
+            ])?;
+            if !vm_volumes.is_empty() {
+                // Not a refusal: the 9p devices ARE attached, and a guest that
+                // mounts them itself is a legitimate use. What does not happen
+                // is the fstab line the generated seed would have written.
+                output::warn(&super::po::tf(
+                    "vm/{name}: volumes are attached but NOT mounted — this image runs no \
+                     cloud-init, so mount them inside the guest",
+                    &[("name", name)],
+                ));
+            }
+        }
         let seed = match spec.seed {
             Some(s) => Some(s),
+            None if appliance => None,
             None => Some(
                 generate_seed_iso(
                     name,
@@ -1155,13 +1297,17 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
 
         let cfg = VmConfig {
             name: name.clone(),
-            // `disk` e não `spec.disk`: é o resolvido por `resolve_vm_disk`, que
-            // é a tag produzida quando o manifesto traz `build:`. Usar o campo
-            // cru aqui compila, não avisa de nada relevante, e faz a VM arrancar
-            // de uma string vazia com o `build:` a parecer honrado.
+            // `disk` e não `spec.disk`: é o resolvido por `resolve_vm_disk` —
+            // o caminho no disco de uma imagem nossa, ou a tag produzida quando
+            // o manifesto traz `build:`. Usar o campo cru aqui compila, não
+            // avisa de nada relevante, e faz a VM arrancar de uma string vazia
+            // com o `build:` a parecer honrado.
             disk,
-            vcpus: spec.vcpus,
-            memory: spec.memory,
+            // Idem: os resolvidos, não os do spec — o spec já não traz o
+            // default (é `Option`), porque «omitido» e «1» decidem coisas
+            // diferentes quando a imagem recomenda outra coisa.
+            vcpus,
+            memory,
             network: spec.network,
             // `metadata.namespace`, the same source every other Kind reads it
             // from — a VM does not get a namespace field of its own in `spec`.
@@ -1175,7 +1321,7 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
             hugepages: spec.hugepages,
             cpu_affinity: spec.cpu_affinity,
             devices: spec.devices,
-            backend: spec.backend,
+            backend,
             net_mode: spec.net_mode,
             bridge: spec.bridge,
             volumes: vm_volumes,
@@ -1236,10 +1382,10 @@ fn resolve_vm_defaults(
 ) -> (u32, String, Option<String>) {
     let vcpus = vcpus
         .or_else(|| image_meta.and_then(|m| m.default_vcpus))
-        .unwrap_or(1);
+        .unwrap_or_else(default_vcpus);
     let memory = memory
         .or_else(|| image_meta.and_then(|m| m.default_memory.clone()))
-        .unwrap_or_else(|| "1G".to_string());
+        .unwrap_or_else(default_memory);
     let backend = backend.or_else(|| image_meta.and_then(|m| m.default_backend.clone()));
     (vcpus, memory, backend)
 }
@@ -1339,15 +1485,13 @@ pub fn run(action: VmCmd) -> Result<()> {
                         .into_owned()
                 }
                 (None, Some(d)) => {
+                    // The same lookup `kind: Vm` performs — one function, so a
+                    // string cannot mean two things depending on which entry
+                    // point read it.
                     let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
-                    let known = store.get(&d).ok().map(|meta| (store.qcow2_path(&d), meta));
-                    match known {
-                        Some((path, meta)) => {
-                            image_meta = Some(meta);
-                            path.to_string_lossy().into_owned()
-                        }
-                        None => d,
-                    }
+                    let (path, meta) = resolve_image_ref(&store, &d);
+                    image_meta = meta;
+                    path
                 }
                 (None, None) => {
                     let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
@@ -1379,25 +1523,11 @@ pub fn run(action: VmCmd) -> Result<()> {
             // a CD-ROM that changes the guest's device list for no reason.
             let appliance = image_meta.as_ref().is_some_and(|m| !m.uses_cloud_init());
             if appliance && seed.is_none() {
-                // Refuse rather than drop: silently ignoring an option the
-                // caller passed is the failure this repo names as its worst.
-                let asked: Vec<&str> = [
+                refuse_cloud_init_on_appliance(&[
                     (hostname.is_some(), "--hostname"),
                     (!ssh_keys.is_empty(), "--ssh-key"),
                     (user_data.is_some(), "--user-data"),
-                ]
-                .iter()
-                .filter(|(given, _)| *given)
-                .map(|(_, flag)| *flag)
-                .collect();
-                if !asked.is_empty() {
-                    return Err(Error::Invalid(super::po::tf(
-                        "{flags}: this image is an appliance and does not run cloud-init, so \
-                         these would be silently ignored — configure it on first boot (console \
-                         or web UI), or pass your own `--seed` if you know the guest reads one",
-                        &[("flags", &asked.join(", "))],
-                    )));
-                }
+                ])?;
             }
             let injected_key = seed.is_none() && !ssh_keys.is_empty();
             // Did the seed directory exist BEFORE this invocation? `vm create` is
@@ -3052,18 +3182,136 @@ mod tests {
     fn um_kind_vm_precisa_de_exactamente_um_de_disk_ou_build() {
         let dir = std::path::Path::new(".");
         let spec = |y: &str| -> super::VmSpec { serde_yaml::from_str(y).unwrap() };
+        let (_tmp, store) = store_de_teste("exclusividade");
 
-        let e = super::resolve_vm_disk("v", &spec("disk: img\nbuild: {tag: x}"), dir).unwrap_err();
+        let e = super::resolve_vm_disk(&store, "v", &spec("disk: img\nbuild: {tag: x}"), dir)
+            .unwrap_err();
         assert!(e.to_string().contains("both"), "{e}");
 
-        let e = super::resolve_vm_disk("v", &spec("vcpus: 1"), dir).unwrap_err();
+        let e = super::resolve_vm_disk(&store, "v", &spec("vcpus: 1"), dir).unwrap_err();
         assert!(e.to_string().contains("needs"), "{e}");
 
-        // Só `disk`: passa tal e qual, sem tocar em disco nenhum.
+        // Um nome que o store não conhece passa tal e qual — é um caminho, e
+        // quem o valida é o motor ao canonicalizá-lo.
         assert_eq!(
-            super::resolve_vm_disk("v", &spec("disk: minha-imagem"), dir).unwrap(),
-            "minha-imagem"
+            super::resolve_vm_disk(&store, "v", &spec("disk: /imagens/minha.qcow2"), dir)
+                .unwrap()
+                .0,
+            "/imagens/minha.qcow2"
         );
+    }
+
+    /// Um store vazio numa pasta temporária, para a resolução se poder provar
+    /// sem depender das imagens que este host por acaso tenha.
+    fn store_de_teste(tag: &str) -> (std::path::PathBuf, super::super::vmimage::VmImageStore) {
+        let dir = std::env::temp_dir().join(format!(
+            "dlx-vmresolve-{tag}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = super::super::vmimage::VmImageStore::open(&dir).unwrap();
+        (dir, store)
+    }
+
+    fn imagem_de_teste(nome: &str) -> super::super::vmimage::VmImage {
+        super::super::vmimage::VmImage {
+            name: nome.to_string(),
+            tag: nome.to_string(),
+            digest: "sha256:0".into(),
+            size: 1,
+            ubuntu_release: None,
+            k8s_version: None,
+            created_unix: 0,
+            kernel_version: None,
+            distro: None,
+            default_vcpus: None,
+            default_memory: None,
+            default_backend: None,
+            cloud_init: None,
+        }
+    }
+
+    /// **O bug**: `--disk <nome-local>` funcionava e `spec.disk: <nome-local>`
+    /// respondia `image not found`, porque só a CLI consultava o store. A
+    /// consequência grave não era o erro — era o silêncio ao lado dele: sem os
+    /// metadados, o manifesto não sabia que a imagem é um APPLIANCE e gerava-lhe
+    /// um seed de cloud-init que a CLI recusa em voz alta.
+    #[test]
+    fn o_manifesto_resolve_um_nome_de_imagem_local_como_a_cli() {
+        let (_tmp, store) = store_de_teste("nome-local");
+        let mut img = imagem_de_teste("opnsense:26.1");
+        img.cloud_init = Some(false);
+        img.default_vcpus = Some(2);
+        img.default_memory = Some("2G".into());
+        store.save(&img).unwrap();
+
+        let spec: super::VmSpec = serde_yaml::from_str("disk: opnsense:26.1").unwrap();
+        let (disk, meta) =
+            super::resolve_vm_disk(&store, "fw", &spec, std::path::Path::new(".")).unwrap();
+
+        assert_eq!(
+            disk,
+            store.qcow2_path("opnsense:26.1").to_string_lossy(),
+            "o motor canonicaliza o disco no sistema de ficheiros: tem de vir o CAMINHO, não o nome"
+        );
+        let meta = meta.expect("os metadados da imagem têm de vir com o disco");
+        assert!(
+            !meta.uses_cloud_init(),
+            "sem isto o apply não distingue um appliance de uma cloud image"
+        );
+    }
+
+    /// A recusa que a CLI já fazia, agora também pelo manifesto — e a nomear os
+    /// campos que o manifesto escreve, não as flags que ele não tem.
+    #[test]
+    fn os_campos_de_cloud_init_de_um_appliance_sao_recusados_a_nomea_los() {
+        super::refuse_cloud_init_on_appliance(&[
+            (false, "hostname"),
+            (false, "sshKeys"),
+            (false, "userData"),
+        ])
+        .expect("nada pedido, nada a recusar");
+
+        let e = super::refuse_cloud_init_on_appliance(&[
+            (true, "hostname"),
+            (false, "sshKeys"),
+            (true, "userData"),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("hostname, userData"), "{e}");
+        assert!(!e.contains("sshKeys"), "só o que foi pedido: {e}");
+    }
+
+    /// **Deriva eterna, evitada.** O `apply` grava o CAMINHO e os defaults da
+    /// imagem; um plano que comparasse o nome cru e o `1`/`1G` do manifesto
+    /// proporia um `Replace` a cada corrida — e um `Replace` de VM é recusado
+    /// sem `--replace` porque deita fora o disco overlay. Os dois lados passam
+    /// pelas MESMAS duas funções.
+    #[test]
+    fn o_plano_compara_o_mesmo_que_o_apply_grava() {
+        let (_tmp, store) = store_de_teste("sem-deriva");
+        let mut img = imagem_de_teste("golden:1");
+        img.default_vcpus = Some(4);
+        img.default_memory = Some("8G".into());
+        img.default_backend = Some("libvirt".into());
+        store.save(&img).unwrap();
+
+        let spec: super::VmSpec = serde_yaml::from_str("disk: golden:1").unwrap();
+        let f = super::desired_vm_fields(&store, "vm1", &spec);
+
+        assert_eq!(f["disk"], store.qcow2_path("golden:1").to_string_lossy());
+        assert_eq!(f["vcpus"], "4");
+        assert_eq!(f["memory"], "8G");
+        assert_eq!(f["backend"], "libvirt");
+
+        // E o que o manifesto DIZ continua a ganhar à imagem.
+        let spec: super::VmSpec =
+            serde_yaml::from_str("disk: golden:1\nvcpus: 1\nmemory: 512M").unwrap();
+        let f = super::desired_vm_fields(&store, "vm1", &spec);
+        assert_eq!(f["vcpus"], "1");
+        assert_eq!(f["memory"], "512M");
     }
 
     /// O `context` resolve-se contra a pasta do MANIFESTO e não contra o cwd —
@@ -3071,8 +3319,9 @@ mod tests {
     /// prova-se pelo caminho que a recusa NOMEIA quando o VMfile falta.
     #[test]
     fn o_contexto_do_build_e_relativo_ao_manifesto_e_nao_ao_cwd() {
+        let (_tmp, store) = store_de_teste("contexto");
         let spec: super::VmSpec = serde_yaml::from_str("build: {context: sub}").unwrap();
-        let e = super::resolve_vm_disk("v", &spec, std::path::Path::new("/tmp/proj"))
+        let e = super::resolve_vm_disk(&store, "v", &spec, std::path::Path::new("/tmp/proj"))
             .unwrap_err()
             .to_string();
         assert!(e.contains("/tmp/proj/sub/VMfile"), "{e}");
@@ -3359,8 +3608,8 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
         .unwrap();
         let spec: VmSpec = serde_yaml::from_value(normalize_vm_spec(grouped)).unwrap();
         assert_eq!(spec.disk, "k8s-golden");
-        assert_eq!(spec.vcpus, 4);
-        assert_eq!(spec.memory, "4G");
+        assert_eq!(spec.vcpus, Some(4));
+        assert_eq!(spec.memory.as_deref(), Some("4G"));
         assert!(spec.hugepages);
         assert_eq!(spec.cpu_affinity.as_deref(), Some("8-15"));
         assert_eq!(spec.network, "node1-net");
@@ -3412,11 +3661,13 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
                 .unwrap();
         let spec: VmSpec = serde_yaml::from_value(normalize_vm_spec(mixed)).unwrap();
         assert_eq!(
-            spec.vcpus, 8,
+            spec.vcpus,
+            Some(8),
             "o vcpus plano explícito devia ganhar ao do grupo"
         );
         assert_eq!(
-            spec.memory, "1G",
+            spec.memory.as_deref(),
+            Some("1G"),
             "sem colisão, o do grupo aplica-se na mesma"
         );
     }
