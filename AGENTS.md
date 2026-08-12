@@ -2987,6 +2987,21 @@ da CLI **198/198**; a documentação sem um único comando ou flag que não exis
 5. **Gravar os vídeos** — o guião (`docs/ROTEIRO-VIDEOS.md`, 6 episódios, comandos já testados)
    está pronto; a gravação é trabalho do utilizador, não de agente.
 
+**Meia-isolação é pior que nenhuma (incidente real, 2026-08-12).** Correr uma bateria com
+`DELONIX_ROOT` isolado e **sem** `DELONIX_NET_RUNTIME_DIR` põe dois roots a disputar
+`/tmp/delonix-net-<uid>/{control,slirp}.sock` — os sockets são por UTILIZADOR e os pidfiles
+por ROOT. O motor tem um guarda que recusa isso («another delonix state root on this user
+already owns the network infra»), e ele **deixa de disparar** assim que o root isolado ganha
+estado de ingress próprio: a partir daí sobe um pin/slirp SEUS por cima dos mesmos caminhos.
+O `net netns up` seguinte, corrido do root REAL, encontrou o controlo partido, **reconstruiu a
+infra inteira** (pin/control/slirp novos) e **reiniciou um container de produção** — a
+recuperação-por-reinício da v0.41.0 a funcionar como desenhada, sobre um problema que eu
+próprio criei. Os outros três containers mantiveram o PID e as portas publicadas continuaram
+a responder. O `scripts/e2e.sh` passou a RECUSAR-SE a correr a secção do cloud-hypervisor
+nessa configuração, e o cabeçalho diz porquê. **Fica também um achado por investigar**: o
+guarda é contornável — devia olhar para quem está VIVO no socket partilhado, não só para a
+presença de um pidfile no root actual.
+
 **Lição de método que esta série repetiu três vezes, e vale mais que qualquer dos itens acima:**
 uma verificação só vale o que o seu filtro deixa passar. Um `grep "^  delonix"` sobre a saída de
 um teste cortou-me as linhas seguintes de um bloco multi-parágrafo; um limiar de «mais de 25
