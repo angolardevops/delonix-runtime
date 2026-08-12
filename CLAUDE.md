@@ -3869,6 +3869,14 @@ a coisa. Mesma armadilha que o `--vnc` já tinha pregado à série das appliance
    de build passam, e o único onde um passo acrescentado depois não lhe pode passar à frente e
    voltar a estragar as etiquetas. Guardado em shell e não por distro: o caminho do VMfile constrói
    a partir de um `FROM` que pode ser um URL, onde não há nada fiável em que ramificar.
+   **Duas coisas que só a reconstrução revelou**: (a) `setfiles /` NÃO chega — com a raiz sozinha o
+   `/home/delonix` fica `unlabeled_t` (o `/home` do Fedora é subvolume próprio), o que dá duas
+   negações por login e um `login` que nem entra na home, e não é cosmético porque o `--ssh-key`
+   escreve `~/.ssh/authorized_keys`; os mountpoints passam a sair do `/etc/fstab` do convidado,
+   que é ele a declarar a sua própria disposição. (b) a partição EFI tem de ser excluída **por
+   TIPO** (vfat não tem xattr → `Operation not supported` → exit≠0 → build chumbado, nas duas
+   distros); filtrar pelo tipo e não pelo caminho faz o mesmo por qualquer outro sistema de
+   ficheiros sem etiquetas.
 2. **O `network-config` do seed casava a NIC por NOME, com um glob.** `match: {name: "e*"}`
    funciona onde o renderer é o netplan (Ubuntu/Debian) e está partido onde é o NetworkManager
    (Fedora/Rocky) — o código do cloud-init decide-o numa linha: `if … not
@@ -3892,8 +3900,24 @@ corre comandos numa VM sem terminal, aproveitando o autologin série que o nosso
 configura. Foi o que deu as respostas todas depois do screenshot; a arqueologia offline com
 `guestfish` só serviu para confirmar.
 
-**Por reconstruir**: as imagens SELinux JÁ publicadas continuam com `/.autorelabel` e o
-`ld.so.cache` sem etiqueta — a correcção é do build, não das imagens em disco.
+**Reconstruídas e validadas ao vivo (2026-08-12)**: `delonix-vm-base:fedora-42` (libvirt) e
+`delonix-vm-base:rocky-9` (cloud-hypervisor) — hostname aplicado, interface UP com endereço,
+`dbus-broker`/NetworkManager activos, home em `~`, SELinux `Enforcing` e **0 AVC**. Falta a
+republicação no ghcr (uma passagem do `vm-image.yml`).
+
+**O host precisa de dois contornos para construir com `--network`, e nenhum deles é do motor.**
+Estão os dois no `tool_failure_hint`, e foram ambos precisos nesta sessão:
+1. O AppArmor do passt recusa o `$XDG_RUNTIME_DIR` que o libguestfs usa →
+   `XDG_RUNTIME_DIR=/tmp/delonix-run`.
+2. O passt empacotado no Ubuntu 24.04 é velho demais: **arranca e nunca dá lease**, o `dhclient`
+   pendura os 300 s e o build SEGUE SEM REDE. O que se vê no fim é o gestor de pacotes a não
+   resolver um mirror, sem a palavra `passt` em lado nenhum — por isso a dica não disparava, e
+   lia-se como «o teu DNS está partido». O `[ 30x.x ]` no passo que falha é a pista: mais nada
+   num build pára exactamente cinco minutos. A dica passa a reconhecer também a falha de DNS.
+   Remédio: compilar o passt actual **e pô-lo PRIMEIRO no PATH** — o libguestfs procura-o por
+   `passt --help`, logo compilá-lo não chega. E **não** o tentes desligar com um stub que falha:
+   medido, o libguestfs usa o stub como helper real e morre nele; ausente cai no slirp do qemu,
+   presente-e-partido não.
 
 ## `delonix_net::Net` foi APAGADO — e é breaking para quem usa a biblioteca
 
