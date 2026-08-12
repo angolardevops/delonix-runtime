@@ -30,6 +30,9 @@ spec:
   network: web-net            # host | none | <custom network>
   restartPolicy: Always       # Always | OnFailure | Never  (delonix values also OK)
   expose: 80                  # auto-register this HTTP port in the L7 proxy (optional)
+  hostAliases:                # extra /etc/hosts entries, k8s shape (one entry per hostname)
+    - ip: 10.0.0.9
+      hostnames: [legacy-api, legacy-api.internal]
   containers:
     - name: web
       image: nginx:latest
