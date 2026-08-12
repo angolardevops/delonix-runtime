@@ -21,18 +21,28 @@ that in the image's metadata, and `vm create` then:
 
 ## Building
 
+Every script fetches its own media and **verifies it against the vendor's
+published SHA-256** before using it. Pass nothing and you get the pinned version
+below; pass a version to get another one; pass a path to use an ISO you already
+have.
+
 ```bash
 # OPNsense — no install step: the vendor publishes a pre-installed disk image
-./build-opnsense.sh 26.1.2
+./build-opnsense.sh                  # 26.1.2
 
 # Proxmox — the vendor's own automated installer, unattended
-./build-proxmox.sh pve /path/to/proxmox-ve_9.1-1.iso
-./build-proxmox.sh pbs /path/to/proxmox-backup-server_4.1-1.iso
-./build-proxmox.sh pmg /path/to/proxmox-mail-gateway_9.0-1.iso
-./build-proxmox.sh pdm /path/to/proxmox-datacenter-manager_1.0-2.iso
+./build-proxmox.sh pve               # 9.2-1
+./build-proxmox.sh pbs               # 4.2-1
+./build-proxmox.sh pmg               # 9.1-1
+./build-proxmox.sh pdm               # 1.1-1
 
 # TrueNAS SCALE — the installer's own JSON-RPC API
-./build-truenas.sh /path/to/TrueNAS-SCALE-25.10.5.iso
+./build-truenas.sh                   # 25.10.5
+
+# Another version, or media you already have
+./build-proxmox.sh pve 9.1-1
+./build-proxmox.sh pve /path/to/proxmox-ve_9.1-1.iso
+./build-truenas.sh 25.04.2
 
 # Prove they serve something, not merely that they boot
 ./verify-boot.sh
@@ -40,6 +50,32 @@ that in the image's metadata, and `vm create` then:
 
 Needs `qemu-system-x86_64` with KVM, `qemu-img`, `xorriso`, `curl`, `python3`.
 Each Proxmox build wants ~4 GiB of RAM and a few minutes; TrueNAS wants ~6 GiB.
+Media lands in `.media/` (override with `MEDIA_CACHE`) and is re-used across
+builds — the checksum is what makes that safe.
+
+### Pinned versions
+
+| Script | Product | Version | Output |
+|---|---|---|---|
+| `build-opnsense.sh` | OPNsense | 26.1.2 | `opnsense-26.1.2.qcow2` |
+| `build-proxmox.sh pve` | Proxmox VE | 9.2-1 | `pve-9.2-1.qcow2` |
+| `build-proxmox.sh pbs` | Proxmox Backup Server | 4.2-1 | `pbs-4.2-1.qcow2` |
+| `build-proxmox.sh pmg` | Proxmox Mail Gateway | 9.1-1 | `pmg-9.1-1.qcow2` |
+| `build-proxmox.sh pdm` | Proxmox Datacenter Manager | 1.1-1 | `pdm-1.1-1.qcow2` |
+| `build-truenas.sh` | TrueNAS SCALE | 25.10.5 | `truenas-25.10.5.qcow2` |
+
+The version is in the output name on purpose: without it, building 9.2 quietly
+overwrites the 9.1 image sitting in the same directory, and both tags are meant
+to coexist in the store.
+
+**A version the vendor does not publish stops the build**, and the error lists
+the versions that do exist. There is no flag to skip verification — the moment
+there is one, it ends up in a script somewhere.
+
+TrueNAS download paths carry the release train's codename (`Goldeye` for
+25.10.x), which is not derivable from the version number. Known trains are in
+`build-truenas.sh`; for a newer one, pass `TRUENAS_TRAIN=<Name>` rather than let
+the script guess a URL that would 404 halfway through a 3 GiB download.
 
 Answer files live next to the scripts (`answer-<product>.toml`); see
 `answer.toml.example`. The fields are the vendor's, validated by the installer
