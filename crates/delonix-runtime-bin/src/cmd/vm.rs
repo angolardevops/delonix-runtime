@@ -1711,7 +1711,7 @@ fn cmd_reach(_base: &std::path::Path) -> Result<()> {
         println!(
             "{}",
             super::po::tf(
-                "  fix: re-publish bound to the VM gateway — `delonix ingress unpublish <c> <port>`, then `DELONIX_PUBLISH_ADDR={gw} delonix ingress publish <c> <port>` (reachable from VMs on that network, not the external LAN)",
+                "  fix: re-publish bound to the VM gateway — `delonix net ingress unpublish <c> <port>`, then `DELONIX_PUBLISH_ADDR={gw} delonix net ingress publish <c> <port>` (reachable from VMs on that network, not the external LAN)",
                 &[("gw", &gw)],
             )
         );
