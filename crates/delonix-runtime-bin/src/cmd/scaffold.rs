@@ -617,10 +617,43 @@ fn manifest_vm(o: &InitOpts) -> String {
         .replace("{image}", &img)
 }
 
-/// Complete reference for `kind: Vm` (mirrors `delonix_vm::VmConfig`).
-const VM_REFERENCE: &str = r#"# Apply with:  delonix vm apply
+/// Complete reference for `kind: Vm` (mirrors `delonix_vm::VmConfig`), plus the
+/// two resources it needs around it.
+///
+/// **The Network is here because the VM already referenced it and nothing
+/// created it.** Measured on a fresh `vm init`: the generated project failed its
+/// own `delonix stack validate` with «Vm 'x' → network 'x-net' is not declared
+/// nor does it exist». A scaffold whose first act is to produce something that
+/// does not apply teaches the wrong thing about the tool.
+///
+/// **The Volume is declared and deliberately NOT attached**, and the comment on
+/// it says why rather than leaving the reader to find out: `spec.volumes` needs
+/// virtio-9p, which is libvirt only (the engine auto-selects it and refuses an
+/// explicit `backend: cloud-hypervisor` beside volumes), while `network:` is the
+/// rootless SDN, which only a Cloud Hypervisor VM joins — a libvirt domain lives
+/// on the host's `virbr0`. Attaching both would generate a manifest that looks
+/// right and silently drops one of them, which is the shape this engine spends
+/// its time removing.
+const VM_REFERENCE: &str = r#"# Apply with:  delonix stack apply   (or `delonix vm apply` for the Vm alone)
 # The golden VM image is built once with:
 #   delonix image vm build -t {image} --k8s-version 1.34
+---
+apiVersion: delonix.io/v1
+kind: Network
+metadata:
+  name: {name}-net
+spec:
+  driver: bridge              # bridge | macvlan | ipvlan | overlay
+  # subnet: 10.89.0.0/16      # optional — picked automatically when omitted
+---
+apiVersion: delonix.io/v1
+kind: Volume
+metadata:
+  name: {name}-data
+spec:
+  driver: local               # local | nfs (for a NAS, use an `nfs:` block)
+  # quota: 2g                 # hard cap as root, monitored in rootless
+---
 apiVersion: delonix.io/v1
 kind: Vm
 metadata:
@@ -629,8 +662,17 @@ spec:
   disk: {image}               # required — base qcow2/raw (an overlay is made per VM)
   vcpus: 2
   memory: 2G                  # "2G" | "1024M" (a "…i" suffix is accepted, k8s-style)
-  network: {name}-net         # ingress network for the VM's tap
+  network: {name}-net         # the kind: Network above — the VM's tap joins it
   restart_policy: null        # no | on-failure | always
+  # volumes:                  # NOT set together with `network:` above, and that
+  #   - name: {name}-data     # is a real constraint, not caution: volumes need
+  #     mountPath: /mnt/data  # virtio-9p (libvirt only), and a libvirt domain
+  #     readOnly: false       # lives on virbr0, not on the rootless SDN that a
+  #                           # kind: Network is. Pick one: keep `network:` for
+  #                           # the SDN, or drop it and uncomment these for
+  #                           # shared storage. `{name}-data` is declared above
+  #                           # either way, and containers of this stack can use
+  #                           # it with no such trade-off.
   # --- boot: firmware (cloud images) OR direct kernel ---
   firmware: null              # UEFI firmware path (typical for cloud images)
   kernel: null                # direct kernel boot (alternative to firmware)
