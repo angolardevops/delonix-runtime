@@ -706,12 +706,18 @@ fn wait(file: Option<PathBuf>, timeout: u64) -> Result<()> {
         for kind in KINDS {
             for doc in manifest::of_kind(&docs, kind) {
                 let (present, status) = presence(kind, doc, &containers);
-                let ready = present == "yes" && ready_status(kind, &status);
-                if !ready {
+                if is_pending(&present, kind, &status) {
                     pending.push(format!(
                         "{kind}/{} ({})",
                         doc.metadata.name,
-                        if present == "yes" { &status } else { "absent" }
+                        // `absent` only for what is genuinely absent: `?` is a
+                        // store that could not be read, and telling that one
+                        // "absent" sends the reader looking for the wrong thing.
+                        match present.as_str() {
+                            "yes" => status.as_str(),
+                            "no" => "absent",
+                            _ => "unknown",
+                        }
                     ));
                 }
             }
@@ -739,6 +745,37 @@ fn wait(file: Option<PathBuf>, timeout: u64) -> Result<()> {
             )));
         }
         std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+}
+
+/// Whether `wait` still has to wait for this resource.
+///
+/// **A presence marker of `-` is not "absent".** This used to be
+/// `present == "yes" && ready_status(...)`, which lumped together two states
+/// that mean opposite things: a resource that is MISSING, and one that has no
+/// observable presence to begin with. The declarative Kinds
+/// (`Ingress`/`FirewallPolicy`/`HTTPRoute`/`Dependency`) are firewall directives
+/// applied to a target, with no store of their own — `presence` reports `-` for
+/// them and never `yes`. So ANY manifest containing one of them burned the whole
+/// `--timeout` and then failed, over a stack that was entirely up: the command
+/// written to replace CI's `sleep` was precisely the one CI could not use.
+///
+/// `ready_status` next door already had the right intent in its doc-comment
+/// («Only the Kinds that HAVE a runtime state are judged on it»); what was
+/// missing was the decision upstream of it.
+///
+/// **`?` stays pending, and that is deliberate**: it is what a store that could
+/// not be read reports (`VolumeStore::open` failing), not just the unsupported
+/// -kind arm. Calling an unknown "ready" would be the same dishonesty in the
+/// other direction — which is why a Kind missing its `presence` arm is fixed
+/// THERE and not by relaxing this.
+fn is_pending(present: &str, kind: &str, status: &str) -> bool {
+    match present {
+        // Declarative: nothing to observe, so nothing to wait for.
+        "-" => false,
+        "yes" => !ready_status(kind, status),
+        // "no" (absent) and "?" (unknown/unreadable) both keep waiting.
+        _ => true,
     }
 }
 
@@ -973,9 +1010,17 @@ fn presence(
         // Ingress/Egress have no store of their own — they are firewall directives
         // applied to a target container, not resources with state. The `apply`
         // always applies them (idempotent); here we only note the nature.
-        "Ingress" | "FirewallPolicy" => ("-".into(), "declarative".into()),
-        "HTTPRoute" => ("-".into(), "declarative".into()),
-        "Dependency" => ("-".into(), "declarative".into()),
+        //
+        // `NetworkRoute` belongs here for the same reason, and its absence was a
+        // real bug: it is in `KINDS` and `stack apply` DOES apply it, but with no
+        // arm it fell through to `_ => ("?", "unsupported kind")` — printed by
+        // `ls`/`describe` about a resource the apply creates, and treated as
+        // never-ready by `wait`. It is realized as one element of the holder's
+        // `@netpair` verdict map and `delonix-net` exposes only the write
+        // (`infra::network_route`), so there is nothing to read back.
+        "Ingress" | "FirewallPolicy" | "HTTPRoute" | "Dependency" | "NetworkRoute" => {
+            ("-".into(), super::po::t("declarative").into())
+        }
         // A share has a record of its own, keyed by (namespace, name) — the
         // namespace comes from the document, which is why `load_record` takes
         // both and why guessing it is not an option.
@@ -2459,6 +2504,62 @@ spec: {}
                 "not converged in this version",
                 "{k} converge e ainda assim tem uma razão para não convergir"
             );
+        }
+    }
+
+    /// Os Kinds de `KINDS` que não têm presença observável — o `presence`
+    /// devolve-lhes `-`, e é essa a marca que o `wait` tem de ler como pronta.
+    const DECLARATIVOS: [&str; 4] = ["Ingress", "FirewallPolicy", "HTTPRoute", "NetworkRoute"];
+
+    /// **Um marcador de presença `-` não é «ausente».** O `wait` decidia
+    /// prontidão com `present == "yes"`, e os Kinds declarativos NUNCA dizem
+    /// `"yes"` — qualquer manifesto com um deles esgotava o `--timeout` inteiro
+    /// e saía com erro sobre uma stack inteiramente a correr.
+    ///
+    /// O `"?"` continua pendente de propósito: é também o que um erro de store
+    /// devolve, e dar «pronto» a um desconhecido é o mesmo defeito ao contrário.
+    #[test]
+    fn um_kind_declarativo_nao_fica_pendente_para_sempre() {
+        for k in DECLARATIVOS {
+            assert!(
+                !super::is_pending("-", k, "declarative"),
+                "{k} é declarativo e ficaria pendente para sempre"
+            );
+        }
+        // Ausente continua pendente — é o que o `wait` existe para esperar.
+        assert!(super::is_pending("no", "Container", "-"));
+        assert!(super::is_pending("no", "Vm", "-"));
+        // Presente é julgado pelo estado, como antes.
+        assert!(!super::is_pending("yes", "Container", "Running"));
+        assert!(super::is_pending("yes", "Container", "Exited"));
+        assert!(super::is_pending("yes", "Container", "unhealthy"));
+        assert!(!super::is_pending("yes", "Volume", "-"));
+        // Desconhecido (store ilegível) NÃO é pronto.
+        assert!(super::is_pending(
+            "?",
+            "Volume",
+            "permission denied: /var/lib/delonix/volumes"
+        ));
+    }
+
+    /// Um Kind que o `apply` aplica tem de ter braço no `presence()`, senão cai
+    /// no `_ => ("?", "unsupported kind")` — que o `ls`/`describe` imprimem e o
+    /// `wait` conta como pendente para sempre. Aconteceu com o `NetworkRoute`,
+    /// que está em `KINDS` e é aplicado desde que existe.
+    ///
+    /// Sem I/O: `util::state_root()` só constrói um `PathBuf` e estes braços
+    /// nunca abrem store nenhum.
+    #[test]
+    fn todo_o_kind_declarativo_de_kinds_tem_braco_no_presence() {
+        let d = docs("apiVersion: delonix.io/v1\nkind: Network\nmetadata:\n  name: n1\nspec: {}\n");
+        let doc = &d[0];
+        for k in DECLARATIVOS {
+            assert!(
+                super::KINDS.contains(&k),
+                "{k} saiu de KINDS — este teste deixou de dizer o que promete"
+            );
+            let (present, status) = super::presence(k, doc, &[]);
+            assert_eq!(present, "-", "{k}: presence devolveu {present}/{status}");
         }
     }
 }

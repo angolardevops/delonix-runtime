@@ -380,6 +380,52 @@ check "volumes describe depois do destroy recusa" fail "$BIN" volumes describe "
 "$BIN" volumes rm "sv-$PFX" >/dev/null 2>&1
 "$BIN" network rm "sn-$PFX" >/dev/null 2>&1
 
+# `stack wait` não tinha UM check — e era o balde dos comandos nunca executados a
+# pagar-se outra vez. O `wait` decidia prontidão com `present == "yes"`, e os
+# Kinds declarativos devolvem `-`: QUALQUER manifesto com um deles esgotava o
+# `--timeout` inteiro e saía com erro sobre uma stack inteiramente a correr.
+# Estes documentos não criam recurso nenhum, por isso o gate é instantâneo.
+cat >"$WORK/declarativos.yaml" <<YAML
+apiVersion: delonix.io/v1
+kind: FirewallPolicy
+metadata:
+  name: wpol-$PFX
+spec:
+  direction: ingress
+  target: walvo-$PFX
+  rules:
+    - port: 80
+      action: allow
+---
+apiVersion: delonix.io/v1
+kind: NetworkRoute
+metadata:
+  name: wrota-$PFX
+spec:
+  from: wneta-$PFX
+  to: wnetb-$PFX
+YAML
+# O `--timeout 5` é o que distingue: antes da correcção esperava-o por inteiro e
+# saía ≠0; agora responde de imediato.
+check "stack wait com Kinds declarativos não espera pelo timeout" ok \
+  "$BIN" stack wait -f "$WORK/declarativos.yaml" --timeout 5
+# A marca `-` deixou de ser confundida com «ausente», mas `no` TEM de continuar a
+# esperar — senão a correcção tornou tudo pronto, que é o mesmo defeito ao contrário.
+cat >"$WORK/ausente.yaml" <<YAML
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: wausente-$PFX
+spec:
+  image: alpine:latest
+YAML
+check "stack wait continua a esperar por um recurso ausente" fail \
+  "$BIN" stack wait -f "$WORK/ausente.yaml" --timeout 3
+# O `NetworkRoute` está em KINDS e o `apply` aplica-o; sem braço no `presence`
+# caía no `_ => ("?", "unsupported kind")`, visível aqui.
+check "stack ls não diz 'unsupported kind' de um Kind que o apply aplica" ok \
+  bash -c "! '$BIN' stack ls -f '$WORK/declarativos.yaml' | grep -q 'unsupported kind'"
+
 ########################################
 section "schema gerado + explain + init"
 ########################################
