@@ -34,7 +34,7 @@ use schemars::generate::SchemaSettings;
 /// A Kind missing from this list is reported as «no typed schema» rather than
 /// omitted — a schema that silently covers half the manifest would validate a
 /// typo into looking correct, which is worse than not validating at all.
-const TYPED_KINDS: &[&str] = &["Container", "Pod", "Volume", "Network"];
+const TYPED_KINDS: &[&str] = &["Container", "Pod", "Volume", "Network", "Vm"];
 
 #[derive(Subcommand)]
 pub enum SchemaCmd {
@@ -78,6 +78,16 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
             "Network" => (
                 generator.subschema_for::<super::network::NetworkSpec>(),
                 super::network::NETWORK_SPEC_FIELDS,
+            ),
+            // `Vm` joins the typed Kinds: it is the largest spec in the manifest
+            // (34 fields) and was the one an editor could say nothing about.
+            // The accept list is `VM_SPEC_FIELDS`, which also carries the
+            // grouped-form keys (`resources:`/`boot:`/`cloudInit:`/`libvirt:`) —
+            // hoisted to flat fields before `VmSpec` is deserialized, so they
+            // exist in a valid manifest and not in the struct.
+            "Vm" => (
+                generator.subschema_for::<super::vm::VmSpec>(),
+                super::vm::VM_SPEC_FIELDS,
             ),
             _ => continue,
         };
@@ -139,8 +149,18 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
             //
             // Found by validating `examples/` against the schema, which is the
             // only reason this is a note and not a shipped false positive.
-            if kind == "Container" {
-                for dual in ["network", "env"] {
+            // `Vm` has the same duality in `network`: a plain string in the flat
+            // form, a mapping in the grouped one (`normalize_vm_spec`). Found the
+            // same way as the Container case — by validating `examples/` against
+            // the generated schema, where `examples/vm.yaml` was rejected for a
+            // shape the engine accepts.
+            let dual_shaped: &[&str] = match kind.as_str() {
+                "Container" => &["network", "env"],
+                "Vm" => &["network"],
+                _ => &[],
+            };
+            {
+                for dual in dual_shaped.iter().copied() {
                     if let Some(existing) = props.get(dual).cloned() {
                         props.insert(
                             dual.to_string(),

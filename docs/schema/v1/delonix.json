@@ -301,6 +301,110 @@
       ],
       "type": "object"
     },
+    "CpuTopologySpec": {
+      "description": "`spec.cpuTopology` of a `kind: Vm`.",
+      "properties": {
+        "cores": {
+          "default": 0,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sockets": {
+          "default": 0,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "threads": {
+          "default": 0,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "ExtraDiskSpec": {
+      "description": "One entry of `spec.extraDisks`.",
+      "properties": {
+        "bus": {
+          "description": "Bus: `virtio` (default), `sata`, `scsi`, `ide`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "device": {
+          "description": "`disk` (default) or `cdrom`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "format": {
+          "description": "Format: `qcow2` (default) or `raw`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "readOnly": {
+          "default": false,
+          "description": "Mount read-only.",
+          "type": "boolean"
+        },
+        "source": {
+          "description": "Host path of the disk image.",
+          "type": "string"
+        },
+        "target": {
+          "description": "Explicit target dev (auto-assigned when omitted).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "type": "object"
+    },
+    "ExtraNicSpec": {
+      "description": "One entry of `spec.extraNics`.",
+      "properties": {
+        "mac": {
+          "description": "Fixed MAC (random when omitted).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "description": "Model: `virtio` (default), `e1000`, …",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "description": "Network/bridge name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "description": "`network` (libvirt network), `bridge` (host bridge) or `user`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
     "HostAlias": {
       "description": "k8s `hostAliases[]` entry: one IP, N hostnames.",
       "properties": {
@@ -980,6 +1084,272 @@
       ],
       "type": "object"
     },
+    "VmSpec": {
+      "additionalProperties": false,
+      "description": "`spec` for `kind: Vm` — mirrors `delonix_vm::VmConfig` (minus `name`, which\ncomes from `metadata.name`).",
+      "properties": {
+        "backend": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "boot": {},
+        "bootOrder": {
+          "default": [],
+          "description": "OS boot device order, e.g. `[cdrom, hd]`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "boot_order": {},
+        "bridge": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cloudInit": {},
+        "cmdline": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cpuAffinity": {
+          "description": "Canonical `cpuAffinity`; `cpu_affinity` stays accepted (back-compat).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cpuModel": {
+          "description": "CPU mode/model: `host-passthrough` (default), `host-model`, or a named model.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cpuTopology": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CpuTopologySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "CPU topology (sockets/cores/threads)."
+        },
+        "cpu_affinity": {},
+        "cpu_model": {},
+        "cpu_topology": {},
+        "devices": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "disk": {
+          "type": "string"
+        },
+        "extraDisks": {
+          "default": [],
+          "description": "Extra disks beyond the main overlay + seed.",
+          "items": {
+            "$ref": "#/$defs/ExtraDiskSpec"
+          },
+          "type": "array"
+        },
+        "extraNics": {
+          "default": [],
+          "description": "Extra network interfaces beyond the primary one.",
+          "items": {
+            "$ref": "#/$defs/ExtraNicSpec"
+          },
+          "type": "array"
+        },
+        "extra_disks": {},
+        "extra_nics": {},
+        "firmware": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hostname": {
+          "description": "cloud-init: hostname applied on first boot (CLI `--hostname`). Without an\nexplicit `seed`, a NoCloud ISO is generated from these fields — full\nparity with `vm create` in the declarative path.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hugepages": {
+          "default": false,
+          "type": "boolean"
+        },
+        "initrd": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ip": {
+          "default": null,
+          "description": "Static IP (libvirt `nat` mode): DHCP reservation on the libvirt network.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kernel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "libvirt": {},
+        "libvirtXml": {
+          "description": "Full `<domain>` XML used verbatim (ultimate escape hatch; trusted only).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "libvirtXmlOverlay": {
+          "default": [],
+          "description": "Raw libvirt XML fragments injected before `</devices>` (trusted manifests).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "libvirt_xml": {},
+        "libvirt_xml_overlay": {},
+        "machine": {
+          "description": "Machine type (default `q35`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "memory": {
+          "default": "1G",
+          "type": "string"
+        },
+        "netMode": {
+          "description": "Canonical `netMode`; `net_mode` stays accepted (back-compat).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "net_mode": {},
+        "network": {
+          "anyOf": [
+            {
+              "default": "ingress",
+              "type": "string"
+            },
+            {
+              "type": "object"
+            }
+          ]
+        },
+        "resources": {},
+        "restartPolicy": {
+          "description": "Canonical `restartPolicy` (uniform with `Container`); `restart_policy`\nstays accepted so earlier manifests don't break.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "restart_policy": {},
+        "seed": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sshKeys": {
+          "default": [],
+          "description": "cloud-init: authorized public SSH keys (CLI `--ssh-key`, repeatable).\nEach is `ssh-ed25519 AAAA…` or `@/path` to read from a file.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ssh_keys": {},
+        "tpm": {
+          "default": false,
+          "description": "Emulated TPM 2.0.",
+          "type": "boolean"
+        },
+        "userData": {
+          "default": null,
+          "description": "cloud-init: your own `user-data` (replaces the generated one) — a path or\n`@/path` (CLI `--user-data`). Full control for whoever needs it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "user_data": {},
+        "vcpus": {
+          "default": 1,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "video": {
+          "description": "Video model (`virtio`|`qxl`|`vga`|`none`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "vnc": {
+          "default": false,
+          "type": "boolean"
+        },
+        "volumes": {
+          "default": [],
+          "description": "Volumes/Storage to mount inside the VM (virtio-9p) — closes the gap of\ngiving storage to a VM without writing cloud-init/XML. See `VmVolumeSpec`.",
+          "items": {
+            "$ref": "#/$defs/VmVolumeSpec"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "disk"
+      ],
+      "type": "object"
+    },
+    "VmVolumeSpec": {
+      "description": "One entry of a VM's `spec.volumes`: refers to a `Volume`/`Storage` by\nname and says where to mount it in the guest.",
+      "properties": {
+        "mountPath": {
+          "description": "Mount point in the guest (e.g. `/mnt/dados`).",
+          "type": "string"
+        },
+        "name": {
+          "description": "Name of a `kind: Volume` or `kind: Storage` (resolved at apply time).",
+          "type": "string"
+        },
+        "readOnly": {
+          "default": false,
+          "description": "Mount read-only.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "mountPath"
+      ],
+      "type": "object"
+    },
     "VolumeSpec": {
       "additionalProperties": false,
       "description": "`spec` of `kind: Volume` — mirrors the fields of `VolumeCmd::Create`.",
@@ -1140,6 +1510,25 @@
         "properties": {
           "spec": {
             "$ref": "#/$defs/NetworkSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Vm"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "$ref": "#/$defs/VmSpec"
           }
         }
       }
