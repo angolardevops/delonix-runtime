@@ -2797,6 +2797,9 @@ msgstr "driver desconhecido: '{other}' (use bridge|macvlan|ipvlan|overlay)"
 msgid "encrypted overlay (wg_ip) but 'wg' is unavailable on the host — install wireguard-tools + the kernel module, or remove wg_ip for plain (unencrypted) VXLAN transport"
 msgstr "overlay cifrado (wg_ip) mas 'wg' indisponível no host — instala wireguard-tools + o módulo do kernel, ou remove wg_ip para transporte VXLAN plano (não cifrado)"
 
+msgid "could not evaluate prerequisites: {err}"
+msgstr "não consegui avaliar os pré-requisitos: {err}"
+
 msgid "declared but NOT applied to an existing VM: {fields} — the reconciler compares only {compared}. Recreate it (`--replace`, which discards the disk) or change it with `vm create`/`vm stop`+`start`"
 msgstr "declarado mas NÃO aplicado a uma VM existente: {fields} — o reconciliador compara só {compared}. Recria-a (`--replace`, que deita fora o disco) ou muda-a com `vm create`/`vm stop`+`start`"
 
