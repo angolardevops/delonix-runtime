@@ -357,7 +357,82 @@ este ficheiro já documenta noutro sítio:
 | `main` (sem elas) | **2 / 10** |
 
 Portanto é pré-existente e intermitente, e não há evidência de que este trabalho
-o agrave. **Não corrigido aqui de propósito**: a causa está no dataplane (a
-suspeita é a janela em que o `pod create` reaplica regras e o conntrack do UDP
-em voo), é outra causa-raiz, e merece a sua própria investigação em vez de um
-palpite no fim de uma sessão.
+o agrave. Ver **D4** abaixo para o que se fez a seguir.
+
+---
+
+# 3.ª passagem: fechar o DNS para produção crítica (2026-08-12)
+
+Pedido: «tudo precisa resolver por nome». Inventário MEDIDO do que resolvia,
+feito antes de mexer em nada — porque até aqui «o que falta» era suposição.
+
+| forma | antes | agora |
+|---|---|---|
+| `api` (nome nu) | ✓ | ✓ |
+| `api.loja.delonix.internal` | ✓ | ✓ |
+| `api.delonix.io` (legado) | ✓ | ✓ |
+| **alias de rede** (`backend`) | **✗** | ✓ |
+| **`api.loja`** (curta) | **✗** | ✓ |
+| **workload MORTO** | **resolvia** ✗ | NXDOMAIN ✓ |
+| externo (`example.com`) | ✓ | ✓ |
+
+## D1 — um workload morto continuava a resolver
+
+Medido: um container que sai sozinho fica `status=Stopped` com o endereço ainda
+no registo, e o `nslookup` continuava a entregá-lo. Um cliente ligava-se a um
+serviço que já não existe e esperava por um timeout, em vez de falhar depressa
+com NXDOMAIN. E o lease volta ao IPAM, por isso o nome de um serviço morto pode
+passar a apontar para o workload que receba esse endereço a seguir.
+
+**Não consegui provocar a reatribuição** em 6 tentativas — os endereços derivam
+do id e a colisão a curto prazo é improvável. Fica dito, porque a consequência
+grave é essa e não a demonstrei.
+
+O índice passa a servir só `Running`/`Paused`/`Created`. `Failed(code)` e o
+legado `Exited` serializam como OBJECTOS e chegam como `None`, tal como um
+registo sem estado — os três param de responder. Fail-closed, que é o lado certo
+da pergunta «este endereço ainda é teu?». O mesmo se aplica a VMs paradas.
+
+## D2 — os aliases de rede nunca foram consultados
+
+`--network-alias`/`networkAlias:` era persistido em `net_aliases` desde sempre e
+**nada o lia** — a opção era aceite e não fazia nada, a forma de falha que este
+repo persegue. Passam a ser indexados como nomes, com o mesmo âmbito de
+namespace e com `or_insert`, para que um alias nunca desloque um container que
+seja mesmo dono daquele nome. Validado: `backend` e `api-v2` → o endereço do `api`.
+
+## D3 — a forma curta `<nome>.<namespace>`
+
+`api.loja` não resolvia; só o nome nu e o FQDN inteiro. O k8s dá isto com
+`search` no `resolv.conf`; aqui faz-se no resolvedor de propósito — um `search`
+faz o cliente colar o nosso sufixo a **todas** as falhas externas, o que é
+tráfego e fuga por omissão.
+
+Só é tentada quando a string inteira não resolve como nome próprio, e **a
+namespace tem de existir neste nó** para o nome ser nosso: sem isso, um
+`api.loja` que não resolvesse saía com a namespace do inquilino colada. Um nome
+com mais de uma etiqueta depois da cabeça (`api.github.com`) nunca é nosso — e
+um container numa namespace chamada `com` não nos faz reclamar `github.com`.
+Validado: `naoexiste.loja` → **NXDOMAIN autoritativo (`aa`) em 1 ms**.
+
+## D4 — o A11, e o que se fez sem o corrigir às cegas
+
+Não reproduziu com o código actual na forma sequencial (0/10). Reproduziu com
+uma sonda CONTÍNUA de dentro de um container enquanto se criavam pods: **2 em
+300** (~0,7 %), contra 0 em 90 sem criação nenhuma. Não isolei a causa, e uma
+correcção sem causa isolada é um palpite.
+
+**Nota de método**: a primeira sonda corria `dig` a partir do holder e deu
+200/200 «falhas» — o holder não pertence à namespace, logo o âmbito recusava-o
+correctamente. Era o isolamento a funcionar, não uma avaria. Uma sonda tem de
+correr de onde o cliente real corre.
+
+O que se fez é outra coisa e é defensável por si: **`options timeout:2
+attempts:3` no `resolv.conf`**. O DNS é UDP e um datagrama perdido enquanto o nó
+reprograma o dataplane é um evento NORMAL; o default da libc é `timeout:5
+attempts:2`, ou seja **cinco segundos** até à primeira retentativa — é isso que
+transforma uma perda transitória numa paragem visível. Medido depois, no mesmo
+cenário e com 16 pods criados durante as sondas: **0 falhas em 600**.
+
+Isto não afirma que a causa foi corrigida — afirma que o cliente deixou de a
+sentir. A causa fica aberta, com o número.
