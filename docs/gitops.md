@@ -4,9 +4,9 @@ O manifesto é a fonte de verdade; o repositório é onde ele vive; o `delonix` 
 quem o aplica. Não é preciso Terraform nem Ansible por cima — esta página é o
 fluxo completo.
 
-> Aplica-se aos Kinds que **convergem**, que são onze dos doze: `Network`,
-> `Volume`, `ShareVolume`, `Image`, `Vm`, `Container`, `Pod`, `FirewallPolicy`,
-> `HTTPRoute`, `Ingress` e `Tunnel`. Só o `Secret` continua «garante presente»
+> Aplica-se aos Kinds que **convergem**, que são doze dos treze: `Network`,
+> `NetworkRoute`, `Volume`, `ShareVolume`, `Image`, `Vm`, `Container`, `Pod`,
+> `FirewallPolicy`, `HTTPRoute`, `Ingress` e `Tunnel`. Só o `Secret` continua «garante presente»
 > (criado se faltar, nunca actualizado), porque o estado são valores cifrados e
 > um plano não os decifra para comparar — e o `plan` marca-o com `!` em vez de o
 > esconder, com o obstáculo nomeado. A lista autoritativa não é este parágrafo:

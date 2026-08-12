@@ -187,12 +187,33 @@ Implementado nesta série, com validação ao vivo em root isolado:
 | | estado |
 |---|---|
 | isolamento entre redes (set + verdict map, com contador) | **feito** — era uma malha O(n²) sem contadores; medido, 8 bridges → 73 regras → **2** |
-| camada B — `network route` + `kind: NetworkRoute` | **feito** — dirigida, e o retorno flui por `established` |
+| camada B — `network route` + `kind: NetworkRoute` | **feito** — dirigida, e o retorno flui por `established`; **reversível** desde a série seguinte, ver abaixo |
 | camada C — `network vlan` (802.1Q) | **feito**, privilegiado e contido; falta uma corrida real com `sudo` |
 | camada A — o tipo `Cidr` e a sua aritmética | **fundação feita**, IPAM por ligar |
 
 Falta exactamente isto, e nada mais, para o que o utilizador chamou «tudo
 funcional a nível de rede»:
+
+### 0. A camada B ficou reversível (fechado)
+
+A camada B entregou o caminho e não o inverso: a `kind: NetworkRoute` era aplicada e validada mas
+ficava fora do `CONVERGING_KINDS`, sem posse e sem teardown. Tirá-la do manifesto e correr
+`stack apply --prune` **não a fechava**, o `stack destroy` também não, e o `stack ls` respondia
+`?  unsupported kind`. Uma excepção ao isolamento que o manifesto abria e não sabia fechar.
+
+O que a correcção decidiu, e vale reter porque inverteu o desenho óbvio: **o `actual` do plano vem
+de um REGISTO (`infra::RouteDef`) e não do `@netpair`**. O mapa vive na netns efémera do holder,
+que nasce a pedido e morre com o último container — num nó ocioso a sonda devolve vazio, o plano lê
+«a rota desapareceu», e o `--detailed-exitcode` fica em 2 para sempre, com o gate de deriva em CI
+vermelho todos os dias. É o mesmo problema que o `EgressState` já tinha, e a resposta é a mesma:
+persistir e repor no `ensure_net_bridge` quando a bridge renasce.
+
+A identidade de uma rota é o **par**, não o `metadata.name` — com o nome do documento, renomeá-lo
+dava `Create`+`Delete` para o mesmo elemento nft, e o `--prune` (que corre em último) fecharia o
+caminho que o próprio apply acabara de abrir. Daí a recusa de dois documentos para o mesmo par.
+
+Continua por fazer o que este ADR já assinalava: **as isenções não têm `counter`**, por isso «esta
+rota passou tráfego?» continua sem resposta.
 
 ### 1. Ligar o IPAM ao `Cidr` (camada A, 2.ª fatia) — rootless
 
