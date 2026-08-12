@@ -3789,17 +3789,23 @@ informal de "hypervisor").
   `vm create`; propagar `default_vcpus`/`default_memory`/`default_backend` a `cluster kubeadm`/
   `kind: Vm` (manifesto) — hoje só o `vm create` via CLI os lê.
 
-## A bateria mede o `--help` de tudo e EXECUTA 23% (medido 2026-08-12)
+## A bateria mede o `--help` de tudo e EXECUTA um quarto (medido 2026-08-12)
 
 Primeira passagem do roteiro de auditoria (`skills/delonix-auditoria`), e o número que
 importa saiu logo do mapa da superfície, antes de qualquer achado: a CLI tem **245 comandos, 218
 folhas invocáveis**; o `scripts/e2e.sh` verifica o `--help` de **100%** delas (um ciclo dinâmico
-percorre a árvore) e **executa 51 — 23%**. Os 167 restantes têm o contrato verificado e nunca são
+percorre a árvore) e **executa 55 — 25%**. Os 163 restantes têm o contrato verificado e nunca são
 corridos, concentrados em `net` (45), `image` (31) e `vm` (24).
 
-**198/198 verde lê-se como «a CLI foi testada», e o que foi testado é sobretudo o texto de ajuda.**
-Foi em `net` que os dois achados abaixo apareceram, ao primeiro contacto, os dois em comandos que
-a bateria nunca executava.
+**Um verde total lê-se como «a CLI foi testada», e o que foi testado é sobretudo o texto de
+ajuda.** Foi em `net` que os dois achados abaixo apareceram, ao primeiro contacto, os dois em
+comandos que a bateria nunca executava.
+
+> **O número de checks NÃO é a cobertura, e esta secção quase o disse.** A primeira versão media
+> 51/23% e citava «198/198»; ao preparar a release, os checks eram já 143 e as execuções 55 (25%),
+> porque outra sessão acrescentou casos entretanto. **Cita-se a fracção medida e a data, nunca o
+> total do relatório** — um total que sobe faz a cobertura parecer melhor sem uma única folha
+> nova exercitada. O rácio é o que interessa, e recalcula-se com o `scripts/e2e.sh` do dia.
 
 **Achado 1 — o `ENOENT` de um spawn, outra vez.** `network node init`/`key` devolviam
 ``system call `spawn` failed: No such file or directory (os error 2)`` quando falta o `wg`: não

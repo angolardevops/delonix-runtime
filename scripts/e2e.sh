@@ -12,8 +12,8 @@
 # ## O que este número quer dizer, e o que NÃO quer (medido 2026-08-12)
 #
 # A CLI tem 245 comandos, 218 folhas invocáveis. Esta bateria verifica o `--help`
-# de 100% delas (o ciclo dinâmico abaixo percorre a árvore) e EXECUTA 51 — 23%.
-# Os outros 167 têm o contrato verificado e nunca são corridos, concentrados em
+# de 100% delas (o ciclo dinâmico abaixo percorre a árvore) e EXECUTA 55 — 25%.
+# Os outros 163 têm o contrato verificado e nunca são corridos, concentrados em
 # `net` (45), `image` (31) e `vm` (24). Um verde aqui lê-se com facilidade como
 # «a CLI foi testada», e o que foi testado é sobretudo o texto de ajuda: foi em
 # comandos nunca executados que a auditoria encontrou um errno cru (`node init`)
