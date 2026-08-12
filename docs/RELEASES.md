@@ -4,6 +4,185 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.52.0 — um instantâneo de VM deixa de desaparecer com o `stop`, e o grupo `vm snapshot` fica completo
+
+O fio deste ciclo é o mesmo do anterior, uma camada mais fundo: **estado
+necessário para reconstruir um recurso a ser deitado fora sem uma palavra**. Na
+v0.51.0 eram vinte e um campos de uma VM que morriam com o `vm create`; aqui é a
+contabilidade dos instantâneos, que o `vm stop` apagava enquanto o disco os
+mantinha intactos. Nenhum dos dois falha — é isso que os torna caros.
+
+## BREAKING: `vm snapshot` passou a grupo, sem aliases
+
+| antes | agora |
+|---|---|
+| `delonix vm snapshot <vm> <n>` | `delonix vm snapshot create <vm> <n>` |
+| `delonix vm snapshots <vm>` | `delonix vm snapshot ls <vm>` |
+| `delonix vm restore <vm> <n>` | `delonix vm snapshot restore <vm> <n>` |
+| *(não existia)* | `delonix vm snapshot rm <vm> <n>` |
+
+A forma antiga falha **alto** (`unrecognized subcommand`, rc=2), nunca em
+silêncio — é a regra de quebra deste projecto, e o grupo `vm` está declarado NÃO
+estável em [cli-stability.md](../cli-stability.md).
+
+O motivo directo foi o quarto verbo: **não havia forma nenhuma de apagar um
+instantâneo pela CLI**. A única saída era o `virsh snapshot-delete` — e era a
+própria mensagem de erro do motor que o mandava fazer, o que é o sinal de que
+faltava um comando. Os quatro verbos são agora os mesmos, pela mesma ordem, do
+`volumes snapshot` que já existia: um checkpoint é um checkpoint, e quem aprendeu
+um não devia ter de aprender o outro.
+
+## O `stop` deitava fora os instantâneos, e o disco tinha-os o tempo todo
+
+Bug report reproduzido antes de qualquer código: `snapshot` → `stop` → `start`
+deixava a lista **VAZIA com rc=0** e o restore a responder «Domain snapshot not
+found». A causa é o `virsh undefine --managed-save --snapshots-metadata --nvram`
+que o `stop` reutiliza do `libvirt_cleanup` — e esse undefine está certo, é o que
+evita domínios órfãos.
+
+**A medição que mudou a leitura do problema**: `qemu-img snapshot -l` sobre o
+overlay mostrava o instantâneo **intacto** depois do `stop`. O `undefine` não
+apaga o instantâneo, apaga só o que aponta para ele. Não era um limite do
+mecanismo — era contabilidade a ser descartada.
+
+- `VmBackend::preserve_snapshots` (default: nada, logo o Cloud Hypervisor e o
+  Proxmox ficam byte a byte iguais) guarda o `snapshot-dumpxml` de cada um em
+  `vms/<vm>/snapshots/`, **dentro do directório que o `remove` já apaga inteiro**
+  — com teste a exigi-lo, porque noutro sítio um `vm rm` deixaria metadados a
+  apontar para um disco que já não existe. Corre no `stop` PÚBLICO, antes do
+  `backend.stop`: uma falha aborta o stop sem nada perdido.
+- O `boot` devolve-os ao libvirt logo a seguir ao `define`. O que faltava para
+  isso não era óbvio: o `snapshot-create --redefine` **RECUSA** um XML cujo uuid
+  de domínio não seja o actual, e o uuid é atribuído em cada `define`.
+  `snapshot_xml_with_uuid` reescreve-o em TODAS as ocorrências — são duas no
+  ficheiro real, e substituir só a primeira dá o mesmo erro pela que ficou.
+
+## Os quatro verbos passam a servir uma VM PARADA
+
+Era a limitação que restava. Sem domínio, o virsh respondia `failed to get
+domain` — uma frase que manda procurar uma VM que está ali no `vm ls`.
+
+`with_stopped_domain` **define o domínio só durante o comando**, a partir do
+`vms/<vm>.xml` que o último `boot` escreveu (o mesmo ficheiro que o libvirt
+tinha, seclabel DAC incluído, em vez de derivar uma descrição que depois teria de
+bater certo com o `boot` à mão), devolve os metadados preservados, corre o verbo,
+volta a guardá-los e desfaz o domínio. Por isso o `stop` **deixou de apagar o
+`<vm>.xml`**.
+
+Um instantâneo tirado assim é **só do disco** (`state=shutoff`), que é o honesto
+para uma VM sem memória para capturar, e a VM **continua parada**. A única
+excepção em que o domínio fica definido é um restore de um checkpoint tirado a
+correr: o revert repõe a memória, logo o convidado fica a correr — desfazer o
+domínio por baixo de uma VM viva não é limpeza, é matá-la. Nesse caso avisa
+(`note: … is RUNNING again`) e o registo é reconciliado pelo `status` que já
+existe, em vez de um segundo reconciliador que possa discordar dele.
+
+## Cloud Hypervisor deixou de recusar tudo — offline, e diz porquê
+
+Os quatro verbos servem também uma VM CH: `qemu-img snapshot -c/-a/-d` no overlay
+da própria VM, e `ls` por `qemu-img info -U` (só leitura, a única forma que o
+force-share permite — o `snapshot -l` abre em leitura-escrita e falha com o vmm a
+correr). Com a VM **a correr**, os três verbos que escrevem são **recusados com
+erro dirigido**; o `ls` responde sempre.
+
+**Porque não se expôs a `vm.snapshot` do próprio CH**, que existe e funciona
+(medido ao vivo: `pause` → `PUT /api/v1/vm.snapshot` → `resume` escreve
+`config.json`, `state.json` e um `memory-ranges` do tamanho da RAM inteira do
+convidado): ela guarda **memória e dispositivos, não o disco**, e o CH não tem
+API de instantâneo de disco ao vivo nenhuma — enquanto o vmm corre segura o
+`qcow2` em exclusivo, por isso mais ninguém o pode capturar (`Failed to lock byte
+100`, com e sem `-U`). Restaurá-la mais tarde, contra um disco que continuou a
+ser escrito, não é voltar atrás: é um convidado cuja memória acredita num
+filesystem que já mudou. Expô-la como `snapshot` faria o MESMO comando significar
+«volta atrás no tempo» no libvirt e «retoma este instante, se ninguém tocou no
+disco» aqui. Um par `vm suspend`/`vm resume` é onde essa capacidade pertence.
+
+## A classe da falha deixa de depender de a VM estar acesa
+
+`NotFound` (**4**) para um instantâneo que não existe, `Conflict` (**5**) para um
+nome já usado — iguais com a VM parada ou a correr. As duas saíam antes como
+**1** genérico com a resposta crua do virsh, onde «domain moment off1 already
+exists» usa uma palavra (`moment`) que esta CLI nunca diz.
+
+## VM: quatro achados que vinham do mesmo sítio
+
+- **O manifesto resolvia a imagem de outra maneira que a CLI** — `resolve_vm_disk`
+  devolvia `spec.disk` cru e nunca consultava o `VmImageStore`, por isso a MESMA
+  string funcionava como `--disk` e respondia `image not found` como `spec.disk`.
+  E sem `image_meta` o `apply` também não sabia que a imagem é um APPLIANCE, e
+  gerava-lhe um seed de cloud-init que a CLI recusa em voz alta.
+- **A recusa num appliance era contornável pelo caminho do qcow2** — o mesmo
+  appliance recusava por nome e era aceite por caminho absoluto, que é
+  precisamente o contorno que alguém tenta depois de levar `image not found`. A
+  busca passa a ser inversa quando o `store.get` falha.
+- **`--wait` do CH anunciava `is up` em 0,062 s sobre uma VM que não arrancou** —
+  em CH o endereço é DERIVADO do MAC, e tomar esse número por resposta é
+  confundir «tem endereço» com «está viva». O `--boot-timeout` passa a ter em que
+  se gastar, e um `--wait` esgotado di-lo.
+- **As imagens saíam do build sem etiquetas SELinux** (e não era um problema da
+  imagem Fedora, como estava registado): mediu-se «não ganha IP» e concluiu-se
+  «não arranca», quando um screenshot da consola mostrava a VM no prompt de
+  login. Arrancava sempre.
+
+## Rede: a coluna BRIDGE nomeava um dispositivo que não existe
+
+`network ls`/`inspect`/`describe` imprimiam `dlxne9623e` onde o dispositivo real
+é `dlxn0536623e`. Duas fórmulas independentes para a mesma coisa, uma por store —
+e só a do plano físico nomeia o que é criado. Mesma família do `ingress ls` a
+dizer `allow` sobre uma porta bloqueada: a superfície de relato a discordar do
+dataplane.
+
+## Imagens: um blob cortado a meio deixa de recomeçar do zero
+
+`vm pull` de 276 MiB morria aos 8m19s numa ligação a 416 KB/s, e a tentativa
+seguinte recomeçava no byte zero — abaixo de ~600 KB/s a imagem **nunca**
+acabava de descarregar, por mais vezes que se tentasse. É o primeiro comando que
+um administrador corre. A atribuição ao timeout estava desactualizada (o tecto é
+de 4 horas desde a v0.47.1): 8m19s é a ligação a cair, e contra uma queda um
+tecto maior não faz nada — só a retomada resolve.
+
+## Documentação
+
+- **Guia do administrador de VMs** ([guia-vm.html](../guia-vm.html)), com um
+  laboratório de seis VMs (BIND9, ISC DHCP, Samba, cliente, TrueNAS, OPNsense)
+  montado por manifestos e provado ponta a ponta. Ganhou **página própria no
+  site**: era Markdown solto no repositório, invisível nas Pages (o `.nojekyll`
+  desliga a renderização de Markdown), e passa a ser gerado pelo mesmo `md_page`
+  do `gitops.md` — a mesma fonte, nunca uma segunda cópia do texto.
+- **ADR-0013** (topologias roteadas) com o spike da camada B corrido rootless num
+  host vivo: o isolamento entre redes **não é ausência de rota**, é um drop
+  par-a-par explícito por par ordenado de bridges.
+
+## Gates
+
+- Secção nova no `scripts/e2e.sh` a correr o **ciclo** (create → stop → start →
+  restore, mais os quatro verbos com a VM parada e as classes 4/5) contra uma VM
+  libvirt real: **20/20**. A versão que cobria só o ciclo original foi verificada
+  pela regra do repo em **9/9 com a correcção e 4/9 com ela revertida** — tinha
+  de ser o ciclo, porque antes da correcção cada comando devolvia 0 por si.
+- Secção irmã para o Cloud Hypervisor: **13/13**, incluindo a recusa com a VM a
+  correr e o `rm` confirmado com `qemu-img snapshot -l` (sair da LISTA não é sair
+  do disco).
+
+## O que NÃO foi validado
+
+- **O CI não exercitou estes gates.** O job `Chaos` fica verde mas os passos «Corre
+  o arnês de caos» e «Bateria E2E da CLI» são SALTADOS pelo preflight daquele
+  runner (sem userns). A prova das duas secções é a corrida local, num host com
+  libvirt e cloud-hypervisor reais.
+- **A secção CH da bateria recusa-se a correr meio isolada** — `DELONIX_ROOT`
+  isolado sem `DELONIX_NET_RUNTIME_DIR` põe dois roots a disputar
+  `/tmp/delonix-net-<uid>/`, e isso custou um incidente real durante este ciclo: o
+  root isolado subiu um pin/slirp por cima dos mesmos caminhos e a reconciliação
+  seguinte, corrida do root real, reconstruiu a infra e reiniciou um container.
+  Fica também um **achado por investigar**: o guarda do motor devia olhar para
+  quem está VIVO no socket partilhado, não só para a presença de um pidfile no
+  root actual.
+- **Backend Proxmox inalterado** — continua a recusar os verbos de instantâneo
+  pelo default do trait, fail-closed, como antes.
+
+---
+
 ## v0.51.0 — o registo passa a guardar a máquina inteira, e o que era descartado em silêncio passa a dizer-se
 
 Um fio atravessa quase tudo neste ciclo: **coisas que eram aceites e deitadas
@@ -155,6 +334,42 @@ Fica declarado o pré-requisito que é mesmo real: **um overlay cifrado precisa 
 `wg` no host**, e a sonda usa a MESMA `wg::available()` do realizador — uma
 condição que discorde de quem realiza é pior que condição nenhuma.
 
+## A coluna BRIDGE nomeava um dispositivo que não existe
+
+`network ls`/`inspect`/`describe` imprimiam uma bridge que **não está no host**.
+Medido ao vivo (kaeso-sys-01, rede `lab-net`): a CLI dizia `dlxne9623e`, e o
+dispositivo real no netns do holder — o mesmo que o `NetDef`, o `resolve_net`, o
+`vm bridge` e a vista de egress usam — é `dlxn0536623e`.
+
+**Duas fórmulas independentes para a mesma coisa**, uma por store, na divisão
+«dois stores em paralelo» que este guia já documenta: o `NetworkStore`
+declarativo fazia `dlxn{base:02x}{hash:04x}` e o plano físico
+(`infra::network_create{,_with}`) faz `dlxn{hash:08x}`. Só o segundo nomeia o
+dispositivo que é criado; o primeiro só **relata**. É a mesma família do
+`ingress ls` a imprimir `allow` sobre uma porta bloqueada — a superfície de
+relato a discordar do dataplane, e outra vez precisamente na coluna que se lê
+para ir depurar a coisa.
+
+- **Uma fórmula só** (`bridge_name`), partilhada pelo gerador e pelo leitor — a
+  disciplina do `fw_rule_tail`/`antispoof_rule_args`. O plano físico é a
+  autoridade, por isso é dele que o `NetworkStore` deriva.
+- **Nada a migrar em disco**: o registo do `NetworkStore` guarda `base=`, e a
+  bridge é recalculada a cada `get` — a correcção aplica-se às redes já
+  existentes sem lhes tocar. O `NetDef`, esse, persiste o nome, e sempre carregou
+  o certo.
+- **O octeto base sai do nome de propósito**: o nome é único nos dois stores, e
+  foi juntar-lhe a base que fez os dois divergirem.
+- **`NetDef::new` passa a ser o único sítio** onde a definição física se
+  constrói. As duas `network_create*` só diferem em como chegam ao prefixo, e
+  construir a struct duas vezes é como uma segunda fórmula entra.
+
+O teste percorre os dois sentidos e **pina o literal medido no host real** — sem
+ele seria tautológico no momento em que os dois lados passassem a chamar o mesmo
+ajudante. Verificado pela regra do repo, com cada lado revertido à vez: sem a
+correcção do store falha em `dlxn64623e ≠ dlxn0536623e`, sem a do plano físico em
+`dlxnc9623e ≠ dlxn0536623e`. A primeira versão do teste **passava** com o plano
+físico divergido, que é exactamente a armadilha que ele existe para apanhar.
+
 ## Progresso: o silêncio passa a ter cobertura, e cada passo fecha-se
 
 - **`container run` ganha spinner só onde há silêncio real.** Um `run` com a
@@ -228,8 +443,161 @@ que o arquivo leva e porquê (registo e dados dos volumes; nem imagem nem rootfs
 que o `restore` deriva por pull; a VM é a excepção, porque o overlay dela É o seu
 estado).
 
+## Cloud Hypervisor: o `--wait` esperava por um número que já sabia, e o firmware não arrancava nada
+
+Dois defeitos, um a esconder o outro, os dois medidos ao vivo em 2026-08-12.
+
+**O `--wait` devolvia em 0,062 s** a anunciar `✓ VM 'x' is up.` e `is up — ip
+10.233.254.141` sobre uma VM cujo firmware falha antes do kernel: overlay a 448
+KiB (o convidado nunca escreveu um byte), processo a 100% de CPU, e `ip neigh`
+desse endereço a dar `FAILED` de um container na mesma SDN. O `--boot-timeout`
+não tinha em que se gastar.
+
+A causa não é o IP estar errado: em CH o endereço é DERIVADO do MAC
+(`infra::dhcp_lease_ip`), e isso é deliberado — é o que permite pôr o endereço de
+uma VM debaixo do isolamento de namespace no `vm_attach`, antes de o convidado
+existir para o pedir. O defeito foi tomar esse número por resposta. **Ter um IP
+só é a resposta toda onde o IP foi OBSERVADO**: em libvirt vem de um lease real,
+logo prova que o convidado arrancou o suficiente para o pedir; em CH é
+aritmética. É a família já catalogada — um ficheiro de socket não é um listener,
+um pidfile não é alcançabilidade, **um lease previsto não é uma VM viva**.
+
+- Quem sabe é o backend: `VmBackend::ip_is_predicted()` (default `false`, CH
+  devolve `true`), e não um `backend.contains("cloud-hypervisor")` no sítio da
+  chamada — a razão do ADR-0008.
+- `infra::sdn_reachable` pergunta de dentro do netns do holder, o único sítio
+  onde a SDN existe. **ARP e não ICMP**: um appliance que deita fora pings tem de
+  responder ARP pelo seu próprio endereço, ou não usava a rede de todo; e o
+  iproute2 já é dependência dura deste motor, ao contrário do `ping`. Medido:
+  host real `REACHABLE` em <0,5 s, endereço livre `PROBE` ~3 s e depois `FAILED`
+  — e é por causa desse atraso que a sonda corre em fatias com o
+  `--boot-timeout` a mandar.
+- **`None` não é `Some(false)`**: sem holder ou sem `ip(8)` a pergunta não se
+  PÔDE fazer, e a CLI di-lo em vez de escolher uma das duas.
+- `✓ VM 'x' is up.` passou a `started.` — nesse ponto o que aconteceu foi um
+  processo VMM existir.
+
+**O segundo defeito é o que o primeiro escondia: com o `rust-hypervisor-fw` que
+o instalador punha, NENHUMA imagem deste projecto arranca em Cloud Hypervisor.**
+As `delonix-vm-base:*` ficam-se pelo firmware e a golden k8s morre no shim de
+Secure Boot (`import_mok_state() failed: Unsupported`, lido na consola série).
+Com o EDK2 `CLOUDHV.fd` do fork `cloud-hypervisor/edk2`:
+
+| imagem | `hypervisor-fw` | EDK2 `CLOUDHV.fd` |
+|---|---|---|
+| `delonix-vm-base:ubuntu-24.04` | não arranca | **is up**, 7,8 s |
+| `delonix-vm-base:ubuntu-26.04` | não arranca | **is up**, 5 s |
+| `delonix-vm-base:debian-bookworm` | não arranca | **is up**, 5 s |
+| `delonix-vm-base:rocky-9` | não arranca | **is up**, 32 s |
+| `delonix-vm-k8s:1.34` | shim de Secure Boot | **is up**, 7 s |
+| `delonix-vm-base:fedora-42` | não arranca | não arranca (ver abaixo) |
+
+O instalador passa a buscar os dois e o motor prefere o EDK2
+(`DEFAULT_CH_FIRMWARES`, com teste a exigir a ordem — um host com ambos que
+escolhesse o `hypervisor-fw` voltaria ao silêncio de origem). O
+`rust-hypervisor-fw` fica como recurso: são ~150 KB, arranca mais depressa onde
+funcione, e tirá-lo mudaria o comportamento de uma VM que hoje dependa dele.
+
+O caminho positivo do `--wait` ficou provado por aqui, que era o que faltava:
+`is up — ip 10.233.254.177` em 7,8 s, com o endereço confirmado à parte por ARP
+(`REACHABLE` com o MAC real do convidado), pelo kernel na consola série, e por
+3/3 ICMP de um container na mesma rede.
+
+**Num host já instalado, o firmware novo não aparece sozinho** — ou se corre o
+`install.sh` outra vez, ou:
+
+```
+sudo curl -fsSL -o /usr/local/share/delonix/CLOUDHV.fd \
+  https://github.com/cloud-hypervisor/edk2/releases/latest/download/CLOUDHV.fd
+```
+
+## O Fedora não arrancava, e eram dois defeitos nossos — nenhum deles do Fedora
+
+A nota anterior deste ciclo dizia que a imagem Fedora era o problema, «porque
+também não ganha IP em libvirt». **Estava errada, e o erro foi de método**:
+medi «não ganha IP» e concluí «não arranca». Um screenshot da consola — 30
+segundos de trabalho — mostrava a imagem no prompt de login. Ela arrancava
+sempre; o que não fazia era ter rede. Duas causas, ambas do nosso build, ambas
+com efeito muito para além do Fedora.
+
+**1. As imagens SELinux saíam do build sem etiquetas.** Qualquer `dnf install`
+dentro do `virt-customize` re-corre o `ldconfig`, e o `/etc/ld.so.cache`
+reescrito volta **sem xattr de SELinux nenhum**. O `virt-customize` 1.52
+relabela por omissão e até imprime `SELinux relabelling` — mas num convidado
+Fedora esse passo demora 0,1 s: não relabela nada, agenda (`/.autorelabel`). E
+esse relabel de primeiro arranque nunca chega a correr, porque a essa altura o
+estrago já é fatal:
+
+```text
+avc: denied { map } for pid=1 comm="systemd" path="/etc/ld.so.cache"
+     scontext=…:init_t tcontext=…:unlabeled_t
+```
+
+Com o PID 1 negado, o `dbus-broker` não arranca; sem D-Bus não há
+NetworkManager; sem NetworkManager o convidado chega ao login com a interface
+DOWN, sem endereço e com o hostname ainda `localhost`. **195 negações num só
+arranque**, e o único sintoma visível de fora era uma VM que nunca tirava lease.
+
+O relabel passa a correr no BUILD, como último passo, em
+`vmimage::customize_args` — o único ponto por onde os dois caminhos de build
+passam, e o único sítio onde não pode ser esquecido nem ultrapassado por um
+passo acrescentado depois. Guardado em shell (`[ -f /etc/selinux/config ]`) em
+vez de por distro, porque o caminho do VMfile constrói a partir de um `FROM`
+que pode ser um URL arbitrário, onde não há nada fiável em que ramificar.
+**Não é um defeito do Fedora**: o `delonix-vm-base:rocky-9` já publicado está
+exactamente no mesmo estado — o Fedora é só onde foi fatal.
+
+**2. O `network-config` do seed casava a NIC por NOME, com um glob.** O
+`match: {name: "e*"}` funciona onde o renderer é o netplan (Ubuntu, Debian) e
+está partido em todo o lado onde é o NetworkManager (Fedora, Rocky). O código
+do cloud-init diz porquê numa linha:
+
+```python
+if if_type == "bridge" or not self.config.has_option(if_type, "mac-address"):
+    self.config["connection"]["interface-name"] = iface["name"]
+```
+
+Sem MAC para escrever, o renderer nomeia a interface a partir da CHAVE do
+netplan — o convidado ficava com um keyfile a dizer `interface-name=eth-all`, o
+NetworkManager à espera de um dispositivo com esse nome, e o `enp1s0` DOWN para
+sempre. Passa a casar por **MAC** (`delonix_vm::mac_for`, o mesmo valor que os
+dois backends carimbam), que é a única coisa da NIC que se sabe antes de o
+convidado existir — e que faz o renderer omitir o `interface-name`, o que é o
+que permite ao mesmo ficheiro servir todas as distros.
+
+**Medido, com a imagem corrigida**: hostname aplicado, `enp1s0 UP
+192.168.122.7`, `dbus-broker` e `NetworkManager` activos, e **0 AVC** (eram
+195). Antes: login prompt, sem endereço, sem lease em 120 s.
+
+**3. Em Cloud Hypervisor o Fedora continua a não arrancar, e isso NÃO é nosso.**
+O GRUB anuncia `Booting 'Fedora Linux (6.14.0-63.fc42.x86_64)'` e o EDK2 leva um
+`#PF` de escrita a carregar o kernel — igual com `CLOUDHV_EFI.fd`, igual com
+2 GiB, e **igual com a imagem original do fabricante, sem uma linha nossa**
+(mesmo RIP). É o controlo que faz disto um problema a montante.
+
+Há caminho, e com flags que já existem — **arranque directo de kernel**, que
+salta o GRUB por inteiro. Validado: `is up — ip 10.201.254.129` em 24 s, com o
+ARP do convidado confirmado no holder.
+
+```
+delonix vm create fed --disk delonix-vm-base:fedora-42 \
+  --backend cloud-hypervisor --network <rede> \
+  --kernel <vmlinuz> --initrd <initramfs> \
+  --cmdline "console=ttyS0,115200n8 root=UUID=<uuid> rootflags=subvol=root rw"
+```
+
+O `vmlinuz`/`initramfs` tiram-se da imagem com `virt-copy-out /boot/...` e o
+`root=`/`rootflags=` estão na entrada BLS em `/boot/loader/entries/*.conf`.
+Automatizar isto (extrair e registar nos metadados da imagem no `vm build`)
+tem perguntas próprias — onde fica o kernel extraído, e o que acontece quando o
+convidado actualiza o dele — e merece a sua própria fatia.
+
 ## Por fazer, declarado
 
+- **As imagens SELinux já publicadas continuam por reconstruir.** A correcção é
+  do build; `delonix-vm-base:fedora-42` e `delonix-vm-base:rocky-9` em disco
+  ainda têm `/.autorelabel` e o `/etc/ld.so.cache` sem etiqueta. Precisam de uma
+  passagem do `vm-image.yml`.
 - **163 comandos por executar** na bateria — a fatia com melhor retorno a seguir.
 - **`scripts/e2e.sh` não isola o estado** por omissão; isolar de fora funciona e
   está documentado, mas forçá-lo partiria os checks que dependem de estado real.
