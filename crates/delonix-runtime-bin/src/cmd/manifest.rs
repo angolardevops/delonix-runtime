@@ -216,6 +216,17 @@ fn expand_stack(doc: &ManifestDoc) -> Result<Vec<ManifestDoc>> {
     warn_unknown_fields(doc, STACK_SPEC_FIELDS);
     let spec: StackSpec = spec_of(doc)?;
     let ns = &doc.metadata.namespace;
+    // ADR-0011 §4: deliberately NOT derived from the stack name. Doing that
+    // would make the reconciler find nothing of its own in the new namespace
+    // and create a SECOND copy of the whole stack, leaving the running one
+    // orphaned and unmanaged — a safety change whose failure mode is
+    // duplicating production is not a safety change. So it warns, and the
+    // scaffold (`stack init`) writes a namespace for NEW stacks instead.
+    if ns.is_none() {
+        super::output::warn(super::po::t(
+            "this stack declares no namespace, so its resources land in the shared 'default' — everything else in 'default' can reach them. Set metadata.namespace to isolate it",
+        ));
+    }
     let groups: Vec<(&str, Vec<StackItem>)> = vec![
         ("Secret", spec.secrets),
         ("Network", spec.networks),

@@ -136,8 +136,40 @@ pub(crate) fn chown_tree(path: &Path, uid: u32) -> Result<()> {
 /// one is a hard error listing the candidates.
 pub(crate) fn find(store: &Store, q: &str) -> Result<Container> {
     let all = store.list()?;
-    if let Some(c) = all.iter().find(|c| c.id == q || c.name == q) {
+    // `<namespace>/<name>` — the unambiguous form, needed since names are only
+    // unique WITHIN a namespace (ADR-0011 §3). Tried first so a container whose
+    // name legitimately contains no slash can never shadow it.
+    if let Some((ns, name)) = q.split_once('/') {
+        return all
+            .into_iter()
+            .find(|c| c.namespace == ns && c.name == name)
+            .ok_or_else(|| Error::NotFound(format!("container: {q}")));
+    }
+    if let Some(c) = all.iter().find(|c| c.id == q) {
         return Ok(c.clone());
+    }
+    // A bare name may now match in SEVERAL namespaces — two tenants are allowed
+    // to both own `db`. Picking one would be picking a tenant, and every
+    // destructive verb (`stop`, `rm`) resolves through here, so this refuses and
+    // names them instead. A name unique on the node — every node not using
+    // namespaces — behaves exactly as before.
+    let by_name: Vec<Container> = all.iter().filter(|c| c.name == q).cloned().collect();
+    if by_name.len() == 1 {
+        return Ok(by_name.into_iter().next().unwrap());
+    }
+    if by_name.len() > 1 {
+        let mut opts: Vec<String> = by_name
+            .iter()
+            .map(|c| format!("{}/{}", c.namespace, c.name))
+            .collect();
+        opts.sort();
+        return Err(Error::Invalid(format!(
+            "{}: {q} ({})",
+            super::po::t(
+                "this name exists in several namespaces — qualify it as <namespace>/<name>"
+            ),
+            opts.join(", ")
+        )));
     }
     let mut matches: Vec<Container> = all.into_iter().filter(|c| c.id.starts_with(q)).collect();
     match matches.len() {
@@ -208,6 +240,49 @@ mod tests {
             vec!["sh".to_string()],
             "0".to_string(),
         )
+    }
+
+    fn mk_ns(id: &str, name: &str, ns: &str) -> Container {
+        let mut c = mk(id, name);
+        c.namespace = ns.to_string();
+        c
+    }
+
+    #[test]
+    fn a_name_in_two_namespaces_is_refused_not_guessed() {
+        // Names are unique per (namespace, name), so two tenants may both own
+        // `db`. Every destructive verb resolves through `find`, so picking one
+        // would be picking a TENANT — `stop db` hitting the wrong team's
+        // database. It refuses and names both instead.
+        let (store, dir) = tmp_store();
+        store.save(&mk_ns("aaa1", "db", "teamA")).unwrap();
+        store.save(&mk_ns("bbb2", "db", "teamB")).unwrap();
+
+        let err = find(&store, "db").unwrap_err().to_string();
+        assert!(err.contains("teamA/db"), "must name the candidates: {err}");
+        assert!(err.contains("teamB/db"), "must name the candidates: {err}");
+
+        // The qualified form resolves each, exactly.
+        assert_eq!(find(&store, "teamA/db").unwrap().id, "aaa1");
+        assert_eq!(find(&store, "teamB/db").unwrap().id, "bbb2");
+        // ...and the id still works, as always.
+        assert_eq!(find(&store, "bbb2").unwrap().name, "db");
+        // A qualified name that does not exist is NotFound, not ambiguity.
+        assert!(matches!(find(&store, "teamC/db"), Err(Error::NotFound(_))));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_unique_bare_name_still_resolves_exactly_as_before() {
+        // Every node that does not use namespaces is this case; it must not
+        // change at all.
+        let (store, dir) = tmp_store();
+        store.save(&mk_ns("aaa1", "web", "default")).unwrap();
+        store.save(&mk_ns("bbb2", "api", "teamA")).unwrap();
+        assert_eq!(find(&store, "web").unwrap().id, "aaa1");
+        assert_eq!(find(&store, "api").unwrap().id, "bbb2");
+        assert!(matches!(find(&store, "nope"), Err(Error::NotFound(_))));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
