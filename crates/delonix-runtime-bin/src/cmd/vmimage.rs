@@ -3659,7 +3659,50 @@ pub(crate) fn rootless_customization_steps(
     ops
 }
 
-/// Translates the `CustomizeOp`s into the actual `virt-customize` arguments.
+/// Relabels the guest's filesystem for SELinux — appended by
+/// [`customize_args`] as the LAST step of every build.
+///
+/// **Why it cannot be left to libguestfs.** `virt-customize` 1.52 relabels by
+/// default and prints `SELinux relabelling`, but on a Fedora guest that step
+/// takes 0.1s: it does not relabel anything, it schedules one by touching
+/// `/.autorelabel`. And that first-boot relabel never runs, because by then the
+/// damage is already fatal — MEASURED, on a Fedora 42 guest this engine built:
+///
+/// ```text
+/// avc: denied { map } for pid=1 comm="systemd" path="/etc/ld.so.cache"
+///      scontext=…:init_t tcontext=…:unlabeled_t
+/// ```
+///
+/// Any `dnf install` inside the appliance re-runs `ldconfig`, and the rewritten
+/// `/etc/ld.so.cache` comes back with **no** SELinux xattr at all. With PID 1
+/// itself denied, `dbus-broker` never starts; with no D-Bus there is no
+/// NetworkManager; with no NetworkManager the guest boots to a login prompt
+/// with an interface that is DOWN, no address, and the hostname still
+/// `localhost`. 195 denials in one boot, and the only visible symptom from
+/// outside was a VM that never took a DHCP lease.
+///
+/// **Why it is here and not in each ops builder.** Every build path has to have
+/// it, and a step each builder must remember to append is the trap this repo
+/// keeps paying for. `customize_args` is the one place both the golden recipe
+/// and the VMfile path go through, and appending here also guarantees the
+/// relabel runs AFTER every other step — a step added later cannot land behind
+/// it and re-break the labels.
+///
+/// Guarded in shell rather than by distro so it is inert on Debian/Ubuntu
+/// (no `/etc/selinux/config`) without this function needing to know which
+/// distro it is looking at — the VMfile path builds from a `FROM` that may be
+/// an arbitrary URL, where there is nothing reliable to branch on. And it
+/// falls back to `/.autorelabel` rather than doing nothing when the guest has
+/// SELinux but no `setfiles`: a slow first boot beats an unlabeled image.
+pub(crate) const SELINUX_RELABEL_CMD: &str = "if [ -f /etc/selinux/config ]; then \
+if command -v setfiles >/dev/null 2>&1; then \
+. /etc/selinux/config; \
+setfiles -F /etc/selinux/${SELINUXTYPE:-targeted}/contexts/files/file_contexts /; \
+else touch /.autorelabel; fi; fi";
+
+/// Translates the `CustomizeOp`s into the actual `virt-customize` arguments,
+/// plus the SELinux relabel every build needs last (see
+/// [`SELINUX_RELABEL_CMD`]).
 pub(crate) fn customize_args(disk: &Path, ops: &[CustomizeOp]) -> Vec<String> {
     let mut args = vec!["-a".to_string(), disk.to_string_lossy().into_owned()];
     for op in ops {
@@ -3682,6 +3725,13 @@ pub(crate) fn customize_args(disk: &Path, ops: &[CustomizeOp]) -> Vec<String> {
             }
         }
     }
+    // Last, and after everything the caller asked for.
+    args.push("--run-command".into());
+    args.push(SELINUX_RELABEL_CMD.into());
+    // …and libguestfs's own pass is then only in the way: it would re-create
+    // the `/.autorelabel` this step exists to make unnecessary, buying a slow
+    // relabel-and-reboot on first boot for labels that are already correct.
+    args.push("--no-selinux-relabel".into());
     args
 }
 
@@ -4711,6 +4761,18 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
                 "--copy-in".to_string(),
                 "/host/bin:/usr/local/bin".to_string()
             ]));
+        // The relabel is LAST, and after it nothing may run: a step that landed
+        // behind it would re-break the labels it just fixed, and the symptom is
+        // a guest whose PID 1 is denied `/etc/ld.so.cache`.
+        assert_eq!(
+            args[args.len() - 3..],
+            [
+                "--run-command".to_string(),
+                SELINUX_RELABEL_CMD.to_string(),
+                "--no-selinux-relabel".to_string()
+            ],
+            "the SELinux relabel must close every build: {args:?}"
+        );
         assert!(args
             .windows(2)
             .any(|w| w == ["--root-password".to_string(), "password:x".to_string()]));

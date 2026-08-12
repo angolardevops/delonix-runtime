@@ -3095,6 +3095,42 @@ fn build_meta_data(instance_id: &str, hostname: &str) -> String {
     format!("instance-id: {instance_id}\nlocal-hostname: {hostname}\n")
 }
 
+/// The NoCloud `network-config`: DHCP on the primary NIC, matched by **MAC**.
+///
+/// It used to match by NAME with a glob (`match: {name: "e*"}`), to cover
+/// `eth0`/`ens3`/`enp1s0` without knowing which the guest would pick. That
+/// works where the renderer is netplan (Ubuntu, Debian) and is BROKEN wherever
+/// it is NetworkManager (Fedora, Rocky) — measured, and the cloud-init source
+/// says why in one line:
+///
+/// ```text
+/// if if_type == "bridge" or not self.config.has_option(if_type, "mac-address"):
+///     self.config["connection"]["interface-name"] = iface["name"]
+/// ```
+///
+/// With no MAC to write, the renderer falls back to naming the interface after
+/// the netplan KEY — so a Fedora guest got a keyfile saying
+/// `interface-name=eth-all`, NetworkManager waited for a device by that name,
+/// and `enp1s0` stayed down forever. The guest booted to a login prompt with no
+/// address and no route, and the only sign was a `Up: False` line buried in
+/// `cloud-init-output.log`.
+///
+/// A MAC is the one thing about the NIC that IS known before the guest exists
+/// ([`delonix_vm::mac_for`], stamped by both backends), so there is nothing to
+/// guess. It also makes the renderer omit `interface-name` entirely, which is
+/// what lets the same file work on every distro.
+///
+/// **Scope: the primary NIC only.** The old glob would also DHCP any extra NIC
+/// (`spec.extraNics`); this names one. That is the interface everything else in
+/// this engine depends on — DNS, namespace isolation, `vm ssh` — and an extra
+/// NIC is a declarative libvirt knob whose guest-side config is the author's.
+fn build_network_config(vm_name: &str) -> String {
+    format!(
+        "version: 2\nethernets:\n  nic0:\n    match:\n      macaddress: \"{}\"\n    dhcp4: true\n",
+        delonix_vm::mac_for(vm_name)
+    )
+}
+
 /// Generates (or reuses, via `user_data_override`) the `user-data`/`meta-data`
 /// and packages them into a NoCloud ISO with `cloud-localds`. Returns the ISO
 /// path. `pub(crate)`: reused by `cmd::cluster::provision_and_apply` (each VM
@@ -3161,14 +3197,9 @@ pub(crate) fn generate_seed_iso(
     let meta_data_path = work_dir.join("meta-data");
     std::fs::write(&meta_data_path, build_meta_data(vm_name, &hostname))?;
 
-    // network-config (NoCloud v2): DHCP on any ethernet interface — without this
-    // the cloud image may not configure the network and the VM ends up with no
-    // IP. `match name: "e*"` covers eth0/ens2/enp0s2/... (predictable or not).
+    // network-config (NoCloud v2): DHCP on the primary NIC, matched by MAC.
     let net_cfg_path = work_dir.join("network-config");
-    std::fs::write(
-        &net_cfg_path,
-        "version: 2\nethernets:\n  eth-all:\n    match:\n      name: \"e*\"\n    dhcp4: true\n",
-    )?;
+    std::fs::write(&net_cfg_path, build_network_config(vm_name))?;
 
     let iso_path = work_dir.join("seed.iso");
     let status = Command::new("cloud-localds")
@@ -3761,6 +3792,28 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
     fn user_data_sem_chaves_nao_tem_seccao_ssh() {
         let ud = build_user_data("myvm", &[], &[]);
         assert!(!ud.contains("ssh_authorized_keys"));
+    }
+
+    #[test]
+    fn o_network_config_casa_por_mac_e_nao_por_nome() {
+        // MEASURED: without a `macaddress` the NetworkManager renderer names the
+        // interface after the netplan key, so a Fedora guest ended up with
+        // `interface-name=eth-all` and `enp1s0` down forever — booted, logged
+        // in, no address. The MAC must be the one both backends stamp, not a
+        // second copy of the formula.
+        let cfg = super::build_network_config("fed-ctl");
+        assert!(
+            cfg.contains(&format!(
+                "macaddress: \"{}\"",
+                delonix_vm::mac_for("fed-ctl")
+            )),
+            "must match the NIC the engine actually creates: {cfg}"
+        );
+        assert!(
+            !cfg.contains("name:"),
+            "a name match is what broke every NetworkManager distro: {cfg}"
+        );
+        assert!(cfg.contains("dhcp4: true"));
     }
 
     #[test]

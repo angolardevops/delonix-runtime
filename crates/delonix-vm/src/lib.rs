@@ -254,7 +254,17 @@ pub fn vm_namespace_supported(backend_id: &str) -> bool {
     backend_id == "cloud-hypervisor"
 }
 
-fn mac_for(name: &str) -> String {
+/// The primary NIC's MAC, DERIVED from the VM name — the same value both
+/// backends stamp on the interface they create, and therefore the one thing
+/// about the guest's network that is knowable before the guest exists.
+///
+/// `pub` because the seed generator needs it: a NoCloud `network-config` that
+/// matches the NIC by name has to guess a name (`eth0`? `ens3`? `enp1s0`?),
+/// and guessing wrong is silent. Matching by MAC is exact. One formula, one
+/// caller-visible function — a second copy of this arithmetic would diverge the
+/// day the vendor prefix changed, and the symptom would be a guest configuring
+/// a NIC that is not there.
+pub fn mac_for(name: &str) -> String {
     let h = infra::name_hash(name);
     format!(
         "52:54:00:{:02x}:{:02x}:{:02x}",
