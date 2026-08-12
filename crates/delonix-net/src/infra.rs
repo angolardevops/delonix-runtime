@@ -4760,7 +4760,12 @@ enum DnsAction {
 /// was therefore broken for every client that resolves the normal way, and only
 /// worked for tools asking for `A` explicitly (`ping`, `getent`) — which is why
 /// it survived manual testing.
-fn dns_action(qtype: u16, name: &str, resolved: Option<[u8; 4]>) -> DnsAction {
+/// `ours` answers "is this name ours to answer?" — it is a parameter rather
+/// than a string test done in here because ownership grew past what a string
+/// can decide: a short `<name>.<namespace>` is ours only when that namespace
+/// exists on THIS node, which needs the index. The decision table stays pure
+/// and testable, which is where the bugs were.
+fn dns_action_owned(qtype: u16, ours: bool, resolved: Option<[u8; 4]>) -> DnsAction {
     if qtype == QTYPE_A {
         if let Some(ip) = resolved {
             return DnsAction::Answer(ip);
@@ -4771,7 +4776,7 @@ fn dns_action(qtype: u16, name: &str, resolved: Option<[u8; 4]>) -> DnsAction {
         // gap — and saying it ourselves costs nothing and leaks nothing.
         return DnsAction::NoData;
     }
-    if is_internal_zone(name) {
+    if ours {
         return DnsAction::NxDomain;
     }
     DnsAction::Forward
@@ -4822,12 +4827,13 @@ fn handle_dns(q: &[u8], client: Option<[u8; 4]>) -> Option<Vec<u8>> {
     let qend = i + 4; // end of the question (QTYPE+QCLASS)
                       // Only the address types (and our own zone) need the index consulted; an
                       // `MX` for an external domain must not pay for a lookup that cannot match.
-    let resolved = if qtype == QTYPE_A || qtype == QTYPE_AAAA || is_internal_zone(&name) {
+    let ours = dns_owns_name(&name);
+    let resolved = if qtype == QTYPE_A || qtype == QTYPE_AAAA || ours {
         dns_resolve_for(&name, client)
     } else {
         None
     };
-    match dns_action(qtype, &name, resolved) {
+    match dns_action_owned(qtype, ours, resolved) {
         DnsAction::Answer(ip) => {
             let mut r = Vec::with_capacity(qend + 16);
             r.extend_from_slice(&q[0..2]); // original ID
@@ -4947,6 +4953,23 @@ fn dns_index_vm_key(name: &str) -> String {
 /// see ADR-0011 §5 for why that stays true and why it is not the leak.
 const NS_DEFAULT: &str = "default";
 
+/// Does a workload in this state still ANSWER to its name?
+///
+/// Only the states that still hold the address: `Running`, `Paused` (frozen
+/// processes, the netns and the veth are untouched) and `Created` (attached,
+/// about to start — excluding it would blank out a name during every start).
+///
+/// Everything else is dead and must NOT resolve. `Failed(code)` and the legacy
+/// `Exited` serialize as OBJECTS rather than strings, so they arrive here as
+/// `None` — which is also what a record with no state at all looks like, and
+/// both should stop answering. Fail-closed is the right default for the
+/// question "is this address still yours?": an NXDOMAIN makes a client fail
+/// fast, a stale address makes it wait for a timeout against a service that is
+/// gone — or reach whichever workload got that address next.
+fn dns_state_serves(status: Option<&str>) -> bool {
+    matches!(status, Some("Running") | Some("Paused") | Some("Created"))
+}
+
 /// One resolvable name, with everything needed to decide WHO may resolve it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct DnsEntry {
@@ -4965,6 +4988,12 @@ struct DnsEntry {
 struct DnsIndex {
     by_key: std::collections::HashMap<String, DnsEntry>,
     ns_of_ip: std::collections::HashMap<[u8; 4], String>,
+    /// Every namespace with at least one workload on this node. Used to decide
+    /// whether `<something>.<ns>` is a name of OURS — without it, a short
+    /// qualified name that does not resolve would be forwarded upstream,
+    /// carrying the tenant's namespace out of the node. Same reasoning as
+    /// `.delonix.internal` never leaving.
+    known_ns: std::collections::HashSet<String>,
 }
 
 /// Parses `a.b.c.d/len` into `(network, mask)`. A bare address is `/32`.
@@ -5079,6 +5108,16 @@ fn build_dns_index() -> DnsIndex {
                         .collect()
                 })
                 .unwrap_or_default();
+            // A DEAD workload must not keep answering. Measured before the fix:
+            // a container that exited on its own kept `ip` in its record and
+            // `nslookup` kept handing that address out — so a caller connected
+            // to a service that no longer exists and waited for a timeout
+            // instead of failing fast on NXDOMAIN. Worse, the lease is released
+            // back to the IPAM, so the name of a dead service can come to point
+            // at whatever workload is given that address next.
+            if !dns_state_serves(v["status"].as_str()) {
+                continue;
+            }
             let entry = DnsEntry {
                 ip,
                 ns: ns.clone(),
@@ -5095,6 +5134,22 @@ fn build_dns_index() -> DnsIndex {
                 .or_insert(entry.clone());
             // Reverse map: the client is identified by its source address.
             idx.ns_of_ip.entry(ip).or_insert(ns.clone());
+            idx.known_ns.insert(ns.to_lowercase());
+            // Network aliases (`--network-alias`, `networkAlias:`). They were
+            // persisted from the start and NOTHING ever read them: the option
+            // was accepted and silently did nothing, which is the failure shape
+            // this repo keeps removing. Same scoping as the real name, and
+            // `or_insert` so an alias can never displace a container that
+            // genuinely owns that name.
+            if let Some(aliases) = v["net_aliases"].as_array() {
+                for a in aliases.iter().filter_map(|a| a.as_str()) {
+                    let a = a.to_lowercase();
+                    idx.by_key.entry(a.clone()).or_insert(entry.clone());
+                    idx.by_key
+                        .entry(dns_index_ns_key(&a, &ns))
+                        .or_insert(entry.clone());
+                }
+            }
             // A pod resolves by its OWN name too (ADR-0011 §6): every member
             // shares the address, and the pod is the thing that owns it. The
             // name comes from the label the creator writes, not from parsing
@@ -5123,6 +5178,11 @@ fn build_dns_index() -> DnsIndex {
             let Some(name) = v["name"].as_str().map(|s| s.to_lowercase()) else {
                 continue;
             };
+            // Same rule as containers: a stopped VM keeps its recorded address
+            // and must not keep answering to its name.
+            if !dns_state_serves(v["status"].as_str()) {
+                continue;
+            }
             // Recorded IP first: a libvirt nat/bridge VM lives on the HOST's
             // virbr0 — its MAC never shows up in the holder's neigh table, so
             // without this branch those VMs simply didn't resolve.
@@ -5218,6 +5278,26 @@ fn dns_client_ns(client: Option<[u8; 4]>) -> String {
 /// name while the dataplane correctly refused the packets. Measured before the
 /// fix: `client`@teamA resolved `webb`@teamB to its exact address, and the
 /// resulting connection then hung, which is the worst of both outcomes.
+/// Is this a name we are authoritative for? Either our own zone, or the short
+/// `<name>.<namespace>` form naming a namespace that exists on this node. The
+/// second half is why a short qualified miss answers NXDOMAIN instead of being
+/// forwarded with the tenant's namespace attached.
+fn dns_owns_name(name: &str) -> bool {
+    if is_internal_zone(name) {
+        return true;
+    }
+    let n = name.trim_end_matches('.').to_lowercase();
+    match n.split_once('.') {
+        // Only a SINGLE label before the namespace: `api.loja` is ours to
+        // answer, `api.github.com` is not, and a container called `api` in a
+        // namespace called `com` must never make us claim `github.com`.
+        Some((head, ns)) => {
+            !head.is_empty() && !ns.contains('.') && dns_index().known_ns.contains(ns)
+        }
+        None => false,
+    }
+}
+
 fn dns_resolve_for(name: &str, client: Option<[u8; 4]>) -> Option<[u8; 4]> {
     let (cname, want_ns) = parse_internal_name(name)?;
     let idx = dns_index();
@@ -5233,6 +5313,24 @@ fn dns_resolve_for(name: &str, client: Option<[u8; 4]>) -> Option<[u8; 4]> {
             .get(&dns_index_ns_key(&cname, ns))
             .filter(|e| visible(e))
             .map(|e| e.ip);
+    }
+    // `<name>.<namespace>` — the SHORT qualified form. k8s gives it through
+    // `search` domains in `resolv.conf`; doing it here instead keeps the
+    // container's `resolv.conf` a single line and, more importantly, avoids
+    // search-domain expansion appending our suffix to every external lookup
+    // that misses. Only tried when the whole string did not already resolve as
+    // a name of its own, so a container legitimately named `api.loja` (names
+    // cannot contain dots, but a VM's can) is never shadowed.
+    if let Some((short, ns)) = cname.split_once('.') {
+        if !idx.by_key.contains_key(&cname) {
+            if let Some(e) = idx
+                .by_key
+                .get(&dns_index_ns_key(short, ns))
+                .filter(|e| visible(e))
+            {
+                return Some(e.ip);
+            }
+        }
     }
     // Bare name: the asker's OWN namespace first. This is what makes two tenants
     // able to both own `db` and each get their own.
@@ -6291,17 +6389,27 @@ Inter-|   Receive                                                |  Transmit
         // lookup — `wget http://weba:8080/` died with `bad address` while the A
         // record resolved perfectly. NoData is what keeps the A half usable.
         assert_eq!(
-            dns_action(QTYPE_AAAA, "weba", Some(IP)),
+            dns_action_owned(QTYPE_AAAA, is_internal_zone("weba"), Some(IP)),
             DnsAction::NoData,
             "AAAA for a name we know must be answered locally, never forwarded"
         );
-        assert_eq!(dns_action(QTYPE_A, "weba", Some(IP)), DnsAction::Answer(IP));
+        assert_eq!(
+            dns_action_owned(QTYPE_A, is_internal_zone("weba"), Some(IP)),
+            DnsAction::Answer(IP)
+        );
         // Same for a fully-qualified internal name, and for any other type.
         assert_eq!(
-            dns_action(QTYPE_AAAA, "weba.teamA.delonix.internal", Some(IP)),
+            dns_action_owned(
+                QTYPE_AAAA,
+                is_internal_zone("weba.teamA.delonix.internal"),
+                Some(IP)
+            ),
             DnsAction::NoData
         );
-        assert_eq!(dns_action(15, "weba", Some(IP)), DnsAction::NoData); // MX
+        assert_eq!(
+            dns_action_owned(15, is_internal_zone("weba"), Some(IP)),
+            DnsAction::NoData
+        ); // MX
     }
 
     #[test]
@@ -6317,11 +6425,14 @@ Inter-|   Receive                                                |  Transmit
             "WEBA.TEAMB.DELONIX.INTERNAL.", // case + trailing dot
         ] {
             assert_eq!(
-                dns_action(QTYPE_A, name, None),
+                dns_action_owned(QTYPE_A, is_internal_zone(name), None),
                 DnsAction::NxDomain,
                 "{name} is in our zone: must be an authoritative NXDOMAIN"
             );
-            assert_eq!(dns_action(QTYPE_AAAA, name, None), DnsAction::NxDomain);
+            assert_eq!(
+                dns_action_owned(QTYPE_AAAA, is_internal_zone(name), None),
+                DnsAction::NxDomain
+            );
         }
     }
 
@@ -6336,13 +6447,19 @@ Inter-|   Receive                                                |  Transmit
             "delonix.io",
             "web.delonix.io",
         ] {
-            assert_eq!(dns_action(QTYPE_A, name, None), DnsAction::Forward);
-            assert_eq!(dns_action(QTYPE_AAAA, name, None), DnsAction::Forward);
+            assert_eq!(
+                dns_action_owned(QTYPE_A, is_internal_zone(name), None),
+                DnsAction::Forward
+            );
+            assert_eq!(
+                dns_action_owned(QTYPE_AAAA, is_internal_zone(name), None),
+                DnsAction::Forward
+            );
         }
         assert!(!is_internal_zone("notdelonix.internal.example.com"));
         // ...but a legacy `.delonix.io` name we DO know still answers locally.
         assert_eq!(
-            dns_action(QTYPE_A, "web.delonix.io", Some(IP)),
+            dns_action_owned(QTYPE_A, is_internal_zone("web.delonix.io"), Some(IP)),
             DnsAction::Answer(IP)
         );
     }
@@ -6407,6 +6524,71 @@ Inter-|   Receive                                                |  Transmit
             "world-wide allows must not be indexed"
         );
         assert!(!dns_scope_allows(&e, "teamA", [10, 250, 0, 5]));
+    }
+
+    #[test]
+    fn a_dead_workload_stops_answering_to_its_name() {
+        // Measured before the fix: a container that exited on its own kept its
+        // address in the record and `nslookup` kept handing it out, so a caller
+        // waited for a timeout against a service that was gone instead of
+        // failing fast — and the lease goes back to the IPAM, so that name can
+        // come to point at whichever workload gets the address next.
+        for alive in ["Running", "Paused", "Created"] {
+            assert!(
+                dns_state_serves(Some(alive)),
+                "{alive} still holds the address"
+            );
+        }
+        for dead in ["Stopped", "Crashed"] {
+            assert!(!dns_state_serves(Some(dead)), "{dead} must not resolve");
+        }
+        // `Failed(code)` and the legacy `Exited` serialize as OBJECTS, so they
+        // arrive as `None` — same as a record with no state at all. Both must
+        // fail closed: a stale address is worse than an NXDOMAIN.
+        assert!(!dns_state_serves(None));
+        assert!(!dns_state_serves(Some("nonsense")));
+    }
+
+    #[test]
+    fn a_short_qualified_name_is_ours_only_when_the_namespace_exists_here() {
+        // `api.loja` must be answered authoritatively (NXDOMAIN on a miss)
+        // rather than forwarded with the tenant's namespace attached...
+        let mut idx = DnsIndex::default();
+        idx.known_ns.insert("loja".into());
+        assert!(idx.known_ns.contains("loja"));
+        // ...but ownership must not spill onto real domains. `api.github.com`
+        // has more than one label after the head, and a container in a
+        // namespace called `com` must never make us claim `github.com` —
+        // that check is the `!ns.contains('.')` half.
+        let owns = |n: &str| {
+            let n = n.trim_end_matches('.').to_lowercase();
+            match n.split_once('.') {
+                Some((h, ns)) => !h.is_empty() && !ns.contains('.') && idx.known_ns.contains(ns),
+                None => false,
+            }
+        };
+        assert!(owns("api.loja"));
+        assert!(owns("API.LOJA."));
+        assert!(!owns("api.github.com"));
+        assert!(!owns("github.com"));
+        assert!(!owns("api.outra"));
+        assert!(!owns("loja"));
+    }
+
+    #[test]
+    fn ownership_decides_nxdomain_versus_forward() {
+        // The table itself, with ownership already answered.
+        assert_eq!(
+            dns_action_owned(QTYPE_A, true, None),
+            DnsAction::NxDomain,
+            "ours and unknown: answer it ourselves, never forward"
+        );
+        assert_eq!(dns_action_owned(QTYPE_A, false, None), DnsAction::Forward);
+        assert_eq!(
+            dns_action_owned(QTYPE_AAAA, false, Some(IP)),
+            DnsAction::NoData,
+            "a name we can answer never gets its AAAA forwarded"
+        );
     }
 
     #[test]
