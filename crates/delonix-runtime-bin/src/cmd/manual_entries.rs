@@ -1916,7 +1916,7 @@ pub static ENTRIES: &[Entry] = &[
             ("stop it and delete the overlay and the record", "delonix vm rm dev"),
             ("drop the local state even when the libvirt cleanup fails, instead of leaving a record you cannot get rid of", "delonix vm rm dev --force"),
         ],
-        see_also: &["vm stop", "vm ls", "vm create", "vm snapshots"],
+        see_also: &["vm stop", "vm ls", "vm create", "vm snapshot ls"],
     },
     Entry {
         path: "vm start",
@@ -1941,7 +1941,7 @@ pub static ENTRIES: &[Entry] = &[
             ("everything the record holds about a VM, plus the live state, kubectl style", "delonix vm describe dev"),
             ("several at once, to compare how they were created", "delonix vm describe dev k8s-cp1"),
         ],
-        see_also: &["vm status", "vm ls", "vm snapshots"],
+        see_also: &["vm status", "vm ls", "vm snapshot ls"],
     },
     Entry {
         path: "vm ls",
@@ -2096,28 +2096,46 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["vm apply", "vm build", "vm create", "stack init"],
     },
     Entry {
-        path: "vm restore",
-        group: "Maintenance",
-        examples: &[
-            ("put the VM back exactly as it was when the checkpoint was taken", "delonix vm restore dev before-upgrade"),
-        ],
-        see_also: &["vm snapshot", "vm snapshots", "vm status"],
-    },
-    Entry {
         path: "vm snapshot",
         group: "Maintenance",
         examples: &[
-            ("a checkpoint of a RUNNING libvirt VM before an upgrade — memory and disk, so `restore` puts it back mid-flight", "delonix vm snapshot dev before-upgrade"),
+            ("a checkpoint before an upgrade — of a RUNNING VM it takes the memory too", "delonix vm snapshot create dev before-upgrade"),
+            ("which checkpoints a VM has, before reverting to one", "delonix vm snapshot ls dev"),
         ],
-        see_also: &["vm restore", "vm snapshots", "vm stop", "vm default-backend"],
+        see_also: &["vm stop", "vm status", "volumes snapshot", "vm default-backend"],
     },
     Entry {
-        path: "vm snapshots",
-        group: "Maintenance",
+        path: "vm snapshot create",
+        group: "Lifecycle",
         examples: &[
-            ("which checkpoints a VM has, before reverting to one", "delonix vm snapshots dev"),
+            ("of a RUNNING libvirt VM: memory and disk, so a restore puts it back mid-flight", "delonix vm snapshot create dev before-upgrade"),
+            ("of a stopped one: disk-only, and the VM stays stopped", "delonix vm snapshot create dev cold-copy"),
         ],
-        see_also: &["vm snapshot", "vm restore", "vm describe"],
+        see_also: &["vm snapshot ls", "vm snapshot restore", "vm snapshot rm", "vm stop"],
+    },
+    Entry {
+        path: "vm snapshot ls",
+        group: "Inspect",
+        examples: &[
+            ("which checkpoints a VM has, before reverting to one — also with the VM stopped", "delonix vm snapshot ls dev"),
+        ],
+        see_also: &["vm snapshot create", "vm snapshot restore", "vm describe"],
+    },
+    Entry {
+        path: "vm snapshot rm",
+        group: "Lifecycle",
+        examples: &[
+            ("drop a checkpoint you no longer need — its state leaves the disk with it", "delonix vm snapshot rm dev before-upgrade"),
+        ],
+        see_also: &["vm snapshot ls", "vm snapshot create", "vm rm"],
+    },
+    Entry {
+        path: "vm snapshot restore",
+        group: "Lifecycle",
+        examples: &[
+            ("put the VM back exactly as it was when the checkpoint was taken", "delonix vm snapshot restore dev before-upgrade"),
+        ],
+        see_also: &["vm snapshot ls", "vm snapshot create", "vm status"],
     },
     Entry {
         path: "vm dash",

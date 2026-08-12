@@ -525,6 +525,11 @@ pub trait VmBackend {
     fn snapshots(&self, _vmdir: &Path, _vm: &Vm) -> Result<Vec<String>> {
         Err(unsupported_snapshot(self.id(), "snapshots"))
     }
+    /// Deletes a named snapshot — the state in the disk AND whatever metadata
+    /// points at it. Default: unsupported (fail closed).
+    fn delete_snapshot(&self, _vmdir: &Path, _vm: &Vm, _name: &str) -> Result<()> {
+        Err(unsupported_snapshot(self.id(), "snapshot rm"))
+    }
 
     /// Saves whatever snapshot state STOPPING this VM would otherwise destroy,
     /// and returns the names saved. Called by [`stop`] BEFORE
@@ -1166,6 +1171,23 @@ fn libvirt_revert_argv(uri: &str, domain: &str, snap: &str) -> Vec<String> {
         "--snapshotname".into(),
         snap.into(),
     ]
+}
+
+/// "This VM has no snapshot by that name" — `NotFound`, not `Runtime`, because
+/// the exit code is the part a script reads: 4 means «it is not there», 1 means
+/// «something broke», and a caller that has to tell them apart cannot parse the
+/// message (it is translated).
+fn missing_snapshot(vm: &str, snap: &str) -> Error {
+    Error::NotFound(format!("snapshot of VM '{vm}': {snap}"))
+}
+
+/// The name is TAKEN — `Conflict` (exit 5), the class whose next move is «pick
+/// another name or remove that one», as opposed to «create it» (4) or
+/// «something broke» (1).
+fn taken_snapshot(vm: &str, snap: &str) -> Error {
+    Error::Conflict(format!(
+        "VM '{vm}' already has a snapshot named '{snap}' (see `delonix vm snapshot ls {vm}`)"
+    ))
 }
 
 /// Where a VM's snapshot metadata is kept on OUR side, under the per-VM
@@ -2087,57 +2109,159 @@ impl VmBackend for LibvirtBackend {
         Self::ip_from_leases(uri, &vm.name, &vm.mac).or_else(|| self.ip_uri(uri, &vm.name))
     }
 
-    fn stop(&self, vmdir: &Path, vm: &Vm) -> Result<()> {
+    fn stop(&self, _vmdir: &Path, vm: &Vm) -> Result<()> {
         libvirt_cleanup(&vm.name)?;
-        let _ = std::fs::remove_file(vmdir.join(format!("{}.xml", vm.name)));
+        // The domain XML that `boot` wrote STAYS. It used to be deleted here,
+        // which is tidy right up to the moment something needs the domain back:
+        // `snapshot`/`restore` on a stopped VM define it again from this exact
+        // file — the one libvirt itself had, DAC seclabel and all — instead of
+        // re-deriving a description that would only have to agree with `boot`
+        // by hand. `remove` still deletes it, with everything else.
         Ok(())
     }
 
-    fn snapshot(&self, _vmdir: &Path, vm: &Vm, name: &str) -> Result<()> {
-        let uri = libvirt_uri_of(&vm.name);
-        let argv = libvirt_snapshot_argv(uri, &vm.name, name);
-        quiet(
-            "virsh",
-            &argv.iter().map(String::as_str).collect::<Vec<_>>(),
-        )
-        .map(|_| ())
-        .map_err(|e| Error::Runtime {
-            context: "virsh snapshot-create-as",
-            message: e,
-        })
+    fn snapshot(&self, vmdir: &Path, vm: &Vm, name: &str) -> Result<()> {
+        let take = |uri: &str| -> Result<()> {
+            let argv = libvirt_snapshot_argv(uri, &vm.name, name);
+            quiet(
+                "virsh",
+                &argv.iter().map(String::as_str).collect::<Vec<_>>(),
+            )
+            .map(|_| ())
+            .map_err(|e| Error::Runtime {
+                context: "virsh snapshot-create-as",
+                message: e,
+            })
+        };
+        match libvirt_domain_uri(&vm.name) {
+            Some(uri) => {
+                // A name already taken is a CONFLICT (exit 5, «pick another or
+                // remove it»), not a generic 1 — and virsh answers it in its
+                // own vocabulary ("domain moment off1 already exists"), where
+                // `moment` is a word this CLI never uses.
+                if Self::live_snapshots(uri, &vm.name)
+                    .iter()
+                    .any(|s| s == name)
+                {
+                    return Err(taken_snapshot(&vm.name, name));
+                }
+                take(uri)
+            }
+            // Stopped: virsh needs a domain to snapshot, and this engine's stop
+            // undefines it. Defining it back for the length of the command
+            // gives a DISK-ONLY checkpoint (`state=shutoff`) — which is the
+            // honest thing for a VM with no memory to capture, and exactly what
+            // `virsh` itself does for a shut-off domain.
+            None => {
+                if preserved_snapshot_names(vmdir, &vm.name)
+                    .iter()
+                    .any(|s| s == name)
+                {
+                    return Err(taken_snapshot(&vm.name, name));
+                }
+                self.with_stopped_domain(vmdir, vm, &take).map(|_| ())
+            }
+        }
     }
 
     fn restore(&self, vmdir: &Path, vm: &Vm, name: &str) -> Result<()> {
-        // A stopped VM has no domain for `snapshot-revert` to talk to, and the
-        // raw virsh answer ("Domain snapshot not found") names the wrong
-        // problem: the snapshot is right there in `vms/<vm>/snapshots`. Say
-        // which of the two it is.
-        if libvirt_domain_uri(&vm.name).is_none() {
-            let preserved = preserved_snapshot_names(vmdir, &vm.name);
-            return Err(Error::Runtime {
-                context: "vm",
-                message: if preserved.iter().any(|s| s == name) {
-                    format!(
-                        "VM '{}' is stopped — snapshot '{name}' is preserved and comes back with \
-                         the domain: start it first (`delonix vm start {}`), then restore",
-                        vm.name, vm.name
-                    )
-                } else {
-                    format!("no such snapshot for the stopped VM '{}': {name}", vm.name)
-                },
+        let revert = |uri: &str| -> Result<()> {
+            let argv = libvirt_revert_argv(uri, &vm.name, name);
+            quiet(
+                "virsh",
+                &argv.iter().map(String::as_str).collect::<Vec<_>>(),
+            )
+            .map(|_| ())
+            .map_err(|e| Error::Runtime {
+                context: "virsh snapshot-revert",
+                message: e,
+            })
+        };
+        let Some(uri) = libvirt_domain_uri(&vm.name) else {
+            // Stopped. Name the missing snapshot BEFORE defining a domain to
+            // revert nothing to — and never with the raw virsh answer ("failed
+            // to get domain"), which sends the reader looking for a VM that is
+            // sitting right there in `vm ls`.
+            if !preserved_snapshot_names(vmdir, &vm.name)
+                .iter()
+                .any(|s| s == name)
+            {
+                return Err(missing_snapshot(&vm.name, name));
+            }
+            return self.with_stopped_domain(vmdir, vm, &revert).map(|running| {
+                if running {
+                    // Reverting to a checkpoint taken while the VM ran means the
+                    // VM runs again — say so, because the command was given to a
+                    // stopped VM and nobody asked for a boot.
+                    eprintln!(
+                        "note: VM '{}' is RUNNING again — the snapshot '{name}' was taken with \
+                         it running, and a revert restores the memory state too",
+                        vm.name
+                    );
+                }
             });
+        };
+        // Running, and the snapshot has to exist for the same reason it does
+        // above: `Error::NotFound` is the exit code 4 that says «create it»,
+        // and virsh's own "Domain snapshot not found" came out as a generic 1,
+        // so the SAME question got two different answers depending on whether
+        // the VM happened to be up (see docs/cli-stability.md).
+        if !Self::live_snapshots(uri, &vm.name)
+            .iter()
+            .any(|s| s == name)
+        {
+            return Err(missing_snapshot(&vm.name, name));
         }
-        let uri = libvirt_uri_of(&vm.name);
-        let argv = libvirt_revert_argv(uri, &vm.name, name);
-        quiet(
-            "virsh",
-            &argv.iter().map(String::as_str).collect::<Vec<_>>(),
-        )
-        .map(|_| ())
-        .map_err(|e| Error::Runtime {
-            context: "virsh snapshot-revert",
-            message: e,
-        })
+        revert(uri)
+    }
+
+    fn delete_snapshot(&self, vmdir: &Path, vm: &Vm, name: &str) -> Result<()> {
+        let del = |uri: &str| -> Result<()> {
+            quiet(
+                "virsh",
+                &[
+                    "-c",
+                    uri,
+                    "snapshot-delete",
+                    "--domain",
+                    &vm.name,
+                    "--snapshotname",
+                    name,
+                ],
+            )
+            .map(|_| ())
+            .map_err(|e| Error::Runtime {
+                context: "virsh snapshot-delete",
+                message: e,
+            })
+        };
+        let done = match libvirt_domain_uri(&vm.name) {
+            Some(uri) => {
+                if !Self::live_snapshots(uri, &vm.name)
+                    .iter()
+                    .any(|s| s == name)
+                {
+                    return Err(missing_snapshot(&vm.name, name));
+                }
+                del(uri)
+            }
+            None => {
+                if !preserved_snapshot_names(vmdir, &vm.name)
+                    .iter()
+                    .any(|s| s == name)
+                {
+                    return Err(missing_snapshot(&vm.name, name));
+                }
+                self.with_stopped_domain(vmdir, vm, &del).map(|_| ())
+            }
+        };
+        // The preserved copy goes even when the VM is running and the dump was
+        // therefore not refreshed: leaving it would let the next `start`
+        // redefine metadata for a snapshot whose state has just been deleted
+        // from the disk — a name that lists fine and fails on revert.
+        let _ =
+            std::fs::remove_file(snapshot_meta_dir(vmdir, &vm.name).join(format!("{name}.xml")));
+        done
     }
 
     fn snapshots(&self, vmdir: &Path, vm: &Vm) -> Result<Vec<String>> {
@@ -2223,6 +2347,57 @@ impl LibvirtBackend {
         .filter(|l| !l.is_empty())
         .map(String::from)
         .collect()
+    }
+
+    /// Runs a snapshot verb against a STOPPED VM, whose libvirt domain does
+    /// not exist (this engine's `stop` undefines it). Returns whether the VM is
+    /// RUNNING when it is done.
+    ///
+    /// Defines the domain again from the XML the last `boot` wrote — the same
+    /// file libvirt itself had, DAC seclabel included, rather than re-deriving
+    /// a description that would then have to agree with `boot` by hand — hands
+    /// back the preserved metadata, runs `op`, and puts the host back as it
+    /// found it: the metadata is dumped again (it now includes whatever `op`
+    /// created) and the domain undefined.
+    ///
+    /// The one case where the domain is deliberately LEFT defined is a revert
+    /// to a checkpoint taken while the VM ran: `snapshot-revert` restores the
+    /// memory state, so the guest is running — undefining it from under a
+    /// running VM is not a cleanup, it is a kill.
+    fn with_stopped_domain(
+        &self,
+        vmdir: &Path,
+        vm: &Vm,
+        op: &dyn Fn(&str) -> Result<()>,
+    ) -> Result<bool> {
+        let xml = vmdir.join(format!("{}.xml", vm.name));
+        if !xml.exists() {
+            return Err(Error::Runtime {
+                context: "vm",
+                message: format!(
+                    "VM '{}' is stopped and its libvirt domain description is not on disk ({}) \
+                     — start it once (`delonix vm start {}`) and it stays there from then on",
+                    vm.name,
+                    xml.display(),
+                    vm.name
+                ),
+            });
+        }
+        // The connection `boot` would pick: `vm.tap` holds the EFFECTIVE net
+        // mode of the last boot (see the `tap: cfg.net_mode…` assignment), and
+        // nat/bridge live only on the system connection.
+        let uri = libvirt_uri_for(Some(&vm.tap));
+        run_quiet("virsh", &["-c", uri, "define", &xml.to_string_lossy()])?;
+        Self::redefine_preserved_snapshots(uri, &vm.name, vmdir);
+        let done = op(uri);
+        // Runs whether `op` failed or not: what it managed to create still has
+        // to survive the undefine below, and the error to report is `op`'s.
+        let preserved = self.preserve_snapshots(vmdir, vm);
+        let running = self.is_running_uri(uri, &vm.name);
+        if !running {
+            let _ = libvirt_cleanup(&vm.name);
+        }
+        done.and(preserved.map(|_| running))
     }
 
     /// Gives libvirt back the snapshots that the previous `stop` preserved,
@@ -2731,7 +2906,12 @@ pub fn restore(base: &Path, name: &str, snap: &str) -> Result<()> {
     }
     let vmdir = vms_dir(base);
     let vm = load_vm(base, name)?;
-    backend_for(&vm)?.restore(&vmdir, &vm, snap)
+    backend_for(&vm)?.restore(&vmdir, &vm, snap)?;
+    // A revert changes what the VM IS: a checkpoint taken running brings a
+    // stopped VM back up, one taken offline puts a running VM down. `status` is
+    // the reconciler this engine already has, under the store lock — calling it
+    // beats a second one here that could disagree with it.
+    status(base, name).map(|_| ())
 }
 
 /// The `blockcommit` that puts a VM back on its own disk after a live backup.
@@ -2796,7 +2976,7 @@ pub fn backup_disk_live(base: &Path, name: &str, dest: &Path, quiesce: bool) -> 
     if vm.backend != "libvirt" {
         return Err(Error::Invalid(format!(
             "live disk backup needs the libvirt backend (this VM runs on {}); stop it first, or \
-             use `delonix vm snapshot {name} <label>`",
+             use `delonix vm snapshot create {name} <label>`",
             vm.backend
         )));
     }
@@ -2940,6 +3120,16 @@ pub fn backup_disk_live(base: &Path, name: &str, dest: &Path, quiesce: bool) -> 
 pub fn snapshots(base: &Path, name: &str) -> Result<Vec<String>> {
     let vm = load_vm(base, name)?;
     backend_for(&vm)?.snapshots(&vms_dir(base), &vm)
+}
+
+/// Deletes VM `name`'s snapshot `snap` (see [`VmBackend::delete_snapshot`]).
+pub fn delete_snapshot(base: &Path, name: &str, snap: &str) -> Result<()> {
+    if !valid_vm_name(snap) {
+        return Err(Error::Invalid(format!("invalid snapshot name: {snap}")));
+    }
+    let vmdir = vms_dir(base);
+    let vm = load_vm(base, name)?;
+    backend_for(&vm)?.delete_snapshot(&vmdir, &vm, snap)
 }
 
 /// Reconstructs the subset of [`VmConfig`] reliably recoverable from a

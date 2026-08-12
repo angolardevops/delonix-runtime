@@ -44,17 +44,21 @@ imagens Proxmox — incluindo as originais do fabricante — entram num ciclo
 kernel. Isto mascarou-se durante horas porque validar com `--vnc` era cómodo
 para depurar.
 
-**`vm stop` faz *undefine* do domínio libvirt** (para não deixar órfãos), logo um
-`vm snapshot` exige a VM a correr. E `undefine` precisa de `--managed-save
---snapshots-metadata --nvram`, senão recusa.
+**`vm stop` faz *undefine* do domínio libvirt** (para não deixar órfãos), logo
+uma VM parada não tem domínio a quem o virsh possa perguntar seja o que for. E o
+`undefine` precisa de `--managed-save --snapshots-metadata --nvram`, senão recusa.
 
 **Mas o `--snapshots-metadata` não apaga o snapshot — apaga só o que aponta para
 ele.** O estado fica no qcow2 (medido com `qemu-img snapshot -l`), por isso o
 `stop` guarda o `snapshot-dumpxml` de cada um em `vms/<vm>/snapshots/` e o `boot`
 devolve-os com `snapshot-create --redefine` — que **RECUSA** um XML cujo uuid de
 domínio não seja o actual, e o uuid é novo em cada `define`. Antes disto, um
-`stop`+`start` deixava `vm snapshots` vazio com rc=0. Ao mexer aqui: nunca
-perguntar ao libvirt por uma VM parada — ele só sabe de domínios definidos.
+`stop`+`start` deixava `vm snapshot ls` vazio com rc=0. Ao mexer aqui: nunca
+perguntar ao libvirt por uma VM parada — ele só sabe de domínios definidos; para
+os quatro verbos com a VM parada há o `with_stopped_domain`, que define o domínio
+só durante o comando (a partir do `vms/<vm>.xml`, que por isso o `stop` já não
+apaga) e o desfaz a seguir — excepto se um revert de checkpoint vivo a tiver
+posto a correr.
 
 **O `Vm` nunca persistiu tudo o que a `VmConfig` tem** — kernel/initrd/firmware,
 seed próprio, volumes 9p, VNC, campos avançados de libvirt só existem como flags
