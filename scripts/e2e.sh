@@ -29,6 +29,13 @@
 #
 #   DELONIX_ROOT=/tmp/e2e/root DELONIX_NET_RUNTIME_DIR=/tmp/e2e/run ./scripts/e2e.sh
 #
+# Os DOIS, sempre — meia-isolação é pior que nenhuma. Os sockets de rede são por
+# UTILIZADOR e os pidfiles por ROOT: isolar só o `DELONIX_ROOT` põe dois roots a
+# disputar `/tmp/delonix-net-<uid>/`, e o fim disso (medido, 2026-08-12) é o root
+# isolado subir um pin/slirp por cima dos mesmos caminhos e a reconciliação
+# seguinte, corrida do root real, reconstruir a infra e reiniciar containers de
+# produção.
+#
 # Não é o default porque os checks que dependem de estado real (imagens no store,
 # holder a correr) passariam a falhar em vez de exercitar — mudar isso é trabalho
 # com análise, não uma linha, e está registado como tal no AGENTS.md.
@@ -552,7 +559,20 @@ section "vm: os mesmos snapshots no backend cloud-hypervisor"
 # prova é que a recusa é CLARA e que os quatro verbos funcionam com a VM parada
 # — nunca um silêncio. Precisa do holder de rede a correr (o vmm do CH vive lá
 # dentro), por isso salta em vez de falhar quando o `create` não passa.
-if command -v cloud-hypervisor >/dev/null; then
+#
+# MEIA-ISOLAÇÃO É PIOR QUE NENHUMA, e custou um incidente real (2026-08-12):
+# `DELONIX_ROOT` isolado SEM `DELONIX_NET_RUNTIME_DIR` deixa os dois roots a
+# partilhar `/tmp/delonix-net-<uid>/{control,slirp}.sock` — os sockets são por
+# UTILIZADOR e os pidfiles por ROOT. O motor tem um guarda que recusa isso, mas
+# ele deixa de disparar assim que o root isolado ganha estado de ingress
+# próprio: a partir daí sobe um pin/slirp SEUS por cima dos mesmos caminhos, e
+# o `net netns up` seguinte, corrido do root REAL, encontra o controlo partido,
+# reconstrói tudo e reinicia containers de produção. Aqui recusa-se a correr
+# nessa configuração em vez de a exercitar.
+if [[ -n "${DELONIX_ROOT:-}" && -z "${DELONIX_NET_RUNTIME_DIR:-}" ]]; then
+  skip "vm: snapshots no cloud-hypervisor" \
+    "DELONIX_ROOT isolado sem DELONIX_NET_RUNTIME_DIR — isola os DOIS ou nenhum"
+elif command -v cloud-hypervisor >/dev/null; then
   CVM="chsnap-$PFX"; CDISK="$OUT/$CVM.qcow2"
   qemu-img create -f qcow2 "$CDISK" 64M >/dev/null 2>&1
   if "$BIN" vm create "$CVM" --disk "$CDISK" --backend cloud-hypervisor --memory 256M >/dev/null 2>&1; then
