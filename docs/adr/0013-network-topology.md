@@ -206,7 +206,47 @@ que restam: um erro de máscara aqui não dá um erro, dá containers com endere
 sobrepostos. Merece a sessão inteira, com o laboratório isolado que esta série
 deixou a funcionar.
 
-### 2. Realizar o `macvlan` (camada C) — privilegiado
+### 2. O `macvlan` pertence a uma FRONTEIRA, não a um inquilino (camada C) — privilegiado
+
+**Decisão corrigida (2026-08-12), e a versão anterior desta secção estava pior.**
+Ela dizia «realizar o driver `macvlan`» e deixava por resolver o aviso que o
+próprio código emite: uma rede macvlan põe os containers DIRECTAMENTE na LAN
+física, FORA da firewall, do anti-spoof e do isolamento deste motor. Realizá-la
+como estava seria entregar uma funcionalidade cuja própria mensagem diz que
+desliga o modelo de segurança — e um aviso alto não deixa de ser um aviso sobre
+algo que não devia ser o caminho normal.
+
+**O `macvlan` passa a ser a perna EXTERNA de um workload de fronteira**, não uma
+rede a que um inquilino se liga. A forma:
+
+* um workload de fronteira (firewall/gateway) com DUAS pernas — uma `macvlan` na
+  NIC física, que tira endereço do DHCP da LAN do host como qualquer outra
+  máquina lá, e uma na `kind: Network` interna;
+* os containers e VMs ficam SÓ na rede interna, filtrada, isolada e com o
+  `fwcont` a decidir como sempre;
+* a saída deles para a LAN/internet passa pela fronteira, que é onde a política
+  de saída passa a viver.
+
+O que isto compra, e é a razão de ser: a capacidade privilegiada fica confinada a
+UM workload declarado para isso, em vez de ser um atributo de qualquer rede a que
+alguém se ligue. É o mesmo princípio de contenção do `network vlan` — a linha
+atravessa-se num sítio nomeado, e não em toda a superfície.
+
+**O que isto exige e ainda não existe**: o masquerade. Hoje TUDO sai sob um
+`oifname "tap0" masquerade` único no holder, por isso a fronteira veria cada
+pacote com o mesmo endereço de origem — e um gateway cujas regras por-origem não
+distinguem ninguém não é um gateway. Mover o masquerade para a fronteira é o
+`via:` que este ADR já tinha deixado por decidir, e é agora pré-requisito desta
+peça em vez de um extra.
+
+**Limite conhecido, medido nesta série**: uma fronteira em VM só serve se for
+Cloud Hypervisor, porque uma VM libvirt vive na `virbr0` do host e não na SDN.
+E o OPNsense — o appliance óbvio para o papel — NÃO arranca em Cloud Hypervisor
+(medido: firmware falha antes do kernel, com a golden Linux a arrancar no mesmo
+firmware como controlo). Portanto a primeira fronteira realizável é um
+CONTAINER, não uma VM appliance.
+
+### 2b. O que a realização do driver ainda precisa
 
 «Uma rede que recebe IP da rede do host por DHCP e serve de gateway às VMs e
 containers» tem nome nesta base: é o driver `macvlan`. Hoje é REGISTADO e o
