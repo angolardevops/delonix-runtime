@@ -515,6 +515,93 @@ pub fn uptime_from_starttime(starttime_jiffies: u64) -> Option<u64> {
     Some(now_unix().saturating_sub(started_unix))
 }
 
+/// The layers of a `stack apply`, rendered the way a CI renders a job: one line
+/// per layer, in dependency order, each ticked with how long it took.
+///
+/// Why not the animated [`Progress`]: every layer prints its OWN per-resource
+/// lines (`container/web: created`), which are the record of what happened. A
+/// spinner rewriting its row would fight them for the same terminal line, and
+/// folding them away would hide the one part worth keeping. The spinner belongs
+/// where a step is silent for seconds (`vm build`, `vm create`); a layer that
+/// narrates itself needs grouping and timing, not animation.
+///
+/// A layer with nothing to do says so instead of claiming a tick it did not
+/// earn — «0 resources» is information, and a green ✓ over no work is the kind
+/// of quiet lie this engine keeps removing.
+pub struct Layers {
+    counts: std::collections::BTreeMap<String, usize>,
+    started: std::time::Instant,
+    ran: usize,
+}
+
+impl Layers {
+    pub fn new(counts: std::collections::BTreeMap<String, usize>) -> Self {
+        Self {
+            counts,
+            started: std::time::Instant::now(),
+            ran: 0,
+        }
+    }
+
+    /// Runs one layer, announcing it before and ticking it after. The closure is
+    /// the Kind's own `apply`; its error passes straight through, with the layer
+    /// closed as ✗ first so the failure is attributed to the layer that produced
+    /// it rather than to the apply as a whole.
+    pub fn run<F>(&mut self, kind: &str, icon: &str, f: F) -> delonix_runtime_core::Result<()>
+    where
+        F: FnOnce() -> delonix_runtime_core::Result<()>,
+    {
+        let n = self.counts.get(kind).copied().unwrap_or(0);
+        // `Ingress` folds into `HTTPRoute` at load, so both count toward that layer.
+        let n = if kind == "HTTPRoute" {
+            n + self.counts.get("Ingress").copied().unwrap_or(0)
+        } else {
+            n
+        };
+        if n == 0 {
+            return f(); // nothing declared: no line, no tick, no noise
+        }
+        self.ran += 1;
+        eprintln!(" {} {kind} ({n}) {icon}", paint(color::YELLOW, "•"));
+        let t0 = std::time::Instant::now();
+        match f() {
+            Ok(()) => {
+                eprintln!(
+                    " {} {kind} ({n}) {icon} {}",
+                    paint(color::GREEN, "✓"),
+                    dim(&fmt_elapsed(t0.elapsed()))
+                );
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!(
+                    " {} {kind} ({n}) {icon} {}",
+                    paint(color::RED, "✗"),
+                    dim(&fmt_elapsed(t0.elapsed()))
+                );
+                Err(e)
+            }
+        }
+    }
+
+    /// The total, once every layer has run.
+    pub fn done(&self) {
+        if self.ran == 0 {
+            return;
+        }
+        eprintln!(
+            "{}",
+            dim(&super::po::tf(
+                "{n} layer(s) in {t}",
+                &[
+                    ("n", &self.ran.to_string()),
+                    ("t", &fmt_elapsed(self.started.elapsed())),
+                ],
+            ))
+        );
+    }
+}
+
 /// `kind`-style progress, with an **animated spinner**: each step shows a
 /// spinning braille (` ⠋ Starting the control-plane 🕹️ `) on a background
 /// thread, and the line is rewritten with ` ✓ …` (or ` ✗ …`) when it closes.
