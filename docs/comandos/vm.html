@@ -178,9 +178,7 @@ Commands:
   push             Push a local golden VM image to an OCI registry (`vm push &lt;name&gt; &lt;target&gt;`)
   apply            Apply the `kind: Vm` documents of a manifest
   init             Bootstrap a project with a VM manifest
-  restore          Revert the VM to a named snapshot
-  snapshot         Take a named snapshot of a VM
-  snapshots        List the VM&#x27;s snapshots
+  snapshot         Point-in-time snapshots of a VM (checkpoints in the VM&#x27;s own disk)
   dash             Dashboard (KPIs + table) of the VMs — interactive TUI, or `--once` snapshot
   help             Print this message or the help of the given subcommand(s)
 
@@ -199,7 +197,7 @@ COMMAND MAP:
   Networking   reach · bridge · unbridge
   Storage      build · pull · ls-remote · push · convert
   Declarative  init · apply
-  Maintenance  snapshot · restore · snapshots
+  Maintenance  snapshot
   Dashboards   dash
 
 EXAMPLES:
@@ -351,68 +349,17 @@ SEE ALSO:
 
   delonix › vm › default-backend</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class="cap">Fixar o backend que o `vm create` usa quando não lhe dizem nada</div><pre><code>delonix vm default-backend --set libvirt</code></pre></div><div class="ex"><div class="cap">Ver o que está fixado (`none` = decide a auto-detecção)</div><pre><code>delonix vm default-backend</code></pre></div><div class="ex"><div class="cap">Voltar à auto-detecção</div><pre><code>delonix vm default-backend --clear</code></pre></div>
-<h2 id='snapshots'><code>vm snapshots</code></h2>
-<p class='intro'>List the VM&#x27;s snapshots</p>
-<div class='help'><pre><code>Usage: delonix vm snapshots [OPTIONS] &lt;NAME&gt;
-
-Arguments:
-  &lt;NAME&gt;
-          
-
-Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
-  -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)
-
-EXAMPLES:
-  # which checkpoints a VM has, before reverting to one
-  delonix vm snapshots dev
-
-SEE ALSO:
-  delonix vm snapshot · delonix vm restore · delonix vm describe
-
-  delonix › vm › snapshots</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Listar os checkpoints de uma VM</div><div class='cap lang-en'>List a VM&#x27;s checkpoints</div><pre><code>delonix vm snapshots dev</code></pre></div>
-<h2 id='restore'><code>vm restore</code></h2>
-<p class='intro'>Revert the VM to a named snapshot</p>
-<div class='help'><pre><code>Usage: delonix vm restore [OPTIONS] &lt;NAME&gt; &lt;SNAPSHOT&gt;
-
-Arguments:
-  &lt;NAME&gt;
-          
-
-  &lt;SNAPSHOT&gt;
-          Snapshot name to revert to
-
-Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
-  -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)
-
-EXAMPLES:
-  # put the VM back exactly as it was when the checkpoint was taken
-  delonix vm restore dev before-upgrade
-
-SEE ALSO:
-  delonix vm snapshot · delonix vm snapshots · delonix vm status
-
-  delonix › vm › restore</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Voltar ao checkpoint</div><div class='cap lang-en'>Roll back to the checkpoint</div><pre><code>delonix vm restore dev antes-do-upgrade</code></pre></div>
 <h2 id='snapshot'><code>vm snapshot</code></h2>
-<p class='intro'>Take a named snapshot of a VM.</p>
-<p class='intro'>libvirt: a running VM&#x27;s snapshot is a system checkpoint — memory + disk; <code>restore</code> reverts to it, and it survives a <code>vm stop</code>/<code>vm start</code> (the state never leaves the disk; the metadata is preserved and given back with the domain). Not yet supported on the cloud-hypervisor backend.</p>
-<div class='help'><pre><code>Usage: delonix vm snapshot [OPTIONS] &lt;NAME&gt; &lt;SNAPSHOT&gt;
+<p class='intro'>Point-in-time snapshots of a VM (checkpoints in the VM&#x27;s own disk).</p>
+<p class='intro'>libvirt: a snapshot of a RUNNING VM is a system checkpoint — memory + disk — and of a stopped one it is disk-only; either survives a <code>vm stop</code>/<code>vm start</code>. Not yet supported on the cloud-hypervisor backend.</p>
+<div class='help'><pre><code>Usage: delonix vm snapshot [OPTIONS] &lt;COMMAND&gt;
 
-Arguments:
-  &lt;NAME&gt;
-          
-
-  &lt;SNAPSHOT&gt;
-          Snapshot name
+Commands:
+  create   Take a named snapshot (memory + disk if the VM is running, disk-only if it is stopped)
+  restore  Revert the VM to a named snapshot
+  rm       Delete a snapshot (its state in the disk goes with it)
+  ls       List the VM&#x27;s snapshots
+  help     Print this message or the help of the given subcommand(s)
 
 Options:
       --l18n &lt;en|pt&gt;
@@ -421,17 +368,23 @@ Options:
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
+COMMAND MAP:
+  Lifecycle  create · rm · restore
+  Inspect    ls
+
 EXAMPLES:
-  # a checkpoint of a RUNNING libvirt VM before an upgrade — memory and disk,
-  # so `restore` puts it back mid-flight
-  delonix vm snapshot dev before-upgrade
+  # a checkpoint before an upgrade — of a RUNNING VM it takes the memory too
+  delonix vm snapshot create dev before-upgrade
+
+  # which checkpoints a VM has, before reverting to one
+  delonix vm snapshot ls dev
 
 SEE ALSO:
-  delonix vm restore · delonix vm snapshots · delonix vm stop · delonix vm
+  delonix vm stop · delonix vm status · delonix volumes snapshot · delonix vm
   default-backend
 
   delonix › vm › snapshot</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Checkpoint de sistema (memória + disco) de uma VM A CORRER</div><div class='cap lang-en'>System checkpoint (memory + disk) of a RUNNING VM</div><pre><code>delonix vm snapshot dev antes-do-upgrade</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Checkpoint de sistema (memória + disco) de uma VM A CORRER</div><div class='cap lang-en'>System checkpoint (memory + disk) of a RUNNING VM</div><pre><code>delonix vm snapshot create dev antes-do-upgrade</code></pre></div><div class="ex"><div class='cap lang-pt'>Com a VM parada é só do disco — e a VM continua parada</div><div class='cap lang-en'>Of a stopped one it is disk-only — and it stays stopped</div><pre><code>delonix vm snapshot create dev copia-fria</code></pre></div><div class="ex"><div class='cap lang-pt'>Listar os checkpoints de uma VM (também com ela parada)</div><div class='cap lang-en'>List a VM&#x27;s checkpoints (with the VM stopped too)</div><pre><code>delonix vm snapshot ls dev</code></pre></div><div class="ex"><div class='cap lang-pt'>Voltar ao checkpoint</div><div class='cap lang-en'>Roll back to the checkpoint</div><pre><code>delonix vm snapshot restore dev antes-do-upgrade</code></pre></div><div class="ex"><div class='cap lang-pt'>Apagar um checkpoint (o estado dele sai do disco)</div><div class='cap lang-en'>Delete a checkpoint (its state leaves the disk)</div><pre><code>delonix vm snapshot rm dev antes-do-upgrade</code></pre></div>
 <h2 id='restart'><code>vm restart</code></h2>
 <p class='intro'>Stop (if running) then start — always a real reboot, unlike <code>start</code>. Same recovered-fields limits as <code>start</code></p>
 <div class='help'><pre><code>Usage: delonix vm restart [OPTIONS] &lt;NAME&gt;
@@ -507,7 +460,7 @@ EXAMPLES:
   delonix vm describe dev k8s-cp1
 
 SEE ALSO:
-  delonix vm status · delonix vm ls · delonix vm snapshots
+  delonix vm status · delonix vm ls · delonix vm snapshot ls
 
   delonix › vm › describe</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Tudo sobre uma VM, estilo kubectl describe</div><div class='cap lang-en'>Everything about a VM, kubectl describe-style</div><pre><code>delonix vm describe dev</code></pre></div>
@@ -1137,7 +1090,7 @@ EXAMPLES:
   delonix vm rm dev --force
 
 SEE ALSO:
-  delonix vm stop · delonix vm ls · delonix vm create · delonix vm snapshots
+  delonix vm stop · delonix vm ls · delonix vm create · delonix vm snapshot ls
 
   delonix › vm › rm</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix vm rm node1</code></pre></div>
