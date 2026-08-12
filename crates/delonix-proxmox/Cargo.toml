@@ -8,6 +8,7 @@ repository.workspace = true
 [dependencies]
 delonix-runtime-core = { path = "../delonix-runtime-core" }
 delonix-vm = { path = "../delonix-vm" }
+tracing = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # The same client, features and TLS stack as `delonix-image` and

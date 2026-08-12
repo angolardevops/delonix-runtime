@@ -307,10 +307,23 @@ impl Client {
                 ("scsihw", "virtio-scsi-single"),
                 ("scsi0", scsi0.as_str()),
                 // A NIC on the node's default bridge. `virtio` alone is the
-                // model; the shape `model=virtio` is REFUSED by the API
-                // ("value 'model' does not have a value in the enumeration"),
-                // measured during the spike.
+                // model — the value goes in the property's default key, and
+                // spelling that key out (`model=virtio`) is what the API
+                // refuses. The ADR recorded this shape as refused too; that was
+                // an artefact of the spike's `curl -d`, which does not
+                // URL-encode. `reqwest`'s `.form()` does, and the node accepts
+                // it: measured, `net0 = virtio=BC:24:11:F4:F9:9C,bridge=vmbr0`
+                // in the resulting config.
                 ("net0", "virtio,bridge=vmbr0"),
+                // Enable the QEMU guest agent CHANNEL. This is the host side
+                // only: it adds the virtio-serial port the agent talks over,
+                // and without it the node will not even try — every
+                // `/agent/...` call answers "QEMU guest agent is not running"
+                // no matter what the guest has installed. Whether an agent
+                // answers on the other end is the image's business, which is
+                // exactly why `ip()` treats silence as "unknown" and not as an
+                // error (see `parse_agent_ip`).
+                ("agent", "1"),
             ],
             true,
         )?;
@@ -318,6 +331,11 @@ impl Client {
     }
 
     /// Clones a template into a new VM.
+    ///
+    /// The agent channel is NOT forced here, unlike `create_vm`: a clone
+    /// inherits the template's configuration, and a template built with the
+    /// agent already has it. Overriding would silently contradict a choice
+    /// somebody made about that template.
     pub fn clone_template(&self, template: u32, vmid: u32, name: &str) -> Result<()> {
         let newid = vmid.to_string();
         let body = self.post_form(
@@ -326,6 +344,21 @@ impl Client {
             true,
         )?;
         self.wait_upid(&body, "clone")
+    }
+
+    /// A VM's configuration, as the node has it.
+    ///
+    /// Sibling of the other lifecycle calls, and the only way to ask the node
+    /// what it actually recorded rather than what was sent — which is how the
+    /// live test checks that the guest-agent channel really is on the VM this
+    /// backend created. Deliberately NOT used by `ip()`: that runs once per VM
+    /// on every `vm ls`, and a second round trip per listing to re-read a
+    /// setting `create_vm` always sends would be paid by every user to catch a
+    /// case only a hand-edited VM can reach.
+    pub fn config(&self, vmid: u32) -> Result<serde_json::Value> {
+        let body = self.get(&format!("/nodes/{}/qemu/{vmid}/config", self.node))?;
+        let w: Wrapped<serde_json::Value> = parse(&body, "config")?;
+        Ok(w.data)
     }
 
     pub fn start(&self, vmid: u32) -> Result<()> {
@@ -546,6 +579,63 @@ fn parse_disk_spec(disk: &str) -> Result<DiskSpec> {
     })
 }
 
+/// Picks the guest's usable IPv4 out of a `network-get-interfaces` answer.
+///
+/// The shape, from the node (`GET .../agent/network-get-interfaces`), is the
+/// QEMU guest agent's own reply wrapped twice — `data.result` is the array:
+///
+/// ```json
+/// {"data": {"result": [
+///   {"name": "lo", "ip-addresses": [{"ip-address-type": "ipv4",
+///                                    "ip-address": "127.0.0.1", "prefix": 8}]},
+///   {"name": "ens18", "hardware-address": "bc:24:11:f4:f9:9c",
+///    "ip-addresses": [{"ip-address-type": "ipv4", "ip-address": "10.0.2.15",
+///                      "prefix": 24},
+///                     {"ip-address-type": "ipv6",
+///                      "ip-address": "fe80::be24:11ff:fef4:f99c", "prefix": 64}]}
+/// ]}}
+/// ```
+///
+/// What it refuses, and each one is an address that would be reported as the
+/// VM's and be useless or wrong:
+///
+/// * **loopback** — every guest has `127.0.0.1`, and it is the first entry, so
+///   taking "the first IPv4" gets it every time;
+/// * **IPv6** — the record's `ip` field and everything that reads it (the
+///   holder's internal DNS answers A records only) are IPv4 here;
+/// * **link-local `169.254.0.0/16`** — what an interface has when DHCP FAILED.
+///   Reporting it says "the VM has an address" when the truth is the opposite.
+///
+/// Order is the agent's, and the first acceptable address wins: a guest with
+/// several NICs has no ranking this side could invent that would beat the one
+/// the guest itself reports.
+fn parse_agent_ip(v: &serde_json::Value) -> Option<String> {
+    for iface in v.get("data")?.get("result")?.as_array()? {
+        // `lo` by name, and 127/8 by value: a guest may name loopback something
+        // else, and an interface named `lo` is not a promise about its address.
+        if iface.get("name").and_then(|n| n.as_str()) == Some("lo") {
+            continue;
+        }
+        let Some(addrs) = iface.get("ip-addresses").and_then(|a| a.as_array()) else {
+            continue;
+        };
+        for a in addrs {
+            if a.get("ip-address-type").and_then(|t| t.as_str()) != Some("ipv4") {
+                continue;
+            }
+            let Some(ip) = a.get("ip-address").and_then(|s| s.as_str()) else {
+                continue;
+            };
+            let ip = ip.trim();
+            if ip.starts_with("127.") || ip.starts_with("169.254.") || ip.is_empty() {
+                continue;
+            }
+            return Some(ip.to_string());
+        }
+    }
+    None
+}
+
 /// The vmid out of the handle `boot` stored (`proxmox:<node>:<vmid>`). Pure, so
 /// the "not ours" case is testable without a node.
 fn vmid_from_handle(handle: &str) -> Option<u32> {
@@ -679,12 +769,34 @@ impl VmBackend for ProxmoxBackend {
             .unwrap_or(false)
     }
 
-    fn ip(&self, _vm: &Vm) -> Option<String> {
-        // Reaching the guest's address needs the QEMU guest agent installed
-        // INSIDE it (`/agent/network-get-interfaces`). Returning None is the
-        // honest answer for a guest that does not have it; inventing one from
-        // the config would be worse than saying nothing.
-        None
+    /// The guest's IPv4, asked of the QEMU guest agent.
+    ///
+    /// **`None` is a first-class answer here, not a failure.** The address
+    /// lives inside the guest, so the only way to it is an agent RUNNING in
+    /// there — `create_vm` opens the channel (`agent=1`), but whether anything
+    /// answers depends on the image. A guest with no agent makes the node reply
+    /// HTTP 500 `"QEMU guest agent is not running"` (measured), and that is the
+    /// ordinary case for, say, a plain cloud image: it must cost a `None` and
+    /// not a scary line, because `vm ls` calls this for every VM on every
+    /// listing.
+    ///
+    /// Every failure is therefore swallowed to `None` — but logged at `debug`
+    /// rather than dropped, because "no agent" and "the token lost its
+    /// permissions" both show up as an empty IP column, and the second one is
+    /// worth being able to find.
+    fn ip(&self, vm: &Vm) -> Option<String> {
+        let vmid = self.vmid_of(vm).ok()?;
+        let body = self
+            .client
+            .get(&format!(
+                "/nodes/{}/qemu/{vmid}/agent/network-get-interfaces",
+                self.client.node
+            ))
+            .map_err(|e| {
+                tracing::debug!(vm = %vm.name, error = %e, "proxmox: no address from the guest agent");
+            })
+            .ok()?;
+        parse_agent_ip(&parse::<serde_json::Value>(&body, "agent interfaces").ok()?)
     }
 
     /// Stops the VM and removes it from the node.
@@ -946,6 +1058,76 @@ mod tests {
             "a 750ms fixos eram 800 pedidos numa tarefa de 10 min; deram {reqs}"
         );
         assert_eq!(next_poll_wait(POLL_MAX), POLL_MAX, "estavel no tecto");
+    }
+
+    /// Three refusals, and each one is an address that would be reported as
+    /// the VM's and be useless or actively misleading.
+    #[test]
+    fn o_ip_do_agente_ignora_loopback_ipv6_e_link_local() {
+        let j = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
+
+        // The ordinary answer. `lo` comes FIRST — which is why "the first IPv4"
+        // would report 127.0.0.1 for every guest there is.
+        let normal = j(r#"{"data":{"result":[
+            {"name":"lo","ip-addresses":[
+                {"ip-address-type":"ipv4","ip-address":"127.0.0.1","prefix":8},
+                {"ip-address-type":"ipv6","ip-address":"::1","prefix":128}]},
+            {"name":"ens18","hardware-address":"bc:24:11:f4:f9:9c","ip-addresses":[
+                {"ip-address-type":"ipv6","ip-address":"fe80::be24:11ff:fef4:f99c","prefix":64},
+                {"ip-address-type":"ipv4","ip-address":"10.0.2.15","prefix":24}]}]}}"#);
+        assert_eq!(parse_agent_ip(&normal).as_deref(), Some("10.0.2.15"));
+
+        // DHCP FAILED: the interface is up and has 169.254/16. Reporting it
+        // would say "the VM has an address" when the truth is the opposite —
+        // and the record's IP is what the holder's DNS hands out.
+        let apipa = j(r#"{"data":{"result":[
+            {"name":"eth0","ip-addresses":[
+                {"ip-address-type":"ipv4","ip-address":"169.254.11.4","prefix":16}]}]}}"#);
+        assert_eq!(parse_agent_ip(&apipa), None);
+
+        // IPv6 only: the record's `ip` and the internal DNS are IPv4 here, so
+        // an address nothing can use is not an answer.
+        let v6 = j(r#"{"data":{"result":[
+            {"name":"eth0","ip-addresses":[
+                {"ip-address-type":"ipv6","ip-address":"2001:db8::1","prefix":64}]}]}}"#);
+        assert_eq!(parse_agent_ip(&v6), None);
+
+        // A loopback that is not NAMED `lo` is still loopback.
+        let odd = j(r#"{"data":{"result":[
+            {"name":"lo0","ip-addresses":[
+                {"ip-address-type":"ipv4","ip-address":"127.0.0.1","prefix":8}]},
+            {"name":"eth0","ip-addresses":[
+                {"ip-address-type":"ipv4","ip-address":"192.168.1.50","prefix":24}]}]}}"#);
+        assert_eq!(parse_agent_ip(&odd).as_deref(), Some("192.168.1.50"));
+
+        // An interface with no addresses at all, before one that has them.
+        let empty_first = j(r#"{"data":{"result":[
+            {"name":"eth0"},
+            {"name":"eth1","ip-addresses":[]},
+            {"name":"eth2","ip-addresses":[
+                {"ip-address-type":"ipv4","ip-address":"10.1.2.3","prefix":24}]}]}}"#);
+        assert_eq!(parse_agent_ip(&empty_first).as_deref(), Some("10.1.2.3"));
+    }
+
+    /// The shapes that are NOT an interface list, and none of them may panic or
+    /// invent an address. The middle one is measured, not imagined: it is
+    /// exactly what a node answers (with HTTP 500) for a guest that has no
+    /// agent running, which is the ordinary case for a plain cloud image.
+    #[test]
+    fn uma_resposta_sem_agente_nao_e_um_ip_nem_um_panico() {
+        let j = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
+        assert_eq!(
+            parse_agent_ip(&j(
+                r#"{"message":"QEMU guest agent is not running\n","data":null}"#
+            )),
+            None
+        );
+        assert_eq!(parse_agent_ip(&j(r#"{"data":{}}"#)), None);
+        assert_eq!(parse_agent_ip(&j(r#"{"data":{"result":"nope"}}"#)), None);
+        assert_eq!(parse_agent_ip(&j(r#"{}"#)), None);
+        assert_eq!(parse_agent_ip(&j(r#"[]"#)), None);
+        // A result whose entries are not objects.
+        assert_eq!(parse_agent_ip(&j(r#"{"data":{"result":[1,2,"x"]}}"#)), None);
     }
 
     #[test]

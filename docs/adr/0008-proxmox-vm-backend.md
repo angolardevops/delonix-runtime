@@ -369,13 +369,55 @@ to extract `auto_detect(&[BackendRegistration])` and hand the test a table where
 the skipped candidate is actually reached. Each of the three fixes was then
 verified by reverting it and watching its test fail.
 
+### The guest agent (2026-08-12)
+
+`ip()` no longer returns a flat `None`. Two halves, and only one of them is
+this side's to control:
+
+* **The channel**, which is the host side: `create_vm` sends `agent=1`, adding
+  the virtio-serial port the agent talks over. Without it the node does not even
+  try — every `/agent/…` call answers "not running" no matter what the guest
+  has installed. Measured: the setting comes back in the VM's config, and the
+  live test now asserts it on the VM the backend itself created.
+  `clone_template` deliberately does NOT force it: a clone inherits the
+  template's configuration, and overriding would contradict a choice somebody
+  made about that template.
+* **The agent**, which is the image's: `parse_agent_ip` reads
+  `data.result[].ip-addresses[]` and takes the first IPv4 that is not loopback,
+  not IPv6 and **not `169.254.0.0/16`** — that last one is what an interface has
+  when DHCP *failed*, so reporting it would say "the VM has an address" when the
+  truth is the opposite. `lo` is skipped by name *and* 127/8 by value, because
+  it is the first entry the agent returns and "the first IPv4" would be
+  loopback for every guest there is.
+
+**`None` is a first-class answer, not a failure.** A guest with no agent makes
+the node reply HTTP 500 `"QEMU guest agent is not running"` (measured), which is
+the ordinary case for a plain cloud image; `vm ls` calls `ip()` for every VM on
+every listing, so it costs a `None` and a `debug` line, never a warning. The
+`debug` line is there because "no agent" and "the token lost its permissions"
+both show up as an empty IP column, and only one of those is fine.
+
+**What was NOT validated live, and why.** The parser was driven with recorded
+answers, not with an agent talking. Getting one needed a nested guest with
+`qemu-guest-agent` installed: the node boots and has egress, and a Debian
+genericcloud image was downloaded onto it and booted as VM 901 — but that image
+does not ship the agent, and installing it into a guest two levels down was
+costing more than the evidence was worth. What IS live: the channel on a
+backend-created VM, and `ip()` answering `None` quietly for a guest with no
+agent. What is not: an actual address coming back.
+
+**A correction this pass owes the reader.** The note above saying
+`net0=virtio,bridge=vmbr0` is *refused* by the API was wrong, and wrong in a way
+worth naming: it was an artefact of the spike's `curl -d`, which does not
+URL-encode. `reqwest`'s `.form()` does, and the node accepts the same string —
+measured, the resulting config reads `net0 = virtio=BC:24:11:F4:F9:9C,bridge=vmbr0`.
+The backend had been sending it correctly all along; only the ADR was wrong.
+
 ### Still open, deliberately
 
-`ip()` returns `None` (it needs the QEMU guest agent inside the guest);
-snapshots use the trait's fail-closed default, though the API supports them and
-the spike exercised one; and the `net0` NIC syntax the spike found refused still
-has not had its own pass — a VM is created on the node's default bridge and
-nothing here configures networking beyond that.
+Snapshots use the trait's fail-closed default, though the API supports them and
+the spike exercised one. Networking beyond a NIC on the node's default bridge is
+not configurable: no VLAN tag, no second NIC, no static address.
 
 ## Phase 2, done (2026-08-11)
 

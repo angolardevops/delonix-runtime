@@ -3674,6 +3674,27 @@ silêncio (agora o do motor é `pub` e partilhado, disciplina do `fw_rule_tail`)
 `urlencode` codificava code points e não bytes (`ç` → `%E7` em vez de `%C3%A7`, e acima de 0xFF
 saía `%1F600`, que não é percent-encoding nenhum — e um UPID traz o nome da conta lá dentro).
 
+**Guest agent (`ip()`)**: são duas metades e só uma é nossa. O **canal** é o `agent=1` que o
+`create_vm` manda (sem ele o nó nem tenta — toda a chamada `/agent/…` responde «not running»,
+haja o que houver no convidado); o **agente** é do lado da imagem. O `parse_agent_ip` toma o
+primeiro IPv4 que não seja loopback, IPv6 nem **`169.254.0.0/16`** — este último é o que uma
+interface tem quando o DHCP FALHOU, e reportá-lo diria «a VM tem endereço» quando a verdade é o
+contrário. O `lo` é saltado pelo nome **e** o 127/8 pelo valor, porque é a primeira entrada que o
+agente devolve: «o primeiro IPv4» seria loopback em todos os convidados. **`None` é resposta de
+primeira classe**, não falha — um convidado sem agente faz o nó responder HTTP 500 «QEMU guest
+agent is not running» (medido), o `vm ls` chama isto por VM em cada listagem, logo custa um `None`
+e uma linha de `debug` (nunca um aviso; mas `debug` e não nada, porque «sem agente» e «o token
+perdeu permissões» dão os dois uma coluna IP vazia). O `clone_template` **não** força o `agent=1`:
+um clone herda a config do template, e sobrepor contradiria uma escolha de quem o fez.
+**Não validado ao vivo**: um endereço a vir mesmo de um agente — precisava de um convidado
+aninhado com o `qemu-guest-agent` instalado, e o custo passou o valor da prova. Validado ao vivo
+está o canal numa VM criada pelo backend, e o `ip()` a devolver `None` em silêncio.
+
+**Correcção**: a nota que dizia o `net0=virtio,bridge=vmbr0` recusado pela API estava errada — era
+artefacto do `curl -d` do spike, que não faz URL-encoding. O `.form()` do reqwest faz, e o nó
+aceita (medido: `net0 = virtio=BC:24:11:F4:F9:9C,bridge=vmbr0` na config). O backend sempre mandou
+bem; só o documento estava mal.
+
 **A nota de método vale mais que os três.** O primeiro teste da ordenação da auto-detecção
 registava o candidato remoto no registo GLOBAL e chamava `select_backend(None)` — e **passava com
 o bug lá dentro**: este host tem um backend local instalado, a passagem pára na primeira entrada,
