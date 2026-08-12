@@ -2580,6 +2580,7 @@ def sidebar(active, depth=0):
         ("estabilidade.html", "Promessa de estabilidade", "Stability promise"),
         ("cloud.html", "cloud-init, cloud-img e CH", "cloud-init, cloud-img & CH"),
         ("labs.html", "Laboratórios", "Labs"),
+        ("guia-vm.html", "Guia de VMs e lab de rede", "VM & network lab guide"),
         ("arquitectura.html", "Arquitectura", "Architecture"),
         ("c4.html", "Modelo C4 e system design", "C4 model & system design"),
         ("cri.html", "CRI — kubelet sem containerd", "CRI — kubelet without containerd"),
@@ -5090,6 +5091,9 @@ def main():
     labs_page()
     md_page("gitops.md", "gitops.html", "GitOps e CI")
     md_page("cli-stability.md", "estabilidade.html", "Promessa de estabilidade")
+    # O guia de VMs é escrito à mão em Markdown (legível no GitHub) e publicado
+    # daqui — a MESMA fonte, nunca uma segunda cópia do texto.
+    md_page("guia-vm-lab.md", "guia-vm.html", "Guia de VMs e laboratório de rede")
     page("cri.html", "CRI", bi("div", CRI, CRI_EN))
     page("comparacao.html", "Delonix vs Docker vs Podman", bi("div", COMPARE, COMPARE_EN))
     page("tutorial-delonix-temp.html", "Projecto completo: Delonix Temp", bi("div", TUTORIAL, TUTORIAL_EN))
