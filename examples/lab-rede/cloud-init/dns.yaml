@@ -1,0 +1,95 @@
+#cloud-config
+# lab-dns — servidor DNS autoritativo (BIND 9) da zona lab.ngola
+#
+# `spec.userData` SUBSTITUI o user-data que o delonix geraria, por isso a conta
+# e a chave têm de vir aqui: sem elas, a VM arranca sem forma de entrar.
+hostname: lab-dns
+fqdn: ns.lab.ngola
+
+users:
+  - name: delonix
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    ssh_authorized_keys:
+      - SSH_KEY_PLACEHOLDER
+
+package_update: true
+packages:
+  - bind9
+  - bind9-utils
+  - bind9-dnsutils
+
+write_files:
+  # A 2.ª placa (a do lab) casa por MAC e não por nome: `enp1s0`/`enp2s0`
+  # dependem da ordem em que o PCI as enumera, e essa ordem não é um contrato.
+  - path: /etc/netplan/60-lab.yaml
+    permissions: "0600"
+    content: |
+      network:
+        version: 2
+        ethernets:
+          lab0:
+            match:
+              macaddress: "52:54:00:5a:b0:10"
+            set-name: lab0
+            addresses: [10.50.0.10/24]
+
+  - path: /etc/bind/named.conf.local
+    content: |
+      zone "lab.ngola" {
+          type master;
+          file "/etc/bind/db.lab.ngola";
+      };
+      zone "0.50.10.in-addr.arpa" {
+          type master;
+          file "/etc/bind/db.10.50.0";
+      };
+
+  - path: /etc/bind/db.lab.ngola
+    content: |
+      $TTL    300
+      @       IN      SOA     ns.lab.ngola. admin.lab.ngola. (
+                                    1         ; Serial
+                                  300         ; Refresh
+                                  120         ; Retry
+                                60480         ; Expire
+                                  300 )       ; Negative Cache TTL
+      @       IN      NS      ns.lab.ngola.
+      ns      IN      A       10.50.0.10
+      dhcp    IN      A       10.50.0.11
+      dc      IN      A       10.50.0.12
+      nas     IN      A       10.50.0.20
+      fw      IN      A       10.50.0.254
+
+  - path: /etc/bind/db.10.50.0
+    content: |
+      $TTL    300
+      @       IN      SOA     ns.lab.ngola. admin.lab.ngola. (
+                                    1 300 120 60480 300 )
+      @       IN      NS      ns.lab.ngola.
+      10      IN      PTR     ns.lab.ngola.
+      11      IN      PTR     dhcp.lab.ngola.
+      12      IN      PTR     dc.lab.ngola.
+      20      IN      PTR     nas.lab.ngola.
+      254     IN      PTR     fw.lab.ngola.
+
+  # Responde à LAN do lab e reencaminha o que não é seu. `dnssec-validation no`
+  # porque a zona lab.ngola não existe na raiz e não pode ser validada.
+  - path: /etc/bind/named.conf.options
+    content: |
+      options {
+          directory "/var/cache/bind";
+          listen-on { 127.0.0.1; 10.50.0.10; };
+          listen-on-v6 { none; };
+          allow-query { 127.0.0.1; 10.50.0.0/24; };
+          recursion yes;
+          allow-recursion { 127.0.0.1; 10.50.0.0/24; };
+          forwarders { 8.8.8.8; 1.1.1.1; };
+          dnssec-validation no;
+      };
+
+runcmd:
+  - netplan apply
+  - systemctl enable --now named
+  - systemctl restart named

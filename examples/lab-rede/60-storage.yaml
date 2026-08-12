@@ -1,0 +1,42 @@
+# Armazenamento do laboratório, provisionado NA NAS a partir do manifesto.
+#
+#   delonix stack apply -f 60-storage.yaml
+#
+# O que isto faz na appliance, sem ninguém abrir a interface web: cria o
+# dataset, aplica-lhe a quota, define dono/modo e publica o export NFS. O que
+# NÃO faz é criar a pool — dispor discos físicos não é coisa que um manifesto
+# de volume deva desencadear (ver ADR-0009). A pool `labpool` cria-se uma vez:
+#
+#   curl -sk -u truenas_admin:<pass> -H 'Content-Type: application/json' \
+#     -X POST https://<nas>/api/v2.0/pool \
+#     -d '{"name":"labpool","topology":{"data":[{"type":"STRIPE","disks":["vdb"]}]}}'
+---
+apiVersion: delonix.io/v1
+kind: Secret
+metadata:
+  name: nas-cred
+spec:
+  stringData:
+    password: delonix-admin
+---
+apiVersion: delonix.io/v1
+kind: Volume
+metadata:
+  name: lab-dados
+spec:
+  provision:
+    truenas:
+      # HTTPS e não HTTP: a credencial vai neste pedido. O motor RECUSA
+      # `http://` com credencial, precisamente para ela não viajar em claro.
+      url: https://NAS_IP
+      username: truenas_admin
+      passwordSecret: nas-cred
+      # Um TrueNAS de fábrica serve um certificado que este host não valida.
+      # Ligar isto é dizer que se aceita esse risco nesta rede.
+      insecureTLS: true
+      dataset: labpool/lab-dados
+      quota: 2G          # mínimo aceite pela appliance: 1 GiB
+      share:
+        networks:
+          - 10.50.0.0/24
+          - 192.168.122.0/24
