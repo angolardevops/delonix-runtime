@@ -6,6 +6,8 @@ metadata:
   name: app
 spec:
   pull: alpine:3.19         # pull this reference (idempotent)
+  pullSecret: null          # `kind: Secret` with the registry credentials, for a private one
+                            # (full example: examples/image-private-registry.yaml)
 ---
 apiVersion: delonix.io/v1
 kind: Image

@@ -207,6 +207,9 @@ spec:
   network: web-net            # host | none | &lt;custom network&gt;
   restartPolicy: Always       # Always | OnFailure | Never  (delonix values also OK)
   expose: 80                  # auto-register this HTTP port in the L7 proxy (optional)
+  hostAliases:                # extra /etc/hosts entries, k8s shape (one entry per hostname)
+    - ip: 10.0.0.9
+      hostnames: [legacy-api, legacy-api.internal]
   containers:
     - name: web
       image: nginx:latest
@@ -699,6 +702,8 @@ metadata:
   name: app
 spec:
   pull: alpine:3.19         # pull this reference (idempotent)
+  pullSecret: null          # `kind: Secret` with the registry credentials, for a private one
+                            # (full example: examples/image-private-registry.yaml)
 ---
 apiVersion: delonix.io/v1
 kind: Image
@@ -794,6 +799,7 @@ spec:
   hostname: null                # container hostname (default: the container name)
   detach: true                  # run in the background (a manifest is declarative)
   restartPolicy: always         # no | on-failure[:max] | always | unless-stopped
+  addHost: []                   # extra /etc/hosts entries, `name:ip` (the `name=ip` form is refused)
 
   resources:                    # cgroup v2 limits
     memory: max                 # 64M | 2G | max (no cap)

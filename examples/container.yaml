@@ -19,6 +19,7 @@ spec:
   hostname: null                # container hostname (default: the container name)
   detach: true                  # run in the background (a manifest is declarative)
   restartPolicy: always         # no | on-failure[:max] | always | unless-stopped
+  addHost: []                   # extra /etc/hosts entries, `name:ip` (the `name=ip` form is refused)
 
   resources:                    # cgroup v2 limits
     memory: max                 # 64M | 2G | max (no cap)
