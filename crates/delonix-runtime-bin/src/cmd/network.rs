@@ -571,16 +571,21 @@ pub(crate) fn create_network(
             // Rootless physical plane (holder netns): bridge + VXLAN uplink + WG (if
             // encrypted). Unlike macvlan/ipvlan, the overlay IS realizable without
             // host privilege — it lives entirely in the holder netns.
+            // Same treatment as `bridge` above, and for the same reason — NOT the
+            // macvlan/ipvlan one. Those are warned-about because rootless genuinely
+            // cannot realize them, so the record preserves intent for a privileged
+            // host. The overlay CAN be realized here, so a record without an uplink
+            // is the orphan the bridge arm exists to prevent: `network ls` shows it,
+            // nothing attaches, and the retry hits `already exists` (exit 5).
+            //
+            // The message this replaces promised "reconciles on the next 'network
+            // create'" and that promise was false — `create_overlay` is not
+            // idempotent, so the second create conflicts instead of reconciling.
+            // Measured: `--wg-ip` with no `wg` on the host exited 0 and printed the
+            // network name, leaving a Realized=False record no command could fix.
             if let Err(e) = realize_overlay(&net) {
-                eprintln!(
-                    "{}",
-                    super::po::tf(
-                        "warning: overlay network '{name}' registered but the physical uplink did not \
-                         come up ({e}) — condition Realized=False. Reconciles on the next \
-                         'network create' once the holder/peers are available.",
-                        &[("name", name), ("e", &e.to_string())],
-                    )
-                );
+                let _ = store.remove(name);
+                return Err(e);
             }
             Ok(net)
         }

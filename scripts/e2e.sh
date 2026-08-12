@@ -180,6 +180,30 @@ check "network ls mostra-a" ok bash -c "'$BIN' network ls | grep -q '$NET'"
 check "network inspect" ok "$BIN" network inspect "$NET"
 check "network describe" ok "$BIN" network describe "$NET"
 
+# --- `wg` ausente: nem errno cru, nem sucesso falso ---
+# Dois achados de uma varredura de auditoria, os dois neste grupo, os dois em
+# comandos que a bateria nunca EXECUTAVA (só lhes verificava o `--help`):
+#   1. `node init|key` devolvia `spawn failed: No such file or directory`. O
+#      ENOENT de um spawn não é um ficheiro em falta — é a FERRAMENTA; a frase
+#      manda o leitor procurar um caminho. Mesma classe que o `vmimage::
+#      tool_package` já corrigira, reaparecida noutro sítio.
+#   2. `create --driver overlay --wg-ip` saía **0** com a rede POR REALIZAR, e
+#      prometia reconciliar «no próximo create» — o que `create_overlay` não faz:
+#      o retry dava conflito (5) e a rede ficava sem comando que a salvasse.
+# O gate testa o COMPORTAMENTO, não o ambiente: num host com `wg` o caminho de
+# falha não existe e o honesto é SKIP, nunca um verde que não exercitou nada.
+if command -v wg >/dev/null 2>&1; then
+  skip "wg ausente: caminho de falha" "este host TEM wg — o caminho não é exercitável aqui"
+else
+  check "node key sem wg: recusa (classe 1)" 1 "$BIN" network node key
+  check "node key sem wg: nomeia a ferramenta, não o errno" ok bash -c \
+    "o=\$('$BIN' network node key 2>&1); grep -q wireguard-tools <<<\"\$o\" && ! grep -q 'No such file' <<<\"\$o\""
+  check "overlay cifrado sem wg: recusa em vez de sair 0" fail \
+    "$BIN" network create "wgx-$PFX" --driver overlay --vni 99 --wg-ip 10.9.0.1/24
+  check "overlay recusado não deixa registo órfão" fail bash -c \
+    "'$BIN' network ls | grep -q 'wgx-$PFX'"
+fi
+
 ########################################
 section "image"
 ########################################
