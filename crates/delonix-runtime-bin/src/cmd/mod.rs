@@ -52,6 +52,7 @@ pub mod storage;
 pub mod system;
 pub mod tunnel;
 pub mod util;
+pub mod vlan;
 pub mod vm;
 pub mod vmbridge;
 pub mod vmfile;
