@@ -2986,6 +2986,9 @@ msgstr "stack validate: {n} documento(s), todas as referências resolvidas — m
 msgid "{w} ignored field(s) — refused by --strict"
 msgstr "{w} campo(s) ignorado(s) — recusado por --strict"
 
+msgid "{n} layer(s) in {t}"
+msgstr "{n} camada(s) em {t}"
+
 msgid "stack validate: OK — {n} document(s), all references resolved"
 msgstr "stack validate: OK — {n} documento(s), todas as referências resolvidas"
 
