@@ -36,6 +36,15 @@
 #
 # Aplicar com `delonix stack apply -f netroute.yaml`.
 # Imperativo equivalente:  delonix network route <from> <to>   (e `--rm` para fechar)
+#
+# E FECHA-SE tirando o documento daqui: a rota converge, tem posse
+# (`delonix.io/stack`) e sai com um `stack apply --prune` ou um `stack destroy`.
+# Uma rota criada à mão pelo comando imperativo não leva carimbo e sobrevive aos
+# dois — um apply nunca remove o que não criou.
+#
+# A identidade é o PAR e não o `metadata.name`: renomear este documento não muda
+# nada, o plano imprime `NetworkRoute web->api`, e dois documentos a declarar o
+# mesmo par são recusados.
 ---
 apiVersion: delonix.io/v1
 kind: Network

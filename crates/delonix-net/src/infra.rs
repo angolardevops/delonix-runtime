@@ -3801,6 +3801,21 @@ fn write_routedef(def: &RouteDef) -> Result<()> {
 fn routes_forget_network(name: &str) {
     for r in route_list() {
         if r.from == name || r.to == name {
+            // The ELEMENT first, and this half was measured missing: deleting
+            // only the record leaves the pair in `@netpair` pointing at a bridge
+            // that no longer exists. Harmless while it does not — except
+            // `bridge_name` is DETERMINISTIC, so recreating a network with the
+            // same name brings the same device back and the path REOPENS on its
+            // own, with nobody having asked for it.
+            //
+            // Best-effort by necessity: `network_remove` is also the teardown
+            // path, and the holder may already be gone — in which case the
+            // ephemeral map went with it and there is nothing left to delete.
+            let _ = control_send(&format!(
+                "netroute del {} {}",
+                crate::bridge_name(&r.from),
+                crate::bridge_name(&r.to)
+            ));
             let _ = std::fs::remove_file(routedef_path(&r.from, &r.to));
         }
     }
@@ -3906,15 +3921,17 @@ pub fn network_create_with(name: &str, prefix: &str) -> Result<NetDef> {
 /// **Removes an ingress private network**: deletes the bridge (if the infra is
 /// up) and the `NetDef`. Best-effort.
 pub fn network_remove(name: &str) {
+    // A route outlives neither of its ends, and this runs FIRST — while the
+    // bridge and the record are still there, so the element can be deleted with
+    // everything in place. See `routes_forget_network` for what leaving a pair
+    // behind would do on the next create.
+    routes_forget_network(name);
     if let Some(def) = network_get(name) {
         // `control_send` fails right away if the holder is down (network with no workloads) —
         // the bridge never lived in a netns, nothing to delete. Best-effort.
         let _ = control_send(&format!("netdel {}", def.bridge));
     }
     let _ = std::fs::remove_file(netdef_path(name));
-    // A route outlives neither of its ends. See `routes_forget_network` for what
-    // leaving them behind would do on the next respawn.
-    routes_forget_network(name);
 }
 
 /// Deletes a link the holder owns, by name — the counterpart of the VXLAN
