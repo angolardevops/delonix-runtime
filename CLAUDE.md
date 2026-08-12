@@ -3845,3 +3845,32 @@ prova que a lista serve): `$?` depois de um pipe ia reportar `rc=0` onde era 1 (
 na raiz do repo (`README.md`, `VMfile`, `cloud-init/`, `cluster-kind.yaml`,
 `delonix-manifest.yaml` — todos removidos, nada tracked tocado). De passagem ficou provado que o
 scaffold **não sobrescreve**: `already exists, skipped (use --force to overwrite)`.
+
+## `delonix backup` / `restore` — o grupo que faltava a este guia
+
+A varredura acima encontrou-o pela ausência: um guia que documenta tudo o resto não tinha **uma
+linha** sobre backup (a única ocorrência da palavra era incidental, sobre exit codes), apesar de o
+grupo ter página de documentação e ciclo completo na bateria E2E. É o primeiro sítio onde um SRE
+olha, e era o único onde não havia nada escrito.
+
+**O que o arquivo leva, e é a decisão que define o resto**: `backup <container|pod|vm|stack>
+<nome>` escreve um `.tar.gz` com o **registo** e os **DADOS dos volumes** — **não** a imagem e
+**não** o rootfs, que o `restore` deriva por pull. A **VM é a excepção**: o disco overlay dela É o
+seu estado, logo esse viaja dentro do arquivo. A regra por trás é a mesma do resto do motor: o que
+tem endereço de conteúdo e se volta a obter não se duplica; o que só existe naquele host, sim.
+
+`restore <kind> <arquivo>` aceita um caminho ou o **nome nu** de um arquivo em `--from` (default
+`.`). **Recusa-se com o recurso a correr** e só `--force` pára, repõe e volta a arrancar — a
+mesma disciplina de não destruir o que está vivo sem o operador o dizer.
+
+**O que a bateria já prova** (`scripts/e2e.sh`, secção «backup / restore por recurso»), e é o
+modelo a seguir para o resto da CLI: o ciclo REAL — arquivar, **destruir os dados**, repor, e
+confirmar que voltaram. Um `backup` que devolve 0 não prova nada; o que prova é o conteúdo do
+ficheiro depois de os dados terem sido apagados. Daí os checks olharem para DENTRO do tar
+(`volumes/<vol>.tar.gz` presente, `rootfs/` **ausente** — a promessa do parágrafo acima verificada
+como facto), o `--dry-run` não deixar um único ficheiro, e os caminhos de erro devolverem a classe
+**4** (não existe) em vez de um 1 genérico.
+
+**Por confirmar**: o agendamento («on demand or on a schedule», no próprio `--help`) não foi
+exercitado nesta passagem — não sei dizer se o agendador é interno, um `systemd --user` timer, ou
+uma linha de cron que o utilizador escreve. Quem lá chegar primeiro, mede e escreve aqui.

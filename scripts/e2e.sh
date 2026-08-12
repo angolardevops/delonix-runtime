@@ -8,6 +8,30 @@
 #
 # Regra: NUNCA usar o `delonix` do PATH — processos/binários antigos são uma
 # armadilha conhecida deste repo (ver CLAUDE.md). O default é o build local.
+#
+# ## O que este número quer dizer, e o que NÃO quer (medido 2026-08-12)
+#
+# A CLI tem 245 comandos, 218 folhas invocáveis. Esta bateria verifica o `--help`
+# de 100% delas (o ciclo dinâmico abaixo percorre a árvore) e EXECUTA 51 — 23%.
+# Os outros 167 têm o contrato verificado e nunca são corridos, concentrados em
+# `net` (45), `image` (31) e `vm` (24). Um verde aqui lê-se com facilidade como
+# «a CLI foi testada», e o que foi testado é sobretudo o texto de ajuda: foi em
+# comandos nunca executados que a auditoria encontrou um errno cru (`node init`)
+# e um `create` de overlay a sair 0 sobre uma rede por realizar.
+#
+# ## Isolamento: NÃO o faz por si, ao contrário do `chaos.sh`
+#
+# Este script corre contra o ESTADO REAL da máquina — não redirecciona
+# `DELONIX_ROOT` nem `DELONIX_NET_RUNTIME_DIR`. Limpa atrás de si e prefixa tudo
+# o que cria (`$PFX`), mas uma corrida interrompida a meio deixa restos, e num
+# host com produção a correr isso é risco directo. Para isolar, exporta os dois
+# roots ANTES de invocar:
+#
+#   DELONIX_ROOT=/tmp/e2e/root DELONIX_NET_RUNTIME_DIR=/tmp/e2e/run ./scripts/e2e.sh
+#
+# Não é o default porque os checks que dependem de estado real (imagens no store,
+# holder a correr) passariam a falhar em vez de exercitar — mudar isso é trabalho
+# com análise, não uma linha, e está registado como tal no CLAUDE.md.
 
 set -uo pipefail
 
