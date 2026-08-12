@@ -596,6 +596,107 @@ fn container_spec_of(doc: &ManifestDoc) -> Result<ContainerSpec> {
     })
 }
 
+/// The grouped form's tables: group name -> (sub-key, flat field it becomes).
+/// ONE source for both the hoist and the unknown-sub-key check — two copies
+/// would drift, silently, in exactly the way that check exists to stop.
+const CONTAINER_GROUPS: &[(&str, &[(&str, &str)])] = &[
+    (
+        "resources",
+        &[
+            ("memory", "memory"),
+            ("cpus", "cpus"),
+            ("cpuWeight", "cpuWeight"),
+            ("cpuset", "cpuset"),
+            ("ioWeight", "ioWeight"),
+        ],
+    ),
+    (
+        "security",
+        &[
+            ("privileged", "privileged"),
+            ("readOnly", "readOnly"),
+            ("capAdd", "capAdd"),
+            ("capDrop", "capDrop"),
+            ("securityOpt", "securityOpt"),
+            ("apparmor", "apparmor"),
+            ("selinux", "selinux"),
+            ("userns", "userns"),
+            ("hostPid", "hostPid"),
+            ("hostIpc", "hostIpc"),
+            ("detect", "detect"),
+        ],
+    ),
+    ("storage", &[("volumes", "volumes"), ("tmpfs", "tmpfs")]),
+    (
+        "limits",
+        &[
+            ("ulimit", "ulimit"),
+            ("sysctl", "sysctl"),
+            ("gpus", "gpus"),
+            ("devices", "devices"),
+        ],
+    ),
+];
+
+/// Sub-keys accepted inside the grouped `network:` mapping.
+const CONTAINER_NETWORK_KEYS: &[&str] = &[
+    "name",
+    "ports",
+    "expose",
+    "alias",
+    "knows",
+    "rateBps",
+    "rateBurst",
+];
+
+/// Sub-keys of the GROUPED `env:` form. A plain `KEY: value` mapping is the
+/// other accepted shape and every key in it is the user's own variable, so it
+/// is never checked against this list.
+const CONTAINER_ENV_KEYS: &[&str] = &["vars", "files", "secrets", "secretFiles"];
+
+/// Sub-keys inside a grouped spec that the hoist does not know — and therefore
+/// throws away.
+///
+/// Pure, and reading the spec BEFORE `normalize_container_spec` touches it.
+/// Returns dotted paths (`resources.memoria`) so the message names the exact
+/// line to fix.
+///
+/// Two shapes are deliberately NOT checked, because in them every key is the
+/// user's own data rather than a field name: a `network:` that is a plain string
+/// (the flat form) and an `env:` that is a plain `KEY: value` mapping. `env` is
+/// only checked when it is the grouped form, which is what having one of
+/// `vars`/`files`/`secrets`/`secretFiles` means — the same test the normalizer
+/// itself makes.
+pub(crate) fn unknown_group_keys(spec: &serde_yaml::Value) -> Vec<String> {
+    use serde_yaml::Value;
+    let Value::Mapping(m) = spec else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut scan = |group: &str, known: &dyn Fn(&str) -> bool| {
+        if let Some(Value::Mapping(g)) = m.get(group) {
+            for k in g.keys().filter_map(|k| k.as_str()) {
+                if !known(k) {
+                    out.push(format!("{group}.{k}"));
+                }
+            }
+        }
+    };
+    scan("network", &|k| CONTAINER_NETWORK_KEYS.contains(&k));
+    if let Some(Value::Mapping(env)) = m.get("env") {
+        if CONTAINER_ENV_KEYS
+            .iter()
+            .any(|k| env.get(Value::from(*k)).is_some())
+        {
+            scan("env", &|k| CONTAINER_ENV_KEYS.contains(&k));
+        }
+    }
+    for (group, pairs) in CONTAINER_GROUPS {
+        scan(group, &|k| pairs.iter().any(|(from, _)| *from == k));
+    }
+    out
+}
+
 /// Hoists each recognized group's sub-fields to their flat top-level name.
 /// Pure, testable independently of serde — see `cmd::vm::normalize_vm_spec`
 /// for the general pattern this mirrors, including the precedence rule (an
@@ -667,49 +768,12 @@ fn normalize_container_spec(mut v: serde_yaml::Value) -> serde_yaml::Value {
             m.insert(Value::from("env"), Value::Sequence(vars));
         }
     }
-    for (group, pairs) in [
-        (
-            "resources",
-            &[
-                ("memory", "memory"),
-                ("cpus", "cpus"),
-                ("cpuWeight", "cpuWeight"),
-                ("cpuset", "cpuset"),
-                ("ioWeight", "ioWeight"),
-            ][..],
-        ),
-        (
-            "security",
-            &[
-                ("privileged", "privileged"),
-                ("readOnly", "readOnly"),
-                ("capAdd", "capAdd"),
-                ("capDrop", "capDrop"),
-                ("securityOpt", "securityOpt"),
-                ("apparmor", "apparmor"),
-                ("selinux", "selinux"),
-                ("userns", "userns"),
-                ("hostPid", "hostPid"),
-                ("hostIpc", "hostIpc"),
-                ("detect", "detect"),
-            ][..],
-        ),
-        ("storage", &[("volumes", "volumes"), ("tmpfs", "tmpfs")][..]),
-        (
-            "limits",
-            &[
-                ("ulimit", "ulimit"),
-                ("sysctl", "sysctl"),
-                ("gpus", "gpus"),
-                ("devices", "devices"),
-            ][..],
-        ),
-    ] {
-        if let Some(Value::Mapping(g)) = m.get(group).cloned() {
-            for (from, to) in pairs {
+    for (group, pairs) in CONTAINER_GROUPS {
+        if let Some(Value::Mapping(g)) = m.get(*group).cloned() {
+            for (from, to) in pairs.iter() {
                 hoist(m, &g, from, to);
             }
-            m.remove(group);
+            m.remove(*group);
         }
     }
     v
@@ -2163,17 +2227,11 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         // Pod-shaped (k8s-like) when `spec.containers` is present; otherwise the
         // flat spec. The two shapes never mix.
         let pod_shaped = doc.spec.get("containers").is_some();
-        // Warn about typos BEFORE the early-continue: a manifest re-applied
-        // against an already-existing resource should also see the warning (otherwise
-        // the typo never shows up after the first creation).
-        manifest::warn_unknown_fields(
-            doc,
-            if pod_shaped {
-                POD_SPEC_FIELDS
-            } else {
-                CONTAINER_SPEC_FIELDS
-            },
-        );
+        // The typo warning used to live here, before the early-continue below, so
+        // that re-applying against an existing resource still showed it. It now
+        // runs in `manifest::load` — which every path arrives at, including this
+        // one — so it keeps that property AND gains `validate`/`plan`, which it
+        // never had. See `manifest::spec_fields_for`.
         if store.list()?.iter().any(|c| &c.name == name) {
             println!("container/{name}: already exists, nothing to do");
             continue;
@@ -7179,6 +7237,30 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn sub_chave_desconhecida_no_grupo_e_reportada() {
+        use super::unknown_group_keys;
+        let v: serde_yaml::Value = serde_yaml::from_str(
+            "image: nginx\nresources:\n  memoria: 128M\nsecurity:\n  privileged: true\n",
+        )
+        .unwrap();
+        assert_eq!(unknown_group_keys(&v), vec!["resources.memoria"]);
+    }
+
+    /// `env: {KEY: value}` é a forma que quem vem do compose escreve, e cada
+    /// chave ali é uma variável do utilizador — avisar sobre elas seria ruído em
+    /// cima de um manifesto correcto. Só a forma AGRUPADA é verificada.
+    #[test]
+    fn env_plano_nao_gera_avisos() {
+        use super::unknown_group_keys;
+        let plano: serde_yaml::Value =
+            serde_yaml::from_str("image: nginx\nenv:\n  POSTGRES_PASSWORD: dev\n").unwrap();
+        assert!(unknown_group_keys(&plano).is_empty());
+        let agrupado: serde_yaml::Value =
+            serde_yaml::from_str("image: nginx\nenv:\n  vars: [A=1]\n  ficheiros: x\n").unwrap();
+        assert_eq!(unknown_group_keys(&agrupado), vec!["env.ficheiros"]);
+    }
+
     fn normalize_container_spec_forma_plana_explicita_ganha_ao_grupo() {
         let mixed: serde_yaml::Value = serde_yaml::from_str(
             "image: nginx\nmemory: 2G\nresources:\n  memory: 512M\n  cpus: \"4.0\"\n",

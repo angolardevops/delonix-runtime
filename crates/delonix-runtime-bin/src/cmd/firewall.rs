@@ -1252,7 +1252,6 @@ fn workload_cidr(store: &Store, name: &str) -> Result<String> {
 /// direction ("in"/"out"). The label in messages uses the document's real Kind.
 fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
     let kind = doc.kind.as_str();
-    manifest::warn_unknown_fields(doc, FW_SPEC_FIELDS);
     let spec: FwDocSpec = manifest::spec_of(doc)?;
 
     // Validate the scope explicitly — a typo (`netowrk`) must not fall silently

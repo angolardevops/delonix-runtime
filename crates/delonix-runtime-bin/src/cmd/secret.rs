@@ -375,7 +375,6 @@ pub fn apply(docs: &[ManifestDoc], base: &Path) -> Result<()> {
     let store = SecretStore::open(state_root())?;
     for doc in manifest::of_kind(docs, "Secret") {
         let name = &doc.metadata.name;
-        manifest::warn_unknown_fields(doc, SECRET_SPEC_FIELDS);
         let spec: SecretSpec = manifest::spec_of(doc)?;
 
         let mut data = BTreeMap::new();

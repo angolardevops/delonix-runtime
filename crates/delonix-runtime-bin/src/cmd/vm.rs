@@ -234,6 +234,91 @@ fn vm_spec_of(doc: &ManifestDoc) -> Result<VmSpec> {
     })
 }
 
+/// The grouped form's tables: group name -> (sub-key, flat field it becomes).
+/// ONE source for both the hoist and the unknown-sub-key check below —
+/// two copies would drift, and the drift would be silent in exactly the way
+/// this check exists to stop.
+const VM_GROUPS: &[(&str, &[(&str, &str)])] = &[
+    (
+        "resources",
+        &[
+            ("vcpus", "vcpus"),
+            ("memory", "memory"),
+            ("hugepages", "hugepages"),
+            ("cpuAffinity", "cpuAffinity"),
+        ],
+    ),
+    (
+        "boot",
+        &[
+            ("kernel", "kernel"),
+            ("initrd", "initrd"),
+            ("firmware", "firmware"),
+            ("cmdline", "cmdline"),
+        ],
+    ),
+    (
+        "cloudInit",
+        &[
+            ("seed", "seed"),
+            ("hostname", "hostname"),
+            ("sshKeys", "sshKeys"),
+            ("userData", "userData"),
+        ],
+    ),
+    (
+        "libvirt",
+        &[
+            ("backend", "backend"),
+            ("machine", "machine"),
+            ("cpuModel", "cpuModel"),
+            ("cpuTopology", "cpuTopology"),
+            ("tpm", "tpm"),
+            ("video", "video"),
+            ("bootOrder", "bootOrder"),
+            ("extraDisks", "extraDisks"),
+            ("extraNics", "extraNics"),
+            ("xmlOverlay", "libvirtXmlOverlay"),
+            ("xml", "libvirtXml"),
+        ],
+    ),
+];
+
+/// Sub-keys accepted inside the grouped `network:` mapping.
+const VM_NETWORK_KEYS: &[&str] = &["name", "mode", "bridge", "staticIp"];
+
+/// Sub-keys inside a grouped spec that the hoist does not know — and therefore
+/// throws away.
+///
+/// Pure, and reading the spec BEFORE `normalize_vm_spec` touches it: after the
+/// hoist the group is gone (`m.remove`), which is why the top-level
+/// unknown-field guard never saw these. Returns dotted paths
+/// (`resources.memoria`) so the message points at the exact line to fix.
+///
+/// `network` is only a group when it is a MAPPING — in the flat form it is a
+/// plain string (the network's name) and has no sub-keys to be wrong about.
+pub(crate) fn unknown_group_keys(spec: &serde_yaml::Value) -> Vec<String> {
+    use serde_yaml::Value;
+    let Value::Mapping(m) = spec else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut scan = |group: &str, known: &dyn Fn(&str) -> bool| {
+        if let Some(Value::Mapping(g)) = m.get(group) {
+            for k in g.keys().filter_map(|k| k.as_str()) {
+                if !known(k) {
+                    out.push(format!("{group}.{k}"));
+                }
+            }
+        }
+    };
+    scan("network", &|k| VM_NETWORK_KEYS.contains(&k));
+    for (group, pairs) in VM_GROUPS {
+        scan(group, &|k| pairs.iter().any(|(from, _)| *from == k));
+    }
+    out
+}
+
 /// Hoists each recognized group's sub-fields to their flat top-level name.
 /// Pure (no I/O) and independent of serde/`VmSpec` — testable against raw
 /// YAML shapes directly. An explicit flat key always wins over a grouped one
@@ -261,56 +346,12 @@ fn normalize_vm_spec(mut v: serde_yaml::Value) -> serde_yaml::Value {
         hoist(m, &net, "bridge", "bridge");
         hoist(m, &net, "staticIp", "ip");
     }
-    for (group, pairs) in [
-        (
-            "resources",
-            &[
-                ("vcpus", "vcpus"),
-                ("memory", "memory"),
-                ("hugepages", "hugepages"),
-                ("cpuAffinity", "cpuAffinity"),
-            ][..],
-        ),
-        (
-            "boot",
-            &[
-                ("kernel", "kernel"),
-                ("initrd", "initrd"),
-                ("firmware", "firmware"),
-                ("cmdline", "cmdline"),
-            ][..],
-        ),
-        (
-            "cloudInit",
-            &[
-                ("seed", "seed"),
-                ("hostname", "hostname"),
-                ("sshKeys", "sshKeys"),
-                ("userData", "userData"),
-            ][..],
-        ),
-        (
-            "libvirt",
-            &[
-                ("backend", "backend"),
-                ("machine", "machine"),
-                ("cpuModel", "cpuModel"),
-                ("cpuTopology", "cpuTopology"),
-                ("tpm", "tpm"),
-                ("video", "video"),
-                ("bootOrder", "bootOrder"),
-                ("extraDisks", "extraDisks"),
-                ("extraNics", "extraNics"),
-                ("xmlOverlay", "libvirtXmlOverlay"),
-                ("xml", "libvirtXml"),
-            ][..],
-        ),
-    ] {
-        if let Some(Value::Mapping(g)) = m.get(group).cloned() {
-            for (from, to) in pairs {
+    for (group, pairs) in VM_GROUPS {
+        if let Some(Value::Mapping(g)) = m.get(*group).cloned() {
+            for (from, to) in pairs.iter() {
                 hoist(m, &g, from, to);
             }
-            m.remove(group);
+            m.remove(*group);
         }
     }
     v
@@ -921,7 +962,6 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let base = state_root();
     for doc in manifest::of_kind(docs, "Vm") {
         let name = &doc.metadata.name;
-        manifest::warn_unknown_fields(doc, VM_SPEC_FIELDS);
         let spec: VmSpec = vm_spec_of(doc)?;
 
         // Resolve each volume (Volume/Storage name → host directory) and
@@ -3013,6 +3053,32 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
     }
 
     #[test]
+    /// O buraco que isto fecha: o hoist copia as sub-chaves que conhece e
+    /// depois APAGA o grupo, por isso uma mal escrita desaparecia sem aviso —
+    /// medido num container, onde `resources: {memoria: 128M}` deu um container
+    /// sem limite de memória nenhum e exit 0.
+    #[test]
+    fn sub_chave_desconhecida_no_grupo_e_reportada() {
+        use super::unknown_group_keys;
+        let v: serde_yaml::Value = serde_yaml::from_str(
+            "disk: d\nresources:\n  vcpus: 2\n  memoria: 1G\nnetwork:\n  name: n\n  modo: nat\n",
+        )
+        .unwrap();
+        let mut got = unknown_group_keys(&v);
+        got.sort();
+        assert_eq!(got, vec!["network.modo", "resources.memoria"]);
+    }
+
+    /// A forma plana não tem grupos — e `network` plano é uma STRING, não um
+    /// mapa: nada para reportar, ou o aviso disparava em cada manifesto antigo.
+    #[test]
+    fn forma_plana_nao_gera_avisos_de_grupo() {
+        use super::unknown_group_keys;
+        let v: serde_yaml::Value =
+            serde_yaml::from_str("disk: d\nvcpus: 2\nnetwork: minha-rede\n").unwrap();
+        assert!(unknown_group_keys(&v).is_empty());
+    }
+
     fn normalize_vm_spec_forma_plana_explicita_ganha_ao_grupo() {
         // A field set BOTH at the flat top level and inside a group — the
         // explicit flat value wins (unambiguous precedence, not "whichever
