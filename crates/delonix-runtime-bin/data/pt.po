@@ -1478,6 +1478,12 @@ msgstr "a vm '{name}' arrancou (rede user-mode, sem IP alcançável) — `deloni
 msgid "vm '{name}' still booting after the timeout — `delonix vm console {name}` to watch"
 msgstr "a vm '{name}' ainda a arrancar após o timeout — `delonix vm console {name}` para acompanhar"
 
+msgid "vm '{name}' started — ip {ip}, which could not be verified from here"
+msgstr "a vm '{name}' arrancou — ip {ip}, que não foi possível verificar a partir daqui"
+
+msgid "vm '{name}' is running but never answered at {ip} — that address is computed from the MAC, not observed, so it exists whether or not the guest booted; `delonix vm console {name}` to watch the boot"
+msgstr "a vm '{name}' está a correr mas nunca respondeu em {ip} — esse endereço é calculado a partir do MAC, não observado, por isso existe quer o convidado tenha arrancado quer não; `delonix vm console {name}` para acompanhar o arranque"
+
 msgid "booting '{name}'..."
 msgstr "a arrancar '{name}'..."
 
@@ -2094,8 +2100,8 @@ msgstr "a definir o domínio"
 msgid "starting the VM"
 msgstr "a arrancar a VM"
 
-msgid "✓ VM '{name}' is up."
-msgstr "✓ VM '{name}' no ar."
+msgid "✓ VM '{name}' started."
+msgstr "✓ VM '{name}' arrancada."
 
 msgid "Next steps:"
 msgstr "Próximos passos:"
