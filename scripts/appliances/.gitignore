@@ -1,0 +1,12 @@
+# Build artefacts of the appliance images. None of this belongs in git: the
+# media is 1.5-1.7 GiB per ISO and the images are several GiB more, and both are
+# reproducible from the vendor's own published artefacts (the scripts verify the
+# SHA-256 before using them).
+.media/
+.venv/
+*.qcow2
+*.iso
+*-install.log
+*-postinstall.log
+*-qemu.pid
+w-*/
