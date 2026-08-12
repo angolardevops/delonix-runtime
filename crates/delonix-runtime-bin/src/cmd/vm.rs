@@ -16,8 +16,8 @@ use super::util::state_root;
 
 /// `spec` for `kind: Vm` — mirrors `delonix_vm::VmConfig` (minus `name`, which
 /// comes from `metadata.name`).
-#[derive(Debug, Deserialize, Serialize)]
-struct VmSpec {
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+pub(crate) struct VmSpec {
     disk: String,
     #[serde(default = "default_vcpus")]
     vcpus: u32,
@@ -100,7 +100,7 @@ struct VmSpec {
 }
 
 /// `spec.cpuTopology` of a `kind: Vm`.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct CpuTopologySpec {
     #[serde(default)]
     sockets: u32,
@@ -111,7 +111,7 @@ struct CpuTopologySpec {
 }
 
 /// One entry of `spec.extraDisks`.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct ExtraDiskSpec {
     /// Host path of the disk image.
     source: String,
@@ -129,7 +129,7 @@ struct ExtraDiskSpec {
 }
 
 /// One entry of `spec.extraNics`.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct ExtraNicSpec {
     /// `network` (libvirt network), `bridge` (host bridge) or `user`.
     #[serde(rename = "type", alias = "kind")]
@@ -144,7 +144,7 @@ struct ExtraNicSpec {
 
 /// One entry of a VM's `spec.volumes`: refers to a `Volume`/`Storage` by
 /// name and says where to mount it in the guest.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct VmVolumeSpec {
     /// Name of a `kind: Volume` or `kind: Storage` (resolved at apply time).
     name: String,
