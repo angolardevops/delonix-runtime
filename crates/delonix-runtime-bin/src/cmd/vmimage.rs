@@ -3694,10 +3694,38 @@ pub(crate) fn rootless_customization_steps(
 /// an arbitrary URL, where there is nothing reliable to branch on. And it
 /// falls back to `/.autorelabel` rather than doing nothing when the guest has
 /// SELinux but no `setfiles`: a slow first boot beats an unlabeled image.
+/// **The mountpoints come from the guest's own `/etc/fstab`, and `/` alone is
+/// not enough.** MEASURED on the rebuilt Fedora image: `/`, `/var`, `/boot` and
+/// the injected binary all came out correctly labelled, and `/home/delonix` —
+/// the account this build creates with `useradd -m` — came out `unlabeled_t`,
+/// which cost two denials at every login and a `login` that could not chdir
+/// into the home directory (the prompt reads `/` instead of `~`). That one is
+/// not cosmetic: `--ssh-key` writes `~/.ssh/authorized_keys`, and sshd cannot
+/// read a mislabeled one.
+///
+/// Fedora puts `/home` and `/var` on separate btrfs subvolumes, so naming the
+/// mountpoints explicitly is what removes the guesswork about which of them a
+/// single `setfiles /` happens to reach. `fstab` is the guest declaring them
+/// itself — accurate, available offline, and it needs no list here to be kept
+/// in step with any distro's layout.
+///
+/// **The EFI partition has to be skipped, and skipping it by TYPE and not by
+/// path is the point.** `/boot/efi` is vfat, which has no extended attributes,
+/// so `setfiles` answers `Operation not supported` and — correctly — exits
+/// non-zero, which fails the whole build. MEASURED: both the Fedora and the
+/// Rocky rebuild died there. The filter is on the fstab's fs-type column, so
+/// any other label-less filesystem a guest happens to mount is skipped too, and
+/// a name other than `/boot/efi` does not reintroduce it. Nothing is lost:
+/// those filesystems could never carry a label in the first place.
 pub(crate) const SELINUX_RELABEL_CMD: &str = "if [ -f /etc/selinux/config ]; then \
 if command -v setfiles >/dev/null 2>&1; then \
 . /etc/selinux/config; \
-setfiles -F /etc/selinux/${SELINUXTYPE:-targeted}/contexts/files/file_contexts /; \
+p=/; \
+for d in $(awk '$1 !~ /^#/ && $2 ~ /^\\/./ && \
+$3 !~ /^(vfat|msdos|exfat|ntfs|ntfs3|iso9660|udf|swap|tmpfs|none)$/ {print $2}' \
+/etc/fstab 2>/dev/null); do \
+[ -d \"$d\" ] && p=\"$p $d\"; done; \
+setfiles -F /etc/selinux/${SELINUXTYPE:-targeted}/contexts/files/file_contexts $p; \
 else touch /.autorelabel; fi; fi";
 
 /// Translates the `CustomizeOp`s into the actual `virt-customize` arguments,
@@ -3858,19 +3886,48 @@ pub(crate) fn tool_failure_hint(tail: &str, f: Family) -> Option<String> {
     // network, and it is confined: the AppArmor profile Debian/Ubuntu ship
     // allows writes under /tmp and $HOME only, while libguestfs puts passt's
     // socket and pid file under $XDG_RUNTIME_DIR (/run/user/UID).
-    if t.contains("passt") {
-        let mut m = String::from(
+    // The SECOND failure mode of the same cause, and the one that used to go
+    // unnamed: passt starts, never hands out a lease, `dhclient` hangs its full
+    // 300s, and the build then CONTINUES with no network. What surfaces is a
+    // package manager failing to resolve a mirror, hundreds of lines deep, with
+    // the word `passt` nowhere in it — so the arm below never fired and the
+    // reader was left to conclude their own DNS was broken. The `[ 30x.x ]`
+    // timestamp on the failing step is the tell: nothing else in a build pauses
+    // for exactly five minutes.
+    let no_dns = t.contains("could not resolve host")
+        || t.contains("temporary failure resolving")
+        || t.contains("cannot prepare internal mirrorlist");
+    if t.contains("passt") || no_dns {
+        let mut m = String::from(if no_dns {
+            "the guest had no working network during the build: its resolver answered nothing.\n\
+             The appliance gets its network from passt, and when passt starts but never leases \
+             an address, libguestfs waits out `dhclient` (~300s — check the timestamp on the \
+             step that failed) and then carries on with no network at all.\n\
+             Most often passt's AppArmor profile forbids the runtime directory libguestfs uses. \
+             Point that directory somewhere the profile allows and retry:\n  \
+             mkdir -p /tmp/delonix-run && chmod 700 /tmp/delonix-run\n  \
+             XDG_RUNTIME_DIR=/tmp/delonix-run delonix vm build --network …"
+        } else {
             "the appliance's network helper (passt) failed, so `--network` could not start.\n\
              Most often its AppArmor profile forbids the runtime directory libguestfs uses.\n\
              Point that directory somewhere the profile allows and retry:\n  \
              mkdir -p /tmp/delonix-run && chmod 700 /tmp/delonix-run\n  \
-             XDG_RUNTIME_DIR=/tmp/delonix-run delonix vm build --network …",
-        );
+             XDG_RUNTIME_DIR=/tmp/delonix-run delonix vm build --network …"
+        });
         if f == Family::Debian {
+            // Building it is only half the remedy, and the half that was
+            // documented. libguestfs finds passt by running `passt --help`,
+            // which goes through PATH — so the new binary has to come FIRST in
+            // it. And do not try to disable the packaged one by shadowing it
+            // with a stub that fails: MEASURED, libguestfs then runs the stub
+            // as the real helper and dies on it. Absent falls back to qemu's
+            // own slirp; present-and-broken does not.
             m.push_str(
                 "\nIf it still fails, the packaged passt is too old to talk to this qemu \
-                 (Ubuntu 24.04 ships the Feb-2024 build, which segfaults here); build a \
-                 current one: git clone https://passt.top/passt && cd passt && make",
+                 (Ubuntu 24.04 ships the Feb-2024 build); build a current one and put it \
+                 FIRST in PATH — libguestfs looks passt up there:\n  \
+                 git clone https://passt.top/passt && cd passt && make\n  \
+                 PATH=$PWD:$PATH XDG_RUNTIME_DIR=/tmp/delonix-run delonix vm build --network …",
             );
         }
         m.push_str("\nOr build without it: drop `--network` (RUN steps then work offline).");
@@ -4773,6 +4830,13 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             ],
             "the SELinux relabel must close every build: {args:?}"
         );
+        // …and it must relabel the guest's OTHER mountpoints, not just `/`.
+        // Measured: with `/` alone, Fedora's `/home` subvolume was missed and
+        // the account this build creates came out unlabeled.
+        assert!(
+            SELINUX_RELABEL_CMD.contains("/etc/fstab"),
+            "relabelling only `/` misses a separate /home or /var: {SELINUX_RELABEL_CMD}"
+        );
         assert!(args
             .windows(2)
             .any(|w| w == ["--root-password".to_string(), "password:x".to_string()]));
@@ -4892,6 +4956,23 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         let h = tool_failure_hint(passt, Family::Debian).expect("devia reconhecer o passt");
         assert!(h.contains("XDG_RUNTIME_DIR"), "{h}");
         assert!(h.contains("--network"), "{h}");
+        // Building a current passt is only half the remedy: libguestfs looks it
+        // up by running `passt --help`, so the new binary has to be FIRST in
+        // PATH or the packaged one keeps winning.
+        assert!(h.contains("PATH=$PWD:$PATH"), "{h}");
+
+        // The SAME cause, and the shape it actually takes on a real host: passt
+        // leases nothing, the build carries on without network, and what the
+        // reader sees is a package manager that cannot resolve a mirror — with
+        // the word `passt` nowhere in it. MEASURED, and it used to get no hint
+        // at all, which reads as "your DNS is broken".
+        let dnf = "Curl error (6): Could not resolve hostname for \
+                   https://mirrors.fedoraproject.org/metalink?repo=updates-released-f42\n\
+                   virt-customize: error: dnf install -y slirp4netns: command exited with an error";
+        let h = tool_failure_hint(dnf, Family::Debian)
+            .expect("um build sem DNS tem de dizer que a rede do appliance é a causa");
+        assert!(h.contains("passt"), "{h}");
+        assert!(h.contains("XDG_RUNTIME_DIR"), "{h}");
 
         // An unrecognised failure gets NO invented advice.
         assert_eq!(
