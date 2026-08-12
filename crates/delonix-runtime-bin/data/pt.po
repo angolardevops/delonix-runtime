@@ -8467,3 +8467,9 @@ msgstr "o segredo '{name}' não tem `tokenId`+`tokenSecret` nem `username`+`pass
 
 msgid "DELONIX_PROXMOX_URL is set but no credential is: use DELONIX_PROXMOX_SECRET (a `kind: Secret` with `tokenId`+`tokenSecret`, preferred), or DELONIX_PROXMOX_TOKEN_ID with DELONIX_PROXMOX_TOKEN, or DELONIX_PROXMOX_USER with DELONIX_PROXMOX_PASSWORD"
 msgstr "o DELONIX_PROXMOX_URL está definido mas não há credencial nenhuma: usa o DELONIX_PROXMOX_SECRET (um `kind: Secret` com `tokenId`+`tokenSecret`, preferível), ou o DELONIX_PROXMOX_TOKEN_ID com o DELONIX_PROXMOX_TOKEN, ou o DELONIX_PROXMOX_USER com o DELONIX_PROXMOX_PASSWORD"
+
+msgid "DELONIX_PROXMOX_VLAN: '{v}' is not a VLAN tag (1-4094)"
+msgstr "DELONIX_PROXMOX_VLAN: '{v}' não é uma etiqueta de VLAN (1-4094)"
+
+msgid "{flags}: a cloud-init seed is a file on THIS host and the VM runs on another machine, so it could never be read — configure the guest through the node's own cloud-init, or use a local backend"
+msgstr "{flags}: um seed de cloud-init é um ficheiro DESTE host e a VM corre noutra máquina, logo nunca poderia ser lido — configura o convidado pelo cloud-init do próprio nó, ou usa um backend local"

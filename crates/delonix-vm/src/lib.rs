@@ -529,6 +529,43 @@ pub trait VmBackend {
     /// to ignore it (`vm rm --force`).
     fn stop(&self, vmdir: &Path, vm: &Vm) -> Result<()>;
 
+    /// Releases everything the VM owns, because its record is going away
+    /// (`vm rm`). Default: [`Self::stop`] — which is exactly right for the two
+    /// local backends and is why nothing existing changes.
+    ///
+    /// **The two are the same operation locally and NOT the same remotely**,
+    /// and conflating them destroyed data. Locally the disk is the engine's: a
+    /// libvirt `undefine` leaves `<root>/vms/<name>.qcow2` untouched, so `stop`
+    /// can free the hypervisor's side and `rm` deletes the file afterwards. On
+    /// a remote node the disk belongs to the node, and the only call that frees
+    /// the VM also frees its disk — so a backend that implemented `stop` as
+    /// "stop and destroy" made `delonix vm stop` erase the guest, while the
+    /// CLI's own next-steps block promises `stop it (keeps the disk)`.
+    ///
+    /// A backend that owns nothing beyond what `stop` releases should leave
+    /// this alone.
+    fn destroy(&self, vmdir: &Path, vm: &Vm) -> Result<()> {
+        self.stop(vmdir, vm)
+    }
+
+    /// Brings an already-created VM back up, instead of creating one.
+    ///
+    /// `Ok(None)` — the default — means "I have no way to resume; create it the
+    /// usual way", which is the truth for both local backends: their `boot` is
+    /// idempotent because the per-VM overlay is on this filesystem and gets
+    /// reused.
+    ///
+    /// A remote backend has no such luck. Its `boot` asks the node for the next
+    /// free id, so a `vm start` on a stopped VM would build a SECOND one and
+    /// leave the first orphaned on the node with nothing pointing at it —
+    /// silently, since the record is then rewritten to the new handle. Here it
+    /// can start the VM its record already names.
+    ///
+    /// Called only when a record exists and the VM is not running.
+    fn resume(&self, _vmdir: &Path, _vm: &Vm) -> Result<Option<Boot>> {
+        Ok(None)
+    }
+
     /// Takes a named snapshot of the VM. On libvirt this is a **system checkpoint**
     /// (`virsh snapshot-create-as`): for a running domain it captures memory + disk
     /// state; `restore` reverts to it. Default: unsupported — a backend that does not
@@ -853,6 +890,23 @@ fn auto_detect(entries: &[BackendRegistration]) -> Result<Box<dyn VmBackend>> {
     Err(Error::Invalid(
         "no VM backend available: install 'cloud-hypervisor' or 'libvirt'+'qemu'".into(),
     ))
+}
+
+/// Does the backend that would run this VM own its own storage?
+///
+/// For a caller that has to decide something BEFORE `create_with` — the CLI
+/// generating a NoCloud seed ISO, which is a file on this filesystem and
+/// therefore meaningless to a hypervisor on another machine. Without this the
+/// CLI built one anyway and handed over a path the node cannot read.
+///
+/// Same resolution as [`select_backend`], so the answer is about the backend
+/// that will actually be used. `false` when nothing resolves: the caller then
+/// keeps its old behaviour and the real error comes from `create_with`, which
+/// is where it reads properly.
+pub fn backend_manages_own_storage(want: Option<&str>) -> bool {
+    select_backend(want)
+        .map(|b| b.manages_own_storage())
+        .unwrap_or(false)
 }
 
 /// Validates and normalizes a backend name for external callers (the CLI's
@@ -2432,22 +2486,37 @@ pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Res
         prepare_local_overlay(&vmdir, cfg, on)?
     };
 
-    let boot = match backend.boot(&vmdir, cfg, &overlay.to_string_lossy(), on) {
-        Ok(b) => b,
-        Err(e) => {
-            // Clean up the overlay only when WE made it. With
-            // `manages_own_storage`, `overlay` IS `cfg.disk` verbatim — the name
-            // the caller wrote for something on the far node — and removing it
-            // means this engine deleting a file it did not create. For today's
-            // Proxmox backend that name is `local-lvm:8` and the unlink simply
-            // fails, but the rule cannot rest on the spelling a backend happens
-            // to use: a remote backend whose disk reference IS a local path
-            // would lose the user's base image on a failed boot.
-            if restarting.is_none() && !own_storage {
-                let _ = std::fs::remove_file(&overlay);
+    // An EXISTING, stopped VM gets a chance to be resumed before anything is
+    // created. Both local backends answer `None` here (their `boot` is already
+    // idempotent — it reuses the per-VM overlay on this filesystem), so this is
+    // invisible to them. A remote backend's `boot` asks the node for the next
+    // free id, so without this a `vm start` built a SECOND VM and orphaned the
+    // first, with the record rewritten to the new handle and nothing left
+    // pointing at the old one.
+    let resumed = match &restarting {
+        Some(ex) => backend.resume(&vmdir, ex)?,
+        None => None,
+    };
+
+    let boot = match resumed {
+        Some(b) => b,
+        None => match backend.boot(&vmdir, cfg, &overlay.to_string_lossy(), on) {
+            Ok(b) => b,
+            Err(e) => {
+                // Clean up the overlay only when WE made it. With
+                // `manages_own_storage`, `overlay` IS `cfg.disk` verbatim — the name
+                // the caller wrote for something on the far node — and removing it
+                // means this engine deleting a file it did not create. For today's
+                // Proxmox backend that name is `local-lvm:8` and the unlink simply
+                // fails, but the rule cannot rest on the spelling a backend happens
+                // to use: a remote backend whose disk reference IS a local path
+                // would lose the user's base image on a failed boot.
+                if restarting.is_none() && !own_storage {
+                    let _ = std::fs::remove_file(&overlay);
+                }
+                return Err(e);
             }
-            return Err(e);
-        }
+        },
     };
 
     let mut vm = Vm::new(
@@ -2529,7 +2598,11 @@ fn remove_inner(base: &Path, name: &str, force: bool) -> Result<()> {
     let st = store(base)?;
     let existed = match st.load(name) {
         Ok(vm) => {
-            if let Err(e) = backend_for(&vm).and_then(|b| b.stop(&vmdir, &vm)) {
+            // `destroy`, not `stop`: the record is going away, so whatever the
+            // backend still owns has to go with it. They are the same call for
+            // the local backends (the default), and deliberately not for a
+            // remote one, whose disk lives on the node.
+            if let Err(e) = backend_for(&vm).and_then(|b| b.destroy(&vmdir, &vm)) {
                 if !force {
                     return Err(e); // record intact — the rm can be retried
                 }
@@ -4207,6 +4280,255 @@ mod tests {
             .write()
             .unwrap()
             .retain(|b| b.id != "falharemoto");
+    }
+
+    /// `stop` and `destroy` are the SAME call locally and NOT remotely, and
+    /// conflating them destroyed data: a backend that read `stop` as "stop and
+    /// destroy" made `delonix vm stop` erase the guest's disk, while the CLI's
+    /// own next-steps block promises `stop it (keeps the disk)`.
+    ///
+    /// Two halves, and both matter: the local backends must keep the old
+    /// behaviour exactly (the default), and `vm rm` must call `destroy`.
+    #[test]
+    fn o_rm_destroi_e_o_stop_so_para() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static STOPS: AtomicUsize = AtomicUsize::new(0);
+        static DESTROYS: AtomicUsize = AtomicUsize::new(0);
+
+        struct Counting;
+        impl VmBackend for Counting {
+            fn id(&self) -> &'static str {
+                "contador"
+            }
+            fn available(&self) -> bool {
+                true
+            }
+            fn manages_own_storage(&self) -> bool {
+                true
+            }
+            fn auto_selectable(&self) -> bool {
+                false
+            }
+            fn boot(
+                &self,
+                _: &Path,
+                _: &VmConfig,
+                _: &str,
+                _: &dyn Fn(CreateStage),
+            ) -> Result<Boot> {
+                unreachable!()
+            }
+            fn is_running(&self, _: &Vm) -> bool {
+                false
+            }
+            fn ip(&self, _: &Vm) -> Option<String> {
+                None
+            }
+            fn stop(&self, _: &Path, _: &Vm) -> Result<()> {
+                STOPS.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+            fn destroy(&self, _: &Path, _: &Vm) -> Result<()> {
+                DESTROYS.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+        }
+        register_backend(BackendRegistration {
+            id: "contador",
+            aliases: &[],
+            auto_selectable: false,
+            new: Box::new(|| Ok(Box::new(Counting))),
+        })
+        .expect("registar");
+
+        let base = std::env::temp_dir().join(format!(
+            "delonix-stop-destroy-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(vms_dir(&base)).unwrap();
+        let st = store(&base).unwrap();
+        let mut vm = Vm::new(
+            "r".into(),
+            "local-lvm:8".into(),
+            "local-lvm:8".into(),
+            1,
+            "1G".into(),
+            String::new(),
+            String::new(),
+            String::new(),
+            "proxmox:pve:100".into(),
+        );
+        vm.backend = "contador".into();
+        st.save("r", &vm).unwrap();
+
+        stop(&base, "r").expect("stop");
+        assert_eq!(STOPS.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            DESTROYS.load(Ordering::SeqCst),
+            0,
+            "`vm stop` destruiu a VM — o disco de um backend remoto vai com ela"
+        );
+
+        remove(&base, "r").expect("rm");
+        assert_eq!(
+            DESTROYS.load(Ordering::SeqCst),
+            1,
+            "`vm rm` tem de libertar tudo, senao fica um orfao no no"
+        );
+
+        // The local backends must be untouched: `destroy` defaults to `stop`.
+        struct OnlyStop;
+        impl VmBackend for OnlyStop {
+            fn id(&self) -> &'static str {
+                "so-stop"
+            }
+            fn available(&self) -> bool {
+                true
+            }
+            fn boot(
+                &self,
+                _: &Path,
+                _: &VmConfig,
+                _: &str,
+                _: &dyn Fn(CreateStage),
+            ) -> Result<Boot> {
+                unreachable!()
+            }
+            fn is_running(&self, _: &Vm) -> bool {
+                false
+            }
+            fn ip(&self, _: &Vm) -> Option<String> {
+                None
+            }
+            fn stop(&self, _: &Path, _: &Vm) -> Result<()> {
+                STOPS.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+        }
+        let before = STOPS.load(Ordering::SeqCst);
+        OnlyStop.destroy(Path::new("/tmp"), &vm).unwrap();
+        assert_eq!(
+            STOPS.load(Ordering::SeqCst),
+            before + 1,
+            "sem override, destroy TEM de ser stop — e o que mantem os locais iguais"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+        backends().write().unwrap().retain(|b| b.id != "contador");
+    }
+
+    /// A `vm start` on a stopped remote VM must resume the one the record names,
+    /// not build a second. Without `resume`, `boot` asked the node for the next
+    /// free id and the first VM was orphaned with nothing pointing at it — and
+    /// with a fresh empty disk on the new one, so the data was still there and
+    /// unreachable.
+    #[test]
+    fn um_start_retoma_a_vm_do_registo_em_vez_de_criar_outra() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static BOOTS: AtomicUsize = AtomicUsize::new(0);
+        static RESUMES: AtomicUsize = AtomicUsize::new(0);
+
+        struct Resumable;
+        impl VmBackend for Resumable {
+            fn id(&self) -> &'static str {
+                "retomavel"
+            }
+            fn available(&self) -> bool {
+                true
+            }
+            fn manages_own_storage(&self) -> bool {
+                true
+            }
+            fn auto_selectable(&self) -> bool {
+                false
+            }
+            fn boot(
+                &self,
+                _: &Path,
+                _: &VmConfig,
+                _: &str,
+                _: &dyn Fn(CreateStage),
+            ) -> Result<Boot> {
+                BOOTS.fetch_add(1, Ordering::SeqCst);
+                Ok(Boot {
+                    pid: None,
+                    tap: String::new(),
+                    mac: String::new(),
+                    api_socket: "remoto:novo".into(),
+                    ip: None,
+                })
+            }
+            fn resume(&self, _: &Path, vm: &Vm) -> Result<Option<Boot>> {
+                RESUMES.fetch_add(1, Ordering::SeqCst);
+                Ok(Some(Boot {
+                    pid: None,
+                    tap: String::new(),
+                    mac: String::new(),
+                    api_socket: vm.api_socket.clone(),
+                    ip: None,
+                }))
+            }
+            fn is_running(&self, _: &Vm) -> bool {
+                false
+            }
+            fn ip(&self, _: &Vm) -> Option<String> {
+                None
+            }
+            fn stop(&self, _: &Path, _: &Vm) -> Result<()> {
+                Ok(())
+            }
+        }
+        register_backend(BackendRegistration {
+            id: "retomavel",
+            aliases: &[],
+            auto_selectable: false,
+            new: Box::new(|| Ok(Box::new(Resumable))),
+        })
+        .expect("registar");
+
+        let base = std::env::temp_dir().join(format!(
+            "delonix-resume-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(vms_dir(&base)).unwrap();
+        let st = store(&base).unwrap();
+        let mut vm = Vm::new(
+            "s".into(),
+            "local-lvm:8".into(),
+            "local-lvm:8".into(),
+            1,
+            "1G".into(),
+            String::new(),
+            String::new(),
+            String::new(),
+            "remoto:original".into(),
+        );
+        vm.backend = "retomavel".into();
+        vm.status = Status::Stopped;
+        st.save("s", &vm).unwrap();
+
+        let out = start(&base, "s").expect("start");
+        assert_eq!(RESUMES.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            BOOTS.load(Ordering::SeqCst),
+            0,
+            "criou uma VM nova — a antiga fica orfa no no e o registo passa a apontar para a nova"
+        );
+        assert_eq!(
+            out.api_socket, "remoto:original",
+            "o registo tem de continuar a apontar para a MESMA VM"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+        backends().write().unwrap().retain(|b| b.id != "retomavel");
     }
 
     #[test]

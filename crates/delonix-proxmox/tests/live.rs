@@ -26,6 +26,8 @@ fn target() -> Option<Target> {
             password: std::env::var("DELONIX_PROXMOX_TEST_PASS").ok()?,
         },
         insecure_tls: true,
+        bridge: None,
+        vlan: None,
     })
 }
 

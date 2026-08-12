@@ -67,11 +67,21 @@ fn register_proxmox() -> Result<()> {
         .map(|v| matches!(v.trim(), "1" | "true" | "yes"))
         .unwrap_or(false);
 
+    // How this node is cabled, not a property of any VM — which is why it is
+    // configured with the target and not in a manifest. A per-VM `bridge:`
+    // still wins over this default.
+    let bridge = env_nonempty("DELONIX_PROXMOX_BRIDGE");
+    let vlan = env_nonempty("DELONIX_PROXMOX_VLAN")
+        .map(|v| parse_vlan(&v))
+        .transpose()?;
+
     delonix_proxmox::register(delonix_proxmox::Target {
         base_url: url,
         node,
         auth,
         insecure_tls,
+        bridge,
+        vlan,
     })
 }
 
@@ -120,6 +130,24 @@ fn proxmox_auth() -> Result<delonix_proxmox::Auth> {
         )
         .into(),
     ))
+}
+
+/// A VLAN tag, or an error naming the range.
+///
+/// **Out of range is an error, not a `None`.** Dropping it would put the VM on
+/// the untagged network while the operator believes it is isolated on a VLAN —
+/// a silent downgrade of a boundary, which is worse than refusing to start.
+/// 0 and 4095 are reserved by 802.1Q.
+fn parse_vlan(v: &str) -> Result<u16> {
+    v.parse::<u16>()
+        .ok()
+        .filter(|t| (1..=4094).contains(t))
+        .ok_or_else(|| {
+            Error::Invalid(po::tf(
+                "DELONIX_PROXMOX_VLAN: '{v}' is not a VLAN tag (1-4094)",
+                &[("v", v)],
+            ))
+        })
 }
 
 /// An environment variable that is set AND not blank.
