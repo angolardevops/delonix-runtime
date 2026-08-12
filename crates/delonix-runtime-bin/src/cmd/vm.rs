@@ -1174,6 +1174,34 @@ pub fn run(action: VmCmd) -> Result<()> {
             // configure themselves; the seed would be an ISO nothing reads, on
             // a CD-ROM that changes the guest's device list for no reason.
             let appliance = image_meta.as_ref().is_some_and(|m| !m.uses_cloud_init());
+            // Same shape, different reason: a REMOTE backend cannot read a file
+            // from this filesystem at all. A NoCloud seed ISO is exactly that,
+            // so generating one produces a path the node cannot open — and the
+            // engine refuses `seed` for such a backend, which used to make even
+            // a plain `vm create --backend proxmox` fail on a seed nobody
+            // asked for. Proxmox has cloud-init of its own; wiring the keys
+            // through to it is a separate piece of work, and until it exists
+            // saying so beats generating something that cannot arrive.
+            let remote = delonix_vm::backend_manages_own_storage(backend.as_deref());
+            if remote && seed.is_none() {
+                let asked: Vec<&str> = [
+                    (hostname.is_some(), "--hostname"),
+                    (!ssh_keys.is_empty(), "--ssh-key"),
+                    (user_data.is_some(), "--user-data"),
+                ]
+                .iter()
+                .filter(|(given, _)| *given)
+                .map(|(_, flag)| *flag)
+                .collect();
+                if !asked.is_empty() {
+                    return Err(Error::Invalid(super::po::tf(
+                        "{flags}: a cloud-init seed is a file on THIS host and the VM runs on \
+                         another machine, so it could never be read — configure the guest through \
+                         the node's own cloud-init, or use a local backend",
+                        &[("flags", &asked.join(", "))],
+                    )));
+                }
+            }
             if appliance && seed.is_none() {
                 // Refuse rather than drop: silently ignoring an option the
                 // caller passed is the failure this repo names as its worst.
@@ -1205,6 +1233,8 @@ pub fn run(action: VmCmd) -> Result<()> {
             let seed = match seed {
                 Some(s) => Some(s),
                 None if appliance => None,
+                // A file on this host is not reachable from another machine.
+                None if remote => None,
                 None => {
                     let iso = generate_seed_iso(
                         &name,

@@ -104,6 +104,12 @@ pub struct Target {
     /// that stops another machine answering in the node's name, taking the
     /// credential with it. Opt-in, never a fallback after a TLS error.
     pub insecure_tls: bool,
+    /// Default bridge for a VM's NIC. `None` → `vmbr0`, which is what a stock
+    /// install has. A per-VM `VmConfig.bridge` still wins over this.
+    pub bridge: Option<String>,
+    /// VLAN tag for the NIC. Lives here and not in `VmConfig` because it
+    /// describes how THIS node is cabled, not the VM.
+    pub vlan: Option<u16>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -164,13 +170,25 @@ pub struct Client {
     node: String,
     auth: Auth,
     /// Set only for password auth; a token needs no ticket.
-    ticket: Option<Ticket>,
+    ///
+    /// Behind a lock and re-fetchable, because **a Proxmox ticket expires** (2 h)
+    /// and this client is shared for the life of the process: a long-running
+    /// one — `serve`, the management API — would start taking 401s partway
+    /// through the day with nothing to explain it. Irrelevant to the CLI, whose
+    /// process lasts seconds, and irrelevant with an API token, which does not
+    /// expire and is the reason tokens are the preferred form.
+    ticket: std::sync::RwLock<Option<Ticket>>,
+    bridge: String,
+    vlan: Option<u16>,
 }
 
 impl Client {
     pub fn connect(target: &Target) -> Result<Self> {
         validate_target_url(&target.base_url)?;
         validate_node_name(&target.node)?;
+        if let Some(b) = &target.bridge {
+            validate_bridge_name(b)?;
+        }
         let http = reqwest::blocking::Client::builder()
             .connect_timeout(Duration::from_secs(15))
             .timeout(Duration::from_secs(120))
@@ -179,25 +197,16 @@ impl Client {
             .map_err(|e| {
                 Error::Invalid(format!("proxmox: could not build the HTTP client: {e}"))
             })?;
-        let mut me = Self {
+        let me = Self {
             http,
             base: target.base_url.trim_end_matches('/').to_string(),
             node: target.node.clone(),
             auth: target.auth.clone(),
-            ticket: None,
+            ticket: std::sync::RwLock::new(None),
+            bridge: target.bridge.clone().unwrap_or_else(|| "vmbr0".to_string()),
+            vlan: target.vlan,
         };
-        if let Auth::Password { username, password } = &me.auth {
-            let body = me.post_form(
-                "/access/ticket",
-                &[
-                    ("username", username.as_str()),
-                    ("password", password.as_str()),
-                ],
-                false,
-            )?;
-            let t: Wrapped<Ticket> = parse(&body, "/access/ticket")?;
-            me.ticket = Some(t.data);
-        }
+        me.login()?;
         // Prove the credential AND the node name before anything is created:
         // a wrong node fails here, not halfway through a create.
         let nodes: Wrapped<Vec<serde_json::Value>> = parse(&me.get("/nodes")?, "/nodes")?;
@@ -221,8 +230,28 @@ impl Client {
         format!("{}/api2/json{path}", self.base)
     }
 
+    /// Exchanges the account credentials for a ticket. No-op for an API token,
+    /// which needs none.
+    fn login(&self) -> Result<()> {
+        let Auth::Password { username, password } = &self.auth else {
+            return Ok(());
+        };
+        let body = self.post_form(
+            "/access/ticket",
+            &[
+                ("username", username.as_str()),
+                ("password", password.as_str()),
+            ],
+            false,
+        )?;
+        let t: Wrapped<Ticket> = parse(&body, "/access/ticket")?;
+        *self.ticket.write().unwrap_or_else(|e| e.into_inner()) = Some(t.data);
+        Ok(())
+    }
+
     fn authed(&self, rb: reqwest::blocking::RequestBuilder) -> reqwest::blocking::RequestBuilder {
-        match (&self.auth, &self.ticket) {
+        let ticket = self.ticket.read().unwrap_or_else(|e| e.into_inner());
+        match (&self.auth, ticket.as_ref()) {
             (Auth::ApiToken { id, secret }, _) => {
                 rb.header("Authorization", format!("PVEAPIToken={id}={secret}"))
             }
@@ -252,12 +281,39 @@ impl Client {
         Ok(body)
     }
 
+    /// Sends an authenticated request, and **re-authenticates once on a 401**.
+    ///
+    /// A Proxmox ticket lasts about two hours and this client is shared for the
+    /// life of the process. Without this, a long-running one starts taking 401s
+    /// partway through the day — with nothing in the message to suggest that
+    /// logging in again is all it takes.
+    ///
+    /// Once, and only for password auth: an API token that gets a 401 was
+    /// revoked or is wrong, and retrying it forever against a node that keeps
+    /// saying no is how a credential ends up locked out. `build` re-creates the
+    /// request because a `RequestBuilder` is consumed by `send`.
+    fn send_authed(&self, build: impl Fn() -> reqwest::blocking::RequestBuilder) -> Result<String> {
+        match self.send(build(), true) {
+            Err(e) if matches!(self.auth, Auth::Password { .. }) && is_unauthorized(&e) => {
+                tracing::debug!("proxmox: ticket rejected, logging in again");
+                self.login()?;
+                self.send(build(), true)
+            }
+            other => other,
+        }
+    }
+
     fn get(&self, path: &str) -> Result<String> {
-        self.send(self.http.get(self.url(path)), true)
+        let url = self.url(path);
+        self.send_authed(|| self.http.get(&url))
     }
 
     fn post_form(&self, path: &str, form: &[(&str, &str)], authed: bool) -> Result<String> {
-        self.send(self.http.post(self.url(path)).form(form), authed)
+        let url = self.url(path);
+        if !authed {
+            return self.send(self.http.post(&url).form(form), false);
+        }
+        self.send_authed(|| self.http.post(&url).form(form))
     }
 
     /// The next free VM id on the CLUSTER.
@@ -296,38 +352,73 @@ impl Client {
         let cores = cfg.vcpus.max(1).to_string();
         let scsi0 = format!("{storage}:{gib}");
         let vmid_s = vmid.to_string();
-        let body = self.post_form(
-            &format!("/nodes/{}/qemu", self.node),
-            &[
-                ("vmid", vmid_s.as_str()),
-                ("name", name),
-                ("memory", mem.as_str()),
-                ("cores", cores.as_str()),
-                ("ostype", "l26"),
-                ("scsihw", "virtio-scsi-single"),
-                ("scsi0", scsi0.as_str()),
-                // A NIC on the node's default bridge. `virtio` alone is the
-                // model — the value goes in the property's default key, and
-                // spelling that key out (`model=virtio`) is what the API
-                // refuses. The ADR recorded this shape as refused too; that was
-                // an artefact of the spike's `curl -d`, which does not
-                // URL-encode. `reqwest`'s `.form()` does, and the node accepts
-                // it: measured, `net0 = virtio=BC:24:11:F4:F9:9C,bridge=vmbr0`
-                // in the resulting config.
-                ("net0", "virtio,bridge=vmbr0"),
-                // Enable the QEMU guest agent CHANNEL. This is the host side
-                // only: it adds the virtio-serial port the agent talks over,
-                // and without it the node will not even try — every
-                // `/agent/...` call answers "QEMU guest agent is not running"
-                // no matter what the guest has installed. Whether an agent
-                // answers on the other end is the image's business, which is
-                // exactly why `ip()` treats silence as "unknown" and not as an
-                // error (see `parse_agent_ip`).
-                ("agent", "1"),
-            ],
-            true,
-        )?;
+        let net0 = self.net0_arg(cfg);
+        // `ip=dhcp` unless an address was asked for. Proxmox's own cloud-init
+        // writes this into the guest, which is why `static_ip` is one of the
+        // few `VmConfig` fields this backend CAN honour — the local backends
+        // reach the same end through a NoCloud seed ISO, which is a file on
+        // this host and therefore meaningless on a node elsewhere.
+        let ipconfig0 = match &cfg.static_ip {
+            Some(ip) => format!("ip={ip}"),
+            None => "ip=dhcp".to_string(),
+        };
+        let mut form: Vec<(&str, &str)> = vec![
+            ("vmid", vmid_s.as_str()),
+            ("name", name),
+            ("memory", mem.as_str()),
+            ("cores", cores.as_str()),
+            ("ostype", "l26"),
+            ("scsihw", "virtio-scsi-single"),
+            ("scsi0", scsi0.as_str()),
+            // A NIC on a bridge of the node. `virtio` alone is the model —
+            // the value goes in the property's default key, and spelling
+            // that key out (`model=virtio`) is what the API refuses. The
+            // ADR recorded this shape as refused too; that was an artefact
+            // of the spike's `curl -d`, which does not URL-encode.
+            // `reqwest`'s `.form()` does, and the node accepts it:
+            // measured, `net0 = virtio=BC:24:11:F4:F9:9C,bridge=vmbr0`.
+            ("net0", net0.as_str()),
+            ("ipconfig0", ipconfig0.as_str()),
+            // Enable the QEMU guest agent CHANNEL. This is the host side
+            // only: it adds the virtio-serial port the agent talks over,
+            // and without it the node will not even try — every
+            // `/agent/...` call answers "QEMU guest agent is not running"
+            // no matter what the guest has installed. Whether an agent
+            // answers on the other end is the image's business, which is
+            // exactly why `ip()` treats silence as "unknown" and not as an
+            // error (see `parse_agent_ip`).
+            ("agent", "1"),
+        ];
+        // The cloud-init drive, and only when there is something to put in it:
+        // an empty one on an image with no cloud-init is a CD-ROM the guest
+        // ignores, but it also silently costs a disk on the node's storage.
+        let ide2 = format!("{storage}:cloudinit");
+        if cfg.static_ip.is_some() {
+            form.push(("ide2", ide2.as_str()));
+        }
+        let body = self.post_form(&format!("/nodes/{}/qemu", self.node), &form, true)?;
         self.wait_upid(&body, "create")
+    }
+
+    /// The `net0` property: model, bridge and optional VLAN tag.
+    ///
+    /// The bridge was hardcoded to `vmbr0`. That is the right DEFAULT — it is
+    /// what a stock Proxmox install has — but a node with more than one bridge
+    /// had no way to say so, and `VmConfig` already carries a `bridge` field
+    /// that every other backend honours. The VLAN comes from the target
+    /// (`DELONIX_PROXMOX_VLAN`) rather than from `VmConfig`, which has no field
+    /// for one: it is a property of how this node is cabled, not of the VM.
+    fn net0_arg(&self, cfg: &VmConfig) -> String {
+        let bridge = cfg
+            .bridge
+            .as_deref()
+            .map(str::trim)
+            .filter(|b| !b.is_empty())
+            .unwrap_or(&self.bridge);
+        match self.vlan {
+            Some(tag) => format!("virtio,bridge={bridge},tag={tag}"),
+            None => format!("virtio,bridge={bridge}"),
+        }
     }
 
     /// Clones a template into a new VM.
@@ -377,6 +468,47 @@ impl Client {
             true,
         )?;
         self.wait_upid(&body, "stop")
+    }
+
+    pub fn snapshot(&self, vmid: u32, name: &str) -> Result<()> {
+        let body = self.post_form(
+            &format!("/nodes/{}/qemu/{vmid}/snapshot", self.node),
+            // `vmstate=1`: include RAM, so a snapshot of a RUNNING VM is a
+            // system checkpoint and not just a disk image at an arbitrary
+            // instant. It is what the libvirt backend's `snapshot-create-as`
+            // gives here, and `restore` returning a guest to a half-written
+            // filesystem instead of to a running state would be the same verb
+            // meaning two things.
+            &[("snapname", name), ("vmstate", "1")],
+            true,
+        )?;
+        self.wait_upid(&body, "snapshot")
+    }
+
+    pub fn rollback(&self, vmid: u32, name: &str) -> Result<()> {
+        let body = self.post_form(
+            &format!("/nodes/{}/qemu/{vmid}/snapshot/{name}/rollback", self.node),
+            &[],
+            true,
+        )?;
+        self.wait_upid(&body, "rollback")
+    }
+
+    /// The VM's snapshot names.
+    ///
+    /// **`current` is filtered out**, and it is not cosmetic: the API includes
+    /// a pseudo-entry by that name meaning "the live state, i.e. no snapshot".
+    /// Listing it would report a snapshot nobody took — and `vm restore
+    /// <name> current` would then look like a supported thing to do.
+    pub fn snapshots(&self, vmid: u32) -> Result<Vec<String>> {
+        let body = self.get(&format!("/nodes/{}/qemu/{vmid}/snapshot", self.node))?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "snapshots")?;
+        Ok(w.data
+            .iter()
+            .filter_map(|s| s.get("name").and_then(|n| n.as_str()))
+            .filter(|n| *n != "current")
+            .map(str::to_string)
+            .collect())
     }
 
     pub fn destroy(&self, vmid: u32) -> Result<()> {
@@ -520,6 +652,33 @@ pub fn validate_target_url(url: &str) -> Result<()> {
     Ok(())
 }
 
+/// Does this error carry the node's 401?
+///
+/// Matched on the rendered message because that is where `send` puts the
+/// status, and the alternative — a typed status on `Error` — would mean a new
+/// variant in `delonix-runtime-core` for one caller. `401` on its own would be
+/// too loose (a body can contain any number); the prefix `send` writes is not.
+fn is_unauthorized(e: &Error) -> bool {
+    e.to_string().contains("returned HTTP 401")
+}
+
+/// A bridge name is interpolated into the `net0` property.
+pub fn validate_bridge_name(bridge: &str) -> Result<()> {
+    let ok = !bridge.is_empty()
+        && bridge.len() <= 15 // IFNAMSIZ - 1
+        && bridge
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+        && !bridge.starts_with('-');
+    if ok {
+        Ok(())
+    } else {
+        Err(Error::Invalid(format!(
+            "invalid Proxmox bridge name '{bridge}': expected something like 'vmbr0'"
+        )))
+    }
+}
+
 /// A node name goes into a URL path on every single call. Restricted to what
 /// Proxmox itself accepts in a node name, which is also what keeps it from
 /// escaping the path.
@@ -636,6 +795,88 @@ fn parse_agent_ip(v: &serde_json::Value) -> Option<String> {
     None
 }
 
+/// A snapshot name goes into a URL path and into `qm`'s own namespace.
+fn validate_snapshot_name(name: &str) -> Result<()> {
+    let ok = !name.is_empty()
+        && name.len() <= 40
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        && !name.starts_with('-')
+        // The API's pseudo-entry for "the live state". Accepting it would let
+        // `vm restore <vm> current` look like a supported operation.
+        && name != "current";
+    if ok {
+        Ok(())
+    } else {
+        Err(Error::Invalid(format!(
+            "invalid Proxmox snapshot name '{name}': expected letters, digits, '-' and '_' \
+             (and not 'current', which the API uses for the live state)"
+        )))
+    }
+}
+
+/// Everything in [`VmConfig`] that this backend cannot honour, refused by NAME.
+///
+/// The ADR calls accepting and dropping these "the failure mode this repo
+/// treats as its worst", and until now that is exactly what happened: a
+/// `--hugepages`, a `-v /data:/data` or an `--ssh-key` went into a
+/// `--backend proxmox` create, the command reported success, and the VM simply
+/// did not have it. There is no way for a user to notice from the outside.
+///
+/// Grouped by WHY, because the reasons are not the same and a user hitting one
+/// of them wants to know which:
+///
+/// * **the guest is on another machine** — a local kernel/initrd/firmware, a
+///   local NoCloud seed ISO, a host device or a 9p share are all paths on THIS
+///   filesystem, and nothing on the node can reach them;
+/// * **QEMU knobs Proxmox owns itself** — hugepages and CPU pinning are the
+///   node's business, configured on the node;
+/// * **libvirt-only escape hatches** — there is no domain XML here at all.
+///
+/// Deliberately NOT refused, because they are honoured: `name`, `disk`,
+/// `vcpus`, `memory`, `bridge`, `static_ip`, `namespace` (unused but harmless:
+/// `vm_namespace_supported` already refuses a non-default one upstream, where
+/// the reason can be explained properly).
+fn refuse_unsupported(cfg: &VmConfig) -> Result<()> {
+    let mut bad: Vec<&str> = Vec::new();
+    let mut add = |present: bool, field: &'static str| {
+        if present {
+            bad.push(field);
+        }
+    };
+    add(cfg.kernel.is_some(), "kernel");
+    add(cfg.initrd.is_some(), "initrd");
+    add(cfg.firmware.is_some(), "firmware");
+    add(cfg.cmdline.is_some(), "cmdline");
+    add(cfg.seed.is_some(), "seed");
+    add(cfg.hugepages, "hugepages");
+    add(cfg.cpu_affinity.is_some(), "cpuAffinity");
+    add(!cfg.devices.is_empty(), "devices");
+    add(!cfg.volumes.is_empty(), "volumes");
+    add(cfg.vnc, "vnc");
+    add(cfg.machine.is_some(), "machine");
+    add(cfg.cpu_model.is_some(), "cpuModel");
+    add(cfg.cpu_topology.is_some(), "cpuTopology");
+    add(cfg.tpm, "tpm");
+    add(cfg.video.is_some(), "video");
+    add(!cfg.boot_order.is_empty(), "bootOrder");
+    add(!cfg.extra_disks.is_empty(), "extraDisks");
+    add(!cfg.extra_nics.is_empty(), "extraNics");
+    add(!cfg.libvirt_xml_overlay.is_empty(), "libvirtXmlOverlay");
+    add(cfg.libvirt_xml.is_some(), "libvirtXml");
+    add(cfg.net_mode.is_some(), "netMode");
+    if bad.is_empty() {
+        return Ok(());
+    }
+    Err(Error::Invalid(format!(
+        "the 'proxmox' backend cannot honour: {}. A VM on a remote node has no access to this \
+         host's kernel/initrd/seed/devices/9p paths, its QEMU tuning (hugepages, CPU pinning, \
+         machine type, TPM, video, boot order) is the node's own configuration, and there is no \
+         libvirt domain XML here at all. Remove the field, or use a local backend \
+         (`--backend libvirt`)",
+        bad.join(", ")
+    )))
+}
+
 /// The vmid out of the handle `boot` stored (`proxmox:<node>:<vmid>`). Pure, so
 /// the "not ours" case is testable without a node.
 fn vmid_from_handle(handle: &str) -> Option<u32> {
@@ -725,6 +966,12 @@ impl VmBackend for ProxmoxBackend {
         disk: &str,
         on: &dyn Fn(CreateStage),
     ) -> Result<Boot> {
+        // BEFORE anything is created on the node: a field this backend cannot
+        // honour is refused by name, never accepted and dropped. The ADR calls
+        // that "the failure mode this repo treats as its worst", and it was
+        // exactly what happened — a `-v /data:/data` or a `--hugepages` went
+        // in, the command said it worked, and the VM did not have it.
+        refuse_unsupported(cfg)?;
         let vmid = self.client.next_vmid()?;
         on(CreateStage::Define);
         match parse_disk_spec(disk)? {
@@ -806,12 +1053,78 @@ impl VmBackend for ProxmoxBackend {
     /// left `stopped` on a Proxmox node after `delonix vm rm` would be an
     /// orphan nobody is looking for. The order matters — a running VM cannot be
     /// destroyed, and asking anyway gets a task failure that reads like a bug.
+    /// Powers the VM off. **The disk stays**, and the VM stays defined on the
+    /// node.
+    ///
+    /// This used to stop AND destroy, on the reasoning that a VM left behind
+    /// after `delonix vm rm` is an orphan. The reasoning was right and it was
+    /// wired to the wrong verb: the engine calls `stop` for `vm stop` too, and
+    /// there the disk is meant to survive — the CLI's own next-steps block says
+    /// `stop it (keeps the disk)`. On a local backend the two coincide because
+    /// the disk is the engine's file; here the node owns it, so destroying the
+    /// VM destroyed the guest's data on a plain `vm stop`. Freeing everything
+    /// is now [`Self::destroy`], which is what `vm rm` calls.
     fn stop(&self, _vmdir: &Path, vm: &Vm) -> Result<()> {
         let vmid = self.vmid_of(vm)?;
         if self.is_running(vm) {
             self.client.stop(vmid)?;
         }
+        Ok(())
+    }
+
+    /// Powers off AND removes the VM from the node — the record is going away,
+    /// so nothing may be left behind for nobody to find.
+    ///
+    /// The order matters: a running VM cannot be destroyed, and asking anyway
+    /// gets a task failure that reads like a bug.
+    fn destroy(&self, vmdir: &Path, vm: &Vm) -> Result<()> {
+        let vmid = self.vmid_of(vm)?;
+        self.stop(vmdir, vm)?;
         self.client.destroy(vmid)
+    }
+
+    /// Starts the VM this record already names, instead of creating another.
+    ///
+    /// Without this, `vm start` on a stopped Proxmox VM went through `boot`,
+    /// which asks the node for the next free id: a SECOND VM, with a fresh
+    /// empty disk, and the first one orphaned on the node with the record
+    /// rewritten to point at the new one. The data was still there and nothing
+    /// could find it.
+    ///
+    /// `Ok(None)` when the node no longer has that vmid — the VM was removed
+    /// outside this engine, and creating one is then the honest answer.
+    fn resume(&self, _vmdir: &Path, vm: &Vm) -> Result<Option<Boot>> {
+        let Ok(vmid) = self.vmid_of(vm) else {
+            // No handle: not created by this backend. Let the caller create.
+            return Ok(None);
+        };
+        if self.client.config(vmid).is_err() {
+            return Ok(None);
+        }
+        self.client.start(vmid)?;
+        Ok(Some(Boot {
+            pid: None,
+            tap: String::new(),
+            mac: String::new(),
+            api_socket: vm.api_socket.clone(),
+            ip: None,
+        }))
+    }
+
+    fn snapshot(&self, _vmdir: &Path, vm: &Vm, name: &str) -> Result<()> {
+        let vmid = self.vmid_of(vm)?;
+        validate_snapshot_name(name)?;
+        self.client.snapshot(vmid, name)
+    }
+
+    fn restore(&self, _vmdir: &Path, vm: &Vm, name: &str) -> Result<()> {
+        let vmid = self.vmid_of(vm)?;
+        validate_snapshot_name(name)?;
+        self.client.rollback(vmid, name)
+    }
+
+    fn snapshots(&self, vm: &Vm) -> Result<Vec<String>> {
+        self.client.snapshots(self.vmid_of(vm)?)
     }
 }
 
@@ -1128,6 +1441,200 @@ mod tests {
         assert_eq!(parse_agent_ip(&j(r#"[]"#)), None);
         // A result whose entries are not objects.
         assert_eq!(parse_agent_ip(&j(r#"{"data":{"result":[1,2,"x"]}}"#)), None);
+    }
+
+    /// The ADR calls accepting-and-dropping "the failure mode this repo treats
+    /// as its worst", and until this pass it was exactly what happened: a
+    /// `-v /data:/data` on a `--backend proxmox` create reported success and
+    /// the VM did not have the volume. Nothing outside could tell.
+    #[test]
+    fn um_campo_que_este_backend_nao_honra_e_recusado_pelo_nome() {
+        let base = VmConfig {
+            name: "v".into(),
+            disk: "local-lvm:8".into(),
+            memory: "1G".into(),
+            ..Default::default()
+        };
+        // The plain case must stay accepted, or the refusal is useless.
+        assert!(refuse_unsupported(&base).is_ok());
+        // And so must the fields this backend DOES honour.
+        assert!(refuse_unsupported(&VmConfig {
+            bridge: Some("vmbr1".into()),
+            static_ip: Some("10.0.0.5/24".into()),
+            vcpus: 4,
+            ..base.clone()
+        })
+        .is_ok());
+
+        // Each of these used to be swallowed. The message must NAME the field:
+        // "unsupported configuration" sends someone reading the whole manifest.
+        let cases: Vec<(&str, VmConfig)> = vec![
+            (
+                "volumes",
+                VmConfig {
+                    volumes: vec![delonix_vm::VmVolume {
+                        source: "/data".into(),
+                        tag: "data".into(),
+                        mount_path: "/data".into(),
+                        read_only: false,
+                    }],
+                    ..base.clone()
+                },
+            ),
+            (
+                "hugepages",
+                VmConfig {
+                    hugepages: true,
+                    ..base.clone()
+                },
+            ),
+            (
+                "kernel",
+                VmConfig {
+                    kernel: Some("/boot/vmlinuz".into()),
+                    ..base.clone()
+                },
+            ),
+            (
+                "seed",
+                VmConfig {
+                    seed: Some("/x/seed.iso".into()),
+                    ..base.clone()
+                },
+            ),
+            (
+                "devices",
+                VmConfig {
+                    devices: vec!["/dev/kvm".into()],
+                    ..base.clone()
+                },
+            ),
+            (
+                "libvirtXml",
+                VmConfig {
+                    libvirt_xml: Some("<domain/>".into()),
+                    ..base.clone()
+                },
+            ),
+            (
+                "vnc",
+                VmConfig {
+                    vnc: true,
+                    ..base.clone()
+                },
+            ),
+        ];
+        for (field, cfg) in cases {
+            let e = match refuse_unsupported(&cfg) {
+                Ok(()) => panic!("'{field}' foi aceite e descartado em silencio"),
+                Err(e) => e.to_string(),
+            };
+            assert!(e.contains(field), "a recusa tem de nomear '{field}': {e}");
+            assert!(
+                e.contains("libvirt"),
+                "e tem de dizer o que fazer em vez disso: {e}"
+            );
+        }
+
+        // Several at once are reported TOGETHER: fixing them one error at a
+        // time is a create attempt per field.
+        let e = refuse_unsupported(&VmConfig {
+            hugepages: true,
+            vnc: true,
+            tpm: true,
+            ..base
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(
+            e.contains("hugepages") && e.contains("vnc") && e.contains("tpm"),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn a_bridge_e_a_vlan_entram_no_net0() {
+        let cli = |bridge: Option<&str>, vlan| Client {
+            http: reqwest::blocking::Client::new(),
+            base: "https://x".into(),
+            node: "pve".into(),
+            auth: Auth::ApiToken {
+                id: "a!b".into(),
+                secret: "c".into(),
+            },
+            ticket: std::sync::RwLock::new(None),
+            bridge: bridge.unwrap_or("vmbr0").to_string(),
+            vlan,
+        };
+        let cfg = VmConfig::default();
+        assert_eq!(cli(None, None).net0_arg(&cfg), "virtio,bridge=vmbr0");
+        assert_eq!(
+            cli(Some("vmbr9"), None).net0_arg(&cfg),
+            "virtio,bridge=vmbr9",
+            "o default do alvo"
+        );
+        assert_eq!(
+            cli(None, Some(42)).net0_arg(&cfg),
+            "virtio,bridge=vmbr0,tag=42"
+        );
+        // A per-VM bridge beats the target's default.
+        let per_vm = VmConfig {
+            bridge: Some("vmbr7".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            cli(Some("vmbr9"), None).net0_arg(&per_vm),
+            "virtio,bridge=vmbr7"
+        );
+        // Blank is "no opinion", not a bridge named "".
+        let blank = VmConfig {
+            bridge: Some("  ".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            cli(Some("vmbr9"), None).net0_arg(&blank),
+            "virtio,bridge=vmbr9"
+        );
+    }
+
+    #[test]
+    fn nomes_que_entram_num_path_ou_numa_propriedade_sao_validados() {
+        for bad in [
+            "",
+            "a b",
+            "a/b",
+            "-vmbr0",
+            "vmbr0;reboot",
+            "x".repeat(16).as_str(),
+        ] {
+            assert!(validate_bridge_name(bad).is_err(), "{bad:?}");
+        }
+        assert!(validate_bridge_name("vmbr0").is_ok());
+        assert!(validate_bridge_name("vmbr0.100").is_ok());
+
+        for bad in ["", "a b", "a/b", "-s", "s;x", "current"] {
+            assert!(validate_snapshot_name(bad).is_err(), "{bad:?}");
+        }
+        assert!(validate_snapshot_name("antes-do-upgrade_1").is_ok());
+    }
+
+    /// A 401 has to be told apart from every other failure, because only that
+    /// one is worth logging in again for — and only for password auth. An API
+    /// token that gets a 401 was revoked, and retrying it forever is how a
+    /// credential ends up locked out.
+    #[test]
+    fn so_um_401_dispara_nova_autenticacao() {
+        let err = |s: &str| Error::Invalid(s.to_string());
+        assert!(is_unauthorized(&err(
+            "proxmox: https://pve returned HTTP 401 Unauthorized: bad ticket"
+        )));
+        assert!(!is_unauthorized(&err(
+            "proxmox: https://pve returned HTTP 500: QEMU guest agent is not running"
+        )));
+        // A body that merely mentions the number is not a 401.
+        assert!(!is_unauthorized(&err(
+            "proxmox: https://pve returned HTTP 500: disk 401 is missing"
+        )));
     }
 
     #[test]

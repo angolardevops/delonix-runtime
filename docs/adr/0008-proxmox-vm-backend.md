@@ -413,11 +413,72 @@ URL-encode. `reqwest`'s `.form()` does, and the node accepts the same string —
 measured, the resulting config reads `net0 = virtio=BC:24:11:F4:F9:9C,bridge=vmbr0`.
 The backend had been sending it correctly all along; only the ADR was wrong.
 
+### Closing the rest (2026-08-12)
+
+The list above was the open one; this closes it. Two of the items turned out to
+be data-loss bugs rather than gaps.
+
+**`vm stop` was destroying the guest's disk.** `stop` and `destroy` are the same
+operation on a local backend — libvirt undefines the domain and
+`<root>/vms/<name>.qcow2`, which the *engine* owns, is untouched — and they are
+not the same remotely, where the only call that frees the VM also frees its
+disk. This backend implemented `stop` as "stop and destroy" for a good reason (a
+VM left behind after `vm rm` is an orphan) wired to the wrong verb: the engine
+calls `stop` for `vm stop` too, and the CLI's own next-steps block promises
+`stop it (keeps the disk)`. `VmBackend::destroy` is new, defaults to `stop` so
+both local backends are byte-for-byte unchanged, and `remove_inner` calls it.
+
+**`vm start` on a stopped remote VM built a second one.** `boot` asks the node
+for the next free id, so the record was rewritten to a fresh VM with an empty
+disk and the original was orphaned — data still on the node, nothing pointing at
+it. `VmBackend::resume` is new, defaults to `Ok(None)` (both local backends'
+`boot` is already idempotent through the per-VM overlay), and the Proxmox one
+starts the vmid its record names, answering `None` only when the node no longer
+has it.
+
+**Fields are refused by name.** `refuse_unsupported` runs before anything is
+created and names every field this backend cannot honour, grouped by why: the
+guest is on another machine (`kernel`, `initrd`, `firmware`, `cmdline`, `seed`,
+`devices`, `volumes`), Proxmox owns the QEMU knobs itself (`hugepages`,
+`cpuAffinity`, `machine`, `cpuModel`, `cpuTopology`, `tpm`, `video`,
+`bootOrder`), or there is no domain XML here at all (`libvirtXml*`). Several are
+reported together — fixing them one error at a time is one create attempt per
+field.
+
+This immediately caught a real case: **the CLI generates a NoCloud seed ISO
+unconditionally**, which is a file on this host and unreadable from a node
+elsewhere, so a plain `vm create --backend proxmox` failed on a seed nobody
+asked for. The CLI now skips it for a backend that owns its storage
+(`delonix_vm::backend_manages_own_storage`) and refuses `--hostname`/`--ssh-key`/
+`--user-data` there with the reason — the same shape the appliance-image refusal
+right above it already uses.
+
+**Snapshots** are implemented (`snapshot`/`restore`/`snapshots`), with
+`vmstate=1` so a snapshot of a running VM is a system checkpoint like the
+libvirt backend's, and with the API's pseudo-entry `current` filtered out of the
+listing *and* refused as a name — otherwise `vm restore <vm> current` would look
+like a supported thing to do.
+
+**Networking** takes a bridge (`VmConfig.bridge`, falling back to the target's,
+falling back to `vmbr0`) and a VLAN tag from the target. The tag lives with the
+target because it describes how the node is cabled, not the VM; an out-of-range
+value is an **error**, never a `None`, because dropping it would put the VM on
+the untagged network while the operator believes it is isolated.
+
+**The ticket expires** (2 h) and this client is shared for the life of the
+process, so `send_authed` re-authenticates once on a 401 — only for password
+auth, since an API token that gets a 401 was revoked and retrying it forever is
+how a credential gets locked out.
+
+Watched running through the CLI against the real node: `create` → `stop` (vmid
+100 **still on the node**) → `start` (same handle, no second VM) → `snapshot` →
+`snapshots` → `restore` → `rm` (node empty). Each of the three bug fixes was
+reverted one at a time and its test fails.
+
 ### Still open, deliberately
 
-Snapshots use the trait's fail-closed default, though the API supports them and
-the spike exercised one. Networking beyond a NIC on the node's default bridge is
-not configurable: no VLAN tag, no second NIC, no static address.
+A second NIC, and an address from an agent (see above — the parser runs against
+recorded answers).
 
 ## Phase 2, done (2026-08-11)
 
