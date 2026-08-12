@@ -21,45 +21,13 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use delonix_net::infra;
-use delonix_runtime_core::{Error, JsonStore, Result, Status, Vm};
+use delonix_runtime_core::{Error, JsonStore, Result, Status, Vm, VmBootSpec};
 
-/// CPU topology (`<cpu><topology sockets cores threads/></cpu>`).
-#[derive(Debug, Clone, Default)]
-pub struct CpuTopology {
-    pub sockets: u32,
-    pub cores: u32,
-    pub threads: u32,
-}
-
-/// An extra disk attached to the VM (beyond the main overlay + cloud-init seed).
-#[derive(Debug, Clone)]
-pub struct ExtraDisk {
-    /// Host path of the disk image.
-    pub source: String,
-    /// `"disk"` (default) or `"cdrom"`.
-    pub device: String,
-    /// Bus: `"virtio"` (default), `"sata"`, `"scsi"`, `"ide"`.
-    pub bus: String,
-    /// Image format: `"qcow2"` (default) or `"raw"`.
-    pub format: String,
-    /// Mount read-only.
-    pub read_only: bool,
-    /// Explicit target dev (e.g. `"vdb"`); auto-assigned when `None`.
-    pub target: Option<String>,
-}
-
-/// An extra network interface (beyond the primary one derived from `net_mode`).
-#[derive(Debug, Clone)]
-pub struct ExtraNic {
-    /// `"network"` (libvirt network), `"bridge"` (host bridge) or `"user"`.
-    pub kind: String,
-    /// Network/bridge name (for `network`/`bridge`).
-    pub source: Option<String>,
-    /// NIC model: `"virtio"` (default), `"e1000"`, `"rtl8139"`, …
-    pub model: String,
-    /// Fixed MAC (auto/random when `None`).
-    pub mac: Option<String>,
-}
+/// The VM shapes that [`Vm`] persists. They are DEFINED in
+/// `delonix-runtime-core` — the record lives there and the dependency cannot
+/// run the other way — and re-exported here so `delonix_vm::CpuTopology` and
+/// friends keep resolving for every existing caller.
+pub use delonix_runtime_core::{CpuTopology, ExtraDisk, ExtraNic, VmVolume};
 
 /// Configuration to boot a microVM (flat fields, independent of the
 /// `orchestrator` — the CLI translates the `VmSpec` into this).
@@ -162,22 +130,11 @@ pub struct VmConfig {
     pub libvirt_xml: Option<String>,
 }
 
-/// A host directory shared into the VM via virtio-9p. This is what
-/// connects `kind: Volume`/`kind: Storage` to a VM without the user writing
-/// cloud-init or XML: the bin resolves the name → `source` (the volume's `_data`, or the
-/// mountpoint of a network Storage), and the engine generates the domain's `<filesystem>`
-/// **and** the `mount` in the guest (via cloud-init) from these flat fields.
-#[derive(Debug, Clone)]
-pub struct VmVolume {
-    /// 9p tag (short, unique in the VM) — the guest mounts by this tag.
-    pub tag: String,
-    /// Directory ON THE HOST to share (resolved by the bin).
-    pub source: String,
-    /// Mount point INSIDE the guest (e.g. `/mnt/dados`).
-    pub mount_path: String,
-    /// Mount read-only.
-    pub read_only: bool,
-}
+// `VmVolume` — what connects `kind: Volume`/`kind: Storage` to a VM without the
+// user writing cloud-init or XML: the bin resolves the name → `source` (the
+// volume's `_data`, or a network Storage's mountpoint) and the engine generates
+// both the domain's `<filesystem>` and the guest-side `mount`. Defined in
+// `delonix-runtime-core` with the other persisted shapes; re-exported above.
 
 // ===========================================================================
 // Shared helpers
@@ -2322,6 +2279,7 @@ pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Res
     vm.ip = boot.ip;
     vm.backend = backend.id().to_string();
     vm.devices = cfg.devices.clone();
+    vm.boot = boot_spec_of(cfg);
     vm.started_unix = Some(
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -2704,7 +2662,87 @@ pub fn snapshots(base: &Path, name: &str) -> Result<Vec<String>> {
 /// cloud-init seed, 9p volumes, static IP, VNC, and the advanced libvirt
 /// knobs (machine/CPU model/topology/TPM/video/boot order/extra disks or
 /// NICs/raw XML) — are lost once `create` returns, so they are NOT restored.
+/// The half of a [`VmConfig`] that the flat [`Vm`] fields do NOT already carry,
+/// ready to persist.
+///
+/// **Destructures `VmConfig` exhaustively on purpose.** Adding a field to
+/// `VmConfig` breaks the build right here, which forces whoever adds it to
+/// decide whether it has to survive a `vm start` — instead of it being
+/// forgotten in silence, which is precisely how the record came to persist ten
+/// fields out of thirty. Same discipline as the exhaustive `match` in
+/// `cmd::exitcode::for_error`: the compiler asks the question so a human does
+/// not have to remember to.
+fn boot_spec_of(cfg: &VmConfig) -> VmBootSpec {
+    let VmConfig {
+        // Already carried by a flat `Vm` field, or derived at boot time — the
+        // record round-trips these without help (see `config_from`).
+        name: _,
+        disk: _,
+        vcpus: _,
+        memory: _,
+        network: _,
+        namespace: _,
+        restart_policy: _,
+        devices: _,
+        backend: _,
+        net_mode: _,
+        // Everything below used to exist only for the duration of `vm create`.
+        kernel,
+        initrd,
+        firmware,
+        cmdline,
+        seed,
+        hugepages,
+        cpu_affinity,
+        bridge,
+        volumes,
+        vnc,
+        static_ip,
+        machine,
+        cpu_model,
+        cpu_topology,
+        tpm,
+        video,
+        boot_order,
+        extra_disks,
+        extra_nics,
+        libvirt_xml_overlay,
+        libvirt_xml,
+    } = cfg;
+    VmBootSpec {
+        kernel: kernel.clone(),
+        initrd: initrd.clone(),
+        firmware: firmware.clone(),
+        cmdline: cmdline.clone(),
+        seed: seed.clone(),
+        hugepages: *hugepages,
+        cpu_affinity: cpu_affinity.clone(),
+        bridge: bridge.clone(),
+        volumes: volumes.clone(),
+        vnc: *vnc,
+        static_ip: static_ip.clone(),
+        machine: machine.clone(),
+        cpu_model: cpu_model.clone(),
+        cpu_topology: cpu_topology.clone(),
+        tpm: *tpm,
+        video: video.clone(),
+        boot_order: boot_order.clone(),
+        extra_disks: extra_disks.clone(),
+        extra_nics: extra_nics.clone(),
+        libvirt_xml_overlay: libvirt_xml_overlay.clone(),
+        libvirt_xml: libvirt_xml.clone(),
+    }
+}
+
+/// Rebuilds the `VmConfig` of an existing VM from its record — what
+/// `start`/`restart` reboot with.
+///
+/// Written WITHOUT `..Default::default()` for the same reason `boot_spec_of`
+/// destructures: the fallback was how twenty-one fields quietly became
+/// defaults on every restart. Spelling every field out means a new one cannot
+/// be silently dropped here either.
 fn config_from(vm: &Vm) -> VmConfig {
+    let b = &vm.boot;
     VmConfig {
         name: vm.name.clone(),
         disk: vm.disk.clone(),
@@ -2715,18 +2753,47 @@ fn config_from(vm: &Vm) -> VmConfig {
         restart_policy: vm.restart_policy.clone(),
         devices: vm.devices.clone(),
         backend: Some(vm.backend.clone()),
+        // For libvirt, `Vm.tap` is not a real tap: `LibvirtBackend::boot` stores
+        // the net mode string there. For Cloud Hypervisor it IS a device name
+        // and must not be misread as one.
         net_mode: (vm.backend == "libvirt").then(|| vm.tap.clone()),
-        ..Default::default()
+        kernel: b.kernel.clone(),
+        initrd: b.initrd.clone(),
+        firmware: b.firmware.clone(),
+        cmdline: b.cmdline.clone(),
+        seed: b.seed.clone(),
+        hugepages: b.hugepages,
+        cpu_affinity: b.cpu_affinity.clone(),
+        bridge: b.bridge.clone(),
+        volumes: b.volumes.clone(),
+        vnc: b.vnc,
+        static_ip: b.static_ip.clone(),
+        machine: b.machine.clone(),
+        cpu_model: b.cpu_model.clone(),
+        cpu_topology: b.cpu_topology.clone(),
+        tpm: b.tpm,
+        video: b.video.clone(),
+        boot_order: b.boot_order.clone(),
+        extra_disks: b.extra_disks.clone(),
+        extra_nics: b.extra_nics.clone(),
+        libvirt_xml_overlay: b.libvirt_xml_overlay.clone(),
+        libvirt_xml: b.libvirt_xml.clone(),
     }
 }
 
 /// Starts an existing, stopped VM — idempotent (already running = no-op,
 /// same as `create`'s auto-heal, which this delegates to). Reboots reusing
 /// the SAME per-VM overlay (disk state preserved) with the base
-/// disk/vcpus/memory/network/backend recorded at its last `create`/`start`.
-/// See [`config_from`] for what is NOT restored (anything only ever passed
-/// as a `vm create` flag) — a VM using those needs the original `vm create`
-/// invocation (itself idempotent), not `start`.
+/// disk/vcpus/memory/network/backend recorded at its last `create`/`start`,
+/// PLUS the boot shape ([`VmBootSpec`]: kernel/seed/volumes/static IP/VNC/TPM/
+/// CPU topology/extra disks and NICs/…). Until that block was persisted this
+/// rebooted a materially different machine and said nothing — see
+/// [`VmBootSpec`] for the measurement.
+///
+/// The one thing still not recovered is a VM whose record predates the block:
+/// `boot` is empty there, and empty means *unknown*, not *none*. Such a VM
+/// keeps its old behaviour until the next `vm create` (idempotent) stamps the
+/// real shape.
 pub fn start(base: &Path, name: &str) -> Result<Vm> {
     let st = store(base)?;
     let vm = st.load(name).map_err(|e| match e {
@@ -3643,11 +3710,102 @@ mod tests {
         assert_eq!(cfg.net_mode.as_deref(), Some("nat"));
         assert_eq!(cfg.restart_policy.as_deref(), Some("on-failure"));
         assert_eq!(cfg.devices, vec!["/sys/bus/pci/devices/0000:65:00.1"]);
-        // Never recovered — only ever existed as `vm create` flags.
+        // A record with an EMPTY boot block (every record written before it
+        // existed) recovers nothing extra — and that is honest: empty means
+        // unknown, not "this VM had none".
         assert!(cfg.kernel.is_none());
         assert!(cfg.seed.is_none());
         assert!(cfg.static_ip.is_none());
     }
+
+    /// The whole point of persisting the boot shape: what a VM was created
+    /// WITH is what it is restarted with. Before this, `vm start` rebooted a
+    /// machine with no TPM, no CPU topology and no extra disks and reported
+    /// success — twenty-one fields silently replaced by their defaults.
+    #[test]
+    fn a_forma_de_arranque_sobrevive_a_um_start() {
+        let cfg = VmConfig {
+            name: "dev".into(),
+            disk: "/base.qcow2".into(),
+            vcpus: 4,
+            memory: "8G".into(),
+            network: "ingress".into(),
+            backend: Some("libvirt".into()),
+            net_mode: Some("nat".into()),
+            kernel: Some("/boot/vmlinuz".into()),
+            seed: Some("/seed.iso".into()),
+            hugepages: true,
+            static_ip: Some("192.168.122.50".into()),
+            vnc: true,
+            tpm: true,
+            machine: Some("q35".into()),
+            cpu_model: Some("host-passthrough".into()),
+            cpu_topology: Some(CpuTopology {
+                sockets: 2,
+                cores: 4,
+                threads: 2,
+            }),
+            boot_order: vec!["hd".into(), "cdrom".into()],
+            extra_disks: vec![ExtraDisk {
+                source: "/data.qcow2".into(),
+                bus: "virtio".into(),
+                ..Default::default()
+            }],
+            extra_nics: vec![ExtraNic {
+                kind: "bridge".into(),
+                source: Some("br0".into()),
+                ..Default::default()
+            }],
+            volumes: vec![VmVolume {
+                tag: "dados".into(),
+                source: "/srv/dados".into(),
+                mount_path: "/mnt/dados".into(),
+                read_only: false,
+            }],
+            libvirt_xml_overlay: vec!["<serial type='pty'/>".into()],
+            ..Default::default()
+        };
+
+        // What `create_with` stamps on the record…
+        let mut vm = Vm::new(
+            cfg.name.clone(),
+            cfg.disk.clone(),
+            "/overlay.qcow2".into(),
+            cfg.vcpus,
+            cfg.memory.clone(),
+            cfg.network.clone(),
+            "nat".into(),
+            "52:54:00:aa:bb:cc".into(),
+            String::new(),
+        );
+        vm.backend = "libvirt".into();
+        vm.boot = boot_spec_of(&cfg);
+
+        // …has to come back out intact on the next `start`.
+        let back = config_from(&vm);
+        assert_eq!(back.kernel.as_deref(), Some("/boot/vmlinuz"));
+        assert_eq!(back.seed.as_deref(), Some("/seed.iso"));
+        assert!(back.hugepages);
+        assert_eq!(back.static_ip.as_deref(), Some("192.168.122.50"));
+        assert!(back.vnc);
+        assert!(back.tpm);
+        assert_eq!(back.machine.as_deref(), Some("q35"));
+        assert_eq!(back.cpu_model.as_deref(), Some("host-passthrough"));
+        assert_eq!(back.cpu_topology.as_ref().map(|t| t.cores), Some(4));
+        assert_eq!(back.boot_order, vec!["hd", "cdrom"]);
+        assert_eq!(back.extra_disks.len(), 1);
+        assert_eq!(back.extra_nics[0].source.as_deref(), Some("br0"));
+        assert_eq!(back.volumes[0].mount_path, "/mnt/dados");
+        assert_eq!(back.libvirt_xml_overlay.len(), 1);
+        // And the flat fields keep round-tripping as they always did.
+        assert_eq!(back.net_mode.as_deref(), Some("nat"));
+        assert_eq!(back.vcpus, 4);
+    }
+
+    /// The wire-compatibility half of this (a record written before the block
+    /// existed must keep deserializing) lives in `delonix-runtime-core`, where
+    /// `Vm` and `serde_json` both are — this crate has no JSON dependency and
+    /// is not gaining one for a test.
 
     #[test]
     fn config_from_leaves_net_mode_none_for_cloud_hypervisor() {
