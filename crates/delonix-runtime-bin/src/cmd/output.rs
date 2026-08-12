@@ -162,6 +162,67 @@ impl Table {
         self
     }
 
+    /// Drops every column whose rows say nothing — all `-`, or all empty.
+    ///
+    /// A listing gets richer by ANSWERING more questions, not by carrying more
+    /// columns: on a host with no GPU passthrough and no cluster nodes, `GPU`
+    /// and `ROLE` are two full columns of dashes, and the width they take is
+    /// width the useful columns do not get. Where those VMs exist, the columns
+    /// come back on their own.
+    ///
+    /// Rules that keep it from surprising anyone: the FIRST column is never
+    /// dropped (it is the identity — a table with no name column is not a
+    /// shorter table, it is an unreadable one), and a table with no rows drops
+    /// nothing (no rows is not evidence that a column is uninformative; the
+    /// header is the only thing an empty `ls` has to say).
+    ///
+    /// The TABLE only. `-o json` keeps every field always — it is the stable
+    /// surface (ADR-0005) and a field that came and went with the host's
+    /// contents would be unusable for automation, which is the opposite of what
+    /// this does for a human.
+    pub fn drop_uninformative(mut self) -> Self {
+        if self.rows.is_empty() {
+            return self;
+        }
+        let keep: Vec<bool> = (0..self.headers.len())
+            .map(|i| {
+                i == 0
+                    || self.rows.iter().any(|r| {
+                        let c = r.get(i).map(|s| s.trim()).unwrap_or("");
+                        !c.is_empty() && c != "-"
+                    })
+            })
+            .collect();
+        fn keep_only(cells: &[String], keep: &[bool]) -> Vec<String> {
+            cells
+                .iter()
+                .zip(keep)
+                .filter(|(_, k)| **k)
+                .map(|(c, _)| c.clone())
+                .collect()
+        }
+        self.headers = keep_only(&self.headers, &keep);
+        self.rows = self.rows.iter().map(|r| keep_only(r, &keep)).collect();
+        // The right-aligned indices refer to the OLD positions; renumber them
+        // against the kept ones, or a dropped column silently shifts the
+        // alignment onto its neighbour.
+        let mut new_idx = vec![usize::MAX; keep.len()];
+        let mut n = 0;
+        for (i, k) in keep.iter().enumerate() {
+            if *k {
+                new_idx[i] = n;
+                n += 1;
+            }
+        }
+        self.right = self
+            .right
+            .iter()
+            .filter_map(|i| new_idx.get(*i).copied())
+            .filter(|i| *i != usize::MAX)
+            .collect();
+        self
+    }
+
     pub fn row(&mut self, cells: Vec<String>) {
         debug_assert_eq!(
             cells.len(),
@@ -908,6 +969,68 @@ impl Drop for Progress {
 
 #[cfg(test)]
 mod tests {
+
+    /// Uma listagem fica mais rica por RESPONDER a mais perguntas, não por
+    /// carregar mais colunas: num host sem passthrough e sem nós de cluster, o
+    /// `GPU` e o `ROLE` são duas colunas inteiras de traços, e a largura que
+    /// ocupam é largura que as úteis não têm.
+    #[test]
+    fn uma_coluna_sem_nada_a_dizer_desaparece_da_tabela() {
+        let mut t = Table::new(&["NAME", "IMAGE", "ROLE", "GPU"]);
+        t.row(vec!["a".into(), "alpine".into(), "-".into(), "-".into()]);
+        t.row(vec!["b".into(), "debian".into(), "-".into(), "".into()]);
+        let out = t.drop_uninformative().render_all();
+        assert!(out.contains("IMAGE"), "{out}");
+        assert!(!out.contains("ROLE"), "coluna só de traços ficou: {out}");
+        assert!(!out.contains("GPU"), "coluna vazia ficou: {out}");
+
+        // Uma linha que diga alguma coisa segura a coluna inteira.
+        let mut t = Table::new(&["NAME", "ROLE"]);
+        t.row(vec!["a".into(), "-".into()]);
+        t.row(vec!["b".into(), "worker".into()]);
+        assert!(t.drop_uninformative().render_all().contains("ROLE"));
+    }
+
+    /// Duas regras que a impedem de surpreender: a identidade nunca cai, e uma
+    /// tabela VAZIA não deita nada fora — sem linhas não há prova de que uma
+    /// coluna seja inútil, e o cabeçalho é a única coisa que um `ls` sem
+    /// resultados tem para dizer.
+    #[test]
+    fn a_primeira_coluna_e_uma_tabela_vazia_nunca_perdem_colunas() {
+        let mut t = Table::new(&["NAME", "ROLE"]);
+        t.row(vec!["-".into(), "-".into()]);
+        let out = t.drop_uninformative().render_all();
+        assert!(out.contains("NAME"), "a coluna de identidade caiu: {out}");
+
+        let vazia = Table::new(&["NAME", "ROLE", "GPU"]).drop_uninformative();
+        let out = vazia.render_all();
+        for c in ["NAME", "ROLE", "GPU"] {
+            assert!(out.contains(c), "{c} caiu numa tabela sem linhas: {out}");
+        }
+    }
+
+    /// O alinhamento à direita é guardado por ÍNDICE, e largar uma coluna
+    /// renumera as que ficam — sem reescrever esses índices, o alinhamento
+    /// passa em silêncio para a coluna vizinha, que é o género de defeito que
+    /// só se vê quando os números ficam tortos numa tabela larga.
+    #[test]
+    fn largar_uma_coluna_nao_desloca_o_alinhamento_para_a_vizinha() {
+        // VCPUS (idx 3) é a alinhada; a IMAGE (idx 1) vai cair.
+        let mut t = Table::new(&["NAME", "IMAGE", "BACKEND", "VCPUS"]).right_align(3);
+        t.row(vec!["a".into(), "-".into(), "libvirt".into(), "4".into()]);
+        t.row(vec!["bb".into(), "-".into(), "libvirt".into(), "16".into()]);
+        let t = t.drop_uninformative();
+        assert_eq!(
+            t.right,
+            vec![2],
+            "o índice não foi renumerado: {:?}",
+            t.right
+        );
+        // E o efeito visível: os números alinham à direita entre si.
+        let out = t.render_all();
+        assert!(out.contains(" 4") && out.contains("16"), "{out}");
+    }
+
     use super::*;
 
     #[test]

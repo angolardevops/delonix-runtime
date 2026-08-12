@@ -1524,29 +1524,61 @@ pub fn run(action: VmCmd) -> Result<()> {
                         started_unix: vm.started_unix,
                         role: vm_role(&vm.name).to_string(),
                         gpu: fmt_vm_gpu(&vm.devices),
+                        backend: vm.backend.clone(),
+                        image: fmt_vm_image(&vm.disk),
+                        namespace: vm.namespace.clone(),
+                        created_unix: vm.created_unix,
                         // The probe does live network I/O — only when --ports (like the column).
                         ports_open: ports.then(|| fmt_open_ports(vm.ip.as_deref())),
                     })
                     .collect();
                 return output::print_json(&rows);
             }
+            // IMAGE/BACKEND/AGE are the columns a STOPPED VM can still answer,
+            // and a stopped VM is most of what `vm ls` shows: `UPTIME` has
+            // nothing to report, and without these the row said only that
+            // something with 4 vCPUs exists. NAMESPACE joins them because the
+            // isolation it names is invisible everywhere else in this listing.
             let mut cols = vec![
-                "NAME", "VCPUS", "MEMORY", "STATUS", "IP", "UPTIME", "ROLE", "GPU",
+                "NAME",
+                "IMAGE",
+                "BACKEND",
+                "VCPUS",
+                "MEMORY",
+                "STATUS",
+                "IP",
+                "AGE",
+                "UPTIME",
+                "NAMESPACE",
+                "ROLE",
+                "GPU",
             ];
             if ports {
                 cols.push("PORTS OPEN");
             }
             let mut t = output::Table::new(&cols)
                 // VCPUS is a count — right-aligned like the sizes.
-                .right_align(1);
+                .right_align(3);
             for vm in delonix_vm::list(&base)? {
                 let mut row = vec![
                     vm.name.clone(),
+                    fmt_vm_image(&vm.disk),
+                    vm.backend.clone(),
                     vm.vcpus.to_string(),
                     vm.memory,
                     fmt_vm_status(&vm.status),
                     vm.ip.clone().unwrap_or_else(|| "<none>".into()),
+                    output::fmt_age(vm.created_unix),
                     fmt_vm_uptime(vm.started_unix),
+                    // `default` is what every record that never asked for a
+                    // namespace carries, so printing it on every row is a column
+                    // of noise — it becomes a dash, and `drop_uninformative`
+                    // removes it entirely on a host that uses no namespaces.
+                    if vm.namespace == "default" {
+                        "-".to_string()
+                    } else {
+                        vm.namespace.clone()
+                    },
                     vm_role(&vm.name).to_string(),
                     fmt_vm_gpu(&vm.devices),
                 ];
@@ -1555,7 +1587,10 @@ pub fn run(action: VmCmd) -> Result<()> {
                 }
                 t.row(row);
             }
-            t.print();
+            // Twelve columns would wrap on any ordinary terminal. They do not,
+            // because the ones with nothing to say are not printed — see
+            // `drop_uninformative`.
+            t.drop_uninformative().print();
             Ok(())
         }
         VmCmd::Describe { names } => cmd_describe(&base, &names),
@@ -1830,8 +1865,34 @@ struct VmLsRow {
     started_unix: Option<u64>,
     role: String,
     gpu: String,
+    /// Which VMM actually runs this VM. Decisive for what does and does not work
+    /// on it (`--namespace` and the SDN are cloud-hypervisor only; snapshots are
+    /// libvirt only) and, until now, invisible from any listing.
+    backend: String,
+    /// What the VM was built from, the file stem of its base disk. `vm ls` could
+    /// show three stopped VMs and give no way to tell a TrueNAS appliance from a
+    /// Proxmox one from a lab box.
+    image: String,
+    namespace: String,
+    created_unix: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     ports_open: Option<String>,
+}
+
+/// IMAGE column: the base disk's file stem (`…/truenas-scale_25.10.qcow2` →
+/// `truenas-scale_25.10`).
+///
+/// The stem and not the whole path: the path is long, identical in its first 40
+/// characters for every VM on the host, and the part that differs is the end —
+/// exactly the part a width-limited column drops.
+fn fmt_vm_image(disk: &str) -> String {
+    if disk.trim().is_empty() {
+        return "-".to_string();
+    }
+    std::path::Path::new(disk)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| disk.to_string())
 }
 
 fn fmt_vm_status(status: &delonix_runtime_core::Status) -> String {
