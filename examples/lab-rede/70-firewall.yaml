@@ -1,0 +1,33 @@
+# lab-fw — OPNsense, a firewall do laboratório
+#
+#   delonix stack apply -f 70-firewall.yaml
+#
+# A ORDEM das placas é o que decide os papéis, e é fácil trocá-la sem dar por
+# isso: o OPNsense chama LAN à primeira placa (`vtnet0`) e WAN à segunda
+# (`vtnet1`). Por isso:
+#
+#   primária  → `labnet`   = vtnet0 = LAN  (a rede que a firewall protege)
+#   extraNic  → `default`  = vtnet1 = WAN  (a saída, NAT do libvirt)
+#
+# Ao contrário das outras VMs do lab, a primária NÃO é a `default`. Uma
+# firewall com a WAN em vtnet0 fica com as regras invertidas — a proteger a
+# internet do laboratório, e não o contrário.
+#
+# Sem `hostname`/`sshKeys`: é um appliance, não corre cloud-init, e o motor
+# recusa esses campos em vez de os aceitar e ignorar. Configura-se na consola
+# (`delonix vm console lab-fw`) ou na interface web.
+apiVersion: delonix.io/v1
+kind: Vm
+metadata:
+  name: lab-fw
+spec:
+  disk: opnsense:26.1
+  vcpus: 2
+  memory: 2G
+  backend: libvirt
+  netMode: nat
+  bridge: labnet          # a placa primária vai para a LAN do lab
+  extraNics:
+    - type: network
+      source: default     # a segunda é a WAN, com saída para a internet
+      model: virtio

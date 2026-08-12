@@ -4,7 +4,7 @@ kind: Vm
 metadata:
   name: lab-cli
 spec:
-  disk: DISK_PLACEHOLDER
+  disk: delonix-vm-base:ubuntu-24.04
   vcpus: 1
   memory: 1G
   backend: libvirt

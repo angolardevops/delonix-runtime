@@ -20,7 +20,7 @@ kind: Vm
 metadata:
   name: lab-nas
 spec:
-  disk: /home/walter/.local/share/delonix/vm-images/truenas-scale_25.10.qcow2
+  disk: truenas-scale:25.10
   vcpus: 2
   memory: 4G
   backend: libvirt
