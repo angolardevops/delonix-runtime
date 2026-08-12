@@ -1,0 +1,17 @@
+# lab-dhcp — servidor DHCP da LAN do laboratorio
+apiVersion: delonix.io/v1
+kind: Vm
+metadata:
+  name: lab-dhcp
+spec:
+  disk: DISK_PLACEHOLDER
+  vcpus: 1
+  memory: 1G
+  backend: libvirt
+  netMode: nat
+  userData: ./cloud-init/dhcp.yaml
+  extraNics:
+    - type: network
+      source: labnet
+      model: virtio
+      mac: "52:54:00:5a:b0:11"

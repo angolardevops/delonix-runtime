@@ -1,0 +1,69 @@
+#cloud-config
+# lab-samba — autenticação e partilha de ficheiros (Samba, modo standalone)
+#
+# Standalone e não Active Directory DC: um AD DC exige que o Samba seja também
+# o DNS da zona, e neste lab o DNS é o BIND do `lab-dns`. Trocar isso obrigaria
+# a desligar o bind9 e a dar a zona ao Samba — uma decisão de arquitectura que
+# o lab mostra em separado, em vez de a misturar aqui.
+hostname: lab-samba
+fqdn: dc.lab.ngola
+
+users:
+  - name: delonix
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    ssh_authorized_keys:
+      - SSH_KEY_PLACEHOLDER
+
+package_update: true
+packages:
+  - samba
+  - smbclient
+
+write_files:
+  - path: /etc/netplan/60-lab.yaml
+    permissions: "0600"
+    content: |
+      network:
+        version: 2
+        ethernets:
+          lab0:
+            match:
+              macaddress: "52:54:00:5a:b0:12"
+            set-name: lab0
+            addresses: [10.50.0.12/24]
+
+  - path: /etc/samba/smb.conf
+    content: |
+      [global]
+         workgroup = LABNGOLA
+         server string = Samba do lab.ngola
+         security = user
+         map to guest = never
+         interfaces = lo lab0
+         bind interfaces only = yes
+         hosts allow = 127.0.0.1 10.50.0.
+         log file = /var/log/samba/log.%m
+         max log size = 1000
+
+      [publico]
+         path = /srv/samba/publico
+         browseable = yes
+         read only = no
+         valid users = @labusers
+
+runcmd:
+  - netplan apply
+  - mkdir -p /srv/samba/publico
+  - groupadd -f labusers
+  # Utilizador de demonstração. A password está no manifesto de propósito, para
+  # o lab arrancar sem passos manuais — num ambiente a sério isto vem de um
+  # `kind: Secret`, nunca de um ficheiro em git.
+  - useradd -m -g labusers -s /bin/bash ana || true
+  - printf 'Lab#2026Ngola\nLab#2026Ngola\n' | smbpasswd -s -a ana
+  - smbpasswd -e ana
+  - chgrp labusers /srv/samba/publico
+  - chmod 2770 /srv/samba/publico
+  - systemctl enable --now smbd nmbd
+  - systemctl restart smbd

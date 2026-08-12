@@ -1,0 +1,65 @@
+#cloud-config
+# lab-dhcp — servidor DHCP (ISC) da LAN 10.50.0.0/24
+hostname: lab-dhcp
+fqdn: dhcp.lab.ngola
+
+users:
+  - name: delonix
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    ssh_authorized_keys:
+      - SSH_KEY_PLACEHOLDER
+
+package_update: true
+packages:
+  - isc-dhcp-server
+
+write_files:
+  - path: /etc/netplan/60-lab.yaml
+    permissions: "0600"
+    content: |
+      network:
+        version: 2
+        ethernets:
+          lab0:
+            match:
+              macaddress: "52:54:00:5a:b0:11"
+            set-name: lab0
+            addresses: [10.50.0.11/24]
+
+  # Serve SÓ na placa do lab. Sem esta linha o dhcpd também escuta na `default`,
+  # onde já há um servidor DHCP do libvirt — dois servidores no mesmo domínio de
+  # difusão entregam a resposta de quem chegar primeiro.
+  - path: /etc/default/isc-dhcp-server
+    content: |
+      INTERFACESv4="lab0"
+      INTERFACESv6=""
+
+  - path: /etc/dhcp/dhcpd.conf
+    content: |
+      default-lease-time 600;
+      max-lease-time 7200;
+      ddns-update-style none;
+      authoritative;
+
+      subnet 10.50.0.0 netmask 255.255.255.0 {
+        range 10.50.0.100 10.50.0.200;
+        option routers 10.50.0.254;              # o OPNsense, quando existir
+        option domain-name-servers 10.50.0.10;   # o BIND do lab
+        option domain-name "lab.ngola";
+      }
+
+      # Reserva por MAC: o cliente do lab tem sempre o mesmo endereço, o que
+      # torna o registo no DNS e as regras de firewall estáveis.
+      host lab-cli {
+        hardware ethernet 52:54:00:5a:b0:13;
+        fixed-address 10.50.0.50;
+      }
+
+runcmd:
+  - netplan apply
+  # O dhcpd recusa arrancar se a placa ainda não tiver endereço; o netplan
+  # acima acabou de o dar, e esta ordem é o que torna o arranque fiável.
+  - systemctl enable isc-dhcp-server
+  - systemctl restart isc-dhcp-server
