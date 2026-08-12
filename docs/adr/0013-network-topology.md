@@ -178,3 +178,102 @@ on tier B being real first.
 Also undecided: IPv6. The engine currently DISABLES it per container by design (v0.37.1, it was a
 complete bypass of the policy model). A routed topology is where v6 stops being avoidable, and
 re-enabling it is a security decision, not a networking one.
+
+
+## Onde isto está (2026-08-12) e o que falta para «tudo funcional»
+
+Implementado nesta série, com validação ao vivo em root isolado:
+
+| | estado |
+|---|---|
+| isolamento entre redes (set + verdict map, com contador) | **feito** — era uma malha O(n²) sem contadores; medido, 8 bridges → 73 regras → **2** |
+| camada B — `network route` + `kind: NetworkRoute` | **feito** — dirigida, e o retorno flui por `established` |
+| camada C — `network vlan` (802.1Q) | **feito**, privilegiado e contido; falta uma corrida real com `sudo` |
+| camada A — o tipo `Cidr` e a sua aritmética | **fundação feita**, IPAM por ligar |
+
+Falta exactamente isto, e nada mais, para o que o utilizador chamou «tudo
+funcional a nível de rede»:
+
+### 1. Ligar o IPAM ao `Cidr` (camada A, 2.ª fatia) — rootless
+
+O tipo existe e está provado; o que ainda recebe uma string `"10.X"` e assume um
+`/16` são três funções (`derive_ip_in`, `valid_ip_in_subnet`, `probe_free`) e o
+registo, que continua a guardar um octeto. Enquanto isso não mudar, `--subnet`
+só escolhe QUAL `10.<200-254>.0.0/16`, e `--gateway` só aceita o derivado.
+
+**É a única peça que destrava CIDR e gateway à escolha**, e é a mais perigosa das
+que restam: um erro de máscara aqui não dá um erro, dá containers com endereços
+sobrepostos. Merece a sessão inteira, com o laboratório isolado que esta série
+deixou a funcionar.
+
+### 2. O `macvlan` pertence a uma FRONTEIRA, não a um inquilino (camada C) — privilegiado
+
+**Decisão corrigida (2026-08-12), e a versão anterior desta secção estava pior.**
+Ela dizia «realizar o driver `macvlan`» e deixava por resolver o aviso que o
+próprio código emite: uma rede macvlan põe os containers DIRECTAMENTE na LAN
+física, FORA da firewall, do anti-spoof e do isolamento deste motor. Realizá-la
+como estava seria entregar uma funcionalidade cuja própria mensagem diz que
+desliga o modelo de segurança — e um aviso alto não deixa de ser um aviso sobre
+algo que não devia ser o caminho normal.
+
+**O `macvlan` passa a ser a perna EXTERNA de um workload de fronteira**, não uma
+rede a que um inquilino se liga. A forma:
+
+* um workload de fronteira (firewall/gateway) com DUAS pernas — uma `macvlan` na
+  NIC física, que tira endereço do DHCP da LAN do host como qualquer outra
+  máquina lá, e uma na `kind: Network` interna;
+* os containers e VMs ficam SÓ na rede interna, filtrada, isolada e com o
+  `fwcont` a decidir como sempre;
+* a saída deles para a LAN/internet passa pela fronteira, que é onde a política
+  de saída passa a viver.
+
+O que isto compra, e é a razão de ser: a capacidade privilegiada fica confinada a
+UM workload declarado para isso, em vez de ser um atributo de qualquer rede a que
+alguém se ligue. É o mesmo princípio de contenção do `network vlan` — a linha
+atravessa-se num sítio nomeado, e não em toda a superfície.
+
+**O que isto exige e ainda não existe**: o masquerade. Hoje TUDO sai sob um
+`oifname "tap0" masquerade` único no holder, por isso a fronteira veria cada
+pacote com o mesmo endereço de origem — e um gateway cujas regras por-origem não
+distinguem ninguém não é um gateway. Mover o masquerade para a fronteira é o
+`via:` que este ADR já tinha deixado por decidir, e é agora pré-requisito desta
+peça em vez de um extra.
+
+**Limite conhecido, medido nesta série**: uma fronteira em VM só serve se for
+Cloud Hypervisor, porque uma VM libvirt vive na `virbr0` do host e não na SDN.
+E o OPNsense — o appliance óbvio para o papel — NÃO arranca em Cloud Hypervisor
+(medido: firmware falha antes do kernel, com a golden Linux a arrancar no mesmo
+firmware como controlo). Portanto a primeira fronteira realizável é um
+CONTAINER, não uma VM appliance.
+
+### 2b. O que a realização do driver ainda precisa
+
+«Uma rede que recebe IP da rede do host por DHCP e serve de gateway às VMs e
+containers» tem nome nesta base: é o driver `macvlan`. Hoje é REGISTADO e o
+`network create` avisa alto que **não foi realizado**
+(`Realized=False reason=DriverNotImplemented`) em vez de fingir — medido a
+2026-08-12. Bate na mesma parede que a VLAN: `CAP_NET_ADMIN` na init-netns do
+host.
+
+Portanto entra pelo MESMO caminho que o `network vlan` já abriu — comando
+privilegiado à parte, dry-run por omissão, recusa clara sem root — e o trabalho
+é o plano `ip link add … type macvlan` mais o encaminhamento que a torna gateway
+das redes internas. O `network vlan` é o precedente pronto a copiar; não há
+modelo de privilégio novo a inventar.
+
+**Aviso que já está no código e tem de continuar visível**: uma rede macvlan põe
+os containers DIRECTAMENTE na LAN física, FORA da firewall, do anti-spoof e do
+isolamento deste motor. Realizá-la não pode calar esse aviso.
+
+### 3. O que continua fora, por decisão e não por esquecimento
+
+**IPv6.** Desligado de propósito desde a v0.37.1 — a SDN dava ULA a cada
+container e a firewall inteira é `table ip`, ou seja um segundo caminho de dados
+sem política nenhuma, que contornava `ingress`/`egress`, isolamento de namespace
+e `kind: Dependency`. Foi medido na altura: com a firewall a negar em IPv4, o
+mesmo alvo respondia pela ULA. Reactivá-lo é trabalho de segurança com o seu
+próprio ADR, não o alargamento de um campo.
+
+**O `via:`** (mandar uma subnet por um appliance) continua onde este ADR já o
+deixou: depende de mover o masquerade para o appliance, senão ele vê todos os
+pacotes com um só endereço de origem.
