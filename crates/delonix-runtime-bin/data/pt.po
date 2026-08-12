@@ -8592,3 +8592,12 @@ msgstr "voltar a tirá-la"
 
 msgid "802.1Q VLAN on a physical NIC — **the one command here that needs root**.\n\nDry-run by default: it prints the plan and changes nothing until `--apply`. Everything else in this engine is rootless; a VLAN interface on a host NIC needs CAP_NET_ADMIN in the host's netns, which no unprivileged user has (see ADR-0013 tier C)."
 msgstr "VLAN 802.1Q sobre uma NIC física — **o único comando aqui que precisa de root**.\n\nDry-run por omissão: imprime o plano e não muda nada até haver `--apply`. Todo o resto deste motor é rootless; uma interface VLAN numa NIC do host precisa de CAP_NET_ADMIN na netns do host, que nenhum utilizador sem privilégio tem (ver ADR-0013, camada C)."
+
+msgid "`network vlan --apply` needs root — re-run with `sudo`. It is refused rather than attempted because a half-created VLAN is worse than none: the interface would exist and never come up, and the failure would surface later as a network that silently carries no traffic."
+msgstr "`network vlan --apply` precisa de root — repete com `sudo`. É recusado em vez de tentado porque uma VLAN meio criada é pior que nenhuma: a interface existia e nunca subia, e a falha aparecia mais tarde como uma rede que não carrega tráfego nenhum."
+
+msgid "DRY-RUN — nothing was changed. This is the ONE command in `delonix network` that needs root: an 802.1Q interface on a host NIC requires CAP_NET_ADMIN in the host's network namespace, which no unprivileged user has (a `Delegate=yes` scope has zero capabilities — that flag delegates cgroup controllers, not networking). Review the plan, then re-run with `--apply` as root."
+msgstr "DRY-RUN — nada foi mudado. Este é o ÚNICO comando do `delonix network` que precisa de root: uma interface 802.1Q numa NIC do host exige CAP_NET_ADMIN na netns do host, que nenhum utilizador sem privilégio tem (um scope com `Delegate=yes` tem zero capabilities — essa flag delega controladores de cgroup, não rede). Revê o plano e repete com `--apply` como root."
+
+msgid "this step runs as ROOT and touches the HOST's networking, unlike the rest of this engine. It is a one-shot state change (no daemon, nothing left running) and `--rm` takes it back out."
+msgstr "este passo corre como ROOT e mexe na rede do HOST, ao contrário do resto deste motor. É uma mudança de estado de uma vez (sem daemon, nada fica a correr) e o `--rm` tira-a."
