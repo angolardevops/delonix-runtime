@@ -8,13 +8,19 @@
 set -uo pipefail
 OUT=${OUT_DIR:-$(pwd)}
 
-# product : image : guest port : path
+# product : filename stem : guest port : path
+#
+# A STEM and not a fixed filename: the builds name their output with the version
+# (`pve-9.2-1.qcow2`), so that two releases of the same product can sit side by
+# side — and every version present gets verified, because "the 9.1 image serves"
+# says nothing about the 9.2 one. The bare `pve.qcow2` of older builds still
+# matches.
 CASES=(
-  "pve:$OUT/pve.qcow2:8006:/"
-  "pbs:$OUT/pbs.qcow2:8007:/"
-  "pmg:$OUT/pmg.qcow2:8006:/"
-  "pdm:$OUT/pdm.qcow2:8443:/"
-  "truenas:$OUT/truenas.qcow2:80:/"
+  "pve:pve:8006:/"
+  "pbs:pbs:8007:/"
+  "pmg:pmg:8006:/"
+  "pdm:pdm:8443:/"
+  "truenas:truenas:80:/"
 )
 
 # KVM when the host has it, TCG when it does not (a CI runner may not expose
@@ -33,13 +39,26 @@ WANT=("$@")
 rc=0
 checked=0
 for spec in "${CASES[@]}"; do
-  IFS=: read -r name img port path <<< "$spec"
+  IFS=: read -r product stem port path <<< "$spec"
   if [ ${#WANT[@]} -gt 0 ]; then
-    case " ${WANT[*]} " in *" $name "*) ;; *) continue ;; esac
-    [ -f "$img" ] || { echo "!! $name: no image at $img"; rc=1; continue; }
-  else
-    [ -f "$img" ] || continue
+    case " ${WANT[*]} " in *" $product "*) ;; *) continue ;; esac
   fi
+  # Every version of this product that is present. `-bootcheck` is excluded:
+  # it is this script's own scratch overlay, and a leftover one would be probed
+  # as if it were an image to publish.
+  imgs=()
+  for cand in "$OUT/$stem".qcow2 "$OUT/$stem"-*.qcow2; do
+    case "$cand" in *-bootcheck.qcow2) continue ;; esac
+    [ -f "$cand" ] && imgs+=("$cand")
+  done
+  if [ ${#imgs[@]} -eq 0 ]; then
+    # Named explicitly and absent is an error; not named at all just means it
+    # was not built in this run.
+    [ ${#WANT[@]} -gt 0 ] && { echo "!! $product: no image matching $OUT/$stem*.qcow2"; rc=1; }
+    continue
+  fi
+  for img in "${imgs[@]}"; do
+  name=$(basename "$img" .qcow2)
   checked=$((checked + 1))
   hostport=$((19000 + port % 1000))
   log="$OUT/$name-boot.log"
@@ -75,6 +94,7 @@ for spec in "${CASES[@]}"; do
   kill "$(cat "$pidfile" 2>/dev/null)" 2>/dev/null
   wait 2>/dev/null
   rm -f "$ovl" "$pidfile"
+  done
 done
 if [ "$checked" = 0 ]; then
   echo "!! nothing to verify — no images found and none named"
