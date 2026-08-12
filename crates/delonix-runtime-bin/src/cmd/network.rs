@@ -215,6 +215,20 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
 
 #[derive(Subcommand)]
 pub enum NetworkCmd {
+    /// Open a DIRECTED path from one network to another (ADR-0013 tier B).
+    ///
+    /// Networks are isolated from each other by default. A route says a packet
+    /// MAY cross; it does not say it is allowed — the per-workload firewall
+    /// still decides, and a namespace boundary still needs its own policy.
+    Route {
+        /// Source network (the side that may initiate).
+        from: String,
+        /// Destination network.
+        to: String,
+        /// Close the path instead of opening it.
+        #[arg(long)]
+        rm: bool,
+    },
     /// Dashboard (KPIs + table) of the networks — interactive TUI, or `--once` snapshot.
     Dash {
         #[arg(long)]
@@ -302,6 +316,21 @@ pub fn run(action: NetworkCmd) -> Result<()> {
     match action {
         NetworkCmd::Dash { once, json } => {
             super::dash::run(super::dash::DashScope::Networks, once, json)
+        }
+        NetworkCmd::Route { from, to, rm } => {
+            delonix_net::infra::network_route(&from, &to, !rm)?;
+            println!(
+                "{}",
+                super::po::tf(
+                    if rm {
+                        "route closed: {from} -> {to}"
+                    } else {
+                        "route open: {from} -> {to}"
+                    },
+                    &[("from", &from), ("to", &to)],
+                )
+            );
+            Ok(())
         }
         NetworkCmd::Ls { output } => cmd_ls(&store, output),
         NetworkCmd::Node { action } => cmd_node(action),

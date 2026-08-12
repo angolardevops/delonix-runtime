@@ -434,6 +434,7 @@ pub fn ingress_table_ruleset() -> String {
          \x20 chain pre {{ type nat hook prerouting priority -100; }}\n\
          \x20 chain post {{ type nat hook postrouting priority 100; oifname \"tap0\" masquerade; }}\n\
          \x20 chain fwdeny {{ type filter hook forward priority -10;\n\
+         \x20\x20 ct state established,related accept\n\
          \x20\x20 iifname . oifname vmap @{NETPAIR_MAP}\n\
          \x20\x20 iifname @{DLXBR_SET} oifname @{DLXBR_SET} counter drop\n\
          \x20 }}\n\
@@ -452,6 +453,7 @@ pub fn ingress_table_ruleset() -> String {
          \x20\x20 oifname \"tap0\" accept\n\
          \x20\x20 iifname \"tap0\" accept\n\
          \x20\x20 iifname \"delonix0\" oifname \"delonix0\" accept\n\
+         \x20\x20 iifname . oifname vmap @{NETPAIR_MAP}\n\
          \x20 }}\n\
          }}\n"
     )
@@ -1357,6 +1359,11 @@ fn handle_control(line: &str) -> String {
     }
     let res = match parts.as_slice() {
         ["ping"] => Ok(()),
+        // ADR-0013 tier B: a declared route between two networks. One ELEMENT in
+        // the exemption map — the spike proved the forwarding already exists and
+        // an explicit pair drop is what closes it, so opening a path is not a
+        // dataplane, it is an exemption.
+        ["netroute", op, a, b] => do_netroute(op, a, b),
         // 5 tokens = `default` namespace (compat with the old client); 6 = namespaced.
         ["attach", netns, ip, bridge, gateway] => do_attach(netns, ip, bridge, gateway, "default"),
         ["attach", netns, ip, bridge, gateway, ns] => do_attach(netns, ip, bridge, gateway, ns),
@@ -2893,6 +2900,72 @@ pub const NETPAIR_MAP: &str = "netpair";
 /// verified by bringing up a holder. This can be asserted in a unit test.
 ///
 /// Two elements per bridge, and nothing per PAIR: that is the whole point.
+/// Adds or removes ONE exemption for the ordered pair `(a, b)`.
+///
+/// Direction is the point: `from: web, to: db` opens web→db and NOT db→web, the
+/// same asymmetry `kind: Dependency` already gives between containers. The
+/// return traffic flows because `fwdeny` accepts `established,related` before
+/// consulting the map — it has to be stated there and not left to the `forward`
+/// chain, which runs at priority 0, AFTER this one at -10. That is the exact
+/// trap the v0.37.1 `policy deny` fix already paid for once.
+fn do_netroute(op: &str, a: &str, b: &str) -> Result<()> {
+    for name in [a, b] {
+        // These reach nft as an element; a name that is not a bridge we made is
+        // refused rather than interpolated.
+        if !(name == INFRA_BRIDGE || name.starts_with("dlxn"))
+            || !name.chars().all(|c| c.is_ascii_alphanumeric())
+        {
+            return Err(Error::Runtime {
+                context: "netroute",
+                message: format!("not a delonix bridge: {name}"),
+            });
+        }
+    }
+    if a == b {
+        // The self-pair is what `isolation_elements` installs to keep intra-network
+        // traffic open; a route onto itself would either be a no-op or, on removal,
+        // silently cut a network off from itself.
+        return Err(Error::Runtime {
+            context: "netroute",
+            message: "a route from a network to itself is not a route".to_string(),
+        });
+    }
+    let verb = match op {
+        "add" => "add",
+        "del" => "delete",
+        other => {
+            return Err(Error::Runtime {
+                context: "netroute",
+                message: format!("unknown netroute op: {other}"),
+            })
+        }
+    };
+    let element = format!("{{ \"{a}\" . \"{b}\" : accept }}");
+    // NOT `run_ok`, which discards the outcome, and NOT `capture`, which is
+    // lenient by design (it answers `Ok` even when the command failed — noted in
+    // AGENTS.md, and it has already fooled a probe in this repo). A route that
+    // reports success without being installed is precisely the class of lie this
+    // engine keeps removing.
+    let out = std::process::Command::new("nft")
+        .args([verb, "element", "ip", INGRESS_TABLE, NETPAIR_MAP, &element])
+        .output()
+        .map_err(|e| Error::Runtime {
+            context: "netroute",
+            message: format!("nft: {e}"),
+        })?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(Error::Runtime {
+            context: "netroute",
+            message: format!(
+                "nft {verb} element {a} -> {b}: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+        })
+    }
+}
+
 pub(crate) fn isolation_elements(bridge: &str) -> Vec<(&'static str, String)> {
     vec![
         (DLXBR_SET, format!("{{ \"{bridge}\" }}")),
@@ -3685,6 +3758,26 @@ pub fn holder_serves_netns(id: &str) -> bool {
 /// **Attaches a container to an ingress network** (`net`=`ingress` or a private
 /// network name): ensures the infra is up (ref-count++), resolves the bridge/gateway and asks
 /// the holder for the netns + `veth` + IP. Returns `(netns, ip)`. On failure it undoes the ref-count.
+/// Opens (or closes) a declared path from network `from` to network `to`.
+///
+/// ADR-0013 tier B. DIRECTED: `from → to` only, the same asymmetry
+/// `kind: Dependency` gives between containers — the return traffic of a
+/// conversation `from` started flows (established), but `to` cannot initiate.
+///
+/// **A route says where a packet MAY go; it never says it is allowed.** The
+/// per-workload `fwcont` chains still decide, and a namespace boundary crossed
+/// by a route still needs an explicit policy. That rule is the whole reason this
+/// composes with what exists instead of undermining it.
+pub fn network_route(from: &str, to: &str, add: bool) -> Result<()> {
+    let (bridge_from, _, _) = resolve_net(from)?;
+    let (bridge_to, _, _) = resolve_net(to)?;
+    ensure_up()?;
+    control_send(&format!(
+        "netroute {} {bridge_from} {bridge_to}",
+        if add { "add" } else { "del" }
+    ))
+}
+
 pub fn attach_container(id: &str, net: &str, namespace: &str) -> Result<(String, String)> {
     let (bridge, prefix, gateway) = resolve_net(net)?;
     let ip = crate::ipam::allocate(&prefix, id)?; // unique lease (anti-collision), stable per id
@@ -5539,6 +5632,32 @@ pub fn dhcp_ip6_for_mac(_net: &str, mac: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+
+    /// **Um `accept` NÃO é terminal entre base chains**, e esquecê-lo partiu o
+    /// tráfego dentro da própria rede.
+    ///
+    /// A isenção no `fwdeny` (prioridade -10) impede o drop DALI, mas o pacote
+    /// segue para a `forward` (prioridade 0), que tem `policy drop` — e a malha
+    /// antiga tratava disso com um `accept` por bridge NESSA chain. Ao mover a
+    /// isenção só para o `fwdeny`, dois containers da MESMA rede deixaram de se
+    /// alcançar: medido ao vivo, 100% de perda. O mesmo mapa tem de ser
+    /// consultado nas DUAS chains, e é essa a asserção aqui.
+    #[test]
+    fn a_isencao_e_consultada_nas_duas_chains_porque_accept_nao_e_terminal() {
+        let rs = ingress_table_ruleset();
+        assert_eq!(
+            rs.matches("vmap @netpair").count(),
+            2,
+            "a isenção tem de ser consultada no fwdeny E na forward: {rs}"
+        );
+        // E a da `forward` tem de vir depois do accept do delonix0, que é o
+        // caso equivalente já tratado à mão para a bridge de infra.
+        let fwd = rs.find("chain forward").expect("sem chain forward");
+        assert!(
+            rs[fwd..].contains("vmap @netpair"),
+            "a forward não consulta a isenção: {rs}"
+        );
+    }
 
     /// O isolamento passa a custar DOIS elementos por rede, e nada por PAR.
     ///

@@ -170,6 +170,7 @@ Commands:
   apply     Apply the `kind: Network` documents of a manifest (idempotent by name)
   dash      Dashboard (KPIs + table) of the networks — interactive TUI, or `--once` snapshot
   node      WireGuard identity of THIS node, for the encrypted overlay between nodes
+  route     Open a DIRECTED path from one network to another (ADR-0013 tier B)
   help      Print this message or the help of the given subcommand(s)
 
 Options:
@@ -185,6 +186,7 @@ COMMAND MAP:
   Declarative  apply
   Dashboards   dash
   Advanced     node
+  Other        route
 
 EXAMPLES:
   # a bridge network of its own, where containers reach each other by name
