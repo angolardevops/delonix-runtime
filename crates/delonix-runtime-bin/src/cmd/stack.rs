@@ -294,8 +294,12 @@ const KINDS: [&str; 13] = [
 /// loud (`Action::NotConverged`) instead of leaving the resource out. A plan
 /// that omits a resource reads as «no changes», which is the exact dishonesty
 /// this whole feature exists to remove.
-pub(crate) const CONVERGING_KINDS: [&str; 11] = [
+pub(crate) const CONVERGING_KINDS: [&str; 12] = [
     "Network",
+    // An exemption to the isolation model has to be closable by the manifest
+    // that opened it. It was applied and validated but never converged, so
+    // removing it from the file left the path open — and the plan said nothing.
+    "NetworkRoute",
     "Volume",
     "ShareVolume",
     "Image",
@@ -317,6 +321,7 @@ fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Desired>>
                 "Container" => super::container::desired(doc)?,
                 "Volume" => super::volume::desired(doc)?,
                 "Network" => super::network::desired(doc)?,
+                "NetworkRoute" => super::netroute::desired(doc)?,
                 "Pod" => super::pod::desired(doc)?,
                 "Image" => super::image::desired(doc)?,
                 "Vm" => super::vm::desired(doc)?,
@@ -348,6 +353,7 @@ fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Actual>> {
     let mut out = super::container::actual()?;
     out.extend(super::volume::actual()?);
     out.extend(super::network::actual()?);
+    out.extend(super::netroute::actual()?);
     out.extend(super::pod::actual()?);
     out.extend(super::image::actual(docs)?);
     out.extend(super::vm::actual()?);
@@ -425,6 +431,12 @@ pub(crate) fn build_plan(docs: &[manifest::ManifestDoc], stack: &str) -> Result<
     Ok(changes)
 }
 
+/// The answer that says nothing. A Kind is only allowed to carry it while it
+/// CONVERGES — for one that does not, it is exactly the «nobody got to it»
+/// reading that `not_converged_reason` exists to prevent, and there is a test
+/// enforcing that.
+pub(crate) const NOT_CONVERGED_GENERIC: &str = "not converged in this version";
+
 /// Why a Kind is still ensure-present.
 ///
 /// A generic «this Kind does not converge yet» reads as «nobody got to it», and
@@ -432,24 +444,22 @@ pub(crate) fn build_plan(docs: &[manifest::ManifestDoc], stack: &str) -> Result<
 /// naming it is the difference between a gap and a decision. Kept next to
 /// `CONVERGING_KINDS` so adding a Kind to that list without removing its excuse
 /// here is visible in one screen.
+///
+/// Returns the ENGLISH literal, translated at the point of printing. Returning
+/// `po::t(...)` here made the value depend on the active language, so the test
+/// that compares it against `NOT_CONVERGED_GENERIC` silently stopped checking
+/// anything under `--l18n=pt` — a gate that only guards one language is not a
+/// gate.
 fn not_converged_reason(kind: &str) -> &'static str {
     match kind {
-        // The applied state is COLLECTIVE: `resolve_config` merges every
-        // HTTPRoute document into one proxy config, and `manual.json` records no
-        // provenance — nothing says which document produced which route. So a
-        // per-document diff has nothing to compare against. Recording provenance
-        // in the proxy config is what would change this.
         // A secret's VALUES are the state, and they are encrypted at rest and
         // never read back for display. A diff would either say nothing useful or
         // decrypt to compare — and decrypting to draw a plan is not a trade
         // worth making.
-        "Secret" => super::po::t(
-            "the state is the encrypted values, and a plan will not decrypt them to compare",
-        ),
-        // A tunnel's identity is a live process and a URL a third party hands
-        // out; the declared half (`localPort`/`provider`) is comparable, the
-        // rest is status.
-        _ => super::po::t("not converged in this version"),
+        "Secret" => {
+            "the state is the encrypted values, and a plan will not decrypt them to compare"
+        }
+        _ => NOT_CONVERGED_GENERIC,
     }
 }
 
@@ -482,6 +492,7 @@ pub(crate) fn compared_fields_table() -> Vec<(&'static str, &'static [&'static s
         ("Container", super::container::RECONCILED_CONTAINER_FIELDS),
         ("Volume", super::volume::RECONCILED_VOLUME_FIELDS),
         ("Network", super::network::RECONCILED_NETWORK_FIELDS),
+        ("NetworkRoute", super::netroute::RECONCILED_ROUTE_FIELDS),
         ("Image", super::image::RECONCILED_IMAGE_FIELDS),
         ("Vm", super::vm::RECONCILED_VM_FIELDS),
         ("FirewallPolicy", super::firewall::RECONCILED_FW_FIELDS),
@@ -508,7 +519,7 @@ fn print_not_converged() {
     for kind in KINDS.iter().filter(|k| !CONVERGING_KINDS.contains(k)) {
         t.row(vec![
             kind.to_string(),
-            not_converged_reason(kind).to_string(),
+            super::po::t(not_converged_reason(kind)).to_string(),
         ]);
     }
     t.print();
@@ -1024,6 +1035,10 @@ fn presence(
         // A share has a record of its own, keyed by (namespace, name) — the
         // namespace comes from the document, which is why `load_record` takes
         // both and why guessing it is not an option.
+        // Declared vs. live are different questions for a route, and the answer
+        // names which. Before this it fell through to `?`/`unsupported kind` —
+        // `stack ls` could not say anything at all about a path it had opened.
+        "NetworkRoute" => super::netroute::presence_of(doc),
         "ShareVolume" => super::sharevolume::presence_of(&root, doc),
         // A tunnel's record says whether an agent was started; the public URL
         // is status and deliberately not part of "is it there".
@@ -1230,6 +1245,58 @@ fn destroy_for_replace(changes: &[Change]) -> Result<()> {
     Ok(())
 }
 
+/// Kinds `destroy_one` actually removes.
+///
+/// A second list beside `CONVERGING_KINDS`, and deliberately so: the `match` in
+/// `destroy_one` cannot be inspected by a test, and what has to be guaranteed is
+/// that no converging Kind reaches a `--prune` or a `destroy` only to be refused
+/// halfway through. `todo_kind_convergente_tem_teardown_ou_razao` ties the two
+/// together in both directions.
+pub(crate) const TEARDOWN_KINDS: [&str; 6] = [
+    "Container",
+    "Volume",
+    "Network",
+    "NetworkRoute",
+    "Pod",
+    "Vm",
+];
+
+/// Why a converging Kind has NO automatic teardown.
+///
+/// Same shape and same reason as `not_converged_reason`: «not implemented» reads
+/// as an oversight, and for each of these it is a property of the resource. A
+/// Kind that converges, is ownable and lands here would be a real gap — the
+/// prune promises to remove it and the destroy refuses mid-run — which is what
+/// the paired test exists to catch.
+/// `None` means «this Kind IS torn down» — the answer for everything in
+/// [`TEARDOWN_KINDS`].
+pub(crate) fn no_teardown_reason(kind: &str) -> Option<&'static str> {
+    Some(match kind {
+        // It has no record of its own (it lives on the target's `ContainerFw`),
+        // so when `target`/`direction` change the OLD target is written down
+        // nowhere — the manifest holds the new one. Leaving stale rules on a
+        // container nobody is looking at any more is the worst outcome
+        // available, so the user is told exactly what to run.
+        "FirewallPolicy" => {
+            "changing `target` or `direction` cannot be undone automatically — the \
+             previous target keeps its rules, because a policy has no record of its own (it lives \
+             on the target's). Clear them by hand with `delonix net ingress clear <old-target>` \
+             (or `net egress clear`), then apply again"
+        }
+        // Shared content-addressed cache: not ownable, so it never reaches a
+        // prune or a destroy, and a `Replace` is just a pull.
+        "Image" => "an image is shared content-addressed cache, owned by no stack",
+        // Routes live in the shared proxy config with no per-document
+        // provenance; a tunnel's record is keyed by a live agent.
+        "HTTPRoute" | "Ingress" => {
+            "routes live in the proxy's shared config, with no per-document provenance"
+        }
+        "Tunnel" => "a tunnel has no labels to stamp ownership on",
+        "ShareVolume" => "a share has no record of its own to stamp ownership on",
+        _ => return None,
+    })
+}
+
 /// Destroys ONE resource of a converging Kind.
 ///
 /// Deliberately the single place that removes anything: `--replace`, `--prune`
@@ -1237,27 +1304,31 @@ fn destroy_for_replace(changes: &[Change]) -> Result<()> {
 /// different teardown paths — which is how a resource ends up half-removed in
 /// one of them.
 fn destroy_one(kind: &str, name: &str) -> Result<()> {
+    // The list decides, the `match` only executes. Asking it first is what keeps
+    // the two from drifting: a Kind added to one and not the other now fails
+    // here, loudly, instead of being silently skipped or silently refused.
+    if !TEARDOWN_KINDS.contains(&kind) {
+        return Err(delonix_runtime_core::Error::Invalid(
+            match no_teardown_reason(kind) {
+                Some(why) => format!("{kind}/{name}: {}", super::po::t(why)),
+                None => {
+                    format!("{kind}/{name}: removing this Kind declaratively is not implemented")
+                }
+            },
+        ));
+    }
     match kind {
         "Container" => super::container::remove_for_replace(name),
         "Volume" => super::volume::remove_for_replace(name),
         "Network" => super::network::remove_for_replace(name),
+        "NetworkRoute" => super::netroute::remove_for_replace(name),
         "Pod" => super::pod::remove_pod(name, true),
         "Vm" => super::vm::remove_for_replace(name),
-        // A firewall policy cannot be torn down automatically, and saying so is
-        // the only honest answer: it has no record of its own (it lives on the
-        // target's `ContainerFw`), so when `target`/`direction` change the OLD
-        // target is not written down anywhere — the manifest holds the new one.
-        // Leaving stale rules on a container nobody is looking at any more is
-        // the worst outcome available, so the user is told exactly what to run.
-        "FirewallPolicy" => Err(delonix_runtime_core::Error::Invalid(super::po::tf(
-            "FirewallPolicy/{name}: changing `target` or `direction` cannot be undone              automatically — the previous target keeps its rules. Clear them by hand with              `delonix net ingress clear <old-target>` (or `net egress clear`), then apply again",
-            &[("name", name)],
-        ))),
-        // `Image` is deliberately absent: it is not ownable (shared content), so
-        // it never reaches a prune or a destroy — and a `Replace` of an image is
-        // just a pull, handled by `converge`, never by destroying anything.
+        // Unreachable: the guard above already refused everything outside
+        // `TEARDOWN_KINDS`. Kept so adding a Kind to that list without an arm
+        // here fails instead of silently doing nothing.
         other => Err(delonix_runtime_core::Error::Invalid(format!(
-            "{other}/{name}: removing this Kind declaratively is not implemented"
+            "{other}/{name}: listed in TEARDOWN_KINDS but `destroy_one` has no arm for it"
         ))),
     }
 }
@@ -1459,6 +1530,7 @@ fn converge_and_stamp(
             "Container" => super::container::stamp(&d.name, stack, &d.fields),
             "Volume" => super::volume::stamp(&d.name, stack, &d.fields),
             "Network" => super::network::stamp(&d.name, stack, &d.fields),
+            "NetworkRoute" => super::netroute::stamp(&d.name, stack, &d.fields),
             "Pod" => super::pod::stamp(&d.name, stack, &d.fields),
             "Vm" => super::vm::stamp(&d.name, stack, &d.fields),
             // `Image` is shared content and deliberately not ownable — stamping
@@ -1665,6 +1737,31 @@ fn validate_graph_with(
                         ],
                     ));
                 }
+            }
+        }
+    }
+
+    // Two documents for the SAME ordered pair, under different names.
+    //
+    // The duplicate check below is keyed on `(kind, metadata.name)`, and a route's
+    // identity is not its document name but the pair (see `netroute::route_name`)
+    // — so two differently-named documents for `web -> db` slip past it and
+    // produce TWO plan lines for ONE nft element. Same class the `FirewallPolicy`
+    // already refuses for one target and direction, and refused rather than
+    // merged for the same reason: this is two answers to one question.
+    let mut pares: HashSet<(String, String)> = HashSet::new();
+    for doc in docs.iter().filter(|d| d.kind == "NetworkRoute") {
+        if let Ok(spec) = manifest::spec_of::<super::netroute::NetworkRouteSpec>(doc) {
+            if !pares.insert((spec.from.clone(), spec.to.clone())) {
+                issues.push(super::po::tf(
+                    "NetworkRoute '{name}': the path {from} -> {to} is declared by more than one \
+                     document — a route is identified by its pair, not by its name",
+                    &[
+                        ("name", &doc.metadata.name),
+                        ("from", &spec.from),
+                        ("to", &spec.to),
+                    ],
+                ));
             }
         }
     }
@@ -2501,7 +2598,7 @@ spec: {}
         for k in super::CONVERGING_KINDS {
             assert_eq!(
                 super::not_converged_reason(k),
-                "not converged in this version",
+                super::NOT_CONVERGED_GENERIC,
                 "{k} converge e ainda assim tem uma razão para não convergir"
             );
         }
@@ -2509,7 +2606,13 @@ spec: {}
 
     /// Os Kinds de `KINDS` que não têm presença observável — o `presence`
     /// devolve-lhes `-`, e é essa a marca que o `wait` tem de ler como pronta.
-    const DECLARATIVOS: [&str; 4] = ["Ingress", "FirewallPolicy", "HTTPRoute", "NetworkRoute"];
+    ///
+    /// **O `NetworkRoute` saiu desta lista**, e a razão é a mudança que o trouxe
+    /// para o `CONVERGING_KINDS`: passou a ter registo próprio
+    /// (`infra::RouteDef`), logo passou a ter presença observável de verdade —
+    /// `yes`/`no`, com o estado vivo ao lado. Deixá-lo aqui faria o `wait` dar
+    /// por pronta uma rota que ainda não existe.
+    const DECLARATIVOS: [&str; 3] = ["Ingress", "FirewallPolicy", "HTTPRoute"];
 
     /// **Um marcador de presença `-` não é «ausente».** O `wait` decidia
     /// prontidão com `present == "yes"`, e os Kinds declarativos NUNCA dizem
@@ -2560,6 +2663,68 @@ spec: {}
             );
             let (present, status) = super::presence(k, doc, &[]);
             assert_eq!(present, "-", "{k}: presence devolveu {present}/{status}");
+        }
+    }
+
+    /// O inverso da asserção acima, e é o que faltava — foi por aqui que o
+    /// `kind: NetworkRoute` entrou.
+    ///
+    /// Ele foi acrescentado ao `KINDS`, ao `apply` e ao `validate_graph`, ficou
+    /// fora do `CONVERGING_KINDS`, e **nada falhou**: a razão genérica cobria-o.
+    /// O resultado é o pior dos dois mundos — o plano imprime-o com `!` e uma
+    /// frase que se lê como «ninguém chegou lá», quando o que estava a acontecer
+    /// era que uma EXCEPÇÃO ao isolamento entre redes não podia ser fechada pelo
+    /// manifesto que a abriu.
+    ///
+    /// Ou o Kind converge, ou o obstáculo concreto está escrito. Não há terceira
+    /// hipótese, e é isso que este teste passa a exigir.
+    #[test]
+    fn todo_kind_nao_convergente_tem_razao_especifica() {
+        for k in super::KINDS
+            .iter()
+            .filter(|k| !super::CONVERGING_KINDS.contains(k))
+        {
+            assert_ne!(
+                super::not_converged_reason(k),
+                super::NOT_CONVERGED_GENERIC,
+                "{k} está fora do CONVERGING_KINDS com a razão genérica — \
+                 «não converge nesta versão» lê-se como «ninguém chegou lá». \
+                 Ou o Kind converge, ou escreve-se o obstáculo concreto em \
+                 `not_converged_reason`."
+            );
+        }
+    }
+
+    /// Um Kind que converge tem de poder ser DESFEITO, ou dizer porque não.
+    ///
+    /// O meio-buraco irmão do anterior: um Kind convergente e possuível entra no
+    /// plano, o `--prune` promete removê-lo, e o `destroy_one` cai no braço
+    /// genérico com «not implemented» **a meio de um destroy** — depois de já ter
+    /// removido os recursos anteriores na ordem de teardown. Um destroy que falha
+    /// a meio é pior que um que recusa à cabeça.
+    #[test]
+    fn todo_kind_convergente_tem_teardown_ou_razao() {
+        for k in super::CONVERGING_KINDS {
+            let removivel = super::TEARDOWN_KINDS.contains(&k);
+            let tem_razao = super::no_teardown_reason(k).is_some();
+            assert!(
+                removivel || tem_razao,
+                "{k} converge mas o `destroy_one` não o remove nem diz porquê — \
+                 um `--prune` promete-o e o destroy recusa-o a meio"
+            );
+            assert!(
+                !(removivel && tem_razao),
+                "{k} está no TEARDOWN_KINDS E tem razão para não ter teardown — \
+                 as duas coisas não podem ser verdade"
+            );
+        }
+        // E o inverso: nada se remove que não convirja, senão o teardown
+        // atravessa um Kind que o plano nunca nomeou.
+        for k in super::TEARDOWN_KINDS {
+            assert!(
+                super::CONVERGING_KINDS.contains(&k),
+                "o TEARDOWN_KINDS remove {k}, que não está no CONVERGING_KINDS"
+            );
         }
     }
 }
