@@ -11,7 +11,7 @@ because the first is free, the second is a real dataplane, and the third is not 
 | Tier | What it buys | Privilege | Verdict |
 |---|---|---|---|
 | **A — the address space becomes real** | arbitrary CIDRs, several subnets, a declared gateway/DNS | none (rootless) | **GO**, unblocked |
-| **B — routing between networks** | subnet ↔ subnet, namespace ↔ namespace through a declared path | none (all inside the holder's netns) | **GO after a spike** |
+| **B — routing between networks** | subnet ↔ subnet, namespace ↔ namespace through a declared path | none (all inside the holder's netns) | **GO** — spike done, see below |
 | **C — 802.1Q VLANs on a physical NIC** | trunk to a real switch, `macvlan`/`ipvlan` realized | `CAP_NET_ADMIN` in the **host's** init-netns | **opt-in privileged**, never the default |
 
 Tier C is the one that cannot be made rootless, and saying so up front is the point of this ADR.
@@ -101,6 +101,44 @@ So it follows the `vm bridge` precedent exactly, and that precedent is the decis
 * **dry-run by default**, printing the plan; `--apply` to execute;
 * refuses under an unprivileged uid with the reason, rather than degrading;
 * a `delonix-runtime-sec` pass before merge, because it puts the host's physical NIC in reach.
+
+## Spike result (2026-08-12) — tier B is a **GO**, and smaller than this ADR assumed
+
+Run rootless on a live host, against two throwaway bridge networks (`10.252.0.0/16` and
+`10.244.0.0/16`) with one container on each, alongside the host's production workloads.
+
+**Isolation between networks is not the absence of a route. It is an explicit pairwise drop.**
+Inside the holder's netns:
+
+* `ip_forward` is **1**;
+* the routing table already has `10.252.0.0/16 dev dlxn…` and `10.244.0.0/16 dev dlxn…`;
+* every `forward` chain (`fwguard` -20, `fwdeny` -10, `fwcont` -5, policy 0) is `policy accept`;
+* and there is one `iifname "<bridgeA>" oifname "<bridgeB>" drop` per ORDERED PAIR of bridges.
+
+The blocker was isolated without mutating anything, by comparing two destinations from the same
+container: A → **B's gateway** (`10.244.0.1`, which is the holder itself, so an `input` path)
+answered with **0% loss**, while A → **a container on B** (a `forward` path between the two
+bridges) lost **100%**. Routing works; the pair is dropped.
+
+**Consequence for tier B: opening a path is EXEMPTING a pair, not building a dataplane.** No new
+forwarding, no privilege, no second mechanism — which is why tier B stays rootless and does not
+descend to tier C. The `kind: NetworkRoute` document compiles to «do not install (or bypass) the
+drop for this ordered pair», and the composition rule already stated holds unchanged: the
+`fwcont` chains still decide whether the packet is allowed.
+
+**Two defects found on the way, both worth their own fix and neither blocking:**
+
+1. **The pairwise drops carry no `counter`.** Every other rule this engine emits does — that was
+   the point of `fw_rule_tail` and of the PACKETS/BYTES columns in `ingress ls`. Here the one
+   question worth asking, «did this pair ever try to talk», cannot be answered at all. It is also
+   why the spike had to prove the blocker by comparing two destinations instead of just reading a
+   number.
+2. **The rules are O(n²) and unmanaged.** Measured on this host: **8 bridges, 73 rules**. Every new
+   network rewrites a mesh against every existing one. This is the same shape the per-container
+   dispatch had before it became a verdict map (`@fwmap`, 2 rules regardless of container count),
+   and the same fix applies — an `nft` set/map keyed on the interface pair. Tier B should land on
+   top of that, not on top of the mesh, or it will be adding exceptions to a structure that is
+   already the wrong one.
 
 ## Alternatives considered
 
