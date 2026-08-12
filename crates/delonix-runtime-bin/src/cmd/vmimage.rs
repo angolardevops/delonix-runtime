@@ -3656,6 +3656,35 @@ pub(crate) fn rootless_customization_steps(
          net.ipv4.ip_unprivileged_port_start = 80\\n' > /etc/sysctl.d/99-delonix-lowports.conf"
             .into(),
     ));
+    // `br_netfilter` + `bridge-nf-call-iptables=1` — WITHOUT THESE THE NAMESPACE
+    // ISOLATION SILENTLY DOES NOTHING, and that is the whole reason this step
+    // exists.
+    //
+    // The isolation lives in nftables chains on the `forward` hook; traffic
+    // between two containers on the SAME bridge only reaches that hook when
+    // `br_netfilter` is bridging it into the ip layer. Without the module the
+    // chains are installed, the `@dlxall`/`@dlxns_*` sets are populated, every
+    // command reports success — and a container in namespace `teamA` reaches one
+    // in `teamB`. MEASURED, in a VM built from this very image: the two
+    // isolation scenarios of the chaos harness FAIL without it and PASS with it,
+    // nothing else changed.
+    //
+    // `install.sh` already does this on a host (`WITH_TUNE`, on by default), but
+    // it justifies it by Kubernetes — so an image built for rootless-only had no
+    // reason to inherit it, and did not. That left OUR OWN base image shipping a
+    // security property that reports itself as applied and is not.
+    //
+    // Files and not `modprobe`/`sysctl -w`, for the same reason as the step
+    // above: the guest is offline here, and only what lands in /etc survives to
+    // first boot. `systemd-modules-load` runs before `systemd-sysctl`, so the
+    // sysctl finds the knob already there.
+    ops.push(CustomizeOp::RunCommand(
+        "printf 'br_netfilter\\n' > /etc/modules-load.d/delonix.conf && \
+         printf '# Delonix Runtime — namespace isolation needs bridged traffic in netfilter.\\n\
+         net.bridge.bridge-nf-call-iptables = 1\\n\
+         net.bridge.bridge-nf-call-ip6tables = 1\\n' > /etc/sysctl.d/99-delonix-bridge.conf"
+            .into(),
+    ));
     ops
 }
 
@@ -4563,11 +4592,30 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
                 |o| matches!(o, CustomizeOp::RunCommand(c) if c.contains("ip_unprivileged_port_start")),
             )
         };
-        for d in [Distro::Ubuntu, Distro::Debian, Distro::Rocky] {
+        // The namespace isolation is unenforceable without bridged traffic in
+        // netfilter — MEASURED in a VM from this image: the chaos harness's two
+        // isolation scenarios fail without it and pass with it. A base image
+        // that ships without this reports the isolation as applied and is not.
+        let has_bridge_nf = |ops: &[CustomizeOp]| {
+            ops.iter().any(|o| {
+                matches!(o, CustomizeOp::RunCommand(c) if c.contains("br_netfilter")
+                    && c.contains("bridge-nf-call-iptables"))
+            })
+        };
+        for d in [
+            Distro::Ubuntu,
+            Distro::Debian,
+            Distro::Rocky,
+            Distro::Fedora,
+        ] {
             let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), d);
             assert!(
                 has_lowports(&ops),
                 "rootless golden ({d:?}) needs the sysctl"
+            );
+            assert!(
+                has_bridge_nf(&ops),
+                "rootless golden ({d:?}): without br_netfilter the namespace isolation is silently inert"
             );
         }
         assert!(!has_lowports(&k8s_customization_steps(
