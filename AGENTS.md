@@ -12,6 +12,36 @@ cargo test  --workspace               # testes
 cargo build -p delonix-runtime-bin    # a CLI `delonix` (ver secção "CLI" abaixo)
 ```
 
+## Método: um worktree por sessão (ler ANTES de editar)
+
+**Várias sessões escrevem neste clone ao mesmo tempo.** Não é hipótese: medido a
+2026-08-12, o HEAD da `main` mudou **quatro vezes** durante uma única sessão, três sessões
+commitaram no mesmo intervalo, e duas regeneraram o MESMO `docs/guia-vm.html` com minutos de
+diferença. Ao lado, o `git worktree list` tinha **oito** worktrees vivos, vários de sessões há
+muito fechadas. Por isso:
+
+1. **Criar o worktree antes da primeira edição** (`git worktree add`), com
+   `CARGO_TARGET_DIR=<repo>/target` para reaproveitar o cache de build.
+2. **No fim**: commitar no worktree → `git cherry-pick <sha>` na `main` → **correr os gates
+   OUTRA VEZ na `main`** → push → remover. Um cherry-pick limpo **não** prova que compila: a
+   base mudou desde que o worktree partiu, e é aí que a `main` cresceu quatro commits alheios.
+3. **Remover as DUAS coisas**: `git worktree remove <path>` **e** `git branch -D <branch>` — o
+   branch sobrevive ao worktree, e é assim que o lixo se torna invisível.
+
+Três armadilhas medidas, todas com custo real:
+
+- **Conflito no `AGENTS.md` é a norma, não a excepção** — várias sessões acrescentam à mesma
+  lista («X não é Y») e ao fim do ficheiro. Resolver **mantendo os dois lados**: são entradas
+  distintas, e escolher uma apaga o achado de outra pessoa.
+- **`git checkout -- <caminho>` na árvore partilhada destrói WIP alheia** (reverte para o HEAD,
+  sem aviso e sem stash). Aconteceu em `docs/` nesta sessão; nada se perdeu por sorte, porque a
+  outra sessão já tinha commitado.
+- **`git add -A`/`-u`/`.` absorve trabalho de outra sessão.** `git add <ficheiro> <ficheiro>`,
+  sempre, e reconhecer cada ficheiro do `git status --short` como seu antes de commitar.
+
+Um push rejeitado por divergência resolve-se com `git pull --rebase` — este repo tem histórico
+linear e não leva merge commits.
+
 ## CLI (`delonix`)
 
 O binário `delonix` (crate `delonix-runtime-bin`) é a CLI opensource completa deste motor —
