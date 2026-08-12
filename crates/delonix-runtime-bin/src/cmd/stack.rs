@@ -1134,7 +1134,7 @@ fn apply(file: Option<PathBuf>, replace: Vec<String>, do_prune: bool) -> Result<
     // already-mounted Storage, so the parent must exist first.
     layers.run("ShareVolume", "📂", || super::sharevolume::apply(&docs))?;
     layers.run("Image", "📦", || super::image::apply(&docs))?;
-    layers.run("Vm", "🖥", || super::vm::apply(&docs))?;
+    layers.run("Vm", "🖥", || super::vm::apply(&docs, base))?;
     layers.run("Container", "📦", || super::container::apply(&docs))?;
     layers.run("Pod", "🧩", || super::pod::apply(&docs))?;
     layers.run("FirewallPolicy", "🧱", || super::firewall::apply(&docs))?;
