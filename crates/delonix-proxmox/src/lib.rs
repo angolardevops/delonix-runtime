@@ -1123,7 +1123,11 @@ impl VmBackend for ProxmoxBackend {
         self.client.rollback(vmid, name)
     }
 
-    fn snapshots(&self, vm: &Vm) -> Result<Vec<String>> {
+    // `_vmdir` porque o Proxmox não tem disco local nosso: os instantâneos
+    // vivem no lado do servidor, indexados pelo `vmid`. O parâmetro entrou no
+    // trait quando os verbos passaram a servir uma VM PARADA (v0.52.0), e serve
+    // os backends que leem o overlay em disco — este não é um deles.
+    fn snapshots(&self, _vmdir: &Path, vm: &Vm) -> Result<Vec<String>> {
         self.client.snapshots(self.vmid_of(vm)?)
     }
 }
