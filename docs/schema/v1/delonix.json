@@ -2103,6 +2103,43 @@
       ],
       "type": "object"
     },
+    "VmBuildSpec": {
+      "description": "`spec.build` of a `kind: Vm` — the declarative face of `delonix vm build`.\n\nThe fields are the flags of that command, one for one, so the two paths\ncannot describe different builds. Nothing here is a second implementation:\n`apply` calls the SAME `vmfile::build`.",
+      "properties": {
+        "compress": {
+          "default": true,
+          "description": "Compress the result with zstd (default `true`) — the image is the\nread-only backing file of every VM created from it, so it is read far\nmore often than written.",
+          "type": "boolean"
+        },
+        "context": {
+          "default": ".",
+          "description": "Build context (default `.`), resolved relative to the MANIFEST's folder\nand not to the shell's working directory — the same rule\n`Secret.fromEnvFile` already follows, so a manifest means the same thing\nfrom wherever it is applied.",
+          "type": "string"
+        },
+        "file": {
+          "default": null,
+          "description": "The `VMfile` (default `<context>/VMfile`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "network": {
+          "default": false,
+          "description": "Give the build network access. **Off by default**, like the CLI: a build\nthat reaches the internet produces a different image depending on the\nday.",
+          "type": "boolean"
+        },
+        "tag": {
+          "default": null,
+          "description": "Tag for the produced image (default `<metadata.name>:latest`), which is\nthen used as the VM's disk.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "VmModeSpec": {
       "description": "`spec.vm` block — only read in `mode: vm`.",
       "properties": {
@@ -2177,6 +2214,18 @@
             "null"
           ]
         },
+        "build": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VmBuildSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Build the base disk from a `VMfile`, instead of naming one that already\nexists — the same shape `kind: Image` has (`pull:` or `build:`), applied\nto VMs.\n\nWithout it, a project whose VM image is built from a `VMfile` needed two\ncommands and a hand-copied tag between them: `delonix vm build -t x` and\nthen a manifest saying `disk: x`. The tag was written in two places and\nnothing kept them in step."
+        },
         "cloudInit": {},
         "cmdline": {
           "type": [
@@ -2220,6 +2269,8 @@
           "type": "array"
         },
         "disk": {
+          "default": "",
+          "description": "The base disk: a VM image name in the store, or a path.\n\nOptional ONLY because [`build`](Self::build) can produce it. Exactly one\nof the two — a `kind: Vm` with neither has no disk to boot, and one with\nboth is two answers to the same question (see [`VmSpec::resolve_disk`]).",
           "type": "string"
         },
         "extraDisks": {
@@ -2389,9 +2440,6 @@
           "type": "array"
         }
       },
-      "required": [
-        "disk"
-      ],
       "type": "object"
     },
     "VmVolumeSpec": {
