@@ -61,6 +61,10 @@ pub struct Env {
     /// `cloud-hypervisor` binary available — decides the VM's AUTO backend
     /// (present → CH; absent → falls back to libvirt). Mirrors `select_backend`.
     pub cloud_hypervisor: bool,
+    /// `wg` usable on the host — the prerequisite of an ENCRYPTED overlay
+    /// (`wgIp`). Without it `realize_overlay` fails closed and the uplink never
+    /// comes up.
+    pub wg: bool,
 }
 
 impl Env {
@@ -73,6 +77,10 @@ impl Env {
             mount_cifs: which("mount.cifs"),
             mount_davfs: which("mount.davfs"),
             cloud_hypervisor: which("cloud-hypervisor"),
+            // The SAME function `realize_overlay` gates on, not a `which("wg")`
+            // lookalike: a condition that disagrees with the realizer is worse
+            // than no condition at all.
+            wg: delonix_net::wg::available(),
         }
     }
 }
@@ -105,7 +113,7 @@ pub fn conditions_for(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
             c.extend(network_share(doc, env));
             c
         }
-        "Network" => network(doc),
+        "Network" => network(doc, env),
         "Vm" => {
             let mut c = vm(doc, env);
             c.extend(vm_volumes(doc));
@@ -182,14 +190,29 @@ fn volume(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
     }
 }
 
-/// `Network.Realized` — only the `bridge` driver has a physical plane (the
-/// rootless holder's bridge); `macvlan`/`ipvlan`/`overlay` stay in the
-/// `NetworkStore` with nothing a container can attach to. See the note in
-/// `cmd::network`.
-fn network(doc: &ManifestDoc) -> Vec<Condition> {
+/// `Network.Realized` — `macvlan`/`ipvlan` stay in the `NetworkStore` with
+/// nothing a container can attach to: their physical plane needs `CAP_NET_ADMIN`
+/// in the host's init-netns, which the rootless model does not have.
+///
+/// **`overlay` is NOT one of them, and used to be listed here as if it were.**
+/// `network create --driver overlay` calls `realize_overlay`, which brings up
+/// the bridge, the VXLAN uplink (`dlxvx<vni>` mastering it) and WireGuard —
+/// entirely inside the holder netns, so entirely without host privilege. The
+/// record it writes allocates a `base` octet exactly like a bridge network's,
+/// and nothing on the attach path gates on the driver, so containers attach to
+/// it like any other. Saying otherwise reported this engine's most advanced
+/// networking as unimplemented, in the plan, to the person who had just asked
+/// for it.
+///
+/// What IS a real prerequisite is the ENCRYPTED overlay: with `wgIp` set,
+/// `realize_overlay` refuses before touching the VXLAN when `wg` is missing
+/// (otherwise the FDB would point at peer addresses reachable only through a
+/// tunnel that never comes up — a silently blackholed uplink). That one is
+/// worth declaring, and it is the reason this function takes an `Env`.
+fn network(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
     let driver = spec_str(doc, &["driver"]).unwrap_or("bridge");
     match driver {
-        "macvlan" | "ipvlan" | "overlay" => vec![Condition::bad(
+        "macvlan" | "ipvlan" => vec![Condition::bad(
             "Realized",
             "DriverNotImplemented",
             super::po::tf(
@@ -197,6 +220,15 @@ fn network(doc: &ManifestDoc) -> Vec<Condition> {
                 &[("driver", driver)],
             ),
         )],
+        "overlay" if spec_str(doc, &["wgIp", "wg_ip"]).is_some() && !env.wg => {
+            vec![Condition::bad(
+                "Realized",
+                "WireguardMissing",
+                super::po::t(
+                    "encrypted overlay (wgIp) but 'wg' is unavailable on the host — install wireguard-tools + the kernel module, or drop wgIp for plain (unencrypted) VXLAN transport",
+                ),
+            )]
+        }
         _ => vec![Condition::ok("Realized")],
     }
 }
@@ -283,6 +315,8 @@ mod tests {
             mount_cifs: cifs,
             mount_davfs: davfs,
             cloud_hypervisor: true,
+            // wg present by default: the tests that exercise it say so.
+            wg: true,
         }
     }
 
@@ -357,7 +391,12 @@ mod tests {
 
     #[test]
     fn network_driver_nao_implementado_e_assinalado() {
-        for d in ["macvlan", "ipvlan", "overlay"] {
+        // These two genuinely have no physical plane without CAP_NET_ADMIN in
+        // the host's init-netns. `overlay` is NOT one of them — the previous
+        // version of this test looped over all three and so FIXED THE BUG in
+        // place: the one networking fundamental this engine implements was
+        // reported to the user as unimplemented, and the test agreed.
+        for d in ["macvlan", "ipvlan"] {
             let c = conditions_for(
                 &doc("Network", &format!("driver: {d}")),
                 &env(false, true, true, true),
@@ -367,6 +406,38 @@ mod tests {
         let c = conditions_for(
             &doc("Network", "driver: bridge"),
             &env(false, true, true, true),
+        );
+        assert!(c[0].ok);
+    }
+
+    /// A plain overlay is realized in the holder (bridge + VXLAN uplink), with
+    /// no host privilege. Reverting the fix makes this fail.
+    #[test]
+    fn overlay_simples_e_realizado() {
+        let c = conditions_for(
+            &doc("Network", "driver: overlay\nvni: 42"),
+            &env(true, true, true, true),
+        );
+        assert!(c[0].ok, "overlay reported as not realized: {:?}", c[0]);
+    }
+
+    /// The prerequisite that IS real: an encrypted overlay needs `wg`, and
+    /// `realize_overlay` refuses without it rather than blackholing the uplink.
+    #[test]
+    fn overlay_cifrado_sem_wg_e_assinalado() {
+        let no_wg = Env {
+            wg: false,
+            ..env(true, true, true, true)
+        };
+        let c = conditions_for(
+            &doc("Network", "driver: overlay\nvni: 42\nwgIp: 10.9.0.1"),
+            &no_wg,
+        );
+        assert_eq!(c[0].reason, "WireguardMissing");
+        // …and with `wg` on the host it is realized like any other overlay.
+        let c = conditions_for(
+            &doc("Network", "driver: overlay\nvni: 42\nwgIp: 10.9.0.1"),
+            &env(true, true, true, true),
         );
         assert!(c[0].ok);
     }
@@ -414,11 +485,8 @@ mod tests {
         // Fix #3: backend ABSENT (auto) on a host WITHOUT cloud-hypervisor → falls
         // back to libvirt → supervised (does not warn BackendCloudHypervisor needlessly).
         let sem_ch = Env {
-            rootless: false,
-            mount_nfs: true,
-            mount_cifs: true,
-            mount_davfs: true,
             cloud_hypervisor: false,
+            ..env(false, true, true, true)
         };
         let c = conditions_for(&doc("Vm", "disk: d\nrestartPolicy: always"), &sem_ch);
         assert!(
