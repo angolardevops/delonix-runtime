@@ -1,7 +1,11 @@
 #!/bin/bash
 # Build a bootable Proxmox appliance image from an installation ISO.
 #
-#   build-proxmox.sh <product> <src.iso>
+#   build-proxmox.sh <product> [version|src.iso]
+#
+#   build-proxmox.sh pve                 # the pinned version below, fetched+verified
+#   build-proxmox.sh pve 9.2-1           # another version, fetched+verified
+#   build-proxmox.sh pve /path/to.iso    # an ISO you already have
 #
 # Runs the vendor's own automated installer unattended against an empty disk
 # in QEMU/KVM, then flattens and compresses the result. Nothing about the
@@ -9,19 +13,67 @@
 set -euo pipefail
 
 PRODUCT=$1
-SRC_ISO=$2
 HERE=$(cd "$(dirname "$0")" && pwd)
 OUT=${OUT_DIR:-$(pwd)}
 DISK_GB=${DISK_GB:-20}
 MEM=${MEM:-4096}
+# Where fetched media is kept between builds. These are ~1.5 GiB each and the
+# checksum makes re-use safe, so a rebuild costs nothing.
+CACHE=${MEDIA_CACHE:-$HERE/.media}
+MIRROR=${PROXMOX_MIRROR:-https://enterprise.proxmox.com/iso}
 
-RAW="$OUT/$PRODUCT.raw.qcow2"
-FINAL="$OUT/$PRODUCT.qcow2"
-LOG="$OUT/$PRODUCT-install.log"
-ISO="$HERE/$PRODUCT-auto.iso"
+# The ISO file stem, per product. Not derivable from the short name — and
+# guessing it would produce a 404 after the checksum had already been fetched.
+case "$PRODUCT" in
+  pve) STEM=proxmox-ve;                 DEFAULT_VER=9.2-1 ;;
+  pbs) STEM=proxmox-backup-server;      DEFAULT_VER=4.2-1 ;;
+  pmg) STEM=proxmox-mail-gateway;       DEFAULT_VER=9.1-1 ;;
+  pdm) STEM=proxmox-datacenter-manager; DEFAULT_VER=1.1-1 ;;
+  *) echo "!! unknown product '$PRODUCT' (want: pve, pbs, pmg or pdm)" >&2; exit 1 ;;
+esac
+
+# Second argument: an existing FILE is used as-is (the original contract, kept);
+# anything else is a version to fetch. Deciding by "does this path exist" and
+# not by shape means a typo in a path fetches rather than failing with a
+# confusing "no such ISO" — and the fetch then fails loudly on a real 404.
+ARG=${2:-$DEFAULT_VER}
+if [ -f "$ARG" ]; then
+  SRC_ISO=$ARG
+  echo "############ $PRODUCT (local ISO: $SRC_ISO)"
+else
+  VER=$ARG
+  SRC_ISO="$CACHE/${STEM}_${VER}.iso"
+  echo "############ $PRODUCT $VER"
+  # The vendor publishes one GNU-format SHA256SUMS for the whole directory.
+  # Pull the line for THIS file: an absent entry means the version does not
+  # exist (or was withdrawn), and that has to stop the build rather than
+  # download something nobody vouched for.
+  SUMS=$(curl -fsSL --retry 3 "$MIRROR/SHA256SUMS")
+  WANT=$(echo "$SUMS" | awk -v f="${STEM}_${VER}.iso" '$2 == f {print $1}')
+  if [ -z "$WANT" ]; then
+    echo "!! no checksum for ${STEM}_${VER}.iso in $MIRROR/SHA256SUMS" >&2
+    echo "   published versions of this product:" >&2
+    echo "$SUMS" | awk -v s="$STEM" '$2 ~ "^"s"_" {print "     " $2}' >&2
+    exit 1
+  fi
+  "$HERE/fetch-media.sh" "$MIRROR/${STEM}_${VER}.iso" "$WANT" "$SRC_ISO"
+fi
+
+# With a local ISO the version is not known from an argument, so read it off the
+# vendor's own filename. It is only ever used to NAME the output.
+if [ -z "${VER:-}" ]; then
+  VER=$(basename "$SRC_ISO" | sed -n "s/^${STEM}_\(.*\)\.iso$/\1/p")
+fi
+# The version belongs in the output name. Without it, building 9.2 silently
+# overwrites the 9.1 image sitting in the same directory — and the whole point
+# of keeping both tags is that both exist.
+SLUG="$PRODUCT${VER:+-$VER}"
+RAW="$OUT/$SLUG.raw.qcow2"
+FINAL="$OUT/$SLUG.qcow2"
+LOG="$OUT/$SLUG-install.log"
+ISO="$HERE/$SLUG-auto.iso"
 ANSWER=${ANSWER:-$HERE/answer-$PRODUCT.toml}
 
-echo "############ $PRODUCT"
 "$HERE/mkiso.sh" "$SRC_ISO" "$ANSWER" "$ISO" "$HERE/w-$PRODUCT"
 
 # KVM when the host has it, TCG when it does not (a CI runner may not expose
@@ -78,7 +130,7 @@ echo "==> post-install: DHCP, eth0, serial console (ssh on :$SSH_PORT)"
 qemu-system-x86_64 "${ACCEL[@]}" -m "$MEM" -smp 4 \
   -drive file="$RAW",if=virtio,format=qcow2,cache=unsafe \
   -netdev "user,id=n0,hostfwd=tcp::$SSH_PORT-:22" -device virtio-net-pci,netdev=n0 \
-  -display none -serial "file:$OUT/$PRODUCT-postinstall.log" &
+  -display none -serial "file:$OUT/$SLUG-postinstall.log" &
 QEMU_PID=$!
 # The port accepting is NOT sshd answering: the QEMU hostfwd accepts a
 # connection whether or not anything listens inside. Wait for the banner.
@@ -99,3 +151,12 @@ qemu-img convert -O qcow2 -c -o compression_type=zstd "$RAW" "$FINAL"
 rm -f "$RAW"
 ls -lh "$FINAL"
 qemu-img info "$FINAL" | grep -E "virtual size|disk size|compression"
+
+# Close the loop: the tag is what makes the image reachable, and `--appliance`
+# is what stops `vm create` from generating a cloud-init seed this guest cannot
+# read. Getting either wrong is only noticed at first boot.
+TAG=${VER%%-*}
+echo
+echo "Register it with:"
+echo "  delonix image vm import $FINAL -t $PRODUCT:${TAG:-latest} --appliance \\"
+echo "      --distro $PRODUCT --release ${VER:-unknown} --default-vcpus 2 --default-memory 4G"

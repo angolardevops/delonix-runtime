@@ -6,11 +6,52 @@
 # touching the ISO at all: the stock `truenas-installer.service` inside the
 # live image is literally `python3 -m truenas_installer --server`, which
 # listens on :8080. We just forward the port and call `install`.
+#
+#   build-truenas.sh                  # the pinned version below, fetched+verified
+#   build-truenas.sh 25.10.5          # another version, fetched+verified
+#   build-truenas.sh /path/to.iso     # an ISO you already have
 set -euo pipefail
 
-SRC_ISO=${1:?usage: build-truenas.sh <TrueNAS-SCALE-*.iso>}
 HERE=$(cd "$(dirname "$0")" && pwd)
 OUT=${OUT_DIR:-$(pwd)}
+CACHE=${MEDIA_CACHE:-$HERE/.media}
+DEFAULT_VER=${DEFAULT_VER:-25.10.5}
+
+# The download path carries the RELEASE TRAIN's codename, and it is not
+# derivable from the version number — so it is a table, and an unknown train
+# stops the build instead of guessing a URL that would 404 halfway through.
+# Each of these was confirmed to resolve before being written down.
+train_of() {
+  case "${1%%.*}.${1#*.}" in
+    25.10*) echo Goldeye ;;
+    25.04*) echo Fangtooth ;;
+    24.10*) echo ElectricEel ;;
+    *) return 1 ;;
+  esac
+}
+
+ARG=${1:-$DEFAULT_VER}
+if [ -f "$ARG" ]; then
+  SRC_ISO=$ARG
+  echo "############ truenas-scale (local ISO: $SRC_ISO)"
+else
+  VER=$ARG
+  TRAIN=${TRUENAS_TRAIN:-$(train_of "$VER" || true)}
+  if [ -z "$TRAIN" ]; then
+    echo "!! unknown release train for TrueNAS SCALE $VER" >&2
+    echo "   known: 25.10.x=Goldeye, 25.04.x=Fangtooth, 24.10.x=ElectricEel" >&2
+    echo "   pass it explicitly: TRUENAS_TRAIN=<Name> build-truenas.sh $VER" >&2
+    exit 1
+  fi
+  BASE=${TRUENAS_MIRROR:-https://download.sys.truenas.net}/TrueNAS-SCALE-$TRAIN/$VER
+  SRC_ISO="$CACHE/TrueNAS-SCALE-$VER.iso"
+  echo "############ truenas-scale $VER ($TRAIN)"
+  # Unlike Proxmox's directory-wide SHA256SUMS, TrueNAS publishes a sidecar
+  # holding the bare hash and nothing else — no filename to match on.
+  WANT=$(curl -fsSL --retry 3 "$BASE/TrueNAS-SCALE-$VER.iso.sha256" | tr -d ' \n')
+  [ -n "$WANT" ] || { echo "!! no checksum published for TrueNAS SCALE $VER" >&2; exit 1; }
+  "$HERE/fetch-media.sh" "$BASE/TrueNAS-SCALE-$VER.iso" "$WANT" "$SRC_ISO"
+fi
 # The RPC client needs a WebSocket library. Debian/Ubuntu ship python3 as an
 # externally-managed environment (PEP 668), so a throwaway venv is the way to
 # get one without touching the system interpreter.
@@ -24,12 +65,17 @@ MEM=${MEM:-6144}
 PORT=${PORT:-18080}
 PASSWORD=${PASSWORD:-delonix-admin}
 
-RAW="$OUT/truenas.raw.qcow2"
-FINAL="$OUT/truenas.qcow2"
-LOG="$OUT/truenas-install.log"
-PIDFILE="$OUT/truenas-qemu.pid"
+if [ -z "${VER:-}" ]; then
+  VER=$(basename "$SRC_ISO" | sed -n 's/^TrueNAS-SCALE-\(.*\)\.iso$/\1/p')
+fi
+# The version belongs in the output name: without it, building a new release
+# silently overwrites the image of the one already sitting there.
+SLUG="truenas${VER:+-$VER}"
+RAW="$OUT/$SLUG.raw.qcow2"
+FINAL="$OUT/$SLUG.qcow2"
+LOG="$OUT/$SLUG-install.log"
+PIDFILE="$OUT/$SLUG-qemu.pid"
 
-echo "############ truenas-scale"
 # KVM when the host has it, TCG when it does not (a CI runner may not expose
 # /dev/kvm). Without acceleration an install takes far longer but still works,
 # and `-cpu host` is meaningless under TCG.
@@ -78,3 +124,10 @@ qemu-img convert -O qcow2 -c -o compression_type=zstd "$RAW" "$FINAL"
 rm -f "$RAW"
 ls -lh "$FINAL"
 qemu-img info "$FINAL" | grep -E "virtual size|disk size|compression"
+
+# Close the loop: `--appliance` is what stops `vm create` from generating a
+# cloud-init seed this guest cannot read.
+echo
+echo "Register it with:"
+echo "  delonix image vm import $FINAL -t truenas-scale:${VER%.*} --appliance \\"
+echo "      --distro truenas --release ${VER:-unknown} --default-vcpus 2 --default-memory 8G"
