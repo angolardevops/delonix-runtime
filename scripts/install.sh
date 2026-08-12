@@ -506,10 +506,37 @@ if [ "$WITH_VM" = 1 ]; then
   else
     skip vm cloud-hypervisor
   fi
-  # Firmware do Cloud Hypervisor (rust-hypervisor-fw): o CH não tem BIOS, por
-  # isso uma cloud image (a golden `delonix vm pull`) só arranca com firmware.
-  # O motor procura-o em /usr/local/share/delonix/hypervisor-fw — sem ele,
-  # `vm create` de uma cloud image falharia. Binário minúsculo (~150 KB).
+  # Firmware do Cloud Hypervisor: o CH não tem BIOS, por isso uma cloud image
+  # (a golden `delonix vm pull`) só arranca com firmware. São instalados DOIS,
+  # e o motor prefere o EDK2 (ver `default_ch_firmware`).
+  #
+  # PORQUÊ os dois, medido em 2026-08-12 e não suposto: sob o `hypervisor-fw`
+  # NENHUMA imagem deste projecto arrancava em CH — as `delonix-vm-base:*`
+  # ficavam com o overlay a 448 KiB (o SO nunca escreveu nada) e a golden k8s
+  # morria no shim de Secure Boot (`import_mok_state() failed: Unsupported`).
+  # Com o EDK2 `CLOUDHV.fd` arrancam e ganham IP na SDN: ubuntu-24.04 em 7,8s,
+  # ubuntu-26.04 e debian-bookworm em 5s, rocky-9 em 32s, a golden em 7s.
+  # O `hypervisor-fw` continua a ser instalado como recurso (é ~150 KB, arranca
+  # mais depressa onde funcione, e tirá-lo mudaria o comportamento de uma VM
+  # que hoje dependa dele).
+  EDK2_DEST=/usr/local/share/delonix/CLOUDHV.fd
+  if [ ! -e "$EDK2_DEST" ]; then
+    EDK2_URL="https://github.com/cloud-hypervisor/edk2/releases/latest/download/CLOUDHV.fd"
+    fetch_edk2() {
+      $SUDO mkdir -p /usr/local/share/delonix \
+        && curl -fsSL -o /tmp/CLOUDHV.fd.$$ "$EDK2_URL" \
+        && $SUDO install -m 0644 /tmp/CLOUDHV.fd.$$ "$EDK2_DEST"
+    }
+    if spin vm CLOUDHV.fd "fetching the EDK2 firmware for Cloud Hypervisor (boots cloud images)..." fetch_edk2; then
+      rm -f /tmp/CLOUDHV.fd.$$
+      stepok vm "CLOUDHV.fd -> $EDK2_DEST"
+    else
+      rm -f /tmp/CLOUDHV.fd.$$
+      warn "could not fetch the EDK2 firmware — a Cloud Hypervisor VM will fall back to rust-hypervisor-fw, which boots none of the delonix images (use --backend libvirt)"
+    fi
+  else
+    skip vm CLOUDHV.fd
+  fi
   FW_DEST=/usr/local/share/delonix/hypervisor-fw
   if [ ! -e "$FW_DEST" ]; then
     FW_URL="https://github.com/cloud-hypervisor/rust-hypervisor-firmware/releases/latest/download/hypervisor-fw"
