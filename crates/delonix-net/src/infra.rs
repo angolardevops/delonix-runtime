@@ -3596,6 +3596,23 @@ pub fn network_remove(name: &str) {
     let _ = std::fs::remove_file(netdef_path(name));
 }
 
+/// Deletes a link the holder owns, by name — the counterpart of the VXLAN
+/// uplink `set_vxlan` creates.
+///
+/// **Measured leak this closes.** `network_remove` deletes the network's
+/// BRIDGE, and nothing deleted the `dlxvx<vni>` device mastered on it: a
+/// `network rm` of an overlay left the uplink behind, still UP, still holding
+/// the peers' FDB entries, now with no master. It survives in the holder until
+/// the holder itself dies, and every create/rm cycle leaves another one.
+///
+/// Separate from `network_remove` rather than folded into it because `NetDef`
+/// (the infra-side record) has no `vni` — only the `NetworkStore` record does,
+/// which is why the caller passes the name. Additive, so no consumer of this
+/// crate has to change.
+pub fn vxlan_remove(dev: &str) {
+    let _ = control_send(&format!("netdel {dev}"));
+}
+
 // ---- host-side API: container factory + lifecycle (ref-count) ---------------
 
 /// Deterministic IP of a container on an ingress network (`<prefix>.A.B`),
