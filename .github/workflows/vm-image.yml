@@ -37,6 +37,7 @@ on:
           - ubuntu
           - debian
           - rocky
+          - fedora
         default: ubuntu
       debian_release:
         description: "Codinome Debian (usado quando distro=debian, builds --no-k8s)"
@@ -44,6 +45,9 @@ on:
       rocky_release:
         description: "Versão major do Rocky (usado quando distro=rocky, builds --no-k8s)"
         default: "9"
+      fedora_release:
+        description: "Release E build do Fedora (ex.: 42-1.1) — o build não se deduz da versão"
+        default: "42-1.1"
 
 permissions:
   contents: read
@@ -75,6 +79,15 @@ jobs:
             elif [ "${{ inputs.distro }}" = "rocky" ]; then
               echo "tag=delonix-vm-base:rocky-${{ inputs.rocky_release }}" >> "$GITHUB_OUTPUT"
               echo "dest_tag=rocky-${{ inputs.rocky_release }}" >> "$GITHUB_OUTPUT"
+            elif [ "${{ inputs.distro }}" = "fedora" ]; then
+              # A tag leva só o MAJOR. O `--fedora-release` tem de trazer o build
+              # (`42-1.1`) porque o nome do artefacto do fabricante o carrega e a
+              # versão não o determina — mas `fedora-42-1.1` como tag OCI não diz
+              # mais nada a quem a lê do que `fedora-42`, e desalinhava-se das
+              # irmãs (`ubuntu-24.04`, `rocky-9`).
+              FED_MAJOR="${{ inputs.fedora_release }}"; FED_MAJOR="${FED_MAJOR%%-*}"
+              echo "tag=delonix-vm-base:fedora-${FED_MAJOR}" >> "$GITHUB_OUTPUT"
+              echo "dest_tag=fedora-${FED_MAJOR}" >> "$GITHUB_OUTPUT"
             else
               echo "tag=delonix-vm-base:ubuntu-${{ inputs.ubuntu_release }}" >> "$GITHUB_OUTPUT"
               echo "dest_tag=ubuntu-${{ inputs.ubuntu_release }}" >> "$GITHUB_OUTPUT"
@@ -97,10 +110,27 @@ jobs:
             --cri-bin ./target/release/delonix-cri \
             --offline
           ./target/release/delonix image --vm ls
+      # Ao contrário da golden (`--offline`, sem rede no appliance), uma build
+      # `--no-k8s` INSTALA pacotes lá dentro e precisa mesmo de rede. Quem a dá é
+      # o passt, e o do Ubuntu 24.04 — o runner — é o mesmo que falha nos dois
+      # modos já medidos: ou recusa o `$XDG_RUNTIME_DIR` do libguestfs por
+      # AppArmor, ou arranca, nunca dá lease, deixa o `dhclient` pendurar 300s e
+      # o build segue SEM rede até o gestor de pacotes não resolver um mirror.
+      # Daí as duas metades: um runtime dir que o perfil permite, e um passt
+      # actual PRIMEIRO no PATH (o libguestfs procura-o com `passt --help`, logo
+      # compilá-lo sem o pôr no PATH não muda nada).
+      - name: passt actual (a build --no-k8s precisa de rede no appliance)
+        if: ${{ inputs.no_k8s == 'true' }}
+        run: |
+          git clone --depth 1 https://passt.top/passt /tmp/passt-src
+          make -C /tmp/passt-src -j"$(nproc)"
+          mkdir -p /tmp/delonix-run && chmod 700 /tmp/delonix-run
+          echo "/tmp/passt-src" >> "$GITHUB_PATH"
       - name: Constrói a imagem VM dourada (sem Kubernetes)
         if: ${{ inputs.no_k8s == 'true' }}
         env:
           LIBGUESTFS_BACKEND: direct
+          XDG_RUNTIME_DIR: /tmp/delonix-run
         run: |
           if [ "${{ inputs.distro }}" = "debian" ]; then
             ./target/release/delonix image --vm build \
@@ -114,6 +144,13 @@ jobs:
               --tag "${{ steps.vars.outputs.tag }}" \
               --distro rocky \
               --rocky-release "${{ inputs.rocky_release }}" \
+              --delonix-bin ./target/release/delonix \
+              --no-k8s
+          elif [ "${{ inputs.distro }}" = "fedora" ]; then
+            ./target/release/delonix image --vm build \
+              --tag "${{ steps.vars.outputs.tag }}" \
+              --distro fedora \
+              --fedora-release "${{ inputs.fedora_release }}" \
               --delonix-bin ./target/release/delonix \
               --no-k8s
           else
