@@ -1,4 +1,4 @@
-//! `delonix ingress` / `delonix egress` — the single firewall surface.
+//! `delonix net ingress` / `delonix net egress` — the single firewall surface.
 //!
 //! Both groups edit ONE source of truth: the per-container [`ContainerFw`]
 //! (persisted on the `Container`, enforced as nft rules in the ingress netns).

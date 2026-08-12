@@ -623,6 +623,112 @@ fn main() {
 /// everyday surface, was 28 of them. The mechanism was never broken (see
 /// `po::translate_help`); what was missing were the catalog entries, and
 /// nothing was watching.
+/// Every `delonix <x>` a message tells the user to run has to EXIST.
+///
+/// The v0.30.0 reorganization moved seven groups under `net` and three under
+/// `serve`, as a clean cut with no aliases — which is the right call for a CLI,
+/// and leaves every message that still names the old form telling the operator
+/// to run something that answers `unrecognized subcommand`.
+///
+/// Found by using the product: after a reboot, `net boot status` said
+/// «run `delonix boot enable`» — the recovery instruction, pointing at a command
+/// removed 19 versions earlier. Five more were sitting next to it (`tunnel ls`,
+/// `tunnel describe`, `ingress publish`/`unpublish`). None of them is caught by
+/// anything else: they are string literals, and the compiler has no opinion
+/// about the inside of a string.
+#[cfg(test)]
+mod comandos_citados_tests {
+    use clap::CommandFactory;
+
+    /// Words that follow `delonix ` in prose without naming a subcommand.
+    ///
+    /// Kept EXPLICIT rather than heuristic: a regex that skipped anything it did
+    /// not recognise would skip the typo too, and this test exists precisely to
+    /// catch the name that stopped being real.
+    const NAO_SAO_COMANDOS: &[&str] = &[
+        "run",
+        "ps",
+        "exec",
+        "logs",
+        "rm",
+        "images", // atalhos de topo (after_help)
+        "<group>",
+        "<grupo>",
+        "<x>",
+        "<command>",
+        "<comando>",
+        "--help",
+        "--version",
+        "-h",
+        "-v",
+        "engine",
+        "runtime",
+        // `delonix netns holder|run` EXISTE — é o re-exec interno do holder,
+        // interceptado a partir de `std::env::args()` CRUA em `main()`, antes de
+        // o clap ver seja o que for. Não estar na árvore do clap é deliberado
+        // (não é superfície pública), e por isso tem de ser dito aqui em vez de
+        // o teste o dar como morto.
+        "netns",
+    ];
+
+    fn fontes() -> Vec<(&'static str, &'static str)> {
+        vec![
+            ("boot.rs", include_str!("cmd/boot.rs")),
+            ("tunnel.rs", include_str!("cmd/tunnel.rs")),
+            ("vm.rs", include_str!("cmd/vm.rs")),
+            ("container.rs", include_str!("cmd/container.rs")),
+            ("network.rs", include_str!("cmd/network.rs")),
+            ("volume.rs", include_str!("cmd/volume.rs")),
+            ("firewall.rs", include_str!("cmd/firewall.rs")),
+            ("rbackup.rs", include_str!("cmd/rbackup.rs")),
+            ("system.rs", include_str!("cmd/system.rs")),
+            ("stack.rs", include_str!("cmd/stack.rs")),
+            ("image.rs", include_str!("cmd/image.rs")),
+            ("vmimage.rs", include_str!("cmd/vmimage.rs")),
+        ]
+    }
+
+    #[test]
+    fn nenhuma_mensagem_manda_correr_um_comando_que_nao_existe() {
+        let cmd = super::Cli::command();
+        let reais: Vec<String> = cmd
+            .get_subcommands()
+            .map(|s| s.get_name().to_string())
+            .collect();
+
+        let mut mortos: Vec<String> = Vec::new();
+        for (ficheiro, src) in fontes() {
+            for (i, linha) in src.lines().enumerate() {
+                // Só o que está entre CRASES. É como este código escreve um
+                // comando executável, em comentários e em mensagens; sem esta
+                // restrição a varredura casa prosa (`delonix and`, `delonix tem`)
+                // e o ruído afogaria o achado — que foi exactamente o que a 1.ª
+                // versão deste teste fez.
+                let mut resto = linha;
+                while let Some(p) = resto.find("`delonix ") {
+                    resto = &resto[p + "`delonix ".len()..];
+                    let palavra: String = resto
+                        .chars()
+                        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
+                        .collect();
+                    if palavra.is_empty()
+                        || NAO_SAO_COMANDOS.contains(&palavra.as_str())
+                        || reais.contains(&palavra)
+                    {
+                        continue;
+                    }
+                    mortos.push(format!("{ficheiro}:{}: delonix {palavra}", i + 1));
+                }
+            }
+        }
+        assert!(
+            mortos.is_empty(),
+            "mensagem(ns) a mandar correr um comando inexistente:\n  {}",
+            mortos.join("\n  ")
+        );
+    }
+}
+
 #[cfg(test)]
 mod help_i18n_tests {
     use clap::CommandFactory;

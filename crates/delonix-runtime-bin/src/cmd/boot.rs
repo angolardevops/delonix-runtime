@@ -1,4 +1,4 @@
-//! `delonix boot` — install systemd units so the running containers come back
+//! `delonix net boot` — install systemd units so the running containers come back
 //! UP automatically when the host boots, with no manual restart.
 //!
 //! Rootless installs USER units + linger (start at boot without a login);
@@ -109,7 +109,7 @@ pub fn run(action: BootCmd) -> Result<()> {
                 }
             }
             if !any {
-                println!("  (no boot units — run `delonix boot enable`)");
+                println!("  (no boot units — run `delonix net boot enable`)");
             }
             Ok(())
         }
@@ -155,7 +155,7 @@ fn enable(
         installed.push(format!("delonix-{}.service", c.name));
     }
     if installed.is_empty() {
-        println!("boot: no running containers — start them first, then `delonix boot enable`.");
+        println!("boot: no running containers — start them first, then `delonix net boot enable`.");
         return Ok(());
     }
     sysctl(&["daemon-reload"]);

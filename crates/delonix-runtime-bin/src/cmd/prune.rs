@@ -200,6 +200,33 @@ pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<Con
         out.containers += 1;
     }
 
+    /// Is the VM behind a `vm-<nome>` ingress ref still running?
+    ///
+    /// Reads the record AND checks the pid, because the two can disagree: a VM whose
+    /// host died keeps `status: Running` on disk until something reconciles it, and
+    /// that stale record is exactly what would keep a dead ref alive. A name the
+    /// store does not know is not alive either — the VM was removed and its ref
+    /// outlived it.
+    fn vm_esta_viva(name: &str) -> bool {
+        let st: delonix_runtime_core::JsonStore<delonix_runtime_core::Vm> =
+            match delonix_runtime_core::JsonStore::open(super::util::state_root().join("vms")) {
+                Ok(s) => s,
+                // Cannot tell → do NOT reap. Freeing the ref of a live VM cuts its
+                // network; leaving a stale one costs a refcount.
+                Err(_) => return true,
+            };
+        match st.load(name) {
+            Ok(vm) => {
+                matches!(vm.status, delonix_runtime_core::Status::Running)
+                    && vm
+                        .pid
+                        .map(delonix_runtime::is_alive)
+                        .unwrap_or(false)
+            }
+            Err(_) => false,
+        }
+    }
+
     // Ids still alive AFTER step 1 — the basis for deciding what is orphan.
     let live_ids: HashSet<String> = store.list()?.iter().map(|c| c.id.clone()).collect();
 
@@ -216,8 +243,29 @@ pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<Con
         .map(|c| c.id.clone())
         .collect();
     for id in delonix_net::infra::attached_refs() {
-        if id.starts_with("cri-") || id.starts_with("vm-") {
+        // A `vm-<nome>` ref is checked against the VM store instead of being
+        // assumed alive. Assuming made it IMMORTAL: nothing on the system ever
+        // freed it, so the ref-count never reached zero, the infra was never torn
+        // down, and — the part that bites — `delonix-cri` reports
+        // `NetworkReady=false` whenever the infra is down while a ref remains,
+        // which pins the node in NotReady forever.
+        //
+        // Measured on this host after a reboot: `ingress DOWN … refcount 1`, held
+        // by `vm-micro`, a VM that had been stopped since before the reboot. Same
+        // family as every other trap in this repo — a FILE that outlives the
+        // process that created it is not a live thing.
+        //
+        // `cri-*` stays unconditional, and that is not an oversight: a sandbox id
+        // belongs to the CRI's own bookkeeping, this command cannot tell a live
+        // pod from a dead one, and guessing wrong tears the network out from
+        // under a running pod. Conservative there is the right side to err on;
+        // here the store gives a real answer.
+        if id.starts_with("cri-") {
             live_refs.insert(id);
+        } else if let Some(name) = id.strip_prefix("vm-") {
+            if vm_esta_viva(name) {
+                live_refs.insert(id);
+            }
         }
     }
     out.refs = delonix_net::infra::reap_orphan_refs(&live_refs);
