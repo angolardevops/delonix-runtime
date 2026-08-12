@@ -3727,11 +3727,58 @@ arrancam e ganham IP na SDN — medido: ubuntu-24.04 **7,8 s**, ubuntu-26.04 e d
   secção acima dava por provado só contra um container, **está agora provado através de uma VM**:
   `is up — ip 10.233.254.177` em 7,8 s, confirmado à parte por ARP (`REACHABLE` com o MAC real do
   convidado), pelo kernel na consola série, e por 3/3 ICMP de um container na mesma rede.
-- **`delonix-vm-base:fedora-42` continua a não arrancar, e não é do backend**: em CH com EDK2 o
-  GRUB anuncia `Booting 'Fedora Linux (6.14.0-63.fc42.x86_64)'` e o firmware leva um `#PF` de
-  escrita a carregar o kernel (igual com `CLOUDHV_EFI.fd`, igual com 2 GiB); e **em libvirt a
-  mesma imagem também não ganha IP em 90 s**. É o controlo em libvirt que faz disto um problema
-  da imagem, e não uma conclusão sobre o Cloud Hypervisor tirada de uma amostra de um.
+- **`delonix-vm-base:fedora-42` continua a não arrancar em CH, e isso não é do backend nem da
+  imagem**: o GRUB anuncia `Booting 'Fedora Linux (6.14.0-63.fc42.x86_64)'` e o EDK2 leva um `#PF`
+  de escrita a carregar o kernel — igual com `CLOUDHV_EFI.fd`, igual com 2 GiB, e **igual com a
+  imagem ORIGINAL do fabricante** (mesmo RIP). Ver a secção seguinte: a parte que era nossa eram
+  outras duas coisas, e a linha que aqui dizia «em libvirt também não ganha IP, logo é da imagem»
+  estava errada por método — media-se «não ganha IP» e concluía-se «não arranca».
+
+## O Fedora arrancava sempre; o que não tinha era rede (2026-08-12)
+
+Três problemas empilhados, e o primeiro passo que valeu foi um **screenshot da consola** (30 s de
+trabalho, `virsh screenshot` + `Read` da imagem): mostrava a VM no prompt de login. Toda a
+conclusão anterior — «a imagem não arranca» — vinha de medir um proxy (não ganha IP) e chamar-lhe
+a coisa. Mesma armadilha que o `--vnc` já tinha pregado à série das appliances.
+
+1. **As imagens SELinux saíam do build sem etiquetas — e isto atinge o Rocky também.** Qualquer
+   `dnf install` dentro do `virt-customize` re-corre o `ldconfig`, e o `/etc/ld.so.cache`
+   reescrito volta **sem xattr de SELinux nenhum**. O `virt-customize` 1.52 relabela por omissão e
+   imprime `SELinux relabelling`, mas num convidado Fedora esse passo demora **0,1 s**: não
+   relabela, agenda (`/.autorelabel`). E o relabel de primeiro arranque nunca corre, porque a essa
+   altura o PID 1 já está a ser negado (`avc: denied { map } … path="/etc/ld.so.cache"
+   scontext=init_t tcontext=unlabeled_t`). Sem `ld.so.cache` legível não há `dbus-broker`; sem
+   D-Bus não há NetworkManager; sem NetworkManager a interface fica DOWN e o hostname `localhost`.
+   **195 negações num arranque**, e de fora via-se só uma VM sem lease. O relabel passa a correr no
+   BUILD, como ÚLTIMO passo, dentro do `customize_args` — o único ponto por onde os dois caminhos
+   de build passam, e o único onde um passo acrescentado depois não lhe pode passar à frente e
+   voltar a estragar as etiquetas. Guardado em shell e não por distro: o caminho do VMfile constrói
+   a partir de um `FROM` que pode ser um URL, onde não há nada fiável em que ramificar.
+2. **O `network-config` do seed casava a NIC por NOME, com um glob.** `match: {name: "e*"}`
+   funciona onde o renderer é o netplan (Ubuntu/Debian) e está partido onde é o NetworkManager
+   (Fedora/Rocky) — o código do cloud-init decide-o numa linha: `if … not
+   self.config.has_option(if_type, "mac-address"): self.config["connection"]["interface-name"] =
+   iface["name"]`. Sem MAC, o renderer nomeia a interface a partir da CHAVE do netplan, e o
+   convidado ficava com `interface-name=eth-all` — um dispositivo que nunca existe. Passa a casar
+   por **MAC** (`delonix_vm::mac_for`, agora `pub`, o mesmo valor que os dois backends carimbam):
+   é a única coisa da NIC conhecida antes de o convidado existir, e é o que faz o renderer omitir
+   o `interface-name`. **Âmbito reduzido de propósito**: o glob também dava DHCP às `extraNics`,
+   isto nomeia a primária — a que o DNS, o isolamento e o `vm ssh` usam.
+3. **Em CH o GRUB do Fedora falha no EDK2, e é a montante** — provado com a imagem original do
+   fabricante. **Arranque directo de kernel funciona**, com flags que já existem
+   (`--kernel`/`--initrd`/`--cmdline`), e foi validado: `is up` em 24 s, com ARP do convidado
+   confirmado no holder. O `vmlinuz`/`initramfs` saem com `virt-copy-out /boot/...` e o
+   `root=`/`rootflags=` estão na entrada BLS de `/boot/loader/entries/*.conf`. Automatizá-lo tem
+   perguntas próprias (onde fica o kernel extraído; o que acontece quando o convidado actualiza o
+   dele) e não se fez às pressas.
+
+**Ferramenta que ficou**: `scripts/`-nada — um `console.py` de sessão (pty + `virsh console`) que
+corre comandos numa VM sem terminal, aproveitando o autologin série que o nosso `user-data` já
+configura. Foi o que deu as respostas todas depois do screenshot; a arqueologia offline com
+`guestfish` só serviu para confirmar.
+
+**Por reconstruir**: as imagens SELinux JÁ publicadas continuam com `/.autorelabel` e o
+`ld.so.cache` sem etiqueta — a correcção é do build, não das imagens em disco.
 
 ## `delonix_net::Net` foi APAGADO — e é breaking para quem usa a biblioteca
 
