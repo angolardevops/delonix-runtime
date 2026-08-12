@@ -757,6 +757,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]
@@ -781,6 +782,7 @@ dependencies = [
  "delonix-image",
  "delonix-mgmt",
  "delonix-net",
+ "delonix-proxmox",
  "delonix-runtime",
  "delonix-runtime-core",
  "delonix-scan",
