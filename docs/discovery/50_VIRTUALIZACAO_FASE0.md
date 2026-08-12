@@ -142,6 +142,55 @@ vocabulário à mesma lista de campos silenciosamente descartados.
    provider que parseie tabelas cuja largura muda com o conteúdo e cujo texto muda com `--l18n=pt`
    nasce partido.
 
+## Estado da execução
+
+**Achado 1 — FECHADO** (`6fd74e9`). `overlay` saiu do braço do `macvlan`/`ipvlan`; ficou declarado
+o pré-requisito real (um overlay cifrado precisa de `wg`), sondado pela MESMA `wg::available()` que
+o realizador usa. O teste antigo percorria os três drivers a exigir `DriverNotImplemented` — fixava
+o defeito — e foi substituído por dois que falham com a correcção revertida (verificado).
+
+**Achado 2, parte A — FECHADO** (`43b3a85`). O registo `Vm` passou a guardar a forma de arranque
+(`VmBootSpec`, no `core`, com os quatro tipos auxiliares movidos para lá e re-exportados pelo
+`delonix-vm`). Bloco inteiro `skip_serializing_if`: uma VM sem opções avançadas não cresce um byte,
+e um registo antigo não tem a chave. Ausente é **desconhecido**, não «não tinha nenhum».
+
+A guarda que impede a reincidência: `boot_spec_of` desestrutura a `VmConfig` exaustivamente e o
+`config_from` constrói-a sem `..Default::default()` — um campo novo parte a build nos dois sítios.
+Verificado a acrescentar um campo de teste. Foi precisamente o `..Default::default()` que deixou
+21 campos virarem defaults em silêncio a cada reinício.
+
+Validado ao vivo: os três registos deste host escritos pelo binário anterior continuam a ler-se,
+`vm ls`/`describe` intactos, e nenhum ganhou a chave só por ser lido.
+
+## Achado 2, parte B — «comparar os seguros» tem hoje o conjunto VAZIO
+
+A escolha era comparar os campos que não obrigam a recriar. Ao implementá-la, o conjunto revelou-se
+vazio, e a razão é estrutural:
+
+- `Action::Update` está definido como «converge sem recriar **e sem mudar o PID**». Este motor não
+  faz hotplug: nenhum destes campos se aplica a uma VM a correr.
+- `Action::Replace` destrói e recria — e recriar deita fora o overlay, ou seja tudo o que o guest
+  escreveu. É por isso que é recusado sem `--replace`.
+- `create_with` devolve cedo quando a VM já corre (`return Ok(ex.clone())`, idempotente), logo um
+  `apply` sobre uma VM viva **não faz nada** mesmo agora que a forma está persistida.
+
+Alargar o `RECONCILED_VM_FIELDS` sob este modelo transformaria cada campo novo num `Replace`
+destrutivo — exactamente o que a escolha queria evitar. Ou seja: comparar mais campos hoje é
+comparar para propor perda de dados.
+
+**O que a parte A destrancou, e que não existia antes**: uma terceira classe entre as duas. Mudar
+`tpm`/`machine`/`cpuTopology`/`vnc`/`bootOrder`/`extraDisks`/`extraNics`/`video`/`cpuModel` é
+aplicável por **stop + start** — o PID muda, mas o overlay sobrevive, e agora que a forma está no
+registo o arranque seguinte usa-a de facto. Não é `Update` (o PID muda) nem `Replace` (não há perda
+de dados): é reinício.
+
+Acrescentar essa classe mexe no `enum Action`, que faz parte do payload `-o json` — um contrato que
+o ADR-0005 existe para manter estável. **Por isso a parte B pára aqui e passa a ADR**, à disciplina
+que este repo aplica a fronteiras estruturais. As perguntas a fechar nesse ADR: um `apply` pode
+reiniciar uma VM sem ser pedido (é interrupção de serviço, não perda de dados)? Se não, qual é o
+gate — um `--reboot` a par do `--replace`? E o que faz o `--detailed-exitcode` com uma mudança que
+o utilizador ainda não autorizou.
+
 ## Medição por fazer, que precisa de autorização
 
 Provar o VXLAN ao vivo exige `network create --driver overlay` — que muta o netns do holder onde
