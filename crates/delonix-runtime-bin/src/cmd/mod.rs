@@ -30,6 +30,7 @@ pub mod mapped;
 pub mod names;
 pub mod net;
 pub mod netns;
+pub mod netroute;
 pub mod network;
 pub mod output;
 pub mod pki;
