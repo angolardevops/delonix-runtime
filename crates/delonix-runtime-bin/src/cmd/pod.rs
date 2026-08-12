@@ -225,6 +225,21 @@ fn create_pod(name: &str, namespace: Option<String>, spec: PodSpec) -> Result<()
         let _ = remove_pod(name, true);
         return Err(e);
     }
+    // The cgroup-delegation warning is about the ENVIRONMENT the members share,
+    // and member one has just answered it — either it warned or there was
+    // nothing to warn about. The engine dedups with a `Once`, but a `Once` sees
+    // one PROCESS and every member is its own (the `--pod` re-exec), so without
+    // this the same eight-line block came out once per member: measured, three
+    // times on a three-container pod, interleaved with the progress lines.
+    //
+    // AFTER the first member and not before it, deliberately. The obvious
+    // version — test up here and silence everyone — was written first and was
+    // WORSE than the noise: `cgroup_limits_apply()` answers for the CLI's own
+    // process, which on this host reports delegation while the members, running
+    // inside the holder's userns, have none and say so. It silenced a warning
+    // that was true. Only the process that actually tried can answer.
+    super::util::silence_cgroup_warning();
+
     // The holder's init PID (host pid) — the peers `setns` its /proc/<pid>/ns/{ipc,uts}.
     let infra_pid = store.load(&first_name).ok().and_then(|c| c.pid);
     for mut opts in members {
