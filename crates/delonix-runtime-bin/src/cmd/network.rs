@@ -553,16 +553,14 @@ pub(crate) fn create_network(
             // with a doc-comment saying so and zero callers.
             let net = match subnet.as_deref() {
                 Some(s) => {
-                    // AINDA o funil do octeto, e é deliberado até o dataplane
-                    // acompanhar. O `validate_subnet`/`create_with_cidr` já
-                    // existem e estão testados, mas ligá-los aqui fazia o
-                    // `create` PASSAR e o attach do primeiro container falhar:
-                    // o holder faz `ip addr add {gateway}/16` fixo, e o
-                    // `ipam::prefix_of` deriva a chave do registo de leases de
-                    // DOIS octetos de um IP — que um prefixo livre não tem.
-                    // Aceitar e falhar depois é pior que recusar já.
-                    let base = NetworkStore::base_from_subnet(s)?;
-                    let net = store.create_with_base(name, base)?;
+                    // Prefixo ARBITRÁRIO (ADR-0013, camada A). Só depois de o
+                    // dataplane saber o comprimento: o holder deriva-o do
+                    // registo em vez do `/16` fixo, e a chave do registo de
+                    // leases passa a vir da rede que CONTÉM o endereço. Ligar
+                    // isto antes fazia o `create` passar e o primeiro container
+                    // falhar no attach.
+                    let cidr = NetworkStore::validate_subnet(s)?;
+                    let net = store.create_with_cidr(name, cidr)?;
                     // The gateway is derived, not chosen. Accepting one that
                     // disagrees would be the same silent lie one layer down.
                     if !gateway.is_empty() && gateway != net.gateway {

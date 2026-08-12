@@ -1463,7 +1463,7 @@ fn handle_control(line: &str) -> String {
 }
 
 /// Ensures a network's BRIDGE in the infra netns (the gateway is ALWAYS the ingress):
-/// creates `<bridge>` with `<gateway>/16` if missing, and ISOLATES it from the other
+/// creates `<bridge>` with `<gateway>/<prefix-len>` if missing, and ISOLATES it from the other
 /// delonix bridges (forward drop between networks, like docker) — but egress (oifname tap0)
 /// and intra-network communication remain. Idempotent.
 fn ensure_net_bridge(bridge: &str, gateway: &str) -> Result<()> {
@@ -1472,9 +1472,25 @@ fn ensure_net_bridge(bridge: &str, gateway: &str) -> Result<()> {
         .unwrap_or(false);
     if !exists {
         run("ip", &["link", "add", bridge, "type", "bridge"])?;
+        // O comprimento vem do PREFIXO da rede e já não é `/16` fixo. Com o
+        // fixo, uma rede `172.20.4.0/22` produzia `ip addr add
+        // 172.20.4.1/16` — uma bridge cujo endereço declara uma rede quatro
+        // mil vezes maior do que a que existe, a sobrepor-se a tudo o que
+        // estiver em 172.20.x. Medido a ligar a camada A: o `create` passava e
+        // o primeiro container falhava no attach.
+        // O prefixo vem do registo, pela bridge — a mesma via que esta função
+        // já usa mais abaixo para reaplicar o egress. Sem `NetDef` (a bridge de
+        // infra, que não é uma rede de utilizador) o /16 histórico é a resposta
+        // certa e não um palpite: é o que o `INFRA_CIDR` declara.
+        let plen = network_list()
+            .into_iter()
+            .find(|d| d.bridge == bridge)
+            .and_then(|d| crate::Cidr::parse(&d.prefix))
+            .map(|c| c.len)
+            .unwrap_or(16);
         run(
             "ip",
-            &["addr", "add", &format!("{gateway}/16"), "dev", bridge],
+            &["addr", "add", &format!("{gateway}/{plen}"), "dev", bridge],
         )?;
         run("ip", &["link", "set", bridge, "up"])?;
         // IPv6 (ULA): gateway on the bridge + v6 forwarding (best-effort).
@@ -3585,9 +3601,17 @@ fn netdef_path(name: &str) -> PathBuf {
     networks_dir().join(format!("{}.json", sanitize(name)))
 }
 
-/// Gateway (= ingress) of a `/16` prefix.
+/// Gateway (= ingress) de um prefixo — o PRIMEIRO endereço utilizável.
+///
+/// Era `{prefix}.0.1`, o que só é o primeiro utilizável num /16: para um
+/// `172.20.4.0/22` produzia a string `172.20.4.0/22.0.1`, que nem endereço é. O
+/// `Cidr::gateway` responde para qualquer prefixo, e a forma legada de dois
+/// octetos continua a dar exactamente `10.210.0.1` — é o mesmo resultado dito de
+/// uma forma que também serve o resto.
 fn gateway_of(prefix: &str) -> String {
-    format!("{prefix}.0.1")
+    crate::Cidr::parse(prefix)
+        .and_then(|c| c.gateway())
+        .unwrap_or_else(|| format!("{prefix}.0.1"))
 }
 
 /// Resolves a network to `(bridge, prefix, gateway)`. `ingress`/empty = the
@@ -3862,7 +3886,7 @@ pub fn detach_extra_container(id: &str, idx: u32, ip: &str) {
     let ifname = format!("eth{idx}");
     let _ = control_send(&format!("detach-extra {netns} {ifname}"));
     let _ = control_send(&format!("nsleave {ip}"));
-    crate::ipam::release(&crate::ipam::prefix_of(ip), id); // frees the extra network's lease
+    crate::ipam::release(&crate::ipam::key_for_ip(ip), id); // frees the extra network's lease
 }
 
 /// **Detaches a container from the ingress**: clears the firewall (on its `ip`), asks the
@@ -3872,7 +3896,7 @@ pub fn detach_container(id: &str, ip: &str) {
     let _ = control_send(&format!("unfirewall {ip}"));
     let _ = control_send(&format!("detach {netns}"));
     let _ = control_send(&format!("nsleave {ip}"));
-    crate::ipam::release(&crate::ipam::prefix_of(ip), id); // frees the IP lease
+    crate::ipam::release(&crate::ipam::key_for_ip(ip), id); // frees the IP lease
     release(id); // removes the ref marker (teardown when it becomes empty)
 }
 

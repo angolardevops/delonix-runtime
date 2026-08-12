@@ -271,6 +271,49 @@ pub fn release(prefix: &str, id: &str) {
 
 /// The `/16` prefix (`a.b`) of an IP `a.b.c.d` — to free the lease on detach
 /// from the known IP, without the caller having to pass the prefix.
+/// A CHAVE do registo de leases para um endereço.
+///
+/// **Procura, não calcula.** O `prefix_of` deriva `10.210` dos dois primeiros
+/// octetos, e isso só funciona enquanto toda a rede for um /16 — num /22 ou num
+/// /28 dois octetos não identificam rede nenhuma, e libertar um lease com a
+/// chave errada deixa o endereço marcado como usado PARA SEMPRE (o container
+/// desaparece, o lease fica, e a rede vai-se enchendo sem nada a explicar).
+///
+/// Por isso vai à lista de redes e devolve a chave daquela que CONTÉM o
+/// endereço. Só quando nenhuma o contém — uma rede já removida, um IP de outra
+/// era — cai para os dois octetos, que é o que sempre fez e continua a ser a
+/// resposta certa para um registo legado.
+pub fn key_for_ip(ip: &str) -> String {
+    if let Some(addr) = crate::Cidr::parse_addr(ip) {
+        for def in crate::infra::network_list() {
+            if let Some(c) = crate::Cidr::parse(&def.prefix) {
+                if c.contains(addr) {
+                    return registry_key(&def.prefix);
+                }
+            }
+        }
+    }
+    prefix_of(ip)
+}
+
+/// A chave de registo de um prefixo.
+///
+/// Um `10.x/16` continua a ser `10.x` — **os ficheiros de lease que existem no
+/// disco estão indexados assim**, e mudar a chave faria o motor deixar de ver os
+/// leases de todas as redes actuais de uma só vez: cada container reiniciado
+/// receberia um endereço novo, e os antigos ficariam ocupados por ninguém.
+/// Qualquer outro prefixo usa o CIDR, que é a única forma que o descreve.
+pub fn registry_key(prefix: &str) -> String {
+    match crate::Cidr::parse(prefix) {
+        Some(c) if c.len == 16 && (c.base >> 24) == 10 => {
+            let b = c.base.to_be_bytes();
+            format!("{}.{}", b[0], b[1])
+        }
+        Some(c) => c.to_string_cidr(),
+        None => prefix.to_string(),
+    }
+}
+
 pub fn prefix_of(ip: &str) -> String {
     let o: Vec<&str> = ip.split('.').collect();
     if o.len() == 4 {
