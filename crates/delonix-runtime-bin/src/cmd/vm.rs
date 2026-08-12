@@ -874,6 +874,52 @@ pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
 /// disk, which is everything the guest wrote since it was created.
 pub(crate) const RECONCILED_VM_FIELDS: &[&str] = &["disk", "vcpus", "memory", "network", "backend"];
 
+/// The spec fields this manifest declares that the reconciler does NOT compare
+/// — named, on a VM that already exists, instead of dropped in silence.
+///
+/// **The measurement that made this necessary.** A `kind: Vm` accepts 36 spec
+/// fields; `RECONCILED_VM_FIELDS` has five. A plan for an existing VM declaring
+/// `cpuTopology`, `tpm`, `vnc`, `machine`, `bootOrder`, an `extraDisks` and an
+/// `extraNics` printed `Summary: 1 to adopt` and nothing else — and the control
+/// case proves the silence was meaningful, because a genuinely unknown field
+/// DOES warn. So those seven were recognised, parsed and discarded: the worst
+/// of the three, because the operator has every reason to believe they applied.
+///
+/// On a `Create` there is nothing to say — creation applies the whole spec.
+/// This only fires once the VM exists, which is when the gap becomes a lie.
+///
+/// **Derived from `RECONCILED_VM_FIELDS`, never a second list.** A field added
+/// to the reconciled set drops out of this warning automatically. Two lists
+/// that have to agree is how this repo already broke `CONVERGING_KINDS` once.
+pub(crate) fn unconverged_fields_condition(
+    doc: &ManifestDoc,
+) -> Option<super::conditions::Condition> {
+    let mapping = doc.spec.as_mapping()?;
+    let mut fields: Vec<String> = mapping
+        .keys()
+        .filter_map(|k| k.as_str())
+        // `name` is not a spec field here; the alias pairs collapse because the
+        // user only ever writes one of the two spellings.
+        .filter(|k| !RECONCILED_VM_FIELDS.contains(k))
+        .map(|k| k.to_string())
+        .collect();
+    if fields.is_empty() {
+        return None;
+    }
+    fields.sort();
+    Some(super::conditions::Condition::bad(
+        "Converged",
+        "FieldsNotCompared",
+        super::po::tf(
+            "declared but NOT applied to an existing VM: {fields} — the reconciler compares only {compared}. Recreate it (`--replace`, which discards the disk) or change it with `vm create`/`vm stop`+`start`",
+            &[
+                ("fields", &fields.join(", ")),
+                ("compared", &RECONCILED_VM_FIELDS.join(", ")),
+            ],
+        ),
+    ))
+}
+
 fn desired_vm_fields(spec: &VmSpec) -> std::collections::BTreeMap<String, String> {
     let mut f = std::collections::BTreeMap::new();
     f.insert("disk".into(), spec.disk.clone());
@@ -2819,8 +2865,9 @@ pub(crate) fn init_for(
 mod tests {
     use super::{
         build_meta_data, build_user_data, fmt_vm_gpu, fmt_vm_status, fmt_vm_uptime,
-        looks_like_address, normalize_vm_spec, parse_ip_gateways, parse_ss_binds,
-        resolve_vm_defaults, vm_role, VmSpec,
+        looks_like_address, manifest, normalize_vm_spec, parse_ip_gateways, parse_ss_binds,
+        resolve_vm_defaults, unconverged_fields_condition, vm_role, ManifestDoc, VmSpec,
+        RECONCILED_VM_FIELDS,
     };
     use delonix_runtime_core::Status;
 
@@ -2993,6 +3040,67 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
         assert_eq!(canon.restart_policy.as_deref(), Some("always"));
         assert_eq!(canon.cpu_affinity.as_deref(), Some("0-3"));
         assert_eq!(canon.net_mode.as_deref(), Some("nat"));
+    }
+
+    /// Builds a `kind: Vm` document from a spec body, for the tests below.
+    fn vm_doc(spec: &str) -> ManifestDoc {
+        ManifestDoc {
+            api_version: "delonix.io/v1".into(),
+            kind: "Vm".into(),
+            metadata: manifest::Metadata {
+                name: "lab".into(),
+                namespace: None,
+                labels: Default::default(),
+                annotations: Default::default(),
+            },
+            spec: serde_yaml::from_str(spec).unwrap(),
+        }
+    }
+
+    /// The defect this closes, measured on a real host: a plan for an EXISTING
+    /// VM declaring seven properties the machine did not have printed
+    /// `Summary: 1 to adopt` and not one word about them. Reverting the
+    /// condition makes this fail.
+    #[test]
+    fn os_campos_nao_convergidos_de_uma_vm_existente_sao_nomeados() {
+        let doc = vm_doc(
+            "disk: d\nvcpus: 2\nmemory: 2G\nnetwork: ingress\nbackend: libvirt\n\
+             tpm: true\nvnc: true\nmachine: q35\n",
+        );
+        let c = unconverged_fields_condition(&doc).expect("tinha de assinalar");
+        assert_eq!(c.reason, "FieldsNotCompared");
+        for esperado in ["tpm", "vnc", "machine"] {
+            assert!(
+                c.message.contains(esperado),
+                "faltou '{esperado}': {}",
+                c.message
+            );
+        }
+        // …e NUNCA nomeia um campo que o reconciliador compara de facto: isso
+        // mandaria o leitor procurar um problema que não existe. A asserção tem
+        // de olhar SÓ para a lista — a frase inteira nomeia os comparados de
+        // propósito, na parte que explica o que É comparado.
+        let listados = c
+            .message
+            .split(": ")
+            .nth(1)
+            .and_then(|s| s.split(" — ").next())
+            .expect("a mensagem tem de trazer a lista antes do travessão");
+        for comparado in RECONCILED_VM_FIELDS {
+            assert!(
+                !listados.split(", ").any(|f| f == *comparado),
+                "'{comparado}' é comparado e não devia estar na lista: {listados}"
+            );
+        }
+    }
+
+    /// A manifest that declares ONLY what the reconciler compares has nothing
+    /// to warn about — and a warning that fires on a correct manifest is how
+    /// people learn to stop reading warnings.
+    #[test]
+    fn uma_vm_so_com_campos_convergidos_nao_avisa() {
+        let doc = vm_doc("disk: d\nvcpus: 2\nmemory: 2G\nnetwork: ingress\nbackend: libvirt\n");
+        assert!(unconverged_fields_condition(&doc).is_none());
     }
 
     #[test]

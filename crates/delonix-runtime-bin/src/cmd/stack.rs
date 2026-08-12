@@ -405,6 +405,21 @@ pub(crate) fn build_plan(docs: &[manifest::ManifestDoc], stack: &str) -> Result<
             .into_iter()
             .filter(|x| !x.ok)
             .collect();
+        // A `kind: Vm` accepts 36 spec fields and the reconciler compares five.
+        // On a Create that is harmless — creation applies the whole spec. On a
+        // VM that ALREADY EXISTS it was a silent drop: the plan said "no
+        // changes" for a manifest declaring a TPM, a CPU topology and two extra
+        // disks the machine did not have, and the apply reported success.
+        //
+        // Naming the fields is deliberately NOT the same as converging them
+        // (see the ADR on the reboot class): converging these means rebooting
+        // the VM, which is a capability, whereas saying so is honesty. The
+        // engine ships the honesty first.
+        if c.kind == "Vm" && c.action != reconcile::Action::Create {
+            if let Some(cond) = super::vm::unconverged_fields_condition(doc) {
+                c.conditions.push(cond);
+            }
+        }
     }
     Ok(changes)
 }
