@@ -396,6 +396,26 @@ check "o gerado valida" ok "$BIN" stack validate -f "$INITDIR/delonix-manifest.y
 # Sem `--force`, um segundo `init` não pode sobrescrever o que já lá está.
 check "init repetido não sobrescreve" ok "$BIN" init "$INITDIR"
 
+# O que um scaffold gera tem de APLICAR-SE. Medido antes de isto existir: o
+# `vm init` produzia um `kind: Vm` com `network: <nome>-net` e nenhum
+# `kind: Network` que o criasse, por isso o projecto falhava o seu PRÓPRIO
+# `stack validate` («network … is not declared nor does it exist»). Um scaffold
+# cujo primeiro acto é produzir algo que não aplica ensina a coisa errada sobre
+# a ferramenta — e é um erro que só se vê correndo o comando, nunca lendo o
+# `--help`, que é a lacuna que esta bateria tem por fechar.
+VMINIT="$OUT/vminit-$PFX"; mkdir -p "$VMINIT"
+if "$BIN" vm init "$VMINIT" --name "v$PFX" >/dev/null 2>&1; then
+  check "vm init: o projecto que gera valida-se" ok \
+    "$BIN" stack validate -f "$VMINIT/delonix-manifest.yaml"
+  check "vm init: gera os três Kinds" ok bash -c "
+    for k in Network Volume Vm; do
+      grep -q \"kind: \$k\" '$VMINIT/delonix-manifest.yaml' || { echo \"falta kind: \$k\"; exit 1; }
+    done
+  "
+else
+  skip "vm init: projecto completo" "o vm init falhou"
+fi
+
 ########################################
 section "workload / pod / secret (leitura)"
 ########################################
