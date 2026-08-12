@@ -776,7 +776,7 @@ pub enum VmCmd {
         #[arg(required = true, add = ArgValueCandidates::new(super::complete::vms))]
         names: Vec<String>,
     },
-    /// Stop the VM (preserves disk/record).
+    /// Stop the VM (preserves disk, record and snapshots).
     #[command(alias = "down")]
     Stop {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
@@ -813,8 +813,10 @@ pub enum VmCmd {
     /// Take a named snapshot of a VM.
     ///
     /// libvirt: a running VM's snapshot is a system checkpoint — memory +
-    /// disk; `restore` reverts to it. Not yet supported on the
-    /// cloud-hypervisor backend.
+    /// disk; `restore` reverts to it, and it survives a `vm stop`/`vm start`
+    /// (the state never leaves the disk; the metadata is preserved and given
+    /// back with the domain). Not yet supported on the cloud-hypervisor
+    /// backend.
     Snapshot {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: String,

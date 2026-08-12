@@ -160,7 +160,7 @@ Commands:
   restart          Stop (if running) then start — always a real reboot, unlike `start`. Same recovered-fields limits as `start`
   rm               Remove the VM (stops + deletes overlay/state)
   start            Start an existing, stopped VM — idempotent (already running = no-op)
-  stop             Stop the VM (preserves disk/record)
+  stop             Stop the VM (preserves disk, record and snapshots)
   describe         Human-readable detail of one or more VMs, `kubectl describe` style
   ls               List the VMs
   status           Current state (reconciles liveness/IP with the backend)
@@ -404,7 +404,7 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Voltar ao checkpoint</div><div class='cap lang-en'>Roll back to the checkpoint</div><pre><code>delonix vm restore dev antes-do-upgrade</code></pre></div>
 <h2 id='snapshot'><code>vm snapshot</code></h2>
 <p class='intro'>Take a named snapshot of a VM.</p>
-<p class='intro'>libvirt: a running VM&#x27;s snapshot is a system checkpoint — memory + disk; <code>restore</code> reverts to it. Not yet supported on the cloud-hypervisor backend.</p>
+<p class='intro'>libvirt: a running VM&#x27;s snapshot is a system checkpoint — memory + disk; <code>restore</code> reverts to it, and it survives a <code>vm stop</code>/<code>vm start</code> (the state never leaves the disk; the metadata is preserved and given back with the domain). Not yet supported on the cloud-hypervisor backend.</p>
 <div class='help'><pre><code>Usage: delonix vm snapshot [OPTIONS] &lt;NAME&gt; &lt;SNAPSHOT&gt;
 
 Arguments:
@@ -1085,7 +1085,7 @@ SEE ALSO:
   delonix › vm › status</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Reconcilia liveness/IP com o backend</div><div class='cap lang-en'>Reconciles liveness/IP with the backend</div><pre><code>delonix vm status node1</code></pre></div>
 <h2 id='stop'><code>vm stop</code></h2>
-<p class='intro'>Stop the VM (preserves disk/record)</p>
+<p class='intro'>Stop the VM (preserves disk, record and snapshots)</p>
 <div class='help'><pre><code>Usage: delonix vm stop [OPTIONS] &lt;NAME&gt;
 
 Arguments:
@@ -1100,8 +1100,9 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 EXAMPLES:
-  # give the host back its CPU and RAM, keeping the disk and the record — take
-  # any snapshot BEFORE this, the libvirt domain is undefined here
+  # give the host back its CPU and RAM, keeping the disk, the record and the
+  # snapshots — the libvirt domain is undefined here, so its snapshot metadata
+  # is preserved on our side and given back on the next start
   delonix vm stop dev
 
 SEE ALSO:

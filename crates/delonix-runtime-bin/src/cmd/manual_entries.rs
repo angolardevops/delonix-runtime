@@ -1930,7 +1930,7 @@ pub static ENTRIES: &[Entry] = &[
         path: "vm stop",
         group: "Lifecycle",
         examples: &[
-            ("give the host back its CPU and RAM, keeping the disk and the record — take any snapshot BEFORE this, the libvirt domain is undefined here", "delonix vm stop dev"),
+            ("give the host back its CPU and RAM, keeping the disk, the record and the snapshots — the libvirt domain is undefined here, so its snapshot metadata is preserved on our side and given back on the next start", "delonix vm stop dev"),
         ],
         see_also: &["vm start", "vm snapshot", "vm rm", "vm ls"],
     },

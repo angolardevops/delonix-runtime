@@ -1968,6 +1968,37 @@ funções de motor `delonix_vm::{snapshot,restore,snapshots}` (espelham `stop`/`
   inicial/injecção). **Armadilha a reter**: `vm stop` faz *undefine* do domínio
   (para não deixar órfãos), por isso **o snapshot exige a VM a correr** — parar
   primeiro dá "failed to get domain" (fail-closed, reporta o erro, não finge). 
+- **O snapshot SOBREVIVE a um `vm stop`/`vm start` (v0.51.x)** — e até aqui não sobrevivia,
+  em silêncio. Bug report real, reproduzido antes de qualquer código: `snapshot` → `stop`
+  → `start` deixava `vm snapshots` **VAZIO com rc=0** e o `vm restore` a responder
+  «Domain snapshot not found». Causa: o `undefine --snapshots-metadata` do `libvirt_cleanup`,
+  que o `stop` reutiliza. **O que a medição mudou**: `qemu-img snapshot -l` sobre o overlay
+  mostrava o `s1` **intacto** depois do stop — o `undefine` não apaga o snapshot, apaga só o
+  que aponta para ele. Portanto isto não era um limite do mecanismo, era **estado necessário
+  para reconstruir o recurso a ser deitado fora** — a mesma armadilha do `-v` não persistido,
+  das redes extra e do `Container.pod`, agora do lado do libvirt.
+  - `VmBackend::preserve_snapshots` (default: nada, logo o CH e o Proxmox ficam byte a byte
+    iguais) faz `snapshot-dumpxml` de cada um para `vms/<vm>/snapshots/<n>.xml` — dentro do
+    directório que o `remove` **já** apaga inteiro, com teste a exigi-lo (noutro sítio, um
+    `vm rm` deixaria metadados a apontar para um disco que já não existe, e a VM seguinte com
+    o mesmo nome herdava-os). É chamado pelo `stop` PÚBLICO, **antes** do `backend.stop`: uma
+    falha aborta o stop sem nada perdido. O `remove` não passa por lá de propósito.
+  - O `boot` devolve-os ao libvirt logo a seguir ao `define` — e o que faltava para isso não
+    era óbvio: o `snapshot-create --redefine` **RECUSA** um XML cujo uuid de domínio não seja
+    o actual, e o uuid é atribuído pelo libvirt em cada `define`, logo nunca é o de quando o
+    snapshot foi tirado. `snapshot_xml_with_uuid` reescreve-o (puro, testado) — em TODAS as
+    ocorrências, que são duas no ficheiro real; substituir só a primeira dá o mesmo erro pela
+    ocorrência que ficou.
+  - **`vm snapshots` de uma VM parada lê os preservados** — perguntar ao libvirt por um
+    domínio que não existe devolve lista vazia, indistinguível de «nunca teve snapshot». E o
+    `vm restore` de uma VM parada diz que a VM está parada e manda arrancá-la, em vez do
+    «failed to get domain» cru, que manda procurar uma VM que está ali no `vm ls`.
+  - **Gate**: secção nova no `scripts/e2e.sh` que corre o CICLO (snapshot → stop → start →
+    restore) contra uma VM libvirt real, e salta com linha audível sem virsh/libvirt.
+    Verificado pela regra do repo: **9/9 com a correcção, 4/9 com ela revertida**. Tinha de
+    ser o ciclo — antes da correcção cada comando devolvia 0 por si. E a recusa com a VM
+    parada verifica-se pela MENSAGEM: o erro cru também saía 1, logo um `fail` ficava verde
+    por cima do relato errado.
 - **Cloud Hypervisor**: **fail-closed**, não implementado (`unsupported_snapshot`) — o
   restore do CH relança um vmm novo (ciclo diferente do revert in-place do libvirt) e
   precisa de `ch-remote`; deferido, com erro claro que aponta para o backend libvirt em
@@ -3215,6 +3246,11 @@ checklist para quem mexer aqui do que como lista de correcções:
   preenchida custa preço inteiro — não há poupança acidental. A correcção é **rootless-only de
   propósito**: como root o `prepare_rootfs` MONTA um overlay, e um mount da 1.ª passagem não é
   necessariamente visível na namespace onde o re-exec aterra (v0.47.0);
+- **`undefine --snapshots-metadata` não apaga o snapshot** — apaga só o que aponta para ele.
+  O estado ficava no qcow2 (`qemu-img snapshot -l` mostrava-o) enquanto o `vm snapshots`
+  respondia lista vazia com rc=0 e o `vm restore` dizia «não existe». Corolário do mesmo
+  achado: **uma lista vazia com rc=0 não é «não há»** — pode ser «perguntei ao sítio errado»,
+  e aqui o sítio errado era o libvirt, que só sabe de domínios definidos (v0.51.x);
 - **um `read` que FALHA não é uma resposta vazia** — o cliente do socket de controlo fazia
   `let _ = s.read_to_string(&mut resp)`, descartando o erro, por isso um timeout de leitura e um
   holder que respondesse nada eram indistinguíveis: os dois davam ``system call `ingress control`

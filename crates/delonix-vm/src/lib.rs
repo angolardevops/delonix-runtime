@@ -517,8 +517,28 @@ pub trait VmBackend {
         Err(unsupported_snapshot(self.id(), "restore"))
     }
     /// Lists the VM's snapshot names. Default: unsupported (fail closed).
-    fn snapshots(&self, _vm: &Vm) -> Result<Vec<String>> {
+    ///
+    /// Takes `vmdir` because a stopped VM's snapshots may live only on OUR
+    /// side: libvirt's metadata does not survive the undefine that [`stop`]
+    /// does, so the list of a stopped VM is read from what
+    /// [`VmBackend::preserve_snapshots`] wrote there.
+    fn snapshots(&self, _vmdir: &Path, _vm: &Vm) -> Result<Vec<String>> {
         Err(unsupported_snapshot(self.id(), "snapshots"))
+    }
+
+    /// Saves whatever snapshot state STOPPING this VM would otherwise destroy,
+    /// and returns the names saved. Called by [`stop`] BEFORE
+    /// [`VmBackend::stop`], so a failure here aborts the stop with nothing lost
+    /// yet. Default: nothing to preserve (a backend whose snapshots survive a
+    /// stop, or which has none, keeps its behaviour byte for byte).
+    ///
+    /// This exists because of what libvirt's `undefine --snapshots-metadata`
+    /// does: the snapshot DATA stays in the qcow2 (measured), only libvirt's
+    /// bookkeeping is deleted — so a `vm stop`/`vm start` left `vm snapshots`
+    /// empty with rc=0 and `vm restore` answering "Domain snapshot not found",
+    /// for snapshots that were still there on the disk the whole time.
+    fn preserve_snapshots(&self, _vmdir: &Path, _vm: &Vm) -> Result<Vec<String>> {
+        Ok(Vec::new())
     }
 
     /// `true` when the backend owns its own disks and [`create`] must NOT
@@ -1146,6 +1166,65 @@ fn libvirt_revert_argv(uri: &str, domain: &str, snap: &str) -> Vec<String> {
         "--snapshotname".into(),
         snap.into(),
     ]
+}
+
+/// Where a VM's snapshot metadata is kept on OUR side, under the per-VM
+/// directory that `remove` already deletes wholesale (so an `rm` takes the
+/// preserved metadata with it, and nothing is left pointing at a disk that
+/// no longer exists).
+fn snapshot_meta_dir(vmdir: &Path, name: &str) -> PathBuf {
+    vmdir.join(name).join("snapshots")
+}
+
+/// The snapshot names preserved for `name`, sorted. Absent directory = none —
+/// this is the answer for a VM that never had a snapshot AND for one that has
+/// never been stopped, which is why the caller only consults it when libvirt
+/// itself does not know the domain.
+fn preserved_snapshot_names(vmdir: &Path, name: &str) -> Vec<String> {
+    let Ok(rd) = std::fs::read_dir(snapshot_meta_dir(vmdir, name)) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = rd
+        .flatten()
+        .filter_map(|e| {
+            let p = e.path();
+            if p.extension().and_then(|x| x.to_str()) != Some("xml") {
+                return None;
+            }
+            p.file_stem().and_then(|s| s.to_str()).map(String::from)
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// Rewrites the `<uuid>` of a snapshot's embedded `<domain>` description.
+/// **Pure** — this is the one thing that stands between a preserved snapshot
+/// and libvirt taking it back.
+///
+/// `snapshot-create --redefine` REFUSES an XML whose domain uuid is not the
+/// current one ("definition for snapshot s must use uuid …"), and the uuid is
+/// assigned by libvirt at `define` time — so the domain this engine re-defines
+/// on `vm start` never has the uuid it had when the snapshot was taken.
+/// Rewriting it is the honest translation of "this snapshot belongs to this
+/// VM": the disk, the name and the memory image are the same; only libvirt's
+/// handle for the domain changed.
+fn snapshot_xml_with_uuid(xml: &str, uuid: &str) -> String {
+    let mut out = String::with_capacity(xml.len());
+    let mut rest = xml;
+    while let Some(open) = rest.find("<uuid>") {
+        let after = &rest[open + "<uuid>".len()..];
+        let Some(close) = after.find("</uuid>") else {
+            break;
+        };
+        out.push_str(&rest[..open]);
+        out.push_str("<uuid>");
+        out.push_str(uuid);
+        out.push_str("</uuid>");
+        rest = &after[close + "</uuid>".len()..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// `true` if this user can use the libvirt SYSTEM connection (the `libvirt`
@@ -1963,6 +2042,12 @@ impl VmBackend for LibvirtBackend {
         if !defined {
             on(CreateStage::Define);
             run_quiet("virsh", &["-c", uri, "define", &xml_path.to_string_lossy()])?;
+            // A domain defined here is a domain libvirt has never seen before,
+            // so any snapshot this VM had is metadata WE are holding — from the
+            // `stop` that undefined it. Hand it back now, before the guest
+            // runs: `vm snapshots`/`vm restore` must answer about the VM, not
+            // about how many times it has been stopped.
+            Self::redefine_preserved_snapshots(uri, &cfg.name, vmdir);
         }
         on(CreateStage::Start);
         let out = stable_cmd("virsh")
@@ -2022,7 +2107,26 @@ impl VmBackend for LibvirtBackend {
         })
     }
 
-    fn restore(&self, _vmdir: &Path, vm: &Vm, name: &str) -> Result<()> {
+    fn restore(&self, vmdir: &Path, vm: &Vm, name: &str) -> Result<()> {
+        // A stopped VM has no domain for `snapshot-revert` to talk to, and the
+        // raw virsh answer ("Domain snapshot not found") names the wrong
+        // problem: the snapshot is right there in `vms/<vm>/snapshots`. Say
+        // which of the two it is.
+        if libvirt_domain_uri(&vm.name).is_none() {
+            let preserved = preserved_snapshot_names(vmdir, &vm.name);
+            return Err(Error::Runtime {
+                context: "vm",
+                message: if preserved.iter().any(|s| s == name) {
+                    format!(
+                        "VM '{}' is stopped — snapshot '{name}' is preserved and comes back with \
+                         the domain: start it first (`delonix vm start {}`), then restore",
+                        vm.name, vm.name
+                    )
+                } else {
+                    format!("no such snapshot for the stopped VM '{}': {name}", vm.name)
+                },
+            });
+        }
         let uri = libvirt_uri_of(&vm.name);
         let argv = libvirt_revert_argv(uri, &vm.name, name);
         quiet(
@@ -2036,24 +2140,151 @@ impl VmBackend for LibvirtBackend {
         })
     }
 
-    fn snapshots(&self, vm: &Vm) -> Result<Vec<String>> {
-        let uri = libvirt_uri_of(&vm.name);
-        // `--name` → one snapshot name per line (empty output = none).
-        let out = capture(
-            "virsh",
-            &["-c", uri, "snapshot-list", "--domain", &vm.name, "--name"],
-        )
-        .unwrap_or_default();
-        Ok(out
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty())
-            .map(String::from)
-            .collect())
+    fn snapshots(&self, vmdir: &Path, vm: &Vm) -> Result<Vec<String>> {
+        // No domain in libvirt = the VM is stopped, and libvirt knows nothing
+        // about its snapshots (the undefine took the metadata). Answering from
+        // the live query alone printed an EMPTY list with rc=0 for a VM whose
+        // snapshots were intact on disk — indistinguishable from a VM that
+        // never had one.
+        match libvirt_domain_uri(&vm.name) {
+            None => Ok(preserved_snapshot_names(vmdir, &vm.name)),
+            Some(uri) => Ok(Self::live_snapshots(uri, &vm.name)),
+        }
+    }
+
+    fn preserve_snapshots(&self, vmdir: &Path, vm: &Vm) -> Result<Vec<String>> {
+        let Some(uri) = libvirt_domain_uri(&vm.name) else {
+            return Ok(Vec::new()); // no domain: nothing for the undefine to destroy
+        };
+        let names = Self::live_snapshots(uri, &vm.name);
+        let dir = snapshot_meta_dir(vmdir, &vm.name);
+        // Rewritten from scratch, never merged: a snapshot deleted while the VM
+        // ran must not be resurrected by a leftover file on the next start.
+        let _ = std::fs::remove_dir_all(&dir);
+        if names.is_empty() {
+            return Ok(names);
+        }
+        std::fs::create_dir_all(&dir)?;
+        for n in &names {
+            // The name becomes a file name. Everything this engine creates
+            // passes `valid_vm_name`, so this only ever trips on a snapshot
+            // made directly with virsh — refuse rather than write outside the
+            // directory, and rather than let the undefine eat it in silence.
+            if !valid_vm_name(n) {
+                return Err(Error::Runtime {
+                    context: "vm",
+                    message: format!(
+                        "VM '{}': cannot preserve the snapshot '{n}' across a stop (its name is \
+                         not usable as a file name). Remove it first with `virsh -c {uri} \
+                         snapshot-delete --domain {} --snapshotname '{n}'`",
+                        vm.name, vm.name
+                    ),
+                });
+            }
+            let xml = capture(
+                "virsh",
+                &[
+                    "-c",
+                    uri,
+                    "snapshot-dumpxml",
+                    "--domain",
+                    &vm.name,
+                    "--snapshotname",
+                    n,
+                ],
+            )
+            .ok_or_else(|| Error::Runtime {
+                context: "virsh snapshot-dumpxml",
+                message: format!(
+                    "VM '{}': could not read the snapshot '{n}' to preserve it across the stop \
+                     (nothing was stopped — the metadata would be lost by the undefine)",
+                    vm.name
+                ),
+            })?;
+            delonix_runtime_core::write_atomic(&dir.join(format!("{n}.xml")), xml.as_bytes())?;
+        }
+        Ok(names)
     }
 }
 
 impl LibvirtBackend {
+    /// Snapshot names libvirt itself knows for `name` (`--name` → one per
+    /// line). Empty when the domain has none — or when it is not defined at
+    /// all, which is why the callers decide FIRST whether libvirt is the right
+    /// place to ask.
+    fn live_snapshots(uri: &str, name: &str) -> Vec<String> {
+        capture(
+            "virsh",
+            &["-c", uri, "snapshot-list", "--domain", name, "--name"],
+        )
+        .unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect()
+    }
+
+    /// Gives libvirt back the snapshots that the previous `stop` preserved,
+    /// for a domain that was just re-defined. The snapshot DATA never left the
+    /// qcow2 that this VM reuses; this restores the bookkeeping that points at
+    /// it.
+    ///
+    /// **Best effort, but never silent.** A snapshot that cannot be redefined
+    /// is a snapshot the operator thinks they have — refusing to boot the VM
+    /// over it would be worse (the VM is the thing they asked for), so it warns
+    /// and names both the snapshot and the file it is still in.
+    fn redefine_preserved_snapshots(uri: &str, name: &str, vmdir: &Path) {
+        let names = preserved_snapshot_names(vmdir, name);
+        if names.is_empty() {
+            return;
+        }
+        let Some(uuid) = capture("virsh", &["-c", uri, "domuuid", "--", name]) else {
+            eprintln!(
+                "warning: VM '{name}': could not read the domain uuid — the {} preserved \
+                 snapshot(s) stay in {} and are NOT known to libvirt yet",
+                names.len(),
+                snapshot_meta_dir(vmdir, name).display()
+            );
+            return;
+        };
+        for n in &names {
+            let path = snapshot_meta_dir(vmdir, name).join(format!("{n}.xml"));
+            let redefined = std::fs::read_to_string(&path)
+                .map_err(|e| e.to_string())
+                .and_then(|xml| {
+                    let patched = snapshot_xml_with_uuid(&xml, uuid.trim());
+                    // Written next to the original: the redefine reads a FILE,
+                    // and this one carries the current domain's uuid.
+                    let tmp = path.with_extension("xml.redefine");
+                    delonix_runtime_core::write_atomic(&tmp, patched.as_bytes())
+                        .map_err(|e| e.to_string())?;
+                    let out = quiet(
+                        "virsh",
+                        &[
+                            "-c",
+                            uri,
+                            "snapshot-create",
+                            "--domain",
+                            name,
+                            "--redefine",
+                            "--xmlfile",
+                            &tmp.to_string_lossy(),
+                        ],
+                    );
+                    let _ = std::fs::remove_file(&tmp);
+                    out.map(|_| ())
+                });
+            if let Err(e) = redefined {
+                eprintln!(
+                    "warning: VM '{name}': snapshot '{n}' could not be given back to libvirt \
+                     ({e}) — its state is still in the disk and its metadata in {}",
+                    path.display()
+                );
+            }
+        }
+    }
+
     fn is_running_uri(&self, uri: &str, name: &str) -> bool {
         capture("virsh", &["-c", uri, "domstate", "--", name])
             .map(|s| s == "running")
@@ -2460,7 +2691,13 @@ pub fn stop(base: &Path, name: &str) -> Result<()> {
         }
         Err(e) => return Err(e),
     };
-    backend_for(&vm)?.stop(&vmdir, &vm)?;
+    let backend = backend_for(&vm)?;
+    // BEFORE the stop, and its failure aborts the stop: on libvirt the stop
+    // undefines the domain, and the undefine deletes the snapshot metadata.
+    // `remove` deliberately does NOT come through here — there the whole
+    // per-VM directory goes anyway.
+    backend.preserve_snapshots(&vmdir, &vm)?;
+    backend.stop(&vmdir, &vm)?;
     vm.status = Status::Stopped;
     vm.pid = None;
     vm.started_unix = None;
@@ -2702,7 +2939,7 @@ pub fn backup_disk_live(base: &Path, name: &str, dest: &Path, quiesce: bool) -> 
 /// Lists VM `name`'s snapshot names (see [`VmBackend::snapshots`]).
 pub fn snapshots(base: &Path, name: &str) -> Result<Vec<String>> {
     let vm = load_vm(base, name)?;
-    backend_for(&vm)?.snapshots(&vm)
+    backend_for(&vm)?.snapshots(&vms_dir(base), &vm)
 }
 
 /// Reconstructs the subset of [`VmConfig`] reliably recoverable from a
@@ -3117,6 +3354,58 @@ mod tests {
                 "before-upgrade",
             ]
         );
+    }
+
+    #[test]
+    fn o_uuid_do_snapshot_e_reescrito_em_todas_as_ocorrencias() {
+        // `snapshot-create --redefine` REFUSES an XML whose domain uuid is not
+        // the CURRENT one, and the uuid of a re-defined domain is new every
+        // time. The dumped XML carries it more than once (the snapshot and the
+        // embedded <domain>), so replacing only the first one gets the file
+        // refused for the occurrence left behind — measured live before this
+        // was written as a loop.
+        let xml = "<domainsnapshot>\n  <name>s1</name>\n  <domain>\n    <uuid>old-1</uuid>\n    \
+                   <memory>x</memory>\n  </domain>\n  <uuid>old-2</uuid>\n</domainsnapshot>\n";
+        let out = super::snapshot_xml_with_uuid(xml, "new-uuid");
+        assert_eq!(out.matches("<uuid>new-uuid</uuid>").count(), 2, "{out}");
+        assert!(!out.contains("old-"), "{out}");
+        assert!(out.contains("<name>s1</name>"), "{out}");
+        assert!(out.contains("<memory>x</memory>"), "{out}");
+        // Nothing to replace = byte-for-byte the same file.
+        assert_eq!(super::snapshot_xml_with_uuid("<a/>", "u"), "<a/>");
+    }
+
+    #[test]
+    fn os_snapshots_preservados_moram_onde_o_rm_ja_apaga() {
+        // The preserved metadata MUST live under the per-VM directory that
+        // `remove` deletes wholesale (`remove_dir_all(vmdir/<name>)`). Anywhere
+        // else and a `vm rm` leaves metadata behind pointing at a disk that no
+        // longer exists — and the next VM with the same name inherits it.
+        let vmdir = std::path::Path::new("/state/vms");
+        let dir = super::snapshot_meta_dir(vmdir, "dev");
+        assert!(
+            dir.starts_with(vmdir.join("dev")),
+            "{} is outside the directory that `rm` deletes",
+            dir.display()
+        );
+    }
+
+    #[test]
+    fn a_lista_preservada_le_so_xml_e_ordena() {
+        let tmp = std::env::temp_dir().join(format!("dlx-snapmeta-{}", std::process::id()));
+        let dir = super::snapshot_meta_dir(&tmp, "dev");
+        // No directory at all is the normal case (a VM that was never stopped,
+        // or never had a snapshot) — not an error, and never a panic.
+        assert!(super::preserved_snapshot_names(&tmp, "dev").is_empty());
+        std::fs::create_dir_all(&dir).unwrap();
+        for f in ["s2.xml", "s1.xml", "s1.xml.redefine", "notes.txt"] {
+            std::fs::write(dir.join(f), b"x").unwrap();
+        }
+        assert_eq!(
+            super::preserved_snapshot_names(&tmp, "dev"),
+            vec!["s1".to_string(), "s2".to_string()]
+        );
+        std::fs::remove_dir_all(&tmp).unwrap();
     }
 
     #[test]

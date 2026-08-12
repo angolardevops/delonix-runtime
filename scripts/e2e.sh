@@ -474,6 +474,54 @@ check "vm ls" ok "$BIN" vm ls
 check "vm create com disco inexistente recusa" fail "$BIN" vm create "vm-$PFX" --disk /nao/existe.qcow2
 
 ########################################
+section "vm: o snapshot sobrevive a um stop/start (precisa de hipervisor)"
+########################################
+# BUG REAL, medido 2026-08-12: `vm stop` desfaz o domínio com `virsh undefine
+# --snapshots-metadata` (é o que evita domínios órfãos), e isso apagava os
+# METADADOS dos snapshots — `vm snapshots` respondia VAZIO com rc=0 e o
+# `vm restore` dizia «Domain snapshot not found», com o estado do snapshot
+# intacto dentro do qcow2 o tempo todo (`qemu-img snapshot -l` mostrava-o).
+#
+# O gate tem de olhar para o CICLO — snapshot, stop, start, restore — e não
+# para o rc de cada comando: antes da correcção TODOS eles devolviam 0. E a
+# recusa com a VM parada verifica-se pela MENSAGEM, não pelo código de saída:
+# o erro cru do virsh também saía 1, logo um `fail` ficaria verde por cima do
+# relato errado.
+if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
+   && virsh -c qemu:///system list --all >/dev/null 2>&1; then
+  SVM="snap-$PFX"; SDISK="$OUT/$SVM.qcow2"
+  qemu-img create -f qcow2 "$SDISK" 64M >/dev/null 2>&1
+  if "$BIN" vm create "$SVM" --disk "$SDISK" --backend libvirt --memory 256M >/dev/null 2>&1; then
+    check "vm snapshot" ok "$BIN" vm snapshot "$SVM" s1
+    check "vm snapshots nomeia-o com a VM a correr" ok bash -c \
+      "'$BIN' vm snapshots '$SVM' | grep -qx s1"
+    check "vm stop" ok "$BIN" vm stop "$SVM"
+    check "o snapshot sobrevive ao stop" ok bash -c \
+      "'$BIN' vm snapshots '$SVM' | grep -qx s1"
+    check "restore com a VM parada aponta para o start" ok bash -c \
+      "'$BIN' vm restore '$SVM' s1 2>&1 | grep -q 'vm start'"
+    # E não o erro cru do virsh para uma VM parada — «failed to get domain»
+    # manda procurar uma VM que existe e está ali no `vm ls`. Medido: era esta
+    # a resposta antes da correcção. Um `grep 'Domain snapshot not found'` seria
+    # inútil AQUI (o virsh nem chega a olhar para o snapshot sem domínio) —
+    # passaria também com o bug, pela razão errada.
+    check "e não devolve o erro cru do virsh" ok bash -c \
+      "! '$BIN' vm restore '$SVM' s1 2>&1 | grep -q 'failed to get domain'"
+    check "vm start" ok "$BIN" vm start "$SVM"
+    check "o libvirt volta a conhecer o snapshot" ok bash -c \
+      "virsh -c qemu:///system snapshot-list '$SVM' --name | grep -qx s1"
+    check "vm restore depois do start" ok "$BIN" vm restore "$SVM" s1
+    "$BIN" vm rm -f "$SVM" >/dev/null 2>&1
+  else
+    skip "vm: snapshot sobrevive a stop/start" "o vm create falhou neste host"
+    "$BIN" vm rm -f "$SVM" >/dev/null 2>&1
+  fi
+  rm -f "$SDISK"
+else
+  skip "vm: snapshot sobrevive a stop/start" "sem virsh/qemu-img, ou sem ligação libvirt de sistema"
+fi
+
+########################################
 section "backup / restore por recurso"
 ########################################
 # O ciclo real: arquivar, DESTRUIR os dados, repor, e confirmar que voltaram. Um
