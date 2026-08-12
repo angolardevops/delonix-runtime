@@ -1126,6 +1126,25 @@
       ],
       "type": "object"
     },
+    "NetworkRouteSpec": {
+      "additionalProperties": false,
+      "description": "`spec` of `kind: NetworkRoute`.",
+      "properties": {
+        "from": {
+          "description": "Network that may INITIATE. Its workloads reach `to`.",
+          "type": "string"
+        },
+        "to": {
+          "description": "Network reached. Its workloads do NOT get to reach `from` back — the\nreturn traffic of a conversation `from` started flows (established), a\nnew one from this side does not. Same asymmetry `kind: Dependency` gives\nbetween containers.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
     "NetworkSpec": {
       "additionalProperties": false,
       "description": "`spec` for `kind: Network` — mirrors the fields of `NetworkCmd::Create`.",
@@ -2802,6 +2821,25 @@
         "properties": {
           "spec": {
             "$ref": "#/$defs/DependencySpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "NetworkRoute"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "$ref": "#/$defs/NetworkRouteSpec"
           }
         }
       }

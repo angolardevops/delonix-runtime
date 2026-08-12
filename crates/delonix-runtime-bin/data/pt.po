@@ -8545,3 +8545,10 @@ msgstr "abre um caminho DIRIGIDO: a web alcança a db, a db não alcança a web"
 
 msgid "close it again"
 msgstr "voltar a fechá-lo"
+
+# `kind: NetworkRoute` (ADR-0013, camada B) — a forma declarativa da rota.
+msgid "networkroute/{name}: {from} -> {to} open"
+msgstr "networkroute/{name}: {from} -> {to} aberta"
+
+msgid "NetworkRoute '{name}' → {side} network '{net}' is not declared nor does it exist"
+msgstr "NetworkRoute '{name}' → a rede {side} '{net}' não está declarada nem existe"
