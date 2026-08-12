@@ -623,6 +623,8 @@ pub struct Progress {
     spin: Option<SpinnerHandle>,
     started: std::time::Instant,
     verbose: bool,
+    /// A step shorter than this prints NOTHING — see `step_after`.
+    threshold: std::time::Duration,
 }
 
 /// Output of the tools a step runs, held back while the step is running.
@@ -703,6 +705,7 @@ impl Progress {
             icon: String::new(),
             spin: None,
             started: std::time::Instant::now(),
+            threshold: std::time::Duration::ZERO,
             // The escape hatch out of the fold, for the run where the collapsed
             // line is exactly what you do not want. Also honoured by `--verbose`
             // where the command has one.
@@ -714,6 +717,20 @@ impl Progress {
     pub fn with_verbose(mut self, verbose: bool) -> Self {
         self.verbose = self.verbose || verbose;
         self
+    }
+
+    /// Like [`step`](Self::step), but SILENT while the work stays under `after`:
+    /// no spinner, and no final line either.
+    ///
+    /// Measured, which is why it exists: `container run` with the image already
+    /// in the store takes 0.43s end to end, so a spinner there is a flash of
+    /// chrome over work nobody was waiting for. The same call on the FIRST run
+    /// of an image extracts every layer (`ensure_layers`) with no output at all
+    /// — tens of seconds of silence on a big image. One threshold covers both:
+    /// nothing is drawn for the fast path, and the slow one animates.
+    pub fn step_after(&mut self, msg: &str, icon: &str, after: std::time::Duration) {
+        self.threshold = after;
+        self.step(msg, icon);
     }
 
     /// Opens a step and starts the spinner (on a TTY). `icon` is the ending emoji.
@@ -735,8 +752,29 @@ impl Progress {
         }
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (s2, msg, icon) = (stop.clone(), self.msg.clone(), self.icon.clone());
+        let quiet_for = self.threshold;
         let handle = std::thread::spawn(move || {
             use std::io::Write;
+            // Nothing is drawn until the work proves it is slow enough to be
+            // worth a line (`step_after`); zero for an ordinary `step`.
+            // Waited in SLICES, never in one `sleep(quiet_for)`: `close_line`
+            // joins this thread, so a single long sleep would make every fast
+            // step block until the threshold elapsed — the delay meant to REMOVE
+            // chrome would have added latency to every `run` instead. Caught by
+            // measurement: the step reported 0.8s inside a run whose total was
+            // 0.3s, which is impossible unless the wait was the step.
+            let mut waited = std::time::Duration::ZERO;
+            while waited < quiet_for {
+                if s2.load(std::sync::atomic::Ordering::Relaxed) {
+                    return;
+                }
+                let slice = std::time::Duration::from_millis(20).min(quiet_for - waited);
+                std::thread::sleep(slice);
+                waited += slice;
+            }
+            if s2.load(std::sync::atomic::Ordering::Relaxed) {
+                return;
+            }
             let mut i = 0usize;
             while !s2.load(std::sync::atomic::Ordering::Relaxed) {
                 // `\x1b[K` clears to the end of the line (avoids leftovers from
@@ -774,7 +812,17 @@ impl Progress {
             return; // nothing open
         }
         let folded = capture_take();
-        let took = dim(&fmt_elapsed(self.started.elapsed()));
+        let elapsed = self.started.elapsed();
+        // Under the threshold the step never announced itself, so closing it
+        // would print a tick for a line the reader never saw starting.
+        if elapsed < self.threshold {
+            self.threshold = std::time::Duration::ZERO;
+            self.msg.clear();
+            let _ = folded;
+            return;
+        }
+        self.threshold = std::time::Duration::ZERO;
+        let took = dim(&fmt_elapsed(elapsed));
         let mark_s = match mark {
             '✓' => paint(color::GREEN, "✓"),
             '✗' => paint(color::RED, "✗"),
