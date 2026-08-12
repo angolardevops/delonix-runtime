@@ -2022,10 +2022,30 @@ Funções de motor `delonix_vm::{snapshot,restore,snapshots,delete_snapshot}` (e
     o ciclo original foi verificada pela regra do repo em **9/9 com a correcção e 4/9 com ela
     revertida**. Tinha de ser o ciclo — antes da correcção cada comando devolvia 0 por si. E
     o `rm` confirma-se com `qemu-img snapshot -l`: sair da LISTA não é sair do disco.
-- **Cloud Hypervisor**: **fail-closed**, não implementado (`unsupported_snapshot`) — o
-  restore do CH relança um vmm novo (ciclo diferente do revert in-place do libvirt) e
-  precisa de `ch-remote`; deferido, com erro claro que aponta para o backend libvirt em
-  vez de argv não-testado.
+- **Cloud Hypervisor (v0.51.x): os mesmos quatro verbos, OFFLINE** — `qemu-img snapshot
+  -c/-a/-d` no overlay da VM, e `ls` por `qemu-img info -U` (parser puro, escrito contra a
+  saída REAL; a primeira versão partia na linha de cabeçalho e devolvia lista vazia — o
+  teste apanhou-o antes do primeiro uso). Com a VM **a correr** os três verbos que ESCREVEM
+  são **recusados com erro dirigido** (`vm stop` primeiro, ou `--backend libvirt`); só o
+  `ls` responde, e é por isso que precisa do `-U`: o vmm segura o qcow2 e o `snapshot -l`
+  abre em leitura-escrita.
+  - **Porque NÃO se expôs a `vm.snapshot` do próprio CH**, que existe e funciona (medido ao
+    vivo numa VM real: `pause` → `PUT /api/v1/vm.snapshot` → `resume` escreve `config.json`
+    + `state.json` + um `memory-ranges` do tamanho da RAM inteira do convidado, 512 MiB):
+    ela guarda **memória e dispositivos, NÃO o disco**, e o CH não tem API de snapshot de
+    disco ao vivo nenhuma — enquanto o vmm corre segura o qcow2 em exclusivo, por isso mais
+    ninguém o pode capturar (`qemu-img` responde «Failed to lock byte 100», medido, com e
+    sem `-U`). Restaurá-la mais tarde, contra um disco que continuou a ser escrito, não é
+    voltar atrás: é um convidado cuja memória acredita num filesystem que já mudou. Expô-la
+    como `snapshot` faria o MESMO comando significar «volta atrás no tempo» no libvirt e
+    «retoma este instante, se ninguém tocou no disco» aqui — a divergência silenciosa entre
+    backends que este motor recusa publicar. Um par `vm suspend`/`vm resume` é onde essa
+    capacidade pertence.
+  - **Gate próprio** (`scripts/e2e.sh`, secção CH): **13/13** ao vivo — a recusa com a VM a
+    correr (e que a mensagem diz o que fazer), os quatro verbos com ela parada, as classes
+    4/5, o `ls` a responder com o vmm a segurar o ficheiro, e o `rm` confirmado com
+    `qemu-img snapshot -l`. Salta com linha audível sem `cloud-hypervisor` ou quando o
+    `create` não passa (o vmm do CH vive dentro do holder de rede).
 - **Validado ao vivo** (host com `qemu:///session`): VM real da golden 1.34 →
   `snapshot` (checkpoint) → `snapshots` lista → `restore` → limpo, sem domínios órfãos.
   Os default methods do trait (erro "not supported") são o mecanismo que dá ao CH o

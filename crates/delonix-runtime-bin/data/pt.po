@@ -8528,8 +8528,8 @@ msgstr "a construir {tag}"
 msgid "Point-in-time snapshots of a VM (checkpoints in the VM's own disk)"
 msgstr "Snapshots pontuais de uma VM (checkpoints no disco da própria VM)"
 
-msgid "Point-in-time snapshots of a VM (checkpoints in the VM's own disk).\n\nlibvirt: a snapshot of a RUNNING VM is a system checkpoint — memory + disk — and of a stopped one it is disk-only; either survives a `vm stop`/`vm start`. Not yet supported on the cloud-hypervisor backend."
-msgstr "Snapshots pontuais de uma VM (checkpoints no disco da própria VM).\n\nlibvirt: o snapshot de uma VM A CORRER é um checkpoint de sistema — memória + disco — e o de uma parada é só do disco; qualquer deles sobrevive a um `vm stop`/`vm start`. Ainda não suportado no backend cloud-hypervisor."
+msgid "Point-in-time snapshots of a VM (checkpoints in the VM's own disk).\n\nlibvirt: a snapshot of a RUNNING VM is a system checkpoint — memory + disk — and of a stopped one it is disk-only; either survives a `vm stop`/`vm start`. cloud-hypervisor: stopped VMs only, because the running vmm holds the disk exclusively and CH has no live disk-snapshot API — it says so instead of writing nothing."
+msgstr "Snapshots pontuais de uma VM (checkpoints no disco da própria VM).\n\nlibvirt: o snapshot de uma VM A CORRER é um checkpoint de sistema — memória + disco — e o de uma parada é só do disco; qualquer deles sobrevive a um `vm stop`/`vm start`. cloud-hypervisor: só com a VM parada, porque o vmm a correr segura o disco em exclusivo e o CH não tem API de snapshot de disco ao vivo — di-lo, em vez de não escrever nada."
 
 msgid "Take a named snapshot (memory + disk if the VM is running, disk-only if it is stopped)"
 msgstr "Tira um snapshot com nome (memória + disco se a VM estiver a correr, só disco se estiver parada)"

@@ -487,6 +487,9 @@ section "vm: o snapshot sobrevive a um stop/start (precisa de hipervisor)"
 # recusa com a VM parada verifica-se pela MENSAGEM, não pelo código de saída:
 # o erro cru do virsh também saía 1, logo um `fail` ficaria verde por cima do
 # relato errado.
+# O caminho do overlay vem do PRÓPRIO motor, nunca de um default assumido aqui.
+SROOT=$("$BIN" system info 2>/dev/null | awk '/state root:/{print $3}')
+
 if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
    && virsh -c qemu:///system list --all >/dev/null 2>&1; then
   SVM="snap-$PFX"; SDISK="$OUT/$SVM.qcow2"
@@ -517,10 +520,7 @@ if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
     check "restore de um snapshot vivo traz a VM de volta a correr" ok bash -c \
       "'$BIN' vm snapshot restore '$SVM' s1 && '$BIN' vm status '$SVM' | grep -q Running"
     check "vm snapshot rm" ok "$BIN" vm snapshot rm "$SVM" s2
-    # Sair da LISTA não é sair do disco — o `qemu-img` é a única testemunha de
-    # que o estado se foi mesmo, e o caminho do overlay vem do próprio motor
-    # (`system info`), nunca de um default assumido aqui.
-    SROOT=$("$BIN" system info 2>/dev/null | awk '/state root:/{print $3}')
+    # Sair da LISTA não é sair do disco: o `qemu-img` é a única testemunha.
     check "e sai mesmo do disco, não só da lista" ok bash -c \
       "! qemu-img snapshot -l '$SROOT/vms/$SVM.qcow2' 2>/dev/null | grep -qw s2 && ! '$BIN' vm snapshot ls '$SVM' | grep -qx s2"
 
@@ -536,9 +536,53 @@ if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
     skip "vm: snapshot sobrevive a stop/start" "o vm create falhou neste host"
     "$BIN" vm rm -f "$SVM" >/dev/null 2>&1
   fi
+
   rm -f "$SDISK"
 else
   skip "vm: snapshot sobrevive a stop/start" "sem virsh/qemu-img, ou sem ligação libvirt de sistema"
+fi
+
+########################################
+section "vm: os mesmos snapshots no backend cloud-hypervisor"
+########################################
+# Aqui os snapshots são do disco (`qemu-img snapshot`) e SÓ com a VM parada: o
+# vmm a correr segura o qcow2 em exclusivo e o CH não tem API de snapshot de
+# disco ao vivo (a `vm.snapshot` dele guarda memória+dispositivos e NÃO o disco
+# — restaurá-la contra um disco que andou não é voltar atrás). O que este bloco
+# prova é que a recusa é CLARA e que os quatro verbos funcionam com a VM parada
+# — nunca um silêncio. Precisa do holder de rede a correr (o vmm do CH vive lá
+# dentro), por isso salta em vez de falhar quando o `create` não passa.
+if command -v cloud-hypervisor >/dev/null; then
+  CVM="chsnap-$PFX"; CDISK="$OUT/$CVM.qcow2"
+  qemu-img create -f qcow2 "$CDISK" 64M >/dev/null 2>&1
+  if "$BIN" vm create "$CVM" --disk "$CDISK" --backend cloud-hypervisor --memory 256M >/dev/null 2>&1; then
+    check "CH: create com a VM a correr RECUSA" fail "$BIN" vm snapshot create "$CVM" s1
+    check "CH: e a recusa diz o que fazer" ok bash -c \
+      "'$BIN' vm snapshot create '$CVM' s1 2>&1 | grep -q 'vm stop'"
+    check "CH: vm stop" ok "$BIN" vm stop "$CVM"
+    check "CH: create com a VM parada" ok "$BIN" vm snapshot create "$CVM" s1
+    check "CH: ls nomeia-o" ok bash -c "'$BIN' vm snapshot ls '$CVM' | grep -qx s1"
+    check "CH: restore" ok "$BIN" vm snapshot restore "$CVM" s1
+    check "CH: create repetido diz 5" 5 "$BIN" vm snapshot create "$CVM" s1
+    check "CH: restore de inexistente diz 4" 4 "$BIN" vm snapshot restore "$CVM" naoexiste
+    check "CH: vm start" ok "$BIN" vm start "$CVM"
+    # O snapshot vive no disco, por isso sobrevive por construção — e o `ls`
+    # tem de responder mesmo com o vmm a segurar o ficheiro (`qemu-img info -U`).
+    check "CH: o ls responde com a VM a correr" ok bash -c \
+      "'$BIN' vm snapshot ls '$CVM' | grep -qx s1"
+    check "CH: rm com a VM a correr RECUSA" fail "$BIN" vm snapshot rm "$CVM" s1
+    "$BIN" vm stop "$CVM" >/dev/null 2>&1
+    check "CH: rm com a VM parada" ok "$BIN" vm snapshot rm "$CVM" s1
+    check "CH: e saiu do disco" ok bash -c \
+      "! qemu-img snapshot -l '$SROOT/vms/$CVM.qcow2' 2>/dev/null | grep -qw s1"
+    "$BIN" vm rm -f "$CVM" >/dev/null 2>&1
+  else
+    skip "vm: snapshots no cloud-hypervisor" "o vm create CH falhou neste host (infra de rede?)"
+    "$BIN" vm rm -f "$CVM" >/dev/null 2>&1
+  fi
+  rm -f "$CDISK"
+else
+  skip "vm: snapshots no cloud-hypervisor" "sem cloud-hypervisor instalado"
 fi
 
 ########################################

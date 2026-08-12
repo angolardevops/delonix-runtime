@@ -814,7 +814,9 @@ pub enum VmCmd {
     ///
     /// libvirt: a snapshot of a RUNNING VM is a system checkpoint — memory +
     /// disk — and of a stopped one it is disk-only; either survives a `vm
-    /// stop`/`vm start`. Not yet supported on the cloud-hypervisor backend.
+    /// stop`/`vm start`. cloud-hypervisor: stopped VMs only, because the
+    /// running vmm holds the disk exclusively and CH has no live disk-snapshot
+    /// API — it says so instead of writing nothing.
     Snapshot {
         #[command(subcommand)]
         action: VmSnapshotCmd,
