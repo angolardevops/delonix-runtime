@@ -54,6 +54,7 @@ pub mod tunnel;
 pub mod util;
 pub mod vlan;
 pub mod vm;
+pub mod vmbackends;
 pub mod vmbridge;
 pub mod vmfile;
 pub mod vmimage;
