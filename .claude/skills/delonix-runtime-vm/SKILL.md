@@ -93,3 +93,11 @@ cinco hipóteses deram uma hora. A consola série (`console=ttyS0`, sem `tty0`)
 
 Corre `delonix-vm-backend` para acrescentar um backend, e `delonix-testing` para
 a disciplina de validação.
+
+## No roteiro de auditoria
+
+Cobre os pontos **1 e 2** no domínio das VMs. A secção «Método» acima é o ponto
+**10** em forma de hábito — quando não souberes o estado, OLHA para ele — e as
+VMs são hoje a lacuna conhecida da recuperação após falha do plano de controlo
+(containers e pods recuperam, VMs não): ver `delonix-producao`. Para acrescentar
+um backend, `delonix-vm-backend`. Ordem e relatório em `delonix-auditoria`.

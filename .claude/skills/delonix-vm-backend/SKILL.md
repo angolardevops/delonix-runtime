@@ -78,3 +78,11 @@ Corre a skill `delonix-testing` para a disciplina de validação, e a
 `delonix-runtime-sec` se o backend passar a segurar uma credencial que mexe
 noutra máquina. E diz nas notas de release o que **não** foi validado ao vivo —
 nunca o implícito.
+
+## No roteiro de auditoria
+
+O registo da Fase 1 é um exemplo canónico dos pontos **3 e 11** (Strategy +
+Registry, e o fim de um `_ =>` que falhava aberto) — ver `delonix-engenharia`
+para o resto do vocabulário e para quando NÃO abstrair. A disciplina da Fase 2 —
+não publicar o que nunca se viu arrancar — é o ponto **10**. Ordem e relatório em
+`delonix-auditoria`.

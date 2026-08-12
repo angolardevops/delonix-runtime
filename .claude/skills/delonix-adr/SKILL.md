@@ -103,3 +103,12 @@ escondidas.
   seu ADR — o shape do `kind: Workload`, a extracção do trait de `VmBackend` para
   `delonix-runtime-core` (confirmar ausência de dependência circular), e a decisão
   de daemon (guarda-rio 1). Não avances nenhuma sem o ADR correspondente aceite.
+
+## No roteiro de auditoria
+
+Conduz os pontos **3** (arquitectura e design) e parte do **11** do roteiro
+completo — ver a skill âncora `delonix-auditoria`. Os guarda-rios acima são o
+critério de aceitação de qualquer achado de arquitectura: um achado que proponha
+violar um deles está errado, por mais elegante que seja. Para os princípios de
+engenharia aplicados ao código (SOLID, patterns, núcleo puro, fronteiras de
+crate) usa `delonix-engenharia`; o ADR entra quando a decisão move uma fronteira.

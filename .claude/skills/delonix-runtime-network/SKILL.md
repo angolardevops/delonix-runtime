@@ -97,3 +97,12 @@ regra. **Um único cliente de teste não caracteriza um caminho de rede, e o mai
 - Corre `delonix-runtime-sec` para qualquer mudança em fronteira de rede: o
   isolamento cross-namespace, o `Dependency` e o guarda L4 decidem TODOS pelo IP
   de origem, e já houve dois contornos por multi-homing e um por IPv6.
+
+## No roteiro de auditoria
+
+Cobre os pontos **1 e 2** no domínio da SDN, e é onde os pontos **4 e 9** têm os
+caminhos quentes mais afiados: o socket de controlo é O ponto de serialização de
+toda a rede, o dispatch nft já cresceu linearmente com o número de containers, e
+hostfwds/refcounts/slirps órfãos são fugas com incidente registado — ver
+`delonix-carga`. Para o raio de dano de um respawn e a recuperação do plano de
+controlo, `delonix-producao`. Ordem e relatório em `delonix-auditoria`.

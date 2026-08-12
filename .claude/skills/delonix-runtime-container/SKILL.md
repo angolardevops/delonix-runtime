@@ -82,3 +82,11 @@ tem»: metade já cá está com outro nome. O que este motor tem e eles não —
 (`container update`) — é o argumento mais forte que existe, porque no Docker
 mudar uma porta obriga a recriar. Uma feature que quebre essa propriedade custa
 mais do que traz.
+
+## No roteiro de auditoria
+
+Cobre os pontos **1 e 2** (revisão, bugs e gaps) no domínio do container, e é o
+domínio onde os pontos **9** (fugas: rootfs órfãos, zombies, fds do shim de logs)
+e **10** (cgroup delegado, limites que só valem em carga) mais mordem. A secção
+de paridade acima é a entrada do ponto **6** — o aprofundamento está em
+`delonix-paridade`. Ver `delonix-auditoria` para a ordem e o relatório.

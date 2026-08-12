@@ -107,3 +107,13 @@ delonix schema print            # o schema tem de ser o do código
 ```
 
 Os cenários de caos que SALTAM por falta de alvo contam como não cobertos.
+
+## No roteiro de auditoria
+
+É o motor dos pontos **5 e 7** (E2E completo, e cada comando/subcomando/
+parâmetro) e a principal fonte do **2** (bugs e gaps) — a auditoria dos 208
+subcomandos encontrou por esta via o que semanas de leitura não tinham
+encontrado. **Corre-se PRIMEIRO** no roteiro (`delonix-auditoria`), antes da
+revisão de código: a medição diz onde olhar. O que esta varredura não faz:
+carga e fugas (`delonix-carga`), comparação com Docker/Podman (`delonix-paridade`)
+e o registo do aprendizado (`delonix-aprendizados`).

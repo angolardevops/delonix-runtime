@@ -97,3 +97,12 @@ glibc 2.35). O trabalho local é: notas → bump → tag → monitorizar → val
 - Versionamento: MINOR para features user-visible, PATCH para fixes/instalador.
 - Strings de UI novas: EN no código + entrada no `data/pt.po` (ver a secção
   i18n do CLAUDE.md) — uma release nunca sai com strings PT hardcoded novas.
+
+## No roteiro de auditoria
+
+Uma release é o ponto de controlo do roteiro (`delonix-auditoria`): antes da tag,
+os pontos **5 e 7** (`scripts/e2e.sh` + varredura da CLI, via `delonix-test-e2e`)
+e **8** (aprendizados e gates, via `delonix-aprendizados`) têm de estar fechados,
+e as notas dizem sempre o que **não** foi validado — nunca o implícito. Se a
+release muda comportamento sob carga, `delonix-carga` com número antes e depois;
+se muda a superfície comparável, `delonix-paridade` para o `COMPARE` do `gen.py`.

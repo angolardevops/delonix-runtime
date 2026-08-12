@@ -98,3 +98,11 @@ falta».
 5. Exemplo em `examples/` — há teste que o valida contra o schema e o dry-run.
 6. Corre `delonix-testing`; se o Kind tocar em credenciais ou destruir dados,
    `delonix-runtime-sec` também.
+
+## No roteiro de auditoria
+
+Cobre os pontos **1, 2 e 3** no domínio declarativo. É também o subsistema onde o
+ponto **10** se mede melhor: o `stack plan --detailed-exitcode` é o gate de
+deriva de um nó em produção, e a prova de que uma mudança reverteu não é o `rc`
+do apply — é o plano seguinte nada ter a propor. Ordem e relatório em
+`delonix-auditoria`; gates e aprendizados em `delonix-aprendizados`.

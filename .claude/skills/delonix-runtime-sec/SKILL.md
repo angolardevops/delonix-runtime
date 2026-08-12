@@ -93,3 +93,11 @@ que impede activamente.
 Isto é auditoria DEFENSIVA do próprio código — nunca gerar exploits para sistemas de terceiros,
 nunca testar contra hosts que não sejam deste sandbox/laboratório. Bugs encontrados ficam
 documentados no `CLAUDE.md` do produto (secção própria) até corrigidos.
+
+## No roteiro de auditoria
+
+É a lente ofensiva dos pontos **1 e 2** do roteiro (`delonix-auditoria`), e uma
+pré-condição do ponto **10**: nada entra num nó crítico com uma fronteira de
+privilégio por auditar. Complementa — não substitui — o agente `revisor` (bugs e
+gaps sem intenção maliciosa) nem `delonix-carga` (DoS por exaustão medida, em vez
+de suposta). Um achado corrigido fecha com gate, via `delonix-aprendizados`.

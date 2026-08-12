@@ -91,3 +91,11 @@ Um push «bem sucedido» prova-se no REGISTO, não no rc do comando nem num grep
 saída — `image vm ls-remote` sem credenciais é a verificação, e mostra o que um
 utilizador vê. Corre `delonix-runtime-sec` para qualquer mudança em pull/push,
 extracção ou credenciais: esta superfície já deu um ALTO e dois CRÍTICOS.
+
+## No roteiro de auditoria
+
+Cobre os pontos **1 e 2** no domínio das imagens. A cadeia de confiança acima é
+material do ponto **10** (produção crítica: um registo comprometido é o vector
+mais barato que existe), e o custo de pull/push/compressão é material do ponto
+**4** — os números medidos (`Cas::has`, zstd vs zlib, timeout de transfer) estão
+em `delonix-carga`. Ver `delonix-auditoria` para a ordem e o relatório.

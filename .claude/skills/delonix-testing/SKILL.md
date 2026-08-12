@@ -133,3 +133,11 @@ holder não-respawnável), e que testes novos foram adicionados. Para uma releas
 actualiza a bateria de `docs/RELATORIO-PRE-PRODUCAO.md` se a superfície E2E
 mudou. **Nunca declares "testado" o que só compilou** — é a diferença entre esta
 skill e um checklist qualquer.
+
+## No roteiro de auditoria
+
+É a disciplina por trás dos pontos **5** (provar que funciona a sério) e **8** (o
+gate que trava a regressão), e dá o piso de medição ao **4** (`criterion`/
+`make bench`, dev-only). A varredura exploratória da CLI é `delonix-test-e2e`;
+a carga, os percentis e as fugas de recursos são `delonix-carga`; onde escrever o
+aprendizado depois do teste é `delonix-aprendizados`. Ordem em `delonix-auditoria`.

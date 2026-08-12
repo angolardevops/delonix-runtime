@@ -63,3 +63,11 @@ apagar.** É a regra que a auditoria dos 208 subcomandos deixou escrita.
 API neste host, por isso o CRUD, a quota e as permissões exercitam-se contra um
 alvo REAL. Usa-o. Um provisionador validado só contra respostas gravadas não
 cumpre a barra deste repositório.
+
+## No roteiro de auditoria
+
+O caminho destrutivo desta skill é um caso do ponto **10** (produção crítica): a
+destruição chega a OUTRA máquina, e o raio de dano deixa de ser nosso. As duas
+condições de aceitação são, na prática, os pontos **1/2** (`delonix-runtime-sec`)
+e **8** (o cenário de caos que falha com a correcção revertida,
+`delonix-aprendizados`). Ordem e relatório em `delonix-auditoria`.

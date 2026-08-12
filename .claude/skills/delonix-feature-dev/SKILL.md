@@ -92,3 +92,13 @@ escrutínio de código novo antes de o ligares (ver o agente `revisor`).
   bem feito toca tipicamente 2-4 ficheiros pequenos (`cmd/vm.rs`, `cmd/
   image.rs`, `cmd/vmimage.rs` + a crate de motor, se aplicável) — um diff
   muito maior ou muito menor do que isso é sinal de ter esquecido um caminho.
+
+## No roteiro de auditoria
+
+É o lado da CONSTRUÇÃO do roteiro (ver `delonix-auditoria`): o passo 1 desta
+skill — todos os pontos de entrada — é o que faz o ponto **7** (cada comando,
+subcomando e parâmetro funciona) passar mais tarde; a validação ao vivo do passo
+4 é o ponto **5** em pequeno. Antes de dar a feature por pronta: `delonix-carga`
+se ela corre num caminho quente ou segura um recurso, `delonix-producao` se vai
+correr num nó crítico, e `delonix-aprendizados` se o caminho revelou uma
+armadilha nova.
