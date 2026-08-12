@@ -60,6 +60,16 @@ só durante o comando (a partir do `vms/<vm>.xml`, que por isso o `stop` já nã
 apaga) e o desfaz a seguir — excepto se um revert de checkpoint vivo a tiver
 posto a correr.
 
+**O Cloud Hypervisor não consegue capturar o disco de uma VM a correr.** A
+`vm.snapshot` dele existe e funciona (pause → `PUT /api/v1/vm.snapshot` →
+resume, medido), mas guarda memória+dispositivos e NÃO o disco — e o vmm segura
+o qcow2 em exclusivo, por isso mais ninguém o captura («Failed to lock byte
+100», mesmo com `-U`). Por isso os snapshots do CH são OFFLINE (`qemu-img
+snapshot`), os verbos que escrevem RECUSAM com a VM a correr, e o `ls` usa
+`qemu-img info -U` (só leitura, a única forma que o force-share permite).
+Expor a `vm.snapshot` como `snapshot` faria o mesmo comando significar coisas
+diferentes em cada backend.
+
 **O `Vm` nunca persistiu tudo o que a `VmConfig` tem** — kernel/initrd/firmware,
 seed próprio, volumes 9p, VNC, campos avançados de libvirt só existem como flags
 do `vm create`. `vm start`/`restart` reconstroem do registo e cobrem o caso

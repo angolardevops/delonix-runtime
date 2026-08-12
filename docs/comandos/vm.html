@@ -351,7 +351,7 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class="cap">Fixar o backend que o `vm create` usa quando não lhe dizem nada</div><pre><code>delonix vm default-backend --set libvirt</code></pre></div><div class="ex"><div class="cap">Ver o que está fixado (`none` = decide a auto-detecção)</div><pre><code>delonix vm default-backend</code></pre></div><div class="ex"><div class="cap">Voltar à auto-detecção</div><pre><code>delonix vm default-backend --clear</code></pre></div>
 <h2 id='snapshot'><code>vm snapshot</code></h2>
 <p class='intro'>Point-in-time snapshots of a VM (checkpoints in the VM&#x27;s own disk).</p>
-<p class='intro'>libvirt: a snapshot of a RUNNING VM is a system checkpoint — memory + disk — and of a stopped one it is disk-only; either survives a <code>vm stop</code>/<code>vm start</code>. Not yet supported on the cloud-hypervisor backend.</p>
+<p class='intro'>libvirt: a snapshot of a RUNNING VM is a system checkpoint — memory + disk — and of a stopped one it is disk-only; either survives a <code>vm stop</code>/<code>vm start</code>. cloud-hypervisor: stopped VMs only, because the running vmm holds the disk exclusively and CH has no live disk-snapshot API — it says so instead of writing nothing.</p>
 <div class='help'><pre><code>Usage: delonix vm snapshot [OPTIONS] &lt;COMMAND&gt;
 
 Commands:

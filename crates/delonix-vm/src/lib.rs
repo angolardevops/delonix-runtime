@@ -923,6 +923,147 @@ impl VmBackend for CloudHypervisorBackend {
         infra::vm_detach(&vm.name, ip.as_deref());
         Ok(())
     }
+
+    // ---- snapshots -------------------------------------------------------
+    //
+    // OFFLINE, in the VM's own qcow2 (`qemu-img snapshot`) — the same kind of
+    // artifact libvirt makes for a shut-off domain, so a checkpoint means the
+    // same thing on both backends.
+    //
+    // **Why not Cloud Hypervisor's own `vm.snapshot`**, which exists and works
+    // (measured on a live VM: pause → `PUT /api/v1/vm.snapshot` → resume writes
+    // `config.json` + `state.json` + a `memory-ranges` the size of the guest's
+    // whole RAM): it captures memory and devices and **NOT the disk**, and CH
+    // has no live disk-snapshot API at all — while the vmm runs it holds the
+    // qcow2 under an exclusive lock, so nothing else can checkpoint it either
+    // (`qemu-img` answers "Failed to lock byte 100"). Restoring that later,
+    // against a disk that kept being written, is not a rollback: it is a guest
+    // whose memory believes in a filesystem that has moved on. Exposing it as
+    // `snapshot` would make the SAME command mean «go back in time» on libvirt
+    // and «resume this exact moment, if nothing touched the disk» here — the
+    // kind of quiet divergence between backends this engine refuses to ship.
+    // A `vm suspend`/`vm resume` pair is where that capability belongs.
+
+    fn snapshots(&self, vmdir: &Path, vm: &Vm) -> Result<Vec<String>> {
+        // `-U` (force-share) because this has to answer while the VM RUNS, and
+        // the vmm holds the write lock: `qemu-img info` opens read-only, which
+        // is the only mode force-share allows. Plain `snapshot -l` opens
+        // read-write and fails on a running VM.
+        let out = capture(
+            "qemu-img",
+            &["info", "-U", "--", &ch_overlay(vmdir, vm).to_string_lossy()],
+        )
+        .ok_or_else(|| Error::Runtime {
+            context: "qemu-img info",
+            message: format!("could not read the disk of VM '{}'", vm.name),
+        })?;
+        Ok(parse_qemu_snapshot_list(&out))
+    }
+
+    fn snapshot(&self, vmdir: &Path, vm: &Vm, name: &str) -> Result<()> {
+        self.offline_snapshot_op(vmdir, vm, "take a snapshot of")?;
+        if self.snapshots(vmdir, vm)?.iter().any(|s| s == name) {
+            return Err(taken_snapshot(&vm.name, name));
+        }
+        qemu_img_snapshot(vmdir, vm, "-c", name)
+    }
+
+    fn restore(&self, vmdir: &Path, vm: &Vm, name: &str) -> Result<()> {
+        self.offline_snapshot_op(vmdir, vm, "restore")?;
+        if !self.snapshots(vmdir, vm)?.iter().any(|s| s == name) {
+            return Err(missing_snapshot(&vm.name, name));
+        }
+        qemu_img_snapshot(vmdir, vm, "-a", name)
+    }
+
+    fn delete_snapshot(&self, vmdir: &Path, vm: &Vm, name: &str) -> Result<()> {
+        self.offline_snapshot_op(vmdir, vm, "delete a snapshot of")?;
+        if !self.snapshots(vmdir, vm)?.iter().any(|s| s == name) {
+            return Err(missing_snapshot(&vm.name, name));
+        }
+        qemu_img_snapshot(vmdir, vm, "-d", name)
+    }
+}
+
+impl CloudHypervisorBackend {
+    /// Refuses a snapshot verb while the VM runs, saying WHY and what to do —
+    /// this is a limit of the hypervisor, not a missing feature: the running
+    /// vmm holds the qcow2 exclusively, so there is no way to checkpoint the
+    /// disk under it. Silence here would be worse than the refusal: the write
+    /// simply would not happen.
+    fn offline_snapshot_op(&self, _vmdir: &Path, vm: &Vm, what: &str) -> Result<()> {
+        if !self.is_running(vm) {
+            return Ok(());
+        }
+        Err(Error::Runtime {
+            context: "vm",
+            message: format!(
+                "cloud-hypervisor cannot {what} a RUNNING VM: the vmm holds its disk exclusively \
+                 and CH has no live disk-snapshot API. Stop it first (`delonix vm stop {}`) — the \
+                 snapshot is then taken in the disk itself and survives everything. A VM that \
+                 needs checkpoints while it runs belongs on `--backend libvirt`.",
+                vm.name
+            ),
+        })
+    }
+}
+
+/// The per-VM overlay `create` builds — the file the checkpoints live in.
+fn ch_overlay(vmdir: &Path, vm: &Vm) -> PathBuf {
+    vmdir.join(format!("{}.qcow2", vm.name))
+}
+
+fn qemu_img_snapshot(vmdir: &Path, vm: &Vm, flag: &str, name: &str) -> Result<()> {
+    let disk = ch_overlay(vmdir, vm);
+    // `--` before the path: a name is already validated, the path is ours, and
+    // this keeps the habit that has bitten this repo before with `ssh`/`virsh`.
+    quiet(
+        "qemu-img",
+        &["snapshot", flag, name, "--", &disk.to_string_lossy()],
+    )
+    .map(|_| ())
+    .map_err(|e| Error::Runtime {
+        context: "qemu-img snapshot",
+        message: e,
+    })
+}
+
+/// Pure parser for the `Snapshot list:` block of `qemu-img info`. Written
+/// against the REAL output captured on this host, not from the man page:
+///
+/// ```text
+/// Snapshot list:
+/// ID        TAG               VM SIZE                DATE     VM CLOCK     ICOUNT
+/// 1         manual1               0 B 2026-08-12 16:44:30 00:00:00.000          0
+/// ```
+///
+/// The block ends at the next unindented section (`Format specific
+/// information:`), and an image with no snapshots has no block at all — which
+/// is an empty list, not an error.
+fn parse_qemu_snapshot_list(out: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut inside = false;
+    for line in out.lines() {
+        if line.starts_with("Snapshot list:") {
+            inside = true;
+            continue;
+        }
+        if !inside {
+            continue;
+        }
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        match cols.as_slice() {
+            // A row always starts with a numeric ID; the TAG is the name.
+            [id, tag, ..] if id.parse::<u64>().is_ok() => names.push((*tag).to_string()),
+            // The column header sits between the marker and the first row —
+            // treating it as a row invented a snapshot called "TAG", and
+            // breaking on it (the first version) returned nothing at all.
+            ["ID", ..] => continue,
+            // Anything else is the next section: the block is over.
+            _ => break,
+        }
+    }
+    names
 }
 
 /// Boots `cloud-hypervisor` INSIDE the infra netns, in the background, and returns
@@ -3563,6 +3704,29 @@ mod tests {
         assert!(out.contains("<memory>x</memory>"), "{out}");
         // Nothing to replace = byte-for-byte the same file.
         assert_eq!(super::snapshot_xml_with_uuid("<a/>", "u"), "<a/>");
+    }
+
+    #[test]
+    fn le_a_lista_de_snapshots_do_qemu_img_info() {
+        // Output REAL capturado neste host (`qemu-img info -U` de um overlay de
+        // uma VM CH a correr) — não a forma do manual. O bloco acaba na secção
+        // seguinte, e a linha de cabeçalho não é um snapshot chamado "TAG".
+        let out = "\
+image: /x/dev.qcow2
+file format: qcow2
+Snapshot list:
+ID        TAG               VM SIZE                DATE     VM CLOCK     ICOUNT
+1         manual1               0 B 2026-08-12 16:44:30 00:00:00.000          0
+2         antes-do-upgrade    2 MiB 2026-08-12 16:45:00 00:00:09.012
+Format specific information:
+    compat: 1.1
+";
+        assert_eq!(
+            super::parse_qemu_snapshot_list(out),
+            vec!["manual1".to_string(), "antes-do-upgrade".to_string()]
+        );
+        // Sem snapshots não há bloco nenhum — lista vazia, nunca um erro.
+        assert!(super::parse_qemu_snapshot_list("image: /x\nfile format: qcow2\n").is_empty());
     }
 
     #[test]
