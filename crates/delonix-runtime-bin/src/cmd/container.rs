@@ -2961,7 +2961,24 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             .to_string_lossy()
             .into_owned()
     } else {
-        prepare_rootfs(images, &img, &id)?
+        // The one genuinely silent phase of a `run`: on the FIRST use of an
+        // image, `prepare_rootfs` → `ensure_layers` extracts every layer with no
+        // output at all — tens of seconds on a big image, with the terminal
+        // showing nothing. Measured on the cached path it is 0.43s end to end,
+        // which is why the spinner is DELAYED: under the threshold nothing is
+        // drawn, so the fast path keeps the output it always had.
+        let mut prog = super::output::Progress::new();
+        prog.step_after(
+            super::po::t("unpacking the image"),
+            "📦",
+            // 800ms, not 400: the cached path measures 0.43s end to end in
+            // release, and a threshold that close to it would flash a spinner on
+            // the ordinary run — the chrome this delay exists to avoid.
+            std::time::Duration::from_millis(800),
+        );
+        let r = prepare_rootfs(images, &img, &id)?;
+        prog.ok();
+        r
     };
 
     // `--entrypoint X` replaces the image's ENTRYPOINT (COMMAND becomes its
