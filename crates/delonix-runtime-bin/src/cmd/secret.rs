@@ -95,8 +95,8 @@ pub enum SecretCmd {
 /// consumed by `Container.secret` (env/files) and `Storage.passwordSecret`
 /// (`password` key). Closes the "no CLI" gap: the secret is declared in YAML
 /// instead of `delonix secret create`.
-#[derive(Debug, Deserialize)]
-struct SecretSpec {
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub(crate) struct SecretSpec {
     /// Inline `KEY: value` pairs. **Plaintext in the manifest** — convenient for
     /// dev, but the value stays in cleartext in the file; for production prefer
     /// `fromEnvFile` (outside version control) or the CLI's `secret create`. Warned at apply.
@@ -126,9 +126,9 @@ struct SecretSpec {
 /// and the variable name are the same, and the mapping is what you need when
 /// the consumer expects a fixed key (`password`) but the environment calls it
 /// something else (`PGPASSWORD`).
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
-enum FromEnv {
+pub(crate) enum FromEnv {
     Names(Vec<String>),
     Mapped(BTreeMap<String, String>),
 }
