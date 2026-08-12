@@ -256,7 +256,6 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
 
 fn apply_with(docs: &[ManifestDoc]) -> Result<()> {
     for doc in manifest::of_kind(docs, "ShareVolume") {
-        manifest::warn_unknown_fields(doc, SHAREVOLUME_SPEC_FIELDS);
         let spec: ShareVolumeSpec = manifest::spec_of(doc)?;
         let ns = doc.metadata.namespace.clone().unwrap_or_else(ns_default);
         apply_one(&state_root(), &doc.metadata.name, &spec, &ns)?;

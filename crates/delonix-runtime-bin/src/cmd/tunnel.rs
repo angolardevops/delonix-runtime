@@ -246,7 +246,6 @@ pub(crate) fn converge_doc(doc: &ManifestDoc) -> Result<()> {
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     for doc in manifest::of_kind(docs, "Tunnel") {
-        manifest::warn_unknown_fields(doc, TUNNEL_SPEC_FIELDS);
         let spec: TunnelSpec = manifest::spec_of(doc)?;
         apply_one(&doc.metadata.name, &spec)?;
     }
