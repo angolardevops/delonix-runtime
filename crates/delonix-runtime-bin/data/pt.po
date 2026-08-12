@@ -8495,3 +8495,8 @@ msgstr "o container não arrancou, e o supervisor morreu antes de dizer porquê"
 # devolvia: o ENOENT de um spawn não é um ficheiro em falta, é a ferramenta.
 msgid "'wg' is not available on this host — install wireguard-tools (Debian/Ubuntu: `apt install wireguard-tools`; Fedora/RHEL: `dnf install wireguard-tools`; Arch: `pacman -S wireguard-tools`). It is only needed for WireGuard node keys and encrypted overlay networks"
 msgstr "'wg' não está disponível neste host — instala wireguard-tools (Debian/Ubuntu: `apt install wireguard-tools`; Fedora/RHEL: `dnf install wireguard-tools`; Arch: `pacman -S wireguard-tools`). Só é preciso para chaves de nó WireGuard e redes overlay cifradas"
+
+# `pod create`: a fase que pertence ao POD e não a nenhum membro — pode ter de
+# levantar o holder inteiro, e era o único silêncio do pod sem uma linha.
+msgid "pod network"
+msgstr "rede do pod"

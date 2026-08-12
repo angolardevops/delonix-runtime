@@ -226,6 +226,23 @@ C="c-$PFX"
 # Porta alta e improvável de colidir com o que já corre na máquina.
 P1=$((29500 + RANDOM % 300)); P2=$((29900 + RANDOM % 90))
 
+# Um passo que se ANUNCIA tem de se FECHAR, e o caminho rápido não anuncia nada.
+#
+# O `Progress` com limiar (`step_after`, usado pelo `container run` sobre o
+# desempacotar da imagem) imprimia o `•` de imediato fora de um TTY, enquanto o
+# fecho é suprimido abaixo do limiar — na premissa de que «abaixo do limiar nada
+# se anunciou», verdadeira num TTY (onde o spinner espera o limiar) e falsa aqui.
+# Com a imagem já em cache: um `•`, zero `✓`. Ou seja, em CI, num pipe ou em
+# qualquer redirecção ficava uma linha «em curso» sobre trabalho já terminado —
+# exactamente onde é menos provável que alguém repare e mais provável que seja
+# lida mais tarde. Só um TTY-menos o apanha, que é o que esta bateria é.
+check "progresso: todo o • tem o seu ✓" ok bash -c "
+  err=\$('$BIN' container run --rm '$IMG' true 2>&1 >/dev/null)
+  o=\$(printf '%s\n' \"\$err\" | grep -c '•' || true)
+  c=\$(printf '%s\n' \"\$err\" | grep -c '✓' || true)
+  [ \"\$o\" = \"\$c\" ] || { printf 'abertos=%s fechados=%s\n%s\n' \"\$o\" \"\$c\" \"\$err\"; exit 1; }
+"
+
 check "container run -d -p" ok "$BIN" container run -d --name "$C" -p "$P1:80" "$IMG" sleep 600
 if "$BIN" container inspect "$C" >/dev/null 2>&1; then
   check "container ls mostra-o" ok bash -c "'$BIN' container ls | grep -q '$C'"
