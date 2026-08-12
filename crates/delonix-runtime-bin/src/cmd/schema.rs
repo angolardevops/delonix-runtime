@@ -53,6 +53,7 @@ const TYPED_KINDS: &[&str] = &[
     "Tunnel",
     "ShareVolume",
     "Dependency",
+    "NetworkRoute",
     "HTTPRoute",
     "Ingress",
     "FirewallPolicy",
@@ -190,6 +191,11 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
                 generator.subschema_for::<super::dependency::DependencySpec>(),
                 "DependencySpec",
                 super::dependency::DEPENDENCY_SPEC_FIELDS,
+            ),
+            "NetworkRoute" => (
+                generator.subschema_for::<super::netroute::NetworkRouteSpec>(),
+                "NetworkRouteSpec",
+                super::netroute::NETWORK_ROUTE_SPEC_FIELDS,
             ),
             "HTTPRoute" => (
                 generator.subschema_for::<super::httproute::HttpRouteSpec>(),
