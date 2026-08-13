@@ -701,15 +701,17 @@ pub(crate) fn create_network(
                 }
                 None => store.create(name)?,
             };
-            let declared_gw = (!gateway.is_empty() && gateway != net.gateway)
-                .then(|| gateway.to_string());
+            let declared_gw =
+                (!gateway.is_empty() && gateway != net.gateway).then(|| gateway.to_string());
             // Realize it physically (real bridge of the rootless holder) — aligned
             // to the SAME prefix the NetworkStore just decided. If this fails, the
             // declarative record just created above would otherwise be ORPHANED —
             // `network ls` would show it, nothing could attach (NotFound), and a
             // retry would fail with "already exists" until a manual `network rm`.
             // Roll it back so a failed `create` leaves nothing behind to clean up.
-            if let Err(e) = infra::network_create_with_gateway(name, &net.prefix, declared_gw.as_deref()) {
+            if let Err(e) =
+                infra::network_create_with_gateway(name, &net.prefix, declared_gw.as_deref())
+            {
                 let _ = store.remove(name);
                 return Err(e);
             }
