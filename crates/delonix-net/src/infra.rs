@@ -4052,6 +4052,24 @@ pub fn network_create_with_gateway(
     gateway: Option<&str>,
 ) -> Result<NetDef> {
     if let Some(mut def) = network_get(name) {
+        // The PREFIX was the half still being dropped on the floor. It is not a
+        // preference like the gateway — it is the address space every container
+        // on this network gets, and the `NetworkStore` is its source of truth.
+        // Silently returning the old one meant `network inspect` showing subnet
+        // A while the containers were handed addresses from subnet B, with
+        // nothing anywhere reporting a problem.
+        //
+        // Refused rather than rewritten: workloads may already be attached with
+        // leases from the recorded prefix, and moving the bridge under them is
+        // not something a `create` should decide on its own.
+        if !prefix.is_empty() && def.prefix != prefix {
+            return Err(Error::Conflict(format!(
+                "network '{name}' is already realized on {} and the registry asks for {prefix} — \
+                 remove it (`delonix network rm {name}`) and create it again, or keep the \
+                 recorded subnet",
+                def.prefix
+            )));
+        }
         match gateway {
             Some(g) if def.gateway.as_deref() != Some(g) => {
                 def.gateway = Some(g.to_string());

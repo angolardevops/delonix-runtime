@@ -427,6 +427,15 @@ pub(crate) fn build_plan(docs: &[manifest::ManifestDoc], stack: &str) -> Result<
                 c.conditions.push(cond);
             }
         }
+        // Same shape, same reason: on a Create the network is about to be built
+        // by this very apply, so «it has no physical plane» is not a finding.
+        // On anything else it is — and it was invisible, because `Realized` was
+        // computed from the document and never from the machine.
+        if c.kind == "Network" && c.action != reconcile::Action::Create {
+            if let Some(cond) = super::conditions::network_not_realized(doc, &env) {
+                c.conditions.push(cond);
+            }
+        }
     }
     Ok(changes)
 }
