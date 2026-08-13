@@ -14,10 +14,12 @@ use super::util::open_stores;
 
 #[derive(Subcommand)]
 pub enum BootCmd {
-    /// Install + enable systemd units for the RUNNING containers.
+    /// Install + enable systemd units so containers come back after a reboot.
     ///
-    /// So they come back up when the host boots. Rootless uses user units +
-    /// linger.
+    /// Covers the ones running now AND the ones whose own policy says they
+    /// should be (`always`/`unless-stopped`) — a reboot kills the supervisor, so
+    /// those are stopped precisely when it matters. Stale units whose container
+    /// is gone are removed. Rootless uses user units + linger.
     Enable {
         /// Restart policy baked into the units (`no|on-failure[:max]|always|unless-stopped`).
         ///
@@ -146,6 +148,27 @@ pub fn run(action: BootCmd) -> Result<()> {
     }
 }
 
+/// Does this container's own policy say it should be running?
+///
+/// **This is the half that was missing, and it is the one a reboot needs.** The
+/// generator only ever looked at containers with a live PID — a snapshot of
+/// `ps`. But the supervisor is a plain `fork()`ed process, so a reboot kills it
+/// and the container is left `Crashed` with no PID; and `stack apply` will not
+/// revive it either (`container::apply` says «already exists, nothing to do»).
+/// So a container declared `--restart always`, stopped by the very reboot the
+/// units exist to survive, was never given one.
+///
+/// This is the role `podman-restart.service` plays there: at boot, start what
+/// the policy says should be running. Here it is one unit per container instead
+/// of one sweeping service, which keeps the systemd-native shape the rest of
+/// this file already has.
+///
+/// `on-failure` is deliberately NOT included: it means «restart if it exits
+/// badly», not «be up at boot», and a container that exited 0 has finished.
+fn wants_to_be_up(policy: Option<&str>) -> bool {
+    matches!(policy, Some("always") | Some("unless-stopped"))
+}
+
 /// The unit text for one container. **Pure, so it is testable** — the same
 /// reason `etcd::build_etcd_unit` is pure. This generator had no test at all,
 /// and it is the artefact that decides whether a host comes back up.
@@ -172,9 +195,11 @@ fn enable(
 ) -> Result<()> {
     std::fs::create_dir_all(unit_dir)?;
     let mut installed: Vec<String> = Vec::new();
-    // One unit per RUNNING container (those are the ones that should come back up).
+    // One unit per container that SHOULD be up — not merely per container that
+    // happens to be up right now.
     for c in store.list()? {
-        if !c.pid.map(runtime::is_alive).unwrap_or(false) {
+        let alive = c.pid.map(runtime::is_alive).unwrap_or(false);
+        if !alive && !wants_to_be_up(c.restart_policy.as_deref()) {
             continue;
         }
         // **`--restart no` used to be unreachable**: the flag defaulted to
@@ -281,6 +306,26 @@ mod tests {
         let u = container_unit("web", "no", "/r", "/usr/bin/delonix", "default.target");
         assert!(u.contains("Restart=no\n"), "{u}");
         assert!(!u.contains("Restart=always"));
+    }
+
+    /// **A lacuna que um reboot expõe.** O supervisor é um `fork()` e morre com
+    /// a máquina; o container fica `Crashed` sem PID; e o `stack apply` não o
+    /// ressuscita («already exists, nothing to do»). Só olhar para quem tem PID
+    /// vivo é fotografar o `ps` — e deixa de fora exactamente o container que
+    /// declarou `--restart always` e que o reboot parou.
+    ///
+    /// É o papel que o `podman-restart.service` faz do outro lado: no arranque,
+    /// levantar o que a política diz que devia estar de pé.
+    #[test]
+    fn a_politica_do_container_decide_se_ele_volta() {
+        assert!(wants_to_be_up(Some("always")));
+        assert!(wants_to_be_up(Some("unless-stopped")));
+        // `on-failure` é «reinicia se sair mal», não «está de pé no arranque» —
+        // um container que saiu 0 acabou o seu trabalho.
+        assert!(!wants_to_be_up(Some("on-failure")));
+        assert!(!wants_to_be_up(Some("on-failure:3")));
+        assert!(!wants_to_be_up(Some("no")));
+        assert!(!wants_to_be_up(None));
     }
 
     /// O unit tem de nomear o container nos DOIS lados e carregar a raiz de
