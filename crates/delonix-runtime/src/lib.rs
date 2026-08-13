@@ -1996,21 +1996,27 @@ fn apply_tmpfs(specs: &[String]) {
             Some((t, o)) => (t, o.to_string()),
             None => (spec.as_str(), "mode=1777".to_string()),
         };
-        // **Um `--tmpfs` que falha em silêncio produz o OPOSTO do que foi pedido.**
+        // **A `--tmpfs` that fails silently delivers the OPPOSITE of what was
+        // asked for.**
         //
-        // Os dois `let _ =` que aqui estavam engoliam o erro, e o container seguia
-        // a correr — com o caminho a ser um directório normal do rootfs. Quem monta
-        // um tmpfs quer, quase sempre, exactamente uma coisa: que aquilo NÃO toque
-        // no disco (scratch, dados sensíveis, um `/tmp` que se evapora). Degradar
-        // para disco sem uma palavra é a falha mais cara que este motor reconhece,
-        // porque o utilizador fica a acreditar na garantia que deixou de existir.
+        // The two `let _ =` that used to be here swallowed the error and the
+        // container carried on running — with the path being a plain directory on
+        // the rootfs. Someone mounting a tmpfs almost always wants exactly one
+        // thing: that it does NOT touch the disk (scratch, sensitive data, a
+        // `/tmp` that evaporates). Degrading to disk without a word is the most
+        // expensive failure this engine recognises, because the user is left
+        // believing a guarantee that stopped existing.
         //
-        // Fatal, e não um aviso, pela mesma razão que o `seccomp` e o `--device` já
-        // abortam aqui ao lado: nesta altura o container ainda não executou o
-        // processo do utilizador, portanto abortar não perde trabalho nenhum — e
-        // deixá-lo arrancar perde a propriedade que ele foi criado para ter.
+        // Fatal rather than a warning, for the same reason `seccomp` and
+        // `--device` already abort right next door: at this point the user's
+        // process has not executed yet, so aborting loses no work — and letting it
+        // start loses the property it was created to have.
         if let Err(e) = std::fs::create_dir_all(target) {
             eprintln!("delonix: --tmpfs {target}: cannot create the mount point: {e}; aborting");
+            // SAFETY: `_exit` is async-signal-safe and this is the container's
+            // init inside a `clone`d child — no `atexit` handlers to run, and no
+            // second flush of the inherited stdio. Same primitive the seccomp and
+            // `--device` aborts above use.
             unsafe { libc::_exit(126) };
         }
         if let Err(e) = mount(
@@ -2024,6 +2030,7 @@ fn apply_tmpfs(specs: &[String]) {
                 "delonix: --tmpfs {target}: {e}; aborting (without it the path would be a \
                  normal directory on disk, which is the opposite of what was asked)"
             );
+            // SAFETY: as above — async-signal-safe exit from the container's init.
             unsafe { libc::_exit(126) };
         }
     }
@@ -3599,36 +3606,38 @@ fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
     // here in the parent changed the base the child uses and broke that validated dance.
     let kind_node = c.labels.keys().any(|k| k.starts_with("io.x-k8s.kind"));
     if !kind_node && (is_rootless() || in_userns()) {
-        // **A cgroup2 pode estar TAPADA, e é o caminho normal que a tapa.**
+        // **The cgroup2 may be COVERED, and it is the normal path that covers it.**
         //
-        // O re-exec de `--net <rede-custom>`/`--pod` passa por `ip netns exec`, que
-        // monta um sysfs NOVO sobre `/sys` — medido: `mount -t sysfs sysfs /sys` num
-        // mount-ns próprio deixa `/sys/fs/cgroup` com ZERO entradas. Sem
-        // `cgroup.controllers` visível, o `try_delegated_base` falha no primeiro
-        // `metadata()` dos dois candidatos, o `create_dir_all` a seguir também falha,
-        // e o `setup_cgroup` devolve `Ok(())` com um aviso cujo texto é FALSO: diz
-        // «rootless WITHOUT cgroup delegation» quando a sessão TEM delegação — o que
-        // falta é a visibilidade, não a permissão.
+        // The `--net <custom>`/`--pod` re-exec goes through `ip netns exec`, which
+        // mounts a FRESH sysfs over `/sys` — measured: `mount -t sysfs sysfs /sys`
+        // in its own mount-ns leaves `/sys/fs/cgroup` with ZERO entries. Without a
+        // visible `cgroup.controllers`, `try_delegated_base` fails on the first
+        // `metadata()` of both candidates, the `create_dir_all` below fails too,
+        // and `setup_cgroup` returns `Ok(())` with a warning whose text is FALSE:
+        // it says «rootless WITHOUT cgroup delegation» when the session HAS
+        // delegation — what is missing is visibility, not permission.
         //
-        // O que isso produzia, e nenhuma das três pontas dá erro: o container ficava
-        // no cgroup do processo que o lançou. Logo `-m`/`--cpus`/`--pids-limit` NÃO
-        // aplicavam nada em tudo o que usa rede custom ou pod — ou seja, em tudo o que
-        // precisa de DNS interno, isolamento de namespace, `--expose` ou HTTPRoute. E
-        // não era só relato: o `live_cgroup` devolve esse mesmo cgroup e é usado para
-        // ESCREVER, portanto um `container pause` congelava a sessão do operador e um
-        // `container update --memory` punha-lhe um tecto à medida do container.
+        // What that produced, with none of the three ends erroring: the container
+        // stayed in the cgroup of the process that launched it. So
+        // `-m`/`--cpus`/`--pids-limit` enforced NOTHING on anything using a custom
+        // network or a pod — that is, on everything that needs internal DNS,
+        // namespace isolation, `--expose` or an HTTPRoute. And it was not just
+        // reporting: `live_cgroup` returns that same cgroup and is used to WRITE,
+        // so a `container pause` froze the operator's own session and a `container
+        // update --memory` capped it to the container's limit.
         //
-        // A correcção já estava escrita — `reveal_cgroup2_if_masked`, com este sintoma
-        // no próprio doc-comment — e nunca teve um chamador. Sétima ocorrência do
-        // padrão `mount_live`/`set_net_rate`/`update_limits`/`publish_port_allow`/
-        // `create_with_base`/`Container.nice`: a capacidade existe e o caminho não lá
-        // chega.
+        // The fix was already written — `reveal_cgroup2_if_masked`, with this very
+        // symptom in its doc-comment — and never had a caller. Seventh occurrence
+        // of the `mount_live`/`set_net_rate`/`update_limits`/`publish_port_allow`/
+        // `create_with_base`/`Container.nice` pattern: the capability exists and
+        // the path never reaches it.
         //
-        // Fica AQUI, e não no `-bin`, para qualquer chamador do motor a herdar (CRI
-        // incluído); e DENTRO do `!kind_node` para o caminho Kind ficar byte-a-byte
-        // igual — esse faz a sua própria revelação no FILHO (`setup_node_cgroup_ns`),
-        // numa dança já validada que não se toca. É best-effort e idempotente: com a
-        // cgroup2 já visível — o caso normal, sem re-exec — devolve sem fazer nada.
+        // It lives HERE, not in `-bin`, so every caller of the engine inherits it
+        // (CRI included); and INSIDE the `!kind_node` arm so the Kind path stays
+        // byte-for-byte the same — that one does its own reveal in the CHILD
+        // (`setup_node_cgroup_ns`), a validated dance not to be touched. It is
+        // best-effort and idempotent: with the cgroup2 already visible — the normal
+        // case, no re-exec — it returns without doing anything.
         reveal_cgroup2_if_masked();
         if let Some(base) = setup_cgroup_delegated(c, pid) {
             // The leaf's parent IS the base — that is where the aggregate
@@ -5636,45 +5645,46 @@ pub fn reconcile_status(c: &mut Container) -> bool {
     }
 }
 
-/// O que aconteceu de facto a um `update_limits` — e são TRÊS coisas, não duas.
+/// What actually happened to an `update_limits` — and it is THREE things, not two.
 ///
-/// A versão anterior devolvia `Result<()>` e saía com `Ok(())` quando o cgroup não
-/// existia, o que fundia dois casos opostos numa só resposta. O chamador imprimia
-/// «resource limits updated» para ambos e persistia o valor no registo, portanto o
-/// registo passava a discordar do kernel e o `describe` confirmava um limite que
-/// não existia.
+/// The previous version returned `Result<()>` and exited with `Ok(())` when the
+/// cgroup did not exist, merging two opposite cases into one answer. The caller
+/// printed «resource limits updated» for both and persisted the value, so the
+/// record started disagreeing with the kernel and `describe` confirmed a limit
+/// that did not exist.
 ///
-/// A distinção que faltava não é cosmética: um container PARADO sem cgroup está
-/// correcto — o limite vai ser aplicado no próximo `start`, que o reconstrói a
-/// partir do registo. Um container A CORRER sem cgroup é o oposto: a escrita não
-/// aconteceu, não vai acontecer, e o que o utilizador pediu não está em vigor.
+/// The missing distinction is not cosmetic: a STOPPED container without a cgroup
+/// is correct — the limit applies on the next `start`, which rebuilds the cgroup
+/// from the record. A RUNNING container without one is the opposite: the write did
+/// not happen, will not happen, and what the user asked for is not in force.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LimitUpdate {
-    /// Escrito no cgroup vivo: está em vigor agora, sem o PID mudar.
+    /// Written to the live cgroup: in force now, without the PID changing.
     Applied,
-    /// Container parado — só o registo muda, e o próximo `start` aplica-o.
+    /// Stopped container — only the record changes, and the next `start` applies it.
     ///
-    /// **Não é alcançável pelo `container update` da CLI**, que recusa antes de
-    /// chegar aqui («the hot update acts on the LIVE process»); medido, não
-    /// deduzido. Existe porque `update_limits` é API pública do motor e um
-    /// chamador directo pode estar nesta situação — e porque a alternativa era
-    /// devolver `NotEnforced` a um container parado, que diria «não está em vigor
-    /// e o remédio é do ambiente» quando o remédio é simplesmente arrancá-lo.
+    /// **Not reachable through the CLI's `container update`**, which refuses before
+    /// getting here («the hot update acts on the LIVE process»); measured, not
+    /// deduced. It exists because `update_limits` is public engine API and a direct
+    /// caller can be in this situation — and because the alternative was returning
+    /// `NotEnforced` for a stopped container, which would say «not in force, and the
+    /// remedy is environmental» when the remedy is simply to start it.
     Deferred,
-    /// **Container a correr e o cgroup dele NÃO EXISTE no caminho esperado.** O
-    /// pedido não está em vigor e não passa a estar sozinho.
+    /// **Running container whose cgroup DOES NOT EXIST at the expected path.** The
+    /// request is not in force and will not become so on its own.
     ///
-    /// **Medido, e não é o que parecia.** A hipótese óbvia — «rootless sem
-    /// delegação» — está ERRADA: numa sessão SSH sem delegação o container fica no
-    /// scope da própria sessão, que EXISTE, por isso a escrita é tentada e falha
-    /// alto com `Permission denied` (confirmado numa VM, `session-5.scope`,
-    /// root:root). Esse caminho já era honesto e continua a sê-lo.
+    /// **Measured, and not what it looked like.** The obvious hypothesis —
+    /// «rootless without delegation» — is WRONG: in an SSH session without
+    /// delegation the container lands in the session's own scope, which DOES exist,
+    /// so the write is attempted and fails loudly with `Permission denied`
+    /// (confirmed in a VM, `session-5.scope`, root:root). That path was already
+    /// honest and stays so.
     ///
-    /// O que chega aqui é o cgroup ter desaparecido entre a resolução do container
-    /// e a escrita — tipicamente um container a morrer, em que o `live_cgroup` já
-    /// não consegue ler `/proc/<pid>/cgroup` e cai na fórmula estática
-    /// `delonix.slice/delonix-<id>`, que em rootless não existe. Raro, e era
-    /// exactamente por ser raro que passava por «updated» sem ninguém reparar.
+    /// What reaches here is the cgroup having disappeared between resolving the
+    /// container and writing — typically a container in the act of dying, where
+    /// `live_cgroup` can no longer read `/proc/<pid>/cgroup` and falls back to the
+    /// static `delonix.slice/delonix-<id>`, which does not exist in rootless. Rare,
+    /// and it was precisely by being rare that it passed as «updated» unnoticed.
     NotEnforced,
 }
 
