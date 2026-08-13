@@ -577,24 +577,7 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfi
     let mut secret_ref: Option<String> = None;
 
     for (name, spec) in specs {
-        // Listeners: the declared ones, or the default (:80, and :443 tls if there
-        // is spec.tls).
-        let eps = if spec.entrypoints.is_empty() {
-            let mut d = vec![Entrypoint {
-                port: 80,
-                tls: false,
-            }];
-            if spec.tls.is_some() {
-                d.push(Entrypoint {
-                    port: 443,
-                    tls: true,
-                });
-            }
-            d
-        } else {
-            spec.entrypoints.clone()
-        };
-        for ep in eps {
+        for ep in effective_entrypoints(spec) {
             // Dedup by port; on collision, TLS wins (more restrictive/secure).
             match listeners.iter_mut().find(|l| l.port == ep.port) {
                 Some(l) => l.tls = l.tls || ep.tls,
@@ -705,11 +688,36 @@ fn spec_of_either(doc: &ManifestDoc) -> Result<HttpRouteSpec> {
     }
 }
 
+/// The listeners a spec ACTUALLY asks for: the declared ones, or the defaults
+/// (`:80`, plus `:443` with TLS when `spec.tls` is set).
+///
+/// **One owner for this rule, because two had it and they disagreed.**
+/// `resolve_config` applied the defaults; `desired()` read `spec.entrypoints`
+/// raw. A manifest that omits `entrypoints` — the common case — therefore
+/// produced `desired="" ` against `actual="80"`, which is drift on EVERY plan of
+/// a file nobody touched, and a plan that always reports drift is worth less
+/// than no plan.
+fn effective_entrypoints(spec: &HttpRouteSpec) -> Vec<Entrypoint> {
+    if !spec.entrypoints.is_empty() {
+        return spec.entrypoints.clone();
+    }
+    let mut d = vec![Entrypoint {
+        port: 80,
+        tls: false,
+    }];
+    if spec.tls.is_some() {
+        d.push(Entrypoint {
+            port: 443,
+            tls: true,
+        });
+    }
+    d
+}
+
 pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     let spec: HttpRouteSpec = spec_of_either(doc)?;
     let mut f = std::collections::BTreeMap::new();
-    let mut eps: Vec<String> = spec
-        .entrypoints
+    let mut eps: Vec<String> = effective_entrypoints(&spec)
         .iter()
         .map(|e| format!("{}{}", e.port, if e.tls { "/tls" } else { "" }))
         .collect();
@@ -810,9 +818,57 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
 
 /// Converges: re-apply every HTTPRoute document. The config is COLLECTIVE, so
 /// there is no per-document apply to call — recomposing the whole thing is what
-/// `apply` already does, and it SIGHUPs the live proxy rather than restarting it.
+/// `apply` already does.
+///
+/// **`rules` reload hot; `entrypoints` and `tls` need the proxy restarted**, and
+/// this is where that stopped being a warning and became the work. A live proxy
+/// only re-reads ROUTES on SIGHUP: the listener sockets are bound and the TLS
+/// material is loaded once, at startup. So a plan that showed a listener change
+/// as `~` used to print «has NO hot effect» from the executor and leave the old
+/// port serving — the plan promising what the apply did not do.
+///
+/// Restarting is a real cost and it is stated rather than hidden: in-flight
+/// connections to the proxy are cut. It is also the only honest option, because
+/// the alternative (leaving them cold) needs a per-document teardown that a
+/// COLLECTIVE config cannot express — removing one document's listener would
+/// mean tearing down the config every other document shares.
 pub(crate) fn converge_all(docs: &[ManifestDoc]) -> Result<()> {
+    let listener_change = pending_listener_change(docs).unwrap_or(false);
+    if listener_change {
+        println!(
+            "{}",
+            super::po::t(
+                "httproute: the listeners or TLS changed — restarting the proxy (in-flight \
+                 connections are cut; routes alone would have reloaded without one)"
+            )
+        );
+        // NOT `stop()`: that is a teardown and deletes `auto.json` too, which
+        // would take down every `--expose` route on the node to rebind one
+        // document's port.
+        ingress_proxy::stop_keeping_sources()?;
+    }
     apply(docs)
+}
+
+/// Would this apply change the LISTENER surface (ports or TLS) of the running
+/// proxy?
+///
+/// Compared against the config the proxy is actually serving, not against the
+/// manifest's previous revision: the question is whether the live sockets match
+/// what is being asked for, and only the live config answers it. `None` when
+/// there is nothing running to compare with — then the normal start-up path
+/// binds whatever the config says and there is nothing to restart.
+fn pending_listener_change(docs: &[ManifestDoc]) -> Option<bool> {
+    let specs = parse_and_validate(docs).ok()?;
+    let wanted = resolve_config(&specs).ok()??;
+    let live = ingress_proxy::live_config()?;
+    let ports = |c: &ingress_proxy::ProxyConfig| {
+        c.listeners
+            .iter()
+            .map(|l| (l.port, l.tls))
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    Some(ports(&wanted) != ports(&live) || wanted.tls.is_some() != live.tls.is_some())
 }
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
@@ -970,6 +1026,67 @@ rules:
         let hr: HttpRouteSpec = serde_yaml::from_value(spec).unwrap();
         validate_spec("t", &hr)?;
         Ok(hr)
+    }
+
+    /// **Deriva ETERNA, e no caso mais comum que existe.**
+    ///
+    /// O `resolve_config` aplica os defaults (`:80`, mais `:443` se houver
+    /// `tls`) quando o manifesto não declara `entrypoints`; o `desired()` lia
+    /// `spec.entrypoints` em CRU. Um ficheiro sem `entrypoints` — o que
+    /// praticamente toda a gente escreve — dava `desired=""` contra
+    /// `actual="80"`, ou seja uma diferença em TODOS os planos de um manifesto
+    /// que ninguém tocou. E um plano que reporta deriva sempre vale menos que
+    /// plano nenhum.
+    ///
+    /// Uma regra, um dono: as duas metades chamam a mesma função.
+    #[test]
+    fn os_entrypoints_por_omissao_sao_os_mesmos_nos_dois_lados() {
+        let sem =
+            parse("rules:\n  - paths:\n      - backend: { service: web, port: 80 }\n").unwrap();
+        let eps = super::effective_entrypoints(&sem);
+        assert_eq!(eps.len(), 1, "{eps:?}");
+        assert_eq!((eps[0].port, eps[0].tls), (80, false));
+
+        // Com TLS declarado, o default ganha o :443 — e o desired tem de o ver
+        // também, senão ligar TLS parece mudar um listener que ninguém escreveu.
+        let com_tls = parse(
+            "tls: { mode: selfSigned }\nrules:\n  - paths:\n      - backend: { service: web, port: 80 }\n",
+        )
+        .unwrap();
+        let eps = super::effective_entrypoints(&com_tls);
+        assert_eq!(eps.len(), 2, "{eps:?}");
+        assert!(eps.iter().any(|e| e.port == 443 && e.tls));
+
+        // Declarado explicitamente, manda o que está escrito — sem defaults por
+        // cima.
+        let expl = parse(
+            "entrypoints: [{ port: 8443, tls: true }]\ntls: { mode: selfSigned }\nrules:\n  - paths:\n      - backend: { service: web, port: 80 }\n",
+        )
+        .unwrap();
+        let eps = super::effective_entrypoints(&expl);
+        assert_eq!(eps.len(), 1);
+        assert_eq!((eps[0].port, eps[0].tls), (8443, true));
+    }
+
+    /// O `hot_fields` é uma promessa, e para este Kind estava VAZIA enquanto o
+    /// `RECONCILED_HTTPROUTE_FIELDS` prometia que tudo converge a quente.
+    ///
+    /// Com a tabela vazia, todo o diff era frio → `Replace` → recusado sem
+    /// `--replace` → e com ele o `destroy_one` erra, porque uma config COLECTIVA
+    /// não tem teardown por documento. O braço do `converge_all` era
+    /// inalcançável. Este teste fixa as duas metades juntas.
+    #[test]
+    fn todos_os_campos_comparados_do_httproute_convergem_a_quente() {
+        for kind in ["HTTPRoute", "Ingress"] {
+            let hot = crate::cmd::reconcile::hot_fields_for(kind);
+            for f in super::RECONCILED_HTTPROUTE_FIELDS {
+                assert!(
+                    hot.contains(f),
+                    "{kind}: '{f}' é comparado mas não converge a quente — o plano \
+                     proporia um Replace que o `destroy_one` não sabe executar"
+                );
+            }
+        }
     }
 
     #[test]

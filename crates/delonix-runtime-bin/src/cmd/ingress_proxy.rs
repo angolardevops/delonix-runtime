@@ -602,6 +602,22 @@ pub(crate) fn read_manual_config() -> Option<ProxyConfig> {
     read_manual()
 }
 
+/// The config the RUNNING proxy is serving, or `None` if none is running.
+///
+/// Distinct from [`read_manual_config`] on purpose: that one is the manual
+/// SOURCE (what `kind: HTTPRoute` asked for), this is the composed result the
+/// proxy actually bound its sockets from. Only the second answers «do the live
+/// listeners match what is being asked for», which is what decides whether a
+/// converge can SIGHUP or has to restart.
+///
+/// Gated on the proxy being alive: a leftover `config.json` from a proxy that
+/// died would otherwise read as live listeners, and a converge would restart a
+/// proxy that does not exist to serve a port nobody is listening on.
+pub(crate) fn live_config() -> Option<ProxyConfig> {
+    running_pid()?;
+    serde_json::from_slice(&std::fs::read(config_path()).ok()?).ok()
+}
+
 fn read_manual() -> Option<ProxyConfig> {
     serde_json::from_slice(&std::fs::read(manual_path()).ok()?).ok()
 }
@@ -1040,6 +1056,35 @@ pub fn stop() -> Result<()> {
     // raise phantom routes again.
     let _ = std::fs::remove_file(manual_path());
     let _ = std::fs::remove_file(auto_path());
+    Ok(())
+}
+
+/// **Stops the proxy WITHOUT touching the sources**, so the next `rebuild`
+/// brings it back with the same routes on the new listeners.
+///
+/// Distinct from [`stop`] on purpose, and the difference is not cosmetic: `stop`
+/// is a teardown and deletes `manual.json` AND `auto.json`. Using it to rebind a
+/// port would silently take down every route auto-registered by a
+/// `container run --expose` — services that have nothing to do with the
+/// document being changed, and which only come back when each container is
+/// restarted.
+///
+/// Unpublishes the live ports here because the caller is about to bind a
+/// different set: leaving the old `hostfwd` in place would keep a port answering
+/// on the host with nothing behind it.
+pub(crate) fn stop_keeping_sources() -> Result<()> {
+    if let Some(cfg) = live_config() {
+        let sock = delonix_net::infra::slirp_sock_path();
+        for l in &cfg.listeners {
+            let _ = delonix_net::infra::slirp_remove_hostfwd(&sock, &l.port.to_string());
+        }
+    }
+    if let Some(pid) = running_pid() {
+        // SAFETY: SIGTERM to a pid confirmed alive and ours (cmdline guard).
+        unsafe { libc::kill(pid, libc::SIGTERM) };
+    }
+    let _ = std::fs::remove_file(pid_path());
+    let _ = std::fs::remove_file(config_path());
     Ok(())
 }
 
