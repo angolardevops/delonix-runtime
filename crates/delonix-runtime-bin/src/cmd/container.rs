@@ -6160,7 +6160,7 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
 
     // --- memory/CPU limits ---
     if o.memory.is_some() || o.cpus.is_some() {
-        runtime::update_limits(&c, o.memory.as_deref(), o.cpus.as_deref())?;
+        let aplicado = runtime::update_limits(&c, o.memory.as_deref(), o.cpus.as_deref())?;
         let (m, cp) = (o.memory.clone(), o.cpus.clone());
         store.update(&c.id, |cur| {
             if let Some(m) = &m {
@@ -6171,17 +6171,48 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
             }
             true
         })?;
-        println!(
-            "{}",
-            super::po::tf(
-                "{name}: resource limits updated (memory={memory}, cpus={cpus})",
-                &[
-                    ("name", &c.name),
-                    ("memory", o.memory.as_deref().unwrap_or("unchanged")),
-                    ("cpus", o.cpus.as_deref().unwrap_or("unchanged")),
-                ],
-            )
+        // **Os três casos dizem três coisas diferentes.** Antes diziam a mesma, e a
+        // pior delas: «updated» sobre um container a correr onde nada foi escrito,
+        // com o registo já persistido — logo o `describe` a seguir confirmava um
+        // limite que o kernel não conhece.
+        let (memory, cpus) = (
+            o.memory.as_deref().unwrap_or("unchanged"),
+            o.cpus.as_deref().unwrap_or("unchanged"),
         );
+        match aplicado {
+            runtime::LimitUpdate::Applied => println!(
+                "{}",
+                super::po::tf(
+                    "{name}: resource limits updated (memory={memory}, cpus={cpus})",
+                    &[("name", &c.name), ("memory", memory), ("cpus", cpus)],
+                )
+            ),
+            runtime::LimitUpdate::Deferred => println!(
+                "{}",
+                super::po::tf(
+                    "{name}: recorded (memory={memory}, cpus={cpus}) — the container is \
+                     stopped; they apply on the next `start`",
+                    &[("name", &c.name), ("memory", memory), ("cpus", cpus)],
+                )
+            ),
+            // Não é erro — o registo FOI actualizado e o próximo `start` aplica-o.
+            // Mas não se chama «updated» a isto. E a mensagem NÃO nomeia uma causa:
+            // a hipótese óbvia (falta de delegação) foi medida e está errada — sem
+            // delegação a escrita é tentada e falha com `Permission denied`, que já
+            // é honesto. Aqui o cgroup não existe de todo, tipicamente porque o
+            // container está a morrer. Afirmar «configura a delegação» mandaria o
+            // utilizador arranjar o que não está partido.
+            runtime::LimitUpdate::NotEnforced => eprintln!(
+                "{}",
+                super::po::tf(
+                    "{name}: recorded (memory={memory}, cpus={cpus}) but NOT enforced — \
+                     the container is running and its cgroup no longer exists, so there \
+                     was nowhere to write them. Check it is still healthy (`delonix \
+                     container ps -a`); the limits apply on the next `start`.",
+                    &[("name", &c.name), ("memory", memory), ("cpus", cpus)],
+                )
+            ),
+        }
     }
     Ok(())
 }
