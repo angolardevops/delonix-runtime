@@ -1080,8 +1080,21 @@ struct PodHostPath {
 }
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct PodEmptyDir {
+    // Nota interna (deliberadamente `//` e não `///`): um doc-comment aqui é
+    // publicado como `description` em `docs/schema/v1/delonix.json` e é o texto que
+    // o IDE de quem escreve o manifesto mostra. Superfície de utilizador, portanto
+    // — EN e sobre o COMPORTAMENTO, nunca sobre as entranhas. O gate
+    // `o_schema_publicado_esta_em_dia_com_o_codigo` apanhou-o na primeira versão,
+    // que tinha aqui uma nota em PT sobre `#[allow(dead_code)]`.
+    //
+    // O campo era `#[allow(dead_code)]` — é assim que um campo aceite-e-ignorado
+    // passa despercebido: o `warn_unknown_fields` deixa-o entrar por estar no
+    // schema, e ninguém o lê. Agora é lido em `pod_to_run_opts`, para avisar.
+    /// `""` (default) or `"Memory"`. This engine always backs an `emptyDir` with
+    /// tmpfs (host RAM); Kubernetes uses node disk unless `Memory` is set, so a
+    /// manifest that omits this gets a warning. Prefer a named volume for large
+    /// scratch space.
     #[serde(default)]
-    #[allow(dead_code)] // "" | "Memory" — delonix maps emptyDir to tmpfs either way
     medium: Option<String>,
 }
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
@@ -1275,7 +1288,41 @@ pub(crate) fn container_to_run_opts(
             volumes.push(format!("{}:{}{ro}", pvc.claim_name, m.mount_path));
         } else if let Some(src) = &vol.source {
             volumes.push(format!("{}:{}{ro}", src, m.mount_path));
-        } else if vol.empty_dir.is_some() {
+        } else if let Some(ed) = &vol.empty_dir {
+            // **Aqui um `emptyDir` é SEMPRE tmpfs, e no k8s não é.** Lá, `medium`
+            // ausente ou `""` significa disco do nó, e só `medium: Memory` é RAM.
+            // Um manifesto importado que use `emptyDir` como scratch de build ou de
+            // upload — vários GiB é vulgar — passa a consumir RAM do HOST, e o
+            // campo que exprime a diferença era `#[allow(dead_code)]`: aceite e
+            // deitado fora.
+            //
+            // Avisar em vez de mudar o comportamento, e a escolha é deliberada:
+            // passar a disco exigia um directório por container com ciclo de vida
+            // próprio (quando se apaga? no `rm`? no `stop`?), que é desenho a
+            // merecer a sua sessão — e mudá-lo por arrasto partiria quem hoje conta
+            // com a semântica actual. O que não pode ficar é o silêncio.
+            match ed.medium.as_deref() {
+                Some("Memory") => {}
+                Some("") | None => eprintln!(
+                    "{}",
+                    super::po::tf(
+                        "warning: volume '{vol}': emptyDir without `medium: Memory` is \
+                         node DISK in Kubernetes, but this engine always backs it with \
+                         tmpfs (host RAM, no `size=` — up to half the RAM). Declare \
+                         `medium: Memory` to say so explicitly, or use a named volume \
+                         for large scratch space.",
+                        &[("vol", &vol.name)],
+                    )
+                ),
+                Some(outro) => eprintln!(
+                    "{}",
+                    super::po::tf(
+                        "warning: volume '{vol}': unknown emptyDir medium '{medium}' \
+                         (Kubernetes defines \"\" and \"Memory\"); treated as tmpfs.",
+                        &[("vol", &vol.name), ("medium", outro)],
+                    )
+                ),
+            }
             tmpfs.push(m.mount_path.clone());
         } else {
             volumes.push(format!("{}:{}{ro}", vol.name, m.mount_path));
