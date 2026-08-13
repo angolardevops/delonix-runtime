@@ -827,6 +827,38 @@ fn apply_ssh(name: &str, spec: &ClusterSpec, wait_ready: bool) -> Result<()> {
     // `provision_and_apply`'s own progress block.
     let mut p = output::Progress::new();
 
+    // O plano ANTES do primeiro passo — a pergunta a que um spinner não responde
+    // é «quanto falta», e aqui cada passo demora minutos. Os títulos são os
+    // MESMOS que os `p.step` a seguir usam (mesma chave de tradução, mesma
+    // interpolação): duas listas a dizerem o mesmo por palavras diferentes
+    // seriam duas coisas para manter de acordo, e este repo já pagou isso com o
+    // `CONVERGING_KINDS`. Os passos condicionais entram só quando a condição que
+    // os cria é verdadeira, senão o plano prometia trabalho que ninguém vai
+    // fazer — pior do que não o anunciar.
+    let mut plano = vec![super::po::tf(
+        "Preparing {n} host(s)",
+        &[("n", &all_hosts.len().to_string())],
+    )];
+    if spec.etcd.mode == "external" {
+        plano.push(super::po::t("Bootstrapping the etcd cluster").to_string());
+    }
+    plano.push(super::po::t("Bootstrapping control-plane (kubeadm init)").to_string());
+    if spec.control_plane.hosts.len() > 1 {
+        plano.push(super::po::tf(
+            "Joining {n} more control-plane(s)",
+            &[("n", &(spec.control_plane.hosts.len() - 1).to_string())],
+        ));
+    }
+    if !spec.workers.hosts.is_empty() {
+        plano.push(super::po::tf(
+            "Joining {n} worker(s)",
+            &[("n", &spec.workers.hosts.len().to_string())],
+        ));
+    }
+    plano.push(super::po::t("Waiting for all nodes to be Ready").to_string());
+    plano.push(super::po::t("Fetching kubeconfig").to_string());
+    p.plan(&plano);
+
     p.step(
         &super::po::tf(
             "Preparing {n} host(s)",

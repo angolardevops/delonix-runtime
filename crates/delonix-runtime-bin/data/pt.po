@@ -3424,6 +3424,9 @@ msgstr ""
 "reconciliador compara só {compared}. Recria-o (`--replace Container/<nome>`) "
 "ou muda-o com `container update` onde esse campo é quente"
 
+msgid "Packaging the image"
+msgstr "A empacotar a imagem"
+
 msgid "{name}: resource limits updated (memory={memory}, cpus={cpus})"
 msgstr "{name}: limites de recursos actualizados (memory={memory}, cpus={cpus})"
 

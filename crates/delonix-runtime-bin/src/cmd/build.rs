@@ -374,6 +374,37 @@ fn clone_rootfs(images: &ImageStore, src_rootfs: &str, id: &str) -> Result<Strin
 /// so it can't be cleaned up via `runtime::remove`/a container list, only by
 /// its id. Every id — container-backed or not — is tracked here for exactly
 /// that reason.
+/// Título de uma instrução na linha de progresso — a instrução COMO ESTÁ ESCRITA
+/// no ficheiro, encurtada.
+///
+/// Reconstruir a linha em vez de a guardar é deliberado: o `Step` já perdeu a
+/// grafia original (um `ENV K V` e um `ENV K=V` chegam aqui iguais), e o que o
+/// leitor precisa é de reconhecer QUAL das suas instruções está a correr, não de
+/// uma citação fiel. Um `RUN` longo é cortado porque a linha tem de caber ao lado
+/// do tempo e do ícone; o corte é por CARACTERES e não por bytes — um `COPY` com
+/// acentos no caminho entraria em pânico a fatiar por índice de byte, que é a
+/// mesma armadilha que a auditoria já encontrou no resumo de respostas HTTP.
+fn step_title(step: &Step) -> Option<String> {
+    const MAX: usize = 60;
+    let raw = match step {
+        Step::Run(r) => format!("RUN {}", r.cmdline),
+        Step::Copy { src, dst, from } => match from {
+            Some(f) => format!("COPY --from={f} {src} {dst}"),
+            None => format!("COPY {src} {dst}"),
+        },
+        // `ENV`/`WORKDIR` não tocam no rootfs — mudam estado em memória e
+        // devolvem no mesmo instante. Um passo para elas seria um lampejo de
+        // cromagem sobre trabalho que ninguém esperou, o mesmo argumento que
+        // levou o `step_after` a existir.
+        Step::Env { .. } | Step::Workdir(_) => return None,
+    };
+    let mut out: String = raw.chars().take(MAX).collect();
+    if raw.chars().count() > MAX {
+        out.push('…');
+    }
+    Some(out)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_one_stage(
     store: &Store,
@@ -385,6 +416,7 @@ fn build_one_stage(
     use_cache: bool,
     secrets: &HashMap<String, PathBuf>,
     platform: Option<&str>,
+    p: &mut super::output::Progress,
 ) -> (Vec<String>, Result<StageResult>) {
     let mut all_ids: Vec<String> = Vec::new();
     let rootless = runtime::is_rootless();
@@ -412,6 +444,15 @@ fn build_one_stage(
 
     let result = (|| -> Result<()> {
         for step in steps {
+            // Um passo por instrução que TOCA no rootfs. Sem spinner e sem fold
+            // (`with_verbose(true)` no chamador), porque o `runtime::exec` de um
+            // `RUN` escreve directamente no stdout herdado: um spinner por baixo
+            // de um `apt-get` a despejar linhas ficaria pior do que não ter
+            // nenhum. O que se ganha é a estrutura — plano à cabeça, e cada
+            // instrução a fechar com o seu tempo.
+            if let Some(t) = step_title(step) {
+                p.step(&t, "");
+            }
             match step {
                 Step::Env { key, val } => {
                     let prefix = format!("{key}=");
@@ -516,6 +557,10 @@ fn build_one_stage(
                     chain_hash = new_hash;
                 }
             }
+            // Fecha o passo com ✓ e o tempo. Um `?` acima sai daqui sem passar
+            // por esta linha e o `Drop`/`step` seguinte fecha-o com ✗ — que é o
+            // que se quer: a instrução que rebentou fica marcada como tal.
+            p.ok();
         }
         Ok(())
     })();
@@ -761,6 +806,36 @@ pub fn build_from_spec(
     let mut stages: HashMap<String, StageResult> = HashMap::new();
     let mut all_ids: Vec<String> = Vec::new();
 
+    // **`with_verbose(true)` é a escolha central deste bloco, e não é preguiça.**
+    //
+    // O modo verboso do `Progress` desliga DUAS coisas: o spinner e o fold do
+    // output. As duas têm de ficar desligadas aqui, porque o `runtime::exec` de
+    // um `RUN` escreve directamente no stdout/stderr herdado — não passa pelo
+    // `capture_line`, ao contrário do `vmimage`, que é o único consumidor do fold
+    // hoje. Com spinner, um `apt-get` a despejar centenas de linhas escreveria
+    // por cima dele; com fold declarado mas sem ninguém a alimentá-lo, o output
+    // sairia na mesma e a promessa de o esconder seria falsa.
+    //
+    // O que sobra é exactamente o que se quer agora: o plano à cabeça e uma linha
+    // por instrução, com o tempo dela. Esconder a saída dos `RUN` como o GitHub
+    // Actions faz exige desviar o `runtime::exec` para o fold — trabalho no
+    // MOTOR, com vários outros chamadores a considerar, e não uma mudança de UI.
+    let mut p = super::output::Progress::new().with_verbose(true);
+    // O plano: um `○` por instrução que toca no rootfs, estágio a estágio, mais o
+    // empacotamento final. Os `ENV`/`WORKDIR` ficam de fora aqui pela mesma razão
+    // que não abrem passo — ver `step_title`.
+    let plano: Vec<String> = df
+        .stages
+        .iter()
+        .flat_map(|st| st.steps.iter())
+        .chain(df.steps.iter())
+        .filter_map(step_title)
+        .chain(std::iter::once(
+            super::po::t("Packaging the image").to_string(),
+        ))
+        .collect();
+    p.plan(&plano);
+
     let build_result: Result<Image> = (|| {
         for (idx, stage) in df.stages.iter().enumerate() {
             let (ids, result) = build_one_stage(
@@ -773,6 +848,7 @@ pub fn build_from_spec(
                 use_cache,
                 secrets,
                 platform,
+                &mut p,
             );
             // Track EVERY id this stage allocated for cleanup BEFORE
             // propagating a step failure — otherwise a `RUN`/`COPY` that fails
@@ -788,10 +864,14 @@ pub fn build_from_spec(
 
         let (ids, final_state) = build_one_stage(
             &store, &images, context, &df.from, &df.steps, &stages, use_cache, secrets, platform,
+            &mut p,
         );
         all_ids.extend(ids);
         let final_state = final_state?;
         let id = final_state.id.clone();
+        // O último `○` do plano: empacotar é o passo mais demorado de um build
+        // com um rootfs grande, e era o único trecho sem sinal nenhum.
+        p.step(super::po::t("Packaging the image"), "📦");
 
         if rootless {
             let cmd = if df.cmd.is_empty() {
@@ -848,6 +928,16 @@ pub fn build_from_spec(
             images.build_image(base_image, layer, &df, tag, arch)
         }
     })();
+    // Fecha o passo do empacotamento em função do RESULTADO. Sem isto o `Drop`
+    // fechava-o sempre com ✗ — apanhado no primeiro build de validação, num
+    // build que tinha corrido bem e imprimiu o id da imagem logo a seguir. Um
+    // indicador que diz «falhou» sobre trabalho bem-sucedido é exactamente o
+    // relato desonesto que esta série passou a semana a tirar do motor, e teria
+    // entrado pela porta da funcionalidade que existe para o mostrar.
+    match &build_result {
+        Ok(_) => p.ok(),
+        Err(_) => drop(&p), // o `Drop`/`close_line('✗')` marca-o como falhado
+    }
 
     // Best-effort cleanup of EVERY id allocated during the build (whether or
     // not it ever got a live container/Store record — see `build_one_stage`'s
@@ -1388,5 +1478,63 @@ mod tests {
         std::fs::write(dir.join("Dockerfile"), "FROM alpine\n").unwrap();
         assert_eq!(default_build_file(&dir), dir.join("Dockerfile"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod progresso_tests {
+    use super::*;
+
+    /// As instruções que TOCAM no rootfs abrem passo; as que só mudam estado em
+    /// memória não. Um passo por `ENV` seria um lampejo de cromagem sobre
+    /// trabalho instantâneo — o mesmo argumento que deu origem ao `step_after`.
+    #[test]
+    fn so_as_instrucoes_com_trabalho_abrem_passo() {
+        assert!(step_title(&Step::Env {
+            key: "A".into(),
+            val: "1".into()
+        })
+        .is_none());
+        assert!(step_title(&Step::Workdir("/app".into())).is_none());
+        assert_eq!(
+            step_title(&Step::Copy {
+                src: "a.txt".into(),
+                dst: "/app/".into(),
+                from: None
+            })
+            .as_deref(),
+            Some("COPY a.txt /app/")
+        );
+        assert_eq!(
+            step_title(&Step::Copy {
+                src: "bin".into(),
+                dst: "/usr/bin".into(),
+                from: Some("builder".into())
+            })
+            .as_deref(),
+            Some("COPY --from=builder bin /usr/bin")
+        );
+    }
+
+    /// **O corte é por CARACTERES, não por bytes.**
+    ///
+    /// Um `COPY` com acentos no caminho — `configuração/`, num repo português —
+    /// entraria em pânico a fatiar por índice de byte se este caiu no meio de um
+    /// carácter multi-byte. É a mesma armadilha que a auditoria de segurança
+    /// encontrou no resumo de respostas HTTP do cliente TrueNAS, e a razão de
+    /// este teste usar um título que só tem acentos.
+    #[test]
+    fn um_titulo_longo_com_acentos_corta_sem_entrar_em_panico() {
+        let longo = "ção".repeat(40); // 120 chars, 200 bytes
+        let t = step_title(&Step::Workdir(longo.clone()));
+        assert!(t.is_none(), "WORKDIR não abre passo");
+        let t = step_title(&Step::Copy {
+            src: longo.clone(),
+            dst: "/x".into(),
+            from: None,
+        })
+        .expect("COPY abre passo");
+        assert!(t.chars().count() <= 61, "cortado a 60 + reticências: {t}");
+        assert!(t.ends_with('…'), "o corte tem de se ver: {t}");
     }
 }
