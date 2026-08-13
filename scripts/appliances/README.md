@@ -72,6 +72,30 @@ to coexist in the store.
 the versions that do exist. There is no flag to skip verification — the moment
 there is one, it ends up in a script somewhere.
 
+### Where the media comes from
+
+All four Proxmox products download from `enterprise.proxmox.com/iso/`, which is
+what the vendor's own download pages link to — verified page by page, not
+assumed:
+
+| Product | Vendor page |
+|---|---|
+| Proxmox VE | <https://proxmox.com/en/downloads/proxmox-virtual-environment/iso> |
+| Proxmox Backup Server | <https://proxmox.com/en/downloads/proxmox-backup-server> |
+| Proxmox Mail Gateway | <https://proxmox.com/en/downloads/proxmox-mail-gateway> |
+| Proxmox Datacenter Manager | <https://proxmox.com/en/downloads/proxmox-datacenter-manager> |
+| OPNsense | the `MIRROR` in `build-opnsense.sh` (dotsrc by default) |
+| TrueNAS SCALE | `download.sys.truenas.net/TrueNAS-SCALE-<train>/<version>/` |
+
+`download.proxmox.com` is **not** where these ISOs live — it serves the apt
+repositories, and none of the four pages links to it. An earlier note in the CI
+workflow named it as the reason the ISOs could not be fetched here; the host was
+right and the conclusion was wrong.
+
+To check what is current before bumping a pinned version, open the page for that
+product — or just ask the build for a version that does not exist, which prints
+the list the vendor publishes.
+
 TrueNAS download paths carry the release train's codename (`Goldeye` for
 25.10.x), which is not derivable from the version number. Known trains are in
 `build-truenas.sh`; for a newer one, pass `TRUENAS_TRAIN=<Name>` rather than let
