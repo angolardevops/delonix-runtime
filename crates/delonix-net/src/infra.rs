@@ -1462,6 +1462,12 @@ fn handle_control(line: &str) -> String {
         // VXLAN uplink of an overlay network (the L2 shared between nodes). `dsts` = the
         // FDB destinations (`wg_ip` if encrypted, otherwise `node_ip`; `-` = no peers).
         ["vxlan", dev, vni, bridge, gateway, dsts] => do_vxlan(dev, vni, bridge, gateway, dsts),
+        // Dropping ONE peer, which the `vxlan` verb above cannot express: it
+        // seeds what is missing and never removes, so a shrinking peer list was
+        // silently a no-op. An OLD holder answers `err:` to both of these, and
+        // the caller reports that rather than pretending the peer is gone.
+        ["vxlan-peer-del", dev, dst] => do_vxlan_peer_del(dev, dst),
+        ["wg-peer-del", iface, key] => do_wg_peer_del(iface, key),
         _ => Err(Error::Invalid(format!("invalid control command: {line:?}"))),
     };
     match res {
@@ -2440,6 +2446,40 @@ fn do_vxlan(dev: &str, vni: &str, bridge: &str, gateway: &str, dsts_csv: &str) -
         }
     }
     Ok(())
+}
+
+/// Removes ONE peer's FDB entry from a VXLAN uplink (runs in the holder).
+///
+/// The inverse of the seeding `do_vxlan` does. Without it a node dropped from the
+/// manifest kept receiving this node's broadcast/unknown-unicast traffic, because
+/// the `00:00:00:00:00:00 dst <ip>` entry is what makes the VXLAN flood to it.
+///
+/// **Reads the FDB first, with the same EXACT token match** the seeding uses, and
+/// for the same reason: `contains` would let `10.0.0.5` match a listed
+/// `10.0.0.50`. Here that trap cuts the other way and is worse — a substring hit
+/// would delete a peer that was never asked for.
+///
+/// Absent is `Ok`: the caller re-runs this on every converge, and a peer already
+/// gone is the normal state, not a failure.
+fn do_vxlan_peer_del(dev: &str, dst: &str) -> Result<()> {
+    let dev = sanitize(dev);
+    if !valid_fdb_dst(dst) {
+        return Err(Error::Invalid(format!("invalid FDB dst: '{dst}'")));
+    }
+    let have = crate::capture("bridge", &["fdb", "show", "dev", &dev]).unwrap_or_default();
+    if !have.lines().any(|l| l.split_whitespace().any(|t| t == dst)) {
+        return Ok(());
+    }
+    run(
+        "bridge",
+        &["fdb", "del", "00:00:00:00:00:00", "dev", &dev, "dst", dst],
+    )
+}
+
+/// Removes a WireGuard peer from an interface (runs in the holder, where the
+/// interface lives).
+fn do_wg_peer_del(iface: &str, key: &str) -> Result<()> {
+    crate::wg::remove_peer(&sanitize(iface), key)
 }
 
 /// Removes a private network's bridge from the infra netns (on `network rm`).
@@ -4279,6 +4319,37 @@ pub fn set_vxlan(dev: &str, vni: u32, bridge: &str, gateway: &str, dsts: &[Strin
         dsts.join(",")
     };
     control_send(&format!("vxlan {dev} {vni} {bridge} {gateway} {csv}"))
+}
+
+/// **Drops one peer's FDB entry** from an overlay's VXLAN uplink.
+///
+/// [`set_vxlan`] only ever SEEDS — it adds what is missing and never removes —
+/// so a peer taken out of the manifest stayed in the FDB and kept receiving this
+/// node's flooded traffic. This is the missing half.
+///
+/// Validated at the boundary, before the `format!`, for the reason `set_vxlan`
+/// states above: this is where a value with a space would malform the line.
+pub fn del_vxlan_peer(dev: &str, dst: &str) -> Result<()> {
+    if !valid_fdb_dst(dst) {
+        return Err(Error::Invalid(format!(
+            "invalid overlay peer destination: {dst:?} (IPs only)"
+        )));
+    }
+    control_send(&format!("vxlan-peer-del {dev} {dst}"))
+}
+
+/// **Drops a WireGuard peer** from the encrypted overlay's interface.
+///
+/// Without this, a node removed from the mesh keeps a working crypto channel to
+/// this one — the FDB entry is what stops the traffic, the peer is what stops
+/// the tunnel, and only removing both actually retires a node.
+pub fn del_wg_peer(iface: &str, public_key: &str) -> Result<()> {
+    if !crate::wg::valid_wg_key(public_key) {
+        return Err(Error::Invalid(format!(
+            "not a WireGuard public key: {public_key:?}"
+        )));
+    }
+    control_send(&format!("wg-peer-del {iface} {public_key}"))
 }
 
 /// Removes a container's firewall from the ingress (best-effort).

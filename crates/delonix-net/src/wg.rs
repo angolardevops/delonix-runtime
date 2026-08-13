@@ -197,6 +197,36 @@ pub fn set_peer(name: &str, p: &Peer) -> Result<()> {
     )
 }
 
+/// **Removes a peer** from an interface (`wg set <if> peer <pub> remove`).
+///
+/// The inverse of [`set_peer`], and the half that was missing where it matters
+/// most: a node dropped from an encrypted overlay kept its tunnel UP. Taking it
+/// out of the FDB stops the VXLAN traffic; leaving the WireGuard peer configured
+/// leaves a machine that is no longer in the mesh still able to establish the
+/// crypto channel.
+pub fn remove_peer(name: &str, public: &str) -> Result<()> {
+    if !valid_wg_key(public) {
+        return Err(Error::Invalid(format!(
+            "not a WireGuard public key: '{public}'"
+        )));
+    }
+    run("wg", &["set", name, "peer", public, "remove"])
+}
+
+/// A base64 WireGuard key: 43 chars of alphabet plus the `=` pad.
+///
+/// Validated BEFORE the value reaches an argv, not only on the far side — the
+/// same discipline as `valid_fdb_dst` and the `valid_*` family the security
+/// audit left behind. Without it a peer string starting with `-` is read by `wg`
+/// as an option.
+pub fn valid_wg_key(s: &str) -> bool {
+    s.len() == 44
+        && s.ends_with('=')
+        && s[..43]
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/')
+}
+
 /// Is WireGuard available on this host? (`wg`/`ip` + kernel module).
 pub fn available() -> bool {
     Command::new("wg")
@@ -223,5 +253,33 @@ mod tests {
         // the public key derives DETERMINISTICALLY from the private one (Curve25519).
         assert_eq!(pubkey(&k.private).unwrap(), k.public);
         assert_ne!(k.private, k.public);
+        // A chave REAL tem de passar o validador — senão o `remove_peer` recusaria
+        // exactamente as chaves que existem.
+        assert!(valid_wg_key(&k.public), "{}", k.public);
+    }
+
+    /// A chave vai para o argv do `wg` e vem de um manifesto. Validar ANTES do
+    /// `format!` é a disciplina `valid_*` que a auditoria deixou: sem ela, um
+    /// valor começado por `-` é lido pelo `wg` como uma opção.
+    #[test]
+    fn valid_wg_key_recusa_flags_espacos_e_comprimentos_errados() {
+        // 44 chars, alfabeto base64, termina em '=' — a forma real.
+        assert!(valid_wg_key("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ="));
+        assert!(valid_wg_key("aB3+/aB3+/aB3+/aB3+/aB3+/aB3+/aB3+/aB3+/aB3="));
+        // O que isto existe para travar.
+        assert!(!valid_wg_key("-remove"));
+        assert!(!valid_wg_key("--endpoint=1.2.3.4:51820"));
+        assert!(!valid_wg_key(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN OP="
+        ));
+        assert!(!valid_wg_key(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLM\nOPQ="
+        ));
+        // Comprimento e pad.
+        assert!(!valid_wg_key(""));
+        assert!(!valid_wg_key("abc="));
+        assert!(!valid_wg_key(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQR"
+        ));
     }
 }
