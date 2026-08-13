@@ -172,13 +172,54 @@ fn wants_to_be_up(policy: Option<&str>) -> bool {
 /// The unit text for one container. **Pure, so it is testable** — the same
 /// reason `etcd::build_etcd_unit` is pure. This generator had no test at all,
 /// and it is the artefact that decides whether a host comes back up.
-fn container_unit(name: &str, rp: &str, root: &str, exe: &str, wanted_by: &str) -> String {
+fn container_unit(
+    name: &str,
+    rp: &str,
+    root: &str,
+    exe: &str,
+    wanted_by: &str,
+    anchor: Option<&str>,
+) -> String {
+    // Members of a POD are ordered behind the first one, and that is not
+    // tidiness: they SHARE a network namespace, and whoever starts first is who
+    // recreates it (`cmd_start` re-enters it if the holder still serves it, and
+    // rebuilds it with the member's namespace if not). N units released in
+    // parallel by systemd race to be that one. Ordering them behind a single
+    // anchor makes the answer deterministic.
+    //
+    // `After=` alone, deliberately: `Requires=` would take the whole pod down
+    // with the anchor, and a member that stops is not a reason to stop its peers
+    // — the engine treats them as separate workloads everywhere else too.
+    let ordering = anchor.map(|a| format!("After={a}\n")).unwrap_or_default();
     format!(
-        "[Unit]\nDescription=Delonix container {name}\nAfter=network-online.target\nWants=network-online.target\n\n\
+        "[Unit]\nDescription=Delonix container {name}\nAfter=network-online.target\nWants=network-online.target\n{ordering}\n\
          [Service]\nType=forking\nRestart={rp}\nTimeoutStopSec=15\nEnvironment=DELONIX_INTERNAL=1\nEnvironment=DELONIX_ROOT={root}\n\
          ExecStart={exe} container start {name}\nExecStop={exe} container stop {name}\n\n\
          [Install]\nWantedBy={wanted_by}\n",
     )
+}
+
+/// The unit each pod's members must start after: the pod's FIRST container by
+/// name, which is stable (`<pod>-c0`, `-c1`, …) and is the one that holds the
+/// shared namespaces.
+fn pod_anchors(
+    containers: &[delonix_runtime_core::Container],
+) -> std::collections::BTreeMap<String, String> {
+    let mut first: std::collections::BTreeMap<String, String> = Default::default();
+    for c in containers {
+        let Some(pod) = c.labels.get(super::pod::POD_LABEL) else {
+            continue;
+        };
+        first
+            .entry(pod.clone())
+            .and_modify(|cur| {
+                if c.name < *cur {
+                    *cur = c.name.clone();
+                }
+            })
+            .or_insert_with(|| c.name.clone());
+    }
+    first
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -194,10 +235,12 @@ fn enable(
     sysctl: &dyn Fn(&[&str]) -> bool,
 ) -> Result<()> {
     std::fs::create_dir_all(unit_dir)?;
+    let all = store.list()?;
+    let anchors = pod_anchors(&all);
     let mut installed: Vec<String> = Vec::new();
     // One unit per container that SHOULD be up — not merely per container that
     // happens to be up right now.
-    for c in store.list()? {
+    for c in &all {
         let alive = c.pid.map(runtime::is_alive).unwrap_or(false);
         if !alive && !wants_to_be_up(c.restart_policy.as_deref()) {
             continue;
@@ -212,7 +255,14 @@ fn enable(
             Some(explicit) => explicit.to_string(),
             None => c.restart_policy.as_deref().unwrap_or("always").to_string(),
         };
-        let unit = container_unit(&c.name, &rp, root, exe, wanted_by);
+        // A âncora do próprio pod nunca depende de si mesma.
+        let anchor = c
+            .labels
+            .get(super::pod::POD_LABEL)
+            .and_then(|p| anchors.get(p))
+            .filter(|first| **first != c.name)
+            .map(|first| format!("{UNIT_PREFIX}{first}.service"));
+        let unit = container_unit(&c.name, &rp, root, exe, wanted_by, anchor.as_deref());
         let unit_name = format!("{UNIT_PREFIX}{}.service", c.name);
         std::fs::write(unit_dir.join(&unit_name), unit)?;
         installed.push(unit_name);
@@ -303,7 +353,14 @@ mod tests {
     /// era o único que ela não sabia exprimir.
     #[test]
     fn a_politica_pedida_e_a_que_fica_no_unit() {
-        let u = container_unit("web", "no", "/r", "/usr/bin/delonix", "default.target");
+        let u = container_unit(
+            "web",
+            "no",
+            "/r",
+            "/usr/bin/delonix",
+            "default.target",
+            None,
+        );
         assert!(u.contains("Restart=no\n"), "{u}");
         assert!(!u.contains("Restart=always"));
     }
@@ -328,6 +385,63 @@ mod tests {
         assert!(!wants_to_be_up(None));
     }
 
+    /// **Os membros de um pod PARTILHAM a netns**, e quem arranca primeiro é
+    /// quem a recria. N units libertados em paralelo pelo systemd correm para
+    /// ser esse — uma corrida que nenhum deles sabe que está a disputar.
+    ///
+    /// A âncora é o primeiro membro por nome (`<pod>-c0`), que é estável, e os
+    /// restantes ficam atrás dele com `After=`. `Requires=` seria errado: levaria
+    /// o pod inteiro abaixo com a âncora, e um membro parado não é razão para
+    /// parar os pares.
+    #[test]
+    fn os_membros_de_um_pod_arrancam_atras_do_primeiro() {
+        let c = |nome: &str, pod: Option<&str>| {
+            let mut c = delonix_runtime_core::Container::new(
+                nome.into(),
+                nome.into(),
+                "alpine".into(),
+                vec!["sleep".into()],
+                "64M".into(),
+            );
+            if let Some(p) = pod {
+                c.labels
+                    .insert(super::super::pod::POD_LABEL.into(), p.into());
+            }
+            c
+        };
+        let all = vec![
+            c("pa-c1", Some("pa")),
+            c("pa-c0", Some("pa")),
+            c("solto", None),
+        ];
+        let a = pod_anchors(&all);
+        // A âncora é o PRIMEIRO por nome, mesmo tendo aparecido em segundo.
+        assert_eq!(a.get("pa").unwrap(), "pa-c0");
+        // Um container sem pod não entra.
+        assert!(!a.contains_key("solto"));
+
+        // O unit do membro seguinte espera pela âncora...
+        let u = container_unit(
+            "pa-c1",
+            "always",
+            "/r",
+            "/b",
+            "default.target",
+            Some("delonix-boot-pa-c0.service"),
+        );
+        assert!(u.contains("After=delonix-boot-pa-c0.service\n"), "{u}");
+        // ...e nunca se declara `Requires`, que derrubaria o pod todo.
+        assert!(!u.contains("Requires="), "{u}");
+        // A própria âncora não depende de si mesma.
+        let anchor_unit = container_unit("pa-c0", "always", "/r", "/b", "default.target", None);
+        assert!(
+            !anchor_unit.contains("After=delonix-boot-"),
+            "{anchor_unit}"
+        );
+        // E um container fora de um pod continua sem ordenação nenhuma.
+        assert!(!anchor_unit.contains("delonix-boot-"), "{anchor_unit}");
+    }
+
     /// O unit tem de nomear o container nos DOIS lados e carregar a raiz de
     /// estado — sem `DELONIX_ROOT`, a unidade arranca contra um store diferente
     /// daquele onde o container existe, e falha por «no such container».
@@ -339,6 +453,7 @@ mod tests {
             "/var/lib/delonix",
             "/usr/bin/delonix",
             "default.target",
+            None,
         );
         assert!(
             u.contains("ExecStart=/usr/bin/delonix container start web\n"),
