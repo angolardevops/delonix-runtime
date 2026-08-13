@@ -1996,14 +1996,36 @@ fn apply_tmpfs(specs: &[String]) {
             Some((t, o)) => (t, o.to_string()),
             None => (spec.as_str(), "mode=1777".to_string()),
         };
-        let _ = std::fs::create_dir_all(target);
-        let _ = mount(
+        // **Um `--tmpfs` que falha em silêncio produz o OPOSTO do que foi pedido.**
+        //
+        // Os dois `let _ =` que aqui estavam engoliam o erro, e o container seguia
+        // a correr — com o caminho a ser um directório normal do rootfs. Quem monta
+        // um tmpfs quer, quase sempre, exactamente uma coisa: que aquilo NÃO toque
+        // no disco (scratch, dados sensíveis, um `/tmp` que se evapora). Degradar
+        // para disco sem uma palavra é a falha mais cara que este motor reconhece,
+        // porque o utilizador fica a acreditar na garantia que deixou de existir.
+        //
+        // Fatal, e não um aviso, pela mesma razão que o `seccomp` e o `--device` já
+        // abortam aqui ao lado: nesta altura o container ainda não executou o
+        // processo do utilizador, portanto abortar não perde trabalho nenhum — e
+        // deixá-lo arrancar perde a propriedade que ele foi criado para ter.
+        if let Err(e) = std::fs::create_dir_all(target) {
+            eprintln!("delonix: --tmpfs {target}: cannot create the mount point: {e}; aborting");
+            unsafe { libc::_exit(126) };
+        }
+        if let Err(e) = mount(
             Some("tmpfs"),
             target,
             Some("tmpfs"),
             MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
             Some(opts.as_str()),
-        );
+        ) {
+            eprintln!(
+                "delonix: --tmpfs {target}: {e}; aborting (without it the path would be a \
+                 normal directory on disk, which is the opposite of what was asked)"
+            );
+            unsafe { libc::_exit(126) };
+        }
     }
 }
 

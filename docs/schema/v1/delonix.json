@@ -1372,6 +1372,7 @@
       "properties": {
         "medium": {
           "default": null,
+          "description": "`\"\"` (default) or `\"Memory\"`. This engine always backs an `emptyDir` with\ntmpfs (host RAM); Kubernetes uses node disk unless `Memory` is set, so a\nmanifest that omits this gets a warning. Prefer a named volume for large\nscratch space.",
           "type": [
             "string",
             "null"
