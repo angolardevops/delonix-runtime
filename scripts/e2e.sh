@@ -188,6 +188,93 @@ check "snapshot já existente diz 5 (conflito)" 5 "$BIN" volumes snapshot create
 check "snapshot rm" ok "$BIN" volumes snapshot rm "$VOL" s1
 
 ########################################
+section "share volumes (kind: Volume com bloco share:)"
+########################################
+# O grupo `sharevolume` tinha ZERO checks — o balde dos «comandos nunca
+# executados» a pagar-se outra vez, e logo no caminho que acabou de mudar de
+# forma: um share deixou de ser `kind: ShareVolume` e passou a ser um
+# `kind: Volume` com bloco `share:`, com o registo antigo absorvido pelo volume.
+#
+# O que prova a fusão é o CICLO, não um comando isolado: cada passo devolve 0
+# sozinho mesmo com a posse partida. As asserções que valem são três — o plano
+# tratar dois shares homónimos como recursos DISTINTOS, o `destroy` alcançá-los
+# (o que era impossível quando um share não era possuível), e os dados do
+# inquilino continuarem no disco depois disso.
+SHWORK="$OUT/share-$PFX"; mkdir -p "$SHWORK"
+SHPAI="shpai-$PFX"
+check "volume pai para os shares" ok "$BIN" volumes create "$SHPAI"
+cat >"$SHWORK/shares.yaml" <<YAML
+apiVersion: delonix.io/v1
+kind: ShareVolume
+metadata:
+  name: sh-$PFX
+  namespace: shteam-a
+spec:
+  storageRef: $SHPAI
+  quota: 5G
+  alertPct: 80
+---
+apiVersion: delonix.io/v1
+kind: Volume
+metadata:
+  name: sh-$PFX
+  namespace: shteam-b
+spec:
+  share:
+    from: $SHPAI
+  quota: 2G
+YAML
+# As duas grafias no MESMO ficheiro, de propósito: a antiga tem de continuar a
+# carregar (reescrita, com aviso) e a produzir exactamente o que a nova produz.
+check "apply das duas grafias (antiga + nova)" ok \
+  "$BIN" volumes apply -f "$SHWORK/shares.yaml"
+check "o aviso de depreciação sai, e nomeia a forma nova" ok \
+  bash -c "'$BIN' volumes apply -f '$SHWORK/shares.yaml' 2>&1 | grep -q 'share: {from'"
+check "sharevolume ls mostra os dois" ok \
+  bash -c "test \$('$BIN' sharevolume ls | grep -c 'sh-$PFX') -eq 2"
+# Dois inquilinos com o MESMO nome de share: o reconciliador identifica por
+# (kind, nome), por isso sem qualificar a namespace os dois seriam UM recurso —
+# um apareceria como deriva do outro em todos os planos, e um `--replace` levava
+# ambos. O nome no plano é `<ns>/<nome>`.
+check "o plano distingue os dois shares homónimos" ok \
+  bash -c "'$BIN' stack plan -f '$SHWORK/shares.yaml' | grep -q 'Volume/shteam-a/sh-$PFX' && '$BIN' stack plan -f '$SHWORK/shares.yaml' | grep -q 'Volume/shteam-b/sh-$PFX'"
+check "stack apply adopta e carimba a posse" ok \
+  "$BIN" stack apply -f "$SHWORK/shares.yaml"
+# O que a fusão existe para dar: um share possuível. Sem isto o plano proporia
+# `Adopt` para sempre — deriva eterna, e o `--prune`/`destroy` nunca lhe chegava.
+check "manifesto inalterado propõe ZERO alterações" ok \
+  "$BIN" stack plan -f "$SHWORK/shares.yaml" --detailed-exitcode
+# Um ficheiro do inquilino, para o destroy ter alguma coisa que possa destruir
+# por engano.
+SHDATA="$("$BIN" sharevolume describe "sh-$PFX" -n shteam-a | awk '/Mountpoint/{print $2}')"
+[[ -n "$SHDATA" ]] && echo "dados-do-inquilino" >"$SHDATA/ficheiro.txt"
+check "o describe do share resolveu um mountpoint" ok test -n "$SHDATA"
+check "stack destroy alcança os dois shares" ok \
+  "$BIN" stack destroy -f "$SHWORK/shares.yaml"
+check "o destroy tirou-os do registo" ok \
+  bash -c "test \$('$BIN' sharevolume ls | grep -c 'sh-$PFX') -eq 0"
+# A garantia que o `remove_with` sempre deu (nunca toca num mountpoint externo)
+# e que ninguém tinha exercitado pelo caminho declarativo.
+check "os DADOS do inquilino sobreviveram ao destroy" ok test -f "$SHDATA/ficheiro.txt"
+# Um share não monta nada — declarar um mount ao lado é dois volumes num
+# documento, e honrar um deles em silêncio é a falha que isto recusa.
+cat >"$SHWORK/mau.yaml" <<YAML
+apiVersion: delonix.io/v1
+kind: Volume
+metadata:
+  name: shmau-$PFX
+spec:
+  share:
+    from: $SHPAI
+  nfs:
+    server: 10.0.0.1
+    share: /export
+YAML
+check "share + nfs no mesmo volume é recusado" fail \
+  "$BIN" volumes apply -f "$SHWORK/mau.yaml"
+"$BIN" volumes rm "$SHPAI" --force >/dev/null 2>&1
+
+########################################
 section "network: ciclo de vida"
 ########################################
 NET="net-$PFX"
@@ -413,6 +500,15 @@ check "volumes describe depois do destroy recusa" fail "$BIN" volumes describe "
 # Kinds declarativos devolvem `-`: QUALQUER manifesto com um deles esgotava o
 # `--timeout` inteiro e saía com erro sobre uma stack inteiramente a correr.
 # Estes documentos não criam recurso nenhum, por isso o gate é instantâneo.
+#
+# **O `NetworkRoute` NÃO pertence aqui, e estava.** Ele foi declarativo, e
+# deixou de o ser quando ganhou registo próprio (`infra::RouteDef`) — o
+# `presence` responde-lhe `yes`/`no` como a qualquer recurso com estado. Com
+# duas redes que este manifesto não cria, a rota está mesmo AUSENTE, o `wait`
+# espera-a até ao fim do `--timeout` e sai ≠0: o check falhava por o motor estar
+# certo. Um teste que fixa o comportamento errado é a armadilha que este repo já
+# pagou (ver AGENTS.md, «um teste pode codificar o bug»), e o sintoma aqui era
+# indistinguível de uma regressão no `wait`.
 cat >"$WORK/declarativos.yaml" <<YAML
 apiVersion: delonix.io/v1
 kind: FirewallPolicy
@@ -426,12 +522,15 @@ spec:
       action: allow
 ---
 apiVersion: delonix.io/v1
-kind: NetworkRoute
+kind: HTTPRoute
 metadata:
   name: wrota-$PFX
 spec:
-  from: wneta-$PFX
-  to: wnetb-$PFX
+  rules:
+    - host: wait-$PFX.test
+      backends:
+        - service: walvo-$PFX
+          port: 80
 YAML
 # O `--timeout 5` é o que distingue: antes da correcção esperava-o por inteiro e
 # saía ≠0; agora responde de imediato.
