@@ -1101,25 +1101,25 @@ fn resolve_ports(ports: &[ComposePort], service: &str) -> Result<Vec<String>> {
                         "compose: service '{service}': malformed port '{s}'"
                     )));
                 }
-                // BUG FOUND (code review): a 3-part `host_ip:host_port:container_port`
-                // form (e.g. `127.0.0.1:9000:80`, a deliberate loopback-only bind)
-                // used to silently drop `parts[2]` (the IP) and fall through to the
-                // 2-part case — the engine's own `-p` flag already rejects a host-IP
-                // bind explicitly (`parse_publish` requires the host port to be
-                // digits-only, see docs/COMPARACAO-DOCKER-PODMAN.md 2b), so doing it
-                // silently here instead was a real gap: a compose file that restricts
-                // a port to loopback got translated into one with NO restriction at
-                // all. Reject explicitly instead, consistent with the CLI and with
-                // this module's own "never a silent no-op" rule.
-                if parts.len() == 3 {
-                    return Err(Error::Invalid(format!(
-                        "compose: service '{service}' port '{s}': binding to a specific host IP is not supported in v1 \
-                         (would silently drop the IP restriction) — use '{}:{}' to bind all interfaces, \
-                         or drop the port publish and reach the service by its internal DNS name instead",
-                        parts[1], parts[0]
-                    )));
-                }
-                out.push(format!("{}:{}", parts[1], parts[0]));
+                // `host_ip:host_port:container_port` (`127.0.0.1:9000:80`) passa
+                // VERBATIM para o motor, que o entende desde que o `parse_publish_addr`
+                // existe (`delonix-net`, forma `[hostIp:]hostPort:contPort[/proto]`).
+                //
+                // **Isto já foi um descarte silencioso e depois uma recusa, e as duas
+                // estavam erradas de maneiras opostas.** Primeiro a forma de 3 partes
+                // caía no caso de 2 e a restrição de IP desaparecia — um ficheiro que
+                // pede loopback-only publicava em TODAS as interfaces, o oposto exacto
+                // da intenção de segurança. A correcção foi recusar; melhor, mas ainda
+                // errado, porque a razão invocada («o `-p` exige host port só dígitos»)
+                // deixou de valer quando o CLI ganhou o parser de host-IP e foi validado
+                // ao vivo com `curl` da LAN a devolver 200. Ficou a recusar uma
+                // capacidade que a casa já tinha — no ficheiro que a maioria das pessoas
+                // traz do docker, e na forma mais comum de expor um serviço só ao host.
+                //
+                // Uma limitação documentada envelhece para mentira sem ninguém lhe tocar:
+                // é a terceira ocorrência nesta sessão, depois do `WorkingDir` da Docker
+                // API e do `--net host` com `-p` do comparativo.
+                out.push(s.clone());
             }
             ComposePort::Long {
                 target,
@@ -1132,11 +1132,12 @@ fn resolve_ports(ports: &[ComposePort], service: &str) -> Result<Vec<String>> {
                     // the short form's bare-port case above.
                     None => free_host_port()?.to_string(),
                 };
-                if host_s.contains('-') {
-                    return Err(Error::Invalid(format!(
-                        "compose: service '{service}': port ranges ('{host_s}') are not supported in v1"
-                    )));
-                }
+                // Ranges (`8000-8002:9000-9002`) também vão verbatim: o
+                // `expand_publish_range` existe, é público, e o `container run` e o
+                // `update --publish-add` já o chamam na sua fronteira — o compose era
+                // o único dos três a recusar o que os outros dois fazem. Larguras
+                // diferentes continuam a ser recusadas lá, com a contagem dos dois
+                // lados, em vez de truncadas em silêncio.
                 let proto = protocol.as_deref().unwrap_or("tcp");
                 let suffix = if proto == "udp" { "/udp" } else { "" };
                 out.push(format!("{host_s}:{}{suffix}", target.as_string()));
@@ -1940,14 +1941,48 @@ services:
         assert!(host2.parse::<u16>().is_ok());
     }
 
-    /// BUG FOUND (code review): `127.0.0.1:9000:80` used to silently drop the
-    /// IP and behave exactly like `9000:80` (bound on every interface) — the
-    /// opposite of what the compose file asked for. Must reject explicitly.
+    /// `127.0.0.1:9000:80` chega INTEIRO ao motor — nem descartado nem recusado.
+    ///
+    /// **Este teste já afirmou o contrário, e a lição é a razão de estar aqui
+    /// escrita.** Nasceu a fixar «tem de recusar», que foi a correcção certa para o
+    /// bug anterior (a forma de 3 partes caía na de 2 e a restrição de IP
+    /// desaparecia — um ficheiro a pedir loopback-only publicava em todas as
+    /// interfaces). Só que a razão da recusa era «o `-p` do motor exige host port
+    /// só dígitos», e isso deixou de valer quando o CLI ganhou o
+    /// `parse_publish_addr`. O teste sobreviveu à premissa e passou a defender uma
+    /// recusa sem motivo, na forma mais comum de expor um serviço só ao host.
+    ///
+    /// Quando uma correcção faz um teste antigo falhar, a primeira hipótese é que o
+    /// teste fixava o comportamento errado — regra já registada neste repo, e a
+    /// segunda vez que se paga.
     #[test]
-    fn resolve_ports_recusa_bind_a_ip_especifico_em_vez_de_o_descartar_em_silencio() {
+    fn resolve_ports_passa_o_bind_a_ip_especifico_intacto_ao_motor() {
         let ports = vec![ComposePort::Short("127.0.0.1:9000:80".to_string())];
-        let err = resolve_ports(&ports, "svc").unwrap_err().to_string();
-        assert!(err.contains("host IP"), "erro inesperado: {err}");
+        let out = resolve_ports(&ports, "svc").unwrap();
+        assert_eq!(
+            out,
+            vec!["127.0.0.1:9000:80".to_string()],
+            "o IP do host tem de sobreviver — é a restrição que o ficheiro pediu"
+        );
+        // E a forma de 2 partes continua exactamente como estava.
+        let simples = resolve_ports(&[ComposePort::Short("9000:80".into())], "svc").unwrap();
+        assert_eq!(simples, vec!["9000:80".to_string()]);
+    }
+
+    /// Um range vai inteiro para o motor, que o expande na sua fronteira
+    /// (`expand_publish_range`, o mesmo que o `container run` já usa). O compose
+    /// era o único dos três pontos de entrada a recusar o que os outros faziam.
+    #[test]
+    fn resolve_ports_passa_ranges_ao_motor_em_vez_de_os_recusar() {
+        let ports = vec![ComposePort::Long {
+            target: StringOrNum::Str("9000-9002".into()),
+            published: Some(StringOrNum::Str("8000-8002".into())),
+            protocol: None,
+        }];
+        assert_eq!(
+            resolve_ports(&ports, "svc").unwrap(),
+            vec!["8000-8002:9000-9002".to_string()]
+        );
     }
 
     /// BUG FOUND (code review): a plain `<project>_<key>` join let two
