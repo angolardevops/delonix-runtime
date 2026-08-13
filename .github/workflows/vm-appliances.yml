@@ -185,8 +185,19 @@ jobs:
           # (`/mnt/appliances/pve.qcow2`) deixariam este passo a apontar para um
           # ficheiro que já não existe — depois de o build inteiro ter corrido.
           # O `-bootcheck` é o overlay de rascunho do `verify-boot.sh`.
-          IMG=$(ls -1 /mnt/appliances/"$STEM".qcow2 /mnt/appliances/"$STEM"-*.qcow2 2>/dev/null \
-                | grep -v -- '-bootcheck\.qcow2$' | head -1)
+          #
+          # Um loop de glob e NÃO `ls -1 a.qcow2 b-*.qcow2 | …`: com dois
+          # padrões em que só um casa, o `ls` devolve 2 — o `2>/dev/null`
+          # esconde a MENSAGEM mas não o código —, o `pipefail` propaga-o e o
+          # `set -e` aborta o passo sem imprimir nada. Foi assim que esta
+          # execução morreu com `exit code 2` e zero output, depois de ter
+          # construído e verificado a imagem toda. É o mesmo padrão que o
+          # `verify-boot.sh` já usa, e ali estava certo.
+          IMG=""
+          for cand in /mnt/appliances/"$STEM".qcow2 /mnt/appliances/"$STEM"-*.qcow2; do
+            case "$cand" in *-bootcheck.qcow2) continue ;; esac
+            if [ -f "$cand" ]; then IMG=$cand; break; fi
+          done
           test -n "$IMG" || { echo "::error::nenhuma imagem /mnt/appliances/$STEM*.qcow2"; ls -l /mnt/appliances; exit 1; }
           echo "imagem: $IMG"
           # A versão EXACTA sai do nome do ficheiro quando o input veio vazio —
@@ -210,6 +221,15 @@ jobs:
           # 2026-08-13 entraram, ao lado de `proxmox-ve-9.1`). Sem tirar o `-1`
           # o `cut` por pontos devolvia `9.2-1`, porque só há um ponto.
           [ -n "$TAG" ] || TAG="$(echo "${VER%%-*}" | cut -d. -f1-2)"
+          # Uma tag vazia publicaria `proxmox-ve:` e um `--release` vazio — o
+          # registo aceitaria e ninguém saberia o que lá está. Acontece quando o
+          # input `version` vem vazio E o ficheiro não traz versão no nome (um
+          # build a partir de um ISO local com outro nome). Falha aqui, a dizer
+          # o que fazer, em vez de publicar uma imagem sem identidade.
+          if [ -z "$TAG" ] || [ -z "$VER" ]; then
+            echo "::error::não consegui a versão de '$IMG' — passa o input \`version\` (e \`tag\` se a série não se deduzir dela)"
+            exit 1
+          fi
           echo "versão descarregada: $VER · tag publicada: $TAG"
           # `--appliance`: nenhuma destas corre cloud-init, e sem esta marca o
           # `vm create` do outro lado voltaria a anexar-lhes um seed NoCloud.
