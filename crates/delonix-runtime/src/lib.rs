@@ -5614,17 +5614,71 @@ pub fn reconcile_status(c: &mut Container) -> bool {
     }
 }
 
+/// O que aconteceu de facto a um `update_limits` — e são TRÊS coisas, não duas.
+///
+/// A versão anterior devolvia `Result<()>` e saía com `Ok(())` quando o cgroup não
+/// existia, o que fundia dois casos opostos numa só resposta. O chamador imprimia
+/// «resource limits updated» para ambos e persistia o valor no registo, portanto o
+/// registo passava a discordar do kernel e o `describe` confirmava um limite que
+/// não existia.
+///
+/// A distinção que faltava não é cosmética: um container PARADO sem cgroup está
+/// correcto — o limite vai ser aplicado no próximo `start`, que o reconstrói a
+/// partir do registo. Um container A CORRER sem cgroup é o oposto: a escrita não
+/// aconteceu, não vai acontecer, e o que o utilizador pediu não está em vigor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LimitUpdate {
+    /// Escrito no cgroup vivo: está em vigor agora, sem o PID mudar.
+    Applied,
+    /// Container parado — só o registo muda, e o próximo `start` aplica-o.
+    ///
+    /// **Não é alcançável pelo `container update` da CLI**, que recusa antes de
+    /// chegar aqui («the hot update acts on the LIVE process»); medido, não
+    /// deduzido. Existe porque `update_limits` é API pública do motor e um
+    /// chamador directo pode estar nesta situação — e porque a alternativa era
+    /// devolver `NotEnforced` a um container parado, que diria «não está em vigor
+    /// e o remédio é do ambiente» quando o remédio é simplesmente arrancá-lo.
+    Deferred,
+    /// **Container a correr e o cgroup dele NÃO EXISTE no caminho esperado.** O
+    /// pedido não está em vigor e não passa a estar sozinho.
+    ///
+    /// **Medido, e não é o que parecia.** A hipótese óbvia — «rootless sem
+    /// delegação» — está ERRADA: numa sessão SSH sem delegação o container fica no
+    /// scope da própria sessão, que EXISTE, por isso a escrita é tentada e falha
+    /// alto com `Permission denied` (confirmado numa VM, `session-5.scope`,
+    /// root:root). Esse caminho já era honesto e continua a sê-lo.
+    ///
+    /// O que chega aqui é o cgroup ter desaparecido entre a resolução do container
+    /// e a escrita — tipicamente um container a morrer, em que o `live_cgroup` já
+    /// não consegue ler `/proc/<pid>/cgroup` e cai na fórmula estática
+    /// `delonix.slice/delonix-<id>`, que em rootless não existe. Raro, e era
+    /// exactamente por ser raro que passava por «updated» sem ninguém reparar.
+    NotEnforced,
+}
+
 /// Rewrites, LIVE, a container's cgroup limits (`docker update`).
-/// If the container is stopped, there is no cgroup — only the record changes (in the CLI), and
-/// the new limits apply on the next `start`.
+///
+/// Devolve qual dos três casos ocorreu — ver `LimitUpdate`. Quem chama TEM de
+/// distinguir: dizer «updated» sobre um `NotEnforced` é exactamente o relato
+/// desonesto que este motor persegue nos outros.
 pub fn update_limits(
     container: &Container,
     memory: Option<&str>,
     cpus: Option<&str>,
-) -> Result<()> {
+) -> Result<LimitUpdate> {
     let cg = live_cgroup(container);
     if !std::path::Path::new(&cg).exists() {
-        return Ok(());
+        // A pergunta que separa os dois casos é «este container está VIVO?», e a
+        // resposta honesta usa o mesmo `safe_to_signal` do resto do motor (o par
+        // pid+starttime, para um PID reciclado não passar por vivo).
+        let vivo = container
+            .pid
+            .is_some_and(|p| safe_to_signal(p, container.pid_starttime));
+        return Ok(if vivo {
+            LimitUpdate::NotEnforced
+        } else {
+            LimitUpdate::Deferred
+        });
     }
     if let Some(m) = memory {
         write_limit(&cg, "memory.max", m)?;
@@ -5632,7 +5686,7 @@ pub fn update_limits(
     if let Some(c) = cpus {
         write_limit(&cg, "cpu.max", &cpu_max_value(c))?;
     }
-    Ok(())
+    Ok(LimitUpdate::Applied)
 }
 
 /// Removes a container. If it is running, requires `force` (and kills it).
@@ -5651,6 +5705,58 @@ pub fn remove(store: &Store, container: &Container, force: bool) -> Result<()> {
     remove_container_cgroup(container);
     store.remove(&container.id)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod limit_update_tests {
+    use super::*;
+
+    fn parado() -> Container {
+        Container::new(
+            "a".repeat(16),
+            "lim".into(),
+            "/tmp/naoexiste".into(),
+            vec!["/bin/true".into()],
+            "64M".into(),
+        )
+    }
+
+    /// **Um container PARADO sem cgroup não é uma falha — é o caso normal.**
+    ///
+    /// Este é o lado do `update_limits` que sempre esteve certo e que a correcção
+    /// não podia estragar: sem processo não há cgroup onde escrever, o registo
+    /// muda, e o próximo `start` reconstrói o cgroup a partir dele. O que estava
+    /// errado era fundir ISTO com o caso oposto (container VIVO e sem cgroup, onde
+    /// a escrita não aconteceu nem vai acontecer) e chamar «updated» aos dois.
+    #[test]
+    fn um_container_parado_adia_em_vez_de_mentir() {
+        let c = parado();
+        assert_eq!(c.pid, None, "o container de teste tem de estar parado");
+        assert_eq!(
+            update_limits(&c, Some("128M"), None).unwrap(),
+            LimitUpdate::Deferred,
+            "sem processo, o limite aplica-se no próximo start — nunca «updated»"
+        );
+    }
+
+    /// Um PID que já não existe conta como parado, e não como vivo-sem-cgroup.
+    ///
+    /// A diferença importa porque as duas mensagens são opostas: uma diz «aplica
+    /// no próximo start» e a outra diz «não está em vigor, e o remédio é do
+    /// ambiente». Um registo com um PID obsoleto — o que sobra de um container
+    /// morto abruptamente — tem de cair na primeira. Usa o mesmo `safe_to_signal`
+    /// (par pid+starttime) do resto do motor, para um PID RECICLADO por outro
+    /// processo qualquer não passar por vivo.
+    #[test]
+    fn um_pid_obsoleto_nao_conta_como_vivo() {
+        let mut c = parado();
+        c.pid = Some(0x7FFF_FFFE); // fora do alcance de qualquer pid_max real
+        c.pid_starttime = Some(1);
+        assert_eq!(
+            update_limits(&c, Some("128M"), None).unwrap(),
+            LimitUpdate::Deferred
+        );
+    }
 }
 
 #[cfg(test)]
