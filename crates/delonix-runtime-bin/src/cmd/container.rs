@@ -6338,16 +6338,27 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
             // é honesto. Aqui o cgroup não existe de todo, tipicamente porque o
             // container está a morrer. Afirmar «configura a delegação» mandaria o
             // utilizador arranjar o que não está partido.
-            runtime::LimitUpdate::NotEnforced => eprintln!(
-                "{}",
-                super::po::tf(
+            // **Devolve ERRO, e a razão é o `converge`.** A primeira versão só
+            // imprimia para stderr e devolvia `Ok(())` — mas o `store.update` acima
+            // já persistiu o valor, e o `container::converge` do `stack apply`
+            // delega neste mesmo caminho. Resultado: o apply carimbava o
+            // `last-applied`, o `stack plan --detailed-exitcode` seguinte
+            // respondia 0, e o gate de deriva do CI ficava verde por cima de uma
+            // barreira de contenção que o kernel não conhece. Apanhado na
+            // passagem `delonix-runtime-sec` a esta série.
+            //
+            // O registo FICA actualizado de propósito (o próximo `start`
+            // reconstrói o cgroup a partir dele e aí o limite passa a valer); o
+            // que não pode acontecer é o comando dizer que está feito.
+            runtime::LimitUpdate::NotEnforced => {
+                return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
                     "{name}: recorded (memory={memory}, cpus={cpus}) but NOT enforced — \
                      the container is running and its cgroup no longer exists, so there \
                      was nowhere to write them. Check it is still healthy (`delonix \
                      container ps -a`); the limits apply on the next `start`.",
                     &[("name", &c.name), ("memory", memory), ("cpus", cpus)],
-                )
-            ),
+                )));
+            }
         }
     }
     Ok(())

@@ -549,35 +549,35 @@ pub struct Container {
     pub seccomp: Option<String>,
     /// AppArmor profile applied (`aa_change_onexec`). Persisted so that `exec`
     /// also confines processes that enter the container later (probes/`crictl`),
-    /// and so that `start`/`restart` re-confine — ver `selinux` já a seguir.
+    /// and so that `start`/`restart` re-confine — see `selinux` right below.
     #[serde(default)]
     pub apparmor: Option<String>,
-    /// SELinux label (`--security-opt label=...`), o `--host-pid`/`--host-ipc` e o
-    /// formato de log CRI. **São aqui porque o `start` tem de os reconstruir.**
+    /// SELinux label (`--security-opt label=...`); with `host_pid`, `host_ipc`
+    /// and `log_cri` below. **They are here because `start` has to rebuild them.**
     ///
-    /// A regra que estes quatro campos existem para cumprir: *estado necessário
-    /// para RECONSTRUIR o recurso tem de ser persistido, não só usado na criação*.
-    /// É a sexta ocorrência da armadilha (depois do `-v`, do `-p` em rede custom,
-    /// das redes extra, do `Container.pod` e do `dns_config`), e a mais cara das
-    /// seis: sem eles, um `stop`+`start` — ou a recuperação automática a seguir a
-    /// um respawn do holder, que ninguém pede — devolvia o container SEM
-    /// confinamento AppArmor/SELinux. O `run` RECUSA arrancar unconfined quando o
-    /// perfil falha; o `start` fazia exactamente o que o `run` proíbe.
+    /// The rule these four exist to honour: *state needed to RECONSTRUCT the
+    /// resource must be persisted, not merely used at creation*. Sixth occurrence
+    /// of the trap (after `-v`, `-p` on a custom network, extra networks,
+    /// `Container.pod` and `dns_config`), and the most expensive of the six:
+    /// without them a `stop`+`start` — or the automatic recovery after a holder
+    /// respawn, which nobody asks for — brought the container back with NO
+    /// AppArmor/SELinux confinement. `run` REFUSES to start unconfined when the
+    /// profile fails; `start` did exactly what `run` forbids.
     ///
-    /// `#[serde(default)]` nos quatro: um registo escrito antes desta versão
-    /// desserializa na mesma, e `false`/`None` é precisamente o que ele era.
+    /// `#[serde(default)]` on all four: a record written before this version still
+    /// deserializes, and `false`/`None` is precisely what it was.
     #[serde(default)]
     pub selinux: Option<String>,
-    /// `--host-pid`: partilha o PID namespace do host (container de diagnóstico).
+    /// `--host-pid`: shares the host's PID namespace (diagnostic containers).
     #[serde(default)]
     pub host_pid: bool,
-    /// `--host-ipc`: partilha o IPC namespace do host.
+    /// `--host-ipc`: shares the host's IPC namespace.
     #[serde(default)]
     pub host_ipc: bool,
-    /// `--log-cri`: formato de log com carimbo temporal por linha. É o ÚNICO que
-    /// dá ao `logs --tail/--since/--timestamps` uma coluna real para filtrar, por
-    /// isso perdê-lo num restart fazia esses três responderem «só com `--log-cri`»
-    /// a um container criado exactamente com `--log-cri`.
+    /// `--log-cri`: log format with a per-line timestamp. It is the ONLY one that
+    /// gives `logs --tail/--since/--timestamps` a real column to filter on, so
+    /// losing it across a restart made those three answer «only with `--log-cri`»
+    /// to a container created with exactly `--log-cri`.
     #[serde(default)]
     pub log_cri: bool,
     /// `true` if the container has a user namespace (container root ≠ host root).
