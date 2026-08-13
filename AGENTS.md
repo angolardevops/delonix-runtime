@@ -635,6 +635,38 @@ e **silenciosamente descartada** — o Postgres do `examples/dependency.yaml` ar
 A forma agrupada passa a ser identificada pelas suas chaves (`vars`/`files`/`secrets`/
 `secretFiles`), e uma mapping simples vira `["K=v"]`.
 
+**5.ª fusão: `ShareVolume`→bloco `share:` de `kind: Volume` (v0.53.x).** É a que estava assinalada
+como candidata e a razão é mais forte do que arrumação: **um share JÁ era um volume** — o
+`apply_one` sempre chamou `VolumeStore::register_external` — e o `ShareRecord` ao lado era um
+SEGUNDO registo do mesmo objecto cujo único campo próprio era o `storage_ref`; mountpoint, quota,
+alert e created estavam duplicados. Dois registos para um objecto é como os dois passam a
+discordar, e era isso que impedia a posse: o carimbo `delonix.io/stack` vive nos `labels`, que só
+o volume tem. Fechado: `Volume.parent` (`#[serde(default)]`) guarda o pai, o `ShareRecord` deixa
+de ser escrito e é **absorvido no apply seguinte** — volume primeiro, registo antigo largado em
+último, com o MOUNTPOINT preservado (recalculá-lo mudaria o directório debaixo de bytes já
+escritos). O `kind: ShareVolume` carrega com aviso, `storageRef` continua a ser aceite como grafia
+de `share.from`. Ganho medido ao vivo: `stack plan` propõe `Adopt`, o apply carimba a posse, e o
+`destroy` remove os DOIS shares homónimos **sem tocar nos dados** (o `remove_with` nunca toca num
+mountpoint externo — a garantia estava lá, faltava alguém chegar-lhe).
+- **A identidade de um share no plano é `<ns>/<nome>`** (`scoped_plan_name`). O reconciliador
+  identifica por `(kind, name)` e um share é escopado por namespace — dois inquilinos com um `db`
+  é a isolação que a funcionalidade existe para dar. Sem qualificar, os dois são UM recurso: um
+  aparece como deriva do outro em todos os planos, e um `--replace Volume/db` destruía os dois.
+- **`Volume` é o único Kind cuja resposta a «é namespaced?» vem do DOCUMENTO** — daí
+  `Namespaced::{Never, Always, PerDocument}` em vez de um booleano. Como `false`, o `load` avisaria
+  «namespace has no effect» num share cuja namespace decide o directório dos dados: um aviso errado,
+  que é pior que nenhum.
+- **Dois bugs meus, apanhados a validar e não a ler.** (1) O `validate_graph` recusa duplicados por
+  `(kind, nome)` e passou a chumbar dois shares homónimos em namespaces diferentes — a fusão a
+  transformar em erro o que sempre funcionou; a chave passou a incluir a namespace **só** para o
+  volume-com-share. (2) `set_quota` trata os dois argumentos ao contrário um do outro —
+  `quota: None` REMOVE o cap, `alert_pct: None` PRESERVA o limiar — por isso convergir só o
+  `alertPct` apagaria em silêncio uma quota que ninguém tocou; o `converge` passa a fazer UMA
+  chamada com o que não está no diff lido do registo.
+- **Nota de método**: um teste que chamasse `apply_share` (que resolve `state_root()`) escreveria no
+  estado REAL da máquina — só não o fez porque o volume pai não existia lá. Os testes usam
+  `apply_one(&tmp, ...)`, como os vizinhos.
+
 **Fusões de Kinds (18 → 15).** `Egress`→`FirewallPolicy` (partilhavam a struct `FwDocSpec`
 inteira), `Dependency`→açúcar reduzido para `FirewallPolicy` no `load` (fundindo por ALVO, porque
 várias dependências ACUMULAM allows e um documento por dependência faria a última apagar as

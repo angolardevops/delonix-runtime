@@ -281,7 +281,6 @@ fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Desired>>
                 "Image" => super::image::desired(doc)?,
                 "Vm" => super::vm::desired(doc)?,
                 "FirewallPolicy" => super::firewall::desired(doc)?,
-                "ShareVolume" => super::sharevolume::desired(doc)?,
                 "HTTPRoute" | "Ingress" => super::httproute::desired(doc)?,
                 "Tunnel" => super::tunnel::desired(doc)?,
                 _ => reconcile::Desired {
@@ -313,7 +312,6 @@ fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Actual>> {
     out.extend(super::image::actual(docs)?);
     out.extend(super::vm::actual()?);
     out.extend(super::firewall::actual(docs)?);
-    out.extend(super::sharevolume::actual(docs)?);
     out.extend(super::httproute::actual(docs)?);
     out.extend(super::tunnel::actual(docs)?);
     let (_, cstore) = super::util::open_stores()?;
@@ -483,7 +481,7 @@ fn print_kind_catalogue() {
             f.kind.to_string(),
             f.domain.label().to_string(),
             form_label(f.form),
-            if f.namespaced { "yes" } else { "-" }.to_string(),
+            super::po::t(namespaced_label(f.namespaced)).to_string(),
             super::po::t(presence_label(f.presence)).to_string(),
         ]);
     }
@@ -506,6 +504,17 @@ fn form_label(form: super::kinds::Form) -> String {
     match form.lowers_to() {
         Some(to) => format!("{word} → {to}"),
         None => word.to_string(),
+    }
+}
+
+/// `PerDocument` prints as what it is — a Kind where the answer is in the
+/// document — which is more use than a `yes` that is only sometimes true.
+fn namespaced_label(n: super::kinds::Namespaced) -> &'static str {
+    use super::kinds::Namespaced;
+    match n {
+        Namespaced::Never => "-",
+        Namespaced::Always => "yes",
+        Namespaced::PerDocument => "per document",
     }
 }
 
@@ -534,7 +543,6 @@ pub(crate) fn compared_fields_table() -> Vec<(&'static str, &'static [&'static s
         ("Image", super::image::RECONCILED_IMAGE_FIELDS),
         ("Vm", super::vm::RECONCILED_VM_FIELDS),
         ("FirewallPolicy", super::firewall::RECONCILED_FW_FIELDS),
-        ("ShareVolume", super::sharevolume::RECONCILED_SHARE_FIELDS),
         ("HTTPRoute", super::httproute::RECONCILED_HTTPROUTE_FIELDS),
         ("Ingress", super::httproute::RECONCILED_HTTPROUTE_FIELDS),
         ("Tunnel", super::tunnel::RECONCILED_TUNNEL_FIELDS),
@@ -1042,10 +1050,26 @@ fn presence(
             }
         }
         // Storage is a network volume — it lives in the same store as the volumes.
-        "Volume" => match delonix_volume::VolumeStore::open(&root).and_then(|s| s.list()) {
-            Ok(vs) => yes_no(vs.iter().any(|v| v.name == name)),
-            Err(e) => ("?".into(), e.to_string()),
-        },
+        // A volume with a `share:` block lives in ITS NAMESPACE's sub-tree, not
+        // the global store — looking only at the latter reported every share as
+        // absent, which `wait` reads as «not up yet» forever.
+        "Volume" => {
+            let store = match delonix_volume::VolumeStore::open(&root) {
+                Ok(s) => s,
+                Err(e) => return ("?".into(), e.to_string()),
+            };
+            if doc.spec.get("share").is_some() {
+                let ns = doc.metadata.namespace.as_deref().unwrap_or("default");
+                return match delonix_volume::VolumeStore::open_scoped(&root, ns) {
+                    Ok(scoped) => yes_no(scoped.inspect(name).is_ok()),
+                    Err(e) => ("?".into(), e.to_string()),
+                };
+            }
+            match store.list() {
+                Ok(vs) => yes_no(vs.iter().any(|v| v.name == name)),
+                Err(e) => ("?".into(), e.to_string()),
+            }
+        }
         "Network" => match delonix_net::NetworkStore::open(&root).and_then(|s| s.list()) {
             Ok(ns) => yes_no(ns.iter().any(|n| n.name == name)),
             Err(e) => ("?".into(), e.to_string()),
@@ -1088,7 +1112,6 @@ fn presence(
         // A share has a record of its own, keyed by (namespace, name) — the
         // namespace comes from the document, which is why `load_record` takes
         // both and why guessing it is not an option.
-        "ShareVolume" => super::sharevolume::presence_of(&root, doc),
         // A tunnel's record says whether an agent was started; the public URL
         // is status and deliberately not part of "is it there".
         "Tunnel" => super::tunnel::presence_of(name),
@@ -1243,9 +1266,6 @@ fn apply(file: Option<PathBuf>, replace: Vec<String>, do_prune: bool) -> Result<
     // do que vem abaixo depende dela para ser criado.
     layers.run("NetworkRoute", "🔗", || super::netroute::apply(&docs))?;
     layers.run("Volume", "💽", || super::volume::apply(&docs))?;
-    // ShareVolume right after Storage: it carves subdirectories out of an
-    // already-mounted Storage, so the parent must exist first.
-    layers.run("ShareVolume", "📂", || super::sharevolume::apply(&docs))?;
     layers.run("Image", "📦", || super::image::apply(&docs))?;
     layers.run("Vm", "🖥", || super::vm::apply(&docs, base))?;
     layers.run("Container", "📦", || super::container::apply(&docs))?;
@@ -1330,7 +1350,6 @@ pub(crate) fn no_teardown_reason(kind: &str) -> Option<&'static str> {
             "routes live in the proxy's shared config, with no per-document provenance"
         }
         "Tunnel" => "a tunnel has no labels to stamp ownership on",
-        "ShareVolume" => "a share has no record of its own to stamp ownership on",
         _ => return None,
     })
 }
@@ -1532,18 +1551,6 @@ fn converge_and_stamp(
                             ))
                         })?;
                     super::tunnel::converge_doc(doc)?
-                }
-                "ShareVolume" => {
-                    let doc = docs
-                        .iter()
-                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
-                        .ok_or_else(|| {
-                            delonix_runtime_core::Error::Invalid(format!(
-                                "ShareVolume/{}: not in the manifest",
-                                c.name
-                            ))
-                        })?;
-                    super::sharevolume::converge_doc(doc)?
                 }
                 // A Pod has no hot field at all, so the planner can never emit
                 // `Update` for one. Saying so beats a silent no-op if that ever
@@ -1806,9 +1813,24 @@ fn validate_graph_with(
 
     // Duplicates within the manifest (same Kind + name) — the `apply` would create one
     // and skip the other; better to warn than to blindly apply one of the two.
-    let mut seen: HashSet<(String, String)> = HashSet::new();
+    //
+    // The NAMESPACE is part of the key for the Kinds where it identifies the
+    // resource, and a volume with a `share:` block is one: two tenants each
+    // having a `db` is the isolation the feature exists for, they get separate
+    // directories, and the reconciler already tells them apart (`Volume/teamA/db`).
+    // Refusing them here would make the merge of `kind: ShareVolume` a regression
+    // — the very thing that used to work would stop applying.
+    let mut seen: HashSet<(String, String, String)> = HashSet::new();
     for doc in docs {
-        let key = (doc.kind.clone(), doc.metadata.name.clone());
+        let scoped = doc.kind == "Volume" && doc.spec.get("share").is_some();
+        let ns = match scoped {
+            true => doc.metadata.namespace.clone().unwrap_or_default(),
+            // Everything else keeps ONE key space, exactly as before: a plain
+            // volume is global, so two of the same name are two writers of one
+            // record whichever namespaces they claim.
+            false => String::new(),
+        };
+        let key = (doc.kind.clone(), ns, doc.metadata.name.clone());
         if !seen.insert(key) {
             issues.push(super::po::tf(
                 "{kind} '{name}' declared more than once",

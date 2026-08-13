@@ -8811,3 +8811,24 @@ msgstr "derivada"
 
 msgid "not observable"
 msgstr "sem presença observável"
+
+# Fusão ShareVolume → kind: Volume com bloco `share:`.
+
+msgid ""
+"ShareVolume '{name}': `kind: ShareVolume` is deprecated — use `kind: Volume` with a `share: {from: ...}` block (same fields, same behaviour, and now ownable by a stack)"
+msgstr ""
+"ShareVolume '{name}': `kind: ShareVolume` está depreciado — usa `kind: Volume` com um bloco `share: {from: ...}` (mesmos campos, mesmo comportamento, e agora possuível por uma stack)"
+
+msgid "ShareVolume '{name}': spec.storageRef is required"
+msgstr "ShareVolume '{name}': spec.storageRef é obrigatório"
+
+msgid "ShareVolume '{name}': spec must be a mapping"
+msgstr "ShareVolume '{name}': o spec tem de ser um mapeamento"
+
+msgid ""
+"a volume with a `share:` block cannot also declare {fields} — a share is a subdirectory of the volume named in `share.from`, and mounts nothing of its own"
+msgstr ""
+"um volume com bloco `share:` não pode declarar também {fields} — um share é um subdirectório do volume nomeado em `share.from`, e não monta nada de seu"
+
+msgid "per document"
+msgstr "por documento"

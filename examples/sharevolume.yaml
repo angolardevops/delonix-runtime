@@ -1,16 +1,22 @@
-# kind: ShareVolume — an isolated, individually-quota'd slice of an existing
-# network share, so multiple container/vm/pod can share ONE NAS export without
-# seeing each other's data or exhausting each other's quota. Each ShareVolume is
-# a real subdirectory of the parent's own mount, registered as its own named
-# volume — consume it exactly like any other volume: `-v <name>:/path`.
+# A SHARE — an isolated, individually-quota'd slice of an existing volume, so
+# several containers/vms/pods can use ONE NAS export without seeing each other's
+# data or exhausting each other's quota. A share is a real subdirectory of the
+# parent's own mount, registered as its own named volume — consume it exactly
+# like any other volume: `-v <name>:/path`.
+#
+# It is a `kind: Volume` with a `share:` block, not a Kind of its own: a share
+# always WAS a volume (that is how `-v` could consume it), and the separate
+# `kind: ShareVolume` only added a second record beside it whose one unique
+# field was the parent's name. `kind: ShareVolume` still loads, rewritten into
+# exactly this with a deprecation warning; `storageRef` is still accepted as a
+# spelling of `share.from`. What the merge buys: a share is now ownable by a
+# stack (`delonix.io/stack`), so `--prune` and `destroy` can reach it.
 #
 # The parent is a `kind: Volume` with a network-share block (`nfs:`/`cifs:`/
-# `webdav:`) — see examples/storage.yaml. `kind: Storage` still loads, rewritten
-# into exactly this with a deprecation warning, but the manifest you write today
-# should use the block.
+# `webdav:`) — see examples/storage.yaml.
 #
-# Apply with:  delonix sharevolume apply -f sharevolume.yaml
-# (the storageRef below must already exist — this file creates it first)
+# Apply with:  delonix volumes apply -f sharevolume.yaml
+# (or `delonix sharevolume apply -f ...`, which applies only the shares)
 apiVersion: delonix.io/v1
 kind: Volume
 metadata:
@@ -21,18 +27,25 @@ spec:
     share: /pool/data
 ---
 apiVersion: delonix.io/v1
-kind: ShareVolume
+kind: Volume
 metadata:
   name: app-a
+  # The namespace scopes the NAME and the data directory: `teamA`'s `app-a` and
+  # `teamB`'s never share a path, and `-v app-a:/data` in a workload resolves to
+  # its own namespace's share.
+  namespace: teamA
 spec:
-  storageRef: nas             # required — an existing network-share volume
+  share:
+    from: nas                 # required — an existing volume to carve out of
   quota: 5G                   # optional; SOFT quota (measured usage + alert), omit = unlimited
-  alertPct: 90                 # optional; usage % above which ls/describe flag a WARN (default 90)
+  alertPct: 90                # optional; usage % above which ls/describe flag a WARN (default 90)
 ---
 apiVersion: delonix.io/v1
-kind: ShareVolume
+kind: Volume
 metadata:
   name: app-b
+  namespace: teamB
 spec:
-  storageRef: nas              # the SAME parent share — app-a and app-b never see each other's files
+  share:
+    from: nas                 # the SAME parent — app-a and app-b never see each other's files
   quota: 2G

@@ -23,6 +23,25 @@ pub(crate) struct VolumeSpec {
     #[serde(rename = "mountOptions", alias = "options")]
     options: Option<String>,
     quota: Option<String>,
+    /// Usage percentage above which `ls`/`describe` flag a WARN (default 90).
+    ///
+    /// The record has carried this since volumes had quotas; the manifest could
+    /// not set it, so a declarative volume was stuck with the default while the
+    /// CLI could change it. It arrived with the `share:` block below, which
+    /// needs it, and applies to every volume for the same reason it always did.
+    #[serde(default, rename = "alertPct")]
+    alert_pct: Option<u8>,
+    /// A subdirectory carved out of ANOTHER volume, with its own name, quota and
+    /// consumers — what `kind: ShareVolume` used to be a Kind of its own for.
+    ///
+    /// It is a block and not a Kind because a share IS a volume: it was already
+    /// registered as one (`VolumeStore::register_external`), and the separate
+    /// Kind only added a second record whose one unique field was the parent's
+    /// name. The block sits beside `nfs:`/`cifs:`/`webdav:` and is exclusive
+    /// with them for the reason `net_share` gives: a volume is one mount, and a
+    /// share does not mount anything — it points inside a mount someone else made.
+    #[serde(default)]
+    share: Option<ShareBlock>,
     /// NFS export. One of the three network-share blocks — the block's NAME is
     /// the type, so a type cannot contradict its own declaration (the same shape
     /// `kind: Workload` uses for `spec.container`/`spec.vm`).
@@ -40,7 +59,64 @@ pub(crate) struct VolumeSpec {
     provision: Option<super::provision::ProvisionSpec>,
 }
 
+/// `spec.share` — the volume this one is carved out of.
+///
+/// One field, because the rest was already on the volume: `quota`/`alertPct` are
+/// the spec's own, so a share sets them exactly where every other volume does
+/// instead of in a second place that would have to be kept in agreement.
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+pub(crate) struct ShareBlock {
+    /// Name of the volume to carve this one out of — typically a network volume
+    /// (`nfs:`/`cifs:`/`webdav:`), which is the case the feature exists for, but
+    /// any volume works: the mechanism is a real subdirectory of its mountpoint.
+    ///
+    /// `storageRef` is the spelling `kind: ShareVolume` used, kept as an alias so
+    /// a manifest that only renames its Kind does not also have to rename this.
+    #[serde(alias = "storageRef")]
+    pub from: String,
+}
+
 impl VolumeSpec {
+    /// The parent this volume is a share of, if any.
+    pub(crate) fn share_from(&self) -> Option<&str> {
+        self.share.as_ref().map(|s| s.from.as_str())
+    }
+
+    /// Refuses a `share:` that also asks for something a share cannot have.
+    ///
+    /// A share does not mount anything — it is a subdirectory INSIDE a mount
+    /// another volume already made — so a `nfs:` block, a `device`, a
+    /// non-`local` driver or a `provision:` beside it are not a richer share:
+    /// they are two different volumes described in one document. Accepting the
+    /// pair and honouring one of them is the silent-drop this engine keeps
+    /// removing; the refusal names the field it found.
+    pub(crate) fn check_share_exclusivity(&self) -> Result<()> {
+        if self.share.is_none() {
+            return Ok(());
+        }
+        let mut clash: Vec<&str> = Vec::new();
+        if self.net_share()?.is_some() {
+            clash.push("nfs/cifs/webdav");
+        }
+        if self.provision.is_some() {
+            clash.push("provision");
+        }
+        if self.device.is_some() {
+            clash.push("device");
+        }
+        if self.driver != default_driver() {
+            clash.push("driver");
+        }
+        if clash.is_empty() {
+            return Ok(());
+        }
+        Err(Error::Invalid(super::po::tf(
+            "a volume with a `share:` block cannot also declare {fields} — a share is a \
+             subdirectory of the volume named in `share.from`, and mounts nothing of its own",
+            &[("fields", &clash.join(", "))],
+        )))
+    }
+
     /// The network-share block, if any — `(type, block)`.
     ///
     /// **Exactly one, or none.** Two blocks are two different mounts asked of
@@ -88,6 +164,9 @@ pub(crate) const VOLUME_SPEC_FIELDS: &[&str] = &[
     "mountOptions",
     "options",
     "quota",
+    "alertPct",
+    // A subdirectory of ANOTHER volume — `kind: ShareVolume` folded in here.
+    "share",
     // Network-share blocks — `kind: Storage` folded in here.
     "nfs",
     "cifs",
@@ -101,7 +180,14 @@ pub(crate) const VOLUME_SPEC_FIELDS: &[&str] = &[
 /// device of a volume that already holds data is a replace, and a replace of a
 /// volume means the data goes — which is exactly why `apply` refuses it without
 /// `--replace`.
-pub(crate) const RECONCILED_VOLUME_FIELDS: &[&str] = &["driver", "device", "mountOptions", "quota"];
+pub(crate) const RECONCILED_VOLUME_FIELDS: &[&str] = &[
+    "driver",
+    "device",
+    "mountOptions",
+    "quota",
+    "alertPct",
+    "parent",
+];
 
 /// The manifest side, in comparable form.
 ///
@@ -140,6 +226,18 @@ fn desired_volume_fields(
             f.insert("quota".into(), bytes.to_string());
         }
     }
+    if let Some(a) = spec.alert_pct {
+        f.insert("alertPct".into(), a.to_string());
+    }
+    // Comparing the PARENT is what makes re-pointing a share at another volume
+    // show up as the destructive change it is: the share is a subdirectory of
+    // that parent, so a different parent is a different directory and the bytes
+    // already written stay in the old one. It is a cold field for exactly that
+    // reason (`hot_fields`), which turns the diff into a refused `Replace`
+    // instead of a silent move.
+    if let Some(p) = spec.share_from() {
+        f.insert("parent".into(), p.to_string());
+    }
     Ok(f)
 }
 
@@ -156,6 +254,12 @@ fn actual_volume_fields(v: &delonix_volume::Volume) -> std::collections::BTreeMa
     if let Some(q) = v.quota_bytes {
         f.insert("quota".into(), q.to_string());
     }
+    if let Some(a) = v.alert_pct {
+        f.insert("alertPct".into(), a.to_string());
+    }
+    if let Some(p) = &v.parent {
+        f.insert("parent".into(), p.clone());
+    }
     f
 }
 
@@ -163,28 +267,29 @@ fn actual_volume_fields(v: &delonix_volume::Volume) -> std::collections::BTreeMa
 /// destroys the data** — which is the whole reason `apply` refuses a volume
 /// replace unless the user names it explicitly.
 pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
-    let store = VolumeStore::open(state_root())?;
-    cmd_rm(&store, name, true)
+    let (store, name) = store_for_plan_name(name)?;
+    cmd_rm(&store, &name, true)
 }
 
 /// Applies the hot part of a plan. `quota` is the only field that converges
 /// without recreating the volume — and recreating a volume means the data goes,
 /// which is why everything else is a `Replace` that `apply` refuses by default.
 pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Result<()> {
-    let store = VolumeStore::open(state_root())?;
+    let (store, name) = store_for_plan_name(name)?;
+    let name = name.as_str();
+    // ONE call for both fields, and that is not tidiness — `set_quota` treats its
+    // two arguments differently on purpose: `quota: None` REMOVES the cap (a
+    // manifest that drops the field means it), while `alert_pct: None` LEAVES the
+    // threshold alone. So converging `alertPct` on its own with a `None` quota
+    // would silently delete a quota nobody touched. What is not in the diff comes
+    // from the record, not from a default.
+    let current = store.inspect(name)?;
+    let mut quota = current.quota_bytes;
+    let mut alert = None;
     for d in diffs {
         match d.field.as_str() {
-            "quota" => {
-                // `None` = the manifest dropped the quota, which means REMOVE
-                // the cap, not «leave the old one» — the revert has to be as
-                // real as the set.
-                let bytes = d.to.as_deref().and_then(|v| v.parse::<u64>().ok());
-                // `privileged: false`, the same as `create_volume`'s own call:
-                // the hard ext4-loopback cap belongs to the root model, and a
-                // declarative apply must not quietly take a different route
-                // from the imperative one it mirrors.
-                store.set_quota(name, bytes, None, false)?;
-            }
+            "quota" => quota = d.to.as_deref().and_then(|v| v.parse::<u64>().ok()),
+            "alertPct" => alert = d.to.as_deref().and_then(|v| v.parse::<u8>().ok()),
             other => {
                 return Err(Error::Invalid(format!(
                     "volume/{name}: '{other}' does not converge hot — bug in \
@@ -193,7 +298,43 @@ pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Res
             }
         }
     }
+    // `privileged: false`, the same as `create_volume`'s own call: the hard
+    // ext4-loopback cap belongs to the root model, and a declarative apply must
+    // not quietly take a different route from the imperative one it mirrors.
+    store.set_quota(name, quota, alert, false)?;
     Ok(())
+}
+
+/// The name a namespace-scoped volume goes by IN A PLAN: `<namespace>/<name>`.
+///
+/// The reconciler identifies a resource by `(kind, name)`, and a share is scoped
+/// by namespace — two tenants may each have a `db`, which is the isolation the
+/// feature exists for. Unqualified, those two are one resource to the planner:
+/// one of them is reported as drift from the other on every plan, and a
+/// `--replace Volume/db` would destroy both. Qualifying is what keeps them
+/// distinct, and it reads the way the rest of the output already does
+/// (`sharevolume ls` has shown NAMESPACE and NAME side by side all along).
+///
+/// A plain volume is NOT scoped and keeps its bare name — its store is the
+/// global one and it always was.
+pub(crate) fn scoped_plan_name(namespace: &str, name: &str) -> String {
+    format!("{namespace}/{name}")
+}
+
+/// The inverse: the store a plan name belongs to, and the name inside it.
+///
+/// The two are returned together because they are one decision — resolving the
+/// store from the global one and then using the qualified name inside it is the
+/// mistake this prevents (it would look for a volume literally called
+/// `teamA/db`, and `valid_name` rejects the slash).
+fn store_for_plan_name(name: &str) -> Result<(VolumeStore, String)> {
+    match name.split_once('/') {
+        Some((ns, bare)) => Ok((
+            VolumeStore::open_scoped(state_root(), ns)?,
+            bare.to_string(),
+        )),
+        None => Ok((VolumeStore::open(state_root())?, name.to_string())),
+    }
 }
 
 /// Records that this stack owns the volume, and what it last applied.
@@ -202,7 +343,8 @@ pub(crate) fn stamp(
     stack: &str,
     fields: &std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
-    let store = VolumeStore::open(state_root())?;
+    let (store, name) = store_for_plan_name(name)?;
+    let name = name.as_str();
     store.set_metadata(
         name,
         &[
@@ -226,10 +368,21 @@ pub(crate) fn stamp(
 /// What the manifest declares, for the reconciler.
 pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     let spec: VolumeSpec = manifest::spec_of(doc)?;
+    spec.check_share_exclusivity()?;
+    let name = match spec.share_from() {
+        Some(_) => scoped_plan_name(
+            doc.metadata.namespace.as_deref().unwrap_or("default"),
+            &doc.metadata.name,
+        ),
+        None => doc.metadata.name.clone(),
+    };
     Ok(super::reconcile::Desired {
         kind: "Volume".into(),
-        name: doc.metadata.name.clone(),
+        // The FIELDS are computed from the document's own name: a share's
+        // directory is `<parent>/shares/<ns>/<name>`, and the qualifier belongs
+        // to the plan's identity, not to anything on disk.
         fields: desired_volume_fields(&doc.metadata.name, &spec)?,
+        name,
         converges: true,
         ownable: true,
     })
@@ -238,20 +391,41 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
 /// What is on the machine, for the reconciler.
 pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
     let store = VolumeStore::open(state_root())?;
-    Ok(store
+    let mut out: Vec<super::reconcile::Actual> = store
         .list()?
         .into_iter()
-        .map(|v| super::reconcile::Actual {
+        .map(|v| actual_of(v.name.clone(), &v))
+        .collect();
+    // The namespaced sub-tree, where every share lives. Enumerated in full — not
+    // per document, the way the old `ShareVolume` adapter did — because that is
+    // what makes a share prunable: a resource the plan cannot SEE is one
+    // `--prune` can never remove, and the whole point of the merge was to give
+    // shares the ownership a volume already had.
+    for ns in store.namespaces() {
+        let Ok(scoped) = VolumeStore::open_scoped(state_root(), &ns) else {
+            continue;
+        };
+        for v in scoped.list().unwrap_or_default() {
+            out.push(actual_of(scoped_plan_name(&ns, &v.name), &v));
+        }
+    }
+    Ok(out)
+}
+
+fn actual_of(name: String, v: &delonix_volume::Volume) -> super::reconcile::Actual {
+    {
+        let v = v.clone();
+        super::reconcile::Actual {
             kind: "Volume".into(),
-            name: v.name.clone(),
+            name,
             fields: actual_volume_fields(&v),
             owner: v.labels.get(super::reconcile::STACK_LABEL).cloned(),
             last_applied: v
                 .annotations
                 .get(super::reconcile::LAST_APPLIED)
                 .and_then(|raw| super::reconcile::decode_last_applied(raw)),
-        })
-        .collect())
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -446,6 +620,23 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     for doc in manifest::of_kind(docs, "Volume") {
         let name = &doc.metadata.name;
         let spec: VolumeSpec = manifest::spec_of(doc)?;
+        spec.check_share_exclusivity()?;
+        // A share is carved out of another volume instead of being created here:
+        // it mounts nothing, and the directory it points at belongs to the
+        // parent. `sharevolume` owns that path — this is the same delegation
+        // `kind: Storage` got when it became the `nfs:` block, and it keeps ONE
+        // implementation of a share rather than a second one that would have to
+        // agree with the CLI's.
+        if let Some(from) = spec.share_from() {
+            super::sharevolume::apply_share(
+                name,
+                from,
+                spec.quota.as_deref(),
+                spec.alert_pct,
+                doc.metadata.namespace.as_deref().unwrap_or("default"),
+            )?;
+            continue;
+        }
         // A network share (`spec.nfs`/`cifs`/`webdav`) IS this volume's driver
         // and device — the friendly declaration that `kind: Storage` used to own.
         // The credentials file is written here and only here: computing the
@@ -1290,20 +1481,69 @@ mod tests {
     /// a field is compared without being documented.
     #[test]
     fn os_campos_comparados_sao_os_documentados() {
-        let spec: super::VolumeSpec = serde_yaml::from_str(
-            "driver: nfs\ndevice: nas:/export\nmountOptions: vers=4\nquota: 10G\n",
+        // Two documents, because no single volume carries every comparable
+        // field: `parent` belongs to a share, and a share has neither driver nor
+        // device. Between them they have to cover the constant exactly.
+        let net: super::VolumeSpec = serde_yaml::from_str(
+            "driver: nfs\ndevice: nas:/export\nmountOptions: vers=4\nquota: 10G\nalertPct: 80\n",
         )
         .unwrap();
-        let f = super::desired_volume_fields("dados", &spec).unwrap();
-        assert_eq!(f.len(), super::RECONCILED_VOLUME_FIELDS.len());
-        for k in f.keys() {
-            assert!(
-                super::RECONCILED_VOLUME_FIELDS.contains(&k.as_str()),
-                "{k} is compared but undocumented"
-            );
+        let share: super::VolumeSpec =
+            serde_yaml::from_str("share:\n  from: nas\nquota: 5G\nalertPct: 90\n").unwrap();
+        let mut seen = std::collections::BTreeSet::new();
+        for spec in [&net, &share] {
+            let f = super::desired_volume_fields("dados", spec).unwrap();
+            for k in f.keys() {
+                assert!(
+                    super::RECONCILED_VOLUME_FIELDS.contains(&k.as_str()),
+                    "{k} is compared but undocumented"
+                );
+                seen.insert(k.clone());
+            }
         }
+        assert_eq!(
+            seen.len(),
+            super::RECONCILED_VOLUME_FIELDS.len(),
+            "documented but never produced: {:?}",
+            super::RECONCILED_VOLUME_FIELDS
+                .iter()
+                .filter(|k| !seen.contains(**k))
+                .collect::<Vec<_>>()
+        );
         // The manifest says `10G`, the record stores bytes — normalizing the
         // manifest side is what stops a quota from reading as changed forever.
+        let f = super::desired_volume_fields("dados", &net).unwrap();
         assert_eq!(f.get("quota").unwrap(), "10737418240");
+        // A share is identified by the volume it is carved out of, and the plan
+        // has to see it: `share.from` is what a `Replace` hinges on.
+        let f = super::desired_volume_fields("dados", &share).unwrap();
+        assert_eq!(f.get("parent").unwrap(), "nas");
+    }
+
+    /// A `share:` beside anything that mounts is two volumes in one document.
+    /// Honouring one of them silently is the failure this refuses.
+    #[test]
+    fn um_share_nao_pode_declarar_tambem_um_mount() {
+        for (yaml, expected) in [
+            (
+                "share:\n  from: nas\nnfs:\n  server: 10.0.0.1\n  share: /export\n",
+                "nfs/cifs/webdav",
+            ),
+            ("share:\n  from: nas\ndevice: /dev/sdb1\n", "device"),
+            ("share:\n  from: nas\ndriver: nfs\n", "driver"),
+        ] {
+            let spec: super::VolumeSpec = serde_yaml::from_str(yaml).unwrap();
+            let e = spec
+                .check_share_exclusivity()
+                .expect_err("um share com mount tem de ser recusado")
+                .to_string();
+            assert!(e.contains(expected), "{e}");
+        }
+        // E o caso normal continua a passar, nos dois sentidos.
+        let share: super::VolumeSpec = serde_yaml::from_str("share:\n  from: nas\n").unwrap();
+        assert!(share.check_share_exclusivity().is_ok());
+        let plain: super::VolumeSpec =
+            serde_yaml::from_str("nfs:\n  server: 10.0.0.1\n  share: /export\n").unwrap();
+        assert!(plain.check_share_exclusivity().is_ok());
     }
 }

@@ -246,7 +246,12 @@ impl Change {
 fn hot_fields(kind: &str) -> &'static [&'static str] {
     match kind {
         "Container" => &["ports", "volumes", "memory", "cpus", "netBps", "netBurst"],
-        "Volume" => &["quota"],
+        // `alertPct` joins `quota` as bookkeeping on the record. `parent` does
+        // NOT: a share is a subdirectory of the volume it names, so repointing
+        // it means a different directory and the bytes already written stay in
+        // the old one — cold, which turns it into a refused `Replace` rather
+        // than a silent move.
+        "Volume" => &["quota", "alertPct"],
         "Network" => &["peers"],
         // Fetching a ref destroys nothing — an image is shared cache, so its
         // whole comparable surface converges without recreating anything.
@@ -256,11 +261,6 @@ fn hot_fields(kind: &str) -> &'static [&'static str] {
         // container the policy governs, so changing one leaves the old target's
         // rules exactly where they were.
         "FirewallPolicy" => &["defaultPolicy", "rules", "scope"],
-        // Bookkeeping on the share's own record, applied by re-running the same
-        // idempotent `apply_one`. `storageRef` stays cold: the share is a
-        // SUBDIRECTORY of that parent, so repointing it means a different
-        // directory and the bytes already written stay in the old one.
-        "ShareVolume" => &["quota", "alertPct"],
         // The proxy's config is COLLECTIVE and `httproute::converge_all`
         // recomposes ALL of it, so every comparable field converges without
         // destroying anything — `rules` by SIGHUP (same PID, no downtime),
