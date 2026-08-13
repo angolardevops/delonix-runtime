@@ -4163,15 +4163,38 @@ fn fmt_ports(ports: &[String]) -> String {
     ports
         .iter()
         .map(|p| {
+            // O parser do motor, e não um `split_once(':')` cru — a forma
+            // `hostIp:hostPort:contPort` tem DOIS dois-pontos, e cortar no
+            // primeiro dá `127.0.0.1` como porta do host e `19555:80` como porta
+            // do container. Medido: um serviço restrito a loopback aparecia como
+            // `127.0.0.1->19555:80/tcp` na coluna que se lê exactamente para
+            // decidir o que está exposto.
+            // Só quando há mesmo uma porta de host. O `parse_publish_addr` aceita
+            // uma porta nua e devolve-a nas DUAS pontas, o que fazia `"80"`
+            // imprimir `80->80/tcp` em vez de `80/tcp` — apanhado pelo teste das
+            // formas antigas, e a razão de ele cobrir o caso aborrecido também.
+            let sem_proto = p.split_once('/').map(|(s, _)| s).unwrap_or(p.as_str());
+            if sem_proto.contains(':') {
+                if let Ok((addr, hp, cp, proto)) = delonix_net::parse_publish_addr(p) {
+                    return match addr {
+                        // Com endereço explícito imprime-se a forma do docker
+                        // (`127.0.0.1:8080->80/tcp`): aqui o endereço é FACTO, veio
+                        // da spec, e é a informação que mais importa nesta coluna.
+                        Some(a) => format!("{a}:{hp}->{cp}/{proto}"),
+                        // Sem endereço mantém-se a omissão deliberada do `0.0.0.0`
+                        // — ver o doc-comment acima: o endereço efectivo depende do
+                        // caminho de publicação e do `DELONIX_PUBLISH_ADDR`, e
+                        // inventar um seria uma afirmação de exposição talvez falsa.
+                        None => format!("{hp}->{cp}/{proto}"),
+                    };
+                }
+            }
             let (spec, proto) = match p.split_once('/') {
                 Some((s, pr)) => (s, pr),
                 None => (p.as_str(), "tcp"),
             };
-            match spec.split_once(':') {
-                Some((hp, cp)) => format!("{hp}->{cp}/{proto}"),
-                // Only the container's port (published without a fixed host port).
-                None => format!("{spec}/{proto}"),
-            }
+            // Só a porta do container (publicada sem porta de host fixa).
+            format!("{spec}/{proto}")
         })
         .collect::<Vec<_>>()
         .join(", ")
@@ -5298,9 +5321,17 @@ pub(crate) fn cmd_port(store: &Store, id: &str) -> Result<()> {
         return Ok(()); // docker prints nothing for a container with no published ports
     }
     for spec in &c.ports {
-        if let Some((host_part, cont_part)) = spec.split_once(':') {
-            let (cont_port, proto) = cont_part.split_once('/').unwrap_or((cont_part, "tcp"));
-            println!("{cont_port}/{proto} -> 0.0.0.0:{host_part}");
+        // Mesma correcção do `fmt_ports`, e aqui a saída antiga era absurda em vez
+        // de só enganadora: com `127.0.0.1:19555:80` o `split_once(':')` dava
+        // `host_part = "127.0.0.1"` e imprimia-se **`19555:80/tcp -> 0.0.0.0:127.0.0.1`**
+        // — um endereço que não existe, sobre um serviço restrito a loopback.
+        if let Ok((addr, hp, cp, proto)) = delonix_net::parse_publish_addr(spec) {
+            // Sem endereço explícito mantém-se o `0.0.0.0` histórico desta saída:
+            // é o formato do `docker port`, e scripts existentes lêem-no.
+            println!(
+                "{cp}/{proto} -> {}:{hp}",
+                addr.as_deref().unwrap_or("0.0.0.0")
+            );
         } else {
             println!("{spec}");
         }
@@ -6910,6 +6941,43 @@ fn health_monitor_loop(id: String, cfg: HealthConfig) {
                 Some(&next.health.to_string()),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod fmt_ports_tests {
+    /// Uma spec com endereço de host tem DOIS dois-pontos, e cortar no primeiro
+    /// troca as duas portas de sítio.
+    ///
+    /// Medido ao vivo antes da correcção, sobre um serviço publicado por compose
+    /// em `127.0.0.1:19555:80`: a coluna PORTS dizia `127.0.0.1->19555:80/tcp` e
+    /// o `container port` dizia **`19555:80/tcp -> 0.0.0.0:127.0.0.1`** — um
+    /// endereço que não existe, na saída que se lê para decidir se um serviço
+    /// está exposto. O bug era alcançável pelo CLI desde que o `-p` passou a
+    /// aceitar host-IP; ficou visível quando o compose deixou de os recusar.
+    #[test]
+    fn uma_spec_com_endereco_de_host_nao_troca_as_portas() {
+        assert_eq!(
+            super::fmt_ports(&["127.0.0.1:19555:80".to_string()]),
+            "127.0.0.1:19555->80/tcp"
+        );
+        assert_eq!(
+            super::fmt_ports(&["0.0.0.0:8080:80/udp".to_string()]),
+            "0.0.0.0:8080->80/udp"
+        );
+    }
+
+    /// As formas SEM endereço mantêm-se byte a byte — incluindo a omissão
+    /// deliberada do `0.0.0.0`, que existe para não afirmar uma exposição que
+    /// depende do caminho de publicação e do `DELONIX_PUBLISH_ADDR`.
+    #[test]
+    fn as_formas_sem_endereco_ficam_como_estavam() {
+        assert_eq!(super::fmt_ports(&["8080:80".to_string()]), "8080->80/tcp");
+        assert_eq!(
+            super::fmt_ports(&["8080:80/udp".to_string()]),
+            "8080->80/udp"
+        );
+        assert_eq!(super::fmt_ports(&["80".to_string()]), "80/tcp");
     }
 }
 
