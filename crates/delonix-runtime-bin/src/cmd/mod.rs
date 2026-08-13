@@ -20,6 +20,7 @@ pub mod ingress_proxy;
 pub mod init;
 pub mod k8s_recipes;
 pub mod kindmode;
+pub mod kinds;
 pub mod kube;
 pub mod kubeadm_config;
 pub mod lb;

@@ -87,16 +87,27 @@ const NESTED_ALIASES: &[(&str, &str, &str)] =
 /// Storage», a reader looks for the bug in their manifest, when the answer is
 /// that the Kind has a current spelling and this is not it.
 fn no_typed_schema(kind: &str) -> Error {
-    let hint = if kind.eq_ignore_ascii_case("Storage") {
+    Error::Invalid(format!(
+        "no typed schema for '{kind}'{} — Kinds with one: {}",
+        untyped_hint(kind),
+        TYPED_KINDS.join(", ")
+    ))
+}
+
+/// Why a Kind this engine KNOWS has no typed schema, or `""` for a name it does
+/// not know at all (a typo, where the list above is the whole answer).
+///
+/// Split out so `todo_kind_conhecido_tem_schema_ou_dica` can require one: a Kind
+/// added to `cmd::kinds` and forgotten here would answer «no typed schema for
+/// X», which reads as a defect in the manifest when the truth is a property of
+/// the Kind. Same shape as `not_converged_reason` and `no_teardown_reason`.
+fn untyped_hint(kind: &str) -> &'static str {
+    if kind.eq_ignore_ascii_case("Storage") {
         " — `kind: Storage` is the deprecated spelling: write `kind: Volume` with an \
          `nfs:`/`cifs:`/`webdav:` block, which is what it is rewritten to at load"
     } else {
         ""
-    };
-    Error::Invalid(format!(
-        "no typed schema for '{kind}'{hint} — Kinds with one: {}",
-        TYPED_KINDS.join(", ")
-    ))
+    }
 }
 
 #[derive(Subcommand)]
@@ -622,6 +633,30 @@ mod tests {
         );
         assert!(explain("Storage").is_err());
         assert!(explain("Container.naoexiste").is_err());
+    }
+
+    /// O inverso do teste acima, e é o que faltava: aquele prova que o `Storage`
+    /// tem dica, e nada exigia o mesmo do PRÓXIMO Kind sem schema.
+    ///
+    /// Um Kind acrescentado ao `cmd::kinds` e esquecido aqui responde «no typed
+    /// schema for X» — que se lê como defeito do manifesto quando é uma
+    /// propriedade do Kind. Ou tem schema tipado, ou escreve-se o obstáculo:
+    /// a mesma exigência que o `not_converged_reason` e o `no_teardown_reason`
+    /// já fazem do lado do stack.
+    #[test]
+    fn todo_kind_conhecido_tem_schema_ou_dica() {
+        for f in crate::cmd::kinds::all() {
+            if TYPED_KINDS.contains(&f.kind) {
+                continue;
+            }
+            assert!(
+                !untyped_hint(f.kind).is_empty(),
+                "{} não tem schema tipado nem dica — a recusa lê-se como «ninguém \
+                 chegou lá». Ou entra no TYPED_KINDS, ou o `untyped_hint` diz o que \
+                 escrever em vez dele.",
+                f.kind
+            );
+        }
     }
 
     /// A estritez tem de valer para TODOS os Kinds tipados, e a verificação é

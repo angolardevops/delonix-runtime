@@ -575,6 +575,33 @@ mudar o PID** e o caminho declarativo nunca lhe chamou — 5.ª ocorrência do p
   escritos à parte. Vm/FirewallPolicy/ShareVolume ganharam adaptador e ficaram fora da constante,
   logo eram SALTADOS — e o sintoma escondeu-se porque o `apply` antigo de cada Kind é idempotente
   e convergia pelo caminho errado. Há agora teste a exigir as três de acordo nos dois sentidos.
+  **E as listas deixaram de existir** (v0.53.x): eram SEIS, cada uma ao lado de quem a consumia —
+  `KINDS` (ordem do apply), `CONVERGING_KINDS`, `TEARDOWN_KINDS`, `kind_honors_namespace`, os
+  `DECLARATIVOS` do teste do `wait`, e os braços do `presence()`. Passam a sair de UMA tabela,
+  `cmd/kinds.rs` (`KindFacts`: domínio, forma, in_stack, converges, teardown, namespaced,
+  presence), uma linha por Kind. Os três defeitos que a motivaram são da mesma família e estão no
+  doc-comment do módulo: o adaptador acima, o `NetworkRoute` aplicado durante versões sem braço no
+  `presence` (o `ls` a chamar «unsupported kind» a um recurso que o apply cria), e os declarativos
+  que o `wait` lia como ausentes. **Um classificador só vale se governar alguma coisa**: o
+  `ownable` ficou deliberadamente DE FORA — é decidido dentro de cada `desired()`, que precisa de
+  um documento para correr, logo uma cópia na tabela seria a sétima lista sem nada a obrigá-la a
+  bater certo. Pela mesma razão não há `is_declarative(kind)`: o `wait` decide pelo marcador que o
+  store DEVOLVEU (`-`), não pelo que a tabela diz que ele devia devolver.
+- **O campo de actuação passou a ser visível** — coluna `DOMAIN` no `stack ls`/`describe` e na
+  tabela do `--fields` (`compute`/`storage`/`net-conn`/`net-policy`/`net-exposure`/`artifact`/
+  `composition`), mais um catálogo completo no fim do `stack plan --fields` com a FORMA de cada
+  Kind (`primary`, `sugar → X`, `deprecated → X`, `compat → X`, `aggregate`). As três de rede são
+  separadas de propósito: um `network` único esconderia que o `NetworkRoute` abre um CAMINHO e o
+  `FirewallPolicy` decide se o tráfego é PERMITIDO nele — as duas perguntas em série que este
+  motor recusa fundir. A FORMA é a coluna que não se adivinha da doc de cada Kind: diz se o
+  documento sobrevive ao `load`, que é a resposta a «porque é que o meu `kind: Egress` nunca
+  aparece no plano com esse nome».
+- **O `Storage` fora do `TYPED_KINDS` do schema é DELIBERADO, não uma lacuna** (registei-o como
+  lacuna numa análise e estava errado): não tem spec própria — é reescrito para `kind: Volume` — e
+  o `no_typed_schema` já trazia a dica dirigida. O que faltava era o gate: nada exigia o mesmo do
+  PRÓXIMO Kind sem schema, que responderia «no typed schema for X», lido como defeito do manifesto
+  quando é propriedade do Kind. `untyped_hint` + `todo_kind_conhecido_tem_schema_ou_dica`, a mesma
+  exigência que o `not_converged_reason` e o `no_teardown_reason` já fazem.
 - **A normalização é o ponto crítico**: se os dois lados não derem a mesma string, tudo aparece
   como deriva para sempre. O conjunto comparado é conservador, cada Kind tem teste a provar que um
   manifesto inalterado dá ZERO diferenças, e **`stack plan --fields`** diz o que é comparado e o
