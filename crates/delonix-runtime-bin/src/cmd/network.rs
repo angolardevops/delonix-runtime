@@ -117,6 +117,26 @@ pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
     cmd_rm(&store, name)
 }
 
+/// The FDB destination of an overlay peer: its `wg_ip` when the overlay is
+/// encrypted, otherwise the plain `node_ip`.
+///
+/// **Extracted because two places need the SAME answer.** The rule used to live
+/// only inside `realize_overlay`; the removal path needs it too, and if the two
+/// ever disagreed the engine would delete the wrong FDB entry — leaving the
+/// removed peer receiving traffic while cutting off one that should stay.
+fn peer_fdb_dst(parsed: &(String, Option<(String, String)>)) -> String {
+    let (node_ip, wg) = parsed;
+    wg.as_ref()
+        .map(|(_pubkey, wgip)| wgip.clone())
+        .unwrap_or_else(|| node_ip.clone())
+}
+
+/// The encrypted overlay's WireGuard interface, derived from the VNI (<= 15 chars).
+/// Same reason as above: realize and remove must name the same device.
+fn wg_iface_name(vni: u32) -> String {
+    format!("wgo{vni:06x}")
+}
+
 /// Applies the hot part of a plan. Only an overlay's peer list converges
 /// without recreating the network; everything else defines the plane containers
 /// are already attached to.
@@ -130,20 +150,22 @@ pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Res
                 for p in &added {
                     store.add_overlay_peer(name, p)?;
                 }
-                if !removed.is_empty() {
-                    // Say it rather than drop it: `add_overlay_peer` has no
-                    // inverse today, so a peer removed from the manifest stays
-                    // in the FDB. Silently reporting success here would be the
-                    // exact dishonesty this feature exists to remove.
-                    eprintln!(
-                        "{}",
-                        super::po::tf(
-                            "WARNING: network/{name}: peer(s) {peers} were removed from the \
-                             manifest but removing an overlay peer is not implemented — \
-                             recreate the network to drop them",
-                            &[("name", name), ("peers", &removed.join(", "))],
-                        )
-                    );
+                for p in &removed {
+                    remove_peer_everywhere(&store, name, p)?;
+                }
+                // **O lado ADD nunca tocou no dataplane**, e só se viu ao ligar o
+                // lado remove: `add_overlay_peer` escreve o registo e mais nada —
+                // quem semeia o FDB é o `realize_overlay`, que corre no `create`.
+                // Medido: acrescentar peers por manifesto deixava-os no registo e
+                // FORA do FDB, ou seja o overlay não os alcançava enquanto o
+                // `network inspect` jurava que sim.
+                //
+                // Re-semeia com a lista FINAL em vez de só com os `added`: o
+                // `do_vxlan` acrescenta apenas o que falta (comparação por token
+                // exacto), logo é idempotente, e uma lista completa também repõe
+                // o que um respawn do holder tenha levado.
+                if !added.is_empty() {
+                    reseed_overlay_fdb(&store, name)?;
                 }
             }
             other => {
@@ -155,6 +177,102 @@ pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Res
         }
     }
     Ok(())
+}
+
+/// Re-seeds the VXLAN uplink's FDB from the registry's CURRENT peer list.
+///
+/// Uses the same `set_vxlan` the creation path uses, so there is one way to seed
+/// an FDB and not two. The WireGuard side is deliberately NOT redone here: a new
+/// peer's tunnel needs `ensure_node_key` and the interface, which is
+/// `realize_overlay`'s job — and a converge that quietly re-ran all of it would
+/// be recreating the network under the name of a field update.
+fn reseed_overlay_fdb(store: &NetworkStore, name: &str) -> Result<()> {
+    let net = store.get(name)?;
+    let (Some(dev), Some(vni)) = (net.vxlan_dev(), net.vni) else {
+        return Ok(());
+    };
+    let dsts: Vec<String> = net
+        .peers
+        .iter()
+        .map(|p| peer_fdb_dst(&delonix_net::parse_overlay_peer(p)))
+        .collect();
+    let (bridge, _prefix, gateway) = infra::resolve_net(name)?;
+    match infra::set_vxlan(&dev, vni, &bridge, &gateway, &dsts) {
+        Err(e) if holder_is_down(&e) => {
+            // Nothing to seed into: the uplink lives in the holder's netns and
+            // died with it. The registry is the whole truth until it comes back.
+            Ok(())
+        }
+        r => r,
+    }
+}
+
+/// Retires an overlay peer from ALL THREE places it lives.
+///
+/// The gap this closes was triple, and only the first was documented: the
+/// registry's `peers=` line, the VXLAN **FDB** entry that makes this node flood
+/// to it, and — on an encrypted overlay — the **WireGuard peer**, which left a
+/// node no longer in the mesh with a working crypto channel. That last one is
+/// the security-relevant leftover.
+///
+/// **Dataplane before registry, deliberately.** If the FDB removal fails, the
+/// registry still lists the peer and the next plan proposes the removal again.
+/// The other order loses the only record of what still had to be undone.
+///
+/// A holder that is DOWN is the one failure treated as success, and it is not a
+/// shortcut: the uplink and its FDB live in the holder's ephemeral netns, so if
+/// the holder is gone the entry is gone with it — removing it from the registry
+/// is then the whole truth. Said out loud rather than silently, because "peer
+/// removed" and "peer removed from a network that is not running" are different
+/// facts.
+fn remove_peer_everywhere(store: &NetworkStore, name: &str, peer: &str) -> Result<()> {
+    let net = store.get(name)?;
+    let parsed = delonix_net::parse_overlay_peer(peer);
+    // `vxlan_dev()` and not a second `format!`: the name is hex-encoded
+    // (`dlxvx0042`, not `dlxvx66`), and a private copy of the formula would send
+    // the deletion to a device that does not exist — reporting success while the
+    // peer keeps receiving traffic. The same «one formula, one owner» rule the
+    // bridge name already carries.
+    if let (Some(dev), Some(vni)) = (net.vxlan_dev(), net.vni) {
+        let dst = peer_fdb_dst(&parsed);
+        if let Err(e) = infra::del_vxlan_peer(&dev, &dst) {
+            if !holder_is_down(&e) {
+                return Err(e);
+            }
+            println!(
+                "{}",
+                super::po::tf(
+                    "network/{name}: peer {peer} removed from the registry (the overlay is not \
+                     running, so its FDB entry is already gone)",
+                    &[("name", name), ("peer", peer)],
+                )
+            );
+            return store.remove_overlay_peer(name, peer).map(|_| ());
+        }
+        // The tunnel only exists on an encrypted overlay, and only for a peer
+        // that carried a key.
+        if net.wg_ip.is_some() {
+            if let Some((pubkey, _)) = &parsed.1 {
+                if let Err(e) = infra::del_wg_peer(&wg_iface_name(vni), pubkey) {
+                    if !holder_is_down(&e) {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+    }
+    store.remove_overlay_peer(name, peer)?;
+    Ok(())
+}
+
+/// Is this the holder being unreachable, rather than the operation failing?
+///
+/// Matched on the error the control socket produces, because the two mean
+/// opposite things here: one says the work is already done, the other says it
+/// was not done and nobody noticed.
+fn holder_is_down(e: &delonix_runtime_core::Error) -> bool {
+    let s = e.to_string();
+    s.contains("holder is down") || s.contains("control socket")
 }
 
 /// Records that this stack owns the network, and what it last applied.
@@ -714,20 +832,13 @@ fn realize_overlay(net: &Network) -> Result<()> {
     infra::network_create_with(&net.name, &net.prefix)?;
     let (bridge, _prefix, gateway) = infra::resolve_net(&net.name)?;
     // FDB: `wg_ip` of each peer if encrypted, otherwise the plain `node_ip`.
-    let dsts: Vec<String> = parsed
-        .iter()
-        .map(|(node_ip, wg)| {
-            wg.as_ref()
-                .map(|(_pubkey, wgip)| wgip.clone())
-                .unwrap_or_else(|| node_ip.clone())
-        })
-        .collect();
+    let dsts: Vec<String> = parsed.iter().map(peer_fdb_dst).collect();
     infra::set_vxlan(&dev, vni, &bridge, &gateway, &dsts)?;
     // WireGuard only in the ENCRYPTED overlay (availability was already ensured
     // above).
     if let Some(my_wg_ip) = net.wg_ip.as_deref() {
         let key = delonix_net::wg::ensure_node_key()?;
-        let iface = format!("wgo{vni:06x}"); // <= 15 chars
+        let iface = wg_iface_name(vni);
         infra::set_wg_iface(&iface, &key.private, WG_PORT, &format!("{my_wg_ip}/24"))?;
         for (node_ip, wg) in &parsed {
             if let Some((pubkey, wgip)) = wg {
@@ -973,5 +1084,47 @@ mod tests {
         // `gateway` is derived from the base octet and empty in the manifest by
         // default — comparing it would report a difference on every plan.
         assert!(!f.contains_key("gateway"));
+    }
+
+    /// **O destino do FDB tem de ser o MESMO no realize e na remoção.**
+    ///
+    /// A regra («`wg_ip` se o overlay é cifrado, senão o `node_ip`») vivia só
+    /// dentro do `realize_overlay`. Duplicá-la no caminho de remoção é como as
+    /// duas passam a discordar — e o sintoma seria o pior possível: apaga-se a
+    /// entrada ERRADA, o peer removido continua a receber tráfego e um que devia
+    /// ficar deixa de o receber. Por isso é uma função, e este teste exerce-a com
+    /// as duas formas que um peer pode ter.
+    #[test]
+    fn o_dst_do_fdb_e_o_mesmo_para_as_duas_formas_de_peer() {
+        // Cifrado: manda o `wg_ip`, que é o endereço DENTRO do túnel.
+        let cifrado = (
+            "10.0.0.7".to_string(),
+            Some(("chave".to_string(), "10.9.0.7".to_string())),
+        );
+        assert_eq!(super::peer_fdb_dst(&cifrado), "10.9.0.7");
+        // Em claro: manda o `node_ip`, o endereço real do nó.
+        let claro = ("10.0.0.8".to_string(), None);
+        assert_eq!(super::peer_fdb_dst(&claro), "10.0.0.8");
+        // E o que a função devolve é o que o `parse_overlay_peer` produz a partir
+        // da string do registo — o elo que fecha o ciclo add→remove.
+        let do_registo = delonix_net::parse_overlay_peer("10.0.0.7=chave=10.9.0.7");
+        assert_eq!(super::peer_fdb_dst(&do_registo), "10.9.0.7");
+    }
+
+    /// O nome do device VXLAN tem UMA fórmula, e é hex.
+    ///
+    /// Escrevi `format!("dlxvx{vni}")` (decimal) na primeira versão da remoção, e
+    /// o `Network::vxlan_dev()` produz `dlxvx002a` para o VNI 42. A deleção teria
+    /// ido para um device inexistente e reportado sucesso — o peer a receber
+    /// tráfego com o registo a dizer que saiu.
+    #[test]
+    fn o_nome_do_device_vxlan_e_o_do_motor() {
+        let tmp = std::env::temp_dir().join(format!("dlx-vxdev-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let store = delonix_net::NetworkStore::open(&tmp).unwrap();
+        let net = store.create_overlay("m", 42, &[], None).unwrap();
+        assert_eq!(net.vxlan_dev().as_deref(), Some("dlxvx002a"));
+        assert_ne!(net.vxlan_dev().as_deref(), Some("dlxvx42"));
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

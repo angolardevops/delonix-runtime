@@ -1483,7 +1483,45 @@ impl NetworkStore {
             .cloned()
             .collect();
         peers.push(peer.to_string());
-        // re-persists replacing ONLY the `peers=` line (preserves base/vni/wgip).
+        self.rewrite_peers_line(name, &peers)
+    }
+
+    /// **Removes an overlay peer** — the inverse of [`Self::add_overlay_peer`],
+    /// and its absence was a real gap: a peer taken out of the manifest stayed
+    /// in the registry, and `network::converge` could only print a warning
+    /// saying so.
+    ///
+    /// Matches on the `node_ip` alone, like the add does, so `10.0.0.7` removes
+    /// `10.0.0.7=<key>=<wg_ip>` — the caller has the address, not necessarily
+    /// the whole triple.
+    ///
+    /// **Idempotent**: removing a peer that is not there is `Ok`, symmetric with
+    /// an add that replaces rather than duplicates. A converge that failed
+    /// because the peer was already gone would turn a no-op into an error.
+    pub fn remove_overlay_peer(&self, name: &str, peer: &str) -> Result<Network> {
+        let net = self.get(name)?;
+        if net.driver != DRIVER_OVERLAY {
+            return Err(Error::Invalid(format!("'{name}' is not an overlay")));
+        }
+        let (gone, _) = parse_overlay_peer(peer);
+        if gone.is_empty() {
+            return Err(Error::Invalid("invalid peer (missing node_ip)".into()));
+        }
+        let peers: Vec<String> = net
+            .peers
+            .iter()
+            .filter(|p| parse_overlay_peer(p).0 != gone)
+            .cloned()
+            .collect();
+        self.rewrite_peers_line(name, &peers)
+    }
+
+    /// Re-persists replacing ONLY the `peers=` line (preserves base/vni/wgip).
+    ///
+    /// Extracted because add and remove both write it: two writers of the same
+    /// line is how the two versions come to disagree — the discipline the
+    /// `set_metadata` line-by-line rewrite already follows for the same reason.
+    fn rewrite_peers_line(&self, name: &str, peers: &[String]) -> Result<Network> {
         let raw = std::fs::read_to_string(self.path(name)).map_err(|e| Error::Runtime {
             context: "read overlay",
             message: e.to_string(),
@@ -2344,6 +2382,69 @@ mod tests {
         assert_eq!(after.wg_ip.as_deref(), Some("10.9.0.1"));
         assert_eq!(after.driver, super::DRIVER_OVERLAY);
         assert_eq!(after.labels.get("delonix.io/stack").unwrap(), "infra");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// O inverso do `add_overlay_peer`, que durante muito tempo não existiu: um
+    /// peer tirado do manifesto ficava no registo e o `converge` só sabia avisar.
+    ///
+    /// Exige as três coisas que a reescrita LINHA A LINHA existe para garantir —
+    /// o `vni`, o `wgIp` e as labels sobrevivem à remoção. Reescrever o ficheiro
+    /// inteiro perderia-os, e o sintoma seria um overlay que deixa de saber o seu
+    /// próprio VNI depois de perder um par.
+    #[test]
+    fn remove_overlay_peer_tira_o_peer_e_preserva_vni_wgip_e_labels() {
+        use super::NetworkStore;
+        let tmp = std::env::temp_dir().join(format!("dlx-net-rmp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let store = NetworkStore::open(&tmp).unwrap();
+        store
+            .create_overlay(
+                "malha",
+                42,
+                &[
+                    "10.0.0.7=chave=10.9.0.7".to_string(),
+                    "10.0.0.8".to_string(),
+                ],
+                Some("10.9.0.1"),
+            )
+            .unwrap();
+        store
+            .set_metadata(
+                "malha",
+                &[("delonix.io/stack".into(), Some("infra".into()))],
+                &[],
+            )
+            .unwrap();
+
+        // Casa pelo `node_ip` SOZINHO — quem remove tem o endereço, não
+        // necessariamente o triplo inteiro que foi escrito.
+        let after = store.remove_overlay_peer("malha", "10.0.0.7").unwrap();
+        assert_eq!(
+            after.peers,
+            vec!["10.0.0.8".to_string()],
+            "{:?}",
+            after.peers
+        );
+        assert_eq!(after.vni, Some(42), "o vni não pode desaparecer");
+        assert_eq!(after.wg_ip.as_deref(), Some("10.9.0.1"));
+        assert_eq!(after.driver, super::DRIVER_OVERLAY);
+        assert_eq!(after.labels.get("delonix.io/stack").unwrap(), "infra");
+
+        // Idempotente: remover o que já não lá está é `Ok`, simétrico com um add
+        // que substitui em vez de duplicar. Um erro aqui transformaria um no-op
+        // num apply falhado.
+        let de_novo = store.remove_overlay_peer("malha", "10.0.0.7").unwrap();
+        assert_eq!(de_novo.peers, vec!["10.0.0.8".to_string()]);
+
+        // E o último peer deixa a linha presente e vazia, não ausente.
+        let vazio = store.remove_overlay_peer("malha", "10.0.0.8").unwrap();
+        assert!(vazio.peers.is_empty(), "{:?}", vazio.peers);
+        assert_eq!(vazio.vni, Some(42));
+
+        // Não é overlay → recusa, como o add.
+        store.create("simples").unwrap();
+        assert!(store.remove_overlay_peer("simples", "10.0.0.7").is_err());
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
