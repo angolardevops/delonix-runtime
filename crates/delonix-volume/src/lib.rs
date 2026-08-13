@@ -54,6 +54,21 @@ pub struct Volume {
     /// `delonix.io/last-applied` here, never in `labels`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub annotations: BTreeMap<String, String>,
+    /// The volume this one is CARVED OUT OF, for a share: a real subdirectory of
+    /// another volume's mountpoint, with its own name, quota and consumers
+    /// (`kind: Volume` with a `share:` block; `delonix sharevolume`).
+    ///
+    /// It lives here, and not in a registry beside this one, because everything
+    /// else about a share — mountpoint, quota, alert threshold, creation time —
+    /// was ALREADY duplicated into a second record whose only unique field was
+    /// this one. Two records for one object is how the two start disagreeing,
+    /// and it is why a share could not be owned by a stack: ownership is stamped
+    /// in `labels`, which only this record has.
+    ///
+    /// `#[serde(default)]`, so every `meta.json` already on disk keeps
+    /// deserializing as what it is — a volume that is nobody's subdirectory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
 }
 
 /// The drivers that mount a network share (as opposed to `local`/loopback).
@@ -207,6 +222,27 @@ impl VolumeStore {
         Ok(Self { root })
     }
 
+    /// The namespaces that hold at least one scoped volume, from the UNSCOPED store.
+    ///
+    /// Exists so a caller can walk every namespace without knowing the on-disk
+    /// layout — the sub-tree name is private precisely so it can change. A
+    /// listing that has to enumerate all shares is the reason: one that shows a
+    /// single namespace is how an operator deletes a parent volume believing
+    /// nothing hangs off it.
+    pub fn namespaces(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        let Ok(rd) = fs::read_dir(self.root.join(Self::NS_SUBTREE)) else {
+            return out;
+        };
+        for e in rd.flatten() {
+            if e.path().is_dir() {
+                out.push(e.file_name().to_string_lossy().into_owned());
+            }
+        }
+        out.sort();
+        out
+    }
+
     /// Whether a namespace-scoped volume of this name exists, seen from the UNSCOPED store.
     fn scoped_exists(&self, namespace: &str, name: &str) -> bool {
         self.root
@@ -275,12 +311,17 @@ impl VolumeStore {
     /// this store never manages ITS lifecycle beyond that — `remove()` only
     /// ever deletes this record's OWN bookkeeping dir (`<root>/<name>/`), not
     /// `mountpoint`, so removing a share never touches the shared data.
+    /// `parent` names the volume this one is carved out of (see [`Volume::parent`]).
+    /// It is preserved on a re-register rather than overwritten with `None`: an
+    /// idempotent re-apply must not turn a share back into a plain volume, which
+    /// is how it would stop being recognised as one.
     pub fn register_external(
         &self,
         name: &str,
         mountpoint: &std::path::Path,
         quota_bytes: Option<u64>,
         alert_pct: Option<u8>,
+        parent: Option<&str>,
     ) -> Result<Volume> {
         if !Self::valid_name(name) {
             return Err(Error::Invalid(format!("invalid volume name: {name:?}")));
@@ -291,6 +332,9 @@ impl VolumeStore {
             existing.mountpoint = mountpoint.to_string_lossy().into_owned();
             existing.quota_bytes = quota_bytes;
             existing.alert_pct = alert_pct;
+            if let Some(p) = parent {
+                existing.parent = Some(p.to_string());
+            }
             existing
         } else {
             Volume {
@@ -304,6 +348,7 @@ impl VolumeStore {
                 alert_pct,
                 labels: BTreeMap::new(),
                 annotations: BTreeMap::new(),
+                parent: parent.map(str::to_string),
             }
         };
         write_meta(&self.meta_path(name), &vol)?;
@@ -348,6 +393,9 @@ impl VolumeStore {
             alert_pct: None,
             labels: BTreeMap::new(),
             annotations: BTreeMap::new(),
+            // A volume created here owns its own data directory; only
+            // `register_external` carves one out of another volume.
+            parent: None,
         };
         // Mount BEFORE persisting: if NFS fails, we don't leave an orphan volume.
         if let Err(e) = self.ensure_mounted(&vol) {
@@ -1334,7 +1382,7 @@ mod tests {
         let (s, dir) = store();
         let external = dir.join("shares").join("..");
         let err = s
-            .register_external("..", &external, None, None)
+            .register_external("..", &external, None, None, None)
             .unwrap_err();
         assert!(format!("{err}").contains("invalid volume name"));
         let _ = std::fs::remove_dir_all(dir);
@@ -1345,7 +1393,7 @@ mod tests {
         let (s, dir) = store();
         let external = dir.join("shares").join("tenant-a");
         let v = s
-            .register_external("share-a", &external, Some(1000), Some(80))
+            .register_external("share-a", &external, Some(1000), Some(80), Some("nas"))
             .unwrap();
         assert_eq!(v.mountpoint, external.to_string_lossy());
         assert!(
@@ -1355,7 +1403,7 @@ mod tests {
         // Re-registering (a `ShareVolume` re-`apply`) updates quota in place,
         // does not error, and keeps pointing at the SAME external path.
         let v2 = s
-            .register_external("share-a", &external, Some(2000), Some(90))
+            .register_external("share-a", &external, Some(2000), Some(90), None)
             .unwrap();
         assert_eq!(v2.quota_bytes, Some(2000));
         assert_eq!(v2.mountpoint, external.to_string_lossy());
@@ -1698,7 +1746,7 @@ mod tests {
         let store = VolumeStore::open(&base).unwrap();
         let shared = base.join("nas").join("shares").join("tenant-a");
         store
-            .register_external("tenant-a", &shared, Some(1024), Some(90))
+            .register_external("tenant-a", &shared, Some(1024), Some(90), Some("nas"))
             .unwrap();
         fs::write(shared.join("data"), b"nas-payload").unwrap();
 

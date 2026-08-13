@@ -51,7 +51,6 @@ const TYPED_KINDS: &[&str] = &[
     "Secret",
     "Image",
     "Tunnel",
-    "ShareVolume",
     "Dependency",
     "NetworkRoute",
     "HTTPRoute",
@@ -102,6 +101,10 @@ fn no_typed_schema(kind: &str) -> Error {
 /// X», which reads as a defect in the manifest when the truth is a property of
 /// the Kind. Same shape as `not_converged_reason` and `no_teardown_reason`.
 fn untyped_hint(kind: &str) -> &'static str {
+    if kind.eq_ignore_ascii_case("ShareVolume") {
+        return " — `kind: ShareVolume` is the deprecated spelling: write `kind: Volume` with a \
+                `share: {from: ...}` block, which is what it is rewritten to at load";
+    }
     if kind.eq_ignore_ascii_case("Storage") {
         " — `kind: Storage` is the deprecated spelling: write `kind: Volume` with an \
          `nfs:`/`cifs:`/`webdav:` block, which is what it is rewritten to at load"
@@ -192,11 +195,6 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
                 generator.subschema_for::<super::tunnel::TunnelSpec>(),
                 "TunnelSpec",
                 super::tunnel::TUNNEL_SPEC_FIELDS,
-            ),
-            "ShareVolume" => (
-                generator.subschema_for::<super::sharevolume::ShareVolumeSpec>(),
-                "ShareVolumeSpec",
-                super::sharevolume::SHAREVOLUME_SPEC_FIELDS,
             ),
             "Dependency" => (
                 generator.subschema_for::<super::dependency::DependencySpec>(),

@@ -544,6 +544,15 @@ fn lower_legacy_kind(doc: &mut ManifestDoc) -> Result<()> {
     if doc.kind == "Storage" {
         lower_storage(doc)?;
     }
+    // `kind: ShareVolume` folds into `kind: Volume` with a `share:` block. A
+    // share was ALREADY a volume — `VolumeStore::register_external` wrote one —
+    // and the separate Kind only added a second record beside it whose single
+    // unique field was the parent's name. Two records for one object is how the
+    // two start disagreeing, and it is why a share could never be owned by a
+    // stack: ownership is stamped in `labels`, which only the volume has.
+    if doc.kind == "ShareVolume" {
+        lower_sharevolume(doc)?;
+    }
     // `kind: Container` with `spec.containers[]` — the k8s Pod grammar applied to
     // a single container. It gets a WARNING and **no rewrite**, unlike the two
     // above, and the reason is worth writing down because the obvious move here
@@ -637,6 +646,57 @@ fn lower_storage(doc: &mut ManifestDoc) -> Result<()> {
         "Storage '{name}': `kind: Storage` is deprecated — use `kind: Volume` with a \
          `{block}:` block (same fields, same behaviour)",
         &[("name", &doc.metadata.name), ("block", block)],
+    ));
+    Ok(())
+}
+
+/// Rewrites a legacy `kind: ShareVolume` into `kind: Volume` with a `share:` block.
+///
+/// `quota`/`alertPct` move UNCHANGED to the volume's own fields — they mean the
+/// same thing there and always did; only `storageRef` moves, into `share.from`.
+/// Which is the whole point: one field was all the separate Kind ever added.
+fn lower_sharevolume(doc: &mut ManifestDoc) -> Result<()> {
+    // Warned against the Kind the user actually wrote, before the rewrite —
+    // the same order `lower_storage` uses, and for the same reason.
+    warn_unknown_fields(doc, crate::cmd::sharevolume::SHAREVOLUME_SPEC_FIELDS);
+    let serde_yaml::Value::Mapping(m) = &doc.spec else {
+        return Err(Error::Invalid(super::po::tf(
+            "ShareVolume '{name}': spec must be a mapping",
+            &[("name", &doc.metadata.name)],
+        )));
+    };
+    let from = m
+        .get(serde_yaml::Value::from("storageRef"))
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            Error::Invalid(super::po::tf(
+                "ShareVolume '{name}': spec.storageRef is required",
+                &[("name", &doc.metadata.name)],
+            ))
+        })?
+        .to_string();
+    let mut out = serde_yaml::Mapping::new();
+    for (k, v) in m {
+        if k.as_str() == Some("storageRef") {
+            continue;
+        }
+        out.insert(k.clone(), v.clone());
+    }
+    let mut share = serde_yaml::Mapping::new();
+    share.insert(
+        serde_yaml::Value::from("from"),
+        serde_yaml::Value::from(from),
+    );
+    out.insert(
+        serde_yaml::Value::from("share"),
+        serde_yaml::Value::Mapping(share),
+    );
+    doc.spec = serde_yaml::Value::Mapping(out);
+    doc.kind = "Volume".to_string();
+    super::output::warn(&super::po::tf(
+        "ShareVolume '{name}': `kind: ShareVolume` is deprecated — use `kind: Volume` with a \
+         `share: {from: ...}` block (same fields, same behaviour, and now ownable by a stack)",
+        &[("name", &doc.metadata.name)],
     ));
     Ok(())
 }
@@ -1014,11 +1074,20 @@ spec: { disk: k8s-golden }
                 "o alias {alias} tem de chegar canonicalizado ao lado honrado"
             );
         }
+        // `Volume` honra-a desde a fusao do `ShareVolume`: um volume com bloco
+        // `share:` e escopado pelo namespace (e o directorio dos dados que muda),
+        // um volume simples nao. E o unico Kind cuja resposta vem do DOCUMENTO,
+        // e por isso `honors_namespace` diz que sim — o aviso do `load` seria
+        // errado num share, e um aviso errado e pior que nenhum.
+        assert!(kind_honors_namespace("Volume"));
+        assert!(
+            kind_honors_namespace("ShareVolume"),
+            "a grafia antiga tambem"
+        );
         // Sem semantica de namespace hoje: aceitam o campo e nao fazem nada com ele,
         // que e precisamente o que passa a ser avisado no `load`.
         for kind in [
             "Network",
-            "Volume",
             "Storage",
             "Secret",
             "Image",
@@ -1383,6 +1452,48 @@ spec:
         // O `type` não sobrevive: passou a ser o nome do bloco.
         assert!(doc.spec.get("type").is_none());
         assert!(b.get("type").is_none());
+    }
+
+    /// Um `kind: ShareVolume` era um `kind: Volume` com um registo a mais ao
+    /// lado, cujo único campo próprio era o pai. Passa a ser o bloco `share:`,
+    /// e o que a reescrita tem de garantir é que **só** o `storageRef` se move:
+    /// `quota` e `alertPct` já significavam num volume exactamente o que
+    /// significavam aqui, e movê-los para dentro do bloco criaria um segundo
+    /// sítio para os escrever.
+    #[test]
+    fn sharevolume_e_reescrito_como_volume_com_bloco_share() {
+        let mut doc: ManifestDoc = serde_yaml::from_str(
+            "apiVersion: delonix.io/v1\nkind: ShareVolume\nmetadata: { name: db, namespace: teamA }\nspec: { storageRef: nas, quota: 5G, alertPct: 80 }\n",
+        )
+        .unwrap();
+        lower_legacy_kind(&mut doc).unwrap();
+        assert_eq!(doc.kind, "Volume");
+        assert_eq!(
+            doc.spec.get("share").unwrap().get("from").unwrap().as_str(),
+            Some("nas")
+        );
+        assert_eq!(doc.spec.get("quota").unwrap().as_str(), Some("5G"));
+        assert_eq!(doc.spec.get("alertPct").unwrap().as_u64(), Some(80));
+        // O `storageRef` não sobrevive à solta: passou a ser `share.from`, e
+        // deixá-lo nos dois sítios é como os dois passam a discordar.
+        assert!(doc.spec.get("storageRef").is_none());
+        // A namespace segue com o documento — é ela que decide o directório dos
+        // dados, e um share que a perdesse na reescrita mudaria de sítio.
+        assert_eq!(doc.metadata.namespace.as_deref(), Some("teamA"));
+    }
+
+    /// Sem `storageRef` não há share nenhum — o campo é o que o Kind existia
+    /// para carregar. Recusar nomeia o campo; deixar passar produziria um
+    /// `kind: Volume` com um bloco `share:` sem `from`, e o erro apareceria
+    /// mais à frente contra um documento que o utilizador nunca escreveu.
+    #[test]
+    fn um_sharevolume_sem_storage_ref_e_recusado() {
+        let mut doc: ManifestDoc = serde_yaml::from_str(
+            "apiVersion: delonix.io/v1\nkind: ShareVolume\nmetadata: { name: db }\nspec: { quota: 5G }\n",
+        )
+        .unwrap();
+        let e = lower_legacy_kind(&mut doc).unwrap_err().to_string();
+        assert!(e.contains("storageRef"), "{e}");
     }
 
     /// `smb` sempre foi um alias de `cifs` (o `build_mount` manda os dois para o

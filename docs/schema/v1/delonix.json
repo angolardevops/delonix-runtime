@@ -1765,6 +1765,19 @@
       },
       "type": "object"
     },
+    "ShareBlock": {
+      "description": "`spec.share` — the volume this one is carved out of.\n\nOne field, because the rest was already on the volume: `quota`/`alertPct` are\nthe spec's own, so a share sets them exactly where every other volume does\ninstead of in a second place that would have to be kept in agreement.",
+      "properties": {
+        "from": {
+          "description": "Name of the volume to carve this one out of — typically a network volume\n(`nfs:`/`cifs:`/`webdav:`), which is the case the feature exists for, but\nany volume works: the mechanism is a real subdirectory of its mountpoint.\n\n`storageRef` is the spelling `kind: ShareVolume` used, kept as an alias so\na manifest that only renames its Kind does not also have to rename this.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from"
+      ],
+      "type": "object"
+    },
     "ShareSpec": {
       "properties": {
         "maprootGroup": {
@@ -1792,38 +1805,6 @@
           "type": "boolean"
         }
       },
-      "type": "object"
-    },
-    "ShareVolumeSpec": {
-      "additionalProperties": false,
-      "properties": {
-        "alertPct": {
-          "default": null,
-          "description": "Usage percentage above which `ls`/`describe` flag a WARN (default 90).",
-          "format": "uint8",
-          "maximum": 255,
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "quota": {
-          "default": null,
-          "description": "Human size (`5G`, `500M`, ...). Omit = unlimited (still measured/shown).",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "storageRef": {
-          "description": "Name of an existing `kind: Storage` (a network-backed `delonix-volume`).",
-          "type": "string"
-        }
-      },
-      "required": [
-        "storageRef"
-      ],
       "type": "object"
     },
     "SshSpec": {
@@ -2497,6 +2478,17 @@
       "additionalProperties": false,
       "description": "`spec` of `kind: Volume` — mirrors the fields of `VolumeCmd::Create`.",
       "properties": {
+        "alertPct": {
+          "default": null,
+          "description": "Usage percentage above which `ls`/`describe` flag a WARN (default 90).\n\nThe record has carried this since volumes had quotas; the manifest could\nnot set it, so a declarative volume was stuck with the default while the\nCLI could change it. It arrived with the `share:` block below, which\nneeds it, and applies to every volume for the same reason it always did.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "cifs": {
           "anyOf": [
             {
@@ -2555,6 +2547,18 @@
             "string",
             "null"
           ]
+        },
+        "share": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ShareBlock"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A subdirectory carved out of ANOTHER volume, with its own name, quota and\nconsumers — what `kind: ShareVolume` used to be a Kind of its own for.\n\nIt is a block and not a Kind because a share IS a volume: it was already\nregistered as one (`VolumeStore::register_external`), and the separate\nKind only added a second record whose one unique field was the parent's\nname. The block sits beside `nfs:`/`cifs:`/`webdav:` and is exclusive\nwith them for the reason `net_share` gives: a volume is one mount, and a\nshare does not mount anything — it points inside a mount someone else made."
         },
         "webdav": {
           "anyOf": [
@@ -2784,25 +2788,6 @@
         "properties": {
           "spec": {
             "$ref": "#/$defs/TunnelSpec"
-          }
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "kind": {
-            "const": "ShareVolume"
-          }
-        },
-        "required": [
-          "kind"
-        ]
-      },
-      "then": {
-        "properties": {
-          "spec": {
-            "$ref": "#/$defs/ShareVolumeSpec"
           }
         }
       }
