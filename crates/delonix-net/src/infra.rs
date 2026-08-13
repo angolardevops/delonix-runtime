@@ -1496,6 +1496,18 @@ fn ensure_net_bridge(bridge: &str, gateway: &str) -> Result<()> {
         // já usa mais abaixo para reaplicar o egress. Sem `NetDef` (a bridge de
         // infra, que não é uma rede de utilizador) o /16 histórico é a resposta
         // certa e não um palpite: é o que o `INFRA_CIDR` declara.
+        // O endereço DA BRIDGE é sempre o derivado do prefixo, mesmo quando a
+        // rede declara outro gateway: o holder tem de continuar a ter um
+        // endereço nela para encaminhar e mascarar. O gateway DECLARADO muda
+        // apenas a rota default que os containers recebem — são duas coisas
+        // diferentes, e confundi-las poria o endereço do appliance na bridge do
+        // holder, deixando-o sem forma de falar com a própria rede.
+        let derivado = network_list()
+            .into_iter()
+            .find(|d| d.bridge == bridge)
+            .and_then(|d| crate::Cidr::parse(&d.prefix))
+            .and_then(|c| c.gateway());
+        let gateway = derivado.as_deref().unwrap_or(gateway);
         let plen = network_list()
             .into_iter()
             .find(|d| d.bridge == bridge)
@@ -2058,7 +2070,7 @@ fn do_attach(netns: &str, ip: &str, bridge: &str, gateway: &str, namespace: &str
     run("ip", &["link", "set", &vh, "master", &bridge])?;
     run("ip", &["link", "set", &vh, "up"])?;
     run("ip", &["link", "set", "eth0", "netns", &netns])?;
-    let cidr = format!("{ip}/16");
+    let cidr = format!("{ip}/{}", plen_of_bridge(&bridge));
     for argv in [
         vec!["netns", "exec", &netns, "ip", "link", "set", "lo", "up"],
         vec![
@@ -2156,7 +2168,7 @@ fn do_attach_extra(
     run("ip", &["link", "set", &vh, "master", &bridge])?;
     run("ip", &["link", "set", &vh, "up"])?;
     run("ip", &["link", "set", &ifname, "netns", &netns])?;
-    let cidr = format!("{ip}/16");
+    let cidr = format!("{ip}/{}", plen_of_bridge(&bridge));
     for argv in [
         vec![
             "netns", "exec", &netns, "ip", "addr", "add", &cidr, "dev", &ifname,
@@ -3461,6 +3473,15 @@ pub struct NetDef {
     /// `ensure_net_bridge` when the bridge is recreated.
     #[serde(default)]
     pub egress: EgressState,
+    /// Gateway DECLARADO, quando a rede tem um.
+    ///
+    /// `None` — que é o que todo o registo escrito até aqui significa — quer
+    /// dizer «o derivado», e por isso não há migração nenhuma. Quando existe, é
+    /// a rota default que os containers desta rede recebem; o endereço DA
+    /// BRIDGE continua a ser o derivado, porque o holder tem de continuar a
+    /// falar na rede que encaminha.
+    #[serde(default)]
+    pub gateway: Option<String>,
 }
 
 impl NetDef {
@@ -3478,6 +3499,7 @@ impl NetDef {
             bridge: crate::bridge_name(name),
             prefix: prefix.to_string(),
             egress: EgressState::default(),
+            gateway: None,
         }
     }
 }
@@ -3861,6 +3883,23 @@ fn routes_forget_network(name: &str) {
     }
 }
 
+/// O comprimento do prefixo da rede a que uma bridge pertence.
+///
+/// **Quarto sítio onde o `/16` estava assado**, e o mais discreto: o endereço do
+/// CONTAINER era `{ip}/16`, o que numa rede `/24` lhe dá uma rota de link para
+/// `172.20.0.0/16` — 256 vezes maior do que a rede onde está. O sintoma não é um
+/// erro: é o container a julgar-se vizinho de endereços que estão noutra rede,
+/// a resolvê-los por ARP na sua bridge e a não obter resposta, enquanto a rota
+/// default (que os alcançaria) nunca chega a ser consultada.
+fn plen_of_bridge(bridge: &str) -> u8 {
+    network_list()
+        .into_iter()
+        .find(|d| d.bridge == bridge)
+        .and_then(|d| crate::Cidr::parse(&d.prefix))
+        .map(|c| c.len)
+        .unwrap_or(16)
+}
+
 /// Gateway (= ingress) de um prefixo — o PRIMEIRO endereço utilizável.
 ///
 /// Era `{prefix}.0.1`, o que só é o primeiro utilizável num /16: para um
@@ -3889,7 +3928,13 @@ pub fn resolve_net(name: &str) -> Result<(String, String, String)> {
             "ingress network '{name}' does not exist — create it with `delonix network create {name}`, or use the default network"
         ))
     })?;
-    let gw = gateway_of(&def.prefix);
+    // O DECLARADO ganha ao derivado — é ele que vira a rota default dos
+    // containers desta rede (`ip route add default via`). Sem declaração, o
+    // derivado, que é o que sempre foi.
+    let gw = def
+        .gateway
+        .clone()
+        .unwrap_or_else(|| gateway_of(&def.prefix));
     Ok((def.bridge, def.prefix, gw))
 }
 
@@ -3942,6 +3987,31 @@ pub fn network_create(name: &str) -> Result<NetDef> {
 /// Used to ALIGN the VMs' network plan to the prefix decided by the
 /// `NetworkStore` (the source of truth), so the same network has the SAME subnet
 /// in containers and VMs. Idempotent by name.
+pub fn network_create_with_gateway(
+    name: &str,
+    prefix: &str,
+    gateway: Option<&str>,
+) -> Result<NetDef> {
+    if let Some(def) = network_get(name) {
+        return Ok(def);
+    }
+    let mut def = NetDef::new(name, prefix);
+    def.gateway = gateway.map(str::to_string);
+    std::fs::create_dir_all(networks_dir()).map_err(|e| Error::Runtime {
+        context: "networks dir",
+        message: e.to_string(),
+    })?;
+    let body = serde_json::to_string_pretty(&def).map_err(|e| Error::Runtime {
+        context: "netdef",
+        message: e.to_string(),
+    })?;
+    std::fs::write(netdef_path(name), body).map_err(|e| Error::Runtime {
+        context: "netdef",
+        message: e.to_string(),
+    })?;
+    Ok(def)
+}
+
 pub fn network_create_with(name: &str, prefix: &str) -> Result<NetDef> {
     if let Some(def) = network_get(name) {
         return Ok(def);
