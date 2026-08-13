@@ -357,9 +357,16 @@ decide se a máquina volta a si:
   container. `on-failure` fica de fora: quer dizer «reinicia se sair mal», não «está de pé no
   arranque».
 
+**Fechado desde então**: as **VMs** ganharam unit (prefixo próprio `delonix-boot-vm-`, porque um
+container e uma VM podem ter o mesmo nome em stores diferentes; `Type=oneshot`+`RemainAfterExit` e
+não `forking`, porque o `vm start` devolve com o VMM de pé e não há processo do host para o systemd
+seguir); e os **membros de um pod** ficam atrás de uma âncora (o primeiro por nome) com `After=` —
+partilham a netns, e quem arranca primeiro é quem a recria, por isso N units em paralelo corriam
+para ser esse. `After=` e não `Requires=`: este levaria o pod inteiro abaixo com a âncora.
+
 **Continua por fazer**: não há Kind que exprima persistência no arranque (13 Kinds, nenhum diz
-«boot»), as VMs não têm caminho de arranque automático nenhum (nem unit, nem `virsh autostart` no
-domínio — só na rede libvirt), e os membros de um pod geram units sem `After=` entre si.
+«boot»). É superfície declarativa nova e fica para a próxima major, que já traz mudanças de
+fronteira.
 
 ## Output: `ls` estilo docker, `describe` estilo kubectl (`cmd/output.rs`)
 
@@ -950,8 +957,12 @@ de uma rede segmentada — a mesma separação que a AWS faz entre route table e
     o `ownable` governa é a ADOPÇÃO, coberta por teste unitário. A reversão que vale é tirá-lo do
     `CONVERGING_KINDS`, e aí falha com o sintoma exacto («após o prune esperava-se só a rota
     imperativa, há 2»).
-- **Continua por fazer**: as isenções do `@netpair` não têm `counter`, por isso «esta rota passou
-  tráfego?» continua sem resposta — o ADR-0013 já o assinalava e mantém-se.
+- **FECHADO**: as isenções passaram a ter `counter` (a flag na declaração do map dá contadores POR
+  ELEMENTO, verificado ao vivo antes de escrever código), e o `stack ls` mostra-o —
+  `open, no traffic yet` contra `open (2 packets)`. O contador entra ENTRE a chave e o verdict, que
+  é onde um parser escrito para o formato antigo se parte; há teste com o formato REAL capturado e
+  com o caso do holder antigo (sem contadores) a ler-se como zero. Nota para quem ler o número: o
+  RETORNO não passa pelo par (casa antes no `ct state established`), por isso 3 pings dão 2.
 - Exemplo: `examples/netroute.yaml` — declara a rota **e** a `Dependency`, de propósito: tirar uma
   delas e reaplicar é a forma mais rápida de ver que as duas perguntas são mesmo independentes.
 
