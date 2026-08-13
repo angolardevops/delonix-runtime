@@ -1221,6 +1221,36 @@ impl NetworkStore {
         Ok(c)
     }
 
+    /// Valida um gateway DECLARADO contra o prefixo da rede.
+    ///
+    /// «Gateway externo» numa SDN rootless quer dizer uma coisa concreta e vale
+    /// a pena dizê-la: o holder continua a ser dono da bridge e a encaminhar; o
+    /// que muda é a ROTA DEFAULT que os containers recebem, que passa a apontar
+    /// para o endereço declarado — tipicamente um appliance de fronteira NESSA
+    /// rede. Não é «a rede passa a ser de outro».
+    ///
+    /// Por isso tem de estar DENTRO do prefixo (um endereço fora não é
+    /// alcançável por link, e a rota nem se instala), e não pode ser a rede nem
+    /// o broadcast.
+    pub fn validate_gateway(cidr: &Cidr, gw: &str) -> Result<()> {
+        let porque = |why: &str| {
+            Error::Invalid(format!(
+                "gateway '{gw}': {why}. It must be an address INSIDE {} that a workload on that \
+                 network actually answers on (a firewall/appliance) — the holder keeps owning the \
+                 bridge and routing; what changes is the default route the containers get",
+                cidr.to_string_cidr()
+            ))
+        };
+        let a = Cidr::parse_addr(gw).ok_or_else(|| porque("not an IPv4 address"))?;
+        if !cidr.contains(a) {
+            return Err(porque("outside the network's prefix"));
+        }
+        if a == cidr.base || a == cidr.last() {
+            return Err(porque("is the network or broadcast address"));
+        }
+        Ok(())
+    }
+
     /// Cria uma rede com um prefixo ARBITRÁRIO, recusando sobreposições.
     ///
     /// A sobreposição é verificada AQUI e não no `validate_subnet` porque é a

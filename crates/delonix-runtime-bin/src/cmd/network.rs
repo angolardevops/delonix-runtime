@@ -561,27 +561,37 @@ pub(crate) fn create_network(
                     // falhar no attach.
                     let cidr = NetworkStore::validate_subnet(s)?;
                     let net = store.create_with_cidr(name, cidr)?;
-                    // The gateway is derived, not chosen. Accepting one that
-                    // disagrees would be the same silent lie one layer down.
+                    // Um gateway DECLARADO é aceite desde a camada A — mas
+                    // validado contra o prefixo, e nunca em silêncio. Ele não
+                    // muda quem é dono da bridge (o holder continua a
+                    // encaminhar e a mascarar); muda a ROTA DEFAULT que os
+                    // containers desta rede recebem, que passa a apontar para
+                    // um appliance de fronteira ali dentro.
                     if !gateway.is_empty() && gateway != net.gateway {
-                        let _ = store.remove(name);
-                        return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
-                            "gateway {want}: a bridge network's gateway is always the first \
-                             address of its subnet ({have}) — omit --gateway",
-                            &[("want", gateway), ("have", &net.gateway)],
-                        )));
+                        if let Err(e) = NetworkStore::validate_gateway(&cidr, gateway) {
+                            let _ = store.remove(name);
+                            return Err(e);
+                        }
+                        super::output::warn(&super::po::tf(
+                            "network '{name}': the default route of its workloads will point at \
+                             {gw}, not at the engine ({have}). Nothing answers there until a \
+                             workload on this network does — until then they have no way out.",
+                            &[("name", name), ("gw", gateway), ("have", &net.gateway)],
+                        ));
                     }
                     net
                 }
                 None => store.create(name)?,
             };
+            let declared_gw = (!gateway.is_empty() && gateway != net.gateway)
+                .then(|| gateway.to_string());
             // Realize it physically (real bridge of the rootless holder) — aligned
             // to the SAME prefix the NetworkStore just decided. If this fails, the
             // declarative record just created above would otherwise be ORPHANED —
             // `network ls` would show it, nothing could attach (NotFound), and a
             // retry would fail with "already exists" until a manual `network rm`.
             // Roll it back so a failed `create` leaves nothing behind to clean up.
-            if let Err(e) = infra::network_create_with(name, &net.prefix) {
+            if let Err(e) = infra::network_create_with_gateway(name, &net.prefix, declared_gw.as_deref()) {
                 let _ = store.remove(name);
                 return Err(e);
             }
