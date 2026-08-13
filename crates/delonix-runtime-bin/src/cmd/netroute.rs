@@ -163,10 +163,28 @@ pub(crate) fn presence_of(doc: &ManifestDoc) -> (String, String) {
     if delonix_net::infra::route_get(&spec.from, &spec.to).is_none() {
         return ("no".into(), "-".into());
     }
-    match delonix_net::infra::network_routes_live() {
+    match delonix_net::infra::network_routes_live_counted() {
         Ok(live) => {
-            if live.iter().any(|(a, b)| *a == spec.from && *b == spec.to) {
-                ("yes".into(), super::po::t("open").into())
+            if let Some((_, _, packets, _)) = live
+                .iter()
+                .find(|(a, b, _, _)| *a == spec.from && *b == spec.to)
+            {
+                // **«Esta rota passou tráfego?»** — a pergunta que o ADR-0013
+                // deixou assinalada como sem resposta, porque as isenções eram a
+                // única família de regras deste motor sem `counter`. Um caminho
+                // aberto que nunca passou um pacote e um que passa milhares
+                // liam-se exactamente igual.
+                (
+                    "yes".into(),
+                    if *packets == 0 {
+                        super::po::t("open, no traffic yet").into()
+                    } else {
+                        super::po::tf(
+                            "open ({packets} packets)",
+                            &[("packets", &packets.to_string())],
+                        )
+                    },
+                )
             } else {
                 // Declared but not in the map: the holder will put it back from
                 // the record when the bridge is reborn.

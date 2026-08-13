@@ -423,7 +423,7 @@ pub fn ingress_table_ruleset() -> String {
          \x20 set {DLXALL_SET} {{ type ipv4_addr; }}\n\
          \x20 map {FWMAP} {{ type ipv4_addr : verdict; }}\n\
          \x20 set {DLXBR_SET} {{ type ifname; }}\n\
-         \x20 map {NETPAIR_MAP} {{ type ifname . ifname : verdict; }}\n\
+         \x20 map {NETPAIR_MAP} {{ type ifname . ifname : verdict; counter; }}\n\
          \x20 chain fwguard {{ type filter hook forward priority -20;\n\
          {guard}\
          \x20 }}\n\
@@ -3292,8 +3292,49 @@ pub fn parse_netpair_elements(listing: &str) -> Vec<(String, String)> {
             let (key, _verdict) = entry.split_once(':')?;
             let (a, b) = key.split_once(" . ")?;
             let a = a.trim().trim_matches('"').to_string();
-            let b = b.trim().trim_matches('"').to_string();
+            // With per-element counters the second half is
+            // `"<b>" counter packets N bytes M` — the name is the first token,
+            // and everything after it is the counter.
+            let b = b.split_whitespace().next().unwrap_or("");
+            let b = b.trim_matches('"').to_string();
             (!a.is_empty() && !b.is_empty() && a != b).then_some((a, b))
+        })
+        .collect()
+}
+
+/// A pair's traffic counter, as the kernel reports it.
+///
+/// **«Esta rota passou tráfego?» had no answer at all** — the ADR that
+/// introduced the exemptions said so, and it is the one question a route exists
+/// to be asked. Every other rule this engine emits carries a `counter`; the
+/// verdict map's elements did not, which is also why the ADR's own spike had to
+/// prove a blocked pair by comparing two destinations instead of reading a
+/// number.
+pub fn parse_netpair_counters(listing: &str) -> Vec<((String, String), (u64, u64))> {
+    let Some(rest) = listing.split_once("elements = {").map(|(_, r)| r) else {
+        return Vec::new();
+    };
+    let body = rest.split_once('}').map(|(b, _)| b).unwrap_or(rest);
+    body.split(',')
+        .filter_map(|entry| {
+            let (key, _verdict) = entry.split_once(':')?;
+            let (a, rhs) = key.split_once(" . ")?;
+            let a = a.trim().trim_matches('"').to_string();
+            let mut toks = rhs.split_whitespace();
+            let b = toks.next()?.trim_matches('"').to_string();
+            if a.is_empty() || b.is_empty() || a == b {
+                return None;
+            }
+            // `counter packets N bytes M`, when the map carries counters.
+            let rest: Vec<&str> = toks.collect();
+            let num = |k: &str| -> u64 {
+                rest.iter()
+                    .position(|t| *t == k)
+                    .and_then(|i| rest.get(i + 1))
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0)
+            };
+            Some(((a, b), (num("packets"), num("bytes"))))
         })
         .collect()
 }
@@ -3324,6 +3365,30 @@ pub fn network_routes_live() -> Result<Vec<(String, String)>> {
     Ok(parse_netpair_elements(&listing)
         .into_iter()
         .map(|(a, b)| (name_of(&a), name_of(&b)))
+        .collect())
+}
+
+/// The live routes WITH their traffic counters — `(from, to, packets, bytes)`.
+///
+/// Same read as [`network_routes_live`], and the reason for a second function
+/// rather than a wider return type is that the callers differ: one asks «is this
+/// path open», the other «did anything ever use it».
+pub fn network_routes_live_counted() -> Result<Vec<(String, String, u64, u64)>> {
+    let body = control_query("netroute-show")?;
+    let listing = hex_decode(body.trim())
+        .and_then(|b| String::from_utf8(b).ok())
+        .ok_or_else(|| Error::Runtime {
+            context: "netroute",
+            message: "could not decode the holder's reply".to_string(),
+        })?;
+    let by_bridge: std::collections::HashMap<String, String> = network_list()
+        .into_iter()
+        .map(|d| (d.bridge, d.name))
+        .collect();
+    let name_of = |b: &str| by_bridge.get(b).cloned().unwrap_or_else(|| b.to_string());
+    Ok(parse_netpair_counters(&listing)
+        .into_iter()
+        .map(|((a, b), (p, by))| (name_of(&a), name_of(&b), p, by))
         .collect())
 }
 
@@ -7003,6 +7068,37 @@ Inter-|   Receive                                                |  Transmit
         assert!(
             parse_netpair_elements("map netpair { type ifname . ifname : verdict }").is_empty()
         );
+    }
+
+    /// **«Esta rota passou tráfego?» não tinha resposta**, e era a única família
+    /// de regras deste motor sem `counter` — o ADR-0013 deixou-o assinalado, e foi
+    /// por isso que o próprio spike teve de provar um par bloqueado comparando
+    /// dois destinos em vez de ler um número.
+    ///
+    /// O formato deste fixture foi CAPTURADO ao vivo (`nft` 1.0.9, netns
+    /// descartável, com tráfego real a passar) e não inventado: com a flag
+    /// `counter` no map, o contador entra ENTRE a chave e o verdict, que é onde
+    /// um parser escrito para o formato antigo se parte.
+    #[test]
+    fn parse_netpair_le_os_contadores_e_o_nome_apesar_deles() {
+        let listing = "table ip dlxing {\n\tmap netpair {\n\t\ttype ifname . ifname : verdict\n\
+                       \t\tcounter\n\
+                       \t\telements = { \"dlxnaaaa\" . \"dlxnaaaa\" counter packets 9 bytes 900 : accept,\n\
+                       \t\t             \"dlxnaaaa\" . \"dlxnbbbb\" counter packets 2 bytes 168 : accept }\n\t}\n}\n";
+        // O nome continua a sair limpo — o contador não pode colar-se-lhe.
+        let els = parse_netpair_elements(listing);
+        assert_eq!(
+            els,
+            vec![("dlxnaaaa".to_string(), "dlxnbbbb".to_string())],
+            "{els:?}"
+        );
+        // E os números chegam, com os auto-pares fora como sempre.
+        let c = parse_netpair_counters(listing);
+        assert_eq!(c.len(), 1, "{c:?}");
+        assert_eq!(c[0].1, (2, 168));
+        // Um mapa SEM contadores (holder antigo) lê-se como zero, não parte.
+        let sem = "elements = { \"a\" . \"b\" : accept }";
+        assert_eq!(parse_netpair_counters(sem)[0].1, (0, 0));
     }
 
     /// RF-NET-11 — the IPv6 bypass, reproduced live before this fix: with the firewall
