@@ -548,9 +548,38 @@ pub struct Container {
     #[serde(default)]
     pub seccomp: Option<String>,
     /// AppArmor profile applied (`aa_change_onexec`). Persisted so that `exec`
-    /// also confines processes that enter the container later (probes/`crictl`).
+    /// also confines processes that enter the container later (probes/`crictl`),
+    /// and so that `start`/`restart` re-confine — ver `selinux` já a seguir.
     #[serde(default)]
     pub apparmor: Option<String>,
+    /// SELinux label (`--security-opt label=...`), o `--host-pid`/`--host-ipc` e o
+    /// formato de log CRI. **São aqui porque o `start` tem de os reconstruir.**
+    ///
+    /// A regra que estes quatro campos existem para cumprir: *estado necessário
+    /// para RECONSTRUIR o recurso tem de ser persistido, não só usado na criação*.
+    /// É a sexta ocorrência da armadilha (depois do `-v`, do `-p` em rede custom,
+    /// das redes extra, do `Container.pod` e do `dns_config`), e a mais cara das
+    /// seis: sem eles, um `stop`+`start` — ou a recuperação automática a seguir a
+    /// um respawn do holder, que ninguém pede — devolvia o container SEM
+    /// confinamento AppArmor/SELinux. O `run` RECUSA arrancar unconfined quando o
+    /// perfil falha; o `start` fazia exactamente o que o `run` proíbe.
+    ///
+    /// `#[serde(default)]` nos quatro: um registo escrito antes desta versão
+    /// desserializa na mesma, e `false`/`None` é precisamente o que ele era.
+    #[serde(default)]
+    pub selinux: Option<String>,
+    /// `--host-pid`: partilha o PID namespace do host (container de diagnóstico).
+    #[serde(default)]
+    pub host_pid: bool,
+    /// `--host-ipc`: partilha o IPC namespace do host.
+    #[serde(default)]
+    pub host_ipc: bool,
+    /// `--log-cri`: formato de log com carimbo temporal por linha. É o ÚNICO que
+    /// dá ao `logs --tail/--since/--timestamps` uma coluna real para filtrar, por
+    /// isso perdê-lo num restart fazia esses três responderem «só com `--log-cri`»
+    /// a um container criado exactamente com `--log-cri`.
+    #[serde(default)]
+    pub log_cri: bool,
     /// `true` if the container has a user namespace (container root ≠ host root).
     #[serde(default)]
     pub userns: bool,
@@ -795,6 +824,10 @@ impl Container {
             cap_add: Vec::new(),
             seccomp: None,
             apparmor: None,
+            selinux: None,
+            host_pid: false,
+            host_ipc: false,
+            log_cri: false,
             userns: false,
             ip: None,
             network: None,
