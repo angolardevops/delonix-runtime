@@ -382,6 +382,17 @@ pub(crate) fn build_plan(docs: &[manifest::ManifestDoc], stack: &str) -> Result<
                 c.conditions.push(cond);
             }
         }
+        // O mesmo, para o Kind MAIS USADO — e onde a lacuna era maior: 43 campos
+        // de spec contra onze comparados. Num container já a correr, mudar `env`,
+        // `user`, `capAdd`, `readOnly` ou `command` dava «no changes» e
+        // `--detailed-exitcode` 0, ou seja um gate de deriva em CI verde por cima
+        // de deriva real. O raciocínio já estava escrito aqui em cima e aplicava-se
+        // só ao `Vm`; era o Container que precisava dele mais.
+        if c.kind == "Container" && c.action != reconcile::Action::Create {
+            if let Some(cond) = super::container::unconverged_fields_condition(doc) {
+                c.conditions.push(cond);
+            }
+        }
         // Same shape, same reason: on a Create the network is about to be built
         // by this very apply, so «it has no physical plane» is not a finding.
         // On anything else it is — and it was invisible, because `Realized` was

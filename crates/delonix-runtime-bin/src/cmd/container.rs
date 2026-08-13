@@ -174,6 +174,60 @@ pub(crate) const RECONCILED_CONTAINER_FIELDS: &[&str] = &[
     "netBurst",
 ];
 
+/// Os campos que o manifesto declara e o reconciliador NÃO compara — nomeados,
+/// num container que já existe, em vez de descartados em silêncio.
+///
+/// **O irmão do `vm::unconverged_fields_condition`, e a mesma medição por trás.**
+/// Um `kind: Container` aceita 43 campos de spec e o `RECONCILED_CONTAINER_FIELDS`
+/// tem onze. Num container que ainda não existe isso é inofensivo — a criação
+/// aplica o spec inteiro. Num container que JÁ CORRE era um descarte mudo: mudar
+/// `env`, `user`, `capAdd`, `readOnly`, `securityOpt`, `sysctl`, `devices` ou
+/// `command` num manifesto aplicado dava `Summary: no changes` e
+/// `--detailed-exitcode` **0**, ou seja um gate de deriva em CI verde por cima de
+/// deriva verdadeira. É o defeito estrutural que a v0.47.0 existiu para fechar,
+/// ainda vivo no Kind mais usado — e o comentário do `netBps`/`netBurst` acima
+/// mostra que a casa já pagou esta classe uma vez.
+///
+/// **Nomear não é convergir, e a diferença é deliberada.** Convergir `capAdd` ou
+/// `readOnly` obriga a recriar o container, que é uma capacidade com o seu próprio
+/// desenho (e o `-/+` é fail-closed, exige `--replace`); dizer que não se converge
+/// custa uma frase. O motor entrega primeiro a honestidade — a mesma ordem que o
+/// `Vm` seguiu.
+///
+/// **Derivado do `RECONCILED_CONTAINER_FIELDS`, nunca uma segunda lista.** Um
+/// campo acrescentado ao conjunto comparado sai deste aviso sozinho. Duas listas
+/// que têm de concordar é como este repo já partiu o `CONVERGING_KINDS` uma vez.
+pub(crate) fn unconverged_fields_condition(
+    doc: &ManifestDoc,
+) -> Option<super::conditions::Condition> {
+    let mapping = doc.spec.as_mapping()?;
+    let mut fields: Vec<String> = mapping
+        .keys()
+        .filter_map(|k| k.as_str())
+        .filter(|k| !RECONCILED_CONTAINER_FIELDS.contains(k))
+        // `detach` não é estado do recurso, é o modo de invocação de quem cria —
+        // um container a correr não «tem» um detach para divergir. Listá-lo faria
+        // TODOS os manifestos avisarem, e um aviso que sai sempre deixa de se ler.
+        .filter(|k| *k != "detach")
+        .map(|k| k.to_string())
+        .collect();
+    if fields.is_empty() {
+        return None;
+    }
+    fields.sort();
+    Some(super::conditions::Condition::bad(
+        "Converged",
+        "FieldsNotCompared",
+        super::po::tf(
+            "declared but NOT applied to an existing container: {fields} — the reconciler compares only {compared}. Recreate it (`--replace Container/<name>`) or change it with `container update` where that field is hot",
+            &[
+                ("fields", &fields.join(", ")),
+                ("compared", &RECONCILED_CONTAINER_FIELDS.join(", ")),
+            ],
+        ),
+    ))
+}
+
 /// Renders a persisted [`Mount`] back into the `source:/target[:ro]` form the
 /// manifest uses, so the two sides of a diff are comparable.
 ///
@@ -6852,6 +6906,84 @@ fn health_monitor_loop(id: String, cfg: HealthConfig) {
                 Some(&next.health.to_string()),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod unconverged_container_tests {
+    use super::*;
+
+    fn doc(spec: &str) -> ManifestDoc {
+        ManifestDoc {
+            api_version: "delonix.io/v1".into(),
+            kind: "Container".into(),
+            metadata: super::super::manifest::Metadata {
+                name: "c".into(),
+                namespace: None,
+                labels: Default::default(),
+                annotations: Default::default(),
+            },
+            spec: serde_yaml::from_str(spec).unwrap(),
+        }
+    }
+
+    /// O aviso tem de NOMEAR o que não é comparado — é a diferença entre um plano
+    /// honesto e um que diz «no changes» sobre um `env` mudado à mão.
+    #[test]
+    fn nomeia_os_campos_declarados_que_nao_sao_comparados() {
+        let c = unconverged_fields_condition(&doc(
+            "image: alpine\nenv: [A=1]\nuser: '1000'\ncapAdd: [NET_ADMIN]\n",
+        ))
+        .expect("um manifesto com env/user/capAdd tem de avisar");
+        for esperado in ["env", "user", "capAdd"] {
+            assert!(
+                c.message.contains(esperado),
+                "'{esperado}' não foi nomeado: {}",
+                c.message
+            );
+        }
+    }
+
+    /// **Nenhum campo COMPARADO pode aparecer na lista** — senão o aviso diz que
+    /// algo não é aplicado quando é, e mandava recriar um container à toa. É o
+    /// mesmo par de asserções que o `Vm` tem, e é o que torna a derivação da
+    /// constante uma garantia em vez de uma intenção.
+    #[test]
+    fn nunca_lista_um_campo_que_e_comparado() {
+        let spec = format!(
+            "{}\nenv: [A=1]\n",
+            RECONCILED_CONTAINER_FIELDS
+                .iter()
+                .map(|f| format!("{f}: x"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        let c = unconverged_fields_condition(&doc(&spec)).expect("o env tem de avisar");
+        // Só a PRIMEIRA lista (a dos não-aplicados). A mensagem traz as duas de
+        // propósito — a segunda diz o que É comparado — e olhar para a frase
+        // inteira faria este teste falhar sobre o texto que existe para ajudar.
+        let listados = c
+            .message
+            .split("container: ")
+            .nth(1)
+            .and_then(|s| s.split(" — ").next())
+            .expect("a mensagem tem de trazer a lista antes do travessão");
+        for comparado in RECONCILED_CONTAINER_FIELDS {
+            assert!(
+                !listados.split(", ").any(|f| f == *comparado),
+                "'{comparado}' é comparado e não devia estar na lista: {listados}"
+            );
+        }
+    }
+
+    /// Um manifesto que declara SÓ o que é comparado não tem nada a avisar — e um
+    /// aviso que dispara sobre um manifesto correcto é como as pessoas aprendem a
+    /// não ler avisos. O `detach` conta como nada a dizer: é o modo de invocação
+    /// de quem cria, não estado que um container a correr possa ter divergido.
+    #[test]
+    fn um_manifesto_so_com_campos_comparados_nao_avisa() {
+        assert!(unconverged_fields_condition(&doc("image: alpine\nports: ['80:80']\n")).is_none());
+        assert!(unconverged_fields_condition(&doc("image: alpine\ndetach: true\n")).is_none());
     }
 }
 
