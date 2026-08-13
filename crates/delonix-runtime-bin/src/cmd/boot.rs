@@ -199,6 +199,27 @@ fn container_unit(
     )
 }
 
+/// The unit text for one VM.
+///
+/// **A VM had NO automatic start path at all** — not a unit, and not
+/// `virsh autostart` on the domain (only on the libvirt network). Worse, `vm
+/// stop` UNDEFINES the domain, so a stopped VM is not even known to libvirt at
+/// the moment of a reboot. The whole burden was on somebody remembering to run
+/// `vm start` by hand.
+///
+/// `Type=oneshot` + `RemainAfterExit`, not `forking`: `vm start` returns once the
+/// VMM is up (the guest boots on its own time) and there is no host process for
+/// systemd to follow — the backend owns it. Claiming otherwise would have
+/// systemd hunting for a main PID that is not there.
+fn vm_unit(name: &str, rp: &str, root: &str, exe: &str, wanted_by: &str) -> String {
+    format!(
+        "[Unit]\nDescription=Delonix VM {name}\nAfter=network-online.target\nWants=network-online.target\n\n\
+         [Service]\nType=oneshot\nRemainAfterExit=yes\nRestart={rp}\nTimeoutStopSec=60\nEnvironment=DELONIX_INTERNAL=1\nEnvironment=DELONIX_ROOT={root}\n\
+         ExecStart={exe} vm start {name}\nExecStop={exe} vm stop {name}\n\n\
+         [Install]\nWantedBy={wanted_by}\n",
+    )
+}
+
 /// The unit each pod's members must start after: the pod's FIRST container by
 /// name, which is stable (`<pod>-c0`, `-c1`, …) and is the one that holds the
 /// shared namespaces.
@@ -265,6 +286,26 @@ fn enable(
         let unit = container_unit(&c.name, &rp, root, exe, wanted_by, anchor.as_deref());
         let unit_name = format!("{UNIT_PREFIX}{}.service", c.name);
         std::fs::write(unit_dir.join(&unit_name), unit)?;
+        installed.push(unit_name);
+    }
+    // VMs, pelo MESMO critério: a correr, ou com política que diga que deviam
+    // estar. Um prefixo próprio (`delonix-boot-vm-`) porque um container e uma
+    // VM podem ter o mesmo nome — são stores diferentes — e dois units com o
+    // mesmo ficheiro seria um a apagar o outro em silêncio.
+    for vm in delonix_vm::list(&std::path::PathBuf::from(root)).unwrap_or_default() {
+        let alive = vm.status == delonix_runtime_core::Status::Running;
+        if !alive && !wants_to_be_up(vm.restart_policy.as_deref()) {
+            continue;
+        }
+        let rp = match restart.as_deref() {
+            Some(explicit) => explicit.to_string(),
+            None => vm.restart_policy.as_deref().unwrap_or("always").to_string(),
+        };
+        let unit_name = format!("{UNIT_PREFIX}vm-{}.service", vm.name);
+        std::fs::write(
+            unit_dir.join(&unit_name),
+            vm_unit(&vm.name, &rp, root, exe, wanted_by),
+        )?;
         installed.push(unit_name);
     }
     // **Converge, don't just create.** A unit whose container was `rm`-ed keeps
@@ -383,6 +424,32 @@ mod tests {
         assert!(!wants_to_be_up(Some("on-failure:3")));
         assert!(!wants_to_be_up(Some("no")));
         assert!(!wants_to_be_up(None));
+    }
+
+    /// **Uma VM não tinha caminho de arranque automático NENHUM** — nem unit,
+    /// nem `virsh autostart` no domínio (só na rede libvirt). E o `vm stop` faz
+    /// `undefine`, portanto uma VM parada nem é conhecida do libvirt no momento
+    /// do reboot: ficava tudo dependente de alguém se lembrar de um `vm start`.
+    #[test]
+    fn uma_vm_ganha_unit_e_nao_colide_com_um_container_do_mesmo_nome() {
+        let u = vm_unit("db", "always", "/r", "/b", "default.target");
+        assert!(u.contains("ExecStart=/b vm start db\n"), "{u}");
+        assert!(u.contains("ExecStop=/b vm stop db\n"), "{u}");
+        // `oneshot` + RemainAfterExit e NÃO `forking`: o `vm start` devolve
+        // quando o VMM está de pé e não há processo do host para o systemd
+        // seguir — o backend é dono dele. Dizer `forking` punha o systemd à
+        // procura de um main PID que não existe.
+        assert!(u.contains("Type=oneshot"), "{u}");
+        assert!(u.contains("RemainAfterExit=yes"), "{u}");
+        assert!(!u.contains("Type=forking"), "{u}");
+        // Um container e uma VM podem ter o MESMO nome (stores diferentes), por
+        // isso os ficheiros têm de ser distintos — senão um apaga o outro em
+        // silêncio.
+        assert_ne!(
+            format!("{UNIT_PREFIX}vm-db.service"),
+            format!("{UNIT_PREFIX}db.service")
+        );
+        assert!(is_boot_unit(&format!("{UNIT_PREFIX}vm-db.service")));
     }
 
     /// **Os membros de um pod PARTILHAM a netns**, e quem arranca primeiro é
