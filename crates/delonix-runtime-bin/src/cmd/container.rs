@@ -3201,6 +3201,14 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             c.apparmor = Some(p.clone());
         }
     }
+    // Persistir o que o `start` tem de reconstruir. O `apparmor` acima já era
+    // guardado (para o `exec` confinar quem entra depois) e mesmo assim o `start`
+    // não o lia — ver `runspec_do_start_reproduz_o_do_run`, que é o gate que
+    // impede a classe inteira de voltar.
+    c.selinux = selinux.clone();
+    c.host_pid = host_pid;
+    c.host_ipc = host_ipc;
+    c.log_cri = log_cri;
 
     // ---- secrets ----
     //
@@ -4878,6 +4886,19 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
         // `c.hostname`, read by the engine). Without this, a `start` ran as root.
         run_uid: c.run_uid,
         run_gid: c.run_gid,
+        // **Os cinco que o `..Default::default()` calava.** Sexta ocorrência da
+        // armadilha do estado-não-reconstruído, e a de pior consequência: o
+        // `apparmor` já ESTAVA persistido e mesmo assim não era lido aqui, por isso
+        // um `stop`+`start` — ou a recuperação automática pós-respawn do holder,
+        // que corre sem ninguém pedir — devolvia o container **sem confinamento**.
+        // O `run` recusa-se a arrancar unconfined quando o perfil falha
+        // (`ensure_apparmor`), o que diz qual era a intenção; o `start` fazia
+        // precisamente o que o `run` proíbe. Os outros quatro nem campo tinham.
+        apparmor: c.apparmor.clone(),
+        selinux: c.selinux.clone(),
+        host_pid: c.host_pid,
+        host_ipc: c.host_ipc,
+        log_cri: c.log_cri,
         ..Default::default()
     };
     // Re-enter supervision on `start`, same as `run -d --restart`: a container with a
@@ -6753,6 +6774,108 @@ fn health_monitor_loop(id: String, cfg: HealthConfig) {
                 Some(&next.health.to_string()),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod runspec_parity_tests {
+    /// **O gate que fecha a classe inteira, e lê o CÓDIGO-FONTE para o fazer.**
+    ///
+    /// Seis vezes já — `-v`, `-p` em rede custom, redes extra, `Container.pod`,
+    /// `dns_config`, e agora AppArmor/SELinux/`--host-pid`/`--host-ipc`/
+    /// `--log-cri` — um campo foi preenchido no `RunSpec` do `cmd_run` e esquecido
+    /// no do `cmd_start`. O sintoma é sempre o mesmo e nunca dá erro: o container
+    /// arranca, parece igual, e perdeu alguma coisa no caminho. Da última vez o
+    /// que se perdia era o CONFINAMENTO, num caminho (a recuperação pós-respawn do
+    /// holder) que corre sem ninguém pedir.
+    ///
+    /// Um teste de comportamento não apanha isto: os dois `RunSpec` nascem dentro
+    /// de funções que fazem I/O, resolvem imagens e falam com o holder, e um campo
+    /// em falta não muda o resultado de nenhuma asserção fácil de escrever. Por
+    /// isso o teste faz o que a matriz da Docker API já faz neste repo — **lê o
+    /// próprio ficheiro** e compara os dois literais campo a campo.
+    ///
+    /// A regra é a PRESENÇA do campo, não o valor: `detach`, `new_netns` e
+    /// `userns` têm valores legitimamente diferentes nos dois sítios. O que não
+    /// pode acontecer é um campo existir num literal e o outro cair no
+    /// `..Default::default()` sem que alguém tenha decidido isso.
+    ///
+    /// Para acrescentar um campo só a um dos lados, põe-lo na `SO_NO_RUN` com a
+    /// razão escrita. Uma allowlist com justificação é uma decisão; um
+    /// `..Default::default()` silencioso é um bug à espera da sexta ocorrência.
+    #[test]
+    fn runspec_do_start_reproduz_o_do_run() {
+        let src = include_str!("container.rs");
+
+        // Extrai os nomes de campo do n-ésimo literal `let spec = RunSpec {`.
+        // Só o primeiro nível conta (8 espaços de indentação): um campo aninhado
+        // não é um campo do RunSpec.
+        fn campos(src: &str, ocorrencia: usize) -> Vec<String> {
+            let mut restante = src;
+            for _ in 0..=ocorrencia {
+                let i = restante
+                    .find("let spec = RunSpec {")
+                    .expect("literal `let spec = RunSpec {` não encontrado");
+                restante = &restante[i + "let spec = RunSpec {".len()..];
+            }
+            let mut out = Vec::new();
+            for linha in restante.lines() {
+                if linha.starts_with("    };") {
+                    break;
+                }
+                let Some(resto) = linha.strip_prefix("        ") else {
+                    continue;
+                };
+                if resto.starts_with(' ') || resto.starts_with("//") {
+                    continue; // aninhado, ou comentário
+                }
+                // **As DUAS formas, e esquecer a segunda quase deixou este gate
+                // decorativo.** `dns,` (abreviada) e `dns: x` (explícita) são o
+                // mesmo campo, e a primeira é a que o `cmd_run` mais usa — a versão
+                // inicial deste parser só via a que tem `:` e, com a correcção
+                // revertida, acusou 2 dos 5 campos em falta. Um gate que vê metade
+                // dá verde sobre a outra metade.
+                let nome = resto
+                    .split_once(':')
+                    .map(|(n, _)| n)
+                    .unwrap_or_else(|| resto.trim_end_matches(','));
+                if !nome.is_empty() && nome.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                    out.push(nome.to_string());
+                }
+            }
+            out
+        }
+
+        // Campos que o `start` deliberadamente NÃO reproduz, cada um com a razão.
+        // Mexer nesta lista é uma decisão consciente — que é exactamente o ponto.
+        const SO_NO_RUN: &[(&str, &str)] = &[(
+            "pod_infra_pid",
+            "o `start` reentra numa netns de pod JÁ criada; o infra-pid é do momento \
+             da criação do pod e não se reconstrói a partir do registo",
+        )];
+
+        let do_run = campos(src, 0);
+        let do_start = campos(src, 1);
+        assert!(
+            do_run.len() > 10 && do_start.len() > 10,
+            "a extracção falhou (run={}, start={}) — o formato do literal mudou e este \
+             gate deixou de ver o que devia",
+            do_run.len(),
+            do_start.len()
+        );
+
+        let em_falta: Vec<&String> = do_run
+            .iter()
+            .filter(|f| !do_start.contains(f))
+            .filter(|f| !SO_NO_RUN.iter().any(|(n, _)| *n == f.as_str()))
+            .collect();
+        assert!(
+            em_falta.is_empty(),
+            "o `RunSpec` do `cmd_start` não reproduz {em_falta:?} do `cmd_run` — um \
+             `stop`+`start` (e a recuperação pós-respawn do holder) perde esse estado \
+             em silêncio. Ou preenche-o no `cmd_start`, ou declara-o em `SO_NO_RUN` \
+             com a razão."
+        );
     }
 }
 
