@@ -3415,6 +3415,15 @@ msgstr ""
 "aviso: volume '{vol}': medium de emptyDir desconhecido '{medium}' (o "
 "Kubernetes define \"\" e \"Memory\"); tratado como tmpfs."
 
+msgid ""
+"declared but NOT applied to an existing container: {fields} — the reconciler "
+"compares only {compared}. Recreate it (`--replace Container/<name>`) or change "
+"it with `container update` where that field is hot"
+msgstr ""
+"declarado mas NÃO aplicado a um container existente: {fields} — o "
+"reconciliador compara só {compared}. Recria-o (`--replace Container/<nome>`) "
+"ou muda-o com `container update` onde esse campo é quente"
+
 msgid "{name}: resource limits updated (memory={memory}, cpus={cpus})"
 msgstr "{name}: limites de recursos actualizados (memory={memory}, cpus={cpus})"
 
