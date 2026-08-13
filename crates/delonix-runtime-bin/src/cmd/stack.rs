@@ -260,62 +260,17 @@ pub fn run(action: StackCmd) -> Result<()> {
     }
 }
 
-/// The stack Kinds, in the SAME order as `apply` — whoever reads `describe` sees
-/// the order in which things are created, which is half the diagnosis when an
-/// apply stops halfway.
-const KINDS: [&str; 13] = [
-    "Secret",
-    "Network",
-    "NetworkRoute",
-    "Volume",
-    // Carved out of a Volume, so it comes after one. It was APPLIED by
-    // `stack apply` and missing from this list, which meant `ls`, `describe`
-    // and `plan` never mentioned a resource the apply creates — the same silent
-    // omission this whole effort keeps removing. Same for `Tunnel` below.
-    "ShareVolume",
-    "Image",
-    "Vm",
-    "Container",
-    "Pod",
-    "Ingress",
-    "FirewallPolicy",
-    "HTTPRoute",
-    // Last, like the apply: a tunnel's `localPort` is typically the L7 proxy's
-    // own listening port, so the proxy has to be up first.
-    "Tunnel",
-];
-
-/// `stack ls` — the structure the manifest composes, in a single TABLE
-/// (kind→name→presence→status), reusing exactly the resolution of
-/// `describe` (`presence` queries the real stores; the stack has no registry
-/// of its own, by design — see CLAUDE.md).
-/// The Kinds that CONVERGE in this version — a changed field really is applied.
-/// Everything else in [`KINDS`] stays "ensure present" and the plan says so out
-/// loud (`Action::NotConverged`) instead of leaving the resource out. A plan
-/// that omits a resource reads as «no changes», which is the exact dishonesty
-/// this whole feature exists to remove.
-pub(crate) const CONVERGING_KINDS: [&str; 12] = [
-    "Network",
-    // An exemption to the isolation model has to be closable by the manifest
-    // that opened it. It was applied and validated but never converged, so
-    // removing it from the file left the path open — and the plan said nothing.
-    "NetworkRoute",
-    "Volume",
-    "ShareVolume",
-    "Image",
-    "Vm",
-    "Container",
-    "Pod",
-    "FirewallPolicy",
-    "HTTPRoute",
-    "Ingress",
-    "Tunnel",
-];
+// The stack Kinds and what each one is — including the apply ORDER, which Kinds
+// CONVERGE and which stay ensure-present — live in `cmd::kinds`, one row per
+// Kind. They were three constants here, written and maintained apart, and they
+// drifted: `super::kinds::stack_kinds`/`converges`/`has_teardown` read the same
+// row, so they cannot any more. The doc-comment on that module has the measured
+// symptoms.
 
 /// Everything the manifest asks for, in the reconciler's comparable form.
 fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Desired>> {
     let mut out = Vec::new();
-    for kind in KINDS {
+    for kind in super::kinds::stack_kinds() {
         for doc in manifest::of_kind(docs, kind) {
             out.push(match kind {
                 "Container" => super::container::desired(doc)?,
@@ -363,8 +318,8 @@ fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Actual>> {
     out.extend(super::tunnel::actual(docs)?);
     let (_, cstore) = super::util::open_stores()?;
     let containers = cstore.list().unwrap_or_default();
-    for kind in KINDS {
-        if CONVERGING_KINDS.contains(&kind) {
+    for kind in super::kinds::stack_kinds() {
+        if super::kinds::converges(kind) {
             continue;
         }
         for doc in manifest::of_kind(docs, kind) {
@@ -451,7 +406,7 @@ pub(crate) const NOT_CONVERGED_GENERIC: &str = "not converged in this version";
 /// A generic «this Kind does not converge yet» reads as «nobody got to it», and
 /// for most of these that is not true — each one has a concrete obstacle, and
 /// naming it is the difference between a gap and a decision. Kept next to
-/// `CONVERGING_KINDS` so adding a Kind to that list without removing its excuse
+/// `cmd::kinds` so flipping a Kind's `converges` without removing its excuse
 /// here is visible in one screen.
 ///
 /// Returns the ENGLISH literal, translated at the point of printing. Returning
@@ -485,17 +440,80 @@ fn print_compared_fields() {
         super::po::t("Fields compared by `stack plan`, per Kind:")
     );
     println!();
-    let mut t = super::output::Table::new(&["KIND", "FIELDS"]);
+    let mut t = super::output::Table::new(&["KIND", "DOMAIN", "FIELDS"]);
     for (kind, fields) in compared_fields_table() {
-        t.row(vec![kind.to_string(), fields.join(", ")]);
+        t.row(vec![
+            kind.to_string(),
+            super::kinds::domain_label(kind).to_string(),
+            fields.join(", "),
+        ]);
     }
     t.print();
     println!();
     print_not_converged();
+    println!();
+    print_kind_catalogue();
+}
+
+/// Every Kind and what it IS — the table `cmd::kinds` holds, printed.
+///
+/// Under `--fields` because the questions arrive together: someone reading «what
+/// does the plan compare?» is one line away from «which Kinds are there, and
+/// which of these names is just another spelling of one I already use». The
+/// FORM column is the one that cannot be guessed from the docs of each Kind: it
+/// says whether a document survives the load or is rewritten into another Kind,
+/// which is why a `kind: Egress` never shows up in a plan under that name.
+fn print_kind_catalogue() {
+    println!("{}", super::po::t("All Kinds, by area of action:"));
+    println!();
+    let mut t = super::output::Table::new(&["KIND", "DOMAIN", "FORM", "NAMESPACED", "PRESENCE"]);
+    for f in super::kinds::all() {
+        t.row(vec![
+            f.kind.to_string(),
+            f.domain.label().to_string(),
+            form_label(f.form),
+            if f.namespaced { "yes" } else { "-" }.to_string(),
+            super::po::t(presence_label(f.presence)).to_string(),
+        ]);
+    }
+    t.print();
+}
+
+/// `Deprecated`/`Sugar`/`Compat` all name their target, and the arrow is the
+/// point: it is the answer to «why did my document come out as another Kind?».
+fn form_label(form: super::kinds::Form) -> String {
+    use super::kinds::Form;
+    let word = super::po::t(match form {
+        Form::Primary => "primary",
+        Form::Aggregate => "aggregate",
+        Form::Sugar(_) => "sugar",
+        Form::Deprecated(_) => "deprecated",
+        Form::Compat(_) => "compat",
+    });
+    // The target comes from `lowers_to` and not from this `match`, so the two
+    // cannot disagree about which forms have one.
+    match form.lowers_to() {
+        Some(to) => format!("{word} → {to}"),
+        None => word.to_string(),
+    }
+}
+
+/// Returns the ENGLISH literal, translated at the point of printing — the same
+/// rule `not_converged_reason` follows, and for the same reason: a value that
+/// depends on the active language stops the tests from checking anything under
+/// `--l18n=pt`.
+fn presence_label(p: super::kinds::Presence) -> &'static str {
+    use super::kinds::Presence;
+    match p {
+        Presence::Registry => "registry",
+        Presence::Derived => "derived",
+        Presence::Declarative => "declarative",
+        Presence::NotObservable => "not observable",
+    }
 }
 
 /// The compared fields, per Kind — ONE source for the printed table and for the
-/// test that keeps it aligned with `CONVERGING_KINDS`.
+/// test that keeps it aligned with the `converges` column of `cmd::kinds`.
 pub(crate) fn compared_fields_table() -> Vec<(&'static str, &'static [&'static str])> {
     vec![
         ("Container", super::container::RECONCILED_CONTAINER_FIELDS),
@@ -524,10 +542,11 @@ fn print_not_converged() {
                       attention:"
         )
     );
-    let mut t = super::output::Table::new(&["KIND", "WHY IT DOES NOT CONVERGE"]);
-    for kind in KINDS.iter().filter(|k| !CONVERGING_KINDS.contains(k)) {
+    let mut t = super::output::Table::new(&["KIND", "DOMAIN", "WHY IT DOES NOT CONVERGE"]);
+    for kind in super::kinds::stack_kinds().filter(|k| !super::kinds::converges(k)) {
         t.row(vec![
             kind.to_string(),
+            super::kinds::domain_label(kind).to_string(),
             super::po::t(not_converged_reason(kind)).to_string(),
         ]);
     }
@@ -723,7 +742,7 @@ fn wait(file: Option<PathBuf>, timeout: u64) -> Result<()> {
         let (_, cstore) = super::util::open_stores()?;
         let containers = cstore.list().unwrap_or_default();
         let mut pending: Vec<String> = Vec::new();
-        for kind in KINDS {
+        for kind in super::kinds::stack_kinds() {
             for doc in manifest::of_kind(&docs, kind) {
                 let (present, status) = presence(kind, doc, &containers);
                 if is_pending(&present, kind, &status) {
@@ -823,12 +842,21 @@ fn ls(file: Option<PathBuf>) -> Result<()> {
     let docs = manifest::load(&path)?;
     let (_, cstore) = super::util::open_stores()?;
     let containers = cstore.list().unwrap_or_default();
-    let mut t = super::output::Table::new(&["KIND", "NAME", "PRESENT", "STATUS"]);
-    for kind in KINDS {
+    // DOMAIN says WHAT AREA the Kind acts on (compute/storage/net-*/...), which
+    // is the column that makes a mixed manifest readable: a `NetworkRoute` and a
+    // `FirewallPolicy` sit next to each other and answer different questions.
+    let mut t = super::output::Table::new(&["KIND", "DOMAIN", "NAME", "PRESENT", "STATUS"]);
+    for kind in super::kinds::stack_kinds() {
         for doc in manifest::of_kind(&docs, kind) {
             let name = &doc.metadata.name;
             let (present, status) = presence(kind, doc, &containers);
-            t.row(vec![kind.to_string(), name.clone(), present, status]);
+            t.row(vec![
+                kind.to_string(),
+                super::kinds::domain_label(kind).to_string(),
+                name.clone(),
+                present,
+                status,
+            ]);
         }
     }
     t.print();
@@ -849,7 +877,7 @@ fn describe(file: Option<PathBuf>) -> Result<()> {
     let desconhecidos: Vec<&str> = docs
         .iter()
         .map(|doc| doc.kind.as_str())
-        .filter(|k| !KINDS.contains(k))
+        .filter(|k| !super::kinds::in_stack(k))
         .collect();
     if !desconhecidos.is_empty() {
         println!();
@@ -865,18 +893,20 @@ fn describe(file: Option<PathBuf>) -> Result<()> {
     let (_, cstore) = super::util::open_stores()?;
     let containers = cstore.list().unwrap_or_default();
 
-    for kind in KINDS {
+    for kind in super::kinds::stack_kinds() {
         let of = manifest::of_kind(&docs, kind);
         if of.is_empty() {
             continue;
         }
         println!();
-        let mut t = super::output::Table::new(&["KIND", "NAME", "PRESENT", "STATUS", "LABELS"]);
+        let mut t =
+            super::output::Table::new(&["KIND", "DOMAIN", "NAME", "PRESENT", "STATUS", "LABELS"]);
         for doc in of {
             let name = &doc.metadata.name;
             let (present, status) = presence(kind, doc, &containers);
             t.row(vec![
                 kind.to_string(),
+                super::kinds::domain_label(kind).to_string(),
                 name.clone(),
                 present,
                 status,
@@ -1253,21 +1283,10 @@ fn destroy_for_replace(changes: &[Change]) -> Result<()> {
     Ok(())
 }
 
-/// Kinds `destroy_one` actually removes.
-///
-/// A second list beside `CONVERGING_KINDS`, and deliberately so: the `match` in
-/// `destroy_one` cannot be inspected by a test, and what has to be guaranteed is
-/// that no converging Kind reaches a `--prune` or a `destroy` only to be refused
-/// halfway through. `todo_kind_convergente_tem_teardown_ou_razao` ties the two
-/// together in both directions.
-pub(crate) const TEARDOWN_KINDS: [&str; 6] = [
-    "Container",
-    "Volume",
-    "Network",
-    "NetworkRoute",
-    "Pod",
-    "Vm",
-];
+// Which Kinds `destroy_one` actually removes is the `teardown` column of
+// `cmd::kinds` (`has_teardown`). The `match` below cannot be inspected by a
+// test, so what is guaranteed is the pairing: no converging Kind reaches a
+// `--prune` or a `destroy` only to be refused halfway through.
 
 /// Why a converging Kind has NO automatic teardown.
 ///
@@ -1277,7 +1296,7 @@ pub(crate) const TEARDOWN_KINDS: [&str; 6] = [
 /// prune promises to remove it and the destroy refuses mid-run — which is what
 /// the paired test exists to catch.
 /// `None` means «this Kind IS torn down» — the answer for everything in
-/// [`TEARDOWN_KINDS`].
+/// the `teardown` column of `cmd::kinds`.
 pub(crate) fn no_teardown_reason(kind: &str) -> Option<&'static str> {
     Some(match kind {
         // It has no record of its own (it lives on the target's `ContainerFw`),
@@ -1315,7 +1334,7 @@ fn destroy_one(kind: &str, name: &str) -> Result<()> {
     // The list decides, the `match` only executes. Asking it first is what keeps
     // the two from drifting: a Kind added to one and not the other now fails
     // here, loudly, instead of being silently skipped or silently refused.
-    if !TEARDOWN_KINDS.contains(&kind) {
+    if !super::kinds::has_teardown(kind) {
         return Err(delonix_runtime_core::Error::Invalid(
             match no_teardown_reason(kind) {
                 Some(why) => format!("{kind}/{name}: {}", super::po::t(why)),
@@ -1333,10 +1352,10 @@ fn destroy_one(kind: &str, name: &str) -> Result<()> {
         "Pod" => super::pod::remove_pod(name, true),
         "Vm" => super::vm::remove_for_replace(name),
         // Unreachable: the guard above already refused everything outside
-        // `TEARDOWN_KINDS`. Kept so adding a Kind to that list without an arm
+        // the `teardown` column. Kept so flipping that column without an arm
         // here fails instead of silently doing nothing.
         other => Err(delonix_runtime_core::Error::Invalid(format!(
-            "{other}/{name}: listed in TEARDOWN_KINDS but `destroy_one` has no arm for it"
+            "{other}/{name}: cmd::kinds says it has teardown but `destroy_one` has no arm for it"
         ))),
     }
 }
@@ -1346,13 +1365,13 @@ fn destroy_one(kind: &str, name: &str) -> Result<()> {
 ///
 /// Removing a network while containers are still attached to it, or a volume
 /// while a container still mounts it, is how a teardown leaves a mess behind.
-/// `KINDS` already encodes the dependency order for creation; reversing it is
+/// `cmd::kinds` already encodes the dependency order for creation; reversing it is
 /// the only correct teardown order, and deriving it instead of writing a second
 /// list means the two cannot drift apart.
 fn teardown_order(changes: &[Change]) -> Vec<&Change> {
     let mut out: Vec<&Change> = Vec::new();
-    for kind in KINDS.iter().rev() {
-        out.extend(changes.iter().filter(|c| c.kind == **kind));
+    for kind in super::kinds::stack_kinds().rev() {
+        out.extend(changes.iter().filter(|c| c.kind == kind));
     }
     out
 }
@@ -1446,7 +1465,7 @@ fn converge_and_stamp(
     changes: &[Change],
 ) -> Result<()> {
     for c in changes {
-        if !CONVERGING_KINDS.contains(&c.kind.as_str()) {
+        if !super::kinds::converges(&c.kind) {
             continue;
         }
         if c.action == Action::Update {
@@ -1531,7 +1550,7 @@ fn converge_and_stamp(
     // stamp must record what was ASKED for, which is also what the next run will
     // compare against.
     for d in desired_of(docs)? {
-        if !CONVERGING_KINDS.contains(&d.kind.as_str()) {
+        if !super::kinds::converges(&d.kind) {
             continue;
         }
         let r = match d.kind.as_str() {
@@ -2501,7 +2520,7 @@ spec: {}
     /// under the containers still attached to it, or a volume from under a
     /// container that mounts it, is how a destroy leaves a mess behind.
     ///
-    /// The order is DERIVED from `KINDS` rather than written down a second
+    /// The order is DERIVED from `cmd::kinds` rather than written down a second
     /// time, so the two cannot drift apart — this test is what fixes that
     /// property, not just the current ordering.
     #[test]
@@ -2529,8 +2548,12 @@ spec: {}
         assert_eq!(order, vec!["Pod", "Container", "Volume", "Network"]);
 
         // And it really is derived: every ordered kind keeps the relative
-        // position `KINDS` gives it, reversed.
-        let idx = |k: &str| super::KINDS.iter().position(|x| *x == k).unwrap();
+        // position `cmd::kinds` gives it, reversed.
+        let idx = |k: &str| {
+            crate::cmd::kinds::stack_kinds()
+                .position(|x| x == k)
+                .unwrap()
+        };
         assert!(idx("Network") < idx("Volume"));
         assert!(idx("Volume") < idx("Container"));
         assert!(idx("Container") < idx("Pod"));
@@ -2570,40 +2593,52 @@ spec: {}
         );
     }
 
-    /// **Três listas que têm de concordar, e que derivaram.** O
-    /// `CONVERGING_KINDS` decide TRÊS coisas — se o `actual_of` sonda a presença
-    /// em vez de usar o adaptador, se o `converge_and_stamp` aplica um Update, e
-    /// se carimba a posse — enquanto os braços do `match` em `desired_of` e a
-    /// tabela do `--fields` são escritos à parte.
+    /// Todos os Kinds convergentes da tabela — a fonte que o `converge_and_stamp`
+    /// e o `actual_of` também consultam.
+    fn convergentes() -> Vec<&'static str> {
+        crate::cmd::kinds::all()
+            .filter(|f| f.converges)
+            .map(|f| f.kind)
+            .collect()
+    }
+
+    /// **Três listas que têm de concordar, e que derivaram.** A coluna
+    /// `converges` decide TRÊS coisas — se o `actual_of` sonda a presença em vez
+    /// de usar o adaptador, se o `converge_and_stamp` aplica um Update, e se
+    /// carimba a posse — enquanto os braços do `match` em `desired_of` e a
+    /// tabela do `--fields` continuam escritos à parte.
     ///
-    /// Aconteceu mesmo: o `Vm`, o `FirewallPolicy` e o `ShareVolume` ganharam
-    /// adaptador e ficaram fora da constante, por isso o `converge_and_stamp`
-    /// SALTAVA-OS. O sintoma escondeu-se porque o `apply` de cada Kind continua a
-    /// correr na cadeia antiga e é idempotente — convergiam pelo caminho errado,
-    /// e o resultado observado parecia certo.
+    /// Aconteceu mesmo, quando isto era uma constante ao lado: o `Vm`, o
+    /// `FirewallPolicy` e o `ShareVolume` ganharam adaptador e ficaram de fora,
+    /// por isso o `converge_and_stamp` SALTAVA-OS. O sintoma escondeu-se porque o
+    /// `apply` de cada Kind continua a correr na cadeia antiga e é idempotente —
+    /// convergiam pelo caminho errado, e o resultado observado parecia certo.
+    ///
+    /// A tabela única fecha a divergência entre as três CONSUMIDORAS; este teste
+    /// continua a ser preciso porque o `--fields` e o `desired_of` não saem dela.
     #[test]
     fn as_tres_listas_de_kinds_convergentes_concordam() {
-        // Tudo o que a constante declara tem de ter uma linha no `--fields`...
+        // Tudo o que a tabela declara tem de ter uma linha no `--fields`...
         let com_campos: Vec<&str> = compared_fields_table()
             .into_iter()
             .map(|(k, _)| k)
             .collect();
-        for k in super::CONVERGING_KINDS {
+        for k in convergentes() {
             assert!(
                 com_campos.contains(&k),
                 "{k} converge mas o `--fields` não diz que campos compara"
             );
         }
-        // ...e o inverso: nada no `--fields` pode estar fora da constante, senão
-        // a tabela promete uma comparação que o apply nunca faz.
+        // ...e o inverso: nada no `--fields` pode estar fora dela, senão a
+        // tabela promete uma comparação que o apply nunca faz.
         for k in com_campos {
             assert!(
-                super::CONVERGING_KINDS.contains(&k),
+                crate::cmd::kinds::converges(k),
                 "o `--fields` lista {k} mas o converge_and_stamp salta-o"
             );
         }
         // E um Kind convergente nunca pode ter uma desculpa de não-convergência.
-        for k in super::CONVERGING_KINDS {
+        for k in convergentes() {
             assert_eq!(
                 super::not_converged_reason(k),
                 super::NOT_CONVERGED_GENERIC,
@@ -2612,15 +2647,23 @@ spec: {}
         }
     }
 
-    /// Os Kinds de `KINDS` que não têm presença observável — o `presence`
+    /// Os Kinds do ciclo do stack sem presença observável — o `presence`
     /// devolve-lhes `-`, e é essa a marca que o `wait` tem de ler como pronta.
     ///
-    /// **O `NetworkRoute` saiu desta lista**, e a razão é a mudança que o trouxe
-    /// para o `CONVERGING_KINDS`: passou a ter registo próprio
+    /// Sai da coluna `presence` de `cmd::kinds` e já não de uma lista escrita
+    /// aqui: era a sexta lista paralela, e a que menos se via.
+    ///
+    /// **O `NetworkRoute` não está entre eles**, e a razão é a mudança que o
+    /// trouxe para os convergentes: passou a ter registo próprio
     /// (`infra::RouteDef`), logo passou a ter presença observável de verdade —
-    /// `yes`/`no`, com o estado vivo ao lado. Deixá-lo aqui faria o `wait` dar
-    /// por pronta uma rota que ainda não existe.
-    const DECLARATIVOS: [&str; 3] = ["Ingress", "FirewallPolicy", "HTTPRoute"];
+    /// `yes`/`no`, com o estado vivo ao lado. Classificá-lo como declarativo faria
+    /// o `wait` dar por pronta uma rota que ainda não existe.
+    fn declarativos() -> Vec<&'static str> {
+        crate::cmd::kinds::all()
+            .filter(|f| f.in_stack && f.presence == crate::cmd::kinds::Presence::Declarative)
+            .map(|f| f.kind)
+            .collect()
+    }
 
     /// **Um marcador de presença `-` não é «ausente».** O `wait` decidia
     /// prontidão com `present == "yes"`, e os Kinds declarativos NUNCA dizem
@@ -2631,7 +2674,12 @@ spec: {}
     /// devolve, e dar «pronto» a um desconhecido é o mesmo defeito ao contrário.
     #[test]
     fn um_kind_declarativo_nao_fica_pendente_para_sempre() {
-        for k in DECLARATIVOS {
+        assert_eq!(
+            declarativos().len(),
+            3,
+            "a lista mudou — confirma o `presence`"
+        );
+        for k in declarativos() {
             assert!(
                 !super::is_pending("-", k, "declarative"),
                 "{k} é declarativo e ficaria pendente para sempre"
@@ -2656,7 +2704,7 @@ spec: {}
     /// Um Kind que o `apply` aplica tem de ter braço no `presence()`, senão cai
     /// no `_ => ("?", "unsupported kind")` — que o `ls`/`describe` imprimem e o
     /// `wait` conta como pendente para sempre. Aconteceu com o `NetworkRoute`,
-    /// que está em `KINDS` e é aplicado desde que existe.
+    /// que está no ciclo do stack e é aplicado desde que existe.
     ///
     /// Sem I/O: `util::state_root()` só constrói um `PathBuf` e estes braços
     /// nunca abrem store nenhum.
@@ -2664,10 +2712,10 @@ spec: {}
     fn todo_o_kind_declarativo_de_kinds_tem_braco_no_presence() {
         let d = docs("apiVersion: delonix.io/v1\nkind: Network\nmetadata:\n  name: n1\nspec: {}\n");
         let doc = &d[0];
-        for k in DECLARATIVOS {
+        for k in declarativos() {
             assert!(
-                super::KINDS.contains(&k),
-                "{k} saiu de KINDS — este teste deixou de dizer o que promete"
+                crate::cmd::kinds::in_stack(k),
+                "{k} saiu do ciclo do stack — este teste deixou de dizer o que promete"
             );
             let (present, status) = super::presence(k, doc, &[]);
             assert_eq!(present, "-", "{k}: presence devolveu {present}/{status}");
@@ -2677,8 +2725,8 @@ spec: {}
     /// O inverso da asserção acima, e é o que faltava — foi por aqui que o
     /// `kind: NetworkRoute` entrou.
     ///
-    /// Ele foi acrescentado ao `KINDS`, ao `apply` e ao `validate_graph`, ficou
-    /// fora do `CONVERGING_KINDS`, e **nada falhou**: a razão genérica cobria-o.
+    /// Ele foi acrescentado ao ciclo do stack, ao `apply` e ao `validate_graph`,
+    /// ficou a NÃO convergir, e **nada falhou**: a razão genérica cobria-o.
     /// O resultado é o pior dos dois mundos — o plano imprime-o com `!` e uma
     /// frase que se lê como «ninguém chegou lá», quando o que estava a acontecer
     /// era que uma EXCEPÇÃO ao isolamento entre redes não podia ser fechada pelo
@@ -2688,14 +2736,11 @@ spec: {}
     /// hipótese, e é isso que este teste passa a exigir.
     #[test]
     fn todo_kind_nao_convergente_tem_razao_especifica() {
-        for k in super::KINDS
-            .iter()
-            .filter(|k| !super::CONVERGING_KINDS.contains(k))
-        {
+        for k in crate::cmd::kinds::stack_kinds().filter(|k| !crate::cmd::kinds::converges(k)) {
             assert_ne!(
                 super::not_converged_reason(k),
                 super::NOT_CONVERGED_GENERIC,
-                "{k} está fora do CONVERGING_KINDS com a razão genérica — \
+                "{k} não converge e traz a razão genérica — \
                  «não converge nesta versão» lê-se como «ninguém chegou lá». \
                  Ou o Kind converge, ou escreve-se o obstáculo concreto em \
                  `not_converged_reason`."
@@ -2712,8 +2757,8 @@ spec: {}
     /// a meio é pior que um que recusa à cabeça.
     #[test]
     fn todo_kind_convergente_tem_teardown_ou_razao() {
-        for k in super::CONVERGING_KINDS {
-            let removivel = super::TEARDOWN_KINDS.contains(&k);
+        for k in convergentes() {
+            let removivel = crate::cmd::kinds::has_teardown(k);
             let tem_razao = super::no_teardown_reason(k).is_some();
             assert!(
                 removivel || tem_razao,
@@ -2722,16 +2767,19 @@ spec: {}
             );
             assert!(
                 !(removivel && tem_razao),
-                "{k} está no TEARDOWN_KINDS E tem razão para não ter teardown — \
+                "{k} tem teardown E razão para não ter teardown — \
                  as duas coisas não podem ser verdade"
             );
         }
         // E o inverso: nada se remove que não convirja, senão o teardown
         // atravessa um Kind que o plano nunca nomeou.
-        for k in super::TEARDOWN_KINDS {
+        for k in crate::cmd::kinds::all()
+            .filter(|f| f.teardown)
+            .map(|f| f.kind)
+        {
             assert!(
-                super::CONVERGING_KINDS.contains(&k),
-                "o TEARDOWN_KINDS remove {k}, que não está no CONVERGING_KINDS"
+                crate::cmd::kinds::converges(k),
+                "o teardown remove {k}, que não converge"
             );
         }
     }
