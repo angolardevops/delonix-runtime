@@ -560,6 +560,7 @@ fn tls_from_secret(name: &str) -> Result<TlsMaterial> {
     Ok(TlsMaterial {
         cert_pem: cert,
         key_pem: key,
+        mode: "secretRef".into(),
     })
 }
 
@@ -766,25 +767,38 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
             continue; // nothing of this document is applied yet
         }
         let mut f = std::collections::BTreeMap::new();
-        let mut eps: Vec<String> = cfg
-            .listeners
+        // **Only the listeners THIS document asked for**, matched against the
+        // live ones. `cfg.listeners` is the deduplicated UNION of every
+        // HTTPRoute on the node, so reporting it raw made a document that
+        // declares `:80` claim the `:443` its neighbour opened — and, worse, a
+        // document whose own port had not been bound yet still reported it as
+        // present, because someone else's was.
+        //
+        // Intersecting keeps the format unchanged (listeners carry no
+        // provenance, unlike routes) and answers the question that matters: is
+        // what THIS document declared actually being served.
+        let want = spec_of_either(doc)
+            .map(|s| effective_entrypoints(&s))
+            .unwrap_or_default();
+        let mut eps: Vec<String> = want
             .iter()
-            .map(|l| format!("{}{}", l.port, if l.tls { "/tls" } else { "" }))
+            .filter(|e| {
+                cfg.listeners
+                    .iter()
+                    .any(|l| l.port == e.port && l.tls == e.tls)
+            })
+            .map(|e| format!("{}{}", e.port, if e.tls { "/tls" } else { "" }))
             .collect();
         eps.sort();
         f.insert("entrypoints".into(), eps.join(","));
-        // The stored config holds the MATERIAL (cert/key), not the mode that
-        // produced it — a self-signed cert and one from a Secret are
-        // indistinguishable once generated. So the actual side reports only
-        // WHETHER TLS is on; a change of `mode` with TLS already on is not
-        // visible here, and the apply's own listener warning is what covers it.
+        // The mode the material was BUILT with, recorded alongside it. It used
+        // to report `spec_tls_mode(doc)` — the DESIRED value — so switching
+        // `selfSigned` → `secretRef` on a route that already had TLS produced no
+        // diff at all, and the plan said «no changes» about a certificate that
+        // was about to be replaced.
         f.insert(
             "tls".into(),
-            if cfg.tls.is_some() {
-                spec_tls_mode(doc)
-            } else {
-                String::new()
-            },
+            cfg.tls.as_ref().map(|t| t.mode.clone()).unwrap_or_default(),
         );
         // The stored backend is `ip:port`; the manifest names a service. Map it
         // back through the same container→IP table the apply resolved with, so
@@ -1087,6 +1101,28 @@ rules:
                 );
             }
         }
+    }
+
+    /// **O `actual` do TLS copiava o DESEJADO.**
+    ///
+    /// A config guarda o material (cert+chave) e um cert não diz de onde veio,
+    /// por isso o lado real reportava `spec_tls_mode(doc)` — o valor pedido.
+    /// Resultado: trocar `selfSigned` por `secretRef` numa rota que já tinha TLS
+    /// não produzia diferença nenhuma, e o plano dizia «sem alterações» sobre um
+    /// certificado que ia ser substituído. Um campo que devolve o desejado não é
+    /// uma observação.
+    #[test]
+    fn o_modo_do_tls_e_registado_com_o_material() {
+        let m = super::ingress_proxy::self_signed_pem(&["a.exemplo.ao".into()]).unwrap();
+        assert_eq!(m.mode, "selfSigned");
+        // E o material de um Secret carrega o seu, logo os dois são
+        // distinguíveis depois de gerados — que era o que faltava.
+        assert_ne!(m.mode, "secretRef");
+        // Uma config escrita antes deste campo lê-se com modo vazio («desconhecido»),
+        // e não a fingir que era self-signed.
+        let antigo: super::ingress_proxy::TlsMaterial =
+            serde_json::from_str(r#"{"certPem":"c","keyPem":"k"}"#).unwrap();
+        assert_eq!(antigo.mode, "");
     }
 
     #[test]

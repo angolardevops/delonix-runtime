@@ -5000,7 +5000,11 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
         host_pid: c.host_pid,
         host_ipc: c.host_ipc,
         log_cri: c.log_cri,
-        ..Default::default()
+        // O `..Default::default()` que aqui estava deixou de ter efeito quando os
+        // cinco campos passaram a ser preenchidos — e o `clippy` do CI falha em
+        // QUALQUER aviso. Tirá-lo é também o que mantém a lição de pé: um campo
+        // novo no `RunSpec` volta a partir a compilação aqui, em vez de ser
+        // calado por um default.
     };
     // Re-enter supervision on `start`, same as `run -d --restart`: a container with a
     // supervised policy that crashed (or whose earlier supervisor died with it — host
