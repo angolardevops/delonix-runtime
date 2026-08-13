@@ -261,12 +261,34 @@ fn hot_fields(kind: &str) -> &'static [&'static str] {
         // SUBDIRECTORY of that parent, so repointing it means a different
         // directory and the bytes already written stay in the old one.
         "ShareVolume" => &["quota", "alertPct"],
+        // The proxy's config is COLLECTIVE and `httproute::converge_all`
+        // recomposes ALL of it, so every comparable field converges without
+        // destroying anything — `rules` by SIGHUP (same PID, no downtime),
+        // `entrypoints`/`tls` by restarting the proxy, which `converge_all` now
+        // does instead of warning that it did not.
+        //
+        // **This arm was MISSING, and its absence made three things false at
+        // once**: no field was hot, so every change planned as `Replace`; the
+        // `Replace` needs a teardown a collective config cannot give per
+        // document; and the `converge_all` arm in `stack.rs` was therefore
+        // unreachable. Meanwhile `RECONCILED_HTTPROUTE_FIELDS` documented
+        // «everything converges hot». The table is a promise — this is it being
+        // kept.
+        "HTTPRoute" | "Ingress" => &["entrypoints", "tls", "rules"],
         _ => &[],
     }
 }
 
 fn is_hot(kind: &str, field: &str) -> bool {
     hot_fields(kind).contains(&field)
+}
+
+/// The hot table, for the per-Kind tests that have to assert their own half of
+/// the promise. Reading it is the only way a module can check that what it
+/// declares comparable is also something the executor can apply.
+#[cfg(test)]
+pub(crate) fn hot_fields_for(kind: &str) -> &'static [&'static str] {
+    hot_fields(kind)
 }
 
 /// Computes the three-way diff of one resource.
