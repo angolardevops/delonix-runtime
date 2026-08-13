@@ -2,8 +2,7 @@
 
 > **O que este documento é.** Uma tabela em que **cada linha foi executada**, nas três
 > ferramentas, na mesma máquina, no mesmo dia. Não decide quem é melhor: mostra o que cada
-> um faz, incluindo aquilo em que o Delonix é **pior** — e há uma linha em que é o pior dos
-> três por uma margem larga.
+> um faz, incluindo aquilo em que o Delonix é **pior**.
 >
 > **O que não é.** Uma análise de funcionalidades lida do `--help`. Isso já existe em
 > [`paridade-docker-podman.md`](paridade-docker-podman.md), que aliás começa por dizer que
@@ -37,8 +36,9 @@
 | 1 | Daemon residente | **Sim** — `systemctl is-active docker` → `active` | Não — 0 processos | Não — 0 processos | `systemctl is-active docker`; `pgrep -c podman`; `pgrep -cf 'delonix (netns\|serve)'` |
 | 2 | Corre sem privilégio | Não sem o grupo `docker`/daemon: `permission denied … unix:///var/run/docker.sock` | Sim (userns, `id -u` → 0) | Sim (userns, `id -u` → 0) | `sudo -u nobody docker ps`; `<eng> run --rm alpine id -u` |
 | 3 | `run` básico | `ok` | `ok` | `ok` | `<eng> run --rm alpine echo ok` |
-| 4a | **Latência de `run --rm`, default de cada um** (mediana de **10**) | **208 ms** (bridge) | **268 ms** (slirp) | **89 ms** (host) | `date +%s%N` à volta de `<eng> run --rm alpine true` |
-| 4b | **Latência com rede isolada por container** (mediana de 10) | **208 ms** (a mesma — bridge JÁ é isolada) | **268 ms** (a mesma) | **333 ms** (`--net <rede>`) | idem, com `delonix network create` antes |
+| 4a | **Latência de `run --rm`, default de cada um** (mediana de **10**) | **208 ms** (bridge) | **268 ms** (slirp) | **91 ms** (host) | `date +%s%N` à volta de `<eng> run --rm alpine true` |
+| 4b | **Latência com rede isolada por container, plano de rede JÁ de pé** (mediana de 10) | **208 ms** (a mesma — a bridge JÁ é isolada) | **268 ms** (a mesma) | **216 ms** (`--net <rede>`) | idem, com um container sentinela na rede a manter o refcount ≥ 1 |
+| 4c | **Idem, com o plano de rede a subir DO ZERO em cada corrida** | 208 ms (o daemon e a `docker0` são permanentes — não paga) | 268 ms (não tem plano partilhado — não paga) | **344 ms** | sem sentinela: o `--rm` do último container leva o refcount a 0 e o `release` faz `teardown()` do pin/control/slirp |
 | 5 | Código de saída de um container `-d` | `42` | `42` | `42` (`Exited (42)`) | `run -d … sh -c 'exit 42'`, depois `inspect -f '{{.State.ExitCode}}'` / `container ls -a` |
 | 6 | **Mudar portas a quente, sem recriar** | **Não** — `unknown flag: --publish-add` | **Não** — `Error: unknown flag: --publish-add` | **Sim** — `port 19312->80/tcp hot-published`, **PID 4118 → 4118**, `container port` lista as duas | `<eng> update --publish-add 19312:80 <c>`; PID lido no `describe` antes e depois |
 | 7 | **stdin de um pipe, SEM flags** | **Não chega** — saída vazia | **Não chega** — saída vazia | **Chega** — `oi` | `echo oi \| <eng> run --rm alpine cat` |
@@ -52,8 +52,8 @@
 
 ## Onde o Delonix ganha, e porquê
 
-**Latência no default: 89 ms contra 208 e 268** (linha 4a) — 2,3× mais rápido que o docker,
-3,0× que o podman. Não é afinação, é arquitectura: não há daemon a contactar nem serviço a
+**Latência no default: 91 ms contra 208 e 268** (linha 4a) — 2,3× mais rápido que o docker,
+2,9× que o podman. Não é afinação, é arquitectura: não há daemon a contactar nem serviço a
 acordar. O `run` é um processo que faz `clone()` e sai. **Mas leia-se a linha 4b antes de
 citar este número** — parte da margem é o default ser `host`, e não uma rede isolada.
 
@@ -69,13 +69,26 @@ já é o comportamento normal.
 
 ## Onde o Delonix perde
 
-**Com rede isolada por container é o MAIS LENTO dos três, e por uma margem larga** (linha
-4b): **333 ms** contra 208 do docker e 268 do podman — 60 % mais lento que o docker, no
-mesmo teste em que o default ganhava por 2,3×. A comparação justa é esta, porque a `bridge`
-do docker **já** dá ao container a sua própria netns e o seu próprio IP; o default `host` do
-Delonix não dá. O custo é o re-exec `nsenter … ip netns exec` que a arquitectura rootless
-exige para entrar na netns do holder — duas passagens do binário em vez de uma. É o preço de
-não haver daemon privilegiado, e até aqui nunca tinha sido medido.
+**A configuração SEGURA é a lenta, e o custo está no arranque a frio do plano de rede.** A
+comparação justa é a linha 4b, não a 4a: a `bridge` do docker **já** dá ao container a sua
+própria netns e o seu próprio IP, e o default `host` do Delonix não dá. Aí o Delonix faz
+**216 ms** contra 208 do docker — empate técnico, e não a derrota larga que uma primeira
+leitura desta bancada indicou (ver a nota de método abaixo). Mas a linha 4c mostra onde dói:
+quando o plano de rede tem de subir do zero, **344 ms**, e o docker/podman nunca pagam esse
+custo porque o daemon e a `docker0` são permanentes. Num nó que arranca containers em rajada
+o custo dilui-se; num nó ocioso que corre um container de vez em quando, paga-se sempre.
+
+Decomposto pelas três linhas: **91 ms** de base, **+125 ms** de attach real à SDN (veth,
+IPAM, ruleset, e o re-exec `nsenter … ip netns exec` que o rootless exige), **+128 ms** de
+reconstrução do pin/control/slirp quando o refcount chegou a zero.
+
+**Nota de método, e é a mesma armadilha que esta página denuncia mais abaixo.** A primeira
+corrida desta bancada mediu 333 ms e concluiu «o pior dos três, 60 % pior que o docker». O
+número estava certo e a conclusão errada: com `--rm` e um container de cada vez, o refcount
+da rede chega a **zero** entre iterações e o `release` faz `teardown()` do plano de rede
+inteiro — cada corrida estava a reconstruí-lo. Não se estava a medir o attach, estava-se a
+medir attach **mais** bring-up. Um número medido não é um número compreendido, e a diferença
+entre os dois foram 128 ms atribuídos ao sítio errado.
 
 **Não consegue forçar um TTY** (linha 7c). Quando o chamador não tem terminal — CI, um pipe,
 um cron — `docker run -t`/`podman run -t` dão na mesma um pty ao container, e o Delonix não
@@ -127,5 +140,9 @@ polui o stdout. Um `run … | cat` devolve exactamente a saída do container.
 - Desempenho de `pull` e de `build`, e qualquer coisa com volumes ou com tráfego entre
   containers: fora do âmbito desta passagem, que foi deliberadamente curta e executável de
   uma vez.
-- A decomposição dos 333 ms da linha 4b (quanto é o re-exec, quanto é o holder, quanto é o
-  IPAM): sabe-se o total, não a repartição.
+- A repartição FINA dos 125 ms de attach da linha 4b (quanto é o re-exec do binário, quanto é
+  o round-trip ao holder, quanto é o veth/nft/IPAM). Sabe-se que ~20-25 `fork`+`exec` de
+  `ip`/`sysctl`/`nft` correm por attach, contados no código, mas não medidos aqui.
+- Se estes números mudam com a DENSIDADE do nó. Duas chamadas do caminho de attach
+  (`nft -a list chain fwdeny`, `nft list sets`) são dumps de texto que crescem com o número de
+  containers e namespaces — medir num nó vazio subestima-as, e este nó estava vazio.
