@@ -8715,3 +8715,12 @@ msgstr "não é possível validar o --gateway contra a subnet {subnet}"
 
 msgid "WARNING: network '{name}': the manifest asks for gateway {want} but its workloads route via {have} — NOT changed (they are already attached). Remove and recreate it to change the gateway."
 msgstr "AVISO: rede '{name}': o manifesto pede o gateway {want} mas os seus workloads roteiam por {have} — NÃO alterado (já estão ligados). Remove-a e recria-a para mudar o gateway."
+# net boot enable --restart (long_help)
+msgid ""
+"Restart policy baked into the units (`no|on-failure[:max]|always|unless-stopped`).\n"
+"\n"
+"Omitted, each unit inherits the container's own policy (`always` if it has none). Given, it applies to every unit — including `no`."
+msgstr ""
+"Política de restart gravada nos units (`no|on-failure[:max]|always|unless-stopped`).\n"
+"\n"
+"Omitida, cada unit herda a política do próprio container (`always` se não tiver nenhuma). Dada, aplica-se a todos — incluindo `no`."
