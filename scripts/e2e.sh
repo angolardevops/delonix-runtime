@@ -211,6 +211,34 @@ check "network ls mostra-a" ok bash -c "'$BIN' network ls | grep -q '$NET'"
 check "network inspect" ok "$BIN" network inspect "$NET"
 check "network describe" ok "$BIN" network describe "$NET"
 
+# --- `--gateway` declarado: validado SEMPRE, e relatado como está em vigor ---
+# Um teste unitário do validador não prova nada aqui, porque o bug não estava no
+# validador: estava na LIGAÇÃO. A chamada vivia dentro do braço `Some(--subnet)`
+# do `match` enquanto o valor era consumido fora dele, por isso um `--gateway`
+# sem `--subnet` chegava ao registo sem uma única verificação — o `create` dizia
+# sucesso e o primeiro `attach` morria num `ip route add default via` para um
+# endereço fora da rede. É por isso que o primeiro check NÃO passa `--subnet`.
+check "gateway fora do prefixo: recusa mesmo SEM --subnet" fail \
+  "$BIN" network create "gwx-$PFX" --gateway 8.8.8.8
+check "gateway recusado não deixa registo órfão" fail bash -c \
+  "'$BIN' network ls | grep -q 'gwx-$PFX'"
+check "gateway = endereço de rede: recusa" fail \
+  "$BIN" network create "gwn-$PFX" --subnet 10.251.0.0/16 --gateway 10.251.0.0
+NETGW="netgw-$PFX"
+if "$BIN" network create "$NETGW" --subnet 10.251.0.0/16 --gateway 10.251.0.254 >/dev/null 2>&1; then
+  # O que se lê no `inspect` tem de ser o que os workloads recebem. O registo
+  # declarativo DERIVA sempre `.0.1`; sem ler o plano físico, esta linha dizia
+  # um endereço e o dataplane usava outro — a mesma família do nome de bridge
+  # que a CLI imprimia sem existir no host.
+  check "inspect relata o gateway EM VIGOR, não o derivado" ok bash -c \
+    "'$BIN' network inspect '$NETGW' | grep -q '10.251.0.254'"
+  check "describe relata o gateway EM VIGOR" ok bash -c \
+    "'$BIN' network describe '$NETGW' | grep -q '10.251.0.254'"
+  "$BIN" network rm "$NETGW" >/dev/null 2>&1 || true
+else
+  skip "gateway declarado: relato" "network create --gateway falhou neste host"
+fi
+
 # --- `wg` ausente: nem errno cru, nem sucesso falso ---
 # Dois achados de uma varredura de auditoria, os dois neste grupo, os dois em
 # comandos que a bateria nunca EXECUTAVA (só lhes verificava o `--help`):

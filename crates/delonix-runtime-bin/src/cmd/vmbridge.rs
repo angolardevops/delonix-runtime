@@ -298,7 +298,8 @@ fn run_plan(plan: &[Vec<String>], apply: bool, tolerate: bool) -> Result<()> {
 /// `delonix vm bridge <network>` — establish (or dry-run) the host↔SDN bridge.
 pub fn bridge(network: &str, vm_subnets: Vec<String>, apply: bool) -> Result<()> {
     adopt_invoking_user_root();
-    let (bridge, prefix, _gw) = infra::resolve_net(network)?;
+    let p = infra::resolve_net(network)?;
+    let (bridge, prefix) = (p.bridge, p.prefix);
     let holder = holder_pid()?;
     let subs = if vm_subnets.is_empty() {
         detect_vm_subnets()
@@ -341,7 +342,8 @@ pub fn bridge(network: &str, vm_subnets: Vec<String>, apply: bool) -> Result<()>
 /// `delonix vm unbridge <network>` — tear the bridge down.
 pub fn unbridge(network: &str, apply: bool) -> Result<()> {
     adopt_invoking_user_root();
-    let (bridge, prefix, _gw) = infra::resolve_net(network)?;
+    let p = infra::resolve_net(network)?;
+    let (bridge, prefix) = (p.bridge, p.prefix);
     let holder = holder_pid()?;
     let subs = detect_vm_subnets();
     let plan = unbridge_plan(&holder, &bridge, &prefix, &subs);

@@ -874,7 +874,7 @@ fn egress_net(network: &str, mode: EgressMode, to: Option<String>) -> Result<()>
     // The REAL bridge lives in the infra registry (NetDef, `dlxn{:08x}`), NOT in
     // the NetworkStore (`dlxn{:02x}{:04x}`) — using the wrong one makes the nft
     // rules never match traffic. resolve_net returns the bridge the holder created.
-    let bridge = infra::resolve_net(network)?.0;
+    let bridge = infra::resolve_net(network)?.bridge;
     match mode {
         EgressMode::Allow => {
             infra::set_egress_policy_net(&bridge, false)?;
@@ -1413,7 +1413,7 @@ fn apply_network_egress(kind: &str, name: &str, spec: &FwDocSpec) -> Result<()> 
     }
 
     // The REAL bridge lives in the infra registry (not the NetworkStore) — see egress_net.
-    let bridge = infra::resolve_net(&spec.target)?.0;
+    let bridge = infra::resolve_net(&spec.target)?.bridge;
 
     if policy == "deny" && !spec.allow_cidrs.is_empty() {
         // deny + allowCidrs → allowlist (denies everything except DNS + these CIDRs).
@@ -1514,7 +1514,7 @@ fn egress_show(network: &str) -> Result<()> {
 
 /// `egress host <net> <hostname>` — FQDN allowlist for a network's egress.
 fn egress_host(network: &str, hostname: &str) -> Result<()> {
-    let bridge = infra::resolve_net(network)?.0;
+    let bridge = infra::resolve_net(network)?.bridge;
     infra::set_egress_host(&bridge, hostname)?;
     println!(
         "network {network}: egress now allows {} (and *.{}) — learnt live from DNS",

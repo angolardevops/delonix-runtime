@@ -3480,11 +3480,18 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         Vec::new()
     };
     let slirp_hook = |pid: i32| -> Result<()> { delonix_net::slirp_attach(pid, &slirp_ports) };
-    // DNS for /etc/resolv.conf: on a custom network it's the gateway (the ingress's
-    // resolver); with `-p` (slirp) it's the slirp's DNS; on `--net host` it's `None`
-    // (the runtime copies the host's resolv.conf).
+    // DNS for /etc/resolv.conf: on a custom network it's the holder's own address
+    // on the bridge (where the internal resolver answers); with `-p` (slirp) it's
+    // the slirp's DNS; on `--net host` it's `None` (the runtime copies the host's
+    // resolv.conf).
+    //
+    // `bridge_addr` and NOT `default_route`: a network with a DECLARED gateway
+    // sends its workloads out through an appliance, and that appliance does not
+    // run this engine's resolver. Taking one string for both questions is what
+    // made `<name>.<ns>.delonix.internal` stop resolving on such a network — with
+    // no error, because a resolver that is simply not there just times out.
     let dns = match &custom_net {
-        Some(n) => infra::resolve_net(n).ok().map(|(_, _, gw)| gw),
+        Some(n) => infra::resolve_net(n).ok().map(|p| p.bridge_addr),
         // POD container (`--pod`): it's on delonix0 like any custom-network container
         // → the resolver is the holder's DNS on the infra gateway. Without this the
         // `/etc/resolv.conf` was left unwritten (the re-exec runs in the holder's mount-ns,
@@ -4818,7 +4825,9 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
     // resolv.conf: the custom network's gateway (the ingress resolver), the slirp's DNS
     // with `-p`, or the host's (`--net host`) — see `run`.
     let dns = match &c.network {
-        Some(n) => infra::resolve_net(n).ok().map(|(_, _, gw)| gw),
+        // Same choice as `cmd_run` above: the resolver's address, never the
+        // declared gateway.
+        Some(n) => infra::resolve_net(n).ok().map(|p| p.bridge_addr),
         // Mirrors `cmd_run`'s pod arm. A pod member sits on `delonix0` like any
         // custom-network container, so its resolver is the ingress gateway —
         // without this arm a restarted member came back resolving nothing by name.

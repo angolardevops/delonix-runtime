@@ -65,11 +65,36 @@ pub(crate) const NETWORK_SPEC_FIELDS: &[&str] = &[
 /// replace of a network detaches every container on it, which is precisely why
 /// it is refused without `--replace`.
 ///
-/// `gateway` is deliberately absent: for a bridge network it is DERIVED from the
-/// base octet and the manifest's field is empty by default, so comparing it
-/// would report a difference on every plan for every network.
+/// `gateway` IS compared, and only a DECLARED one ever appears on either side.
+/// The earlier note here said it was left out because it is derived and the
+/// manifest's field is empty by default — true while a declared gateway was
+/// REFUSED, and false since it started changing the default route the workloads
+/// get. Left out, it was a manifest field that alters the dataplane and is
+/// invisible to `plan`: change it, re-apply, and the network already exists, so
+/// nothing happens and the run reports success. Both sides normalise a gateway
+/// equal to the derived one away ([`normalized_gateway`]), which is what keeps an
+/// unchanged manifest at zero differences.
 pub(crate) const RECONCILED_NETWORK_FIELDS: &[&str] =
-    &["driver", "parent", "subnet", "vni", "peers"];
+    &["driver", "parent", "subnet", "gateway", "vni", "peers"];
+
+/// A gateway worth recording: `None` when absent or equal to the one derived from
+/// `subnet`, which declares nothing.
+///
+/// Both sides of the diff go through it. Without it, writing the derived address
+/// explicitly in the manifest put a value on the desired side and nothing on the
+/// actual one — drift proposed forever over a network nobody had changed.
+fn normalized_gateway(gateway: &str, subnet: Option<&str>) -> Option<String> {
+    if gateway.is_empty() {
+        return None;
+    }
+    let derived = subnet
+        .and_then(delonix_net::Cidr::parse)
+        .and_then(|c| c.gateway());
+    if derived.as_deref() == Some(gateway) {
+        return None;
+    }
+    Some(gateway.to_string())
+}
 
 fn desired_network_fields(spec: &NetworkSpec) -> std::collections::BTreeMap<String, String> {
     let mut f = std::collections::BTreeMap::new();
@@ -79,6 +104,9 @@ fn desired_network_fields(spec: &NetworkSpec) -> std::collections::BTreeMap<Stri
     }
     if let Some(s) = &spec.subnet {
         f.insert("subnet".into(), s.clone());
+    }
+    if let Some(g) = normalized_gateway(&spec.gateway, spec.subnet.as_deref()) {
+        f.insert("gateway".into(), g);
     }
     if let Some(v) = spec.vni {
         f.insert("vni".into(), v.to_string());
@@ -91,13 +119,23 @@ fn desired_network_fields(spec: &NetworkSpec) -> std::collections::BTreeMap<Stri
     f
 }
 
-fn actual_network_fields(n: &Network) -> std::collections::BTreeMap<String, String> {
+/// `effective_gw` is the default route actually in force — read from the holder's
+/// registry by the caller, because the `NetworkStore` only ever derives it (which
+/// is the very reason `network inspect` could print one address while the
+/// workloads routed via another).
+fn actual_network_fields(
+    n: &Network,
+    effective_gw: Option<&str>,
+) -> std::collections::BTreeMap<String, String> {
     let mut f = std::collections::BTreeMap::new();
     f.insert("driver".into(), n.driver.clone());
     if let Some(p) = &n.parent {
         f.insert("parent".into(), p.clone());
     }
     f.insert("subnet".into(), n.subnet.clone());
+    if let Some(g) = effective_gw.and_then(|g| normalized_gateway(g, Some(&n.subnet))) {
+        f.insert("gateway".into(), g);
+    }
     if let Some(v) = n.vni {
         f.insert("vni".into(), v.to_string());
     }
@@ -196,8 +234,10 @@ fn reseed_overlay_fdb(store: &NetworkStore, name: &str) -> Result<()> {
         .iter()
         .map(|p| peer_fdb_dst(&delonix_net::parse_overlay_peer(p)))
         .collect();
-    let (bridge, _prefix, gateway) = infra::resolve_net(name)?;
-    match infra::set_vxlan(&dev, vni, &bridge, &gateway, &dsts) {
+    // `bridge_addr`: the uplink's bridge is a normal holder bridge, and this token
+    // only reaches `ensure_net_bridge` as its fallback address — never a route.
+    let plan = infra::resolve_net(name)?;
+    match infra::set_vxlan(&dev, vni, &plan.bridge, &plan.bridge_addr, &dsts) {
         Err(e) if holder_is_down(&e) => {
             // Nothing to seed into: the uplink lives in the holder's netns and
             // died with it. The registry is the whole truth until it comes back.
@@ -321,7 +361,7 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
         .map(|n| super::reconcile::Actual {
             kind: "Network".into(),
             name: n.name.clone(),
-            fields: actual_network_fields(&n),
+            fields: actual_network_fields(&n, effective_default_route(&n.name).as_deref()),
             owner: n.labels.get(super::reconcile::STACK_LABEL).cloned(),
             last_applied: n
                 .annotations
@@ -590,6 +630,29 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                     );
                 }
             }
+            // Same reason, one field over: a declared gateway is honoured at
+            // CREATION and this path creates nothing. Silence here would make
+            // editing `gateway` in a manifest a no-op reported as success — the
+            // accept-and-drop this engine refuses to publish.
+            let effective =
+                effective_default_route(name).unwrap_or_else(|| existing.gateway.clone());
+            let want = normalized_gateway(&spec.gateway, Some(&existing.subnet));
+            let have = normalized_gateway(&effective, Some(&existing.subnet));
+            if want != have {
+                eprintln!(
+                    "{}",
+                    super::po::tf(
+                        "WARNING: network '{name}': the manifest asks for gateway {want} but its \
+                         workloads route via {have} — NOT changed (they are already attached). \
+                         Remove and recreate it to change the gateway.",
+                        &[
+                            ("name", name),
+                            ("want", want.as_deref().unwrap_or("<derived>")),
+                            ("have", have.as_deref().unwrap_or("<derived>")),
+                        ],
+                    )
+                );
+            }
             println!(
                 "network/{name}: {}",
                 super::po::t("already exists, nothing to do")
@@ -643,6 +706,30 @@ fn cmd_ls(store: &NetworkStore, format: output::OutputFormat) -> Result<()> {
     Ok(())
 }
 
+/// The DECLARED gateway of a bridge network, validated against the prefix the
+/// store actually decided — or `None` when the caller declared none.
+///
+/// Pure on purpose (it takes the resulting `Network`, it does not create one), so
+/// the cases that matter are testable as data: an address outside the prefix, the
+/// network address, the broadcast, and the one that reads as declared but is not
+/// (`--gateway` repeating the derived value, which asks for nothing).
+fn declared_gateway(gateway: &str, subnet: &str) -> Result<Option<String>> {
+    // A MESMA regra que o plano usa para decidir se há declaração — uma segunda
+    // cópia dela é como o `create` e o `plan` passariam a discordar sobre o que
+    // conta como gateway declarado.
+    let Some(g) = normalized_gateway(gateway, Some(subnet)) else {
+        return Ok(None);
+    };
+    let cidr = delonix_net::Cidr::parse(subnet).ok_or_else(|| {
+        delonix_runtime_core::Error::Invalid(super::po::tf(
+            "cannot validate --gateway against subnet {subnet}",
+            &[("subnet", subnet)],
+        ))
+    })?;
+    NetworkStore::validate_gateway(&cidr, &g)?;
+    Ok(Some(g))
+}
+
 #[allow(clippy::too_many_arguments)]
 /// Create a network in BOTH coordinated stores (declarative registry + the
 /// holder's physical plane, with the SAME prefix). It is `pub(crate)` so the kind
@@ -678,31 +765,37 @@ pub(crate) fn create_network(
                     // isto antes fazia o `create` passar e o primeiro container
                     // falhar no attach.
                     let cidr = NetworkStore::validate_subnet(s)?;
-                    let net = store.create_with_cidr(name, cidr)?;
-                    // Um gateway DECLARADO é aceite desde a camada A — mas
-                    // validado contra o prefixo, e nunca em silêncio. Ele não
-                    // muda quem é dono da bridge (o holder continua a
-                    // encaminhar e a mascarar); muda a ROTA DEFAULT que os
-                    // containers desta rede recebem, que passa a apontar para
-                    // um appliance de fronteira ali dentro.
-                    if !gateway.is_empty() && gateway != net.gateway {
-                        if let Err(e) = NetworkStore::validate_gateway(&cidr, gateway) {
-                            let _ = store.remove(name);
-                            return Err(e);
-                        }
-                        super::output::warn(&super::po::tf(
-                            "network '{name}': the default route of its workloads will point at \
-                             {gw}, not at the engine ({have}). Nothing answers there until a \
-                             workload on this network does — until then they have no way out.",
-                            &[("name", name), ("gw", gateway), ("have", &net.gateway)],
-                        ));
-                    }
-                    net
+                    store.create_with_cidr(name, cidr)?
                 }
                 None => store.create(name)?,
             };
-            let declared_gw =
-                (!gateway.is_empty() && gateway != net.gateway).then(|| gateway.to_string());
+            // Um gateway DECLARADO é aceite desde a camada A — mas validado
+            // contra o prefixo, e nunca em silêncio. Ele não muda quem é dono da
+            // bridge (o holder continua a encaminhar e a mascarar); muda a ROTA
+            // DEFAULT que os containers desta rede recebem, que passa a apontar
+            // para um appliance de fronteira ali dentro.
+            //
+            // Decidido AQUI, uma vez, para os DOIS braços do `match`. Estava
+            // dentro do braço `Some(subnet)` enquanto o valor era usado fora
+            // dele, por isso um `--gateway` sem `--subnet` chegava ao registo sem
+            // uma única validação — e o `create` reportava sucesso, deixando o
+            // primeiro `attach` a morrer num `ip route add default via` para um
+            // endereço fora da rede.
+            let declared_gw = match declared_gateway(gateway, &net.subnet) {
+                Ok(g) => g,
+                Err(e) => {
+                    let _ = store.remove(name);
+                    return Err(e);
+                }
+            };
+            if let Some(gw) = &declared_gw {
+                super::output::warn(&super::po::tf(
+                    "network '{name}': the default route of its workloads will point at \
+                     {gw}, not at the engine ({have}). Nothing answers there until a \
+                     workload on this network does — until then they have no way out.",
+                    &[("name", name), ("gw", gw), ("have", &net.gateway)],
+                ));
+            }
             // Realize it physically (real bridge of the rootless holder) — aligned
             // to the SAME prefix the NetworkStore just decided. If this fails, the
             // declarative record just created above would otherwise be ORPHANED —
@@ -832,10 +925,11 @@ fn realize_overlay(net: &Network) -> Result<()> {
     // The bridge/gateway come from the physical plane aligned to the NetworkStore
     // prefix.
     infra::network_create_with(&net.name, &net.prefix)?;
-    let (bridge, _prefix, gateway) = infra::resolve_net(&net.name)?;
+    let plan = infra::resolve_net(&net.name)?;
+    let bridge = plan.bridge.clone();
     // FDB: `wg_ip` of each peer if encrypted, otherwise the plain `node_ip`.
     let dsts: Vec<String> = parsed.iter().map(peer_fdb_dst).collect();
-    infra::set_vxlan(&dev, vni, &bridge, &gateway, &dsts)?;
+    infra::set_vxlan(&dev, vni, &bridge, &plan.bridge_addr, &dsts)?;
     // WireGuard only in the ENCRYPTED overlay (availability was already ensured
     // above).
     if let Some(my_wg_ip) = net.wg_ip.as_deref() {
@@ -877,19 +971,35 @@ struct NetworkInspect<'a> {
     peers: &'a [String],
 }
 
+/// The default route actually in force on a network — the holder's registry, which
+/// is the authority, and not the `NetworkStore`, which only ever DERIVES it.
+///
+/// The same rule the bridge name already lives by: the physical plane decides and
+/// the registry reports. Without this, `network inspect` printed the derived
+/// address while every workload on the network routed via the declared one — the
+/// same class of lie as a CLI naming a bridge device that does not exist on the
+/// host, or `ingress ls` saying `allow` about a blocked port.
+///
+/// `None` when the network has no record here (nothing was ever realized): the
+/// store's derived value is then all there is, and it is the honest answer.
+fn effective_default_route(name: &str) -> Option<String> {
+    infra::resolve_net(name).ok().map(|p| p.default_route)
+}
+
 fn cmd_inspect(
     store: &NetworkStore,
     name: &str,
     format: super::output::OutputFormat,
 ) -> Result<()> {
     let n = store.get(name)?;
+    let gw = effective_default_route(&n.name).unwrap_or_else(|| n.gateway.clone());
     if format == super::output::OutputFormat::Json {
         return super::output::print_json(&[NetworkInspect {
             name: &n.name,
             driver: &n.driver,
             bridge: &n.bridge,
             subnet: &n.subnet,
-            gateway: &n.gateway,
+            gateway: &gw,
             parent: n.parent.as_deref(),
             vni: n.vni,
             peers: &n.peers,
@@ -899,7 +1009,7 @@ fn cmd_inspect(
     println!("driver:   {}", n.driver);
     println!("bridge:   {}", n.bridge);
     println!("subnet:   {}", n.subnet);
-    println!("gateway:  {}", n.gateway);
+    println!("gateway:  {gw}");
     if let Some(p) = &n.parent {
         println!("parent:   {p}");
     }
@@ -975,14 +1085,11 @@ fn describe_one(n: &Network) {
         },
     );
     d.field("Subnet", &n.subnet);
-    d.field(
-        "Gateway",
-        if n.gateway.is_empty() {
-            "<none>"
-        } else {
-            &n.gateway
-        },
-    );
+    // The one in FORCE (see `effective_default_route`), not the one the store
+    // derives — on a network with a declared gateway they are different addresses
+    // and this is the field people read to decide where the traffic goes.
+    let gw = effective_default_route(&n.name).unwrap_or_else(|| n.gateway.clone());
+    d.field("Gateway", if gw.is_empty() { "<none>" } else { &gw });
     d.field("Prefix", &n.prefix);
     // Only on the physical-LAN drivers (macvlan/ipvlan).
     d.field_opt("Parent", n.parent.as_deref());
@@ -1083,9 +1190,80 @@ mod tests {
                 "{k} is compared but undocumented"
             );
         }
-        // `gateway` is derived from the base octet and empty in the manifest by
-        // default — comparing it would report a difference on every plan.
+        // Um manifesto que não declara gateway não põe o campo em lado nenhum —
+        // e é isso, e não a ausência da comparação, que mantém uma rede normal a
+        // zero diferenças. A versão anterior desta asserção dizia que o campo
+        // NUNCA é comparado, o que passou a fixar em teste o bug de o
+        // `spec.gateway` ser aceite e invisível ao plano.
         assert!(!f.contains_key("gateway"));
+    }
+
+    /// **Um gateway igual ao derivado não declara nada** — nos dois lados.
+    ///
+    /// Se só um dos lados normalizasse, escrever o endereço derivado à mão no
+    /// manifesto punha um valor no desejado e nada no observado: deriva proposta
+    /// para sempre sobre uma rede que ninguém mexeu.
+    #[test]
+    fn o_gateway_igual_ao_derivado_nao_e_declaracao() {
+        let sub = Some("10.42.0.0/16");
+        assert_eq!(super::normalized_gateway("", sub), None);
+        assert_eq!(super::normalized_gateway("10.42.0.1", sub), None);
+        assert_eq!(
+            super::normalized_gateway("10.42.0.254", sub).as_deref(),
+            Some("10.42.0.254")
+        );
+        // `/22` — o derivado deixa de ser `.0.1`, e é aqui que uma fórmula fixa
+        // de dois octetos daria a resposta errada.
+        assert_eq!(
+            super::normalized_gateway("172.20.4.1", Some("172.20.4.0/22")),
+            None
+        );
+    }
+
+    /// **O `--gateway` é validado com e SEM `--subnet`.**
+    ///
+    /// A validação vivia dentro do braço `Some(subnet)` do `match` enquanto o
+    /// valor era consumido fora dele: `network create x --gateway 8.8.8.8` (sem
+    /// `--subnet`) escrevia-o no registo sem uma única verificação, o `create`
+    /// dizia sucesso, e o primeiro `attach` morria num `ip route add default via`
+    /// para um endereço que não está na rede.
+    #[test]
+    fn o_gateway_declarado_e_sempre_validado_contra_o_prefixo() {
+        let sub = "10.42.0.0/16";
+        // Fora do prefixo — o caso que escapava sem `--subnet`.
+        assert!(super::declared_gateway("8.8.8.8", sub).is_err());
+        // Endereço de rede e broadcast: existem, e nenhum responde.
+        assert!(super::declared_gateway("10.42.0.0", sub).is_err());
+        assert!(super::declared_gateway("10.42.255.255", sub).is_err());
+        assert!(super::declared_gateway("nao-e-um-ip", sub).is_err());
+        // Dentro do prefixo, e diferente do derivado: é uma declaração.
+        assert_eq!(
+            super::declared_gateway("10.42.0.254", sub)
+                .unwrap()
+                .as_deref(),
+            Some("10.42.0.254")
+        );
+        // Igual ao derivado, ou ausente: não declara nada, e não é erro.
+        assert_eq!(super::declared_gateway("10.42.0.1", sub).unwrap(), None);
+        assert_eq!(super::declared_gateway("", sub).unwrap(), None);
+    }
+
+    /// O ROUND-TRIP que todo o Kind convergente tem de cumprir: um manifesto
+    /// inalterado dá ZERO diferenças, com e sem gateway declarado.
+    #[test]
+    fn um_manifesto_inalterado_nao_tem_deriva_de_gateway() {
+        for (yaml, effective) in [
+            ("driver: bridge\nsubnet: 10.42.0.0/16\n", "10.42.0.1"),
+            (
+                "driver: bridge\nsubnet: 10.42.0.0/16\ngateway: 10.42.0.254\n",
+                "10.42.0.254",
+            ),
+        ] {
+            let spec: super::NetworkSpec = serde_yaml::from_str(yaml).unwrap();
+            let want = super::normalized_gateway(&spec.gateway, spec.subnet.as_deref());
+            let have = super::normalized_gateway(effective, Some("10.42.0.0/16"));
+            assert_eq!(want, have, "manifesto inalterado propôs deriva: {yaml}");
+        }
     }
 
     /// **O destino do FDB tem de ser o MESMO no realize e na remoção.**

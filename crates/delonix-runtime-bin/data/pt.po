@@ -8705,3 +8705,13 @@ msgstr "um túnel não tem labels onde carimbar a posse"
 
 msgid "a share has no record of its own to stamp ownership on"
 msgstr "uma partilha não tem registo próprio onde carimbar a posse"
+
+# gateway declarado numa rede bridge
+msgid "network '{name}': the default route of its workloads will point at {gw}, not at the engine ({have}). Nothing answers there until a workload on this network does — until then they have no way out."
+msgstr "rede '{name}': a rota default dos seus workloads vai apontar para {gw}, e não para o motor ({have}). Ninguém responde ali enquanto um workload desta rede o não fizer — até lá ficam sem saída."
+
+msgid "cannot validate --gateway against subnet {subnet}"
+msgstr "não é possível validar o --gateway contra a subnet {subnet}"
+
+msgid "WARNING: network '{name}': the manifest asks for gateway {want} but its workloads route via {have} — NOT changed (they are already attached). Remove and recreate it to change the gateway."
+msgstr "AVISO: rede '{name}': o manifesto pede o gateway {want} mas os seus workloads roteiam por {have} — NÃO alterado (já estão ligados). Remove-a e recria-a para mudar o gateway."

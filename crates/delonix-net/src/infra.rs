@@ -1476,44 +1476,50 @@ fn handle_control(line: &str) -> String {
     }
 }
 
-/// Ensures a network's BRIDGE in the infra netns (the gateway is ALWAYS the ingress):
-/// creates `<bridge>` with `<gateway>/<prefix-len>` if missing, and ISOLATES it from the other
+/// Ensures a network's BRIDGE in the infra netns: creates `<bridge>` with the
+/// holder's own address on it if missing, and ISOLATES it from the other
 /// delonix bridges (forward drop between networks, like docker) — but egress (oifname tap0)
 /// and intra-network communication remain. Idempotent.
-fn ensure_net_bridge(bridge: &str, gateway: &str) -> Result<()> {
+///
+/// `fallback_addr` is used ONLY for a bridge with no `NetDef` — the infra bridge,
+/// which is not a user network and has no registry entry. For every other bridge
+/// the registry is the authority and the argument is not consulted. It is named
+/// for what it does: an earlier shape took a `gateway` and then silently ignored
+/// it, which is how `reexec_start` came to use its `id` in place of the `netns`
+/// it was handed and work only by coincidence.
+///
+/// **The bridge's address is never the DECLARED gateway.** The holder has to keep
+/// an address on the network it routes and masquerades for; a declared gateway
+/// only changes the default route the workloads receive. Confusing the two would
+/// put the appliance's address on the holder's bridge and leave the holder with
+/// no way to speak on its own network.
+fn ensure_net_bridge(bridge: &str, fallback_addr: &str) -> Result<()> {
     let exists = crate::capture("ip", &["link", "show", bridge])
         .map(|o| o.contains(bridge))
         .unwrap_or(false);
+    // O comprimento vem do PREFIXO da rede e já não é `/16` fixo. Com o
+    // fixo, uma rede `172.20.4.0/22` produzia `ip addr add
+    // 172.20.4.1/16` — uma bridge cujo endereço declara uma rede quatro
+    // mil vezes maior do que a que existe, a sobrepor-se a tudo o que
+    // estiver em 172.20.x. Medido a ligar a camada A: o `create` passava e
+    // o primeiro container falhava no attach.
+    // O prefixo vem do registo, pela bridge — a mesma via que esta função
+    // já usa mais abaixo para reaplicar o egress. Sem `NetDef` (a bridge de
+    // infra, que não é uma rede de utilizador) o /16 histórico é a resposta
+    // certa e não um palpite: é o que o `INFRA_CIDR` declara.
+    //
+    // Calculado FORA do `if !exists` porque o servidor de DHCP abaixo tem de
+    // partir exactamente do mesmo endereço: derivá-lo duas vezes é como o
+    // servidor acabaria a arrendar numa rede diferente daquela em que a bridge
+    // está endereçada.
+    let cidr = cidr_of_bridge(bridge);
+    let gateway = cidr
+        .and_then(|c| c.gateway())
+        .unwrap_or_else(|| fallback_addr.to_string());
+    let gateway = gateway.as_str();
     if !exists {
         run("ip", &["link", "add", bridge, "type", "bridge"])?;
-        // O comprimento vem do PREFIXO da rede e já não é `/16` fixo. Com o
-        // fixo, uma rede `172.20.4.0/22` produzia `ip addr add
-        // 172.20.4.1/16` — uma bridge cujo endereço declara uma rede quatro
-        // mil vezes maior do que a que existe, a sobrepor-se a tudo o que
-        // estiver em 172.20.x. Medido a ligar a camada A: o `create` passava e
-        // o primeiro container falhava no attach.
-        // O prefixo vem do registo, pela bridge — a mesma via que esta função
-        // já usa mais abaixo para reaplicar o egress. Sem `NetDef` (a bridge de
-        // infra, que não é uma rede de utilizador) o /16 histórico é a resposta
-        // certa e não um palpite: é o que o `INFRA_CIDR` declara.
-        // O endereço DA BRIDGE é sempre o derivado do prefixo, mesmo quando a
-        // rede declara outro gateway: o holder tem de continuar a ter um
-        // endereço nela para encaminhar e mascarar. O gateway DECLARADO muda
-        // apenas a rota default que os containers recebem — são duas coisas
-        // diferentes, e confundi-las poria o endereço do appliance na bridge do
-        // holder, deixando-o sem forma de falar com a própria rede.
-        let derivado = network_list()
-            .into_iter()
-            .find(|d| d.bridge == bridge)
-            .and_then(|d| crate::Cidr::parse(&d.prefix))
-            .and_then(|c| c.gateway());
-        let gateway = derivado.as_deref().unwrap_or(gateway);
-        let plen = network_list()
-            .into_iter()
-            .find(|d| d.bridge == bridge)
-            .and_then(|d| crate::Cidr::parse(&d.prefix))
-            .map(|c| c.len)
-            .unwrap_or(16);
+        let plen = cidr.map(|c| c.len).unwrap_or(16);
         run(
             "ip",
             &["addr", "add", &format!("{gateway}/{plen}"), "dev", bridge],
@@ -1558,7 +1564,11 @@ fn ensure_net_bridge(bridge: &str, gateway: &str) -> Result<()> {
             &["add", "element", "ip", INGRESS_TABLE, target, &element],
         );
     }
-    // the network's DHCP server (for VMs/clients that request an IP).
+    // the network's DHCP server (for VMs/clients that request an IP). It takes the
+    // TWO-OCTET form and nothing else — `dhcp_serve`/`dhcp_lease_ip` both bail out
+    // on `oct.len() != 2`, and bailing out means no server at all, in silence. So
+    // it is derived from the bridge's own address (never from a declared gateway,
+    // which would move the whole pool onto the appliance's octets).
     start_dhcp(bridge, &prefix_of(gateway));
     // Re-applies the PERSISTED egress intent when the bridge is (re)created — it's what
     // makes it survive the holder's respawn (the nft and the FQDN registry live in the
@@ -3892,12 +3902,22 @@ fn routes_forget_network(name: &str) {
 /// a resolvê-los por ARP na sua bridge e a não obter resposta, enquanto a rota
 /// default (que os alcançaria) nunca chega a ser consultada.
 fn plen_of_bridge(bridge: &str) -> u8 {
+    cidr_of_bridge(bridge).map(|c| c.len).unwrap_or(16)
+}
+
+/// O prefixo da rede a que uma bridge pertence, lido do registo.
+///
+/// Existe porque a MESMA travessia (`network_list` → casar a bridge → parsear o
+/// prefixo) estava escrita em três sítios, e é essa a forma como a aritmética do
+/// `dhcp_lease_ip` chegou a viver em três cópias: no dia em que uma delas
+/// mudasse, o sintoma seria uma bridge com um comprimento e os containers com
+/// outro. `None` = bridge sem `NetDef` (a de infra), e cada chamador diz o que
+/// isso significa para ele em vez de o adivinhar aqui.
+fn cidr_of_bridge(bridge: &str) -> Option<crate::Cidr> {
     network_list()
         .into_iter()
         .find(|d| d.bridge == bridge)
         .and_then(|d| crate::Cidr::parse(&d.prefix))
-        .map(|c| c.len)
-        .unwrap_or(16)
 }
 
 /// Gateway (= ingress) de um prefixo — o PRIMEIRO endereço utilizável.
@@ -3913,29 +3933,59 @@ fn gateway_of(prefix: &str) -> String {
         .unwrap_or_else(|| format!("{prefix}.0.1"))
 }
 
-/// Resolves a network to `(bridge, prefix, gateway)`. `ingress`/empty = the
+/// The addresses of a network, kept APART because they are answers to different
+/// questions — and a DECLARED gateway is exactly what makes them differ.
+///
+/// They used to be one string, and a single `resolve_net` tuple element fed both
+/// `ip route add default via` **and** the container's `nameserver`. The day the
+/// first of those became redirectable, the second followed it in silence: every
+/// container on such a network would point its resolver at the appliance, and the
+/// holder's internal resolver — `<name>.<ns>.delonix.internal`, the whole service
+/// discovery — stopped being reachable, with no error to read.
+///
+/// Same family as `c.ip`, which is not "the container's address" but "its address
+/// on the primary network". A field name that answers only one question is what
+/// stops a caller from silently picking the wrong one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NetPlan {
+    pub bridge: String,
+    pub prefix: String,
+    /// The holder's OWN address on the bridge — always derived from the prefix,
+    /// never the declared gateway. The internal resolver answers here, the
+    /// masquerade leaves from here, and the DHCP server hands this out.
+    pub bridge_addr: String,
+    /// The default route handed to workloads: the DECLARED gateway when the
+    /// network has one, otherwise `bridge_addr` (what it always was).
+    pub default_route: String,
+}
+
+/// Resolves a network to its bridge and addresses. `ingress`/empty = the
 /// default network (delonix0/10.200); otherwise loads the private network's `NetDef`.
-pub fn resolve_net(name: &str) -> Result<(String, String, String)> {
+pub fn resolve_net(name: &str) -> Result<NetPlan> {
     if name.is_empty() || name == "ingress" {
-        return Ok((
-            INFRA_BRIDGE.to_string(),
-            INFRA_PREFIX.to_string(),
-            INFRA_GATEWAY.to_string(),
-        ));
+        return Ok(NetPlan {
+            bridge: INFRA_BRIDGE.to_string(),
+            prefix: INFRA_PREFIX.to_string(),
+            bridge_addr: INFRA_GATEWAY.to_string(),
+            default_route: INFRA_GATEWAY.to_string(),
+        });
     }
     let def = network_get(name).ok_or_else(|| {
         Error::NotFound(format!(
             "ingress network '{name}' does not exist — create it with `delonix network create {name}`, or use the default network"
         ))
     })?;
-    // O DECLARADO ganha ao derivado — é ele que vira a rota default dos
-    // containers desta rede (`ip route add default via`). Sem declaração, o
+    let bridge_addr = gateway_of(&def.prefix);
+    // O DECLARADO ganha ao derivado APENAS na rota default — é ele que vira o
+    // `ip route add default via` dos containers desta rede. Sem declaração, o
     // derivado, que é o que sempre foi.
-    let gw = def
-        .gateway
-        .clone()
-        .unwrap_or_else(|| gateway_of(&def.prefix));
-    Ok((def.bridge, def.prefix, gw))
+    let default_route = def.gateway.clone().unwrap_or_else(|| bridge_addr.clone());
+    Ok(NetPlan {
+        bridge: def.bridge,
+        prefix: def.prefix,
+        bridge_addr,
+        default_route,
+    })
 }
 
 /// Reads a private network's `NetDef` (if it exists).
@@ -3983,25 +4033,59 @@ pub fn network_create(name: &str) -> Result<NetDef> {
     Ok(def)
 }
 
-/// Like [`network_create`], but with an **explicit `/16` prefix** (e.g.: `"10.50"`).
-/// Used to ALIGN the VMs' network plan to the prefix decided by the
-/// `NetworkStore` (the source of truth), so the same network has the SAME subnet
-/// in containers and VMs. Idempotent by name.
+/// Like [`network_create`], but with an **explicit prefix** (e.g.: `"10.50"`) and,
+/// optionally, a **declared gateway** — the default route this network's workloads
+/// receive instead of the holder's own address on the bridge.
+///
+/// Idempotent by name, and NOT silent about it: on a network that already exists,
+/// a declared gateway that disagrees with the recorded one is APPLIED, not
+/// dropped on the floor. The two stores are independent by design, so a `NetDef`
+/// surviving without a `NetworkStore` record is real state, not a hypothesis —
+/// and returning the old record there would be `create_with_base` all over again
+/// (a value accepted, recorded nowhere, and reported as success).
+///
+/// `None` means "do not touch": it is what [`network_create_with`] passes, and an
+/// existing declaration must survive a caller that has no opinion about it.
 pub fn network_create_with_gateway(
     name: &str,
     prefix: &str,
     gateway: Option<&str>,
 ) -> Result<NetDef> {
-    if let Some(def) = network_get(name) {
+    if let Some(mut def) = network_get(name) {
+        match gateway {
+            Some(g) if def.gateway.as_deref() != Some(g) => {
+                def.gateway = Some(g.to_string());
+                write_netdef(name, &def)?;
+            }
+            _ => {}
+        }
         return Ok(def);
     }
     let mut def = NetDef::new(name, prefix);
     def.gateway = gateway.map(str::to_string);
+    write_netdef(name, &def)?;
+    Ok(def)
+}
+
+/// Used to ALIGN the VMs' network plan to the prefix decided by the
+/// `NetworkStore` (the source of truth), so the same network has the SAME subnet
+/// in containers and VMs. Idempotent by name.
+///
+/// Delegates instead of repeating the body: the two differed by one field, and
+/// two copies of a write path is how a leader and a reader stop agreeing on the
+/// day one of them changes.
+pub fn network_create_with(name: &str, prefix: &str) -> Result<NetDef> {
+    network_create_with_gateway(name, prefix, None)
+}
+
+/// Persists a `NetDef`. One writer, because the two creation paths used to have
+/// one each and only one of them reported the serialization error.
+fn write_netdef(name: &str, def: &NetDef) -> Result<()> {
     std::fs::create_dir_all(networks_dir()).map_err(|e| Error::Runtime {
         context: "networks dir",
         message: e.to_string(),
     })?;
-    let body = serde_json::to_string_pretty(&def).map_err(|e| Error::Runtime {
+    let body = serde_json::to_string_pretty(def).map_err(|e| Error::Runtime {
         context: "netdef",
         message: e.to_string(),
     })?;
@@ -4009,23 +4093,7 @@ pub fn network_create_with_gateway(
         context: "netdef",
         message: e.to_string(),
     })?;
-    Ok(def)
-}
-
-pub fn network_create_with(name: &str, prefix: &str) -> Result<NetDef> {
-    if let Some(def) = network_get(name) {
-        return Ok(def);
-    }
-    let def = NetDef::new(name, prefix);
-    std::fs::create_dir_all(networks_dir()).map_err(|e| Error::Runtime {
-        context: "networks dir",
-        message: e.to_string(),
-    })?;
-    std::fs::write(
-        netdef_path(name),
-        serde_json::to_vec_pretty(&def).unwrap_or_default(),
-    )?;
-    Ok(def)
+    Ok(())
 }
 
 /// **Removes an ingress private network**: deletes the bridge (if the infra is
@@ -4145,8 +4213,8 @@ pub fn holder_serves_netns(id: &str) -> bool {
 /// Dataplane first, record second: if the `nft` element fails, no record is left
 /// claiming a path that was never opened.
 pub fn network_route(from: &str, to: &str, add: bool) -> Result<()> {
-    let (bridge_from, _, _) = resolve_net(from)?;
-    let (bridge_to, _, _) = resolve_net(to)?;
+    let bridge_from = resolve_net(from)?.bridge;
+    let bridge_to = resolve_net(to)?.bridge;
     ensure_up()?;
     control_send(&format!(
         "netroute {} {bridge_from} {bridge_to}",
@@ -4170,7 +4238,15 @@ pub fn network_route(from: &str, to: &str, add: bool) -> Result<()> {
 }
 
 pub fn attach_container(id: &str, net: &str, namespace: &str) -> Result<(String, String)> {
-    let (bridge, prefix, gateway) = resolve_net(net)?;
+    // `default_route` and NOT `bridge_addr`: this token becomes the container's
+    // `ip route add default via`, which is the ONE thing a declared gateway is
+    // meant to redirect.
+    let NetPlan {
+        bridge,
+        prefix,
+        default_route: gateway,
+        ..
+    } = resolve_net(net)?;
     let ip = crate::ipam::allocate(&prefix, id)?; // unique lease (anti-collision), stable per id
     acquire(id)?; // ensure_up + ref marker for `id`
     let netns = sanitize(id);
@@ -4207,7 +4283,13 @@ pub fn attach_extra_container(
     net: &str,
     namespace: &str,
 ) -> Result<(String, String)> {
-    let (bridge, prefix, gateway) = resolve_net(net)?;
+    // Same choice as `attach_container`: the extra interface's default route.
+    let NetPlan {
+        bridge,
+        prefix,
+        default_route: gateway,
+        ..
+    } = resolve_net(net)?;
     let ip = crate::ipam::allocate(&prefix, id)?; // unique lease on the additional network
     let ifname = format!("eth{idx}");
     let netns = sanitize(id);
@@ -4463,7 +4545,20 @@ fn vmtap_line(tap: &str, bridge: &str, gateway: &str, ip: Option<&str>, namespac
 /// the membership (in the holder) and the chain (here) can both be installed
 /// now rather than after a lease nobody watches for.
 pub fn vm_attach(vm: &str, net: &str, mac: &str, namespace: &str) -> Result<String> {
-    let (bridge, prefix, gateway) = resolve_net(net)?;
+    // `bridge_addr`, deliberately, and it is worth saying why it is not the
+    // declared gateway: a VM gets address, mask and router from OUR DHCP server
+    // (`dhcp_serve`), which hands out the address derived from the prefix. This
+    // token only ever reaches `ensure_net_bridge` as its no-`NetDef` fallback,
+    // so sending the declared one here would claim a redirection the guest never
+    // receives. **KNOWN GAP**: on a network with a declared gateway, containers
+    // route via the appliance and VMs still route via the engine — closing it
+    // means teaching `dhcp_serve` the declared value, which is where it belongs.
+    let NetPlan {
+        bridge,
+        prefix,
+        bridge_addr: gateway,
+        ..
+    } = resolve_net(net)?;
     // Ref key `vm-<name>` — its own namespace, distinct from the container ids
     // and the `cri-*` pods; the `prune` reaper preserves the `vm-*` (managed by
     // another store) just like the `cri-*`.
@@ -4550,7 +4645,7 @@ pub fn dhcp_ip_for_mac(net: &str, mac: &str) -> Option<String> {
     // the IP after recent ARP and gave `<none>` for a live but silent VM
     // (the real reported case). This is the IP the VM gets from DHCP, available
     // as soon as it exists, and the right one for SSH.
-    let (_bridge, prefix, _gw) = resolve_net(net).ok()?;
+    let prefix = resolve_net(net).ok()?.prefix;
     dhcp_lease_ip(&prefix, mac)
 }
 
@@ -4577,7 +4672,7 @@ pub fn dhcp_ip_for_mac(net: &str, mac: &str) -> Option<String> {
 /// no `nsenter`/`ip`) — which is NOT `Some(false)`, and a caller must report
 /// neither reachable nor unreachable for it.
 pub fn sdn_reachable(net: &str, ip: &str, mac: &str, timeout: std::time::Duration) -> Option<bool> {
-    let (bridge, _prefix, _gw) = resolve_net(net).ok()?;
+    let bridge = resolve_net(net).ok()?.bridge;
     let holder = read_pid(&holder_pid_path()).filter(|&p| pid_alive(p))?;
     // `-m` as well as `-U -n`, as everywhere else that reaches into the holder:
     // the netns is entered through the holder's own user namespace, where this
@@ -6384,7 +6479,7 @@ Inter-|   Receive                                                |  Transmit
         let expected = format!("10.200.254.{host}");
         // The default (delonix0/10.200) resolves without a holder — uses the fixed prefix.
         // (resolve_net("ingress") returns INFRA_PREFIX without touching disk.)
-        let (_b, prefix, _g) = super::resolve_net("ingress").unwrap();
+        let prefix = super::resolve_net("ingress").unwrap().prefix;
         let oct: Vec<u8> = prefix.split('.').filter_map(|x| x.parse().ok()).collect();
         let got = format!("{}.{}.254.{host}", oct[0], oct[1]);
         assert_eq!(got, expected);
