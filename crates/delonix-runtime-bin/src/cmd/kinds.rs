@@ -112,6 +112,25 @@ pub(crate) enum Presence {
     NotObservable,
 }
 
+/// Whether `metadata.namespace` means anything on a Kind.
+///
+/// Three states and not a bool, because `Volume` genuinely has three answers:
+/// none for a plain volume, real for one with a `share:` block. Modelling that
+/// as `true` would make the load stop warning about a namespace that does
+/// nothing on every ordinary volume; as `false`, it would warn «namespace has no
+/// effect» on a share, whose namespace decides which directory its data lives
+/// in — a warning that is not merely useless but wrong.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Namespaced {
+    /// Never — the resource is global to the node.
+    Never,
+    /// Always.
+    Always,
+    /// Depends on the document. `honors_namespace` answers `true` so nothing is
+    /// warned away wholesale, and the Kind's own apply decides what to do with it.
+    PerDocument,
+}
+
 /// Everything the rest of the code asks about a Kind.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct KindFacts {
@@ -125,8 +144,8 @@ pub(crate) struct KindFacts {
     pub converges: bool,
     /// `destroy_one` removes it, so `--prune` and `destroy` can promise it.
     pub teardown: bool,
-    /// `metadata.namespace` does something on this Kind.
-    pub namespaced: bool,
+    /// Whether `metadata.namespace` does something on this Kind.
+    pub namespaced: Namespaced,
     pub presence: Presence,
 }
 
@@ -143,7 +162,7 @@ const FACTS: &[KindFacts] = &[
         // says so in those words.
         converges: false,
         teardown: false,
-        namespaced: false,
+        namespaced: Namespaced::Never,
         presence: Presence::Registry,
     },
     KindFacts {
@@ -153,7 +172,7 @@ const FACTS: &[KindFacts] = &[
         in_stack: true,
         converges: true,
         teardown: true,
-        namespaced: false,
+        namespaced: Namespaced::Never,
         presence: Presence::Registry,
     },
     KindFacts {
@@ -163,7 +182,7 @@ const FACTS: &[KindFacts] = &[
         in_stack: true,
         converges: true,
         teardown: true,
-        namespaced: false,
+        namespaced: Namespaced::Never,
         presence: Presence::Registry,
     },
     KindFacts {
@@ -173,19 +192,9 @@ const FACTS: &[KindFacts] = &[
         in_stack: true,
         converges: true,
         teardown: true,
-        namespaced: false,
-        presence: Presence::Registry,
-    },
-    KindFacts {
-        kind: "ShareVolume",
-        domain: Domain::Storage,
-        form: Form::Primary,
-        in_stack: true,
-        converges: true,
-        // No record to stamp an owner on, so it is neither adopted nor pruned.
-        teardown: false,
-        // The only Kind where a namespace scopes a NAME rather than reachability.
-        namespaced: true,
+        // A plain volume is global and a `share:` one is scoped by namespace,
+        // so this is the one Kind whose answer comes from the DOCUMENT.
+        namespaced: Namespaced::PerDocument,
         presence: Presence::Registry,
     },
     KindFacts {
@@ -197,7 +206,7 @@ const FACTS: &[KindFacts] = &[
         // Shared content-addressed cache: removing it because one stack stopped
         // declaring it would pull it from under the others.
         teardown: false,
-        namespaced: false,
+        namespaced: Namespaced::Never,
         presence: Presence::Registry,
     },
     KindFacts {
@@ -207,7 +216,7 @@ const FACTS: &[KindFacts] = &[
         in_stack: true,
         converges: true,
         teardown: true,
-        namespaced: true,
+        namespaced: Namespaced::Always,
         presence: Presence::Registry,
     },
     KindFacts {
@@ -217,7 +226,7 @@ const FACTS: &[KindFacts] = &[
         in_stack: true,
         converges: true,
         teardown: true,
-        namespaced: true,
+        namespaced: Namespaced::Always,
         presence: Presence::Registry,
     },
     KindFacts {
@@ -227,7 +236,7 @@ const FACTS: &[KindFacts] = &[
         in_stack: true,
         converges: true,
         teardown: true,
-        namespaced: true,
+        namespaced: Namespaced::Always,
         presence: Presence::Derived,
     },
     KindFacts {
@@ -237,7 +246,7 @@ const FACTS: &[KindFacts] = &[
         in_stack: true,
         converges: true,
         teardown: false,
-        namespaced: false,
+        namespaced: Namespaced::Never,
         presence: Presence::Declarative,
     },
     KindFacts {
@@ -247,7 +256,7 @@ const FACTS: &[KindFacts] = &[
         in_stack: true,
         converges: true,
         teardown: false,
-        namespaced: false,
+        namespaced: Namespaced::Never,
         presence: Presence::Declarative,
     },
     KindFacts {
@@ -257,7 +266,7 @@ const FACTS: &[KindFacts] = &[
         in_stack: true,
         converges: true,
         teardown: false,
-        namespaced: false,
+        namespaced: Namespaced::Never,
         presence: Presence::Declarative,
     },
     KindFacts {
@@ -267,7 +276,7 @@ const FACTS: &[KindFacts] = &[
         in_stack: true,
         converges: true,
         teardown: false,
-        namespaced: false,
+        namespaced: Namespaced::Never,
         presence: Presence::Registry,
     },
     // --- Not resources of the stack: they become one of the above, or are not
@@ -280,7 +289,7 @@ const FACTS: &[KindFacts] = &[
         converges: false,
         teardown: false,
         // Carried onto the child it lowers to.
-        namespaced: true,
+        namespaced: Namespaced::Always,
         presence: Presence::NotObservable,
     },
     KindFacts {
@@ -290,11 +299,23 @@ const FACTS: &[KindFacts] = &[
         in_stack: false,
         converges: false,
         teardown: false,
-        namespaced: false,
+        namespaced: Namespaced::Never,
         // It has an arm in `presence()` (answering `-`) even though the load
         // lowers it away, so a document that somehow reaches `ls` is described
         // rather than called unsupported.
         presence: Presence::Declarative,
+    },
+    KindFacts {
+        kind: "ShareVolume",
+        domain: Domain::Storage,
+        form: Form::Deprecated("Volume"),
+        in_stack: false,
+        converges: false,
+        teardown: false,
+        // It carried a namespace and still does — as a `kind: Volume` with a
+        // `share:` block, which is what it lowers to.
+        namespaced: Namespaced::Always,
+        presence: Presence::NotObservable,
     },
     KindFacts {
         kind: "Storage",
@@ -303,7 +324,7 @@ const FACTS: &[KindFacts] = &[
         in_stack: false,
         converges: false,
         teardown: false,
-        namespaced: false,
+        namespaced: Namespaced::Never,
         presence: Presence::NotObservable,
     },
     KindFacts {
@@ -313,7 +334,7 @@ const FACTS: &[KindFacts] = &[
         in_stack: false,
         converges: false,
         teardown: false,
-        namespaced: false,
+        namespaced: Namespaced::Never,
         presence: Presence::NotObservable,
     },
     KindFacts {
@@ -324,7 +345,7 @@ const FACTS: &[KindFacts] = &[
         converges: false,
         teardown: false,
         // Propagated to every child it expands into.
-        namespaced: true,
+        namespaced: Namespaced::Always,
         presence: Presence::NotObservable,
     },
     KindFacts {
@@ -336,7 +357,7 @@ const FACTS: &[KindFacts] = &[
         in_stack: false,
         converges: false,
         teardown: false,
-        namespaced: false,
+        namespaced: Namespaced::Never,
         presence: Presence::NotObservable,
     },
 ];
@@ -375,7 +396,7 @@ pub(crate) fn has_teardown(kind: &str) -> bool {
 
 /// Whether `metadata.namespace` does anything here.
 pub(crate) fn honors_namespace(kind: &str) -> bool {
-    facts(kind).is_some_and(|f| f.namespaced)
+    facts(kind).is_some_and(|f| f.namespaced != Namespaced::Never)
 }
 
 // There is deliberately no `is_declarative(kind)` helper. `stack wait` decides
