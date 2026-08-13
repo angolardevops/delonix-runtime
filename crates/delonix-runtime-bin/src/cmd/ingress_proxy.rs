@@ -47,6 +47,19 @@ pub struct TlsMaterial {
     pub cert_pem: String,
     #[serde(rename = "keyPem")]
     pub key_pem: String,
+    /// Which `tls.mode` produced this material (`selfSigned` / `secretRef`).
+    ///
+    /// **Recorded because a cert does not say where it came from**, and without
+    /// it the reconciler's `actual` had nothing to report but «TLS is on» — so
+    /// it copied the DESIRED mode instead, and switching `selfSigned` →
+    /// `secretRef` on a route that already had TLS was invisible to the plan.
+    /// A field that reports the desired value is not an observation.
+    ///
+    /// `#[serde(default)]` because configs written before this exist on disk;
+    /// they read back as an empty mode, which compares as «unknown» and settles
+    /// on the next apply.
+    #[serde(default)]
+    pub mode: String,
 }
 
 /// Generates a **self-signed** cert+key pair (PEM) for the given `hosts` (SANs).
@@ -64,6 +77,7 @@ pub fn self_signed_pem(hosts: &[String]) -> Result<TlsMaterial> {
     Ok(TlsMaterial {
         cert_pem: ck.cert.pem(),
         key_pem: ck.key_pair.serialize_pem(),
+        mode: "selfSigned".into(),
     })
 }
 
@@ -1195,6 +1209,7 @@ mod tests {
             tls: Some(TlsMaterial {
                 cert_pem: "C".into(),
                 key_pem: "K".into(),
+                mode: "secretRef".into(),
             }),
         };
         let js = serde_json::to_string(&cfg).unwrap();
