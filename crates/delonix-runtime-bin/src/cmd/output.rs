@@ -819,6 +819,33 @@ impl Progress {
         self
     }
 
+    /// Announces the whole plan up front, one `○` per step still to come.
+    ///
+    /// **What this adds is the answer to «how much is left».** A spinner says
+    /// what is happening now and a closed line says what happened; neither says
+    /// how far along you are, and on a `cluster kubeadm` — six to nine steps,
+    /// several minutes each — that is the question being asked.
+    ///
+    /// Printed ONCE, and deliberately not redrawn. The alternative was to keep a
+    /// live block and move the cursor up on every change, which looks better on
+    /// a TTY and is worse everywhere else: this output goes to stderr, and
+    /// stderr here lands in pipes, in `tee`, in CI logs and in `2>&1` files
+    /// where cursor movement is garbage. The same reason `close_line` already
+    /// branches on `tty`. So the reader gets the map first, then walks it — the
+    /// steps close underneath, in order, exactly as before.
+    ///
+    /// Does nothing when the list is empty, so a caller that cannot enumerate
+    /// its steps (the `build`, whose instruction count depends on a file it has
+    /// not parsed yet) simply does not call it.
+    pub fn plan(&mut self, steps: &[String]) {
+        if steps.is_empty() {
+            return;
+        }
+        for s in steps {
+            eprintln!(" {} {}", dim("○"), dim(s));
+        }
+    }
+
     /// Like [`step`](Self::step), but SILENT while the work stays under `after`:
     /// no spinner, and no final line either.
     ///
@@ -940,11 +967,22 @@ impl Progress {
             '✗' => paint(color::RED, "✗"),
             other => other.to_string(),
         };
+        // O ícone é OPCIONAL desde que o `build` passou a abrir um passo por
+        // instrução: `RUN apt-get …  1.0s` com dois espaços a meio lê-se como
+        // desalinhamento, e uma instrução de Dockerfile não tem emoji que a
+        // descreva melhor do que o próprio texto. Um `format!` condicional em vez
+        // de um espaço fixo — o mesmo cuidado que a `Table` já tem em medir as
+        // colunas pelo conteúdo em vez de as fixar.
+        let icon = if self.icon.is_empty() {
+            String::new()
+        } else {
+            format!(" {}", self.icon)
+        };
         if self.tty && !self.verbose {
             // `\r` + clear the spinner line, then the final line.
-            eprintln!("\r {mark_s} {} {} {took}\x1b[K", self.msg, self.icon);
+            eprintln!("\r {mark_s} {}{icon} {took}\x1b[K", self.msg);
         } else if !self.msg.is_empty() {
-            eprintln!(" {mark_s} {} {} {took}", self.msg, self.icon);
+            eprintln!(" {mark_s} {}{icon} {took}", self.msg);
         }
         // A FAILED step always unfolds. Hiding the output of the one thing that
         // broke is the single case where the fold costs more than it saves —
