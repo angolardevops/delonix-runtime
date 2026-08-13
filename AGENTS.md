@@ -170,7 +170,35 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   privilégio de host (vive todo no netns do holder). Provado ao vivo: `network create --driver
   overlay --vni 42 --peer …` cria o device VXLAN (`id 42 dstport 4789 nolearning`, master na
   bridge) e semeia o FDB com os pares — validado até à fronteira single-node (o forwarding
-  inter-nó exige um 2.º nó real, não testável no sandbox). Já `macvlan`/`ipvlan` só ficam no
+  inter-nó exige um 2.º nó real, não testável no sandbox).
+  **A lista de pares converge nos DOIS sentidos, e o buraco era TRIPLO** (v0.53.x): o
+  `converge` só sabia AVISAR que remover não estava implementado, e o aviso cobria o registo
+  `peers=` — mas ficavam também a entrada `00:00:00:00:00:00 dst <ip>` no **FDB** (é ela que faz
+  este nó inundar para lá) e, num overlay cifrado, o **peer WireGuard**, ou seja um nó já
+  retirado da malha com o canal cripto DE PÉ. Esse terceiro não estava em lista nenhuma e é o
+  que tinha relevância de segurança. Ordem: **dataplane primeiro, registo em último** — se o FDB
+  falhar, o registo ainda lista o par e o plano seguinte volta a propor a remoção; ao contrário,
+  perdia-se a informação do que faltava desfazer. Um holder EM BAIXO é o único caso tratado como
+  sucesso (o uplink vive na netns efémera e morreu com ele), e **diz-se em voz alta**.
+  - **`peer_fdb_dst` e `Network::vxlan_dev()` são os donos únicos de duas regras.** A primeira
+    («`wgIp` se cifrado, senão `nodeIp`») vivia só dentro do `realize_overlay`, e duplicá-la
+    faria apagar a entrada ERRADA — o par removido a receber tráfego e um que devia ficar sem o
+    receber. A segunda é HEX (`dlxvx002a` para o VNI 42): escrevi `format!("dlxvx{vni}")` na
+    primeira versão e a deleção teria ido para um device inexistente, a reportar sucesso.
+  - **BUG PRÉ-EXISTENTE que só o inverso revelou: o lado ADD nunca tocou no dataplane.** O
+    `add_overlay_peer` escreve o registo e mais nada — quem semeia o FDB é o `realize_overlay`,
+    que só corre no `create`. Medido: acrescentar pares por manifesto deixava-os no registo e
+    FORA do FDB, com o `inspect` a jurar que o overlay os alcançava. Re-semeia-se com a lista
+    FINAL (o `do_vxlan` só acrescenta o que falta), o que de passagem repõe o que um respawn do
+    holder tenha levado.
+  - **Validado ao vivo, as três camadas** (root isolado, contra `bridge fdb show` e `wg show`, e
+    não contra o que o comando disse): overlay em claro (VNI 42) — par removido sai do FDB e do
+    registo, pares acrescentados entram no FDB, e a armadilha do substring exercitada com
+    `10.0.0.5` e `10.0.0.50` a coexistir (remover o `.5` deixa o `.50`; um `contains` levava os
+    dois); overlay CIFRADO (VNI 77, interface `wgo00004d`) — o par desaparece do `wg show`, do
+    FDB e do registo. **Continua por medir** que o tráfego para o nó retirado deixa mesmo de
+    fluir: isso precisa de dois nós reais, e o que está provado é a mecânica.
+  Já `macvlan`/`ipvlan` só ficam no
   `NetworkStore` e o `create` **AVISA alto** que a rede NÃO foi realizada (Realized=False,
   reason=DriverNotImplemented) em vez de fingir sucesso — o plano físico deles precisa de
   CAP_NET_ADMIN na init-netns do host, que o modelo rootless não tem.
@@ -3103,10 +3131,10 @@ da CLI **198/198**; a documentação sem um único comando ou flag que não exis
    recuperam desde a v0.41.0); WebSocket/upgrade tunelado no proxy L7 (`httproute`); `exec`/attach
    interactivo + `--restart` na API `serve docker-api` (a primeira precisa de HTTP hijacking real,
    a segunda de repensar o modelo de supervisor `fork()` para um servidor multi-thread).
-4. **Publicar as imagens de appliance** em `ghcr.io/angolardevops/delonix-vm-appliances` — exige
-   um PAT classic com `write:packages` (o token do `gh` deste host tem só `gist,read:org,repo,
-   workflow`, e o `GITHUB_TOKEN` não cria packages novos de user; ver a lição da golden) — e um
-   workflow de CI que as reconstrua, como o `vm-image.yml` já faz para a golden.
+4. **Um workflow de CI que reconstrua as imagens de appliance**, como o `vm-image.yml` já faz para
+   a golden. As imagens em si já estão publicadas em
+   `ghcr.io/angolardevops/delonix-vm-appliances` (2026-08-13) — o `write:packages` que faltava
+   já está na conta `angolardevops`; ver a secção «Imagens de appliance».
 5. **Gravar os vídeos** — o guião (`docs/ROTEIRO-VIDEOS.md`, 6 episódios, comandos já testados)
    está pronto; a gravação é trabalho do utilizador, não de agente.
 
@@ -3618,10 +3646,27 @@ e 2 GiB **herdados da imagem**, zero `seed.iso` em disco e zero `cdrom` no XML d
 `root`/`truenas_admin` com `delonix-admin` nas restantes, definidas pelo answer file/RPC). Mesma
 natureza da golden k8s — documentadas no README dos scripts, para mudar no primeiro arranque.
 
-**Por fazer**: publicar em `ghcr.io/angolardevops/delonix-vm-appliances` (exige um PAT classic com
-`write:packages` — o token do `gh` deste host tem só `gist,read:org,repo,workflow`, e o
-`GITHUB_TOKEN` não cria packages novos de user, ver a lição da golden); e um workflow de CI que
-reconstrua estas imagens como o `vm-image.yml` já faz para a golden.
+**Publicadas** em `ghcr.io/angolardevops/delonix-vm-appliances` (2026-08-13). A nota anterior dava
+isto por bloqueado por falta de um PAT com `write:packages` — **a conta `angolardevops` do `gh` já
+o tem**, e o caminho é `gh auth token | delonix image login ghcr.io -u angolardevops
+--password-stdin` seguido de `image vm push`; ~2m30s por imagem de 1,4 GiB. A tag remota segue
+`<nome-completo>-<versão-curta>` (`proxmox-ve-9.2`), lida do registo com `ls-remote` e não
+inventada: o `pve` só existe como argumento do script de build, e o próprio script chegou a
+imprimir um `import -t pve:9.2` que teria posto dois nomes para a mesma coisa na mesma listagem.
+
+**Os builds obtêm e VERIFICAM o media sozinhos** (`scripts/appliances/fetch-media.sh`, v0.48.0):
+antes só o OPNsense o fazia e os outros dois aceitavam um ISO que ninguém conferira. Cada
+fabricante publica o checksum noutra forma — Proxmox um `SHA256SUMS` GNU do directório, TrueNAS um
+sidecar com o hash nu, OPNsense a forma BSD —, por isso é o script de build que o resolve e o
+`fetch-media.sh` que só verifica, fail-closed e sem flag para saltar. A correspondência é por
+IGUALDADE do nome (`awk '$2 == f'`): o directório do Proxmox publica `proxmox-ve_9.2-1.iso` **e**
+`proxmox-ve_9.2-1-arm64.iso`, e um `grep` apanha os dois. A versão entra no NOME do ficheiro de
+saída, senão construir a 9.2 apaga em silêncio a imagem da 9.1 — o que obrigou a alinhar o
+`verify-boot.sh`, que tinha os nomes antigos fixos e passou a procurar por raiz do nome,
+verificando TODAS as versões presentes.
+
+**Por fazer**: um workflow de CI que reconstrua estas imagens como o `vm-image.yml` já faz para a
+golden.
 
 ## O manifesto de VM resolvia a imagem de outra maneira que a CLI (2026-08-12)
 
