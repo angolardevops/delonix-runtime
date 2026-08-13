@@ -1002,13 +1002,24 @@ impl NetworkStore {
         }
         // New format: key=value.
         let mut kv = std::collections::HashMap::new();
+        // `cidr=` é a forma nova e ganha ao `base=`: uma rede escrita com prefixo
+        // livre não tem octeto que a descreva.
+        //
+        // **Guardado, e NÃO devolvido aqui.** Este ramo fazia `return` a meio do
+        // ciclo, e o que ficava por correr era a passagem que lê os `label.`/
+        // `annotation.` — ou seja, uma rede com `cidr=` voltava SEM POSSE. O
+        // efeito é deriva eterna no caso mais comum que existe: o `stack apply`
+        // carimba `delonix.io/stack`, o `get` seguinte deita-o fora, o plano diz
+        // «exists and belongs to no stack — will be taken over», e o
+        // `--detailed-exitcode` responde 2 num manifesto que ninguém tocou. Um
+        // gate de deriva em CI fica vermelho todos os dias, que é precisamente
+        // aquilo de que o gate serve para avisar.
+        let mut cidr = None;
         for line in trimmed.lines() {
             if let Some((k, v)) = line.split_once('=') {
-                // `cidr=` é a forma nova e ganha ao `base=`: uma rede escrita
-                // com prefixo livre não tem octeto que a descreva.
                 if k.trim() == "cidr" {
                     if let Some(c) = Cidr::parse(v.trim()) {
-                        return Ok(Network::user_with_cidr(name, c));
+                        cidr = Some(c);
                     }
                 }
                 kv.insert(k.trim(), v.trim().to_string());
@@ -1031,6 +1042,15 @@ impl NetworkStore {
             .get("driver")
             .map(String::as_str)
             .unwrap_or(DRIVER_BRIDGE);
+        // The `cidr` wins over the driver-specific reconstruction, exactly as it
+        // did when it returned from inside the loop — what changed is only that
+        // the labels below now get applied to it too.
+        if let Some(c) = cidr {
+            let mut net = Network::user_with_cidr(name, c);
+            net.labels = labels;
+            net.annotations = annotations;
+            return Ok(net);
+        }
         let mut net = match driver {
             DRIVER_MACVLAN | DRIVER_IPVLAN => {
                 let parent = kv.get("parent").cloned().ok_or_else(|| {
@@ -2267,6 +2287,64 @@ mod tests {
         ] {
             assert!(Cidr::parse(mau).is_none(), "aceitou {mau:?}");
         }
+    }
+
+    /// **Uma rede com `cidr=` perdia a posse a cada leitura.** O ramo do `cidr`
+    /// devolvia de dentro do ciclo das linhas, antes da passagem que recolhe os
+    /// `label.`/`annotation.` — por isso o `stack apply` carimbava
+    /// `delonix.io/stack`, o `get` seguinte deitava-o fora, e o plano voltava a
+    /// propor a adopção do que acabara de possuir. Deriva ETERNA, no caso mais
+    /// comum que há: um `kind: Network` com `subnet:`.
+    ///
+    /// Medido antes da correcção com a bateria E2E: `stack plan
+    /// --detailed-exitcode` respondia **2** sobre um manifesto inalterado — um
+    /// gate de deriva em CI vermelho todos os dias.
+    #[test]
+    fn uma_rede_com_cidr_nao_perde_a_posse() {
+        use super::NetworkStore;
+        let tmp = std::env::temp_dir().join(format!("dlx-net-cidr-meta-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let store = NetworkStore::open(&tmp).unwrap();
+        let c = super::Cidr::parse("10.251.0.0/16").expect("cidr valido");
+        store.create_with_cidr("comcidr", c).unwrap();
+        // Pré-condição: o registo é MESMO da forma que perdia os labels.
+        let raw = std::fs::read_to_string(tmp.join("networks/comcidr")).unwrap();
+        assert!(raw.contains("cidr="), "raw={raw:?}");
+
+        store
+            .set_metadata(
+                "comcidr",
+                &[("delonix.io/stack".into(), Some("loja".into()))],
+                &[("delonix.io/last-applied".into(), Some("{\"a\":1}".into()))],
+            )
+            .unwrap();
+
+        let n = store.get("comcidr").unwrap();
+        assert_eq!(
+            n.labels.get("delonix.io/stack").map(String::as_str),
+            Some("loja"),
+            "a posse tem de sobreviver à leitura, senão o plano readopta para sempre"
+        );
+        assert_eq!(
+            n.annotations
+                .get("delonix.io/last-applied")
+                .map(String::as_str),
+            Some("{\"a\":1}")
+        );
+        // E o `cidr` continua a ganhar: a rede é a que foi pedida, não uma
+        // reconstruída a partir de um `base=` que este registo nem tem.
+        assert_eq!(n.subnet, "10.251.0.0/16");
+        // O `list` é o que o reconciliador usa, e passa pelo MESMO `get`.
+        let listed = store.list().unwrap();
+        let found = listed
+            .iter()
+            .find(|x| x.name == "comcidr")
+            .expect("listada");
+        assert_eq!(
+            found.labels.get("delonix.io/stack").map(String::as_str),
+            Some("loja")
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// `create` still writes the LEGACY form (the bare base octet), which has

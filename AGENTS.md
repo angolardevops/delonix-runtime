@@ -656,10 +656,16 @@ mountpoint externo — a garantia estava lá, faltava alguém chegar-lhe).
   `Namespaced::{Never, Always, PerDocument}` em vez de um booleano. Como `false`, o `load` avisaria
   «namespace has no effect» num share cuja namespace decide o directório dos dados: um aviso errado,
   que é pior que nenhum.
-- **Dois bugs meus, apanhados a validar e não a ler.** (1) O `validate_graph` recusa duplicados por
-  `(kind, nome)` e passou a chumbar dois shares homónimos em namespaces diferentes — a fusão a
-  transformar em erro o que sempre funcionou; a chave passou a incluir a namespace **só** para o
-  volume-com-share. (2) `set_quota` trata os dois argumentos ao contrário um do outro —
+- **Dois bugs apanhados a validar e não a ler.** (1) O `validate_graph` recusa duplicados por
+  `(kind, nome)` e chumbava dois shares homónimos em namespaces diferentes; a chave passou a
+  incluir a namespace **só** para o volume-com-share. **Registei-o como bug MEU e não era** —
+  medido depois contra o binário anterior à fusão: `stack apply` respondia
+  `ShareVolume 'bsh' declared more than once` e o plano imprimia `ShareVolume/bsh` DUAS vezes para
+  dois recursos distintos. Ou seja, dois inquilinos com um share do mesmo nome **nunca** foram
+  aplicáveis por manifesto — só pela API/CLI directa, que é o que o
+  `dois_namespaces_com_o_mesmo_share_nao_se_tocam` sempre provou. A fusão, com o
+  `scoped_plan_name`, é o que torna a capacidade alcançável de forma declarativa. (2) `set_quota`
+  trata os dois argumentos ao contrário um do outro —
   `quota: None` REMOVE o cap, `alert_pct: None` PRESERVA o limiar — por isso convergir só o
   `alertPct` apagaria em silêncio uma quota que ninguém tocou; o `converge` passa a fazer UMA
   chamada com o que não está no diff lido do registo.
@@ -3875,6 +3881,19 @@ existia para isso, dizia-o no doc-comment, e tinha **zero chamadores** (5.ª oco
 Ver o commit `net: a subnet de uma rede passa a valer`. Fechou de caminho uma **deriva eterna no
 reconciler**: `RECONCILED_NETWORK_FIELDS` já comparava `subnet`, logo um manifesto com `subnet:`
 dava plano `-/+` a cada `stack plan` e o apply nunca o resolvia.
+
+**E abriu uma SEGUNDA, que só a bateria E2E apanhou (2026-08-13).** Ao ganhar a forma `cidr=`, o
+`NetworkStore::get` passou a ter um ramo que devolvia de dentro do ciclo das linhas — e o que
+ficava por correr era a passagem que lê os `label.`/`annotation.`. Ou seja **uma rede com `cidr=`
+voltava sem posse**: o `stack apply` carimbava `delonix.io/stack`, o `get` seguinte deitava-o
+fora, o plano dizia `exists and belongs to no stack — will be taken over`, e o
+`--detailed-exitcode` respondia **2** sobre um manifesto que ninguém tocou. Um gate de deriva em
+CI vermelho todos os dias, no caso mais comum que há (`kind: Network` com `subnet:`). O `cidr`
+continua a ganhar sobre o `base=`; o que mudou é que os labels são aplicados antes de devolver.
+**Lição de método**: o bug estava a um `git blame` de distância do trabalho que o introduziu, e
+nenhum teste unitário lhe chegou — foi o CICLO (apply → plan) contra o binário real que o mostrou,
+o que é exactamente a razão de o `scripts/e2e.sh` existir. Correr a bateria faz parte de fechar um
+ciclo, não é opcional.
 
 **O que o espaço de endereçamento permite, e porquê**: o registo de uma rede guarda UM OCTETO,
 não um CIDR; tudo o resto (bridge, gateway `.0.1`, range do IPAM) é derivado. Daí `10.<200-254>.
