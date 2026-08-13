@@ -917,7 +917,53 @@ YAML
   rm -rf "$dir"
 }
 
-ALL=(holder_kill control_restart holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_holder_respawn scale abrupt_kill aggregate_ceiling delegated_scope disk_full write_failure stack_converge stack_netroute truenas_destroy)
+# O caminho de rede custom TAPA a cgroup2, e um teste sem CONTROLO fica verde.
+#
+# O re-exec de `--net <rede>`/`--pod` passa por `ip netns exec`, que monta um sysfs
+# novo sobre `/sys`: sem `cgroup.controllers` visível nenhuma operação de cgroup
+# funciona, e o container ficava no cgroup do processo que o lançou — com `-m` a não
+# aplicar nada e o `container pause`/`update` a escreverem na sessão do operador.
+#
+# **Porque é preciso o container de CONTROLO** (`--net none`, o caminho que nunca
+# tapou nada): uma sessão SSH normal não tem cgroup delegado NENHUM, e aí o container
+# de rede custom também não tem leaf própria — por uma razão de ambiente, não por este
+# bug. Sem o controlo, este cenário acusava um defeito onde não há um (falso positivo),
+# ou saltava sempre num host onde há (falso verde). Com ele, a pergunta passa a ser a
+# certa: os DOIS caminhos comportam-se igual? Se o `--net none` tem leaf e o
+# `--net <rede>` não tem, a diferença só pode ser o re-exec.
+scen_cgroup_netns() {
+  head_ "cgroup-netns — o re-exec de rede custom não pode deixar o container no cgroup do chamador"
+  local mine; mine=$(sed 's|^0::||' /proc/self/cgroup 2>/dev/null)
+  dlx container run -d --name ckg0 --net none      -m 128M "$IMAGE" sleep 120 >/dev/null 2>&1
+  dlx container run -d --name ckg1 --net chaosnet  -m 128M "$IMAGE" sleep 120 >/dev/null 2>&1
+  sleep 2
+  local p0 p1; p0=$(cpid ckg0); p1=$(cpid ckg1)
+  if [ -z "$p0" ] || [ -z "$p1" ]; then
+    skip "cgroup-netns" "container não arrancou (none=${p0:-—} net=${p1:-—})"
+    dlx container rm -f ckg0 ckg1 >/dev/null 2>&1; return
+  fi
+  local cg0 cg1; cg0=$(sed 's|^0::||' "/proc/$p0/cgroup" 2>/dev/null)
+  cg1=$(sed 's|^0::||' "/proc/$p1/cgroup" 2>/dev/null)
+  log "chamador      = $mine"
+  log "--net none    = $cg0"
+  log "--net custom  = $cg1"
+  if [ "$cg0" = "$mine" ]; then
+    # O controlo também não tem leaf: é o ambiente, não o re-exec.
+    skip "cgroup-netns" "sem cgroup delegado nesta sessão (nem o --net none tem leaf); \
+usa: systemd-run --user --scope -p Delegate=yes -- <comando>"
+  elif [ "$cg1" = "$mine" ]; then
+    bad "cgroup-netns" "o container de rede custom ficou no cgroup do chamador — \
+-m/--cpus não aplicam, e pause/update escrevem na sessão"
+  elif [ "$(cat "/sys/fs/cgroup$cg1/memory.max" 2>/dev/null)" != "134217728" ]; then
+    bad "cgroup-netns" "leaf própria mas -m 128M não aplicado (memory.max=\
+$(cat "/sys/fs/cgroup$cg1/memory.max" 2>/dev/null || echo ausente))"
+  else
+    ok "cgroup-netns (leaf própria nos dois caminhos, memory.max=134217728)"
+  fi
+  dlx container rm -f ckg0 ckg1 >/dev/null 2>&1
+}
+
+ALL=(holder_kill control_restart holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_holder_respawn scale abrupt_kill aggregate_ceiling delegated_scope cgroup_netns disk_full write_failure stack_converge stack_netroute truenas_destroy)
 
 while [ $# -gt 0 ]; do
   case "$1" in

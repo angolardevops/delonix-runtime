@@ -3577,6 +3577,37 @@ fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
     // here in the parent changed the base the child uses and broke that validated dance.
     let kind_node = c.labels.keys().any(|k| k.starts_with("io.x-k8s.kind"));
     if !kind_node && (is_rootless() || in_userns()) {
+        // **A cgroup2 pode estar TAPADA, e é o caminho normal que a tapa.**
+        //
+        // O re-exec de `--net <rede-custom>`/`--pod` passa por `ip netns exec`, que
+        // monta um sysfs NOVO sobre `/sys` — medido: `mount -t sysfs sysfs /sys` num
+        // mount-ns próprio deixa `/sys/fs/cgroup` com ZERO entradas. Sem
+        // `cgroup.controllers` visível, o `try_delegated_base` falha no primeiro
+        // `metadata()` dos dois candidatos, o `create_dir_all` a seguir também falha,
+        // e o `setup_cgroup` devolve `Ok(())` com um aviso cujo texto é FALSO: diz
+        // «rootless WITHOUT cgroup delegation» quando a sessão TEM delegação — o que
+        // falta é a visibilidade, não a permissão.
+        //
+        // O que isso produzia, e nenhuma das três pontas dá erro: o container ficava
+        // no cgroup do processo que o lançou. Logo `-m`/`--cpus`/`--pids-limit` NÃO
+        // aplicavam nada em tudo o que usa rede custom ou pod — ou seja, em tudo o que
+        // precisa de DNS interno, isolamento de namespace, `--expose` ou HTTPRoute. E
+        // não era só relato: o `live_cgroup` devolve esse mesmo cgroup e é usado para
+        // ESCREVER, portanto um `container pause` congelava a sessão do operador e um
+        // `container update --memory` punha-lhe um tecto à medida do container.
+        //
+        // A correcção já estava escrita — `reveal_cgroup2_if_masked`, com este sintoma
+        // no próprio doc-comment — e nunca teve um chamador. Sétima ocorrência do
+        // padrão `mount_live`/`set_net_rate`/`update_limits`/`publish_port_allow`/
+        // `create_with_base`/`Container.nice`: a capacidade existe e o caminho não lá
+        // chega.
+        //
+        // Fica AQUI, e não no `-bin`, para qualquer chamador do motor a herdar (CRI
+        // incluído); e DENTRO do `!kind_node` para o caminho Kind ficar byte-a-byte
+        // igual — esse faz a sua própria revelação no FILHO (`setup_node_cgroup_ns`),
+        // numa dança já validada que não se toca. É best-effort e idempotente: com a
+        // cgroup2 já visível — o caso normal, sem re-exec — devolve sem fazer nada.
+        reveal_cgroup2_if_masked();
         if let Some(base) = setup_cgroup_delegated(c, pid) {
             // The leaf's parent IS the base — that is where the aggregate
             // ceiling lives (or does not).
