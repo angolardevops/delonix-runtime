@@ -302,11 +302,12 @@ fn expand_stack(doc: &ManifestDoc) -> Result<Vec<ManifestDoc>> {
 ///
 /// Takes the CANONICAL kind (`canonical_kind` has already run at the call site), so
 /// `VirtualMachine`/`VM` never reach here as such.
+///
+/// The answer is the `namespaced` column of [`crate::cmd::kinds`] — it used to be
+/// a `matches!` of its own, one of the several per-Kind lists that had nothing
+/// keeping them in agreement.
 pub(crate) fn kind_honors_namespace(kind: &str) -> bool {
-    matches!(
-        kind,
-        "Container" | "Pod" | "Vm" | "Workload" | "Stack" | "ShareVolume"
-    )
+    crate::cmd::kinds::honors_namespace(kind)
 }
 
 /// The accepted `spec` field names of a Kind — the list each group's `apply`

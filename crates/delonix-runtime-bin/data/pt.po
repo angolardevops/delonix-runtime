@@ -8754,3 +8754,33 @@ msgstr ""
 "Instala + activa units do systemd para os containers voltarem depois de um reboot.\n"
 "\n"
 "Cobre os que estão a correr agora E aqueles cuja política diz que deviam estar (`always`/`unless-stopped`) — um reboot mata o supervisor, logo esses estão parados precisamente quando interessa. Units obsoletos, cujo container já não existe, são removidos. Em rootless usa units de utilizador + linger."
+
+# Catálogo de Kinds (`stack plan --fields`) — os classificadores de cada Kind.
+# «declarative» já está traduzido acima e é reaproveitado tal e qual.
+
+msgid "All Kinds, by area of action:"
+msgstr "Todos os Kinds, por campo de actuação:"
+
+msgid "primary"
+msgstr "próprio"
+
+msgid "aggregate"
+msgstr "agregador"
+
+msgid "sugar"
+msgstr "açúcar"
+
+msgid "deprecated"
+msgstr "depreciado"
+
+msgid "compat"
+msgstr "compatibilidade"
+
+msgid "registry"
+msgstr "registo"
+
+msgid "derived"
+msgstr "derivada"
+
+msgid "not observable"
+msgstr "sem presença observável"
