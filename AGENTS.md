@@ -202,6 +202,22 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   `NetworkStore` e o `create` **AVISA alto** que a rede NÃO foi realizada (Realized=False,
   reason=DriverNotImplemented) em vez de fingir sucesso — o plano físico deles precisa de
   CAP_NET_ADMIN na init-netns do host, que o modelo rootless não tem.
+  **«Realizável» não é «realizada», e a condição `Realized` respondia à segunda pergunta com a
+  primeira**: saía inteiramente do YAML — `False` porque o documento dizia `macvlan`, nunca porque
+  alguém tivesse olhado para a máquina. Uma rede cujo `NetDef` não existe (um `rm` a meio, um
+  `ingress/` limpo) reportava `Realized=True`, o `stack plan` dizia «sem alterações», o
+  `network ls` mostrava-a com bridge e subnet, e o `container run --net <nome>` falhava com «does
+  not exist» — medido ao vivo. Passa a ler o `NetDef` (via `Env`, sondado UMA vez por plano) e
+  **deliberadamente NÃO a bridge**: esta vive na netns efémera e num nó ocioso não existe, logo
+  sondá-la daria por partida toda a rede saudável — a armadilha que fez o `NetworkRoute` planear
+  contra o registo. Entra como CONDIÇÃO e não como campo comparado, porque um campo daria diff →
+  `Replace` → e um replace de rede desliga todos os containers ligados a ela; e é saltada num
+  `Create`, onde a rede está a ser construída por esse mesmo apply.
+  **O `network_create_with_gateway` descartava o PREFIXO em silêncio** quando o `NetDef` já existia
+  (o gateway já tinha sido corrigido antes, o prefixo não): dava `network inspect` a mostrar a subnet
+  A com os containers a receber endereços da subnet B. Passa a RECUSAR — pode haver workloads já
+  ligados com leases do prefixo registado, e mudar a bridge debaixo deles não é decisão de um
+  `create`.
 - `delonix storage` — armazenamento de REDE (NFS/CIFS-SMB/WebDAV) montável como volume, estilo
   PersistentVolume do k8s. `create/ls/inspect/rm/apply` + `kind: Storage`. Uma pasta de um NAS
   (TrueNAS/Synology/Nextcloud) vira um volume nomeado que qualquer container monta com `-v <nome>:/x`.
@@ -310,6 +326,40 @@ como se fosse um comando principal por engano. Pedido explícito: agrupamento **
   independente** do enum `Cmd` público — mover `netns` para dentro de `Cmd::Net` não lhe mexe
   em nada. Confirmado ao vivo: `container run --net <rede-existente>` neste host continua a
   ganhar IP real na SDN depois da reorganização.
+
+## Sobreviver a um reboot (`delonix net boot`, `cmd/boot.rs`)
+
+Não há daemon a repor estado — a persistência é do systemd, como no Podman. `net boot enable`
+escreve um unit por container (`ExecStart=<exe> container start <nome>`), rootless em
+`~/.config/systemd/user` + `loginctl enable-linger`, root em `/etc/systemd/system`. A infra de rede
+não tem unit nenhum: sobe preguiçosamente no primeiro `container start` (`acquire` → `ensure_up`), e
+as bridges/rotas/egress voltam quando um workload se liga (`ensure_net_bridge`).
+
+Quatro defeitos corrigidos num ficheiro que não tinha um único teste, e que gera o artefacto que
+decide se a máquina volta a si:
+
+- **DESTRUTIVO**: a varredura era `starts_with("delonix-")`, e em modo root o directório é
+  `/etc/systemd/system` — onde vive o **`delonix-cri.service`**. Um `net boot disable` num nó
+  Kubernetes desactivava e APAGAVA o endpoint CRI do kubelet, e o `status` listava-o como se este
+  comando o tivesse gerado. Os units passam a ter prefixo próprio (`delonix-boot-`), a forma legada
+  continua reconhecida para limpar o que uma versão anterior instalou, e o `delonix-cri.service` é
+  excluído pelo nome.
+- **`--restart no` era inalcançável**: o default era `always` e o ÚNICO ramo que lia a política do
+  container era `restart == "no"` — pedir `Restart=no` produzia `Restart=always`. Passou a `Option`,
+  que separa «não dado» (herda do container) de «dado» (manda, incluindo `no`).
+- **O `enable` só criava**: um unit cujo container foi removido ficava com o link de boot e, com
+  `Restart=always` gravado, falhava em CICLO a cada arranque. Agora poda os obsoletos e diz quais.
+- **Um container `--restart always` parado por um reboot não gerava unit nenhum**, e a lacuna é
+  circular: o supervisor é um `fork()` cru, logo o reboot mata-o e o container fica `Crashed` sem
+  PID; o `enable` só olhava para quem tinha PID vivo; e o `stack apply` também não o levanta
+  («already exists, nothing to do»). O critério passou a ser «devia estar de pé» — PID vivo OU
+  política `always`/`unless-stopped`. É o papel do `podman-restart.service`, aqui com um unit por
+  container. `on-failure` fica de fora: quer dizer «reinicia se sair mal», não «está de pé no
+  arranque».
+
+**Continua por fazer**: não há Kind que exprima persistência no arranque (13 Kinds, nenhum diz
+«boot»), as VMs não têm caminho de arranque automático nenhum (nem unit, nem `virsh autostart` no
+domínio — só na rede libvirt), e os membros de um pod geram units sem `After=` entre si.
 
 ## Output: `ls` estilo docker, `describe` estilo kubectl (`cmd/output.rs`)
 
@@ -714,8 +764,24 @@ manifesto mudou de significado.
   HTTPRoute — respeita o "daemonless".
 - **Reload a quente (SIGHUP):** as rotas vivem numa tabela trocável (`Arc<RwLock<Arc<Vec<Route>>>>`);
   `httproute apply` num proxy vivo reescreve a config e envia SIGHUP → só as ROTAS recarregam (mesmo
-  PID, sem downtime). **Listeners e TLS ficam FIXOS no arranque** — mudá-los exige `httproute rm` +
-  apply (o apply avisa se detetar mudança de portas). É o substrato do auto-registo de containers.
+  PID, sem downtime). **Listeners e TLS ficam FIXOS no arranque** (os sockets são ligados e o
+  material TLS carregado uma vez), por isso mudá-los **reinicia o proxy** — o `converge_all` fá-lo e
+  DI-LO, porque as ligações em curso são cortadas. É o substrato do auto-registo de containers.
+  - **Reinicia com `stop_keeping_sources` e nunca com o `stop()`**, e a distinção não é cosmética:
+    aquele é um teardown e apaga também o `auto.json`, ou seja derrubaria TODAS as rotas
+    auto-registadas por `container run --expose` — serviços sem relação com o documento mexido, que
+    só voltariam quando cada container fosse reiniciado.
+  - **O `hot_fields` não tinha braço para `HTTPRoute`/`Ingress`**, e a cadeia caía toda atrás: nenhum
+    campo quente → qualquer alteração planeava `Replace` → recusado sem `--replace` → e COM ele o
+    `destroy_one` erra, porque uma config COLECTIVA não tem teardown por documento → logo o braço
+    `converge_all` do `stack.rs` era inalcançável. As `rules` convergiam à mesma, mas pela cadeia
+    antiga do `apply` por-Kind — o padrão «convergiam pelo caminho errado e o resultado parecia
+    certo» que o `Vm`/`FirewallPolicy`/`ShareVolume` já tinham dado. Há teste a exigir que todo campo
+    comparado seja quente.
+  - **DERIVA ETERNA, no caso mais comum que existe**: o `resolve_config` aplicava os defaults
+    (`:80`, mais `:443` se houvesse `tls`) e o `desired()` lia `spec.entrypoints` em CRU — um
+    manifesto sem `entrypoints` dava `desired=""` contra `actual="80"`, ou seja diferença em TODOS os
+    planos de um ficheiro que ninguém tocou. Uma regra, um dono: `effective_entrypoints`.
 - **TLS termina no proxy** (`tokio-rustls`, provider `ring`): `spec.tls.mode: selfSigned` (gera um
   cert multi-SAN com `rcgen` cobrindo todos os hosts) ou `secretRef` (lê `tls_crt`/`tls_key` — ou
   `tls.crt`/`tls.key` — de um `kind: Secret`). Limitação v1: **um só cert** (sem selecção por SNI).
