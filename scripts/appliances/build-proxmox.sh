@@ -155,8 +155,21 @@ qemu-img info "$FINAL" | grep -E "virtual size|disk size|compression"
 # Close the loop: the tag is what makes the image reachable, and `--appliance`
 # is what stops `vm create` from generating a cloud-init seed this guest cannot
 # read. Getting either wrong is only noticed at first boot.
+#
+# The tag uses the FULL product name (`proxmox-ve:9.2`), not the short one this
+# script takes as an argument — that is the convention the already-published
+# images follow, and a `pve:9.2` sitting next to a `proxmox-ve:9.1` is two
+# names for the same thing in the same listing.
+#
+# The defaults are per product and were read off those same images: a VE node
+# virtualises, the other three do not.
+case "$PRODUCT" in
+  pve) DEF_CPU=4; DEF_MEM=4G ;;
+  *)   DEF_CPU=2; DEF_MEM=2G ;;
+esac
 TAG=${VER%%-*}
 echo
 echo "Register it with:"
-echo "  delonix image vm import $FINAL -t $PRODUCT:${TAG:-latest} --appliance \\"
-echo "      --distro $PRODUCT --release ${VER:-unknown} --default-vcpus 2 --default-memory 4G"
+echo "  delonix image vm import $FINAL -t $STEM:${TAG:-latest} --appliance \\"
+echo "      --distro $STEM --release ${VER:-unknown} \\"
+echo "      --default-vcpus $DEF_CPU --default-memory $DEF_MEM"
