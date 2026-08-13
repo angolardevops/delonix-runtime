@@ -7,12 +7,24 @@
 #
 # Disparo MANUAL — publicar uma imagem oficial é uma decisão explícita.
 #
-# NOTA SOBRE OS ISOs (ler antes de correr): o OPNsense é descarregado e
-# verificado sozinho (o mirror publica checksums e o script lê-os). Os ISOs do
-# Proxmox e do TrueNAS NÃO são descarregáveis da máquina onde isto foi escrito
-# (`download.proxmox.com` está inacessível de lá), por isso o URL e o SHA-256
-# são INPUTS em vez de valores embutidos que ninguém confirmou. O build falha
-# se o checksum não bater — nunca aceita um download por verificar.
+# OS ISOs: os TRÊS scripts obtêm e verificam o media sozinhos (v0.48.0). Basta
+# a `version`; `iso_url`/`iso_sha256` ficam para um media que o fabricante não
+# publique no sítio do costume — uma build interna, um mirror próprio.
+#
+# A nota anterior dizia que os ISOs do Proxmox «NÃO são descarregáveis da
+# máquina onde isto foi escrito» e por isso exigia os dois inputs. O host que
+# ela nomeia (`download.proxmox.com`) responde mesmo 000 daqui — mas **não é
+# de lá que os ISOs vêm**: a página oficial de downloads
+# (proxmox.com/en/downloads/…/iso) aponta EXCLUSIVAMENTE para
+# `enterprise.proxmox.com` (verificado a 2026-08-13: 9 ocorrências, zero da
+# outra), que é onde estão os ISOs e o `SHA256SUMS`, e por onde as quatro
+# imagens novas foram construídas. `download.proxmox.com` serve os
+# repositórios apt, não este media. É o host que o `build-proxmox.sh` usa por
+# omissão (`PROXMOX_MIRROR` para o trocar).
+#
+# O checksum nunca é opcional: com `iso_url` o `iso_sha256` passa a ser
+# obrigatório, e sem ele o script resolve-o no `SHA256SUMS` do fabricante. Um
+# download por verificar não chega ao build por nenhum dos dois caminhos.
 name: VM appliance images
 
 on:
@@ -30,16 +42,16 @@ on:
           - truenas
         required: true
       version:
-        description: "Versão COMPLETA, para DESCARREGAR (ex.: 26.1.2, 9.1, 25.10.5) — tem de existir no fabricante"
-        required: true
+        description: "Versão COMPLETA, para DESCARREGAR (ex.: 26.1.2, 9.2-1, 25.10.5) — tem de existir no fabricante. Vazio = a versão fixada no script"
+        default: ""
       tag:
         description: "Tag de publicação (vazio = a SÉRIE da versão, `26.1.2` → `26.1`). A convenção deste projecto é a série, como `delonix-vm-k8s:1.34`"
         default: ""
       iso_url:
-        description: "URL do ISO (obrigatório excepto para opnsense)"
+        description: "URL do ISO — só para media que o fabricante não publique no sítio do costume. Vazio = o script descarrega e verifica sozinho"
         default: ""
       iso_sha256:
-        description: "SHA-256 do ISO (obrigatório excepto para opnsense)"
+        description: "SHA-256 do ISO — OBRIGATÓRIO se iso_url for dado"
         default: ""
       dest_repo:
         description: "Repositório OCI de destino"
@@ -85,9 +97,11 @@ jobs:
         run: |
           set -euo pipefail
           p='${{ inputs.product }}'
-          if [ "$p" != "opnsense" ]; then
-            test -n '${{ inputs.iso_url }}'    || { echo "::error::iso_url é obrigatório para $p"; exit 1; }
-            test -n '${{ inputs.iso_sha256 }}' || { echo "::error::iso_sha256 é obrigatório para $p"; exit 1; }
+          # Um URL sem checksum é a única combinação recusada: o caminho normal
+          # resolve o hash no `SHA256SUMS` do fabricante, e quem traz um media
+          # de outro sítio tem de trazer também com que o provar.
+          if [ -n '${{ inputs.iso_url }}' ] && [ -z '${{ inputs.iso_sha256 }}' ]; then
+            echo "::error::iso_sha256 é obrigatório quando iso_url é dado"; exit 1
           fi
           case "$p" in
             opnsense) echo "name=opnsense" ;;
@@ -98,8 +112,8 @@ jobs:
             truenas)  echo "name=truenas-scale" ;;
           esac >> "$GITHUB_OUTPUT"
 
-      - name: Descarrega e verifica o ISO
-        if: ${{ inputs.product != 'opnsense' }}
+      - name: Descarrega e verifica o ISO (só com iso_url)
+        if: ${{ inputs.iso_url != '' }}
         working-directory: /mnt/appliances
         run: |
           set -euo pipefail
@@ -111,13 +125,23 @@ jobs:
         working-directory: /mnt/appliances
         env:
           OUT_DIR: /mnt/appliances
+          MEDIA_CACHE: /mnt/appliances/.media
         run: |
           set -euo pipefail
           S="$GITHUB_WORKSPACE/scripts/appliances"
+          # Com `iso_url` passa-se o CAMINHO; sem ele passa-se a VERSÃO (vazia =
+          # a fixada no script) e é o script que descarrega e verifica. Os dois
+          # caminhos existem no mesmo argumento: um ficheiro que existe é usado
+          # tal e qual, o resto é tratado como versão.
+          # `if` e não `[ … ] && SRC=…`: sob `set -e` a forma curta só é segura
+          # porque o teste está ANTES do `&&` — reordená-la um dia faria o passo
+          # sair com 1 sem uma linha de erro. Medido, e não vale o risco.
+          SRC='${{ inputs.version }}'
+          if [ -n '${{ inputs.iso_url }}' ]; then SRC=/mnt/appliances/src.iso; fi
           case '${{ inputs.product }}' in
-            opnsense) "$S/build-opnsense.sh" '${{ inputs.version }}' ;;
-            truenas)  "$S/build-truenas.sh" /mnt/appliances/src.iso ;;
-            *)        "$S/build-proxmox.sh" '${{ inputs.product }}' /mnt/appliances/src.iso ;;
+            opnsense) "$S/build-opnsense.sh" ${SRC:+"$SRC"} ;;
+            truenas)  "$S/build-truenas.sh"  ${SRC:+"$SRC"} ;;
+            *)        "$S/build-proxmox.sh" '${{ inputs.product }}' ${SRC:+"$SRC"} ;;
           esac
           rm -f src.iso
           ls -lh /mnt/appliances/*.qcow2
@@ -148,13 +172,28 @@ jobs:
           D=./target/release/delonix
           N='${{ steps.vars.outputs.name }}'
           case '${{ inputs.product }}' in
-            opnsense) IMG=/mnt/appliances/opnsense-'${{ inputs.version }}'.qcow2; VCPUS=2; MEM=2G ;;
-            pve)      IMG=/mnt/appliances/pve.qcow2;     VCPUS=4; MEM=4G ;;
-            pbs)      IMG=/mnt/appliances/pbs.qcow2;     VCPUS=2; MEM=2G ;;
-            pmg)      IMG=/mnt/appliances/pmg.qcow2;     VCPUS=2; MEM=2G ;;
-            pdm)      IMG=/mnt/appliances/pdm.qcow2;     VCPUS=2; MEM=2G ;;
-            truenas)  IMG=/mnt/appliances/truenas.qcow2; VCPUS=4; MEM=8G ;;
+            opnsense) STEM=opnsense; VCPUS=2; MEM=2G ;;
+            pve)      STEM=pve;      VCPUS=4; MEM=4G ;;
+            pbs)      STEM=pbs;      VCPUS=2; MEM=2G ;;
+            pmg)      STEM=pmg;      VCPUS=2; MEM=2G ;;
+            pdm)      STEM=pdm;      VCPUS=2; MEM=2G ;;
+            truenas)  STEM=truenas;  VCPUS=4; MEM=8G ;;
           esac
+          # A imagem é DESCOBERTA e não construída por nome. Os builds passaram a
+          # carimbar a versão no ficheiro (`pve-9.2-1.qcow2`) para duas releases
+          # poderem coexistir, e os nomes fixos que estavam aqui
+          # (`/mnt/appliances/pve.qcow2`) deixariam este passo a apontar para um
+          # ficheiro que já não existe — depois de o build inteiro ter corrido.
+          # O `-bootcheck` é o overlay de rascunho do `verify-boot.sh`.
+          IMG=$(ls -1 /mnt/appliances/"$STEM".qcow2 /mnt/appliances/"$STEM"-*.qcow2 2>/dev/null \
+                | grep -v -- '-bootcheck\.qcow2$' | head -1)
+          test -n "$IMG" || { echo "::error::nenhuma imagem /mnt/appliances/$STEM*.qcow2"; ls -l /mnt/appliances; exit 1; }
+          echo "imagem: $IMG"
+          # A versão EXACTA sai do nome do ficheiro quando o input veio vazio —
+          # é o script que decide a versão fixada, e os metadados têm de dizer o
+          # que lá está mesmo e não «unknown».
+          VER='${{ inputs.version }}'
+          [ -n "$VER" ] || VER=$(basename "$IMG" .qcow2 | sed -n "s/^$STEM-//p")
           # A versão que se DESCARREGA e a tag que se PUBLICA são coisas
           # diferentes, e estavam acopladas. O fabricante publica o ficheiro pela
           # versão exacta (`OPNsense-26.1.2-nano-amd64.img`), mas a convenção de
@@ -166,12 +205,16 @@ jobs:
           # O `--release` guarda a versão EXACTA de propósito: a tag diz a série,
           # os metadados dizem o que lá está mesmo.
           TAG='${{ inputs.tag }}'
-          [ -n "$TAG" ] || TAG="$(echo '${{ inputs.version }}' | cut -d. -f1-2)"
-          echo "versão descarregada: ${{ inputs.version }} · tag publicada: $TAG"
+          # O sufixo de build do Proxmox cai ANTES do corte da série: a versão
+          # é `9.2-1` e a tag publicada é `9.2` (foi assim que as quatro de
+          # 2026-08-13 entraram, ao lado de `proxmox-ve-9.1`). Sem tirar o `-1`
+          # o `cut` por pontos devolvia `9.2-1`, porque só há um ponto.
+          [ -n "$TAG" ] || TAG="$(echo "${VER%%-*}" | cut -d. -f1-2)"
+          echo "versão descarregada: $VER · tag publicada: $TAG"
           # `--appliance`: nenhuma destas corre cloud-init, e sem esta marca o
           # `vm create` do outro lado voltaria a anexar-lhes um seed NoCloud.
-          $D image vm import $IMG -t "$N:$TAG" --appliance \
-            --distro "$N" --release '${{ inputs.version }}' \
+          $D image vm import "$IMG" -t "$N:$TAG" --appliance \
+            --distro "$N" --release "$VER" \
             --default-vcpus "$VCPUS" --default-memory "$MEM"
           $D image vm ls
           echo "${GHCR_TOKEN:-$GITHUB_TOKEN}" | $D image login ghcr.io \
