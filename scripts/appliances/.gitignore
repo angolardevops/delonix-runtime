@@ -6,7 +6,10 @@
 .venv/
 *.qcow2
 *.iso
-*-install.log
-*-postinstall.log
-*-qemu.pid
+# Todos os logs, e não uma lista deles: o `verify-boot.sh` escreve
+# `<img>-boot.log`, que a lista original (`-install`/`-postinstall`) não
+# apanhava — e apareceu como ficheiro por commitar depois da primeira
+# verificação. Um padrão largo evita a próxima omissão.
+*.log
+*.pid
 w-*/
