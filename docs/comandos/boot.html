@@ -155,7 +155,7 @@ boots, with no daemon.</p>
 
 Commands:
   disable  Disable + remove the generated boot units
-  enable   Install + enable systemd units for the RUNNING containers
+  enable   Install + enable systemd units so containers come back after a reboot
   status   Show boot-persistence status (installed units + mode)
   help     Print this message or the help of the given subcommand(s)
 
@@ -181,8 +181,8 @@ SEE ALSO:
 
   delonix › net › boot</code></pre></div>
 <h2 id='enable'><code>boot enable</code></h2>
-<p class='intro'>Install + enable systemd units for the RUNNING containers.</p>
-<p class='intro'>So they come back up when the host boots. Rootless uses user units + linger.</p>
+<p class='intro'>Install + enable systemd units so containers come back after a reboot.</p>
+<p class='intro'>Covers the ones running now AND the ones whose own policy says they should be (<code>always</code>/<code>unless-stopped</code>) — a reboot kills the supervisor, so those are stopped precisely when it matters. Stale units whose container is gone are removed. Rootless uses user units + linger.</p>
 <div class='help'><pre><code>Usage: delonix net boot enable [OPTIONS]
 
 Options:
@@ -190,9 +190,9 @@ Options:
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
       --restart &lt;RESTART&gt;
-          Restart policy baked into the units (`no|on-failure[:max]|always|unless-stopped`)
+          Restart policy baked into the units (`no|on-failure[:max]|always|unless-stopped`).
           
-          [default: always]
+          Omitted, each unit inherits the container&#x27;s own policy (`always` if it has none). Given, it applies to every unit — including `no`.
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
