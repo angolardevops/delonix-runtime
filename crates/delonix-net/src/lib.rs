@@ -28,6 +28,7 @@ use std::process::{Command, Stdio};
 pub mod bpf;
 pub mod cni;
 pub mod discover;
+mod flock;
 pub mod infra;
 pub mod ipam;
 pub mod wg;
@@ -1127,6 +1128,25 @@ impl NetworkStore {
         {
             return Err(Error::Invalid(format!("invalid network name: '{name}'")));
         }
+        // Serializado: escolher um octeto livre é ler o registo INTEIRO, decidir,
+        // e escrever. Sem fechadura, duas criações concorrentes cujos nomes
+        // caem no mesmo candidato lêem ambas o mesmo `used` e escrevem ambas o
+        // mesmo octeto.
+        //
+        // Medido antes desta correção, com 8 nomes que colidem no mesmo
+        // candidato: em série dão 8 `/16` distintos; em paralelo dão 3 a 5, com
+        // até CINCO redes em `10.220.0.0/16`. As bridges diferem (o nome deriva
+        // do da rede), por isso as redes parecem separadas no `network ls` — e
+        // os workloads tiram endereços do mesmo espaço.
+        let trinco = self.lock_path();
+        let _lock = flock::ExclusiveLock::acquire(&trinco).ok_or_else(|| {
+            flock::ExclusiveLock::unavailable(
+                &trinco,
+                "an unsynchronised allocation can put two networks on the same /16",
+            )
+        })?;
+        // Re-verificado DEBAIXO da fechadura: entre o teste acima e o trinco,
+        // outra criação com este nome pode ter passado.
         if self.path(name).exists() {
             return Err(Error::Conflict(format!("network '{name}' already exists")));
         }
@@ -1135,21 +1155,43 @@ impl NetworkStore {
             .iter()
             .filter_map(|n| n.prefix.rsplit('.').next().and_then(|o| o.parse().ok()))
             .collect();
+        let lo = delonix_runtime_core::workload_net::WORKLOAD_IPV4_LO.octets()[1];
+        let hi = delonix_runtime_core::workload_net::WORKLOAD_IPV4_HI.octets()[1];
         // searches for a free base octet starting from the candidate.
         let mut base = Network::base_for(name);
-        for _ in 0..140 {
+        let mut livre = false;
+        // Uma volta COMPLETA ao espaço, e não um número redondo de tentativas: o
+        // `0..140` percorria 140 candidatos num espaço de 55, o que dava duas
+        // voltas e meia e escondia o caso em que não há nenhum livre.
+        for _ in 0..=(hi - lo) {
             if !used.contains(&base) {
+                livre = true;
                 break;
             }
             // Wrap WITHIN the workload space (not 100..239, which fell outside it).
-            base = if base >= delonix_runtime_core::workload_net::WORKLOAD_IPV4_HI.octets()[1] {
-                delonix_runtime_core::workload_net::WORKLOAD_IPV4_LO.octets()[1]
-            } else {
-                base + 1
-            };
+            base = if base >= hi { lo } else { base + 1 };
+        }
+        // Sem lugar livre, o ciclo saía com o ÚLTIMO candidato tentado e escrevia-o
+        // à mesma: a rede nº 56 ficava em silêncio no `/16` de outra. Um limite
+        // atingido é uma resposta legítima; entregar uma rede que colide não é.
+        if !livre {
+            return Err(Error::Conflict(format!(
+                "no free /16 left for network '{name}': the workload space \
+                 10.{lo}.0.0-10.{hi}.255.255 holds {} networks and all are taken \
+                 — remove one (`delonix network rm <name>`) to free a subnet",
+                (hi - lo) as u16 + 1
+            )));
         }
         delonix_runtime_core::write_atomic(&self.path(name), base.to_string().as_bytes())?;
         self.get(name)
+    }
+
+    /// A fechadura do registo, IRMÃ da pasta e não dentro dela — `list()` varre
+    /// a pasta e não deve ter de saltar ficheiros que não são redes.
+    fn lock_path(&self) -> std::path::PathBuf {
+        let mut p = self.dir.clone();
+        p.set_extension("lock");
+        p
     }
 
     /// The base octet a requested `subnet` maps to — `10.<base>.0.0/16` is the
@@ -1283,6 +1325,21 @@ impl NetworkStore {
                 "'bridge' is the default network (reserved)".into(),
             ));
         }
+        if let Ok(existente) = self.get(name) {
+            return Ok(existente);
+        }
+        // Mesma fechadura do `create`, pela mesma razão: verificar sobreposição
+        // contra o registo e só depois escrever é ler-depois-escrever. Duas
+        // criações concorrentes de CIDRs que se sobrepõem passavam ambas a
+        // verificação — e o conflito que esta função existe para recusar
+        // acabava gravado.
+        let trinco = self.lock_path();
+        let _lock = flock::ExclusiveLock::acquire(&trinco).ok_or_else(|| {
+            flock::ExclusiveLock::unavailable(
+                &trinco,
+                "two overlapping subnets can both pass the overlap check",
+            )
+        })?;
         if let Ok(existente) = self.get(name) {
             return Ok(existente);
         }
@@ -3065,5 +3122,126 @@ mod tests {
         assert!(store.create_with_base("x", 50).is_err());
         assert!(store.create_with_base("x", 200).is_ok());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// Regressão da alocação do `/16` no `NetworkStore` — o caminho que
+/// `delonix network create` percorre de facto.
+///
+/// Os nomes que colidem são DERIVADOS aqui a partir de `Network::base_for`, e
+/// não escritos à mão: uma lista fixa deixaria de exercitar colisão nenhuma no
+/// dia em que a função de dispersão mudasse, e o teste continuaria verde a não
+/// testar nada.
+#[cfg(test)]
+mod tests_alocacao_16 {
+    use super::*;
+    use std::collections::HashSet;
+
+    fn raiz(etiqueta: &str) -> std::path::PathBuf {
+        let d =
+            std::env::temp_dir().join(format!("dlx-store-alloc-{}-{etiqueta}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// `n` nomes que caem TODOS no mesmo candidato inicial.
+    fn nomes_que_colidem(n: usize) -> Vec<String> {
+        let mut por_base: std::collections::HashMap<u8, Vec<String>> = Default::default();
+        for i in 0..20_000 {
+            let nome = format!("corp{i}");
+            let e = por_base.entry(Network::base_for(&nome)).or_default();
+            e.push(nome);
+            if e.len() == n {
+                return e.clone();
+            }
+        }
+        panic!("não foi possível encontrar {n} nomes a colidir");
+    }
+
+    #[test]
+    fn criacoes_concorrentes_com_nomes_a_colidir_nao_partilham_o_mesmo_16() {
+        let nomes = nomes_que_colidem(8);
+        let store = std::sync::Arc::new(NetworkStore::open(raiz("corrida")).unwrap());
+        let barreira = std::sync::Arc::new(std::sync::Barrier::new(nomes.len()));
+
+        let hs: Vec<_> = nomes
+            .iter()
+            .map(|n| {
+                let (s, b, n) = (store.clone(), barreira.clone(), n.clone());
+                std::thread::spawn(move || {
+                    // Largam todas ao mesmo tempo — arrancarem em fila esconde
+                    // exactamente a corrida que este teste existe para apanhar.
+                    b.wait();
+                    s.create(&n).expect("create falhou")
+                })
+            })
+            .collect();
+        let redes: Vec<Network> = hs.into_iter().map(|h| h.join().unwrap()).collect();
+
+        let prefixos: HashSet<&str> = redes.iter().map(|r| r.prefix.as_str()).collect();
+        assert_eq!(
+            prefixos.len(),
+            redes.len(),
+            "duas redes ficaram no mesmo /16: {:?}",
+            redes
+                .iter()
+                .map(|r| (&r.name, &r.prefix))
+                .collect::<Vec<_>>()
+        );
+
+        // E o disco tem de concordar com o devolvido: uma escrita a pisar outra
+        // dá prefixos únicos em memória e duplicados no registo.
+        let em_disco: HashSet<String> = store
+            .list()
+            .unwrap()
+            .into_iter()
+            .map(|r| r.prefix)
+            .collect();
+        assert_eq!(
+            em_disco.len(),
+            redes.len(),
+            "prefixos duplicados no registo"
+        );
+    }
+
+    #[test]
+    fn sem_16_livre_recusa_em_vez_de_entregar_um_duplicado() {
+        let lo = delonix_runtime_core::workload_net::WORKLOAD_IPV4_LO.octets()[1];
+        let hi = delonix_runtime_core::workload_net::WORKLOAD_IPV4_HI.octets()[1];
+        let capacidade = (hi - lo) as usize + 1;
+
+        let store = NetworkStore::open(raiz("tecto")).unwrap();
+        for i in 0..capacidade {
+            store
+                .create(&format!("r{i}"))
+                .unwrap_or_else(|e| panic!("a rede {i} devia caber ({capacidade} lugares): {e}"));
+        }
+        assert_eq!(
+            store.list().unwrap().len(),
+            capacidade,
+            "o espaço de workloads tem {capacidade} /16"
+        );
+
+        // A que passa do tecto: até aqui o ciclo esgotava-se, saía com o último
+        // candidato tentado e escrevia-o à mesma — a rede ficava, em silêncio,
+        // no /16 de outra.
+        let erro = store.create("a-mais").expect_err("devia recusar");
+        let t = erro.to_string();
+        assert!(t.contains("no free /16"), "erro pouco claro: {t}");
+        assert!(t.contains("a-mais"), "o erro devia nomear a rede: {t}");
+        assert!(
+            !store.dir.join("a-mais").exists(),
+            "recusou mas escreveu o registo à mesma"
+        );
+
+        // E nenhum /16 ficou partilhado.
+        let prefixos: HashSet<String> = store
+            .list()
+            .unwrap()
+            .into_iter()
+            .map(|r| r.prefix)
+            .collect();
+        assert_eq!(prefixos.len(), capacidade);
     }
 }
