@@ -243,6 +243,17 @@ fn router(state: AppState) -> Router {
         .route("/v1/net/egress", put(set_egress_global))
         .route("/v1/net/egress/:bridge", put(set_egress_net))
         .route("/v1/containers/:id/rate", put(set_net_rate))
+        // Endereços e ligação a redes: as perguntas que o control-plane faz
+        // antes de publicar um porto ou escrever uma regra.
+        .route("/v1/net/dhcp/:net/:mac", get(dhcp_ip))
+        .route("/v1/net/dhcp6/:net/:mac", get(dhcp_ip6))
+        .route("/v1/net/container-ip/:id", get(container_ip))
+        .route("/v1/net/attach-extra", post(attach_extra))
+        .route(
+            "/v1/net/attach-extra/:id/:idx/:ip",
+            axum::routing::delete(detach_extra),
+        )
+        .route("/v1/net/attach/:id/:ip", axum::routing::delete(detach))
         // Hot reconfig of a container: ONLY the subset that the runtime's `container
         // update` supports (publish-add/publish-rm). The fields the PaaS's
         // `ContainerUpdateSpec` has but the runtime does NOT (memory/cpus/restart/
@@ -891,6 +902,161 @@ async fn sbom_image(State(s): State<AppState>, Query(q): Query<RefQuery>) -> Res
 #[derive(serde::Deserialize)]
 struct NetworkBody {
     name: String,
+}
+
+/// `GET /v1/net/dhcp/:net/:mac` — o IP que o DHCP dá a um MAC nesta rede.
+///
+/// Determinístico a partir do MAC (`<prefix>.254.<10 + fnv32(mac)%240>`), e não
+/// lido da tabela ARP: o `ip neigh` só mostra o endereço depois de tráfego
+/// recente, e devolvia «nenhum» para uma VM viva mas calada — caso reportado a
+/// sério. Aqui o IP existe assim que a rede existe, que é o que serve para
+/// abrir um SSH.
+///
+/// `None` → 404: a rede não existe. Não é o mesmo que «a VM ainda não arrancou»,
+/// e por isso não se responde 200 com corpo vazio.
+async fn dhcp_ip(Path((net, mac)): Path<(String, String)>) -> Response {
+    if !valid_arg(&net) || !valid_mac(&mac) {
+        return err_response(Error::Invalid("invalid network or MAC".to_string()));
+    }
+    match tokio::task::spawn_blocking(move || delonix_net::infra::dhcp_ip_for_mac(&net, &mac)).await
+    {
+        Ok(Some(ip)) => Json(serde_json::json!({ "ip": ip })).into_response(),
+        Ok(None) => err_response(Error::NotFound("network".to_string())),
+        Err(e) => err_response(Error::Runtime {
+            context: "join",
+            message: e.to_string(),
+        }),
+    }
+}
+
+/// `GET /v1/net/dhcp6/:net/:mac` — o equivalente IPv6.
+///
+/// Rota própria e não um campo na de cima: o v6 está DESLIGADO por decisão de
+/// segurança neste motor, e quem o pede tem de o pedir. Um campo opcional numa
+/// resposta partilhada faria parecer que vem de graça.
+async fn dhcp_ip6(Path((net, mac)): Path<(String, String)>) -> Response {
+    if !valid_arg(&net) || !valid_mac(&mac) {
+        return err_response(Error::Invalid("invalid network or MAC".to_string()));
+    }
+    match tokio::task::spawn_blocking(move || delonix_net::infra::dhcp_ip6_for_mac(&net, &mac))
+        .await
+    {
+        Ok(Some(ip)) => Json(serde_json::json!({ "ip": ip })).into_response(),
+        Ok(None) => err_response(Error::NotFound("ipv6 lease".to_string())),
+        Err(e) => err_response(Error::Runtime {
+            context: "join",
+            message: e.to_string(),
+        }),
+    }
+}
+
+/// `GET /v1/net/container-ip/:id` — o IP que um container tem na rede por omissão.
+///
+/// Derivado do id, sem tocar em estado: é a pergunta que o control-plane faz
+/// antes de publicar um porto ou de escrever uma regra, e fazê-la por HTTP evita
+/// que ele reimplemente a fórmula — que teria de dar exactamente o mesmo
+/// resultado que esta, sempre.
+async fn container_ip(Path(id): Path<String>) -> Response {
+    if !valid_arg(&id) {
+        return err_response(Error::Invalid("invalid container id".to_string()));
+    }
+    match tokio::task::spawn_blocking(move || delonix_net::infra::container_ip(&id)).await {
+        Ok(ip) => Json(serde_json::json!({ "ip": ip })).into_response(),
+        Err(e) => err_response(Error::Runtime {
+            context: "join",
+            message: e.to_string(),
+        }),
+    }
+}
+
+/// Corpo de `POST /v1/net/attach-extra`.
+#[derive(serde::Deserialize)]
+struct AttachExtraBody {
+    id: String,
+    /// Índice da interface adicional (0 é a primária, que não passa por aqui).
+    idx: u32,
+    net: String,
+    #[serde(default)]
+    namespace: String,
+}
+
+/// `POST /v1/net/attach-extra` — liga um container a uma rede ADICIONAL.
+///
+/// Devolve `{ ifname, ip }`: quem chama precisa dos dois para o que vem a
+/// seguir (a regra de firewall é endereçada pelo IP, a de shaping pela
+/// interface), e obrigá-lo a uma segunda volta para os descobrir seria pagar
+/// duas viagens por uma operação.
+async fn attach_extra(Json(b): Json<AttachExtraBody>) -> Response {
+    if !valid_arg(&b.id) || !valid_arg(&b.net) {
+        return err_response(Error::Invalid(
+            "invalid container id or network".to_string(),
+        ));
+    }
+    if !b.namespace.is_empty() && !valid_arg(&b.namespace) {
+        return err_response(Error::Invalid("invalid namespace".to_string()));
+    }
+    let r = tokio::task::spawn_blocking(move || {
+        delonix_net::infra::attach_extra_container(&b.id, b.idx, &b.net, &b.namespace)
+    })
+    .await;
+    match r {
+        Ok(Ok((ifname, ip))) => {
+            Json(serde_json::json!({ "ifname": ifname, "ip": ip })).into_response()
+        }
+        Ok(Err(e)) => err_response(e),
+        Err(e) => err_response(Error::Runtime {
+            context: "join",
+            message: e.to_string(),
+        }),
+    }
+}
+
+/// `DELETE /v1/net/attach-extra/:id/:idx/:ip` — desliga uma interface adicional.
+///
+/// Best-effort, como os outros `detach`: o mecanismo não devolve resultado.
+async fn detach_extra(Path((id, idx, ip)): Path<(String, u32, String)>) -> Response {
+    if !valid_arg(&id) || delonix_net::Cidr::parse_addr(&ip).is_none() {
+        return err_response(Error::Invalid("invalid container id or IP".to_string()));
+    }
+    match tokio::task::spawn_blocking(move || {
+        delonix_net::infra::detach_extra_container(&id, idx, &ip)
+    })
+    .await
+    {
+        Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Err(e) => err_response(Error::Runtime {
+            context: "join",
+            message: e.to_string(),
+        }),
+    }
+}
+
+/// `DELETE /v1/net/attach/:id/:ip` — desliga um container da rede primária.
+async fn detach(Path((id, ip)): Path<(String, String)>) -> Response {
+    if !valid_arg(&id) || delonix_net::Cidr::parse_addr(&ip).is_none() {
+        return err_response(Error::Invalid("invalid container id or IP".to_string()));
+    }
+    match tokio::task::spawn_blocking(move || delonix_net::infra::detach_container(&id, &ip)).await
+    {
+        Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Err(e) => err_response(Error::Runtime {
+            context: "join",
+            message: e.to_string(),
+        }),
+    }
+}
+
+/// Um MAC é `aa:bb:cc:dd:ee:ff` — hexadecimal e dois-pontos, e mais nada.
+///
+/// Validado à parte do `valid_arg` porque este ACEITA os dois-pontos e aquele
+/// não; sem isto, um MAC legítimo era recusado e a alternativa (afrouxar o
+/// `valid_arg`) alargaria o crivo de todos os outros argumentos.
+fn valid_mac(mac: &str) -> bool {
+    !mac.is_empty()
+        && mac.len() <= 17
+        && mac
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() || c == ':' || c == '-')
 }
 
 /// Corpo de `PUT /v1/net/firewall/:ip`.
@@ -2002,6 +2168,72 @@ mod tests {
                 "/v1/containers/../rate",
                 r#"{"rate_bit":1000,"burst_bytes":100}"#,
             ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+    /// Endereços e ligação a redes: o crivo, e o `valid_mac` que existe por
+    /// causa dos dois-pontos.
+    #[tokio::test]
+    async fn dhcp_e_attach_validam_o_que_recebem() {
+        let (st, d) = test_state();
+        std::env::set_var("DELONIX_ROOT", d.path());
+        let app = router(st);
+
+        let g = |uri: String| {
+            app.clone()
+                .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+        };
+
+        // MAC com caracteres que não são hex nem `:`.
+        let resp = g("/v1/net/dhcp/app/zz:zz:zz:zz:zz:zz".into())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        // Um MAC legítimo NÃO pode ser recusado — é o que o `valid_mac` existe
+        // para garantir, porque o `valid_arg` do módulo rejeita os dois-pontos.
+        // A rede não existe, portanto 404 (e não 400): a distinção é o ponto.
+        let resp = g("/v1/net/dhcp/rede-que-nao-existe/aa:bb:cc:dd:ee:ff".into())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+        // O IP derivado de um id responde sem tocar em estado.
+        let resp = g("/v1/net/container-ip/abc123".into()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(body_json(resp).await["ip"].is_string());
+
+        // Id inválido é recusado.
+        let resp = g("/v1/net/container-ip/..".into()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        // Detach com um IP que não é IP.
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/v1/net/attach/abc/nao-e-ip")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        // E o attach recusa rede inválida antes de tocar no holder.
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/net/attach-extra")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"id":"abc","idx":1,"net":"..","namespace":""}"#,
+                    ))
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
