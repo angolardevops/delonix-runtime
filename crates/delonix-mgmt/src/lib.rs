@@ -216,8 +216,12 @@ fn router(state: AppState) -> Router {
         .route("/v1/images/sbom", get(sbom_image))
         // Networks: create/rm (network lifecycle) — shell-out to the CLI. publish/
         // unpublish (DNAT) do NOT go here — `Net::`/`infra::` debt in the PaaS.
-        .route("/v1/networks", post(create_network))
-        .route("/v1/networks/:name", axum::routing::delete(delete_network))
+        .route("/v1/networks", get(list_networks).post(create_network))
+        .route(
+            "/v1/networks/:name",
+            get(get_network).delete(delete_network),
+        )
+        .route("/v1/net/status", get(net_status))
         // Hot reconfig of a container: ONLY the subset that the runtime's `container
         // update` supports (publish-add/publish-rm). The fields the PaaS's
         // `ContainerUpdateSpec` has but the runtime does NOT (memory/cpus/restart/
@@ -868,6 +872,60 @@ struct NetworkBody {
     name: String,
 }
 
+/// `GET /v1/networks` — as redes DECLARADAS neste nó.
+///
+/// Leitura pela biblioteca, como o resto dos `GET` deste módulo: passar pelo
+/// binário só para ler seria pagar um `fork`+`exec` por uma leitura de ficheiros.
+///
+/// **Declaradas, não realizadas.** Uma rede aparece aqui a partir do
+/// `network create`, mas a bridge só nasce no netns do holder ao primeiro
+/// attach — ver `/v1/net/status` para saber o que está de pé. A distinção é do
+/// modelo, não desta rota, e esconde-la aqui seria fazer a API mentir sobre ela.
+async fn list_networks() -> Response {
+    match tokio::task::spawn_blocking(delonix_net::infra::network_list).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => err_response(Error::Runtime {
+            context: "join",
+            message: e.to_string(),
+        }),
+    }
+}
+
+/// `GET /v1/networks/:name` — uma rede pelo nome, ou 404.
+///
+/// O 404 é a resposta certa e não um detalhe: quem chama isto está a decidir se
+/// cria a rede ou se a reutiliza, e um corpo vazio com 200 fá-lo-ia criar por
+/// cima de uma rede que existe.
+async fn get_network(Path(name): Path<String>) -> Response {
+    if !valid_arg(&name) {
+        return err_response(Error::Invalid("invalid network name".to_string()));
+    }
+    let achada = tokio::task::spawn_blocking(move || delonix_net::infra::network_get(&name)).await;
+    match achada {
+        Ok(Some(def)) => Json(def).into_response(),
+        Ok(None) => err_response(Error::NotFound("network".to_string())),
+        Err(e) => err_response(Error::Runtime {
+            context: "join",
+            message: e.to_string(),
+        }),
+    }
+}
+
+/// `GET /v1/net/status` — o estado da infra de rede REALIZADA neste nó.
+///
+/// A contraparte do `list_networks`: aquele diz o que está declarado, este diz
+/// o que está de pé (holder, slirp, bridge, ref-count). Um control-plane que só
+/// leia o primeiro conclui que a rede existe quando ainda não existe.
+async fn net_status() -> Response {
+    match tokio::task::spawn_blocking(delonix_net::infra::status).await {
+        Ok(st) => Json(st).into_response(),
+        Err(e) => err_response(Error::Runtime {
+            context: "join",
+            message: e.to_string(),
+        }),
+    }
+}
+
 async fn create_network(State(s): State<AppState>, Json(b): Json<NetworkBody>) -> Response {
     if !valid_arg(&b.name) {
         return err_response(Error::Invalid("invalid network name".to_string()));
@@ -1488,5 +1546,102 @@ mod tests {
             .unwrap();
         let resp = router(st).oneshot(create).await.unwrap();
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+    /// As rotas de rede novas: listar, obter, e o estado da infra realizada.
+    ///
+    /// `DELONIX_ROOT` é do PROCESSO, e o `test_state` já dá uma raiz temporária
+    /// por teste — mas estas rotas leem pelo `infra`, que resolve a raiz do
+    /// ambiente e não do `AppState`. Por isso a raiz é apontada aqui, uma vez.
+    #[tokio::test]
+    async fn redes_lista_get_e_estado() {
+        let (st, d) = test_state();
+        std::env::set_var("DELONIX_ROOT", d.path());
+        let app = router(st);
+
+        // Sem redes declaradas → lista vazia (e não um 500).
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/networks")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(body_json(resp).await.as_array().unwrap().len(), 0);
+
+        // Uma rede que não existe → 404, e não 200 com corpo vazio: quem chama
+        // isto está a decidir entre criar e reutilizar.
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/networks/nao-existe")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+        // Nome inválido é recusado ANTES de tocar no disco.
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/networks/..")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        // Declara uma rede pela biblioteca e confirma que as duas rotas a veem.
+        let def = delonix_net::infra::network_create("api-teste").expect("criar rede");
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/networks")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let lista = body_json(resp).await;
+        assert_eq!(lista.as_array().unwrap().len(), 1);
+
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/networks/api-teste")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let j = body_json(resp).await;
+        assert_eq!(j["name"], "api-teste");
+        assert_eq!(j["bridge"], def.bridge);
+        assert_eq!(j["prefix"], def.prefix);
+
+        // O estado da infra responde mesmo com o holder em baixo — é a pergunta
+        // «está de pé?», e uma resposta de erro aí não se distingue de um nó
+        // inacessível.
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/net/status")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
     }
 }
