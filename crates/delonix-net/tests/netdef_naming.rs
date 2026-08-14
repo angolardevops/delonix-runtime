@@ -39,8 +39,14 @@ fn nomes_com_os_mesmos_12_caracteres_nao_partilham_registo() {
     // devolvia o primeiro, com a bridge errada.
     let ga = delonix_net::infra::network_get("producao-alpha").expect("get alpha");
     let gb = delonix_net::infra::network_get("producao-alpine").expect("get alpine");
-    assert_eq!((ga.name.as_str(), ga.bridge.as_str()), ("producao-alpha", a.bridge.as_str()));
-    assert_eq!((gb.name.as_str(), gb.bridge.as_str()), ("producao-alpine", b.bridge.as_str()));
+    assert_eq!(
+        (ga.name.as_str(), ga.bridge.as_str()),
+        ("producao-alpha", a.bridge.as_str())
+    );
+    assert_eq!(
+        (gb.name.as_str(), gb.bridge.as_str()),
+        ("producao-alpine", b.bridge.as_str())
+    );
 
     let listadas: Vec<String> = delonix_net::infra::network_list()
         .into_iter()
@@ -108,7 +114,10 @@ fn registo_legado_continua_a_ser_lido_e_migra_a_escrita() {
     // A escrita seguinte migra-o: `network_create` é idempotente por nome, por
     // isso devolve o registo existente sem lhe mudar o prefixo.
     let de_novo = delonix_net::infra::network_create("arquivo-antigo").expect("idempotente");
-    assert_eq!(de_novo.prefix, "10.249", "a idempotência não pode renumerar a rede");
+    assert_eq!(
+        de_novo.prefix, "10.249",
+        "a idempotência não pode renumerar a rede"
+    );
 
     // O ficheiro legado só desaparece quando algo o reescreve — força-o por um
     // caminho que escreve mesmo (declarar o gateway).
@@ -116,7 +125,9 @@ fn registo_legado_continua_a_ser_lido_e_migra_a_escrita() {
         .expect("declara gateway");
     assert!(!legado.exists(), "o registo legado ficou para trás");
     assert_eq!(
-        delonix_net::infra::network_get("arquivo-antigo").unwrap().bridge,
+        delonix_net::infra::network_get("arquivo-antigo")
+            .unwrap()
+            .bridge,
         "dlxnaaaabbbb",
         "a migração não pode inventar uma bridge nova"
     );
