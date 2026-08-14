@@ -1,0 +1,10 @@
+[package]
+name = "delonix-net-model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# SEM dependências, e é o ponto: este crate existe para poder ser usado dos dois
+# lados da fronteira (o motor e o control-plane) sem arrastar o mecanismo atrás.
+# Uma dependência aqui seria uma dependência que o PaaS passaria a ter.
+[dependencies]
