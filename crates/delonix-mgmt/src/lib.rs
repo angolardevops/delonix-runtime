@@ -222,6 +222,17 @@ fn router(state: AppState) -> Router {
             get(get_network).delete(delete_network),
         )
         .route("/v1/net/status", get(net_status))
+        // Publicação de portos (DNAT + hostfwd do slirp). Ao contrário do
+        // create/rm de redes, NÃO passa pelo binário: o `publish_port` recebe o
+        // IP do container, e a CLI recebe o NOME — quem chama esta API (o
+        // control-plane) tem o IP e não tem forma de resolver o nome do lado de
+        // cá sem uma segunda volta. Chamar a biblioteca é o caminho curto e o
+        // honesto.
+        .route("/v1/net/publish", post(publish_port))
+        .route(
+            "/v1/net/publish/:host_port",
+            axum::routing::delete(unpublish_port),
+        )
         // Hot reconfig of a container: ONLY the subset that the runtime's `container
         // update` supports (publish-add/publish-rm). The fields the PaaS's
         // `ContainerUpdateSpec` has but the runtime does NOT (memory/cpus/restart/
@@ -870,6 +881,70 @@ async fn sbom_image(State(s): State<AppState>, Query(q): Query<RefQuery>) -> Res
 #[derive(serde::Deserialize)]
 struct NetworkBody {
     name: String,
+}
+
+/// Corpo de `POST /v1/net/publish`.
+#[derive(serde::Deserialize)]
+struct PublishBody {
+    /// IP do container que recebe o tráfego.
+    container_ip: String,
+    /// `hostPort:contPort[/tcp|udp]` — a mesma forma que o `-p` da CLI.
+    spec: String,
+}
+
+/// `POST /v1/net/publish` — publica um porto através do ingress.
+///
+/// Fecha a maior divida da fronteira: `publish_port`/`unpublish_port` eram 13 dos
+/// ~153 sítios em que o control-plane chamava o `delonix-net` directamente, e o
+/// comentário por cima das rotas de rede já os nomeava como tal («publish/
+/// unpublish (DNAT) do NOT go here — `Net::`/`infra::` debt in the PaaS»).
+///
+/// O `container_ip` é validado antes de chegar ao mecanismo: é o que acaba numa
+/// regra de DNAT, e uma string arbitrária ali é uma regra arbitrária.
+async fn publish_port(Json(b): Json<PublishBody>) -> Response {
+    if delonix_net::Cidr::parse_addr(&b.container_ip).is_none() {
+        return err_response(Error::Invalid(format!(
+            "invalid container IP: '{}'",
+            b.container_ip
+        )));
+    }
+    if !valid_arg(&b.spec) {
+        return err_response(Error::Invalid("invalid publish spec".to_string()));
+    }
+    let r = tokio::task::spawn_blocking(move || {
+        delonix_net::infra::publish_port(&b.container_ip, &b.spec)
+    })
+    .await;
+    match r {
+        Ok(Ok(())) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Ok(Err(e)) => err_response(e),
+        Err(e) => err_response(Error::Runtime {
+            context: "join",
+            message: e.to_string(),
+        }),
+    }
+}
+
+/// `DELETE /v1/net/publish/:host_port` — retira a publicação de um porto.
+///
+/// **Best-effort, e a API não finge o contrário**: o `unpublish_port` não
+/// devolve resultado — tira a regra se lá estiver e cala-se se não estiver. Um
+/// 200 aqui significa «a operação correu», não «havia o que remover». Inventar
+/// um 404 exigiria uma leitura que o mecanismo não oferece, e um 404 adivinhado
+/// é pior do que a verdade.
+async fn unpublish_port(Path(host_port): Path<String>) -> Response {
+    if host_port.is_empty() || !host_port.chars().all(|c| c.is_ascii_digit()) {
+        return err_response(Error::Invalid(format!("invalid host port: '{host_port}'")));
+    }
+    let r =
+        tokio::task::spawn_blocking(move || delonix_net::infra::unpublish_port(&host_port)).await;
+    match r {
+        Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Err(e) => err_response(Error::Runtime {
+            context: "join",
+            message: e.to_string(),
+        }),
+    }
 }
 
 /// `GET /v1/networks` — as redes DECLARADAS neste nó.
@@ -1643,5 +1718,67 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
+    }
+    /// A publicação de portos: o que é recusado ANTES de chegar ao mecanismo.
+    ///
+    /// O caminho feliz não se testa aqui de propósito — publicar exige o holder
+    /// de pé, slirp e nft, e um teste que precise disso deixa de correr no CI e
+    /// passa a decoração. O que se testa é a fronteira: o que a API deixa passar
+    /// para uma regra de DNAT.
+    #[tokio::test]
+    async fn publish_recusa_ip_e_spec_invalidos() {
+        let (st, _d) = test_state();
+        let app = router(st);
+
+        // Um IP que não é um IP acabaria numa regra de DNAT arbitrária.
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/net/publish")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"container_ip":"nao-e-um-ip","spec":"8080:80"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        // E a spec passa pelo mesmo crivo dos outros argumentos.
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/net/publish")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"container_ip":"10.200.0.5","spec":"8080:80; rm -rf /"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        // O porto do unpublish é um número, e nada mais — é o que identifica a
+        // regra a remover.
+        for mau in ["abc", "80a", ".."] {
+            let resp = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("DELETE")
+                        .uri(format!("/v1/net/publish/{mau}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "aceitou {mau:?}");
+        }
     }
 }
