@@ -3600,9 +3600,9 @@ fn update_netdef_egress(
     for mut def in network_list() {
         if def.bridge == bridge {
             mutate(&mut def.egress);
-            if let Ok(json) = serde_json::to_vec_pretty(&def) {
-                let _ = std::fs::write(netdef_path(&def.name), json);
-            }
+            // Pelo escritor único: escrever aqui à parte era como o registo
+            // legado ficava para trás depois de uma mudança de egress.
+            let _ = write_netdef(&def.name, &def);
             return Some(def.egress);
         }
     }
@@ -3820,8 +3820,57 @@ fn networks_lock() -> PathBuf {
     ingress_dir().join("networks.lock")
 }
 
+/// O ficheiro de um `NetDef`. **Injetivo**, ao contrário do que aqui esteve.
+///
+/// Era `sanitize(name).json`, e o `sanitize` corta a 12 caracteres — um limite
+/// que existe para nomes de DISPOSITIVO (o kernel tem `IFNAMSIZ`), não para
+/// nomes de ficheiro, onde é perda pura. Duas redes cujos nomes coincidissem
+/// nos primeiros 12 caracteres partilhavam registo:
+///
+/// ```text
+/// producao-alpha  ─┐
+///                  ├─→ producao-alp.json
+/// producao-alpine ─┘
+/// ```
+///
+/// E o que se lê num registo é a BRIDGE: os workloads da segunda rede iam parar
+/// à bridge da primeira, com as duas a aparecerem separadas no `network ls`. O
+/// `network rm` da segunda mandava `netdel` à bridge da primeira e apagava-lhe o
+/// registo.
+///
+/// O sufixo vem do nome COMPLETO, por isso o prefixo legível pode ser cortado à
+/// vontade sem juntar dois nomes distintos. `fnv32` é o mesmo orçamento de
+/// colisão que [`crate::bridge_name`] já aceita para o nome do dispositivo — e,
+/// ao contrário desse, aqui há uma segunda linha de defesa: `network_get`
+/// confirma o campo `name` do registo, portanto uma colisão dá «não existe» e
+/// não uma rede trocada por outra.
 fn netdef_path(name: &str) -> PathBuf {
+    let legivel: String = name
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .take(32)
+        .collect();
+    networks_dir().join(format!("{legivel}-{:08x}.json", crate::fnv32(name)))
+}
+
+/// O caminho ANTIGO, truncado. Continua a ser LIDO — um registo em disco é a
+/// bridge e o `/16` de uma rede que pode ter workloads ligados, e mudar a
+/// fórmula sem ler o que já lá está seria perdê-los em silêncio, que é o mesmo
+/// género de dano que esta correção existe para fechar.
+///
+/// Só é aceite depois de confirmado o campo `name`, e desaparece à primeira
+/// escrita ou remoção da rede.
+fn netdef_path_legado(name: &str) -> PathBuf {
     networks_dir().join(format!("{}.json", sanitize(name)))
+}
+
+/// Lê um `NetDef` de um caminho, aceitando-o só se for MESMO o da rede pedida.
+///
+/// A verificação é o que torna a colisão inofensiva em vez de silenciosa: um
+/// registo de outra rede é recusado em vez de devolvido como se fosse este.
+fn ler_netdef(caminho: &PathBuf, name: &str) -> Option<NetDef> {
+    let def: NetDef = serde_json::from_slice(&std::fs::read(caminho).ok()?).ok()?;
+    (def.name == name).then_some(def)
 }
 
 /// A declared path between two networks, PERSISTED.
@@ -4061,18 +4110,26 @@ pub fn resolve_net(name: &str) -> Result<NetPlan> {
 
 /// Reads a private network's `NetDef` (if it exists).
 pub fn network_get(name: &str) -> Option<NetDef> {
-    serde_json::from_slice(&std::fs::read(netdef_path(name)).ok()?).ok()
+    ler_netdef(&netdef_path(name), name).or_else(|| ler_netdef(&netdef_path_legado(name), name))
 }
 
 /// Lists the defined ingress private networks.
 pub fn network_list() -> Vec<NetDef> {
-    let mut v = Vec::new();
+    let mut v: Vec<NetDef> = Vec::new();
     if let Ok(rd) = std::fs::read_dir(networks_dir()) {
         for e in rd.flatten() {
             if let Ok(def) =
                 serde_json::from_slice::<NetDef>(&std::fs::read(e.path()).unwrap_or_default())
             {
-                v.push(def);
+                // Uma rede com registo legado E novo (a meio da migração) é UMA
+                // rede. Sem isto, apareceria duas vezes no `network ls` e — pior
+                // — duas vezes no conjunto de prefixos usados que a alocação lê.
+                let novo = e.path() == netdef_path(&def.name);
+                match v.iter_mut().find(|d| d.name == def.name) {
+                    Some(ja) if novo => *ja = def,
+                    Some(_) => {}
+                    None => v.push(def),
+                }
             }
         }
     }
@@ -4119,14 +4176,7 @@ pub fn network_create(name: &str) -> Result<NetDef> {
         .find(|p| !used.contains(p))
         .ok_or_else(|| Error::Invalid("no free /16 prefixes for ingress networks".into()))?;
     let def = NetDef::new(name, &prefix);
-    std::fs::create_dir_all(networks_dir()).map_err(|e| Error::Runtime {
-        context: "networks dir",
-        message: e.to_string(),
-    })?;
-    std::fs::write(
-        netdef_path(name),
-        serde_json::to_vec_pretty(&def).unwrap_or_default(),
-    )?;
+    write_netdef(name, &def)?;
     Ok(def)
 }
 
@@ -4208,6 +4258,13 @@ fn write_netdef(name: &str, def: &NetDef) -> Result<()> {
         context: "netdef",
         message: e.to_string(),
     })?;
+    // O registo antigo desta MESMA rede desaparece agora que há um novo, para o
+    // `network_list` não a ver duas vezes. Só o desta rede: um ficheiro legado
+    // com outro `name` pertence a outra e fica onde está.
+    let legado = netdef_path_legado(name);
+    if legado != netdef_path(name) && ler_netdef(&legado, name).is_some() {
+        let _ = std::fs::remove_file(&legado);
+    }
     Ok(())
 }
 
@@ -4219,12 +4276,23 @@ pub fn network_remove(name: &str) {
     // everything in place. See `routes_forget_network` for what leaving a pair
     // behind would do on the next create.
     routes_forget_network(name);
-    if let Some(def) = network_get(name) {
-        // `control_send` fails right away if the holder is down (network with no workloads) —
-        // the bridge never lived in a netns, nothing to delete. Best-effort.
-        let _ = control_send(&format!("netdel {}", def.bridge));
-    }
+    let Some(def) = network_get(name) else {
+        // Sem registo desta rede não há nada a desfazer. Antes, a leitura do
+        // registo truncado podia devolver o de OUTRA rede — e então isto mandava
+        // `netdel` à bridge dela e apagava-lhe o ficheiro. Agora `network_get`
+        // confirma o `name`, e sem correspondência não se toca em nada.
+        return;
+    };
+    // `control_send` fails right away if the holder is down (network with no workloads) —
+    // the bridge never lived in a netns, nothing to delete. Best-effort.
+    let _ = control_send(&format!("netdel {}", def.bridge));
     let _ = std::fs::remove_file(netdef_path(name));
+    // E o legado, se for MESMO desta rede — senão a rede reapareceria no
+    // próximo `ls`, com a bridge que se acabou de apagar.
+    let legado = netdef_path_legado(name);
+    if legado != netdef_path(name) && ler_netdef(&legado, name).is_some() {
+        let _ = std::fs::remove_file(&legado);
+    }
 }
 
 /// Deletes a link the holder owns, by name — the counterpart of the VXLAN
