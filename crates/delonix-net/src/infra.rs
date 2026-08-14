@@ -3814,6 +3814,12 @@ fn fqdn_register(bridge: &str, set: &str, hosts: &[String]) {
 fn networks_dir() -> PathBuf {
     ingress_dir().join("networks")
 }
+/// A fechadura do registo de redes de ingress — IRMÃ da pasta, não dentro dela
+/// (`network_list` varre-a e não deve ter de saltar ficheiros que não são redes).
+fn networks_lock() -> PathBuf {
+    ingress_dir().join("networks.lock")
+}
+
 fn netdef_path(name: &str) -> PathBuf {
     networks_dir().join(format!("{}.json", sanitize(name)))
 }
@@ -4077,6 +4083,32 @@ pub fn network_list() -> Vec<NetDef> {
 /// avoiding 10.200 and the ones already used) and a bridge, and persists the `NetDef`. The bridge is
 /// created (lazily) in the infra netns on the 1st `attach`. Idempotent by name.
 pub fn network_create(name: &str) -> Result<NetDef> {
+    if let Some(def) = network_get(name) {
+        return Ok(def);
+    }
+    // Serialised: picking a free `/16` is a read-modify-write over the WHOLE
+    // registry, and without a lock two concurrent `network create` both read the
+    // same `used` set and pick the SAME prefix.
+    //
+    // Measured before this fix: 10 parallel `delonix network create` produced
+    // only 2-4 distinct prefixes; 20 produced 10, with four networks all on
+    // `10.201.0.0/16`. The bridges differ (their name is derived from the
+    // network's), so the networks LOOK separate — but workloads on them draw
+    // addresses from the same `/16`, and any rule indexed on an IP becomes
+    // ambiguous between two networks the operator believes are isolated.
+    //
+    // Same mechanism as `NetworkStore::create` (and as `ipam::IpamLock`, whose
+    // doc records what happens when a lock that guards uniqueness fails open).
+    let trinco = networks_lock();
+    let _lock = crate::flock::ExclusiveLock::acquire(&trinco).ok_or_else(|| {
+        crate::flock::ExclusiveLock::unavailable(
+            &trinco,
+            "an unsynchronised allocation can put two networks on the same /16",
+        )
+    })?;
+    // Re-check UNDER the lock: another process may have created this very name
+    // while we waited for it. Without this, the winner's `NetDef` would be
+    // overwritten by ours, moving the bridge under whatever is already attached.
     if let Some(def) = network_get(name) {
         return Ok(def);
     }
