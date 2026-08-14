@@ -46,7 +46,11 @@ fn criar_em_paralelo(prefixo_do_nome: &str, n: usize) -> Vec<delonix_net::infra:
         }));
     }
     hs.into_iter()
-        .map(|h| h.join().expect("thread em pânico").expect("network_create falhou"))
+        .map(|h| {
+            h.join()
+                .expect("thread em pânico")
+                .expect("network_create falhou")
+        })
         .collect()
 }
 
@@ -59,7 +63,9 @@ fn criacoes_concorrentes_nao_partilham_o_mesmo_16() {
         prefixos.len(),
         defs.len(),
         "duas redes distintas ficaram no mesmo /16 — prefixos: {:?}",
-        defs.iter().map(|d| (&d.name, &d.prefix)).collect::<Vec<_>>()
+        defs.iter()
+            .map(|d| (&d.name, &d.prefix))
+            .collect::<Vec<_>>()
     );
 
     // E o que ficou em disco tem de concordar com o que foi devolvido: uma
@@ -70,7 +76,11 @@ fn criacoes_concorrentes_nao_partilham_o_mesmo_16() {
         .collect();
     assert_eq!(em_disco.len(), defs.len(), "redes perdidas no disco");
     let no_disco: HashSet<String> = em_disco.iter().map(|d| d.prefix.clone()).collect();
-    assert_eq!(no_disco.len(), defs.len(), "prefixos duplicados no disco: {em_disco:?}");
+    assert_eq!(
+        no_disco.len(),
+        defs.len(),
+        "prefixos duplicados no disco: {em_disco:?}"
+    );
 }
 
 /// NOTA de honestidade: este passa também no código ANTIGO (6/6 corridas). Com
@@ -102,9 +112,17 @@ fn o_mesmo_nome_em_paralelo_converge_numa_so_rede() {
     // chegasse depois reescrevia o `NetDef` do vencedor com outro prefixo,
     // mudando a bridge por baixo do que já lá estivesse ligado.
     let prefixos: HashSet<&str> = defs.iter().map(|d| d.prefix.as_str()).collect();
-    assert_eq!(prefixos.len(), 1, "o mesmo nome deu redes diferentes: {prefixos:?}");
+    assert_eq!(
+        prefixos.len(),
+        1,
+        "o mesmo nome deu redes diferentes: {prefixos:?}"
+    );
     let bridges: HashSet<&str> = defs.iter().map(|d| d.bridge.as_str()).collect();
-    assert_eq!(bridges.len(), 1, "o mesmo nome deu bridges diferentes: {bridges:?}");
+    assert_eq!(
+        bridges.len(),
+        1,
+        "o mesmo nome deu bridges diferentes: {bridges:?}"
+    );
 
     assert_eq!(
         delonix_net::infra::network_list()
@@ -123,7 +141,10 @@ fn a_fechadura_nao_entra_no_registo_de_redes() {
     let dir = raiz().join("ingress").join("networks");
     for e in std::fs::read_dir(&dir).unwrap().flatten() {
         let n = e.file_name().to_string_lossy().into_owned();
-        assert!(n.ends_with(".json"), "ficheiro estranho no registo de redes: {n}");
+        assert!(
+            n.ends_with(".json"),
+            "ficheiro estranho no registo de redes: {n}"
+        );
     }
     assert!(raiz().join("ingress").join("networks.lock").exists());
 }
