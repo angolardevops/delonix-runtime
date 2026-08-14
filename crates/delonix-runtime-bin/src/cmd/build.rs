@@ -934,9 +934,14 @@ pub fn build_from_spec(
     // indicador que diz «falhou» sobre trabalho bem-sucedido é exactamente o
     // relato desonesto que esta série passou a semana a tirar do motor, e teria
     // entrado pela porta da funcionalidade que existe para o mostrar.
-    match &build_result {
-        Ok(_) => p.ok(),
-        Err(_) => drop(&p), // o `Drop`/`close_line('✗')` marca-o como falhado
+    // No caminho de ERRO não há nada a fazer: o `Drop`/`close_line('✗')` do `p`
+    // marca-o como falhado ao sair do escopo. O ramo estava escrito
+    // `Err(_) => drop(&p)`, que larga a REFERÊNCIA e não faz absolutamente
+    // nada — o efeito pretendido vinha todo do `Drop` que acontecia a seguir de
+    // qualquer maneira. Dizia uma intenção que o código não executava, e o
+    // `clippy -D warnings` do CI reprovava-o.
+    if build_result.is_ok() {
+        p.ok();
     }
 
     // Best-effort cleanup of EVERY id allocated during the build (whether or
