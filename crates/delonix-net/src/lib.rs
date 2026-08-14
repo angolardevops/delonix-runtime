@@ -3138,10 +3138,8 @@ mod tests_alocacao_16 {
     use std::collections::HashSet;
 
     fn raiz(etiqueta: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!(
-            "dlx-store-alloc-{}-{etiqueta}",
-            std::process::id()
-        ));
+        let d =
+            std::env::temp_dir().join(format!("dlx-store-alloc-{}-{etiqueta}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -3186,14 +3184,25 @@ mod tests_alocacao_16 {
             prefixos.len(),
             redes.len(),
             "duas redes ficaram no mesmo /16: {:?}",
-            redes.iter().map(|r| (&r.name, &r.prefix)).collect::<Vec<_>>()
+            redes
+                .iter()
+                .map(|r| (&r.name, &r.prefix))
+                .collect::<Vec<_>>()
         );
 
         // E o disco tem de concordar com o devolvido: uma escrita a pisar outra
         // dá prefixos únicos em memória e duplicados no registo.
-        let em_disco: HashSet<String> =
-            store.list().unwrap().into_iter().map(|r| r.prefix).collect();
-        assert_eq!(em_disco.len(), redes.len(), "prefixos duplicados no registo");
+        let em_disco: HashSet<String> = store
+            .list()
+            .unwrap()
+            .into_iter()
+            .map(|r| r.prefix)
+            .collect();
+        assert_eq!(
+            em_disco.len(),
+            redes.len(),
+            "prefixos duplicados no registo"
+        );
     }
 
     #[test]
@@ -3227,8 +3236,12 @@ mod tests_alocacao_16 {
         );
 
         // E nenhum /16 ficou partilhado.
-        let prefixos: HashSet<String> =
-            store.list().unwrap().into_iter().map(|r| r.prefix).collect();
+        let prefixos: HashSet<String> = store
+            .list()
+            .unwrap()
+            .into_iter()
+            .map(|r| r.prefix)
+            .collect();
         assert_eq!(prefixos.len(), capacidade);
     }
 }
