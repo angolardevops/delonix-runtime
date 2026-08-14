@@ -25,6 +25,13 @@
 use delonix_runtime_core::{Error, Result};
 use std::process::{Command, Stdio};
 
+// Re-exportadas do `delonix-net-model`, que é onde vivem agora: são regras
+// PURAS, e o control-plane precisa de calcular exactamente o mesmo (o nome da
+// bridge que ele espera tem de ser o que este motor cria). Re-exportar em vez de
+// mudar os consumidores: nenhum call-site deste crate teve de mexer.
+pub(crate) use delonix_net_model::fnv32;
+pub use delonix_net_model::{bridge_name, parse_overlay_peer};
+
 pub mod bpf;
 pub mod cni;
 pub mod discover;
@@ -145,30 +152,6 @@ fn capture(prog: &str, args: &[&str]) -> Result<String> {
             message: format!("{prog}: {e}"),
         })?;
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
-}
-
-/// Parses an overlay peer entry: `<node_ip>` (flat VXLAN) OR
-/// `<node_ip>=<wg_pubkey>=<wg_ip>` (encrypted). Returns (node_ip, Option<(pubkey, wg_ip)>).
-pub fn parse_overlay_peer(s: &str) -> (String, Option<(String, String)>) {
-    // Format `node_ip=wg_pubkey=wg_ip`. The pubkey is base64 and ENDS in `=`
-    // (padding) — it collides with the delimiter. Since node_ip and wg_ip are IPs (never
-    // contain `=`), we delimit by the FIRST and the LAST `=`; what remains in the
-    // middle is the pubkey WITH its padding intact. (Flat VXLAN peer = just `node_ip`.)
-    match (s.find('='), s.rfind('=')) {
-        (Some(first), Some(last)) if last > first => {
-            let node = &s[..first];
-            let pubkey = &s[first + 1..last];
-            let wgip = &s[last + 1..];
-            if !pubkey.is_empty() && !wgip.is_empty() {
-                return (
-                    node.to_string(),
-                    Some((pubkey.to_string(), wgip.to_string())),
-                );
-            }
-            (node.to_string(), None)
-        }
-        _ => (s.split('=').next().unwrap_or_default().to_string(), None),
-    }
 }
 
 fn link_exists(name: &str) -> bool {
@@ -737,36 +720,6 @@ pub fn alloc_ip_cidr(subnet: &str, id: &str) -> Option<String> {
     let n = u32::from_str_radix(hex, 16).unwrap_or(2);
     let offset = 2 + (n % usable);
     Some(u32_to_ipv4(net + offset))
-}
-
-/// 32-bit FNV-1a hash (to derive a network's subnet/bridge from its name).
-fn fnv32(s: &str) -> u32 {
-    let mut h: u32 = 0x811c_9dc5;
-    for byte in s.bytes() {
-        h ^= byte as u32;
-        h = h.wrapping_mul(0x0100_0193);
-    }
-    h
-}
-
-/// The bridge device name of a user network — **the single formula**, shared by
-/// the two stores that talk about the same device (the same
-/// generator-and-reader-share-the-format discipline as `fw_rule_tail`/
-/// `antispoof_rule_args`).
-///
-/// The authority is the physical plane: `infra::network_create{,_with}` writes
-/// this into the `NetDef` and it is that name the holder actually creates the
-/// link with (`netadd`/`link_exists`/`resolve_net`). The declarative
-/// `NetworkStore` only ever REPORTS it (`network ls`/`inspect`/`describe`), and
-/// it derives it here rather than recomputing — it had its own formula
-/// (`dlxn{base:02x}{hash:04x}`) and printed a device that does not exist on the
-/// host, in the very column an operator reads to go and debug the device.
-///
-/// Note this deliberately does NOT depend on the base octet: the name alone is
-/// unique in both stores, and adding the base is what made the two diverge.
-/// 12 chars, comfortably inside IFNAMSIZ (15).
-pub(crate) fn bridge_name(name: &str) -> String {
-    format!("dlxn{:08x}", fnv32(name))
 }
 
 /// The name of the default network (the `delonix0` bridge, `docker0` style).
