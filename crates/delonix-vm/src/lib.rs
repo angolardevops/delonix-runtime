@@ -148,9 +148,18 @@ fn store(base: &Path) -> Result<JsonStore<Vm>> {
     JsonStore::open(vms_dir(base))
 }
 
-/// `true` if the PID is alive (`/proc/<pid>` exists).
-fn is_alive(pid: i32) -> bool {
-    pid > 0 && Path::new(&format!("/proc/{pid}")).exists()
+// `is_alive` era uma TERCEIRA cópia da mesma pergunta (a do motor usa o
+// `kill(pid, 0)`, esta lia `/proc`). Usa-se agora a do `delonix-runtime-core`,
+// que é também onde vive o `safe_to_signal` que fecha a reciclagem de PID.
+use delonix_runtime_core::{proc_starttime, safe_to_signal};
+
+/// The pid of this VM's VMM, **only when it is safe to signal it**: alive AND
+/// still the same process we started.
+///
+/// Split out of `stop` so the recycled-pid case is covered by a test that fails
+/// if the guard is dropped — a test on `safe_to_signal` alone would keep passing.
+fn vmm_to_signal(vm: &Vm) -> Option<i32> {
+    vm.pid.filter(|&p| safe_to_signal(p, vm.pid_starttime))
 }
 
 /// `true` if a VM with this name already exists.
@@ -1079,7 +1088,8 @@ impl VmBackend for CloudHypervisorBackend {
     }
 
     fn is_running(&self, vm: &Vm) -> bool {
-        vm.pid.map(is_alive).unwrap_or(false)
+        // Mesma pergunta que o `stop`: vivo E ainda o nosso.
+        vm.pid.is_some_and(|p| safe_to_signal(p, vm.pid_starttime))
     }
 
     fn ip(&self, vm: &Vm) -> Option<String> {
@@ -1094,12 +1104,18 @@ impl VmBackend for CloudHypervisorBackend {
     }
 
     fn stop(&self, _vmdir: &Path, vm: &Vm) -> Result<()> {
-        if let Some(pid) = vm.pid {
-            if pid > 0 {
-                // SAFETY: sending SIGTERM to a PID is safe; the error is ignored.
-                unsafe {
-                    libc::kill(pid, libc::SIGTERM);
-                }
+        // `pid > 0` was the ONLY condition here, which is not an identity: a
+        // record left behind by a VMM that died — or by a reboot — names a
+        // number the kernel is free to hand to anything, and this path then
+        // SIGTERMs a stranger. The container side of this engine has guarded
+        // every signal with `safe_to_signal` for a long time (sixteen call
+        // sites); the VM side simply never got it, and its record did not even
+        // carry the `starttime` to check against.
+        if let Some(pid) = vmm_to_signal(vm) {
+            // SAFETY: pid confirmed alive AND confirmed to be the same process
+            // we started, by `vmm_to_signal`.
+            unsafe {
+                libc::kill(pid, libc::SIGTERM);
             }
         }
         // The record's own address if it learned one; otherwise the lease its MAC
@@ -3088,6 +3104,9 @@ pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Res
         boot.api_socket,
     );
     vm.pid = boot.pid;
+    // Registado JUNTO do pid, e a partir do MESMO pid: é o par que torna o
+    // `stop` capaz de distinguir este VMM de um pid reciclado mais tarde.
+    vm.pid_starttime = boot.pid.and_then(proc_starttime);
     vm.status = Status::Running;
     vm.restart_policy = cfg.restart_policy.clone();
     vm.namespace = ns.clone();
@@ -5500,5 +5519,82 @@ Format specific information:
             ..base
         };
         assert!(libvirt_domain_xml(&qxl, "/tmp/x.qcow2", "").contains("type='qxl'"));
+    }
+}
+
+/// Identidade do PID antes de matar o VMM — a assimetria que faltava fechar.
+///
+/// O lado dos containers guarda TODOS os sinais com `safe_to_signal` (dezasseis
+/// pontos de chamada); o das VMs matava por `pid > 0`, e o registo nem sequer
+/// levava o `starttime` contra o qual comparar.
+#[cfg(test)]
+mod tests_identidade_do_vmm {
+    use super::*;
+
+    fn vm_com(pid: Option<i32>, st: Option<u64>) -> Vm {
+        let mut vm = Vm::new(
+            "t".into(),
+            "d".into(),
+            "o".into(),
+            1,
+            "1G".into(),
+            "n".into(),
+            "tap".into(),
+            "mac".into(),
+            "sock".into(),
+        );
+        vm.pid = pid;
+        vm.pid_starttime = st;
+        vm
+    }
+
+    /// O achado: um registo que nomeia um pid RECICLADO não pode disparar.
+    #[test]
+    fn um_pid_reciclado_nao_e_sinalizavel() {
+        let eu = std::process::id() as i32;
+        // vivo, mas o starttime não é o nosso — é o que um pid reciclado parece.
+        assert_eq!(vmm_to_signal(&vm_com(Some(eu), Some(1))), None);
+    }
+
+    #[test]
+    fn o_nosso_vmm_continua_a_ser_sinalizavel() {
+        let eu = std::process::id() as i32;
+        let st = proc_starttime(eu);
+        assert!(st.is_some(), "o /proc deste processo tem de ser legível");
+        assert_eq!(vmm_to_signal(&vm_com(Some(eu), st)), Some(eu));
+    }
+
+    /// Registos anteriores a este campo não podem deixar de parar.
+    #[test]
+    fn um_registo_antigo_sem_starttime_mantem_o_comportamento() {
+        let eu = std::process::id() as i32;
+        assert_eq!(vmm_to_signal(&vm_com(Some(eu), None)), Some(eu));
+    }
+
+    #[test]
+    fn sem_pid_nao_ha_nada_a_sinalizar() {
+        assert_eq!(vmm_to_signal(&vm_com(None, None)), None);
+        // pid morto (o 0 nunca é sinalizável por este caminho)
+        assert_eq!(vmm_to_signal(&vm_com(Some(0), None)), None);
+    }
+
+    /// O campo é `#[serde(default)]`: um `.json` escrito antes disto existir
+    /// tem de continuar a carregar, senão a correcção tranca VMs em disco.
+    /// Escrito com o MESMO `JsonStore` que o motor usa, e sem o campo novo.
+    #[test]
+    fn um_registo_em_disco_sem_o_campo_continua_a_carregar() {
+        let dir = std::env::temp_dir().join(format!("dlx-vmpid-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let antigo = concat!(
+            r#"{"name":"v","disk":"d","overlay":"o","vcpus":1,"#,
+            r#""memory":"1G","network":"n","tap":"t","mac":"m","pid":42,"#,
+            r#""api_socket":"s","status":"Running","created_unix":0}"#
+        );
+        std::fs::write(dir.join("v.json"), antigo).unwrap();
+        let st: JsonStore<Vm> = JsonStore::open(&dir).unwrap();
+        let vm = st.load("v").expect("um registo antigo tem de carregar");
+        assert_eq!(vm.pid, Some(42));
+        assert_eq!(vm.pid_starttime, None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -70,33 +70,11 @@ fn syserr(context: &'static str) -> impl Fn(nix::Error) -> Error {
     }
 }
 
-/// `true` if process `pid` still exists (signal 0 = only tests liveness).
-pub fn is_alive(pid: i32) -> bool {
-    kill(Pid::from_raw(pid), None).is_ok()
-}
-
-/// The process `starttime` (field 22 of `/proc/<pid>/stat`, jiffies since
-/// boot). Unique and stable for the process's lifetime — we use it to detect
-/// PID reuse.
-pub fn proc_starttime(pid: i32) -> Option<u64> {
-    let s = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    // The comm (field 2) may contain spaces/parentheses — cut up to the last ')'.
-    let rest = &s[s.rfind(')')? + 1..];
-    rest.split_whitespace().nth(19).and_then(|f| f.parse().ok()) // field 22 = the 20th after the comm
-}
-
-/// `true` if it is safe to send a signal to `pid` on behalf of this container: the PID
-/// is alive AND (if we know the recorded `starttime`) is still the SAME process.
-/// Guards against PID reuse — we never kill a process belonging to the host.
-pub fn safe_to_signal(pid: i32, starttime: Option<u64>) -> bool {
-    if !is_alive(pid) {
-        return false;
-    }
-    match starttime {
-        Some(want) => proc_starttime(pid) == Some(want),
-        None => true, // old record without starttime: legacy behavior
-    }
-}
+// `is_alive`, `proc_starttime` e `safe_to_signal` vivem agora no
+// `delonix-runtime-core`, ao lado do campo `pid_starttime` que existem para
+// guardar — e para o `delonix-vm` os poder usar sem uma SEGUNDA cópia da regra
+// de reciclagem de PID. Re-exportadas: nenhum chamador deste crate muda.
+pub use delonix_runtime_core::{is_alive, proc_starttime, safe_to_signal};
 
 /// Short, stable reason code for WHY `safe_to_signal` failed — the two cases it
 /// collapses into one bool. Precondition: only meaningful when `safe_to_signal(pid,
