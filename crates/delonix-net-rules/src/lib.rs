@@ -1,5 +1,11 @@
 //! Regras de rede PURAS — o que se pode calcular sem tocar no kernel.
 //!
+//! `delonix-net-RULES`, e não `-model`: o `delonix-paas` já tem um crate com
+//! esse nome, e é outra coisa — o modelo de domínio tipado de uma rede
+//! (`Network`, `Subnet`, `Port`, IPAM, reconciliação). Dois crates com o mesmo
+//! nome, em repositórios que dependem um do outro, colidem no dia em que o
+//! segundo consumir o primeiro. Este são REGRAS: funções e um tipo de valor.
+//!
 //! Existe por causa da migração do PaaS para falar com o motor por API. Ao
 //! contar o que o control-plane chamava do `delonix-net` (153 sítios), uma parte
 //! não era mecanismo nenhum: derivar o nome de uma bridge, atribuir um IP dentro

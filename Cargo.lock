@@ -740,7 +740,7 @@ dependencies = [
 name = "delonix-net"
 version = "0.54.0"
 dependencies = [
- "delonix-net-model",
+ "delonix-net-rules",
  "delonix-runtime-core",
  "libc",
  "proptest",
@@ -750,7 +750,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "delonix-net-model"
+name = "delonix-net-rules"
 version = "0.54.0"
 
 [[package]]
