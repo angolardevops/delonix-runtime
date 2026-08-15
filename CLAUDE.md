@@ -3717,7 +3717,16 @@ checklist para quem mexer aqui do que como lista de correcções:
   está a ~3,8 milhões de distância e NÃO é iminente aqui. A guarda continua certa (um host de
   vida longa dá a volta, e `pid_max` a 32768 é comum noutras máquinas), mas quem priorizar isto
   acima do `flock` em falta no `ensure`/`teardown` está a trocar a ordem: a guarda impede o dano
-  colateral, não impede a decisão errada que o provoca. Aceita-se `netns holder` além de
+  colateral, não impede a decisão errada que o provoca. **E a varredura seguinte mostrou que o
+  problema não era o mecanismo, era um consumidor esquecido**: o `safe_to_signal(pid, starttime)`
+  existe há muito, com o `starttime` do `/proc/<pid>/stat` a distinguir um pid reciclado, e guarda
+  DEZASSEIS pontos de chamada do lado dos containers. As VMs é que ficaram de fora — o
+  `CloudHypervisorBackend::stop` matava por `pid > 0` (nem `/proc` verificava) e o registo `Vm` nem
+  levava o `starttime` para comparar. Registei-o primeiro como «mecanismo escrito e nunca ligado»,
+  o padrão do `mount_live`/`set_net_rate`/`update_limits`, e estava ERRADO: aqui o mecanismo é
+  maduro e bem usado, faltava-lhe um consumidor. As três funções passaram para o
+  `delonix-runtime-core`, ao lado do campo que existem para guardar, e o `delonix-vm` perdeu a sua
+  TERCEIRA cópia de `is_alive` (lia `/proc`, a do motor usa `kill(pid,0)`); Aceita-se `netns holder` além de
   `netns pin` de propósito — o `teardown` é o comando de recuperação de um upgrade in-place, e
   o processo vivo aí é de um binário pré-split;
 

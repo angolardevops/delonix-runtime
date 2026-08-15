@@ -1048,6 +1048,35 @@ impl VmBootSpec {
 /// [`Container`]: a VM has no rootfs/cgroup/seccomp/init-pid, so it does not make
 /// sense to overload the `Container`. Persisted via [`store::JsonStore`]
 /// (one JSON per name, under `$DELONIX_ROOT/vms`).
+/// `true` if process `pid` still exists (signal 0 = only tests liveness).
+pub fn is_alive(pid: i32) -> bool {
+    // SAFETY: signal 0 sends nothing — it only tests that we may signal `pid`.
+    pid > 0 && unsafe { libc::kill(pid, 0) } == 0
+}
+
+/// The process `starttime` (field 22 of `/proc/<pid>/stat`, jiffies since
+/// boot). Unique and stable for the process's lifetime — we use it to detect
+/// PID reuse.
+pub fn proc_starttime(pid: i32) -> Option<u64> {
+    let s = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // The comm (field 2) may contain spaces/parentheses — cut up to the last ')'.
+    let rest = &s[s.rfind(')')? + 1..];
+    rest.split_whitespace().nth(19).and_then(|f| f.parse().ok()) // field 22 = the 20th after the comm
+}
+
+/// `true` if it is safe to send a signal to `pid` on behalf of this container: the PID
+/// is alive AND (if we know the recorded `starttime`) is still the SAME process.
+/// Guards against PID reuse — we never kill a process belonging to the host.
+pub fn safe_to_signal(pid: i32, starttime: Option<u64>) -> bool {
+    if !is_alive(pid) {
+        return false;
+    }
+    match starttime {
+        Some(want) => proc_starttime(pid) == Some(want),
+        None => true, // old record without starttime: legacy behavior
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Vm {
     /// VM name (persistence key).
@@ -1068,6 +1097,12 @@ pub struct Vm {
     pub mac: String,
     /// PID of the `cloud-hypervisor` process (if alive).
     pub pid: Option<i32>,
+    /// `starttime` of that PID (field 22 of `/proc/<pid>/stat`), used to tell a
+    /// live VMM apart from a RECYCLED pid before signalling it — see
+    /// [`safe_to_signal`]. `None` in records written before this existed, which
+    /// keeps their old behaviour instead of refusing to stop a VM they name.
+    #[serde(default)]
+    pub pid_starttime: Option<u64>,
     /// Path of the Cloud Hypervisor API socket.
     pub api_socket: String,
     /// Lifecycle state (reuses [`Status`]).
@@ -1158,6 +1193,7 @@ impl Vm {
             tap,
             mac,
             pid: None,
+            pid_starttime: None,
             api_socket,
             status: Status::Created,
             created_unix,
