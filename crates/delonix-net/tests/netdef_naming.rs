@@ -14,12 +14,45 @@ use std::sync::OnceLock;
 fn raiz() -> &'static std::path::PathBuf {
     static RAIZ: OnceLock<std::path::PathBuf> = OnceLock::new();
     RAIZ.get_or_init(|| {
+        // Varre o que corridas ANTERIORES deixaram: a pasta é nomeada pelo pid e
+        // nada a removia no fim, por isso cada `cargo test` deixava uma para
+        // trás — mediram-se 23 em `/tmp` a 2026-08-15, e foram elas que
+        // tornaram INÚTIL um check de caos que contava `/tmp/delonix-net-*`
+        // (passava com a correcção revertida, porque a glob apanhava estes
+        // restos).
+        //
+        // Só remove as de pid MORTO. É o mesmo princípio de posse que esta série
+        // aplicou ao reaper de slirp e ao `kill_pidfile`: uma varredura
+        // destrutiva prova que o alvo não está em uso, e duas corridas em
+        // paralelo (várias sessões trabalham neste clone) não se destroem.
+        limpa_restos_de_corridas_mortas();
         let d = std::env::temp_dir().join(format!("delonix-net-naming-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         std::env::set_var("DELONIX_ROOT", &d);
         d
     })
+}
+
+/// Remove as pastas `delonix-net-naming-<pid>` cujo processo já não existe.
+///
+/// `/proc/<pid>` é a prova; sem ela não se toca. Best-effort de ponta a ponta —
+/// uma falha aqui nunca pode chumbar um teste que não é sobre limpeza.
+fn limpa_restos_de_corridas_mortas() {
+    let tmp = std::env::temp_dir();
+    let Ok(rd) = std::fs::read_dir(&tmp) else {
+        return;
+    };
+    for e in rd.flatten() {
+        let nome = e.file_name();
+        let Some(nome) = nome.to_str() else { continue };
+        let Some(pid) = nome.strip_prefix("delonix-net-naming-") else {
+            continue;
+        };
+        if pid.parse::<u32>().is_ok() && !std::path::Path::new(&format!("/proc/{pid}")).exists() {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
 }
 
 fn dir_de_redes() -> std::path::PathBuf {
