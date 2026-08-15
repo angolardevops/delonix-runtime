@@ -362,6 +362,7 @@ impl Client {
             Some(ip) => format!("ip={ip}"),
             None => "ip=dhcp".to_string(),
         };
+        let ci = cloud_init_form(cfg);
         let mut form: Vec<(&str, &str)> = vec![
             ("vmid", vmid_s.as_str()),
             ("name", name),
@@ -389,18 +390,63 @@ impl Client {
             // error (see `parse_agent_ip`).
             ("agent", "1"),
         ];
+        form.extend(ci.iter().map(|(k, v)| (*k, v.as_str())));
         // The cloud-init drive, and only when there is something to put in it:
         // an empty one on an image with no cloud-init is a CD-ROM the guest
         // ignores, but it also silently costs a disk on the node's storage.
+        //
+        // `!ci.is_empty()` and not just `static_ip`: a hostname or an SSH key is
+        // just as much something to deliver, and without the drive the node has
+        // nowhere to write them — the settings would be accepted and never
+        // reach the guest, which is the aceite-e-ignorado this repo refuses.
         let ide2 = format!("{storage}:cloudinit");
-        if cfg.static_ip.is_some() {
+        if !ci.is_empty() {
             form.push(("ide2", ide2.as_str()));
         }
         let body = self.post_form(&format!("/nodes/{}/qemu", self.node), &form, true)?;
         self.wait_upid(&body, "create")
     }
 
+    /// Applies to an already-cloned VM the configuration the clone did not carry.
+    ///
+    /// **A clone inherits the TEMPLATE's settings, not the caller's**, and until
+    /// now nothing put the caller's back: `boot` cloned and started, so a VM
+    /// asked for with 4 vCPU and 8 GiB came up with whatever the template had,
+    /// on the template's bridge, with no address configured and no SSH key. It
+    /// is the path a DKS node takes (a golden image registered as a template),
+    /// i.e. exactly the case where a node nobody can log into is useless.
+    ///
+    /// The agent channel is deliberately NOT forced here — that part of the
+    /// original reasoning holds: a template built with the agent already has it,
+    /// and overriding would contradict a choice somebody made about it.
+    pub fn configure_clone(&self, vmid: u32, cfg: &VmConfig) -> Result<()> {
+        let mem = mem_mib(&cfg.memory).to_string();
+        let cores = cfg.vcpus.max(1).to_string();
+        let net0 = self.net0_arg(cfg);
+        let ci = cloud_init_form(cfg);
+        let mut form: Vec<(&str, &str)> = vec![
+            ("memory", mem.as_str()),
+            ("cores", cores.as_str()),
+            ("net0", net0.as_str()),
+        ];
+        form.extend(ci.iter().map(|(k, v)| (*k, v.as_str())));
+        // No `ide2` here: a cloud-init drive cannot be added to a VM that has
+        // one, and a template meant for cloud-init carries it already. Saying
+        // so beats a failure whose message is about a busy device slot.
+        let body = self.post_form(
+            &format!("/nodes/{}/qemu/{vmid}/config", self.node),
+            &form,
+            false,
+        )?;
+        // A config change is applied synchronously and answers `data: null` —
+        // there is no UPID to wait on, unlike clone/start/stop.
+        let _ = body;
+        Ok(())
+    }
+
     /// The `net0` property: model, bridge and optional VLAN tag.
+    ///
+    /// (See [`cloud_init_form`] for the cloud-init half of the same idea.)
     ///
     /// The bridge was hardcoded to `vmbr0`. That is the right DEFAULT — it is
     /// what a stock Proxmox install has — but a node with more than one bridge
@@ -877,6 +923,63 @@ fn refuse_unsupported(cfg: &VmConfig) -> Result<()> {
     )))
 }
 
+/// Translates the cloud-init INTENT of a `VmConfig` into the node's own
+/// cloud-init parameters. **This is the whole point of the intent fields.**
+///
+/// The local backends realize the same intent as a NoCloud seed ISO — a file on
+/// the host, which is why `seed` stays refused here and always will be. Proxmox
+/// has cloud-init of its own and speaks these four keys, so the same manifest
+/// produces the same guest on either side without the caller knowing which.
+///
+/// Empty when there is nothing to deliver, and the caller uses that to decide
+/// whether the VM needs a cloud-init drive at all: an empty drive on an image
+/// that ignores it is a CD-ROM nobody reads that still costs storage on the node.
+///
+/// **`sshkeys` is passed RAW here on purpose.** The API wants it URL-encoded,
+/// and `reqwest`'s `.form()` percent-encodes every value exactly once, so the
+/// node decodes back to the newline-separated keys. Encoding it ourselves first
+/// is the classic double-encoding bug with this endpoint — the guest then gets a
+/// `authorized_keys` full of `%20` and `%2B` and refuses every login, with
+/// nothing on the host to suggest why.
+fn cloud_init_form(cfg: &VmConfig) -> Vec<(&'static str, String)> {
+    if cfg.cloud_init == Some(false) {
+        return Vec::new();
+    }
+    let mut out: Vec<(&'static str, String)> = Vec::new();
+    // `ip=dhcp` unless an address was asked for. Proxmox's own cloud-init writes
+    // this into the guest — the local backends reach the same end through the
+    // seed's `network-config`.
+    out.push((
+        "ipconfig0",
+        match &cfg.static_ip {
+            Some(ip) => format!("ip={ip}"),
+            None => "ip=dhcp".to_string(),
+        },
+    ));
+    // The hostname travels as `name`, which Proxmox's cloud-init writes into the
+    // guest — so an explicit `hostname` that differs from the VM name is the
+    // only case that needs saying, and `searchdomain` is not it.
+    if let Some(h) = cfg
+        .hostname
+        .as_deref()
+        .filter(|h| !h.is_empty() && *h != cfg.name)
+    {
+        out.push(("name", h.to_string()));
+    }
+    if !cfg.ssh_keys.is_empty() {
+        out.push((
+            "ciuser",
+            cfg.ci_user
+                .as_deref()
+                .filter(|u| !u.is_empty())
+                .unwrap_or(delonix_vm::cloudinit::DEFAULT_CI_USER)
+                .to_string(),
+        ));
+        out.push(("sshkeys", cfg.ssh_keys.join("\n")));
+    }
+    out
+}
+
 /// The vmid out of the handle `boot` stored (`proxmox:<node>:<vmid>`). Pure, so
 /// the "not ours" case is testable without a node.
 fn vmid_from_handle(handle: &str) -> Option<u32> {
@@ -975,7 +1078,15 @@ impl VmBackend for ProxmoxBackend {
         let vmid = self.client.next_vmid()?;
         on(CreateStage::Define);
         match parse_disk_spec(disk)? {
-            DiskSpec::Template(src) => self.client.clone_template(src, vmid, &cfg.name)?,
+            DiskSpec::Template(src) => {
+                self.client.clone_template(src, vmid, &cfg.name)?;
+                // A clone carries the TEMPLATE's CPU, memory, NIC and cloud-init
+                // — never the caller's. Applying them is a separate call by the
+                // API's own shape (clone takes `newid`/`name`/`full` and nothing
+                // else), and skipping it was how a DKS node came up with the
+                // golden's defaults and no key on it.
+                self.client.configure_clone(vmid, cfg)?;
+            }
             DiskSpec::New { storage, gib } => {
                 self.client.create_vm(vmid, &cfg.name, cfg, &storage, gib)?
             }

@@ -29,6 +29,8 @@ use delonix_runtime_core::{Error, JsonStore, Result, Status, Vm, VmBootSpec};
 /// friends keep resolving for every existing caller.
 pub use delonix_runtime_core::{CpuTopology, ExtraDisk, ExtraNic, VmVolume};
 
+pub mod cloudinit;
+
 /// Configuration to boot a microVM (flat fields, independent of the
 /// `orchestrator` — the CLI translates the `VmSpec` into this).
 #[derive(Debug, Clone, Default)]
@@ -56,7 +58,39 @@ pub struct VmConfig {
     /// Kernel command line (with `kernel`).
     pub cmdline: Option<String>,
     /// cloud-init *seed* ISO (NoCloud) — secondary disk.
+    ///
+    /// This is the MECHANISM, and it is a file on THIS host: a backend whose
+    /// guest runs elsewhere cannot open it. Prefer the intent fields below and
+    /// let each backend realize them; keep this for a seed you built yourself.
     pub seed: Option<String>,
+    // --- cloud-init INTENT ------------------------------------------------
+    // What the operator MEANT, as opposed to `seed` above, which is one way of
+    // delivering it. The local backends turn these into a NoCloud ISO
+    // ([`cloudinit::generate_seed_iso`]); Proxmox maps them to the node's own
+    // cloud-init (`--ciuser`/`--sshkeys`). Before this existed, a remote backend
+    // was structurally excluded from cloud-init — the only vocabulary available
+    // was a local path.
+    /// Guest hostname. `None` means the VM name.
+    pub hostname: Option<String>,
+    /// Account the SSH keys are installed on, and that the serial console
+    /// auto-logs in as. `None` means [`cloudinit::DEFAULT_CI_USER`] — the
+    /// account the golden image already creates.
+    pub ci_user: Option<String>,
+    /// Authorized SSH public keys, ALREADY RESOLVED (never `@file` forms — see
+    /// [`cloudinit::generate_seed_iso`]).
+    pub ssh_keys: Vec<String>,
+    /// Whether this guest runs cloud-init at all. `Some(false)` for an appliance
+    /// (OPNsense, Proxmox, TrueNAS), which configures itself and for which a
+    /// seed is an ISO nobody reads on a drive that changes the guest's device
+    /// list for no reason.
+    ///
+    /// `Option` and not `bool` **because this struct derives `Default`**, and
+    /// callers build it with `..Default::default()` all over this workspace: a
+    /// bare `bool` would default to `false` and silently stop seeding every one
+    /// of them — a VM with no datasource skips cloud-init's network phase and
+    /// comes up with no address, which is the exact bug already on record for
+    /// `kind: Vm`. `None` means "yes", so nothing changes for who never sets it.
+    pub cloud_init: Option<bool>,
     /// Normalized restart policy (`"no"`|`"on-failure"`|`"always"`).
     pub restart_policy: Option<String>,
     // --- HPC (S4) ---------------------------------------------------------
@@ -3104,6 +3138,41 @@ pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Res
         prepare_local_overlay(&vmdir, cfg, on)?
     };
 
+    // REALIZE the cloud-init intent, for the backends that need it realized as a
+    // file. A local backend has no vocabulary for "this VM should have this
+    // hostname and these keys" other than a NoCloud ISO, so the engine builds
+    // one here; a backend that owns its storage is handed the intent verbatim
+    // and maps it to whatever the far node speaks (Proxmox: `--ciuser`/
+    // `--sshkeys`), which is the entire reason these fields exist.
+    //
+    // This used to be the CALLER's job, and that is what kept cloud-init local:
+    // every consumer built its own ISO — the CLI, `cluster kubeadm`, and the
+    // private PaaS in a copy of its own — so a remote backend could only ever
+    // receive a path it could not open.
+    //
+    // An explicit `seed` always wins: someone who built their own is not asking
+    // us to guess. An appliance (`cloud_init: Some(false)`) gets nothing — an
+    // ISO nobody reads, on a drive that changes the guest's device list.
+    let realized;
+    let cfg = if cfg.seed.is_none() && cfg.cloud_init != Some(false) && !own_storage {
+        let iso = cloudinit::generate_seed_iso(
+            base,
+            &cfg.name,
+            cfg.hostname.as_deref(),
+            cfg.ci_user.as_deref(),
+            &cfg.ssh_keys,
+            None,
+            &cfg.volumes,
+        )?;
+        realized = VmConfig {
+            seed: Some(iso.to_string_lossy().into_owned()),
+            ..cfg.clone()
+        };
+        &realized
+    } else {
+        cfg
+    };
+
     // An EXISTING, stopped VM gets a chance to be resumed before anything is
     // created. Both local backends answer `None` here (their `boot` is already
     // idempotent — it reuses the per-VM overlay on this filesystem), so this is
@@ -3596,6 +3665,10 @@ fn boot_spec_of(cfg: &VmConfig) -> VmBootSpec {
         firmware,
         cmdline,
         seed,
+        hostname,
+        ci_user,
+        ssh_keys,
+        cloud_init,
         hugepages,
         cpu_affinity,
         bridge,
@@ -3619,6 +3692,10 @@ fn boot_spec_of(cfg: &VmConfig) -> VmBootSpec {
         firmware: firmware.clone(),
         cmdline: cmdline.clone(),
         seed: seed.clone(),
+        hostname: hostname.clone(),
+        ci_user: ci_user.clone(),
+        ssh_keys: ssh_keys.clone(),
+        cloud_init: *cloud_init,
         hugepages: *hugepages,
         cpu_affinity: cpu_affinity.clone(),
         bridge: bridge.clone(),
@@ -3666,6 +3743,10 @@ fn config_from(vm: &Vm) -> VmConfig {
         firmware: b.firmware.clone(),
         cmdline: b.cmdline.clone(),
         seed: b.seed.clone(),
+        hostname: b.hostname.clone(),
+        ci_user: b.ci_user.clone(),
+        ssh_keys: b.ssh_keys.clone(),
+        cloud_init: b.cloud_init,
         hugepages: b.hugepages,
         cpu_affinity: b.cpu_affinity.clone(),
         bridge: b.bridge.clone(),
