@@ -31,7 +31,7 @@ use std::process::{Command, Stdio};
 // mudar os consumidores: nenhum call-site deste crate teve de mexer.
 pub(crate) use delonix_net_rules::fnv32;
 pub use delonix_net_rules::{
-    bridge_name, derive_ip_in, parse_overlay_peer, valid_ip_in_subnet, Cidr,
+    bridge_name, derive_ip_in, parse_overlay_peer, service_vip, valid_ip_in_subnet, Cidr,
 };
 
 pub mod bpf;
