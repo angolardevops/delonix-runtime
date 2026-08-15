@@ -48,6 +48,17 @@ pub(crate) fn base_root() -> PathBuf {
     if let Some(root) = std::env::var_os("DELONIX_ROOT") {
         return PathBuf::from(root);
     }
+    default_root()
+}
+
+/// The state root when nobody names one — i.e. THE root of this machine's normal
+/// engine. Split out of [`base_root`] because [`runtime_dir`] has to answer "is
+/// this the default root?", and comparing against the computed value is the only
+/// answer that stays right when someone sets `DELONIX_ROOT` to the default path
+/// by hand (checking whether the variable is merely *set* would give that caller
+/// its own socket directory while it shares everyone else's pidfiles — the same
+/// split-brain, inverted).
+fn default_root() -> PathBuf {
     // SAFETY: geteuid() has no preconditions.
     if unsafe { libc::geteuid() } != 0 {
         let base = std::env::var_os("XDG_DATA_HOME")
@@ -57,6 +68,39 @@ pub(crate) fn base_root() -> PathBuf {
         return base.join("delonix");
     }
     PathBuf::from("/var/lib/delonix")
+}
+
+/// The suffix that makes a NON-default state root's runtime dir its own.
+///
+/// **The bug this closes** (measured live 2026-08-15, and described in the
+/// comment on `ensure_up`'s `control_reachable` guard long before that): the
+/// sockets are per-UID while the pidfiles are per-ROOT, so two roots on one login
+/// — a test root beside the normal CLI, a `delonix-cri` with its own state dir —
+/// each read their own (absent) pidfile, each conclude "no infra", and the second
+/// one calls `teardown()`: it deletes the FIRST one's sockets and unplugs every
+/// workload on that netns. Four `slirp4netns` were found bound to the same
+/// `/tmp/delonix-net-1000/slirp.sock` from four different roots.
+///
+/// **The default root keeps the bare name, byte for byte.** That is deliberate
+/// and is what keeps this change safe to ship: the machine's normal engine —
+/// including any holder already running from an older binary — resolves exactly
+/// the path it always did, so there is no in-place-upgrade trap of the kind
+/// v0.34.2 had to be written to recover from. Only the roots that CAUSE the
+/// collision move, and they are by definition short-lived or secondary.
+///
+/// Fixed width on purpose: `runtime_dir` must not grow with the root's length,
+/// or a deep test root pushes the socket past `AF_UNIX`'s 108-byte `sun_path`
+/// (the very failure that moved these sockets out of `DELONIX_ROOT` to begin
+/// with). Trailing separators are trimmed so `/tmp/r` and `/tmp/r/` are one root
+/// and not two; anything beyond that (symlinks, `..`) would need canonicalisation,
+/// which does I/O and fails on a root that does not exist yet.
+fn root_suffix() -> String {
+    let root = base_root();
+    if root == default_root() {
+        return String::new();
+    }
+    let s = root.to_string_lossy();
+    format!("-{:08x}", crate::fnv32(s.trim_end_matches('/')))
 }
 
 /// Directory `<base>/ingress/` with the infra's state.
@@ -84,6 +128,10 @@ fn control_pid_path() -> PathBuf {
 /// died is exactly the case where the file has to outlive the process.
 fn control_log_path() -> PathBuf {
     ingress_dir().join("control.log")
+}
+/// The pin's stderr. A file and not the caller's — see `start_pin`.
+fn pin_log_path() -> PathBuf {
+    ingress_dir().join("pin.log")
 }
 fn slirp_pid_path() -> PathBuf {
     ingress_dir().join("slirp.pid")
@@ -229,7 +277,7 @@ fn runtime_dir() -> PathBuf {
         // always short, and always writable; scoped by uid so two users
         // sharing a host never collide (the control socket is ALSO
         // protected by SO_PEERCRED + 0600 — this is defense in depth only).
-        return std::env::temp_dir().join(format!("delonix-net-{uid}"));
+        return std::env::temp_dir().join(format!("delonix-net-{uid}{}", root_suffix()));
     }
     // Real root — the INITIAL namespace's root — never reaches this module's
     // holder at all (see `infra.rs`'s
@@ -238,7 +286,7 @@ fn runtime_dir() -> PathBuf {
     // `Net::` in `lib.rs` — no rootless holder, no netns re-exec, no `/run`
     // remount). Kept for symmetry/future reuse of this function, not because
     // `control_sock_path`/`slirp_sock_path` exercise it today.
-    PathBuf::from("/run/delonix-net")
+    PathBuf::from(format!("/run/delonix-net{}", root_suffix()))
 }
 
 /// The `(env var, value)` pair that PINS `runtime_dir` for a child that will run
@@ -297,15 +345,76 @@ fn read_pid(path: &Path) -> Option<i32> {
         .ok()
 }
 
-/// Sends `SIGTERM` to a pid and removes its pidfile.
-fn kill_pidfile(path: &Path) {
+/// Which of our processes a pidfile is supposed to name.
+///
+/// A pid on its own is not an identity: the kernel recycles them, and this host
+/// routinely runs pids past 300k with heavy container churn. A stale pidfile plus
+/// one wrap-around is all it takes for `teardown()` to `SIGTERM` a process that
+/// has nothing to do with us. `ingress_proxy::running_pid` already guards its own
+/// pid this way and says why; this is the same guard on the path that kills the
+/// holder, the control plane and the slirp.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum PidKind {
+    Slirp,
+    Control,
+    /// The pin — and, deliberately, a PRE-SPLIT holder too (see [`argv_matches`]).
+    Pin,
+}
+
+/// Whether `argv` is the process `kind` claims. PURE, so the recycled-pid and
+/// upgrade cases are testable without spawning anything.
+///
+/// **`Pin` accepts `netns holder` as well as `netns pin`, and that is not
+/// leniency.** `teardown()` is exactly the command an operator runs to recover a
+/// host from an in-place upgrade, where the process still holding the namespaces
+/// was started by a PRE-v0.42.0 binary and spells itself `holder`. Matching only
+/// today's argv would make the recovery command refuse to kill the very process
+/// it exists to remove — and it would fail silently, since a mismatch is a no-op.
+fn argv_matches(kind: PidKind, argv: &[String]) -> bool {
+    let pair = |a: &str, b: &str| argv.windows(2).any(|w| w[0] == a && w[1] == b);
+    match kind {
+        // Not `contains`: the target pid trails the argv, so a container whose pid
+        // happens to spell the tool's name must not be able to pose as one.
+        PidKind::Slirp => argv.first().is_some_and(|a| a.ends_with("slirp4netns")),
+        PidKind::Control => pair("netns", "control"),
+        PidKind::Pin => pair("netns", "pin") || pair("netns", "holder"),
+    }
+}
+
+/// The argv of a live process, NUL-separated in `/proc/<pid>/cmdline`.
+fn proc_argv(pid: i32) -> Option<Vec<String>> {
+    let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+    Some(
+        raw.split(|b| *b == 0)
+            .filter(|s| !s.is_empty())
+            .map(|s| String::from_utf8_lossy(s).into_owned())
+            .collect(),
+    )
+}
+
+/// Sends `SIGTERM` to the pid in `path` **only if that pid is really the process
+/// `kind` says it is**, and removes the pidfile either way.
+///
+/// A mismatch means the pidfile is stale — the process died and something else
+/// now holds its number. Removing the file is the correct cleanup; signalling it
+/// would not be.
+fn kill_pidfile(path: &Path, kind: PidKind) {
     if let Some(pid) = read_pid(path) {
-        if pid_alive(pid) {
-            // SAFETY: kill() with a valid pid; we ignore the result (best-effort).
+        let argv = if pid_alive(pid) { proc_argv(pid) } else { None };
+        if should_signal(kind, argv.as_deref()) {
+            // SAFETY: kill() with a pid confirmed alive AND confirmed ours.
             unsafe { libc::kill(pid, libc::SIGTERM) };
         }
     }
     let _ = std::fs::remove_file(path);
+}
+
+/// The whole decision of [`kill_pidfile`], as a PURE function of what `/proc`
+/// said. `None` = the pid is gone. Split out so the recycled-pid case is covered
+/// by a test that fails if the identity check is dropped — a test on
+/// `argv_matches` alone would keep passing without it.
+fn should_signal(kind: PidKind, argv: Option<&[String]>) -> bool {
+    argv.is_some_and(|a| argv_matches(kind, a))
 }
 
 // ---- ingress nft (inside the infra netns) -----------------------------------
@@ -573,7 +682,8 @@ impl Drop for FileLock {
 /// Store; idempotent (attaching the same id twice doesn't count double).
 pub fn acquire(id: &str) -> Result<()> {
     let _lock = FileLock::acquire();
-    ensure_up()?; // idempotent — robust even with stale markers
+    // `_locked`: we are already inside the critical section — see `ensure_up_locked`.
+    ensure_up_locked()?; // idempotent — robust even with stale markers
     ref_add_in(&refs_dir(), id);
     Ok(())
 }
@@ -585,7 +695,7 @@ pub fn release(id: &str) {
     let _lock = FileLock::acquire();
     ref_remove_in(&refs_dir(), id);
     if refs_in(&refs_dir()).is_empty() {
-        teardown();
+        teardown_locked();
     }
 }
 
@@ -640,7 +750,7 @@ pub fn reap_orphan_refs(live: &std::collections::HashSet<String>) -> usize {
         ref_remove_in(&dir, id);
     }
     if refs_in(&dir).is_empty() {
-        teardown();
+        teardown_locked();
     }
     orphans.len()
 }
@@ -701,6 +811,32 @@ pub fn status() -> InfraStatus {
 /// Ensures the infra is up (holder + bridge + single slirp). **Idempotent**: if
 /// everything is already alive, does nothing. It's the manager's entry point.
 pub fn ensure_up() -> Result<()> {
+    // Serialises the whole decide-and-rebuild against a concurrent `ensure_up`
+    // or `teardown` OF THIS ROOT. The lock is per-ROOT (`ingress_dir()/lock`) and
+    // that is now the right scope: since `root_suffix`, the runtime dir is per-root
+    // too, so a root's sockets are no longer reachable by anybody else's teardown.
+    // Before that change a per-root lock could not have helped — two roots take two
+    // different lock files and exclude nothing.
+    let _lock = FileLock::acquire();
+    ensure_up_locked()
+}
+
+/// [`ensure_up`]'s body, for callers that ALREADY hold [`FileLock`].
+///
+/// **This split is a deadlock fix, and the deadlock was shipped for half an hour
+/// before the CLI battery caught it.** `flock` is per open file description, so
+/// `acquire()` — which takes the lock and then brings the infra up on the first
+/// user — blocked the process against itself: every `container run` hung forever,
+/// with the kernel showing it in `locks_lock_inode_wait` holding two lock fds.
+///
+/// The lesson is the ordering of the check, not the check itself: when the
+/// `teardown` half of this was written, the callers of `teardown` were enumerated
+/// and the callers of `ensure_up` were not. **Both directions have to be walked,
+/// every time a lock is added to a function that already has callers.** The
+/// functions that hold `FileLock` today are `acquire`, `release`,
+/// `reap_orphan_refs`, `ensure_up` and `teardown`; anything they reach must use a
+/// `_locked` variant.
+fn ensure_up_locked() -> Result<()> {
     // The pin is alive: the namespaces, and everything plugged into them, are
     // intact. The only question is whether the CONTROL plane is there.
     if let Some(pin) = read_pid(&holder_pid_path()).filter(|&p| pid_alive(p)) {
@@ -770,7 +906,7 @@ pub fn ensure_up() -> Result<()> {
             message: foreign_holder_message(&control_sock_path(), &ingress_dir()),
         });
     }
-    teardown();
+    teardown_locked();
     std::fs::create_dir_all(ingress_dir()).map_err(|e| Error::Runtime {
         context: "ingress dir",
         message: e.to_string(),
@@ -778,12 +914,12 @@ pub fn ensure_up() -> Result<()> {
     ensure_runtime_dir()?;
     let pin_pid = start_pin()?;
     if let Err(e) = start_control(pin_pid) {
-        teardown();
+        teardown_locked();
         return Err(e);
     }
     if let Err(e) = start_slirp(pin_pid) {
         // if the slirp fails, we don't leave an orphan pin.
-        teardown();
+        teardown_locked();
         return Err(e);
     }
     Ok(())
@@ -823,9 +959,10 @@ fn start_control(pin: i32) -> Result<i32> {
         // panic in any of them used to go to the void, so the service degraded
         // with no line anywhere — measured during the DNS review, where it was
         // the single biggest reason a diagnosis took as long as it did.
-        // Inherit is wrong here (unlike the pin): the control plane is
-        // RESTARTABLE and long-lived, so it would hold the stderr of whichever
-        // short-lived CLI happened to start it. A file is the thing that
+        // Inherit is wrong here — and, as of 2026-08-15, wrong for the pin too,
+        // which this comment used to name as the counter-example: the control
+        // plane is RESTARTABLE and long-lived, so it would hold the stderr of
+        // whichever short-lived CLI happened to start it. A file is the thing that
         // survives. Appends, because the reason a control plane DIED is worth
         // more than the log of the one that replaced it.
         .stderr(
@@ -871,12 +1008,25 @@ fn start_control(pin: i32) -> Result<i32> {
 /// Tears down the infra: kills the slirp and the holder (which frees the netns) and cleans up the
 /// artifacts. Best-effort and idempotent.
 pub fn teardown() {
+    let _lock = FileLock::acquire();
+    teardown_locked();
+}
+
+/// [`teardown`]'s body, for callers that ALREADY hold [`FileLock`].
+///
+/// The split is not tidiness — it is a deadlock. `flock` is held per open file
+/// description, so a second `FileLock::acquire()` in the same process opens a new
+/// fd and blocks on a lock the process itself is holding. Every internal caller
+/// (`release`, `reap_orphan_refs`, `ensure_up`, `start_pin`) is already inside the
+/// critical section, so calling the public `teardown` from any of them would hang
+/// every `container run` on this host, forever.
+fn teardown_locked() {
     // the DHCP/DNS/RA servers are threads of the holder — they die when it's killed.
-    kill_pidfile(&slirp_pid_path());
+    kill_pidfile(&slirp_pid_path(), PidKind::Slirp);
     // Control BEFORE pin: the control lives inside the pin's namespaces, and
     // killing the pin first would leave it running in a netns nobody can name.
-    kill_pidfile(&control_pid_path());
-    kill_pidfile(&holder_pid_path());
+    kill_pidfile(&control_pid_path(), PidKind::Control);
+    kill_pidfile(&holder_pid_path(), PidKind::Pin);
     let _ = std::fs::remove_file(slirp_sock_path());
     let _ = std::fs::remove_file(control_sock_path());
     // Also the PRE-v0.34.2 locations: this is the command that recovers a host from
@@ -952,12 +1102,33 @@ fn start_pin() -> Result<i32> {
         .env("DELONIX_INTERNAL", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        // Kept out of `/dev/null`, deliberately. The holder failing to start is
+        // Kept out of `/dev/null`, deliberately: the pin failing to start is
         // reported to the caller as a bare timeout, and the reason — an
         // `unshare`/`newuidmap` refusal, printed here and nowhere else — used to
-        // be discarded. Inheriting stderr costs nothing (the process is
-        // detached) and turns a five-second silence into a sentence.
-        .stderr(Stdio::inherit())
+        // be discarded.
+        //
+        // But a FILE, not `inherit`. This line said "inheriting stderr costs
+        // nothing (the process is detached)", and that was measured FALSE on
+        // 2026-08-15: the pin sleeps for the entire life of the infra, so it
+        // holds its inherited stderr open forever. Any caller that captures
+        // output through a pipe — `out=$(delonix …)`, a CI step,
+        // `scripts/e2e.sh` — then blocks on a read that never sees EOF, for as
+        // long as the infra lives. The battery hung exactly there: the shell
+        // waiting on a pipe whose write end was fd 2 of `delonix netns pin`,
+        // with no child of its own left alive. **Detached is not the same as
+        // done with the caller's fds.**
+        //
+        // The control plane two functions up already does this, for the same
+        // reason and with the reasoning written out; the pin — which outlives
+        // it, being the one process that never restarts — was left behind.
+        .stderr(
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(pin_log_path())
+                .map(Stdio::from)
+                .unwrap_or_else(|_| Stdio::null()),
+        )
         .spawn()
         .map_err(|e| Error::Runtime {
             context: "spawn unshare",
@@ -971,7 +1142,7 @@ fn start_pin() -> Result<i32> {
     // waits for the holder to signal "ready" (or error) in the state file (~5s).
     for _ in 0..100 {
         if !pid_alive(pid) {
-            teardown();
+            teardown_locked();
             return Err(Error::Runtime {
                 context: "ingress holder",
                 message: "the netns holder died during startup".into(),
@@ -980,7 +1151,7 @@ fn start_pin() -> Result<i32> {
         match std::fs::read_to_string(status_path()) {
             Ok(s) if s.trim() == "pinned" => return Ok(pid),
             Ok(s) if s.trim_start().starts_with("err:") => {
-                teardown();
+                teardown_locked();
                 return Err(Error::Runtime {
                     context: "ingress holder",
                     message: s.trim().trim_start_matches("err:").trim().to_string(),
@@ -989,7 +1160,7 @@ fn start_pin() -> Result<i32> {
             _ => std::thread::sleep(std::time::Duration::from_millis(50)),
         }
     }
-    teardown();
+    teardown_locked();
     Err(Error::Runtime {
         context: "ingress holder",
         message: "timeout waiting for the netns holder".into(),
@@ -8112,16 +8283,42 @@ Inter-|   Receive                                                |  Transmit
         );
         std::env::remove_var(RUNTIME_DIR_ENV);
 
-        // Rootless fallback (no explicit override, no root): `/tmp`, uid-scoped
-        // — NOT `/run`-based (see `runtime_dir`'s doc comment for why: the
-        // holder remounts `/run` as an empty tmpfs for its own `/run/netns`,
-        // which would hide anything the parent created there first).
-        assert_eq!(
-            runtime_dir(),
-            std::env::temp_dir().join(format!("delonix-net-{}", unsafe { libc::geteuid() }))
+        // Rootless fallback: `/tmp`, uid-scoped — NOT `/run`-based (see
+        // `runtime_dir`'s doc comment for why: the holder remounts `/run` as an
+        // empty tmpfs for its own `/run/netns`, which would hide anything the
+        // parent created there first).
+        //
+        // With a NON-default `DELONIX_ROOT` still set, the dir is now scoped to
+        // that root as well (`root_suffix`). This assertion used to demand the
+        // bare uid-scoped path for EVERY root, which is precisely the sharing
+        // that let one root's `teardown()` delete another's sockets.
+        let uid = unsafe { libc::geteuid() };
+        let com_root = runtime_dir();
+        assert_ne!(
+            com_root,
+            std::env::temp_dir().join(format!("delonix-net-{uid}")),
+            "um root alternativo NÃO pode partilhar a pasta do root por omissão"
         );
 
+        // O invariante que esta secção sempre existiu para proteger, e que a
+        // separação por root não pode sacrificar: o caminho não cresce com o
+        // comprimento do `DELONIX_ROOT` (AF_UNIX `sun_path` = 108 bytes). O root
+        // acima é deliberadamente fundo; o sufixo é de largura fixa.
+        assert!(
+            control_sock_path().as_os_str().len() < 108,
+            "socket de {} bytes — passaria o SUN_LEN: {}",
+            control_sock_path().as_os_str().len(),
+            control_sock_path().display()
+        );
+
+        // E o root POR OMISSÃO mantém o nome nu, byte a byte — é o que torna
+        // esta mudança segura de publicar: um holder já a correr de um binário
+        // anterior resolve exactamente o caminho de sempre.
         std::env::remove_var("DELONIX_ROOT");
+        assert_eq!(
+            runtime_dir(),
+            std::env::temp_dir().join(format!("delonix-net-{uid}"))
+        );
     }
 
     /// BUG FIXED: DNS resolution used to do a full directory scan + JSON parse
@@ -8347,5 +8544,121 @@ mod testes_lbset {
         assert!(lb_map_targets("8.8.8.8:80").is_err()); // fora do ingress
         assert!(lb_map_targets("10.200.0.5:80; reboot").is_err()); // injecção
         assert!(lb_map_targets("").is_err()); // vazio não é um LB
+    }
+}
+
+/// Identidade do PID antes de o matar — a guarda que falta a um pidfile obsoleto.
+#[cfg(test)]
+mod tests_identidade_do_pidfile {
+    use super::*;
+
+    fn argv(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn reconhece_os_nossos_tres_processos() {
+        assert!(argv_matches(
+            PidKind::Pin,
+            &argv(&["/usr/local/bin/delonix", "netns", "pin"])
+        ));
+        assert!(argv_matches(
+            PidKind::Control,
+            &argv(&["/usr/local/bin/delonix", "netns", "control"])
+        ));
+        assert!(argv_matches(
+            PidKind::Slirp,
+            &argv(&["slirp4netns", "--configure", "1234", "tap0"])
+        ));
+    }
+
+    /// O achado: pidfile obsoleto + PID reciclado = SIGTERM num processo alheio.
+    #[test]
+    fn um_pid_reciclado_nao_e_nosso() {
+        let alheio = argv(&["/usr/lib/firefox/firefox", "-contentproc"]);
+        assert!(!argv_matches(PidKind::Pin, &alheio));
+        assert!(!argv_matches(PidKind::Control, &alheio));
+        assert!(!argv_matches(PidKind::Slirp, &alheio));
+    }
+
+    /// O caminho de RECUPERAÇÃO tem de continuar a funcionar: o processo vivo
+    /// num upgrade in-place é de um binário pré-split e chama-se `holder`.
+    #[test]
+    fn o_holder_pre_split_continua_a_ser_morto() {
+        assert!(argv_matches(
+            PidKind::Pin,
+            &argv(&["/usr/local/bin/delonix", "netns", "holder"])
+        ));
+    }
+
+    /// Os papéis não se confundem entre si — matar o pin julgando-o control
+    /// derruba a netns de todos os workloads do nó.
+    #[test]
+    fn os_papeis_nao_se_trocam() {
+        let pin = argv(&["delonix", "netns", "pin"]);
+        assert!(!argv_matches(PidKind::Control, &pin));
+        assert!(!argv_matches(PidKind::Slirp, &pin));
+        let control = argv(&["delonix", "netns", "control"]);
+        assert!(!argv_matches(PidKind::Pin, &control));
+    }
+
+    /// `slirp4netns` só no argv[0]: o pid do alvo vai na cauda do argv, logo um
+    /// processo qualquer não se pode fazer passar por um pelo que traz atrás.
+    #[test]
+    fn slirp_so_conta_no_argv0() {
+        assert!(!argv_matches(
+            PidKind::Slirp,
+            &argv(&["/bin/sh", "-c", "pkill slirp4netns"])
+        ));
+        assert!(!argv_matches(PidKind::Slirp, &[]));
+    }
+}
+
+/// A decisão do `kill_pidfile`, isolada — é este módulo que falha se alguém
+/// voltar a matar por presença de PID em vez de por identidade.
+#[cfg(test)]
+mod tests_decisao_de_matar {
+    use super::*;
+
+    fn argv(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn um_pid_reciclado_por_outro_processo_nao_leva_sigterm() {
+        let alheio = argv(&["/usr/lib/firefox/firefox", "-contentproc"]);
+        assert!(
+            !should_signal(PidKind::Pin, Some(&alheio)),
+            "pidfile obsoleto + PID reciclado: NUNCA sinalizar"
+        );
+        assert!(!should_signal(PidKind::Control, Some(&alheio)));
+        assert!(!should_signal(PidKind::Slirp, Some(&alheio)));
+    }
+
+    #[test]
+    fn um_pid_morto_nao_leva_sigterm() {
+        assert!(!should_signal(PidKind::Pin, None));
+    }
+
+    /// O outro lado: o teardown continua a matar o que é mesmo nosso — senão a
+    /// guarda teria trocado um bug por infra que ninguém consegue derrubar.
+    #[test]
+    fn o_nosso_continua_a_ser_morto() {
+        assert!(should_signal(
+            PidKind::Pin,
+            Some(&argv(&["delonix", "netns", "pin"]))
+        ));
+        assert!(should_signal(
+            PidKind::Control,
+            Some(&argv(&["delonix", "netns", "control"]))
+        ));
+        assert!(should_signal(
+            PidKind::Slirp,
+            Some(&argv(&["slirp4netns", "--configure", "9", "tap0"]))
+        ));
+        assert!(
+            should_signal(PidKind::Pin, Some(&argv(&["delonix", "netns", "holder"]))),
+            "recuperação de um upgrade in-place"
+        );
     }
 }
