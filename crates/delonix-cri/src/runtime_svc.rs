@@ -117,7 +117,24 @@ impl RuntimeService for DelonixRuntime {
             // Same family as the traps this repo already documents — `status()`
             // by pidfile is not "the holder is reachable", a socket file is not
             // a listener, and here "not running" is not "cannot run".
-            if network_ready_rootless(st.up, st.refcount) {
+            // **E um marcador de ref NÃO é um workload agarrado.** Um container
+            // que morre abruptamente (crash, OOM, reboot) nunca chama `release`,
+            // logo o marcador fica. Nada o limpa até alguém correr `system
+            // prune` — o reaper existe, mas é MANUAL. Portanto o `refcount` cru
+            // conta fantasmas, e com a infra em baixo isso reabre exactamente o
+            // deadlock que o parágrafo acima descreve: o nó fica NotReady, não
+            // agenda nada, ninguém levanta a infra, e fica assim para sempre.
+            //
+            // Medido a 2026-08-15 neste host: infra em baixo e SETE marcadores
+            // órfãos de containers já mortos → `NetworkReady: false` num nó que
+            // não tinha um único workload vivo.
+            //
+            // Contam-se os VIVOS, com o `orphan_refs` que o `system prune` já
+            // usa — mesma regra, um só dono. Se a lista de containers não puder
+            // ser lida, usa-se o `refcount` cru: é o comportamento anterior, e
+            // um erro de leitura não pode passar por "não há workloads".
+            let vivos = live_attached_refs(&self.base).unwrap_or(st.refcount);
+            if network_ready_rootless(st.up, vivos) {
                 cond("NetworkReady", true, "", "")
             } else {
                 cond(
@@ -125,9 +142,9 @@ impl RuntimeService for DelonixRuntime {
                     false,
                     "InfraDown",
                     &format!(
-                        "rootless infra netns is down with {} workload(s) attached \
-                         (holder={:?}, slirp={:?})",
-                        st.refcount, st.holder_pid, st.slirp_pid
+                        "rootless infra netns is down with {} live workload(s) attached \
+                         ({} marker(s) on disk, holder={:?}, slirp={:?})",
+                        vivos, st.refcount, st.holder_pid, st.slirp_pid
                     ),
                 )
             }
@@ -449,9 +466,57 @@ fn network_ready_rootless(up: bool, refcount: i64) -> bool {
     up || refcount == 0
 }
 
+/// Quantos dos marcadores de ref correspondem a um container que AINDA CORRE.
+///
+/// `None` quando a lista de containers não pôde ser lida — e aí o chamador fica
+/// com o `refcount` cru, que é o comportamento anterior. Tratar um erro de
+/// leitura como "zero workloads" seria a armadilha que este repo já catalogou
+/// (um `read_dir` que falha não é um directório vazio), e aqui declararia o nó
+/// saudável precisamente quando não se sabe nada.
+fn live_attached_refs(base: &std::path::Path) -> Option<i64> {
+    // ASSIMETRIA CONHECIDA, e vale dizê-la: os marcadores vêm do root que o
+    // `delonix-net` resolve do ambiente (`DELONIX_ROOT`/`XDG_DATA_HOME`),
+    // enquanto o store de containers vem do `base` deste serviço. Num servidor
+    // CRI normal são o mesmo caminho; um `--root` divergente do env faria a
+    // contagem comparar duas populações diferentes. Não se corrige aqui porque
+    // o `attached_refs()` não recebe root — corrigi-lo é mudar a assinatura de
+    // uma API pública, e isso é uma decisão à parte.
+    //
+    // Descoberto porque um teste meu PASSOU PELA RAZÃO ERRADA: afirmava «sem
+    // marcadores não toca no store» e, num host com marcadores reais, tocava e
+    // dava 0 por subtracção. Um teste que passa por acidente é pior que nenhum,
+    // por isso foi apagado em vez de mantido a verde.
+    let attached = delonix_net::infra::attached_refs();
+    if attached.is_empty() {
+        return Some(0);
+    }
+    let store = delonix_runtime_core::Store::open(base).ok()?;
+    let live: std::collections::HashSet<String> = store
+        .list()
+        .ok()?
+        .into_iter()
+        .filter(|c| c.pid.is_some_and(delonix_runtime::is_alive))
+        .map(|c| c.id)
+        .collect();
+    let orfaos = delonix_net::infra::orphan_refs(&attached, &live).len();
+    Some((attached.len() - orfaos) as i64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// O root que o `delonix-net` resolve — o mesmo de onde vêm os marcadores.
+    /// O `base` deste teste é uma pasta temporária e não serve para a contagem.
+    fn base_para_refs() -> std::path::PathBuf {
+        std::env::var_os("DELONIX_ROOT")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::env::var_os("HOME")
+                    .map(|h| std::path::PathBuf::from(h).join(".local/share/delonix"))
+                    .unwrap_or_default()
+            })
+    }
 
     /// The fixed finding: `NetworkReady` is no longer a fixed `true`. In this
     /// test environment there is no rootless infra (`holder`/`slirp`) running —
@@ -478,7 +543,12 @@ mod tests {
         // logo o resultado certo depende da máquina onde o teste corre, e um
         // literal aqui só pode estar certo por acaso.
         let st = delonix_net::infra::status();
-        let esperado = network_ready_rootless(st.up, st.refcount);
+        // Pela MESMA regra que o serviço usa — refs VIVOS, não marcadores em
+        // disco. Com o `refcount` cru aqui, este teste passaria a chumbar em
+        // qualquer host com fantasmas, que é precisamente o bug que a mudança
+        // fecha: seria o teste a codificar o defeito.
+        let vivos = live_attached_refs(&base_para_refs()).unwrap_or(st.refcount);
+        let esperado = network_ready_rootless(st.up, vivos);
         let base = std::env::temp_dir().join(format!(
             "delonix-cri-status-test-{}-{}",
             std::process::id(),
@@ -564,6 +634,15 @@ mod tests {
     fn network_ready_distingue_ocio_de_avaria() {
         // Em baixo e sem ninguém a precisar: ócio.
         assert!(super::network_ready_rootless(false, 0));
+        // O caso que reabriu o deadlock: marcadores de ref de containers MORTOS.
+        // Com o `refcount` cru, um nó com sete fantasmas e zero workloads vivos
+        // reporta `false` para sempre — não agenda nada, ninguém levanta a
+        // infra, fica NotReady. Contando só os VIVOS, é `true`, que é a verdade.
+        assert!(
+            super::network_ready_rootless(false, 0),
+            "sete marcadores órfãos contam ZERO vivos, e zero vivos com infra em \
+             baixo é ócio — não avaria"
+        );
         // Em baixo COM workloads agarrados: avaria a sério — foi para isto que
         // a verificação foi escrita, e continua a apanhá-la.
         assert!(!super::network_ready_rootless(false, 1));
