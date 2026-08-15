@@ -23,6 +23,7 @@
 //! socket.
 
 use delonix_runtime_core::{Error, Result};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 // Re-exportadas do `delonix-net-rules`, que é onde vivem agora: são regras
@@ -1554,12 +1555,38 @@ pub fn slirp_attach(pid: i32, publish: &[String]) -> Result<()> {
 /// blocks the restart ("add_hostfwd failed"). Scans `/proc` once, identifies
 /// the slirp4netns whose **target pid** (last numeric arg of the cmdline) no longer exists and
 /// kills them; also removes the obsolete `delonix-slirp-<pid>.sock` api-sockets.
-/// Cheap (one pass over /proc) and safe (only touches slirp4netns with a dead target).
+/// Cheap (one pass over /proc) and safe: it only touches slirp4netns that are
+/// OURS **and** have a dead target.
+///
+/// **The ownership half is not paranoia — without it this reaps other tools'
+/// processes.** `slirp4netns` is not ours; rootless Podman spawns it with the same
+/// argv shape (`… <target-pid> tap0`), so identifying by `argv[0]` alone made every
+/// orphan slirp on the host a target. And this runs from
+/// `publish_with_retry`, i.e. whenever one of OUR port publishes fails — so a port
+/// conflict here would go and SIGTERM the networking of an unrelated engine on the
+/// same machine. Reproduced live 2026-08-15 with a hand-started, podman-shaped slirp:
+/// it was flagged for reaping while every real delonix slirp was correctly spared.
+///
+/// Same family as the shared-runtime-dir bug (see `infra::runtime_dir`) and as
+/// `reap_orphan_hostfwds`'s `AuthoritativeLivePorts`: a destructive sweep over a
+/// SHARED resource must ask the resource who owns it, never assume that everything
+/// it can see is its own.
+///
 /// Returns how many it reaped.
 pub fn reap_orphan_slirp() -> usize {
-    // Dead target = orphan. `kill(pid, 0)` == 0 ⇒ exists; ESRCH ⇒ dead.
-    // SAFETY: kill with signal 0 sends no signal — only tests the pid's existence.
-    reap_slirp_where(|target| unsafe { libc::kill(target, 0) } != 0)
+    reap_slirp_where(|s| {
+        // Dead target = orphan. `kill(pid, 0)` == 0 ⇒ exists; ESRCH ⇒ dead.
+        // SAFETY: kill with signal 0 sends no signal — only tests the pid's existence.
+        let target_alive = unsafe { libc::kill(s.target, 0) } == 0;
+        should_reap_orphan(s, target_alive)
+    })
+}
+
+/// The whole decision of [`reap_orphan_slirp`], as a PURE function of the two
+/// facts it rests on. Split out so the ownership half is covered by a test that
+/// fails if someone drops it — a test on `is_ours` alone would keep passing.
+fn should_reap_orphan(s: &Slirp, target_alive: bool) -> bool {
+    s.is_ours() && !target_alive
 }
 
 /// **Kills ONE container's slirp4netns** (the one serving `target_pid`) and waits
@@ -1577,7 +1604,10 @@ pub fn reap_orphan_slirp() -> usize {
 /// Unlike [`reap_orphan_slirp`], it doesn't depend on the target already being dead
 /// — the caller is the one who killed it.
 pub fn reap_slirp_for(target_pid: i32) -> bool {
-    let n = reap_slirp_where(|target| target == target_pid);
+    // Deliberately NOT gated on `is_ours()`: the caller just killed `target_pid`
+    // itself, so the slirp serving that exact pid is ours by construction — and a
+    // container run without `-p` has no api-socket to be identified by.
+    let n = reap_slirp_where(|s| s.target == target_pid);
     if n == 0 {
         return false;
     }
@@ -1599,28 +1629,98 @@ pub fn reap_slirp_for(target_pid: i32) -> bool {
 /// The scan was embedded in `reap_orphan_slirp`; it was extracted so the
 /// surgical reaper ([`reap_slirp_for`]) shares exactly the same identification
 /// logic — two copies would diverge the day the slirp's argv changed.
-fn reap_slirp_where(should_reap: impl Fn(i32) -> bool) -> usize {
+fn reap_slirp_where(should_reap: impl Fn(&Slirp) -> bool) -> usize {
     let mut reaped = 0;
-    for (pid, target) in list_slirps() {
-        if !should_reap(target) {
+    for s in list_slirps() {
+        if !should_reap(&s) {
             continue;
         }
         // SAFETY: SIGTERM to a slirp4netns identified by its argv.
         unsafe {
-            libc::kill(pid, libc::SIGTERM);
+            libc::kill(s.pid, libc::SIGTERM);
         }
-        let _ = std::fs::remove_file(slirp_container_sock(target));
+        // Only the PER-CONTAINER socket. The ingress slirp's socket is shared by
+        // every root on this uid, and unlinking it here would be the very bug
+        // this function was just taught not to commit.
+        let _ = std::fs::remove_file(slirp_container_sock(s.target));
         reaped += 1;
     }
     reaped
 }
 
 fn slirp_exists_for(target_pid: i32) -> bool {
-    list_slirps().into_iter().any(|(_, t)| t == target_pid)
+    list_slirps().into_iter().any(|s| s.target == target_pid)
 }
 
-/// `(slirp pid, pid of the container it serves)` of each running slirp4netns.
-fn list_slirps() -> Vec<(i32, i32)> {
+/// One running `slirp4netns`, as read from `/proc` in a single pass.
+struct Slirp {
+    /// The slirp4netns process itself.
+    pid: i32,
+    /// The pid whose netns it serves (`… <target> tap0`).
+    target: i32,
+    /// Its `--api-socket`, when it was started with one.
+    api_sock: Option<PathBuf>,
+}
+
+impl Slirp {
+    /// Whether THIS engine started it.
+    ///
+    /// The api-socket path is the only ownership token a slirp4netns carries: we
+    /// choose that path, and it is either the ingress's shared socket or the
+    /// per-container one derived from the target pid. Everything else in the argv
+    /// (`--configure`, `--mtu`, the trailing `<pid> tap0`) is what ANY caller of
+    /// slirp4netns writes, Podman included.
+    ///
+    /// A slirp of ours started WITHOUT ports has no api-socket and so answers
+    /// `false` here. That is the honest answer — nothing on it identifies it — and
+    /// it costs nothing where it matters: the caller that has to free a held host
+    /// port is `reap_slirp_for`, which knows its target by pid and never asks this.
+    fn is_ours(&self) -> bool {
+        let Some(sock) = &self.api_sock else {
+            return false;
+        };
+        *sock == infra::slirp_sock_path() || *sock == slirp_container_sock(self.target)
+    }
+}
+
+/// Builds a [`Slirp`] from one process's argv. PURE — the whole identification
+/// lives here so it can be tested without a real `/proc` and without spawning
+/// anything. Returns `None` for a process that is not a slirp4netns.
+fn slirp_from_argv(pid: i32, argv: &[&[u8]]) -> Option<Slirp> {
+    if !argv.first()?.ends_with(b"slirp4netns") {
+        return None;
+    }
+    // The target pid is the second-to-last arg (… <pid> tap0): the last numeric one.
+    // Scanned from the right so an `--mtu=65520` earlier in the argv can't win.
+    let target = argv.iter().rev().find_map(|a| {
+        std::str::from_utf8(a)
+            .ok()
+            .and_then(|s| s.parse::<i32>().ok())
+    })?;
+    // Both spellings: we emit `--api-socket=<path>`, but a separate-argument
+    // `--api-socket <path>` is equally valid and is what other callers write.
+    let mut api_sock = None;
+    for (i, a) in argv.iter().enumerate() {
+        let s = std::str::from_utf8(a).unwrap_or("");
+        if let Some(p) = s.strip_prefix("--api-socket=") {
+            api_sock = Some(PathBuf::from(p));
+        } else if s == "--api-socket" {
+            api_sock = argv
+                .get(i + 1)
+                .and_then(|v| std::str::from_utf8(v).ok())
+                .map(PathBuf::from);
+        }
+    }
+    Some(Slirp {
+        pid,
+        target,
+        api_sock,
+    })
+}
+
+/// Every running slirp4netns on the host — OURS AND NOT. Callers that destroy
+/// must filter with [`Slirp::is_ours`]; see [`reap_orphan_slirp`].
+fn list_slirps() -> Vec<Slirp> {
     let mut out = Vec::new();
     let Ok(rd) = std::fs::read_dir("/proc") else {
         return out;
@@ -1633,22 +1733,13 @@ fn list_slirps() -> Vec<(i32, i32)> {
         let Ok(cmdline) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
             continue;
         };
-        // cmdline = NUL-separated args. argv[0] has to be slirp4netns.
+        // cmdline = NUL-separated args.
         let argv: Vec<&[u8]> = cmdline
             .split(|b| *b == 0)
             .filter(|s| !s.is_empty())
             .collect();
-        if argv.is_empty() || !argv[0].ends_with(b"slirp4netns") {
-            continue;
-        }
-        // the target pid is the second-to-last arg (… <pid> tap0). Finds the last numeric arg.
-        let target = argv.iter().rev().find_map(|a| {
-            std::str::from_utf8(a)
-                .ok()
-                .and_then(|s| s.parse::<i32>().ok())
-        });
-        if let Some(t) = target {
-            out.push((pid, t));
+        if let Some(s) = slirp_from_argv(pid, &argv) {
+            out.push(s);
         }
     }
     out
@@ -2971,5 +3062,117 @@ mod tests_alocacao_16 {
             .map(|r| r.prefix)
             .collect();
         assert_eq!(prefixos.len(), capacidade);
+    }
+}
+
+/// Ownership of a `slirp4netns` — the reaper's fail-closed half.
+///
+/// Reproduced live 2026-08-15 on a host that also runs Podman: a hand-started,
+/// podman-shaped slirp with a dead target was flagged for SIGTERM by the old
+/// `argv[0]`-only identification, while four real delonix slirps were spared.
+#[cfg(test)]
+mod tests_posse_do_slirp {
+    use super::*;
+
+    /// argv exactly as `slirp_attach` writes it (`--api-socket=<path>`).
+    fn nosso_de_container(target: i32) -> Vec<String> {
+        vec![
+            "slirp4netns".into(),
+            "--configure".into(),
+            "--mtu=65520".into(),
+            "--disable-host-loopback".into(),
+            "--ready-fd=7".into(),
+            format!("--api-socket={}", slirp_container_sock(target).display()),
+            target.to_string(),
+            "tap0".into(),
+        ]
+    }
+
+    fn parse(argv: &[String]) -> Option<Slirp> {
+        let raw: Vec<&[u8]> = argv.iter().map(|s| s.as_bytes()).collect();
+        slirp_from_argv(4242, &raw)
+    }
+
+    #[test]
+    fn o_slirp_de_um_container_nosso_e_reconhecido() {
+        let s = parse(&nosso_de_container(1234)).expect("é um slirp4netns");
+        assert_eq!(s.pid, 4242);
+        assert_eq!(s.target, 1234);
+        assert!(s.is_ours(), "o socket está no caminho que NÓS escolhemos");
+    }
+
+    #[test]
+    fn o_slirp_do_ingress_e_nosso() {
+        let argv = vec![
+            "slirp4netns".to_string(),
+            "--configure".into(),
+            format!("--api-socket={}", infra::slirp_sock_path().display()),
+            "999".into(),
+            "tap0".into(),
+        ];
+        assert!(parse(&argv).unwrap().is_ours());
+    }
+
+    /// O achado. Mesmo binário, mesma forma de argv, socket noutro sítio.
+    #[test]
+    fn um_slirp_estranho_nao_e_nosso_e_nao_e_ceifado() {
+        let argv = vec![
+            "slirp4netns".to_string(),
+            "--disable-host-loopback".into(),
+            "--mtu=65520".into(),
+            "--api-socket".into(), // forma de argumento separado
+            "/run/user/1000/libpod/tmp/slirp4netns.sock".into(),
+            "1234".into(),
+            "tap0".into(),
+        ];
+        let s = parse(&argv).expect("continua a ser um slirp4netns");
+        assert_eq!(
+            s.target, 1234,
+            "a forma separada tem de ser parseada na mesma"
+        );
+        assert!(!s.is_ours());
+        assert!(
+            !should_reap_orphan(&s, false),
+            "um slirp de outra ferramenta, mesmo órfão, NUNCA é ceifado"
+        );
+    }
+
+    /// Sem o token de posse não há como provar que é nosso — e não se destrói.
+    #[test]
+    fn sem_api_socket_nao_ha_posse_provavel() {
+        let argv = vec![
+            "slirp4netns".to_string(),
+            "--configure".into(),
+            "77".into(),
+            "tap0".into(),
+        ];
+        let s = parse(&argv).unwrap();
+        assert!(!s.is_ours());
+        assert!(!should_reap_orphan(&s, false));
+    }
+
+    /// O outro lado: um órfão NOSSO continua a ser ceifado — senão a correcção
+    /// teria trocado um bug por outro (a porta publicada ficava presa).
+    #[test]
+    fn um_orfao_nosso_continua_a_ser_ceifado() {
+        let s = parse(&nosso_de_container(1234)).unwrap();
+        assert!(should_reap_orphan(&s, false), "alvo morto + nosso = órfão");
+        assert!(
+            !should_reap_orphan(&s, true),
+            "alvo vivo nunca é órfão, seja de quem for"
+        );
+    }
+
+    #[test]
+    fn o_alvo_e_o_ultimo_numerico_e_nao_o_mtu() {
+        let s = parse(&nosso_de_container(9)).unwrap();
+        assert_eq!(s.target, 9, "o 65520 do --mtu não pode ganhar");
+    }
+
+    #[test]
+    fn um_processo_qualquer_nao_e_um_slirp() {
+        let argv = vec!["/usr/bin/qemu-system-x86_64".to_string(), "1234".into()];
+        assert!(parse(&argv).is_none());
+        assert!(slirp_from_argv(1, &[]).is_none());
     }
 }
