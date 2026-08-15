@@ -32,3 +32,9 @@ tracing = { workspace = true }
 
 [build-dependencies]
 tonic-build = "0.12"
+
+[dev-dependencies]
+# Só para o round-trip gRPC de `tests/grpc_status.rs` — o cliente gerado precisa
+# de um conector para socket unix, que o tonic não traz por si.
+tower = { version = "0.5", features = ["util"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
