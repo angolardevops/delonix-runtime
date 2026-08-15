@@ -473,10 +473,12 @@ mod tests {
         // test can never do. In that case we skip; on a clean runner (infra down,
         // the case that matters for the regression) the test runs and validates
         // the `false` path.
-        if delonix_net::infra::status().up {
-            eprintln!("SKIP: infra rootless ambiente a correr — não se pode provar InfraDown sem a derrubar");
-            return;
-        }
+        // Lido UMA vez, e é contra ISTO que a condição é comparada — não contra um
+        // valor fixo. O `status()` sonda a infra GLOBAL (ver o comentário acima),
+        // logo o resultado certo depende da máquina onde o teste corre, e um
+        // literal aqui só pode estar certo por acaso.
+        let st = delonix_net::infra::status();
+        let esperado = network_ready_rootless(st.up, st.refcount);
         let base = std::env::temp_dir().join(format!(
             "delonix-cri-status-test-{}-{}",
             std::process::id(),
@@ -518,17 +520,33 @@ mod tests {
         // sempre. O que este teste guarda continua a ser o mesmo: que a
         // condição é DERIVADA do estado real e não fabricada.
         //
-        // Aqui não há infra a correr nem containers agarrados, logo `true` com
-        // razão vazia é a resposta certa. O caso que interessa proteger — em
-        // baixo COM workloads — vive no teste puro abaixo, porque exige um
-        // ref-count que este ambiente não consegue montar.
-        assert!(
-            network_ready.status,
-            "sem infra E sem workloads é ócio, não avaria"
+        // **E é por isso que a asserção compara com `esperado` e não com um
+        // literal.** A versão anterior exigia `true` porque assumia «nem infra
+        // nem workloads» — verdadeiro num runner limpo, falso num host de
+        // desenvolvimento. Medido a 2026-08-15: com a infra em baixo e SETE
+        // marcadores de ref órfãos deixados por containers mortos, o valor certo
+        // é `false`, e o teste chumbava a acusar uma regressão que não existia.
+        // Um teste que só passa em ambientes limpos não distingue «o código
+        // partiu» de «a máquina está suja», e a primeira coisa que se faz com um
+        // vermelho desses é ignorá-lo.
+        //
+        // **O que este teste NÃO faz, e é preciso dizê-lo**: num host onde a
+        // infra está UP o valor certo é `true`, e uma condição FABRICADA (`if
+        // true`) dá o mesmo — logo aqui ele não discrimina. Medido, a reverter
+        // a condição: passa. Quem fixa a lógica são as cinco asserções puras
+        // sobre `network_ready_rootless` (os quatro quadrantes), e é lá que uma
+        // regressão da REGRA é apanhada. O trabalho deste teste é o outro
+        // metade: provar que o caminho gRPC TRANSPORTA o valor derivado até ao
+        // `StatusResponse`, em vez de o recalcular ou o esquecer.
+        assert_eq!(
+            network_ready.status, esperado,
+            "NetworkReady tem de ser DERIVADO de (up={}, refcount={}), não fabricado",
+            st.up, st.refcount
         );
-        assert!(
+        assert_eq!(
             network_ready.reason.is_empty(),
-            "uma condição verdadeira não tem razão de falha"
+            esperado,
+            "uma condição verdadeira não tem razão de falha, e uma falsa tem de a dar"
         );
 
         let _ = std::fs::remove_dir_all(&base);
