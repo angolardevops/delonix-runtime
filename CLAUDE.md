@@ -1710,7 +1710,13 @@ achados de arquitectura ficam registados nesta secção.
    reciclar de volta para Running). Corrigido com um tecto generoso (30 min) + heartbeat de
    progresso a cada 30s — nunca mais silenciosamente indistinguível de um hang.
 2. **`compose.rs`: porta `host_ip:host:container` (ex.: `127.0.0.1:9000:80`) descartava o IP em
-   silêncio** — caía no caminho de 2 partes (`hostPort:containerPort`), publicando em TODAS as
+   silêncio** — **SUPERADO em 2026-07-27**, e esta entrada induziu em erro quem a leu depois (custou
+   um check chumbado a 2026-08-15): o `parse_publish_addr`/`publish_bind_addr` da mesma série deu
+   ao motor suporte REAL à forma `[hostIp:]hostPort:contPort`, por isso o compose **já não recusa,
+   HONRA**. Medido: `ports: ["127.0.0.1:19099:80"]` → `container port` diz `127.0.0.1:19099` e o
+   `ss` confirma o bind em loopback, sem nada em `0.0.0.0`. O que a bateria fixa hoje é o
+   ENDEREÇO, não a recusa — um IP descartado voltaria a publicar em todas as interfaces, e é essa
+   a regressão que importa apanhar. O texto original, para contexto histórico: — caía no caminho de 2 partes (`hostPort:containerPort`), publicando em TODAS as
    interfaces exactamente o oposto do que o ficheiro compose pedia (bind só a loopback). Corrigido
    para recusar explicitamente (o motor em si já recusa `-p 127.0.0.1:...` — `parse_publish` exige
    host_port só dígitos), consistente com a regra do próprio módulo de nunca degradar em silêncio.

@@ -14,9 +14,10 @@
 # A CLI tem 245 comandos, 218 folhas invocáveis. Esta bateria verifica o `--help`
 # de 100% delas (o ciclo dinâmico abaixo percorre a árvore) e EXECUTA 55 — 25%.
 #
-# **Actualizado 2026-08-15**: o grupo `net` (43 folhas em 6 subgrupos) tinha ZERO
-# execuções e passou a ter 19 checks. Continuam sem nenhuma: `compose` (12),
-# `storage` (13) e `serve` (8) — e os comandos-folha `dash`/`man`/`version`.
+# **Actualizado 2026-08-15**: `net` (43 folhas em 6 subgrupos) tinha ZERO
+# execuções e passou a ter 19 checks; `compose` tinha ZERO e passou a ter 20.
+# Continuam sem nenhuma: `storage` (13) e `serve` (8) — e os comandos-folha
+# `dash`/`man`/`version`.
 # Cita-se a FRACÇÃO medida e a data, nunca o total de checks: um total que sobe
 # faz a cobertura parecer melhor sem uma única folha nova exercitada.
 # Os outros 163 têm o contrato verificado e nunca são corridos, concentrados em
@@ -844,6 +845,113 @@ check "--cron com 4 campos recusa" fail "$BIN" backup container "$BKC" --to "$BK
 "$BIN" volumes rm "$BKV" >/dev/null 2>&1
 
 ########################################
+section "compose — o que é recusado, e se a recusa dispara"
+
+# O `compose` tinha ZERO execuções. Metade do valor aqui não é o caminho feliz —
+# é confirmar que as lacunas DECLARADAS no v1 falham ALTO. A armadilha que esta
+# base de código pagou mais vezes é a opção aceite e descartada em silêncio
+# (`--security-opt seccomp=`, `-v …:z`, `--network-alias`, `--subnet`), e o
+# `compose.rs` declara sete recusas que nada exercitava.
+# NOTA: as flags vão DEPOIS do subcomando (`compose config -f X`), não antes.
+# A primeira versão desta secção pôs `-f` antes e chumbou 10 checks com
+# "unexpected argument '-f'" — verificar UMA invocação à mão antes de escrever
+# a secção teria custado trinta segundos.
+CWORK="$OUT/compose-$PFX"; mkdir -p "$CWORK"
+
+cat >"$CWORK/docker-compose.yml" <<YAML
+services:
+  web-$PFX:
+    image: alpine:3.19
+    command: ["sleep", "600"]
+    environment:
+      GREETING: ola
+    working_dir: /tmp
+YAML
+
+check "compose config aceita um ficheiro válido" ok \
+  "$BIN" compose config -f "$CWORK/docker-compose.yml" -p "cp$PFX"
+check "compose config resolve o serviço" ok bash -c \
+  "'$BIN' compose config -f '$CWORK/docker-compose.yml' -p 'cp$PFX' | grep -q 'web-$PFX'"
+check "compose -f inexistente falha" fail \
+  "$BIN" compose config -f "$CWORK/naoexiste.yml" -p "cp$PFX"
+
+# --- as recusas do v1: cada uma tem de NOMEAR o campo ------------------------
+cat >"$CWORK/replicas.yml" <<YAML
+services:
+  s-$PFX:
+    image: alpine:3.19
+    deploy:
+      replicas: 3
+YAML
+check "compose recusa deploy.replicas != 1" fail \
+  "$BIN" compose config -f "$CWORK/replicas.yml" -p "cp$PFX"
+check "e a recusa NOMEIA o campo" ok bash -c \
+  "'$BIN' compose config -f '$CWORK/replicas.yml' -p 'cp$PFX' 2>&1 | grep -qi 'replicas'"
+
+cat >"$CWORK/extends.yml" <<YAML
+services:
+  s-$PFX:
+    image: alpine:3.19
+    extends:
+      service: outro
+YAML
+check "compose recusa extends:" fail \
+  "$BIN" compose config -f "$CWORK/extends.yml" -p "cp$PFX"
+check "e a recusa NOMEIA o extends" ok bash -c \
+  "'$BIN' compose config -f '$CWORK/extends.yml' -p 'cp$PFX' 2>&1 | grep -qi 'extends'"
+
+cat >"$CWORK/profiles.yml" <<YAML
+services:
+  s-$PFX:
+    image: alpine:3.19
+    profiles: ["dev"]
+YAML
+check "compose recusa profiles: por-serviço" fail \
+  "$BIN" compose config -f "$CWORK/profiles.yml" -p "cp$PFX"
+check "e a recusa NOMEIA os profiles" ok bash -c \
+  "'$BIN' compose config -f '$CWORK/profiles.yml' -p 'cp$PFX' 2>&1 | grep -qi 'profiles'"
+
+# A porta com IP de host tem HISTÓRIA, e a primeira versão deste check estava
+# errada: o `compose.rs` chegou a DESCARTAR o IP em silêncio (publicando em
+# todas as interfaces o oposto do que o ficheiro pedia), foi corrigido para
+# RECUSAR, e depois o motor ganhou suporte real à forma `[ip:]host:cont`
+# (`parse_publish_addr`, 2026-07-27) — logo já não recusa, honra. Escrevi o
+# check contra a fase do meio e ele chumbou; o que vale medir não é a recusa,
+# é o ENDEREÇO em que a porta fica ligada. Um IP descartado voltaria a publicar
+# em 0.0.0.0 e este check apanha-o.
+cat >"$CWORK/hostip.yml" <<YAML
+services:
+  s-$PFX:
+    image: alpine:3.19
+    command: ["sleep", "600"]
+    ports:
+      - "127.0.0.1:19099:80"
+YAML
+check "compose aceita porta com IP de host" ok \
+  "$BIN" compose up -d -f "$CWORK/hostip.yml" -p "cp$PFX"
+check "e o registo guarda o IP pedido, não 0.0.0.0" ok bash -c \
+  "'$BIN' container port 'cp$PFX-s-$PFX' | grep -q '127\.0\.0\.1:19099'"
+check "e o bind REAL do host é loopback (não todas as interfaces)" ok bash -c \
+  "ss -tlnH | grep -q '127\.0\.0\.1:19099'"
+check "e nada ficou ligado em 0.0.0.0:19099" ok bash -c \
+  "! ss -tlnH | grep -q '0\.0\.0\.0:19099'"
+"$BIN" compose down -f "$CWORK/hostip.yml" -p "cp$PFX" >/dev/null 2>&1
+
+# --- ciclo real -------------------------------------------------------------
+check "compose up -d" ok \
+  "$BIN" compose up -d -f "$CWORK/docker-compose.yml" -p "cp$PFX"
+check "compose ps lista o serviço" ok bash -c \
+  "'$BIN' compose ps -f '$CWORK/docker-compose.yml' -p 'cp$PFX' | grep -q 'web-$PFX'"
+check "o working_dir do compose foi aplicado" ok bash -c \
+  "'$BIN' container exec cp$PFX-web-$PFX pwd 2>/dev/null | grep -qx /tmp || \
+   '$BIN' container exec web-$PFX pwd 2>/dev/null | grep -qx /tmp"
+check "compose logs responde" ok \
+  "$BIN" compose logs -f "$CWORK/docker-compose.yml" -p "cp$PFX"
+check "compose down limpa" ok \
+  "$BIN" compose down -f "$CWORK/docker-compose.yml" -p "cp$PFX"
+check "e o serviço deixou de aparecer" ok bash -c \
+  "! '$BIN' compose ps -f '$CWORK/docker-compose.yml' -p 'cp$PFX' 2>/dev/null | grep -q 'Up'"
+
 section "net — a plumbing que nunca era executada"
 
 # Porque esta secção existe: o grupo `net` tem 43 folhas em 6 subgrupos e a
