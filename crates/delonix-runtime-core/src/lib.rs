@@ -986,6 +986,29 @@ pub struct VmBootSpec {
     /// cloud-init *seed* ISO (NoCloud) — secondary disk.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<String>,
+    // --- cloud-init INTENT ------------------------------------------------
+    // The `seed` above is one DELIVERY of cloud-init and it is a local file, so
+    // it says nothing to a backend whose guest runs on another machine. These
+    // three say what was MEANT, and each backend realizes them its own way.
+    // They are persisted for the reason this whole struct exists: `vm start`
+    // delegates to `create`'s auto-heal, and a VM whose backend-side guest is
+    // gone gets rebuilt — with these dropped, it would come back with the
+    // hostname defaulted and NO authorized key, i.e. unreachable by the very
+    // `cluster kubeadm` that provisioned it.
+    /// Guest hostname (`None` = the VM name).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hostname: Option<String>,
+    /// Account the SSH keys land on and the serial console auto-logs in as.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ci_user: Option<String>,
+    /// Authorized SSH public keys, already resolved.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ssh_keys: Vec<String>,
+    /// `Some(false)` for an appliance that configures itself and must not be
+    /// handed a seed. `None` means "runs cloud-init", so records written before
+    /// this existed keep the behaviour they had.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloud_init: Option<bool>,
     /// Backs the VM memory with *hugepages*.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hugepages: bool,

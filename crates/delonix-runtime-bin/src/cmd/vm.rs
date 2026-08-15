@@ -1355,10 +1355,14 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
                 ));
             }
         }
+        // A `--user-data` of the author's own is still packaged HERE: it is a
+        // file on this host, so it is a `seed` by nature and the engine's intent
+        // path has nowhere to put it. Everything else travels as intent and is
+        // realized by whichever backend runs the guest.
         let seed = match spec.seed {
             Some(s) => Some(s),
             None if appliance => None,
-            None => Some(
+            None if spec.user_data.is_some() => Some(
                 generate_seed_iso(
                     name,
                     spec.hostname.as_deref(),
@@ -1369,7 +1373,11 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
                 .to_string_lossy()
                 .into_owned(),
             ),
+            None => None,
         };
+        let resolved_keys: Result<Vec<String>> =
+            spec.ssh_keys.iter().map(|s| resolve_ssh_key(s)).collect();
+        let resolved_keys = resolved_keys?;
 
         let cfg = VmConfig {
             name: name.clone(),
@@ -1393,6 +1401,10 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
             firmware: spec.firmware,
             cmdline: spec.cmdline,
             seed,
+            hostname: spec.hostname,
+            ci_user: None,
+            ssh_keys: resolved_keys,
+            cloud_init: appliance.then_some(false),
             restart_policy: spec.restart_policy,
             hugepages: spec.hugepages,
             cpu_affinity: spec.cpu_affinity,
@@ -1606,25 +1618,28 @@ pub fn run(action: VmCmd) -> Result<()> {
             // asked for. Proxmox has cloud-init of its own; wiring the keys
             // through to it is a separate piece of work, and until it exists
             // saying so beats generating something that cannot arrive.
+            // `--hostname`/`--ssh-key` USED to be refused here for a remote
+            // backend, and the message said the honest thing at the time: a
+            // NoCloud seed is a file on this host and the guest runs elsewhere.
+            // They are now INTENT (`VmConfig.hostname`/`ssh_keys`) and Proxmox
+            // maps them to the node's own cloud-init, so the refusal is gone.
+            //
+            // `--user-data` stays refused, and the reason did not change: an
+            // arbitrary user-data document has no equivalent in what the API can
+            // set on a VM (it needs a snippet on the node's storage, which the
+            // API's upload endpoint does not accept), so honouring it would mean
+            // a second, privileged channel to the node.
             let remote = delonix_vm::backend_manages_own_storage(backend.as_deref());
-            if remote && seed.is_none() {
-                let asked: Vec<&str> = [
-                    (hostname.is_some(), "--hostname"),
-                    (!ssh_keys.is_empty(), "--ssh-key"),
-                    (user_data.is_some(), "--user-data"),
-                ]
-                .iter()
-                .filter(|(given, _)| *given)
-                .map(|(_, flag)| *flag)
-                .collect();
-                if !asked.is_empty() {
-                    return Err(Error::Invalid(super::po::tf(
-                        "{flags}: a cloud-init seed is a file on THIS host and the VM runs on \
-                         another machine, so it could never be read — configure the guest through \
-                         the node's own cloud-init, or use a local backend",
-                        &[("flags", &asked.join(", "))],
-                    )));
-                }
+            if remote && seed.is_none() && user_data.is_some() {
+                return Err(Error::Invalid(
+                    super::po::t(
+                        "--user-data: a cloud-init user-data document is a file on THIS host and \
+                         the VM runs on another machine, so it could never be read — use \
+                         --hostname and --ssh-key, which the node's own cloud-init can deliver, \
+                         or a local backend",
+                    )
+                    .into(),
+                ));
             }
             if appliance && seed.is_none() {
                 refuse_cloud_init_on_appliance(&[
@@ -1640,12 +1655,14 @@ pub fn run(action: VmCmd) -> Result<()> {
             // brought into being is ours to remove. See `seed_to_clean` below.
             let vmdir = state_root().join("vms").join(&name);
             let vmdir_existed = vmdir.exists();
+            // Only a caller-supplied `--user-data` is packaged here now: it IS a
+            // local file, so it is a seed by nature. `--hostname`/`--ssh-key`
+            // travel as intent and the engine realizes them per backend — which
+            // is what stopped this path from being local-only.
             let seed = match seed {
                 Some(s) => Some(s),
                 None if appliance => None,
-                // A file on this host is not reachable from another machine.
-                None if remote => None,
-                None => {
+                None if user_data.is_some() => {
                     let iso = generate_seed_iso(
                         &name,
                         hostname.as_deref(),
@@ -1655,7 +1672,11 @@ pub fn run(action: VmCmd) -> Result<()> {
                     )?;
                     Some(iso.to_string_lossy().into_owned())
                 }
+                None => None,
             };
+            let resolved_keys: Result<Vec<String>> =
+                ssh_keys.iter().map(|s| resolve_ssh_key(s)).collect();
+            let resolved_keys = resolved_keys?;
             // The seed is written BEFORE any backend is chosen, and everything
             // between here and `create_with` can fail: an unknown/unavailable
             // backend, `vm_admission_check` (no RAM on the host), the `--namespace`
@@ -1679,6 +1700,10 @@ pub fn run(action: VmCmd) -> Result<()> {
                 firmware,
                 cmdline,
                 seed,
+                hostname: hostname.clone(),
+                ci_user: None,
+                ssh_keys: resolved_keys,
+                cloud_init: appliance.then_some(false),
                 restart_policy,
                 hugepages,
                 cpu_affinity,
@@ -3134,120 +3159,16 @@ fn resolve_ssh_key(spec: &str) -> Result<String> {
     }
 }
 
-/// Minimal NoCloud `user-data` — pure, testable without a real `cloud-localds`.
-/// `package_update: false`/`package_upgrade: false` because the golden image
-/// already comes ready (see `cmd::vmimage`); no point spending the first boot
-/// on `apt update`.
-fn build_user_data(
-    hostname: &str,
-    ssh_keys: &[String],
-    volumes: &[delonix_vm::VmVolume],
-) -> String {
-    let mut out = String::from("#cloud-config\n");
-    out.push_str(&format!("hostname: {hostname}\n"));
-    out.push_str("package_update: false\n");
-    out.push_str("package_upgrade: false\n");
-    if !ssh_keys.is_empty() {
-        // BUG FIXED HERE: a bare top-level `ssh_authorized_keys:` only reaches
-        // cloud-init's DEFAULT distro user (`ubuntu` on this Ubuntu-based golden
-        // image) — NOT the `delonix` user the golden image itself creates at
-        // build time (`vmimage.rs`, `sudo` NOPASSWD) and that everything else
-        // here assumes is the login target: the autologin config right below
-        // (`agetty --autologin delonix`), and `cluster kubeadm`'s SSH user,
-        // hardcoded to `delonix` (the account "the golden image already
-        // creates"). Found live: `delonix cluster kubeadm` consistently failed
-        // "SSH did not respond within --boot-timeout" — the VM WAS reachable
-        // and the key WAS installed, just onto `ubuntu`, not `delonix`.
-        // Scoping the key under `users:` (keeping `- default` so the `ubuntu`
-        // account nothing else here relies on still gets created too) targets
-        // the EXISTING `delonix` account directly — cloud-init adds keys to an
-        // already-existing user without trying to recreate it.
-        out.push_str("users:\n");
-        out.push_str("  - default\n");
-        out.push_str("  - name: delonix\n");
-        out.push_str("    ssh_authorized_keys:\n");
-        for k in ssh_keys {
-            out.push_str(&format!("      - {k}\n"));
-        }
-    }
-    // Auto-login on the serial console (ttyS0) as the golden's `delonix` user:
-    // `vm console` enters directly, without asking for a password (user's choice
-    // — a dev VM's serial console is local access, like in multipass/kind).
-    // Without this, cloud-init reconfigures the getty and the console asks for login.
-    out.push_str("write_files:\n");
-    out.push_str("  - path: /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf\n");
-    out.push_str("    content: |\n");
-    out.push_str("      [Service]\n");
-    out.push_str("      ExecStart=\n");
-    out.push_str(
-        "      ExecStart=-/sbin/agetty --autologin delonix --keep-baud 115200,57600,38400,9600 - $TERM\n",
-    );
-    out.push_str("runcmd:\n");
-    out.push_str("  - [ systemctl, daemon-reload ]\n");
-    out.push_str("  - [ systemctl, restart, serial-getty@ttyS0 ]\n");
-    // Mount each 9p volume shared by the domain's `<filesystem>`. The `_netdev`
-    // avoids blocking the boot if the share isn't ready; `trans=virtio`
-    // + `9p2000.L` is the dialect that libvirt/QEMU expose. This way the guest
-    // mounts the NAS/volume WITHOUT the user writing fstab or cloud-init by hand.
-    if !volumes.is_empty() {
-        out.push_str("mounts:\n");
-        for v in volumes {
-            let mode = if v.read_only { "ro" } else { "rw" };
-            // `mount_path` quoted (validated without `"` in `valid_mount_path`) and
-            // `tag` sanitized (`vol_tag`) — the YAML flow sequence doesn't break.
-            out.push_str(&format!(
-                "  - [ \"{}\", \"{}\", 9p, \"trans=virtio,version=9p2000.L,{mode},_netdev\", \"0\", \"0\" ]\n",
-                v.tag, v.mount_path
-            ));
-        }
-    }
-    out
-}
-
-fn build_meta_data(instance_id: &str, hostname: &str) -> String {
-    format!("instance-id: {instance_id}\nlocal-hostname: {hostname}\n")
-}
-
-/// The NoCloud `network-config`: DHCP on the primary NIC, matched by **MAC**.
+/// Packages a caller-supplied `user-data` document into a NoCloud seed ISO.
 ///
-/// It used to match by NAME with a glob (`match: {name: "e*"}`), to cover
-/// `eth0`/`ens3`/`enp1s0` without knowing which the guest would pick. That
-/// works where the renderer is netplan (Ubuntu, Debian) and is BROKEN wherever
-/// it is NetworkManager (Fedora, Rocky) — measured, and the cloud-init source
-/// says why in one line:
+/// The BUILDERS moved to `delonix_vm::cloudinit` — this is now the thin part
+/// that stays in the CLI, and the split is the point: hostname/user/keys are
+/// INTENT and belong in `VmConfig`, where every backend can realize them its own
+/// way; a `--user-data` document is a file on this host, so it can only ever be
+/// a seed. Keeping a second copy of the generator here is what made cloud-init
+/// local-only in the first place.
 ///
-/// ```text
-/// if if_type == "bridge" or not self.config.has_option(if_type, "mac-address"):
-///     self.config["connection"]["interface-name"] = iface["name"]
-/// ```
-///
-/// With no MAC to write, the renderer falls back to naming the interface after
-/// the netplan KEY — so a Fedora guest got a keyfile saying
-/// `interface-name=eth-all`, NetworkManager waited for a device by that name,
-/// and `enp1s0` stayed down forever. The guest booted to a login prompt with no
-/// address and no route, and the only sign was a `Up: False` line buried in
-/// `cloud-init-output.log`.
-///
-/// A MAC is the one thing about the NIC that IS known before the guest exists
-/// ([`delonix_vm::mac_for`], stamped by both backends), so there is nothing to
-/// guess. It also makes the renderer omit `interface-name` entirely, which is
-/// what lets the same file work on every distro.
-///
-/// **Scope: the primary NIC only.** The old glob would also DHCP any extra NIC
-/// (`spec.extraNics`); this names one. That is the interface everything else in
-/// this engine depends on — DNS, namespace isolation, `vm ssh` — and an extra
-/// NIC is a declarative libvirt knob whose guest-side config is the author's.
-fn build_network_config(vm_name: &str) -> String {
-    format!(
-        "version: 2\nethernets:\n  nic0:\n    match:\n      macaddress: \"{}\"\n    dhcp4: true\n",
-        delonix_vm::mac_for(vm_name)
-    )
-}
-
-/// Generates (or reuses, via `user_data_override`) the `user-data`/`meta-data`
-/// and packages them into a NoCloud ISO with `cloud-localds`. Returns the ISO
-/// path. `pub(crate)`: reused by `cmd::cluster::provision_and_apply` (each VM
-/// provisioned by `delonix cluster kubeadm` needs the same seed).
+/// `pub(crate)` because `cmd::vmfile` still packages an author's own document.
 pub(crate) fn generate_seed_iso(
     vm_name: &str,
     hostname: Option<&str>,
@@ -3255,80 +3176,36 @@ pub(crate) fn generate_seed_iso(
     user_data_override: Option<&std::path::Path>,
     volumes: &[delonix_vm::VmVolume],
 ) -> Result<PathBuf> {
-    // SECURITY: this runs BEFORE `delonix_vm::create()` — which is where
-    // `valid_vm_name` is enforced — so a `../../../home/<u>/.ssh` name reached
-    // `create_dir_all`/`fs::write` here (seed.iso with fully attacker-controlled
-    // content via `--user-data`) before ever hitting that check. Enforce it here
-    // too: this function is a path-writing boundary of its own, not just an API
-    // consumer of `create()`.
-    if !delonix_vm::valid_vm_name(vm_name) {
-        return Err(Error::Invalid(format!("invalid VM name: {vm_name:?}")));
+    // The user's own user-data replaces EVERYTHING — there is nowhere to inject
+    // the volume mounts without merging them. Warn instead of losing them
+    // silently (the `<filesystem>` stays in the XML, but the guest will not
+    // mount them by itself without a `mounts:` entry). Stays HERE and not in the
+    // engine: it is about a flag the CLI accepted.
+    if user_data_override.is_some() && !volumes.is_empty() {
+        eprintln!(
+            "{}",
+            super::po::tf(
+                "WARNING: VM '{vm_name}': custom --user-data/seed does not include the 9p volume mounts — add them manually (tags: {tags})",
+                &[
+                    ("vm_name", vm_name),
+                    (
+                        "tags",
+                        &volumes.iter().map(|v| v.tag.as_str()).collect::<Vec<_>>().join(", "),
+                    ),
+                ],
+            )
+        );
     }
-    let hostname = hostname.unwrap_or(vm_name).to_string();
-    let work_dir = state_root().join("vms").join(vm_name);
-    std::fs::create_dir_all(&work_dir)?;
-
-    let user_data_path = work_dir.join("user-data");
-    match user_data_override {
-        Some(p) => {
-            std::fs::copy(p, &user_data_path).map_err(|e| {
-                Error::Invalid(format!(
-                    "{}: {e}",
-                    super::po::tf(
-                        "could not copy --user-data '{path}'",
-                        &[("path", &p.display().to_string())],
-                    )
-                ))
-            })?;
-            // The user's own user-data replaces EVERYTHING — there's nowhere to
-            // inject the volume mounts without merging them. Warn instead of
-            // losing them silently (the `<filesystem>` stays in the XML, but the
-            // guest won't mount them by itself without a `mounts:` entry).
-            if !volumes.is_empty() {
-                eprintln!(
-                    "{}",
-                    super::po::tf(
-                        "WARNING: VM '{vm_name}': custom --user-data/seed does not include the 9p volume mounts — add them manually (tags: {tags})",
-                        &[
-                            ("vm_name", vm_name),
-                            (
-                                "tags",
-                                &volumes.iter().map(|v| v.tag.as_str()).collect::<Vec<_>>().join(", "),
-                            ),
-                        ],
-                    )
-                );
-            }
-        }
-        None => {
-            let resolved_keys: Result<Vec<String>> =
-                ssh_keys.iter().map(|s| resolve_ssh_key(s)).collect();
-            let content = build_user_data(&hostname, &resolved_keys?, volumes);
-            std::fs::write(&user_data_path, content)?;
-        }
-    }
-    let meta_data_path = work_dir.join("meta-data");
-    std::fs::write(&meta_data_path, build_meta_data(vm_name, &hostname))?;
-
-    // network-config (NoCloud v2): DHCP on the primary NIC, matched by MAC.
-    let net_cfg_path = work_dir.join("network-config");
-    std::fs::write(&net_cfg_path, build_network_config(vm_name))?;
-
-    let iso_path = work_dir.join("seed.iso");
-    let status = Command::new("cloud-localds")
-        .arg(format!("--network-config={}", net_cfg_path.display()))
-        .arg(&iso_path)
-        .arg(&user_data_path)
-        .arg(&meta_data_path)
-        .status()
-        .map_err(|e| Error::Invalid(format!("{}: {e}", super::po::t("running cloud-localds"))))?;
-    if !status.success() {
-        return Err(Error::Invalid(super::po::tf(
-            "cloud-localds failed (exit {code})",
-            &[("code", &format!("{:?}", status.code()))],
-        )));
-    }
-    Ok(iso_path)
+    let resolved: Result<Vec<String>> = ssh_keys.iter().map(|s| resolve_ssh_key(s)).collect();
+    delonix_vm::cloudinit::generate_seed_iso(
+        &state_root(),
+        vm_name,
+        hostname,
+        None,
+        &resolved?,
+        user_data_override,
+        volumes,
+    )
 }
 
 /// Handles the `init` of this group (see `cmd::scaffold`).
@@ -3581,10 +3458,9 @@ mod tests {
     }
 
     use super::{
-        build_meta_data, build_user_data, fmt_vm_gpu, fmt_vm_status, fmt_vm_uptime,
-        looks_like_address, manifest, normalize_vm_spec, parse_ip_gateways, parse_ss_binds,
-        resolve_vm_defaults, unconverged_fields_condition, vm_role, ManifestDoc, VmSpec,
-        RECONCILED_VM_FIELDS,
+        fmt_vm_gpu, fmt_vm_status, fmt_vm_uptime, looks_like_address, manifest, normalize_vm_spec,
+        parse_ip_gateways, parse_ss_binds, resolve_vm_defaults, unconverged_fields_condition,
+        vm_role, ManifestDoc, VmSpec, RECONCILED_VM_FIELDS,
     };
     use delonix_runtime_core::Status;
 
@@ -3935,87 +3811,6 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
     }
 
     #[test]
-    fn user_data_inclui_hostname_e_chaves() {
-        let ud = build_user_data("myvm", &["ssh-ed25519 AAAA foo".to_string()], &[]);
-        assert!(ud.starts_with("#cloud-config\n"));
-        assert!(ud.contains("hostname: myvm\n"));
-        assert!(ud.contains("package_update: false\n"));
-        // Regression: a bare top-level `ssh_authorized_keys:` only reaches
-        // cloud-init's DEFAULT user (`ubuntu`), never the `delonix` account the
-        // golden image actually creates and that `cluster kubeadm`'s SSH login
-        // (and the autologin config below) hardcode. Found live: `delonix
-        // cluster kubeadm` consistently failed "SSH did not respond" against a
-        // fully-booted, reachable VM, because the key landed on the wrong user.
-        // Must be scoped under `users: - name: delonix`, alongside `- default`
-        // so the `ubuntu` account still gets created too (unrelated code paths
-        // may depend on it existing).
-        assert!(ud.contains("users:\n  - default\n  - name: delonix\n"));
-        assert!(ud.contains("ssh_authorized_keys:\n      - ssh-ed25519 AAAA foo\n"));
-    }
-
-    #[test]
-    fn user_data_sem_chaves_nao_tem_seccao_ssh() {
-        let ud = build_user_data("myvm", &[], &[]);
-        assert!(!ud.contains("ssh_authorized_keys"));
-    }
-
-    #[test]
-    fn o_network_config_casa_por_mac_e_nao_por_nome() {
-        // MEASURED: without a `macaddress` the NetworkManager renderer names the
-        // interface after the netplan key, so a Fedora guest ended up with
-        // `interface-name=eth-all` and `enp1s0` down forever — booted, logged
-        // in, no address. The MAC must be the one both backends stamp, not a
-        // second copy of the formula.
-        let cfg = super::build_network_config("fed-ctl");
-        assert!(
-            cfg.contains(&format!(
-                "macaddress: \"{}\"",
-                delonix_vm::mac_for("fed-ctl")
-            )),
-            "must match the NIC the engine actually creates: {cfg}"
-        );
-        assert!(
-            !cfg.contains("name:"),
-            "a name match is what broke every NetworkManager distro: {cfg}"
-        );
-        assert!(cfg.contains("dhcp4: true"));
-    }
-
-    #[test]
-    fn user_data_configura_autologin_serial() {
-        // The serial console enters directly as `delonix` (`vm console` without
-        // asking for a password) — cloud-init would reconfigure the getty otherwise.
-        let ud = build_user_data("myvm", &[], &[]);
-        assert!(ud.contains("serial-getty@ttyS0.service.d/autologin.conf"));
-        assert!(ud.contains("--autologin delonix"));
-        assert!(ud.contains("restart, serial-getty@ttyS0"));
-    }
-
-    #[test]
-    fn user_data_com_volumes_injecta_mounts_9p() {
-        let vols = vec![
-            delonix_vm::VmVolume {
-                tag: "dados".into(),
-                source: "/srv/dados".into(),
-                mount_path: "/mnt/dados".into(),
-                read_only: false,
-            },
-            delonix_vm::VmVolume {
-                tag: "ro".into(),
-                source: "/srv/ro".into(),
-                mount_path: "/mnt/ro".into(),
-                read_only: true,
-            },
-        ];
-        let ud = build_user_data("myvm", &[], &vols);
-        assert!(ud.contains("mounts:\n"));
-        assert!(ud.contains("[ \"dados\", \"/mnt/dados\", 9p, \"trans=virtio,version=9p2000.L,rw,_netdev\", \"0\", \"0\" ]"), "{ud}");
-        assert!(ud.contains("[ \"ro\", \"/mnt/ro\", 9p, \"trans=virtio,version=9p2000.L,ro,_netdev\", \"0\", \"0\" ]"), "{ud}");
-        // No volumes → no mounts section.
-        assert!(!build_user_data("myvm", &[], &[]).contains("mounts:"));
-    }
-
-    #[test]
     fn vol_tag_saneia_e_trunca() {
         assert_eq!(super::vol_tag("nas-creds.db"), "nas_creds_db");
         assert_eq!(super::vol_tag(&"x".repeat(40)).len(), 31);
@@ -4031,11 +3826,5 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
         for bad in ["/mnt/a,b", "/mnt/a]b", "/mnt/a\"b", "/mnt/a#b", "/mnt/a\nb"] {
             assert!(!super::valid_mount_path(bad), "{bad:?} devia ser rejeitado");
         }
-    }
-
-    #[test]
-    fn meta_data_tem_instance_id_e_hostname() {
-        let md = build_meta_data("vm-1", "myvm");
-        assert_eq!(md, "instance-id: vm-1\nlocal-hostname: myvm\n");
     }
 }
