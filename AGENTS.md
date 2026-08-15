@@ -2067,10 +2067,15 @@ static pod que nunca passou pelo API server.
   em EN e PT, sem socket criado); servidor `delonix-cri` real a anunciar o tecto expandido; e — o
   pressuposto central do clamp — o argv emitido aplicado pelo MOTOR real, com o kernel a confirmar
   `CapEff 0x1001` (CHOWN+NET_ADMIN exactos) contra `0xa0042dfb` do baseline e `0x1ffffffffff` de um
-  `--privileged`. **Não validado com um kubelet/`crictl` real** (nenhum dos dois existe neste host,
-  e `build_client(false)` no `build.rs` não gera stubs de cliente gRPC): o caminho gRPC está coberto
-  pelo teste do `create_container` real + `cap_flags`/`cap_args`, e a camada tonic são três linhas
-  de `blocking(...)`.
+  `--privileged`. **FECHADO a 2026-08-15**: esta nota dizia que o caminho gRPC não era validável aqui
+  porque não há `crictl` e o `build_client(false)` não gerava stubs de cliente — e concluía que «a
+  camada tonic são três linhas de `blocking(...)`». Isso é uma razão para ACHAR que funciona, não
+  uma medição. O cliente passou a ser gerado (custo medido antes de decidir: **3,5 s** de build no
+  crate) e `crates/delonix-cri/tests/grpc_status.rs` faz o round-trip a sério — sobe o servidor num
+  socket unix, chama `Version` e `Status` pelo cliente gerado, e exige as duas condições que o
+  kubelet lê. Verificado que apanha regressão: com o `Status` a devolver condições vazias, chumba
+  em «faltou RuntimeReady: []». Continua por validar com um **kubelet** real — isso precisa de um
+  nó, não de um cliente.
 - **Por fazer, deliberadamente**: nada disto toca no `container run` da CLI (lá quem escolhe é o
   operador, não um pedido remoto — um tecto local seria o utilizador a limitar-se a si mesmo); e
   `add_ambient_capabilities` do CRI continua sem tradução nenhuma no motor (gap pré-existente,
