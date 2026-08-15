@@ -25,12 +25,12 @@
 use delonix_runtime_core::{Error, Result};
 use std::process::{Command, Stdio};
 
-// Re-exportadas do `delonix-net-model`, que é onde vivem agora: são regras
+// Re-exportadas do `delonix-net-rules`, que é onde vivem agora: são regras
 // PURAS, e o control-plane precisa de calcular exactamente o mesmo (o nome da
 // bridge que ele espera tem de ser o que este motor cria). Re-exportar em vez de
 // mudar os consumidores: nenhum call-site deste crate teve de mexer.
-pub(crate) use delonix_net_model::fnv32;
-pub use delonix_net_model::{
+pub(crate) use delonix_net_rules::fnv32;
+pub use delonix_net_rules::{
     bridge_name, derive_ip_in, parse_overlay_peer, valid_ip_in_subnet, Cidr,
 };
 
