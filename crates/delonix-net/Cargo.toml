@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-delonix-net-model = { path = "../delonix-net-model" }
+delonix-net-rules = { path = "../delonix-net-rules" }
 delonix-runtime-core = { path = "../delonix-runtime-core" }
 tracing = { workspace = true }
 libc = { workspace = true }
