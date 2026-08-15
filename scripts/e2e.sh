@@ -16,8 +16,9 @@
 #
 # **Actualizado 2026-08-15**: `net` (43 folhas em 6 subgrupos) tinha ZERO
 # execuções e passou a ter 19 checks; `compose` tinha ZERO e passou a ter 20.
-# `serve` tinha ZERO e passou a ter 17. Continua sem nenhuma: `storage` (13)
-# — e os comandos-folha
+# `serve` tinha ZERO e passou a ter 17, `storage` ZERO e passou a ter 8 (dos
+# quais 3 só num host com privilégio de montagem). Continuam sem nenhuma os
+# comandos-folha
 # `dash`/`man`/`version`.
 # Cita-se a FRACÇÃO medida e a data, nunca o total de checks: um total que sobe
 # faz a cobertura parecer melhor sem uma única folha nova exercitada.
@@ -896,6 +897,42 @@ check "--cron com 4 campos recusa" fail "$BIN" backup container "$BKC" --to "$BK
 "$BIN" volumes rm "$BKV" >/dev/null 2>&1
 
 ########################################
+section "storage — o que se consegue provar sem uma NAS"
+
+# O `storage` tinha ZERO execuções. E é o grupo onde o SKIP honesto é a maior
+# parte do valor: `storage create` MONTA de imediato (`mount -t nfs|cifs|davfs`),
+# o que exige CAP_SYS_ADMIN — num host rootless não é exercitável, ponto.
+# Fingir com um servidor NFS falso provaria o parser, não o caminho.
+STGN="stg-$PFX"
+
+check "storage ls responde" ok "$BIN" storage ls
+check "storage inspect de inexistente diz 4" 4 "$BIN" storage inspect "naoexiste-$PFX"
+check "storage rm de inexistente diz 4" 4 "$BIN" storage rm "naoexiste-$PFX"
+check "storage create com --type desconhecido recusa" 2 \
+  "$BIN" storage create "$STGN" --type naoexiste --server 10.99.99.99 --share /x
+check "storage create sem --share recusa" 2 \
+  "$BIN" storage create "$STGN" --type nfs --server 10.99.99.99
+
+# O que É exercitável do `create`: que ele falha ALTO por falta de privilégio e
+# NÃO deixa estado atrás. Um create meio-feito é a classe que este repo já pagou
+# várias vezes (o `create_network` sem rollback, o `volumes rm` a apagar a
+# contabilidade antes dos dados) — e aqui está medido, não assumido.
+if "$BIN" storage create "$STGN" --type nfs --server 10.99.99.99 --share /exports/x >/dev/null 2>&1; then
+  # Um host COM privilégio de montagem chega aqui; então exercita-se o resto.
+  check "storage inspect do que foi criado" ok "$BIN" storage inspect "$STGN"
+  check "storage ls mostra-o" ok bash -c "'$BIN' storage ls | grep -q '$STGN'"
+  check "storage rm" ok "$BIN" storage rm "$STGN"
+else
+  skip "storage create/inspect/rm com NAS real" "montar NFS/CIFS exige CAP_SYS_ADMIN — não exercitável em rootless"
+  # E ISTO é o que se prova sem privilégio nenhum:
+  check "um create falhado não deixa o directório do volume" ok bash -c \
+    "[ ! -d \"\${DELONIX_ROOT:-\$HOME/.local/share/delonix}/volumes/$STGN\" ]"
+  check "um create falhado não deixa registo em volumes ls" ok bash -c \
+    "! '$BIN' volumes ls 2>/dev/null | grep -q '$STGN'"
+  check "um create falhado não deixa registo em storage ls" ok bash -c \
+    "! '$BIN' storage ls 2>/dev/null | grep -q '$STGN'"
+fi
+
 section "serve — arrancar, sondar, matar, e não deixar restos"
 
 # O grupo `serve` tinha ZERO execuções. São SERVIDORES, por isso precisa de um
