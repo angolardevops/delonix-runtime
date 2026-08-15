@@ -23,6 +23,7 @@ never rewritten — supersede them with a new one.
 | [0010](0010-remote-management-api.md) | What it would take for the management API to be remote | **Rejected** — the API stays local; remoteness belongs to the PaaS |
 | [0012](0012-vm-reboot-convergence.md) | A third convergence class for VMs: reboot, between update and replace | **Proposed** — deliberately after the production launch |
 | [0013](0013-network-topology.md) | Routed topologies — external gateway/DNS, subnets and VLANs, without leaving rootless | **Accepted** — tier A/B rootless (B spiked GO), tier C privileged |
+| [0014](0014-runtime-dir-per-root.md) | The network runtime dir is scoped to the state root, not just to the uid | **Accepted** — implemented; default root unchanged, only alternative roots move |
 
 ## Roadmap (from `CLAUDE.md` "Universal Runtime" — each phase needs its own accepted ADR)
 

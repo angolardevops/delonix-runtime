@@ -3681,7 +3681,45 @@ checklist para quem mexer aqui do que como lista de correcções:
   `_ => ("?", "unsupported kind")` — o `stack ls`/`describe` a chamarem «kind não suportado» a
   um recurso que o apply cria. **E `stack wait` tinha ZERO checks no `scripts/e2e.sh`** — o
   balde dos «comandos nunca executados» a pagar-se outra vez, e é onde a próxima varredura deve
-  ir primeiro (v0.53.0).
+  ir primeiro (v0.53.0);
+- **`argv[0]` dizer `slirp4netns` não é «este slirp é nosso»** — o `slirp4netns` não é nosso, é
+  uma ferramenta de terceiros que o Podman rootless também usa, com a MESMA forma de argv
+  (`… <pid-alvo> tap0`). O `list_slirps` identificava por `argv[0]` e mais nada, por isso o
+  `reap_orphan_slirp` tratava como órfão CEIFÁVEL qualquer slirp do host cujo alvo tivesse
+  morrido — incluindo os de outras ferramentas. E corre a partir do `publish_with_retry`, ou
+  seja sempre que um `-p` NOSSO falha: um conflito de porta aqui ia mandar SIGTERM à rede de um
+  motor sem relação nenhuma, na mesma máquina. Reproduzido ao vivo (2026-08-15) com um slirp
+  arrancado à mão com a forma de argv do Podman: marcado para ceifa, enquanto os quatro slirps
+  reais do delonix eram correctamente poupados. O token de posse é o `--api-socket`, porque é o
+  único elemento do argv cujo CAMINHO nós escolhemos; um slirp nosso sem portas não tem
+  api-socket e responde «não é meu», que é a resposta honesta e não custa nada — quem liberta
+  uma porta presa é o `reap_slirp_for`, que conhece o alvo pelo pid;
+- **«o processo é detached» não é «já não preciso dos fds do chamador»** — o `start_pin` herdava o
+  `stderr` do chamador com o comentário a garantir que «inheriting stderr costs nothing (the
+  process is detached)». O pin dorme durante toda a vida da infra, logo segura esse fd aberto
+  para sempre: quem capture a saída por pipe fica bloqueado num `read` que nunca vê EOF —
+  `out=$(delonix …)`, um passo de CI, um `stack apply` num pipeline, todos penduram se calhar
+  ser essa a invocação que arranca a rede. **Medido a 2026-08-15**: o `scripts/e2e.sh` parou 16
+  minutos sem escrever um check, com o bash em `anon_pipe_read` e **sem um único filho vivo** — a
+  ponta de escrita do pipe era o fd 2 do `delonix netns pin`. E a correcção já existia **duas
+  funções acima**: o `start_control` escreve para `control.log` com esta mesma razão explicada, e
+  chegava a nomear o pin como contra-exemplo — quando o pin é o MAIS longevo dos dois (o control
+  reinicia, o pin nunca). Passou a `ingress/pin.log`. Mesma forma do `write_private_temp`: a
+  correcção feita e o chamador ao lado deixado para trás. **Nota de método**: um `timeout` na
+  bateria teria matado a corrida sem explicar nada; o que deu a resposta foi seguir o pipe até
+  ao dono (`readlink /proc/*/fd/*`);
+- **um PID vivo não é o processo que o pidfile diz** — o `kill_pidfile` do `infra` decidia por
+  `Path::new("/proc/{pid}").exists()`, logo um pidfile obsoleto cujo número tivesse sido
+  reciclado levava SIGTERM a um processo alheio. O `ingress_proxy::running_pid` já tinha a
+  guarda certa (compara o `/proc/<pid>/cmdline`) e dizia porquê no doc-comment; o caminho que
+  mata o holder, o controlo e o slirp é que ficou sem ela. **Nota de severidade, medida e não
+  deduzida**: neste host o `pid_max` é 4 194 304 com o último PID em ~416 746 — o wraparound
+  está a ~3,8 milhões de distância e NÃO é iminente aqui. A guarda continua certa (um host de
+  vida longa dá a volta, e `pid_max` a 32768 é comum noutras máquinas), mas quem priorizar isto
+  acima do `flock` em falta no `ensure`/`teardown` está a trocar a ordem: a guarda impede o dano
+  colateral, não impede a decisão errada que o provoca. Aceita-se `netns holder` além de
+  `netns pin` de propósito — o `teardown` é o comando de recuperação de um upgrade in-place, e
+  o processo vivo aí é de um binário pré-split;
 
 **Achado vivo da varredura (v0.42.2)**: `delonix system info` reportava `cgroup2 delegated: yes`
 incondicionalmente, por ler os ficheiros do cgroup raiz do host — o comando que se corre para
