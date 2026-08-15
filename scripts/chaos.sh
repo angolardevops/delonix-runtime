@@ -609,6 +609,64 @@ scen_pod_holder_respawn() {
 # It checks PIDs and not just connectivity on purpose. A recovery-by-restart would
 # also leave the network working, and would look identical here — the whole point
 # is that no workload was touched.
+scen_posse_destrutiva() {
+  head_ "posse-destrutiva — nada destrói o que não prova ser seu"
+  # Trava as correcções de 2026-08-15. Cada asserção corresponde a um defeito
+  # REPRODUZIDO nesse dia, e não a uma hipótese.
+
+  # --- 1. o reaper de slirp NÃO é exercitado aqui, e a razão foi medida -------
+  # Tentei-o: decoy `slirp4netns` com a forma de argv do Podman, órfão, e dois
+  # containers a disputar a MESMA porta para provocar o `publish_with_retry` (o
+  # único chamador do reaper). O cenário passou COM a posse revertida — ou seja,
+  # não exercitava nada: o conflito de porta é apanhado por um preflight ANTES
+  # de chegar ao publish, logo o reaper nunca corre.
+  #
+  # A posse está fixada onde falha mesmo: `tests_posse_do_slirp` (delonix-net),
+  # sete testes, dos quais dois chumbam se a metade da posse for retirada —
+  # verificado. Um cenário de caos que passa com o defeito lá dentro é pior que
+  # nenhum, porque dá por travado o que não está.
+
+  # --- 2. o pin não segura o stdout/stderr de quem o arranca ------------------
+  # Antes da correcção, um `$(...)` sobre um comando que levantasse a infra
+  # bloqueava para sempre: o pin herdava o pipe e nunca o largava.
+  dlx net netns down >/dev/null 2>&1
+  local saida
+  if saida=$(timeout 45 env DELONIX_ROOT="$SANDBOX/root" DELONIX_NET_RUNTIME_DIR="$SANDBOX/run" \
+               "$BIN" net netns up 2>&1) && [ -n "$saida" ]; then
+    ok "posse-destrutiva/pin: capturar a saída de quem levanta a infra não pendura"
+  else
+    bad "posse-destrutiva/pin" "o comando não devolveu — o pin voltou a segurar o pipe do chamador"
+  fi
+
+  # --- 3. o teardown não deixa o socket de controlo para trás ----------------
+  dlx net netns down >/dev/null 2>&1
+  if [ ! -S "$SANDBOX/run/control.sock" ]; then
+    ok "posse-destrutiva/teardown: o socket de controlo não fica órfão"
+  else
+    bad "posse-destrutiva/teardown" "ficheiro de socket sobreviveu ao teardown"
+  fi
+
+  # --- 4. o runtime dir por-root NÃO é verificado aqui, de propósito ---------
+  # Tentei-o e o check só sabia SALTAR: subir infra a partir de um segundo root
+  # dentro do sandbox não é fiável neste ambiente. E um check que nunca corre
+  # não é um check — é um SKIP a fazer de conta.
+  #
+  # O invariante está fixado onde é DETERMINÍSTICO: o teste unitário
+  # `base_root_e_runtime_dir_honram_env_vars_explicitas` (delonix-net) exige que
+  # um root alternativo resolva uma pasta DIFERENTE da do root por omissão, que
+  # o root por omissão mantenha o nome nu byte a byte, e que o caminho do socket
+  # fique abaixo dos 108 bytes do `sun_path`. É pura, corre sempre, e falha se o
+  # `root_suffix` for revertido.
+  #
+  # A primeira versão deste check contava `/tmp/delonix-net-*` inteiro e
+  # afirmava `>= 1` — passava com a correcção REVERTIDA, porque a glob apanha os
+  # restos de testes unitários (`delonix-net-naming-<pid>`). Fica registado
+  # porque é a mesma armadilha do filtro largo que esta série já pagou três
+  # vezes: um verde sobre uma medição que não exercita nada.
+
+  dlx net netns down >/dev/null 2>&1
+}
+
 scen_control_restart() {
   head_ "control-restart — matar o plano de controlo não pode mexer em nada"
   dlx net netns up >/dev/null 2>&1
@@ -963,7 +1021,7 @@ $(cat "/sys/fs/cgroup$cg1/memory.max" 2>/dev/null || echo ausente))"
   dlx container rm -f ckg0 ckg1 >/dev/null 2>&1
 }
 
-ALL=(holder_kill control_restart holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_holder_respawn scale abrupt_kill aggregate_ceiling delegated_scope cgroup_netns disk_full write_failure stack_converge stack_netroute truenas_destroy)
+ALL=(holder_kill control_restart posse_destrutiva holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_holder_respawn scale abrupt_kill aggregate_ceiling delegated_scope cgroup_netns disk_full write_failure stack_converge stack_netroute truenas_destroy)
 
 while [ $# -gt 0 ]; do
   case "$1" in

@@ -117,11 +117,21 @@ holder's directory.
 
 ## What this ADR does NOT decide
 
-- **`control_reachable()` stays a bare `connect`.** Scoping the dir removes the cross-root race
-  that made its weakness matter, but it is still a TOCTOU probe rather than a lock, and it is
-  still the thing standing between a second process of the *same* root and a live holder. The
-  `FileLock` now covers that path; whether the probe should become an ownership assertion of its
-  own is a separate question.
+- **`control_reachable()` stays a bare `connect` — and the deferred question has since been
+  answered.** *(Amendment, 2026-08-15, after the change shipped.)* Re-read against the code as it
+  now stands, the probe's weakness no longer has a scenario:
+  - **Cross-root is structurally impossible.** Two roots resolve two different `runtime_dir`s, so
+    neither can see the other's control socket. The 2026-08-10 incident that motivated the guard
+    — a conformance run and a normal session fighting over one socket — cannot recur.
+  - **Same-root concurrency is serialized.** Both processes take `FileLock` before deciding, so
+    the second finds the first's infra up and returns early, never reaching the guard.
+  What the guard still covers is narrower and real: THIS root's pidfiles are gone (an `ingress/`
+  wiped by hand, a partial `rm`) while its control plane is still listening — rebuilding there
+  would strand a live holder with every workload attached to it. So it stays, as a probe, and the
+  comment in `ensure_up_locked` was corrected: it described a failure mode that can no longer
+  happen, which is precisely how a stale comment misleads the next reader. **No ownership
+  assertion is warranted**; adding one would be a second mechanism answering a question the
+  directory scoping already answers structurally.
 - **Nothing about `reap_orphan_slirp`**, which is the same bug class one layer down (a
   destructive sweep over a shared resource with no ownership test) and is fixed in the same
   change by a different mechanism — the `--api-socket` path as an ownership token.

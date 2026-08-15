@@ -897,9 +897,23 @@ fn ensure_up_locked() -> Result<()> {
     // afterwards hung for the full 600s spec timeout, and the run reported 79
     // failures that had nothing to do with conformance.
     //
-    // So: ask the RESOURCE, not our bookkeeping. A live listener on the shared
-    // socket means somebody owns this user's infra, and destroying it is the
-    // operator's call, never a side effect of a command that wanted a network.
+    // So: ask the RESOURCE, not our bookkeeping. A live listener on the socket
+    // means somebody owns this infra, and destroying it is the operator's call,
+    // never a side effect of a command that wanted a network.
+    //
+    // **The cross-ROOT scenario above can no longer happen** (ADR-0014,
+    // 2026-08-15): `runtime_dir` carries a `root_suffix`, so two roots resolve
+    // two different sockets and neither can see — let alone tear down — the
+    // other's. And two processes of the SAME root now serialize on `FileLock`,
+    // so the second one finds the first's infra up and returns early, never
+    // reaching this branch.
+    //
+    // The guard is kept, and is NOT dead code, but the case it still covers is
+    // narrower than the story above: THIS root's pidfiles are gone (an `ingress/`
+    // wiped by hand, a partial `rm`) while its control plane is still listening.
+    // Rebuilding on top of that would strand a live holder with every workload
+    // attached to it. The paragraphs above are kept as the history that produced
+    // the guard — but read them as history, not as a live failure mode.
     if control_reachable() {
         return Err(Error::Runtime {
             context: "control socket",
