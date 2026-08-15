@@ -1,5 +1,5 @@
 [package]
-name = "delonix-net-model"
+name = "delonix-net-rules"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
