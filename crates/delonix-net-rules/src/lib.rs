@@ -368,6 +368,29 @@ pub fn parse_iptables_save(texto: &str) -> IptablesSummary {
     s
 }
 
+/// O VIP estável de um serviço, derivado do nome (`10.90.a.b`).
+///
+/// Fora do espaço dos containers de propósito: o tráfego para o VIP tem de
+/// passar pelo caminho que o balanceia, e um endereço dentro da subrede seria
+/// entregue directamente ao container.
+///
+/// Puro e determinístico — o control-plane precisa de calcular o mesmo VIP que o
+/// motor, e é por isso que vive aqui e não atrás de uma API. Os extremos `.0`,
+/// `.1` e `.255` são evitados: o primeiro não é um endereço de host, o segundo é
+/// por convenção o gateway, e o último é o broadcast.
+pub fn service_vip(key: &str) -> String {
+    let h = fnv32(key);
+    let a = ((h >> 8) & 0xff) as u8;
+    let mut b = (h & 0xff) as u8;
+    if b < 2 {
+        b = 2;
+    }
+    if b == 255 {
+        b = 254;
+    }
+    format!("10.90.{a}.{b}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -502,5 +525,24 @@ COMMIT
     #[test]
     fn ficheiro_vazio_nao_rebenta() {
         assert_eq!(parse_iptables_save(""), IptablesSummary::default());
+    }
+    /// O VIP é um CONTRATO: o control-plane calcula-o para escrever regras e o
+    /// motor para as aplicar. Se divergirem, o tráfego vai para um endereço que
+    /// ninguém está a escutar.
+    #[test]
+    fn service_vip_e_estavel_e_evita_os_extremos() {
+        assert_eq!(service_vip("api"), service_vip("api"));
+        assert_ne!(service_vip("api"), service_vip("db"));
+
+        // Fora do espaço dos containers (10.200-254): tem de passar pelo
+        // caminho que balanceia.
+        for nome in ["api", "db", "cache", "web", "worker", "queue"] {
+            let vip = service_vip(nome);
+            assert!(vip.starts_with("10.90."), "{nome} -> {vip}");
+            let ultimo: u8 = vip.rsplit('.').next().unwrap().parse().unwrap();
+            // `.0` não é endereço de host, `.1` é o gateway por convenção,
+            // `.255` é broadcast.
+            assert!((2..=254).contains(&ultimo), "{nome} -> {vip}");
+        }
     }
 }
