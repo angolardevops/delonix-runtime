@@ -1227,7 +1227,7 @@ const CONTROL_WORK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 fn is_readonly_verb(line: &str) -> bool {
     matches!(
         line.split_whitespace().next().unwrap_or(""),
-        "ping" | "has-netns" | "fwstats" | "egress-show" | "netroute-show"
+        "ping" | "has-netns" | "fwstats" | "fwsummary" | "egress-show" | "netroute-show"
     )
 }
 
@@ -1356,6 +1356,26 @@ fn handle_control(line: &str) -> String {
         )
         .unwrap_or_default();
         return format!("ok {}\n", hex_encode(listing.as_bytes()));
+    }
+    // Query: as regras de DNAT e o conjunto de bloqueados, para o resumo de
+    // firewall do control-plane. Read-only, e no holder porque a tabela `dlxing`
+    // vive no netns dele.
+    //
+    // Devolve as DUAS listagens numa resposta, separadas por `|`: quem pergunta
+    // quer o retrato completo, e duas viagens ao holder dariam duas fotografias
+    // de instantes diferentes — com uma publicação a acontecer no meio, o
+    // resumo mostraria um porto que já não existe ao lado de um bloqueio que
+    // ainda não existia.
+    if let ["fwsummary"] = parts.as_slice() {
+        let pre = crate::capture("nft", &["list", "chain", "ip", INGRESS_TABLE, "pre"])
+            .unwrap_or_default();
+        let blocked = crate::capture("nft", &["list", "set", "ip", INGRESS_TABLE, "blocked"])
+            .unwrap_or_default();
+        return format!(
+            "ok {}|{}\n",
+            hex_encode(pre.as_bytes()),
+            hex_encode(blocked.as_bytes())
+        );
     }
     // Query: the LIVE exemption map, for `stack ls`/`network route ls`. Read-only
     // and hex-encoded for the same reason as `fwstats` — an nft listing is not
@@ -3743,6 +3763,116 @@ fn egress_set_members(bridge: &str) -> Vec<String> {
     ips.sort();
     ips.dedup();
     ips
+}
+
+/// Uma publicação de porto vista do lado do mecanismo: a regra de DNAT.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
+pub struct DnatRule {
+    pub proto: String,
+    pub host_port: String,
+    /// `ip:porta` do container que recebe.
+    pub to: String,
+}
+
+/// O retrato da firewall de ingress de um nó.
+///
+/// Reposto depois de o `Net` — o gestor anterior ao holder — ter sido apagado do
+/// motor. O control-plane usava o `Net::firewall_summary`, que lia o `nft` do
+/// netns do HOST; em rootless a tabela vive no netns do holder, e por isso a
+/// leitura passa a ser um verbo read-only do protocolo de controlo.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
+pub struct FirewallSummary {
+    /// Portos publicados (DNAT host → container).
+    pub dnat: Vec<DnatRule>,
+    /// IPs de containers bloqueados.
+    pub blocked: Vec<String>,
+}
+
+/// Extrai as regras de DNAT de uma listagem `nft list chain`.
+///
+/// Separado do I/O de propósito: é a parte que erra, e assim erra num teste em
+/// vez de errar contra um holder a correr. A forma das linhas está fixada nos
+/// testes com listagens reais.
+pub fn parse_dnat(listagem: &str) -> Vec<DnatRule> {
+    let mut fora = Vec::new();
+    for linha in listagem.lines() {
+        let l = linha.trim();
+        let Some(i) = l.find("dnat to ") else {
+            continue;
+        };
+        let to = l[i + 8..]
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .to_string();
+        // O protocolo lê-se do MATCH da regra, não do início da linha: um
+        // `nft -a` prefixa o número da regra, e a versão anterior — que fazia
+        // `starts_with("udp")` — dava `tcp` para todas nesse formato.
+        let proto = if l.contains("udp dport") {
+            "udp"
+        } else {
+            "tcp"
+        }
+        .to_string();
+        let dport = l
+            .split("dport ")
+            .nth(1)
+            .and_then(|x| x.split_whitespace().next())
+            .unwrap_or("")
+            .to_string();
+        if !to.is_empty() && !dport.is_empty() {
+            fora.push(DnatRule {
+                proto,
+                host_port: dport,
+                to,
+            });
+        }
+    }
+    fora
+}
+
+/// Extrai os elementos de um `nft list set`.
+pub fn parse_set_elements(listagem: &str) -> Vec<String> {
+    let Some(i) = listagem.find("elements = {") else {
+        return Vec::new();
+    };
+    let resto = &listagem[i + 12..];
+    let Some(j) = resto.find('}') else {
+        return Vec::new();
+    };
+    resto[..j]
+        .split(',')
+        .map(str::trim)
+        .filter(|x| !x.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// O resumo da firewall de ingress deste nó.
+///
+/// **Vazio quando o holder está em baixo**, e não um erro: um resumo de firewall
+/// tem de poder ser pedido com o dataplane desligado — a resposta certa é «não
+/// há regras a correr», não «não sei responder». É a mesma escolha do
+/// [`fw_counters`].
+pub fn firewall_summary() -> FirewallSummary {
+    let mut s = FirewallSummary::default();
+    let Ok(body) = control_query("fwsummary") else {
+        return s;
+    };
+    // `pre|blocked`, ambos em hex: uma listagem de nft não é uma linha, e o
+    // protocolo é de linhas.
+    let (pre_hex, blocked_hex) = match body.trim().split_once('|') {
+        Some(p) => p,
+        None => return s,
+    };
+    let decodificar = |h: &str| {
+        hex_decode(h)
+            .and_then(|b| String::from_utf8(b).ok())
+            .unwrap_or_default()
+    };
+    s.dnat = parse_dnat(&decodificar(pre_hex));
+    s.blocked = parse_set_elements(&decodificar(blocked_hex));
+    s
 }
 
 /// Live counters of a container's firewall rules, keyed by the rule tail
