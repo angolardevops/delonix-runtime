@@ -153,6 +153,51 @@ fn store(base: &Path) -> Result<JsonStore<Vm>> {
 // que é também onde vive o `safe_to_signal` que fecha a reciclagem de PID.
 use delonix_runtime_core::{proc_starttime, safe_to_signal};
 
+/// Is `argv` the `cloud-hypervisor` serving THIS VM? PURE.
+///
+/// The api-socket path is the ownership token: we choose it, it is unique per
+/// VM, and the VMM carries it in its own argv. Same idiom the slirp reaper uses
+/// — the tool's name alone identifies a TOOL, never an instance.
+fn argv_is_vmm_for(argv: &[String], api_socket: &str) -> bool {
+    if api_socket.is_empty() {
+        return false;
+    }
+    argv.first()
+        .is_some_and(|a| a.ends_with("cloud-hypervisor"))
+        && argv.iter().any(|a| a == api_socket)
+}
+
+/// Adopts `pid_starttime` for a record written before the field existed.
+///
+/// **Only when the pid is PROVABLY this VM's VMM**, by a means independent of
+/// the starttime itself: the process's argv has to name this VM's api-socket.
+/// Stamping on liveness alone would be worse than the gap it closes — it would
+/// carve a recycled pid's starttime into the record and make every later check
+/// agree with it, turning a missing guard into a confidently wrong one.
+///
+/// Returns `true` when it stamped (the caller persists).
+fn adopt_pid_starttime(vm: &mut Vm) -> bool {
+    if vm.pid_starttime.is_some() {
+        return false;
+    }
+    let Some(pid) = vm.pid.filter(|&p| p > 0) else {
+        return false;
+    };
+    let Ok(raw) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
+        return false;
+    };
+    let argv: Vec<String> = raw
+        .split(|b| *b == 0)
+        .filter(|c| !c.is_empty())
+        .map(|c| String::from_utf8_lossy(c).into_owned())
+        .collect();
+    if !argv_is_vmm_for(&argv, &vm.api_socket) {
+        return false;
+    }
+    vm.pid_starttime = proc_starttime(pid);
+    vm.pid_starttime.is_some()
+}
+
 /// The pid of this VM's VMM, **only when it is safe to signal it**: alive AND
 /// still the same process we started.
 ///
@@ -3701,6 +3746,11 @@ pub fn status(base: &Path, name: &str) -> Result<Vm> {
     st.update(name, |vm| {
         let old_ip = vm.ip.clone();
         let was_running = vm.status == Status::Running;
+        // Records written before `pid_starttime` existed carry `None`, which
+        // `safe_to_signal` treats as the old behaviour — so the guard is inert
+        // for every VM already on disk until it is booted again. Adopt it here,
+        // where we are already reading the process, and only on proof.
+        let adopted = adopt_pid_starttime(vm);
         if backend.is_running(vm) {
             vm.status = Status::Running;
             vm.ip = backend.ip(vm).or_else(|| vm.ip.clone());
@@ -3718,7 +3768,7 @@ pub fn status(base: &Path, name: &str) -> Result<Vm> {
         // `create` saved the record): the record is what the holder's internal DNS
         // reads to resolve `<vm-name>` for containers — a stale null IP there means
         // the name never resolves. Only writes when something actually changed.
-        vm.ip != old_ip || was_running != (vm.status == Status::Running)
+        adopted || vm.ip != old_ip || was_running != (vm.status == Status::Running)
     })
 }
 
@@ -5569,6 +5619,47 @@ mod tests_identidade_do_vmm {
     fn um_registo_antigo_sem_starttime_mantem_o_comportamento() {
         let eu = std::process::id() as i32;
         assert_eq!(vmm_to_signal(&vm_com(Some(eu), None)), Some(eu));
+    }
+
+    /// A adopção só pode acontecer com a identidade provada por OUTRO meio.
+    #[test]
+    fn a_adopcao_exige_o_api_socket_no_argv() {
+        let sock = "/tmp/dlx/v.sock".to_string();
+        let vmm = vec![
+            "/usr/bin/cloud-hypervisor".to_string(),
+            "--api-socket".into(),
+            sock.clone(),
+        ];
+        assert!(argv_is_vmm_for(&vmm, &sock));
+
+        // O MESMO binário, a servir OUTRA VM — é o caso que um pid reciclado
+        // dentro da mesma frota produz, e é o que não pode ser adoptado.
+        assert!(!argv_is_vmm_for(&vmm, "/tmp/dlx/outra.sock"));
+        // Um processo qualquer que por acaso nomeie o socket.
+        assert!(!argv_is_vmm_for(
+            &["/bin/cat".to_string(), sock.clone()],
+            &sock
+        ));
+        // Um registo sem api-socket não tem token nenhum: nunca adopta.
+        assert!(!argv_is_vmm_for(&vmm, ""));
+    }
+
+    /// Um registo que JÁ tem starttime nunca é reescrito — carimbar por cima
+    /// seria trocar uma prova por um palpite.
+    #[test]
+    fn a_adopcao_nao_toca_num_registo_ja_carimbado() {
+        let mut vm = vm_com(Some(std::process::id() as i32), Some(12345));
+        assert!(!adopt_pid_starttime(&mut vm));
+        assert_eq!(vm.pid_starttime, Some(12345));
+    }
+
+    /// Este processo de teste não é um cloud-hypervisor: a adopção recusa.
+    #[test]
+    fn nao_adopta_um_pid_vivo_que_nao_e_o_vmm() {
+        let mut vm = vm_com(Some(std::process::id() as i32), None);
+        vm.api_socket = "/tmp/dlx/v.sock".into();
+        assert!(!adopt_pid_starttime(&mut vm));
+        assert_eq!(vm.pid_starttime, None, "não carimbar sem prova");
     }
 
     #[test]
