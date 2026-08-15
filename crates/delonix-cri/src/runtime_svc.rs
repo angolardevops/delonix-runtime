@@ -474,19 +474,18 @@ fn network_ready_rootless(up: bool, refcount: i64) -> bool {
 /// (um `read_dir` que falha não é um directório vazio), e aqui declararia o nó
 /// saudável precisamente quando não se sabe nada.
 fn live_attached_refs(base: &std::path::Path) -> Option<i64> {
-    // ASSIMETRIA CONHECIDA, e vale dizê-la: os marcadores vêm do root que o
-    // `delonix-net` resolve do ambiente (`DELONIX_ROOT`/`XDG_DATA_HOME`),
-    // enquanto o store de containers vem do `base` deste serviço. Num servidor
-    // CRI normal são o mesmo caminho; um `--root` divergente do env faria a
-    // contagem comparar duas populações diferentes. Não se corrige aqui porque
-    // o `attached_refs()` não recebe root — corrigi-lo é mudar a assinatura de
-    // uma API pública, e isso é uma decisão à parte.
+    // Os marcadores vêm do MESMO root que o store de containers — o `base` deste
+    // serviço. A primeira versão usava o `attached_refs()` sem argumento, que
+    // resolve o root do AMBIENTE: num servidor normal coincidem, mas com um
+    // `--root` divergente a contagem comparava duas populações diferentes e não
+    // queria dizer nada. O `attached_refs_in` fecha isso.
     //
-    // Descoberto porque um teste meu PASSOU PELA RAZÃO ERRADA: afirmava «sem
-    // marcadores não toca no store» e, num host com marcadores reais, tocava e
-    // dava 0 por subtracção. Um teste que passa por acidente é pior que nenhum,
-    // por isso foi apagado em vez de mantido a verde.
-    let attached = delonix_net::infra::attached_refs();
+    // Registado porque um teste meu PASSOU PELA RAZÃO ERRADA e foi ele que
+    // revelou a assimetria: afirmava «sem marcadores não toca no store» e, num
+    // host com marcadores reais, tocava e dava 0 por subtracção. Um teste que
+    // passa por acidente é pior que nenhum — foi apagado, e a assimetria que
+    // ele expôs está agora corrigida em vez de só documentada.
+    let attached = delonix_net::infra::attached_refs_in(base);
     if attached.is_empty() {
         return Some(0);
     }
@@ -505,18 +504,6 @@ fn live_attached_refs(base: &std::path::Path) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// O root que o `delonix-net` resolve — o mesmo de onde vêm os marcadores.
-    /// O `base` deste teste é uma pasta temporária e não serve para a contagem.
-    fn base_para_refs() -> std::path::PathBuf {
-        std::env::var_os("DELONIX_ROOT")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| {
-                std::env::var_os("HOME")
-                    .map(|h| std::path::PathBuf::from(h).join(".local/share/delonix"))
-                    .unwrap_or_default()
-            })
-    }
 
     /// The fixed finding: `NetworkReady` is no longer a fixed `true`. In this
     /// test environment there is no rootless infra (`holder`/`slirp`) running —
@@ -543,12 +530,6 @@ mod tests {
         // logo o resultado certo depende da máquina onde o teste corre, e um
         // literal aqui só pode estar certo por acaso.
         let st = delonix_net::infra::status();
-        // Pela MESMA regra que o serviço usa — refs VIVOS, não marcadores em
-        // disco. Com o `refcount` cru aqui, este teste passaria a chumbar em
-        // qualquer host com fantasmas, que é precisamente o bug que a mudança
-        // fecha: seria o teste a codificar o defeito.
-        let vivos = live_attached_refs(&base_para_refs()).unwrap_or(st.refcount);
-        let esperado = network_ready_rootless(st.up, vivos);
         let base = std::env::temp_dir().join(format!(
             "delonix-cri-status-test-{}-{}",
             std::process::id(),
@@ -560,6 +541,13 @@ mod tests {
         std::fs::create_dir_all(&base).unwrap();
         let streamer = crate::streaming::Streamer::new(base.clone(), "127.0.0.1:0".to_string());
         let svc = DelonixRuntime::new(base.clone(), streamer, crate::CapCeiling::unlimited());
+
+        // Pela MESMA regra e com o MESMO root que o serviço usa: refs VIVOS do
+        // `base` deste serviço, não marcadores em disco nem um root do ambiente.
+        // Com o `refcount` cru aqui, o teste chumbaria em qualquer host com
+        // fantasmas — seria o teste a codificar o defeito que a mudança fecha.
+        let vivos = live_attached_refs(&base).unwrap_or(st.refcount);
+        let esperado = network_ready_rootless(st.up, vivos);
 
         let resp = svc
             .status(Request::new(StatusRequest { verbose: false }))
