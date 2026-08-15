@@ -1005,6 +1005,23 @@ pub fn backend_manages_own_storage(want: Option<&str>) -> bool {
         .unwrap_or(false)
 }
 
+/// The backend chosen ONCE instead of per-command: `DELONIX_VM_BACKEND`
+/// (session-wide) and then the persisted default ([`set_default_backend`],
+/// machine-wide). `None` when neither is set.
+///
+/// Public because [`create_with`] is no longer the only place that needs the
+/// answer, and two copies of a precedence rule is how they start to disagree.
+/// `backend_manages_own_storage(None)` resolves by AUTO-DETECTION, so a caller
+/// that asks it without threading this through gets the local backend even on a
+/// machine standing-configured for Proxmox — and then goes on to prepare a
+/// local overlay for a guest that will run somewhere else entirely.
+pub fn standing_backend_choice(base: &Path) -> Option<String> {
+    std::env::var("DELONIX_VM_BACKEND")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| get_default_backend(base))
+}
+
 /// Validates and normalizes a backend name for external callers (the CLI's
 /// `HYPERVISOR` VMfile instruction, `vm default-backend --set`) — same
 /// acceptance rules as [`select_backend`]'s explicit-request arm, without
@@ -3082,10 +3099,7 @@ pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Res
             // choice, just made once instead of per-command; a backend
             // requested this way that can't actually boot the VM (e.g. the
             // volumes/9p case above) still fails loud at boot, never silently.
-            let standing_choice = std::env::var("DELONIX_VM_BACKEND")
-                .ok()
-                .filter(|s| !s.trim().is_empty())
-                .or_else(|| get_default_backend(base));
+            let standing_choice = standing_backend_choice(base);
             let want = match cfg.backend.as_deref().or(standing_choice.as_deref()) {
                 Some(b) => Some(b.to_string()),
                 None if !cfg.volumes.is_empty() => Some("libvirt".to_string()),
