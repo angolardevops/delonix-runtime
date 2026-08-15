@@ -1454,6 +1454,7 @@ fn handle_control(line: &str) -> String {
         ["publish", proto, host_port, cip, cport] => do_publish(proto, host_port, cip, cport),
         // 2 tokens = every proto on the port (teardown); 3 = only that proto.
         ["lbclear", vip] => do_lbclear(vip),
+        ["lbset", vip, algo, backends] => do_lbset(vip, algo, backends),
         ["unpublish", host_port] => do_unpublish(host_port, None),
         ["unpublish", host_port, proto] => do_unpublish(host_port, Some(proto)),
         ["firewall", _netns, ip, hex] => do_firewall(ip, hex),
@@ -2611,6 +2612,97 @@ fn do_lbclear(vip: &str) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Instala o balanceamento de um VIP de serviço: uma regra de DNAT no `pre` que
+/// reparte para os `backends` (`ip:port`, separados por vírgulas).
+///
+/// Contraparte do [`do_lbclear`] — e a razão de existir. Até aqui dava para LIMPAR
+/// um balanceamento que nada instalava: um par em que só metade estava escrita.
+///
+/// A repartição é do kernel (`numgen`/`jhash` + `map`), sem cópia em espaço de
+/// utilizador:
+/// - `round-robin` — `numgen inc`, por ligação e em ordem;
+/// - `random` — `numgen random`;
+/// - `ip-hash`/`sticky` — `jhash ip saddr`, ou seja AFINIDADE: o mesmo cliente cai
+///   sempre no mesmo backend enquanto o conjunto não mudar;
+/// - `weighted` — backends em `ip:port#peso`, repetidos no mapa na proporção do
+///   peso (sem peso → round-robin).
+///
+/// `least-conn` não se exprime só com `dnat`/`numgen`: exige contar ligações
+/// abertas por backend, que o mapa não sabe fazer. Fica para o caminho L7.
+///
+/// **Substitui, não acumula**: limpa primeiro as regras do VIP. Sem isso, mudar o
+/// conjunto de backends deixaria as regras antigas por baixo e o tráfego
+/// continuaria a cair em backends que já saíram do serviço — um LB que só
+/// acrescenta nunca tira ninguém de rotação.
+///
+/// Tudo é validado ANTES de chegar ao argv do `nft`: o VIP no espaço de ingress,
+/// cada backend um `ip:port` do mesmo espaço. É a única barreira entre um nome de
+/// serviço, que vem de um manifesto, e uma regra de firewall.
+fn do_lbset(vip: &str, algo: &str, backends: &str) -> Result<()> {
+    if !is_ingress_ip(vip) {
+        return Err(Error::Invalid(format!(
+            "VIP fora do espaço de ingress: {vip}"
+        )));
+    }
+    let alvos = lb_map_targets(backends)?;
+    do_lbclear(vip)?;
+    let seletor = match algo {
+        "random" => "numgen random",
+        "ip-hash" | "sticky" => "jhash ip saddr",
+        // `weighted` já foi resolvido em `lb_map_targets`, ao repetir os alvos.
+        _ => "numgen inc",
+    };
+    let mapa = alvos
+        .iter()
+        .enumerate()
+        .map(|(i, a)| format!("{i} : {a}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let regra = format!(
+        "add rule ip {INGRESS_TABLE} pre ip daddr {vip} dnat to {seletor} mod {} map {{ {mapa} }}",
+        alvos.len()
+    );
+    let args: Vec<&str> = regra.split_whitespace().collect();
+    run("nft", &args)
+}
+
+/// Valida a lista de backends e devolve os alvos já na forma do mapa do `nft`
+/// (`<ip> . <porta>`), com os pesos expandidos por repetição.
+///
+/// Puro — separado do [`do_lbset`] para que a validação, que é onde mora o risco,
+/// se possa testar sem holder, sem netns e sem `nft`.
+///
+/// O peso é limitado a 64: sem tecto, um `#100000` num manifesto gerava um mapa
+/// com cem mil entradas e punha o holder a construir uma linha de `nft` de vários
+/// megabytes — negação de serviço escrita por quem só queria muito daquele backend.
+fn lb_map_targets(backends: &str) -> Result<Vec<String>> {
+    let mut alvos: Vec<String> = Vec::new();
+    for b in backends.split(',').filter(|s| !s.is_empty()) {
+        let (endereco, peso) = match b.split_once('#') {
+            Some((e, p)) => (
+                e,
+                p.parse::<u32>()
+                    .map_err(|_| Error::Invalid(format!("peso inválido: {p}")))?
+                    .clamp(1, 64),
+            ),
+            None => (b, 1),
+        };
+        let Some((ip, porta)) = endereco.rsplit_once(':') else {
+            return Err(Error::Invalid(format!("backend sem porta: {endereco}")));
+        };
+        if !is_ingress_ip(ip) || !is_port(porta) {
+            return Err(Error::Invalid(format!("backend inválido: {endereco}")));
+        }
+        for _ in 0..peso {
+            alvos.push(format!("{ip} . {porta}"));
+        }
+    }
+    if alvos.is_empty() {
+        return Err(Error::Invalid("lbset sem backends".into()));
+    }
+    Ok(alvos)
 }
 
 fn do_unpublish(host_port: &str, proto: Option<&str>) -> Result<()> {
@@ -3820,6 +3912,21 @@ fn egress_set_members(bridge: &str) -> Vec<String> {
 /// para poder desligar algo que já não está ligado.
 pub fn clear_service_lb(vip: &str) {
     let _ = control_send(&format!("lbclear {vip}"));
+}
+
+/// Instala o balanceamento de um VIP de serviço, com repartição round-robin.
+/// Ver [`set_service_lb_algo`] para escolher o algoritmo.
+pub fn set_service_lb(vip: &str, backends: &[String]) -> Result<()> {
+    set_service_lb_algo(vip, backends, "round-robin")
+}
+
+/// Como [`set_service_lb`], com o algoritmo à escolha: `round-robin`, `random`,
+/// `ip-hash`/`sticky` (afinidade de sessão) ou `weighted` (backends `ip:port#peso`).
+///
+/// É o par que faltava ao [`clear_service_lb`]: um limpador sem instalador só
+/// conseguia apagar regras postas por outra coisa qualquer.
+pub fn set_service_lb_algo(vip: &str, backends: &[String], algo: &str) -> Result<()> {
+    control_send(&format!("lbset {vip} {algo} {}", backends.join(",")))
 }
 
 /// **Analisa** um `iptables-save` e devolve um relatório legível — sem tocar no
@@ -8213,5 +8320,32 @@ Inter-|   Receive                                                |  Transmit
         assert!(m.contains("delonix net netns down"));
         // Nunca sugerir a reconstrução: é isso que destrói a infra alheia.
         assert!(!m.contains("rebuild it"));
+    }
+}
+
+#[cfg(test)]
+mod testes_lbset {
+    use super::lb_map_targets;
+
+    #[test]
+    fn expande_pesos_e_recusa_o_que_nao_e_backend() {
+        // Sem peso: um alvo por backend, na ordem dada.
+        let t = lb_map_targets("10.200.0.5:80,10.200.0.6:80").unwrap();
+        assert_eq!(t, vec!["10.200.0.5 . 80", "10.200.0.6 . 80"]);
+
+        // Com peso: repetição proporcional — é assim que o `numgen` fica pesado.
+        let t = lb_map_targets("10.200.0.5:80#3,10.200.0.6:80").unwrap();
+        assert_eq!(t.iter().filter(|x| x.starts_with("10.200.0.5")).count(), 3);
+        assert_eq!(t.iter().filter(|x| x.starts_with("10.200.0.6")).count(), 1);
+
+        // Tecto do peso: um manifesto não pode mandar construir um mapa gigante.
+        assert_eq!(lb_map_targets("10.200.0.5:80#100000").unwrap().len(), 64);
+
+        // O que NÃO pode chegar ao argv do `nft`.
+        assert!(lb_map_targets("10.200.0.5").is_err()); // sem porta
+        assert!(lb_map_targets("10.200.0.5:0").is_err()); // porta 0
+        assert!(lb_map_targets("8.8.8.8:80").is_err()); // fora do ingress
+        assert!(lb_map_targets("10.200.0.5:80; reboot").is_err()); // injecção
+        assert!(lb_map_targets("").is_err()); // vazio não é um LB
     }
 }
