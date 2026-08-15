@@ -641,6 +641,17 @@ pub fn attached_refs() -> Vec<String> {
     refs_in(&refs_dir())
 }
 
+/// Os mesmos ids, mas do root que o CHAMADOR nomeia.
+///
+/// O [`attached_refs`] resolve o root do AMBIENTE (`DELONIX_ROOT`/`XDG_DATA_HOME`),
+/// o que obriga quem tem um root próprio — o servidor CRI tem-no em `self.base` —
+/// a comparar marcadores de um root com containers de outro. Num servidor normal
+/// coincidem; com um `--root` divergente são duas populações, e o resultado é uma
+/// contagem que não quer dizer nada.
+pub fn attached_refs_in(root: &Path) -> Vec<String> {
+    refs_in(&root.join("ingress").join("refs"))
+}
+
 /// Number of containers using the infra (cardinality of the marker set).
 fn read_refcount() -> i64 {
     refs_in(&refs_dir()).len() as i64
