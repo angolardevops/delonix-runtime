@@ -24,7 +24,7 @@ use super::output;
 use super::remote::{self, SshTarget};
 use super::util::state_root;
 use super::vmimage::VmImageStore;
-use super::{etcd, k8s_recipes, kubeadm_config, lb, vm as vm_cmd, vmimage};
+use super::{etcd, k8s_recipes, kubeadm_config, lb, vmimage};
 
 /// `kubeadm` only auto-detects a CRI socket among a hardcoded list of
 /// well-known paths (containerd/CRI-O/dockershim) — `delonix-cri`'s socket
@@ -1549,13 +1549,12 @@ fn create_and_wait(
     ssh: &SshSpec,
     timeout: Duration,
 ) -> Result<String> {
-    let seed = vm_cmd::generate_seed_iso(
-        vm_name,
-        Some(vm_name),
-        std::slice::from_ref(&ssh_public.to_string()),
-        None,
-        &[],
-    )?;
+    // Cloud-init as INTENT and not as a seed ISO built here: this is the one
+    // caller whose whole next step is `ssh delonix@<ip>`, so it is also the one
+    // that broke hardest on a backend that cannot read a file from this host.
+    // The engine turns this into a NoCloud ISO for the local backends and into
+    // the node's own `--ciuser`/`--sshkeys` for Proxmox, which is what lets
+    // `cluster kubeadm` provision onto a Proxmox node at all.
     let cfg = delonix_vm::VmConfig {
         name: vm_name.to_string(),
         disk: disk.to_string_lossy().into_owned(),
@@ -1566,7 +1565,9 @@ fn create_and_wait(
         initrd: None,
         firmware: None,
         cmdline: None,
-        seed: Some(seed.to_string_lossy().into_owned()),
+        seed: None,
+        hostname: Some(vm_name.to_string()),
+        ssh_keys: vec![ssh_public.to_string()],
         restart_policy: None,
         hugepages: false,
         cpu_affinity: None,
