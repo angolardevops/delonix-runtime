@@ -28,8 +28,9 @@
 #
 # ## Isolamento: NÃO o faz por si, ao contrário do `chaos.sh`
 #
-# Este script corre contra o ESTADO REAL da máquina — não redirecciona
-# `DELONIX_ROOT` nem `DELONIX_NET_RUNTIME_DIR`. Limpa atrás de si e prefixa tudo
+# **Isola-se por omissão desde 2026-08-15.** Redirecciona `DELONIX_ROOT` E
+# `DELONIX_NET_RUNTIME_DIR` para directórios próprios, cria-os, e derruba a infra
+# que subiu ao sair. Limpa atrás de si e prefixa tudo
 # o que cria (`$PFX`), mas uma corrida interrompida a meio deixa restos, e num
 # host com produção a correr isso é risco directo. Para isolar, exporta os dois
 # roots ANTES de invocar:
@@ -43,9 +44,23 @@
 # seguinte, corrida do root real, reconstruir a infra e reiniciar containers de
 # produção.
 #
-# Não é o default porque os checks que dependem de estado real (imagens no store,
-# holder a correr) passariam a falhar em vez de exercitar — mudar isso é trabalho
-# com análise, não uma linha, e está registado como tal no CLAUDE.md.
+# **Porque deixou de não ser o default.** A objecção registada era que «os checks
+# que dependem de estado real (imagens no store, holder a correr) passariam a
+# falhar em vez de exercitar». Medido: não passam — a secção `image` já faz
+# `pull` quando a referência não está no store, que é exactamente o caso de um
+# root vazio. A única dependência real que sobra é REDE, e essa é declarada: sem
+# ela o pull falha e as secções que precisam de imagem **saltam com a razão**, em
+# vez de pintarem a bateria de vermelho.
+#
+# E o custo de NÃO isolar era concreto: duas secções acrescentadas nesta série
+# (`net`, `compose`) já se recusavam a correr sem os dois roots, ou seja o
+# isolamento estava a tornar-se o default por acumulação, sem ninguém o ter
+# decidido — meio-feito, que é a pior das três hipóteses e é literalmente o
+# incidente de 2026-08-12 registado no CLAUDE.md.
+#
+# `E2E_SHARED_STATE=1` opta por sair disto e correr contra a máquina real (o
+# comportamento anterior), com aviso alto. Serve para diagnosticar um host, não
+# para uma corrida normal.
 
 set -uo pipefail
 
@@ -53,6 +68,27 @@ BIN="${1:-$(cd "$(dirname "$0")/.." && pwd)/target/debug/delonix}"
 OUT="${OUT:-/tmp/delonix-e2e}"
 mkdir -p "$OUT"
 : >"$OUT/results.jsonl"
+
+# --- isolamento (ver cabeçalho) ---------------------------------------------
+if [[ "${E2E_SHARED_STATE:-0}" == "1" ]]; then
+  E2E_ISOLATED=0
+else
+  E2E_ISOLATED=1
+  # O runtime dir tem de ser CURTO: `sun_path` do AF_UNIX são 108 bytes, e um
+  # `$OUT` fundo (o default de uma sessão de agente já passa os 90) põe o socket
+  # de controlo acima do limite. Não deriva do `$OUT` por isso.
+  export DELONIX_ROOT="${DELONIX_ROOT:-$OUT/root}"
+  export DELONIX_NET_RUNTIME_DIR="${DELONIX_NET_RUNTIME_DIR:-/tmp/dlxe2e-$$}"
+  mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR"
+  if [[ ${#DELONIX_NET_RUNTIME_DIR} -gt 80 ]]; then
+    echo "FATAL: DELONIX_NET_RUNTIME_DIR tem ${#DELONIX_NET_RUNTIME_DIR} bytes;" >&2
+    echo "       o socket de controlo passaria o limite de 108 do AF_UNIX." >&2
+    exit 2
+  fi
+  # A infra que ESTA corrida subir é desta corrida — desce ao sair, mesmo por
+  # Ctrl-C. Sem isto um pin/slirp isolado fica a correr depois do relatório.
+  trap '"$BIN" net netns down >/dev/null 2>&1 || true' EXIT
+fi
 
 PASS=0; FAIL=0; SKIP=0
 declare -a FAILED_NAMES=()
@@ -360,16 +396,30 @@ fi
 ########################################
 section "image"
 ########################################
+if [[ $E2E_ISOLATED -eq 1 ]]; then
+  log "  (root isolado: $DELONIX_ROOT · runtime: $DELONIX_NET_RUNTIME_DIR)"
+else
+  log "  (E2E_SHARED_STATE=1 — ESTADO REAL da máquina)"
+fi
+
 IMG="${E2E_IMAGE:-alpine:3.19}"
 # A guarda tem de procurar a REFERÊNCIA inteira, não só o repositório: com um
 # `alpine:latest` no store e `alpine:3.19` ausente, o `grep alpine` passava e o
 # `image describe alpine:3.19` a seguir falhava. `redis:7-alpine` também casava
 # com `alpine`, o que tornava o falso positivo ainda mais fácil.
+E2E_HAVE_IMAGE=1
 if "$BIN" image ls 2>/dev/null | grep -qF "$IMG "; then
   check "image describe" ok "$BIN" image describe "$IMG"
-else
-  check "image pull ($IMG)" ok "$BIN" image pull "$IMG"
+elif "$BIN" image pull "$IMG" >/dev/null 2>&1; then
+  check "image pull ($IMG)" ok "$BIN" image ls
   check "image describe" ok "$BIN" image describe "$IMG"
+else
+  # Um root isolado começa vazio; sem rede o pull não acontece. Isto SALTA com a
+  # razão em vez de chumbar — uma bateria vermelha por falta de rede esconde as
+  # falhas verdadeiras, e um SKIP declarado conta como NÃO COBERTO, que é o que é.
+  E2E_HAVE_IMAGE=0
+  skip "image pull ($IMG)" "sem rede (ou registo inalcançável) e a imagem não está no store"
+  skip "tudo o que precisa de $IMG" "a imagem não pôde ser obtida — ver o skip acima"
 fi
 
 ########################################
