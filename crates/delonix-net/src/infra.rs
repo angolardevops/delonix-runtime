@@ -1453,6 +1453,7 @@ fn handle_control(line: &str) -> String {
         ["vmtapdel", tap] => do_vmtapdel(tap),
         ["publish", proto, host_port, cip, cport] => do_publish(proto, host_port, cip, cport),
         // 2 tokens = every proto on the port (teardown); 3 = only that proto.
+        ["lbclear", vip] => do_lbclear(vip),
         ["unpublish", host_port] => do_unpublish(host_port, None),
         ["unpublish", host_port, proto] => do_unpublish(host_port, Some(proto)),
         ["firewall", _netns, ip, hex] => do_firewall(ip, hex),
@@ -2566,6 +2567,52 @@ fn do_publish(proto: &str, host_port: &str, cip: &str, cport: &str) -> Result<()
 /// `proto` narrows it to one protocol; `None` removes every proto on that port.
 /// The `dport <n>` needle alone matched a `tcp dport n` rule and a `udp dport n` rule
 /// alike, so unpublishing one protocol tore down the other's DNAT too.
+/// Remove as regras de DNAT que apontam para um VIP de serviço.
+///
+/// Contraparte rootless do antigo `Net::clear_service_lb`, que fazia isto no
+/// netns do host. Corre no holder, dono do netns onde a tabela vive.
+///
+/// **O VIP é validado contra o espaço de ingress** antes de entrar numa
+/// comparação de texto: sem isso, um `vip` com um espaço lá dentro casaria
+/// linhas que não são dele, e apagar regras de DNAT alheias tira do ar serviços
+/// que ninguém mandou tirar.
+fn do_lbclear(vip: &str) -> Result<()> {
+    if !is_ingress_ip(vip) {
+        return Err(Error::Invalid(format!(
+            "VIP fora do espaço de ingress: {vip}"
+        )));
+    }
+    let listed = crate::capture("nft", &["-a", "list", "chain", "ip", INGRESS_TABLE, "pre"])
+        .unwrap_or_default();
+    // `ip daddr <vip> ` com o espaço final: sem ele, `10.200.0.5` casaria
+    // `10.200.0.50`.
+    let needle = format!("ip daddr {vip} ");
+    for line in listed.lines() {
+        if !line.contains(&needle) || !line.contains("dnat") {
+            continue;
+        }
+        if let Some(handle) = line
+            .rsplit("# handle ")
+            .next()
+            .and_then(|h| h.trim().parse::<u32>().ok())
+        {
+            run_ok(
+                "nft",
+                &[
+                    "delete",
+                    "rule",
+                    "ip",
+                    INGRESS_TABLE,
+                    "pre",
+                    "handle",
+                    &handle.to_string(),
+                ],
+            );
+        }
+    }
+    Ok(())
+}
+
 fn do_unpublish(host_port: &str, proto: Option<&str>) -> Result<()> {
     if !is_port(host_port) {
         return Err(Error::Invalid(format!("invalid port: {host_port}")));
@@ -3765,6 +3812,50 @@ fn egress_set_members(bridge: &str) -> Vec<String> {
     ips
 }
 
+/// Limpa o balanceamento de um VIP de serviço — todas as regras de DNAT que lhe
+/// apontam.
+///
+/// Best-effort, como o `unpublish_port`: se o holder está em baixo não há
+/// regras a remover, e insistir seria pedir ao operador que levantasse a infra
+/// para poder desligar algo que já não está ligado.
+pub fn clear_service_lb(vip: &str) {
+    let _ = control_send(&format!("lbclear {vip}"));
+}
+
+/// **Analisa** um `iptables-save` e devolve um relatório legível — sem tocar no
+/// host.
+///
+/// Reposto depois de o `Net` sair do motor. O nome tem «import» por herança, mas
+/// o que faz é um DRY-RUN: conta o que lá está e mostra a primeira regra
+/// traduzida para `nft`, para quem está a migrar poder ver a forma antes de
+/// decidir. Nunca aplicou nada, e continua a não aplicar.
+///
+/// Não precisa do holder nem de privilégio: é ler um ficheiro e, se o
+/// `iptables-translate` existir na máquina, pedir-lhe uma tradução. Sem ele, o
+/// relatório sai na mesma — só sem o exemplo. Uma ferramenta em falta não é
+/// razão para recusar a contagem.
+pub fn import_iptables(path: &std::path::Path) -> Result<String> {
+    let texto = std::fs::read_to_string(path).map_err(|e| Error::Runtime {
+        context: "iptables-save",
+        message: format!("{}: {e}", path.display()),
+    })?;
+    let s = delonix_net_rules::parse_iptables_save(&texto);
+    let mut relatorio = format!(
+        "iptables-save: {} tabela(s), {} cadeia(s), {} regra(s) — intenção preservada",
+        s.tables, s.chains, s.rules
+    );
+    if let Some(regra) = s.sample {
+        let args: Vec<&str> = regra.split_whitespace().collect();
+        if let Ok(nft) = crate::capture("iptables-translate", &args) {
+            let nft = nft.trim();
+            if !nft.is_empty() {
+                relatorio.push_str(&format!("\n  exemplo: {regra}\n     -> nft {nft}"));
+            }
+        }
+    }
+    Ok(relatorio)
+}
+
 /// Uma publicação de porto vista do lado do mecanismo: a regra de DNAT.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct DnatRule {
@@ -4581,6 +4672,59 @@ pub fn attach_container(id: &str, net: &str, namespace: &str) -> Result<(String,
         Ok(()) => Ok((netns, ip)),
         Err(e) => {
             release(id); // undoes the ref marker if the attach failed
+            Err(e)
+        }
+    }
+}
+
+/// Como [`attach_container`], mas com o **IP escolhido por quem chama**.
+///
+/// Reposto depois de o `Net::attach_on_ip` sair do motor. Serve o caso em que o
+/// endereço não é do motor para decidir: um VIP de serviço, um endereço fixo que
+/// já está num DNS ou numa regra escrita à mão.
+///
+/// **RESERVA o IP no IPAM em vez de o alocar.** Sem isso o registo não saberia
+/// que o endereço está tomado e entregá-lo-ia a outro container mais tarde —
+/// dois workloads no mesmo IP, e o segundo a roubar o tráfego do primeiro sem
+/// nada a assinalá-lo.
+///
+/// O IP é validado contra o prefixo da rede: um endereço de fora não é um pedido
+/// exótico, é um engano, e aplicá-lo daria um container inalcançável com um
+/// attach bem-sucedido.
+pub fn attach_container_on_ip(
+    id: &str,
+    net: &str,
+    ip: &str,
+    namespace: &str,
+) -> Result<(String, String)> {
+    let NetPlan {
+        bridge,
+        prefix,
+        default_route: gateway,
+        ..
+    } = resolve_net(net)?;
+    if !delonix_net_rules::valid_ip_in_subnet(&prefix, ip) {
+        return Err(Error::Invalid(format!(
+            "o IP {ip} não pertence à rede {net} ({prefix}.0.0/16)"
+        )));
+    }
+    crate::ipam::reserve(&prefix, id, ip);
+    acquire(id)?;
+    let netns = sanitize(id);
+    let ns = sanitize(if namespace.is_empty() {
+        "default"
+    } else {
+        namespace
+    });
+    let cmd = if ns == "default" {
+        format!("attach {netns} {ip} {bridge} {gateway}")
+    } else {
+        format!("attach {netns} {ip} {bridge} {gateway} {ns}")
+    };
+    match control_send(&cmd) {
+        Ok(()) => Ok((netns, ip.to_string())),
+        Err(e) => {
+            release(id);
             Err(e)
         }
     }
