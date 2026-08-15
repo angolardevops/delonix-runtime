@@ -4,6 +4,123 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.56.0 — cloud-init deixa de ser um ficheiro deste disco
+
+Um tema só, e é uma correcção de vocabulário: o `VmConfig` sabia dizer
+`seed: <caminho>` — um ISO NoCloud NESTE sistema de ficheiros — e mais nada. Isso é
+um mecanismo no lugar de uma intenção, e a consequência era estrutural: **qualquer
+backend cujo convidado corre noutra máquina ficava fora do cloud-init por
+construção**, por muito que o produto do outro lado o suportasse.
+
+O Proxmox suporta. Tem cloud-init próprio e fala `ciuser`/`sshkeys`/`ipconfig0` —
+só nunca recebeu nada, porque o único vocabulário disponível era um caminho que ele
+não pode abrir.
+
+> **Nota de proveniência.** Tudo nesta série foi medido contra um nó **Proxmox VE
+> 9.2 real** (clone de um template → boot → SSH lá dentro), e as três correcções da
+> última secção só apareceram por causa disso: as três compilavam, passavam nos
+> testes, e tinham comentários confiantes a explicar porque estavam certas.
+
+### Cloud-init como INTENÇÃO
+
+O `VmConfig` passa a levar o que o operador QUIS — `hostname`, `ci_user`,
+`ssh_keys`, `cloud_init` — e cada backend realiza-o à sua maneira: um ISO NoCloud
+nos backends locais, os parâmetros do nó no Proxmox. O `seed` fica como escapatória
+para quem traz o seu.
+
+- **Os construtores mudaram-se para o motor** (`delonix_vm::cloudinit`). Viviam no
+  crate BINÁRIO, que ninguém pode importar, por isso cada consumidor tinha a sua
+  cópia — a CLI, o `cluster kubeadm`, e o PaaS privado noutra. Três cópias de um
+  formato com que o convidado tem de concordar.
+- **A intenção é PERSISTIDA** (`VmBootSpec`), pela regra que o doc-comment desse
+  struct já enuncia: o `vm start` delega no auto-heal do `create`, e uma VM cujo
+  convidado desapareceu é reconstruída — sem estes campos voltava com o hostname
+  por omissão e SEM chave nenhuma, ou seja inalcançável.
+- **`cloud_init` é `Option<bool>` e não `bool`** porque o struct deriva `Default`:
+  um bool cairia em `false` e desligaria o seed a todos os chamadores que usam
+  `..Default::default()` — e uma VM sem datasource salta a fase de rede do
+  cloud-init e sobe sem endereço.
+- O `--user-data` continua recusado num backend remoto, e a razão não mudou: um
+  documento arbitrário não tem equivalente na API do nó (precisaria de um snippet
+  na storage dele, que o endpoint de upload não aceita), logo honrá-lo obrigaria a
+  um segundo canal privilegiado.
+
+### `cluster kubeadm` provisiona para um backend remoto
+
+- **A imagem era sempre resolvida contra o store LOCAL** — `qcow2_path()`
+  incondicional transformava uma referência válida do nó (`template:9000`) num
+  caminho deste host. Num backend com storage própria a referência passa VERBATIM,
+  e sem imagem explícita RECUSA em vez de descarregar uma golden que ninguém vai
+  usar.
+- **`backend_manages_own_storage(None)` respondia pela AUTO-DETECÇÃO.** A
+  precedência do backend escolhido uma vez em vez de por comando
+  (`DELONIX_VM_BACKEND`, depois o default persistido) vivia inteiramente dentro do
+  `create_with`. Numa máquina configurada para Proxmox, qualquer chamador que
+  perguntasse «isto é remoto?» recebia **não** — e seguia a preparar um overlay
+  local para um convidado que vai correr noutra máquina. Extraído para
+  `delonix_vm::standing_backend_choice`, usado pelos dois.
+
+### Três defeitos que só um nó real revelou
+
+1. **`configure_clone` mandava `authed: false`.** O nó respondeu **401 logo a
+   seguir a um clone bem-sucedido** — a VM ficava com a CPU e a memória do template
+   e sem chave nenhuma.
+2. **Uma falha depois do clone deixava a VM no nó.** Medido: a VMID 100 ficou lá,
+   invisível ao `vm ls` (nenhum registo escrito) e removível só à mão pela UI. O
+   `create_with` não pode limpar isto — a limpeza dele é de um overlay local, e o
+   vmid só se conhece dentro do `boot`, que é onde o undo passou a viver.
+3. **O `sshkeys` tem de ir percent-encoded por nós**, por cima do encoding do
+   formulário. O comentário original afirmava o contrário, com uma explicação
+   convincente; o nó respondeu `400 … "invalid format - invalid urlencoded
+   string"`. É o único parâmetro desta API com essa forma.
+
+**E o clone nunca aplicava configuração nenhuma.** A API de clone leva
+`newid`/`name`/`full` e mais nada, por isso uma VM pedida com 4 vCPU e 8 GiB subia
+com o que o template tivesse, na bridge do template, sem endereço e sem chave. É o
+caminho de um nó DKS a partir de uma golden registada como template.
+
+### Validado ao vivo
+
+Contra PVE 9.2, com a VM removida no fim e zero restos no nó:
+
+```
+cores   = 2        ← do chamador, não do template
+memory  = 1024     ← idem
+net0    = virtio=...,bridge=vmbr0
+ciuser  = delonix
+sshkeys = ssh-ed25519 AAAA... (descodificado, exacto)
+
+$ ssh -i <chave> delonix@192.168.122.56
+LOGIN-OK / ci-pve-01 / delonix / nproc=2 / Mem 955 MiB
+```
+
+E o caminho local, que não podia regredir: VM libvirt real, seed gerado pelo MOTOR,
+chave sob `users: - name: delonix` (e não na conta da distro), SSH lá dentro.
+
+### O que NÃO foi validado
+
+- **Um cluster Kubernetes completo sobre Proxmox.** O provisionamento, a
+  configuração e o SSH foram exercitados de ponta a ponta pelo caminho declarativo;
+  o `kubeadm init` parou por duas razões que não são deste código: o template do
+  lab não traz `kubeadm` (é uma base rootless, não a golden k8s), e o
+  `cluster apply` corre `apt-get` sem esperar que o cloud-init do primeiro arranque
+  assente — uma corrida real, registada aqui como achado por fechar.
+- **A forma password do `sshkeys` com chaves não-ASCII**: o `urlencode` codifica
+  bytes, e há teste para isso, mas nenhuma chave real deste tipo foi enviada a um nó.
+
+### Nota de método
+
+Duas diagnoses erradas nesta série tiveram a mesma causa: **um `CARGO_TARGET_DIR`
+partilhado entre worktrees em commits diferentes**. Um build a partir de outro
+worktree sobrescreve o binário, e as corridas seguintes medem código que não é o
+que se está a editar; e um output de build script de uma sessão já fechada deixou
+caminhos absolutos para um worktree removido, com o `cargo test` a falhar por
+ficheiros que nunca existiram nesta árvore. O `AGENTS.md` manda partilhar o target
+dir para reaproveitar cache — o que faltava dizer é que isso só é seguro entre
+worktrees no MESMO commit.
+
+---
+
 ## v0.55.0 — o isolamento que desaparecia em silêncio, e as varreduras que não perguntavam de quem era
 
 Vinte commits desde a v0.54.0, e o tema é a **segmentação**: três lugares onde duas
