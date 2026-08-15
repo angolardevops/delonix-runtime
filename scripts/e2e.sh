@@ -16,7 +16,8 @@
 #
 # **Actualizado 2026-08-15**: `net` (43 folhas em 6 subgrupos) tinha ZERO
 # execuções e passou a ter 19 checks; `compose` tinha ZERO e passou a ter 20.
-# Continuam sem nenhuma: `storage` (13) e `serve` (8) — e os comandos-folha
+# `serve` tinha ZERO e passou a ter 17. Continua sem nenhuma: `storage` (13)
+# — e os comandos-folha
 # `dash`/`man`/`version`.
 # Cita-se a FRACÇÃO medida e a data, nunca o total de checks: um total que sobe
 # faz a cobertura parecer melhor sem uma única folha nova exercitada.
@@ -895,6 +896,74 @@ check "--cron com 4 campos recusa" fail "$BIN" backup container "$BKC" --to "$BK
 "$BIN" volumes rm "$BKV" >/dev/null 2>&1
 
 ########################################
+section "serve — arrancar, sondar, matar, e não deixar restos"
+
+# O grupo `serve` tinha ZERO execuções. São SERVIDORES, por isso precisa de um
+# padrão próprio, e o padrão é a parte que interessa reter:
+#
+#   1. arrancar DETACHED com a saída para ficheiro (nunca para um pipe que a
+#      bateria leia — um servidor longevo segura esse fd e o `read` do shell
+#      nunca vê EOF; foi assim que o pin pendurou uma corrida 31 minutos);
+#   2. esperar por CONDIÇÃO (o socket existir), nunca por tempo;
+#   3. sondar a sério — um socket que aceita não é um servidor que responde;
+#   4. matar e confirmar que morreu.
+#
+# Sockets em /tmp e não em $OUT: `sun_path` do AF_UNIX são 108 bytes.
+SRVLOG="$OUT/serve-$PFX.log"
+
+# --- fail-closed: o tecto de capabilities recusa ANTES de qualquer bind -------
+# Vale mais que o caminho feliz: um tecto que caísse em silêncio para "ilimitado"
+# por causa de um typo é exactamente a falha que ele existe para evitar.
+CAPSOCK="/tmp/dlx-cap-$PFX.sock"; rm -f "$CAPSOCK"
+check "serve cri recusa uma capability desconhecida" fail \
+  "$BIN" serve cri --addr "unix://$CAPSOCK" --cap-ceiling "NAO_EXISTE_CAP"
+check "e NÃO chegou a criar o socket" ok bash -c "[ ! -S '$CAPSOCK' ]"
+check "e a recusa NOMEIA a capability" ok bash -c \
+  "'$BIN' serve cri --addr 'unix://$CAPSOCK' --cap-ceiling NAO_EXISTE_CAP 2>&1 | grep -q NAO_EXISTE_CAP"
+check "serve cri recusa um modo de tecto desconhecido" fail \
+  "$BIN" serve cri --addr "unix://$CAPSOCK" --cap-ceiling-mode xyz
+check "e também aqui não criou socket" ok bash -c "[ ! -S '$CAPSOCK' ]"
+
+# --- o helper: sobe, espera pelo socket, devolve o pid -----------------------
+e2e_serve_up() {  # $1=subcomando  $2=socket  → ecoa o pid, ou vazio
+  local sub="$1" sock="$2"
+  rm -f "$sock"
+  setsid "$BIN" serve "$sub" --addr "unix://$sock" >>"$SRVLOG" 2>&1 &
+  local i
+  for i in $(seq 1 60); do [ -S "$sock" ] && break; sleep 0.2; done
+  pgrep -f "serve $sub --addr unix://$sock" | head -1
+}
+
+for spec in "api:/v1/dash" "docker-api:/_ping"; do
+  sub="${spec%%:*}"; path="${spec#*:}"
+  SOCK="/tmp/dlx-srv-$sub-$PFX.sock"
+  PID="$(e2e_serve_up "$sub" "$SOCK")"
+  check "serve $sub cria o socket" ok bash -c "[ -S '$SOCK' ]"
+  check "serve $sub continua vivo depois de ligar" ok bash -c "[ -n '$PID' ] && kill -0 '$PID'"
+  # Um socket que ACEITA não é um servidor que responde — daí o HTTP real.
+  check "serve $sub responde 200 em $path" ok bash -c \
+    "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --unix-socket '$SOCK' 'http://localhost$path' --max-time 30)\" = 200 ]"
+  [ -n "$PID" ] && kill "$PID" 2>/dev/null
+  for i in $(seq 1 40); do kill -0 "$PID" 2>/dev/null || break; sleep 0.2; done
+  check "serve $sub morre com SIGTERM" ok bash -c "! kill -0 '$PID' 2>/dev/null"
+  rm -f "$SOCK"
+done
+
+# O CRI fala gRPC, não HTTP — a sonda honesta é o socket mais o processo vivo,
+# e é isso que se afirma, em vez de fingir um pedido que não sabemos fazer aqui.
+CRISOCK="/tmp/dlx-srv-cri-$PFX.sock"
+CRIPID="$(e2e_serve_up cri "$CRISOCK")"
+check "serve cri cria o socket" ok bash -c "[ -S '$CRISOCK' ]"
+check "serve cri continua vivo (gRPC: não se sonda por HTTP aqui)" ok bash -c \
+  "[ -n '$CRIPID' ] && kill -0 '$CRIPID'"
+[ -n "$CRIPID" ] && kill "$CRIPID" 2>/dev/null
+for i in $(seq 1 40); do kill -0 "$CRIPID" 2>/dev/null || break; sleep 0.2; done
+check "serve cri morre com SIGTERM" ok bash -c "! kill -0 '$CRIPID' 2>/dev/null"
+rm -f "$CRISOCK"
+
+check "nenhum servidor desta corrida ficou para trás" ok bash -c \
+  "! pgrep -f 'serve (cri|api|docker-api) --addr unix:///tmp/dlx-srv-.*$PFX' >/dev/null"
+
 section "compose — o que é recusado, e se a recusa dispara"
 
 # O `compose` tinha ZERO execuções. Metade do valor aqui não é o caminho feliz —
