@@ -13,6 +13,12 @@
 #
 # A CLI tem 245 comandos, 218 folhas invocáveis. Esta bateria verifica o `--help`
 # de 100% delas (o ciclo dinâmico abaixo percorre a árvore) e EXECUTA 55 — 25%.
+#
+# **Actualizado 2026-08-15**: o grupo `net` (43 folhas em 6 subgrupos) tinha ZERO
+# execuções e passou a ter 19 checks. Continuam sem nenhuma: `compose` (12),
+# `storage` (13) e `serve` (8) — e os comandos-folha `dash`/`man`/`version`.
+# Cita-se a FRACÇÃO medida e a data, nunca o total de checks: um total que sobe
+# faz a cobertura parecer melhor sem uma única folha nova exercitada.
 # Os outros 163 têm o contrato verificado e nunca são corridos, concentrados em
 # `net` (45), `image` (31) e `vm` (24). Um verde aqui lê-se com facilidade como
 # «a CLI foi testada», e o que foi testado é sobretudo o texto de ajuda: foi em
@@ -838,6 +844,67 @@ check "--cron com 4 campos recusa" fail "$BIN" backup container "$BKC" --to "$BK
 "$BIN" volumes rm "$BKV" >/dev/null 2>&1
 
 ########################################
+section "net — a plumbing que nunca era executada"
+
+# Porque esta secção existe: o grupo `net` tem 43 folhas em 6 subgrupos e a
+# bateria executava ZERO delas. Foi onde viveram todos os defeitos da série de
+# 2026-08-15 (o reaper de slirp a ceifar processos de outras ferramentas, o
+# `kill_pidfile` sem identidade, o `runtime_dir` partilhado entre roots, o lock
+# em falta, o pin a segurar o stderr do chamador) — e nenhum apareceu aqui: os
+# dois hangs só se manifestaram por `container`/`vm` arrastarem a rede por baixo.
+#
+# Precisa dos DOIS roots isolados. Sem eles isto mexe na infra real da máquina.
+if [[ -z "${DELONIX_ROOT:-}" || -z "${DELONIX_NET_RUNTIME_DIR:-}" ]]; then
+  skip "net: ciclo do netns" "exige DELONIX_ROOT E DELONIX_NET_RUNTIME_DIR (ver cabeçalho)"
+else
+  # --- ciclo de vida da infra -------------------------------------------------
+  check "net netns status responde parado" ok "$BIN" net netns status
+  check "net netns up" ok "$BIN" net netns up
+  check "net netns status diz UP" ok bash -c \
+    "'$BIN' net netns status | grep -qi 'ingress UP'"
+  # Idempotente: subir duas vezes não pode reconstruir nada.
+  check "net netns up é idempotente" ok "$BIN" net netns up
+
+  # O pin NÃO pode segurar o stdout/stderr de quem o arrancou. Antes de
+  # 2026-08-15 segurava, e um `$(...)` sobre qualquer comando que levantasse a
+  # infra bloqueava para sempre. `timeout` é o teste: se o pipe ficar preso, o
+  # comando nunca devolve.
+  check "um comando que CAPTURA a saída não fica preso no pin" ok bash -c \
+    "out=\$(timeout 20 '$BIN' net netns status 2>&1); [ -n \"\$out\" ]"
+
+  # --- ingress / egress: as regras por-container ------------------------------
+  check "net ingress ls" ok "$BIN" net ingress ls
+  check "net egress ls" ok "$BIN" net egress ls
+  check "net ingress de um container inexistente diz 4" 4 \
+    "$BIN" net ingress allow naoexiste-$PFX 80
+  check "net egress de um container inexistente diz 4" 4 \
+    "$BIN" net egress allow naoexiste-$PFX 80
+
+  # --- os outros verbos respondem, e a classe de erro é a certa ---------------
+  check "net httproute ls" ok "$BIN" net httproute ls
+  check "net tunnel ls" ok "$BIN" net tunnel ls
+  check "net flow --help" ok "$BIN" net flow --help
+  check "net boot status" ok "$BIN" net boot status
+  # O grupo tem `status`, não `ls`. Fica fixado: a primeira versão deste check
+  # assumiu `ls` (o verbo do resto da CLI) e chumbou com rc=2 — se algum dia o
+  # `ls` for acrescentado, é uma escolha e não um acidente.
+  check "net boot ls NÃO existe (é status)" 2 "$BIN" net boot ls
+
+  # `net boot enable/disable` escreve units systemd em ~/.config/systemd/user,
+  # que o DELONIX_ROOT NÃO redirecciona — num host com produção isso mexe fora
+  # do isolamento. Fica declarado por cobrir, nunca corrido às escondidas.
+  skip "net boot enable/disable" "escreve units em ~/.config/systemd/user, fora do DELONIX_ROOT"
+
+  # --- e a infra desce sem deixar restos --------------------------------------
+  check "net netns down" ok "$BIN" net netns down
+  check "net netns status diz parado outra vez" ok bash -c \
+    "! '$BIN' net netns status | grep -qi 'ingress UP'"
+  check "o socket de controlo não ficou para trás" ok bash -c \
+    "[ ! -S \"\$DELONIX_NET_RUNTIME_DIR/control.sock\" ]"
+  # down duas vezes é idempotente (é o comando de recuperação de um host).
+  check "net netns down é idempotente" ok "$BIN" net netns down
+fi
+
 section "limpeza"
 ########################################
 "$BIN" container rm -f "$C" >/dev/null 2>&1
