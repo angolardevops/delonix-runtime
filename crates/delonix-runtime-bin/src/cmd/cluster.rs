@@ -1397,12 +1397,35 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
     // here only, so the SAME missing image was a helpful download from
     // `cluster kubeadm` and a dead end from `vm create` — and when this copy
     // gained a better error, the other did not.
-    let image_tag = resolve_or_pull_vm_image(
-        &vm_store,
-        args.vm_image.clone(),
-        args.k8s_version.as_deref(),
-    )?;
-    let disk = vm_store.qcow2_path(&image_tag);
+    // A backend that owns its storage names the node's own template
+    // (`template:9000`) — there is no local qcow2 to resolve, nothing to pull,
+    // and `qcow2_path` would turn a perfectly good reference into a path on
+    // this host that the node cannot open. The reference travels VERBATIM, the
+    // same rule `create_with` already follows for `cfg.disk`.
+    //
+    // The backend is not a flag of this command: it comes from the standing
+    // choice (`DELONIX_VM_BACKEND` or `vm default-backend`), which is exactly
+    // how a control plane provisioning onto Proxmox steers it.
+    let remote_storage = delonix_vm::backend_manages_own_storage(
+        delonix_vm::standing_backend_choice(&state_root()).as_deref(),
+    );
+    let (image_tag, disk) = if remote_storage {
+        let ref_ = args.vm_image.clone().ok_or_else(|| {
+            Error::Invalid(super::po::t(
+                "--vm-image is required with a remote VM backend: the node's own template is the \
+                 image, and there is no local store to pick one from (e.g. `template:9000`)",
+            ).into())
+        })?;
+        (ref_.clone(), std::path::PathBuf::from(ref_))
+    } else {
+        let tag = resolve_or_pull_vm_image(
+            &vm_store,
+            args.vm_image.clone(),
+            args.k8s_version.as_deref(),
+        )?;
+        let disk = vm_store.qcow2_path(&tag);
+        (tag, disk)
+    };
 
     output::info(&super::po::tf(
         "Creating cluster \"{name}\" (kubeadm, {image})...",
