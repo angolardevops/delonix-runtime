@@ -433,10 +433,15 @@ impl Client {
         // No `ide2` here: a cloud-init drive cannot be added to a VM that has
         // one, and a template meant for cloud-init carries it already. Saying
         // so beats a failure whose message is about a busy device slot.
+        // `authed: true` — this is NOT the login call. The first version passed
+        // `false` and the node answered 401 straight after a clone that had
+        // just succeeded, leaving a VM on the node with the template's CPU,
+        // memory and no key: the exact half-configured state this function
+        // exists to prevent. Measured against a live PVE 9.2.
         let body = self.post_form(
             &format!("/nodes/{}/qemu/{vmid}/config", self.node),
             &form,
-            false,
+            true,
         )?;
         // A config change is applied synchronously and answers `data: null` —
         // there is no UPID to wait on, unlike clone/start/stop.
@@ -935,12 +940,21 @@ fn refuse_unsupported(cfg: &VmConfig) -> Result<()> {
 /// whether the VM needs a cloud-init drive at all: an empty drive on an image
 /// that ignores it is a CD-ROM nobody reads that still costs storage on the node.
 ///
-/// **`sshkeys` is passed RAW here on purpose.** The API wants it URL-encoded,
-/// and `reqwest`'s `.form()` percent-encodes every value exactly once, so the
-/// node decodes back to the newline-separated keys. Encoding it ourselves first
-/// is the classic double-encoding bug with this endpoint — the guest then gets a
-/// `authorized_keys` full of `%20` and `%2B` and refuses every login, with
-/// nothing on the host to suggest why.
+/// **`sshkeys` is percent-encoded BY US, on top of the form encoding.** This
+/// comment used to say the opposite — that `.form()` encoding it once was
+/// enough and that encoding it ourselves would be a double-encoding bug. The
+/// node says otherwise, and it says it plainly:
+///
+/// ```text
+/// 400 Bad Request {"errors":{"sshkeys":"invalid format - invalid urlencoded
+///   string: ssh-ed25519 AAAAC3Nza... validacao-proxmox\n"}}
+/// ```
+///
+/// So the VALUE of this parameter is itself defined as a urlencoded string —
+/// the transport encoding is a separate layer, and the node decodes twice on
+/// purpose. It is the one parameter of this API with that shape, which is
+/// exactly why it is worth a comment; reasoning about it from the outside got
+/// it backwards, and only a live node settled it.
 fn cloud_init_form(cfg: &VmConfig) -> Vec<(&'static str, String)> {
     if cfg.cloud_init == Some(false) {
         return Vec::new();
@@ -975,7 +989,7 @@ fn cloud_init_form(cfg: &VmConfig) -> Vec<(&'static str, String)> {
                 .unwrap_or(delonix_vm::cloudinit::DEFAULT_CI_USER)
                 .to_string(),
         ));
-        out.push(("sshkeys", cfg.ssh_keys.join("\n")));
+        out.push(("sshkeys", urlencode(&cfg.ssh_keys.join("\n"))));
     }
     out
 }
@@ -1077,6 +1091,27 @@ impl VmBackend for ProxmoxBackend {
         refuse_unsupported(cfg)?;
         let vmid = self.client.next_vmid()?;
         on(CreateStage::Define);
+        // Everything after the VM EXISTS on the node has to undo it on failure.
+        // `create_with` cannot: its cleanup removes a local overlay, and for a
+        // backend that owns its storage it deliberately touches nothing — the
+        // only thing it holds is `cfg.disk`, which here names the TEMPLATE. The
+        // vmid is known only in here.
+        //
+        // Measured, and it is why this exists: a `configure_clone` that failed
+        // (401, in the first version) left VMID 100 on the node with the
+        // template's CPU and no key, invisible to `vm ls` because no record was
+        // ever written, and removable only by hand through the node's own UI.
+        // One per attempt, and the likeliest next move is to retry the command
+        // that just failed.
+        let undo = |e: Error| -> Error {
+            // Best-effort by nature: if the node is unreachable this fails too,
+            // and the ORIGINAL error is the one worth reporting — a cleanup
+            // error on top would name the symptom instead of the cause.
+            if let Err(e2) = self.client.destroy(vmid) {
+                tracing::warn!(vmid, error = %e2, "proxmox: could not remove the VM left by a failed create");
+            }
+            e
+        };
         match parse_disk_spec(disk)? {
             DiskSpec::Template(src) => {
                 self.client.clone_template(src, vmid, &cfg.name)?;
@@ -1085,14 +1120,14 @@ impl VmBackend for ProxmoxBackend {
                 // API's own shape (clone takes `newid`/`name`/`full` and nothing
                 // else), and skipping it was how a DKS node came up with the
                 // golden's defaults and no key on it.
-                self.client.configure_clone(vmid, cfg)?;
+                self.client.configure_clone(vmid, cfg).map_err(undo)?;
             }
             DiskSpec::New { storage, gib } => {
                 self.client.create_vm(vmid, &cfg.name, cfg, &storage, gib)?
             }
         }
         on(CreateStage::Start);
-        self.client.start(vmid)?;
+        self.client.start(vmid).map_err(undo)?;
         // The vmid is what every later call addresses, and the name is not: two
         // VMs on a node may share a name, and `qm` takes the id. It goes in
         // `api_socket`, the field a backend uses for its own handle — the
@@ -1287,6 +1322,69 @@ pub fn register(target: Target) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cfg_com(ssh: &[&str]) -> VmConfig {
+        VmConfig {
+            name: "no1".into(),
+            vcpus: 2,
+            memory: "1G".into(),
+            ssh_keys: ssh.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    /// O `sshkeys` vai PERCENT-ENCODED por nós, por cima do encoding do
+    /// formulário. Medido contra um PVE 9.2 ao vivo: o valor cru é recusado com
+    /// `400 … "invalid format - invalid urlencoded string"`. Escrevi primeiro o
+    /// contrário, com um comentário confiante a explicar porquê — este teste
+    /// existe para a próxima pessoa não repetir o raciocínio.
+    #[test]
+    fn as_chaves_ssh_vao_percent_encoded() {
+        let f = cloud_init_form(&cfg_com(&["ssh-ed25519 AAAA+B/c teste"]));
+        let sk = f
+            .iter()
+            .find(|(k, _)| *k == "sshkeys")
+            .expect("sshkeys em falta")
+            .1
+            .clone();
+        assert!(!sk.contains(' '), "o espaço tem de ir escapado: {sk}");
+        assert!(sk.contains("%20"), "{sk}");
+        assert!(
+            sk.contains("%2B"),
+            "o '+' tem de ir escapado, senão vira espaço: {sk}"
+        );
+        assert!(sk.contains("%2F"), "{sk}");
+        // Duas chaves separam-se por newline, também escapada.
+        let f = cloud_init_form(&cfg_com(&["ssh-ed25519 AAA a", "ssh-rsa BBB b"]));
+        let sk = f.iter().find(|(k, _)| *k == "sshkeys").unwrap().1.clone();
+        assert!(sk.contains("%0A"), "{sk}");
+    }
+
+    /// Sem chaves não se manda `ciuser` nem `sshkeys` — mas o `ipconfig0` vai
+    /// sempre, e é ele que decide se o `ide2` de cloud-init é preciso.
+    #[test]
+    fn sem_chaves_so_vai_a_configuracao_de_rede() {
+        let f = cloud_init_form(&cfg_com(&[]));
+        assert!(
+            f.iter().any(|(k, v)| *k == "ipconfig0" && v == "ip=dhcp"),
+            "{f:?}"
+        );
+        assert!(
+            !f.iter().any(|(k, _)| *k == "sshkeys" || *k == "ciuser"),
+            "{f:?}"
+        );
+    }
+
+    /// Um appliance não leva cloud-init nenhum — e a lista VAZIA é o que faz o
+    /// chamador não lhe anexar um drive de cloud-init que ninguém lê.
+    #[test]
+    fn um_appliance_nao_leva_cloud_init_nenhum() {
+        let cfg = VmConfig {
+            cloud_init: Some(false),
+            ..cfg_com(&["ssh-ed25519 AAAA x"])
+        };
+        assert!(cloud_init_form(&cfg).is_empty());
+    }
 
     #[test]
     fn stopped_nao_quer_dizer_falhou() {
