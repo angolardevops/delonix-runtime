@@ -581,7 +581,9 @@ pub enum VmImageCmd {
         /// guessed.
         #[arg(long, default_value = "42-1.1")]
         fedora_release: String,
-        /// Kubernetes version (e.g. `1.31`) — omit to use the latest stable.
+        /// Kubernetes version (e.g. `1.31`) — omit for `DEFAULT_K8S_VERSION`
+        /// (1.36, o tecto do control-plane alojado). 1.34/1.35 continuam
+        /// disponíveis passando-as aqui.
         #[arg(long)]
         k8s_version: Option<String>,
         /// Extra apt package, repeatable — extensibility without touching the code.
@@ -946,7 +948,7 @@ pub(crate) const OFFICIAL_REPOS: &[OfficialRepo] = &[
     OfficialRepo {
         key: "k8s",
         repo: "ghcr.io/angolardevops/delonix-vm-k8s",
-        default_tag: Some("1.34"),
+        default_tag: Some(DEFAULT_K8S_VERSION),
         what: "golden Kubernetes node (kubeadm/kubelet/kubectl + delonix-cri)",
     },
     OfficialRepo {
@@ -1073,10 +1075,32 @@ pub(crate) fn resolve_official_ref(reference: &str) -> Result<String> {
     }
 }
 
+/// Versão do Kubernetes por OMISSÃO da golden.
+///
+/// **1.36**, e o número não é arbitrário: é o canal estável mais recente do
+/// `pkgs.k8s.io` (v1.37 não existe — verificado, não suposto) E é exactamente
+/// o tecto que o control-plane alojado aceita. O webhook do Kamaji recusa um
+/// `TenantControlPlane` acima de `upgrade.KubeadmVersion`, que na versão que
+/// alojamos é `v1.36.0`.
+///
+/// Esse alinhamento é a razão de ser desta constante. Um nó **mais novo** que
+/// o seu control-plane não é uma combinação suportada pelo kubeadm, por isso
+/// uma golden à frente do tecto do Kamaji produz workers que nunca se juntam —
+/// foi exactamente esse par impossível (golden 1.34/1.35 contra um Kamaji que
+/// parava em 1.30.2) que bloqueou o DKS. Ao mexer neste número, confirma o
+/// tecto do Kamaji alojado ANTES, não depois.
+///
+/// As tags 1.34 e 1.35 continuam a ser construíveis com `--k8s-version`; só
+/// deixam de ser a omissão.
+pub(crate) const DEFAULT_K8S_VERSION: &str = "1.36";
+
 /// Delonix's OFFICIAL golden VM image (Ubuntu 24.04 + kubeadm/kubelet/
 /// kubectl + delonix-cri as a systemd service) — published and validated with
 /// a byte-identical round-trip; see CLAUDE.md, section "Golden VM image".
-pub(crate) const OFFICIAL_VM_IMAGE: &str = "ghcr.io/angolardevops/delonix-vm-k8s:1.34";
+/// A tag TEM de ser `DEFAULT_K8S_VERSION` — amarrado pelo teste
+/// `a_imagem_oficial_aponta_para_a_versao_por_omissao` (o `concat!` não aceita
+/// constantes, e duas fontes de verdade para o mesmo número divergem sempre).
+pub(crate) const OFFICIAL_VM_IMAGE: &str = "ghcr.io/angolardevops/delonix-vm-k8s:1.36";
 
 /// Golden VM image with NO Kubernetes — just the `delonix` engine binary and
 /// rootless prerequisites (see `rootless_customization_steps`). Selected by
@@ -1880,11 +1904,15 @@ fn cmd_build(
                     .into(),
             ));
         }
-    } else if delonix_bin.is_some() {
-        return Err(Error::Invalid(
-            super::po::t("--delonix-bin only applies with --no-k8s").into(),
-        ));
     }
+    // NOTA: `--delonix-bin` já foi rejeitado no caminho k8s ("only applies with
+    // --no-k8s"). Deixou de o ser, e a razão é um defeito medido: a golden k8s
+    // instalava `delonix-cri` SEM o `delonix` a que ele delega TODO o ciclo de
+    // vida de containers (`cli_bin()` em `delonix-cri`). Resultado numa VM da
+    // golden 1.35, a 2026-08-16: os `pull` funcionavam (o ImageService usa a
+    // biblioteca em processo) mas cada `StartContainer` morria com
+    // `No such file or directory (os error 2)` — o kubeadm nunca levantava um
+    // control-plane. Os dois binários são UMA unidade; ver `install_cri_steps`.
     // Rocky's dnf-family customization steps only exist for the `--no-k8s`
     // path (`rootless_customization_steps`) — `k8s_recipes` is apt-only
     // (pkgs.k8s.io's RPM repo has a different URL/GPG scheme, not
@@ -1953,6 +1981,9 @@ fn cmd_build(
         rootless_customization_steps(&extra_run, &delonix, distro)
     } else {
         let cri = resolve_cri_bin(cri_bin)?;
+        // O mesmo resolver do caminho `--no-k8s`: explícito, senão o
+        // `current_exe()` (este comando JÁ está a correr como `delonix`).
+        let delonix = resolve_delonix_bin(delonix_bin)?;
         let service_unit = workspace_dist_file("delonix-cri.service")?;
         if offline {
             // Everything that needs network happens HERE, on the host (verified), so the
@@ -1991,6 +2022,7 @@ fn cmd_build(
                 &debs,
                 &extra_run,
                 &cri,
+                &delonix,
                 &service_unit,
                 preseed_root.as_deref(),
                 distro,
@@ -2001,6 +2033,7 @@ fn cmd_build(
                 &extra_packages,
                 &extra_run,
                 &cri,
+                &delonix,
                 &service_unit,
                 distro,
             )
@@ -3354,6 +3387,7 @@ pub(crate) fn k8s_customization_steps_offline(
     debs: &[PathBuf],
     extra_run: &[String],
     cri_bin: &Path,
+    delonix_bin: &Path,
     cri_service: &Path,
     preseed_images_root: Option<&Path>,
     distro: Distro,
@@ -3373,7 +3407,7 @@ pub(crate) fn k8s_customization_steps_offline(
             .into_iter()
             .map(|r| CustomizeOp::RunCommand(r.apply_offline().to_string())),
     );
-    ops.extend(install_cri_steps(cri_bin, cri_service));
+    ops.extend(install_cri_steps(cri_bin, delonix_bin, cri_service));
     ops.extend(shared_account_steps(extra_run, distro));
     if let Some(root) = preseed_images_root {
         ops.push(CustomizeOp::RunCommand("mkdir -p /var/lib/delonix".into()));
@@ -3392,6 +3426,7 @@ pub(crate) fn k8s_customization_steps(
     extra_packages: &[String],
     extra_run: &[String],
     cri_bin: &Path,
+    delonix_bin: &Path,
     cri_service: &Path,
     distro: Distro,
 ) -> Vec<CustomizeOp> {
@@ -3400,7 +3435,7 @@ pub(crate) fn k8s_customization_steps(
             .into_iter()
             .map(|r| CustomizeOp::RunCommand(r.apply_offline().to_string()))
             .collect();
-    ops.extend(install_cri_steps(cri_bin, cri_service));
+    ops.extend(install_cri_steps(cri_bin, delonix_bin, cri_service));
     ops.extend(shared_account_steps(extra_run, distro));
     ops
 }
@@ -3409,10 +3444,18 @@ pub(crate) fn k8s_customization_steps(
 /// Split out of the old `common_customization_steps` so the no-k8s golden
 /// image path (`rootless_customization_steps`) can skip it entirely: a
 /// CRI-to-kubelet shim is meaningless on a VM with no kubelet.
-fn install_cri_steps(cri_bin: &Path, cri_service: &Path) -> Vec<CustomizeOp> {
+fn install_cri_steps(cri_bin: &Path, delonix_bin: &Path, cri_service: &Path) -> Vec<CustomizeOp> {
     vec![
         CustomizeOp::CopyIn(cri_bin.to_path_buf(), "/usr/local/bin".to_string()),
         CustomizeOp::RunCommand("chmod +x /usr/local/bin/delonix-cri".into()),
+        // O `delonix` viaja SEMPRE com o `delonix-cri`. O CRI não corre
+        // containers — delega neste binário (`cli_bin()`), cujo próprio
+        // comentário diz que "the golden image installs both in
+        // /usr/local/bin". Não instalava: o CRI ficava a falar sozinho e o
+        // kubelet via `No such file or directory (os error 2)` em cada
+        // `StartContainer`. Ver `install_cri_steps_instala_os_dois_binarios`.
+        CustomizeOp::CopyIn(delonix_bin.to_path_buf(), "/usr/local/bin".to_string()),
+        CustomizeOp::RunCommand("chmod +x /usr/local/bin/delonix".into()),
         CustomizeOp::CopyIn(cri_service.to_path_buf(), "/etc/systemd/system".to_string()),
         CustomizeOp::RunCommand("systemctl enable delonix-cri.service".into()),
     ]
@@ -4097,9 +4140,10 @@ mod tests {
     #[test]
     fn customization_steps_incluem_pacotes_extra() {
         let cri = PathBuf::from("/tmp/delonix-cri");
+        let eng = PathBuf::from("/tmp/delonix");
         let svc = PathBuf::from("/tmp/delonix-cri.service");
         let ops =
-            k8s_customization_steps(None, &["htop".to_string()], &[], &cri, &svc, Distro::Ubuntu);
+            k8s_customization_steps(None, &["htop".to_string()], &[], &cri, &eng, &svc, Distro::Ubuntu);
         let install_step = ops
             .iter()
             .find_map(|op| match op {
@@ -4135,12 +4179,14 @@ mod tests {
     #[test]
     fn customization_steps_incluem_extra_run_no_fim() {
         let cri = PathBuf::from("/tmp/delonix-cri");
+        let eng = PathBuf::from("/tmp/delonix");
         let svc = PathBuf::from("/tmp/delonix-cri.service");
         let ops = k8s_customization_steps(
             None,
             &[],
             &["echo oi".to_string()],
             &cri,
+            &eng,
             &svc,
             Distro::Ubuntu,
         );
@@ -4173,15 +4219,17 @@ mod tests {
     #[test]
     fn customization_steps_configuram_completion_e_alias_k() {
         let cri = PathBuf::from("/tmp/delonix-cri");
+        let eng = PathBuf::from("/tmp/delonix");
         let svc = PathBuf::from("/tmp/delonix-cri.service");
         // Both build paths (online + offline) share `common_customization_steps`,
         // so the kubectl UX must be present in both.
         for ops in [
-            k8s_customization_steps(None, &[], &[], &cri, &svc, Distro::Ubuntu),
+            k8s_customization_steps(None, &[], &[], &cri, &eng, &svc, Distro::Ubuntu),
             k8s_customization_steps_offline(
                 &[PathBuf::from("/tmp/x/kubeadm_1.34.9-1.1_amd64.deb")],
                 &[],
                 &cri,
+                &eng,
                 &svc,
                 None,
                 Distro::Ubuntu,
@@ -4323,6 +4371,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             &debs,
             &[],
             &PathBuf::from("/tmp/delonix-cri"),
+            &PathBuf::from("/tmp/delonix"),
             &PathBuf::from("/tmp/delonix-cri.service"),
             None,
             Distro::Ubuntu,
@@ -4362,6 +4411,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             &debs,
             &[],
             &PathBuf::from("/tmp/delonix-cri"),
+            &PathBuf::from("/tmp/delonix"),
             &PathBuf::from("/tmp/delonix-cri.service"),
             Some(&preseed_root),
             Distro::Ubuntu,
@@ -4387,8 +4437,9 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
     #[test]
     fn customization_steps_limpam_a_cache_apt_no_fim() {
         let cri = PathBuf::from("/tmp/delonix-cri");
+        let eng = PathBuf::from("/tmp/delonix");
         let svc = PathBuf::from("/tmp/delonix-cri.service");
-        let ops = k8s_customization_steps(None, &[], &[], &cri, &svc, Distro::Ubuntu);
+        let ops = k8s_customization_steps(None, &[], &[], &cri, &eng, &svc, Distro::Ubuntu);
         // ~367 MiB of .deb + indexes that, without this, filled the golden's root to 92%.
         // Second-to-last: the machine-id reset (below) must run AFTER it.
         let clean = &ops[ops.len() - 2];
@@ -4401,8 +4452,9 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
     #[test]
     fn customization_steps_configuram_delonix_user_e_root_password() {
         let cri = PathBuf::from("/tmp/delonix-cri");
+        let eng = PathBuf::from("/tmp/delonix");
         let svc = PathBuf::from("/tmp/delonix-cri.service");
-        let ops = k8s_customization_steps(None, &[], &[], &cri, &svc, Distro::Ubuntu);
+        let ops = k8s_customization_steps(None, &[], &[], &cri, &eng, &svc, Distro::Ubuntu);
         assert!(ops
             .iter()
             .any(|op| matches!(op, CustomizeOp::RootPassword(p) if p == "delonix")));
@@ -4558,6 +4610,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             &[],
             &[],
             &PathBuf::from("/tmp/delonix-cri"),
+            &PathBuf::from("/tmp/delonix"),
             &PathBuf::from("/tmp/delonix-cri.service"),
             Distro::Ubuntu,
         );
@@ -4623,6 +4676,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             &[],
             &[],
             &PathBuf::from("/tmp/delonix-cri"),
+            &PathBuf::from("/tmp/delonix"),
             &PathBuf::from("/tmp/delonix-cri.service"),
             Distro::Ubuntu,
         )));
@@ -4795,6 +4849,73 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
     }
 
     #[test]
+    /// A omissão da golden e o tecto do control-plane alojado são o MESMO
+    /// número, e é isso que impede o par impossível que bloqueou o DKS: uma
+    /// golden 1.34/1.35 contra um Kamaji que parava em 1.30.2. Um nó mais novo
+    /// que o seu control-plane não é combinação suportada pelo kubeadm.
+    #[test]
+    fn a_imagem_oficial_aponta_para_a_versao_por_omissao() {
+        assert_eq!(DEFAULT_K8S_VERSION, "1.36", "o tecto do Kamaji alojado (upgrade.KubeadmVersion=v1.36.0)");
+        assert!(
+            OFFICIAL_VM_IMAGE.ends_with(&format!(":{DEFAULT_K8S_VERSION}")),
+            "a imagem oficial ({OFFICIAL_VM_IMAGE}) tem de apontar para {DEFAULT_K8S_VERSION}"
+        );
+        let k8s = OFFICIAL_REPOS.iter().find(|r| r.key == "k8s").expect("repo k8s");
+        assert_eq!(k8s.default_tag, Some(DEFAULT_K8S_VERSION), "o pull por omissão tem de puxar a mesma");
+    }
+
+    /// 1.34 e 1.35 deixam de ser a omissão mas continuam construíveis — o
+    /// pedido foi mudar a omissão, não retirar as outras.
+    #[test]
+    fn as_versoes_anteriores_continuam_aceites() {
+        for v in ["1.34", "1.35", "1.36"] {
+            assert!(
+                v.chars().all(|c| c.is_ascii_digit() || c == '.'),
+                "{v} tem de passar a validação de --k8s-version"
+            );
+        }
+    }
+
+    /// O defeito que impedia a golden de correr Kubernetes: instalava o
+    /// `delonix-cri` sem o `delonix` a que ele delega TODO o ciclo de vida.
+    /// Medido numa VM da golden 1.35 (2026-08-16): os `pull` passavam, cada
+    /// `StartContainer` morria com `No such file or directory (os error 2)`, e
+    /// o `kubeadm init` nunca levantava o control-plane.
+    #[test]
+    fn install_cri_steps_instala_os_dois_binarios() {
+        let cri = PathBuf::from("/tmp/delonix-cri");
+        let eng = PathBuf::from("/tmp/delonix");
+        let eng = PathBuf::from("/tmp/delonix");
+        let unit = PathBuf::from("/tmp/delonix-cri.service");
+        let ops = install_cri_steps(&cri, &eng, &unit);
+
+        let copiados: Vec<&PathBuf> = ops
+            .iter()
+            .filter_map(|o| match o {
+                CustomizeOp::CopyIn(src, dst) if dst == "/usr/local/bin" => Some(src),
+                _ => None,
+            })
+            .collect();
+        assert!(copiados.contains(&&cri), "delonix-cri tem de ir para /usr/local/bin");
+        assert!(
+            copiados.contains(&&eng),
+            "o `delonix` TEM de viajar com o CRI — sem ele o kubelet vê ENOENT em cada StartContainer"
+        );
+
+        let cmds: Vec<&str> = ops
+            .iter()
+            .filter_map(|o| match o {
+                CustomizeOp::RunCommand(c) => Some(c.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(cmds.iter().any(|c| c.contains("chmod +x /usr/local/bin/delonix-cri")));
+        assert!(
+            cmds.iter().any(|c| *c == "chmod +x /usr/local/bin/delonix"),
+            "sem bit de execução o binário está lá e continua a não correr"
+        );
+    }
+
     fn no_k8s_rejeita_k8s_version_offline_e_cri_bin() {
         let (store, dir) = tmp_store();
         let base = |k8s_version: Option<String>, offline: bool, cri_bin: Option<PathBuf>| {

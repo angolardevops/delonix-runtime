@@ -19,7 +19,7 @@ on:
     inputs:
       k8s_version:
         description: "Versão do Kubernetes (tag da imagem) — ignorado se no_k8s=true"
-        default: "1.34"
+        default: "1.36"
       ubuntu_release:
         description: "Cloud image Ubuntu base (usado quando distro=ubuntu)"
         default: "24.04"
@@ -108,6 +108,7 @@ jobs:
             --ubuntu-release "${{ inputs.ubuntu_release }}" \
             --k8s-version "${{ inputs.k8s_version }}" \
             --cri-bin ./target/release/delonix-cri \
+            --delonix-bin ./target/release/delonix \
             --offline
           ./target/release/delonix image --vm ls
       # Ao contrário da golden (`--offline`, sem rede no appliance), uma build
