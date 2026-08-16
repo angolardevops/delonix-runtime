@@ -852,33 +852,59 @@ fn ceiling_reduces(capped: &[String], rec: &ContainerRec) -> bool {
     })
 }
 
-pub fn start_container(
-    base: &Path,
-    id: String,
+
+/// Constrói o ARGV de `delonix container run` para um container do CRI.
+///
+/// Extraído de [`start_container`] para ser **puro e testável**: este ARGV é a
+/// fronteira onde um erro não aparece como falha de compilação nem de teste
+/// unitário, só como um cluster que não arranca. Foi assim que o
+/// `hostNetwork: true` passou meses a não ser rede do host — ver o comentário
+/// dentro da função.
+pub(crate) fn start_argv(
+    rec: &ContainerRec,
+    sandbox: Option<&SandboxRec>,
     ceiling: crate::CapCeiling,
-) -> Result<Response<StartContainerResponse>, Status> {
-    let mut rec: ContainerRec = read_rec(&ct_dir(base), &id)?;
-    let name = format!("cri-{id}");
+    id: &str,
+) -> Vec<String> {
     let mut args: Vec<String> = vec![
         "container".into(),
         "run".into(),
         "-d".into(),
         "--name".into(),
-        name,
+        format!("cri-{id}"),
     ];
     // Logs in the path/format the kubelet/crictl expect (CRI), if any.
     if !rec.log_path.is_empty() {
-        if let Some(dir) = std::path::Path::new(&rec.log_path).parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
         args.push("--log-file".into());
         args.push(rec.log_path.clone());
         args.push("--log-cri".into());
     }
     // Joins the pod sandbox's netns (network/namespace sharing), unless the pod
     // uses the host's network.
-    if let Ok(sb) = read_rec::<SandboxRec>(&sb_dir(base), &rec.sandbox_id) {
-        if !sb.host_network {
+    if let Some(sb) = sandbox {
+        if sb.host_network {
+            // `hostNetwork: true` tem de ser a REDE DO HOST, não "sem `--pod`".
+            //
+            // Omitir só o `--pod` deixava o container cair na rede por omissão
+            // (bridge) com um netns SEU — e ao mesmo tempo o `pod_sandbox_status`
+            // reportava ao kubelet que o pod estava na rede do host. Kubelet e
+            // realidade a dizer coisas diferentes, em silêncio.
+            //
+            // Medido a 2026-08-16 numa golden 1.36: os quatro static pods do
+            // control-plane apareciam com portas PUBLICADAS (`6443->6443`,
+            // `2381->2381`), que é a assinatura de um netns próprio. O etcd
+            // escutava em `127.0.0.1:2379` dentro do seu netns, o apiserver
+            // procurava-o em `127.0.0.1:2379` NOUTRO netns
+            // (`--etcd-servers=https://127.0.0.1:2379`), as sondas falhavam, o
+            // kubelet matava-os, e o motor registava `Crashed` — morte por
+            // sinal, sem código de saída. O `kubeadm init` ficava preso em
+            // `wait-control-plane` e a 6443 nunca abria.
+            //
+            // O mesmo etcd, corrido à mão com `--net host` e as mesmas flags de
+            // log do CRI, fica `Up` e serve tráfego. A diferença era esta linha.
+            args.push("--net".into());
+            args.push("host".into());
+        } else {
             args.push("--pod".into());
             args.push(format!("cri-{}", rec.sandbox_id));
         }
@@ -909,9 +935,15 @@ pub fn start_container(
             args.push("--dns-option".into());
             args.push(d.clone());
         }
-        for p in &sb.port_mappings {
-            args.push("--publish".into());
-            args.push(p.clone());
+        // Na rede do HOST não há o que publicar: o processo liga-se
+        // directamente aos portos do host. Publicar aqui pedia DNAT para um
+        // netns que não existe — e era o sintoma pelo qual este defeito se
+        // deixou ver (`6443->6443` num pod `hostNetwork`).
+        if !sb.host_network {
+            for p in &sb.port_mappings {
+                args.push("--publish".into());
+                args.push(p.clone());
+            }
         }
         // pod sysctls, applied to the container (shares the pod's namespaces).
         for s in &sb.sysctls {
@@ -981,6 +1013,24 @@ pub fn start_container(
     args.push(rec.image.clone());
     args.extend(rec.command.iter().cloned());
     args.extend(rec.args.iter().cloned());
+    args
+}
+
+pub fn start_container(
+    base: &Path,
+    id: String,
+    ceiling: crate::CapCeiling,
+) -> Result<Response<StartContainerResponse>, Status> {
+    let mut rec: ContainerRec = read_rec(&ct_dir(base), &id)?;
+    let sandbox = read_rec::<SandboxRec>(&sb_dir(base), &rec.sandbox_id).ok();
+    // O `--log-file` precisa que o directório exista ANTES de o motor abrir o
+    // ficheiro; é o único efeito lateral que sobra deste caminho.
+    if !rec.log_path.is_empty() {
+        if let Some(dir) = std::path::Path::new(&rec.log_path).parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+    }
+    let args = start_argv(&rec, sandbox.as_ref(), ceiling, &id);
     let argv: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     if !delonix_detached(base, &argv)? {
         return Err(Status::internal(format!("failed to start container {id}")));
@@ -1645,6 +1695,67 @@ mod tests {
         ));
         std::fs::create_dir_all(&p).unwrap();
         p
+    }
+
+    /// `hostNetwork: true` tem de virar REDE DO HOST no ARGV do motor.
+    ///
+    /// Este é o teste que faltava. Antes, o caminho `host_network` limitava-se
+    /// a NÃO passar `--pod`, e o container caía na rede por omissão com um
+    /// netns só dele — enquanto o `pod_sandbox_status` dizia ao kubelet que o
+    /// pod estava na rede do host. Medido numa golden 1.36: os static pods do
+    /// control-plane apareciam com `6443->6443`/`2381->2381` publicados, o
+    /// apiserver não alcançava o etcd em `127.0.0.1:2379` (netns diferente), o
+    /// kubelet matava-os e o `kubeadm init` ficava preso em
+    /// `wait-control-plane`. Nada disto falha a compilar nem falha um teste
+    /// unitário — só falha um cluster.
+    #[test]
+    fn host_network_vira_rede_do_host_e_nao_publica_portas() {
+        let mut rec = ContainerRec::default();
+        rec.image = "registry.k8s.io/etcd:3.6.6-0".into();
+        rec.sandbox_id = "sb1".into();
+
+        let mut sb = SandboxRec::default();
+        sb.id = "sb1".into();
+        sb.host_network = true;
+        sb.port_mappings = vec!["2381:2381".into()];
+
+        let argv = start_argv(&rec, Some(&sb), crate::CapCeiling::default(), "abc");
+        let pos = |f: &str| argv.iter().position(|a| a == f);
+
+        // A metade que faltava: rede do host de verdade.
+        let i = pos("--net").expect(&format!("`--net` ausente em {argv:?}"));
+        assert_eq!(argv[i + 1], "host", "hostNetwork tem de ser `--net host`");
+        assert!(pos("--pod").is_none(), "na rede do host não se entra no netns do sandbox");
+
+        // A outra metade: publicar portas num pod hostNetwork pede DNAT para um
+        // netns que não existe — e foi o sintoma que denunciou o defeito.
+        assert!(
+            pos("--publish").is_none(),
+            "hostNetwork não publica portas — o processo liga-se aos portos do host: {argv:?}"
+        );
+    }
+
+    /// O caminho normal (sem hostNetwork) não pode ter regredido: entra no
+    /// netns do sandbox e publica as portas do pod.
+    #[test]
+    fn sem_host_network_entra_no_netns_do_pod_e_publica() {
+        let mut rec = ContainerRec::default();
+        rec.image = "nginx".into();
+        rec.sandbox_id = "sb2".into();
+
+        let mut sb = SandboxRec::default();
+        sb.id = "sb2".into();
+        sb.host_network = false;
+        sb.port_mappings = vec!["8080:80".into()];
+
+        let argv = start_argv(&rec, Some(&sb), crate::CapCeiling::default(), "xyz");
+        let pos = |f: &str| argv.iter().position(|a| a == f);
+
+        let i = pos("--pod").expect("sem hostNetwork tem de entrar no netns do sandbox");
+        assert_eq!(argv[i + 1], "cri-sb2");
+        assert!(pos("--net").is_none(), "só o caminho hostNetwork mexe em `--net`");
+        let j = pos("--publish").expect("as portas do pod são publicadas");
+        assert_eq!(argv[j + 1], "8080:80");
     }
 
     /// The ceiling has to bite at CREATE, on the real CRI request path — not just
