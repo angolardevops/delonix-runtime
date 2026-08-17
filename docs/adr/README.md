@@ -25,6 +25,7 @@ never rewritten — supersede them with a new one.
 | [0013](0013-network-topology.md) | Routed topologies — external gateway/DNS, subnets and VLANs, without leaving rootless | **Accepted** — tier A/B rootless (B spiked GO), tier C privileged |
 | [0014](0014-runtime-dir-per-root.md) | The network runtime dir is scoped to the state root, not just to the uid | **Accepted** — implemented; default root unchanged, only alternative roots move |
 | [0015](0015-intermediate-cgroup-level.md) | An intermediate cgroup level with an aggregate ceiling (tenancy-free) | **Accepted** — implemented; opaque group name, `None` changes nothing |
+| [0016](0016-filesystem-under-the-state-root.md) | Keep ext4 under the state root; revisit btrfs only for a measured need | **Accepted** — the disk was full of duplicates, not compressible data; written triggers to reopen |
 
 ## Roadmap (from `CLAUDE.md` "Universal Runtime" — each phase needs its own accepted ADR)
 
