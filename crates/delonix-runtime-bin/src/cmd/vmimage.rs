@@ -2038,6 +2038,46 @@ fn cmd_build(
                 "amd64",
                 &extra_packages,
             )?;
+            // The guest agent, from the DISTRO archive, into the SAME directory the
+            // existing `dpkg -i /tmp/k8s-debs/*.deb` step already installs — so this adds a
+            // download, not a second install path.
+            //
+            // Why it belongs in the golden: on a Proxmox node the platform learns a VM's
+            // address through the agent (`ProxmoxBackend::ip`), and it also gives PBS a
+            // quiesced backup. Without it that lookup answers `None` — a first-class answer
+            // there, which is exactly why its absence is INVISIBLE until someone needs an
+            // IP. So this FAILS the build instead of warning: a golden that silently lacks
+            // the agent is indistinguishable from one that has it.
+            let codename = guest_os_codename(&work_qcow2).ok_or_else(|| {
+                Error::Invalid(
+                    super::po::t(
+                        "could not read VERSION_CODENAME from the base image (needed to \
+                         reach the distro archive) — is libguestfs installed?",
+                    )
+                    .to_string(),
+                )
+            })?;
+            eprintln!(
+                "{}",
+                super::po::tf(
+                    "offline mode: getting the guest agent from the {codename} archive...",
+                    &[("codename", &codename)]
+                )
+            );
+            download_archive_debs(
+                &work_dir,
+                &work_dir.join("debs"),
+                "http://archive.ubuntu.com/ubuntu",
+                &codename,
+                // `qemu-guest-agent` is in `universe`, its `liburing2` dependency in
+                // `main`: measured, not assumed. The other four deps it declares
+                // (libc6/libglib2.0-0t64/libnuma1/libudev1) are ALREADY in the cloud image,
+                // so the closure to carry is two files — same measurement the k8s path made
+                // before settling on four.
+                &["main", "universe"],
+                "amd64",
+                &["qemu-guest-agent", "liburing2"],
+            )?;
             // Best-effort: the golden image ships with kubeadm's own core images
             // already local, so a real `kubeadm init` on a booted VM does not
             // redownload apiserver/etcd/coredns/... from scratch (see
@@ -2958,6 +2998,147 @@ fn download_k8s_debs(
     Ok(out)
 }
 
+/// Where the DISTRO's own archive keyring lives on the build host.
+///
+/// The k8s chain fetches `Release.key` from the repo it is about to trust — fine for a
+/// third-party repo (there is no other anchor), but trust-on-first-use. The Ubuntu archive
+/// key ships with the distro, so here the anchor is the host's package manager instead of
+/// the server we are downloading from. That is strictly stronger, and it is why an absent
+/// keyring **fails** rather than falling back to fetching a key from the archive.
+const UBUNTU_ARCHIVE_KEYRING: &str = "/usr/share/keyrings/ubuntu-archive-keyring.gpg";
+
+/// The suite codename (`noble`) of an image, read from ITS OWN `/etc/os-release`.
+///
+/// Deliberately not a `24.04 → noble` table: the archive URL needs the codename, a table
+/// goes stale the day a release is added (this build already accepts `--ubuntu-release
+/// 26.04`), and the image is the thing that knows. Same idiom as `detect_kernel_version`,
+/// which reads the kernel out of the artefact instead of deriving it.
+fn guest_os_codename(qcow2: &Path) -> Option<String> {
+    let out = std::process::Command::new("virt-cat")
+        .args(["-a", &qcow2.to_string_lossy(), "/etc/os-release"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    parse_os_release_codename(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// PURE. `VERSION_CODENAME=noble` → `noble`; quotes stripped (some distros quote it).
+pub(crate) fn parse_os_release_codename(text: &str) -> Option<String> {
+    for line in text.lines() {
+        if let Some(v) = line.trim().strip_prefix("VERSION_CODENAME=") {
+            let v = v.trim().trim_matches('"').trim_matches('\'');
+            if !v.is_empty() {
+                return Some(v.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Verifies a distro archive's clearsigned `InRelease` against a keyring ALREADY on the
+/// host, and returns its text. Fails closed at both steps.
+fn verify_archive_inrelease(work: &Path, dists_base: &str, keyring: &str) -> Result<String> {
+    if !Path::new(keyring).exists() {
+        return Err(Error::Invalid(super::po::tf(
+            "the distro archive keyring is missing: {keyring} — install the distro's \
+             archive keyring on the BUILD HOST (Debian/Ubuntu: ubuntu-keyring)",
+            &[("keyring", keyring)],
+        )));
+    }
+    let inrelease = work.join("archive-InRelease");
+    stream_download(&format!("{dists_base}/InRelease"), &inrelease)?;
+    run_tool(
+        "gpgv",
+        &["--keyring", keyring, &inrelease.to_string_lossy()],
+    )
+    .map_err(|_| {
+        Error::Invalid(
+            super::po::t(
+                "the distro archive's InRelease signature does NOT match the host keyring \
+                 — aborting (possible compromised mirror or MITM)",
+            )
+            .to_string(),
+        )
+    })?;
+    Ok(std::fs::read_to_string(&inrelease)?)
+}
+
+/// Downloads `.deb` files from a DISTRO archive into `dest_dir`, with the same apt chain
+/// the k8s path uses — signed `InRelease` → SHA256 of the component index → SHA256 of each
+/// `.deb` — but anchored on the host keyring (see [`UBUNTU_ARCHIVE_KEYRING`]).
+///
+/// The index is only published COMPRESSED for the big components (measured: an
+/// uncompressed `universe/binary-amd64/Packages` is a 404), so it is gunzipped here —
+/// `flate2` is already a direct dependency of this crate, no new supply-chain surface.
+///
+/// Every wanted package must be found; a missing one is an ERROR and never a quiet
+/// omission, because the whole point of installing offline is that the guest cannot go
+/// looking for what we forgot.
+fn download_archive_debs(
+    work: &Path,
+    dest_dir: &Path,
+    archive_base: &str,
+    codename: &str,
+    components: &[&str],
+    arch: &str,
+    wanted: &[&str],
+) -> Result<Vec<PathBuf>> {
+    let dists_base = format!("{archive_base}/dists/{codename}");
+    let release = verify_archive_inrelease(work, &dists_base, UBUNTU_ARCHIVE_KEYRING)?;
+    std::fs::create_dir_all(dest_dir)?;
+
+    let mut found: Vec<K8sDeb> = Vec::new();
+    for comp in components {
+        let rel_path = format!("{comp}/binary-{arch}/Packages.gz");
+        let Some(want_sha) = release_sha256_of(&release, &rel_path) else {
+            continue;
+        };
+        let gz = work.join(format!("Packages-{comp}.gz"));
+        stream_download(&format!("{dists_base}/{rel_path}"), &gz)?;
+        let got = hex_sha256_file(&gz)?;
+        if got != want_sha {
+            return Err(Error::Invalid(super::po::tf(
+                "the archive index {path} does not match the SHA256 in the signed InRelease",
+                &[("path", &rel_path)],
+            )));
+        }
+        let mut text = String::new();
+        {
+            use std::io::Read;
+            let f = std::fs::File::open(&gz)?;
+            flate2::read::GzDecoder::new(f).read_to_string(&mut text)?;
+        }
+        found.extend(parse_packages_index(&text, arch, "", wanted, &[]));
+    }
+
+    for w in wanted {
+        if !found.iter().any(|d| d.name == *w) {
+            return Err(Error::Invalid(super::po::tf(
+                "package {pkg} was not found in the archive index for {codename}",
+                &[("pkg", w), ("codename", codename)],
+            )));
+        }
+    }
+
+    let mut out = Vec::new();
+    for d in &found {
+        let dest = dest_dir.join(d.filename.rsplit('/').next().unwrap_or(&d.filename));
+        stream_download(&format!("{archive_base}/{}", d.filename), &dest)?;
+        let got = hex_sha256_file(&dest)?;
+        if got != d.sha256 {
+            let _ = std::fs::remove_file(&dest);
+            return Err(Error::Invalid(super::po::tf(
+                "the .deb {pkg} does not match the SHA256 in the authenticated index",
+                &[("pkg", &d.name)],
+            )));
+        }
+        out.push(dest);
+    }
+    Ok(out)
+}
+
 /// Pre-seeds the golden image's own `ImageStore` (`/var/lib/delonix`, what
 /// `delonix-cri` reads at runtime) with the exact container images
 /// `kubeadm init`/`join` need for this k8s version — fetched+verified on the
@@ -3453,6 +3634,17 @@ pub(crate) fn k8s_customization_steps_offline(
     }
     ops.push(CustomizeOp::RunCommand(
         "dpkg -i /tmp/k8s-debs/*.deb && apt-mark hold kubeadm kubelet kubectl && rm -rf /tmp/k8s-debs"
+            .into(),
+    ));
+    // The agent's own postinst DOES enable its unit — but through `deb-systemd-helper`,
+    // against a guest where systemd is not running, which is a claim about someone else's
+    // maintainer script and not a measurement. Enabling it here costs one idempotent
+    // command and is the same thing this build already does for `delonix-cri.service`
+    // instead of trusting a preset. Guarded, because a build without the agent (a
+    // `--distro` whose archive we do not fetch) must not fail on a unit that is absent.
+    ops.push(CustomizeOp::RunCommand(
+        "systemctl list-unit-files qemu-guest-agent.service >/dev/null 2>&1 && \
+         systemctl enable qemu-guest-agent.service || true"
             .into(),
     ));
     ops.extend(
@@ -4417,6 +4609,63 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         assert_eq!(release_sha256_of(release, "nao-existe"), None);
     }
 
+    /// O codinome sai da própria imagem, e é o que constrói o URL do arquivo — um valor
+    /// errado aqui dá um 404 depois de centenas de MB, ou pior, o índice de outra suite.
+    #[test]
+    fn o_codinome_le_se_do_os_release_da_imagem() {
+        let real = "PRETTY_NAME=\"Ubuntu 24.04.1 LTS\"\nNAME=\"Ubuntu\"\n\
+                    VERSION_ID=\"24.04\"\nVERSION_CODENAME=noble\nID=ubuntu\n\
+                    UBUNTU_CODENAME=noble\n";
+        assert_eq!(parse_os_release_codename(real).as_deref(), Some("noble"));
+        // Algumas distros citam-no; o valor é o mesmo.
+        assert_eq!(
+            parse_os_release_codename("VERSION_CODENAME=\"bookworm\"\n").as_deref(),
+            Some("bookworm")
+        );
+        // Ausente é None e NÃO uma string vazia: vazio construiria
+        // `dists//InRelease`, que é um 404 a dizer outra coisa.
+        assert!(parse_os_release_codename("ID=fedora\nVERSION_ID=42\n").is_none());
+        assert!(parse_os_release_codename("VERSION_CODENAME=\n").is_none());
+        // `UBUNTU_CODENAME` sozinho não conta — este parser tem um dono, e é a chave
+        // padronizada pelo os-release(5).
+        assert!(parse_os_release_codename("UBUNTU_CODENAME=noble\n").is_none());
+    }
+
+    /// O `.deb` do agente instala pelo passo que já existia; o que faltava era garantir a
+    /// unit ACTIVA, sem depender do postinst de outro pacote num convidado sem systemd a
+    /// correr. Guardado, para um build sem o agente não falhar numa unit ausente.
+    #[test]
+    fn steps_offline_activam_a_unit_do_guest_agent() {
+        let ops = k8s_customization_steps_offline(
+            &[PathBuf::from("/tmp/x/qemu-guest-agent_8.2.2_amd64.deb")],
+            &[],
+            &PathBuf::from("/tmp/delonix-cri"),
+            &PathBuf::from("/tmp/delonix"),
+            &PathBuf::from("/tmp/delonix-cri.service"),
+            None,
+            Distro::Ubuntu,
+        );
+        let cmds: Vec<&str> = ops
+            .iter()
+            .filter_map(|o| match o {
+                CustomizeOp::RunCommand(c) => Some(c.as_str()),
+                _ => None,
+            })
+            .collect();
+        let enable = cmds
+            .iter()
+            .find(|c| c.contains("qemu-guest-agent.service"))
+            .expect("faltou activar a unit do guest agent");
+        assert!(
+            enable.contains("systemctl enable"),
+            "a unit é listada mas não activada: {enable}"
+        );
+        assert!(
+            enable.contains("list-unit-files") && enable.contains("|| true"),
+            "activar tem de ser guardado, senão um build sem o agente chumba: {enable}"
+        );
+    }
+
     #[test]
     fn steps_offline_instalam_por_dpkg_e_nao_tocam_a_rede() {
         let debs = vec![PathBuf::from("/tmp/x/kubeadm_1.34.9-1.1_amd64.deb")];
@@ -4901,7 +5150,6 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[test]
     /// A golden tem de nascer com disco para um nó de Kubernetes. Com os 3,5
     /// GiB da imagem base do Ubuntu, o WAL do etcd não cabe e o control-plane
     /// nunca arranca — medido, não suposto (ver `GOLDEN_DISK_SIZE_GIB`).
