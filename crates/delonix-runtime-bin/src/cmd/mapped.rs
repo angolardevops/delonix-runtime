@@ -209,6 +209,48 @@ fn mknod_whiteout(p: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Is this flat rootfs a plausible WHOLE tree, or a truncated one?
+///
+/// # The bug this exists to close, measured in production
+///
+/// `whiteout_missing` reads "in the lower, absent from the upper" as "the
+/// container deleted it", and for a file that is right. For a TOP-LEVEL system
+/// directory it is not: no container deletes `/usr`, `/etc` and `/bin`. When the
+/// flat tree is empty or truncated, every one of those absences becomes a
+/// whiteout and the result is a container that is permanently empty — the rootfs
+/// destroyed by the very step meant to shrink it.
+///
+/// Measured: a `postgres:15-alpine` whose `rootfs/` had been emptied migrated
+/// into an upper holding **12 whiteouts and nothing else**, and the next start
+/// died on `could not write 'etc/hostname': Not a directory` — `etc` was by then
+/// a character device. Nothing recovers that tree; it has to be recreated.
+///
+/// So the guard is at the TOP LEVEL only, where absence is implausible, and
+/// deeper whiteouts keep working (a container purging `/etc/motd` is ordinary,
+/// and that deletion must survive — it is the whole reason whiteouts are
+/// written). Refusing costs exactly the disk the migration would have saved, and
+/// the container goes on running flat. Destroying it costs the container.
+///
+/// It is the same class this repo already catalogues under «X is not Y»: an
+/// empty directory is not "the container deleted everything" — here it is far
+/// more likely to be a tree that was never complete.
+fn flat_looks_complete(lowers: &[std::path::PathBuf], rootfs: &Path) -> bool {
+    for low in lowers {
+        let Ok(entries) = std::fs::read_dir(low) else {
+            continue; // unreadable lower proves nothing either way
+        };
+        for e in entries.flatten() {
+            if !e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue; // only top-level DIRECTORIES carry this signal
+            }
+            if rootfs.join(e.file_name()).symlink_metadata().is_err() {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 /// For every path present in a LOWER layer and absent from the upper, records a
 /// whiteout.
 ///
@@ -402,6 +444,12 @@ pub fn ovlmigrate(dir: &Path) -> Result<()> {
         .collect();
     if lowers.is_empty() {
         return Err(Error::Invalid("__ovlmigrate: empty lower stack".into()));
+    }
+    if !flat_looks_complete(&lowers, &rootfs) {
+        // Refuse rather than migrate: see `flat_looks_complete`. The container
+        // stays flat, which costs disk and nothing else.
+        let _ = std::fs::remove_file(&pending);
+        return Ok(());
     }
 
     std::fs::rename(&rootfs, &upper).map_err(io_err("__ovlmigrate rootfs→upper"))?;
@@ -735,6 +783,50 @@ mod migrate_tests {
         std::fs::create_dir_all(l3.parent().unwrap()).unwrap();
         std::os::unix::fs::symlink("alvo", &l3).unwrap();
         assert!(same_entry(&l, &l3));
+    }
+
+    /// A guarda que faltava, e que custou um container real: um rootfs flat
+    /// VAZIO não é «o container apagou tudo». Sem isto, cada directório de
+    /// topo da lower vira um whiteout e a árvore fica destruída para sempre.
+    #[test]
+    fn um_rootfs_truncado_nao_migra() {
+        const NAME: &str = "trunc";
+        let t = scratch(NAME);
+        let low = t.join("low");
+        for d in ["usr", "etc", "bin"] {
+            std::fs::create_dir_all(low.join(d)).unwrap();
+        }
+        let lowers = vec![low.clone()];
+
+        // Vazio: o caso medido em produção.
+        let vazio = t.join("vazio");
+        std::fs::create_dir_all(&vazio).unwrap();
+        assert!(
+            !flat_looks_complete(&lowers, &vazio),
+            "um rootfs vazio nunca pode migrar"
+        );
+
+        // Truncado: tem parte, falta-lhe um directório de sistema.
+        let parcial = t.join("parcial");
+        std::fs::create_dir_all(parcial.join("usr")).unwrap();
+        std::fs::create_dir_all(parcial.join("etc")).unwrap();
+        assert!(
+            !flat_looks_complete(&lowers, &parcial),
+            "faltar um directório de topo da imagem é implausível, logo não migra"
+        );
+
+        // Completo: migra, e um ficheiro apagado LÁ DENTRO continua a poder
+        // levar whiteout — a guarda é só ao nível de topo.
+        let cheio = t.join("cheio");
+        for d in ["usr", "etc", "bin"] {
+            std::fs::create_dir_all(cheio.join(d)).unwrap();
+        }
+        assert!(flat_looks_complete(&lowers, &cheio));
+        std::fs::remove_file(cheio.join("etc/motd")).ok();
+        assert!(
+            flat_looks_complete(&lowers, &cheio),
+            "apagar um ficheiro dentro de /etc é normal e não bloqueia a migração"
+        );
     }
 
     /// Um caminho que não existe nunca é "igual" — o valor por omissão tem de
