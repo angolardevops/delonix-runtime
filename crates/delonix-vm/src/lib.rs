@@ -63,6 +63,20 @@ pub struct VmConfig {
     /// guest runs elsewhere cannot open it. Prefer the intent fields below and
     /// let each backend realize them; keep this for a seed you built yourself.
     pub seed: Option<String>,
+    /// Tamanho do disco do nó, em GiB. `None` = herda o da imagem base.
+    ///
+    /// Existe porque sem ele **todo o nó herdava o tamanho da golden**, e não
+    /// havia como dimensionar um nó pelo armazenamento que o inquilino paga —
+    /// a quota (`TenantQuota.storage_gb` no PaaS) conta-se sobre o
+    /// PROVISIONADO, logo é aqui que ela se aplica.
+    ///
+    /// O overlay é fino: pedir 40 GiB não escreve 40 GiB: cresce à medida do
+    /// uso. Mas o número PROMETIDO é o que a quota do inquilino paga, e é este.
+    ///
+    /// **Não pode ser menor que a imagem base** — um overlay qcow2 não encolhe
+    /// o seu backing file, e tentar fazê-lo produz uma VM que arranca e corrompe
+    /// o filesystem. Validado antes de criar (ver `prepare_local_overlay`).
+    pub disk_size_gib: Option<u32>,
     // --- cloud-init INTENT ------------------------------------------------
     // What the operator MEANT, as opposed to `seed` above, which is one way of
     // delivering it. The local backends turn these into a NoCloud ISO
@@ -400,6 +414,31 @@ fn parse_qemu_format(info: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Extracts the virtual size IN BYTES from the `virtual size: … (N bytes)` line
+/// of `qemu-img info`. Pure function (testable without `qemu-img`).
+///
+/// Reads the parenthesised byte count and not the human figure: `2.2 GiB` is
+/// rounded, and a per-node disk quota compared against a rounded number is a
+/// quota that lets through what it meant to refuse.
+fn parse_qemu_virtual_size_bytes(info: &str) -> Option<u64> {
+    for line in info.lines() {
+        if let Some(rest) = line.trim().strip_prefix("virtual size:") {
+            let inside = rest.split('(').nth(1)?;
+            let digits: String = inside.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if !digits.is_empty() {
+                return digits.parse().ok();
+            }
+        }
+    }
+    None
+}
+
+/// Virtual size of a disk, in bytes, via `qemu-img info`.
+fn disk_virtual_size_bytes(disk: &Path) -> Option<u64> {
+    let out = stable_cmd("qemu-img").arg("info").arg(disk).output().ok()?;
+    parse_qemu_virtual_size_bytes(&String::from_utf8_lossy(&out.stdout))
 }
 
 /// The REAL format of the base disk via `qemu-img info` — does NOT trust the extension.
@@ -3024,19 +3063,38 @@ fn prepare_local_overlay(
     if !overlay.exists() {
         on(CreateStage::Disk);
         let bf = disk_backing_format(&disk_path);
-        run_quiet(
-            "qemu-img",
-            &[
-                "create",
-                "-f",
-                "qcow2",
-                "-b",
-                &disk_path.to_string_lossy(),
-                "-F",
-                &bf,
-                &overlay.to_string_lossy(),
-            ],
-        )?;
+        let mut argv: Vec<String> = vec![
+            "create".into(),
+            "-f".into(),
+            "qcow2".into(),
+            "-b".into(),
+            disk_path.to_string_lossy().into_owned(),
+            "-F".into(),
+            bf,
+            overlay.to_string_lossy().into_owned(),
+        ];
+        // Tamanho pedido para o nó. O `qemu-img create` aceita-o depois do
+        // ficheiro e o guest cresce a raiz no arranque (growpart do cloud-init,
+        // medido). Sem isto o overlay herda o tamanho da base — que é
+        // deliberadamente o PISO da golden.
+        if let Some(gib) = cfg.disk_size_gib {
+            let pedido = u64::from(gib) * 1024 * 1024 * 1024;
+            // Um overlay não pode ser menor que o seu backing file: o
+            // `qemu-img` aceita-o em algumas versões e o resultado é uma VM que
+            // arranca e corrompe o filesystem. Recusar por nome e com os dois
+            // números é a diferença entre um erro e um mistério.
+            if let Some(base_bytes) = disk_virtual_size_bytes(&disk_path) {
+                if pedido < base_bytes {
+                    return Err(Error::Invalid(format!(
+                        "--disk-size {gib}G é menor que a imagem base ({} GiB): um overlay qcow2 \
+                         não encolhe o seu backing file",
+                        base_bytes / (1024 * 1024 * 1024)
+                    )));
+                }
+            }
+            argv.push(format!("{gib}G"));
+        }
+        run_quiet("qemu-img", &argv.iter().map(String::as_str).collect::<Vec<_>>())?;
     }
     Ok((disk_path, overlay))
 }
@@ -3673,6 +3731,11 @@ fn boot_spec_of(cfg: &VmConfig) -> VmBootSpec {
         devices: _,
         backend: _,
         net_mode: _,
+        // Consumido em `prepare_local_overlay` no momento da criação: depois de
+        // o overlay existir, o tamanho é uma propriedade DELE e não há nada a
+        // reaplicar no arranque (e `prepare_local_overlay` salta um overlay que
+        // já existe). Por isso não entra no `VmBootSpec`.
+        disk_size_gib: _,
         // Everything below used to exist only for the duration of `vm create`.
         kernel,
         initrd,
@@ -3752,6 +3815,10 @@ fn config_from(vm: &Vm) -> VmConfig {
         // the net mode string there. For Cloud Hypervisor it IS a device name
         // and must not be misread as one.
         net_mode: (vm.backend == "libvirt").then(|| vm.tap.clone()),
+        // `None` de propósito: o overlay já tem o tamanho com que nasceu, e um
+        // restart não o redimensiona. Reafirmar aqui um número seria convidar um
+        // resize acidental em cada arranque.
+        disk_size_gib: None,
         kernel: b.kernel.clone(),
         initrd: b.initrd.clone(),
         firmware: b.firmware.clone(),
@@ -4482,6 +4549,23 @@ Format specific information:
             "create should refuse the clobber of a direct-QEMU record: {err}"
         );
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// O tamanho virtual lê-se dos BYTES entre parênteses, não do número
+    /// humano: `2.2 GiB` é arredondado, e uma quota comparada com um número
+    /// arredondado é uma quota que deixa passar o que queria recusar.
+    #[test]
+    fn tamanho_virtual_le_se_dos_bytes_e_nao_do_numero_humano() {
+        let info = "image: g.qcow2\nfile format: qcow2\nvirtual size: 10 GiB (10737418240 bytes)\ndisk size: 690 MiB\n";
+        assert_eq!(parse_qemu_virtual_size_bytes(info), Some(10_737_418_240));
+
+        // 2.2 GiB arredondado esconde 161 MiB — daí ler os bytes.
+        let arred = "virtual size: 2.2 GiB (2361393152 bytes)\n";
+        assert_eq!(parse_qemu_virtual_size_bytes(arred), Some(2_361_393_152));
+
+        // Sem os parênteses (formatos antigos), não se inventa um número.
+        assert_eq!(parse_qemu_virtual_size_bytes("virtual size: 8 MiB\n"), None);
+        assert_eq!(parse_qemu_virtual_size_bytes("file format: qcow2\n"), None);
     }
 
     #[test]

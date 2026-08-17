@@ -860,7 +860,7 @@ fn ceiling_reduces(capped: &[String], rec: &ContainerRec) -> bool {
 /// unitário, só como um cluster que não arranca. Foi assim que o
 /// `hostNetwork: true` passou meses a não ser rede do host — ver o comentário
 /// dentro da função.
-pub(crate) fn start_argv(
+fn start_argv(
     rec: &ContainerRec,
     sandbox: Option<&SandboxRec>,
     ceiling: crate::CapCeiling,

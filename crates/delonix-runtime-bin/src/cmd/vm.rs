@@ -542,6 +542,14 @@ pub enum VmCmd {
         /// uses it directly).
         #[arg(long)]
         seed: Option<String>,
+        /// Disk size for the node, in GiB (e.g. `40`) — omit to inherit the
+        /// image's own size.
+        ///
+        /// This is the number a tenant's storage quota is counted against: it
+        /// is PROVISIONED, not consumed (the overlay is thin and grows with
+        /// use). Cannot be smaller than the base image.
+        #[arg(long = "disk-size")]
+        disk_size_gib: Option<u32>,
         /// Hostname to apply on first boot (generates the NoCloud ISO if no
         /// explicit `--seed` is given).
         #[arg(long)]
@@ -1380,6 +1388,10 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
         let resolved_keys = resolved_keys?;
 
         let cfg = VmConfig {
+            // O caminho DECLARATIVO ainda não tem tamanho no `VmSpec`: um
+            // `kind: VM` herda o tamanho da imagem. Acrescentá-lo é o passo
+            // seguinte, e é o que liga a quota do inquilino ao manifesto.
+            disk_size_gib: None,
             name: name.clone(),
             // `disk` e não `spec.disk`: é o resolvido por `resolve_vm_disk` —
             // o caminho no disco de uma imagem nossa, ou a tag produzida quando
@@ -1525,6 +1537,7 @@ pub fn run(action: VmCmd) -> Result<()> {
         VmCmd::Dash { .. } => unreachable!("tratado acima"),
         VmCmd::Create {
             name,
+            disk_size_gib,
             url_img,
             disk,
             vcpus,
@@ -1689,6 +1702,7 @@ pub fn run(action: VmCmd) -> Result<()> {
             // 45 GiB disk-pressure incident from the same class of unreaped orphan.
             let seed_to_clean = (!vmdir_existed).then(|| vmdir.clone());
             let cfg = VmConfig {
+                disk_size_gib,
                 name,
                 disk,
                 vcpus,
