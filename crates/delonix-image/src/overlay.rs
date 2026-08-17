@@ -272,6 +272,18 @@ impl ImageStore {
     /// `merged/` does; a struct built before the re-exec does not.
     pub const LOWERS_FILE: &'static str = "overlay-lowers";
 
+    /// The extracted layer directories of an image, highest first — the exact
+    /// `lowerdir=` order. Extracts and caches them if needed.
+    ///
+    /// Public for the flat→overlay migration, which needs the lower stack
+    /// WITHOUT creating a write layer: `prepare_overlay` would also write the
+    /// marker, and that file is the migration's commit point — writing it early
+    /// would declare a container migrated before it is.
+    pub fn lower_dirs(&self, image: &Image) -> Result<Vec<PathBuf>> {
+        let lowers = self.ensure_layers(image)?;
+        Ok(lowers.into_iter().rev().collect())
+    }
+
     /// Prepares an overlay rootfs for a container WITHOUT mounting it, and
     /// returns the `merged` path the mount will land on.
     ///

@@ -555,6 +555,13 @@ fn main() {
         }
         std::process::exit(0);
     }
+    if raw.len() == 3 && raw[1] == "__ovlmigrate" {
+        if let Err(e) = cmd::mapped::ovlmigrate(std::path::Path::new(&raw[2])) {
+            eprintln!("delonix: {}", cmd::po::t_dyn(&e.to_string()));
+            std::process::exit(cmd::exitcode::for_error(&e));
+        }
+        std::process::exit(0);
+    }
     if raw.len() == 3 && raw[1] == "__ovlhold" {
         if let Err(e) = cmd::mapped::ovlhold(std::path::Path::new(&raw[2])) {
             eprintln!("delonix: {}", cmd::po::t_dyn(&e.to_string()));

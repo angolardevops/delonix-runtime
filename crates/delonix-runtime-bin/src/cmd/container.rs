@@ -4984,6 +4984,13 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
     }
 
     let rootfs = if runtime::is_rootless() {
+        // A container created before the layers were shared still carries a full
+        // private copy of the image. This is the ONE moment it can be converted:
+        // the tree is nobody's while the container is down, and a running one
+        // cannot be converted at all (its process is pivot_root'ed into it).
+        // Best-effort by construction — see `migrate_flat_to_overlay`; a start
+        // never fails because of it.
+        super::util::migrate_flat_to_overlay(images, &c.id, &c.image);
         // Overlay (`merged/`, remounted by the container's own init) or the
         // legacy flat copy — `existing_rootfs_path` knows which this container is.
         let rfs = super::util::existing_rootfs_path(images, &c.id).ok_or_else(|| {
