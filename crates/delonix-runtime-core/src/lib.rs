@@ -251,6 +251,88 @@ pub struct ContainerFw {
     pub namespace: String,
 }
 
+/// An intermediate cgroup level shared by a GROUP of containers, with its own
+/// aggregate ceiling. See [`Container::cgroup_parent`].
+///
+/// The limits are the group's, not any container's: `memory_max` bounds what every
+/// container under this name can hold TOGETHER, however many they are and whatever
+/// each one declares for itself.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+pub struct CgroupParent {
+    /// Directory name of the group. A SINGLE path segment — see [`safe_cgroup_segment`].
+    pub name: String,
+    /// Aggregate `memory.max` (e.g. `1073741824`). `None` = no memory ceiling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_max: Option<String>,
+    /// Aggregate CPU in cores (e.g. `2`, `0.5`). `None` = no CPU ceiling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpus: Option<String>,
+    /// Aggregate `pids.max`. `None` = no process ceiling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pids_max: Option<String>,
+}
+
+/// Validates a cgroup group name as a SINGLE, safe path segment. PURE.
+///
+/// This is a privilege boundary, not tidiness. The name reaches this engine from
+/// outside (a PaaS derives it from a tenant name, which a customer chose). Interpolated
+/// unchecked into `<base>/{name}/dlx-<id>`, a `..` walks OUT of the delegated base and
+/// a leading `/` leaves it entirely — either one puts the caller's containers in a
+/// cgroup it was never granted, ceiling included. Rejects anything that is not
+/// `[a-z0-9._-]`, longer than 64, empty, `.`/`..`, or starting with `-` (which the
+/// kernel accepts but every CLI reads as a flag).
+pub fn safe_cgroup_segment(name: &str) -> Option<&str> {
+    let n = name.trim();
+    if n.is_empty() || n.len() > 64 || n == "." || n == ".." || n.starts_with('-') {
+        return None;
+    }
+    if !n.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-')) {
+        return None;
+    }
+    Some(n)
+}
+
+#[cfg(test)]
+mod cgroup_parent_tests {
+    use super::safe_cgroup_segment;
+
+    #[test]
+    fn accepts_a_plain_group_name() {
+        assert_eq!(safe_cgroup_segment("tenant-acme"), Some("tenant-acme"));
+        assert_eq!(safe_cgroup_segment(" tenant-acme "), Some("tenant-acme"));
+        assert_eq!(safe_cgroup_segment("t_1.2"), Some("t_1.2"));
+    }
+
+    #[test]
+    fn rejects_path_traversal() {
+        // The whole reason this function exists: `<base>/{name}/dlx-<id>` with a
+        // `..` inside `name` lands the container OUTSIDE the delegated base.
+        for bad in ["..", ".", "../x", "a/b", "/abs", "tenant/../..", "a//b"] {
+            assert_eq!(safe_cgroup_segment(bad), None, "{bad:?} had to be rejected");
+        }
+    }
+
+    #[test]
+    fn rejects_names_that_read_as_flags() {
+        assert_eq!(safe_cgroup_segment("-rf"), None);
+    }
+
+    #[test]
+    fn rejects_empty_and_oversized() {
+        assert_eq!(safe_cgroup_segment(""), None);
+        assert_eq!(safe_cgroup_segment("   "), None);
+        assert_eq!(safe_cgroup_segment(&"a".repeat(65)), None);
+        assert!(safe_cgroup_segment(&"a".repeat(64)).is_some());
+    }
+
+    #[test]
+    fn rejects_characters_outside_the_allowlist() {
+        for bad in ["Tenant", "a b", "a$b", "a\nb", "a\0b", "acçe"] {
+            assert_eq!(safe_cgroup_segment(bad), None, "{bad:?} had to be rejected");
+        }
+    }
+}
+
 /// Default namespace (`default`) — everything in `default` = open SDN (the same
 /// namespace contains everyone), preserving the pre-namespaces behavior.
 pub fn default_namespace() -> String {
@@ -528,6 +610,22 @@ pub struct Container {
     /// nodes by `io.x-k8s.kind.cluster`).
     #[serde(default)]
     pub labels: std::collections::BTreeMap<String, String>,
+    /// Optional INTERMEDIATE cgroup level between the delegated base and this
+    /// container's leaf, with its own aggregate ceiling (Docker's `--cgroup-parent`,
+    /// plus limits). `None` = the leaf hangs directly off the base, as before.
+    ///
+    /// Why the engine has this and still knows nothing about tenants: a per-container
+    /// limit cannot bound a GROUP of containers. Ten containers of 1 GiB each are ten
+    /// valid containers and 10 GiB of pressure. Whoever groups them — a PaaS billing a
+    /// tenant, a CI runner fencing a job, an operator carving a box — needs the kernel
+    /// to hold the aggregate, and only an intermediate cgroup does that.
+    ///
+    /// The engine deliberately does NOT learn what the group MEANS. It takes an opaque
+    /// name, nests under it and applies the ceiling. `delonix-core` maps its own notion
+    /// of tenant onto this; the engine stays independent of tenants, plans and billing
+    /// (see this module's header).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cgroup_parent: Option<CgroupParent>,
     /// `key→value` annotations — deliberately SEPARATE from `labels`, the same
     /// split Kubernetes makes and for the same reason: labels are short,
     /// identifying and get shown/filtered on (`ps --filter label=`), annotations
@@ -800,6 +898,9 @@ impl Container {
             name,
             image,
             command,
+            // Sem grupo por omissão: um container avulso continua a pendurar
+            // directamente da base delegada, exactamente como antes.
+            cgroup_parent: None,
             pid: None,
             pid_starttime: None,
             status: Status::Created,

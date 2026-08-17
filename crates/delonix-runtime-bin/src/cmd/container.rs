@@ -24,6 +24,39 @@ use super::util::{effective_command, find, open_stores, prepare_rootfs, resolve_
 /// foreground would block waiting for the process to exit — dangerous for a
 /// declarative command. Pass `detach: false` explicitly in the YAML if you want
 /// the synchronous behavior of the interactive `run`.
+/// Manifest mirror of [`delonix_runtime_core::CgroupParent`].
+///
+/// It exists here, and not in `delonix-runtime-core`, for two reasons: the core crate
+/// stays free of `schemars` (the manifest schema is a concern of this binary, not of
+/// the domain types), and the manifest speaks camelCase (`memoryMax`) while the
+/// persisted `Container` keeps its own field names. One conversion at the boundary is
+/// cheaper than either a new dependency in core or a rename that breaks stored records.
+#[derive(Debug, Deserialize, Serialize, Clone, schemars::JsonSchema)]
+pub(crate) struct SpecCgroupParent {
+    /// Group directory name — a single, safe path segment.
+    pub(crate) name: String,
+    /// Aggregate memory ceiling for the whole group (e.g. `1073741824`).
+    #[serde(default, rename = "memoryMax", skip_serializing_if = "Option::is_none")]
+    pub(crate) memory_max: Option<String>,
+    /// Aggregate CPU in cores.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cpus: Option<String>,
+    /// Aggregate process ceiling.
+    #[serde(default, rename = "pidsMax", skip_serializing_if = "Option::is_none")]
+    pub(crate) pids_max: Option<String>,
+}
+
+impl From<SpecCgroupParent> for delonix_runtime_core::CgroupParent {
+    fn from(s: SpecCgroupParent) -> Self {
+        delonix_runtime_core::CgroupParent {
+            name: s.name,
+            memory_max: s.memory_max,
+            cpus: s.cpus,
+            pids_max: s.pids_max,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 pub(crate) struct ContainerSpec {
     pub(crate) image: String,
@@ -76,6 +109,11 @@ pub(crate) struct ContainerSpec {
     cpu_weight: Option<String>,
     #[serde(default)]
     cpuset: Option<String>,
+    /// Intermediate cgroup shared by a GROUP of containers, with its own aggregate
+    /// ceiling — the only way to bound what N containers hold TOGETHER (see
+    /// `delonix_runtime_core::CgroupParent`).
+    #[serde(default, rename = "cgroupParent")]
+    cgroup_parent: Option<SpecCgroupParent>,
     #[serde(default, rename = "ioWeight")]
     io_weight: Option<String>,
     #[serde(default, rename = "readOnly")]
@@ -593,6 +631,7 @@ pub(crate) const CONTAINER_SPEC_FIELDS: &[&str] = &[
     "cpus",
     "cpuWeight",
     "cpuset",
+    "cgroupParent",
     "ioWeight",
     "readOnly",
     "capAdd",
@@ -661,6 +700,7 @@ const CONTAINER_GROUPS: &[(&str, &[(&str, &str)])] = &[
             ("cpus", "cpus"),
             ("cpuWeight", "cpuWeight"),
             ("cpuset", "cpuset"),
+            ("cgroupParent", "cgroupParent"),
             ("ioWeight", "ioWeight"),
         ],
     ),
@@ -2163,6 +2203,9 @@ pub fn run(action: ContainerCmd) -> Result<()> {
                 cpus,
                 cpu_weight,
                 cpuset,
+                // Sem flag de CLI: o nível de grupo entra pelo MANIFESTO
+                // (`cgroupParent`), que é quem sabe agrupar cargas.
+                cgroup_parent: None,
                 io_weight,
                 no_supervisor: false,
                 io_max: compose_io_max(
@@ -2372,6 +2415,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                 cpus: spec.cpus,
                 cpu_weight: spec.cpu_weight,
                 cpuset: spec.cpuset,
+                cgroup_parent: spec.cgroup_parent.map(Into::into),
                 io_weight: spec.io_weight,
                 io_max: None,
                 read_only: spec.read_only,
@@ -2713,6 +2757,8 @@ pub(crate) struct RunOpts {
     #[serde(default)]
     pub(crate) cpuset: Option<String>,
     #[serde(default)]
+    pub(crate) cgroup_parent: Option<delonix_runtime_core::CgroupParent>,
+    #[serde(default)]
     pub(crate) io_weight: Option<String>,
     /// Composed cgroup-v2 `io.max` value half (`rbps=… wbps=…`), device excluded
     /// — the engine prepends the store device. `None` = no absolute ceiling.
@@ -2863,6 +2909,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         cpus,
         cpu_weight,
         cpuset,
+        cgroup_parent,
         io_weight,
         io_max,
         no_supervisor,
@@ -3216,6 +3263,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     }
     c.cpu_weight = cpu_weight;
     c.cpuset = cpuset;
+    c.cgroup_parent = cgroup_parent;
     c.io_weight = io_weight;
     c.io_max = io_max;
 
