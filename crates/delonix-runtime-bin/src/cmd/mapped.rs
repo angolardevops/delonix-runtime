@@ -188,6 +188,254 @@ pub fn buildtar(rootfs: &Path, out: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Creates an overlayfs **whiteout** — a character device 0:0, which is how
+/// overlayfs records "this path was deleted" in the upper layer.
+///
+/// Works rootless: measured inside `unshare --user --map-root-user --mount`,
+/// `mknod c 0 0` succeeds and the mounted overlay honours it (the file is gone
+/// from `merged`). No `trusted.overlay.*` xattr needed — that one WOULD have
+/// been a problem, since setting it wants CAP_SYS_ADMIN over the filesystem.
+/// This is the whole reason the migration has to run inside the mapped userns.
+fn mknod_whiteout(p: &Path) -> Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let c = std::ffi::CString::new(p.as_os_str().as_bytes())
+        .map_err(|_| Error::Invalid(format!("path with NUL: {}", p.display())))?;
+    // SAFETY: a valid C string and a fixed device number; we are root in the
+    // mapped user namespace, so CAP_MKNOD is held.
+    let rc = unsafe { libc::mknod(c.as_ptr(), libc::S_IFCHR, libc::makedev(0, 0)) };
+    if rc != 0 {
+        return Err(io_err("whiteout")(std::io::Error::last_os_error()));
+    }
+    Ok(())
+}
+
+/// For every path present in a LOWER layer and absent from the upper, records a
+/// whiteout.
+///
+/// **This is a correctness requirement, not an optimisation.** A flat rootfs is
+/// the image plus the container's writes, already merged — so a file the
+/// container DELETED is simply absent. Turn that tree into an upper layer
+/// without whiteouts and the overlay happily serves the file back from the
+/// lower: a deletion silently undone, which for something like a purged config
+/// or a rotated secret is worse than the disk it saves.
+///
+/// Does not descend past a missing path: once the directory itself is whited
+/// out, nothing under it can show through.
+fn whiteout_missing(low: &Path, upper: &Path, rel: &Path) -> Result<()> {
+    let dir = low.join(rel);
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(e) => e,
+        // An unreadable lower directory is not fatal: the whiteouts we fail to
+        // write only cost correctness for paths we could not see anyway, and
+        // the caller reverts on error. Skipping keeps a partial read from
+        // aborting a migration that is otherwise fine.
+        Err(_) => return Ok(()),
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let r = rel.join(&name);
+        let up = upper.join(&r);
+        match up.symlink_metadata() {
+            // Absent from the upper → the container deleted it. Mark and stop.
+            Err(_) => mknod_whiteout(&up)?,
+            Ok(um) => {
+                let is_dir_both =
+                    entry.file_type().map(|t| t.is_dir()).unwrap_or(false) && um.is_dir();
+                if is_dir_both {
+                    whiteout_missing(low, upper, &r)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Two paths hold the same thing: same type, same mode, same owner, and the same
+/// bytes (or the same symlink target).
+///
+/// Deliberately strict. This decides what gets DELETED from the upper, so a
+/// false "equal" loses the container's change — a file whose contents match but
+/// whose mode the container chmod'ed is NOT equal.
+fn same_entry(a: &Path, b: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let (ma, mb) = match (a.symlink_metadata(), b.symlink_metadata()) {
+        (Ok(x), Ok(y)) => (x, y),
+        _ => return false,
+    };
+    if ma.file_type() != mb.file_type() || ma.mode() != mb.mode() {
+        return false;
+    }
+    if ma.uid() != mb.uid() || ma.gid() != mb.gid() {
+        return false;
+    }
+    if ma.file_type().is_symlink() {
+        return match (std::fs::read_link(a), std::fs::read_link(b)) {
+            (Ok(x), Ok(y)) => x == y,
+            _ => false,
+        };
+    }
+    if !ma.file_type().is_file() {
+        return false; // only regular files and symlinks are pruned
+    }
+    if ma.len() != mb.len() {
+        return false;
+    }
+    same_bytes(a, b).unwrap_or(false)
+}
+
+/// Byte comparison in chunks — these are whole container images, so nothing is
+/// read into memory at once. Any I/O error reads as "not equal", which keeps the
+/// file in the upper: the safe direction.
+fn same_bytes(a: &Path, b: &Path) -> std::io::Result<bool> {
+    use std::io::Read;
+    let (mut fa, mut fb) = (std::fs::File::open(a)?, std::fs::File::open(b)?);
+    let (mut ba, mut bb) = ([0u8; 64 * 1024], [0u8; 64 * 1024]);
+    loop {
+        let na = fa.read(&mut ba)?;
+        let nb = fb.read(&mut bb)?;
+        if na != nb {
+            return Ok(false);
+        }
+        if na == 0 {
+            return Ok(true);
+        }
+        if ba[..na] != bb[..nb] {
+            return Ok(false);
+        }
+    }
+}
+
+/// Removes from the upper everything that is byte-for-byte what the lower
+/// already provides. Returns the bytes freed.
+///
+/// This is the step that actually saves the disk, and it is the ONLY step that
+/// may fail without consequence — it runs after the migration has committed, and
+/// a file it declines to remove costs space, never data. That asymmetry is the
+/// whole reason the migration is written as "delete what is redundant" rather
+/// than the seemingly equivalent "copy across what differs": the latter loses
+/// data when the comparison is wrong, this one only loses savings.
+fn prune_identical(low: &Path, upper: &Path, rel: &Path) -> u64 {
+    let mut freed = 0u64;
+    let entries = match std::fs::read_dir(upper.join(rel)) {
+        Ok(e) => e,
+        Err(_) => return 0,
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let r = rel.join(&name);
+        let (lp, up) = (low.join(&r), upper.join(&r));
+        let ft = match entry.file_type() {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        if ft.is_dir() {
+            if lp.is_dir() {
+                freed += prune_identical(low, upper, &r);
+                // An emptied directory that the lower also provides, with the
+                // same metadata, shows through identically — so it can go. A
+                // non-empty one must stay: it is the parent of what remains.
+                if same_dir_meta(&lp, &up) {
+                    let _ = std::fs::remove_dir(&up); // fails if not empty: fine
+                }
+            }
+            continue;
+        }
+        if same_entry(&lp, &up) {
+            let sz = up.symlink_metadata().map(|m| m.len()).unwrap_or(0);
+            if std::fs::remove_file(&up).is_ok() {
+                freed += sz;
+            }
+        }
+    }
+    freed
+}
+
+/// Same mode and owner on two directories (contents compared separately).
+fn same_dir_meta(a: &Path, b: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (a.symlink_metadata(), b.symlink_metadata()) {
+        (Ok(x), Ok(y)) => {
+            x.is_dir()
+                && y.is_dir()
+                && x.mode() == y.mode()
+                && x.uid() == y.uid()
+                && x.gid() == y.gid()
+        }
+        _ => false,
+    }
+}
+
+/// `__ovlmigrate <container-dir>` — converts a legacy FLAT rootfs into a shared
+/// overlay, in place, inside the mapped userns.
+///
+/// Reads the lower stack from `overlay-lowers.pending`, which the parent wrote
+/// after making sure the image's layers are extracted. That file is also the
+/// COMMIT POINT: renaming it to `overlay-lowers` is the single step that turns
+/// this container from flat into overlay, and everything before it is
+/// reversible.
+///
+/// # The order is correctness, not taste
+///
+/// 1. `rename(rootfs → upper)` — atomic, and the tree is unchanged.
+/// 2. **whiteouts** for everything the lower has and the upper does not. Skip
+///    this and a file the container deleted comes back from the lower.
+/// 3. `rename(pending → overlay-lowers)` — commit. Only now is it an overlay.
+/// 4. prune the redundant — pure saving, after the commit, may fail freely.
+///
+/// A failure before step 3 renames the upper back and the container stays flat.
+/// **The migration must never be able to stop a container from starting**: the
+/// caller treats any error here as "carry on flat", which is exactly what the
+/// tree still is.
+pub fn ovlmigrate(dir: &Path) -> Result<()> {
+    let pending = dir.join("overlay-lowers.pending");
+    let rootfs = dir.join("rootfs");
+    let upper = dir.join("upper");
+    if !rootfs.exists() || dir.join("overlay-lowers").exists() {
+        let _ = std::fs::remove_file(&pending);
+        return Ok(()); // nothing to migrate, or already migrated — idempotent
+    }
+    let body = std::fs::read_to_string(&pending).map_err(io_err("__ovlmigrate lowers"))?;
+    let lowers: Vec<std::path::PathBuf> = body
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(std::path::PathBuf::from)
+        .collect();
+    if lowers.is_empty() {
+        return Err(Error::Invalid("__ovlmigrate: empty lower stack".into()));
+    }
+
+    std::fs::rename(&rootfs, &upper).map_err(io_err("__ovlmigrate rootfs→upper"))?;
+
+    let committed = (|| -> Result<()> {
+        for low in &lowers {
+            whiteout_missing(low, &upper, Path::new(""))?;
+        }
+        std::fs::rename(&pending, dir.join("overlay-lowers"))
+            .map_err(io_err("__ovlmigrate commit"))?;
+        Ok(())
+    })();
+
+    if let Err(e) = committed {
+        // Back to exactly what we found. The container starts flat, as before.
+        let _ = std::fs::rename(&upper, &rootfs);
+        return Err(e);
+    }
+
+    let mut freed = 0u64;
+    for low in &lowers {
+        freed += prune_identical(low, &upper, Path::new(""));
+    }
+    // Said out loud, and only when it saved something: a migration that runs in
+    // silence is indistinguishable from one that did not run at all.
+    if freed > 0 {
+        println!(
+            "migrated to shared layers, {} MiB reclaimed",
+            freed / (1024 * 1024)
+        );
+    }
+    Ok(())
+}
+
 /// `__ovlhold <container-dir>` — mounts a STOPPED container's overlay inside a
 /// throwaway mount namespace, announces the mountpoint is ready, and then sleeps
 /// until the parent kills it.
@@ -399,5 +647,104 @@ mod tests {
             use std::os::unix::fs::MetadataExt;
             self.ino()
         }
+    }
+}
+
+#[cfg(test)]
+mod migrate_tests {
+    use super::*;
+    use std::io::Write;
+
+    /// O idioma dos testes vizinhos (`backup.rs`/`cdi.rs`): `temp_dir` + pid,
+    /// porque este crate não tem `dev-dependencies` e a regra do repo é não
+    /// acrescentar dependências — nem para testes.
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("delonix-mig-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn write(dir: &std::path::Path, rel: &str, body: &[u8], mode: u32) -> std::path::PathBuf {
+        let p = dir.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        let mut f = std::fs::File::create(&p).unwrap();
+        f.write_all(body).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(mode)).unwrap();
+        p
+    }
+
+    /// `same_entry` decides what gets DELETED from the upper layer, so every
+    /// case it gets wrong loses a container's change. These are the four ways
+    /// two files can differ while looking alike to a careless comparison.
+    #[test]
+    fn same_entry_so_diz_igual_quando_tudo_bate() {
+        const NAME: &str = "eq";
+        let t = scratch(NAME);
+        let a = write(t.as_path(), "a/f", b"conteudo", 0o644);
+        let b = write(t.as_path(), "b/f", b"conteudo", 0o644);
+        assert!(
+            same_entry(&a, &b),
+            "mesmos bytes, modo e dono deviam ser iguais"
+        );
+
+        // Conteúdo diferente do MESMO tamanho — um comparador por len passaria.
+        let c = write(t.as_path(), "c/f", b"conteudX", 0o644);
+        assert!(
+            !same_entry(&a, &c),
+            "bytes diferentes do mesmo tamanho não são iguais"
+        );
+
+        // Só o modo difere: o container fez chmod e essa mudança é dele.
+        let d = write(t.as_path(), "d/f", b"conteudo", 0o755);
+        assert!(
+            !same_entry(&a, &d),
+            "um chmod do container não pode ser apagado"
+        );
+
+        // Tamanhos diferentes.
+        let e = write(t.as_path(), "e/f", b"conteudo-maior", 0o644);
+        assert!(!same_entry(&a, &e));
+    }
+
+    /// Um symlink e um ficheiro regular com o mesmo nome NUNCA são a mesma
+    /// coisa — apagar o symlink da upper deixaria a lower a servir um ficheiro
+    /// onde o container pôs um link, e vice-versa.
+    #[test]
+    fn same_entry_distingue_symlink_de_ficheiro() {
+        const NAME: &str = "link";
+        let t = scratch(NAME);
+        let f = write(t.as_path(), "a/f", b"alvo", 0o644);
+        let l = t.as_path().join("b/f");
+        std::fs::create_dir_all(l.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink("alvo", &l).unwrap();
+        assert!(!same_entry(&f, &l), "symlink e ficheiro não são o mesmo");
+
+        // Dois symlinks para alvos diferentes também não.
+        let l2 = t.as_path().join("c/f");
+        std::fs::create_dir_all(l2.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink("outro", &l2).unwrap();
+        assert!(
+            !same_entry(&l, &l2),
+            "symlinks com alvos diferentes não são iguais"
+        );
+
+        // O mesmo alvo, sim.
+        let l3 = t.as_path().join("d/f");
+        std::fs::create_dir_all(l3.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink("alvo", &l3).unwrap();
+        assert!(same_entry(&l, &l3));
+    }
+
+    /// Um caminho que não existe nunca é "igual" — o valor por omissão tem de
+    /// ser NÃO apagar, senão um erro de I/O transitório apaga dados.
+    #[test]
+    fn same_entry_falha_para_o_lado_seguro() {
+        const NAME: &str = "safe";
+        let t = scratch(NAME);
+        let a = write(t.as_path(), "a/f", b"x", 0o644);
+        assert!(!same_entry(&a, &t.as_path().join("nao/existe")));
+        assert!(!same_entry(&t.as_path().join("nao/existe"), &a));
     }
 }
