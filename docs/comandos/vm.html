@@ -901,6 +901,11 @@ Options:
       --seed &lt;SEED&gt;
           Ready-made cloud-init (NoCloud) ISO — if given, takes priority over `--hostname`/`--ssh-key`/`--user-data` (those generate the ISO; this uses it directly)
 
+      --disk-size &lt;DISK_SIZE_GIB&gt;
+          Disk size for the node, in GiB (e.g. `40`) — omit to inherit the image&#x27;s own size.
+          
+          This is the number a tenant&#x27;s storage quota is counted against: it is PROVISIONED, not consumed (the overlay is thin and grows with use). Cannot be smaller than the base image.
+
       --hostname &lt;HOSTNAME&gt;
           Hostname to apply on first boot (generates the NoCloud ISO if no explicit `--seed` is given)
 
