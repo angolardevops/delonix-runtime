@@ -1368,7 +1368,12 @@ fn is_forbidden_device(host: &str) -> bool {
 /// the first write and records deletions as whiteouts in the upper. Verified
 /// against a container running as uid 0 in its user namespace — after writing to
 /// and unlinking a lower file, the lower kept the same inode and the same bytes.
-fn mount_overlay_if_marked(rootfs: &str) -> nix::Result<()> {
+/// Public because a SECOND caller needs the exact same mount: `cmd::mapped::ovlhold`
+/// remounts a stopped container's overlay inside a throwaway namespace so `cp`/
+/// `commit` can read it. Two copies of the option string would diverge the day the
+/// layout changes, and the divergence would only show as a container reading a
+/// tree that is not the one it runs against.
+pub fn mount_overlay_if_marked(rootfs: &str) -> nix::Result<()> {
     let merged = std::path::Path::new(rootfs);
     let Some(base) = merged.parent() else {
         return Ok(());
@@ -1823,6 +1828,143 @@ pub fn reexec_mapped(args: &[&str]) -> Option<bool> {
                 libc::close(w);
             }
             Some(false)
+        }
+    }
+}
+
+/// Like [`reexec_mapped`], but LEAVES THE CHILD RUNNING and hands it back.
+///
+/// `reexec_mapped` waits for the child, which is right for a job that finishes
+/// (`__rmtree`, `__volsnap`). It is exactly wrong for a job whose whole purpose
+/// is to STAY alive: `__ovlhold` mounts an overlay in its own namespace so the
+/// parent can read it through `/proc/<pid>/root`, and the mount lives only as
+/// long as that process does.
+///
+/// Returns once the child has written one line to stdout — its own proof that
+/// the mount is up. Without that handshake the caller would race the mount and
+/// read an empty directory, which is the silent-empty-answer this exists to
+/// prevent. A child that dies or says nothing yields `None`, never a path.
+///
+/// Raw `fork` and NOT `Command` + `pre_exec`, and the reason cost a hang to
+/// find: `Command::spawn` waits for the child to reach `exec` (it reads a
+/// CLOEXEC pipe that only closes there) so it can report exec failures. This
+/// handshake blocks the child BEFORE `exec`, waiting for maps the parent only
+/// writes after `spawn` returns — so `spawn` and the child deadlock, each
+/// waiting for the other. Measured: `container cp` on a stopped container hung
+/// until killed. The sibling `reexec_mapped` uses raw `fork` for this exact
+/// reason.
+pub fn reexec_mapped_hold(args: &[&str]) -> Option<HeldChild> {
+    use std::io::{BufRead, BufReader};
+    use std::os::fd::FromRawFd;
+    if !is_rootless() || !have_subid_helpers() {
+        return None;
+    }
+    // Everything that allocates happens BEFORE the fork — after it, only
+    // async-signal-safe calls.
+    let exe = std::env::current_exe().ok()?;
+    let prog = std::ffi::CString::new(exe.as_os_str().as_encoded_bytes()).ok()?;
+    let cargs: Vec<std::ffi::CString> = args
+        .iter()
+        .map(|a| std::ffi::CString::new(*a))
+        .collect::<std::result::Result<_, _>>()
+        .ok()?;
+    let mut argv: Vec<*const libc::c_char> = Vec::with_capacity(cargs.len() + 2);
+    argv.push(prog.as_ptr());
+    argv.extend(cargs.iter().map(|c| c.as_ptr()));
+    argv.push(std::ptr::null());
+    let mut sync = [0i32; 2];
+    let mut out = [0i32; 2];
+    if unsafe { libc::pipe(sync.as_mut_ptr()) } != 0 {
+        return None;
+    }
+    if unsafe { libc::pipe(out.as_mut_ptr()) } != 0 {
+        unsafe {
+            libc::close(sync[0]);
+            libc::close(sync[1]);
+        }
+        return None;
+    }
+    // SAFETY: fork; the child only does close/dup2/unshare/read/setuid/execv —
+    // all async-signal-safe, with the CStrings and argv built above.
+    match unsafe { libc::fork() } {
+        0 => unsafe {
+            libc::close(sync[1]);
+            libc::close(out[0]);
+            // The child's stdout is our handshake channel; stderr stays inherited
+            // so a mount failure is still visible to whoever ran the command.
+            libc::dup2(out[1], 1);
+            libc::close(out[1]);
+            if libc::unshare(libc::CLONE_NEWUSER) != 0 {
+                libc::_exit(1);
+            }
+            let mut b = [0u8; 1];
+            let _ = libc::read(sync[0], b.as_mut_ptr() as *mut libc::c_void, 1);
+            libc::close(sync[0]);
+            libc::setgid(0);
+            libc::setuid(0);
+            libc::execv(prog.as_ptr(), argv.as_ptr());
+            libc::_exit(127);
+        },
+        pid if pid > 0 => {
+            unsafe {
+                libc::close(sync[0]);
+                libc::close(out[1]);
+            }
+            // Same 20ms grace as `reexec_mapped`: the child must have unshared
+            // before `/proc/<pid>/uid_map` means anything.
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            let _ = write_userns_maps(pid, true);
+            unsafe {
+                let go = [1u8; 1];
+                let _ = libc::write(sync[1], go.as_ptr() as *const libc::c_void, 1);
+                libc::close(sync[1]);
+            }
+            // SAFETY: `out[0]` is ours and not used anywhere else from here on.
+            let f = unsafe { std::fs::File::from_raw_fd(out[0]) };
+            let mut line = String::new();
+            // A child that dies before mounting closes this pipe, so the read
+            // ends instead of hanging, and the line is not `ready`.
+            let ok = BufReader::new(f).read_line(&mut line).is_ok() && line.trim() == "ready";
+            let held = HeldChild { pid };
+            if !ok {
+                return None; // `held` drops here: kills and reaps.
+            }
+            Some(held)
+        }
+        _ => {
+            unsafe {
+                libc::close(sync[0]);
+                libc::close(sync[1]);
+                libc::close(out[0]);
+                libc::close(out[1]);
+            }
+            None
+        }
+    }
+}
+
+/// A child from [`reexec_mapped_hold`], killed and reaped when dropped.
+///
+/// Reaping is not optional: this runs inside long-lived processes too
+/// (`serve docker-api`), where an unreaped child is a zombie for the life of the
+/// server — a bug that path has already paid for once.
+pub struct HeldChild {
+    pid: i32,
+}
+
+impl HeldChild {
+    /// The holder's pid — the caller reads its namespace via `/proc/<pid>/root`.
+    pub fn pid(&self) -> i32 {
+        self.pid
+    }
+}
+
+impl Drop for HeldChild {
+    fn drop(&mut self) {
+        unsafe {
+            libc::kill(self.pid, libc::SIGKILL);
+            let mut st = 0;
+            libc::waitpid(self.pid, &mut st, 0);
         }
     }
 }
