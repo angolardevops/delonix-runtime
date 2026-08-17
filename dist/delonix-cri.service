@@ -21,5 +21,25 @@ Restart=always
 RestartSec=2
 LimitNOFILE=1048576
 
+# Reiniciar o CRI NÃO pode matar os containers que ele lançou.
+#
+# Sem estas duas linhas o `KillMode` é o `control-group` por omissão: os
+# containers são netos deste serviço e vivem no seu cgroup, logo qualquer
+# reinício (e há `Restart=always`) leva um SIGTERM a TODOS ao mesmo tempo. Num
+# nó Kubernetes isso é o control-plane inteiro a cair de uma vez.
+#
+# Medido a 2026-08-16/17 numa golden 1.36: os quatro static pods
+# (etcd/apiserver/controller-manager/scheduler) saíam com `Exited (0)` — saída
+# LIMPA, não crash — os quatro no mesmo instante, sem uma única falha de sonda
+# no kubelet, e o `kubeadm init` ficava preso em `wait-control-plane`. O mesmo
+# container lançado à mão pelo CLI ficava `Up`, porque aí não há cgroup de
+# serviço a matá-lo.
+#
+# `Delegate=yes` dá ao CRI o seu próprio subárvore de cgroup para gerir, e
+# `KillMode=process` faz o systemd parar só o processo principal. É exactamente
+# o que a unit do containerd faz, e pela mesma razão.
+Delegate=yes
+KillMode=process
+
 [Install]
 WantedBy=multi-user.target
