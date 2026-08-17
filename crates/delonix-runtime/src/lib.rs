@@ -3322,7 +3322,19 @@ fn try_delegated_base(base: &str, c: &Container, pid: i32, move_self: bool) -> b
     if std::fs::metadata(format!("{base}/cgroup.subtree_control")).is_err() {
         return false; // base not writable/delegated
     }
-    let leaf = format!("{base}/dlx-{}", c.id);
+    // Optional intermediate level (`--cgroup-parent`): `<base>/<group>/dlx-<id>`.
+    // An unsafe name is DROPPED, not sanitised: silently rewriting a caller's group
+    // name would put its containers in a different group than the one it thinks it
+    // limited — worse than having no group at all.
+    let group = c
+        .cgroup_parent
+        .as_ref()
+        .and_then(|g| delonix_runtime_core::safe_cgroup_segment(&g.name).map(|n| n.to_string()));
+    let parent = match &group {
+        Some(g) => format!("{base}/{g}"),
+        None => base.to_string(),
+    };
+    let leaf = format!("{parent}/dlx-{}", c.id);
     if std::fs::create_dir_all(&leaf).is_err() {
         return false;
     }
@@ -3352,6 +3364,15 @@ fn try_delegated_base(base: &str, c: &Container, pid: i32, move_self: bool) -> b
     if !any {
         abandon_leaf(&leaf);
         return false; // no delegation (no-internal-processes or no permission)
+    }
+    // 1b) The GROUP level, when there is one. Its ceiling goes on BEFORE the leaf is
+    //     populated, exactly like the leaf's own: a limit applied after the first
+    //     allocation is a limit that was not there when it mattered.
+    if let (Some(_), Some(gp)) = (&group, c.cgroup_parent.as_ref()) {
+        apply_group_ceiling(&parent, gp);
+        for ctrl in ["+cpuset", "+cpu", "+io", "+memory", "+pids"] {
+            let _ = std::fs::write(format!("{parent}/cgroup.subtree_control"), ctrl);
+        }
     }
     // 2) Limits on the leaf (controllers already active) — BEFORE the process enters,
     //    so the ceiling holds from the first allocation.
@@ -3465,6 +3486,31 @@ fn warn_unapplied_limits(leaf: &str, c: &Container) {
 /// the case here, so a failure means someone else got in and we must NOT force it.
 fn abandon_leaf(leaf: &str) {
     let _ = std::fs::remove_dir(leaf);
+}
+
+/// Writes the GROUP's aggregate ceiling (see [`delonix_runtime_core::CgroupParent`]).
+///
+/// `memory.swap.max = 0` travels WITH the memory ceiling, and that pairing is the whole
+/// point: measured on a host with 2 GiB of swap, a group capped at 64 MiB let a single
+/// process allocate 200 MiB and finish — the pages just went to swap. Only with swap
+/// closed did the kernel do what the operator asked (`memory.events` showed the ceiling
+/// being hit 1466 times and then `oom_kill 1`). A memory quota that swap walks around
+/// is not a quota. Same reasoning, same fix, as the container leaf.
+///
+/// Best-effort by design: a group ceiling that cannot be written must not stop the
+/// container from starting — but it is also why the caller cannot TRUST the ceiling
+/// without reading it back (`memory.max` on the group).
+fn apply_group_ceiling(parent: &str, gp: &delonix_runtime_core::CgroupParent) {
+    if let Some(m) = &gp.memory_max {
+        let _ = std::fs::write(format!("{parent}/memory.max"), m);
+        let _ = std::fs::write(format!("{parent}/memory.swap.max"), swap_max_value());
+    }
+    if let Some(cpus) = &gp.cpus {
+        let _ = std::fs::write(format!("{parent}/cpu.max"), cpu_max_value(cpus));
+    }
+    if let Some(p) = &gp.pids_max {
+        let _ = std::fs::write(format!("{parent}/pids.max"), p);
+    }
 }
 
 /// Value for a container leaf's `memory.swap.max`.
