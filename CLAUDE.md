@@ -410,10 +410,13 @@ scrape Prometheus nunca divergirem na aritmética.
   a agregação — single source of truth entre TUI/JSON/Prometheus.
 - **BUG DE CUSTO encontrado a validar ao vivo, corrigido antes de publicar**:
   a soma de disco (`storage_bytes_*`) percorre `containers/` — em rootless
-  cada container tem uma cópia FLAT completa do rootfs (ver secção "Imagem VM
+  cada container tinha uma cópia FLAT completa do rootfs (ver secção "Imagem VM
   dourada"/histórico do incidente de disk-pressure) — medido neste host (49
   containers, vários nós `kindest/node` completos): **68 GiB, mais de um
-  minuto** de I/O de disco. Calcular isto em linha bloquearia o TUI a cada
+  minuto** de I/O de disco. **A cópia por container acabou na v0.59.0** (ver
+  «Containers rootless partilham as layers», abaixo) e o custo desta passagem
+  cai com ela; o desacoplamento abaixo continua a valer, porque `containers/`
+  ainda tem as cópias legadas e as `upper/` continuam a ser percorridas. Calcular isto em linha bloquearia o TUI a cada
   tick E estouraria o timeout de scrape do Prometheus (10s por omissão).
   Corrigido com dois mecanismos de desacoplamento:
   1. `dashstats::collect` ganhou `include_network`/`include_storage`
@@ -3637,9 +3640,24 @@ checklist para quem mexer aqui do que como lista de correcções:
   Medido com `pgvector:pg16` (10 296 entradas, 431 MB): 1 526 ms com `--net none` contra
   3 143 ms com rede custom, e o delta é exactamente uma extracção (1 666 ms à parte); o `strace`
   concorda, 2 060 canonicalizações do destino contra 1 030. Reextrair por cima de uma árvore
-  preenchida custa preço inteiro — não há poupança acidental. A correcção é **rootless-only de
+  preenchida custa preço inteiro — não há poupança acidental. A correcção era **rootless-only de
   propósito**: como root o `prepare_rootfs` MONTA um overlay, e um mount da 1.ª passagem não é
-  necessariamente visível na namespace onde o re-exec aterra (v0.47.0);
+  necessariamente visível na namespace onde o re-exec aterra (v0.47.0). **Desde a v0.59.0 o
+  rootless também não extrai por container** — partilha as layers e o mount é feito pelo init de
+  CADA passagem, dentro da namespace onde ela aterra, por isso a assimetria root/rootless deste
+  parágrafo deixou de existir;
+- **duas builds com a mesma versão não são a mesma build** — o `Cargo.toml` continuava a dizer
+  `0.58.0` depois de a tag v0.58.0 ter saído, por isso um binário instalado ANTES da série e a
+  build que a continha apresentavam-se ambos como `delonix 0.58.0`. Custou uma confusão real: o
+  host criava containers flat e o `--version` jurava estar actualizado. **O que discrimina é o
+  comportamento, não o número** — aqui, se um container novo nasce com `overlay-lowers` ou com
+  `rootfs/`. Fechado com o bump para 0.59.0, mas a regra fica: depois de uma tag, a versão de
+  trabalho tem de sair de imediato do número publicado;
+- **`Command::spawn` não devolve antes do `exec`** — lê um pipe CLOEXEC que só fecha lá, para
+  poder reportar falhas de exec. Logo um `pre_exec` que BLOQUEIE (à espera de mapas de userns que
+  o pai só escreve depois do `spawn` retornar) faz deadlock: os dois esperam um pelo outro.
+  Medido — `container cp` de um container parado pendurado até ser morto. É a razão de o
+  `reexec_mapped` usar `fork` cru, e o `reexec_mapped_hold` teve de fazer o mesmo (v0.59.0);
 - **`undefine --snapshots-metadata` não apaga o snapshot** — apaga só o que aponta para ele.
   O estado ficava no qcow2 (`qemu-img snapshot -l` mostrava-o) enquanto o `vm snapshots`
   respondia lista vazia com rc=0 e o `vm restore` dizia «não existe». Corolário do mesmo
@@ -4798,3 +4816,56 @@ como facto), o `--dry-run` não deixar um único ficheiro, e os caminhos de erro
 **Por confirmar**: o agendamento («on demand or on a schedule», no próprio `--help`) não foi
 exercitado nesta passagem — não sei dizer se o agendador é interno, um `systemd --user` timer, ou
 uma linha de cron que o utilizador escreve. Quem lá chegar primeiro, mede e escreve aqui.
+
+## Containers rootless partilham as layers em vez de as copiarem (v0.59.0)
+
+Um bug report abriu isto («os containers estão a encher o disco») com uma proposta de compressão.
+A medição discordou da premissa, e é daí que sai tudo: `containers/` tinha 47 GiB e **~39 eram
+duplicação byte-a-byte** — 21 containers da MESMA `kaeso-odoo:16`, cada um com a sua cópia física
+de 2,1 GiB, todos os ficheiros a `nlink == 1`. Cada `run` pagava **13 s e 2,2 GiB**.
+
+O `prepare_rootfs` fazia `export_rootfs` (cópia FLAT da imagem por container) e o caminho de
+overlay existia há muito, só que **rootless-only-não**: `mount(2)` de um uid sem privilégio é
+EPERM. **Mas o mount não tem de acontecer na CLI** — o `setup_rootfs` já corre dentro do clone,
+como criador do userns e com caps completas sobre ele. Medido antes de escrever código: um
+`mount -t overlay` sem privilégio dentro de `unshare --user --map-root-user --mount` monta, lê da
+lower e escreve na upper.
+
+- **Contrato em DISCO, não campo no `RunSpec`** — `ImageStore::prepare_overlay` deixa um
+  `overlay-lowers` ao lado do `merged/` e `mount_overlay_if_marked` lê-o. Os caminhos rootless
+  re-executam o binário (`--net <custom>`, `--pod`) e um struct não sobrevive a essa fronteira.
+- **A partilha é segura por construção, e foi VERIFICADA**: contra um container a correr como uid
+  0 no seu userns, escrever e apagar um ficheiro da lower deixou-a com o mesmo inode e os mesmos
+  bytes. Copy-up antes da escrita, whiteout na remoção.
+- **O `chown_tree(…, USERNS_UID_BASE)` era código morto** e nunca fez nada: `lchown` para 100000 a
+  partir de um uid sem privilégio é EPERM e o `lchown_tree` engole o erro. Layers e rootfs deste
+  host são uniformemente `1000:1000`, e funcionam porque o mapa rootless é `0 <euid> 1` — o uid 0
+  DENTRO do namespace É quem invocou. É também isso que deixa uma layer servir todos.
+- **O `build` fica no caminho flat** (`prepare_rootfs_flat`), deliberado: o `COPY` escreve na
+  árvore a partir do host, o `FROM <estágio>` clona com `cp -a`, o `commit_flat_rootfs` empacota —
+  tudo fora de qualquer namespace. E é o caso onde a duplicação não acumula.
+- **`existing_rootfs_path` resolve os TRÊS layouts**, e o marcador é verificado PRIMEIRO: um
+  container pode ter as duas formas ao mesmo tempo (um `rootfs/` legado ao lado do `merged/` novo),
+  e escolher a cópia velha arrancá-lo-ia contra uma árvore que já não recebe as suas escritas.
+
+**Dois defeitos que só a validação revelou**: o `commit` passou a ler por `/proc/<pid>/root`, que
+inclui os MOUNTS do container — o empacotador descia pelo procfs real e falhava com `Permission
+denied` (se acabasse, publicava um retrato do kernel do host numa imagem); `pack_rootfs_tar`
+mantém `proc`/`sys`/`dev` vazios. E o `Command::spawn`/`pre_exec` que faz deadlock com o handshake
+de userns — ver a entrada na classe «X não é Y».
+
+**`cp`/`commit` num container overlay PARADO** (`__ovlhold` + `reexec_mapped_hold`): o `merged/` é
+um directório vazio até alguém montar. Em vez de copiar a árvore para um temporário (a cópia que
+acabámos de eliminar) ou refazer a fusão do overlayfs em userspace (2.ª implementação da semântica
+do kernel), um processo segura o mount na sua namespace e o resto lê por `/proc/<pid>/root` — a
+MESMA porta do container vivo, zero mudanças a jusante. O `HeldChild` mata **e reapa** no `Drop`:
+sem o reap, um `serve docker-api` acumula zombies, defeito que esse caminho já pagou.
+
+**Medido**: 6 containers da mesma imagem em 1 MiB cada contra 17 MiB de layers; no host real,
+`containers/` de **47 para 7,2 GiB**. **Não validado**: a bateria `scripts/e2e.sh` não correu
+nesta série (corre contra o estado real e o host tinha produção viva). O ADR-0016 fecha a
+pergunta do filesystem que deu origem a tudo.
+
+**Armadilha de método que vale por si**: os containers só passam a partilhar quando o binário EM
+USO é o novo. Durante esta série o host criou containers flat com o `--version` a dizer o número
+certo — ver «duas builds com a mesma versão não são a mesma build».
