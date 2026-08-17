@@ -1046,6 +1046,24 @@ pub fn stop_container(
     id: String,
     timeout: i64,
 ) -> Result<Response<StopContainerResponse>, Status> {
+    // Cada paragem é REGISTADA, e não é cosmética: este caminho apagava as suas
+    // próprias pistas.
+    //
+    // Um `StopContainer` não deixava rasto nenhum no journal, só o SIGTERM do
+    // lado do container. A depurar um control-plane que não estabilizava
+    // (2026-08-17), um `journalctl -u delonix-cri | grep -i stop` devolvia
+    // ZERO — o que levou à conclusão errada de que «ninguém manda parar». O
+    // actor só apareceu por acidente, num `systemd-cgls` que mostrou um
+    // `delonix container stop cri-…` vivo dentro do cgroup do serviço.
+    //
+    // Ausência de log lida como ausência de facto custou duas conclusões
+    // erradas na mesma investigação. Quem para um container do kubelet fica
+    // agora escrito, com o id e o prazo, do lado de quem o executa.
+    tracing::info!(
+        container = %format!("cri-{id}"),
+        grace_secs = timeout.max(0),
+        "CRI StopContainer"
+    );
     // Honor the CRI request's grace period (seconds): the kubelet/crictl impose
     // their own deadline, so we CANNOT use `delonix stop`'s long default.
     // `timeout=0` → immediate stop (SIGKILL).
@@ -1066,6 +1084,7 @@ pub fn stop_container(
         let alive = matches!(c.status, delonix_runtime_core::Status::Running)
             && c.pid.map(delonix_runtime::is_alive).unwrap_or(false);
         if alive {
+            tracing::warn!(container = %format!("cri-{id}"), "ainda a correr depois do stop — o kubelet vai repetir");
             return Err(Status::internal(format!(
                 "'cri-{id}' is still running after stop"
             )));
@@ -1078,6 +1097,9 @@ pub fn remove_container(
     base: &Path,
     id: String,
 ) -> Result<Response<RemoveContainerResponse>, Status> {
+    // Registado pela mesma razão que o `StopContainer`: sem isto, a sequência
+    // stop→remove que o kubelet faz num pod em churn é invisível deste lado.
+    tracing::info!(container = %format!("cri-{id}"), "CRI RemoveContainer");
     // ONLY delete the CRI record AFTER the runtime removes the container. Before,
     // the JSON was deleted even with a failed `rm -f` → leak of rootfs/subuid/netns
     // with no trace for the kubelet to retry. Idempotent (CRI contract): a container
