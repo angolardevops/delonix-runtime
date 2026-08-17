@@ -61,7 +61,7 @@ use delonix_runtime::{self as runtime, RunSpec};
 use delonix_runtime_core::{generate_id, Container, Error, Result, Store};
 use sha2::{Digest, Sha256};
 
-use super::util::{open_stores, prepare_rootfs, resolve_or_pull_platform};
+use super::util::{open_stores, prepare_rootfs_flat, resolve_or_pull_platform};
 
 #[derive(Args)]
 pub struct BuildArgs {
@@ -296,7 +296,7 @@ fn resolve_stage_base(
         })
     } else {
         let img = resolve_or_pull_platform(images, from, platform)?;
-        let rootfs = prepare_rootfs(images, &img, new_id)?;
+        let rootfs = prepare_rootfs_flat(images, &img, new_id)?;
         let workdir = if img.config.working_dir.is_empty() {
             "/".to_string()
         } else {

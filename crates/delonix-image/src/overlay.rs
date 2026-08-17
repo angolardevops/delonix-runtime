@@ -261,6 +261,67 @@ impl ImageStore {
         Ok(merged)
     }
 
+    /// Name of the file that marks a container directory as OVERLAY-backed and
+    /// carries its lower stack (one absolute path per line, highest layer
+    /// first — already in `lowerdir=` order).
+    ///
+    /// It is an on-disk contract on purpose, not a field threaded through
+    /// `RunSpec`: the rootless paths re-exec the binary (`--net <custom>` goes
+    /// through `nsenter … ip netns exec`, `--pod` likewise), and anything the
+    /// mount needs has to survive that boundary. A sibling file next to
+    /// `merged/` does; a struct built before the re-exec does not.
+    pub const LOWERS_FILE: &'static str = "overlay-lowers";
+
+    /// Prepares an overlay rootfs for a container WITHOUT mounting it, and
+    /// returns the `merged` path the mount will land on.
+    ///
+    /// This is the rootless counterpart of [`Self::mount_rootfs`]: there, the
+    /// engine is real root and mounts on the host right away; here it cannot —
+    /// an unprivileged `mount(2)` on the host is EPERM, and the overlay can only
+    /// be mounted from INSIDE the container's user namespace (where the creator
+    /// holds full caps). So this call does the part that must happen outside
+    /// (extract/cache the layers, create the write layer) and leaves the mount
+    /// to `delonix-runtime`'s `setup_rootfs`, which reads [`Self::LOWERS_FILE`].
+    ///
+    /// What this replaces is a FULL COPY of the image per container
+    /// (`export_rootfs`): measured on this host, 21 containers of the same
+    /// `kaeso-odoo:16` held 21 physical copies of the same 2.1 GiB tree, every
+    /// file at `nlink == 1` — ~39 GiB of byte-identical duplication, and 13 s of
+    /// I/O on every `run`. The layers under `layers/<hex>/` were already shared
+    /// and already had the right ownership for the container's uid map; nothing
+    /// pointed at them.
+    pub fn prepare_overlay(&self, image: &Image, container_id: &str) -> Result<PathBuf> {
+        let lowers = self.ensure_layers(image)?;
+        if lowers.is_empty() {
+            return Err(Error::Invalid("image has no layers".into()));
+        }
+        // A `:` would split the mount option into two lowerdirs and silently
+        // point the overlay at a path that does not exist. Our own layer
+        // directories are hex digests and cannot contain one, but the state root
+        // is user-supplied (`DELONIX_ROOT`), so refuse instead of assuming.
+        if let Some(bad) = lowers.iter().find(|p| p.to_string_lossy().contains(':')) {
+            return Err(Error::Invalid(format!(
+                "state root path contains ':' and cannot back an overlay: {}",
+                bad.display()
+            )));
+        }
+        let base = self.container_dir(container_id);
+        for d in ["upper", "work", "merged"] {
+            std::fs::create_dir_all(base.join(d))?;
+        }
+        // Highest layer first, which is what `lowerdir=` expects — the same
+        // `.rev()` that `mount_rootfs` applies, done ONCE here so the reader
+        // never has to know the store's layer order.
+        let body = lowers
+            .iter()
+            .rev()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(base.join(Self::LOWERS_FILE), body)?;
+        Ok(base.join("merged"))
+    }
+
     /// Does a (recursive) `chown` of the container's write layer (upper+work)
     /// to `uid:gid`. Needed with a user namespace: the container's root
     /// (mapped to `uid` on the host) needs to own its write layer.
@@ -279,11 +340,26 @@ impl ImageStore {
         if merged.exists() {
             let _ = umount2(&merged, MntFlags::MNT_DETACH);
         }
-        // ROOTLESS FLAT: `rootfs/` is the container's PERSISTENT state (reused on
+        // ROOTLESS OVERLAY: `upper/` is the container's PERSISTENT state — it holds
+        // every write the container made, and is exactly what the flat `rootfs/`
+        // used to hold. Deleting it on `stop` would make a restart come back with
+        // the bare image, silently losing the container's data. Only the mountpoint
+        // and the overlay's own bookkeeping directory are scratch.
+        //
+        // The check is the LOWERS file and not `upper/`: `mount_rootfs` (root mode)
+        // also creates an `upper/`, and there the whole directory is scratch —
+        // reading the marker keeps the two models apart instead of guessing from a
+        // directory both of them happen to make.
+        if base.join(Self::LOWERS_FILE).exists() {
+            for d in ["merged", "work"] {
+                let _ = std::fs::remove_dir_all(base.join(d));
+            }
+        }
+        // ROOTLESS FLAT (legacy): `rootfs/` is the container's PERSISTENT state (reused on
         // restart, preserves the writes — like Docker). On `stop`/cleanup do NOT
         // delete it; clean only the overlay's scratch directories (root model). The
         // definitive destroy is `remove_container_dir` (called by `rm`).
-        if base.join("rootfs").exists() {
+        else if base.join("rootfs").exists() {
             for d in ["merged", "upper", "work"] {
                 let _ = std::fs::remove_dir_all(base.join(d));
             }
