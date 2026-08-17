@@ -287,6 +287,65 @@ pub(crate) fn existing_rootfs_path(images: &ImageStore, id: &str) -> Option<Path
     None
 }
 
+/// Converts a container's legacy FLAT rootfs into a shared overlay, if it has
+/// one. Best-effort: any failure leaves the container exactly as it was.
+///
+/// # Why here, and why it is allowed to give up
+///
+/// Containers created before the layers were shared each carry a full private
+/// copy of the image. There is no way to convert one WHILE IT RUNS — the process
+/// `pivot_root`ed into that tree and holds open files in it, so swapping the
+/// root is by definition recreating the process. What there IS, is the stop that
+/// already happened: a `start` is the one moment the tree belongs to nobody, and
+/// this costs the operator no downtime they were not already paying.
+///
+/// Everything here is therefore **opportunistic**. A migration that cannot run
+/// is not an error to report — the container starts flat, exactly as it did
+/// yesterday. What it must never do is prevent a start: that would trade a
+/// container that wastes disk for one that does not come back.
+///
+/// The image is resolved LOCALLY (`ImageStore::resolve`) and never pulled. The
+/// lower layers have to exist to migrate against, but going to a registry —
+/// slowly, or failing on a node with no route out — during a `start` that would
+/// otherwise succeed is not a trade this optimisation gets to make.
+///
+/// Runs inside the mapped userns (`reexec_mapped`) for two independent reasons:
+/// whiteouts need `CAP_MKNOD`, and a flat rootfs may hold files owned by mapped
+/// SUBUIDS (anything the container wrote as a non-zero uid), which the invoking
+/// uid can neither move nor delete.
+pub(crate) fn migrate_flat_to_overlay(images: &ImageStore, id: &str, image: &str) {
+    let dir = images.root().join("containers").join(id);
+    // Already shared, or nothing flat to convert. Also the fast path for every
+    // ordinary start, which is why it is two `exists()` and no I/O beyond that.
+    if !dir.join("rootfs").exists() || dir.join(ImageStore::LOWERS_FILE).exists() {
+        return;
+    }
+    let Ok(img) = images.resolve(image) else {
+        return; // image gone from the store — nothing to share against
+    };
+    let Ok(lowers) = images.lower_dirs(&img) else {
+        return;
+    };
+    if lowers.is_empty() {
+        return;
+    }
+    let body = lowers
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let pending = dir.join("overlay-lowers.pending");
+    if std::fs::write(&pending, body).is_err() {
+        return;
+    }
+    let d = dir.to_string_lossy().into_owned();
+    if delonix_runtime::reexec_mapped(&["__ovlmigrate", &d]) != Some(true) {
+        // The helper reverts its own half; this only clears the marker it read,
+        // so a later start finds the same clean starting point.
+        let _ = std::fs::remove_file(&pending);
+    }
+}
+
 /// Silences the engine's cgroup-delegation warning in every process spawned
 /// from here on, on the grounds that it has ALREADY been printed once.
 ///
