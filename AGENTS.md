@@ -4848,6 +4848,33 @@ lower e escreve na upper.
   container pode ter as duas formas ao mesmo tempo (um `rootfs/` legado ao lado do `merged/` novo),
   e escolher a cópia velha arrancá-lo-ia contra uma árvore que já não recebe as suas escritas.
 
+**Um flat legado MIGRA no `start` seguinte** (`migrate_flat_to_overlay`, pós-v0.59.0 — as notas
+dessa release dizem «não há migração automática» e descrevem o que era verdade quando saíram).
+Um container A CORRER não se converte: o processo fez `pivot_root` para aquela árvore e tem
+ficheiros abertos lá dentro, logo trocar-lhe a raiz é recriá-lo. O que se aproveita é a paragem
+que já aconteceu — um `start` é o único instante em que a árvore não é de ninguém, e converter aí
+não custa tempo de baixo nenhum que já não estivesse a ser pago.
+
+- **A ORDEM é correcção e não gosto**: `rename(rootfs→upper)` (atómico) → **whiteouts** →
+  `overlay-lowers`. Um rootfs flat é a imagem mais as escritas JÁ fundidas, por isso um ficheiro
+  que o container APAGOU está simplesmente ausente; sem whiteout o overlay serve-o de volta da
+  lower, e uma config purgada ou um segredo rotado a reaparecer é pior que o disco que se poupa.
+  O `overlay-lowers.pending` é o ponto de COMMIT — renomeá-lo é o único passo que torna o
+  container overlay, e tudo antes dele reverte para flat.
+- **A poda dos idênticos corre DEPOIS do commit** e pode falhar à vontade: é a única parte que só
+  custa espaço. É também a razão de a migração ser escrita como «apagar o que é redundante» e não
+  como o aparentemente equivalente «copiar o que difere» — aquela erra para o lado do espaço,
+  esta perde dados.
+- **Best-effort, e nunca impede um arranque.** A imagem é resolvida LOCALMENTE (um `start` não vai
+  a um registo por causa de uma optimização) e qualquer falha deixa o container a arrancar flat.
+- **Corre no userns mapeado por DUAS razões independentes**: os whiteouts precisam de `CAP_MKNOD`
+  (medido no spike: `mknod c 0 0` funciona dentro de `unshare --user --map-root-user` e o
+  overlayfs honra-o), e um rootfs flat pode ter ficheiros de SUBUID mapeado — tudo o que o
+  container escreveu como uid≠0 — que o uid que invoca não consegue mover nem apagar.
+- **Validado com o binário 0.58.0 REAL** (o backup da instalação), para o container flat ser
+  genuíno e não fabricado: escrita própria preservada, `/etc/alpine-release` apagado lá dentro a
+  NÃO ressuscitar (whiteout `c--------- 0, 0` em disco), 9 MB → 1 MB, e o 2.º start no-op.
+
 **Dois defeitos que só a validação revelou**: o `commit` passou a ler por `/proc/<pid>/root`, que
 inclui os MOUNTS do container — o empacotador descia pelo procfs real e falhava com `Permission
 denied` (se acabasse, publicava um retrato do kernel do host numa imagem); `pack_rootfs_tar`
