@@ -3095,19 +3095,23 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // accidental saving. `strace` agrees: 2 060 canonicalizations of the destination,
     // exactly 2 × the 1 030 of a single pass.
     //
-    // Rootless ONLY, deliberately. There the rootfs is a flat directory on disk, visible
-    // from any mount namespace, so the 2nd pass just uses it. Under root
-    // `prepare_rootfs` MOUNTS an overlay, and a mount made by the 1st pass is not
-    // necessarily visible in the namespace the re-exec lands in — skipping it there would
-    // trade a slow container for a broken one.
+    // Rootless ONLY, deliberately. Under root `prepare_rootfs` MOUNTS an overlay on the
+    // host, and a mount made by the 1st pass is not necessarily visible in the namespace
+    // the re-exec lands in — skipping it there would trade a slow container for a broken
+    // one. Rootless is safe for the opposite reason: what the 1st pass left behind is
+    // inert on-disk state (the extracted layers, the write layer, the `overlay-lowers`
+    // marker), and the mount itself is done by the container's own init, inside whichever
+    // namespace this pass ends up in. Nothing is inherited across the re-exec.
     let rootfs = if reexec && rootless {
-        images
-            .root()
-            .join("containers")
-            .join(&id)
-            .join("rootfs")
-            .to_string_lossy()
-            .into_owned()
+        // A 2nd pass with nothing prepared would be a bug in the re-exec, not a user
+        // error; preparing again is cheap (the layers are already extracted and cached)
+        // and is strictly better than starting the container against a path that does
+        // not exist. Never silently empty — an empty rootfs string would `pivot_root`
+        // into the caller's own cwd.
+        match super::util::existing_rootfs_path(images, &id) {
+            Some(p) => p.to_string_lossy().into_owned(),
+            None => prepare_rootfs(images, &img, &id)?,
+        }
     } else {
         // The one genuinely silent phase of a `run`: on the FIRST use of an
         // image, `prepare_rootfs` → `ensure_layers` extracts every layer with no
@@ -4980,13 +4984,14 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
     }
 
     let rootfs = if runtime::is_rootless() {
-        let rfs = images.root().join("containers").join(&c.id).join("rootfs");
-        if !rfs.exists() {
-            return Err(Error::Invalid(format!(
+        // Overlay (`merged/`, remounted by the container's own init) or the
+        // legacy flat copy — `existing_rootfs_path` knows which this container is.
+        let rfs = super::util::existing_rootfs_path(images, &c.id).ok_or_else(|| {
+            Error::Invalid(format!(
                 "rootfs of {} no longer exists — use `run` again",
                 c.name
-            )));
-        }
+            ))
+        })?;
         rfs.to_string_lossy().into_owned()
     } else {
         let img = resolve_or_pull(images, &c.image)?;
@@ -5555,19 +5560,6 @@ pub(crate) fn cmd_rm(images: &ImageStore, store: &Store, id: &str, force: bool) 
     Ok(())
 }
 
-/// Rootfs path of an ALREADY-RUNNING container — same convention `cmd_commit`/
-/// `cmd_start` already use per mode: a flat directory in rootless (no overlay
-/// to look through), the overlay's `merged` mountpoint in root mode. Only
-/// needed to resolve `exec -u <name>` against `/etc/passwd` — a numeric `-u`
-/// never touches this path at all.
-fn live_rootfs_path(images: &ImageStore, id: &str) -> PathBuf {
-    if runtime::is_rootless() {
-        images.root().join("containers").join(id).join("rootfs")
-    } else {
-        images.root().join("containers").join(id).join("merged")
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn cmd_exec(
     images: &ImageStore,
@@ -5582,9 +5574,18 @@ fn cmd_exec(
 ) -> Result<()> {
     let c = find(store, id)?;
     let _ = interactive; // stdin is inherited; the flag keeps CLI parity
-    let user_override = user
-        .map(|u| resolve_run_user(&live_rootfs_path(images, &c.id).to_string_lossy(), u))
-        .transpose()?;
+    // `container_fs_root` and not a path built here: an `exec` targets a RUNNING
+    // container, so it resolves to `/proc/<pid>/root` — the merged tree as the
+    // container itself sees it, which is the only view that works whether the
+    // rootfs is an overlay or the legacy flat copy. A numeric `-u` never reaches
+    // this at all.
+    let user_override = match user {
+        Some(u) => Some(resolve_run_user(
+            &container_fs_root(images, &c)?.to_string_lossy(),
+            u,
+        )?),
+        None => None,
+    };
     // `--secret` (env mode) values are no longer baked into `c.env` — they are
     // resolved from the vault at spawn time and live only in the init process's
     // memory. An `exec` therefore has to resolve them too, or a debugging shell
@@ -5657,13 +5658,13 @@ fn cmd_commit(images: &ImageStore, store: &Store, id: &str, tag: &str) -> Result
         ))
     })?;
     let img = if runtime::is_rootless() {
-        let rootfs = images.root().join("containers").join(&c.id).join("rootfs");
-        if !rootfs.exists() {
-            return Err(Error::Invalid(super::po::tf(
-                "'{name}' has no rootfs on disk — it was removed, or the container never got to start",
-                &[("name", &c.name)],
-            )));
-        }
+        // `container_fs_root` resolves the three layouts AND, for an overlay
+        // container, insists it be running: packing a stopped one would read an
+        // empty `merged/` and publish an EMPTY image while reporting success —
+        // the same dishonest-report class this engine treats as its worst bug.
+        // A running container packs from `/proc/<pid>/root`, which is the merged
+        // tree including every write the container has made.
+        let rootfs = container_fs_root(images, &c)?;
         images.commit_flat_rootfs(
             &rootfs,
             c.command.clone(),
@@ -5839,6 +5840,20 @@ fn container_fs_root(images: &ImageStore, c: &Container) -> Result<std::path::Pa
         return Ok(std::path::PathBuf::from(format!("/proc/{pid}/root")));
     }
     let dir = images.root().join("containers").join(&c.id);
+    // A STOPPED overlay container has no readable tree from out here: `merged/`
+    // is an empty directory until the container's own init mounts the overlay
+    // inside its namespace. Returning it would be the worst possible answer —
+    // `cp` would copy nothing, find nothing, and report success. Refuse and name
+    // the way out.
+    //
+    // The running case above needs none of this: `/proc/<pid>/root` sees the
+    // merged tree exactly as the container does, mounts and all.
+    if dir.join(delonix_image::ImageStore::LOWERS_FILE).exists() {
+        return Err(Error::Invalid(super::po::tf(
+            "container '{name}' is stopped and its filesystem is an overlay that only exists while it runs — start it (`delonix container start {name}`)",
+            &[("name", &c.name)],
+        )));
+    }
     for cand in ["merged", "rootfs"] {
         let p = dir.join(cand);
         if p.exists() {
