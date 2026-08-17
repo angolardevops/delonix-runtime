@@ -127,7 +127,6 @@
     },
     "ContainerSpec": {
       "additionalProperties": false,
-      "description": "`spec` for `kind: Container` — mirrors `ContainerCmd::Run` (minus `name`,\nwhich comes from `metadata.name`). **`detach` defaults to `true`** (unlike the\nCLI, where the default is `false`): an `apply`/`stack apply` run in the\nforeground would block waiting for the process to exit — dangerous for a\ndeclarative command. Pass `detach: false` explicitly in the YAML if you want\nthe synchronous behavior of the interactive `run`.",
       "properties": {
         "addHost": {
           "default": [],
@@ -156,6 +155,18 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "cgroupParent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpecCgroupParent"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Intermediate cgroup shared by a GROUP of containers, with its own aggregate\nceiling — the only way to bound what N containers hold TOGETHER (see\n`delonix_runtime_core::CgroupParent`)."
         },
         "command": {
           "default": [],
@@ -1805,6 +1816,40 @@
           "type": "boolean"
         }
       },
+      "type": "object"
+    },
+    "SpecCgroupParent": {
+      "description": "`spec` for `kind: Container` — mirrors `ContainerCmd::Run` (minus `name`,\nwhich comes from `metadata.name`). **`detach` defaults to `true`** (unlike the\nCLI, where the default is `false`): an `apply`/`stack apply` run in the\nforeground would block waiting for the process to exit — dangerous for a\ndeclarative command. Pass `detach: false` explicitly in the YAML if you want\nthe synchronous behavior of the interactive `run`.\nManifest mirror of [`delonix_runtime_core::CgroupParent`].\n\nIt exists here, and not in `delonix-runtime-core`, for two reasons: the core crate\nstays free of `schemars` (the manifest schema is a concern of this binary, not of\nthe domain types), and the manifest speaks camelCase (`memoryMax`) while the\npersisted `Container` keeps its own field names. One conversion at the boundary is\ncheaper than either a new dependency in core or a rename that breaks stored records.",
+      "properties": {
+        "cpus": {
+          "description": "Aggregate CPU in cores.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "memoryMax": {
+          "description": "Aggregate memory ceiling for the whole group (e.g. `1073741824`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Group directory name — a single, safe path segment.",
+          "type": "string"
+        },
+        "pidsMax": {
+          "description": "Aggregate process ceiling.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
       "type": "object"
     },
     "SshSpec": {
