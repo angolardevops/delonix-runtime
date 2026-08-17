@@ -234,10 +234,10 @@ impl RuntimeService for DelonixRuntime {
     #[tracing::instrument(name = "cri.list_pod_sandbox", skip_all)]
     async fn list_pod_sandbox(
         &self,
-        _r: Request<ListPodSandboxRequest>,
+        r: Request<ListPodSandboxRequest>,
     ) -> Result<Response<ListPodSandboxResponse>, Status> {
-        let base = self.base.clone();
-        blocking(move || lifecycle::list_pod_sandbox(&base)).await
+        let (base, filter) = (self.base.clone(), r.into_inner().filter);
+        blocking(move || lifecycle::list_pod_sandbox(&base, filter)).await
     }
     #[tracing::instrument(name = "cri.create_container", skip_all, fields(
         pod = %r.get_ref().pod_sandbox_id,
@@ -287,10 +287,10 @@ impl RuntimeService for DelonixRuntime {
     #[tracing::instrument(name = "cri.list_containers", skip_all)]
     async fn list_containers(
         &self,
-        _r: Request<ListContainersRequest>,
+        r: Request<ListContainersRequest>,
     ) -> Result<Response<ListContainersResponse>, Status> {
-        let base = self.base.clone();
-        blocking(move || lifecycle::list_containers(&base)).await
+        let (base, filter) = (self.base.clone(), r.into_inner().filter);
+        blocking(move || lifecycle::list_containers(&base, filter)).await
     }
     #[tracing::instrument(name = "cri.container_status", skip_all, fields(
         container = %r.get_ref().container_id,

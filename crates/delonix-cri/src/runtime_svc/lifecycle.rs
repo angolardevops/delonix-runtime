@@ -542,10 +542,39 @@ fn to_pod_sandbox(r: &SandboxRec) -> PodSandbox {
     }
 }
 
-pub fn list_pod_sandbox(base: &Path) -> Result<Response<ListPodSandboxResponse>, Status> {
+/// Does this sandbox satisfy the kubelet's `PodSandboxFilter`?
+///
+/// Pure, and on the ALREADY-BUILT `PodSandbox` rather than on the record: `state` is
+/// derived (`sandbox_state`), so matching on the built value is what keeps a filtered
+/// list from deriving it twice and from ever disagreeing with what it reports.
+///
+/// An absent/empty filter matches everything — that is the CRI contract for "list all",
+/// and it is why `unwrap_or_default()` upstream is correct rather than lenient.
+fn sandbox_matches(s: &PodSandbox, f: &PodSandboxFilter) -> bool {
+    if !f.id.is_empty() && s.id != f.id {
+        return false;
+    }
+    if let Some(st) = &f.state {
+        if s.state != st.state {
+            return false;
+        }
+    }
+    // SUBSET match, not map equality: the kubelet selects on the two or three labels it
+    // cares about while a sandbox carries every label the pod was created with.
+    f.label_selector
+        .iter()
+        .all(|(k, v)| s.labels.get(k) == Some(v))
+}
+
+pub fn list_pod_sandbox(
+    base: &Path,
+    filter: Option<PodSandboxFilter>,
+) -> Result<Response<ListPodSandboxResponse>, Status> {
+    let f = filter.unwrap_or_default();
     let items = list_recs::<SandboxRec>(&sb_dir(base))
         .iter()
         .map(to_pod_sandbox)
+        .filter(|s| sandbox_matches(s, &f))
         .collect();
     Ok(Response::new(ListPodSandboxResponse { items }))
 }
@@ -1137,10 +1166,38 @@ fn to_container(base: &Path, r: &ContainerRec) -> Container {
     }
 }
 
-pub fn list_containers(base: &Path) -> Result<Response<ListContainersResponse>, Status> {
+/// Does this container satisfy the kubelet's `ContainerFilter`?
+///
+/// `pod_sandbox_id` is the field that matters most here: the kubelet builds a pod's status
+/// by listing the containers of THAT pod's sandbox. Ignoring it hands every container on
+/// the node to every pod — and the kubelet then reads the ones it cannot find in the pod
+/// spec as containers it must kill. Same shape and same reasoning as `sandbox_matches`.
+fn container_matches(c: &Container, f: &ContainerFilter) -> bool {
+    if !f.id.is_empty() && c.id != f.id {
+        return false;
+    }
+    if !f.pod_sandbox_id.is_empty() && c.pod_sandbox_id != f.pod_sandbox_id {
+        return false;
+    }
+    if let Some(st) = &f.state {
+        if c.state != st.state {
+            return false;
+        }
+    }
+    f.label_selector
+        .iter()
+        .all(|(k, v)| c.labels.get(k) == Some(v))
+}
+
+pub fn list_containers(
+    base: &Path,
+    filter: Option<ContainerFilter>,
+) -> Result<Response<ListContainersResponse>, Status> {
+    let f = filter.unwrap_or_default();
     let containers = list_recs::<ContainerRec>(&ct_dir(base))
         .iter()
         .map(|r| to_container(base, r))
+        .filter(|c| container_matches(c, &f))
         .collect();
     Ok(Response::new(ListContainersResponse { containers }))
 }
@@ -2024,6 +2081,170 @@ mod tests {
         );
         assert_eq!(s1.started_at, s2.started_at);
 
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// A base with two sandboxes and three containers: two in `sbaaaa`, one in `sbbbbb`.
+    fn base_with_two_pods(tag: &str) -> PathBuf {
+        let tmp = std::env::temp_dir().join(format!("dlx-cri-filter-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        for (id, name) in [("sbaaaa", "etcd"), ("sbbbbb", "kube-apiserver")] {
+            write_rec(
+                &sb_dir(&tmp),
+                id,
+                &SandboxRec {
+                    id: id.into(),
+                    name: name.into(),
+                    namespace: "kube-system".into(),
+                    labels: HashMap::from([(
+                        "io.kubernetes.pod.name".to_string(),
+                        name.to_string(),
+                    )]),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+        for (id, sb, name) in [
+            ("ctaaa1", "sbaaaa", "etcd"),
+            ("ctaaa2", "sbaaaa", "etcd-sidecar"),
+            ("ctbbb1", "sbbbbb", "kube-apiserver"),
+        ] {
+            write_rec(
+                &ct_dir(&tmp),
+                id,
+                &ContainerRec {
+                    id: id.into(),
+                    sandbox_id: sb.into(),
+                    name: name.into(),
+                    labels: HashMap::from([(
+                        "io.kubernetes.container.name".to_string(),
+                        name.to_string(),
+                    )]),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+        tmp
+    }
+
+    /// The 6th wall of the DKS control-plane: `ListContainers` ignored the filter, so the
+    /// kubelet asked for ONE pod's containers and got the whole node's. It then reads every
+    /// container it cannot find in that pod's spec as one to kill — which is the graceful
+    /// 30s teardown the static pods were getting seconds after starting.
+    ///
+    /// Fails with the fix reverted: unfiltered, this returns all three.
+    #[test]
+    fn list_containers_honra_o_filtro_de_sandbox_do_kubelet() {
+        let tmp = base_with_two_pods("ctsb");
+        let got = list_containers(
+            &tmp,
+            Some(ContainerFilter {
+                pod_sandbox_id: "sbaaaa".into(),
+                ..Default::default()
+            }),
+        )
+        .unwrap()
+        .into_inner()
+        .containers;
+        let mut ids: Vec<_> = got.iter().map(|c| c.id.clone()).collect();
+        ids.sort();
+        assert_eq!(
+            ids,
+            vec!["ctaaa1", "ctaaa2"],
+            "o filtro por sandbox devolveu containers de outro pod"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// No filter (and an empty filter) still means "everything" — the CRI contract. Without
+    /// this, closing the bug above would have broken `crictl ps` and the kubelet's own
+    /// full-node sweep, which passes no filter at all.
+    #[test]
+    fn sem_filtro_continua_a_listar_tudo() {
+        let tmp = base_with_two_pods("all");
+        assert_eq!(
+            list_containers(&tmp, None)
+                .unwrap()
+                .into_inner()
+                .containers
+                .len(),
+            3
+        );
+        assert_eq!(
+            list_containers(&tmp, Some(ContainerFilter::default()))
+                .unwrap()
+                .into_inner()
+                .containers
+                .len(),
+            3
+        );
+        assert_eq!(
+            list_pod_sandbox(&tmp, None)
+                .unwrap()
+                .into_inner()
+                .items
+                .len(),
+            2
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn list_pod_sandbox_honra_o_id_e_o_estado() {
+        let tmp = base_with_two_pods("sb");
+        let got = list_pod_sandbox(
+            &tmp,
+            Some(PodSandboxFilter {
+                id: "sbbbbb".into(),
+                ..Default::default()
+            }),
+        )
+        .unwrap()
+        .into_inner()
+        .items;
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].id, "sbbbbb");
+
+        // A state the records do not have must match nothing — a filter that silently
+        // ignored `state` would report a terminated pod as alive to the kubelet.
+        let none = list_pod_sandbox(
+            &tmp,
+            Some(PodSandboxFilter {
+                state: Some(PodSandboxStateValue {
+                    state: PodSandboxState::SandboxNotready as i32,
+                }),
+                ..Default::default()
+            }),
+        )
+        .unwrap()
+        .into_inner()
+        .items;
+        assert!(none.is_empty(), "o filtro de estado não foi aplicado");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// `label_selector` is a SUBSET match. Comparing whole maps would match nothing in
+    /// practice, because a real container carries every label the kubelet set on it.
+    #[test]
+    fn o_label_selector_e_subconjunto_e_nao_igualdade() {
+        let tmp = base_with_two_pods("lbl");
+        let got = list_containers(
+            &tmp,
+            Some(ContainerFilter {
+                label_selector: HashMap::from([(
+                    "io.kubernetes.container.name".to_string(),
+                    "etcd".to_string(),
+                )]),
+                ..Default::default()
+            }),
+        )
+        .unwrap()
+        .into_inner()
+        .containers;
+        assert_eq!(got.len(), 1, "esperava só o container 'etcd'");
+        assert_eq!(got[0].id, "ctaaa1");
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }
