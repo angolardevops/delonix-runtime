@@ -478,6 +478,31 @@ fn allowed_syscalls() -> Vec<i64> {
         SYS_getcpu,
         SYS_capget,
         SYS_capset,
+        // `seccomp(2)` — lets the payload sandbox ITSELF (nested seccomp).
+        //
+        // Allowing it grants no privilege. `seccomp(SECCOMP_SET_MODE_FILTER)`
+        // requires either `CAP_SYS_ADMIN` or `no_new_privs`, and we set
+        // `no_new_privs` before installing our own filter — so the only thing a
+        // container can do with this syscall is restrict itself FURTHER. A filter
+        // can never be relaxed once loaded: the kernel ANDs them, taking the most
+        // restrictive answer. Docker, podman and containerd all allow it in their
+        // default profiles for exactly this reason.
+        //
+        // Leaving it out was a gap, not hardening, and it broke real workloads
+        // that sandbox themselves. Found live on 2026-08-17: the SonarQube preset
+        // could not start, because its embedded Elasticsearch 8.14 installs a
+        // system call filter of its own and treats the failure as a fatal
+        // bootstrap check —
+        //
+        //   bootstrap check failure [1] of [1]: system call filters failed to
+        //   install; check the logs and fix your configuration
+        //
+        // — exiting 78. Measured: with `--security-opt seccomp=unconfined` the
+        // same image reached `Process[es] is up` and went on to boot the web
+        // server; with the default allowlist it died every time. The same class of
+        // payload (Chrome/Electron renderers, systemd-nspawn, other JVM search
+        // engines) hit the same wall.
+        SYS_seccomp,
         // ids / credentials (no extra privilege — NO_NEW_PRIVS+caps already limit)
         SYS_getuid,
         SYS_geteuid,
@@ -6797,6 +6822,36 @@ mod tests {
                 allowed.contains(&nr),
                 "syscall {nr} essencial DEVIA estar na allowlist"
             );
+        }
+    }
+
+    /// `seccomp(2)` has to be allowed, and it is NOT a hole.
+    ///
+    /// It grants no privilege: `SECCOMP_SET_MODE_FILTER` needs either
+    /// `CAP_SYS_ADMIN` or `no_new_privs`, and we set `no_new_privs` before
+    /// installing our own filter — so a container can only restrict itself
+    /// FURTHER. The kernel ANDs stacked filters and takes the most restrictive
+    /// answer; a loaded filter can never be relaxed.
+    ///
+    /// Leaving it out broke every payload that sandboxes itself. Measured live on
+    /// 2026-08-17: the Elasticsearch 8.14 embedded in SonarQube treats the failed
+    /// install as a fatal bootstrap check and exits 78 — the container never
+    /// started. The same image reached `Process[es] is up` with the filter off.
+    #[test]
+    fn seccomp_allowlist_permite_o_proprio_seccomp() {
+        let allowed = allowed_syscalls();
+        assert!(
+            allowed.contains(&libc::SYS_seccomp),
+            "sem `seccomp` na allowlist, nenhum payload se pode auto-sandboxar \
+             (Elasticsearch, Chrome, systemd-nspawn) — e falha de forma fatal"
+        );
+        // O `prctl` acompanha-o: é por ele que o payload põe `no_new_privs`, que é
+        // a condição para o `seccomp` sem CAP_SYS_ADMIN.
+        assert!(allowed.contains(&libc::SYS_prctl));
+        // E as escotilhas de fuga continuam FORA — permitir o `seccomp` não pode
+        // arrastar nada consigo.
+        for nr in [libc::SYS_setns, libc::SYS_unshare, libc::SYS_bpf] {
+            assert!(!allowed.contains(&nr));
         }
     }
 
