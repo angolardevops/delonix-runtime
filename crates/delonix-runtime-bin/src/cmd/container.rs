@@ -5580,10 +5580,11 @@ fn cmd_exec(
     // rootfs is an overlay or the legacy flat copy. A numeric `-u` never reaches
     // this at all.
     let user_override = match user {
-        Some(u) => Some(resolve_run_user(
-            &container_fs_root(images, &c)?.to_string_lossy(),
-            u,
-        )?),
+        Some(u) => {
+            let root = container_fs_root(images, &c)?;
+            let resolved = resolve_run_user(&root.path().to_string_lossy(), u)?;
+            Some(resolved)
+        }
         None => None,
     };
     // `--secret` (env mode) values are no longer baked into `c.env` — they are
@@ -5666,7 +5667,7 @@ fn cmd_commit(images: &ImageStore, store: &Store, id: &str, tag: &str) -> Result
         // tree including every write the container has made.
         let rootfs = container_fs_root(images, &c)?;
         images.commit_flat_rootfs(
-            &rootfs,
+            rootfs.path(),
             c.command.clone(),
             Vec::new(),
             c.env.clone(),
@@ -5835,29 +5836,65 @@ fn cmd_diff(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
 /// A container's filesystem root, for `cp`: if it's alive,
 /// `/proc/<pid>/root` (which respects the mounts it has, including those that
 /// `container update --volume-add` added hot); otherwise, the rootfs on disk.
-fn container_fs_root(images: &ImageStore, c: &Container) -> Result<std::path::PathBuf> {
+/// A container's filesystem root, together with anything that has to stay alive
+/// for that path to keep meaning something.
+///
+/// The `hold` is the `__ovlhold` process for a STOPPED overlay container: the
+/// merged tree exists only inside its mount namespace, and we reach it through
+/// `/proc/<pid>/root`. Dropping this unmounts the overlay by killing its holder,
+/// which is why the value has to outlive every use of the path — hence a guard
+/// and not a bare `PathBuf`. `HeldChild` kills and reaps in its own `Drop`, so
+/// this struct needs none of its own.
+struct FsRoot {
+    path: std::path::PathBuf,
+    /// Underscored because nothing ever READS it: it exists purely so its
+    /// `Drop` runs when this struct dies, which is what unmounts the overlay.
+    _hold: Option<runtime::HeldChild>,
+}
+
+impl FsRoot {
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+}
+
+fn container_fs_root(images: &ImageStore, c: &Container) -> Result<FsRoot> {
     if let Some(pid) = c.pid.filter(|p| runtime::is_alive(*p)) {
-        return Ok(std::path::PathBuf::from(format!("/proc/{pid}/root")));
+        return Ok(FsRoot {
+            path: std::path::PathBuf::from(format!("/proc/{pid}/root")),
+            _hold: None,
+        });
     }
     let dir = images.root().join("containers").join(&c.id);
     // A STOPPED overlay container has no readable tree from out here: `merged/`
-    // is an empty directory until the container's own init mounts the overlay
-    // inside its namespace. Returning it would be the worst possible answer —
-    // `cp` would copy nothing, find nothing, and report success. Refuse and name
-    // the way out.
+    // is an empty directory until something mounts the overlay, and an
+    // unprivileged `mount(2)` on the host is EPERM. So we borrow the same door
+    // the running case uses — a process that holds the mount in its own
+    // namespace, read through `/proc/<pid>/root`.
     //
-    // The running case above needs none of this: `/proc/<pid>/root` sees the
-    // merged tree exactly as the container does, mounts and all.
+    // Returning the empty `merged/` would be the worst possible answer: `cp`
+    // would copy nothing and report success.
     if dir.join(delonix_image::ImageStore::LOWERS_FILE).exists() {
-        return Err(Error::Invalid(super::po::tf(
-            "container '{name}' is stopped and its filesystem is an overlay that only exists while it runs — start it (`delonix container start {name}`)",
-            &[("name", &c.name)],
-        )));
+        let hold = runtime::reexec_mapped_hold(&["__ovlhold", &dir.to_string_lossy()])
+            .ok_or_else(|| {
+                Error::Invalid(super::po::tf(
+                    "could not mount the overlay of the stopped container '{name}' to read it — start it (`delonix container start {name}`)",
+                    &[("name", &c.name)],
+                ))
+            })?;
+        let pid = hold.pid();
+        return Ok(FsRoot {
+            path: std::path::PathBuf::from(format!("/proc/{pid}/root{}", dir.join("merged").display())),
+            _hold: Some(hold),
+        });
     }
     for cand in ["merged", "rootfs"] {
         let p = dir.join(cand);
         if p.exists() {
-            return Ok(p);
+            return Ok(FsRoot {
+                path: p,
+                _hold: None,
+            });
         }
     }
     Err(Error::Invalid(super::po::tf(
@@ -5901,13 +5938,13 @@ fn cmd_cp(images: &ImageStore, store: &Store, src: &str, dst: &str) -> Result<()
         (Some((name, cpath)), None) => {
             let c = find(store, &name)?;
             let root = container_fs_root(images, &c)?;
-            copy_recursive(&join_root(&root, &cpath), std::path::Path::new(dst))
+            copy_recursive(&join_root(root.path(), &cpath), std::path::Path::new(dst))
                 .map_err(|e| Error::Invalid(format!("cp: {e}")))?;
         }
         (None, Some((name, cpath))) => {
             let c = find(store, &name)?;
             let root = container_fs_root(images, &c)?;
-            copy_recursive(std::path::Path::new(src), &join_root(&root, &cpath))
+            copy_recursive(std::path::Path::new(src), &join_root(root.path(), &cpath))
                 .map_err(|e| Error::Invalid(format!("cp: {e}")))?;
         }
         _ => {
