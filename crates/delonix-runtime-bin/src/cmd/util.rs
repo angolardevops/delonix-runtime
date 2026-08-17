@@ -201,19 +201,90 @@ pub(crate) fn find(store: &Store, q: &str) -> Result<Container> {
     }
 }
 
-/// Prepares a new container's rootfs from an image: FLAT (export +
-/// chown to the userns uid) in rootless, or a mounted overlay in root mode. Same
-/// rule used by `container run` and by `build` (the "work" container).
+/// Prepares a new container's rootfs from an image: an overlay over the SHARED
+/// layer cache in both modes — mounted here in root mode, mounted by the
+/// container's own init in rootless (see `ImageStore::prepare_overlay`). Same
+/// rule used by `container run`.
+///
+/// Rootless used to take a FULL COPY of the image instead (`export_rootfs`), and
+/// the cost was not marginal: measured on this host, 21 containers of the same
+/// `kaeso-odoo:16` image held 21 separate physical copies of the same 2.1 GiB
+/// tree — every file at `nlink == 1`, ~39 GiB of byte-identical duplication —
+/// and every `run` paid 13 s of I/O to make one more. The layer cache under
+/// `layers/<hex>/` was already shared and already had the ownership the
+/// container's uid map wants; nothing pointed at it.
+///
+/// The `chown_tree(…, USERNS_UID_BASE)` that used to follow the copy is gone,
+/// and it never did anything: `lchown` to uid 100000 from an unprivileged uid is
+/// EPERM, and `lchown_tree` discards the error. Measured — both the extracted
+/// layers and every flat rootfs on this host are uniformly `1000:1000`. They
+/// work because the rootless map is `0 <euid> 1`, so uid 0 INSIDE the namespace
+/// IS the invoking uid on the host, and the files already read as `root` to the
+/// container. That is also what lets one extracted layer serve every container.
 pub(crate) fn prepare_rootfs(images: &ImageStore, img: &Image, id: &str) -> Result<String> {
     let rootless = runtime::is_rootless();
     if rootless {
+        // Does not mount — an unprivileged `mount(2)` on the host is EPERM. The
+        // mount happens inside the clone, where we own the user namespace.
+        Ok(images
+            .prepare_overlay(img, id)?
+            .to_string_lossy()
+            .into_owned())
+    } else {
+        Ok(images.mount_rootfs(img, id)?.to_string_lossy().into_owned())
+    }
+}
+
+/// Prepares a FLAT rootfs (full copy of the image) for a container whose tree
+/// the HOST has to read and write directly. Kept for `build` alone.
+///
+/// A build's work container is the one case where the flat copy earns its cost:
+/// `COPY` writes into the tree from the host, `FROM <stage>` clones it with
+/// `cp -a`, and `commit_flat_rootfs` packs it — all from outside any namespace,
+/// where an overlay mounted by the container's init is not visible. It is also
+/// the case where duplication does not accumulate: the work container is
+/// removed when the stage ends, unlike the long-lived containers that made 21
+/// copies of the same image sit on this disk at once.
+///
+/// Do NOT reach for this for `run`. That is what [`prepare_rootfs`] is for, and
+/// the difference between them is the 39 GiB.
+pub(crate) fn prepare_rootfs_flat(images: &ImageStore, img: &Image, id: &str) -> Result<String> {
+    if runtime::is_rootless() {
         let rfs = images.root().join("containers").join(id).join("rootfs");
         images.export_rootfs(img, &rfs)?;
-        chown_tree(&rfs, runtime::USERNS_UID_BASE)?;
         Ok(rfs.to_string_lossy().into_owned())
     } else {
         Ok(images.mount_rootfs(img, id)?.to_string_lossy().into_owned())
     }
+}
+
+/// The rootfs path of a container that was ALREADY prepared, across the three
+/// layouts this engine has on disk, or `None` when nothing was prepared.
+///
+/// The order matters and is not arbitrary: the overlay marker is checked FIRST
+/// because a container can carry both shapes at once — a flat `rootfs/` written
+/// by a pre-overlay binary keeps living next to the `merged/` a newer `run`
+/// would use, and picking the stale copy would start the container against a
+/// tree that no longer receives its writes.
+///
+/// 1. `overlay-lowers` present → `merged/` (rootless overlay; the mount itself
+///    happens inside the container's clone, so this path is an empty directory
+///    out here and that is expected).
+/// 2. `rootfs/` present → the legacy rootless flat copy. Kept working on
+///    purpose: containers created by an older binary must survive the upgrade.
+/// 3. `merged/` present → root mode, where the overlay is mounted on the host.
+pub(crate) fn existing_rootfs_path(images: &ImageStore, id: &str) -> Option<PathBuf> {
+    let base = images.root().join("containers").join(id);
+    if base.join(ImageStore::LOWERS_FILE).exists() {
+        return Some(base.join("merged"));
+    }
+    for cand in ["rootfs", "merged"] {
+        let p = base.join(cand);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
 }
 
 /// Silences the engine's cgroup-delegation warning in every process spawned

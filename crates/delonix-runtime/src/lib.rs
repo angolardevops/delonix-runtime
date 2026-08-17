@@ -1351,6 +1351,70 @@ fn is_forbidden_device(host: &str) -> bool {
     )
 }
 
+/// Mounts the container's overlay when `rootfs` is an overlay `merged/` prepared
+/// by `ImageStore::prepare_overlay` (marked by a sibling `overlay-lowers` file).
+/// A no-op for a flat rootfs, so the legacy and root-mode paths are untouched.
+///
+/// **This has to run HERE and cannot run in the CLI.** In rootless the engine is
+/// an unprivileged uid on the host and `mount(2)` is EPERM; inside the clone we
+/// are the user namespace's creator and hold full caps over it — the same window
+/// that already lets `setup_rootfs` bind-mount and `pivot_root`. Measured on
+/// this host (kernel 7.0): an unprivileged `mount -t overlay` inside
+/// `unshare --user --map-root-user --mount` succeeds, reads through to the
+/// lower, and sends writes to the upper.
+///
+/// The lower stack stays READ-ONLY by construction, which is what makes sharing
+/// one extracted layer across containers safe: overlayfs copies a file up before
+/// the first write and records deletions as whiteouts in the upper. Verified
+/// against a container running as uid 0 in its user namespace — after writing to
+/// and unlinking a lower file, the lower kept the same inode and the same bytes.
+fn mount_overlay_if_marked(rootfs: &str) -> nix::Result<()> {
+    let merged = std::path::Path::new(rootfs);
+    let Some(base) = merged.parent() else {
+        return Ok(());
+    };
+    let marker = base.join("overlay-lowers");
+    if !marker.exists() {
+        return Ok(()); // flat rootfs (legacy or root mode) — nothing to mount
+    }
+    // Fail closed: the marker says this container HAS no usable tree until the
+    // overlay is up. Falling through would `pivot_root` into an empty `merged/`
+    // and the container would start against a rootfs with no image in it.
+    let lowers = std::fs::read_to_string(&marker).map_err(|_| nix::errno::Errno::EIO)?;
+    let lowerdir = lowers
+        .lines()
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join(":");
+    if lowerdir.is_empty() {
+        return Err(nix::errno::Errno::EINVAL);
+    }
+    // Recreate the scratch directories rather than assuming they survived. On
+    // `stop`, `unmount_rootfs` deletes `merged/` and `work/` — they hold no state
+    // — and keeps only `upper/`, which is the container's data. A `start` then
+    // arrives with the mountpoint and the workdir gone, and overlayfs needs both
+    // to exist (ENOENT for the target, EINVAL for a missing workdir). Doing it
+    // here rather than in `start` keeps the mount self-sufficient: every path
+    // that reaches this function gets a working overlay, whatever cleanup ran
+    // before it. `upper/` is deliberately NOT created — if it is missing, this
+    // container's writes are gone and the honest outcome is the mount failing.
+    for d in ["merged", "work"] {
+        let _ = std::fs::create_dir_all(base.join(d));
+    }
+    let opts = format!(
+        "lowerdir={lowerdir},upperdir={},workdir={}",
+        base.join("upper").display(),
+        base.join("work").display()
+    );
+    mount(
+        Some("overlay"),
+        merged,
+        Some("overlay"),
+        MsFlags::empty(),
+        Some(opts.as_str()),
+    )
+}
+
 /// Mounts the container rootfs and does `pivot_root` (runs INSIDE the `clone`).
 #[allow(clippy::too_many_arguments)]
 fn setup_rootfs(
@@ -1381,6 +1445,10 @@ fn setup_rootfs(
         MsFlags::MS_REC | MsFlags::MS_PRIVATE
     };
     mount(None::<&str>, "/", None::<&str>, root_prop, None::<&str>)?;
+    // AFTER the root propagation (so the overlay never escapes into the host's
+    // mount tree) and BEFORE the bind below, which needs `rootfs` to already
+    // hold the merged image.
+    mount_overlay_if_marked(rootfs)?;
     mount(
         Some(rootfs),
         rootfs,
@@ -3932,6 +4000,43 @@ pub fn create_with(
 /// `safe_bind_target` (this same file) resolves component by component and
 /// refuses any symlink — it is the fix this repo already applied twice, to
 /// bind mounts and to the build's `COPY`. This path had been left out.
+/// For an overlay-backed container, the directory the PARENT must write into
+/// before the clone: the write layer (`upper/`), because `merged/` is still an
+/// empty mountpoint out here — the overlay only exists inside the container's
+/// mount namespace. Writing to `upper/etc/hosts` and writing to `merged/etc/hosts`
+/// land on the same file for the container; only the first is reachable now.
+///
+/// Returns `None` for a flat rootfs, so the legacy and root-mode paths keep
+/// writing exactly where they always did.
+///
+/// Without this, `write_etc_files` would take its "image has no /etc" early exit
+/// on EVERY overlay container (`merged/etc` does not exist yet) and silently skip
+/// `/etc/hosts`, `/etc/hostname` and `/etc/resolv.conf` — a container that comes
+/// up with no name resolution and no idea why.
+fn overlay_staging_root(rootfs: &str) -> Option<String> {
+    let base = std::path::Path::new(rootfs).parent()?;
+    let lowers = std::fs::read_to_string(base.join("overlay-lowers")).ok()?;
+    let upper = base.join("upper");
+    // Mirror `/etc` from the lower stack so the caller's `symlink_metadata` check
+    // passes. Created as a plain directory, NOT an opaque one: overlayfs then
+    // MERGES it with the image's `/etc`, so the image's own files stay visible
+    // and only the three files we write are ours.
+    //
+    // An image whose `/etc` is a SYMLINK is left alone on purpose. Creating a
+    // directory over it would mask the link and change what the container sees;
+    // `write_inside_rootfs` already refuses that shape loudly (`safe_bind_target`
+    // walks component by component and rejects symlinks), and a loud refusal is
+    // better than a silent divergence between the flat and overlay paths.
+    let etc_is_dir = lowers.lines().filter(|l| !l.is_empty()).find_map(|l| {
+        let p = std::path::Path::new(l).join("etc");
+        std::fs::symlink_metadata(&p).ok().map(|m| m.is_dir())
+    });
+    if etc_is_dir != Some(false) {
+        let _ = std::fs::create_dir_all(upper.join("etc"));
+    }
+    Some(upper.to_string_lossy().into_owned())
+}
+
 fn write_inside_rootfs(rootfs: &str, rel: &str, contents: &str) {
     let Some(path) = safe_bind_target(rootfs, rel) else {
         // Loud, not silent: a refusal here means the image tried to redirect
@@ -3964,6 +4069,11 @@ fn write_etc_files(
     dns_config: Option<&DnsConfig>,
     extra_hosts: &[String],
 ) {
+    // An overlay container is written through its write layer: out here `merged/`
+    // is an empty mountpoint, and the overlay only exists inside the container's
+    // mount namespace. No-op for a flat rootfs.
+    let staged = overlay_staging_root(rootfs);
+    let rootfs = staged.as_deref().unwrap_or(rootfs);
     // `symlink_metadata`, not `metadata`: an `/etc` that is itself a symlink
     // must not be followed just to decide whether to proceed.
     if std::fs::symlink_metadata(format!("{rootfs}/etc")).is_err() {
