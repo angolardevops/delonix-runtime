@@ -1094,6 +1094,26 @@ pub(crate) fn resolve_official_ref(reference: &str) -> Result<String> {
 /// deixam de ser a omissão.
 pub(crate) const DEFAULT_K8S_VERSION: &str = "1.36";
 
+/// Tamanho VIRTUAL do disco da golden, em GiB.
+///
+/// A imagem base do Ubuntu vem com 3,5 GiB (≈2,4 GB de raiz utilizável), e isso
+/// **não chega para um nó de Kubernetes**. Medido a 2026-08-16 numa golden 1.36:
+/// depois de o `delonix-cri` puxar as imagens do control-plane a raiz ficava a
+/// `2.4G/2.4G, 100%`, o `fallocate` do WAL do etcd falhava com ENOSPC — à letra
+/// `failed to preallocate space when creating a new WAL` — o etcd morria, o
+/// apiserver não o alcançava e o `kubeadm init` ficava preso em
+/// `wait-control-plane`.
+///
+/// O `DKS_DELIVERY_LOG` do `delonix-paas` já dizia que o nó precisa de ≥20G, e
+/// dava isso por fechado com «a golden já vem dimensionada». Não vinha.
+///
+/// Custa ZERO ao artefacto publicado: o qcow2 é esparso, e a mesma imagem
+/// redimensionada para 30 GiB continua a ocupar ~705 MiB em disco e a viajar
+/// igual no registo. E não exige nada ao guest — as imagens cloud do Ubuntu
+/// trazem o `growpart` do cloud-init, que cresce a raiz no primeiro arranque
+/// (medido: 29G com 26G livres, sem tocar na imagem por dentro).
+pub(crate) const GOLDEN_DISK_SIZE_GIB: u32 = 30;
+
 /// Delonix's OFFICIAL golden VM image (Ubuntu 24.04 + kubeadm/kubelet/
 /// kubectl + delonix-cri as a systemd service) — published and validated with
 /// a byte-identical round-trip; see CLAUDE.md, section "Golden VM image".
@@ -2059,6 +2079,20 @@ fn cmd_build(
     run_tool(
         "virt-customize",
         &args.iter().map(String::as_str).collect::<Vec<_>>(),
+    )?;
+
+    // Cresce o disco DEPOIS da customização e ANTES de compactar: o `qemu-img
+    // resize` só mexe no tamanho virtual (o ficheiro continua esparso), e quem
+    // estende a partição e o filesystem é o `growpart` do cloud-init no
+    // primeiro arranque. Ver `GOLDEN_DISK_SIZE_GIB` para a medição que obriga
+    // a isto.
+    run_tool(
+        "qemu-img",
+        &[
+            "resize",
+            &work_qcow2.to_string_lossy(),
+            &format!("{GOLDEN_DISK_SIZE_GIB}G"),
+        ],
     )?;
 
     // Read back the kernel version the customize steps recorded (see the
@@ -4849,6 +4883,17 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
     }
 
     #[test]
+    /// A golden tem de nascer com disco para um nó de Kubernetes. Com os 3,5
+    /// GiB da imagem base do Ubuntu, o WAL do etcd não cabe e o control-plane
+    /// nunca arranca — medido, não suposto (ver `GOLDEN_DISK_SIZE_GIB`).
+    #[test]
+    fn a_golden_nasce_com_disco_para_um_no_de_kubernetes() {
+        assert!(
+            GOLDEN_DISK_SIZE_GIB >= 20,
+            "o nó precisa de ≥20G; {GOLDEN_DISK_SIZE_GIB}G não chega para o etcd + imagens do control-plane"
+        );
+    }
+
     /// A omissão da golden e o tecto do control-plane alojado são o MESMO
     /// número, e é isso que impede o par impossível que bloqueou o DKS: uma
     /// golden 1.34/1.35 contra um Kamaji que parava em 1.30.2. Um nó mais novo
