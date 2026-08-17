@@ -188,6 +188,77 @@ pub fn buildtar(rootfs: &Path, out: &Path) -> Result<()> {
     Ok(())
 }
 
+/// `__ovlhold <container-dir>` — mounts a STOPPED container's overlay inside a
+/// throwaway mount namespace, announces the mountpoint is ready, and then sleeps
+/// until the parent kills it.
+///
+/// # Why a live process instead of a copy
+///
+/// A stopped overlay container has no readable tree from the outside: `merged/`
+/// is an empty directory until something mounts the overlay, and an unprivileged
+/// `mount(2)` on the host is EPERM. The obvious fixes are both bad — packing the
+/// whole tree to a temp directory costs a full copy of exactly the data this
+/// engine stopped duplicating, and re-implementing overlayfs's merge in
+/// userspace (upper over lowers, whiteouts and all) is a second implementation of
+/// the kernel's semantics that would drift from it.
+///
+/// So: hold the namespace and let the caller in through `/proc/<pid>/root`, the
+/// SAME door a running container already uses (`container_fs_root`). Nothing
+/// downstream changes — `cp` and `commit` keep reading a plain path.
+///
+/// Runs under `reexec_mapped`, so we are root in a user namespace with the
+/// subuids mapped: we can both mount and read files the container wrote as a
+/// non-root uid. The extra `unshare(CLONE_NEWNS)` is ours to do — being root in
+/// the userns is what makes it permitted — and it is what keeps the mount from
+/// ever appearing in the host's mount tree.
+///
+/// Prints `ready` on stdout and flushes BEFORE sleeping: that byte is the
+/// parent's only proof the mount succeeded. Without it the parent would race the
+/// mount and read an empty directory — the silent-empty-answer failure this
+/// whole path exists to avoid.
+pub fn ovlhold(dir: &Path) -> Result<()> {
+    use std::io::Write;
+    // Our own mount namespace, with propagation severed: the overlay must never
+    // show up on the host, and must disappear with this process.
+    if unsafe { libc::unshare(libc::CLONE_NEWNS) } != 0 {
+        return Err(io_err("__ovlhold unshare")(std::io::Error::last_os_error()));
+    }
+    // `libc` and not `nix`: this crate does not depend on `nix`, and a new
+    // dependency in a container runtime is not worth one `mount(2)` call.
+    // SAFETY: three well-formed C strings and a flag word; `/` is always a valid
+    // target, and we are root in our own user namespace with a private mount ns.
+    let slash = c"/";
+    let rc = unsafe {
+        libc::mount(
+            std::ptr::null(),
+            slash.as_ptr(),
+            std::ptr::null(),
+            libc::MS_REC | libc::MS_PRIVATE,
+            std::ptr::null(),
+        )
+    };
+    if rc != 0 {
+        return Err(io_err("__ovlhold private root")(
+            std::io::Error::last_os_error(),
+        ));
+    }
+    let merged = dir.join("merged");
+    delonix_runtime::mount_overlay_if_marked(&merged.to_string_lossy()).map_err(|e| {
+        Error::Runtime {
+            context: "__ovlhold mount overlay",
+            message: e.to_string(),
+        }
+    })?;
+    println!("ready");
+    std::io::stdout().flush().map_err(io_err("__ovlhold"))?;
+    // The parent reads `/proc/<pid>/root/...` for as long as it needs and then
+    // signals us. `pause` returns only on a signal, so this costs nothing while
+    // it waits.
+    loop {
+        unsafe { libc::pause() };
+    }
+}
+
 /// Dispatches `__volsnap <mode> <data> <tarball>`.
 pub fn volsnap(mode: &str, data: &Path, tarball: &Path) -> Result<()> {
     match mode {
