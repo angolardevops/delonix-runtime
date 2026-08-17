@@ -614,6 +614,58 @@ impl ImageStore {
         Ok(img)
     }
 
+    /// Top-level directories that are MOUNTPOINTS inside a running container and
+    /// never part of an image's content. An image keeps them as empty directories
+    /// so the runtime has somewhere to mount.
+    const PSEUDO_FS_DIRS: [&'static str; 3] = ["proc", "sys", "dev"];
+
+    /// Packs a rootfs into a tar, keeping `proc`/`sys`/`dev` as EMPTY directories
+    /// instead of descending into them.
+    ///
+    /// Needed the moment a commit reads a LIVE container through `/proc/<pid>/root`
+    /// rather than a quiescent directory on disk: that view includes the mounts the
+    /// container has, so a plain recursive walk descends into the real procfs and
+    /// sysfs. Measured — it fails with `Permission denied` long before finishing,
+    /// and if it did finish it would have written a snapshot of the host's kernel
+    /// state into a published image.
+    ///
+    /// The flat-rootfs path never hit this because a rootfs on disk has those three
+    /// as the empty directories the image extraction created.
+    fn pack_rootfs_tar(rootfs: &std::path::Path) -> Result<Vec<u8>> {
+        let mut buf = Vec::new();
+        {
+            let mut b = tar::Builder::new(&mut buf);
+            b.follow_symlinks(false);
+            let entries =
+                std::fs::read_dir(rootfs).map_err(|e| Error::Invalid(format!("ler rootfs: {e}")))?;
+            for entry in entries {
+                let entry = entry.map_err(|e| Error::Invalid(format!("ler rootfs: {e}")))?;
+                let name = entry.file_name();
+                let in_tar = std::path::Path::new(&name);
+                let is_pseudo = name
+                    .to_str()
+                    .is_some_and(|n| Self::PSEUDO_FS_DIRS.contains(&n));
+                let ft = entry
+                    .file_type()
+                    .map_err(|e| Error::Invalid(format!("ler rootfs: {e}")))?;
+                let res = if is_pseudo && ft.is_dir() {
+                    // The directory entry itself, none of its contents.
+                    b.append_dir(in_tar, entry.path())
+                } else if ft.is_dir() {
+                    b.append_dir_all(in_tar, entry.path())
+                } else {
+                    // Files and symlinks at the top level. `follow_symlinks(false)`
+                    // above makes this store the link, not what it points at.
+                    b.append_path_with_name(entry.path(), in_tar)
+                };
+                res.map_err(|e| Error::Invalid(format!("empacotar rootfs: {e}")))?;
+            }
+            b.finish()
+                .map_err(|e| Error::Invalid(format!("fechar tar: {e}")))?;
+        }
+        Ok(buf)
+    }
+
     /// Creates an image from a FLAT rootfs (*rootless*/vfs mode): packs
     /// the ENTIRE directory as **a single layer** (squash) — there is no overlay, hence
     /// no diff. Valid OCI config (1 diff_id). Used by the rootless `build`.
@@ -630,15 +682,7 @@ impl ImageStore {
         arch: &str,
         healthcheck: Option<String>,
     ) -> Result<Image> {
-        let mut buf = Vec::new();
-        {
-            let mut b = tar::Builder::new(&mut buf);
-            b.follow_symlinks(false);
-            b.append_dir_all(".", rootfs)
-                .map_err(|e| Error::Invalid(format!("empacotar rootfs: {e}")))?;
-            b.finish()
-                .map_err(|e| Error::Invalid(format!("fechar tar: {e}")))?;
-        }
+        let buf = Self::pack_rootfs_tar(rootfs)?;
         self.commit_flat_rootfs_from_tar(
             buf,
             cmd,
