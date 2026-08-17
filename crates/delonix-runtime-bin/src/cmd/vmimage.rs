@@ -1107,12 +1107,31 @@ pub(crate) const DEFAULT_K8S_VERSION: &str = "1.36";
 /// O `DKS_DELIVERY_LOG` do `delonix-paas` já dizia que o nó precisa de ≥20G, e
 /// dava isso por fechado com «a golden já vem dimensionada». Não vinha.
 ///
-/// Custa ZERO ao artefacto publicado: o qcow2 é esparso, e a mesma imagem
-/// redimensionada para 30 GiB continua a ocupar ~705 MiB em disco e a viajar
-/// igual no registo. E não exige nada ao guest — as imagens cloud do Ubuntu
-/// trazem o `growpart` do cloud-init, que cresce a raiz no primeiro arranque
-/// (medido: 29G com 26G livres, sem tocar na imagem por dentro).
-pub(crate) const GOLDEN_DISK_SIZE_GIB: u32 = 30;
+/// Custa ZERO ao artefacto publicado: o qcow2 é esparso, e a imagem
+/// redimensionada continua a ocupar ~690 MiB em disco e a viajar igual no
+/// registo. E não exige nada ao guest — as imagens cloud do Ubuntu trazem o
+/// `growpart` do cloud-init, que cresce a raiz no primeiro arranque.
+///
+/// ## Porque 10 e não 30: isto é um PISO, não um tamanho
+///
+/// A quota de armazenamento de um inquilino conta-se sobre o **provisionado**
+/// (a soma dos tamanhos virtuais), não sobre o consumido — decisão do
+/// utilizador, 2026-08-17. Um inquilino que paga 40G não pode receber nós de
+/// 30G, senão o segundo já estoura a quota. Por isso a golden nasce no **mínimo
+/// viável** e o disco de cada nó cresce a partir daí, dentro da quota do
+/// cluster.
+///
+/// O mínimo está medido, não estimado (2026-08-17, golden 1.36 encolhida para
+/// 10 GiB): a raiz fica com 8,7G, um control-plane completo consome **2,4G
+/// (28%)**, o apiserver atende na 6443 aos ~120s e o log do etcd não tem uma
+/// única linha de `preallocate`/`No space`. Sobram 6,3G de folga. Com os 3,5
+/// GiB da imagem base, a mesma corrida enchia o disco a 100% e o WAL do etcd
+/// falhava — ver acima.
+///
+/// **O que isto NÃO resolve**: `delonix vm create` não tem hoje flag de
+/// tamanho de disco, por isso todo o nó herda este piso. Dimensionar um nó pela
+/// quota do inquilino exige essa flag primeiro.
+pub(crate) const GOLDEN_DISK_SIZE_GIB: u32 = 10;
 
 /// Delonix's OFFICIAL golden VM image (Ubuntu 24.04 + kubeadm/kubelet/
 /// kubectl + delonix-cri as a systemd service) — published and validated with
@@ -4889,8 +4908,8 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
     #[test]
     fn a_golden_nasce_com_disco_para_um_no_de_kubernetes() {
         assert!(
-            GOLDEN_DISK_SIZE_GIB >= 20,
-            "o nó precisa de ≥20G; {GOLDEN_DISK_SIZE_GIB}G não chega para o etcd + imagens do control-plane"
+            GOLDEN_DISK_SIZE_GIB >= 10,
+            "medido: um control-plane completo consome 2,4G de 8,7G úteis; abaixo de 10 GiB o WAL do etcd deixa de caber"
         );
     }
 
