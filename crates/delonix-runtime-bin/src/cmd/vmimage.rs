@@ -621,6 +621,13 @@ pub enum VmImageCmd {
         /// build, then a verified download from the matching release).
         #[arg(value_hint = clap::ValueHint::FilePath, long)]
         delonix_bin: Option<PathBuf>,
+        /// Set a root password in the image. WITHOUT this, no account ships
+        /// with one (the supported ways in are the SSH key cloud-init injects
+        /// and the key `cluster kubeadm` generates). Use it only when you need
+        /// the serial console to take a login — and remember the image is an
+        /// artefact you may publish.
+        #[arg(long)]
+        root_password: Option<String>,
     },
 }
 
@@ -694,6 +701,7 @@ pub fn run(action: VmImageCmd) -> Result<()> {
             offline,
             no_k8s,
             delonix_bin,
+            root_password,
         } => {
             // A `VMfile` in the context beats the golden recipe, the same way a
             // `Delonixfile` beats a `Dockerfile` for `delonix build`. Explicit
@@ -761,6 +769,7 @@ pub fn run(action: VmImageCmd) -> Result<()> {
                 offline,
                 no_k8s,
                 delonix_bin,
+                root_password,
             )
         }
     }
@@ -1918,6 +1927,7 @@ fn cmd_build(
     offline: bool,
     no_k8s: bool,
     delonix_bin: Option<PathBuf>,
+    root_password: Option<String>,
 ) -> Result<()> {
     // `--no-k8s` builds a completely different image (no kubeadm/kubelet/
     // kubectl/delonix-cri at all — see `rootless_customization_steps`); the
@@ -2017,7 +2027,7 @@ fn cmd_build(
             )
         );
         let delonix = resolve_delonix_bin(delonix_bin)?;
-        rootless_customization_steps(&extra_run, &delonix, distro)
+        rootless_customization_steps(&extra_run, &delonix, distro, root_password.as_deref())
     } else {
         let cri = resolve_cri_bin(cri_bin)?;
         // O mesmo resolver do caminho `--no-k8s`: explícito, senão o
@@ -2105,6 +2115,7 @@ fn cmd_build(
                 &service_unit,
                 preseed_root.as_deref(),
                 distro,
+                root_password.as_deref(),
             )
         } else {
             k8s_customization_steps(
@@ -2115,6 +2126,7 @@ fn cmd_build(
                 &delonix,
                 &service_unit,
                 distro,
+                root_password.as_deref(),
             )
         }
     };
@@ -3617,6 +3629,7 @@ pub(crate) enum CustomizeOp {
 /// `/var/lib/delonix` (what `delonix-cri` reads at runtime) via 4
 /// `--copy-in` calls, one per `ImageStore` subdirectory
 /// (`images`/`layers`/`containers`/`blobs`).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn k8s_customization_steps_offline(
     debs: &[PathBuf],
     extra_run: &[String],
@@ -3625,6 +3638,7 @@ pub(crate) fn k8s_customization_steps_offline(
     cri_service: &Path,
     preseed_images_root: Option<&Path>,
     distro: Distro,
+    root_password: Option<&str>,
 ) -> Vec<CustomizeOp> {
     let mut ops: Vec<CustomizeOp> = Vec::new();
     // `--copy-in` requires the target directory to ALREADY exist in the guest.
@@ -3636,24 +3650,13 @@ pub(crate) fn k8s_customization_steps_offline(
         "dpkg -i /tmp/k8s-debs/*.deb && apt-mark hold kubeadm kubelet kubectl && rm -rf /tmp/k8s-debs"
             .into(),
     ));
-    // The agent's own postinst DOES enable its unit — but through `deb-systemd-helper`,
-    // against a guest where systemd is not running, which is a claim about someone else's
-    // maintainer script and not a measurement. Enabling it here costs one idempotent
-    // command and is the same thing this build already does for `delonix-cri.service`
-    // instead of trusting a preset. Guarded, because a build without the agent (a
-    // `--distro` whose archive we do not fetch) must not fail on a unit that is absent.
-    ops.push(CustomizeOp::RunCommand(
-        "systemctl list-unit-files qemu-guest-agent.service >/dev/null 2>&1 && \
-         systemctl enable qemu-guest-agent.service || true"
-            .into(),
-    ));
     ops.extend(
         super::k8s_recipes::k8s_config_recipes()
             .into_iter()
             .map(|r| CustomizeOp::RunCommand(r.apply_offline().to_string())),
     );
     ops.extend(install_cri_steps(cri_bin, delonix_bin, cri_service));
-    ops.extend(shared_account_steps(extra_run, distro));
+    ops.extend(shared_account_steps(extra_run, distro, root_password));
     if let Some(root) = preseed_images_root {
         ops.push(CustomizeOp::RunCommand("mkdir -p /var/lib/delonix".into()));
         for sub in ["images", "layers", "containers", "blobs"] {
@@ -3666,6 +3669,7 @@ pub(crate) fn k8s_customization_steps_offline(
     ops
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn k8s_customization_steps(
     k8s_version: Option<&str>,
     extra_packages: &[String],
@@ -3674,6 +3678,7 @@ pub(crate) fn k8s_customization_steps(
     delonix_bin: &Path,
     cri_service: &Path,
     distro: Distro,
+    root_password: Option<&str>,
 ) -> Vec<CustomizeOp> {
     let mut ops: Vec<CustomizeOp> =
         super::k8s_recipes::k8s_host_recipes(k8s_version, extra_packages)
@@ -3681,7 +3686,7 @@ pub(crate) fn k8s_customization_steps(
             .map(|r| CustomizeOp::RunCommand(r.apply_offline().to_string()))
             .collect();
     ops.extend(install_cri_steps(cri_bin, delonix_bin, cri_service));
-    ops.extend(shared_account_steps(extra_run, distro));
+    ops.extend(shared_account_steps(extra_run, distro, root_password));
     ops
 }
 
@@ -3717,7 +3722,11 @@ fn install_cri_steps(cri_bin: &Path, delonix_bin: &Path, cri_service: &Path) -> 
 /// the system-wide interactive-bash file is `/etc/bashrc` on Rocky, not
 /// `/etc/bash.bashrc` (a Debian/Ubuntu-family convention); and the package
 /// cache cleanup command is obviously package-manager-specific.
-fn shared_account_steps(extra_run: &[String], distro: Distro) -> Vec<CustomizeOp> {
+fn shared_account_steps(
+    extra_run: &[String],
+    distro: Distro,
+    root_password: Option<&str>,
+) -> Vec<CustomizeOp> {
     let sudo_group = match distro {
         Distro::Ubuntu | Distro::Debian => "sudo",
         Distro::Rocky | Distro::Fedora => "wheel",
@@ -3728,24 +3737,64 @@ fn shared_account_steps(extra_run: &[String], distro: Distro) -> Vec<CustomizeOp
     };
     let mut ops: Vec<CustomizeOp> = Vec::new();
     ops.extend([
-        // Default account: root/delonix and delonix:delonix in sudoers (explicit request).
-        CustomizeOp::RootPassword("delonix".to_string()),
+        // The `delonix` account exists so cloud-init has somewhere to put the
+        // SSH key and `cluster kubeadm` has someone to log in as. It ships with
+        // NO PASSWORD, and neither does root — see the block below.
         CustomizeOp::RunCommand(format!(
             "useradd -m -s /bin/bash -G {sudo_group} delonix || true"
         )),
-        CustomizeOp::Password { user: "delonix".to_string(), password: "delonix".to_string() },
         CustomizeOp::RunCommand(
             "echo 'delonix ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/90-delonix && chmod 440 /etc/sudoers.d/90-delonix"
                 .into(),
         ),
-        // Those two passwords are FIXED, PUBLIC (they are right here, in an
-        // open-source repo) and the account has passwordless sudo — so anyone
-        // who can reach a login prompt on a golden VM is root on it. Password
-        // login over SSH is therefore turned OFF in the image: every supported
-        // way in gets you in without it (cloud-init injects the SSH keys, and
-        // `cluster kubeadm` authenticates with a generated key), while the
-        // serial console still takes the password, which is what you want when
-        // a VM has lost its network and you need to get in and fix it.
+        // Activa o `qemu-guest-agent` — instalado pelas TRÊS receitas (a golden
+        // busca os `.deb` verificados no host, a base instala-o pelo gestor de
+        // pacotes), por isso o `enable` vive aqui e não numa delas: estava só na
+        // receita offline da golden, e era por isso que a `delonix-vm-base` saía
+        // sem agente nenhum.
+        //
+        // O postinst do próprio pacote TAMBÉM activa a unit — mas por
+        // `deb-systemd-helper`, contra um convidado onde o systemd não corre, o
+        // que é uma afirmação sobre o script de outra pessoa e não uma medição.
+        // Fazê-lo aqui custa um comando idempotente e é o mesmo que este build já
+        // faz ao `delonix-cri.service` em vez de confiar num preset. Guardado,
+        // porque uma build sem o agente (uma distro cujo arquivo não buscamos)
+        // não pode falhar por causa de uma unit ausente.
+        CustomizeOp::RunCommand(
+            "systemctl list-unit-files qemu-guest-agent.service >/dev/null 2>&1 && \
+             systemctl enable qemu-guest-agent.service || true"
+                .into(),
+        ),
+        // **No password ships in the image, on any account.**
+        //
+        // Until now root and `delonix` both had the password `delonix`, and the
+        // account has passwordless sudo — so anyone reaching a login prompt was
+        // root. The mitigation was to turn password login OFF over SSH and keep
+        // the serial console open «for when the VM has lost its network», which
+        // holds for a laboratory VM on someone's laptop and stops holding the
+        // moment the same artefact is published and a tenant runs it: on a
+        // shared hypervisor, console access is not a lesser door than SSH.
+        //
+        // A credential that lives in an open-source repository is not a
+        // credential. Both accounts are locked (`passwd -l`, portable across the
+        // four distros — `!` in front of the hash means no password can ever
+        // match), and every supported way in still works untouched: cloud-init
+        // injects the SSH key, and `cluster kubeadm` authenticates with a key it
+        // generates.
+        //
+        // The console case the old comment defends is real, and it keeps an
+        // answer — but one the OPERATOR chooses, not one baked into every copy
+        // of the image: `--root-password` at build time, or `chpasswd` in the
+        // cloud-init user-data of that one VM. What is gone is the default.
+        match root_password {
+            // Escolha EXPLÍCITA de quem constrói, para o caso da consola série —
+            // e vive só naquela imagem, não em todas as cópias publicadas.
+            Some(pw) => CustomizeOp::RootPassword(pw.to_string()),
+            None => CustomizeOp::RunCommand(
+                "passwd -l root >/dev/null 2>&1 || true; passwd -l delonix >/dev/null 2>&1 || true"
+                    .into(),
+            ),
+        },
         //
         // Both places, deliberately: `sshd_config.d` is the modern drop-in, but
         // Debian bullseye's stock `sshd_config` has no `Include` line, so there
@@ -3862,6 +3911,7 @@ pub(crate) fn rootless_customization_steps(
     extra_run: &[String],
     delonix_bin: &Path,
     distro: Distro,
+    root_password: Option<&str>,
 ) -> Vec<CustomizeOp> {
     // Same package LIST `install.sh` requires (`require_dep`/`optional_dep`),
     // just guest-installed instead of host-detected. Package NAMES confirmed
@@ -3870,9 +3920,22 @@ pub(crate) fn rootless_customization_steps(
     // `conntrack-tools` (not `conntrack`) — all present in Rocky's base
     // BaseOS/AppStream, no EPEL needed. `nftables`/`slirp4netns` share the
     // same package name across both families.
+    // `qemu-guest-agent` viaja com a imagem base pela mesma razão que já viaja na
+    // golden k8s (ver `k8s_customization_steps_offline`): sem ele o hypervisor
+    // não sabe o IP do convidado (mede-o por ARP ou pelo lease, e em
+    // cloud-hypervisor o endereço é CALCULADO do MAC, nunca observado), não faz
+    // `fsfreeze` antes de um snapshot — o que torna qualquer snapshot de uma base
+    // de dados a correr crash-consistent em vez de consistente — e não tem forma
+    // de pedir um shutdown ordenado. O backend Proxmox deste repo já chama
+    // `/agent/…` e trata a ausência como normal; o que faltava era o convidado.
+    //
+    // Vai no MESMO `apt-get`/`dnf` dos outros: esta receita já instala por rede
+    // (ao contrário da golden, que tem o caminho `--offline` com os `.deb`
+    // verificados no host), por isso não há mecanismo novo — há um nome a mais
+    // numa lista que já existia.
     let pkg_install_cmd = match distro {
         Distro::Ubuntu | Distro::Debian => {
-            "apt-get update && apt-get install -y slirp4netns uidmap nftables iproute2 conntrack"
+            "apt-get update && apt-get install -y slirp4netns uidmap nftables iproute2 conntrack qemu-guest-agent"
                 .to_string()
         }
         // Fedora is the same dnf/RPM family as Rocky and uses the same package
@@ -3880,7 +3943,8 @@ pub(crate) fn rootless_customization_steps(
         // `conntrack-tools`, and the shared `nftables`/`slirp4netns`) are named
         // identically in Fedora's repos.
         Distro::Rocky | Distro::Fedora => {
-            "dnf install -y slirp4netns shadow-utils nftables iproute conntrack-tools".to_string()
+            "dnf install -y slirp4netns shadow-utils nftables iproute conntrack-tools qemu-guest-agent"
+                .to_string()
         }
     };
     let mut ops: Vec<CustomizeOp> = vec![
@@ -3890,7 +3954,7 @@ pub(crate) fn rootless_customization_steps(
         CustomizeOp::CopyIn(delonix_bin.to_path_buf(), "/usr/local/bin".to_string()),
         CustomizeOp::RunCommand("chmod +x /usr/local/bin/delonix".into()),
     ];
-    ops.extend(shared_account_steps(extra_run, distro));
+    ops.extend(shared_account_steps(extra_run, distro, root_password));
     // Subuid/subgid range for the `delonix` account — mirrors `install.sh`'s
     // `ensure_subid`: without a range, the rootless userns only maps 1 uid and
     // any image with a non-root USER fails. Idempotent (`grep -q` guard).
@@ -4395,6 +4459,7 @@ mod tests {
             &eng,
             &svc,
             Distro::Ubuntu,
+            None,
         );
         let install_step = ops
             .iter()
@@ -4441,6 +4506,7 @@ mod tests {
             &eng,
             &svc,
             Distro::Ubuntu,
+            None,
         );
         // `--extra-run` runs after all base steps; only the apt cleanup
         // comes after it (it must be last — the extra-run may install packages).
@@ -4476,7 +4542,7 @@ mod tests {
         // Both build paths (online + offline) share `common_customization_steps`,
         // so the kubectl UX must be present in both.
         for ops in [
-            k8s_customization_steps(None, &[], &[], &cri, &eng, &svc, Distro::Ubuntu),
+            k8s_customization_steps(None, &[], &[], &cri, &eng, &svc, Distro::Ubuntu, None),
             k8s_customization_steps_offline(
                 &[PathBuf::from("/tmp/x/kubeadm_1.34.9-1.1_amd64.deb")],
                 &[],
@@ -4485,6 +4551,7 @@ mod tests {
                 &svc,
                 None,
                 Distro::Ubuntu,
+                None,
             ),
         ] {
             let bashrc = ops
@@ -4651,6 +4718,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             &PathBuf::from("/tmp/delonix-cri.service"),
             None,
             Distro::Ubuntu,
+            None,
         );
         let cmds: Vec<&str> = ops
             .iter()
@@ -4684,6 +4752,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             &PathBuf::from("/tmp/delonix-cri.service"),
             None,
             Distro::Ubuntu,
+            None,
         );
         let cmds: Vec<&str> = ops
             .iter()
@@ -4724,6 +4793,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             &PathBuf::from("/tmp/delonix-cri.service"),
             Some(&preseed_root),
             Distro::Ubuntu,
+            None,
         );
         for sub in ["images", "layers", "containers", "blobs"] {
             assert!(
@@ -4748,7 +4818,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         let cri = PathBuf::from("/tmp/delonix-cri");
         let eng = PathBuf::from("/tmp/delonix");
         let svc = PathBuf::from("/tmp/delonix-cri.service");
-        let ops = k8s_customization_steps(None, &[], &[], &cri, &eng, &svc, Distro::Ubuntu);
+        let ops = k8s_customization_steps(None, &[], &[], &cri, &eng, &svc, Distro::Ubuntu, None);
         // ~367 MiB of .deb + indexes that, without this, filled the golden's root to 92%.
         // Second-to-last: the machine-id reset (below) must run AFTER it.
         let clean = &ops[ops.len() - 2];
@@ -4759,21 +4829,51 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
     }
 
     #[test]
-    fn customization_steps_configuram_delonix_user_e_root_password() {
+    fn a_imagem_nao_leva_password_nenhuma_por_omissao() {
         let cri = PathBuf::from("/tmp/delonix-cri");
         let eng = PathBuf::from("/tmp/delonix");
         let svc = PathBuf::from("/tmp/delonix-cri.service");
-        let ops = k8s_customization_steps(None, &[], &[], &cri, &eng, &svc, Distro::Ubuntu);
+        let ops = k8s_customization_steps(None, &[], &[], &cri, &eng, &svc, Distro::Ubuntu, None);
+        // No account may carry a password that is written down in this repository.
+        assert!(!ops
+            .iter()
+            .any(|op| matches!(op, CustomizeOp::RootPassword(_))));
+        assert!(!ops
+            .iter()
+            .any(|op| matches!(op, CustomizeOp::Password { .. })));
+        let cmds: Vec<&str> = ops
+            .iter()
+            .filter_map(|o| match o {
+                CustomizeOp::RunCommand(c) => Some(c.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(cmds.iter().any(|c| c.contains("useradd")));
+        assert!(
+            cmds.iter()
+                .any(|c| c.contains("passwd -l root") && c.contains("passwd -l delonix")),
+            "as contas ficam trancadas quando ninguem pede password"
+        );
+        // With --root-password, and only then, the image carries one.
+        let ops = k8s_customization_steps(
+            None,
+            &[],
+            &[],
+            &cri,
+            &eng,
+            &svc,
+            Distro::Ubuntu,
+            Some("segredo"),
+        );
         assert!(ops
             .iter()
-            .any(|op| matches!(op, CustomizeOp::RootPassword(p) if p == "delonix")));
-        assert!(ops.iter().any(|op| matches!(op, CustomizeOp::Password{user,password} if user=="delonix" && password=="delonix")));
+            .any(|op| matches!(op, CustomizeOp::RootPassword(p) if p == "segredo")));
     }
 
     #[test]
     fn rootless_steps_instalam_dependencias_e_o_binario_delonix_sem_cri() {
         let delonix = PathBuf::from("/tmp/delonix");
-        let ops = rootless_customization_steps(&[], &delonix, Distro::Ubuntu);
+        let ops = rootless_customization_steps(&[], &delonix, Distro::Ubuntu, None);
         let cmds: Vec<&str> = ops
             .iter()
             .filter_map(|o| match o {
@@ -4798,7 +4898,8 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
 
     #[test]
     fn rootless_steps_configuram_subuid_e_subgid_para_delonix() {
-        let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Ubuntu);
+        let ops =
+            rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Ubuntu, None);
         let cmds: Vec<&str> = ops
             .iter()
             .filter_map(|o| match o {
@@ -4816,7 +4917,8 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
 
     #[test]
     fn rootless_steps_escrevem_o_perfil_apparmor_unconfined_userns() {
-        let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Ubuntu);
+        let ops =
+            rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Ubuntu, None);
         let cmds: Vec<&str> = ops
             .iter()
             .filter_map(|o| match o {
@@ -4831,16 +4933,34 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
 
     #[test]
     fn rootless_steps_partilham_a_criacao_de_conta_delonix() {
-        let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Ubuntu);
-        assert!(ops
+        let ops =
+            rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Ubuntu, None);
+        let cmds: Vec<&str> = ops
             .iter()
-            .any(|op| matches!(op, CustomizeOp::RootPassword(p) if p == "delonix")));
-        assert!(ops.iter().any(|op| matches!(op, CustomizeOp::Password{user,password} if user=="delonix" && password=="delonix")));
+            .filter_map(|o| match o {
+                CustomizeOp::RunCommand(c) => Some(c.as_str()),
+                _ => None,
+            })
+            .collect();
+        // A conta é partilhada com as receitas do k8s — é o que este teste
+        // sempre guardou. O que MUDOU é que ela já não traz password: exigia
+        // `RootPassword("delonix")` e `delonix:delonix`, e era esse o defeito.
+        assert!(cmds
+            .iter()
+            .any(|c| c.contains("useradd") && c.contains("delonix")));
+        assert!(cmds.iter().any(|c| c.contains("passwd -l root")));
+        assert!(!ops
+            .iter()
+            .any(|op| matches!(op, CustomizeOp::RootPassword(_))));
+        assert!(!ops
+            .iter()
+            .any(|op| matches!(op, CustomizeOp::Password { .. })));
     }
 
     #[test]
     fn rootless_steps_rocky_usa_dnf_e_pacotes_rpm() {
-        let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Rocky);
+        let ops =
+            rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Rocky, None);
         let cmds: Vec<&str> = ops
             .iter()
             .filter_map(|o| match o {
@@ -4861,7 +4981,8 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
 
     #[test]
     fn rootless_steps_rocky_usa_wheel_bashrc_e_dnf_clean() {
-        let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Rocky);
+        let ops =
+            rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Rocky, None);
         let cmds: Vec<&str> = ops
             .iter()
             .filter_map(|o| match o {
@@ -4894,7 +5015,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             )
         };
         for d in [Distro::Ubuntu, Distro::Debian, Distro::Rocky] {
-            let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), d);
+            let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), d, None);
             assert!(
                 hardened(&ops),
                 "a golden rootless ({d:?}) tem de desligar o login por password"
@@ -4922,6 +5043,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             &PathBuf::from("/tmp/delonix"),
             &PathBuf::from("/tmp/delonix-cri.service"),
             Distro::Ubuntu,
+            None,
         );
         assert!(hardened(&k8s), "a golden k8s também tem de vir endurecida");
     }
@@ -4935,7 +5057,8 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         // would fail and take down the whole `virt-customize` build (the
         // `&&` isn't guarded). Ubuntu-only gating is the fix; this test
         // proves Rocky never even sees the command.
-        let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Rocky);
+        let ops =
+            rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Rocky, None);
         assert!(!ops
             .iter()
             .any(|o| matches!(o, CustomizeOp::RunCommand(c) if c.contains("apparmor"))));
@@ -4970,7 +5093,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             Distro::Rocky,
             Distro::Fedora,
         ] {
-            let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), d);
+            let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), d, None);
             assert!(
                 has_lowports(&ops),
                 "rootless golden ({d:?}) needs the sysctl"
@@ -4988,6 +5111,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             &PathBuf::from("/tmp/delonix"),
             &PathBuf::from("/tmp/delonix-cri.service"),
             Distro::Ubuntu,
+            None,
         )));
     }
 
@@ -4995,7 +5119,8 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
     fn rootless_steps_debian_nao_muda_de_comportamento() {
         // v0.17.0 regression guard: Debian's sudo/bashrc/apt-clean output must
         // stay byte-identical to before this Rocky-driven refactor.
-        let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Debian);
+        let ops =
+            rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Debian, None);
         let cmds: Vec<&str> = ops
             .iter()
             .filter_map(|o| match o {
@@ -5051,6 +5176,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             false,
             false, // no_k8s = false — Rocky doesn't support the k8s path yet
             None,
+            None, // sem password: o caminho por omissão, e o que a imagem publica
         );
         assert!(err.is_err());
         assert!(format!("{}", err.unwrap_err()).contains("--no-k8s"));
@@ -5269,6 +5395,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
                 offline,
                 true, // no_k8s
                 None,
+                None, // root_password
             )
         };
         assert!(base(Some("1.34".into()), false, None).is_err());
@@ -5296,6 +5423,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             false,
             false, // no_k8s = false
             Some(PathBuf::from("/tmp/delonix")),
+            None, // root_password
         );
         assert!(err.is_err());
         let _ = std::fs::remove_dir_all(&dir);
@@ -5614,8 +5742,8 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         // `/etc/bash.bashrc`), `dnf clean all`. Verified against the Rocky
         // steps rather than restated, so the two cannot drift apart.
         let bin = PathBuf::from("/tmp/delonix");
-        let fedora = rootless_customization_steps(&[], &bin, Distro::Fedora);
-        let rocky = rootless_customization_steps(&[], &bin, Distro::Rocky);
+        let fedora = rootless_customization_steps(&[], &bin, Distro::Fedora, None);
+        let rocky = rootless_customization_steps(&[], &bin, Distro::Rocky, None);
         let cmds = |ops: &[CustomizeOp]| -> Vec<String> {
             ops.iter()
                 .filter_map(|o| match o {
@@ -5637,7 +5765,8 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         // `kernel.apparmor_restrict_unprivileged_userns` patch); Fedora uses
         // SELinux and has no /etc/apparmor.d, so writing there would fail the
         // whole `virt-customize` run — the same trap already fixed for Rocky.
-        let ops = rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Fedora);
+        let ops =
+            rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Fedora, None);
         assert!(!ops.iter().any(|o| matches!(
             o,
             CustomizeOp::RunCommand(c) if c.contains("apparmor")
@@ -5663,6 +5792,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             false,
             false,
             None,
+            None, // root_password
         )
         .unwrap_err()
         .to_string();
@@ -5710,7 +5840,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             Distro::Rocky,
             Distro::Fedora,
         ] {
-            let ops = shared_account_steps(&[], d);
+            let ops = shared_account_steps(&[], d, None);
             let mid = ops
                 .iter()
                 .filter_map(|o| match o {

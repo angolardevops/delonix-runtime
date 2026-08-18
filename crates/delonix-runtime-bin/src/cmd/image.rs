@@ -445,6 +445,9 @@ pub enum ImageCmd {
         no_k8s: bool,
         #[arg(value_hint = clap::ValueHint::FilePath, long)]
         delonix_bin: Option<PathBuf>,
+        /// Set a root password in the image (without it, no account has one).
+        #[arg(long)]
+        root_password: Option<String>,
     },
 }
 
@@ -595,6 +598,9 @@ pub enum VmSub {
         no_k8s: bool,
         #[arg(value_hint = clap::ValueHint::FilePath, long)]
         delonix_bin: Option<PathBuf>,
+        /// Set a root password in the image (without it, no account has one).
+        #[arg(long)]
+        root_password: Option<String>,
     },
 }
 
@@ -676,6 +682,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
                 offline,
                 no_k8s,
                 delonix_bin,
+                root_password,
             } => VmImageCmd::Build {
                 tag,
                 file,
@@ -694,6 +701,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
                 offline,
                 no_k8s,
                 delonix_bin,
+                root_password,
             },
         });
     }
@@ -909,6 +917,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
             offline,
             no_k8s,
             delonix_bin,
+            root_password,
         } => VmImageCmd::Build {
             tag,
             file,
@@ -927,6 +936,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
             offline,
             no_k8s,
             delonix_bin,
+            root_password,
         },
         ImageCmd::Tag { .. }
         | ImageCmd::History { .. }

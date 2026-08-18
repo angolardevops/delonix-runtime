@@ -8889,3 +8889,9 @@ msgstr "Tamanho do disco do nó, em GiB (ex.: `40`) — omitir herda o da própr
 
 msgid "Disk size for the node, in GiB (e.g. `40`) — omit to inherit the image's own size.\n\nThis is the number a tenant's storage quota is counted against: it is PROVISIONED, not consumed (the overlay is thin and grows with use). Cannot be smaller than the base image."
 msgstr "Tamanho do disco do nó, em GiB (ex.: `40`) — omitir herda o da própria imagem.\n\nÉ este o número que a quota de armazenamento do inquilino conta: é PROVISIONADO, não consumido (o overlay é fino e cresce com o uso). Não pode ser menor que a imagem base."
+
+msgid "Set a root password in the image (without it, no account has one)"
+msgstr "Define uma password de root na imagem (sem ela, nenhuma conta tem password)"
+
+msgid "Set a root password in the image (without it, no account has one)."
+msgstr "Define uma password de root na imagem (sem ela, nenhuma conta tem password)."
