@@ -1224,8 +1224,10 @@ nó não faz nenhuma instalação**, só `kubeadm init`/`kubeadm join`.
   `--extra-run` estendem sem tocar no código. Instala o repositório `pkgs.k8s.io` +
   `kubeadm`/`kubelet`/`kubectl`, desliga swap, carrega `overlay`/`br_netfilter` + sysctls
   exigidos pelo kubelet/CNI, injecta o binário `delonix-cri` (ver abaixo) + a unit systemd
-  (`dist/delonix-cri.service`, `systemctl enable`), e cria a conta padrão pedida: `root`/senha
-  `delonix`, utilizador `delonix:delonix` em `sudo` com `NOPASSWD`. cloud-init fica ACTIVO na
+  (`dist/delonix-cri.service`, `systemctl enable`), e cria a conta `delonix` em `sudo` com
+  `NOPASSWD` — **sem password nenhuma, nem ela nem o root** (ver «A imagem base não leva
+  credenciais» abaixo; esta linha dizia `root`/senha `delonix` e deixou de ser verdade).
+  cloud-init fica ACTIVO na
   imagem (o build só corre uma vez; o cloud-init do primeiro-boot de CADA VM continua a aplicar
   hostname/SSH-keys — ver `delonix vm create` abaixo). Configura também, em `/etc/bash.bashrc`
   (bash interactivo login E não-login — consola série e SSH), o **autocomplete + alias `k`**
@@ -1984,7 +1986,9 @@ filtrado + `clone3`→ENOSYS *sempre* instalado), tar-slip, Shocker/`CAP_DAC_REA
      `WNOWAIT`** e a só colher pids que ninguém reclamou (`AuthoritativeLivePorts` do lado da rede,
      `CLAIMED_PIDS` aqui). Validado: ciclo de vida completo (create/start-304/restart/stop/rm), **8
      creates concorrentes → 8 containers a correr**, e zero zombies.
-6. **MÉDIO — credenciais da golden não documentadas.** `root/delonix` + `delonix:delonix` com sudo
+6. **MÉDIO — credenciais da golden não documentadas.** *(SUPERADO em 2026-08-18: a imagem
+   deixou de levar password nenhuma — ver «A imagem base não leva credenciais». O que segue é o
+   registo do que era verdade à data desta auditoria.)* `root/delonix` + `delonix:delonix` com sudo
    NOPASSWD são FIXAS e públicas (estão no código), e não havia uma linha sobre isso no README. A
    golden passou a desligar o **login por password no SSH** (drop-in **e** `sshd_config` — o
    bullseye não tem linha `Include`, e o sshd usa a PRIMEIRA ocorrência, por isso um append cego
@@ -4521,6 +4525,57 @@ e o remoto nunca é alcançado. Um teste que não consegue chegar à linha de qu
 nada. A correcção foi extrair `auto_detect(&[BackendRegistration])` e dar-lhe uma tabela onde o
 candidato saltado é mesmo alcançado. Os três defeitos foram depois verificados pela regra do
 repo: revertidos um a um, cada teste falha.
+
+## A imagem base não leva credenciais, e diz o que tem dentro (2026-08-18)
+
+Revisão da `delonix-vm-base` contra o que uma cloud exige de uma imagem base. Sete lacunas;
+cinco são código e estão fechadas, duas são decisões (ADR de assinatura e de multi-arch).
+
+- **Nenhuma conta leva password.** Root e `delonix` tinham `delonix`, escrita neste repositório
+  PÚBLICO — uma credencial que vive num repo aberto não é uma credencial, e a conta tem sudo sem
+  password, por isso quem chegasse a um prompt de login era root. A mitigação anterior (desligar
+  o login por password no SSH e manter a consola série aberta «para quando a VM perde a rede»)
+  vale para uma VM de laboratório e deixa de valer no instante em que o MESMO artefacto é
+  publicado: num hipervisor partilhado a consola não é uma porta menor que o SSH. As duas contas
+  ficam trancadas (`passwd -l`) e as vias de entrada suportadas continuam intactas — a chave SSH
+  que o cloud-init injecta e a que o `cluster kubeadm` gera. `--root-password` existe para quem
+  precise mesmo da consola série a aceitar um login: escolha explícita de quem constrói, e vive
+  só naquela imagem.
+- **`qemu-guest-agent` nas três receitas.** Estava só na receita offline da golden, por isso a
+  `delonix-vm-base` saía sem agente: sem ele o hipervisor não descobre o IP, não congela o
+  filesystem para um snapshot consistente, e um shutdown ordenado passa a ser um corte de
+  energia. O `enable` é feito por nós e não confiado ao postinst do pacote — este corre
+  `deb-systemd-helper` contra um convidado onde o systemd não está a correr, o que é uma
+  afirmação sobre o script de outra pessoa e não uma medição.
+- **O journal era volátil**, logo um reboot apagava os logs do arranque que falhou. Passa a
+  persistente nas quatro distros, **com tecto** (200 MiB) — este host já teve disk-pressure, e um
+  journal sem limite na raiz de 10 GiB de um inquilino é enchê-la com os nossos próprios logs.
+- **Agente de métricas OPT-IN** (`--node-exporter[=<addr>]`). Sem a flag a imagem não abre porta
+  nenhuma: um listener em todas as cópias publicadas é uma porta que o inquilino nunca pediu. A
+  AWS e a GCP põem o guest agent por omissão e deixam o de métricas por activar. A versão está
+  PINADA — um `latest` flutuante faria duas builds da mesma receita darem imagens diferentes.
+- **Inventário e proveniência.** `/usr/share/delonix/packages.tsv` dentro da imagem e num sidecar
+  ao lado do qcow2 (nome, versão, arch — o conteúdo que um SPDX carrega, na forma que o convidado
+  produz sem ferramenta nova), mais `/etc/delonix-image-release` com base + sha256 da base, que
+  `delonix` construiu, k8s, offline e extra-packages. Sem isto, «esta versão está aqui?» obriga a
+  montar a imagem. **Não é uma promessa de build reprodutível** — o apt/dnf resolvem contra um
+  arquivo em movimento; pinar cada versão transitiva exigiria um mirror de snapshot, que é
+  decisão de plataforma e não uma flag deste comando.
+- **O disco já estava fechado** por `GOLDEN_DISK_SIZE_GIB = 10` (2026-08-17): a medição que
+  levantou a lacuna era de uma imagem construída a 2026-08-12, antes dessa correcção. Vale como
+  método — medir o artefacto que está publicado, não o que está no store.
+
+**Armadilha de teste que se pagou duas vezes na mesma passagem**: dois testes fixavam POSIÇÕES na
+cauda da receita (`ops[len-2]` é a limpeza do apt) e chumbaram por a cauda ter crescido (journal,
+inventário). O que eles querem dizer é ORDEM — a limpeza depois de tudo o que instala, o reset do
+machine-id em último — e é assim que estão escritos agora.
+
+**Validado ao vivo** contra um convidado Ubuntu 24.04 real (`virt-customize --no-network` sobre
+uma cópia da imagem publicada), e contra o RESULTADO e não contra o rc: 669 pacotes com TABs
+reais e ordenados, o drop-in do journal com newlines a sério, e `root`/`delonix` com `!` à frente
+do hash no `/etc/shadow`. **Não validado**: um build completo de ponta a ponta com `--network`
+(precisa dos contornos de host do passt já documentados), e o `--node-exporter` contra um
+Prometheus a fazer scrape a sério.
 
 ## Regra de ouro: fronteira com o PaaS
 
