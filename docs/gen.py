@@ -568,6 +568,19 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
             "inspect": {"examples": [("", "delonix volumes inspect dados")]},
             "rm": {"examples": [("", "delonix volumes rm dados")]},
             "apply": {"examples": [("", "delonix volumes apply -f delonix-manifest.yaml")]},
+            # `prune` faltava aqui, e a consequência não era estética: a página
+            # listava o subcomando na tabela do grupo e nunca documentava uma
+            # única flag dele. O âmbito por dono (`--namespace`/`-A`) existia no
+            # binário e não na documentação — e o portão da CI não dava por isso,
+            # porque só compara o que ESTE mapa manda gerar.
+            "prune": {"examples": [
+                ('DESTRUIR todos os volumes locais que nada referencia (só a raiz sem dono)',
+                 'delonix volumes prune'),
+                ('Recuperar o disco de um inquilino que já não existe — os volumes dele vivem\n'
+                 '# no seu próprio namespace, onde um prune sem âmbito nunca olha',
+                 'delonix volumes prune --namespace acme -f'),
+                ('A loja inteira: a raiz sem dono E todos os inquilinos',
+                 'delonix volumes prune -A -f')]},
         },
     },
     "network": {
