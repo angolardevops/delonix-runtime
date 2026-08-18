@@ -873,6 +873,12 @@ Options:
       --delonix-bin &lt;DELONIX_BIN&gt;
           
 
+      --root-password &lt;ROOT_PASSWORD&gt;
+          Set a root password in the image (without it, no account has one)
+
+      --node-exporter[=&lt;NODE_EXPORTER&gt;]
+          Install the Prometheus node_exporter and enable it on this address (bare flag: `0.0.0.0:9100`). Without it the image ships no listener
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
