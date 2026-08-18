@@ -881,7 +881,6 @@ fn ceiling_reduces(capped: &[String], rec: &ContainerRec) -> bool {
     })
 }
 
-
 /// Constrói o ARGV de `delonix container run` para um container do CRI.
 ///
 /// Extraído de [`start_container`] para ser **puro e testável**: este ARGV é a
@@ -1012,7 +1011,7 @@ fn start_argv(
         args.push("--security-opt".into());
         args.push(format!("seccomp={p}"));
     }
-    args.extend(cap_flags(&rec, ceiling, &id));
+    args.extend(cap_flags(rec, ceiling, id));
     if let Some(prof) = &rec.apparmor {
         args.push("--apparmor".into());
         args.push(prof.clone());
@@ -1789,22 +1788,29 @@ mod tests {
     /// unitário — só falha um cluster.
     #[test]
     fn host_network_vira_rede_do_host_e_nao_publica_portas() {
-        let mut rec = ContainerRec::default();
-        rec.image = "registry.k8s.io/etcd:3.6.6-0".into();
-        rec.sandbox_id = "sb1".into();
+        let rec = ContainerRec {
+            image: "registry.k8s.io/etcd:3.6.6-0".into(),
+            sandbox_id: "sb1".into(),
+            ..Default::default()
+        };
 
-        let mut sb = SandboxRec::default();
-        sb.id = "sb1".into();
-        sb.host_network = true;
-        sb.port_mappings = vec!["2381:2381".into()];
+        let sb = SandboxRec {
+            id: "sb1".into(),
+            host_network: true,
+            port_mappings: vec!["2381:2381".into()],
+            ..Default::default()
+        };
 
         let argv = start_argv(&rec, Some(&sb), crate::CapCeiling::default(), "abc");
         let pos = |f: &str| argv.iter().position(|a| a == f);
 
         // A metade que faltava: rede do host de verdade.
-        let i = pos("--net").expect(&format!("`--net` ausente em {argv:?}"));
+        let i = pos("--net").unwrap_or_else(|| panic!("`--net` ausente em {argv:?}"));
         assert_eq!(argv[i + 1], "host", "hostNetwork tem de ser `--net host`");
-        assert!(pos("--pod").is_none(), "na rede do host não se entra no netns do sandbox");
+        assert!(
+            pos("--pod").is_none(),
+            "na rede do host não se entra no netns do sandbox"
+        );
 
         // A outra metade: publicar portas num pod hostNetwork pede DNAT para um
         // netns que não existe — e foi o sintoma que denunciou o defeito.
@@ -1818,21 +1824,28 @@ mod tests {
     /// netns do sandbox e publica as portas do pod.
     #[test]
     fn sem_host_network_entra_no_netns_do_pod_e_publica() {
-        let mut rec = ContainerRec::default();
-        rec.image = "nginx".into();
-        rec.sandbox_id = "sb2".into();
+        let rec = ContainerRec {
+            image: "nginx".into(),
+            sandbox_id: "sb2".into(),
+            ..Default::default()
+        };
 
-        let mut sb = SandboxRec::default();
-        sb.id = "sb2".into();
-        sb.host_network = false;
-        sb.port_mappings = vec!["8080:80".into()];
+        let sb = SandboxRec {
+            id: "sb2".into(),
+            host_network: false,
+            port_mappings: vec!["8080:80".into()],
+            ..Default::default()
+        };
 
         let argv = start_argv(&rec, Some(&sb), crate::CapCeiling::default(), "xyz");
         let pos = |f: &str| argv.iter().position(|a| a == f);
 
         let i = pos("--pod").expect("sem hostNetwork tem de entrar no netns do sandbox");
         assert_eq!(argv[i + 1], "cri-sb2");
-        assert!(pos("--net").is_none(), "só o caminho hostNetwork mexe em `--net`");
+        assert!(
+            pos("--net").is_none(),
+            "só o caminho hostNetwork mexe em `--net`"
+        );
         let j = pos("--publish").expect("as portas do pod são publicadas");
         assert_eq!(argv[j + 1], "8080:80");
     }

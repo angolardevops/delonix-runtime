@@ -5581,11 +5581,11 @@ fn cmd_exec(
 ) -> Result<()> {
     let c = find(store, id)?;
     let _ = interactive; // stdin is inherited; the flag keeps CLI parity
-    // `container_fs_root` and not a path built here: an `exec` targets a RUNNING
-    // container, so it resolves to `/proc/<pid>/root` — the merged tree as the
-    // container itself sees it, which is the only view that works whether the
-    // rootfs is an overlay or the legacy flat copy. A numeric `-u` never reaches
-    // this at all.
+                         // `container_fs_root` and not a path built here: an `exec` targets a RUNNING
+                         // container, so it resolves to `/proc/<pid>/root` — the merged tree as the
+                         // container itself sees it, which is the only view that works whether the
+                         // rootfs is an overlay or the legacy flat copy. A numeric `-u` never reaches
+                         // this at all.
     let user_override = match user {
         Some(u) => {
             let root = container_fs_root(images, &c)?;
@@ -5891,7 +5891,10 @@ fn container_fs_root(images: &ImageStore, c: &Container) -> Result<FsRoot> {
             })?;
         let pid = hold.pid();
         return Ok(FsRoot {
-            path: std::path::PathBuf::from(format!("/proc/{pid}/root{}", dir.join("merged").display())),
+            path: std::path::PathBuf::from(format!(
+                "/proc/{pid}/root{}",
+                dir.join("merged").display()
+            )),
             _hold: Some(hold),
         });
     }
