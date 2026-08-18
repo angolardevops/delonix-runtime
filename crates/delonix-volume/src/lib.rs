@@ -187,6 +187,30 @@ fn write_meta(path: &std::path::Path, vol: &Volume) -> Result<()> {
     write_atomic(path, &serde_json::to_vec_pretty(vol)?)
 }
 
+/// A [`Volume`] together with the namespace that owns it.
+///
+/// The pair exists because the owner is NOT a field of `Volume`: it is the
+/// on-disk location (`volumes/.ns/<namespace>/<name>`). Reading it back from
+/// the path at each use is how two callers end up with two different answers,
+/// so it is read once, here, and travels with the record.
+#[derive(Clone, Debug)]
+pub struct OwnedVolume {
+    /// `None` = the unscoped root (no owner), NOT the `default` namespace.
+    pub namespace: Option<String>,
+    pub volume: Volume,
+}
+
+impl OwnedVolume {
+    /// How an operator names this owner on the command line and in a report.
+    pub fn owner(&self) -> &str {
+        self.namespace.as_deref().unwrap_or(Self::NO_OWNER)
+    }
+
+    /// The label for a volume in the unscoped root. Not a namespace name —
+    /// `valid_name` refuses the brackets, so it can never collide with one.
+    pub const NO_OWNER: &'static str = "<none>";
+}
+
 /// The volume store, under `<root>/volumes`.
 pub struct VolumeStore {
     root: PathBuf,
@@ -241,6 +265,55 @@ impl VolumeStore {
         }
         out.sort();
         out
+    }
+
+    /// A store rooted at ONE namespace's sub-tree of THIS store.
+    ///
+    /// [`Self::open_scoped`] does the same from a state root; this one does it
+    /// from a store already open, which is what a sweep that walks every
+    /// namespace needs — it holds the unscoped store and must reach each
+    /// owner's sub-tree without re-deriving the base path (re-deriving it is
+    /// how a caller ends up one directory off and reports an empty namespace).
+    pub fn scoped(&self, namespace: &str) -> Result<Self> {
+        let root = self.root.join(Self::NS_SUBTREE).join(namespace);
+        fs::create_dir_all(&root)?;
+        Ok(Self { root })
+    }
+
+    /// Every volume in this store INCLUDING the namespace-scoped sub-trees,
+    /// each one tagged with the namespace that owns it.
+    ///
+    /// [`Self::list`] deliberately reads only the direct children of the root,
+    /// so a namespaced volume is invisible to it. That is correct for a listing
+    /// scoped to one tenant and WRONG for anything that has to account for the
+    /// whole store: a reclaim sweep built on `list` walks past every tenant's
+    /// data and reports the store as clean. That is not hypothetical — it is
+    /// why a tenant's volumes survived every `prune` ever run on a host and
+    /// were 46 of the 141 GB eventually removed by hand.
+    ///
+    /// `namespace: None` means the unscoped root — a volume with no owner, not
+    /// a volume owned by `default`. The two are different on disk and the
+    /// distinction is what lets `--namespace default` mean one of them.
+    pub fn list_all(&self) -> Result<Vec<OwnedVolume>> {
+        let mut out: Vec<OwnedVolume> = self
+            .list()?
+            .into_iter()
+            .map(|volume| OwnedVolume {
+                namespace: None,
+                volume,
+            })
+            .collect();
+        for ns in self.namespaces() {
+            // A namespace that cannot be opened is REPORTED, never skipped: a
+            // sweep that silently drops an owner is the failure this function
+            // exists to end.
+            let scoped = self.scoped(&ns)?;
+            out.extend(scoped.list()?.into_iter().map(|volume| OwnedVolume {
+                namespace: Some(ns.clone()),
+                volume,
+            }));
+        }
+        Ok(out)
     }
 
     /// Whether a namespace-scoped volume of this name exists, seen from the UNSCOPED store.
@@ -1163,6 +1236,61 @@ mod tests {
         let back = serde_json::to_string(&v).unwrap();
         assert!(!back.contains("labels"), "{back}");
         assert!(!back.contains("annotations"), "{back}");
+    }
+
+    /// **The regression guard for the hole this API exists to close.**
+    ///
+    /// `list` is scoped to the root by design and must STAY that way — it is
+    /// what a per-tenant listing is built on. The danger is the other half:
+    /// anything that has to account for the whole store (a reclaim sweep, a
+    /// usage report) reading `list` and concluding the store holds nothing but
+    /// the root. That is not a hypothetical — a tenant's volumes survived every
+    /// prune ever run on a real host and were 46 of the 141 GB later removed by
+    /// hand.
+    ///
+    /// So this test asserts BOTH halves: that `list` still does not see a
+    /// namespaced volume, and that `list_all` does, with the owner attached. If
+    /// someone re-bases a sweep on `list`, the second half stops being true.
+    #[test]
+    fn list_nao_ve_o_volume_de_um_inquilino_e_list_all_ve_com_o_dono() {
+        let tmp = std::env::temp_dir().join(format!("dlx-vol-listall-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let store = VolumeStore::open(&tmp).unwrap();
+        store.create("sem-dono").unwrap();
+        store.scoped("acme").unwrap().create("pgdata").unwrap();
+        store.scoped("globex").unwrap().create("pgdata").unwrap();
+
+        // Half 1: the scoped listing stays scoped.
+        let root: Vec<String> = store.list().unwrap().into_iter().map(|v| v.name).collect();
+        assert_eq!(root, ["sem-dono"], "`list` deixou de ser a raiz apenas");
+
+        // Half 2: the whole store is reachable, and each volume knows its owner.
+        let mut all: Vec<(String, String)> = store
+            .list_all()
+            .unwrap()
+            .into_iter()
+            .map(|o| (o.owner().to_string(), o.volume.name))
+            .collect();
+        all.sort();
+        assert_eq!(
+            all,
+            [
+                ("<none>".to_string(), "sem-dono".to_string()),
+                ("acme".to_string(), "pgdata".to_string()),
+                ("globex".to_string(), "pgdata".to_string()),
+            ],
+            "um dono ficou de fora da varredura"
+        );
+
+        // And the two `pgdata` are genuinely different volumes on disk — the
+        // reason the sweep's identity had to stop being the name.
+        let a = store.scoped("acme").unwrap().inspect("pgdata").unwrap();
+        let b = store.scoped("globex").unwrap().inspect("pgdata").unwrap();
+        assert_ne!(a.mountpoint, b.mountpoint);
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// The trap this repo has paid for four times (`-v` not persisted, `-p` on a

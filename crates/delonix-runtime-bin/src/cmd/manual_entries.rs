@@ -2201,6 +2201,8 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("DESTROY every local volume nothing references — the data does not come back", "delonix volumes prune"),
             ("in CI, where there is no terminal to confirm at", "delonix volumes prune -f"),
+            ("reclaim the disk of a tenant that no longer exists — its volumes live under its own namespace, where an unscoped prune never looks", "delonix volumes prune --namespace acme -f"),
+            ("the whole store: the unscoped root AND every tenant", "delonix volumes prune -A -f"),
         ],
         see_also: &["volumes rm", "volumes ls", "volumes snapshot create", "system prune"],
     },

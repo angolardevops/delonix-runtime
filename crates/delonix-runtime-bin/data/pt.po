@@ -8258,6 +8258,30 @@ msgstr "nenhum volume sem referências para remover"
 msgid "kept {name}: {reason}"
 msgstr "mantido {name}: {reason}"
 
+msgid "volume owned by namespace '{ns}' — owners that do own volumes: {list}"
+msgstr "volume do namespace '{ns}' — donos que têm mesmo volumes: {list}"
+
+msgid "none — no namespace owns a volume here"
+msgstr "nenhum — nenhum namespace tem volumes aqui"
+
+msgid "not considered: {n} namespace(s) own volumes ({list}) — use --namespace <ns> or --all-namespaces"
+msgstr "não considerados: {n} namespace(s) têm volumes ({list}) — usa --namespace <ns> ou --all-namespaces"
+
+msgid "Sweep the volumes owned by THIS namespace, and nothing else."
+msgstr "Varre os volumes deste namespace, e mais nada."
+
+msgid "Sweep the volumes owned by THIS namespace, and nothing else.\n\nThis is the teardown primitive: when a tenant is deleted its volumes stay on disk under its own namespace, where an unscoped prune never looks. Refused for a namespace that owns no volume — a filter that silently matches nothing is how a cleanup is believed to have run."
+msgstr "Varre os volumes deste namespace, e mais nada.\n\nÉ o primitivo do desmantelamento: quando um inquilino é apagado, os volumes dele ficam no disco sob o seu próprio namespace, onde um prune sem âmbito nunca olha. Recusado para um namespace que não tem volume nenhum — um filtro que não encontra nada em silêncio é como se acredita que uma limpeza correu."
+
+msgid "reclaim the disk of a tenant that no longer exists — its volumes live under its own namespace, where an unscoped prune never looks"
+msgstr "recuperar o disco de um inquilino que já não existe — os volumes dele vivem sob o seu próprio namespace, onde um prune sem âmbito nunca olha"
+
+msgid "the whole store: the unscoped root AND every tenant"
+msgstr "a loja inteira: a raiz sem dono E todos os inquilinos"
+
+msgid "Sweep the unscoped root AND every namespace."
+msgstr "Varre a raiz sem dono E todos os namespaces."
+
 msgid "a share carved out of volume '{parent}' — remove the parent, or use `volumes rm`"
 msgstr "é uma partilha recortada do volume '{parent}' — remove o pai, ou usa `volumes rm`"
 
