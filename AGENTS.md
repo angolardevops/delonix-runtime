@@ -154,6 +154,15 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   `Delonixfile` é só o nome canónico por omissão.
 - `delonix vm` — create/ls/stop/rm/status, flags 1:1 com `delonix_vm::VmConfig`.
 - `delonix volumes` — create/ls/rm/inspect, wrapper fino sobre `VolumeStore`.
+  **`prune` tem ÂMBITO POR DONO** (`prune::Scope`): sem flags varre só a raiz sem dono — o que
+  sempre varreu — e ao fim DIZ quais os namespaces que não olhou; `--namespace <ns>` varre um
+  inquilino (é o primitivo do teardown de tenant), `-A/--all-namespaces` varre tudo. Um volume
+  de inquilino vive em `volumes/.ns/<ns>/<nome>` e o `VolumeStore::list` NÃO o vê por desenho —
+  quem tem de contabilizar a loja inteira usa `list_all`, que devolve o dono agarrado a cada
+  registo. **O âmbito limita o que se LEVA, nunca o que se OLHA**: um `kind: ShareVolume` é
+  registado na sub-árvore do inquilino mas o `Storage` pai fica na raiz, com os dados da share
+  DENTRO da árvore do pai — filtrar antes da derivação pai/filho faria `--namespace <t>` apagar
+  dados na NAS.
 - `delonix network` — ls/create/rm/inspect. **Dois stores em paralelo, deliberado**:
   `NetworkStore` (registo declarativo rico — drivers bridge/macvlan/ipvlan/overlay) e
   `infra::{network_create_with,network_remove}` (plano físico do holder netns rootless).

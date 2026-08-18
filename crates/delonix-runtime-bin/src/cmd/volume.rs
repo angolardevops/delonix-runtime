@@ -495,6 +495,17 @@ pub enum VolumeCmd {
         /// Skip the confirmation prompt (REQUIRED when stdin is not a terminal).
         #[arg(short = 'f', long)]
         force: bool,
+        /// Sweep the volumes owned by THIS namespace, and nothing else.
+        ///
+        /// This is the teardown primitive: when a tenant is deleted its volumes
+        /// stay on disk under its own namespace, where an unscoped prune never
+        /// looks. Refused for a namespace that owns no volume — a filter that
+        /// silently matches nothing is how a cleanup is believed to have run.
+        #[arg(long, conflicts_with = "all_namespaces")]
+        namespace: Option<String>,
+        /// Sweep the unscoped root AND every namespace.
+        #[arg(short = 'A', long = "all-namespaces")]
+        all_namespaces: bool,
     },
     /// Apply the `kind: Volume` documents from a manifest (idempotent by name).
     Apply {
@@ -566,7 +577,11 @@ pub fn run(action: VolumeCmd) -> Result<()> {
             force,
             destroy_remote,
         } => cmd_rm_with(&store, &name, force, destroy_remote),
-        VolumeCmd::Prune { force } => cmd_prune(&store, force),
+        VolumeCmd::Prune {
+            force,
+            namespace,
+            all_namespaces,
+        } => cmd_prune(&store, force, namespace, all_namespaces),
         VolumeCmd::Snapshot { action } => cmd_snapshot(&store, action),
         VolumeCmd::Apply { file } => {
             let path = manifest::resolve_path(file)?;
@@ -1269,8 +1284,47 @@ pub(crate) fn volume_refs(store: &VolumeStore, name: &str) -> VolumeRefs {
 ///
 /// A kept volume that LOOKS prunable prints why. A prune that quietly does
 /// nothing is the failure this repo calls dishonest reporting.
-fn cmd_prune(store: &VolumeStore, force: bool) -> Result<()> {
-    let facts = super::prune::volume_facts(store)?;
+fn cmd_prune(
+    store: &VolumeStore,
+    force: bool,
+    namespace: Option<String>,
+    all_namespaces: bool,
+) -> Result<()> {
+    let owners = super::prune::volume_owners(store)?;
+    let scope = match (namespace, all_namespaces) {
+        (Some(ns), _) => {
+            // A filter that matches nothing is REFUSED, never run as an empty
+            // sweep that reports success. This is the reaper rule the nightly
+            // gate learned the expensive way: the wrong filter is the problem,
+            // not the solution, and "0 removed" from a typo is
+            // indistinguishable from "0 removed, nothing to do".
+            if !owners.contains(&ns) {
+                return Err(Error::NotFound(super::po::tf(
+                    "volume owned by namespace '{ns}' — owners that do own volumes: {list}",
+                    &[
+                        ("ns", &ns),
+                        (
+                            "list",
+                            // A whole phrase, never a loose "none": a bare word
+                            // shared as a `msgid` across contexts is how one of
+                            // the two translations silently comes out with the
+                            // wrong gender.
+                            &if owners.is_empty() {
+                                super::po::t("none — no namespace owns a volume here").to_string()
+                            } else {
+                                owners.join(", ")
+                            },
+                        ),
+                    ],
+                )));
+            }
+            super::prune::Scope::Namespace(ns)
+        }
+        (None, true) => super::prune::Scope::Everything,
+        (None, false) => super::prune::Scope::Unowned,
+    };
+
+    let facts = super::prune::volume_facts(store, &scope)?;
     let (take, keep) = super::prune::classify_volumes(&facts);
 
     for (v, why) in &keep {
@@ -1279,17 +1333,18 @@ fn cmd_prune(store: &VolumeStore, force: bool) -> Result<()> {
                 "{}",
                 super::po::tf(
                     "kept {name}: {reason}",
-                    &[("name", &v.name), ("reason", &reason)]
+                    &[("name", &v.qualified()), ("reason", &reason)]
                 )
             );
         }
     }
     if take.is_empty() {
         println!("{}", super::po::t("no unreferenced volume to remove"));
+        note_unswept_owners(&scope, &owners);
         return Ok(());
     }
 
-    let names: Vec<&str> = take.iter().map(|v| v.name.as_str()).collect();
+    let names: Vec<String> = take.iter().map(|v| v.qualified()).collect();
     if !super::prune::confirm(
         force,
         super::po::t(
@@ -1317,7 +1372,33 @@ fn cmd_prune(store: &VolumeStore, force: bool) -> Result<()> {
         )
     );
     super::prune::note_partial(swept.freed);
+    note_unswept_owners(&scope, &owners);
     Ok(())
+}
+
+/// Says out loud which owners the sweep did NOT look at.
+///
+/// The default scope stays the unscoped root on purpose — widening the blast
+/// radius of a command that destroys data, for everyone who already runs it
+/// unattended with `--force`, is not a bug fix. But staying narrow AND quiet is
+/// how a tenant's volumes outlive every prune ever run: the operator reads
+/// "no unreferenced volume to remove" as "the store is clean". So the scope
+/// stays, and the silence goes.
+fn note_unswept_owners(scope: &super::prune::Scope, owners: &[String]) {
+    if !matches!(scope, super::prune::Scope::Unowned) || owners.is_empty() {
+        return;
+    }
+    println!(
+        "{}",
+        super::po::tf(
+            "not considered: {n} namespace(s) own volumes ({list}) — use --namespace <ns> or \
+             --all-namespaces",
+            &[
+                ("n", &owners.len().to_string()),
+                ("list", &owners.join(", ")),
+            ]
+        )
+    );
 }
 
 /// `storage rm`'s removal: the same reference check and mapped-tree removal as

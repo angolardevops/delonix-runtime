@@ -429,6 +429,12 @@ pub(crate) fn sweep_networks(store: &Store) -> Result<usize> {
 #[derive(Clone, Debug)]
 pub(crate) struct VolumeFacts {
     pub name: String,
+    /// The namespace that owns it; `None` = the unscoped root (no owner).
+    ///
+    /// It is NOT read from the record — a volume's owner is where it lives on
+    /// disk (`volumes/.ns/<ns>/<name>`), so it is carried here from the walk
+    /// that found it rather than re-derived from the path by each reader.
+    pub namespace: Option<String>,
     pub mountpoint: String,
     pub driver: String,
     /// Carries `delonix.io/provisioned-by`: the local record is the ONLY thing
@@ -437,6 +443,68 @@ pub(crate) struct VolumeFacts {
     /// A CONTAINER references it, running or stopped (see [`volume_facts`]).
     /// Being a share's parent is NOT this — that is derived, and reported.
     pub referenced: bool,
+    /// Whether the sweep's [`Scope`] allows TAKING this one.
+    ///
+    /// Out-of-scope volumes are still collected, because safety is derived from
+    /// the whole store: a `kind: ShareVolume` is registered in its tenant's
+    /// sub-tree while its parent `Storage` stays unscoped node infrastructure
+    /// (`sharevolume::apply_one` says so, and puts the share's data INSIDE the
+    /// parent's tree). Hand `classify_volumes` only one namespace and that
+    /// parent is invisible, the share looks like a free-standing volume, and
+    /// `--namespace <tenant>` destroys data on the NAS. So the scope decides
+    /// what may be taken; it never decides what is looked at.
+    pub in_scope: bool,
+}
+
+impl VolumeFacts {
+    /// The owner as an operator names it (`<none>` for the unscoped root).
+    pub fn owner(&self) -> &str {
+        self.namespace
+            .as_deref()
+            .unwrap_or(delonix_volume::OwnedVolume::NO_OWNER)
+    }
+
+    /// How this volume is named in a report that may span several owners.
+    ///
+    /// Unqualified inside one namespace would be ambiguous the moment two
+    /// tenants use the same obvious name — and `data`, `pgdata` and `config`
+    /// are exactly the names every tenant picks.
+    pub fn qualified(&self) -> String {
+        match &self.namespace {
+            Some(ns) => format!("{ns}/{}", self.name),
+            None => self.name.clone(),
+        }
+    }
+}
+
+/// Which owners a volume sweep is allowed to touch.
+///
+/// A destructive sweep gets its blast radius from an explicit value, never from
+/// a default that happens to be whatever the caller had in hand. This is rule 1
+/// of the reaper rules (`prefix or owner, and refuse the rest`): the wrong
+/// filter IS the problem, so the filter is a type, and adding an owner is a
+/// change to it rather than a wider `if`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Scope {
+    /// The unscoped root only — volumes with no owner. What `volumes prune`
+    /// has always swept, and still sweeps when nobody says otherwise.
+    Unowned,
+    /// One namespace's sub-tree, and nothing else. The primitive a tenant
+    /// teardown calls: `volumes prune --namespace <ns> --force`.
+    Namespace(String),
+    /// The root AND every namespace.
+    Everything,
+}
+
+impl Scope {
+    /// Whether a volume with this owner falls inside the scope.
+    pub fn covers(&self, namespace: Option<&str>) -> bool {
+        match self {
+            Scope::Unowned => namespace.is_none(),
+            Scope::Namespace(ns) => namespace == Some(ns.as_str()),
+            Scope::Everything => true,
+        }
+    }
 }
 
 /// Why a volume was kept. Every variant is a concrete failure mode that
@@ -486,21 +554,36 @@ pub(crate) fn classify_volumes(
     let mut take = Vec::new();
     let mut keep = Vec::new();
     for v in vols {
+        // Out of scope: it took part in the derivation above as a possible
+        // parent or child, and that is ALL it is here for. It is neither taken
+        // nor reported as kept — a listing of every other tenant's volumes is
+        // noise, and worse, it reads as if they had been considered.
+        if !v.in_scope {
+            continue;
+        }
         let mine = std::path::Path::new(&v.mountpoint);
-        // Component-wise, never a string prefix: `/vol/data2` is not inside
-        // `/vol/data`, and `starts_with` on `str` would say it is.
-        let parent = vols
-            .iter()
-            .find(|o| o.name != v.name && mine.starts_with(std::path::Path::new(&o.mountpoint)));
+        // Identity is the MOUNTPOINT, not the name. Once a sweep spans several
+        // namespaces the name stops being unique — two tenants both call it
+        // `data` — and `o.name != v.name` would then read one tenant's volume
+        // as "myself" and drop it from the parent/child derivation of the
+        // other. The mountpoint is what is actually unique on disk, and
+        // comparing it also excludes self exactly (`starts_with` is true for
+        // equal paths).
+        let parent = vols.iter().find(|o| {
+            o.mountpoint != v.mountpoint && mine.starts_with(std::path::Path::new(&o.mountpoint))
+        });
         let children: Vec<String> = vols
             .iter()
-            .filter(|o| o.name != v.name && std::path::Path::new(&o.mountpoint).starts_with(mine))
-            .map(|o| o.name.clone())
+            .filter(|o| {
+                o.mountpoint != v.mountpoint
+                    && std::path::Path::new(&o.mountpoint).starts_with(mine)
+            })
+            .map(|o| o.qualified())
             .collect();
         if v.referenced {
             keep.push((v.clone(), Keep::InUse));
         } else if let Some(p) = parent {
-            keep.push((v.clone(), Keep::ShareOf(p.name.clone())));
+            keep.push((v.clone(), Keep::ShareOf(p.qualified())));
         } else if !children.is_empty() {
             keep.push((v.clone(), Keep::HoldsShares(children)));
         } else if v.provisioned {
@@ -521,17 +604,44 @@ pub(crate) fn classify_volumes(
 /// that call for `volumes rm` and it is the only defensible one here: a stopped
 /// container is one `start` away from needing its data, and prune is a sweeper
 /// of leftovers, not a way to discover that yesterday's database is gone.
-pub(crate) fn volume_facts(store: &VolumeStore) -> Result<Vec<VolumeFacts>> {
+pub(crate) fn volume_facts(store: &VolumeStore, scope: &Scope) -> Result<Vec<VolumeFacts>> {
     let mut out = Vec::new();
-    for v in store.list()? {
+    for owned in store.list_all()? {
+        let in_scope = scope.covers(owned.namespace.as_deref());
+        let v = &owned.volume;
+        // The reference test has to run against the store the volume ACTUALLY
+        // lives in: `volume_refs` starts with `store.inspect(name)`, and an
+        // unscoped store cannot inspect a namespaced volume. It would return
+        // `NotFound`, hence no references, hence "unreferenced" — and this
+        // function's answer is what decides whether data is destroyed. An
+        // owner's volume must be inspected through its owner's store.
+        let scoped;
+        let home = match &owned.namespace {
+            Some(ns) if in_scope => {
+                scoped = store.scoped(ns)?;
+                &scoped
+            }
+            _ => store,
+        };
         // CONTAINERS only. `volume_refs` also reports the shares carved out of
         // this volume, and folding those in here would send a share's parent
-        // down the silent `InUse` path — see `classify_volumes`.
-        let referenced = !super::volume::volume_refs(store, &v.name)
-            .containers
-            .is_empty();
+        // down the silent `InUse` path — see `classify_volumes`. The container
+        // scan behind it is global and matches by RESOLVED mountpoint, so a
+        // container in any namespace still counts as a reference — which is
+        // the point: ownership decides what a sweep may consider, never
+        // whether someone else's running workload gets its data deleted.
+        //
+        // Only for what the scope may actually take: an out-of-scope volume is
+        // carried for its PATH alone (parent/child derivation), and the
+        // container scan behind this is the expensive part of the sweep.
+        let referenced = in_scope
+            && !super::volume::volume_refs(home, &v.name)
+                .containers
+                .is_empty();
         out.push(VolumeFacts {
             name: v.name.clone(),
+            namespace: owned.namespace.clone(),
+            in_scope,
             mountpoint: v.mountpoint.clone(),
             driver: v.driver.clone(),
             provisioned: v
@@ -540,6 +650,31 @@ pub(crate) fn volume_facts(store: &VolumeStore) -> Result<Vec<VolumeFacts>> {
             referenced,
         });
     }
+    Ok(out)
+}
+
+/// The owners that hold at least one volume, for the report that tells an
+/// operator what a default `volumes prune` did NOT look at.
+///
+/// Rule 1 of the reaper rules cuts both ways: a sweep must refuse what is not
+/// in scope, AND it must say what it refused. A prune that silently walks past
+/// every tenant's data reads as "the store is clean" — which is exactly how a
+/// tenant's volumes survived every prune ever run on the host that eventually
+/// gave up 141 GB by hand, 46 of them volumes.
+pub(crate) fn volume_owners(store: &VolumeStore) -> Result<Vec<String>> {
+    // Derived from the volumes themselves, NOT from `namespaces()`: that one
+    // lists DIRECTORIES, and a namespace's directory outlives the last volume
+    // in it (a sweep removes the volume, not the empty sub-tree). Built on it,
+    // this would keep naming a tenant as an owner of volumes after its last one
+    // was reclaimed — the report would be false in exactly the direction that
+    // sends someone looking for disk that is already free.
+    let mut out: Vec<String> = store
+        .list_all()?
+        .into_iter()
+        .filter_map(|o| o.namespace)
+        .collect();
+    out.sort();
+    out.dedup();
     Ok(out)
 }
 
@@ -589,17 +724,45 @@ pub(crate) fn sweep_volumes(store: &VolumeStore, take: &[VolumeFacts]) -> Volume
     let mut out = VolumeSweep::default();
     for v in take {
         let size = measure(std::path::Path::new(&v.mountpoint));
-        match store.remove_with(&v.name, Some(&delonix_runtime::remove_tree_mapped)) {
+        // Removal goes through the OWNER's store, for the same reason the
+        // reference test did: `remove_with` resolves `<root>/<name>`, and the
+        // unscoped root does not contain a namespaced volume. Called with the
+        // wrong store it returns `NotFound` — the volume survives while the
+        // report says it was swept.
+        let scoped;
+        let home = match &v.namespace {
+            Some(ns) => match store.scoped(ns) {
+                Ok(s) => {
+                    scoped = s;
+                    &scoped
+                }
+                Err(e) => {
+                    eprintln!(
+                        "{}",
+                        po::tf(
+                            "volume '{name}' could not be removed: {err}",
+                            &[("name", &v.qualified()), ("err", &e.to_string())],
+                        )
+                    );
+                    continue;
+                }
+            },
+            None => store,
+        };
+        match home.remove_with(&v.name, Some(&delonix_runtime::remove_tree_mapped)) {
             Ok(()) => {
                 out.freed.add(size);
-                out.removed.push(v.name.clone());
+                out.removed.push(v.qualified());
+                // The owner goes in the trail (reaper rule 5: leave a trace).
+                // "volume `data` removed by prune" is not answerable a week
+                // later; "whose `data`" is the whole question.
                 delonix_runtime_core::events::emit(
                     &super::util::state_root(),
                     "volume",
                     "remove",
                     &v.name,
                     &v.name,
-                    Some("prune"),
+                    Some(&format!("prune owner={}", v.owner())),
                 );
             }
             Err(e) => {
@@ -609,7 +772,7 @@ pub(crate) fn sweep_volumes(store: &VolumeStore, take: &[VolumeFacts]) -> Volume
                     "{}",
                     po::tf(
                         "volume '{name}' could not be removed: {err}",
-                        &[("name", &v.name), ("err", &e.to_string())],
+                        &[("name", &v.qualified()), ("err", &e.to_string())],
                     )
                 );
             }
@@ -649,11 +812,20 @@ mod tests {
     fn v(name: &str, mount: &str) -> VolumeFacts {
         VolumeFacts {
             name: name.into(),
+            namespace: None,
             mountpoint: mount.into(),
             driver: "local".into(),
             provisioned: false,
             referenced: false,
+            in_scope: true,
         }
+    }
+
+    /// O mesmo, mas pertencente a um inquilino.
+    fn vns(ns: &str, name: &str, mount: &str) -> VolumeFacts {
+        let mut f = v(name, mount);
+        f.namespace = Some(ns.into());
+        f
     }
 
     #[test]
@@ -720,6 +892,122 @@ mod tests {
         let (take, keep) = classify_volumes(&[a]);
         assert!(take.is_empty());
         assert_eq!(keep[0].1, Keep::Provisioned);
+    }
+
+    /// O âmbito é o filtro, e um filtro que não distingue «sem dono» de
+    /// «do inquilino `default`» apaga os dados errados. São dois sítios
+    /// diferentes no disco e têm de continuar a ser duas respostas diferentes.
+    #[test]
+    fn o_ambito_distingue_a_raiz_sem_dono_do_inquilino_default() {
+        assert!(Scope::Unowned.covers(None));
+        assert!(!Scope::Unowned.covers(Some("default")));
+        assert!(!Scope::Unowned.covers(Some("acme")));
+
+        let acme = Scope::Namespace("acme".into());
+        assert!(acme.covers(Some("acme")));
+        assert!(!acme.covers(Some("acme2")), "nem por prefixo");
+        assert!(!acme.covers(None), "a raiz não é de ninguém");
+
+        assert!(Scope::Everything.covers(None));
+        assert!(Scope::Everything.covers(Some("acme")));
+    }
+
+    /// O buraco que esta feature fecha: o volume de um inquilino ENTRA na
+    /// classificação, com o dono agarrado, em vez de ficar invisível.
+    #[test]
+    fn o_volume_de_um_inquilino_e_podavel_e_diz_de_quem_era() {
+        let (take, keep) =
+            classify_volumes(&[vns("acme", "pgdata", "/root/volumes/.ns/acme/pgdata/_data")]);
+        assert_eq!(take.len(), 1);
+        assert!(keep.is_empty());
+        assert_eq!(take[0].owner(), "acme");
+        // Num relatório que atravessa donos, o nome nu é ambíguo.
+        assert_eq!(take[0].qualified(), "acme/pgdata");
+    }
+
+    /// A identidade é o MOUNTPOINT, não o nome. Dois inquilinos escolhem
+    /// `data` — comparar por nome faria cada um passar por «eu próprio» na
+    /// derivação pai/filho do outro, e um `Storage` partilhado deixaria de ser
+    /// reconhecido como pai de uma share do vizinho.
+    #[test]
+    fn dois_inquilinos_com_o_mesmo_nome_nao_se_confundem() {
+        let a = vns("acme", "data", "/root/volumes/.ns/acme/data/_data");
+        let b = vns("globex", "data", "/root/volumes/.ns/globex/data/_data");
+        let (take, keep) = classify_volumes(&[a, b]);
+        assert_eq!(take.len(), 2, "nenhum é filho do outro");
+        assert!(keep.is_empty());
+        let mut donos: Vec<&str> = take.iter().map(|v| v.owner()).collect();
+        donos.sort();
+        assert_eq!(donos, ["acme", "globex"]);
+    }
+
+    /// E a prova de que a correcção da identidade não foi só cosmética: com o
+    /// nome como identidade, a share do `acme` NÃO seria vista como filha do
+    /// `Storage` homónimo do `globex`... mas a do MESMO nome dentro da sua
+    /// própria árvore passaria despercebida. Aqui o pai e a filha chamam-se
+    /// ambos `nas` e a relação tem de ser detectada na mesma.
+    #[test]
+    fn pai_e_filha_com_o_mesmo_nome_em_donos_diferentes_sao_detectados() {
+        let pai = vns("acme", "nas", "/root/volumes/.ns/acme/nas/_data");
+        let filha = vns("acme", "nas", "/root/volumes/.ns/acme/nas/_data/teamA");
+        let (take, keep) = classify_volumes(&[pai, filha]);
+        assert!(take.is_empty(), "nem o pai nem a filha podem ser podados");
+        assert_eq!(keep.len(), 2);
+        assert!(keep.iter().any(|(_, k)| matches!(k, Keep::HoldsShares(_))));
+        assert!(keep.iter().any(|(_, k)| matches!(k, Keep::ShareOf(_))));
+    }
+
+    /// **O caminho de perda de dados que o âmbito por dono quase abriu.**
+    ///
+    /// Um `kind: ShareVolume` é registado na sub-árvore do SEU inquilino, mas o
+    /// `Storage` pai fica na raiz sem dono — é o mount da NAS, infraestrutura
+    /// do nó (`sharevolume::apply_one` diz isto por escrito) — e os dados da
+    /// share vivem DENTRO da árvore do pai.
+    ///
+    /// Se o âmbito filtrasse a lista ANTES da derivação, `--namespace acme`
+    /// veria a share sozinha, não lhe encontraria pai nenhum, e apagaria dados
+    /// na NAS. O âmbito decide o que se LEVA; nunca o que se OLHA.
+    #[test]
+    fn uma_share_do_inquilino_nao_perde_o_pai_por_ele_estar_fora_do_ambito() {
+        let mut pai = v("nas", "/root/volumes/nas/_data");
+        pai.in_scope = false; // a raiz não está no âmbito de `--namespace acme`
+        let filha = vns("acme", "db", "/root/volumes/nas/_data/shares/acme/db");
+
+        let (take, keep) = classify_volumes(&[pai, filha]);
+        assert!(
+            take.is_empty(),
+            "a share foi levada — os dados na NAS seriam destruídos"
+        );
+        assert_eq!(keep.len(), 1, "o pai fora do âmbito não se reporta");
+        assert_eq!(keep[0].0.qualified(), "acme/db");
+        assert_eq!(keep[0].1, Keep::ShareOf("nas".into()));
+    }
+
+    /// E o simétrico: um volume fora do âmbito não aparece no relatório como
+    /// «mantido». Listar os volumes dos outros inquilinos é ruído, e pior —
+    /// lê-se como se tivessem sido considerados.
+    #[test]
+    fn o_que_esta_fora_do_ambito_nao_entra_no_relatorio() {
+        let mut outro = vns("globex", "pgdata", "/root/volumes/.ns/globex/pgdata/_data");
+        outro.in_scope = false;
+        let meu = vns("acme", "pgdata", "/root/volumes/.ns/acme/pgdata/_data");
+
+        let (take, keep) = classify_volumes(&[outro, meu]);
+        assert_eq!(take.len(), 1);
+        assert_eq!(take[0].qualified(), "acme/pgdata");
+        assert!(keep.is_empty());
+    }
+
+    /// Um container de OUTRO inquilino a montar este volume conta como
+    /// referência. A posse decide o que a varredura pode CONSIDERAR; nunca
+    /// autoriza apagar dados debaixo de uma carga viva de outrem.
+    #[test]
+    fn a_referencia_de_outro_inquilino_protege_o_volume() {
+        let mut a = vns("acme", "dados", "/root/volumes/.ns/acme/dados/_data");
+        a.referenced = true;
+        let (take, keep) = classify_volumes(&[a]);
+        assert!(take.is_empty());
+        assert_eq!(keep[0].1, Keep::InUse);
     }
 
     #[test]
