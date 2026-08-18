@@ -636,8 +636,8 @@ impl ImageStore {
         {
             let mut b = tar::Builder::new(&mut buf);
             b.follow_symlinks(false);
-            let entries =
-                std::fs::read_dir(rootfs).map_err(|e| Error::Invalid(format!("ler rootfs: {e}")))?;
+            let entries = std::fs::read_dir(rootfs)
+                .map_err(|e| Error::Invalid(format!("ler rootfs: {e}")))?;
             for entry in entries {
                 let entry = entry.map_err(|e| Error::Invalid(format!("ler rootfs: {e}")))?;
                 let name = entry.file_name();

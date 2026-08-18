@@ -73,8 +73,11 @@ fn two_containers_of_a_group_share_one_intermediate_cgroup_with_its_ceiling() {
         return;
     };
 
-    let mut guard =
-        Cleanup { store_dir: root.join("containers"), ids: Vec::new(), root: root.clone() };
+    let mut guard = Cleanup {
+        store_dir: root.join("containers"),
+        ids: Vec::new(),
+        root: root.clone(),
+    };
     let group = CgroupParent {
         name: "tenant-acme".into(),
         memory_max: Some(GROUP_MEM.into()),
@@ -87,7 +90,11 @@ fn two_containers_of_a_group_share_one_intermediate_cgroup_with_its_ceiling() {
             format!("{:016x}", 0xc0ffee00u64 + n),
             format!("carga-{n}"),
             rootfs.to_string_lossy().to_string(),
-            vec!["/bin/sh".into(), "-c".into(), "while :; do sleep 1; done".into()],
+            vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                "while :; do sleep 1; done".into(),
+            ],
             "32M".into(),
         );
         c.cgroup_parent = Some(group.clone());
@@ -114,7 +121,10 @@ fn two_containers_of_a_group_share_one_intermediate_cgroup_with_its_ceiling() {
         .iter()
         .map(|p| p.rsplit_once('/').map(|(parent, _)| parent).unwrap_or(p))
         .collect();
-    assert_eq!(group_dirs[0], group_dirs[1], "both containers must share ONE group cgroup");
+    assert_eq!(
+        group_dirs[0], group_dirs[1],
+        "both containers must share ONE group cgroup"
+    );
     let gdir = group_dirs[0];
     assert!(
         gdir.ends_with("/tenant-acme"),
@@ -122,7 +132,12 @@ fn two_containers_of_a_group_share_one_intermediate_cgroup_with_its_ceiling() {
     );
 
     // The ceiling is on the GROUP, not only on each leaf.
-    let read = |p: &str| std::fs::read_to_string(p).unwrap_or_default().trim().to_string();
+    let read = |p: &str| {
+        std::fs::read_to_string(p)
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    };
     let mem = read(&format!("{gdir}/memory.max"));
     if mem.is_empty() {
         eprintln!(
@@ -158,19 +173,29 @@ fn an_unsafe_group_name_does_not_escape_the_delegated_base() {
         eprintln!("SKIPPED: cannot open a store.");
         return;
     };
-    let mut guard =
-        Cleanup { store_dir: root.join("containers"), ids: Vec::new(), root: root.clone() };
+    let mut guard = Cleanup {
+        store_dir: root.join("containers"),
+        ids: Vec::new(),
+        root: root.clone(),
+    };
 
     let mut c = Container::new(
         "00000000deadbeef".into(),
         "fuga".into(),
         rootfs.to_string_lossy().to_string(),
-        vec!["/bin/sh".into(), "-c".into(), "while :; do sleep 1; done".into()],
+        vec![
+            "/bin/sh".into(),
+            "-c".into(),
+            "while :; do sleep 1; done".into(),
+        ],
         "32M".into(),
     );
     // `..` would climb OUT of the delegated base, into a cgroup this engine was
     // never granted — ceiling included.
-    c.cgroup_parent = Some(CgroupParent { name: "../escapou".into(), ..Default::default() });
+    c.cgroup_parent = Some(CgroupParent {
+        name: "../escapou".into(),
+        ..Default::default()
+    });
     match delonix_runtime::create(&store, &mut c, &rootfs.to_string_lossy(), true) {
         Ok(_) => guard.ids.push(c.clone()),
         Err(e) => {
@@ -180,6 +205,9 @@ fn an_unsafe_group_name_does_not_escape_the_delegated_base() {
     }
     let path = delonix_runtime::live_cgroup(&c);
     eprintln!("cgroup with a rejected name: {path}");
-    assert!(!path.contains("escapou"), "the unsafe name was honoured: {path}");
+    assert!(
+        !path.contains("escapou"),
+        "the unsafe name was honoured: {path}"
+    );
     assert!(!path.contains(".."), "the path climbed out: {path}");
 }

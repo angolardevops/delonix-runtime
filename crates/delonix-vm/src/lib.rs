@@ -3094,7 +3094,10 @@ fn prepare_local_overlay(
             }
             argv.push(format!("{gib}G"));
         }
-        run_quiet("qemu-img", &argv.iter().map(String::as_str).collect::<Vec<_>>())?;
+        run_quiet(
+            "qemu-img",
+            &argv.iter().map(String::as_str).collect::<Vec<_>>(),
+        )?;
     }
     Ok((disk_path, overlay))
 }
