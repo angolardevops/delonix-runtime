@@ -8880,3 +8880,9 @@ msgstr "o binário do node_exporter tem de se chamar"
 
 msgid "the archive did not contain the expected binary"
 msgstr "o arquivo não continha o binário esperado"
+
+msgid "could not find the root partition of the base image"
+msgstr "não encontrei a partição raiz da imagem base"
+
+msgid "the built image has no qemu-guest-agent: without it the platform cannot learn a VM's address and a backup is not quiesced"
+msgstr "a imagem construída não leva qemu-guest-agent: sem ele a plataforma não descobre o endereço de uma VM e um backup não fica consistente"
