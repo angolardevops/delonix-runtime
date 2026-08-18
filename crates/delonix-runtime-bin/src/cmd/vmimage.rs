@@ -26,7 +26,7 @@ use super::util::state_root;
 
 const VM_IMAGE_MEDIA_TYPE: &str = "application/vnd.delonix.vmimage.v1.qcow2";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VmImage {
     pub name: String,
     pub tag: String,
@@ -89,6 +89,22 @@ pub struct VmImage {
     /// `--network-alias` in AGENTS.md).
     #[serde(default)]
     pub cloud_init: Option<bool>,
+    /// How many packages the image carries, and the sha256 of the inventory
+    /// itself (`<store>/<name>.packages.tsv`, and `/usr/share/delonix/
+    /// packages.tsv` inside the guest). `None` on images built before this
+    /// existed or `vm pull`ed — the same known gap as `kernel_version`.
+    #[serde(default)]
+    pub packages: Option<u32>,
+    #[serde(default)]
+    pub packages_sha256: Option<String>,
+    /// The `delonix` that built it, and the sha256 of the vendor cloud image it
+    /// started from — the two facts that let someone repeat this build from the
+    /// same starting point. The base image moves under a stable URL, so its
+    /// name alone does not identify it.
+    #[serde(default)]
+    pub built_by: Option<String>,
+    #[serde(default)]
+    pub base_sha256: Option<String>,
 }
 
 impl VmImage {
@@ -235,6 +251,14 @@ impl VmImageStore {
 
     pub fn qcow2_path(&self, name: &str) -> PathBuf {
         self.root.join(format!("{}.qcow2", Self::sanitize(name)))
+    }
+
+    /// The package inventory extracted from the image at build time. Sidecar
+    /// and not a field of the `.json`: a full inventory is tens of KiB and the
+    /// metadata is read on every `vm ls`.
+    pub fn sbom_path(&self, name: &str) -> PathBuf {
+        self.root
+            .join(format!("{}.packages.tsv", Self::sanitize(name)))
     }
 
     pub fn base_cache_path(&self, distro: Distro, release: &str) -> PathBuf {
@@ -933,6 +957,35 @@ fn describe_one(store: &VmImageStore, img: &VmImage) {
         "On disk",
         std::fs::metadata(&qcow2).ok().map(|m| fmt_size(m.len())),
     );
+    // Proveniência e inventário: as duas perguntas que alguém faz a um
+    // artefacto que recebeu — «de onde veio isto?» e «tem a versão X?».
+    // Sem elas a resposta é montar a imagem.
+    d.field_opt("Built by", img.built_by.clone());
+    d.field_opt("Base sha256", img.base_sha256.clone());
+    let sbom = store.sbom_path(&img.name);
+    match (img.packages, sbom.exists()) {
+        (Some(n), true) => {
+            d.field(
+                "Packages",
+                super::po::tf(
+                    "{n} (see {path})",
+                    &[("n", &n.to_string()), ("path", &sbom.to_string_lossy())],
+                ),
+            );
+        }
+        (Some(n), false) => {
+            d.field("Packages", n.to_string());
+        }
+        // Deliberadamente uma linha e não silêncio: «não sei» e «zero pacotes»
+        // não são a mesma coisa, e um artefacto sem inventário é um facto que
+        // quem o for auditar precisa de ver.
+        (None, _) => {
+            d.field(
+                "Packages",
+                super::po::t("<unknown> (built before the inventory existed, or pulled)"),
+            );
+        }
+    }
     d.print();
 }
 
@@ -1334,6 +1387,12 @@ pub(crate) fn official_distro_base(
         default_memory: None,
         default_backend: None,
         cloud_init: None,
+        // O artefacto OCI/o disco importado não trazem inventário nem
+        // proveniência — a mesma lacuna conhecida do `kernel_version`.
+        packages: None,
+        packages_sha256: None,
+        built_by: None,
+        base_sha256: None,
     };
     // Same metadata path a plain `vm pull` takes, so the base lands in the
     // store indistinguishable from one pulled by hand — including showing up
@@ -1562,6 +1621,12 @@ pub(crate) fn cmd_import(store: &VmImageStore, args: ImportArgs) -> Result<()> {
         default_memory,
         default_backend: None,
         cloud_init: Some(!appliance),
+        // O artefacto OCI/o disco importado não trazem inventário nem
+        // proveniência — a mesma lacuna conhecida do `kernel_version`.
+        packages: None,
+        packages_sha256: None,
+        built_by: None,
+        base_sha256: None,
     };
     store.save(&img)?;
     println!("{tag}");
@@ -1766,6 +1831,12 @@ pub(crate) fn cmd_pull(store: &VmImageStore, source: &str, name: Option<String>)
         // set them. Left `None` (= assume cloud-init, the historical
         // behaviour) for an artifact that carries no annotations.
         cloud_init: None,
+        // O artefacto OCI/o disco importado não trazem inventário nem
+        // proveniência — a mesma lacuna conhecida do `kernel_version`.
+        packages: None,
+        packages_sha256: None,
+        built_by: None,
+        base_sha256: None,
     };
     let img = apply_pulled_annotations(img, &annotations);
     store.save(&img)?;
@@ -2155,6 +2226,51 @@ fn cmd_build(
         }
         None => ops,
     };
+    // O manifesto de build vai para DENTRO da imagem: um qcow2 que circula sem
+    // ele obriga quem o recebe a adivinhar de onde veio. O sha256 da base é o
+    // elo que falta para alguém poder repetir o build a partir do mesmo ponto
+    // de partida — a cloud image do fabricante muda debaixo da mesma URL.
+    let base_sha256 = hex_sha256_file(&base).ok();
+    let manifest = build_manifest(&[
+        ("DELONIX_IMAGE", tag.to_string()),
+        ("DELONIX_DISTRO", format!("{distro:?}").to_lowercase()),
+        ("DELONIX_RELEASE", release.to_string()),
+        (
+            "DELONIX_BUILT_BY",
+            format!("delonix {}", env!("CARGO_PKG_VERSION")),
+        ),
+        (
+            "DELONIX_BASE_IMAGE",
+            base.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
+        ),
+        (
+            "DELONIX_BASE_SHA256",
+            base_sha256.clone().unwrap_or_else(|| "unknown".into()),
+        ),
+        (
+            "DELONIX_K8S_VERSION",
+            k8s_version.clone().unwrap_or_else(|| "none".into()),
+        ),
+        ("DELONIX_OFFLINE", offline.to_string()),
+        (
+            "DELONIX_NODE_EXPORTER",
+            node_exporter
+                .as_deref()
+                .map(|l| format!("{NODE_EXPORTER_VERSION} on {l}"))
+                .unwrap_or_else(|| "none".into()),
+        ),
+        ("DELONIX_EXTRA_PACKAGES", extra_packages.join(" ")),
+    ]);
+    let ops = splice_before_machine_id(
+        ops,
+        vec![CustomizeOp::RunCommand(format!(
+            "printf '%s' \'{}\' > /etc/delonix-image-release && chmod 644 /etc/delonix-image-release",
+            manifest.replace('\'', "'\\''")
+        ))],
+    );
     let mut args = customize_args(&work_qcow2, &ops);
     if offline {
         // Without this, libguestfs starts passt and the appliance waits for a DHCP
@@ -2207,6 +2323,36 @@ fn cmd_build(
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .filter(|s| !s.is_empty() && s != "unknown");
+
+    // O inventário sai para um sidecar ao lado do qcow2, pela mesma razão que o
+    // `kernel_version` sai para os metadados: responder a «esta versão está
+    // aqui?» não pode obrigar a montar a imagem. Best-effort — uma imagem sem
+    // inventário é pior que uma com, mas muito melhor que um build chumbado por
+    // causa dele.
+    let (packages, packages_sha256) = match std::process::Command::new("virt-cat")
+        .args([
+            "-a",
+            &work_qcow2.to_string_lossy(),
+            "/usr/share/delonix/packages.tsv",
+        ])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| o.stdout)
+        .filter(|b| !b.is_empty())
+    {
+        Some(bytes) => {
+            let n = bytes.iter().filter(|b| **b == b'\n').count() as u32;
+            let sha = hex_sha256(&bytes);
+            let _ = std::fs::write(store.sbom_path(tag), &bytes);
+            eprintln!(
+                "{}",
+                super::po::tf("package inventory: {n} packages", &[("n", &n.to_string())])
+            );
+            (Some(n), Some(sha))
+        }
+        None => (None, None),
+    };
 
     // Shrink the artifact. Measured on a 24.04 golden (2.38 GiB → 677 MiB, −72%):
     //  1) `virt-sparsify --in-place` — zeroes the blocks already freed (the apt
@@ -2281,6 +2427,10 @@ fn cmd_build(
         // The golden recipe deliberately leaves cloud-init enabled in the
         // image so each VM's first boot applies its own hostname/SSH keys.
         cloud_init: Some(true),
+        packages,
+        packages_sha256,
+        built_by: Some(format!("delonix {}", env!("CARGO_PKG_VERSION"))),
+        base_sha256,
     };
     store.save(&img)?;
     println!("{tag}");
@@ -2411,6 +2561,31 @@ pub(crate) fn fetch_node_exporter(store: &VmImageStore, version: &str) -> Result
 ///
 /// Falls back to appending when the marker is absent, so a recipe that never
 /// resets the machine-id still gets the steps rather than silently losing them.
+/// The build manifest baked into the image at `/etc/delonix-image-release`,
+/// `os-release` shape (one `KEY=value` per line, shell-sourceable).
+///
+/// **This is the reproducibility record, and it is deliberately not a promise
+/// of a reproducible build.** `apt`/`dnf` resolve against a moving archive, so
+/// two runs of the same recipe a week apart legitimately differ; pinning every
+/// transitive version would mean carrying a snapshot mirror, which is a
+/// platform decision and not a flag on this command. What IS achievable — and
+/// is what an operator actually needs after a CVE lands — is that any image can
+/// say which base it came from, which `delonix` built it, and exactly which
+/// package versions it carries (`/usr/share/delonix/packages.tsv`). That turns
+/// «is this affected?» from an investigation into a lookup.
+///
+/// Values are quoted and newlines refused rather than escaped: a value with a
+/// newline would split into a second, forged `KEY=value` line, and this file is
+/// meant to be sourced.
+pub(crate) fn build_manifest(fields: &[(&str, String)]) -> String {
+    let mut out = String::from("# Generated by `delonix image vm build` — do not edit.\n");
+    for (k, v) in fields {
+        let v = v.replace(['\n', '\r'], " ");
+        out.push_str(&format!("{k}=\"{}\"\n", v.replace('"', "'")));
+    }
+    out
+}
+
 pub(crate) fn splice_before_machine_id(
     mut ops: Vec<CustomizeOp>,
     extra: Vec<CustomizeOp>,
@@ -4092,6 +4267,32 @@ fn shared_account_steps(
         Distro::Rocky | Distro::Fedora => "dnf clean all",
     };
     ops.push(CustomizeOp::RunCommand(cleanup_cmd.into()));
+    // **A imagem passa a dizer o que tem dentro.** Um artefacto que se publica
+    // sem inventário obriga quem o consome a montá-lo para responder à única
+    // pergunta que interessa depois de um CVE sair: «esta versão está aqui?».
+    //
+    // O formato é o que o convidado sabe produzir sem ferramenta nova — nome,
+    // versão e arquitectura, uma linha por pacote — que é exactamente o
+    // conteúdo que um SPDX/CycloneDX carrega. Gerar um desses aqui obrigaria a
+    // meter um gerador dentro de TODAS as imagens, e o que este passo precisa
+    // de ser é uma leitura da base de dados de pacotes que já lá está.
+    //
+    // Corre DEPOIS da limpeza de cache de propósito: o `dpkg-query`/`rpm` lê
+    // `/var/lib/dpkg`/`/var/lib/rpm`, não os índices que a limpeza apaga, por
+    // isso é aqui que o inventário reflecte a imagem FINAL — incluindo o que um
+    // `--extra-run` tenha instalado.
+    let sbom_cmd = match distro {
+        Distro::Ubuntu | Distro::Debian => {
+            "dpkg-query -W -f='${binary:Package}\\t${Version}\\t${Architecture}\\n'"
+        }
+        Distro::Rocky | Distro::Fedora => {
+            "rpm -qa --qf '%{NAME}\\t%{VERSION}-%{RELEASE}\\t%{ARCH}\\n'"
+        }
+    };
+    ops.push(CustomizeOp::RunCommand(format!(
+        "mkdir -p /usr/share/delonix && {sbom_cmd} 2>/dev/null | LC_ALL=C sort \
+         > /usr/share/delonix/packages.tsv && chmod 644 /usr/share/delonix/packages.tsv"
+    )));
     // BUG FOUND LIVE (delonix cluster kubeadm, multi-VM libvirt NAT): every VM
     // cloned from this golden qcow2 shares ONE `/etc/machine-id` — installing
     // kubeadm's dependencies during `virt-customize` pulls in a package whose
@@ -4734,19 +4935,20 @@ mod tests {
             .iter()
             .position(|op| matches!(op, CustomizeOp::RunCommand(c) if c == "echo oi"))
             .expect("o --extra-run devia estar na lista");
-        assert_eq!(
-            idx_extra,
-            ops.len() - 5,
-            "o --extra-run devia vir logo antes da leitura do kernel + journal + limpeza"
-        );
+        // Ordem, e não posições fixas: a cauda cresceu duas vezes desde que este
+        // teste foi escrito (journal, inventário de pacotes) e o que ele existe
+        // para fixar é que NADA se intromete entre o `--extra-run` e a limpeza,
+        // e que o reset do machine-id continua a ser o último passo.
+        let at = |needle: &str| {
+            ops.iter()
+                .position(|op| matches!(op, CustomizeOp::RunCommand(c) if c.contains(needle)))
+                .unwrap_or_else(|| panic!("passo em falta: {needle}"))
+        };
+        assert!(idx_extra < at("/etc/delonix-kernel-version"));
+        assert!(at("/etc/delonix-kernel-version") < at("apt-get clean"));
         assert!(
-            matches!(&ops[ops.len() - 4], CustomizeOp::RunCommand(c) if c.contains("/etc/delonix-kernel-version"))
-        );
-        assert!(
-            matches!(&ops[ops.len() - 3], CustomizeOp::RunCommand(c) if c.contains("Storage=persistent"))
-        );
-        assert!(
-            matches!(&ops[ops.len() - 2], CustomizeOp::RunCommand(c) if c.contains("apt-get clean"))
+            at("apt-get clean") < at("packages.tsv"),
+            "o inventário tem de reflectir a imagem FINAL"
         );
         // machine-id reset must be the ABSOLUTE last step (regression: shared
         // machine-id across cloned VMs breaks DHCP client-id, see comment at
@@ -5043,12 +5245,20 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         let svc = PathBuf::from("/tmp/delonix-cri.service");
         let ops = k8s_customization_steps(None, &[], &[], &cri, &eng, &svc, Distro::Ubuntu, None);
         // ~367 MiB of .deb + indexes that, without this, filled the golden's root to 92%.
-        // Second-to-last: the machine-id reset (below) must run AFTER it.
-        let clean = &ops[ops.len() - 2];
+        // Tem de correr DEPOIS de tudo o que instala pacotes (incluindo o
+        // `--extra-run`) e ANTES do reset do machine-id, que é o último passo.
+        // Por posição fixa isto já chumbou duas vezes por a cauda ter crescido
+        // (journal, inventário) — o que fixa é a ordem.
+        let at = |needle: &str| {
+            ops.iter()
+                .position(|op| matches!(op, CustomizeOp::RunCommand(c) if c.contains(needle)))
+                .unwrap_or_else(|| panic!("passo em falta: {needle}"))
+        };
         assert!(
-            matches!(clean, CustomizeOp::RunCommand(c) if c.contains("apt-get clean") && c.contains("/var/lib/apt/lists")),
-            "o penúltimo passo devia limpar a cache apt, obtido: {clean:?}"
+            matches!(&ops[at("apt-get clean")], CustomizeOp::RunCommand(c) if c.contains("/var/lib/apt/lists")),
+            "a limpeza tem de apagar tambem os indices"
         );
+        assert!(at("apt-get clean") < at("truncate -s 0 /etc/machine-id"));
     }
 
     #[test]
@@ -5572,6 +5782,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             default_memory: None,
             default_backend: None,
             cloud_init: None,
+            ..Default::default()
         };
         // Pulled image, no build metadata at all — pre-existing gap, not new.
         assert_eq!(distro_label(&img), "-");
@@ -5969,6 +6180,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             default_memory: None,
             default_backend: None,
             cloud_init: None,
+            ..Default::default()
         }
     }
 
