@@ -696,6 +696,41 @@ if [ "$WITH_IMAGE_BUILD" = 1 ]; then
   else
     skip imgbuild kernel-readable
   fi
+
+  # ---- passt: o libguestfs usa-o para dar rede ao appliance, e o empacotado
+  # do Ubuntu 24.04 ARRANCA e nunca atribui lease. O que se ve nao tem a
+  # palavra passt em lado nenhum: o dhclient espera ~300s, o build segue SEM
+  # rede, e falha la a frente com o gestor de pacotes a nao resolver um
+  # mirror — le-se como "o teu DNS esta partido". Medido outra vez a
+  # 2026-08-18, a construir a delonix-vm-base.
+  #
+  # O remedio ja estava escrito na mensagem de erro do motor, como PASSO
+  # MANUAL. Um passo manual no caminho de quem instala e um bloqueio, por isso
+  # e feito aqui: compila-se o passt actual para /usr/local/bin, que precede
+  # /usr/bin no PATH — o libguestfs procura-o por PATH e passa a achar este.
+  #
+  # So quando ha um passt do SISTEMA e nao ha ja um em /usr/local/bin: nao se
+  # instala o que ninguem usa, e nao se pisa uma build que o operador tenha
+  # posto la. Falha ABERTO (warn e segue): um passt velho da um build sem rede
+  # com erro claro, um instalador que morre aqui nao instala nada.
+  if [ -x /usr/local/bin/passt ]; then
+    skip imgbuild passt
+  elif ! has_cmd passt; then
+    skip imgbuild passt
+  else
+    step imgbuild passt "building a current passt (the packaged one never leases)..."
+    PASST_SRC="$(mktemp -d)"
+    if command -v git >/dev/null 2>&1 && command -v make >/dev/null 2>&1 && command -v cc >/dev/null 2>&1 \
+       && git clone -q --depth 1 https://passt.top/passt "$PASST_SRC/passt" >/dev/null 2>&1 \
+       && ( cd "$PASST_SRC/passt" && make -j"$(nproc 2>/dev/null || echo 2)" >/dev/null 2>&1 ) \
+       && $SUDO install -m 0755 "$PASST_SRC/passt/passt" /usr/local/bin/passt 2>/dev/null; then
+      stepok imgbuild passt
+    else
+      warn "could not build passt — a network image build may fail with a DNS error;\
+ see https://passt.top/passt (build it and put it first in PATH)"
+    fi
+    rm -rf "$PASST_SRC"
+  fi
 fi
 
 # --------------------------------------- tuning de ESCALA (--production, opt-in)

@@ -2086,12 +2086,47 @@ fn cmd_build(
         "{}",
         super::po::t("preparing the working image (flattened, no backing file)...")
     );
+    // **Cresce ANTES de customizar, e não depois.** O disco crescia no fim, o
+    // que serve o `growpart` do primeiro arranque e não serve de nada ao
+    // BUILD: durante o `virt-customize` o convidado tinha o tamanho de origem
+    // do fabricante. Medido a 2026-08-18 — a golden `--offline` morria no
+    // primeiro `dpkg -i` com `No space left on device`, porque os pacotes do
+    // k8s mais as imagens pré-semeadas já não cabem nos ~2 GiB livres de uma
+    // cloud image de 24.04. O `qemu-img resize` também não chegaria: mexe só
+    // no tamanho virtual, e quem estende partição E filesystem offline é o
+    // `virt-resize`. Como escreve para uma imagem nova, achata de caminho (era
+    // o que o `qemu-img convert` aqui fazia).
+    let parts = std::process::Command::new("virt-filesystems")
+        .args(["-a", &base.to_string_lossy(), "--parts", "--long", "--csv"])
+        .output()
+        .ok()
+        // O exit status LÊ-SE: um `Ok` do `output()` diz que o processo
+        // correu, não que respondeu — a armadilha já catalogada do `capture`.
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    let root_part = largest_partition_from_csv(&parts).ok_or_else(|| {
+        Error::Invalid(format!(
+            "{}: {}",
+            super::po::t("could not find the root partition of the base image"),
+            base.display()
+        ))
+    })?;
     run_tool(
         "qemu-img",
         &[
-            "convert",
-            "-O",
+            "create",
+            "-f",
             "qcow2",
+            &work_qcow2.to_string_lossy(),
+            &format!("{GOLDEN_DISK_SIZE_GIB}G"),
+        ],
+    )?;
+    run_tool(
+        "virt-resize",
+        &[
+            "--expand",
+            &root_part,
             &base.to_string_lossy(),
             &work_qcow2.to_string_lossy(),
         ],
@@ -2119,7 +2154,7 @@ fn cmd_build(
                 "{}",
                 super::po::t("offline mode: getting the k8s .deb on the host...")
             );
-            let debs = download_k8s_debs(
+            let mut debs = download_k8s_debs(
                 &work_dir,
                 &work_dir.join("debs"),
                 k8s_version.as_deref(),
@@ -2152,7 +2187,17 @@ fn cmd_build(
                     &[("codename", &codename)]
                 )
             );
-            download_archive_debs(
+            // **O retorno TEM de ser recolhido.** A receita não copia o
+            // DIRECTÓRIO para dentro do convidado — faz um `--copy-in` por
+            // ficheiro, a partir deste vector (`for d in debs`). Descartá-lo
+            // deixava os `.deb` do agente no host, com o `dpkg -i
+            // /tmp/k8s-debs/*.deb` a instalar só o que veio da lista do k8s.
+            // Medido a 2026-08-18 numa golden construída: kubeadm e kubelet
+            // presentes, `qemu-guest-agent` ausente do inventário e sem
+            // `/usr/sbin/qemu-ga` — exactamente a ausência INVISÍVEL que o
+            // comentário acima diz que este passo existe para impedir, e que
+            // só apareceu porque a imagem passou a levar inventário.
+            let agent_debs = download_archive_debs(
                 &work_dir,
                 &work_dir.join("debs"),
                 "http://archive.ubuntu.com/ubuntu",
@@ -2164,8 +2209,14 @@ fn cmd_build(
                 // before settling on four.
                 &["main", "universe"],
                 "amd64",
-                &["qemu-guest-agent", "liburing2"],
+                // Só as RAÍZES são nomeadas; o resto do fecho sai do índice
+                // e do que a imagem base já tem (`liburing2` estava aqui à
+                // mão, e o `ubuntu-virt` que a 26.04 acrescentou não estava —
+                // era essa a golden que saía sem agente configurado).
+                &["qemu-guest-agent"],
+                &guest_installed_packages(&work_qcow2),
             )?;
+            debs.extend(agent_debs);
             // Best-effort: the golden image ships with kubeadm's own core images
             // already local, so a real `kubeadm init` on a booted VM does not
             // redownload apiserver/etcd/coredns/... from scratch (see
@@ -2293,20 +2344,6 @@ fn cmd_build(
         &args.iter().map(String::as_str).collect::<Vec<_>>(),
     )?;
 
-    // Cresce o disco DEPOIS da customização e ANTES de compactar: o `qemu-img
-    // resize` só mexe no tamanho virtual (o ficheiro continua esparso), e quem
-    // estende a partição e o filesystem é o `growpart` do cloud-init no
-    // primeiro arranque. Ver `GOLDEN_DISK_SIZE_GIB` para a medição que obriga
-    // a isto.
-    run_tool(
-        "qemu-img",
-        &[
-            "resize",
-            &work_qcow2.to_string_lossy(),
-            &format!("{GOLDEN_DISK_SIZE_GIB}G"),
-        ],
-    )?;
-
     // Read back the kernel version the customize steps recorded (see the
     // `/etc/delonix-kernel-version` step in `common_customization_steps`) —
     // `virt-cat` pulls a single file out of a disk image without booting it.
@@ -2345,6 +2382,25 @@ fn cmd_build(
             let n = bytes.iter().filter(|b| **b == b'\n').count() as u32;
             let sha = hex_sha256(&bytes);
             let _ = std::fs::write(store.sbom_path(tag), &bytes);
+            // **A golden RECUSA sair sem o agente**, e é o inventário que
+            // torna a pergunta respondível sem arrancar a imagem. A intenção
+            // já estava escrita no passo que o descarrega («this FAILS the
+            // build instead of warning: a golden that silently lacks the agent
+            // is indistinguishable from one that has it») — o que faltava era
+            // alguém VERIFICAR. Faltava mesmo: medido a 2026-08-18, a golden
+            // saía sem ele porque o `--copy-in` é por ficheiro e o retorno do
+            // download tinha sido descartado. Um teste da receita não podia
+            // apanhar isto; a receita estava certa, o chamador é que não lhe
+            // deu os ficheiros.
+            let tsv = String::from_utf8_lossy(&bytes);
+            if offline && !no_k8s && !inventory_has(&tsv, "qemu-guest-agent") {
+                return Err(Error::Invalid(
+                    super::po::t(
+                        "the built image has no qemu-guest-agent: without it the platform                          cannot learn a VM's address and a backup is not quiesced",
+                    )
+                    .to_string(),
+                ));
+            }
             eprintln!(
                 "{}",
                 super::po::tf("package inventory: {n} packages", &[("n", &n.to_string())])
@@ -2440,6 +2496,148 @@ fn cmd_build(
 // ---------------------------------------------------------------------------
 // Download + verification of the Ubuntu cloud image
 // ---------------------------------------------------------------------------
+
+/// Splits a Debian `Depends` field into ALTERNATIVE GROUPS — `a | b` stays one
+/// group with two names — stripping version constraints and arch qualifiers.
+///
+/// The grouping is not a detail: flattening to «the first of each group» is
+/// what made the golden fail a SECOND time. `ubuntu-virt` depends on
+/// `ubuntu-helper-virt-hwe | ubuntu-helper-virt-generic`, the first is not in
+/// the components fetched here, and taking it blindly downloaded nothing
+/// usable while `dpkg` left the whole chain unconfigured. apt picks the first
+/// alternative that is actually AVAILABLE, and so does `deb_closure`.
+pub(crate) fn parse_depends_groups(field: &str) -> Vec<Vec<String>> {
+    field
+        .split(',')
+        .filter_map(|group| {
+            let alts: Vec<String> = group
+                .split('|')
+                .filter_map(|alt| {
+                    let name = alt.split_whitespace().next()?.split(':').next()?;
+                    (!name.is_empty()).then(|| name.to_string())
+                })
+                .collect();
+            (!alts.is_empty()).then_some(alts)
+        })
+        .collect()
+}
+
+/// Every name a `Provides` field mentions. Only for `Provides`, where there
+/// are no alternatives to choose between.
+pub(crate) fn parse_depends(field: &str) -> Vec<String> {
+    parse_depends_groups(field).into_iter().flatten().collect()
+}
+
+/// The set of packages that actually have to be downloaded so `dpkg -i` can
+/// CONFIGURE `roots` inside the guest: the transitive dependencies, minus what
+/// the base image already carries.
+///
+/// **Derived and not written by hand, and that is the whole point.** The list
+/// used to be a literal `["qemu-guest-agent", "liburing2"]` with a comment
+/// saying it had been measured — and it had, against Ubuntu 24.04. One release
+/// later `qemu-guest-agent` gained a dependency on `ubuntu-virt`, `dpkg -i`
+/// left it *unconfigured*, and the golden shipped without an agent. A measured
+/// list is still a list, and lists go stale.
+///
+/// A dependency the index does not know is SKIPPED rather than fatal: that is
+/// what a virtual package looks like from here (something installed `Provides`
+/// it), and refusing would break builds over a name that was never a file.
+pub(crate) fn deb_closure(
+    roots: &[&str],
+    index: &std::collections::BTreeMap<String, String>,
+    installed: &std::collections::BTreeSet<String>,
+) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut seen: std::collections::BTreeSet<String> = Default::default();
+    let mut queue: Vec<String> = roots.iter().map(|r| r.to_string()).collect();
+    while let Some(pkg) = queue.pop() {
+        if !seen.insert(pkg.clone()) {
+            continue;
+        }
+        // A root is downloaded even if the image claims to have it — that is
+        // the package the caller asked for, and re-installing it is harmless.
+        if !roots.contains(&pkg.as_str()) && installed.contains(&pkg) {
+            continue;
+        }
+        let Some(deps) = index.get(&pkg) else {
+            continue;
+        };
+        out.push(pkg.clone());
+        for group in parse_depends_groups(deps) {
+            // Satisfeito por algo que a imagem já tem? Não se traz nada.
+            if group.iter().any(|a| installed.contains(a)) {
+                continue;
+            }
+            // Senão, a primeira alternativa que o arquivo REALMENTE tem —
+            // escolher a primeira escrita traz um nome que não é um ficheiro e
+            // deixa o `dpkg` a configurar metade da cadeia.
+            if let Some(pick) = group.iter().find(|a| index.contains_key(*a)) {
+                queue.push(pick.clone());
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// The packages a guest image already has, read from its dpkg database without
+/// booting it. `Provides` counts: a dependency satisfied by a virtual package
+/// is satisfied.
+pub(crate) fn guest_installed_packages(img: &Path) -> std::collections::BTreeSet<String> {
+    let status = std::process::Command::new("virt-cat")
+        .args(["-a", &img.to_string_lossy(), "/var/lib/dpkg/status"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    let mut out: std::collections::BTreeSet<String> = Default::default();
+    for line in status.lines() {
+        if let Some(v) = line.strip_prefix("Package: ") {
+            out.insert(v.trim().to_string());
+        } else if let Some(v) = line.strip_prefix("Provides: ") {
+            for p in parse_depends(v) {
+                out.insert(p);
+            }
+        }
+    }
+    out
+}
+
+/// Whether the package inventory read out of a built image lists `pkg`.
+///
+/// The inventory is `name\tversion\tarch` per line; matching the FIRST field
+/// exactly, because `qemu-guest-agent` and a hypothetical
+/// `qemu-guest-agent-dbg` are different answers to «is the agent here?».
+pub(crate) fn inventory_has(tsv: &str, pkg: &str) -> bool {
+    tsv.lines()
+        .any(|l| l.split('\t').next().map(str::trim) == Some(pkg))
+}
+
+/// Picks the partition to grow out of `virt-filesystems --parts --long --csv`.
+///
+/// The root is taken to be the LARGEST partition, which is what a cloud image
+/// always is: the vendor ships a root sized to the download plus a handful of
+/// tiny companions (BIOS boot, ESP, and on Ubuntu 24.04 a third one). Reading
+/// the columns by NAME off the header rather than by position, because a
+/// libguestfs release that adds a column would otherwise silently make us grow
+/// the wrong partition — and growing the ESP would produce an image that does
+/// not boot.
+pub(crate) fn largest_partition_from_csv(csv: &str) -> Option<String> {
+    let mut lines = csv.lines().filter(|l| !l.trim().is_empty());
+    let header: Vec<&str> = lines.next()?.split(',').map(|c| c.trim()).collect();
+    let name_at = header.iter().position(|c| c.eq_ignore_ascii_case("Name"))?;
+    let size_at = header.iter().position(|c| c.eq_ignore_ascii_case("Size"))?;
+    lines
+        .filter_map(|l| {
+            let cols: Vec<&str> = l.split(',').map(|c| c.trim()).collect();
+            let name = cols.get(name_at)?;
+            let size: u64 = cols.get(size_at)?.parse().ok()?;
+            Some((size, name.to_string()))
+        })
+        .max_by_key(|(size, _)| *size)
+        .map(|(_, name)| name)
+}
 
 /// The node_exporter release this build ships, PINNED.
 ///
@@ -3160,6 +3358,10 @@ pub(crate) struct K8sDeb {
     /// Path relative to the repo root (the `Filename` field).
     pub filename: String,
     pub sha256: String,
+    /// The raw `Depends` field, kept so the closure can be DERIVED instead of
+    /// hand-written (see `deb_closure`).
+    #[allow(dead_code)]
+    pub depends: String,
 }
 
 /// Parses a `Packages` index (Debian control, blocks separated by a blank
@@ -3195,7 +3397,13 @@ pub(crate) fn parse_packages_index(
         ) else {
             continue;
         };
-        if *a != arch {
+        // `Architecture: all` conta como o arch pedido — é o que um
+        // metapacote É. Filtrar só por `amd64` deixava-os TODOS de fora do
+        // índice, e o efeito foi silencioso: o fecho de dependências tratava
+        // o que faltava como pacote virtual e seguia. Medido — a golden saía
+        // com `ubuntu-virt` por configurar porque o `ubuntu-helper-virt-hwe`
+        // de que depende é `all`.
+        if *a != arch && *a != "all" {
             continue;
         }
         if !wanted.is_empty() && !wanted.contains(name) {
@@ -3210,6 +3418,7 @@ pub(crate) fn parse_packages_index(
             version: version.to_string(),
             filename: filename.to_string(),
             sha256: sha.to_string(),
+            depends: f.get("Depends").map(|d| d.to_string()).unwrap_or_default(),
         };
         best.entry(name.to_string())
             .and_modify(|cur| {
@@ -3491,6 +3700,7 @@ fn verify_archive_inrelease(work: &Path, dists_base: &str, keyring: &str) -> Res
 /// Every wanted package must be found; a missing one is an ERROR and never a quiet
 /// omission, because the whole point of installing offline is that the guest cannot go
 /// looking for what we forgot.
+#[allow(clippy::too_many_arguments)]
 fn download_archive_debs(
     work: &Path,
     dest_dir: &Path,
@@ -3499,6 +3709,7 @@ fn download_archive_debs(
     components: &[&str],
     arch: &str,
     wanted: &[&str],
+    installed: &std::collections::BTreeSet<String>,
 ) -> Result<Vec<PathBuf>> {
     let dists_base = format!("{archive_base}/dists/{codename}");
     let release = verify_archive_inrelease(work, &dists_base, UBUNTU_ARCHIVE_KEYRING)?;
@@ -3525,8 +3736,18 @@ fn download_archive_debs(
             let f = std::fs::File::open(&gz)?;
             flate2::read::GzDecoder::new(f).read_to_string(&mut text)?;
         }
-        found.extend(parse_packages_index(&text, arch, "", wanted, &[]));
+        // Parse-se o índice INTEIRO (e não só o que se pediu) porque o fecho
+        // de dependências tem de ser calculado a partir dele — ver `deb_closure`
+        // para a lista escrita à mão que envelheceu numa release.
+        found.extend(parse_packages_index(&text, arch, "", &[], &[]));
     }
+
+    let deps_index: std::collections::BTreeMap<String, String> = found
+        .iter()
+        .map(|d| (d.name.clone(), d.depends.clone()))
+        .collect();
+    let need = deb_closure(wanted, &deps_index, installed);
+    found.retain(|d| need.binary_search(&d.name).is_ok());
 
     for w in wanted {
         if !found.iter().any(|d| d.name == *w) {
@@ -4754,10 +4975,13 @@ pub(crate) fn tool_failure_hint(tail: &str, f: Family) -> Option<String> {
             // own slirp; present-and-broken does not.
             m.push_str(
                 "\nIf it still fails, the packaged passt is too old to talk to this qemu \
-                 (Ubuntu 24.04 ships the Feb-2024 build); build a current one and put it \
-                 FIRST in PATH — libguestfs looks passt up there:\n  \
-                 git clone https://passt.top/passt && cd passt && make\n  \
-                 PATH=$PWD:$PATH XDG_RUNTIME_DIR=/tmp/delonix-run delonix vm build --network …",
+                 (Ubuntu 24.04 ships the Feb-2024 build) and a current one has to come \
+                 FIRST in PATH — libguestfs looks passt up there. The installer does \
+                 exactly that:\n  \
+                 curl -fsSL https://angolardevops.github.io/delonix-runtime/install.sh \
+                 | sh -s -- --with-image-build\n  \
+                 or by hand: git clone https://passt.top/passt && cd passt && make && \
+                 sudo install -m0755 passt /usr/local/bin/passt",
             );
         }
         m.push_str("\nOr build without it: drop `--network` (RUN steps then work offline).");
@@ -5375,6 +5599,133 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         };
         assert!(last.contains("/etc/machine-id"), "último passo: {last}");
         assert_eq!(with.len(), base.len() + 4);
+    }
+
+    #[test]
+    fn o_indice_aceita_architecture_all() {
+        // Um metapacote é `all`, e é dele que a cadeia do agente depende.
+        let index = "Package: ubuntu-helper-virt-hwe\n\
+                     Version: 1.0\n\
+                     Filename: pool/main/u/x_1.0_all.deb\n\
+                     SHA256: aa\n\
+                     Architecture: all\n\
+                     \n\
+                     Package: outro\n\
+                     Version: 2.0\n\
+                     Filename: pool/main/o/outro_2.0_i386.deb\n\
+                     SHA256: bb\n\
+                     Architecture: i386\n";
+        let got = parse_packages_index(index, "amd64", "", &[], &[]);
+        let names: Vec<&str> = got.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["ubuntu-helper-virt-hwe"],
+            "o `all` entra, o `i386` não"
+        );
+    }
+
+    #[test]
+    fn o_fecho_de_dependencias_sai_do_indice_e_nao_de_uma_lista() {
+        use std::collections::{BTreeMap, BTreeSet};
+        // A forma REAL que partiu a golden: na 24.04 o agente dependia de
+        // `liburing2`, na 26.04 passou a depender também de `ubuntu-virt`.
+        let index: BTreeMap<String, String> = [
+            (
+                "qemu-guest-agent".to_string(),
+                "libc6 (>= 2.34), liburing2 (>= 2.1), ubuntu-virt".to_string(),
+            ),
+            ("liburing2".to_string(), String::new()),
+            ("ubuntu-virt".to_string(), "libc6 | libc6-udeb".to_string()),
+            ("libc6".to_string(), String::new()),
+        ]
+        .into_iter()
+        .collect();
+        // `libc6` já vem na cloud image; os outros dois não.
+        let installed: BTreeSet<String> = ["libc6".to_string()].into_iter().collect();
+        let need = deb_closure(&["qemu-guest-agent"], &index, &installed);
+        assert_eq!(need, vec!["liburing2", "qemu-guest-agent", "ubuntu-virt"]);
+
+        // Uma dependência que o índice não conhece é VIRTUAL (alguém a
+        // `Provides`), não um erro — recusar partia o build por um nome que
+        // nunca foi um ficheiro.
+        let so_virtual: BTreeMap<String, String> =
+            [("qemu-guest-agent".to_string(), "debconf-2.0".to_string())]
+                .into_iter()
+                .collect();
+        assert_eq!(
+            deb_closure(&["qemu-guest-agent"], &so_virtual, &BTreeSet::new()),
+            vec!["qemu-guest-agent"]
+        );
+
+        // A forma que partiu a golden uma SEGUNDA vez: a primeira alternativa
+        // escrita não existe nos componentes que se buscam, e é a segunda que
+        // tem de vir. Escolher a primeira às cegas deixava o `dpkg` com a
+        // cadeia por configurar.
+        let alternativas: BTreeMap<String, String> = [
+            (
+                "ubuntu-virt".to_string(),
+                "ubuntu-helper-virt-hwe | ubuntu-helper-virt-generic".to_string(),
+            ),
+            ("ubuntu-helper-virt-generic".to_string(), String::new()),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            deb_closure(&["ubuntu-virt"], &alternativas, &BTreeSet::new()),
+            vec!["ubuntu-helper-virt-generic", "ubuntu-virt"]
+        );
+    }
+
+    #[test]
+    fn as_dependencias_lem_se_com_alternativas_e_versoes() {
+        assert_eq!(
+            parse_depends_groups("libc6 (>= 2.34), liburing2 (>= 2.1) | liburing1, python3:any"),
+            vec![
+                vec!["libc6"],
+                vec!["liburing2", "liburing1"],
+                vec!["python3"]
+            ]
+        );
+        assert!(parse_depends_groups("").is_empty());
+    }
+
+    #[test]
+    fn o_inventario_responde_pelo_nome_exacto_do_pacote() {
+        let tsv = "kubeadm\t1.34.10-1.1\tamd64\nqemu-guest-agent\t1:8.2.2\tamd64\n";
+        assert!(inventory_has(tsv, "qemu-guest-agent"));
+        assert!(inventory_has(tsv, "kubeadm"));
+        // Um pacote parecido não responde pelo que se procurou.
+        assert!(!inventory_has(tsv, "qemu-guest-agent-dbg"));
+        assert!(!inventory_has(tsv, "qemu"));
+        assert!(!inventory_has("", "qemu-guest-agent"));
+    }
+
+    #[test]
+    fn a_particao_a_crescer_e_a_maior_lida_por_nome_de_coluna() {
+        // Saída REAL do `virt-filesystems --parts --long --csv` contra a cloud
+        // image de Ubuntu 24.04, capturada a 2026-08-18. A 3.ª coluna é `MBR` e
+        // vem VAZIA — um parser por posição leria o tamanho da coluna errada e
+        // faria crescer a ESP, o que produz uma imagem que não arranca.
+        let csv = "Name,Type,MBR,Size,Parent\n\
+                   /dev/sda1,partition,,2683289088,/dev/sda\n\
+                   /dev/sda14,partition,,4194304,/dev/sda\n\
+                   /dev/sda15,partition,,111149056,/dev/sda\n\
+                   /dev/sda16,partition,,957350400,/dev/sda\n";
+        assert_eq!(
+            largest_partition_from_csv(csv).as_deref(),
+            Some("/dev/sda1")
+        );
+        // Uma release do libguestfs que acrescente uma coluna à frente não pode
+        // mudar a resposta.
+        let reordenado =
+            "Parent,Size,Name\n/dev/sda,4194304,/dev/sda14\n/dev/sda,2683289088,/dev/sda1\n";
+        assert_eq!(
+            largest_partition_from_csv(reordenado).as_deref(),
+            Some("/dev/sda1")
+        );
+        // Sem cabeçalho reconhecível não se adivinha: quem chama recusa.
+        assert_eq!(largest_partition_from_csv("lixo\n1,2,3\n"), None);
+        assert_eq!(largest_partition_from_csv(""), None);
     }
 
     #[test]
@@ -6180,8 +6531,14 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         assert!(h.contains("--network"), "{h}");
         // Building a current passt is only half the remedy: libguestfs looks it
         // up by running `passt --help`, so the new binary has to be FIRST in
-        // PATH or the packaged one keeps winning.
-        assert!(h.contains("PATH=$PWD:$PATH"), "{h}");
+        // PATH or the packaged one keeps winning. The remedy is now the
+        // installer (`--with-image-build` builds it into `/usr/local/bin`,
+        // which precedes `/usr/bin`) — a manual step in this path is a
+        // blocker, and this used to be one. The manual form stays as the
+        // fallback, and it has to name the same destination.
+        assert!(h.contains("--with-image-build"), "{h}");
+        assert!(h.contains("/usr/local/bin/passt"), "{h}");
+        assert!(h.contains("FIRST in PATH"), "{h}");
 
         // The SAME cause, and the shape it actually takes on a real host: passt
         // leases nothing, the build carries on without network, and what the
