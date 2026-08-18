@@ -286,7 +286,10 @@ pub fn safe_cgroup_segment(name: &str) -> Option<&str> {
     if n.is_empty() || n.len() > 64 || n == "." || n == ".." || n.starts_with('-') {
         return None;
     }
-    if !n.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-')) {
+    if !n
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'))
+    {
         return None;
     }
     Some(n)

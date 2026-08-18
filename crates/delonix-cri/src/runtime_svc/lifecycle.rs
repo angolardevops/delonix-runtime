@@ -881,7 +881,6 @@ fn ceiling_reduces(capped: &[String], rec: &ContainerRec) -> bool {
     })
 }
 
-
 /// Constrói o ARGV de `delonix container run` para um container do CRI.
 ///
 /// Extraído de [`start_container`] para ser **puro e testável**: este ARGV é a
@@ -1804,7 +1803,10 @@ mod tests {
         // A metade que faltava: rede do host de verdade.
         let i = pos("--net").expect(&format!("`--net` ausente em {argv:?}"));
         assert_eq!(argv[i + 1], "host", "hostNetwork tem de ser `--net host`");
-        assert!(pos("--pod").is_none(), "na rede do host não se entra no netns do sandbox");
+        assert!(
+            pos("--pod").is_none(),
+            "na rede do host não se entra no netns do sandbox"
+        );
 
         // A outra metade: publicar portas num pod hostNetwork pede DNAT para um
         // netns que não existe — e foi o sintoma que denunciou o defeito.
@@ -1832,7 +1834,10 @@ mod tests {
 
         let i = pos("--pod").expect("sem hostNetwork tem de entrar no netns do sandbox");
         assert_eq!(argv[i + 1], "cri-sb2");
-        assert!(pos("--net").is_none(), "só o caminho hostNetwork mexe em `--net`");
+        assert!(
+            pos("--net").is_none(),
+            "só o caminho hostNetwork mexe em `--net`"
+        );
         let j = pos("--publish").expect("as portas do pod são publicadas");
         assert_eq!(argv[j + 1], "8080:80");
     }

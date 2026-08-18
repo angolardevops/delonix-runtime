@@ -4387,8 +4387,15 @@ mod tests {
         let cri = PathBuf::from("/tmp/delonix-cri");
         let eng = PathBuf::from("/tmp/delonix");
         let svc = PathBuf::from("/tmp/delonix-cri.service");
-        let ops =
-            k8s_customization_steps(None, &["htop".to_string()], &[], &cri, &eng, &svc, Distro::Ubuntu);
+        let ops = k8s_customization_steps(
+            None,
+            &["htop".to_string()],
+            &[],
+            &cri,
+            &eng,
+            &svc,
+            Distro::Ubuntu,
+        );
         let install_step = ops
             .iter()
             .find_map(|op| match op {
@@ -5167,13 +5174,23 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
     /// que o seu control-plane não é combinação suportada pelo kubeadm.
     #[test]
     fn a_imagem_oficial_aponta_para_a_versao_por_omissao() {
-        assert_eq!(DEFAULT_K8S_VERSION, "1.36", "o tecto do Kamaji alojado (upgrade.KubeadmVersion=v1.36.0)");
+        assert_eq!(
+            DEFAULT_K8S_VERSION, "1.36",
+            "o tecto do Kamaji alojado (upgrade.KubeadmVersion=v1.36.0)"
+        );
         assert!(
             OFFICIAL_VM_IMAGE.ends_with(&format!(":{DEFAULT_K8S_VERSION}")),
             "a imagem oficial ({OFFICIAL_VM_IMAGE}) tem de apontar para {DEFAULT_K8S_VERSION}"
         );
-        let k8s = OFFICIAL_REPOS.iter().find(|r| r.key == "k8s").expect("repo k8s");
-        assert_eq!(k8s.default_tag, Some(DEFAULT_K8S_VERSION), "o pull por omissão tem de puxar a mesma");
+        let k8s = OFFICIAL_REPOS
+            .iter()
+            .find(|r| r.key == "k8s")
+            .expect("repo k8s");
+        assert_eq!(
+            k8s.default_tag,
+            Some(DEFAULT_K8S_VERSION),
+            "o pull por omissão tem de puxar a mesma"
+        );
     }
 
     /// 1.34 e 1.35 deixam de ser a omissão mas continuam construíveis — o
@@ -5208,7 +5225,10 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
                 _ => None,
             })
             .collect();
-        assert!(copiados.contains(&&cri), "delonix-cri tem de ir para /usr/local/bin");
+        assert!(
+            copiados.contains(&&cri),
+            "delonix-cri tem de ir para /usr/local/bin"
+        );
         assert!(
             copiados.contains(&&eng),
             "o `delonix` TEM de viajar com o CRI — sem ele o kubelet vê ENOENT em cada StartContainer"
@@ -5221,7 +5241,9 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
                 _ => None,
             })
             .collect();
-        assert!(cmds.iter().any(|c| c.contains("chmod +x /usr/local/bin/delonix-cri")));
+        assert!(cmds
+            .iter()
+            .any(|c| c.contains("chmod +x /usr/local/bin/delonix-cri")));
         assert!(
             cmds.iter().any(|c| *c == "chmod +x /usr/local/bin/delonix"),
             "sem bit de execução o binário está lá e continua a não correr"
