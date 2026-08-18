@@ -5162,7 +5162,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
     /// nunca arranca — medido, não suposto (ver `GOLDEN_DISK_SIZE_GIB`).
     #[test]
     fn a_golden_nasce_com_disco_para_um_no_de_kubernetes() {
-        assert!(
+        const _: () = assert!(
             GOLDEN_DISK_SIZE_GIB >= 10,
             "medido: um control-plane completo consome 2,4G de 8,7G úteis; abaixo de 10 GiB o WAL do etcd deixa de caber"
         );
@@ -5214,7 +5214,6 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
     fn install_cri_steps_instala_os_dois_binarios() {
         let cri = PathBuf::from("/tmp/delonix-cri");
         let eng = PathBuf::from("/tmp/delonix");
-        let eng = PathBuf::from("/tmp/delonix");
         let unit = PathBuf::from("/tmp/delonix-cri.service");
         let ops = install_cri_steps(&cri, &eng, &unit);
 
@@ -5245,11 +5244,12 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             .iter()
             .any(|c| c.contains("chmod +x /usr/local/bin/delonix-cri")));
         assert!(
-            cmds.iter().any(|c| *c == "chmod +x /usr/local/bin/delonix"),
+            cmds.contains(&"chmod +x /usr/local/bin/delonix"),
             "sem bit de execução o binário está lá e continua a não correr"
         );
     }
 
+    #[test]
     fn no_k8s_rejeita_k8s_version_offline_e_cri_bin() {
         let (store, dir) = tmp_store();
         let base = |k8s_version: Option<String>, offline: bool, cri_bin: Option<PathBuf>| {
