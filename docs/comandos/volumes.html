@@ -425,6 +425,51 @@ SEE ALSO:
 
   delonix › volumes › apply</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix volumes apply -f delonix-manifest.yaml</code></pre></div>
+<h2 id='prune'><code>volumes prune</code></h2>
+<p class='intro'>DESTROY every local volume that nothing references.</p>
+<p class='intro'><strong>This deletes data.</strong> It only takes a volume that is unreferenced by any container (running OR stopped), is not a share carved out of another volume, was not provisioned on a remote NAS, and uses the <code>local</code> driver. Anything else is kept and the reason is printed — a prune that silently skips is worse than one that refuses.</p>
+<div class='help'><pre><code>Usage: delonix volumes prune [OPTIONS]
+
+Options:
+  -f, --force
+          Skip the confirmation prompt (REQUIRED when stdin is not a terminal)
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --namespace &lt;NAMESPACE&gt;
+          Sweep the volumes owned by THIS namespace, and nothing else.
+          
+          This is the teardown primitive: when a tenant is deleted its volumes stay on disk under its own namespace, where an unscoped prune never looks. Refused for a namespace that owns no volume — a filter that silently matches nothing is how a cleanup is believed to have run.
+
+  -A, --all-namespaces
+          Sweep the unscoped root AND every namespace
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # DESTROY every local volume nothing references — the data does not come
+  # back
+  delonix volumes prune
+
+  # in CI, where there is no terminal to confirm at
+  delonix volumes prune -f
+
+  # reclaim the disk of a tenant that no longer exists — its volumes live
+  # under its own namespace, where an unscoped prune never looks
+  delonix volumes prune --namespace acme -f
+
+  # the whole store: the unscoped root AND every tenant
+  delonix volumes prune -A -f
+
+SEE ALSO:
+  delonix volumes rm · delonix volumes ls · delonix volumes snapshot create ·
+  delonix system prune
+
+  delonix › volumes › prune</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class="cap">DESTRUIR todos os volumes locais que nada referencia (só a raiz sem dono)</div><pre><code>delonix volumes prune</code></pre></div><div class="ex"><div class="cap">Recuperar o disco de um inquilino que já não existe — os volumes dele vivem
+# no seu próprio namespace, onde um prune sem âmbito nunca olha</div><pre><code>delonix volumes prune --namespace acme -f</code></pre></div><div class="ex"><div class="cap">A loja inteira: a raiz sem dono E todos os inquilinos</div><pre><code>delonix volumes prune -A -f</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Prova que um volume nomeado sobrevive a um restart do container —
 ao contrário de escrever directamente no rootfs.</p>
