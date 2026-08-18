@@ -628,6 +628,10 @@ pub enum VmImageCmd {
         /// artefact you may publish.
         #[arg(long)]
         root_password: Option<String>,
+        /// Install the Prometheus node_exporter and enable it on this address
+        /// (bare flag: `0.0.0.0:9100`). Without it the image ships no listener.
+        #[arg(long, require_equals = true, num_args = 0..=1, default_missing_value = "0.0.0.0:9100")]
+        node_exporter: Option<String>,
     },
 }
 
@@ -702,6 +706,7 @@ pub fn run(action: VmImageCmd) -> Result<()> {
             no_k8s,
             delonix_bin,
             root_password,
+            node_exporter,
         } => {
             // A `VMfile` in the context beats the golden recipe, the same way a
             // `Delonixfile` beats a `Dockerfile` for `delonix build`. Explicit
@@ -770,6 +775,7 @@ pub fn run(action: VmImageCmd) -> Result<()> {
                 no_k8s,
                 delonix_bin,
                 root_password,
+                node_exporter,
             )
         }
     }
@@ -1928,6 +1934,7 @@ fn cmd_build(
     no_k8s: bool,
     delonix_bin: Option<PathBuf>,
     root_password: Option<String>,
+    node_exporter: Option<String>,
 ) -> Result<()> {
     // `--no-k8s` builds a completely different image (no kubeadm/kubelet/
     // kubectl/delonix-cri at all — see `rootless_customization_steps`); the
@@ -2130,6 +2137,24 @@ fn cmd_build(
             )
         }
     };
+    // Metrics agent: OPT-IN, fetched and verified host-side like everything else
+    // this build downloads. Without the flag the image is byte-for-byte what it
+    // was — a listener in every published copy is a port the tenant never asked
+    // for, on an artefact whose whole purpose is to be handed to someone else.
+    let ops = match node_exporter.as_deref() {
+        Some(listen) => {
+            eprintln!(
+                "{}",
+                super::po::tf(
+                    "installing the node_exporter metrics agent on {listen}...",
+                    &[("listen", listen)]
+                )
+            );
+            let bin = fetch_node_exporter(store, NODE_EXPORTER_VERSION)?;
+            splice_before_machine_id(ops, node_exporter_steps(&bin, listen))
+        }
+        None => ops,
+    };
     let mut args = customize_args(&work_qcow2, &ops);
     if offline {
         // Without this, libguestfs starts passt and the appliance waits for a DHCP
@@ -2265,6 +2290,181 @@ fn cmd_build(
 // ---------------------------------------------------------------------------
 // Download + verification of the Ubuntu cloud image
 // ---------------------------------------------------------------------------
+
+/// The node_exporter release this build ships, PINNED.
+///
+/// A floating `latest` would make two builds of the same `VMfile` produce
+/// different images — the exact property the build manifest exists to make
+/// checkable. Bumping it is a deliberate edit, with the checksum verified by
+/// the same path as everything else this build downloads.
+pub(crate) const NODE_EXPORTER_VERSION: &str = "1.9.1";
+
+/// `<hash>  <file>` (GNU coreutils shape) — the form Prometheus, Ubuntu and
+/// Debian all publish, as opposed to the BSD `SHA256 (f) = h` that Rocky uses
+/// (`parse_bsd_checksum`).
+///
+/// Matches the file name by EQUALITY of the last field and not by
+/// `contains`/`ends_with`: a release directory that publishes both
+/// `node_exporter-1.9.1.linux-amd64.tar.gz` and
+/// `...linux-arm64.tar.gz` has entries where one name is not a suffix of the
+/// other, but the day an asset is renamed with a suffix the loose form starts
+/// returning the wrong hash — and a wrong hash here reads as tampering.
+pub(crate) fn sha256_from_gnu_sums(text: &str, filename: &str) -> Option<String> {
+    text.lines().find_map(|l| {
+        let mut it = l.split_whitespace();
+        let hash = it.next()?;
+        let name = it.next()?.trim_start_matches('*');
+        (name == filename && hash.len() == 64).then(|| hash.to_string())
+    })
+}
+
+pub(crate) fn node_exporter_asset(version: &str) -> String {
+    format!("node_exporter-{version}.linux-amd64.tar.gz")
+}
+
+/// Downloads and verifies the node_exporter binary ON THE HOST, returning the
+/// extracted binary's path. Cached under `_base/` next to the cloud images, so
+/// building several appliances costs one download.
+///
+/// Host-side and verified for the same reason the k8s `.deb` are: the guest is
+/// customized OFFLINE, and a binary fetched inside it would be a second trust
+/// path with no checksum on it.
+pub(crate) fn fetch_node_exporter(store: &VmImageStore, version: &str) -> Result<PathBuf> {
+    let version = VmImageStore::sanitize(version);
+    let cached = store
+        .base_cache_path(Distro::Ubuntu, "unused")
+        .with_file_name(format!("node_exporter-{version}"));
+    if cached.exists() {
+        return Ok(cached);
+    }
+    let asset = node_exporter_asset(&version);
+    let base = format!("https://github.com/prometheus/node_exporter/releases/download/v{version}");
+    let tarball = cached.with_extension("tar.gz");
+    eprintln!(
+        "{}",
+        super::po::tf(
+            "downloading {url}...",
+            &[("url", &format!("{base}/{asset}"))]
+        )
+    );
+    stream_download(&format!("{base}/{asset}"), &tarball)?;
+
+    eprintln!("{}", super::po::t("verifying SHA256SUMS..."));
+    let sums = http_get_text(&format!("{base}/sha256sums.txt"))?;
+    let expected = sha256_from_gnu_sums(&sums, &asset).ok_or_else(|| {
+        Error::Invalid(format!(
+            "{} {asset}",
+            super::po::t("SHA256SUMS has no entry for")
+        ))
+    })?;
+    let got = hex_sha256_file(&tarball)?;
+    if got != expected {
+        let _ = std::fs::remove_file(&tarball);
+        return Err(Error::Invalid(format!(
+            "{}: {asset} (expected {expected}, got {got})",
+            super::po::t("checksum mismatch")
+        )));
+    }
+
+    // `--strip-components=1` because the tarball has one top-level directory
+    // named after the release; `-C` into the cache dir and rename, so a failed
+    // extraction never leaves a half-written binary under the final name.
+    let dir = cached.parent().unwrap_or(Path::new(".")).to_path_buf();
+    let staged = dir.join(format!("node_exporter-{version}.staged"));
+    let _ = std::fs::remove_file(&staged);
+    let member = format!("node_exporter-{version}.linux-amd64/node_exporter");
+    run_tool(
+        "tar",
+        &[
+            "-xzf",
+            &tarball.to_string_lossy(),
+            "-C",
+            &dir.to_string_lossy(),
+            "--strip-components=1",
+            &member,
+        ],
+    )?;
+    let _ = std::fs::rename(dir.join("node_exporter"), &staged);
+    std::fs::rename(&staged, &cached)?;
+    let _ = std::fs::remove_file(&tarball);
+    Ok(cached)
+}
+
+/// Installs the node_exporter binary already fetched host-side, as a systemd
+/// unit bound to `listen`.
+///
+/// **Opt-in, and that is the security decision.** A metrics listener in every
+/// published copy of this image is a port the tenant never asked for, on an
+/// artefact whose whole point is to be handed to someone else — the same
+/// reasoning that took the built-in password out. AWS and GCP ship a guest
+/// agent by default and leave the metrics agent to be enabled; this follows
+/// them. Without `--node-exporter` the image is byte-for-byte what it was.
+///
+/// Runs as a dedicated system account with no shell and no home, under the
+/// systemd sandbox directives that cost nothing here (it reads `/proc` and
+/// `/sys`, never writes).
+/// Splices `extra` in BEFORE the machine-id reset, which has to stay the very
+/// last operation (see `shared_account_steps` for the DHCP incident that put it
+/// there): `systemctl enable` can materialise a machine-id in a guest that has
+/// none, and an image whose VMs all boot with the same one loses its DHCP lease
+/// to whichever sibling renewed last.
+///
+/// Falls back to appending when the marker is absent, so a recipe that never
+/// resets the machine-id still gets the steps rather than silently losing them.
+pub(crate) fn splice_before_machine_id(
+    mut ops: Vec<CustomizeOp>,
+    extra: Vec<CustomizeOp>,
+) -> Vec<CustomizeOp> {
+    let at = ops
+        .iter()
+        .position(|o| matches!(o, CustomizeOp::RunCommand(c) if c.contains("/etc/machine-id")))
+        .unwrap_or(ops.len());
+    for (i, op) in extra.into_iter().enumerate() {
+        ops.insert(at + i, op);
+    }
+    ops
+}
+
+pub(crate) fn node_exporter_steps(bin: &Path, listen: &str) -> Vec<CustomizeOp> {
+    let unit = format!(
+        "[Unit]\\n\
+         Description=Prometheus node exporter\\n\
+         Documentation=https://github.com/prometheus/node_exporter\\n\
+         After=network-online.target\\n\
+         Wants=network-online.target\\n\
+         \\n\
+         [Service]\\n\
+         User=node-exporter\\n\
+         Group=node-exporter\\n\
+         ExecStart=/usr/local/bin/node_exporter --web.listen-address={listen}\\n\
+         Restart=on-failure\\n\
+         RestartSec=5\\n\
+         NoNewPrivileges=yes\\n\
+         ProtectSystem=strict\\n\
+         ProtectHome=yes\\n\
+         PrivateTmp=yes\\n\
+         ProtectKernelTunables=yes\\n\
+         ProtectControlGroups=yes\\n\
+         RestrictNamespaces=yes\\n\
+         \\n\
+         [Install]\\n\
+         WantedBy=multi-user.target\\n"
+    );
+    vec![
+        CustomizeOp::CopyIn(bin.to_path_buf(), "/usr/local/bin".to_string()),
+        CustomizeOp::RunCommand("chmod 0755 /usr/local/bin/node_exporter".into()),
+        CustomizeOp::RunCommand(
+            "useradd --system --no-create-home --shell /usr/sbin/nologin node-exporter \
+             || useradd --system --no-create-home --shell /sbin/nologin node-exporter || true"
+                .into(),
+        ),
+        CustomizeOp::RunCommand(format!(
+            "printf '{unit}' > /etc/systemd/system/node-exporter.service && \
+             chmod 644 /etc/systemd/system/node-exporter.service && \
+             systemctl enable node-exporter.service"
+        )),
+    ]
+}
 
 pub(crate) fn download_ubuntu_base(store: &VmImageStore, release: &str) -> Result<PathBuf> {
     let cached = store.base_cache_path(Distro::Ubuntu, release);
@@ -3867,6 +4067,26 @@ fn shared_account_steps(
     // with `cluster apply`, which prepares LIVE hosts — cleaning the package
     // cache is a concern of the ARTIFACT (shrinking a distributable image),
     // not of host preparation.
+    // **O journal é VOLÁTIL nas cloud images de Ubuntu/Debian**, e o que isso
+    // custa é preciso: `Storage=auto` quer dizer «persiste SE `/var/log/journal`
+    // existir», e não existe — por isso um reboot apaga os logs do arranque que
+    // falhou, que são exactamente os que alguém iria ler. Uma VM que reinicia
+    // sozinha não deixa rasto nenhum de porquê. (Rocky/Fedora já criam o
+    // directório; lá isto só acrescenta os limites.)
+    //
+    // **O limite não é decoração.** Este host já teve disk-pressure a sério (49
+    // rootfs órfãos, o kubelet a marcar o nó), e um journal sem tecto na raiz de
+    // 10 GiB de um inquilino é uma forma de a encher com os NOSSOS logs. Os
+    // 200 MiB são a proporção default do systemd (10%) escrita à mão, para não
+    // escalar com um disco que não controlamos.
+    ops.push(CustomizeOp::RunCommand(
+        "mkdir -p /var/log/journal /etc/systemd/journald.conf.d && \
+         printf '[Journal]\\nStorage=persistent\\nCompress=yes\\nSystemMaxUse=200M\\nSystemMaxFileSize=50M\\nRuntimeMaxUse=50M\\n' \
+           > /etc/systemd/journald.conf.d/99-delonix.conf && \
+         chmod 644 /etc/systemd/journald.conf.d/99-delonix.conf && \
+         systemd-tmpfiles --create --prefix /var/log/journal >/dev/null 2>&1 || true"
+            .into(),
+    ));
     let cleanup_cmd = match distro {
         Distro::Ubuntu | Distro::Debian => "apt-get clean && rm -rf /var/lib/apt/lists/*",
         Distro::Rocky | Distro::Fedora => "dnf clean all",
@@ -4516,11 +4736,14 @@ mod tests {
             .expect("o --extra-run devia estar na lista");
         assert_eq!(
             idx_extra,
-            ops.len() - 4,
-            "o --extra-run devia vir logo antes da leitura do kernel + limpeza"
+            ops.len() - 5,
+            "o --extra-run devia vir logo antes da leitura do kernel + journal + limpeza"
         );
         assert!(
-            matches!(&ops[ops.len() - 3], CustomizeOp::RunCommand(c) if c.contains("/etc/delonix-kernel-version"))
+            matches!(&ops[ops.len() - 4], CustomizeOp::RunCommand(c) if c.contains("/etc/delonix-kernel-version"))
+        );
+        assert!(
+            matches!(&ops[ops.len() - 3], CustomizeOp::RunCommand(c) if c.contains("Storage=persistent"))
         );
         assert!(
             matches!(&ops[ops.len() - 2], CustomizeOp::RunCommand(c) if c.contains("apt-get clean"))
@@ -4826,6 +5049,120 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             matches!(clean, CustomizeOp::RunCommand(c) if c.contains("apt-get clean") && c.contains("/var/lib/apt/lists")),
             "o penúltimo passo devia limpar a cache apt, obtido: {clean:?}"
         );
+    }
+
+    #[test]
+    fn a_imagem_traz_o_journal_persistente_em_todas_as_distros() {
+        // Um journal volátil apaga, a cada reboot, os logs do arranque que
+        // falhou — e o tecto impede que os NOSSOS logs encham a raiz do
+        // inquilino, que é uma forma de disk-pressure que este host já viu.
+        for d in [
+            Distro::Ubuntu,
+            Distro::Debian,
+            Distro::Rocky,
+            Distro::Fedora,
+        ] {
+            let ops = shared_account_steps(&[], d, None);
+            let cmds: Vec<&str> = ops
+                .iter()
+                .filter_map(|o| match o {
+                    CustomizeOp::RunCommand(c) => Some(c.as_str()),
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                cmds.iter()
+                    .any(|c| c.contains("Storage=persistent") && c.contains("/var/log/journal")),
+                "{d:?} ficou com o journal volátil"
+            );
+            assert!(
+                cmds.iter().any(|c| c.contains("SystemMaxUse=")),
+                "{d:?} ficou com um journal sem tecto"
+            );
+        }
+    }
+
+    #[test]
+    fn sem_a_flag_a_imagem_nao_abre_porta_nenhuma() {
+        // O agente de métricas é opt-in: uma imagem publicada não leva um
+        // listener que o inquilino nunca pediu.
+        let ops =
+            rootless_customization_steps(&[], &PathBuf::from("/tmp/delonix"), Distro::Ubuntu, None);
+        assert!(!ops.iter().any(|o| matches!(
+            o,
+            CustomizeOp::RunCommand(c) if c.contains("node-exporter") || c.contains("node_exporter")
+        )));
+    }
+
+    #[test]
+    fn o_node_exporter_corre_sem_privilegio_no_endereco_pedido() {
+        let ops = node_exporter_steps(&PathBuf::from("/tmp/node_exporter"), "127.0.0.1:9100");
+        let cmds: Vec<&str> = ops
+            .iter()
+            .filter_map(|o| match o {
+                CustomizeOp::RunCommand(c) => Some(c.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(ops
+            .iter()
+            .any(|o| matches!(o, CustomizeOp::CopyIn(_, dst) if dst == "/usr/local/bin")));
+        assert!(cmds
+            .iter()
+            .any(|c| c.contains("--web.listen-address=127.0.0.1:9100")));
+        assert!(
+            cmds.iter().any(|c| c.contains("User=node-exporter")),
+            "o exporter nunca corre como root"
+        );
+        assert!(cmds.iter().any(|c| c.contains("NoNewPrivileges=yes")));
+        assert!(cmds
+            .iter()
+            .any(|c| c.contains("systemctl enable node-exporter.service")));
+    }
+
+    #[test]
+    fn o_reset_do_machine_id_continua_a_ser_o_ultimo_passo() {
+        // Se o `systemctl enable` do exporter corresse DEPOIS do reset, podia
+        // materializar um machine-id — e VMs que partilham um perdem o lease
+        // DHCP umas às outras (medido, e a razão de aquele passo ser o último).
+        let base = shared_account_steps(&[], Distro::Ubuntu, None);
+        let with = splice_before_machine_id(
+            base.clone(),
+            node_exporter_steps(&PathBuf::from("/tmp/node_exporter"), ":9100"),
+        );
+        let last = match with.last().expect("não pode ficar vazio") {
+            CustomizeOp::RunCommand(c) => c.clone(),
+            other => panic!("último passo inesperado: {other:?}"),
+        };
+        assert!(last.contains("/etc/machine-id"), "último passo: {last}");
+        assert_eq!(with.len(), base.len() + 4);
+    }
+
+    #[test]
+    fn sem_marcador_de_machine_id_os_passos_sao_acrescentados() {
+        let extra = vec![CustomizeOp::RunCommand("echo oi".into())];
+        let out = splice_before_machine_id(vec![CustomizeOp::RunCommand("echo a".into())], extra);
+        assert_eq!(out.len(), 2);
+        assert!(matches!(&out[1], CustomizeOp::RunCommand(c) if c == "echo oi"));
+    }
+
+    #[test]
+    fn o_sums_gnu_casa_o_nome_exacto_e_nao_um_sufixo() {
+        let hash_amd = "a".repeat(64);
+        let hash_arm = "b".repeat(64);
+        let text = format!(
+            "{hash_arm}  node_exporter-1.9.1.linux-arm64.tar.gz\n\
+             {hash_amd}  node_exporter-1.9.1.linux-amd64.tar.gz\n"
+        );
+        assert_eq!(
+            sha256_from_gnu_sums(&text, "node_exporter-1.9.1.linux-amd64.tar.gz"),
+            Some(hash_amd)
+        );
+        // Um nome que é SUFIXO de outra entrada não pode devolver o hash dela.
+        assert_eq!(sha256_from_gnu_sums(&text, "linux-amd64.tar.gz"), None);
+        assert_eq!(sha256_from_gnu_sums(&text, "inexistente.tar.gz"), None);
+        // Uma linha truncada não é um hash.
+        assert_eq!(sha256_from_gnu_sums("abc  ficheiro\n", "ficheiro"), None);
     }
 
     #[test]
@@ -5177,6 +5514,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             false, // no_k8s = false — Rocky doesn't support the k8s path yet
             None,
             None, // sem password: o caminho por omissão, e o que a imagem publica
+            None, // node_exporter: sem agente, que é o default
         );
         assert!(err.is_err());
         assert!(format!("{}", err.unwrap_err()).contains("--no-k8s"));
@@ -5396,6 +5734,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
                 true, // no_k8s
                 None,
                 None, // root_password
+                None, // node_exporter
             )
         };
         assert!(base(Some("1.34".into()), false, None).is_err());
@@ -5424,6 +5763,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             false, // no_k8s = false
             Some(PathBuf::from("/tmp/delonix")),
             None, // root_password
+            None, // node_exporter
         );
         assert!(err.is_err());
         let _ = std::fs::remove_dir_all(&dir);
@@ -5793,6 +6133,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             false,
             None,
             None, // root_password
+            None, // node_exporter
         )
         .unwrap_err()
         .to_string();
