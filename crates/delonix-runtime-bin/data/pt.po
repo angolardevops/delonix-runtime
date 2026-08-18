@@ -8922,3 +8922,9 @@ msgstr "{n} (ver {path})"
 
 msgid "<unknown> (built before the inventory existed, or pulled)"
 msgstr "<desconhecido> (construída antes do inventário existir, ou puxada)"
+
+msgid "the node_exporter binary must be named"
+msgstr "o binário do node_exporter tem de se chamar"
+
+msgid "the archive did not contain the expected binary"
+msgstr "o arquivo não continha o binário esperado"
