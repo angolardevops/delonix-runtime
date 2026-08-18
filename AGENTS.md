@@ -153,6 +153,17 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   Delonix `SCAN`/`CPUS`/`MEMORY`/`SECURITY`/`HEALTHCHECK` independentemente do nome do ficheiro);
   `Delonixfile` é só o nome canónico por omissão.
 - `delonix vm` — create/ls/stop/rm/status, flags 1:1 com `delonix_vm::VmConfig`.
+- `delonix system prune` — a varredura global. **`--auto --threshold N` é o modo AGENDADO**:
+  mede a ocupação do sistema de ficheiros que contém o estado e, abaixo do limiar, sai a 0
+  sem ter tocado em nada — isso é sucesso, não um nada-feito para corrigir. A porta corre
+  ANTES de abrir qualquer store. `--auto` implica `--force` (não há quem responda a um
+  prompt num timer) e **nunca toca em volumes** — para esses o caminho é `volumes prune
+  --namespace`. A percentagem é a do `df` (`used/(used+bavail)`, arredondada para cima), e
+  não a ingénua `(blocks-bfree)/blocks`: esta conta os blocos reservados ao root como
+  livres e dá ~5% a menos, que é exactamente a distância entre o limiar do GC (75) e o do
+  alerta do thin pool (80). Se a ocupação não puder ser lida, **recusa** em vez de
+  adivinhar. É o comando que o role `store_gc` do `delonix-deploy` agenda — e que até aqui
+  não existia: `delonix prune --auto` devolvia exit 2, `unrecognized subcommand`.
 - `delonix volumes` — create/ls/rm/inspect, wrapper fino sobre `VolumeStore`.
   **`prune` tem ÂMBITO POR DONO** (`prune::Scope`): sem flags varre só a raiz sem dono — o que
   sempre varreu — e ao fim DIZ quais os namespaces que não olhou; `--namespace <ns>` varre um

@@ -84,6 +84,53 @@ fn measure(p: &std::path::Path) -> Reclaimed {
     }
 }
 
+/// **PURE** — the occupancy percentage `df` would print, from raw `statvfs`
+/// counters.
+///
+/// The formula is `df`'s, deliberately and not by coincidence: an operator who
+/// sets a 75% threshold read that 75 off `df -h`. Computing it any other way —
+/// `(blocks - bfree) / blocks`, the obvious one — reports a SMALLER number,
+/// because it counts the root-reserved blocks as free space that a rootless
+/// engine can never use. The gap is around 5% on a default ext4, which is the
+/// whole distance between this threshold and the thin-pool alert above it.
+///
+/// So: used = `blocks - bfree`, usable = used + `bavail`, and the percentage
+/// rounds UP (`df` never reports 99% for a filesystem that has 0.4% left).
+///
+/// A filesystem with no usable blocks at all reports 100: as full as it gets,
+/// and the reading that makes a reclaim sweep run rather than skip.
+pub(crate) fn used_pct(blocks: u64, bfree: u64, bavail: u64) -> u8 {
+    let used = blocks.saturating_sub(bfree);
+    let usable = used.saturating_add(bavail);
+    if usable == 0 {
+        return 100;
+    }
+    // Integer ceiling, and saturating: a percentage cannot exceed 100 even if a
+    // filesystem reports counters that do not add up.
+    let pct = (used.saturating_mul(100)).div_ceil(usable);
+    pct.min(100) as u8
+}
+
+/// Occupancy of the filesystem holding `path`, via `statvfs(3)`.
+///
+/// `None` when the call fails — and the caller must NOT read that as "empty".
+/// Reaper rule 4 (no visibility, defer): a sweep that cannot see how full the
+/// disk is has no business deciding it is full enough to start deleting.
+pub(crate) fn filesystem_used_pct(path: &std::path::Path) -> Option<u8> {
+    let c_path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).ok()?;
+    // SAFETY: `c_path` is a valid NUL-terminated string that outlives the call,
+    // and `stat` is a fully-owned, correctly-sized destination.
+    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) } != 0 {
+        return None;
+    }
+    Some(used_pct(
+        stat.f_blocks as u64,
+        stat.f_bfree as u64,
+        stat.f_bavail as u64,
+    ))
+}
+
 /// Confirmation gate, shared by all four prunes.
 ///
 /// Two different situations, deliberately not collapsed into one:
@@ -892,6 +939,41 @@ mod tests {
         let (take, keep) = classify_volumes(&[a]);
         assert!(take.is_empty());
         assert_eq!(keep[0].1, Keep::Provisioned);
+    }
+
+    /// A fórmula é a do `df`, e a diferença NÃO é cosmética: os blocos
+    /// reservados ao root contam como ocupados para quem não é root. Um motor
+    /// rootless nunca lhes toca, portanto contá-los como espaço livre reporta
+    /// um número mais BAIXO do que o operador vê — e o limiar dele foi lido do
+    /// `df`.
+    #[test]
+    fn a_ocupacao_e_a_que_o_df_reporta_nao_a_ingenua() {
+        // 1000 blocos, 100 livres, 50 disponíveis a quem não é root.
+        // df: usados=900, utilizáveis=950 → 95%. A ingénua daria 90%.
+        assert_eq!(used_pct(1000, 100, 50), 95);
+    }
+
+    /// Arredonda para CIMA: um disco com 0,4% livre não se lê como 99%.
+    #[test]
+    fn a_percentagem_arredonda_para_cima() {
+        assert_eq!(used_pct(1000, 4, 4), 100);
+        assert_eq!(used_pct(1000, 996, 996), 1, "1 bloco usado já não é 0%");
+    }
+
+    #[test]
+    fn os_extremos_nao_saem_da_gama() {
+        assert_eq!(used_pct(1000, 1000, 1000), 0, "vazio");
+        assert_eq!(used_pct(1000, 0, 0), 100, "cheio");
+        // Um sistema de ficheiros sem blocos utilizáveis lê-se como CHEIO, que
+        // é a leitura que faz uma varredura correr em vez de saltar.
+        assert_eq!(used_pct(0, 0, 0), 100);
+        // Contadores que não batem certo não podem produzir mais de 100 nem
+        // dar a volta: `bfree > blocks` satura em ZERO usados, e com blocos
+        // ainda disponíveis isso lê-se como um disco vazio.
+        assert_eq!(used_pct(10, 100, 50), 0);
+        // Mas sem NADA disponível ganha o ramo de cima — cheio, não vazio: é a
+        // leitura que faz a varredura correr em vez de saltar.
+        assert_eq!(used_pct(10, 100, 0), 100);
     }
 
     /// O âmbito é o filtro, e um filtro que não distingue «sem dono» de

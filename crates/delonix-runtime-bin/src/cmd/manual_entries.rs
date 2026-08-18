@@ -1866,6 +1866,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("reclaim space: stopped containers, unused images, unreferenced blobs, orphan rootfs directories", "delonix system prune"),
             ("in CI, where there is no terminal to confirm at", "delonix system prune -f"),
+            ("from a nightly timer: reclaim only when the disk is at 75% or above, and do nothing at all below it", "delonix system prune --auto --threshold 75"),
             ("also drop tagged images nobody uses, not just the dangling ones", "delonix system prune -a -f"),
         ],
         see_also: &["system df", "image rm", "container rm", "volumes ls"],

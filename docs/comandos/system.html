@@ -393,6 +393,20 @@ Options:
   -a, --all
           Also remove unused images that DO have a tag (not just the dangling ones)
 
+      --auto
+          SCHEDULED mode: reclaim only when the disk is at or above `--threshold`, and do nothing at all below it.
+          
+          This is the flag that makes `system prune` safe to put in a timer. Below the threshold it exits 0 having changed nothing, and that is SUCCESS, not a no-op to be fixed: pruning every night by habit deletes images that get pulled again in the morning, which costs bandwidth and start-up time and reclaims nothing that was a problem.
+          
+          It implies `--force` — an unattended sweep has nobody to answer a prompt — and it never touches volumes (see `volumes prune`).
+
+      --threshold &lt;THRESHOLD&gt;
+          Occupancy percentage at or above which `--auto` acts.
+          
+          Measured the way `df` measures it, on the filesystem holding the engine&#x27;s state. Keep it BELOW the threshold of whatever alerts on the same disk: the GC has to act before someone is woken up, and with equal numbers the alert always arrives first and the GC looks useless.
+          
+          [default: 75]
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -403,6 +417,10 @@ EXAMPLES:
 
   # in CI, where there is no terminal to confirm at
   delonix system prune -f
+
+  # from a nightly timer: reclaim only when the disk is at 75% or above, and
+  # do nothing at all below it
+  delonix system prune --auto --threshold 75
 
   # also drop tagged images nobody uses, not just the dangling ones
   delonix system prune -a -f
