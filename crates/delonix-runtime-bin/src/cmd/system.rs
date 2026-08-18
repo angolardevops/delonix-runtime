@@ -111,6 +111,28 @@ pub enum SystemCmd {
         /// Also remove unused images that DO have a tag (not just the dangling ones).
         #[arg(short, long)]
         all: bool,
+        /// SCHEDULED mode: reclaim only when the disk is at or above
+        /// `--threshold`, and do nothing at all below it.
+        ///
+        /// This is the flag that makes `system prune` safe to put in a timer.
+        /// Below the threshold it exits 0 having changed nothing, and that is
+        /// SUCCESS, not a no-op to be fixed: pruning every night by habit
+        /// deletes images that get pulled again in the morning, which costs
+        /// bandwidth and start-up time and reclaims nothing that was a problem.
+        ///
+        /// It implies `--force` — an unattended sweep has nobody to answer a
+        /// prompt — and it never touches volumes (see `volumes prune`).
+        #[arg(long)]
+        auto: bool,
+        /// Occupancy percentage at or above which `--auto` acts.
+        ///
+        /// Measured the way `df` measures it, on the filesystem holding the
+        /// engine's state. Keep it BELOW the threshold of whatever alerts on
+        /// the same disk: the GC has to act before someone is woken up, and
+        /// with equal numbers the alert always arrives first and the GC looks
+        /// useless.
+        #[arg(long, default_value_t = 75, requires = "auto", value_parser = clap::value_parser!(u8).range(1..=100))]
+        threshold: u8,
     },
     /// Active network connections per container (via conntrack).
     ///
@@ -179,7 +201,12 @@ pub fn run(action: SystemCmd) -> Result<()> {
             force,
             dry_run,
         } => super::backup::cmd_restore(&archive, force, dry_run, &state_root()),
-        SystemCmd::Prune { all, force } => cmd_prune(all, force),
+        SystemCmd::Prune {
+            all,
+            force,
+            auto,
+            threshold,
+        } => cmd_prune(all, force, auto, threshold),
         SystemCmd::Monitor {
             interval,
             no_stream,
@@ -290,7 +317,61 @@ fn cmd_monitor(interval: u64, no_stream: bool) -> Result<()> {
 /// networks. **Volumes are deliberately not here** — `docker system prune`
 /// leaves them alone too, and removing a volume destroys data that nothing else
 /// in this sweep does.
-fn cmd_prune(all: bool, force: bool) -> Result<()> {
+/// Whether the engine's filesystem is full enough for `--auto` to act, saying
+/// out loud what it measured either way.
+///
+/// Both answers print. A scheduled job whose only output is silence is
+/// indistinguishable from one that never ran — which is exactly the failure
+/// mode a nightly reaper has to avoid, because nobody reads a journal that
+/// says nothing.
+///
+/// Errors when the occupancy cannot be read at all. That is reaper rule 4 (no
+/// visibility, defer) with the sign deliberately chosen: a sweep that cannot
+/// see how full the disk is must not assume it is full and start deleting, and
+/// must not assume it is empty and report success — it has to fail loudly so
+/// the timer goes red and somebody looks.
+fn above_threshold(threshold: u8) -> Result<bool> {
+    let root = super::util::state_root();
+    let Some(pct) = super::prune::filesystem_used_pct(&root) else {
+        return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+            "cannot read the occupancy of the filesystem holding {path} — refusing to reclaim \
+             blind",
+            &[("path", &root.display().to_string())],
+        )));
+    };
+    if pct < threshold {
+        println!(
+            "{}",
+            super::po::tf(
+                "disk at {pct}%, below the {threshold}% threshold — nothing to do",
+                &[
+                    ("pct", &pct.to_string()),
+                    ("threshold", &threshold.to_string()),
+                ]
+            )
+        );
+        return Ok(false);
+    }
+    println!(
+        "{}",
+        super::po::tf(
+            "disk at {pct}%, at or above the {threshold}% threshold — reclaiming",
+            &[
+                ("pct", &pct.to_string()),
+                ("threshold", &threshold.to_string()),
+            ]
+        )
+    );
+    Ok(true)
+}
+
+fn cmd_prune(all: bool, force: bool, auto: bool, threshold: u8) -> Result<()> {
+    // THE GATE COMES FIRST — before opening a store, before listing anything.
+    // A scheduled sweep that is not going to act should cost nothing and, above
+    // all, should not have started deciding what to delete.
+    if auto && !above_threshold(threshold)? {
+        return Ok(());
+    }
     let (images, store) = open_stores()?;
 
     // CONFIRM FIRST. This is destructive well beyond what its name suggests: the
@@ -310,7 +391,11 @@ fn cmd_prune(all: bool, force: bool) -> Result<()> {
         )
     });
     if !super::prune::confirm(
-        force,
+        // `--auto` IS the unattended mode: it runs from a timer, where there is
+        // no terminal and nobody to answer. Requiring `--force` beside it would
+        // be a second word for the same intent, and the kind of papercut that
+        // ends with `--auto` in a unit file that fails every night.
+        force || auto,
         super::po::t(
             "`system prune` removes every stopped container and unreferenced data — pass --force \
              to confirm when not on a terminal",

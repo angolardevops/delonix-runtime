@@ -8258,6 +8258,30 @@ msgstr "nenhum volume sem referências para remover"
 msgid "kept {name}: {reason}"
 msgstr "mantido {name}: {reason}"
 
+msgid "SCHEDULED mode: reclaim only when the disk is at or above `--threshold`, and do nothing at all below it"
+msgstr "modo AGENDADO: só recupera espaço com o disco no limiar de `--threshold` ou acima, e abaixo disso não faz rigorosamente nada"
+
+msgid "SCHEDULED mode: reclaim only when the disk is at or above `--threshold`, and do nothing at all below it.\n\nThis is the flag that makes `system prune` safe to put in a timer. Below the threshold it exits 0 having changed nothing, and that is SUCCESS, not a no-op to be fixed: pruning every night by habit deletes images that get pulled again in the morning, which costs bandwidth and start-up time and reclaims nothing that was a problem.\n\nIt implies `--force` — an unattended sweep has nobody to answer a prompt — and it never touches volumes (see `volumes prune`)."
+msgstr "modo AGENDADO: só recupera espaço com o disco no limiar de `--threshold` ou acima, e abaixo disso não faz rigorosamente nada.\n\nÉ esta a flag que torna o `system prune` seguro dentro de um temporizador. Abaixo do limiar sai com 0 sem ter mudado nada, e isso é SUCESSO, não um nada-feito para corrigir: podar todas as noites por hábito apaga imagens que voltam a ser puxadas de manhã — custa banda e tempo de arranque, e não recupera nada que fosse problema.\n\nImplica `--force` — uma varredura não assistida não tem quem responda a uma pergunta — e nunca toca em volumes (ver `volumes prune`)."
+
+msgid "Occupancy percentage at or above which `--auto` acts"
+msgstr "percentagem de ocupação a partir da qual o `--auto` age"
+
+msgid "Occupancy percentage at or above which `--auto` acts.\n\nMeasured the way `df` measures it, on the filesystem holding the engine's state. Keep it BELOW the threshold of whatever alerts on the same disk: the GC has to act before someone is woken up, and with equal numbers the alert always arrives first and the GC looks useless."
+msgstr "percentagem de ocupação a partir da qual o `--auto` age.\n\nMedida como o `df` a mede, no sistema de ficheiros que contém o estado do motor. Mantém-na ABAIXO do limiar de qualquer alerta sobre o mesmo disco: o GC tem de agir antes de alguém ser acordado, e com números iguais o alerta chega sempre primeiro e o GC parece inútil."
+
+msgid "disk at {pct}%, below the {threshold}% threshold — nothing to do"
+msgstr "disco a {pct}%, abaixo do limiar de {threshold}% — nada a fazer"
+
+msgid "disk at {pct}%, at or above the {threshold}% threshold — reclaiming"
+msgstr "disco a {pct}%, no limiar de {threshold}% ou acima — a recuperar espaço"
+
+msgid "cannot read the occupancy of the filesystem holding {path} — refusing to reclaim blind"
+msgstr "não consigo ler a ocupação do sistema de ficheiros que contém {path} — recuso limpar às cegas"
+
+msgid "from a nightly timer: reclaim only when the disk is at 75% or above, and do nothing at all below it"
+msgstr "a partir de um temporizador nocturno: só recupera espaço com o disco a 75% ou acima, e abaixo disso não faz rigorosamente nada"
+
 msgid "volume owned by namespace '{ns}' — owners that do own volumes: {list}"
 msgstr "volume do namespace '{ns}' — donos que têm mesmo volumes: {list}"
 
