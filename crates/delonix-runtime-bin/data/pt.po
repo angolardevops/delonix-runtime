@@ -8913,3 +8913,12 @@ msgstr "Instala o node_exporter do Prometheus e activa-o neste endereço (flag n
 
 msgid "Install the Prometheus node_exporter and enable it on this address (bare flag: `0.0.0.0:9100`). Without it the image ships no listener."
 msgstr "Instala o node_exporter do Prometheus e activa-o neste endereço (flag nua: `0.0.0.0:9100`). Sem ela a imagem não leva listener nenhum."
+
+msgid "package inventory: {n} packages"
+msgstr "inventário de pacotes: {n} pacotes"
+
+msgid "{n} (see {path})"
+msgstr "{n} (ver {path})"
+
+msgid "<unknown> (built before the inventory existed, or pulled)"
+msgstr "<desconhecido> (construída antes do inventário existir, ou puxada)"

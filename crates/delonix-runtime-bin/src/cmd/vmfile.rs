@@ -640,6 +640,13 @@ pub(crate) fn build(
         // A VMfile build starts `FROM` a cloud image and is customized by
         // cloud-init on first boot — that is the whole premise of the format.
         cloud_init: Some(true),
+        // Um build de VMfile corre a receita de quem o escreveu, não a
+        // dourada, por isso não emite inventário — mas a proveniência do
+        // construtor vale na mesma.
+        packages: None,
+        packages_sha256: None,
+        built_by: Some(format!("delonix {}", env!("CARGO_PKG_VERSION"))),
+        base_sha256: None,
     };
     store.save(&img)?;
     println!("{tag}");

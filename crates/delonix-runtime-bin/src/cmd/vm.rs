@@ -3321,6 +3321,7 @@ mod tests {
             default_memory: None,
             default_backend: None,
             cloud_init: None,
+            ..Default::default()
         }
     }
 
@@ -3497,6 +3498,7 @@ mod tests {
             default_memory: memory,
             default_backend: backend,
             cloud_init: None,
+            ..Default::default()
         }
     }
 
