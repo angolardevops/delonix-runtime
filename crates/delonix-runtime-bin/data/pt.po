@@ -8847,3 +8847,21 @@ msgstr "Define uma password de root na imagem (sem ela, nenhuma conta tem passwo
 
 msgid "Set a root password in the image (without it, no account has one)."
 msgstr "Define uma password de root na imagem (sem ela, nenhuma conta tem password)."
+
+msgid "Install the Prometheus node_exporter and enable it on this address (bare flag: `0.0.0.0:9100`)"
+msgstr "Instala o node_exporter do Prometheus e activa-o neste endereço (flag nua: `0.0.0.0:9100`)"
+
+msgid "Install the Prometheus node_exporter and enable it on this address (bare flag: `0.0.0.0:9100`)."
+msgstr "Instala o node_exporter do Prometheus e activa-o neste endereço (flag nua: `0.0.0.0:9100`)."
+
+msgid "installing the node_exporter metrics agent on {listen}..."
+msgstr "a instalar o agente de métricas node_exporter em {listen}..."
+
+msgid "checksum mismatch"
+msgstr "checksum não bate certo"
+
+msgid "Install the Prometheus node_exporter and enable it on this address (bare flag: `0.0.0.0:9100`). Without it the image ships no listener"
+msgstr "Instala o node_exporter do Prometheus e activa-o neste endereço (flag nua: `0.0.0.0:9100`). Sem ela a imagem não leva listener nenhum"
+
+msgid "Install the Prometheus node_exporter and enable it on this address (bare flag: `0.0.0.0:9100`). Without it the image ships no listener."
+msgstr "Instala o node_exporter do Prometheus e activa-o neste endereço (flag nua: `0.0.0.0:9100`). Sem ela a imagem não leva listener nenhum."

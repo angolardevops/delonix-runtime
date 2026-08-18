@@ -448,6 +448,10 @@ pub enum ImageCmd {
         /// Set a root password in the image (without it, no account has one).
         #[arg(long)]
         root_password: Option<String>,
+        /// Install the Prometheus node_exporter and enable it on this address
+        /// (bare flag: `0.0.0.0:9100`). Without it the image ships no listener.
+        #[arg(long, require_equals = true, num_args = 0..=1, default_missing_value = "0.0.0.0:9100")]
+        node_exporter: Option<String>,
     },
 }
 
@@ -601,6 +605,10 @@ pub enum VmSub {
         /// Set a root password in the image (without it, no account has one).
         #[arg(long)]
         root_password: Option<String>,
+        /// Install the Prometheus node_exporter and enable it on this address
+        /// (bare flag: `0.0.0.0:9100`). Without it the image ships no listener.
+        #[arg(long, require_equals = true, num_args = 0..=1, default_missing_value = "0.0.0.0:9100")]
+        node_exporter: Option<String>,
     },
 }
 
@@ -683,6 +691,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
                 no_k8s,
                 delonix_bin,
                 root_password,
+                node_exporter,
             } => VmImageCmd::Build {
                 tag,
                 file,
@@ -702,6 +711,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
                 no_k8s,
                 delonix_bin,
                 root_password,
+                node_exporter,
             },
         });
     }
@@ -918,6 +928,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
             no_k8s,
             delonix_bin,
             root_password,
+            node_exporter,
         } => VmImageCmd::Build {
             tag,
             file,
@@ -937,6 +948,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
             no_k8s,
             delonix_bin,
             root_password,
+            node_exporter,
         },
         ImageCmd::Tag { .. }
         | ImageCmd::History { .. }
