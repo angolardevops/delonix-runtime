@@ -2222,7 +2222,7 @@ fn cmd_build(
                 )
             );
             let bin = fetch_node_exporter(store, NODE_EXPORTER_VERSION)?;
-            splice_before_machine_id(ops, node_exporter_steps(&bin, listen))
+            splice_before_machine_id(ops, node_exporter_steps(&bin, listen)?)
         }
         None => ops,
     };
@@ -2449,6 +2449,10 @@ fn cmd_build(
 /// the same path as everything else this build downloads.
 pub(crate) const NODE_EXPORTER_VERSION: &str = "1.9.1";
 
+/// The binary's name inside the guest. `--copy-in` keeps the basename, so
+/// this is also the name the cached file MUST have host-side.
+pub(crate) const NODE_EXPORTER_BIN: &str = "node_exporter";
+
 /// `<hash>  <file>` (GNU coreutils shape) — the form Prometheus, Ubuntu and
 /// Debian all publish, as opposed to the BSD `SHA256 (f) = h` that Rocky uses
 /// (`parse_bsd_checksum`).
@@ -2481,15 +2485,24 @@ pub(crate) fn node_exporter_asset(version: &str) -> String {
 /// path with no checksum on it.
 pub(crate) fn fetch_node_exporter(store: &VmImageStore, version: &str) -> Result<PathBuf> {
     let version = VmImageStore::sanitize(version);
-    let cached = store
+    // **O nome do ficheiro faz parte do contrato.** O `virt-customize
+    // --copy-in` preserva o BASENAME, e tanto o `ExecStart` da unit como o
+    // `chmod` a seguir nomeiam `/usr/local/bin/node_exporter`. Guardar a cache
+    // como `node_exporter-1.9.1` punha lá `/usr/local/bin/node_exporter-1.9.1`
+    // e o build morria no chmod — apanhado a CONSTRUIR uma imagem, não a ler
+    // o código. Mesma armadilha do `gen.py`, que tira o `Usage:` do argv[0].
+    // Daí um directório por versão, com o binário sempre com o nome certo.
+    let vdir = store
         .base_cache_path(Distro::Ubuntu, "unused")
         .with_file_name(format!("node_exporter-{version}"));
+    let cached = vdir.join(NODE_EXPORTER_BIN);
     if cached.exists() {
         return Ok(cached);
     }
+    std::fs::create_dir_all(&vdir)?;
     let asset = node_exporter_asset(&version);
     let base = format!("https://github.com/prometheus/node_exporter/releases/download/v{version}");
-    let tarball = cached.with_extension("tar.gz");
+    let tarball = vdir.join("node_exporter.tar.gz");
     eprintln!(
         "{}",
         super::po::tf(
@@ -2519,24 +2532,27 @@ pub(crate) fn fetch_node_exporter(store: &VmImageStore, version: &str) -> Result
     // `--strip-components=1` because the tarball has one top-level directory
     // named after the release; `-C` into the cache dir and rename, so a failed
     // extraction never leaves a half-written binary under the final name.
-    let dir = cached.parent().unwrap_or(Path::new(".")).to_path_buf();
-    let staged = dir.join(format!("node_exporter-{version}.staged"));
-    let _ = std::fs::remove_file(&staged);
-    let member = format!("node_exporter-{version}.linux-amd64/node_exporter");
+    let member = format!("node_exporter-{version}.linux-amd64/{NODE_EXPORTER_BIN}");
     run_tool(
         "tar",
         &[
             "-xzf",
             &tarball.to_string_lossy(),
             "-C",
-            &dir.to_string_lossy(),
+            &vdir.to_string_lossy(),
             "--strip-components=1",
             &member,
         ],
     )?;
-    let _ = std::fs::rename(dir.join("node_exporter"), &staged);
-    std::fs::rename(&staged, &cached)?;
     let _ = std::fs::remove_file(&tarball);
+    // Fail-closed: sem isto, um tarball com outro layout deixava a cache vazia
+    // e o erro só aparecia lá dentro do convidado, como o chmod que falhou.
+    if !cached.exists() {
+        return Err(Error::Invalid(format!(
+            "{asset}: {}",
+            super::po::t("the archive did not contain the expected binary")
+        )));
+    }
     Ok(cached)
 }
 
@@ -2600,7 +2616,19 @@ pub(crate) fn splice_before_machine_id(
     ops
 }
 
-pub(crate) fn node_exporter_steps(bin: &Path, listen: &str) -> Vec<CustomizeOp> {
+pub(crate) fn node_exporter_steps(bin: &Path, listen: &str) -> Result<Vec<CustomizeOp>> {
+    // O contrato do basename, verificado AQUI e não confiado a quem chama: o
+    // `--copy-in` preserva o nome do ficheiro, e a unit fala de
+    // `/usr/local/bin/node_exporter`. Um src com outro nome instala um binário
+    // que a unit nunca encontra — e a primeira vez isso só apareceu dentro do
+    // convidado, no `chmod`, com um build de 4 minutos já pago.
+    if bin.file_name().and_then(|n| n.to_str()) != Some(NODE_EXPORTER_BIN) {
+        return Err(Error::Invalid(format!(
+            "{}: {}",
+            super::po::t("the node_exporter binary must be named"),
+            NODE_EXPORTER_BIN
+        )));
+    }
     let unit = format!(
         "[Unit]\\n\
          Description=Prometheus node exporter\\n\
@@ -2625,7 +2653,7 @@ pub(crate) fn node_exporter_steps(bin: &Path, listen: &str) -> Vec<CustomizeOp> 
          [Install]\\n\
          WantedBy=multi-user.target\\n"
     );
-    vec![
+    Ok(vec![
         CustomizeOp::CopyIn(bin.to_path_buf(), "/usr/local/bin".to_string()),
         CustomizeOp::RunCommand("chmod 0755 /usr/local/bin/node_exporter".into()),
         CustomizeOp::RunCommand(
@@ -2638,7 +2666,7 @@ pub(crate) fn node_exporter_steps(bin: &Path, listen: &str) -> Vec<CustomizeOp> 
              chmod 644 /etc/systemd/system/node-exporter.service && \
              systemctl enable node-exporter.service"
         )),
-    ]
+    ])
 }
 
 pub(crate) fn download_ubuntu_base(store: &VmImageStore, release: &str) -> Result<PathBuf> {
@@ -5306,7 +5334,8 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
 
     #[test]
     fn o_node_exporter_corre_sem_privilegio_no_endereco_pedido() {
-        let ops = node_exporter_steps(&PathBuf::from("/tmp/node_exporter"), "127.0.0.1:9100");
+        let ops = node_exporter_steps(&PathBuf::from("/tmp/node_exporter"), "127.0.0.1:9100")
+            .expect("um src com o nome certo tem de passar");
         let cmds: Vec<&str> = ops
             .iter()
             .filter_map(|o| match o {
@@ -5338,7 +5367,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         let base = shared_account_steps(&[], Distro::Ubuntu, None);
         let with = splice_before_machine_id(
             base.clone(),
-            node_exporter_steps(&PathBuf::from("/tmp/node_exporter"), ":9100"),
+            node_exporter_steps(&PathBuf::from("/tmp/node_exporter"), ":9100").unwrap(),
         );
         let last = match with.last().expect("não pode ficar vazio") {
             CustomizeOp::RunCommand(c) => c.clone(),
@@ -5346,6 +5375,17 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         };
         assert!(last.contains("/etc/machine-id"), "último passo: {last}");
         assert_eq!(with.len(), base.len() + 4);
+    }
+
+    #[test]
+    fn um_binario_com_o_nome_errado_e_recusado_antes_de_construir() {
+        // Bug REAL, apanhado a construir uma imagem e não a ler código: a cache
+        // chamava-se `node_exporter-1.9.1`, o `--copy-in` preservou o basename,
+        // e o build morreu lá dentro em `chmod /usr/local/bin/node_exporter:
+        // No such file or directory` — depois de já ter instalado tudo.
+        let err = node_exporter_steps(&PathBuf::from("/tmp/node_exporter-1.9.1"), ":9100");
+        assert!(err.is_err(), "um nome com versão tem de ser recusado");
+        assert!(format!("{}", err.unwrap_err()).contains("node_exporter"));
     }
 
     #[test]
