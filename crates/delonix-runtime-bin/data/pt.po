@@ -9074,4 +9074,55 @@ msgstr "destrói TAMBÉM toda a VM que não esteja a correr, discos incluídos �
 
 msgid "only one isolation namespace — and the NAMESPACE column stays, which it does not when every row would say `default`"
 msgstr "só um namespace de isolamento — e a coluna NAMESPACE fica, o que não acontece quando todas as linhas diriam `default`"
+# ---- help e output do `system prune --dry-run` -----------------------------
+
+msgid "Print what this sweep WOULD take, split by category, and take nothing"
+msgstr "Imprime o que esta varredura LEVARIA, separado por categoria, e não leva nada"
+
+msgid ""
+"Print what this sweep WOULD take, split by category, and take nothing.\n"
+"\n"
+"The split is the reason it exists. `prune` mixes two different things in one verb — resources somebody DECLARED (stopped containers, tagged images) and debris that never had a record (orphan directories, unreferenced blobs) — and only the second is safe to hand to a timer. Whoever arms `--auto` has to be able to see which half it would touch first.\n"
+"\n"
+"Combines with `--auto`: it then also says whether the threshold gate would let the sweep run at all right now.\n"
+"\n"
+"The three network reapers (orphan slirps, ingress refs, host ports) are NOT previewed — they compute and act in one call inside `delonix-net`. None of them frees a byte of disk, so everything that reclaims space is in the report."
+msgstr ""
+"Imprime o que esta varredura LEVARIA, separado por categoria, e não leva nada.\n"
+"\n"
+"A separação é a razão de existir. O `prune` mistura duas coisas diferentes num só verbo — recursos que alguém DECLAROU (containers parados, imagens etiquetadas) e lixo que nunca teve registo (directórios órfãos, blobs sem referência) — e só a segunda é segura de entregar a um temporizador. Quem arma o `--auto` tem de conseguir ver qual das metades ele tocaria, antes de a tocar.\n"
+"\n"
+"Combina com o `--auto`: passa também a dizer se o portão do limiar deixaria a varredura correr agora.\n"
+"\n"
+"Os três ceifeiros de rede (slirps órfãos, refs de ingress, portas do host) NÃO são pré-visualizados — calculam e agem na mesma chamada dentro do `delonix-net`. Nenhum deles liberta um byte de disco, portanto tudo o que recupera espaço está no relatório."
+
+msgid "--auto: the threshold gate WOULD let this run now"
+msgstr "--auto: o portão do limiar DEIXARIA isto correr agora"
+
+msgid "--auto: the threshold gate would NOT let this run now (the report below is what it would take once it does)"
+msgstr "--auto: o portão do limiar NÃO deixaria isto correr agora (o relatório abaixo é o que levaria quando deixar)"
+
+msgid "nothing to reclaim"
+msgstr "nada a recuperar"
+
+msgid "DECLARED — resources someone created (a `prune` destroys these):"
+msgstr "DECLARADO — recursos que alguém criou (um `prune` destrói estes):"
+
+msgid "  {n} stopped container(s), {i} image(s) — {size}"
+msgstr "  {n} container(s) parado(s), {i} imagem(ns) — {size}"
+
+msgid "DEBRIS — never had a record (safe for an unattended sweep):"
+msgstr "LIXO — nunca teve registo (seguro para uma varredura sem ninguém a ver):"
+
+msgid "  {d} orphan dir(s), {b} blob(s), {g} cgroup(s), {n} network(s) — {size}"
+msgstr "  {d} directório(s) órfão(s), {b} blob(s), {g} cgroup(s), {n} rede(s) — {size}"
+
+msgid "total if BOTH halves run: {size}"
+msgstr "total se AS DUAS metades correrem: {size}"
+
+msgid "see what it WOULD take, split into declared resources and debris, and take nothing — the report to read before putting `--auto` in a timer"
+msgstr "ver o que LEVARIA, separado entre recursos declarados e lixo, e não levar nada — o relatório a ler antes de meter o `--auto` num temporizador"
+
+msgid "what the scheduled sweep would do right now, threshold gate included"
+msgstr "o que a varredura agendada faria agora mesmo, portão do limiar incluído"
 

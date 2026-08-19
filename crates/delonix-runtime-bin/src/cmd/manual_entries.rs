@@ -1886,6 +1886,8 @@ pub static ENTRIES: &[Entry] = &[
             ("in CI, where there is no terminal to confirm at", "delonix system prune -f"),
             ("from a nightly timer: reclaim only when the disk is at 75% or above, and do nothing at all below it", "delonix system prune --auto --threshold 75"),
             ("also drop tagged images nobody uses, not just the dangling ones", "delonix system prune -a -f"),
+            ("see what it WOULD take, split into declared resources and debris, and take nothing — the report to read before putting `--auto` in a timer", "delonix system prune --dry-run"),
+            ("what the scheduled sweep would do right now, threshold gate included", "delonix system prune --dry-run --auto"),
         ],
         see_also: &["system df", "image rm", "container rm", "volumes ls"],
     },
