@@ -178,6 +178,7 @@ Commands:
   push             Push a local golden VM image to an OCI registry (`vm push &lt;name&gt; &lt;target&gt;`)
   apply            Apply the `kind: Vm` documents of a manifest
   init             Bootstrap a project with a VM manifest
+  prune            Reclaim the VM state directory: everything in it no VM record accounts for
   snapshot         Point-in-time snapshots of a VM (checkpoints in the VM&#x27;s own disk)
   dash             Dashboard (KPIs + table) of the VMs — interactive TUI, or `--once` snapshot
   help             Print this message or the help of the given subcommand(s)
@@ -197,7 +198,7 @@ COMMAND MAP:
   Networking   reach · bridge · unbridge
   Storage      build · pull · ls-remote · push · convert
   Declarative  init · apply
-  Maintenance  snapshot
+  Maintenance  prune · snapshot
   Dashboards   dash
 
 EXAMPLES:
@@ -994,6 +995,11 @@ Options:
           [default: table]
           [possible values: table, json]
 
+      --namespace &lt;NAMESPACE&gt;
+          Show only the VMs of this isolation namespace (see `vm create --namespace`). Omit to list every namespace.
+          
+          Filtering is the only way to read a namespace off this listing on a host that uses none: the NAMESPACE column hides itself when every row would say `default`. Passing the flag prints the value verbatim instead, so the filter is visible in its own output.
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -1008,9 +1014,13 @@ EXAMPLES:
   # the same rows as JSON, for a script
   delonix vm ls -o json
 
+  # only one isolation namespace — and the NAMESPACE column stays, which it
+  # does not when every row would say `default`
+  delonix vm ls --namespace teamA
+
 SEE ALSO:
-  delonix vm status · delonix vm describe · delonix vm dash · delonix image vm
-  ls
+  delonix vm status · delonix vm describe · delonix vm dash · delonix vm prune
+  · delonix image vm ls
 
   delonix › vm › ls</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix vm ls</code></pre></div>
@@ -1096,6 +1106,7 @@ EXAMPLES:
 
 SEE ALSO:
   delonix vm stop · delonix vm ls · delonix vm create · delonix vm snapshot ls
+  · delonix vm prune
 
   delonix › vm › rm</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix vm rm node1</code></pre></div>
