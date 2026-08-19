@@ -2234,7 +2234,7 @@ fn cmd_build(
                         "{}",
                         super::po::t("pre-seeding the kubeadm images on the host...")
                     );
-                    preseed_k8s_images(&work_dir, kubeadm_deb, k8s_version.as_deref())
+                    preseed_k8s_images(&work_dir, kubeadm_deb)
                 });
             k8s_customization_steps_offline(
                 &debs,
@@ -3796,11 +3796,45 @@ fn download_archive_debs(
 /// `kubeadm config images list` or the pre-seed step does not succeed, and
 /// logs (does not fail) a per-image pull error — a slower first boot beats a
 /// broken one.
-fn preseed_k8s_images(
-    work: &Path,
-    kubeadm_deb: &Path,
-    k8s_version: Option<&str>,
-) -> Option<PathBuf> {
+/// A versão `X.Y.Z` a partir do nome de um `.deb` do `pkgs.k8s.io`
+/// (`kubeadm_1.34.10-1.1_amd64.deb` → `1.34.10`). `None` se o nome não tiver a
+/// forma esperada — nesse caso o `kubeadm` resolve sozinho, e o pior que acontece
+/// é usar a versão dele por omissão.
+///
+/// # Porque é que a versão NÃO pode vir do `--k8s-version`
+///
+/// A mesma flag alimenta dois consumidores que querem formatos DIFERENTES, e não
+/// há valor que sirva os dois (medido a 2026-08-19):
+///
+/// - o repo e o filtro de pacotes querem a MINOR. `--k8s-version 1.34` resolve
+///   `kubeadm 1.34.10-1.1`; com `1.34.10` o prefixo do filtro passa a `1.34.10.`,
+///   não casa com `1.34.10-1.1`, e o build aborta com «the k8s repo … does not
+///   have 'kubeadm'».
+/// - o `kubeadm config images list` quer a PATCH. Com `--kubernetes-version=v1.34`
+///   responde «version "v1.34" doesn't match patterns for neither semantic version
+///   nor labels»; com `v1.34.10` lista as imagens, sem rede.
+///
+/// Resultado: quem seguia o exemplo da própria ajuda (`--k8s-version 1.34`) ficava
+/// com a pré-semeagem SALTADA — e em silêncio, porque é best-effort e só avisa. A
+/// golden saía sem as imagens core, cada `kubeadm init` redescarregava-as dentro da
+/// VM, e isso é lento o suficiente para estourar o deadline do rate-limiter do
+/// kubeadm: o `wait-control-plane` falhava e o cluster nunca ficava Ready.
+///
+/// O `.deb` é a fonte certa porque é o que vai mesmo ser instalado no convidado — a
+/// versão das imagens fica assim amarrada à dos binários, por construção.
+fn patch_version_do_deb(deb: &Path) -> Option<String> {
+    let nome = deb.file_name()?.to_str()?;
+    // `<pacote>_<versão>_<arch>.deb`, com a versão a trazer o revision do Debian
+    // (`1.34.10-1.1`), que não faz parte da versão do Kubernetes.
+    let versao = nome.split('_').nth(1)?;
+    let sem_revision = versao.split('-').next()?;
+    if sem_revision.split('.').count() < 3 {
+        return None;
+    }
+    Some(sem_revision.to_string())
+}
+
+fn preseed_k8s_images(work: &Path, kubeadm_deb: &Path) -> Option<PathBuf> {
     let extract_dir = work.join("kubeadm-host");
     let status = Command::new("dpkg-deb")
         .args([
@@ -3820,15 +3854,32 @@ fn preseed_k8s_images(
         return None;
     }
 
+    // A versao vem do NOME DO `.deb` que acabamos de descarregar e verificar,
+    // nunca do `--k8s-version` da linha de comandos. Ver `patch_version_do_deb`.
     let mut cmd = Command::new(&kubeadm_bin);
     cmd.arg("config").arg("images").arg("list");
-    if let Some(v) = k8s_version {
+    if let Some(v) = patch_version_do_deb(kubeadm_deb) {
         cmd.arg(format!("--kubernetes-version=v{v}"));
     }
+    // O `stderr` do kubeadm ENTRA no aviso. Sem ele o modo de falha era mudo: a
+    // golden saia sem imagens, cada `kubeadm init` redescarregava-as dentro da VM,
+    // o `wait-control-plane` estourava, e nada ligava o segundo sintoma a primeira
+    // causa. Diagnosticar isto obrigou a correr o binario a mao; nao deve voltar a.
     let out = match cmd.output() {
         Ok(o) if o.status.success() => o,
-        _ => {
-            eprintln!("warning: `kubeadm config images list` failed — skipping image pre-seed");
+        Ok(o) => {
+            eprintln!(
+                "warning: `kubeadm config images list` failed: {} — the golden goes out \
+                 WITHOUT the core images, and each `kubeadm init` will fetch them inside the VM",
+                String::from_utf8_lossy(&o.stderr).trim()
+            );
+            return None;
+        }
+        Err(e) => {
+            eprintln!(
+                "warning: could not run `kubeadm config images list` ({e}) — the golden goes out \
+                 WITHOUT the core images, and each `kubeadm init` will fetch them inside the VM"
+            );
             return None;
         }
     };
@@ -3839,6 +3890,10 @@ fn preseed_k8s_images(
         .map(str::to_string)
         .collect();
     if images.is_empty() {
+        eprintln!(
+            "warning: `kubeadm config images list` printed nothing — the golden goes out \
+             WITHOUT the core images, and each `kubeadm init` will fetch them inside the VM"
+        );
         return None;
     }
 
@@ -5107,6 +5162,53 @@ pub(crate) fn run_tool(bin: &str, args: &[&str]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn versao_de_pre_semeagem_vem_do_deb_com_a_patch() {
+        // O `.deb` que o build descarrega traz a PATCH e o revision do Debian; o
+        // `kubeadm --kubernetes-version` só aceita semver completo.
+        assert_eq!(
+            super::patch_version_do_deb(std::path::Path::new(
+                "/tmp/build/kubeadm_1.34.10-1.1_amd64.deb"
+            )),
+            Some("1.34.10".to_string())
+        );
+    }
+
+    #[test]
+    fn a_minor_da_linha_de_comandos_nao_serve_para_o_kubeadm() {
+        // Guarda da regressão. `--k8s-version 1.34` — a forma que o repo do
+        // pkgs.k8s.io EXIGE, e a que a ajuda dá como exemplo — chegava aqui intacta
+        // e o kubeadm recusava-a: «version "v1.34" doesn't match patterns for
+        // neither semantic version nor labels». A pré-semeagem era saltada em
+        // silêncio e a golden saía sem as imagens core.
+        let do_deb =
+            super::patch_version_do_deb(std::path::Path::new("kubeadm_1.34.10-1.1_amd64.deb"))
+                .expect("o nome tem a forma canónica do repo");
+        assert_eq!(do_deb, "1.34.10");
+        assert_eq!(
+            do_deb.matches('.').count(),
+            2,
+            "o kubeadm exige vX.Y.Z — uma minor volta a saltar a pré-semeagem"
+        );
+    }
+
+    #[test]
+    fn nome_de_deb_sem_patch_nao_inventa_versao() {
+        // Sem terceira componente devolve None e o kubeadm resolve sozinho — melhor
+        // do que passar-lhe uma versão que ele recusa.
+        for nome in [
+            "kubeadm_1.34-1.1_amd64.deb",
+            "kubeadm.deb",
+            "kubeadm_amd64.deb",
+        ] {
+            assert_eq!(
+                super::patch_version_do_deb(std::path::Path::new(nome)),
+                None,
+                "{nome}"
+            );
+        }
+    }
+
     use super::*;
 
     /// Gap closed: `OFFICIAL_VM_BASE_IMAGE` existed but had no default-selection
