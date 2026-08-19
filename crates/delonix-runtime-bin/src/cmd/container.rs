@@ -1602,10 +1602,12 @@ pub enum ContainerCmd {
         #[arg(long = "label")]
         labels: Vec<String>,
         // ---- resources (cgroup v2) ----
-        /// Memory limit (`64M`, `2G`, `max`). Default: `max` (no cap).
+        /// Memory limit (`64M`, `2G`, `max`). Default: a quarter of the engine's
+        /// budget (`DELONIX_DEFAULT_PCT`); `max` lifts the cap entirely.
         #[arg(short = 'm', long)]
         memory: Option<String>,
-        /// CPU quota (number of cores, e.g. `0.5`, `2`). Default: `1.0`.
+        /// CPU quota (number of cores, e.g. `0.5`, `2`). Default: the lesser of
+        /// 1.0 and a quarter of the engine's budget.
         #[arg(short = 'c', long)]
         cpus: Option<String>,
         /// Relative CPU weight (`cpu.weight`, 1–10000) under contention.
