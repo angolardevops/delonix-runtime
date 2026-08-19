@@ -56,6 +56,15 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["cluster create", "cluster ls", "system prune"],
     },
     Entry {
+        path: "cluster prune",
+        group: "Maintenance",
+        examples: &[
+            ("collect what clusters with no nodes left behind: their directory, their exported kubeconfig, and the `~/.kube/config` context still pointing at a port that may now answer for something else", "delonix cluster prune"),
+            ("in CI, where there is no terminal to confirm at", "delonix cluster prune -f"),
+        ],
+        see_also: &["cluster delete", "cluster ls", "vm prune", "system prune"],
+    },
+    Entry {
         path: "cluster kubeadm",
         group: "Lifecycle",
         examples: &[
@@ -1626,6 +1635,15 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["stack apply", "stack plan", "stack ls", "compose down"],
     },
     Entry {
+        path: "stack prune",
+        group: "Maintenance",
+        examples: &[
+            ("remove what this stack owns and the manifest no longer declares, WITHOUT re-running everything else the file declares", "delonix stack prune -f prod.yaml"),
+            ("see the list first and remove nothing", "delonix stack prune -f prod.yaml --dry-run"),
+        ],
+        see_also: &["stack apply", "stack destroy", "stack plan", "stack ls"],
+    },
+    Entry {
         path: "stack wait",
         group: "Lifecycle",
         examples: &[
@@ -1936,7 +1954,17 @@ pub static ENTRIES: &[Entry] = &[
             ("stop it and delete the overlay and the record", "delonix vm rm dev"),
             ("drop the local state even when the libvirt cleanup fails, instead of leaving a record you cannot get rid of", "delonix vm rm dev --force"),
         ],
-        see_also: &["vm stop", "vm ls", "vm create", "vm snapshot ls"],
+        see_also: &["vm stop", "vm ls", "vm create", "vm snapshot ls", "vm prune"],
+    },
+    Entry {
+        path: "vm prune",
+        group: "Maintenance",
+        examples: &[
+            ("reclaim the VM state directory: stale create locks, sockets and overlays of VMs that no longer exist — declared VMs and the disks their records point to are left alone", "delonix vm prune"),
+            ("in CI, where there is no terminal to confirm at", "delonix vm prune -f"),
+            ("ALSO destroy every VM that is not running, disks included — the `container prune` behaviour, opt-in because a stopped VM is a machine at rest, not a corpse", "delonix vm prune --stopped"),
+        ],
+        see_also: &["vm rm", "vm ls", "cluster prune", "system prune"],
     },
     Entry {
         path: "vm start",
@@ -1970,8 +1998,9 @@ pub static ENTRIES: &[Entry] = &[
             ("every VM, with vcpus, memory, state and the IP it got", "delonix vm ls"),
             ("also knock on 22/6443/10250/80/443 to see what already answers — live network I/O, so it is off by default", "delonix vm ls --ports"),
             ("the same rows as JSON, for a script", "delonix vm ls -o json"),
+            ("only one isolation namespace — and the NAMESPACE column stays, which it does not when every row would say `default`", "delonix vm ls --namespace teamA"),
         ],
-        see_also: &["vm status", "vm describe", "vm dash", "image vm ls"],
+        see_also: &["vm status", "vm describe", "vm dash", "vm prune", "image vm ls"],
     },
     Entry {
         path: "vm status",
