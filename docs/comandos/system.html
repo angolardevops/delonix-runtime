@@ -407,6 +407,15 @@ Options:
           
           [default: 75]
 
+      --dry-run
+          Print what this sweep WOULD take, split by category, and take nothing.
+          
+          The split is the reason it exists. `prune` mixes two different things in one verb — resources somebody DECLARED (stopped containers, tagged images) and debris that never had a record (orphan directories, unreferenced blobs) — and only the second is safe to hand to a timer. Whoever arms `--auto` has to be able to see which half it would touch first.
+          
+          Combines with `--auto`: it then also says whether the threshold gate would let the sweep run at all right now.
+          
+          The three network reapers (orphan slirps, ingress refs, host ports) are NOT previewed — they compute and act in one call inside `delonix-net`. None of them frees a byte of disk, so everything that reclaims space is in the report.
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -424,6 +433,13 @@ EXAMPLES:
 
   # also drop tagged images nobody uses, not just the dangling ones
   delonix system prune -a -f
+
+  # see what it WOULD take, split into declared resources and debris, and take
+  # nothing — the report to read before putting `--auto` in a timer
+  delonix system prune --dry-run
+
+  # what the scheduled sweep would do right now, threshold gate included
+  delonix system prune --dry-run --auto
 
 SEE ALSO:
   delonix system df · delonix image rm · delonix container rm · delonix
