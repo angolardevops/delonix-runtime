@@ -1206,7 +1206,7 @@ struct PublishBody {
 ///
 /// O `container_ip` é validado antes de chegar ao mecanismo: é o que acaba numa
 /// regra de DNAT, e uma string arbitrária ali é uma regra arbitrária.
-async fn publish_port(Json(b): Json<PublishBody>) -> Response {
+async fn publish_port(State(s): State<AppState>, Json(b): Json<PublishBody>) -> Response {
     if delonix_net::Cidr::parse_addr(&b.container_ip).is_none() {
         return err_response(Error::Invalid(format!(
             "invalid container IP: '{}'",
@@ -1216,18 +1216,102 @@ async fn publish_port(Json(b): Json<PublishBody>) -> Response {
     if !valid_arg(&b.spec) {
         return err_response(Error::Invalid("invalid publish spec".to_string()));
     }
+    // BUG FIXED HERE: this route used to call `infra::publish_port` and STOP —
+    // it wrote the actual state and skipped the desired one. A port published
+    // this way lived only in the slirp's `hostfwd` table and in the nft rules
+    // inside the infra netns, both of which die with the ingress. The ONLY
+    // durable copy of a publication is the container record's `ports`, and it is
+    // exclusively from there that `cmd_start` and `reconcile_after_respawn`
+    // replay them — so a port published here worked until the next ingress
+    // restart and then vanished with nothing left to rebuild it from.
+    //
+    // Measured on a live host: 18 container records all with `ports: []` while
+    // 127.0.0.1:8077 and :8079 were serving HTTP — publications no record knew
+    // about. The engine could not have restored them; it did not know they were
+    // wanted.
+    //
+    // Persist FIRST, publish second. The other order loses the record when the
+    // process dies between the two, and an unpublished-but-recorded port is the
+    // recoverable failure (the next start republishes it) while a
+    // published-but-unrecorded one is exactly the bug being fixed.
+    let ip = b.container_ip.clone();
+    let spec = b.spec.clone();
+    if let Err(e) = record_published_port(s.base.clone(), ip.clone(), spec.clone()).await {
+        return err_response(e);
+    }
     let r = tokio::task::spawn_blocking(move || {
         delonix_net::infra::publish_port(&b.container_ip, &b.spec)
     })
     .await;
     match r {
         Ok(Ok(())) => Json(serde_json::json!({ "ok": true })).into_response(),
-        Ok(Err(e)) => err_response(e),
+        Ok(Err(e)) => {
+            // The publication failed, so the record must not keep claiming it —
+            // otherwise the next start would replay a port the operator never got.
+            let _ = forget_published_port(s.base, Some(ip), spec).await;
+            err_response(e)
+        }
         Err(e) => err_response(Error::Runtime {
             context: "join",
             message: e.to_string(),
         }),
     }
+}
+
+/// Adds `spec` to the `ports` of the container that holds `container_ip`.
+///
+/// Silent when no container matches: the ingress addresses workloads by IP and
+/// nothing guarantees one of OUR records owns it (a VM, a foreign netns). The
+/// publication itself still proceeds — refusing it would break a caller that
+/// works today, and this function exists to record what it can, not to become a
+/// second admission gate.
+async fn record_published_port(base: PathBuf, ip: String, spec: String) -> Result<(), Error> {
+    with_container_store(base, move |store| {
+        for mut c in store.list()? {
+            if c.ip.as_deref() == Some(ip.as_str()) {
+                if !c.ports.contains(&spec) {
+                    c.ports.push(spec.clone());
+                    store.save(&c)?;
+                }
+                return Ok(());
+            }
+        }
+        Ok(())
+    })
+    .await
+}
+
+/// Drops a publication from whichever record claims it.
+///
+/// `ip` narrows the search when the caller knows it (the rollback path); the
+/// DELETE route knows only the host port, so it matches on that alone — which is
+/// correct, because a host port can only be published once at a time.
+async fn forget_published_port(
+    base: PathBuf,
+    ip: Option<String>,
+    spec_or_port: String,
+) -> Result<(), Error> {
+    with_container_store(base, move |store| {
+        let wanted_port = delonix_net::parse_publish(&spec_or_port)
+            .map(|(hp, _, _)| hp)
+            .unwrap_or_else(|_| spec_or_port.clone());
+        for mut c in store.list()? {
+            if ip.is_some() && c.ip != ip {
+                continue;
+            }
+            let before = c.ports.len();
+            c.ports.retain(|s| {
+                delonix_net::parse_publish(s)
+                    .map(|(hp, _, _)| hp != wanted_port)
+                    .unwrap_or(true)
+            });
+            if c.ports.len() != before {
+                store.save(&c)?;
+            }
+        }
+        Ok(())
+    })
+    .await
 }
 
 /// `DELETE /v1/net/publish/:host_port` — retira a publicação de um porto.
@@ -1237,10 +1321,13 @@ async fn publish_port(Json(b): Json<PublishBody>) -> Response {
 /// 200 aqui significa «a operação correu», não «havia o que remover». Inventar
 /// um 404 exigiria uma leitura que o mecanismo não oferece, e um 404 adivinhado
 /// é pior do que a verdade.
-async fn unpublish_port(Path(host_port): Path<String>) -> Response {
+async fn unpublish_port(State(s): State<AppState>, Path(host_port): Path<String>) -> Response {
     if host_port.is_empty() || !host_port.chars().all(|c| c.is_ascii_digit()) {
         return err_response(Error::Invalid(format!("invalid host port: '{host_port}'")));
     }
+    // Mirror of the publish path: drop the desired state too, or the next start
+    // would faithfully republish a port the operator has just asked to remove.
+    let _ = forget_published_port(s.base, None, host_port.clone()).await;
     let r =
         tokio::task::spawn_blocking(move || delonix_net::infra::unpublish_port(&host_port)).await;
     match r {
@@ -1424,6 +1511,114 @@ mod tests {
     async fn body_json(resp: Response) -> serde_json::Value {
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null)
+    }
+
+    /// Builds a saved container record with an IP, for the publish-persistence tests.
+    fn ctr_com_ip(base: &std::path::Path, id: &str, ip: &str) -> Store {
+        let store = Store::open(base.join("containers")).unwrap();
+        let mut c = delonix_runtime_core::Container::new(
+            id.to_string(),
+            id.to_string(),
+            "alpine:3.20".to_string(),
+            vec!["sleep".to_string()],
+            "256m".to_string(),
+        );
+        c.ip = Some(ip.to_string());
+        c.network = Some("rede".to_string());
+        store.save(&c).unwrap();
+        store
+    }
+
+    /// THE REGRESSION GUARD. Publishing through the API used to touch only the
+    /// slirp/nft (the ACTUAL state) and leave `ports` empty, so nothing could
+    /// replay the publication after an ingress restart. Measured on a live host:
+    /// 18 records with `ports: []` while two of those ports were serving HTTP.
+    #[tokio::test]
+    async fn publicar_pela_api_fica_no_registo() {
+        let (st, _d) = test_state();
+        let store = ctr_com_ip(&st.base, "aaaa1111bbbb2222", "10.210.0.5");
+
+        record_published_port(
+            st.base.clone(),
+            "10.210.0.5".to_string(),
+            "18099:80".to_string(),
+        )
+        .await
+        .unwrap();
+
+        let c = store.list().unwrap().pop().unwrap();
+        assert_eq!(
+            c.ports,
+            vec!["18099:80".to_string()],
+            "a publicação não chegou ao registo — nada a poderia repor num reinício"
+        );
+    }
+
+    /// Publishing the same spec twice must not stack duplicates: the replay on
+    /// start walks `ports` and would try to publish the same host port twice,
+    /// the second failing as already in use.
+    #[tokio::test]
+    async fn publicar_duas_vezes_nao_duplica() {
+        let (st, _d) = test_state();
+        let store = ctr_com_ip(&st.base, "cccc3333dddd4444", "10.210.0.6");
+        for _ in 0..3 {
+            record_published_port(
+                st.base.clone(),
+                "10.210.0.6".to_string(),
+                "18100:80".to_string(),
+            )
+            .await
+            .unwrap();
+        }
+        assert_eq!(store.list().unwrap().pop().unwrap().ports.len(), 1);
+    }
+
+    /// An IP that belongs to no record of ours (a VM, a foreign netns) must not
+    /// be an error: the ingress addresses workloads by IP and this function
+    /// records what it can — it is not a second admission gate.
+    #[tokio::test]
+    async fn ip_desconhecido_nao_falha_nem_toca_em_ninguem() {
+        let (st, _d) = test_state();
+        let store = ctr_com_ip(&st.base, "eeee5555ffff6666", "10.210.0.7");
+        record_published_port(
+            st.base.clone(),
+            "10.210.99.99".to_string(),
+            "18101:80".to_string(),
+        )
+        .await
+        .expect("um IP alheio não é erro");
+        assert!(store.list().unwrap().pop().unwrap().ports.is_empty());
+    }
+
+    /// Un-publishing must drop the DESIRED state too, or the next start would
+    /// faithfully republish a port the operator just removed.
+    #[tokio::test]
+    async fn despublicar_tira_do_registo() {
+        let (st, _d) = test_state();
+        let store = ctr_com_ip(&st.base, "7777aaaa8888bbbb", "10.210.0.8");
+        record_published_port(
+            st.base.clone(),
+            "10.210.0.8".to_string(),
+            "18102:80".to_string(),
+        )
+        .await
+        .unwrap();
+
+        let resp = router(st)
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/v1/net/publish/18102")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(
+            store.list().unwrap().pop().unwrap().ports.is_empty(),
+            "o registo continuou a pedir um porto que já foi retirado"
+        );
     }
 
     #[tokio::test]
