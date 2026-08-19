@@ -3185,10 +3185,9 @@ pub fn default_memory_max() -> String {
 pub fn default_cpus() -> String {
     let budget_centicores = host_ncpu() * host_reserve_pct();
     let share = (budget_centicores * default_workload_pct() / 100) as f64 / 100.0;
-    format!(
-        "{:.2}",
-        share.min(LEGACY_DEFAULT_CPUS).max(MIN_DEFAULT_CPUS)
-    )
+    // `clamp` panics if max < min; both bounds are the constants above, so the
+    // order is fixed at compile time and cannot invert at runtime.
+    format!("{:.2}", share.clamp(MIN_DEFAULT_CPUS, LEGACY_DEFAULT_CPUS))
 }
 
 fn host_ncpu() -> u64 {
