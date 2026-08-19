@@ -172,6 +172,7 @@ Commands:
   ls        List the structure the manifest composes, and whether each resource exists
   plan      Shows what an `apply` WOULD change, without changing anything
   validate  Validates the manifest WITHOUT touching anything (dry-run)
+  prune     Remove what this stack owns and the manifest no longer declares
   help      Print this message or the help of the given subcommand(s)
 
 Options:
@@ -182,9 +183,10 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 COMMAND MAP:
-  Lifecycle  apply · destroy · wait
-  Create     init
-  Inspect    plan · ls · describe · validate
+  Lifecycle    apply · destroy · wait
+  Create       init
+  Inspect      plan · ls · describe · validate
+  Maintenance  prune
 
 EXAMPLES:
   # everything a manifest declares, in dependency order
