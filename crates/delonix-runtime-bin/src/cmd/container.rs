@@ -351,14 +351,19 @@ pub(crate) fn desired_container_fields(
         "volumes".into(),
         list_key(spec.volumes.iter().map(|v| volume_spec_key(v)).collect()),
     );
-    // `max` is what the engine stores for "no cap" (cgroup v2's own word).
+    // Undeclared limits are DERIVED (a quarter of the engine's budget), never
+    // absent — so the desired state matches what `cmd_run` will really apply.
+    // These two used to be `"max"`/`"1.0"`; a literal here and a derived value
+    // there would make every such container read as drifted forever.
     f.insert(
         "memory".into(),
-        spec.memory.clone().unwrap_or_else(|| "max".into()),
+        spec.memory
+            .clone()
+            .unwrap_or_else(runtime::default_memory_max),
     );
     f.insert(
         "cpus".into(),
-        spec.cpus.clone().unwrap_or_else(|| "1.0".into()),
+        spec.cpus.clone().unwrap_or_else(runtime::default_cpus),
     );
     f.insert("privileged".into(), spec.privileged.to_string());
     f.insert("restartPolicy".into(), spec.restart.clone());
@@ -399,11 +404,11 @@ fn desired_fields_from_run_opts(o: &RunOpts) -> std::collections::BTreeMap<Strin
     );
     f.insert(
         "memory".into(),
-        o.memory.clone().unwrap_or_else(|| "max".into()),
+        o.memory.clone().unwrap_or_else(runtime::default_memory_max),
     );
     f.insert(
         "cpus".into(),
-        o.cpus.clone().unwrap_or_else(|| "1.0".into()),
+        o.cpus.clone().unwrap_or_else(runtime::default_cpus),
     );
     f.insert("privileged".into(), o.privileged.to_string());
     f.insert("restartPolicy".into(), o.restart.clone());
@@ -3204,8 +3209,12 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             ],
         )));
     }
-    // `max` = no memory cap (cgroup v2); in k8s the pod's cgroup already limits.
-    let eff_memory = memory.unwrap_or_else(|| "max".to_string());
+    // HOUSE RULE: a workload started without `-m` gets a QUARTER of the engine's
+    // budget, not `"max"`. It used to get `"max"` — cgroup-v2 for no ceiling at
+    // all — which let one leaking container consume everything the slice had,
+    // while the engine only PRINTED a warning saying so. Under k8s the pod
+    // cgroup caps it anyway, so the derived ceiling costs that path nothing.
+    let eff_memory = memory.unwrap_or_else(runtime::default_memory_max);
     let mut c = Container::new(id.clone(), cname, image.clone(), cmd, eff_memory);
     c.namespace = namespace.clone();
     c.env = img.config.env.clone();
@@ -3262,9 +3271,11 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     }
 
     // ---- resources (cgroup v2) ----
-    if let Some(cp) = cpus {
-        c.cpus = cp;
-    }
+    // Always resolved, never left to `Container::new`'s `"1.0"`: that literal is
+    // the right fallback for DESERIALISING an old record, and the wrong policy
+    // for a new container — 1 core is 3% of a 32-thread host and 50% of a 2-vCPU
+    // node, so the same default under- and over-protects on different machines.
+    c.cpus = cpus.unwrap_or_else(runtime::default_cpus);
     c.cpu_weight = cpu_weight;
     c.cpuset = cpuset;
     c.cgroup_parent = cgroup_parent;

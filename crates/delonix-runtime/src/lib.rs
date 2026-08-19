@@ -3121,6 +3121,76 @@ fn host_mem_bytes() -> u64 {
         .unwrap_or(0)
 }
 
+/// Percentage of Delonix's OWN budget that ONE workload may take when it was
+/// started without declared limits — the house rule that no unlimited
+/// container, VM or cluster node exceeds a QUARTER of what the engine has.
+///
+/// A fraction of the SLICE (`host_reserve_pct()`% of the host), not of the
+/// host: the slice IS the engine's budget, so four unlimited workloads fill it
+/// exactly and the arithmetic composes. Clamped to `1..=100` so a typo in the
+/// environment cannot silently disable the ceiling — the failure mode this
+/// whole function exists to remove.
+fn default_workload_pct() -> u64 {
+    std::env::var("DELONIX_DEFAULT_PCT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|p| (1..=100).contains(p))
+        .unwrap_or(25)
+}
+
+/// Historical default CPU share, in cores. Kept as the UPPER bound of
+/// `default_cpus` rather than deleted — see there for why.
+const LEGACY_DEFAULT_CPUS: f64 = 1.0;
+
+/// Floor for the derived CPU default, in cores. On a 1-vCPU node a quarter of
+/// 85% is 0.21 cores, tight enough that an image's own entrypoint can time out
+/// before it serves anything; below this the ceiling stops being protection and
+/// becomes a fault of its own.
+const MIN_DEFAULT_CPUS: f64 = 0.25;
+
+/// The memory ceiling for a workload that declared none, in a form
+/// `parse_mem_bytes` accepts.
+///
+/// BUG FIXED HERE: `-m` used to default to `"max"` — cgroup-v2 for NO CEILING,
+/// copied from Docker — so one leaking container could take the engine's entire
+/// budget, and `warn_if_unprotected_memory` merely PRINTED a warning about it.
+/// The engine's own docs claimed the opposite (`write_limit`: "limits are
+/// MANDATORY — a container should never run without a resource ceiling"), which
+/// made this a gap between declared doctrine and behaviour, not just a default.
+///
+/// Returns `"max"` ONLY when the host's memory is unreadable: sizing a ceiling
+/// from a number we do not have would be inventing protection rather than
+/// providing it, and the caller's warning path still fires.
+pub fn default_memory_max() -> String {
+    let mem = host_mem_bytes();
+    if mem == 0 {
+        return "max".into();
+    }
+    let budget = mem / 100 * host_reserve_pct();
+    let share_mib = budget / 100 * default_workload_pct() / (1024 * 1024);
+    // 64 MiB floor: under it even a shell's page cache trips the OOM killer, so
+    // a smaller ceiling would report as a workload bug instead of a bad default.
+    format!("{}M", share_mib.max(64))
+}
+
+/// The CPU ceiling for a workload that declared none, in cores.
+///
+/// The MINIMUM of the historical `1.0` and the quarter-share, because this rule
+/// must only ever TIGHTEN. On a 32-thread host a quarter-share is 6.8 cores —
+/// widening the default from 1.0 to that would be a regression wearing the
+/// costume of a safety feature. On a 2-vCPU node the quarter-share is 0.42 and
+/// it is the historical `1.0` (half the box) that was always too loose. The
+/// absolute default was never wrong in one direction; it was wrong in BOTH,
+/// depending on the machine, which is what a fraction fixes.
+pub fn default_cpus() -> String {
+    let budget_centicores = host_ncpu() * host_reserve_pct();
+    let share = (budget_centicores * default_workload_pct() / 100) as f64 / 100.0;
+    format!(
+        "{:.2}",
+        share.min(LEGACY_DEFAULT_CPUS).max(MIN_DEFAULT_CPUS)
+    )
+}
+
 fn host_ncpu() -> u64 {
     std::thread::available_parallelism()
         .map(|n| n.get() as u64)
@@ -3807,8 +3877,9 @@ fn warn_if_unprotected_memory(c: &Container, leaf_parent: Option<&str>) {
     ONCE.call_once(|| {
         eprintln!(
             "delonix: warning — this container has NO memory ceiling, at any level.\n\
-             \x20 `-m` defaults to `max` (as in Docker) and no aggregate ceiling applies here,\n\
-             \x20 so a leak in the workload can take the whole host down.\n\
+             \x20 `-m` normally defaults to a quarter of the engine's budget, but the host's\n\
+             \x20 memory could not be read, so no ceiling could be derived — and no aggregate\n\
+             \x20 one applies here either, so a leak in the workload can take the whole host down.\n\
              \x20 Fix it with either:\n\
              \x20   delonix container run -m 512M …            # cap this container\n\
              \x20   systemd-run --user --scope -p Delegate=yes …  # let Delonix own a cgroup it can cap"
@@ -6094,6 +6165,87 @@ mod limit_update_tests {
 
 #[cfg(test)]
 mod tests {
+    /// The derived ceilings must COMPOSE: four workloads without declared limits
+    /// fill the engine's budget exactly and no more. This is the whole point of
+    /// taking a quarter of the SLICE rather than a quarter of the host — with the
+    /// latter, four of them would be 100% of the machine and only the aggregate
+    /// ceiling would catch it.
+    #[test]
+    fn quatro_cargas_sem_limites_enchem_o_orcamento_e_nao_o_host() {
+        let host_mib = 32 * 1024u64;
+        let reserve = 85u64; // host_reserve_pct default
+        let pct = 25u64; // default_workload_pct default
+        let budget = host_mib / 100 * reserve;
+        let share = budget / 100 * pct;
+        // Never OVER the budget — that is the property that matters. Integer
+        // division loses a little at each of the two steps (here 95 MiB of
+        // 27795), so four shares land just under, never above.
+        assert!(
+            4 * share <= budget,
+            "4 x {share} = {} excede o orçamento de {budget}",
+            4 * share
+        );
+        assert!(
+            budget - 4 * share < budget / 100,
+            "perda de arredondamento acima de 1% do orçamento"
+        );
+        assert!(
+            4 * share < host_mib,
+            "quatro cargas nunca podem somar o host inteiro"
+        );
+    }
+
+    /// The CPU rule may only ever TIGHTEN the historical `1.0`. A quarter-share
+    /// on a big host is 6.8 cores; if `default_cpus` ever returned that, this
+    /// "safety feature" would have widened the default sevenfold.
+    #[test]
+    fn default_de_cpu_nunca_afrouxa_o_historico() {
+        let cores: f64 = super::default_cpus().parse().expect("cpus parseável");
+        assert!(
+            cores <= super::LEGACY_DEFAULT_CPUS,
+            "default_cpus() = {cores} — afrouxou acima do histórico de {}",
+            super::LEGACY_DEFAULT_CPUS
+        );
+        assert!(
+            cores >= super::MIN_DEFAULT_CPUS,
+            "default_cpus() = {cores} — abaixo do piso de {}",
+            super::MIN_DEFAULT_CPUS
+        );
+    }
+
+    /// A memory default of `max` is the bug this work removes. On any host whose
+    /// `/proc/meminfo` is readable — every host that runs the tests — the derived
+    /// value must be a real number, never cgroup-v2's word for "no ceiling".
+    #[test]
+    fn default_de_memoria_nunca_e_max_num_host_legivel() {
+        let v = super::default_memory_max();
+        assert_ne!(v, "max", "voltou ao default sem tecto");
+        assert!(v.ends_with('M'), "formato inesperado: {v}");
+        let mib: u64 = v.trim_end_matches('M').parse().expect("MiB parseável");
+        assert!(mib >= 64, "abaixo do piso de 64 MiB: {v}");
+        // And it must be a real fraction of the host, not the whole thing.
+        assert!(
+            super::parse_mem_bytes(&v) < super::host_mem_bytes(),
+            "o default ({v}) não pode ser o host inteiro"
+        );
+    }
+
+    /// `DELONIX_DEFAULT_PCT` is clamped, so a typo cannot silently disable the
+    /// ceiling — the exact failure mode the derived default exists to remove.
+    #[test]
+    fn percentagem_invalida_cai_no_default_e_nao_desliga_o_tecto() {
+        for bad in ["0", "101", "-5", "vinte e cinco", ""] {
+            // SAFETY: single-threaded test, restored before returning.
+            unsafe { std::env::set_var("DELONIX_DEFAULT_PCT", bad) };
+            assert_eq!(
+                super::default_workload_pct(),
+                25,
+                "{bad:?} devia ter caído no default"
+            );
+        }
+        unsafe { std::env::remove_var("DELONIX_DEFAULT_PCT") };
+    }
+
     /// Achado de auditoria (MÉDIO): a lista default de masked/readonly paths era
     /// mais curta que a do runc — o motor mascarava só `sysrq-trigger`/`kcore`
     /// (controlo do host) e deixava passar os que vazam INFORMAÇÃO do host.
