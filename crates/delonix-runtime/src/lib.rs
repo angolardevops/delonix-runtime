@@ -4415,6 +4415,36 @@ fn write_etc_files(
     write_inside_rootfs(rootfs, "etc/hosts", &hosts);
 }
 
+/// `close_range(2)` pelo número da chamada, e não pelo wrapper do `libc`.
+///
+/// O wrapper `libc::close_range` só existe para `target_env = "gnu"`: a crate
+/// `libc` não o expõe em musl, e o build estático do binário Free morria aqui
+/// com `cannot find function `close_range` in crate `libc`` — dois erros, um
+/// por chamada. O número da chamada (`SYS_close_range`) está definido para
+/// Linux em qualquer libc, e este ficheiro já o usa no perfil de seccomp.
+///
+/// Continua a ser exactamente o que o sítio de chamada precisa: `syscall(2)` é
+/// um invólucro fino sem alocação, e isto corre depois de um `fork` num
+/// processo que pode ter outras threads — onde alocar é o que não se pode
+/// fazer.
+///
+/// Falhas são ignoradas de propósito, como eram antes: num kernel sem
+/// `close_range` (< 5.9) devolve `ENOSYS`, e o shim segue com descritores a
+/// mais em vez de não arrancar.
+///
+/// # Safety
+///
+/// Chama directamente o kernel. O chamador garante que os descritores em
+/// `[first, last]` não são usados depois disto.
+unsafe fn close_range_raw(first: u32, last: u32) {
+    libc::syscall(
+        libc::SYS_close_range,
+        first as libc::c_uint,
+        last as libc::c_uint,
+        0 as libc::c_uint,
+    );
+}
+
 fn spawn(
     store: &Store,
     container: &mut Container,
@@ -4826,11 +4856,11 @@ fn spawn(
                 let mut lo = 3u32;
                 for k in &keep {
                     if *k > lo {
-                        libc::close_range(lo, k - 1, 0);
+                        close_range_raw(lo, k - 1);
                     }
                     lo = k + 1;
                 }
-                libc::close_range(lo, u32::MAX, 0);
+                close_range_raw(lo, u32::MAX);
             }
             // The shim outlives `delonix run` (it lives as long as the container lives).
             // It must DROP the stdio inherited from the parent — otherwise a caller that captures
