@@ -3920,6 +3920,44 @@ fn apply_aggregate_ceiling(base: &str) {
         format!("{} 100000", ncpu * 100_000 / 100 * pct),
     );
     let _ = std::fs::write(format!("{base}/pids.max"), (ncpu * 4096).to_string());
+    // BUG FIXED HERE — o tecto agregado tinha TRÊS das quatro dimensões.
+    //
+    // `ensure_delonix_slice()` (o caminho ROOT) escreve memory/cpu/pids **e**
+    // `io.max`; este, o caminho ROOTLESS — o modo de bandeira do motor —
+    // escrevia só os três primeiros. O disco ficava sem tecto agregado, e o
+    // raciocínio que justifica os outros três aplica-se-lhe igual: N containers
+    // sem `--device-write-bps` somam escrita sem limite nenhum, e um só a
+    // escrever a fundo satura o disco e leva o host à frente — journald, store
+    // e swap incluídos — com memória e CPU já limitados.
+    //
+    // Medido ao vivo a 2026-08-19, numa VM com `io` já delegado ao
+    // `user@.service` ANTES de a base existir:
+    //
+    //     dlx-containers  memory.max  856956928     <- aplicado
+    //     dlx-containers  cpu.max     85000 100000  <- aplicado
+    //     dlx-containers  io.max      (vazio)       <- NUNCA escrito
+    //
+    // E o ficheiro aceitava a escrita à mão, com o valor exacto que esta função
+    // passa a escrever — portanto não era o kernel a recusar nem delegação em
+    // falta: era esta linha a não existir.
+    if let Some(v) = aggregate_io_max_value() {
+        let _ = std::fs::write(format!("{base}/io.max"), v);
+    }
+}
+
+/// A linha `io.max` do tecto AGREGADO — `MAJ:MIN rbps=N wbps=N` — ou `None`
+/// quando não há tecto a aplicar (`DELONIX_IO_MAX_BPS=0`) ou o dispositivo da
+/// store não é utilizável (overlay/tmpfs, `maj == 0`).
+///
+/// Separada da escrita para ser testável sem cgroupfs: o que se pode enganar
+/// aqui é a FORMA do valor, e essa não precisa de um kernel para ser verificada.
+fn aggregate_io_max_value() -> Option<String> {
+    let cap_bps = host_io_max_bps();
+    if cap_bps == 0 {
+        return None; // tecto desligado por ambiente
+    }
+    let dev = slice_io_device()?;
+    Some(format!("{dev} rbps={cap_bps} wbps={cap_bps}"))
 }
 
 fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
@@ -6720,7 +6758,61 @@ mod tests {
                 .trim(),
             "0"
         );
+        // O TECTO TINHA TRÊS DAS QUATRO DIMENSÕES, e este teste era cúmplice:
+        // verificava memória, CPU e pids e não perguntava pelo disco. Medido ao
+        // vivo a 2026-08-19, `dlx-containers` ficava com `io.max` vazio enquanto
+        // os outros três estavam aplicados.
+        //
+        // `slice_io_device()` devolve `None` em máquinas onde a store assenta em
+        // overlay/tmpfs (`maj == 0`), e aí não escrever é o comportamento certo —
+        // por isso a asserção só aperta quando há dispositivo.
+        match aggregate_io_max_value() {
+            Some(esperado) => {
+                let escrito = std::fs::read_to_string(base.join("io.max"))
+                    .expect("io.max tem de ser escrito quando há dispositivo");
+                assert_eq!(escrito, esperado);
+                let campos: Vec<&str> = escrito.split_whitespace().collect();
+                assert_eq!(campos.len(), 3, "forma `MAJ:MIN rbps=N wbps=N`: {escrito}");
+                assert!(
+                    campos[0].split(':').count() == 2
+                        && campos[0].split(':').all(|n| n.parse::<u32>().is_ok()),
+                    "o primeiro campo tem de ser MAJ:MIN, veio `{}`",
+                    campos[0]
+                );
+                assert!(campos[1].starts_with("rbps=") && campos[2].starts_with("wbps="));
+            }
+            None => assert!(
+                !base.join("io.max").exists(),
+                "sem dispositivo utilizável não se escreve io.max nenhum"
+            ),
+        }
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A FORMA do valor, que é o que se pode enganar sem um kernel por perto.
+    /// Uma linha mal formada é recusada pelo cgroupfs com `EINVAL` e o `let _ =`
+    /// da escrita engole-a — voltaria a dar um tecto que não existe.
+    #[test]
+    fn o_valor_do_tecto_agregado_de_io_tem_a_forma_que_o_cgroupfs_aceita() {
+        // `if let` e não `match`: numa máquina sem dispositivo utilizável não há
+        // nada a verificar — e é justamente por isso que a função devolve
+        // `Option` em vez de fabricar um valor.
+        if let Some(v) = aggregate_io_max_value() {
+            {
+                let campos: Vec<&str> = v.split_whitespace().collect();
+                assert_eq!(campos.len(), 3, "`MAJ:MIN rbps=N wbps=N`, veio `{v}`");
+                let (maj, min) = campos[0].split_once(':').expect("MAJ:MIN");
+                assert!(maj.parse::<u32>().is_ok() && min.parse::<u32>().is_ok());
+                assert_ne!(maj, "0", "maj 0 é dispositivo virtual e não serve de tecto");
+                for (campo, prefixo) in [(campos[1], "rbps="), (campos[2], "wbps=")] {
+                    let n = campo.strip_prefix(prefixo).expect(prefixo);
+                    assert!(
+                        n.parse::<u64>().map(|v| v > 0).unwrap_or(false),
+                        "`{campo}` tem de trazer um número positivo"
+                    );
+                }
+            }
+        }
     }
     /// A sonda de delegação tem de separar os DOIS casos que este projecto já
     /// mediu em hosts reais: um scope `Delegate=yes` (systemd faz chown dos
