@@ -168,6 +168,7 @@ Commands:
   load     Load local images into a kind-mode cluster&#x27;s nodes, **without a registry**
   apply    Apply the `kind: Cluster` document(s) of a manifest
   kube     Generate a Kubernetes manifest from a container/pod already running locally
+  prune    Reclaim the state of clusters that have no nodes left
   help     Print this message or the help of the given subcommand(s)
 
 Options:
@@ -183,6 +184,7 @@ COMMAND MAP:
   Inspect      ls
   Interact     load
   Declarative  kube · apply
+  Maintenance  prune
 
 EXAMPLES:
   # a local Kubernetes cluster with no manifest and no Docker
