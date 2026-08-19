@@ -153,6 +153,28 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   Delonix `SCAN`/`CPUS`/`MEMORY`/`SECURITY`/`HEALTHCHECK` independentemente do nome do ficheiro);
   `Delonixfile` é só o nome canónico por omissão.
 - `delonix vm` — create/ls/stop/rm/status, flags 1:1 com `delonix_vm::VmConfig`.
+  **`ls --namespace <ns>`** filtra pelo namespace de isolamento e é o único caminho para o LER
+  nesta listagem: a coluna `NAMESPACE` esconde-se sozinha (`drop_uninformative`) quando todas as
+  linhas diriam `default`, por isso passar a flag imprime o valor tal e qual.
+  **`prune` NÃO é o `container prune`.** Por omissão leva só o que nada referencia — locks de
+  criação obsoletos, sockets/pid/console de VMs que já não existem, overlays sem registo — e
+  deixa em paz toda a VM declarada, paradas incluídas. A razão é medida: na máquina onde isto
+  foi escrito as 17 VMs estavam TODAS paradas, e a semântica do Docker teria apagado o
+  laboratório inteiro. O teste de alcançabilidade é o que importa — `vms/` tinha `hadata`,
+  `labdata` e `pbs`, três pastas com **53 GiB de discos VIVOS** citados pelos `.xml`/`.json` de
+  VMs existentes, e nenhuma com nome de VM; uma varredura por nome chamava-lhes órfãos.
+  `--stopped` opta pelo comportamento destrutivo, e diz na pré-visualização quantas máquinas leva.
+- `delonix cluster prune` — o estado dos clusters que já não têm um único nó. Um cluster existe
+  enquanto houver containers com a etiqueta `io.x-k8s.kind.cluster` (o `cluster ls` deriva-o
+  assim, sem registo próprio), logo os nós removidos por outro caminho deixam para trás a pasta,
+  o kubeconfig e — o que não é cosmético — o contexto no `~/.kube/config` a apontar para uma
+  porta que entretanto pode ser de outra coisa. Reutiliza a limpeza do `kindmode::delete`; um
+  cluster COM nós, mesmo parados, nunca é tocado.
+- `delonix stack prune -f <manifesto>` — a metade de poda do `apply --prune`, isolada: remove o
+  que o stack possui e o manifesto já não declara, sem criar nem convergir nada. Constrói o mesmo
+  plano do `apply` e fica-lhe só com as mudanças `Delete`, para não haver uma segunda noção de
+  posse a divergir do `destroy`. Como o `destroy` e ao contrário dos outros `prune`, não pergunta
+  nada — o manifesto é a autorização, e o `--dry-run` é a pré-visualização.
 - `delonix system prune` — a varredura global. **`--auto --threshold N` é o modo AGENDADO**:
   mede a ocupação do sistema de ficheiros que contém o estado e, abaixo do limiar, sai a 0
   sem ter tocado em nada — isso é sucesso, não um nada-feito para corrigir. A porta corre
