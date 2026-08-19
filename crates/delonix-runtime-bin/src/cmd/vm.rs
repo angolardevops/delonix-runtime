@@ -705,6 +705,15 @@ pub enum VmCmd {
         /// column — the probe does live network I/O, off by default).
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: super::output::OutputFormat,
+        /// Show only the VMs of this isolation namespace (see `vm create
+        /// --namespace`). Omit to list every namespace.
+        ///
+        /// Filtering is the only way to read a namespace off this listing on a
+        /// host that uses none: the NAMESPACE column hides itself when every
+        /// row would say `default`. Passing the flag prints the value verbatim
+        /// instead, so the filter is visible in its own output.
+        #[arg(long)]
+        namespace: Option<String>,
     },
     /// Attach to the VM's serial console (interactive terminal).
     ///
@@ -816,6 +825,30 @@ pub enum VmCmd {
         name: String,
         /// Remove the local state even if the libvirt cleanup fails.
         #[arg(long, short = 'f')]
+        force: bool,
+    },
+    /// Reclaim the VM state directory: everything in it no VM record accounts for.
+    ///
+    /// Stale create locks, sockets, pidfiles and console logs of VMs that are
+    /// long gone, and overlay disks whose record was deleted from under them.
+    ///
+    /// **Declared VMs are not touched, stopped ones included.** That is the
+    /// deliberate difference from `container prune`: a stopped container is a
+    /// finished process, a stopped VM is a machine somebody built and will boot
+    /// again. Nor is any path a live VM's record points into — an extra data
+    /// disk lives in this same directory under a name of its own, and reading
+    /// the records is what tells the two apart.
+    ///
+    /// Pass `--stopped` for the `container prune` behaviour, which removes
+    /// every VM that is not running.
+    Prune {
+        /// ALSO remove every VM that is not running — records, disks and all.
+        ///
+        /// Destroys machines, not leftovers. Check `vm ls` first.
+        #[arg(long)]
+        stopped: bool,
+        /// Skip the confirmation prompt (REQUIRED when stdin is not a terminal).
+        #[arg(short = 'f', long)]
         force: bool,
     },
     /// Point-in-time snapshots of a VM (checkpoints in the VM's own disk).
@@ -1111,6 +1144,80 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
             }
         })
         .collect())
+}
+
+/// `vm prune` — the VM half of the reclaim family, with the one semantic
+/// difference that matters.
+///
+/// `container prune` removes every stopped container without asking twice,
+/// because a stopped container is a corpse. This does not, because a stopped VM
+/// is a machine at rest: on the host this was written against, all seventeen
+/// VMs were stopped, and the Docker semantics would have deleted the lab.
+///
+/// So the default sweeps leftovers only, and the preview names them before the
+/// prompt. `--stopped` opts into the destructive half, and gets its own line in
+/// the warning rather than being folded into the same sentence.
+fn cmd_prune(base: &std::path::Path, stopped: bool, force: bool) -> Result<()> {
+    let mut lines = Vec::new();
+    let entries = super::prune::doomed_vm_entries(base)?;
+    if !entries.is_empty() {
+        lines.push(super::po::tf(
+            "This will remove {n} orphan entr(y/ies) from the VM state directory: {list}",
+            &[
+                ("n", &entries.len().to_string()),
+                ("list", &entries.join(", ")),
+            ],
+        ));
+    }
+    if stopped {
+        let doomed: Vec<String> = delonix_vm::list(base)?
+            .into_iter()
+            .filter(|vm| !matches!(vm.status, delonix_runtime_core::Status::Running))
+            .map(|vm| vm.name)
+            .collect();
+        if !doomed.is_empty() {
+            lines.push(super::po::tf(
+                "This will DESTROY {n} VM(s), disks included: {list}",
+                &[
+                    ("n", &doomed.len().to_string()),
+                    ("list", &doomed.join(", ")),
+                ],
+            ));
+        }
+    }
+    let preview = (!lines.is_empty()).then(|| lines.join("\n"));
+
+    if !super::prune::confirm(
+        force,
+        super::po::t(
+            "`vm prune` removes the VM state nothing references — pass --force to confirm when \
+             not on a terminal",
+        ),
+        preview,
+        super::po::t(if stopped {
+            "--stopped was given: every VM that is not running will be removed, disks included. \
+             Continue? [y/N]"
+        } else {
+            "Declared VMs and the disks their records point to are left alone. Continue? [y/N]"
+        }),
+    )? {
+        return Ok(());
+    }
+
+    let v = super::prune::sweep_vms(base, stopped)?;
+    println!(
+        "{}",
+        super::po::tf(
+            "removed: {e} orphan entr(y/ies), {v} VM(s) — {size} freed",
+            &[
+                ("e", &v.entries.to_string()),
+                ("v", &v.vms.to_string()),
+                ("size", &v.freed.fmt()),
+            ]
+        )
+    );
+    super::prune::note_partial(v.freed);
+    Ok(())
 }
 
 /// Records that this stack owns the VM, and what it last applied.
@@ -1907,9 +2014,21 @@ pub fn run(action: VmCmd) -> Result<()> {
             }
             Ok(())
         }
-        VmCmd::Ls { ports, output } => {
+        VmCmd::Ls {
+            ports,
+            output,
+            namespace,
+        } => {
+            // One filter, applied once, before either renderer sees a row —
+            // table and JSON cannot disagree about what `--namespace` means.
+            let filter = |vms: Vec<delonix_runtime_core::Vm>| -> Vec<delonix_runtime_core::Vm> {
+                match namespace.as_deref() {
+                    None => vms,
+                    Some(ns) => vms.into_iter().filter(|vm| vm.namespace == ns).collect(),
+                }
+            };
             if output == super::output::OutputFormat::Json {
-                let rows: Vec<VmLsRow> = delonix_vm::list(&base)?
+                let rows: Vec<VmLsRow> = filter(delonix_vm::list(&base)?)
                     .into_iter()
                     .map(|vm| VmLsRow {
                         name: vm.name.clone(),
@@ -1955,7 +2074,7 @@ pub fn run(action: VmCmd) -> Result<()> {
             let mut t = output::Table::new(&cols)
                 // VCPUS is a count — right-aligned like the sizes.
                 .right_align(3);
-            for vm in delonix_vm::list(&base)? {
+            for vm in filter(delonix_vm::list(&base)?) {
                 let mut row = vec![
                     vm.name.clone(),
                     fmt_vm_image(&vm.disk),
@@ -1970,7 +2089,11 @@ pub fn run(action: VmCmd) -> Result<()> {
                     // namespace carries, so printing it on every row is a column
                     // of noise — it becomes a dash, and `drop_uninformative`
                     // removes it entirely on a host that uses no namespaces.
-                    if vm.namespace == "default" {
+                    //
+                    // Unless the operator asked for a namespace by name: then
+                    // the column IS the answer, and blanking it to `-` would
+                    // drop the one thing `--namespace default` was run to see.
+                    if namespace.is_none() && vm.namespace == "default" {
                         "-".to_string()
                     } else {
                         vm.namespace.clone()
@@ -2093,6 +2216,7 @@ pub fn run(action: VmCmd) -> Result<()> {
             println!("{name}");
             Ok(())
         }
+        VmCmd::Prune { stopped, force } => cmd_prune(&base, stopped, force),
         VmCmd::Apply { file } => {
             let path = manifest::resolve_path(file)?;
             let docs = manifest::load(&path)?;

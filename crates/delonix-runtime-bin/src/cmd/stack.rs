@@ -124,6 +124,32 @@ pub enum StackCmd {
         #[arg(long = "dry-run")]
         dry_run: bool,
     },
+    /// Remove what this stack owns and the manifest no longer declares.
+    ///
+    /// The pruning half of `apply --prune`, on its own: nothing is created,
+    /// nothing is converged, and a resource whose declaration is still in the
+    /// file is left exactly as it is. The use it exists for is the one
+    /// `apply --prune` cannot serve — dropping a resource from the manifest and
+    /// collecting it WITHOUT re-running everything else the stack declares.
+    ///
+    /// Ownership is the `delonix.io/stack` label, same as `destroy`: a resource
+    /// created by hand, or belonging to another stack, is never a candidate.
+    ///
+    /// Like `destroy` — and unlike `container prune`/`vm prune` — this asks
+    /// nothing at a terminal. The manifest is the authorization: what goes is
+    /// exactly what you deleted from a file you wrote. `--dry-run` is the
+    /// preview.
+    Prune {
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
+        file: Option<PathBuf>,
+        /// Stack name (owner of the resources). Default: a `kind: Stack`'s name,
+        /// else the manifest's directory.
+        #[arg(long)]
+        name: Option<String>,
+        /// List what would be removed, and remove nothing.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+    },
     /// Shows what an `apply` WOULD change, without changing anything.
     ///
     /// Compares the manifest against the machine and against the last spec this
@@ -253,6 +279,11 @@ pub fn run(action: StackCmd) -> Result<()> {
             name,
             dry_run,
         } => destroy(file, name, dry_run),
+        StackCmd::Prune {
+            file,
+            name,
+            dry_run,
+        } => prune_cmd(file, name, dry_run),
         StackCmd::Wait { file, timeout } => wait(file, timeout),
         StackCmd::Ls { file } => ls(file),
         StackCmd::Describe { file } => describe(file),
@@ -1427,6 +1458,49 @@ fn prune(changes: &[Change]) -> Result<()> {
         destroy_one(&c.kind, &c.name)?;
     }
     Ok(())
+}
+
+/// `stack prune` — [`prune`]'s work, reachable without an `apply`.
+///
+/// Builds the same plan `apply` builds and keeps only its `Delete` changes, so
+/// the answer to "what does this stack own that the file no longer declares" is
+/// computed in ONE place. A second notion of ownership is how `destroy` and
+/// `apply --prune` would start disagreeing about the same manifest.
+fn prune_cmd(file: Option<PathBuf>, name: Option<String>, dry_run: bool) -> Result<()> {
+    let path = manifest::resolve_path(file)?;
+    let docs = manifest::load(&path)?;
+    let stack = stack_name(&path, name.as_deref());
+    let changes = build_plan(&docs, &stack)?;
+    let doomed: Vec<&Change> = teardown_order(&changes)
+        .into_iter()
+        .filter(|c| c.action == Action::Delete)
+        .collect();
+    if doomed.is_empty() {
+        println!(
+            "{}",
+            super::po::tf(
+                "stack \"{stack}\" declares everything it owns — nothing to prune",
+                &[("stack", &stack)],
+            )
+        );
+        // Not an error, for the same reason `destroy` is not: a prune that is
+        // already done has to succeed, or no teardown script can call it twice.
+        return Ok(());
+    }
+    if dry_run {
+        println!(
+            "{}",
+            super::po::tf(
+                "stack \"{stack}\" would remove {n} resource(s):",
+                &[("stack", &stack), ("n", &doomed.len().to_string())],
+            )
+        );
+        for c in doomed {
+            println!("  -   {}/{}", c.kind, c.name);
+        }
+        return Ok(());
+    }
+    prune(&changes)
 }
 
 /// `stack destroy` — removes everything this stack owns.

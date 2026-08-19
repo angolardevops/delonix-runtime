@@ -502,6 +502,24 @@ pub enum ClusterCmd {
         #[arg(long, default_value = "delonix", add = ArgValueCandidates::new(super::complete::clusters))]
         name: String,
     },
+    /// Reclaim the state of clusters that have no nodes left.
+    ///
+    /// A cluster exists as long as containers carry its label — `cluster ls`
+    /// derives it that way instead of keeping a registry that could drift. So a
+    /// cluster whose nodes went away by another route (`container rm`, `system
+    /// prune`, a lost rootfs) leaves its directory, its exported kubeconfig and
+    /// its `~/.kube/config` context behind, and nothing ever collects them.
+    ///
+    /// That context is the reason this is not cosmetic: it still points at
+    /// `127.0.0.1:<port>`, and by now that port may answer for something else.
+    ///
+    /// **A cluster with nodes is never touched, stopped ones included** — for
+    /// that there is `cluster delete`, which takes a name on purpose.
+    Prune {
+        /// Skip the confirmation prompt (REQUIRED when stdin is not a terminal).
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
     /// Load local images into a kind-mode cluster's nodes, **without a registry**.
     ///
     /// The equivalent of `kind load docker-image`: packs each image from the
@@ -639,6 +657,39 @@ pub fn run(action: ClusterCmd) -> Result<()> {
             let (images, store) = super::util::open_stores()?;
             return super::kindmode::delete(&images, &store, name);
         }
+        ClusterCmd::Prune { force } => {
+            let (_, store) = super::util::open_stores()?;
+            let doomed = super::kindmode::doomed_clusters(&store)?;
+            let preview = (!doomed.is_empty()).then(|| {
+                super::po::tf(
+                    "This will remove the leftover state of {n} cluster(s): {list}",
+                    &[
+                        ("n", &doomed.len().to_string()),
+                        ("list", &doomed.join(", ")),
+                    ],
+                )
+            });
+            if !super::prune::confirm(
+                force,
+                super::po::t(
+                    "`cluster prune` removes the state of clusters with no nodes left — pass \
+                     --force to confirm when not on a terminal",
+                ),
+                preview,
+                super::po::t(
+                    "Also removes their kubeconfig and the matching `~/.kube/config` context. \
+                     Continue? [y/N]",
+                ),
+            )? {
+                return Ok(());
+            }
+            let n = super::kindmode::prune(&store)?;
+            println!(
+                "{}",
+                super::po::tf("removed: {n} cluster leftover(s)", &[("n", &n.to_string())])
+            );
+            return Ok(());
+        }
         ClusterCmd::Load {
             images: ref refs,
             ref name,
@@ -654,6 +705,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
         | ClusterCmd::Delete { .. }
         | ClusterCmd::Init { .. }
         | ClusterCmd::Load { .. }
+        | ClusterCmd::Prune { .. }
         | ClusterCmd::Ls => {
             unreachable!("tratados acima")
         }

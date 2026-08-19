@@ -27,6 +27,17 @@
 //!   never touched volumes and still does not, exactly as `docker system prune`
 //!   leaves them alone. Removing a volume destroys data; it takes its own verb.
 //! * [`sweep_networks`] — empty auto-created `dlx-*` networks.
+//! * [`sweep_vms`] — the entries of `vms/` no VM record accounts for, and only
+//!   with `stopped` the VMs themselves.
+//!
+//! # `system prune` deliberately does NOT call `sweep_vms`
+//!
+//! Every other sweep here is safe to fold into the global one because what it
+//! takes is disposable. A VM is not: on the host `sweep_vms` was written
+//! against, all seventeen were stopped, and three directories holding 53 GiB of
+//! live disks sat in `vms/` under names no VM carries. `vm prune` therefore
+//! keeps its own verb and its own preview, the same way `volumes prune` does
+//! and for the same reason — the sweep destroys something somebody built.
 //!
 //! # The measurement is a LOWER BOUND, and says so
 //!
@@ -852,8 +863,254 @@ pub(crate) fn orphan_container_dirs(
     out
 }
 
+/// The suffixes a VM's state carries in `vms/`, longest first.
+///
+/// Order is load-bearing: `micro.sock.lock` has to yield `micro`, and a
+/// shortest-first scan would strip `.lock` and leave `micro.sock`.
+const VM_STATE_SUFFIXES: &[&str] = &[
+    ".sock.lock",
+    ".console",
+    ".qcow2",
+    ".json",
+    ".sock",
+    ".xml",
+    ".pid",
+    ".log",
+];
+
+/// **PURE** — the VM name an entry of `vms/` belongs to, and whether the shape
+/// is one prune is allowed to reason about at all.
+///
+/// `None` means "not a recognised piece of VM state": a bare directory, or
+/// anything else that landed here. Those are never doomed by name — see
+/// [`classify_vm_debris`].
+pub(crate) fn vm_state_owner(entry: &str) -> Option<&str> {
+    // `.NAME.lock` — the create lock, the one shape with the name in the middle.
+    if let Some(rest) = entry.strip_prefix('.') {
+        // A non-empty stem, or nothing: `..lock` would otherwise yield `""`,
+        // and an empty needle makes every `refs.contains` test true.
+        return rest.strip_suffix(".lock").filter(|stem| !stem.is_empty());
+    }
+    VM_STATE_SUFFIXES
+        .iter()
+        .find_map(|suf| entry.strip_suffix(suf))
+        .filter(|stem| !stem.is_empty())
+}
+
+/// **PURE** — splits the entries of the VM state directory into the ones prune
+/// may take and the ones it must leave alone.
+///
+/// Three independent tests have to agree before an entry is doomed, and the
+/// reason there are three is a measurement, not caution in the abstract. On the
+/// host this was written against, `vms/` held 63 entries against 17 VMs; a
+/// name-based sweep would have called `hadata`, `labdata` and `pbs` orphans and
+/// destroyed **53 GiB of live data** — three ZFS disks belonging to the
+/// `pve-ha-*` cluster, a NAS disk, and the substrate's backup server. Not one
+/// of them is named after a VM, because none of them IS a VM: they are extra
+/// disks that live records point INTO.
+///
+/// So:
+/// 1. the entry's owning name must not be a VM in the registry;
+/// 2. its name must not appear anywhere in a live VM's record (`refs`), which
+///    is what catches a directory whose name looks like nothing in particular;
+/// 3. its shape must be recognised VM state — [`vm_state_owner`] — or, for a
+///    plain directory, a `NAME.json`/`NAME.qcow2` sibling must prove that a VM
+///    called `NAME` once existed. A lone directory is NEVER swept.
+///
+/// Test 2 alone would be enough if every record parsed and every path were
+/// spelled the same way. Test 3 is there for the day one does not.
+pub(crate) fn classify_vm_debris(
+    entries: &[String],
+    live: &HashSet<String>,
+    refs: &str,
+    stems_with_record: &HashSet<String>,
+) -> Vec<String> {
+    let mut doomed: Vec<String> = entries
+        .iter()
+        .filter(|e| {
+            let owner = vm_state_owner(e);
+            // A plain directory is only ever debris when a sibling record names
+            // the same VM; on its own it is somebody's data.
+            let name = match owner {
+                Some(o) => o,
+                None => {
+                    if stems_with_record.contains(*e) {
+                        e.as_str()
+                    } else {
+                        return false;
+                    }
+                }
+            };
+            !live.contains(name) && !refs.contains(name)
+        })
+        .cloned()
+        .collect();
+    doomed.sort();
+    doomed
+}
+
+/// The entries of `vms/` a prune would remove — the preview that turns a blind
+/// `[y/N]` into an informed one, and the single place the decision is made.
+///
+/// `sweep_vms` calls exactly this: a preview computed by a second code path is
+/// a preview that can lie about what the sweep is about to do.
+pub(crate) fn doomed_vm_entries(base: &std::path::Path) -> Result<Vec<String>> {
+    let dir = base.join("vms");
+    let live: HashSet<String> = delonix_vm::list(base)?
+        .into_iter()
+        .map(|v| v.name)
+        .collect();
+
+    // Every live record, concatenated. A candidate whose name appears anywhere
+    // in here is pointed at by a VM that still exists — an extra disk, a seed
+    // ISO, a console log — and is not ours to take.
+    let mut refs = String::new();
+    for name in &live {
+        for ext in ["json", "xml"] {
+            if let Ok(t) = std::fs::read_to_string(dir.join(format!("{name}.{ext}"))) {
+                refs.push_str(&t);
+                refs.push('\n');
+            }
+        }
+    }
+
+    let entries: Vec<String> = std::fs::read_dir(&dir)
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    let stems_with_record: HashSet<String> = entries
+        .iter()
+        .filter(|e| e.ends_with(".json") || e.ends_with(".qcow2"))
+        .filter_map(|e| vm_state_owner(e).map(str::to_string))
+        .collect();
+
+    Ok(classify_vm_debris(
+        &entries,
+        &live,
+        &refs,
+        &stems_with_record,
+    ))
+}
+
+/// What [`sweep_vms`] reclaimed.
+#[derive(Default)]
+pub(crate) struct VmSweep {
+    pub entries: usize,
+    pub vms: usize,
+    pub freed: Reclaimed,
+}
+
+/// Everything in `vms/` that no VM record accounts for — and, with `stopped`,
+/// the stopped VMs themselves.
+///
+/// The default is deliberately NOT `container prune`'s. A stopped container is
+/// a finished process; a stopped VM is the normal resting state of a machine
+/// somebody built, and on the host this was written against **every one of the
+/// 17 VMs was stopped**. Sweeping them by default would have been a `rm -rf` of
+/// the whole lab wearing the name of a cleanup command. `--stopped` is
+/// therefore opt-in, and even then goes through `vm rm`'s own removal path so
+/// the backend gets its cleanup.
+pub(crate) fn sweep_vms(base: &std::path::Path, stopped: bool) -> Result<VmSweep> {
+    let mut out = VmSweep::default();
+    let dir = base.join("vms");
+    let vms = delonix_vm::list(base)?;
+
+    for entry in doomed_vm_entries(base)? {
+        let p = dir.join(&entry);
+        let sz = measure(&p);
+        let gone = if p.is_dir() {
+            std::fs::remove_dir_all(&p).is_ok()
+        } else {
+            std::fs::remove_file(&p).is_ok()
+        };
+        if gone {
+            out.entries += 1;
+            out.freed.add(sz);
+        }
+    }
+
+    if stopped {
+        for vm in vms {
+            if !matches!(vm.status, delonix_runtime_core::Status::Running) {
+                let sz = measure(&dir.join(format!("{}.qcow2", vm.name)));
+                if delonix_vm::remove(base, &vm.name).is_ok() {
+                    out.vms += 1;
+                    out.freed.add(sz);
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
+
+    fn set(items: &[&str]) -> std::collections::HashSet<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn o_dono_de_um_ficheiro_de_estado_tira_o_sufixo_mais_longo_primeiro() {
+        assert_eq!(super::vm_state_owner("micro.sock.lock"), Some("micro"));
+        assert_eq!(super::vm_state_owner("micro.sock"), Some("micro"));
+        assert_eq!(super::vm_state_owner("lab-dns.qcow2"), Some("lab-dns"));
+        assert_eq!(super::vm_state_owner(".pve2.lock"), Some("pve2"));
+        // A bare directory is not VM state by shape — it needs a sibling record.
+        assert_eq!(super::vm_state_owner("hadata"), None);
+        // `.lock`/`..lock` name no VM — an empty stem is not a name.
+        assert_eq!(super::vm_state_owner(".lock"), None);
+        assert_eq!(super::vm_state_owner("..lock"), None);
+    }
+
+    /// REGRESSION GUARD, and the reason this classifier has three tests instead
+    /// of one. On the host `vm prune` was written against, `vms/` held three
+    /// directories — `hadata` (28 GiB of `pve-ha-*` ZFS disks), `labdata`
+    /// (a NAS disk) and `pbs` (the substrate's backup server) — none named
+    /// after a VM. A name-based sweep calls all three orphans and deletes
+    /// 53 GiB of live data.
+    #[test]
+    fn uma_pasta_de_dados_citada_por_um_registo_vivo_nunca_e_podada() {
+        let entries: Vec<String> = ["hadata", "labdata", "pve-ha-1.json", ".morta.lock"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let live = set(&["pve-ha-1"]);
+        let refs = "<disk file='/home/w/.local/share/delonix/vms/hadata/pve-ha-1-zfs.qcow2'/>";
+        // `labdata` is in NO record here: it survives on shape alone, because a
+        // lone directory with no sibling record is never swept.
+        let doomed = super::classify_vm_debris(&entries, &live, refs, &set(&["pve-ha-1"]));
+        assert_eq!(doomed, vec![".morta.lock".to_string()]);
+    }
+
+    #[test]
+    fn uma_vm_viva_guarda_todo_o_seu_proprio_estado() {
+        let entries: Vec<String> = ["micro.sock", "micro.pid", "micro.log", ".micro.lock"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let doomed = super::classify_vm_debris(&entries, &set(&["micro"]), "", &set(&[]));
+        assert!(doomed.is_empty(), "{doomed:?}");
+    }
+
+    #[test]
+    fn o_overlay_e_o_registo_de_uma_vm_morta_saem_juntos() {
+        let entries: Vec<String> = ["morta.qcow2", "morta.json", "morta", "viva.qcow2"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let doomed = super::classify_vm_debris(
+            &entries,
+            &set(&["viva"]),
+            "",
+            // `morta` has a record sibling, so its directory is sweepable too.
+            &set(&["morta", "viva"]),
+        );
+        assert_eq!(doomed, vec!["morta", "morta.json", "morta.qcow2"]);
+    }
     use super::*;
 
     fn v(name: &str, mount: &str) -> VolumeFacts {

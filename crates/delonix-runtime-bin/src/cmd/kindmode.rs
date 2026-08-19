@@ -1293,6 +1293,74 @@ pub(crate) fn load(
 }
 
 /// Removes a kind cluster: stops and deletes the nodes with the cluster label.
+/// The clusters that have state on disk but not one node left running or
+/// stopped — read once, so the preview and the sweep cannot disagree.
+///
+/// A cluster EXISTS when containers carry its `io.x-k8s.kind.cluster` label;
+/// `cluster ls` has always derived it that way rather than keeping a registry
+/// that could drift. The corollary is that a cluster whose nodes were removed
+/// by hand — a `container rm`, a `system prune`, a host that lost its rootfs —
+/// leaves its directory, its kubeconfig and its `~/.kube/config` context
+/// behind, and nothing ever collects them. That last one is not cosmetic: the
+/// context still names `127.0.0.1:<port>`, and that port may by now belong to
+/// something else entirely.
+pub(crate) fn doomed_clusters(store: &Store) -> Result<Vec<String>> {
+    let live: std::collections::HashSet<String> = store
+        .list()?
+        .into_iter()
+        .filter_map(|c| c.labels.get("io.x-k8s.kind.cluster").cloned())
+        .collect();
+
+    let root = super::util::state_root().join("clusters");
+    let mut names = std::collections::BTreeSet::new();
+    if let Ok(rd) = std::fs::read_dir(&root) {
+        for e in rd.flatten() {
+            let n = e.file_name().to_string_lossy().into_owned();
+            // Both shapes the state takes: the directory `<name>/` and the
+            // exported `<name>-kubeconfig.yaml` beside it.
+            let name = n
+                .strip_suffix("-kubeconfig.yaml")
+                .map(str::to_string)
+                .unwrap_or(n);
+            if !name.is_empty() && !live.contains(&name) {
+                names.insert(name);
+            }
+        }
+    }
+    Ok(names.into_iter().collect())
+}
+
+/// `cluster prune` — the leftovers of clusters whose nodes are already gone.
+///
+/// Reuses [`delete`]'s own cleanup steps rather than restating them, because a
+/// second implementation of "what a dead cluster leaves behind" is how the two
+/// start to disagree about the kube context. A cluster with nodes — running or
+/// stopped — is never touched here: `cluster delete` is the verb for that, and
+/// it takes a name on purpose.
+pub(crate) fn prune(store: &Store) -> Result<usize> {
+    let mut n = 0;
+    for name in doomed_clusters(store)? {
+        let _ = std::fs::remove_file(kubeconfig_path(&name));
+        let _ = std::fs::remove_dir_all(cluster_dir(&name));
+        let net = cluster_net(&name);
+        if let Ok(nstore) = delonix_net::NetworkStore::open(super::util::state_root()) {
+            if nstore.get(&net).is_ok() {
+                let _ = nstore.remove(&net);
+                delonix_net::infra::network_remove(&net);
+            }
+        }
+        if let Err(e) = remove_kubecontext(&name) {
+            super::output::warn(&super::po::tf(
+                "could not remove context '{ctx}' from kubeconfig: {err}",
+                &[("ctx", &context_name(&name)), ("err", &e.to_string())],
+            ));
+        }
+        println!("{name}");
+        n += 1;
+    }
+    Ok(n)
+}
+
 pub(crate) fn delete(images: &ImageStore, store: &Store, name: &str) -> Result<()> {
     let label = format!("io.x-k8s.kind.cluster={name}");
     let (k, v) = label.split_once('=').unwrap();
