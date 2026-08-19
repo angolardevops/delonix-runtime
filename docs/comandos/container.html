@@ -319,10 +319,10 @@ Options:
           Label (`KEY=VAL`), repeatable — e.g. `io.x-k8s.kind.role=control-plane` enables the dedicated cgroup2 delegation for Kind nodes (see `setup_node_cgroup_ns`)
 
   -m, --memory &lt;MEMORY&gt;
-          Memory limit (`64M`, `2G`, `max`). Default: `max` (no cap)
+          Memory limit (`64M`, `2G`, `max`). Default: a quarter of the engine&#x27;s budget (`DELONIX_DEFAULT_PCT`); `max` lifts the cap entirely
 
   -c, --cpus &lt;CPUS&gt;
-          CPU quota (number of cores, e.g. `0.5`, `2`). Default: `1.0`
+          CPU quota (number of cores, e.g. `0.5`, `2`). Default: the lesser of 1.0 and a quarter of the engine&#x27;s budget
 
       --cpu-weight &lt;CPU_WEIGHT&gt;
           Relative CPU weight (`cpu.weight`, 1–10000) under contention
