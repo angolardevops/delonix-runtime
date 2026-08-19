@@ -4638,8 +4638,8 @@ msgstr "Nome do container (por omissão: `dlx-<id>`)"
 msgid "Container sysctl (`net.core.somaxconn=1024`). Repeatable"
 msgstr "Sysctl do container (`net.core.somaxconn=1024`). Repetível"
 
-msgid "CPU quota (number of cores, e.g. `0.5`, `2`). Default: `1.0`"
-msgstr "Quota de CPU (número de cores, ex.: `0.5`, `2`). Por omissão: `1.0`"
+msgid "CPU quota (number of cores, e.g. `0.5`, `2`). Default: the lesser of 1.0 and a quarter of the engine's budget"
+msgstr "Quota de CPU (número de cores, ex.: `0.5`, `2`). Por omissão: o menor entre 1.0 e um quarto do orçamento do motor"
 
 msgid "CPUs the container is pinned to (`cpuset.cpus`, e.g. `0-3`, `0,2`)"
 msgstr "CPUs a que o container fica preso (`cpuset.cpus`, ex.: `0-3`, `0,2`)"
@@ -4716,8 +4716,8 @@ msgstr "Caminho do ficheiro de log (substitui o por omissão)"
 msgid "Logical ISOLATION namespace (default `default`). Containers in different namespaces cannot reach each other (even on the same network); only a `kind: Dependency` crosses the boundary"
 msgstr "Namespace lógica de ISOLAMENTO (por omissão `default`). Containers em namespaces diferentes não se alcançam (mesmo na mesma rede); só um `kind: Dependency` atravessa a fronteira"
 
-msgid "Memory limit (`64M`, `2G`, `max`). Default: `max` (no cap)"
-msgstr "Limite de memória (`64M`, `2G`, `max`). Por omissão: `max` (sem tecto)"
+msgid "Memory limit (`64M`, `2G`, `max`). Default: a quarter of the engine's budget (`DELONIX_DEFAULT_PCT`); `max` lifts the cap entirely"
+msgstr "Limite de memória (`64M`, `2G`, `max`). Por omissão: um quarto do orçamento do motor (`DELONIX_DEFAULT_PCT`); `max` levanta o tecto por completo"
 
 msgid "Mount a tmpfs (`/path[:options]`). Repeatable"
 msgstr "Monta um tmpfs (`/caminho[:opções]`). Repetível"
