@@ -224,11 +224,24 @@ pub(crate) struct ContainerSweep {
 /// Everything whose lifetime is a container's: stopped containers, their
 /// directories, and the debris left by the ones that died without an `rm`.
 ///
-/// The single biggest reclaimer is the orphan directories — measured on this
-/// machine, **88 container directories on disk against 4 in the registry
-/// (~36 GiB)**. They come from cluster nodes and containers killed by
-/// SIGKILL/crash/closed session, so no `container rm` will ever see them: they
-/// are not in the registry, and only an explicit GC like this one catches them.
+/// The orphan directories are the part no `container rm` will ever see: they
+/// come from cluster nodes and containers killed by SIGKILL/crash/closed
+/// session, are not in the registry, and only an explicit GC like this one
+/// catches them.
+///
+/// **What they are WORTH changed under this engine's feet, and the old figure
+/// is kept here only as the correction it needed.** Before v0.59.0 a rootless
+/// container got a flat COPY of its image, so 88 directories against 4 in the
+/// registry meant ~36 GiB and the orphan pass was by far the biggest reclaimer.
+/// Since containers share layers, the same host measured 38 directories against
+/// 17 in the registry and **202 MiB in total** — three orders of magnitude less.
+/// The disk moved to the CAS blobs, which [`sweep_images`] reclaims and only
+/// AFTER the images naming them are gone.
+///
+/// The lesson is not the number: it is that a sweep's justification can go
+/// stale without the sweep changing a line. `system prune --dry-run` exists so
+/// the next decision is made against a measurement instead of against this
+/// paragraph.
 pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<ContainerSweep> {
     // Orphan slirps (dead target) — the SAFE reaper, never the fail-open
     // `reap_orphan_hostfwds` (see the history of the reaper that deleted live
@@ -415,10 +428,7 @@ pub(crate) fn sweep_images(images: &ImageStore, store: &Store, all: bool) -> Res
 
     let in_use: HashSet<String> = store.list()?.iter().map(|c| c.image.clone()).collect();
     for img in images.list()? {
-        let dangling =
-            img.repo_tags.is_empty() || img.repo_tags.iter().all(|t| t.contains("<none>"));
-        let used = in_use.contains(&img.id) || img.repo_tags.iter().any(|t| in_use.contains(t));
-        if (dangling || all) && !used {
+        if image_is_doomed(&img.id, &img.repo_tags, &in_use, all) {
             if img.repo_tags.is_empty() {
                 let _ = images.remove(&img.id);
             } else {
@@ -453,27 +463,212 @@ pub(crate) fn sweep_images(images: &ImageStore, store: &Store, all: bool) -> Res
     Ok(out)
 }
 
+/// What a `prune` WOULD take, computed without taking anything.
+///
+/// Split by CATEGORY, and that is the whole point of the type: a resource that
+/// somebody DECLARED (a stopped container, a tagged image) and debris that
+/// never had a record (an orphan directory, an unreferenced blob) are the same
+/// bytes and a completely different decision. `--auto` runs unattended from a
+/// timer, so the operator arming it has to be able to see which half it would
+/// touch before it touches it.
+#[derive(Default)]
+pub(crate) struct PrunePlan {
+    /// A — stopped containers in the registry, by name.
+    pub containers: Vec<String>,
+    pub containers_bytes: Reclaimed,
+    /// A — images that would go, by tag (or id when untagged).
+    pub images: Vec<String>,
+    /// B — container directories with no registry entry.
+    pub dirs: usize,
+    pub dirs_bytes: Reclaimed,
+    /// B — empty `delonix-*` cgroups.
+    pub cgroups: usize,
+    /// B — CAS blobs nothing would reference once the images above are gone.
+    pub blobs: usize,
+    pub blobs_bytes: u64,
+    /// B — empty auto-created `dlx-*` networks.
+    pub networks: usize,
+}
+
+impl PrunePlan {
+    /// Bytes the DECLARED half would free.
+    pub fn bytes_a(&self) -> Reclaimed {
+        self.containers_bytes
+    }
+
+    /// Bytes the DEBRIS half would free.
+    pub fn bytes_b(&self) -> Reclaimed {
+        let mut r = self.dirs_bytes;
+        r.add(Reclaimed {
+            bytes: self.blobs_bytes,
+            partial: false,
+        });
+        r
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.containers.is_empty()
+            && self.images.is_empty()
+            && self.dirs == 0
+            && self.cgroups == 0
+            && self.blobs == 0
+            && self.networks == 0
+    }
+}
+
+/// Everything [`sweep_containers`] + [`sweep_images`] + [`sweep_networks`] would
+/// remove, measured and not removed.
+///
+/// # What this deliberately does NOT predict
+///
+/// The three network reapers — orphan slirps, orphan ingress refs, orphan
+/// hostfwds — compute and act in one call inside `delonix-net`, and separating
+/// them would mean changing that crate's API. They are absent from the plan on
+/// purpose, and the omission costs nothing for the question this exists to
+/// answer: **not one of them frees a byte of disk.** Everything that reclaims
+/// space is here.
+///
+/// The blob pass simulates the image pass rather than reading the store as it
+/// is now: a blob only becomes unreferenced once the images naming it are gone,
+/// so counting against today's images would report zero on a host whose whole
+/// reclaim is waiting behind one dangling image.
+pub(crate) fn plan(images: &ImageStore, store: &Store, all: bool) -> Result<PrunePlan> {
+    // A — the same predicate `sweep_containers` step 1 uses, via the same
+    // function the confirmation preview uses.
+    let mut out = PrunePlan {
+        containers: doomed_containers(store)?,
+        ..Default::default()
+    };
+    let live_ids: HashSet<String> = store
+        .list()?
+        .iter()
+        .filter(|c| c.pid.map(delonix_runtime::is_alive).unwrap_or(false))
+        .map(|c| c.id.clone())
+        .collect();
+    for c in store.list()? {
+        if !live_ids.contains(&c.id) {
+            out.containers_bytes
+                .add(measure(&images.container_path(&c.id)));
+        }
+    }
+
+    // A — images, and the set that SURVIVES, which the blob pass needs.
+    let in_use: HashSet<String> = store.list()?.iter().map(|c| c.image.clone()).collect();
+    let mut referenced: HashSet<String> = HashSet::new();
+    for img in images.list()? {
+        if image_is_doomed(&img.id, &img.repo_tags, &in_use, all) {
+            out.images.push(if img.repo_tags.is_empty() {
+                img.id.clone()
+            } else {
+                img.repo_tags.join(", ")
+            });
+            continue;
+        }
+        referenced.insert(delonix_image::cas::strip(&img.id).to_string());
+        for l in &img.layers {
+            referenced.insert(delonix_image::cas::strip(l).to_string());
+        }
+    }
+
+    // B — container directories with no registry entry. Same helper the sweep
+    // walks, so a directory cannot be doomed by one and spared by the other.
+    let containers_dir = images.root().join("containers");
+    for path in orphan_container_dirs(&containers_dir, &live_ids) {
+        out.dirs_bytes.add(measure(&path));
+        out.dirs += 1;
+    }
+
+    // B — empty `delonix-*` cgroups. `read_dir` on an empty directory is the
+    // same test `remove_dir` makes, without making it.
+    let live_cg: HashSet<String> = live_ids.iter().map(|id| format!("delonix-{id}")).collect();
+    if let Ok(rd) = std::fs::read_dir(delonix_runtime_core::DELONIX_SLICE) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with("delonix-")
+                && !live_cg.contains(&name)
+                && std::fs::read_dir(e.path())
+                    .map(|mut d| d.next().is_none())
+                    .unwrap_or(false)
+            {
+                out.cgroups += 1;
+            }
+        }
+    }
+
+    // B — blobs nothing would reference once the doomed images are gone.
+    let blobs_dir = images.root().join("blobs").join("sha256");
+    if let Ok(rd) = std::fs::read_dir(&blobs_dir) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') || referenced.contains(&name) {
+                continue;
+            }
+            out.blobs_bytes += e.metadata().map(|m| m.len()).unwrap_or(0);
+            out.blobs += 1;
+        }
+    }
+
+    // B — empty auto-created `dlx-*` networks.
+    out.networks = doomed_networks(store)?.len();
+
+    Ok(out)
+}
+
+/// **PURE** — would [`sweep_images`] take this image?
+///
+/// Extracted so the sweep and the plan behind `--dry-run` cannot answer it
+/// differently. A preview that is computed by a second code path is a preview
+/// that can lie about what the sweep is about to do, and this one exists
+/// precisely to be trusted by a timer.
+///
+/// `all` widens it from "dangling only" to "every image no container uses" —
+/// it never overrides the in-use test, which is what keeps a running workload's
+/// image out of reach.
+pub(crate) fn image_is_doomed(
+    id: &str,
+    repo_tags: &[String],
+    in_use: &HashSet<String>,
+    all: bool,
+) -> bool {
+    let dangling = repo_tags.is_empty() || repo_tags.iter().all(|t| t.contains("<none>"));
+    let used = in_use.contains(id) || repo_tags.iter().any(|t| in_use.contains(t));
+    (dangling || all) && !used
+}
+
 /// Empty auto-created `dlx-*` networks (a cluster that has been deleted). A
 /// user network, without the prefix, is NEVER touched here.
 pub(crate) fn sweep_networks(store: &Store) -> Result<usize> {
+    let doomed = doomed_networks(store)?;
+    let mut n = 0usize;
+    if let Ok(nstore) = delonix_net::NetworkStore::open(super::util::state_root()) {
+        for name in doomed {
+            let _ = nstore.remove(&name);
+            delonix_net::infra::network_remove(&name);
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
+/// The `dlx-*` networks [`sweep_networks`] would take — the same decision, so
+/// the plan behind `--dry-run` and the sweep cannot name different networks.
+pub(crate) fn doomed_networks(store: &Store) -> Result<Vec<String>> {
     let attached: HashSet<String> = store
         .list()?
         .iter()
         .filter_map(|c| c.network.clone())
         .collect();
-    let mut n = 0usize;
+    let mut out = Vec::new();
     if let Ok(nstore) = delonix_net::NetworkStore::open(super::util::state_root()) {
         if let Ok(nets) = nstore.list() {
             for net in nets {
                 if net.name.starts_with("dlx-") && !attached.contains(&net.name) {
-                    let _ = nstore.remove(&net.name);
-                    delonix_net::infra::network_remove(&net.name);
-                    n += 1;
+                    out.push(net.name);
                 }
             }
         }
     }
-    Ok(n)
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------
@@ -1110,6 +1305,56 @@ mod tests {
             &set(&["morta", "viva"]),
         );
         assert_eq!(doomed, vec!["morta", "morta.json", "morta.qcow2"]);
+    }
+
+    fn tags(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn uma_imagem_em_uso_nunca_e_condenada_nem_com_all() {
+        let em_uso: std::collections::HashSet<String> =
+            ["nginx:alpine".to_string()].into_iter().collect();
+        assert!(!super::image_is_doomed(
+            "sha256:aa",
+            &tags(&["nginx:alpine"]),
+            &em_uso,
+            false
+        ));
+        // `--all` alarga o critério, mas NUNCA passa por cima do «está em uso».
+        assert!(!super::image_is_doomed(
+            "sha256:aa",
+            &tags(&["nginx:alpine"]),
+            &em_uso,
+            true
+        ));
+    }
+
+    #[test]
+    fn uma_imagem_pendurada_sai_sem_all_e_uma_etiquetada_so_com_all() {
+        let vazio = std::collections::HashSet::new();
+        // Sem etiquetas = pendurada.
+        assert!(super::image_is_doomed("sha256:bb", &[], &vazio, false));
+        // `<none>` conta como pendurada — é como o store as marca.
+        assert!(super::image_is_doomed(
+            "sha256:cc",
+            &tags(&["<none>:<none>"]),
+            &vazio,
+            false
+        ));
+        // Etiquetada e sem uso: fica, até alguém pedir `--all`.
+        assert!(!super::image_is_doomed(
+            "sha256:dd",
+            &tags(&["demo:1"]),
+            &vazio,
+            false
+        ));
+        assert!(super::image_is_doomed(
+            "sha256:dd",
+            &tags(&["demo:1"]),
+            &vazio,
+            true
+        ));
     }
     use super::*;
 

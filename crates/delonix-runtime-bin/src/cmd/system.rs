@@ -133,6 +133,25 @@ pub enum SystemCmd {
         /// useless.
         #[arg(long, default_value_t = 75, requires = "auto", value_parser = clap::value_parser!(u8).range(1..=100))]
         threshold: u8,
+        /// Print what this sweep WOULD take, split by category, and take
+        /// nothing.
+        ///
+        /// The split is the reason it exists. `prune` mixes two different
+        /// things in one verb — resources somebody DECLARED (stopped
+        /// containers, tagged images) and debris that never had a record
+        /// (orphan directories, unreferenced blobs) — and only the second is
+        /// safe to hand to a timer. Whoever arms `--auto` has to be able to see
+        /// which half it would touch first.
+        ///
+        /// Combines with `--auto`: it then also says whether the threshold gate
+        /// would let the sweep run at all right now.
+        ///
+        /// The three network reapers (orphan slirps, ingress refs, host ports)
+        /// are NOT previewed — they compute and act in one call inside
+        /// `delonix-net`. None of them frees a byte of disk, so everything that
+        /// reclaims space is in the report.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
     },
     /// Active network connections per container (via conntrack).
     ///
@@ -206,7 +225,8 @@ pub fn run(action: SystemCmd) -> Result<()> {
             force,
             auto,
             threshold,
-        } => cmd_prune(all, force, auto, threshold),
+            dry_run,
+        } => cmd_prune(all, force, auto, threshold, dry_run),
         SystemCmd::Monitor {
             interval,
             no_stream,
@@ -365,14 +385,101 @@ fn above_threshold(threshold: u8) -> Result<bool> {
     Ok(true)
 }
 
-fn cmd_prune(all: bool, force: bool, auto: bool, threshold: u8) -> Result<()> {
+/// Renders a [`super::prune::PrunePlan`] as the two halves it is, never as one
+/// total.
+///
+/// A single "would free 12 GiB" line is the number that gets an `--auto` into a
+/// unit file, and it is the wrong number to decide on: most of it can sit
+/// behind the half that destroys declared resources. So the totals are printed
+/// per category and the categories are named, not implied by indentation.
+fn print_plan(p: &super::prune::PrunePlan, auto: bool, would_run: bool) {
+    if auto {
+        println!(
+            "{}",
+            super::po::t(if would_run {
+                "--auto: the threshold gate WOULD let this run now"
+            } else {
+                "--auto: the threshold gate would NOT let this run now (the report below is what \
+                 it would take once it does)"
+            })
+        );
+    }
+    if p.is_empty() {
+        println!("{}", super::po::t("nothing to reclaim"));
+        return;
+    }
+
+    println!(
+        "{}",
+        super::po::t("DECLARED — resources someone created (a `prune` destroys these):")
+    );
+    println!(
+        "{}",
+        super::po::tf(
+            "  {n} stopped container(s), {i} image(s) — {size}",
+            &[
+                ("n", &p.containers.len().to_string()),
+                ("i", &p.images.len().to_string()),
+                ("size", &p.bytes_a().fmt()),
+            ]
+        )
+    );
+    for name in &p.containers {
+        println!("  -   container/{name}");
+    }
+    for name in &p.images {
+        println!("  -   image/{name}");
+    }
+
+    println!(
+        "{}",
+        super::po::t("DEBRIS — never had a record (safe for an unattended sweep):")
+    );
+    println!(
+        "{}",
+        super::po::tf(
+            "  {d} orphan dir(s), {b} blob(s), {g} cgroup(s), {n} network(s) — {size}",
+            &[
+                ("d", &p.dirs.to_string()),
+                ("b", &p.blobs.to_string()),
+                ("g", &p.cgroups.to_string()),
+                ("n", &p.networks.to_string()),
+                ("size", &p.bytes_b().fmt()),
+            ]
+        )
+    );
+
+    let mut total = p.bytes_a();
+    total.add(p.bytes_b());
+    println!(
+        "{}",
+        super::po::tf(
+            "total if BOTH halves run: {size}",
+            &[("size", &total.fmt())]
+        )
+    );
+    super::prune::note_partial(total);
+}
+
+fn cmd_prune(all: bool, force: bool, auto: bool, threshold: u8, dry_run: bool) -> Result<()> {
     // THE GATE COMES FIRST — before opening a store, before listing anything.
     // A scheduled sweep that is not going to act should cost nothing and, above
     // all, should not have started deciding what to delete.
-    if auto && !above_threshold(threshold)? {
+    //
+    // Under `--dry-run` the gate REPORTS instead of returning: "the timer would
+    // not fire right now" is half the answer somebody arming `--auto` came for,
+    // and stopping here would hide the other half.
+    let would_run = !auto || above_threshold(threshold)?;
+    if !would_run && !dry_run {
         return Ok(());
     }
     let (images, store) = open_stores()?;
+
+    if dry_run {
+        let p = super::prune::plan(&images, &store, all)?;
+        print_plan(&p, auto, would_run);
+        return Ok(());
+    }
 
     // CONFIRM FIRST. This is destructive well beyond what its name suggests: the
     // help leads with "unused images", but the container sweep removes EVERY
