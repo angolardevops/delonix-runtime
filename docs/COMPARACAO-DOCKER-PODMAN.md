@@ -208,6 +208,14 @@ Honestamente, não é só "Docker com menos features" — há genuíno valor nov
 - **Snapshots e quota por-volume** — tar crash-consistente rootless-safe + cap por loopback ext4. Docker CLI puro não tem.
 - **describe estilo kubectl** (aditivo ao inspect), **healthcheck/ssh/dash TUI** como extras de operação.
 - **Limites obrigatórios** — o arranque falha se o cgroup não aplicar o limite (Docker por omissão não limita nada).
+- **Tectos DERIVADOS quando o manifesto não os declara** — uma carga sem `-m`/`--cpus` recebe
+  **um quarto do orçamento do motor** (o `delonix.slice`, que é `DELONIX_RESERVE_PCT`% do host),
+  não `max`. Quatro cargas sem limites enchem o orçamento exactamente, e nenhuma pode sozinha
+  consumir tudo o que o motor tem. O declarado sobrepõe sempre: `-m 12G` continua a dar 12G.
+  Afinável com `DELONIX_DEFAULT_PCT` (1..=100, omissão 25); um valor fora do intervalo cai no
+  default em vez de desligar o tecto. O CPU toma o **menor** entre este quarto e o histórico de
+  1 core — a regra só aperta, nunca alarga (num host de 32 threads um quarto seriam 6.8 cores).
+  Docker e Podman deixam ambos a memória sem tecto por omissão.
 - **i18n** — fonte EN + catálogo gettext pt.po embutido, help do clap traduzido em runtime.
 - **Pods reais multi-container** (`kind: Pod` / `delonix pod`) — N containers a partilhar netns+IPC+UTS como um Pod do k8s, validado E2E (2026-07). Nenhum destes dois concorrentes tem isto fora do próprio k8s.
 - **`kindest/node` (Kind) a arrancar sem Docker** — cgroup2, netfilter (nft) e containerd resolvidos em rootless; um control-plane Kubernetes v1.34 completo ficou `Ready` a correr sobre o Delonix, com o kube-proxy a programar netfilter no nosso netns. Prova viva do "container+VM+k8s num só motor".
