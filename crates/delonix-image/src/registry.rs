@@ -35,6 +35,31 @@ fn reg_err(e: reqwest::Error) -> Error {
     Error::Registry(e.to_string())
 }
 
+/// The same error, plus the one hint that turns it into an action.
+///
+/// A transport failure against `https://<host>` where the host was NOT declared
+/// insecure is, in practice, almost always a registry that speaks plain HTTP —
+/// and the bare `error sending request for url (https://…)` sends the reader
+/// looking for a network problem that is not there. Measured on the NgolaCloud
+/// production cluster (2026-08-19): the platform could not pull from its own
+/// registry, and the message named neither the cause nor the knob.
+///
+/// The hint is only added when it can be true: loopback and already-declared
+/// hosts get the message unchanged, so it never invites an operator to open up
+/// a registry that had nothing to do with the failure.
+fn reg_err_with_hint(e: reqwest::Error, host: &str) -> Error {
+    let declared = matches_insecure(host, &insecure_registries());
+    let loopback = scheme_for(host) == "http";
+    if declared || loopback || !e.is_connect() && !e.is_request() {
+        return reg_err(e);
+    }
+    Error::Registry(format!(
+        "{e}\n\nhint: {host} was contacted over HTTPS. If it serves plain HTTP \
+         (a private registry on a trusted network often does), declare it: \
+         DELONIX_INSECURE_REGISTRIES={host}"
+    ))
+}
+
 /// Splits the reference into (API host, repository, tag/digest), applying
 /// Docker's rules: default registry `registry-1.docker.io`, official
 /// images under `library/`.
@@ -98,16 +123,90 @@ fn extract(header: &str, key: &str) -> Option<String> {
     Some(rest[..end].to_string())
 }
 
-/// The HTTP scheme for a registry: `http` for local/insecure registries
-/// (`localhost`, `127.0.0.1`, `[::1]`), `https` for all others — the same
-/// rule as Docker/containerd for insecure registries by default.
-fn scheme_for(host: &str) -> &'static str {
-    let h = host.split(':').next().unwrap_or(host);
-    if h == "localhost" || h == "127.0.0.1" || h == "::1" || h == "[::1]" {
-        "http"
-    } else {
-        "https"
+/// Registries declared as plain-HTTP by the operator, via
+/// `DELONIX_INSECURE_REGISTRIES` (comma-separated, `host` or `host:port`).
+///
+/// Same knob as `--insecure-registry` (Docker) and `certs.d` (containerd), and
+/// it exists for the same reason: a private registry on a trusted network
+/// frequently serves HTTP, and a client that cannot be told so simply cannot
+/// pull from it. Measured 2026-08-19 on the NgolaCloud production cluster —
+/// the platform could not pull a single image from its OWN registry, because
+/// the registry serves HTTP and this client insisted on HTTPS; the API
+/// answered `registry error: error sending request` and the image store stayed
+/// empty. A knob nobody can reach is not a security boundary, it is a wall.
+///
+/// Explicit opt-in per host, never a range and never a "detect the LAN" rule:
+/// silently downgrading a connection because an address looks private is how a
+/// credential ends up on the wire in a place the operator never inspected.
+fn insecure_registries() -> Vec<String> {
+    std::env::var("DELONIX_INSECURE_REGISTRIES")
+        .ok()
+        .map(|v| {
+            v.split(',')
+                .map(|e| e.trim().to_ascii_lowercase())
+                .filter(|e| !e.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The host part of a registry authority, with the port removed.
+///
+/// Not a `split(':')`, and the difference is a bug that predates this function:
+/// an IPv6 authority is bracketed (`[::1]:5000`), so splitting on the first
+/// colon yields `"["` and the loopback comparison below could NEVER match a
+/// bracketed address with a port. The literal `"[::1]"` was in the list of
+/// loopback hosts and was unreachable — a check that reads as covered and is
+/// not. Caught by the test `loopback_is_http_without_any_declaration`.
+fn bare_host(authority: &str) -> &str {
+    if let Some(rest) = authority.strip_prefix('[') {
+        return match rest.find(']') {
+            Some(i) => &rest[..i], // `[::1]:5000` -> `::1`
+            None => authority,
+        };
     }
+    authority.split(':').next().unwrap_or(authority)
+}
+
+/// Does `host` (as written in the image reference, so possibly `host:port`)
+/// match one of the declared entries?
+///
+/// An entry WITH a port matches only that port; an entry WITHOUT one matches
+/// the host on any port. That asymmetry is deliberate and is what Docker does:
+/// `registry.lan:5000` is a promise about one endpoint, `registry.lan` is a
+/// promise about a machine.
+///
+/// Both sides are lowered here, and not only at the parsing of the environment
+/// variable: this function is also the one the tests call, and a comparison
+/// that is case-sensitive on one side only is a knob that looks set and is not.
+fn matches_insecure(host: &str, entries: &[String]) -> bool {
+    let host = host.to_ascii_lowercase();
+    let bare = bare_host(&host);
+    entries.iter().any(|raw| {
+        let e = raw.to_ascii_lowercase();
+        e == host || (!e.contains(':') && e == bare)
+    })
+}
+
+/// The HTTP scheme for a registry: `http` for the loopback family and for
+/// registries the operator declared insecure, `https` for all others — the
+/// same rule as Docker/containerd.
+///
+/// Pure over its inputs so the decision can be tested without touching the
+/// process environment: `scheme_for` is the thin wrapper that reads it.
+fn scheme_for_with(host: &str, insecure: &[String]) -> &'static str {
+    let h = bare_host(host);
+    if h == "localhost" || h == "127.0.0.1" || h == "::1" {
+        return "http";
+    }
+    if matches_insecure(host, insecure) {
+        return "http";
+    }
+    "https"
+}
+
+fn scheme_for(host: &str) -> &'static str {
+    scheme_for_with(host, &insecure_registries())
 }
 
 /// Start offset and whole size declared by a `Content-Range` response header
@@ -184,7 +283,12 @@ impl Client {
         accept: &str,
         from: Option<u64>,
     ) -> Result<reqwest::blocking::Response> {
-        let resp = self.send_once(url, accept, from).map_err(reg_err)?;
+        // `_with_hint` here and in `write_req` only: these are the first two
+        // contacts with the registry, and a plain-HTTP registry fails right
+        // there — the transport gives up before there is any state to report.
+        let resp = self
+            .send_once(url, accept, from)
+            .map_err(|e| reg_err_with_hint(e, &self.host))?;
         if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
             let www = resp
                 .headers()
@@ -515,7 +619,7 @@ impl Client {
             }
             req.send()
         };
-        let resp = send(&self.http, &self.token).map_err(reg_err)?;
+        let resp = send(&self.http, &self.token).map_err(|e| reg_err_with_hint(e, &self.host))?;
         if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
             let www = resp
                 .headers()
@@ -1458,9 +1562,87 @@ pub fn pull_oci_artifact_with_meta(
 #[cfg(test)]
 mod tests {
     use super::{
-        layer_media_type, parse_content_range, parse_reference, pull_from_registry_with_creds,
-        pull_oci_artifact, push_oci_artifact, sha256_hex, with_prefix, Client,
+        layer_media_type, matches_insecure, parse_content_range, parse_reference,
+        pull_from_registry_with_creds, pull_oci_artifact, push_oci_artifact, scheme_for_with,
+        sha256_hex, with_prefix, Client,
     };
+
+    fn insecure(entries: &[&str]) -> Vec<String> {
+        entries.iter().map(|e| e.to_string()).collect()
+    }
+
+    #[test]
+    fn loopback_is_http_without_any_declaration() {
+        for h in ["localhost:5000", "127.0.0.1:5000", "[::1]:5000"] {
+            assert_eq!(scheme_for_with(h, &[]), "http", "{h}");
+        }
+    }
+
+    /// The default has to stay HTTPS: this knob widens what an operator CAN
+    /// allow, it does not change what happens when nobody said anything.
+    #[test]
+    fn everything_else_is_https_by_default() {
+        for h in ["registry.lan:5000", "192.168.1.11:5000", "ghcr.io"] {
+            assert_eq!(scheme_for_with(h, &[]), "https", "{h}");
+        }
+    }
+
+    #[test]
+    fn a_declared_registry_is_http() {
+        let list = insecure(&["192.168.1.11:5000"]);
+        assert_eq!(scheme_for_with("192.168.1.11:5000", &list), "http");
+    }
+
+    /// An entry WITH a port is a promise about one endpoint — the same host on
+    /// another port keeps the default. Getting this wrong would silently
+    /// downgrade a neighbouring registry that was never declared.
+    #[test]
+    fn a_port_in_the_entry_binds_the_promise_to_that_port() {
+        let list = insecure(&["192.168.1.11:5000"]);
+        assert_eq!(scheme_for_with("192.168.1.11:5001", &list), "https");
+        assert_eq!(scheme_for_with("192.168.1.12:5000", &list), "https");
+    }
+
+    /// An entry WITHOUT a port is a promise about the machine.
+    #[test]
+    fn an_entry_without_a_port_matches_any_port() {
+        let list = insecure(&["registry.lan"]);
+        assert_eq!(scheme_for_with("registry.lan:5000", &list), "http");
+        assert_eq!(scheme_for_with("registry.lan:5001", &list), "http");
+        assert_eq!(scheme_for_with("other.lan:5000", &list), "https");
+    }
+
+    /// Hosts are case-insensitive; a list written in mixed case must not be a
+    /// knob that looks set and is not.
+    #[test]
+    fn matching_ignores_case() {
+        assert!(matches_insecure(
+            "Registry.LAN:5000",
+            &insecure(&["registry.lan"])
+        ));
+        assert!(matches_insecure(
+            "registry.lan:5000",
+            &insecure(&["Registry.LAN:5000"])
+        ));
+    }
+
+    /// A suffix is not a match: `evil-registry.lan` must not be let in by a
+    /// declaration of `registry.lan`.
+    #[test]
+    fn a_suffix_is_not_a_match() {
+        let list = insecure(&["registry.lan"]);
+        assert!(!matches_insecure("evil-registry.lan:5000", &list));
+        assert_eq!(scheme_for_with("evil-registry.lan:5000", &list), "https");
+    }
+
+    #[test]
+    fn blank_entries_are_ignored_not_matched() {
+        // `DELONIX_INSECURE_REGISTRIES=""` and `"a,,b"` are the shapes a shell
+        // produces by accident; neither may turn into "match everything".
+        let list = insecure(&["", "registry.lan", ""]);
+        assert!(!matches_insecure("ghcr.io", &list));
+        assert!(matches_insecure("registry.lan", &list));
+    }
 
     fn test_client(host: &str, repo: &str) -> Client {
         Client {
