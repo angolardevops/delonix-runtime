@@ -3498,6 +3498,20 @@ pub fn slice_budget() -> (u64, u64, u64, f64, u64) {
     )
 }
 
+/// Whole-slice CPU usage, RAW `cpu.stat` `usage_usec` counter (microseconds)
+/// — same caveats as `slice_budget`'s memory reading (a root-mode static
+/// path; see this repo's cgroup-delegation notes for where that can
+/// undercount in rootless). Not a percentage — the caller keeps the
+/// previous sample and divides the delta by elapsed wall time, same as
+/// [`ContainerUsage::cpu_usage_usec`].
+pub fn slice_cpu_usage_usec() -> Option<u64> {
+    ensure_delonix_slice();
+    let slice = delonix_runtime_core::DELONIX_SLICE;
+    std::fs::read_to_string(format!("{slice}/cpu.stat"))
+        .ok()
+        .and_then(|s| parse_cpu_stat_usage_usec(&s))
+}
+
 /// Current cgroup v2 of the process (from `/proc/self/cgroup`, the `0::` line).
 pub fn current_cgroup_v2() -> Option<String> {
     let s = std::fs::read_to_string("/proc/self/cgroup").ok()?;
@@ -6007,6 +6021,108 @@ pub fn live_cgroup(container: &Container) -> String {
         }
     }
     container.cgroup()
+}
+
+/// Per-container resource usage read directly from its live cgroup v2 leaf —
+/// three cheap file reads (`memory.current`/`cpu.stat`/`io.stat`), no
+/// subprocess. Safe to call every dashboard tick for every container, unlike
+/// network bytes (`delonix_net::infra::container_net_bytes`, one `nsenter`+
+/// `cat` per container — see `cmd/dash.rs`'s slow background refresh).
+///
+/// `cpu_usage_usec` is the RAW monotonic counter from `cpu.stat`
+/// (`usage_usec`), not a percentage — the caller must keep the previous
+/// sample and divide the delta by elapsed wall-clock time (the TUI does this
+/// per-tick; a one-shot snapshot has no previous sample to diff against).
+///
+/// `io_read_bytes`/`io_write_bytes` are `None` (never `0`) when `io.stat`
+/// doesn't exist at all — a rootless delegated leaf commonly does NOT have
+/// the `io` controller delegated (see this repo's cgroup-delegation notes),
+/// and a real "hasn't read/written yet" would be `Some(0)`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ContainerUsage {
+    pub cpu_usage_usec: Option<u64>,
+    pub mem_bytes: Option<u64>,
+    pub io_read_bytes: Option<u64>,
+    pub io_write_bytes: Option<u64>,
+}
+
+/// Collects [`ContainerUsage`] for one container from its live cgroup.
+/// Best-effort per field: a stopped container (dead/missing cgroup) simply
+/// reads back all-`None`, never a fabricated zero.
+pub fn container_usage(container: &Container) -> ContainerUsage {
+    let base = live_cgroup(container);
+    let mem_bytes = std::fs::read_to_string(format!("{base}/memory.current"))
+        .ok()
+        .and_then(|s| s.trim().parse().ok());
+    let cpu_usage_usec = std::fs::read_to_string(format!("{base}/cpu.stat"))
+        .ok()
+        .and_then(|s| parse_cpu_stat_usage_usec(&s));
+    let (io_read_bytes, io_write_bytes) = std::fs::read_to_string(format!("{base}/io.stat"))
+        .ok()
+        .map(|s| parse_io_stat_totals(&s))
+        .map(|(r, w)| (Some(r), Some(w)))
+        .unwrap_or((None, None));
+    ContainerUsage {
+        cpu_usage_usec,
+        mem_bytes,
+        io_read_bytes,
+        io_write_bytes,
+    }
+}
+
+/// Extracts `usage_usec` from a `cpu.stat` blob (`key value` lines).
+fn parse_cpu_stat_usage_usec(s: &str) -> Option<u64> {
+    s.lines()
+        .find_map(|l| l.strip_prefix("usage_usec "))
+        .and_then(|v| v.trim().parse().ok())
+}
+
+/// Sums `rbytes`/`wbytes` across every device line of `io.stat`. Format:
+/// `<major:minor> rbytes=<n> wbytes=<n> rios=<n> wios=<n> ...` — one line per
+/// block device the cgroup has touched. A container normally touches only
+/// its overlay's backing device, but summing every line is correct either way.
+fn parse_io_stat_totals(s: &str) -> (u64, u64) {
+    let mut r = 0u64;
+    let mut w = 0u64;
+    for line in s.lines() {
+        for field in line.split_whitespace() {
+            if let Some(v) = field.strip_prefix("rbytes=") {
+                r += v.parse::<u64>().unwrap_or(0);
+            } else if let Some(v) = field.strip_prefix("wbytes=") {
+                w += v.parse::<u64>().unwrap_or(0);
+            }
+        }
+    }
+    (r, w)
+}
+
+#[cfg(test)]
+mod container_usage_tests {
+    use super::*;
+
+    #[test]
+    fn parse_cpu_stat_usage_usec_reads_the_right_field() {
+        let s = "usage_usec 123456\nuser_usec 100000\nsystem_usec 23456\n";
+        assert_eq!(parse_cpu_stat_usage_usec(s), Some(123456));
+    }
+
+    #[test]
+    fn parse_cpu_stat_usage_usec_returns_none_without_the_field() {
+        assert_eq!(parse_cpu_stat_usage_usec("nr_periods 0\n"), None);
+        assert_eq!(parse_cpu_stat_usage_usec(""), None);
+    }
+
+    #[test]
+    fn parse_io_stat_totals_sums_all_devices() {
+        let s =
+            "8:0 rbytes=1000 wbytes=2000 rios=1 wios=1\n8:16 rbytes=500 wbytes=0 rios=1 wios=0\n";
+        assert_eq!(parse_io_stat_totals(s), (1500, 2000));
+    }
+
+    #[test]
+    fn parse_io_stat_totals_empty_gives_zero() {
+        assert_eq!(parse_io_stat_totals(""), (0, 0));
+    }
 }
 
 /// Suspends (`pause`) or resumes (`unpause`) a container using the cgroup v2

@@ -9126,3 +9126,21 @@ msgstr "ver o que LEVARIA, separado entre recursos declarados e lixo, e não lev
 msgid "what the scheduled sweep would do right now, threshold gate included"
 msgstr "o que a varredura agendada faria agora mesmo, portão do limiar incluído"
 
+msgid "RUNNING CONTAINERS (last 2 min)"
+msgstr "CONTAINERS A CORRER (últimos 2 min)"
+
+msgid "MEMORY USAGE, MiB (last 2 min)"
+msgstr "USO DE MEMÓRIA, MiB (últimos 2 min)"
+
+msgid "CPU%: interactive TUI only (needs two samples to compute a rate)"
+msgstr "CPU%: só no TUI interactivo (precisa de duas amostras para calcular uma taxa)"
+
+msgid "no resources match the filter"
+msgstr "nenhum recurso corresponde ao filtro"
+
+msgid "(Enter: apply · Esc: clear)"
+msgstr "(Enter: aplica · Esc: limpa)"
+
+msgid "q/Esc: quit · ↑↓: select · Tab/1-6: scope · /: search · s: sort ({sort}) · refresh 1s"
+msgstr "q/Esc: sair · ↑↓: seleccionar · Tab/1-6: âmbito · /: procurar · s: ordenar ({sort}) · refresh 1s"
+
