@@ -271,14 +271,14 @@ pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<Con
         out.containers += 1;
     }
 
-    /// Is the VM behind a `vm-<nome>` ingress ref still running?
+    /// Is the VM behind a `vm-<name>` ingress ref still running?
     ///
     /// Reads the record AND checks the pid, because the two can disagree: a VM whose
     /// host died keeps `status: Running` on disk until something reconciles it, and
     /// that stale record is exactly what would keep a dead ref alive. A name the
     /// store does not know is not alive either — the VM was removed and its ref
     /// outlived it.
-    fn vm_esta_viva(name: &str) -> bool {
+    fn vm_is_alive(name: &str) -> bool {
         let st: delonix_runtime_core::JsonStore<delonix_runtime_core::Vm> =
             match delonix_runtime_core::JsonStore::open(super::util::state_root().join("vms")) {
                 Ok(s) => s,
@@ -311,7 +311,7 @@ pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<Con
         .map(|c| c.id.clone())
         .collect();
     for id in delonix_net::infra::attached_refs() {
-        // A `vm-<nome>` ref is checked against the VM store instead of being
+        // A `vm-<name>` ref is checked against the VM store instead of being
         // assumed alive. Assuming made it IMMORTAL: nothing on the system ever
         // freed it, so the ref-count never reached zero, the infra was never torn
         // down, and — the part that bites — `delonix-cri` reports
@@ -331,7 +331,7 @@ pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<Con
         if id.starts_with("cri-") {
             live_refs.insert(id);
         } else if let Some(name) = id.strip_prefix("vm-") {
-            if vm_esta_viva(name) {
+            if vm_is_alive(name) {
                 live_refs.insert(id);
             }
         }
@@ -1249,7 +1249,7 @@ mod tests {
     }
 
     #[test]
-    fn o_dono_de_um_ficheiro_de_estado_tira_o_sufixo_mais_longo_primeiro() {
+    fn state_file_owner_strips_the_longest_suffix_first() {
         assert_eq!(super::vm_state_owner("micro.sock.lock"), Some("micro"));
         assert_eq!(super::vm_state_owner("micro.sock"), Some("micro"));
         assert_eq!(super::vm_state_owner("lab-dns.qcow2"), Some("lab-dns"));
@@ -1268,7 +1268,7 @@ mod tests {
     /// after a VM. A name-based sweep calls all three orphans and deletes
     /// 53 GiB of live data.
     #[test]
-    fn uma_pasta_de_dados_citada_por_um_registo_vivo_nunca_e_podada() {
+    fn a_data_dir_cited_by_a_live_record_is_never_pruned() {
         let entries: Vec<String> = ["hadata", "labdata", "pve-ha-1.json", ".morta.lock"]
             .iter()
             .map(|s| s.to_string())
@@ -1282,7 +1282,7 @@ mod tests {
     }
 
     #[test]
-    fn uma_vm_viva_guarda_todo_o_seu_proprio_estado() {
+    fn a_live_vm_keeps_all_of_its_own_state() {
         let entries: Vec<String> = ["micro.sock", "micro.pid", "micro.log", ".micro.lock"]
             .iter()
             .map(|s| s.to_string())
@@ -1292,7 +1292,7 @@ mod tests {
     }
 
     #[test]
-    fn o_overlay_e_o_registo_de_uma_vm_morta_saem_juntos() {
+    fn the_overlay_and_the_record_of_a_dead_vm_go_together() {
         let entries: Vec<String> = ["morta.qcow2", "morta.json", "morta", "viva.qcow2"]
             .iter()
             .map(|s| s.to_string())
@@ -1312,7 +1312,7 @@ mod tests {
     }
 
     #[test]
-    fn uma_imagem_em_uso_nunca_e_condenada_nem_com_all() {
+    fn an_image_in_use_is_never_doomed_not_even_with_all() {
         let em_uso: std::collections::HashSet<String> =
             ["nginx:alpine".to_string()].into_iter().collect();
         assert!(!super::image_is_doomed(
@@ -1321,7 +1321,7 @@ mod tests {
             &em_uso,
             false
         ));
-        // `--all` alarga o critério, mas NUNCA passa por cima do «está em uso».
+        // `--all` widens the criterion, but NEVER overrides "still in use".
         assert!(!super::image_is_doomed(
             "sha256:aa",
             &tags(&["nginx:alpine"]),
@@ -1331,28 +1331,28 @@ mod tests {
     }
 
     #[test]
-    fn uma_imagem_pendurada_sai_sem_all_e_uma_etiquetada_so_com_all() {
-        let vazio = std::collections::HashSet::new();
-        // Sem etiquetas = pendurada.
-        assert!(super::image_is_doomed("sha256:bb", &[], &vazio, false));
-        // `<none>` conta como pendurada — é como o store as marca.
+    fn a_dangling_image_goes_without_all_a_tagged_one_only_with_all() {
+        let empty = std::collections::HashSet::new();
+        // No tags = dangling.
+        assert!(super::image_is_doomed("sha256:bb", &[], &empty, false));
+        // `<none>` counts as dangling — that is how the store marks them.
         assert!(super::image_is_doomed(
             "sha256:cc",
             &tags(&["<none>:<none>"]),
-            &vazio,
+            &empty,
             false
         ));
-        // Etiquetada e sem uso: fica, até alguém pedir `--all`.
+        // Tagged and unused: it stays, until someone asks for `--all`.
         assert!(!super::image_is_doomed(
             "sha256:dd",
             &tags(&["demo:1"]),
-            &vazio,
+            &empty,
             false
         ));
         assert!(super::image_is_doomed(
             "sha256:dd",
             &tags(&["demo:1"]),
-            &vazio,
+            &empty,
             true
         ));
     }
@@ -1370,7 +1370,7 @@ mod tests {
         }
     }
 
-    /// O mesmo, mas pertencente a um inquilino.
+    /// The same, but owned by a tenant.
     fn vns(ns: &str, name: &str, mount: &str) -> VolumeFacts {
         let mut f = v(name, mount);
         f.namespace = Some(ns.into());
@@ -1378,64 +1378,69 @@ mod tests {
     }
 
     #[test]
-    fn um_volume_local_sem_referencias_e_podavel() {
+    fn a_local_volume_with_no_references_is_prunable() {
         let (take, keep) = classify_volumes(&[v("solto", "/root/volumes/solto/_data")]);
         assert_eq!(take.len(), 1);
         assert_eq!(take[0].name, "solto");
         assert!(keep.is_empty());
     }
 
-    /// O caso que este comando existe para NÃO fazer: um container parado
-    /// continua a um `start` de precisar dos dados.
+    /// The case this command exists NOT to do: a stopped container is still
+    /// one `start` away from needing the data.
     #[test]
-    fn um_volume_referenciado_nunca_e_podado() {
+    fn a_referenced_volume_is_never_pruned() {
         let mut a = v("dados", "/root/volumes/dados/_data");
         a.referenced = true;
         let (take, keep) = classify_volumes(&[a]);
         assert!(take.is_empty());
         assert_eq!(keep[0].1, Keep::InUse);
-        // In-use não imprime linha — senão todos os volumes ligados enchiam o ecrã.
+        // In-use prints no line — otherwise every attached volume would fill the screen.
         assert!(keep_reason(&keep[0].1).is_none());
     }
 
-    /// Um `kind: ShareVolume` é um subdirectório REAL do Storage pai, e NENHUM
-    /// dos dois lados é podável: podar a filha apaga os dados de um inquilino,
-    /// podar o pai apaga a árvore que os contém.
+    /// A `kind: ShareVolume` is a REAL subdirectory of the parent Storage, and
+    /// NEITHER side is prunable: pruning the child deletes a tenant's data,
+    /// pruning the parent deletes the tree that holds them.
     ///
-    /// A asserção que interessa é a do PAI: antes desta correcção ele voltava
-    /// como `InUse` (porque o `volume_refs` conta as shares) e essa é a variante
-    /// que não imprime linha nenhuma — desaparecia do relatório em silêncio.
+    /// The assertion that matters is the PARENT one: before this fix it came
+    /// back as `InUse` (because `volume_refs` counts the shares) and that is
+    /// the variant that prints no line at all — it vanished from the report
+    /// in silence.
     #[test]
-    fn nem_a_share_nem_o_seu_pai_sao_podados_e_os_dois_dizem_porque() {
-        let pai = v("nas", "/root/volumes/nas/_data");
-        let filha = v("nas-teamA", "/root/volumes/nas/_data/teamA");
-        let (take, keep) = classify_volumes(&[pai, filha]);
-        assert!(take.is_empty(), "nem o pai nem a filha podem ser podados");
+    fn neither_the_share_nor_its_parent_is_pruned_and_both_say_why() {
+        let parent = v("nas", "/root/volumes/nas/_data");
+        let child = v("nas-teamA", "/root/volumes/nas/_data/teamA");
+        let (take, keep) = classify_volumes(&[parent, child]);
+        assert!(
+            take.is_empty(),
+            "neither the parent nor the child may be pruned"
+        );
         assert_eq!(keep.len(), 2);
-        let pai = keep.iter().find(|(v, _)| v.name == "nas").unwrap();
-        assert_eq!(pai.1, Keep::HoldsShares(vec!["nas-teamA".into()]));
-        let filha = keep.iter().find(|(v, _)| v.name == "nas-teamA").unwrap();
-        assert_eq!(filha.1, Keep::ShareOf("nas".into()));
-        // Os DOIS têm de imprimir razão: um volume local e sem containers que
-        // não é levado, sem uma linha a explicar, lê-se como um prune partido.
-        assert!(keep_reason(&pai.1).is_some());
-        assert!(keep_reason(&filha.1).is_some());
+        let parent = keep.iter().find(|(v, _)| v.name == "nas").unwrap();
+        assert_eq!(parent.1, Keep::HoldsShares(vec!["nas-teamA".into()]));
+        let child = keep.iter().find(|(v, _)| v.name == "nas-teamA").unwrap();
+        assert_eq!(child.1, Keep::ShareOf("nas".into()));
+        // BOTH must print a reason: a local volume with no containers that is
+        // not taken, with no line explaining why, reads as a broken prune.
+        assert!(keep_reason(&parent.1).is_some());
+        assert!(keep_reason(&child.1).is_some());
     }
 
-    /// `/vol/data2` NÃO está dentro de `/vol/data`. Com `str::starts_with`
-    /// estaria, e um volume perfeitamente podável seria guardado para sempre
-    /// como se fosse filho de outro.
+    /// `/vol/data2` is NOT inside `/vol/data`. With `str::starts_with` it
+    /// would be, and a perfectly prunable volume would be kept forever as if
+    /// it were another one's child.
     #[test]
-    fn o_prefixo_de_caminho_e_por_componente_e_nao_por_texto() {
+    fn path_prefix_matches_by_component_not_by_text() {
         let (take, keep) = classify_volumes(&[v("data", "/vol/data"), v("data2", "/vol/data2")]);
         assert_eq!(take.len(), 2);
         assert!(keep.is_empty());
     }
 
-    /// O registo local é a ÚNICA coisa que diz qual dataset em qual appliance
-    /// pertence a este volume: apagá-lo deixa um dataset órfão do outro lado.
+    /// The local record is the ONLY thing that says which dataset on which
+    /// appliance belongs to this volume: dropping it orphans a dataset on the
+    /// other side.
     #[test]
-    fn um_volume_provisionado_numa_nas_nunca_e_podado() {
+    fn a_volume_provisioned_on_a_nas_is_never_pruned() {
         let mut a = v("nas-dados", "/root/volumes/nas-dados/_data");
         a.provisioned = true;
         let (take, keep) = classify_volumes(&[a]);
@@ -1443,46 +1448,46 @@ mod tests {
         assert_eq!(keep[0].1, Keep::Provisioned);
     }
 
-    /// A fórmula é a do `df`, e a diferença NÃO é cosmética: os blocos
-    /// reservados ao root contam como ocupados para quem não é root. Um motor
-    /// rootless nunca lhes toca, portanto contá-los como espaço livre reporta
-    /// um número mais BAIXO do que o operador vê — e o limiar dele foi lido do
-    /// `df`.
+    /// The formula is the one `df` uses, and the difference is NOT cosmetic:
+    /// root-reserved blocks count as used for anyone who is not root. A
+    /// rootless engine never touches them, so counting them as free space
+    /// reports a LOWER number than the operator sees — and their threshold was
+    /// read from `df`.
     #[test]
-    fn a_ocupacao_e_a_que_o_df_reporta_nao_a_ingenua() {
+    fn usage_is_what_df_reports_not_the_naive_sum() {
         // 1000 blocos, 100 livres, 50 disponíveis a quem não é root.
         // df: usados=900, utilizáveis=950 → 95%. A ingénua daria 90%.
         assert_eq!(used_pct(1000, 100, 50), 95);
     }
 
-    /// Arredonda para CIMA: um disco com 0,4% livre não se lê como 99%.
+    /// Rounds UP: a disk with 0.4% free must not read as 99%.
     #[test]
-    fn a_percentagem_arredonda_para_cima() {
+    fn the_percentage_rounds_up() {
         assert_eq!(used_pct(1000, 4, 4), 100);
         assert_eq!(used_pct(1000, 996, 996), 1, "1 bloco usado já não é 0%");
     }
 
     #[test]
-    fn os_extremos_nao_saem_da_gama() {
-        assert_eq!(used_pct(1000, 1000, 1000), 0, "vazio");
-        assert_eq!(used_pct(1000, 0, 0), 100, "cheio");
-        // Um sistema de ficheiros sem blocos utilizáveis lê-se como CHEIO, que
-        // é a leitura que faz uma varredura correr em vez de saltar.
+    fn the_extremes_stay_within_range() {
+        assert_eq!(used_pct(1000, 1000, 1000), 0, "empty");
+        assert_eq!(used_pct(1000, 0, 0), 100, "full");
+        // A filesystem with no usable blocks reads as FULL, which is the
+        // reading that makes a sweep run instead of skip.
         assert_eq!(used_pct(0, 0, 0), 100);
-        // Contadores que não batem certo não podem produzir mais de 100 nem
-        // dar a volta: `bfree > blocks` satura em ZERO usados, e com blocos
-        // ainda disponíveis isso lê-se como um disco vazio.
+        // Counters that do not add up must neither exceed 100 nor wrap
+        // around: `bfree > blocks` saturates at ZERO used, and with blocks
+        // still available that reads as an empty disk.
         assert_eq!(used_pct(10, 100, 50), 0);
-        // Mas sem NADA disponível ganha o ramo de cima — cheio, não vazio: é a
-        // leitura que faz a varredura correr em vez de saltar.
+        // But with NOTHING available the branch above wins — full, not empty:
+        // that is the reading that makes the sweep run instead of skip.
         assert_eq!(used_pct(10, 100, 0), 100);
     }
 
-    /// O âmbito é o filtro, e um filtro que não distingue «sem dono» de
-    /// «do inquilino `default`» apaga os dados errados. São dois sítios
-    /// diferentes no disco e têm de continuar a ser duas respostas diferentes.
+    /// Scope is the filter, and a filter that does not tell "ownerless" apart
+    /// from "owned by tenant `default`" deletes the wrong data. They are two
+    /// different places on disk and must stay two different answers.
     #[test]
-    fn o_ambito_distingue_a_raiz_sem_dono_do_inquilino_default() {
+    fn scope_distinguishes_the_ownerless_root_from_the_default_tenant() {
         assert!(Scope::Unowned.covers(None));
         assert!(!Scope::Unowned.covers(Some("default")));
         assert!(!Scope::Unowned.covers(Some("acme")));
@@ -1496,97 +1501,100 @@ mod tests {
         assert!(Scope::Everything.covers(Some("acme")));
     }
 
-    /// O buraco que esta feature fecha: o volume de um inquilino ENTRA na
-    /// classificação, com o dono agarrado, em vez de ficar invisível.
+    /// The hole this feature closes: a tenant's volume ENTERS the
+    /// classification, with its owner attached, instead of staying invisible.
     #[test]
-    fn o_volume_de_um_inquilino_e_podavel_e_diz_de_quem_era() {
+    fn a_tenant_volume_is_prunable_and_says_whose_it_was() {
         let (take, keep) =
             classify_volumes(&[vns("acme", "pgdata", "/root/volumes/.ns/acme/pgdata/_data")]);
         assert_eq!(take.len(), 1);
         assert!(keep.is_empty());
         assert_eq!(take[0].owner(), "acme");
-        // Num relatório que atravessa donos, o nome nu é ambíguo.
+        // In a report that spans owners, the bare name is ambiguous.
         assert_eq!(take[0].qualified(), "acme/pgdata");
     }
 
-    /// A identidade é o MOUNTPOINT, não o nome. Dois inquilinos escolhem
-    /// `data` — comparar por nome faria cada um passar por «eu próprio» na
-    /// derivação pai/filho do outro, e um `Storage` partilhado deixaria de ser
-    /// reconhecido como pai de uma share do vizinho.
+    /// Identity is the MOUNTPOINT, not the name. Two tenants both pick
+    /// `data` — comparing by name would make each pass for "myself" in the
+    /// other's parent/child derivation, and a shared `Storage` would stop
+    /// being recognised as the parent of a neighbour's share.
     #[test]
-    fn dois_inquilinos_com_o_mesmo_nome_nao_se_confundem() {
+    fn two_tenants_with_the_same_name_are_not_confused() {
         let a = vns("acme", "data", "/root/volumes/.ns/acme/data/_data");
         let b = vns("globex", "data", "/root/volumes/.ns/globex/data/_data");
         let (take, keep) = classify_volumes(&[a, b]);
-        assert_eq!(take.len(), 2, "nenhum é filho do outro");
+        assert_eq!(take.len(), 2, "neither is a child of the other");
         assert!(keep.is_empty());
         let mut donos: Vec<&str> = take.iter().map(|v| v.owner()).collect();
         donos.sort();
         assert_eq!(donos, ["acme", "globex"]);
     }
 
-    /// E a prova de que a correcção da identidade não foi só cosmética: com o
-    /// nome como identidade, a share do `acme` NÃO seria vista como filha do
-    /// `Storage` homónimo do `globex`... mas a do MESMO nome dentro da sua
-    /// própria árvore passaria despercebida. Aqui o pai e a filha chamam-se
-    /// ambos `nas` e a relação tem de ser detectada na mesma.
+    /// And the proof that the identity fix was not merely cosmetic: with the
+    /// name as identity, `acme`'s share would NOT be seen as a child of
+    /// `globex`'s same-named `Storage`... but the one with the SAME name
+    /// inside its own tree would slip through unnoticed. Here parent and child
+    /// are both called `nas` and the relation must still be detected.
     #[test]
-    fn pai_e_filha_com_o_mesmo_nome_em_donos_diferentes_sao_detectados() {
-        let pai = vns("acme", "nas", "/root/volumes/.ns/acme/nas/_data");
-        let filha = vns("acme", "nas", "/root/volumes/.ns/acme/nas/_data/teamA");
-        let (take, keep) = classify_volumes(&[pai, filha]);
-        assert!(take.is_empty(), "nem o pai nem a filha podem ser podados");
+    fn parent_and_child_with_the_same_name_under_different_owners_are_detected() {
+        let parent = vns("acme", "nas", "/root/volumes/.ns/acme/nas/_data");
+        let child = vns("acme", "nas", "/root/volumes/.ns/acme/nas/_data/teamA");
+        let (take, keep) = classify_volumes(&[parent, child]);
+        assert!(
+            take.is_empty(),
+            "neither the parent nor the child may be pruned"
+        );
         assert_eq!(keep.len(), 2);
         assert!(keep.iter().any(|(_, k)| matches!(k, Keep::HoldsShares(_))));
         assert!(keep.iter().any(|(_, k)| matches!(k, Keep::ShareOf(_))));
     }
 
-    /// **O caminho de perda de dados que o âmbito por dono quase abriu.**
+    /// **The data-loss path that owner scoping nearly opened.**
     ///
-    /// Um `kind: ShareVolume` é registado na sub-árvore do SEU inquilino, mas o
-    /// `Storage` pai fica na raiz sem dono — é o mount da NAS, infraestrutura
-    /// do nó (`sharevolume::apply_one` diz isto por escrito) — e os dados da
-    /// share vivem DENTRO da árvore do pai.
+    /// A `kind: ShareVolume` is recorded in ITS tenant's subtree, but the
+    /// parent `Storage` sits at the ownerless root — it is the NAS mount, node
+    /// infrastructure (`sharevolume::apply_one` says so in writing) — and the
+    /// share's data live INSIDE the parent's tree.
     ///
-    /// Se o âmbito filtrasse a lista ANTES da derivação, `--namespace acme`
-    /// veria a share sozinha, não lhe encontraria pai nenhum, e apagaria dados
-    /// na NAS. O âmbito decide o que se LEVA; nunca o que se OLHA.
+    /// If scope filtered the list BEFORE the derivation, `--namespace acme`
+    /// would see the share alone, find no parent for it, and delete data on
+    /// the NAS. Scope decides what is TAKEN; never what is LOOKED AT.
     #[test]
-    fn uma_share_do_inquilino_nao_perde_o_pai_por_ele_estar_fora_do_ambito() {
-        let mut pai = v("nas", "/root/volumes/nas/_data");
-        pai.in_scope = false; // a raiz não está no âmbito de `--namespace acme`
-        let filha = vns("acme", "db", "/root/volumes/nas/_data/shares/acme/db");
+    fn a_tenant_share_does_not_lose_its_parent_for_being_out_of_scope() {
+        let mut parent = v("nas", "/root/volumes/nas/_data");
+        parent.in_scope = false; // a raiz não está no âmbito de `--namespace acme`
+        let child = vns("acme", "db", "/root/volumes/nas/_data/shares/acme/db");
 
-        let (take, keep) = classify_volumes(&[pai, filha]);
+        let (take, keep) = classify_volumes(&[parent, child]);
         assert!(
             take.is_empty(),
             "a share foi levada — os dados na NAS seriam destruídos"
         );
-        assert_eq!(keep.len(), 1, "o pai fora do âmbito não se reporta");
+        assert_eq!(keep.len(), 1, "an out-of-scope parent is not reported");
         assert_eq!(keep[0].0.qualified(), "acme/db");
         assert_eq!(keep[0].1, Keep::ShareOf("nas".into()));
     }
 
-    /// E o simétrico: um volume fora do âmbito não aparece no relatório como
-    /// «mantido». Listar os volumes dos outros inquilinos é ruído, e pior —
-    /// lê-se como se tivessem sido considerados.
+    /// And the symmetric case: a volume outside the scope does not appear in
+    /// the report as "kept". Listing other tenants' volumes is noise, and
+    /// worse — it reads as if they had been considered.
     #[test]
-    fn o_que_esta_fora_do_ambito_nao_entra_no_relatorio() {
-        let mut outro = vns("globex", "pgdata", "/root/volumes/.ns/globex/pgdata/_data");
-        outro.in_scope = false;
+    fn what_is_out_of_scope_does_not_enter_the_report() {
+        let mut other = vns("globex", "pgdata", "/root/volumes/.ns/globex/pgdata/_data");
+        other.in_scope = false;
         let meu = vns("acme", "pgdata", "/root/volumes/.ns/acme/pgdata/_data");
 
-        let (take, keep) = classify_volumes(&[outro, meu]);
+        let (take, keep) = classify_volumes(&[other, meu]);
         assert_eq!(take.len(), 1);
         assert_eq!(take[0].qualified(), "acme/pgdata");
         assert!(keep.is_empty());
     }
 
-    /// Um container de OUTRO inquilino a montar este volume conta como
-    /// referência. A posse decide o que a varredura pode CONSIDERAR; nunca
-    /// autoriza apagar dados debaixo de uma carga viva de outrem.
+    /// A container from ANOTHER tenant mounting this volume counts as a
+    /// reference. Ownership decides what the sweep may CONSIDER; it never
+    /// authorises deleting data underneath someone else's live workload.
     #[test]
-    fn a_referencia_de_outro_inquilino_protege_o_volume() {
+    fn a_reference_from_another_tenant_protects_the_volume() {
         let mut a = vns("acme", "dados", "/root/volumes/.ns/acme/dados/_data");
         a.referenced = true;
         let (take, keep) = classify_volumes(&[a]);
@@ -1595,7 +1603,7 @@ mod tests {
     }
 
     #[test]
-    fn um_volume_de_rede_e_infraestrutura_declarada_e_fica() {
+    fn a_network_volume_is_declared_infrastructure_and_stays() {
         let mut a = v("export", "/root/volumes/export/_data");
         a.driver = "nfs".into();
         let (take, keep) = classify_volumes(&[a]);
@@ -1603,24 +1611,25 @@ mod tests {
         assert_eq!(keep[0].1, Keep::NetworkDriver("nfs".into()));
     }
 
-    /// A medição incompleta não pode passar por número exacto: em rootless o
-    /// rootfs é de um subuid e um `du` de fora lê zero onde há gigabytes.
+    /// An incomplete measurement must not pass for an exact number: under
+    /// rootless the rootfs belongs to a subuid and a `du` from outside reads
+    /// zero where there are gigabytes.
     #[test]
-    fn uma_medicao_incompleta_imprime_se_como_limite_inferior() {
+    fn an_incomplete_measurement_prints_as_a_lower_bound() {
         let exacta = Reclaimed {
             bytes: 1024,
             partial: false,
         };
-        let parcial = Reclaimed {
+        let partial = Reclaimed {
             bytes: 1024,
             partial: true,
         };
         assert!(!exacta.fmt().starts_with('≥'));
-        assert!(parcial.fmt().starts_with('≥'));
+        assert!(partial.fmt().starts_with('≥'));
     }
 
     #[test]
-    fn a_soma_de_uma_medicao_parcial_contamina_o_total() {
+    fn a_partial_measurement_taints_the_total() {
         let mut total = Reclaimed::default();
         total.add(Reclaimed {
             bytes: 10,
@@ -1641,7 +1650,7 @@ mod tests {
     /// real one, so asserting authority there would reap every published port on
     /// the machine as an orphan. Fails the moment the guard becomes a constant.
     #[test]
-    fn so_o_root_default_pode_reclamar_o_ingress_partilhado() {
+    fn only_the_default_root_can_claim_the_shared_ingress() {
         assert!(owns_shared_ingress_at(&ImageStore::default_root()));
         assert!(!owns_shared_ingress_at(std::path::Path::new(
             "/tmp/um-root-de-teste"
@@ -1671,7 +1680,7 @@ mod tests {
     /// orphans remain. Runs without privilege — it tests the DECISION
     /// (`orphan_container_dirs`), not `remove_tree_mapped` (which needs subuid).
     #[test]
-    fn stress_reaper_rootfs_orfaos_deixa_zero() {
+    fn stress_reaper_leaves_zero_orphan_rootfs() {
         const N: usize = 300;
         let root = tmp_dir("rootfs");
         let containers = root.join("containers");

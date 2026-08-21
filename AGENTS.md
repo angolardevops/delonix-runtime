@@ -10,7 +10,45 @@ privado `delonix-paas` (ver [README.md](README.md) para a arquitectura dos 10 cr
 cargo build --workspace               # tudo
 cargo test  --workspace               # testes
 cargo build -p delonix-runtime-bin    # a CLI `delonix` (ver secção "CLI" abaixo)
+python3 scripts/lang_ratchet.py       # gate de língua (ver "Língua do código")
 ```
+
+## Língua do código: inglês (LANG-01)
+
+**Identificadores, comentários e mensagens escrevem-se em inglês.** O português
+serve o operador, e chega-lhe pelo catálogo de tradução (`cmd::po`), nunca por
+uma string escrita à mão no meio do código.
+
+Isto não é uma política nova — é a política que o repo já tinha e nunca fez
+cumprir. O `help` da CLI é autorado em inglês e traduzido para PT desde a
+v0.32.2; tudo o que ficou em português ficou por ter **saltado** o catálogo.
+
+**O gate:** `scripts/lang_ratchet.py` conta três dívidas — identificadores,
+comentários e mensagens ao utilizador ainda em PT — contra
+`scripts/lang_baseline.json`, e corre no CI (job `lang`).
+
+É um **ratchet, não um tecto**, tal como o `ARG_HELP_PENDING` do
+`help_i18n_tests`: falha se o número SUBIR (entrou português novo) **e** se
+DESCER sem a linha de base ter sido baixada no mesmo commit. Um `<=` deixaria a
+dívida a ler-se como verde para sempre.
+
+```bash
+python3 scripts/lang_ratchet.py --list --only identifiers   # o que falta
+python3 scripts/lang_ratchet.py --update                    # baixar a base
+```
+
+Ao traduzir, `--update` e o ficheiro traduzido vão no **mesmo commit**.
+
+**O léxico (`scripts/lang_pt_lexicon.txt`) não leva homógrafos.** `remove`,
+`media`, `data`, `base`, `no`, `so`, `ate`, `ver`, `pos` e `seg` existem nas duas
+línguas. `nas` foi pior: colide com **NAS**, o armazenamento, e à primeira
+passagem deu seis falsos positivos que faziam comentários já ingleses contar como
+dívida. Um contador com falsos positivos não é um contador — é ruído com um
+número à frente.
+
+Acrescentar uma palavra ao léxico **sobe** a contagem e faz o gate falhar. Está
+certo: significa que se descobriu dívida que já lá estava. Baixa a linha de base
+no mesmo commit em que acrescentas a palavra.
 
 ## Método: um worktree por sessão (ler ANTES de editar)
 
@@ -3656,6 +3694,15 @@ correr. Merece a sua própria sessão.
 Pedido do utilizador ao ver que cinco bugs de uma série eram a mesma frase. Vale mais como
 checklist para quem mexer aqui do que como lista de correcções:
 
+- **código em português** não é uma decisão de arquitectura — é o nome dos testes (2026-08-21:
+  dos 1165 nomes de função em PT dos dois repos Rust, **1145, ou 98,3%, são nomes de teste**;
+  só 2 são públicos, e dos 1690 itens públicos ZERO têm PT em `serde(rename)`, campos `pub` ou
+  flags de CLI). A convenção já era EN-na-fonte com catálogo PT desde a v0.32.2 — o que ficou
+  em português ficou por ter SALTADO o catálogo. Ver «Língua do código (LANG-01)»;
+- um **contador com falsos positivos** não é um contador — é ruído com um número à frente. O
+  léxico do `lang_ratchet` levava `nas`, que colide com **NAS**: seis comentários já ingleses
+  contavam como dívida. Antes de confiar numa métrica de dívida, lê uma amostra do que ela
+  acusa;
 - um **ficheiro de socket** não é um listener (`wait_for_control_sock` era `.exists()`);
 - **`/sys/class/net`** não é a netns do processo (reporta a de quem MONTOU o sysfs);
 - **`capture()` devolver `Ok`** não é o comando ter passado (não olha para o exit status — lê-se
