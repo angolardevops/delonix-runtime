@@ -232,7 +232,7 @@ INFO:     10.0.2.2:57802 - "GET /api/weather/Luanda HTTP/1.1" 200 OK</code></pre
 <h2>4. Expor à internet</h2>
 <p>Uma porta local não chega — o objectivo é uma URL que qualquer pessoa, em qualquer rede,
 consiga abrir. É aqui que entra o <a href="comandos/tunnel.html"><code>kind: Tunnel</code></a>:</p>
-<pre><code>delonix net tunnel expose --name delonix-temp --provider pinggy --local-port 8080</code></pre>
+<pre><code>delonix net tunnel expose 8080 --name delonix-temp</code></pre>
 <div class="out"><pre><code>tunnel/delonix-temp: running — https://lfdhz-197-148-40-67.free.pinggy.net</code></pre></div>
 <p>Essa URL é REAL — foi a que este guião recebeu ao correr o comando. (A tua vai ser diferente
 de cada vez: o provider grátis atribui uma nova de cada sessão.) Confirmação, de fora, sem
@@ -353,7 +353,7 @@ INFO:     10.0.2.2:57802 - "GET /api/weather/Luanda HTTP/1.1" 200 OK</code></pre
 <h2>4. Expose it to the internet</h2>
 <p>A local port isn't enough — the goal is a URL anyone, on any network, can open. This is where
 <a href="comandos/tunnel.html"><code>kind: Tunnel</code></a> comes in:</p>
-<pre><code>delonix net tunnel expose --name delonix-temp --provider pinggy --local-port 8080</code></pre>
+<pre><code>delonix net tunnel expose 8080 --name delonix-temp</code></pre>
 <div class="out"><pre><code>tunnel/delonix-temp: running — https://lfdhz-197-148-40-67.free.pinggy.net</code></pre></div>
 <p>That URL is REAL — it's the one this guide got when the command was actually run. (Yours will
 be different every time: the free provider assigns a new one each session.) Confirmation, from
