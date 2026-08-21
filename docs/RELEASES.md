@@ -4,6 +4,71 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.62.0 — uma plataforma que não conseguia puxar do seu próprio registo
+
+A correcção que dá nome a esta versão não saiu de leitura de código nem de um
+teste: saiu de uma plataforma em produção que esteve **onze horas e vinte
+minutos** sem API, e do gate nocturno que, na primeira corrida real, apontou
+para o sítio certo.
+
+### O motor impunha HTTPS e não havia como dizer o contrário
+
+O `scheme_for` falava HTTP à família do loopback e impunha HTTPS a tudo o resto,
+sem botão nenhum. O Docker tem `--insecure-registry`, o containerd tem
+`certs.d`; este motor não tinha nada — e a consequência não era teórica.
+
+Medido no cluster de produção da NgolaCloud a 2026-08-19: o `POST
+/api/images/pull` respondia **HTTP 200 com `{"ok":false}`** e, por baixo,
+`registry error: error sending request for url (https://192.168.1.11:5000/...)`.
+O registo do próprio cluster serve HTTP simples. O `/v2/images` do control-plane
+tinha **zero imagens** — nenhuma carga de inquilino alguma vez tinha passado por
+ali, e todos os `apply` de uma `Application` eram recusados antes de reconciliar
+o que quer que fosse.
+
+Um botão que ninguém alcança não é uma fronteira de segurança; é uma parede.
+
+`DELONIX_INSECURE_REGISTRIES` (lista por vírgulas, `host` ou `host:port`) declara
+os registos que falam HTTP simples. Adesão explícita por host — nunca uma gama,
+nunca uma regra do género «detectar a LAN»: baixar uma ligação em silêncio
+porque um endereço parece privado é como uma credencial acaba na rede num sítio
+que ninguém inspeccionou. Uma entrada **com** porta prende a promessa àquele
+extremo; **sem** porta prende-a à máquina — a mesma assimetria do Docker.
+
+**O default não se move:** um host não declarado continua em HTTPS, e há um
+teste que falha se isso alguma vez mudar.
+
+### Dois defeitos apanhados a testar, um deles mais velho que esta mudança
+
+* **`[::1]:5000` nunca era reconhecido como loopback.** O host era extraído com
+  `split(':').next()`, que numa autoridade IPv6 entre parênteses rectos devolve
+  `"["` — por isso o literal `"[::1]"` na lista de loopback era inalcançável.
+  Uma verificação que se lia como coberta e não estava. Agora o `bare_host`
+  interpreta os parênteses, e o teste que o apanhou fica.
+* **A comparação baixava a caixa de um só lado**, portanto uma lista escrita com
+  maiúsculas era um botão que parecia posto e não estava.
+
+O erro de transporte ganhou também a dica que o transforma em acção — nomeia o
+host e a variável — e só onde ela pode ser verdadeira: um host já declarado, ou
+loopback, recebe a mensagem inalterada. Assim nunca convida ninguém a abrir um
+registo que não teve nada a ver com a falha.
+
+### O resto da versão
+
+* **`vm ls --namespace`, e `prune` para `vm`/`cluster`/`stack`** — o `prune`
+  cobria containers e imagens e deixava de fora precisamente o que ocupa mais
+  disco.
+* **`system prune --dry-run`**, com as duas metades separadas por nome: o que
+  seria apagado e o que ficaria.
+* **O tecto AGREGADO em rootless tinha três das quatro dimensões** — faltava o
+  disco. Um tecto que não cobre uma dimensão não é um tecto, é uma estatística.
+* **`close_range` em musl passa a ser chamado pelo número da chamada**, não pelo
+  wrapper do libc, que não existe em todas as versões.
+* **A pré-semeagem de imagens saltava em silêncio** e a golden saía vazia — o
+  modo de falha mais caro que há, porque só aparece quando a imagem é usada.
+* O help do `-m`/`-c` ainda anunciava o default antigo, corrigido na v0.61.0.
+
+---
+
 ## v0.61.0 — a distância entre o que o motor diz e o que o motor faz
 
 Duas correcções, e o fio comum é desconfortável: em ambas o mecanismo estava
