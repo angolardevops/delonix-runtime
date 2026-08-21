@@ -1106,8 +1106,8 @@ spec:
 # public URL, routed by Host/path to as many backend containers as you want.
 #
 # Apply with:  delonix net tunnel apply -f tunnel.yaml
-# One-shot equivalent, no manifest:
-#   delonix net tunnel expose --provider pinggy --local-port 80
+# One-shot equivalent, no manifest (pinggy is the default provider):
+#   delonix net tunnel expose 80
 apiVersion: delonix.io/v1
 kind: Tunnel
 metadata:

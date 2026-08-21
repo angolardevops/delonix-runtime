@@ -2922,6 +2922,35 @@ próprio da pinggy, não documentado à parte, mas que ligou com sucesso nas mes
 15s. Validado ao vivo: URL pública real devolvida (`https://….free.pinggy.net`), `curl` local E
 à URL pública deram 200 — o túnel encaminha tráfego de verdade, não é só log-scraping.
 
+### `tunnel expose` simplificado — porta posicional, `provider` opcional (BREAKING, sem alias)
+
+Pedido do utilizador: `delonix net tunnel expose --name <n> --provider pinggy --local-port
+<porta>` era o comando mais verboso deste grupo para o caso mais comum (pinggy, sem nome
+próprio) — três flags para um único número que interessa. `net tunnel` não está na lista de
+"Estável" do `docs/cli-stability.md`, por isso o corte é limpo, sem alias, como o precedente da
+v0.30.0.
+
+- **`local_port` passou a POSICIONAL** — `delonix net tunnel expose 8080`. A flag `--local-port`
+  deixou de existir; quem a usar leva "unrecognized argument", nunca um silêncio.
+- **`--provider` ganhou DEFAULT `pinggy`** (é o único que não precisa de binário extra nem de
+  conta — ver o doc-comment do módulo) e passou de `String` livre a `clap::ValueEnum`
+  (`TunnelProvider`), só no lado da CLI — `TunnelSpec.provider` do manifesto continua `String`,
+  porque um `kind: Tunnel` não é clap e não ganha nada com o enum. Dá autocomplete de GRAÇA (o
+  motor de completions dinâmicas do `clap_complete` já sabe enumerar os `possible values` de um
+  `ValueEnum`, sem precisar de `ArgValueCandidates`) e `[possible values: pinggy, ngrok,
+  cloudflare]` aparece sozinho no `--help`.
+- **`-p`/`-n` como atalhos** de `--provider`/`--name`.
+- **`--name` ganhou autocomplete dos túneis JÁ existentes** (`ArgValueCandidates::new(super::
+  complete::tunnels)`, o mesmo completador que `describe`/`rm` já usavam) — útil para reexpor com
+  o mesmo nome (reconfigura em vez de criar um segundo), não só para nomes novos.
+- Resultado: `delonix net tunnel expose --name kitamba-saurimo-85 --provider pinggy --local-port
+  8080` passa a `delonix net tunnel expose 8080 --name kitamba-saurimo-85` (ou, sem nome
+  próprio, só `delonix net tunnel expose 8080`).
+- Actualizados os exemplos em `manual_entries.rs`, `docs/gen.py` e `examples/tunnel.yaml` — nenhum
+  ficou com a sintaxe antiga (o teste `os_exemplos_invocam_o_comando_que_documentam` só confirma
+  que o exemplo NOMEIA o comando, não que a sintaxe é válida; a validação real foi ao vivo, com o
+  binário, incluindo o motor de completions dinâmicas com `_CLAP_COMPLETE_INDEX`/`COMPLETE=bash`).
+
 ## Cluster modo Kind sem Docker — investigação (GO/NO-GO)
 
 Pedido: `delonix cluster` em modo `kind` (sem `kubeadm`) a funcionar **sem Docker instalado** —

@@ -72,6 +72,28 @@ pub const TUNNEL_SPEC_FIELDS: &[&str] = &[
     "tokenSecretRef",
 ];
 
+/// `pinggy` | `ngrok` | `cloudflare`, as a CLI-level choice (`expose` only —
+/// `TunnelSpec.provider` above stays a bare `String`, since a manifest is not
+/// clap and gains nothing from the enum). `pinggy` is the default: it is the
+/// only one needing no extra binary on `PATH` (plain `ssh`, already a
+/// dependency of this binary) and no account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum TunnelProvider {
+    Pinggy,
+    Ngrok,
+    Cloudflare,
+}
+
+impl TunnelProvider {
+    fn as_str(self) -> &'static str {
+        match self {
+            TunnelProvider::Pinggy => "pinggy",
+            TunnelProvider::Ngrok => "ngrok",
+            TunnelProvider::Cloudflare => "cloudflare",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TunnelRecord {
     name: String,
@@ -101,14 +123,14 @@ pub enum TunnelCmd {
     },
     /// One-shot expose of a local port, no manifest needed.
     Expose {
-        /// Name (default: `tunnel-<port>`).
-        #[arg(long)]
-        name: Option<String>,
-        /// `pinggy` | `ngrok` | `cloudflare`.
-        #[arg(long)]
-        provider: String,
-        #[arg(long = "local-port")]
+        /// Local TCP port to expose.
         local_port: u16,
+        /// `pinggy` | `ngrok` | `cloudflare`.
+        #[arg(short, long, value_enum, default_value_t = TunnelProvider::Pinggy)]
+        provider: TunnelProvider,
+        /// Name (default: `tunnel-<port>`).
+        #[arg(short, long, add = clap_complete::engine::ArgValueCandidates::new(super::complete::tunnels))]
+        name: Option<String>,
         #[arg(long)]
         hostname: Option<String>,
         #[arg(long)]
@@ -138,16 +160,16 @@ pub fn run(action: TunnelCmd) -> Result<()> {
             apply(&docs)
         }
         TunnelCmd::Expose {
-            name,
-            provider,
             local_port,
+            provider,
+            name,
             hostname,
             token,
             token_secret,
         } => {
             let name = name.unwrap_or_else(|| format!("tunnel-{local_port}"));
             let spec = TunnelSpec {
-                provider,
+                provider: provider.as_str().to_string(),
                 local_port,
                 hostname,
                 token,

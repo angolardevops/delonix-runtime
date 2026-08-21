@@ -5001,6 +5001,9 @@ msgstr "`portaHost:portaContainer[/tcp|udp]` ou só `porta`"
 msgid "IP in the infra subnet. Defaults to a deterministic one derived from `name`"
 msgstr "IP na subnet de infra. Por omissão, um determinístico derivado do `name`"
 
+msgid "Local TCP port to expose"
+msgstr "Porta TCP local a expor"
+
 msgid "Name (default: `tunnel-<port>`)"
 msgstr "Nome (por omissão: `tunnel-<porta>`)"
 
