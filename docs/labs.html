@@ -527,6 +527,119 @@ delonix cluster delete --name lab</code></pre>
 <code>Running</code>. Neither <code>ctr images import</code> nor
 <code>crictl images</code> prove this — both have reported success on an
 image the kubelet then couldn't resolve.</p></div>
+<h2 id='lab-8'><span class='lang-pt'>IaC de verdade: plan, apply convergente, e a recriação recusada</span><span class='lang-en'>Real IaC: plan, converging apply, and a recreate that gets refused</span> <span class='badge'><span class='lang-pt'>avançado</span><span class='lang-en'>advanced</span></span></h2>
+<div class='lang-pt'>
+<p>Objectivo: o ciclo completo — <code>plan</code> → <code>apply</code> →
+<code>plan</code> outra vez (sem alterações) → mudar um campo QUENTE → mudar um
+campo FRIO — <strong>sem ficheiro de estado nenhum</strong>: o que já foi
+aplicado vive no PRÓPRIO recurso, não num <code>.tfstate</code> à parte.</p>
+<pre><code>mkdir -p lab-iac &amp;&amp; cd lab-iac
+cat &gt; stack.yaml &lt;&lt;'EOF'
+apiVersion: delonix.io/v1
+kind: Network
+metadata:
+  name: iac-lab
+spec: {}
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: iac-app
+spec:
+  image: nginx:alpine
+  network: iac-lab
+  memory: 64M
+EOF
+
+# 1. Nada foi aplicado ainda — o plano di-lo, e o exit code também
+delonix stack plan -f stack.yaml --detailed-exitcode; echo "exit=$?"   # 2 = há alterações
+
+# 2. Aplicar
+delonix stack apply -f stack.yaml
+
+# 3. O MESMO plano, sobre o que acabou de ser criado
+delonix stack plan -f stack.yaml --detailed-exitcode; echo "exit=$?"   # 0 = nada a fazer
+
+# 4. Mudar um campo QUENTE — o plano propõe uma actualização, não uma recriação
+sed -i 's/memory: 64M/memory: 128M/' stack.yaml
+delonix stack plan -f stack.yaml     # memory: 64M → 128M
+delonix stack apply -f stack.yaml    # "updating 1 field(s) live" — MESMO pid
+
+# 5. Mudar um campo FRIO (a imagem) — o apply RECUSA-SE, não adivinha
+sed -i 's/image: nginx:alpine/image: httpd:alpine/' stack.yaml
+delonix stack apply -f stack.yaml    # refused: does not converge live: image
+
+# 6. Só com a decisão explícita é que recria
+delonix stack apply -f stack.yaml --replace Container/iac-app
+
+delonix rm -f iac-app; delonix network rm iac-lab; cd ..; rm -rf lab-iac</code></pre>
+<p class="note"><strong>Verificação:</strong> no passo 4, o pid antes e depois
+(<code>delonix container inspect iac-app | grep pid</code>) é o MESMO — só o
+cgroup mudou. No passo 5 o <code>apply</code> sai com erro e <strong>nada
+muda</strong> — nem o container antigo é tocado — até correres o passo 6 de
+propósito. É a diferença entre uma ferramenta que converge e uma que só sabe
+criar: um <code>terraform apply</code> sobre um campo imutável também
+recria; a diferença aqui é que a recriação nunca é silenciosa, precisa do
+nome exacto do recurso, e sem ela o comando falha em vez de decidir por ti.
+Para remover o que o ficheiro deixou de declarar (sem tocar no resto), existe
+ainda <code>stack apply --prune</code> — não corrido aqui de propósito, para
+este lab nunca apagar mais do que os dois recursos que ele próprio criou.</p></div><div class='lang-en'>
+<p>Goal: the full cycle — <code>plan</code> → <code>apply</code> →
+<code>plan</code> again (nothing to do) → change a HOT field → change a COLD
+field — <strong>with no state file at all</strong>: what's already applied
+lives on the resource ITSELF, not in a <code>.tfstate</code> off to the side.</p>
+<pre><code>mkdir -p lab-iac &amp;&amp; cd lab-iac
+cat &gt; stack.yaml &lt;&lt;'EOF'
+apiVersion: delonix.io/v1
+kind: Network
+metadata:
+  name: iac-lab
+spec: {}
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: iac-app
+spec:
+  image: nginx:alpine
+  network: iac-lab
+  memory: 64M
+EOF
+
+# 1. Nothing applied yet — the plan says so, and so does the exit code
+delonix stack plan -f stack.yaml --detailed-exitcode; echo "exit=$?"   # 2 = changes pending
+
+# 2. Apply it
+delonix stack apply -f stack.yaml
+
+# 3. The SAME plan, against what was just created
+delonix stack plan -f stack.yaml --detailed-exitcode; echo "exit=$?"   # 0 = nothing to do
+
+# 4. Change a HOT field — the plan proposes an update, not a recreate
+sed -i 's/memory: 64M/memory: 128M/' stack.yaml
+delonix stack plan -f stack.yaml     # memory: 64M → 128M
+delonix stack apply -f stack.yaml    # "updating 1 field(s) live" — SAME pid
+
+# 5. Change a COLD field (the image) — apply REFUSES, it doesn't guess
+sed -i 's/image: nginx:alpine/image: httpd:alpine/' stack.yaml
+delonix stack apply -f stack.yaml    # refused: does not converge live: image
+
+# 6. Only an explicit decision recreates it
+delonix stack apply -f stack.yaml --replace Container/iac-app
+
+delonix rm -f iac-app; delonix network rm iac-lab; cd ..; rm -rf lab-iac</code></pre>
+<p class="note"><strong>Verification:</strong> in step 4, the pid before and
+after (<code>delonix container inspect iac-app | grep pid</code>) is the
+SAME — only the cgroup changed. In step 5 <code>apply</code> exits with an
+error and <strong>nothing changes</strong> — not even the old container is
+touched — until you deliberately run step 6. That's the difference between a
+tool that converges and one that only knows how to create: a
+<code>terraform apply</code> over an immutable field also recreates; the
+difference here is that the recreate is never silent, it needs the exact
+resource name, and without it the command fails instead of deciding for you.
+To remove what the file no longer declares (without touching anything else),
+there's also <code>stack apply --prune</code> — not run here on purpose, so
+this lab never deletes more than the two resources it created itself.</p></div>
 <footer><span class='lang-pt'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</span><span class='lang-en'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.</span></footer>
 </main>
 <aside class="toc" id="pagetoc"><div class="toc-inner"><h5><span class='lang-pt'>Nesta página</span><span class='lang-en'>On this page</span></h5><nav id="toc-nav"></nav></div></aside>

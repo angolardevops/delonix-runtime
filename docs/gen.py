@@ -3829,6 +3829,12 @@ KINDS_DOC = [
      "bidireccional): <code>from</code> alcança <code>to</code>, e <code>to</code> não fica exposto aos outros. "
      "É açúcar reduzido no load para <code>kind: FirewallPolicy</code> — sem dataplane novo. Várias dependências "
      "para o mesmo alvo ACUMULAM os allows (por isso são fundidas por alvo, e não uma política por dependência)."),
+    ("NetworkRoute", "netroute.yaml", "O grau ACIMA do <code>Dependency</code>: aquele liga dois WORKLOADS, este "
+     "liga duas REDES — isoladas por omissão. Uma rota diz que o pacote PODE atravessar; <strong>nunca</strong> diz "
+     "que é PERMITIDO — quem decide isso continua a ser o <code>FirewallPolicy</code>/<code>Dependency</code> em "
+     "cada extremidade. São duas perguntas em série (há caminho? → é aceite?), por isso são dois Kinds e não um "
+     "campo <code>routes:</code> dentro de <code>Network</code>. Dirigida (<code>from</code> inicia, o retorno "
+     "flui; <code>to</code> nunca inicia de volta); custo constante, não cresce com o número de redes."),
     ("FirewallPolicy", "firewallpolicy.yaml", "Firewall L4 por container, estilo NetworkPolicy do k8s, com a "
      "direcção em <code>spec.direction</code>. Aplicar substitui as regras dessa direcção e deixa a outra intacta."),
     ("Ingress", "ingress.yaml", "Ingress L7 no formato <code>networking.k8s.io/v1</code> (host/path → backend), "
@@ -3898,6 +3904,13 @@ KINDS_DOC_EN = [
     "others. Sugar lowered on load into <code>kind: FirewallPolicy</code> — no new dataplane. Several "
     "dependencies on the same target ACCUMULATE their allows, which is why they are merged by target rather "
     "than one policy per dependency.",
+    "The grade ABOVE <code>Dependency</code>: that one links two WORKLOADS, this one "
+    "links two NETWORKS — isolated by default. A route says the packet CAN cross; it <strong>never</strong> says "
+    "it's ALLOWED — that decision still belongs to <code>FirewallPolicy</code>/<code>Dependency</code> at each "
+    "end. Two questions in series (is there a path? → is it accepted?), which is why they're two Kinds and not "
+    "one <code>routes:</code> field inside <code>Network</code>. Directed (<code>from</code> initiates, the "
+    "return flows; <code>to</code> never initiates back); constant cost, doesn't grow with the number of "
+    "networks.",
     "Per-container L4 firewall, k8s NetworkPolicy-style, with the "
     "direction in <code>spec.direction</code>. Applying replaces that direction's rules and leaves the other "
     "intact.",
@@ -4152,6 +4165,63 @@ delonix cluster delete --name lab</code></pre>
 <code>Running</code>. Nem o <code>ctr images import</code> nem o
 <code>crictl images</code> provam isto — os dois já reportaram sucesso sobre
 uma imagem que o kubelet depois não resolvia.</p>"""),
+
+    ("lab-8", "IaC de verdade: plan, apply convergente, e a recriação recusada", "avançado", """
+<p>Objectivo: o ciclo completo — <code>plan</code> → <code>apply</code> →
+<code>plan</code> outra vez (sem alterações) → mudar um campo QUENTE → mudar um
+campo FRIO — <strong>sem ficheiro de estado nenhum</strong>: o que já foi
+aplicado vive no PRÓPRIO recurso, não num <code>.tfstate</code> à parte.</p>
+<pre><code>mkdir -p lab-iac &amp;&amp; cd lab-iac
+cat &gt; stack.yaml &lt;&lt;'EOF'
+apiVersion: delonix.io/v1
+kind: Network
+metadata:
+  name: iac-lab
+spec: {}
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: iac-app
+spec:
+  image: nginx:alpine
+  network: iac-lab
+  memory: 64M
+EOF
+
+# 1. Nada foi aplicado ainda — o plano di-lo, e o exit code também
+delonix stack plan -f stack.yaml --detailed-exitcode; echo "exit=$?"   # 2 = há alterações
+
+# 2. Aplicar
+delonix stack apply -f stack.yaml
+
+# 3. O MESMO plano, sobre o que acabou de ser criado
+delonix stack plan -f stack.yaml --detailed-exitcode; echo "exit=$?"   # 0 = nada a fazer
+
+# 4. Mudar um campo QUENTE — o plano propõe uma actualização, não uma recriação
+sed -i 's/memory: 64M/memory: 128M/' stack.yaml
+delonix stack plan -f stack.yaml     # memory: 64M → 128M
+delonix stack apply -f stack.yaml    # "updating 1 field(s) live" — MESMO pid
+
+# 5. Mudar um campo FRIO (a imagem) — o apply RECUSA-SE, não adivinha
+sed -i 's/image: nginx:alpine/image: httpd:alpine/' stack.yaml
+delonix stack apply -f stack.yaml    # refused: does not converge live: image
+
+# 6. Só com a decisão explícita é que recria
+delonix stack apply -f stack.yaml --replace Container/iac-app
+
+delonix rm -f iac-app; delonix network rm iac-lab; cd ..; rm -rf lab-iac</code></pre>
+<p class="note"><strong>Verificação:</strong> no passo 4, o pid antes e depois
+(<code>delonix container inspect iac-app | grep pid</code>) é o MESMO — só o
+cgroup mudou. No passo 5 o <code>apply</code> sai com erro e <strong>nada
+muda</strong> — nem o container antigo é tocado — até correres o passo 6 de
+propósito. É a diferença entre uma ferramenta que converge e uma que só sabe
+criar: um <code>terraform apply</code> sobre um campo imutável também
+recria; a diferença aqui é que a recriação nunca é silenciosa, precisa do
+nome exacto do recurso, e sem ela o comando falha em vez de decidir por ti.
+Para remover o que o ficheiro deixou de declarar (sem tocar no resto), existe
+ainda <code>stack apply --prune</code> — não corrido aqui de propósito, para
+este lab nunca apagar mais do que os dois recursos que ele próprio criou.</p>"""),
 ]
 
 # Tradução EN de `LABS` — dict por âncora (title, level, body), para não
@@ -4356,6 +4426,64 @@ delonix cluster delete --name lab</code></pre>
 <code>Running</code>. Neither <code>ctr images import</code> nor
 <code>crictl images</code> prove this — both have reported success on an
 image the kubelet then couldn't resolve.</p>"""),
+
+    "lab-8": ("Real IaC: plan, converging apply, and a recreate that gets refused", "advanced", """
+<p>Goal: the full cycle — <code>plan</code> → <code>apply</code> →
+<code>plan</code> again (nothing to do) → change a HOT field → change a COLD
+field — <strong>with no state file at all</strong>: what's already applied
+lives on the resource ITSELF, not in a <code>.tfstate</code> off to the side.</p>
+<pre><code>mkdir -p lab-iac &amp;&amp; cd lab-iac
+cat &gt; stack.yaml &lt;&lt;'EOF'
+apiVersion: delonix.io/v1
+kind: Network
+metadata:
+  name: iac-lab
+spec: {}
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: iac-app
+spec:
+  image: nginx:alpine
+  network: iac-lab
+  memory: 64M
+EOF
+
+# 1. Nothing applied yet — the plan says so, and so does the exit code
+delonix stack plan -f stack.yaml --detailed-exitcode; echo "exit=$?"   # 2 = changes pending
+
+# 2. Apply it
+delonix stack apply -f stack.yaml
+
+# 3. The SAME plan, against what was just created
+delonix stack plan -f stack.yaml --detailed-exitcode; echo "exit=$?"   # 0 = nothing to do
+
+# 4. Change a HOT field — the plan proposes an update, not a recreate
+sed -i 's/memory: 64M/memory: 128M/' stack.yaml
+delonix stack plan -f stack.yaml     # memory: 64M → 128M
+delonix stack apply -f stack.yaml    # "updating 1 field(s) live" — SAME pid
+
+# 5. Change a COLD field (the image) — apply REFUSES, it doesn't guess
+sed -i 's/image: nginx:alpine/image: httpd:alpine/' stack.yaml
+delonix stack apply -f stack.yaml    # refused: does not converge live: image
+
+# 6. Only an explicit decision recreates it
+delonix stack apply -f stack.yaml --replace Container/iac-app
+
+delonix rm -f iac-app; delonix network rm iac-lab; cd ..; rm -rf lab-iac</code></pre>
+<p class="note"><strong>Verification:</strong> in step 4, the pid before and
+after (<code>delonix container inspect iac-app | grep pid</code>) is the
+SAME — only the cgroup changed. In step 5 <code>apply</code> exits with an
+error and <strong>nothing changes</strong> — not even the old container is
+touched — until you deliberately run step 6. That's the difference between a
+tool that converges and one that only knows how to create: a
+<code>terraform apply</code> over an immutable field also recreates; the
+difference here is that the recreate is never silent, it needs the exact
+resource name, and without it the command fails instead of deciding for you.
+To remove what the file no longer declares (without touching anything else),
+there's also <code>stack apply --prune</code> — not run here on purpose, so
+this lab never deletes more than the two resources it created itself.</p>"""),
 }
 
 
@@ -4744,13 +4872,15 @@ def kinds_page():
         'Cada Kind com um template COMPLETO e funcional — '
         'todos os campos, com os defaults e um comentário. Aplica um só com '
         '<code>delonix &lt;grupo&gt; apply -f</code>, ou todos de uma vez com <code>delonix stack apply</code> '
-        '(ordem por dependência: Secret → Network → Volume → ShareVolume → Image → Vm → Container → '
-        'Pod → Ingress → FirewallPolicy → HTTPRoute → Tunnel).',
+        '(ordem por dependência: Secret → Network → NetworkRoute → Volume → Image → Vm → Container → '
+        'Pod → Ingress → FirewallPolicy → HTTPRoute → Tunnel — <code>ShareVolume</code> baixa para '
+        '<code>Volume</code> antes desta ordem entrar em jogo).',
         'Each Kind with a COMPLETE, functional template — '
         'every field, with defaults and a comment. Apply just one with '
         '<code>delonix &lt;group&gt; apply -f</code>, or all at once with <code>delonix stack apply</code> '
-        '(dependency order: Secret → Network → Volume → ShareVolume → Image → Vm → Container → '
-        'Pod → Ingress → FirewallPolicy → HTTPRoute → Tunnel).',
+        '(dependency order: Secret → Network → NetworkRoute → Volume → Image → Vm → Container → '
+        'Pod → Ingress → FirewallPolicy → HTTPRoute → Tunnel — <code>ShareVolume</code> lowers into '
+        '<code>Volume</code> before this order comes into play).',
         cls='tagline',
     )
     body = [f"<h1>Kinds do manifesto</h1>{tagline}"]

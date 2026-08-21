@@ -142,7 +142,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
 </nav>
 <main>
-<h1>Kinds do manifesto</h1><p class='tagline lang-pt'>Cada Kind com um template COMPLETO e funcional — todos os campos, com os defaults e um comentário. Aplica um só com <code>delonix &lt;grupo&gt; apply -f</code>, ou todos de uma vez com <code>delonix stack apply</code> (ordem por dependência: Secret → Network → Volume → ShareVolume → Image → Vm → Container → Pod → Ingress → FirewallPolicy → HTTPRoute → Tunnel).</p><p class='tagline lang-en'>Each Kind with a COMPLETE, functional template — every field, with defaults and a comment. Apply just one with <code>delonix &lt;group&gt; apply -f</code>, or all at once with <code>delonix stack apply</code> (dependency order: Secret → Network → Volume → ShareVolume → Image → Vm → Container → Pod → Ingress → FirewallPolicy → HTTPRoute → Tunnel).</p>
+<h1>Kinds do manifesto</h1><p class='tagline lang-pt'>Cada Kind com um template COMPLETO e funcional — todos os campos, com os defaults e um comentário. Aplica um só com <code>delonix &lt;grupo&gt; apply -f</code>, ou todos de uma vez com <code>delonix stack apply</code> (ordem por dependência: Secret → Network → NetworkRoute → Volume → Image → Vm → Container → Pod → Ingress → FirewallPolicy → HTTPRoute → Tunnel — <code>ShareVolume</code> baixa para <code>Volume</code> antes desta ordem entrar em jogo).</p><p class='tagline lang-en'>Each Kind with a COMPLETE, functional template — every field, with defaults and a comment. Apply just one with <code>delonix &lt;group&gt; apply -f</code>, or all at once with <code>delonix stack apply</code> (dependency order: Secret → Network → NetworkRoute → Volume → Image → Vm → Container → Pod → Ingress → FirewallPolicy → HTTPRoute → Tunnel — <code>ShareVolume</code> lowers into <code>Volume</code> before this order comes into play).</p>
 <p class='lang-pt'>Desde a v0.47.0 o <code>apply</code> <strong>converge</strong>: o <code>stack plan</code> diz o que mudaria e porquê, e o <code>apply</code> reconfigura portas, volumes, redes, memória e CPU <strong>a quente, sem mudar o PID</strong> — recusando, com o nome do campo, o que obrigaria a recriar (a não ser com <code>--replace</code>). Sem ficheiro de estado: o último spec aplicado vive no próprio recurso. Continua fail-fast e sem rollback, e é convergência <em>a pedido</em> — não um loop. Os templates abaixo são os ficheiros reais em <a href='https://github.com/angolardevops/delonix-runtime/tree/main/examples'><code>examples/</code></a>.</p><p class='lang-en'>Since v0.47.0 <code>apply</code> <strong>converges</strong>: <code>stack plan</code> says what would change and why, and <code>apply</code> reconfigures ports, volumes, networks, memory and CPU <strong>hot, with the PID unchanged</strong> — refusing, by field name, anything that would need a recreate (unless you pass <code>--replace</code>). No state file: the last applied spec lives on the resource itself. Still fail-fast and without rollback, and still convergence <em>on demand</em> — not a loop. The templates below are the real files in <a href='https://github.com/angolardevops/delonix-runtime/tree/main/examples'><code>examples/</code></a>.</p>
 <h2 id='secret'>Secret</h2>
 <p class='lang-pt'>Um segredo do cofre cifrado em repouso. Consumido por <code>run --secret</code>/<code>--secret-files</code> e por <code>passwordSecret</code> do Storage. Os valores NUNCA ficam no registo do container em texto — são resolvidos no arranque a partir do NOME.</p><p class='lang-en'>A secret from the vault, encrypted at rest. Consumed by <code>run --secret</code>/<code>--secret-files</code> and by Storage's <code>passwordSecret</code>. Values are NEVER kept in the container's registry as plaintext — they're resolved at startup from the NAME.</p>
@@ -351,6 +351,102 @@ spec:
   to: db             # alvo protegido (aceita um nome ou uma lista: [db, cache])
   ports: [&quot;5432&quot;]    # opcional — vazio = qualquer porta
   proto: tcp         # opcional — default any</code></pre>
+<h2 id='networkroute'>NetworkRoute</h2>
+<p class='lang-pt'>O grau ACIMA do <code>Dependency</code>: aquele liga dois WORKLOADS, este liga duas REDES — isoladas por omissão. Uma rota diz que o pacote PODE atravessar; <strong>nunca</strong> diz que é PERMITIDO — quem decide isso continua a ser o <code>FirewallPolicy</code>/<code>Dependency</code> em cada extremidade. São duas perguntas em série (há caminho? → é aceite?), por isso são dois Kinds e não um campo <code>routes:</code> dentro de <code>Network</code>. Dirigida (<code>from</code> inicia, o retorno flui; <code>to</code> nunca inicia de volta); custo constante, não cresce com o número de redes.</p><p class='lang-en'>The grade ABOVE <code>Dependency</code>: that one links two WORKLOADS, this one links two NETWORKS — isolated by default. A route says the packet CAN cross; it <strong>never</strong> says it's ALLOWED — that decision still belongs to <code>FirewallPolicy</code>/<code>Dependency</code> at each end. Two questions in series (is there a path? → is it accepted?), which is why they're two Kinds and not one <code>routes:</code> field inside <code>Network</code>. Directed (<code>from</code> initiates, the return flows; <code>to</code> never initiates back); constant cost, doesn't grow with the number of networks.</p>
+<pre><code># kind: NetworkRoute — caminho DIRIGIDO entre duas REDES (ADR-0013 tier B).
+#
+# Redes são isoladas umas das outras por omissão. Isto declara que uma pode
+# alcançar a outra. Dirigido, como o `kind: Dependency` entre containers: `from`
+# inicia, e o retorno dessa conversa flui (established); `to` NÃO inicia de volta.
+#
+# ┌─ A REGRA QUE FAZ ISTO COMPOR-SE, e não minar o isolamento ──────────────────┐
+# │ Uma rota diz que o pacote PODE atravessar. Nunca diz que é PERMITIDO.       │
+# │ As chains `fwcont` por workload continuam a decidir, e uma fronteira de     │
+# │ namespace atravessada por uma rota continua a precisar da sua política.     │
+# └─────────────────────────────────────────────────────────────────────────────┘
+#
+# São duas perguntas em série, e é por isso que são dois Kinds e não um:
+#
+#   fwdeny (-10)  ← NetworkRoute:   as duas redes têm caminho?   senão: drop
+#   fwcont  (-5)  ← FirewallPolicy: este workload aceita isto?   senão: drop
+#
+# Sem a rota, o `api` nem é alcançável do `web` (redes diferentes). Com a rota e
+# sem a Dependency abaixo, o caminho existe e o `api` continua a decidir sozinho
+# quem aceita. Este ficheiro declara as duas coisas de propósito — tirar uma
+# delas e reaplicar é a melhor forma de ver a diferença.
+#
+# Por baixo é UM elemento no verdict map `@netpair` do holder (uma isenção ao
+# drop par-a-par entre bridges), não um dataplane novo. Custo constante: não
+# cresce com o número de redes.
+#
+# Documento próprio, e não um campo `routes:` dentro do `kind: Network`, porque
+# uma rota é uma RELAÇÃO e não pertence a nenhuma das pontas — exprimível dos
+# dois lados é como dois documentos passam a discordar sobre a mesma rota, o bug
+# que o `FirewallPolicy` já paga ao RECUSAR duas políticas para o mesmo alvo e
+# direcção.
+#
+# O `via:` que aparece no rascunho do ADR-0013 NÃO existe: o spike mostrou que o
+# encaminhamento já lá estava e que fechar é que era explícito, por isso o que
+# sobrou foi `from`/`to`. Os campos aceites são só esses dois.
+#
+# Aplicar com `delonix stack apply -f netroute.yaml`.
+# Imperativo equivalente:  delonix network route &lt;from&gt; &lt;to&gt;   (e `--rm` para fechar)
+#
+# E FECHA-SE tirando o documento daqui: a rota converge, tem posse
+# (`delonix.io/stack`) e sai com um `stack apply --prune` ou um `stack destroy`.
+# Uma rota criada à mão pelo comando imperativo não leva carimbo e sobrevive aos
+# dois — um apply nunca remove o que não criou.
+#
+# A identidade é o PAR e não o `metadata.name`: renomear este documento não muda
+# nada, o plano imprime `NetworkRoute web-&gt;api`, e dois documentos a declarar o
+# mesmo par são recusados.
+---
+apiVersion: delonix.io/v1
+kind: Network
+metadata: { name: frontend }
+spec:
+  driver: bridge
+---
+apiVersion: delonix.io/v1
+kind: Network
+metadata: { name: backend }
+spec:
+  driver: bridge
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata: { name: web }
+spec:
+  image: &quot;alpine:3.19&quot;
+  network: frontend
+  command: [&quot;sleep&quot;, &quot;infinity&quot;]
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata: { name: api }
+spec:
+  image: &quot;alpine:3.19&quot;
+  network: backend
+  command: [&quot;sleep&quot;, &quot;infinity&quot;]
+---
+# 1ª pergunta: HÁ CAMINHO? — frontend alcança backend, e não o contrário.
+apiVersion: delonix.io/v1
+kind: NetworkRoute
+metadata: { name: frontend-to-backend }
+spec:
+  from: frontend
+  to: backend
+---
+# 2ª pergunta: É PERMITIDO? — a rota não abriu o `api` a ninguém; isto abre-o
+# ao `web` e só a ele (default-deny no `api` + um allow para o `web`).
+apiVersion: delonix.io/v1
+kind: Dependency
+metadata: { name: web-knows-api }
+spec:
+  from: web
+  to: api
+  ports: [&quot;8080&quot;]
+  proto: tcp</code></pre>
 <h2 id='firewallpolicy'>FirewallPolicy</h2>
 <p class='lang-pt'>Firewall L4 por container, estilo NetworkPolicy do k8s, com a direcção em <code>spec.direction</code>. Aplicar substitui as regras dessa direcção e deixa a outra intacta.</p><p class='lang-en'>Per-container L4 firewall, k8s NetworkPolicy-style, with the direction in <code>spec.direction</code>. Applying replaces that direction's rules and leaves the other intact.</p>
 <pre><code># kind: FirewallPolicy — a forma UNIFICADA do firewall declarativo. A direcção
