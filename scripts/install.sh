@@ -184,11 +184,11 @@ if [ "$(id -u)" -eq 0 ]; then
 else
   command -v sudo >/dev/null 2>&1 || die "this script needs root for packages/config — install sudo or run as root"
   SUDO="sudo"
-  msg "some steps need root — sudo may ask for your password"
-  # Autentica JÁ: assim, um falhanço de pkg_install mais à frente significa
-  # mesmo "pacote indisponível", nunca "sudo falhou em silêncio".
-  sudo -v || die "sudo authentication failed — run again and enter your password, or run as root"
 fi
+# A autenticação em si (`sudo -v`) NÃO corre aqui — ver a nota mais abaixo,
+# a seguir ao download/instalação do binário. `--user` sem root nenhum é um
+# caso de uso deliberado (só o binário, em ~/.local/bin) e não pode ficar
+# refém de dependências que nem sequer vão ser tocadas.
 
 # ------------------------------------------------------------ detecção de distro
 # NUNCA fazer `source /etc/os-release` no shell principal: ele define VERSION/
@@ -399,7 +399,12 @@ if [ "$WITH_BINARY" = 1 ]; then
   DELONIX_ASSET=$(cat "$TMP/.asset-delonix")
   verify_asset "$DELONIX_ASSET"
   step binary delonix "sha256 verified ($DELONIX_ASSET)"
-  $BIN_SUDO install -m 0755 "$TMP/$DELONIX_ASSET" "$BIN_DIR/delonix"
+  # Guarda explícita: sem `--user` isto é a 1ª chamada a sudo do script (a
+  # autenticação eager foi adiada para depois desta secção — ver a nota mais
+  # abaixo). Sem `|| die`, um sudo sem TTY/credencial cache abortava aqui por
+  # `set -e` com o stderr cru do sudo, em vez de um erro claro e accionável.
+  $BIN_SUDO install -m 0755 "$TMP/$DELONIX_ASSET" "$BIN_DIR/delonix" \
+    || die "could not install the delonix binary to $BIN_DIR — sudo failed or the destination isn't writable (use --user for a no-root install to \$HOME/.local/bin, or ensure sudo works non-interactively)"
   stepok binary "delonix -> $BIN_DIR/delonix"
   if [ "$WITH_CRI" = 1 ]; then
     dl_cri() { fetch_asset delonix-cri > "$TMP/.asset-cri"; }
@@ -407,7 +412,8 @@ if [ "$WITH_BINARY" = 1 ]; then
       || die "delonix-cri download failed"
     CRI_ASSET=$(cat "$TMP/.asset-cri")
     verify_asset "$CRI_ASSET"
-    $BIN_SUDO install -m 0755 "$TMP/$CRI_ASSET" "$BIN_DIR/delonix-cri"
+    $BIN_SUDO install -m 0755 "$TMP/$CRI_ASSET" "$BIN_DIR/delonix-cri" \
+      || die "could not install delonix-cri to $BIN_DIR — sudo failed or the destination isn't writable"
     stepok binary "delonix-cri -> $BIN_DIR/delonix-cri"
   fi
   case ":$PATH:" in *":$BIN_DIR:"*) ;; *) warn "$BIN_DIR is not in your PATH" ;; esac
@@ -420,6 +426,24 @@ if [ "$WITH_BINARY" = 1 ]; then
   fi
 else
   BIN_DIR=$(dirname "$(command -v delonix 2>/dev/null || echo /usr/local/bin/delonix)")
+fi
+
+# BUG REAL corrigido aqui: `sudo -v` corria logo no arranque do script,
+# incondicionalmente para qualquer utilizador não-root — ANTES sequer de
+# saber se alguma coisa ia precisar de root. Um `--user` com todas as
+# dependências já satisfeitas (o caso normal de voltar a correr o instalador
+# só para apanhar uma release nova) morria em "sudo authentication failed"
+# sem chegar a tocar no binário — reproduzido ao vivo (sem TTY/sudo cache):
+# o binário ficava na versão antiga, mesmo com o download/verificação/
+# instalação em si a funcionarem perfeitamente quando testados isolados.
+# Adiar a autenticação para AQUI — depois do binário já descarregado,
+# verificado e instalado — mantém a garantia original ("um `pkg_install`
+# falhado adiante significa mesmo 'pacote indisponível', nunca 'sudo falhou
+# em silêncio'") para tudo o que se segue, e deixa de bloquear o único
+# caminho que não precisa de root nenhum.
+if [ -n "$SUDO" ]; then
+  msg "some steps need root — sudo may ask for your password"
+  sudo -v || die "sudo authentication failed — run again and enter your password, or run as root"
 fi
 
 # ------------------------------------------------- dependências core (containers)
