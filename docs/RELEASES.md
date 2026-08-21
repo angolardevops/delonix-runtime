@@ -4,6 +4,77 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.63.0 — o código passa a escrever-se em inglês, e um portão no CI garante que fica assim
+
+Português no código nunca foi decisão de arquitectura — foi o que sobrou de
+antes de haver catálogo de tradução. O `help` da CLI já era autorado em inglês
+e traduzido por catálogo (`cmd::po::has_pt_translation`) desde a v0.32.2; o que
+ficou em português ficou por ter **saltado** esse catálogo, não por escolha.
+
+### O que se mediu antes de mexer
+
+| | valor |
+|---|---|
+| nomes de função em PT (runtime + paas) | **1165** |
+| … que são nomes de **teste** | **1145 (98,3%)** |
+| … privados (não-teste) | 18 |
+| … públicos | **2** |
+| itens públicos com PT em `serde(rename)` / campos `pub` / flags de CLI | **0 de 1690** |
+
+A conclusão que os números sustentam: quase toda a dívida é cosmética — nomes
+de teste, não superfície pública — mas «quase toda» não é «toda», e sem um
+número não havia como saber a diferença nem como impedir que crescesse.
+
+### O gate
+
+`scripts/lang_ratchet.py` (job `lang` no CI) conta três dívidas —
+identificadores, comentários e mensagens ao utilizador — contra
+`scripts/lang_baseline.json`. É um **ratchet nos dois sentidos**, tal como o
+`ARG_HELP_PENDING` do `help_i18n_tests`: falha se o número **subir** (entrou
+português novo) e falha se **descer** sem a linha de base ter sido baixada no
+mesmo commit. Um `<=` deixaria a dívida a ler-se como verde para sempre, mesmo
+que ninguém a estivesse a pagar.
+
+```bash
+python3 scripts/lang_ratchet.py --list --only identifiers   # o que falta
+python3 scripts/lang_ratchet.py --update                    # baixar a base
+```
+
+Provado a correr, não afirmado: injectar uma função nova em português falha o
+gate (`identifiers: 1085 > 1084`); traduzir sem `--update` falha do outro lado
+(`comments: 3482 < 3543`). O gate reage às duas direcções, não só à que
+interessa hoje.
+
+### Uma armadilha do próprio detector
+
+O léxico de palavras em português não levava em conta homógrafos PT/EN —
+`remove`, `media`, `data`, `base`, `no`, `so`, `ate`, `ver`, `pos`, `seg`. `nas`
+foi o pior caso: colide com **NAS**, o armazenamento, e na primeira passagem
+deu seis falsos positivos que contavam comentários já em inglês como dívida.
+Um contador com falsos positivos não é um contador — é ruído com um número à
+frente, e teria inflacionado a linha de base logo na primeira medição.
+
+### Primeira tranche traduzida
+
+`crates/delonix-runtime-bin/src/cmd/prune.rs` por inteiro — 34 identificadores,
+65 comentários, 4 mensagens de asserção (por exemplo, `vm_esta_viva` passa a
+`vm_is_alive`). `cargo test -p delonix-runtime-bin`: 625 passed, 0 failed.
+`cargo fmt --all --check` limpo.
+
+### As duas metades
+
+**Provado:** o gate apanha nas duas direcções; `prune.rs` traduzido compila,
+formata e passa os 625 testes do crate; a convenção fica escrita no
+`AGENTS.md`.
+
+**Não validado:** a suite completa do workspace não correu sobre este ramo —
+só o crate tocado. Ficam por traduzir **1049 identificadores, 3482 comentários
+e 129 mensagens**, agora contados em vez de invisíveis. O léxico de homógrafos
+foi corrigido para os casos encontrados nesta passagem; não há garantia de que
+seja exaustivo.
+
+---
+
 ## v0.62.0 — uma plataforma que não conseguia puxar do seu próprio registo
 
 A correcção que dá nome a esta versão não saiu de leitura de código nem de um
