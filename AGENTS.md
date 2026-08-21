@@ -3872,6 +3872,18 @@ as portas publicadas morrerem sozinhas quando um consumidor externo lhe passou a
 `unwrap_or_default()` restantes são todos «listar para decidir o que acrescentar», onde vazio
 leva a criar (idempotente) e nunca a apagar.
 
+**`sudo -v` no arranque do `install.sh` não é uma pré-condição — é um bloqueio (2026-08-21)**:
+bug report real, confirmado ao vivo neste host (`~/.local/bin/delonix` preso na v0.59.0, quatro
+releases atrás). O script autenticava root NO ARRANQUE, incondicionalmente para qualquer
+utilizador não-root — antes sequer de saber se alguma coisa ia precisar de root. Num `--user`
+com todas as dependências já satisfeitas (o caso normal de voltar a correr o instalador só para
+apanhar uma release nova), isso morria em «sudo authentication failed» sem chegar a tocar no
+binário, mesmo com o download/verificação/instalação em si a funcionarem perfeitamente quando
+testados isolados (provado com uma cópia da lógica fora do gate). Corrigido adiando a
+autenticação para DEPOIS da secção do binário — `--user` deixa de ficar refém de dependências
+que nem vai tocar, e o caminho por omissão (root) ganhou uma guarda `|| die` explícita no
+`install` em si, que passou a ser a 1ª chamada a sudo do script nesse caminho.
+
 ## Imagens de appliance (OPNsense, Proxmox, TrueNAS) — v0.47.0
 
 Pedido: transformar ISOs de instalação em imagens VM oficiais do Delonix. Scripts em
