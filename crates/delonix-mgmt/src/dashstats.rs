@@ -196,6 +196,29 @@ pub fn collect(root: &Path, include_network: bool, include_storage: bool) -> Das
     }
 }
 
+/// Per-container cumulative network rx/tx bytes (bytes since each
+/// interface's creation), keyed by container id, for every RUNNING
+/// container. Same cost profile as `collect`'s `include_network` totals —
+/// one `nsenter`+`cat` per container — so this must never be called on a
+/// tick budget; see [`collect_container_net_with_timeout`] and
+/// `cmd/dash.rs`'s slow background refresh for the real caller.
+pub fn collect_container_net(root: &Path) -> std::collections::HashMap<String, (u64, u64)> {
+    let mut out = std::collections::HashMap::new();
+    if let Ok(store) = delonix_runtime_core::Store::open(root.join("containers")) {
+        if let Ok(list) = store.list() {
+            for mut c in list {
+                delonix_runtime::reconcile_status(&mut c);
+                if c.status == Status::Running {
+                    if let Some(bytes) = delonix_net::infra::container_net_bytes(&c.id) {
+                        out.insert(c.id.clone(), bytes);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Outcome of a bounded collection — three distinct states, because the
 /// caller's log line must not claim a timeout when nothing was even attempted.
 #[derive(Debug)]
@@ -313,6 +336,23 @@ pub fn collect_with_timeout(
     let root = root.to_path_buf();
     run_bounded(&COLLECT_IN_FLIGHT, timeout, move || {
         collect(&root, include_network, include_storage)
+    })
+}
+
+/// The latch guarding [`collect_container_net_with_timeout`] — its OWN latch
+/// (not [`COLLECT_IN_FLIGHT`]), so a stuck netns read here never blocks the
+/// unrelated `DashSummary` collection, and vice-versa.
+static CONTAINER_NET_IN_FLIGHT: InFlight = InFlight::new();
+
+/// Bounded/circuit-broken form of [`collect_container_net`] — same two
+/// mechanisms as [`collect_with_timeout`] (see [`run_bounded`]).
+pub fn collect_container_net_with_timeout(
+    root: &Path,
+    timeout: Duration,
+) -> Bounded<std::collections::HashMap<String, (u64, u64)>> {
+    let root = root.to_path_buf();
+    run_bounded(&CONTAINER_NET_IN_FLIGHT, timeout, move || {
+        collect_container_net(&root)
     })
 }
 
