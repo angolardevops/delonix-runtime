@@ -6101,26 +6101,26 @@ mod container_usage_tests {
     use super::*;
 
     #[test]
-    fn parse_cpu_stat_usage_usec_le_o_campo_certo() {
+    fn parse_cpu_stat_usage_usec_reads_the_right_field() {
         let s = "usage_usec 123456\nuser_usec 100000\nsystem_usec 23456\n";
         assert_eq!(parse_cpu_stat_usage_usec(s), Some(123456));
     }
 
     #[test]
-    fn parse_cpu_stat_usage_usec_devolve_none_sem_o_campo() {
+    fn parse_cpu_stat_usage_usec_returns_none_without_the_field() {
         assert_eq!(parse_cpu_stat_usage_usec("nr_periods 0\n"), None);
         assert_eq!(parse_cpu_stat_usage_usec(""), None);
     }
 
     #[test]
-    fn parse_io_stat_totals_soma_todos_os_dispositivos() {
+    fn parse_io_stat_totals_sums_all_devices() {
         let s =
             "8:0 rbytes=1000 wbytes=2000 rios=1 wios=1\n8:16 rbytes=500 wbytes=0 rios=1 wios=0\n";
         assert_eq!(parse_io_stat_totals(s), (1500, 2000));
     }
 
     #[test]
-    fn parse_io_stat_totals_vazio_da_zero() {
+    fn parse_io_stat_totals_empty_gives_zero() {
         assert_eq!(parse_io_stat_totals(""), (0, 0));
     }
 }

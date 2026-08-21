@@ -1698,7 +1698,7 @@ mod tui {
         }
 
         #[test]
-        fn sort_rows_por_nome_e_alfabetico() {
+        fn sort_rows_by_name_is_alphabetical() {
             let a = row("zeta", "running", None);
             let b = row("alfa", "running", None);
             let mut rows = vec![&a, &b];
@@ -1708,7 +1708,7 @@ mod tui {
         }
 
         #[test]
-        fn sort_rows_por_memoria_poe_o_maior_primeiro() {
+        fn sort_rows_by_mem_puts_the_largest_first() {
             let a = row("small", "running", Some(1024));
             let b = row("big", "running", Some(1024 * 1024));
             let mut rows = vec![&a, &b];
@@ -1717,7 +1717,7 @@ mod tui {
         }
 
         #[test]
-        fn sort_rows_por_cpu_poe_o_maior_pct_primeiro() {
+        fn sort_rows_by_cpu_puts_the_highest_pct_first() {
             let a = row("idle", "running", None);
             let b = row("busy", "running", None);
             let mut cpu = HashMap::new();
@@ -1729,7 +1729,7 @@ mod tui {
         }
 
         #[test]
-        fn trend_of_compara_contra_a_amostra_anterior() {
+        fn trend_of_compares_against_the_previous_sample() {
             assert!(matches!(Trend::of(None, 10), Trend::Unknown));
             assert!(matches!(Trend::of(Some(5), 10), Trend::Up));
             assert!(matches!(Trend::of(Some(10), 5), Trend::Down));
@@ -1737,7 +1737,7 @@ mod tui {
         }
 
         #[test]
-        fn sortkey_next_percorre_as_4_e_da_a_volta() {
+        fn sortkey_next_cycles_through_all_4_and_wraps() {
             let mut k = SortKey::Name;
             for _ in 0..4 {
                 k = k.next();
@@ -1861,42 +1861,42 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_mostra_as_colunas_de_recursos_novas() {
+    fn snapshot_shows_the_new_resource_columns() {
         let s = render_snapshot(&sample(), false);
         assert!(s.contains("CPU"));
         assert!(s.contains("MEM"));
         assert!(s.contains("I/O R/W"));
         assert!(s.contains("NET DOWN/UP"));
-        // "db" tem tudo a None → célula "-", nunca um zero fabricado.
+        // "db" has everything None → cell "-", never a fabricated zero.
         assert!(s.contains("R -/W -") || s.contains("- "));
     }
 
     #[test]
-    fn fmt_io_pair_ambos_ausentes_e_traco() {
+    fn fmt_io_pair_both_absent_is_a_dash() {
         assert_eq!(fmt_io_pair(None, None), "-");
     }
 
     #[test]
-    fn fmt_io_pair_formata_leitura_e_escrita() {
+    fn fmt_io_pair_formats_read_and_write() {
         let s = fmt_io_pair(Some(1024), Some(2048));
         assert!(s.contains("R "));
         assert!(s.contains("W "));
     }
 
     #[test]
-    fn fmt_net_pair_ambos_ausentes_e_traco() {
+    fn fmt_net_pair_both_absent_is_a_dash() {
         assert_eq!(fmt_net_pair(None, None), "-");
     }
 
     #[test]
-    fn fmt_net_pair_formata_down_e_up() {
+    fn fmt_net_pair_formats_down_and_up() {
         let s = fmt_net_pair(Some(4096), Some(8192));
         assert!(s.contains('\u{2193}'));
         assert!(s.contains('\u{2191}'));
     }
 
     #[test]
-    fn dashscope_next_e_prev_percorrem_os_6_e_dao_a_volta() {
+    fn dashscope_next_and_prev_cycle_through_all_6_and_wrap() {
         let mut s = DashScope::Global;
         for _ in 0..6 {
             s = s.next();
@@ -1907,7 +1907,7 @@ mod tests {
     }
 
     #[test]
-    fn dashscope_from_digit_mapeia_1_a_6_e_recusa_o_resto() {
+    fn dashscope_from_digit_maps_1_to_6_and_rejects_the_rest() {
         assert_eq!(DashScope::from_digit('1'), Some(DashScope::Global));
         assert_eq!(DashScope::from_digit('6'), Some(DashScope::Images));
         assert_eq!(DashScope::from_digit('0'), None);
