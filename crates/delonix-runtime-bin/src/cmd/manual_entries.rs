@@ -1075,6 +1075,7 @@ pub static ENTRIES: &[Entry] = &[
             ("a name of your own, instead of the `tunnel-<port>` default", "delonix net tunnel expose 8080 --name demo"),
             ("ngrok, with the authtoken read from a secret rather than typed into argv", "delonix net tunnel expose 8080 --provider ngrok --token-secret ngrok-token"),
             ("a cloudflare quick tunnel — random trycloudflare.com URL, no account, `cloudflared` must be on PATH", "delonix net tunnel expose 8080 --provider cloudflare"),
+            ("a cloudflare NAMED tunnel you already created — its public hostname is whatever you configured for it in the dashboard", "delonix net tunnel expose 8080 --provider cloudflare --token-secret cf-tunnel-token"),
         ],
         see_also: &["net tunnel ls", "net tunnel rm", "net tunnel apply", "net httproute apply"],
     },

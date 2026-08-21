@@ -2156,6 +2156,15 @@ msgstr "nenhum container em execução publica uma porta — nada para uma VM al
 msgid "free.pinggy.io did not return a URL (geo-routed node may be down, or the connection hung) — trying a.pinggy.io..."
 msgstr "free.pinggy.io não devolveu URL (o nó geo-encaminhado pode estar em baixo, ou a ligação ficou pendurada) — a tentar a.pinggy.io..."
 
+msgid "note: insecure-skip-tls-verify is a no-op for provider=pinggy — it forwards raw TCP and never inspects the local backend's certificate"
+msgstr "nota: insecure-skip-tls-verify é no-op no provider=pinggy — ele encaminha TCP cru e nunca inspecciona o certificado do backend local"
+
+msgid "another ngrok tunnel is already running ('{name}') — ngrok v3's local agent API has no per-tunnel port anymore, so only one ngrok-provider tunnel can run on this host at a time; stop it first (`delonix net tunnel rm {name}`)"
+msgstr "já há outro tunnel ngrok em execução ('{name}') — a API local do agente do ngrok v3 já não tem porta por-tunnel, por isso só pode correr um tunnel provider=ngrok de cada vez neste host; pára-o primeiro (`delonix net tunnel rm {name}`)"
+
+msgid "provider=cloudflare with hostname but no token: the anonymous quick-tunnel (ephemeral *.trycloudflare.com URL) cannot pick its own hostname — pass --token (or --token-secret) for a NAMED tunnel you already created, whose public hostname is configured in the Cloudflare dashboard"
+msgstr "provider=cloudflare com hostname mas sem token: o quick-tunnel anónimo (URL efémera *.trycloudflare.com) não pode escolher o seu próprio hostname — passa --token (ou --token-secret) para um tunnel NOMEADO já criado, cujo hostname público está configurado no dashboard da Cloudflare"
+
 # ---- dash (cmd/dash.rs) — KPI dashboard --------------------------------
 
 msgid "DELONIX — SUMMARY"
@@ -4986,6 +4995,9 @@ msgstr "CIDRs para o modo `allowlist` (separados por vírgula), ex.: `10.0.0.0/8
 msgid "ContainerFw as JSON, e.g. `{\"enabled\":true,\"policyIn\":\"deny\",\"rules\":[...]}`"
 msgstr "ContainerFw em JSON, ex.: `{\"enabled\":true,\"policyIn\":\"deny\",\"rules\":[...]}`"
 
+msgid "Custom/reserved hostname — `ngrok` uses it as `--url` (a reserved domain on your account); `cloudflare` only accepts it together with `--token` (a NAMED tunnel), where it is informational — the route itself lives in the Cloudflare dashboard for that tunnel"
+msgstr "Domínio reservado/próprio — o `ngrok` usa-o como `--url` (um domínio reservado da tua conta); o `cloudflare` só o aceita junto com `--token` (um tunnel NOMEADO), onde é informativo — a rota em si vive no dashboard da Cloudflare desse tunnel"
+
 msgid "e.g. `github.com` (matches `github.com` and `*.github.com`)"
 msgstr "ex.: `github.com` (casa com `github.com` e com `*.github.com`)"
 
@@ -5031,11 +5043,17 @@ msgstr "`pinggy` | `ngrok` | `cloudflare`"
 msgid "Port mapping `hostPort:containerPort[/tcp|udp]`"
 msgstr "Mapeamento de porta `portaHost:portaContainer[/tcp|udp]`"
 
+msgid "Provider token: pinggy pro token, ngrok authtoken, or a cloudflare NAMED tunnel's token (`cloudflared tunnel token <name>` or the Zero Trust dashboard) — switches `--provider cloudflare` from an anonymous quick tunnel to that tunnel"
+msgstr "Token do provider: token pro do pinggy, authtoken do ngrok, ou o token de um tunnel NOMEADO da cloudflare (`cloudflared tunnel token <name>` ou o dashboard Zero Trust) — muda `--provider cloudflare` de um quick tunnel anónimo para esse tunnel"
+
 msgid "Remove the container's firewall from the ingress"
 msgstr "Remove do ingress a firewall do container"
 
 msgid "Restart policy baked into the units (`no|on-failure[:max]|always|unless-stopped`)"
 msgstr "Política de reinício embutida nas unidades (`no|on-failure[:max]|always|unless-stopped`)"
+
+msgid "Skip TLS verification of the LOCAL backend's cert (self-signed HTTPS on `localhost:<local-port>`). Never affects the public tunnel URL. No-op for `pinggy`"
+msgstr "Salta a verificação TLS do certificado do backend LOCAL (HTTPS self-signed em `localhost:<local-port>`). Nunca afecta a URL pública do tunnel. No-op no `pinggy`"
 
 msgid "`tcp/5432`, `udp/53`, `5432` (any proto), or `tcp/*` (all ports)"
 msgstr "`tcp/5432`, `udp/53`, `5432` (qualquer proto), ou `tcp/*` (todas as portas)"
@@ -6278,6 +6296,9 @@ msgstr "ngrok, com o authtoken lido de um segredo em vez de escrito no argv"
 
 msgid "a cloudflare quick tunnel — random trycloudflare.com URL, no account, `cloudflared` must be on PATH"
 msgstr "um quick tunnel da cloudflare — URL trycloudflare.com aleatória, sem conta, o `cloudflared` tem de estar no PATH"
+
+msgid "a cloudflare NAMED tunnel you already created — its public hostname is whatever you configured for it in the dashboard"
+msgstr "um tunnel NOMEADO da cloudflare já criado por ti — o hostname público é o que configuraste para ele no dashboard"
 
 msgid "every tunnel, its state and the public URL the provider gave it"
 msgstr "todos os túneis, o estado de cada um e a URL pública que o fornecedor lhe deu"

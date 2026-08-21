@@ -14,18 +14,27 @@
 //! - `pinggy`: **zero extra binary** — plain `ssh` (already a dependency via
 //!   `cmd::remote`) reverse-forwarded to `free.pinggy.io`, with or without a
 //!   token (`[<token>@]free.pinggy.io`, their own documented general form).
-//!   Free tier: ephemeral URL, ~60 min session.
+//!   Free tier: ephemeral URL, ~60 min session; a pro token behaves the same,
+//!   just without the time limit — pinggy does not distinguish the two at
+//!   the SSH layer.
 //! - `ngrok`: needs the `ngrok` agent on `PATH` (clear error if absent).
-//!   Public URL is read from the agent's own local HTTP API
-//!   (`127.0.0.1:<web-addr>/api/tunnels`), not by scraping logs — the
-//!   documented way to get it programmatically.
-//! - `cloudflare`: needs `cloudflared` on `PATH`. **Only the QUICK TUNNEL**
-//!   (`cloudflared tunnel --url ...`, zero account, random
-//!   `*.trycloudflare.com` URL) is implemented. A NAMED tunnel with a
-//!   custom domain needs a 3-step Cloudflare API dance (create tunnel →
-//!   PUT ingress config → create DNS record — all confirmed against their
-//!   docs while designing this) plus `Secret`-based API-token handling; real
-//!   scope of its own, left as a documented follow-up rather than half-built.
+//!   Public URL is read from the agent's own local HTTP API, fixed at
+//!   `127.0.0.1:4040` since ngrok v3 dropped the `--web-addr` flag this used
+//!   to vary per tunnel — **found live** while adding cloudflare-token
+//!   support (confirmed `unknown flag` against a real v3.39.11 binary) — so
+//!   only ONE ngrok-provider tunnel can run on this host at a time
+//!   (`other_alive_ngrok` refuses a second with a clear reason, rather than
+//!   letting two agents fight over the same port). A `--token`/reserved
+//!   `--hostname` (paid plan) work the same as ever.
+//! - `cloudflare`: needs `cloudflared` on `PATH`. No token: the anonymous
+//!   **quick tunnel** (`cloudflared tunnel --url ...`, zero account, random
+//!   `*.trycloudflare.com` URL). With `--token`/`--token-secret`: a NAMED
+//!   tunnel already created through the Cloudflare dashboard or
+//!   `cloudflared tunnel create` — this module never calls the Cloudflare
+//!   API, it only runs `cloudflared tunnel run --token <token>`, the direct
+//!   analogue of pinggy's/ngrok's paid-token path. Creating a NEW named
+//!   tunnel from scratch (and its DNS route) by API would be a different,
+//!   larger feature and stays a documented follow-up.
 //!
 //! Each provider's agent runs DETACHED (`setsid`, like `cmd::ingress_proxy`)
 //! so it survives the CLI exiting, tracked by a `TunnelRecord` (own
@@ -52,16 +61,28 @@ pub(crate) struct TunnelSpec {
     #[serde(rename = "localPort")]
     local_port: u16,
     /// Custom/reserved hostname — provider-dependent support (see module doc).
+    /// For `cloudflare` this is informational only: it does not create the
+    /// route, it just labels the URL this tunnel is expected to answer on —
+    /// the route itself lives in the Cloudflare dashboard for that tunnel.
     #[serde(default)]
     hostname: Option<String>,
-    /// Literal provider token (pinggy pro token / ngrok authtoken). Prefer
-    /// `tokenSecretRef` for anything checked into a manifest.
+    /// Literal provider token (pinggy pro token / ngrok authtoken / a
+    /// cloudflare NAMED tunnel's token, from `cloudflared tunnel token
+    /// <name>` or the Zero Trust dashboard). Prefer `tokenSecretRef` for
+    /// anything checked into a manifest.
     #[serde(default)]
     token: Option<String>,
     /// Pull the token from a `kind: Secret`'s `token` key — same convention
     /// as `storage`'s `--password-secret`.
     #[serde(default, rename = "tokenSecretRef")]
     token_secret_ref: Option<String>,
+    /// Skip TLS verification when the tunnel connects to the LOCAL backend
+    /// (a self-signed cert on `localhost:<localPort>`) — never affects the
+    /// public tunnel URL, which every provider here always serves over a
+    /// real, provider-issued TLS cert. No-op for `pinggy` (it forwards raw
+    /// TCP and never inspects what is behind it).
+    #[serde(default, rename = "insecureSkipTlsVerify")]
+    insecure_skip_tls_verify: bool,
 }
 
 pub const TUNNEL_SPEC_FIELDS: &[&str] = &[
@@ -70,6 +91,7 @@ pub const TUNNEL_SPEC_FIELDS: &[&str] = &[
     "hostname",
     "token",
     "tokenSecretRef",
+    "insecureSkipTlsVerify",
 ];
 
 /// `pinggy` | `ngrok` | `cloudflare`, as a CLI-level choice (`expose` only —
@@ -100,18 +122,27 @@ struct TunnelRecord {
     provider: String,
     local_port: u16,
     hostname: Option<String>,
-    /// Hash of (provider, local_port, hostname, resolved token) — a re-`apply`
-    /// with the SAME effective config is a no-op; a DIFFERENT one restarts
-    /// the agent (no provider here supports hot-reload the way the HTTPRoute
-    /// proxy's SIGHUP does).
+    /// Hash of (provider, local_port, hostname, insecure_skip_tls_verify,
+    /// resolved token) — a re-`apply` with the SAME effective config is a
+    /// no-op; a DIFFERENT one restarts the agent (no provider here supports
+    /// hot-reload the way the HTTPRoute proxy's SIGHUP does).
     config_hash: String,
     pid: Option<i32>,
     public_url: Option<String>,
     created_unix: u64,
     started_unix: Option<u64>,
-    /// `ngrok` only — its local agent API port, one per concurrent tunnel to
-    /// avoid every ngrok agent colliding on the default `:4040`.
+    /// `ngrok` only — its local agent API port. FIXED at `4040` (ngrok v3
+    /// dropped the `--web-addr` flag this used to vary — see
+    /// `NGROK_WEB_ADDR`), so this is really "was an ngrok agent web API
+    /// reachable when this record was written", kept for `describe` and for
+    /// `other_alive_ngrok`'s one-at-a-time guard.
+    #[serde(default)]
     agent_web_port: Option<u16>,
+    /// Skip TLS verification of the LOCAL backend's cert (see
+    /// `TunnelSpec::insecure_skip_tls_verify`). `#[serde(default)]`: older
+    /// records predate the field and mean `false`.
+    #[serde(default)]
+    insecure_skip_tls_verify: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -131,12 +162,25 @@ pub enum TunnelCmd {
         /// Name (default: `tunnel-<port>`).
         #[arg(short, long, add = clap_complete::engine::ArgValueCandidates::new(super::complete::tunnels))]
         name: Option<String>,
+        /// Custom/reserved hostname — `ngrok` uses it as `--url` (a reserved
+        /// domain on your account); `cloudflare` only accepts it together
+        /// with `--token` (a NAMED tunnel), where it is informational — the
+        /// route itself lives in the Cloudflare dashboard for that tunnel.
         #[arg(long)]
         hostname: Option<String>,
+        /// Provider token: pinggy pro token, ngrok authtoken, or a
+        /// cloudflare NAMED tunnel's token (`cloudflared tunnel token
+        /// <name>` or the Zero Trust dashboard) — switches `--provider
+        /// cloudflare` from an anonymous quick tunnel to that tunnel.
         #[arg(long)]
         token: Option<String>,
         #[arg(long = "token-secret", add = clap_complete::engine::ArgValueCandidates::new(super::complete::secrets))]
         token_secret: Option<String>,
+        /// Skip TLS verification of the LOCAL backend's cert (self-signed
+        /// HTTPS on `localhost:<local-port>`). Never affects the public
+        /// tunnel URL. No-op for `pinggy`.
+        #[arg(long = "insecure-skip-tls-verify")]
+        insecure_skip_tls_verify: bool,
     },
     /// List tunnels (state + public URL).
     Ls,
@@ -166,6 +210,7 @@ pub fn run(action: TunnelCmd) -> Result<()> {
             hostname,
             token,
             token_secret,
+            insecure_skip_tls_verify,
         } => {
             let name = name.unwrap_or_else(|| format!("tunnel-{local_port}"));
             let spec = TunnelSpec {
@@ -174,6 +219,7 @@ pub fn run(action: TunnelCmd) -> Result<()> {
                 hostname,
                 token,
                 token_secret_ref: token_secret,
+                insecure_skip_tls_verify,
             };
             apply_one(&name, &spec)
         }
@@ -197,7 +243,8 @@ pub fn run(action: TunnelCmd) -> Result<()> {
 /// changed on its own is therefore invisible to the plan; the apply's own
 /// `config_hash` still notices and restarts the agent, so nothing is lost
 /// except the preview.
-pub(crate) const RECONCILED_TUNNEL_FIELDS: &[&str] = &["provider", "localPort", "hostname"];
+pub(crate) const RECONCILED_TUNNEL_FIELDS: &[&str] =
+    &["provider", "localPort", "hostname", "insecureSkipTlsVerify"];
 
 pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     let spec: TunnelSpec = manifest::spec_of(doc)?;
@@ -206,6 +253,9 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     f.insert("localPort".into(), spec.local_port.to_string());
     if let Some(h) = &spec.hostname {
         f.insert("hostname".into(), h.clone());
+    }
+    if spec.insecure_skip_tls_verify {
+        f.insert("insecureSkipTlsVerify".into(), "true".into());
     }
     Ok(super::reconcile::Desired {
         kind: "Tunnel".into(),
@@ -230,6 +280,9 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
         f.insert("localPort".into(), rec.local_port.to_string());
         if let Some(h) = &rec.hostname {
             f.insert("hostname".into(), h.clone());
+        }
+        if rec.insecure_skip_tls_verify {
+            f.insert("insecureSkipTlsVerify".into(), "true".into());
         }
         out.push(super::reconcile::Actual {
             kind: "Tunnel".into(),
@@ -353,6 +406,7 @@ fn config_hash(spec: &TunnelSpec, token: &Option<String>) -> String {
     spec.provider.hash(&mut h);
     spec.local_port.hash(&mut h);
     spec.hostname.hash(&mut h);
+    spec.insecure_skip_tls_verify.hash(&mut h);
     token.hash(&mut h);
     format!("{:016x}", h.finish())
 }
@@ -432,12 +486,24 @@ fn apply_one(name: &str, spec: &TunnelSpec) -> Result<()> {
         created_unix: now,
         started_unix: None,
         agent_web_port: None,
+        insecure_skip_tls_verify: spec.insecure_skip_tls_verify,
     };
 
     match spec.provider.as_str() {
         "pinggy" => spawn_pinggy(&mut rec, token.as_deref())?,
-        "ngrok" => spawn_ngrok(&mut rec, token.as_deref(), spec.hostname.as_deref(), &store)?,
-        "cloudflare" => spawn_cloudflare_quick(&mut rec)?,
+        "ngrok" => spawn_ngrok(
+            &mut rec,
+            token.as_deref(),
+            spec.hostname.as_deref(),
+            spec.insecure_skip_tls_verify,
+            &store,
+        )?,
+        "cloudflare" => spawn_cloudflare(
+            &mut rec,
+            token.as_deref(),
+            spec.hostname.as_deref(),
+            spec.insecure_skip_tls_verify,
+        )?,
         _ => unreachable!(),
     }
     rec.started_unix = Some(now);
@@ -533,7 +599,31 @@ fn spawn_and_capture(
     Ok(())
 }
 
+/// **Found live** while testing `provider=cloudflare --token <bad>`: a
+/// `cloudflared` that exits within the poll loop (confirmed: "Provided
+/// Tunnel token is not valid.", under a second) still made `apply_one` run
+/// the entire 15s poll before this fix, contradicting the whole point of the
+/// `!pid_alive` early-break introduced for the v0.16.1 pinggy fix — proven
+/// with a minimal C repro, not deduced: a child we spawned and never
+/// `waitpid`ed on is a ZOMBIE once it exits, and `/proc/<pid>` keeps
+/// existing for a zombie for as long as THIS process keeps running (which is
+/// exactly the window every caller here cares about) — a bare `/proc` check
+/// reports "alive" for a process that has already exited.
+///
+/// The `waitpid(..., WNOHANG)` reaps it first, opportunistically: if `pid`
+/// is a child of ours and has exited, this collects it and its `/proc`
+/// entry disappears immediately after — also verified with the same repro.
+/// If `pid` is NOT a child of this process (every caller here only ever
+/// passes a PID it just spawned itself, but the pre-existing test below
+/// checks `std::process::id()`, our OWN pid), `waitpid` harmlessly fails
+/// with ECHILD and changes nothing — the `/proc` check right after still
+/// answers correctly, so this stays a strict improvement, not a behavior
+/// change, for every caller that predates it.
 fn pid_alive(pid: i32) -> bool {
+    let mut status: libc::c_int = 0;
+    // SAFETY: WNOHANG never blocks; a `pid` that is not our child (or
+    // already reaped) just makes this call fail (ECHILD), changing nothing.
+    unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
     std::path::Path::new(&format!("/proc/{pid}")).exists()
 }
 
@@ -580,6 +670,15 @@ fn find_url_containing(text: &str, needle: &str) -> Option<String> {
 /// endpoint that connected successfully under the exact same conditions) is
 /// a one-shot fallback for exactly this, not a replacement default.
 fn spawn_pinggy(rec: &mut TunnelRecord, token: Option<&str>) -> Result<()> {
+    if rec.insecure_skip_tls_verify {
+        eprintln!(
+            "tunnel: {}",
+            super::po::t(
+                "note: insecure-skip-tls-verify is a no-op for provider=pinggy — it forwards \
+                 raw TCP and never inspects the local backend's certificate"
+            )
+        );
+    }
     spawn_pinggy_at(rec, token, "free.pinggy.io")?;
     if rec.public_url.is_none() {
         if let Some(pid) = rec.pid {
@@ -652,10 +751,32 @@ fn spawn_pinggy_at(rec: &mut TunnelRecord, token: Option<&str>, host: &str) -> R
     })
 }
 
+/// ngrok's local agent web API is FIXED at `127.0.0.1:4040` since ngrok v3
+/// dropped the `--web-addr` flag every earlier version of this function
+/// depended on to give each concurrent tunnel its own port — **found live**
+/// against a real `ngrok v3.39.11` binary while adding cloudflare-token
+/// support: `--web-addr` is now `unknown flag`, and there is no config-file
+/// key that replaces it (`web_addr` in a `--config` YAML errors "field not
+/// found"). Before this fix `provider=ngrok` could not run at all against a
+/// current ngrok agent — every invocation died on the unknown flag before
+/// even attempting a connection.
+const NGROK_WEB_ADDR: &str = "127.0.0.1:4040";
+
+/// The other ngrok record (if any) currently holding the fixed web API port
+/// — pure lookup over the store, independent of actually spawning anything,
+/// so it is testable without an `ngrok` binary on `PATH`.
+fn other_alive_ngrok(store: &JsonStore<TunnelRecord>) -> Result<Option<TunnelRecord>> {
+    Ok(store
+        .list()?
+        .into_iter()
+        .find(|r| r.provider == "ngrok" && is_alive(r)))
+}
+
 fn spawn_ngrok(
     rec: &mut TunnelRecord,
     token: Option<&str>,
     hostname: Option<&str>,
+    insecure_skip_tls_verify: bool,
     store: &JsonStore<TunnelRecord>,
 ) -> Result<()> {
     which("ngrok").ok_or_else(|| {
@@ -667,13 +788,28 @@ fn spawn_ngrok(
             .into(),
         )
     })?;
-    let web_port = pick_free_ngrok_web_port(store)?;
-    rec.agent_web_port = Some(web_port);
+    // Only one ngrok agent can bind the fixed web API port — see
+    // `NGROK_WEB_ADDR`. A second one wouldn't fail loudly on its own (the
+    // tunnel itself would still connect), it would just make `poll_ngrok_api`
+    // read whichever agent got there first — a silent cross-wire between two
+    // unrelated tunnels, worse than refusing up front.
+    if let Some(other) = other_alive_ngrok(store)? {
+        return Err(Error::Invalid(super::po::tf(
+            "another ngrok tunnel is already running ('{name}') — ngrok v3's local agent API \
+             has no per-tunnel port anymore, so only one ngrok-provider tunnel can run on this \
+             host at a time; stop it first (`delonix net tunnel rm {name}`)",
+            &[("name", &other.name)],
+        )));
+    }
+    rec.agent_web_port = Some(4040);
+    let address = if insecure_skip_tls_verify {
+        format!("https://localhost:{}", rec.local_port)
+    } else {
+        rec.local_port.to_string()
+    };
     let mut args = vec![
         "http".to_string(),
-        rec.local_port.to_string(),
-        "--web-addr".to_string(),
-        format!("127.0.0.1:{web_port}"),
+        address,
         "--log".to_string(),
         "stdout".to_string(),
     ];
@@ -705,12 +841,19 @@ fn spawn_ngrok(
     // ngrok's own log isn't a reliable place to scrape the URL from (format
     // varies by version); its local agent API is the documented way.
     spawn_and_capture(rec, "ngrok", &args, |_| None)?;
-    poll_ngrok_api(rec, web_port);
+    poll_ngrok_api(rec);
     Ok(())
 }
 
-fn poll_ngrok_api(rec: &mut TunnelRecord, web_port: u16) {
-    let url = format!("http://127.0.0.1:{web_port}/api/tunnels");
+/// **Found live** right after fixing the `--web-addr` crash above: with that
+/// fixed, an `ngrok` that fails on its own (e.g. no authtoken, invalid one)
+/// now dies within a second or so — but this loop had no way to know that,
+/// and polled a local API nobody was answering for the entire 15s deadline
+/// regardless. Checks `pid_alive` each iteration and breaks the instant the
+/// agent is gone, the exact same fix `spawn_and_capture` already applies to
+/// its own poll loop (v0.16.1) for the identical reason.
+fn poll_ngrok_api(rec: &mut TunnelRecord) {
+    let url = format!("http://{NGROK_WEB_ADDR}/api/tunnels");
     let deadline = Instant::now() + Duration::from_secs(15);
     while Instant::now() < deadline {
         if let Ok(resp) = reqwest::blocking::get(&url) {
@@ -725,27 +868,28 @@ fn poll_ngrok_api(rec: &mut TunnelRecord, web_port: u16) {
                 }
             }
         }
+        if !rec.pid.is_some_and(pid_alive) {
+            break;
+        }
         std::thread::sleep(Duration::from_millis(500));
     }
 }
 
-/// One ngrok agent web-API port per CONCURRENT tunnel — the default `:4040`
-/// would collide the moment a 2nd ngrok-provider Tunnel is applied.
-fn pick_free_ngrok_web_port(store: &JsonStore<TunnelRecord>) -> Result<u16> {
-    let used: std::collections::HashSet<u16> = store
-        .list()?
-        .into_iter()
-        .filter(|r| r.provider == "ngrok" && is_alive(r))
-        .filter_map(|r| r.agent_web_port)
-        .collect();
-    (4040..4140).find(|p| !used.contains(p)).ok_or_else(|| {
-        Error::Invalid(
-            super::po::t("no free port for the ngrok agent (4040-4139 all in use)").into(),
-        )
-    })
-}
-
-fn spawn_cloudflare_quick(rec: &mut TunnelRecord) -> Result<()> {
+/// Dispatches on whether a token was resolved: no token is the anonymous
+/// quick tunnel (unchanged); a token is a NAMED tunnel already created
+/// through the Cloudflare dashboard or `cloudflared tunnel create` — running
+/// it is just `cloudflared tunnel run --token <token>`, confirmed against a
+/// real `cloudflared v2026.8.2` binary's `tunnel run --help`. **No Cloudflare
+/// API calls happen here** — creating a NEW named tunnel from scratch (and
+/// its DNS route) is still the documented follow-up this module has always
+/// deferred; this only RUNS a tunnel the operator already has a token for,
+/// the direct analogue of pinggy's/ngrok's paid-token path.
+fn spawn_cloudflare(
+    rec: &mut TunnelRecord,
+    token: Option<&str>,
+    hostname: Option<&str>,
+    insecure_skip_tls_verify: bool,
+) -> Result<()> {
     which("cloudflared").ok_or_else(|| {
         Error::Invalid(
             super::po::t(
@@ -756,25 +900,88 @@ fn spawn_cloudflare_quick(rec: &mut TunnelRecord) -> Result<()> {
             .into(),
         )
     })?;
-    if rec.hostname.is_some() {
-        return Err(Error::Invalid(
-            super::po::t(
-                "provider=cloudflare with hostname requested: only the quick-tunnel (ephemeral \
-                 *.trycloudflare.com URL, no account) is implemented for now — a NAMED tunnel \
-                 with its own domain needs the Cloudflare API (accountId/zoneId/token) to \
-                 create the tunnel, apply the ingress and the DNS route; still to do, see AGENTS.md",
-            )
-            .into(),
-        ));
+    match token {
+        Some(t) => spawn_cloudflare_named(rec, t, hostname, insecure_skip_tls_verify),
+        None => {
+            if hostname.is_some() {
+                return Err(Error::Invalid(
+                    super::po::t(
+                        "provider=cloudflare with hostname but no token: the anonymous quick-tunnel \
+                         (ephemeral *.trycloudflare.com URL) cannot pick its own hostname — pass \
+                         --token (or --token-secret) for a NAMED tunnel you already created, whose \
+                         public hostname is configured in the Cloudflare dashboard",
+                    )
+                    .into(),
+                ));
+            }
+            spawn_cloudflare_quick(rec, insecure_skip_tls_verify)
+        }
     }
-    let args = vec![
+}
+
+fn cloudflare_origin_url(local_port: u16, insecure_skip_tls_verify: bool) -> String {
+    let scheme = if insecure_skip_tls_verify {
+        "https"
+    } else {
+        "http"
+    };
+    format!("{scheme}://localhost:{local_port}")
+}
+
+/// Live-validated against a real `cloudflared v2026.8.2` quick tunnel and a
+/// self-signed local HTTPS server: without `--no-tls-verify` the public URL
+/// answers 502 (origin TLS rejected); with it (and the `https://` scheme in
+/// `--url`), the same request reaches the backend and returns 200.
+fn spawn_cloudflare_quick(rec: &mut TunnelRecord, insecure_skip_tls_verify: bool) -> Result<()> {
+    let mut args = vec![
         "tunnel".to_string(),
         "--url".to_string(),
-        format!("http://localhost:{}", rec.local_port),
+        cloudflare_origin_url(rec.local_port, insecure_skip_tls_verify),
     ];
+    if insecure_skip_tls_verify {
+        args.push("--no-tls-verify".to_string());
+    }
     spawn_and_capture(rec, "cloudflared", &args, |t| {
         find_url_containing(t, ".trycloudflare.com")
     })
+}
+
+/// `--url`/`--no-tls-verify` are accepted by `cloudflared tunnel run` too,
+/// and per its own `--help` text they only take effect "if you define your
+/// origin with --url and if you do not use ingress rules" — i.e. they are a
+/// harmless no-op on a tunnel whose Public Hostname routes are already
+/// configured remotely, and the working origin override on one that has
+/// none yet (the common case for a tunnel just created for this purpose).
+/// **Not live-validated with a real token** (no Cloudflare account available
+/// in this sandbox) — confirmed instead with an invalid token, which fails
+/// fast and clearly ("Provided Tunnel token is not valid"), proving the argv
+/// this function builds is accepted by the real binary.
+fn spawn_cloudflare_named(
+    rec: &mut TunnelRecord,
+    token: &str,
+    hostname: Option<&str>,
+    insecure_skip_tls_verify: bool,
+) -> Result<()> {
+    let mut args = vec![
+        "tunnel".to_string(),
+        "run".to_string(),
+        "--token".to_string(),
+        token.to_string(),
+        "--url".to_string(),
+        cloudflare_origin_url(rec.local_port, insecure_skip_tls_verify),
+    ];
+    if insecure_skip_tls_verify {
+        args.push("--no-tls-verify".to_string());
+    }
+    // The public hostname of a NAMED tunnel is whatever was routed to it in
+    // the Cloudflare dashboard — this process never learns it from the log
+    // (unlike the quick tunnel, `tunnel run` doesn't print one). `hostname`
+    // is the operator telling us what they already configured there; take
+    // it at face value rather than leaving the URL blank.
+    if let Some(h) = hostname {
+        rec.public_url = Some(format!("https://{h}"));
+    }
+    spawn_and_capture(rec, "cloudflared", &args, |_| None)
 }
 
 fn cmd_ls() -> Result<()> {
@@ -921,6 +1128,29 @@ mod tests {
     }
 
     #[test]
+    fn pid_alive_reaps_an_unwaited_zombie_child_of_this_process() {
+        // Found live testing `provider=cloudflare --token <bad>`: a bare
+        // `/proc/<pid>` check reports a zombie as "alive" for as long as
+        // this process keeps running, because nobody ever `waitpid`ed it —
+        // and every `spawn_and_capture` caller relies on `pid_alive`
+        // detecting death promptly to break its poll loop early. Reverting
+        // the `waitpid(..., WNOHANG)` line in `pid_alive` makes this fail.
+        let mut child = Command::new("true").spawn().expect("spawn `true`");
+        let pid = child.id() as i32;
+        // Give the child time to actually exit (it's `true`, near-instant)
+        // before checking — a fresh child can look alive for a moment
+        // regardless of the bug under test.
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            !pid_alive(pid),
+            "an exited-but-unwaited child must not read as alive just because its zombie /proc entry persists"
+        );
+        // `pid_alive` already reaped it via its own waitpid; avoid a second
+        // wait through the `Child` handle racing with that.
+        let _ = child.try_wait();
+    }
+
+    #[test]
     fn resolve_token_recusa_token_a_comecar_por_traco() {
         // CRITICAL fixed here: a token like "-oProxyCommand=..." embedded as
         // `<token>@free.pinggy.io`, the last positional ssh argv element, was
@@ -945,6 +1175,7 @@ mod tests {
             hostname: None,
             token: None,
             token_secret_ref: None,
+            insecure_skip_tls_verify: false,
         };
         let h0 = config_hash(&base, &None);
         let mut port_changed = base.clone();
@@ -954,6 +1185,9 @@ mod tests {
         let mut host_changed = base.clone();
         host_changed.hostname = Some("app.example.com".to_string());
         assert_ne!(h0, config_hash(&host_changed, &None));
+        let mut tls_changed = base.clone();
+        tls_changed.insecure_skip_tls_verify = true;
+        assert_ne!(h0, config_hash(&tls_changed, &None));
         // Same effective config → same hash (idempotency check for `apply_one`).
         assert_eq!(h0, config_hash(&base, &None));
     }
@@ -971,6 +1205,7 @@ mod tests {
             created_unix: 0,
             started_unix: None,
             agent_web_port: None,
+            insecure_skip_tls_verify: false,
         };
         assert!(!is_alive(&rec));
     }
@@ -988,24 +1223,25 @@ mod tests {
             created_unix: 0,
             started_unix: None,
             agent_web_port: None,
+            insecure_skip_tls_verify: false,
         };
         assert!(!is_alive(&rec));
     }
 
     #[test]
-    fn pick_free_ngrok_web_port_evita_colisao() {
+    fn other_alive_ngrok_ignores_a_not_genuinely_alive_record() {
         let tmp = std::env::temp_dir().join(format!(
-            "delonix-tunnel-webport-test-{}-{}",
+            "delonix-tunnel-otherngrok-test-{}-{}",
             std::process::id(),
             line!()
         ));
         let store = JsonStore::<TunnelRecord>::open(&tmp).unwrap();
-        // A "running" record occupying :4040 — is_alive requires a real /proc
-        // entry, so fake it with our OWN pid (this test process, definitely
-        // alive) and a cmdline that won't contain "ngrok"... which means
-        // is_alive is actually false here. That's fine: it proves the port
-        // is freed once a record isn't genuinely alive (no leaked reservations).
-        let fake = TunnelRecord {
+        // A "running" record claiming the fixed ngrok web port — is_alive
+        // requires a real /proc entry, so fake it with our OWN pid (this test
+        // process, definitely alive) and a cmdline that won't contain
+        // "ngrok"... which means is_alive is actually false here. That's
+        // fine: it proves a stale/dead record never blocks a new tunnel.
+        let stale = TunnelRecord {
             name: "other".to_string(),
             provider: "ngrok".to_string(),
             local_port: 1234,
@@ -1016,13 +1252,39 @@ mod tests {
             created_unix: 0,
             started_unix: None,
             agent_web_port: Some(4040),
+            insecure_skip_tls_verify: false,
         };
-        store.save("other", &fake).unwrap();
-        let port = pick_free_ngrok_web_port(&store).unwrap();
-        assert_eq!(
-            port, 4040,
+        store.save("other", &stale).unwrap();
+        assert!(
+            other_alive_ngrok(&store).unwrap().is_none(),
             "o registo não está genuinamente vivo (cmdline não é ngrok)"
         );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn other_alive_ngrok_ignores_other_providers() {
+        let tmp = std::env::temp_dir().join(format!(
+            "delonix-tunnel-otherngrok-provider-test-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let store = JsonStore::<TunnelRecord>::open(&tmp).unwrap();
+        let pinggy_rec = TunnelRecord {
+            name: "p".to_string(),
+            provider: "pinggy".to_string(),
+            local_port: 1234,
+            hostname: None,
+            config_hash: "x".to_string(),
+            pid: Some(std::process::id() as i32),
+            public_url: None,
+            created_unix: 0,
+            started_unix: None,
+            agent_web_port: None,
+            insecure_skip_tls_verify: false,
+        };
+        store.save("p", &pinggy_rec).unwrap();
+        assert!(other_alive_ngrok(&store).unwrap().is_none());
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

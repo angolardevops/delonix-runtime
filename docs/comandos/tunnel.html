@@ -253,13 +253,16 @@ Options:
           Name (default: `tunnel-&lt;port&gt;`)
 
       --hostname &lt;HOSTNAME&gt;
-          
+          Custom/reserved hostname — `ngrok` uses it as `--url` (a reserved domain on your account); `cloudflare` only accepts it together with `--token` (a NAMED tunnel), where it is informational — the route itself lives in the Cloudflare dashboard for that tunnel
 
       --token &lt;TOKEN&gt;
-          
+          Provider token: pinggy pro token, ngrok authtoken, or a cloudflare NAMED tunnel&#x27;s token (`cloudflared tunnel token &lt;name&gt;` or the Zero Trust dashboard) — switches `--provider cloudflare` from an anonymous quick tunnel to that tunnel
 
       --token-secret &lt;TOKEN_SECRET&gt;
           
+
+      --insecure-skip-tls-verify
+          Skip TLS verification of the LOCAL backend&#x27;s cert (self-signed HTTPS on `localhost:&lt;local-port&gt;`). Never affects the public tunnel URL. No-op for `pinggy`
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
