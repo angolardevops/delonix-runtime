@@ -27,6 +27,15 @@ jobs:
         run: rustup show
       - run: cargo fmt --all --check
 
+  # ---- Language: this code is written in English (ratchet, see LANG-01) ----
+  lang:
+    name: lang ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Identifiers, comments and user-facing messages still in Portuguese
+        run: python3 scripts/lang_ratchet.py
+
   # ---- Lint: clippy a falhar em QUALQUER warning (gate estrito) ----
   clippy:
     name: clippy -D warnings
