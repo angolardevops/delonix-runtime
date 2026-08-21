@@ -3694,6 +3694,15 @@ correr. Merece a sua própria sessão.
 Pedido do utilizador ao ver que cinco bugs de uma série eram a mesma frase. Vale mais como
 checklist para quem mexer aqui do que como lista de correcções:
 
+- **código em português** não é uma decisão de arquitectura — é o nome dos testes (2026-08-21:
+  dos 1165 nomes de função em PT dos dois repos Rust, **1145, ou 98,3%, são nomes de teste**;
+  só 2 são públicos, e dos 1690 itens públicos ZERO têm PT em `serde(rename)`, campos `pub` ou
+  flags de CLI). A convenção já era EN-na-fonte com catálogo PT desde a v0.32.2 — o que ficou
+  em português ficou por ter SALTADO o catálogo. Ver «Língua do código (LANG-01)»;
+- um **contador com falsos positivos** não é um contador — é ruído com um número à frente. O
+  léxico do `lang_ratchet` levava `nas`, que colide com **NAS**: seis comentários já ingleses
+  contavam como dívida. Antes de confiar numa métrica de dívida, lê uma amostra do que ela
+  acusa;
 - um **ficheiro de socket** não é um listener (`wait_for_control_sock` era `.exists()`);
 - **`/sys/class/net`** não é a netns do processo (reporta a de quem MONTOU o sysfs);
 - **`capture()` devolver `Ok`** não é o comando ter passado (não olha para o exit status — lê-se
