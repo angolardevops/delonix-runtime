@@ -1115,9 +1115,10 @@ metadata:
 spec:
   provider: pinggy           # pinggy (zero extra binary) | ngrok | cloudflare
   localPort: 80               # the HTTPRoute proxy&#x27;s port, or any container&#x27;s published port
-  hostname: null               # custom/reserved hostname — provider-dependent, omit for an ephemeral URL
-  token: null                  # pinggy pro token / ngrok authtoken (literal — prefer tokenSecretRef)
-  tokenSecretRef: null         # pull the token from a `kind: Secret`&#x27;s `token` key instead</code></pre>
+  hostname: null               # custom/reserved hostname — ngrok&#x27;s --url; cloudflare only with a token (informational, the route lives in its dashboard)
+  token: null                  # pinggy pro token / ngrok authtoken / a cloudflare NAMED tunnel&#x27;s token (literal — prefer tokenSecretRef)
+  tokenSecretRef: null         # pull the token from a `kind: Secret`&#x27;s `token` key instead
+  insecureSkipTlsVerify: false # skip TLS verification of the LOCAL backend&#x27;s self-signed cert — never affects the public URL, no-op for pinggy</code></pre>
 <h2 id='sharevolume'>ShareVolume</h2>
 <p class='lang-pt'>Uma fatia ISOLADA e com quota própria de uma partilha de rede — vários container/vm/pod partilham UM export NFS/CIFS/WebDAV sem se verem. Cada fatia é um subdirectório real do mount pai, registado como o seu próprio volume; consome-se com <code>-v &lt;nome&gt;:/destino</code>, sem nada de novo do lado do consumidor.</p><p class='lang-en'>An ISOLATED, individually-quota'd slice of a network share — several container/vm/pod share ONE NFS/CIFS/WebDAV export without seeing each other. Each slice is a real subdirectory of the parent mount, registered as its own volume; consumed with <code>-v &lt;name&gt;:/dest</code>, nothing new on the consumer side.</p>
 <pre><code># A SHARE — an isolated, individually-quota&#x27;d slice of an existing volume, so

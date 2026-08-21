@@ -282,6 +282,10 @@ EXAMPLES:
   # `cloudflared` must be on PATH
   delonix net tunnel expose 8080 --provider cloudflare
 
+  # a cloudflare NAMED tunnel you already created — its public hostname is
+  # whatever you configured for it in the dashboard
+  delonix net tunnel expose 8080 --provider cloudflare --token-secret cf-tunnel-token
+
 SEE ALSO:
   delonix net tunnel ls · delonix net tunnel rm · delonix net tunnel apply ·
   delonix net httproute apply
