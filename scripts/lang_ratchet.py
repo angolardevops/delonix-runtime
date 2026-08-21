@@ -26,7 +26,12 @@ ROOT = Path(__file__).resolve().parent.parent
 LEXICON = Path(__file__).resolve().parent / "lang_pt_lexicon.txt"
 BASELINE = Path(__file__).resolve().parent / "lang_baseline.json"
 
-SKIP_DIRS = {".git", "target", "node_modules", ".claude", "vendor", "dist", "build"}
+SKIP_DIRS = {".git", "target", "node_modules", ".claude", "vendor", "dist", "build",
+             ".ansible", ".venv", "site-packages", "third_party"}
+
+# O gate não se conta a si próprio: o léxico É português por definição, e a
+# documentação do script está em PT como o resto das notas da casa.
+SKIP_FILES = {"scripts/lang_ratchet.py", "scripts/lang_pt_lexicon.txt"}
 
 # Declarações que introduzem um nome, por linguagem.
 DECL = {
@@ -100,7 +105,10 @@ def walk(root: Path):
     for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
-        if any(part in SKIP_DIRS for part in path.relative_to(root).parts):
+        rel = path.relative_to(root)
+        if any(part in SKIP_DIRS for part in rel.parts):
+            continue
+        if rel.as_posix() in SKIP_FILES:
             continue
         if path.suffix in DECL or path.suffix in COMMENT:
             yield path
