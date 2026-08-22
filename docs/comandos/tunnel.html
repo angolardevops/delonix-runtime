@@ -146,7 +146,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <p class='tagline lang-pt'>Expõe uma porta local à internet pública via pinggy/ngrok/cloudflare (`kind: Tunnel`).</p><p class='tagline lang-en'>Exposes a local port to the public internet via pinggy/ngrok/cloudflare (`kind: Tunnel`).</p>
 <p class='lang-pt'>Faz UMA coisa: leva tráfego da internet pública até UMA porta local — sem conta,
 sem IP público, sem configurar o router. Junta-se ao <code>httproute</code> apontando
-<code>--local-port</code> para a porta onde o proxy L7 escuta, e o routing por <code>Host</code>
+a porta local do túnel para a porta onde o proxy L7 escuta, e o routing por <code>Host</code>
 do lado de lá continua a decidir para que container vai cada pedido — uma só URL pública, vários
 backends. Três providers, cada um o binário/mecanismo REAL desse serviço (nunca simulado):
 <strong>pinggy</strong> (zero binário extra — <code>ssh</code> puro, já uma dependência do
@@ -155,7 +155,7 @@ da API local do próprio agente) e <strong>cloudflare</strong> (precisa de <code
 por agora só o quick-tunnel efémero <code>*.trycloudflare.com</code>, sem conta — um tunnel
 NOMEADO com domínio próprio precisa da API do Cloudflare, ainda por implementar).</p><p class='lang-en'>Does ONE thing: carries traffic from the public internet down to ONE local
 port — no account, no public IP, no router config. Pairs with <code>httproute</code> by pointing
-<code>--local-port</code> at the port the L7 proxy listens on, and <code>Host</code>-based routing
+the tunnel's local port at the port the L7 proxy listens on, and <code>Host</code>-based routing
 on the other end still decides which container each request goes to — one public URL, several
 backends. Three providers, each the REAL binary/mechanism of that service (never simulated):
 <strong>pinggy</strong> (zero extra binary — plain <code>ssh</code>, already a project dependency),
@@ -189,7 +189,7 @@ COMMAND MAP:
 EXAMPLES:
   # a local port on the public internet, with no account and no public IP on
   # this host
-  delonix net tunnel expose --provider pinggy --local-port 8080
+  delonix net tunnel expose 8080
 
   # the tunnels and the public URLs they got
   delonix net tunnel ls
@@ -233,29 +233,36 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Declarar o túnel num manifesto kind: Tunnel</div><div class='cap lang-en'>Declare the tunnel in a kind: Tunnel manifest</div><pre><code>delonix net tunnel apply -f tunel.yaml</code></pre></div>
 <h2 id='expose'><code>tunnel expose</code></h2>
 <p class='intro'>One-shot expose of a local port, no manifest needed</p>
-<div class='help'><pre><code>Usage: delonix net tunnel expose [OPTIONS] --provider &lt;PROVIDER&gt; --local-port &lt;LOCAL_PORT&gt;
+<div class='help'><pre><code>Usage: delonix net tunnel expose [OPTIONS] &lt;LOCAL_PORT&gt;
+
+Arguments:
+  &lt;LOCAL_PORT&gt;
+          Local TCP port to expose
 
 Options:
       --l18n &lt;en|pt&gt;
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
-      --name &lt;NAME&gt;
+  -p, --provider &lt;PROVIDER&gt;
+          `pinggy` | `ngrok` | `cloudflare`
+          
+          [default: pinggy]
+          [possible values: pinggy, ngrok, cloudflare]
+
+  -n, --name &lt;NAME&gt;
           Name (default: `tunnel-&lt;port&gt;`)
 
-      --provider &lt;PROVIDER&gt;
-          `pinggy` | `ngrok` | `cloudflare`
-
-      --local-port &lt;LOCAL_PORT&gt;
-          
-
       --hostname &lt;HOSTNAME&gt;
-          
+          Custom/reserved hostname — `ngrok` uses it as `--url` (a reserved domain on your account); `cloudflare` only accepts it together with `--token` (a NAMED tunnel), where it is informational — the route itself lives in the Cloudflare dashboard for that tunnel
 
       --token &lt;TOKEN&gt;
-          
+          Provider token: pinggy pro token, ngrok authtoken, or a cloudflare NAMED tunnel&#x27;s token (`cloudflared tunnel token &lt;name&gt;` or the Zero Trust dashboard) — switches `--provider cloudflare` from an anonymous quick tunnel to that tunnel
 
       --token-secret &lt;TOKEN_SECRET&gt;
           
+
+      --insecure-skip-tls-verify
+          Skip TLS verification of the LOCAL backend&#x27;s cert (self-signed HTTPS on `localhost:&lt;local-port&gt;`). Never affects the public tunnel URL. No-op for `pinggy`
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
@@ -263,17 +270,21 @@ Options:
 EXAMPLES:
   # pinggy needs no account and no extra binary — it is plain ssh, and the
   # free URL is ephemeral
-  delonix net tunnel expose --provider pinggy --local-port 8080
+  delonix net tunnel expose 8080
 
   # a name of your own, instead of the `tunnel-&lt;port&gt;` default
-  delonix net tunnel expose --name demo --provider pinggy --local-port 8080
+  delonix net tunnel expose 8080 --name demo
 
   # ngrok, with the authtoken read from a secret rather than typed into argv
-  delonix net tunnel expose --provider ngrok --local-port 8080 --token-secret ngrok-token
+  delonix net tunnel expose 8080 --provider ngrok --token-secret ngrok-token
 
   # a cloudflare quick tunnel — random trycloudflare.com URL, no account,
   # `cloudflared` must be on PATH
-  delonix net tunnel expose --provider cloudflare --local-port 8080
+  delonix net tunnel expose 8080 --provider cloudflare
+
+  # a cloudflare NAMED tunnel you already created — its public hostname is
+  # whatever you configured for it in the dashboard
+  delonix net tunnel expose 8080 --provider cloudflare --token-secret cf-tunnel-token
 
 SEE ALSO:
   delonix net tunnel ls · delonix net tunnel rm · delonix net tunnel apply ·
@@ -283,7 +294,7 @@ SEE ALSO:
 <div class='lang-pt'><p>Validado ao vivo nesta mesma sessão: tráfego HTTPS real da internet
 chegou a um servidor local através do tunnel (HTTP 200) usando exactamente este comando.</p></div><div class='lang-en'><p>Validated live in this very session: real HTTPS traffic from the
 internet reached a local server through the tunnel (HTTP 200) using exactly this command.</p></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Expor uma porta local sem escrever manifesto (pinggy, grátis, efémero)</div><div class='cap lang-en'>Expose a local port with no manifest (pinggy, free, ephemeral)</div><pre><code>delonix net tunnel expose --name demo --provider pinggy --local-port 8080</code></pre><div class="out"><pre><code>tunnel/demo: running — https://oxipg-197-148-40-67.free.pinggy.net</code></pre></div></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Expor uma porta local sem escrever manifesto (pinggy, grátis, efémero)</div><div class='cap lang-en'>Expose a local port with no manifest (pinggy, free, ephemeral)</div><pre><code>delonix net tunnel expose 8080 --name demo</code></pre><div class="out"><pre><code>tunnel/demo: running — https://oxipg-197-148-40-67.free.pinggy.net</code></pre></div></div>
 <h2 id='ls'><code>tunnel ls</code></h2>
 <p class='intro'>List tunnels (state + public URL)</p>
 <div class='help'><pre><code>Usage: delonix net tunnel ls [OPTIONS]
@@ -357,14 +368,14 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Parar e remover (mata o processo agente a sério)</div><div class='cap lang-en'>Stop and remove (really kills the agent process)</div><pre><code>delonix net tunnel rm demo</code></pre><div class="out"><pre><code>tunnel/demo: removed</code></pre></div></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Uma porta local, uma URL pública — sem conta, sem router.</p>
-<pre><code>delonix net tunnel expose --provider pinggy --local-port 8080
+<pre><code>delonix net tunnel expose 8080
 delonix net tunnel ls</code></pre></div><div class='callout lang-en'><p>One local port, one public URL — no account, no router config.</p>
-<pre><code>delonix net tunnel expose --provider pinggy --local-port 8080
+<pre><code>delonix net tunnel expose 8080
 delonix net tunnel ls</code></pre></div>
 <h2><span class='lang-pt'>Desafio</span><span class='lang-en'>Challenge</span></h2>
-<div class='callout lang-pt'><p>Aponta o <code>--local-port</code> do tunnel para a porta onde o
+<div class='callout lang-pt'><p>Aponta a porta local do tunnel para a porta onde o
 proxy L7 (<code>httproute</code>) escuta, e confirma que a MESMA URL pública consegue servir vários
-containers backend diferentes, decididos pelo <code>Host</code> do pedido.</p></div><div class='callout lang-en'><p>Point the tunnel's <code>--local-port</code> at the port the L7 proxy
+containers backend diferentes, decididos pelo <code>Host</code> do pedido.</p></div><div class='callout lang-en'><p>Point the tunnel's local port at the port the L7 proxy
 (<code>httproute</code>) listens on, and confirm the SAME public URL can serve several different
 backend containers, decided by the request's <code>Host</code>.</p></div>
 <footer><span class='lang-pt'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</span><span class='lang-en'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.</span></footer>

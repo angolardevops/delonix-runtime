@@ -2922,6 +2922,95 @@ próprio da pinggy, não documentado à parte, mas que ligou com sucesso nas mes
 15s. Validado ao vivo: URL pública real devolvida (`https://….free.pinggy.net`), `curl` local E
 à URL pública deram 200 — o túnel encaminha tráfego de verdade, não é só log-scraping.
 
+### `tunnel expose` simplificado — porta posicional, `provider` opcional (BREAKING, sem alias)
+
+Pedido do utilizador: `delonix net tunnel expose --name <n> --provider pinggy --local-port
+<porta>` era o comando mais verboso deste grupo para o caso mais comum (pinggy, sem nome
+próprio) — três flags para um único número que interessa. `net tunnel` não está na lista de
+"Estável" do `docs/cli-stability.md`, por isso o corte é limpo, sem alias, como o precedente da
+v0.30.0.
+
+- **`local_port` passou a POSICIONAL** — `delonix net tunnel expose 8080`. A flag `--local-port`
+  deixou de existir; quem a usar leva "unrecognized argument", nunca um silêncio.
+- **`--provider` ganhou DEFAULT `pinggy`** (é o único que não precisa de binário extra nem de
+  conta — ver o doc-comment do módulo) e passou de `String` livre a `clap::ValueEnum`
+  (`TunnelProvider`), só no lado da CLI — `TunnelSpec.provider` do manifesto continua `String`,
+  porque um `kind: Tunnel` não é clap e não ganha nada com o enum. Dá autocomplete de GRAÇA (o
+  motor de completions dinâmicas do `clap_complete` já sabe enumerar os `possible values` de um
+  `ValueEnum`, sem precisar de `ArgValueCandidates`) e `[possible values: pinggy, ngrok,
+  cloudflare]` aparece sozinho no `--help`.
+- **`-p`/`-n` como atalhos** de `--provider`/`--name`.
+- **`--name` ganhou autocomplete dos túneis JÁ existentes** (`ArgValueCandidates::new(super::
+  complete::tunnels)`, o mesmo completador que `describe`/`rm` já usavam) — útil para reexpor com
+  o mesmo nome (reconfigura em vez de criar um segundo), não só para nomes novos.
+- Resultado: `delonix net tunnel expose --name kitamba-saurimo-85 --provider pinggy --local-port
+  8080` passa a `delonix net tunnel expose 8080 --name kitamba-saurimo-85` (ou, sem nome
+  próprio, só `delonix net tunnel expose 8080`).
+- Actualizados os exemplos em `manual_entries.rs`, `docs/gen.py` e `examples/tunnel.yaml` — nenhum
+  ficou com a sintaxe antiga (o teste `os_exemplos_invocam_o_comando_que_documentam` só confirma
+  que o exemplo NOMEIA o comando, não que a sintaxe é válida; a validação real foi ao vivo, com o
+  binário, incluindo o motor de completions dinâmicas com `_CLAP_COMPLETE_INDEX`/`COMPLETE=bash`).
+
+### `tunnel expose --token`/`--insecure-skip-tls-verify` — cloudflare NAMED tunnel, e 3 bugs achados ao vivo
+
+Pedido directo a seguir à simplificação acima: token de conta paga (já existia para pinggy/ngrok,
+mas cloudflare rejeitava-o por inteiro) + TLS. Ao contrário do resto deste módulo, este trabalho
+foi validado contra binários REAIS descarregados (`cloudflared v2026.8.2`, `ngrok v3.39.11`) —
+nenhum estava instalado neste host, e o `--help` real + testes ao vivo contra um servidor HTTPS
+self-signed local é o que decidiu a forma final, não a documentação lida por cima.
+
+- **`insecureSkipTlsVerify` (`TunnelSpec`/`--insecure-skip-tls-verify`)** — TLS do BACKEND LOCAL
+  (self-signed em `localhost:<localPort>`), nunca da URL pública (essa é sempre um cert real do
+  provider). Para `cloudflare` liga `--no-tls-verify` + troca `http://` por `https://` no `--url`;
+  para `ngrok` só troca o endereço para `https://localhost:<porta>` (confirmado no `ngrok http
+  --help`: `--upstream-tls-verify` existe para EXIGIR verificação, ou seja o default já é
+  permissivo para um backend local — não há flag "skip" a passar); no-op documentado para
+  `pinggy` (encaminha TCP cru, nunca inspecciona o que está atrás). **Validado ao vivo, as duas
+  direcções**: um `cloudflared tunnel --url https://localhost:<porta>` real contra um servidor
+  HTTPS self-signed devolveu 200 COM `--no-tls-verify` e 502 SEM — a flag não é decorativa.
+- **`cloudflare` + `--token`/`--token-secret` corre um tunnel NOMEADO já criado**
+  (`cloudflared tunnel run --token <token> --url <origem>`) — confirmado no `--help` real que
+  `--token`/`--url`/`--no-tls-verify` são todos aceites por `tunnel run`, e que `--url` só faz
+  efeito quando o tunnel ainda não tem ingress remoto configurado (documentado pelo próprio
+  cloudflared), logo é inofensivo passá-lo sempre. **Nenhuma chamada à API do Cloudflare** — só
+  corre o binário com o token que o operador já tem (dashboard/`cloudflared tunnel create`); criar
+  um tunnel NOVO por API continua o follow-up documentado que já era. `hostname` passa a aceite
+  (só com token) como campo INFORMATIVO — a rota em si vive no dashboard, delonix não a lê.
+  **Confirmado com um token inválido**: falha em 0.4s com "Provided Tunnel token is not valid.",
+  não com um crash nem um hang — prova que o argv construído é aceite pelo binário real; o caminho
+  com um token VÁLIDO não foi exercitado (sem conta Cloudflare disponível neste sandbox).
+
+**3 bugs pré-existentes encontrados ao vivo por este trabalho, todos corrigidos**, nenhum causado
+pela simplificação anterior — só nunca tinham sido alcançados por um teste real antes:
+
+1. **`provider=ngrok` estava 100% partido contra qualquer agente ngrok v3.** `spawn_ngrok` passava
+   `--web-addr <porta>` para variar a API local por túnel — `ngrok http --web-addr ...` responde
+   **`unknown flag`** num binário v3 real (confirmado; a API local ficou FIXA em `127.0.0.1:4040`,
+   sem flag nem chave de config que a mude — `web_addr:` num `--config` YAML dá "field not found").
+   Corrigido: a porta é sempre `4040` (`NGROK_WEB_ADDR`), e como só pode haver UMA, um 2.º túnel
+   `ngrok` alive é recusado com razão clara (`other_alive_ngrok`) em vez de dois agentes a
+   disputar a mesma porta em silêncio.
+2. **`pid_alive` confundia um zombie com "vivo"** — só lia `/proc/<pid>`, e um filho morto e nunca
+   `waitpid`ado continua com entrada em `/proc` (Estado `Z`) enquanto o processo QUE O CRIOU
+   continuar vivo — **provado com um repro em C** antes de tocar no Rust. Isto tornava inútil a
+   própria razão de existir do `!pid_alive` no poll loop do `spawn_and_capture` (fix da v0.16.1
+   para o pinggy): com um token cloudflare inválido, o `cloudflared` morria em <1s e mesmo assim o
+   `expose` esperava os 15s inteiros. Corrigido com um `waitpid(pid, WNOHANG)` oportunista ANTES do
+   `/proc` — reaping de um filho nosso que já morreu, no-op inofensivo (ECHILD) para um pid que não
+   é nosso filho (o próprio pid do processo, testado). **Revertido e confirmado que o teste novo
+   falha sem o fix** (regra do repo); e confirmado ao vivo: `cloudflared crashed right at startup`
+   em 0.4s em vez de um `timeout 15` a matar o processo.
+3. **`poll_ngrok_api` não olhava para o pid** — mesmo com o `pid_alive` corrigido, este loop
+   SEPARADO (depois do `spawn_and_capture` já ter voltado) continuava a martelar a API local os
+   15s inteiros mesmo com o agente já confirmado morto. Ganhou o mesmo `if !pid_alive { break }`
+   que o `spawn_and_capture` já tinha desde a v0.16.1. **Validado ao vivo**: `ngrok` sem
+   `--authtoken` (falha de auth real, confirmada no log) passou de `timeout 8` a matar o processo
+   para 1.4s de resposta.
+
+**Ficheiros tocados**: só `cmd/tunnel.rs` (schema+CLI+os 3 fixes) + `pt.po` + `manual_entries.rs`
++ `docs/gen.py`/`docs/comandos/tunnel.html` (regenerados) + `docs/schema/v1/delonix.json`
+(regenerado — `insecureSkipTlsVerify` é campo novo do schema publicado) + `examples/tunnel.yaml`.
+
 ## Cluster modo Kind sem Docker — investigação (GO/NO-GO)
 
 Pedido: `delonix cluster` em modo `kind` (sem `kubeadm`) a funcionar **sem Docker instalado** —
