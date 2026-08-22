@@ -967,7 +967,7 @@ para dar uma única URL pública a vários backends.""",
         "tagline": "Expõe uma porta local à internet pública via pinggy/ngrok/cloudflare (`kind: Tunnel`).",
         "intro": """Faz UMA coisa: leva tráfego da internet pública até UMA porta local — sem conta,
 sem IP público, sem configurar o router. Junta-se ao <code>httproute</code> apontando
-<code>--local-port</code> para a porta onde o proxy L7 escuta, e o routing por <code>Host</code>
+a porta local do túnel para a porta onde o proxy L7 escuta, e o routing por <code>Host</code>
 do lado de lá continua a decidir para que container vai cada pedido — uma só URL pública, vários
 backends. Três providers, cada um o binário/mecanismo REAL desse serviço (nunca simulado):
 <strong>pinggy</strong> (zero binário extra — <code>ssh</code> puro, já uma dependência do
@@ -981,7 +981,7 @@ NOMEADO com domínio próprio precisa da API do Cloudflare, ainda por implementa
                  'delonix net tunnel apply -f tunel.yaml')]},
             "expose": {"examples": [
                 ("Expor uma porta local sem escrever manifesto (pinggy, grátis, efémero)",
-                 "delonix net tunnel expose --name demo --provider pinggy --local-port 8080",
+                 "delonix net tunnel expose 8080 --name demo",
                  "tunnel/demo: running — https://oxipg-197-148-40-67.free.pinggy.net"),
             ], "notes": """<p>Validado ao vivo nesta mesma sessão: tráfego HTTPS real da internet
 chegou a um servidor local através do tunnel (HTTP 200) usando exactamente este comando.</p>"""},
@@ -1452,7 +1452,7 @@ to give several backends a single public URL.""",
         "tagline": "Exposes a local port to the public internet via pinggy/ngrok/cloudflare (`kind: Tunnel`).",
         "intro": """Does ONE thing: carries traffic from the public internet down to ONE local
 port — no account, no public IP, no router config. Pairs with <code>httproute</code> by pointing
-<code>--local-port</code> at the port the L7 proxy listens on, and <code>Host</code>-based routing
+the tunnel's local port at the port the L7 proxy listens on, and <code>Host</code>-based routing
 on the other end still decides which container each request goes to — one public URL, several
 backends. Three providers, each the REAL binary/mechanism of that service (never simulated):
 <strong>pinggy</strong> (zero extra binary — plain <code>ssh</code>, already a project dependency),
@@ -1957,15 +1957,15 @@ configuration.</p>"""},
     },
     "tunnel": {
         "lab": {"pt": """<p>Uma porta local, uma URL pública — sem conta, sem router.</p>
-<pre><code>delonix net tunnel expose --provider pinggy --local-port 8080
+<pre><code>delonix net tunnel expose 8080
 delonix net tunnel ls</code></pre>""",
                 "en": """<p>One local port, one public URL — no account, no router config.</p>
-<pre><code>delonix net tunnel expose --provider pinggy --local-port 8080
+<pre><code>delonix net tunnel expose 8080
 delonix net tunnel ls</code></pre>"""},
-        "challenge": {"pt": """<p>Aponta o <code>--local-port</code> do tunnel para a porta onde o
+        "challenge": {"pt": """<p>Aponta a porta local do tunnel para a porta onde o
 proxy L7 (<code>httproute</code>) escuta, e confirma que a MESMA URL pública consegue servir vários
 containers backend diferentes, decididos pelo <code>Host</code> do pedido.</p>""",
-                "en": """<p>Point the tunnel's <code>--local-port</code> at the port the L7 proxy
+                "en": """<p>Point the tunnel's local port at the port the L7 proxy
 (<code>httproute</code>) listens on, and confirm the SAME public URL can serve several different
 backend containers, decided by the request's <code>Host</code>.</p>"""},
     },
@@ -3777,7 +3777,7 @@ CHEAT_TASKS = [
     ("Volume de rede de um NAS (NFS)", "delonix storage create media --type nfs --server 10.0.0.5 --share /mnt/pool/media"),
     ("Segredo no cofre (não no argv)", "printf 'password=s3nha' | delonix secret create db-pass --from-env-file -"),
     ("Expor um container à internet pública (sem conta, sem router)",
-     "delonix container run -d --name web --expose 80 nginx\ndelonix net tunnel expose --provider pinggy --local-port 8080",
+     "delonix container run -d --name web --expose 80 nginx\ndelonix net tunnel expose 8080",
      "tunnel/tunnel-8080: running — https://oxipg-197-148-40-67.free.pinggy.net"),
     ("NAS partilhado por vários tenants, cada um com a sua quota",
      "delonix storage create nas --type nfs --server 10.0.0.5 --share /pool/data\n"
@@ -5048,7 +5048,7 @@ INFO:     10.0.2.2:57802 - "GET /api/weather/Luanda HTTP/1.1" 200 OK</code></pre
 <h2>4. Expor à internet</h2>
 <p>Uma porta local não chega — o objectivo é uma URL que qualquer pessoa, em qualquer rede,
 consiga abrir. É aqui que entra o <a href="comandos/tunnel.html"><code>kind: Tunnel</code></a>:</p>
-<pre><code>delonix net tunnel expose --name delonix-temp --provider pinggy --local-port 8080</code></pre>
+<pre><code>delonix net tunnel expose 8080 --name delonix-temp</code></pre>
 <div class="out"><pre><code>tunnel/delonix-temp: running — https://lfdhz-197-148-40-67.free.pinggy.net</code></pre></div>
 <p>Essa URL é REAL — foi a que este guião recebeu ao correr o comando. (A tua vai ser diferente
 de cada vez: o provider grátis atribui uma nova de cada sessão.) Confirmação, de fora, sem
@@ -5171,7 +5171,7 @@ INFO:     10.0.2.2:57802 - "GET /api/weather/Luanda HTTP/1.1" 200 OK</code></pre
 <h2>4. Expose it to the internet</h2>
 <p>A local port isn't enough — the goal is a URL anyone, on any network, can open. This is where
 <a href="comandos/tunnel.html"><code>kind: Tunnel</code></a> comes in:</p>
-<pre><code>delonix net tunnel expose --name delonix-temp --provider pinggy --local-port 8080</code></pre>
+<pre><code>delonix net tunnel expose 8080 --name delonix-temp</code></pre>
 <div class="out"><pre><code>tunnel/delonix-temp: running — https://lfdhz-197-148-40-67.free.pinggy.net</code></pre></div>
 <p>That URL is REAL — it's the one this guide got when the command was actually run. (Yours will
 be different every time: the free provider assigns a new one each session.) Confirmation, from

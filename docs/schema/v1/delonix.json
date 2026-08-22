@@ -2110,11 +2110,16 @@
       "properties": {
         "hostname": {
           "default": null,
-          "description": "Custom/reserved hostname — provider-dependent support (see module doc).",
+          "description": "Custom/reserved hostname — provider-dependent support (see module doc).\nFor `cloudflare` this is informational only: it does not create the\nroute, it just labels the URL this tunnel is expected to answer on —\nthe route itself lives in the Cloudflare dashboard for that tunnel.",
           "type": [
             "string",
             "null"
           ]
+        },
+        "insecureSkipTlsVerify": {
+          "default": false,
+          "description": "Skip TLS verification when the tunnel connects to the LOCAL backend\n(a self-signed cert on `localhost:<localPort>`) — never affects the\npublic tunnel URL, which every provider here always serves over a\nreal, provider-issued TLS cert. No-op for `pinggy` (it forwards raw\nTCP and never inspects what is behind it).",
+          "type": "boolean"
         },
         "localPort": {
           "format": "uint16",
@@ -2128,7 +2133,7 @@
         },
         "token": {
           "default": null,
-          "description": "Literal provider token (pinggy pro token / ngrok authtoken). Prefer\n`tokenSecretRef` for anything checked into a manifest.",
+          "description": "Literal provider token (pinggy pro token / ngrok authtoken / a\ncloudflare NAMED tunnel's token, from `cloudflared tunnel token\n<name>` or the Zero Trust dashboard). Prefer `tokenSecretRef` for\nanything checked into a manifest.",
           "type": [
             "string",
             "null"

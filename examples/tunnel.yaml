@@ -5,8 +5,8 @@
 # public URL, routed by Host/path to as many backend containers as you want.
 #
 # Apply with:  delonix net tunnel apply -f tunnel.yaml
-# One-shot equivalent, no manifest:
-#   delonix net tunnel expose --provider pinggy --local-port 80
+# One-shot equivalent, no manifest (pinggy is the default provider):
+#   delonix net tunnel expose 80
 apiVersion: delonix.io/v1
 kind: Tunnel
 metadata:
@@ -14,6 +14,7 @@ metadata:
 spec:
   provider: pinggy           # pinggy (zero extra binary) | ngrok | cloudflare
   localPort: 80               # the HTTPRoute proxy's port, or any container's published port
-  hostname: null               # custom/reserved hostname — provider-dependent, omit for an ephemeral URL
-  token: null                  # pinggy pro token / ngrok authtoken (literal — prefer tokenSecretRef)
+  hostname: null               # custom/reserved hostname — ngrok's --url; cloudflare only with a token (informational, the route lives in its dashboard)
+  token: null                  # pinggy pro token / ngrok authtoken / a cloudflare NAMED tunnel's token (literal — prefer tokenSecretRef)
   tokenSecretRef: null         # pull the token from a `kind: Secret`'s `token` key instead
+  insecureSkipTlsVerify: false # skip TLS verification of the LOCAL backend's self-signed cert — never affects the public URL, no-op for pinggy
