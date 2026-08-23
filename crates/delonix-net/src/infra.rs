@@ -1608,8 +1608,9 @@ fn handle_control(line: &str) -> String {
     // bridged packet only reaches an IP hook — where `forward` lives — when
     // `br_netfilter` is loaded AND `net.bridge.bridge-nf-call-iptables=1`.
     // Without it EVERY rule still installs, `nft list` shows it, and the
-    // traffic walks straight past it: measured 2026-08-12 (see AGENTS.md,
-    // "O isolamento de namespace é INERTE sem `br_netfilter`"). Read in the
+    // traffic walks straight past it: measured 2026-08-12 (see the
+    // `br_netfilter` section of AGENTS.md — namespace isolation is INERT
+    // without it). Read in the
     // HOLDER's netns on purpose — this sysctl is per-netns since Linux 4.x,
     // so the value that matters is the one the dataplane itself sees, not
     // whatever the CLI's own netns happens to report.
