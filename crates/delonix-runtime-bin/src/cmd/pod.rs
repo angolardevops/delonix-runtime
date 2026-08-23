@@ -198,6 +198,7 @@ fn create_pod(name: &str, namespace: Option<String>, spec: PodSpec) -> Result<()
         })
     })?;
     apply_pod_namespace_isolation(&netns, &ip, &ns);
+    container::warn_if_namespace_isolation_inert(&ns);
 
     // 2. Each container joins THAT netns (via `--pod`) — same IP, localhost peers.
     // The FIRST container holds the pod's IPC/UTS namespaces; the rest join them

@@ -9168,3 +9168,51 @@ msgstr "(Enter: aplica · Esc: limpa)"
 msgid "q/Esc: quit · ↑↓: select · Tab/1-6: scope · /: search · s: sort ({sort}) · refresh 1s"
 msgstr "q/Esc: sair · ↑↓: seleccionar · Tab/1-6: âmbito · /: procurar · s: ordenar ({sort}) · refresh 1s"
 
+# net l4guard (CLI wiring for the ingress-wide L4 DDoS guard)
+msgid "Ingress-wide L4 DDoS guard (per-source connection rate + concurrent cap)."
+msgstr "Guarda L4 anti-DDoS do ingress inteiro (taxa de ligações + tecto concorrente, por origem)."
+
+msgid "Turn the guard on (or update it): new conns/s and concurrent conns, per source IP."
+msgstr "Liga a guarda (ou actualiza-a): novas ligações/s e ligações concorrentes, por IP de origem."
+
+msgid "Turn the guard off."
+msgstr "Desliga a guarda."
+
+msgid "Show whether the guard is active, with its drop counters."
+msgstr "Mostra se a guarda está activa, com os contadores de descarte."
+
+msgid "l4guard: active — up to {rate} new connection(s)/s and {max} concurrent connection(s) per source IP"
+msgstr "l4guard: activa — até {rate} nova(s) ligação(ões)/s e {max} ligação(ões) concorrente(s) por IP de origem"
+
+msgid "l4guard: cleared"
+msgstr "l4guard: desligada"
+
+msgid "l4guard: not active"
+msgstr "l4guard: inactiva"
+
+msgid "l4guard: active"
+msgstr "l4guard: activa"
+
+# --namespace sem br_netfilter — o isolamento reporta sucesso mas é inerte
+msgid "--namespace '{namespace}' is active, but this host is not filtering bridge traffic (br_netfilter not loaded, or net.bridge.bridge-nf-call-iptables=0) — isolation between namespaces on the SAME network reports success but does not actually block traffic. Fix: modprobe br_netfilter && sysctl -w net.bridge.bridge-nf-call-iptables=1 net.bridge.bridge-nf-call-ip6tables=1 (persist via /etc/modules-load.d and /etc/sysctl.d, or `install.sh --tune`)"
+msgstr "--namespace '{namespace}' está activo, mas este host não filtra tráfego de bridge (br_netfilter não carregado, ou net.bridge.bridge-nf-call-iptables=0) — o isolamento entre namespaces na MESMA rede reporta sucesso mas não bloqueia tráfego nenhum. Correcção: modprobe br_netfilter && sysctl -w net.bridge.bridge-nf-call-iptables=1 net.bridge.bridge-nf-call-ip6tables=1 (persistir via /etc/modules-load.d e /etc/sysctl.d, ou `install.sh --tune`)"
+
+# net l4guard (comentários de exemplo do manual, `delonix man net l4guard`)
+msgid "turn on the ingress-wide DDoS guard: at most 20 new connections/s and 100 concurrent connections per source IP"
+msgstr "liga a guarda anti-DDoS do ingress inteiro: no máximo 20 ligações novas/s e 100 ligações concorrentes por IP de origem"
+
+msgid "check whether it's actually doing anything, with its drop counters"
+msgstr "confere se está mesmo a fazer alguma coisa, com os contadores de descarte"
+
+msgid "turn it off"
+msgstr "desliga-a"
+
+msgid "a conservative default for a public-facing node"
+msgstr "um default conservador para um nó exposto ao público"
+
+msgid "stop rate-limiting inbound connections"
+msgstr "pára de limitar a taxa de ligações de entrada"
+
+msgid "is the guard on, and has it dropped anything"
+msgstr "a guarda está ligada, e já descartou alguma coisa"
+

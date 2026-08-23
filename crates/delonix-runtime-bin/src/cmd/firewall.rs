@@ -192,6 +192,64 @@ pub enum EgressCmd {
     },
 }
 
+/// `delonix net l4guard` — the ingress-wide L4 DDoS guard (per-source
+/// connection rate + concurrent-connection cap on `tap0`). Until now this was
+/// reachable ONLY through a `kind: Egress`/`FirewallPolicy` manifest with
+/// `scope: network` + `rateLimit` — an operator reacting to an ongoing flood
+/// had to write and apply a manifest to turn it on. `set`/`clear` expose the
+/// same `infra::set_l4_guard`/`clear_l4_guard` the manifest path already
+/// calls (zero new dataplane); `status` is new — the guard had no query verb
+/// at all before this, so "is it even on" could only be answered by `nft
+/// list` inside the holder's netns, which an operator has no route to.
+#[derive(Subcommand)]
+pub enum L4guardCmd {
+    /// Turn the guard on (or update it): new conns/s and concurrent conns, per source IP.
+    Set { conn_rate: u32, conn_max: u32 },
+    /// Turn the guard off.
+    Clear,
+    /// Show whether the guard is active, with its drop counters.
+    Status,
+}
+
+pub fn run_l4guard(cmd: L4guardCmd) -> Result<()> {
+    match cmd {
+        L4guardCmd::Set {
+            conn_rate,
+            conn_max,
+        } => {
+            infra::set_l4_guard(conn_rate, conn_max)?;
+            println!(
+                "{}",
+                super::po::tf(
+                    "l4guard: active — up to {rate} new connection(s)/s and {max} concurrent connection(s) per source IP",
+                    &[
+                        ("rate", &conn_rate.to_string()),
+                        ("max", &conn_max.to_string()),
+                    ],
+                )
+            );
+            Ok(())
+        }
+        L4guardCmd::Clear => {
+            infra::clear_l4_guard()?;
+            println!("{}", super::po::t("l4guard: cleared"));
+            Ok(())
+        }
+        L4guardCmd::Status => {
+            let rules = infra::l4_guard_status()?;
+            if rules.is_empty() {
+                println!("{}", super::po::t("l4guard: not active"));
+                return Ok(());
+            }
+            println!("{}", super::po::t("l4guard: active"));
+            for (text, packets, bytes) in rules {
+                println!("  {text}  ({packets} packets, {bytes} bytes dropped)");
+            }
+            Ok(())
+        }
+    }
+}
+
 pub fn run_ingress(cmd: IngressCmd) -> Result<()> {
     let (_images, store) = open_stores()?;
     match cmd {
