@@ -1423,7 +1423,14 @@ const CONTROL_WORK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 fn is_readonly_verb(line: &str) -> bool {
     matches!(
         line.split_whitespace().next().unwrap_or(""),
-        "ping" | "has-netns" | "fwstats" | "fwsummary" | "egress-show" | "netroute-show"
+        "ping"
+            | "has-netns"
+            | "fwstats"
+            | "fwsummary"
+            | "egress-show"
+            | "netroute-show"
+            | "l4guard-show"
+            | "br-netfilter-check"
     )
 }
 
@@ -1580,6 +1587,37 @@ fn handle_control(line: &str) -> String {
         let listing = crate::capture("nft", &["list", "map", "ip", INGRESS_TABLE, NETPAIR_MAP])
             .unwrap_or_default();
         return format!("ok {}\n", hex_encode(listing.as_bytes()));
+    }
+    // Query: the L4 DDoS guard's live rules (with counters), for `net l4guard
+    // status`. Filtered to the two meter rules `do_l4guard` writes — the
+    // `forward` chain also carries the base accept/drop policy and every
+    // `NetworkRoute` exemption, and neither is this command's business.
+    if let ["l4guard-show"] = parts.as_slice() {
+        let listing = crate::capture("nft", &["list", "chain", "ip", INGRESS_TABLE, "forward"])
+            .unwrap_or_default();
+        let filtered: String = listing
+            .lines()
+            .filter(|l| l.contains("dlx_conn_rate") || l.contains("dlx_conn_count"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        return format!("ok {}\n", hex_encode(filtered.as_bytes()));
+    }
+    // Query: is the intra-bridge traffic between two containers on the SAME
+    // network actually being filtered? Namespace isolation (`@dlxns_*`) and
+    // the per-container firewall (`fwcont`) live in the `forward` hook, and a
+    // bridged packet only reaches an IP hook — where `forward` lives — when
+    // `br_netfilter` is loaded AND `net.bridge.bridge-nf-call-iptables=1`.
+    // Without it EVERY rule still installs, `nft list` shows it, and the
+    // traffic walks straight past it: measured 2026-08-12 (see AGENTS.md,
+    // "O isolamento de namespace é INERTE sem `br_netfilter`"). Read in the
+    // HOLDER's netns on purpose — this sysctl is per-netns since Linux 4.x,
+    // so the value that matters is the one the dataplane itself sees, not
+    // whatever the CLI's own netns happens to report.
+    if let ["br-netfilter-check"] = parts.as_slice() {
+        let active = std::fs::read_to_string("/proc/sys/net/bridge/bridge-nf-call-iptables")
+            .map(|s| s.trim() == "1")
+            .unwrap_or(false);
+        return format!("ok {}\n", if active { "1" } else { "0" });
     }
     let res = match parts.as_slice() {
         ["ping"] => Ok(()),
@@ -4944,6 +4982,17 @@ pub fn network_route(from: &str, to: &str, add: bool) -> Result<()> {
     Ok(())
 }
 
+/// Whether the kernel is actually filtering intra-bridge traffic — the
+/// precondition namespace isolation (`--namespace`) silently depends on. See
+/// `br-netfilter-check` in `handle_control` for what this measures and why.
+///
+/// An `Err` here means "could not ask" (holder unreachable/too old) — the
+/// caller must not read that as either answer; same discipline as
+/// [`network_routes_live`]/[`l4_guard_status`].
+pub fn br_netfilter_active() -> Result<bool> {
+    Ok(control_query("br-netfilter-check")?.trim() == "1")
+}
+
 pub fn attach_container(id: &str, net: &str, namespace: &str) -> Result<(String, String)> {
     // `default_route` and NOT `bridge_addr`: this token becomes the container's
     // `ip route add default via`, which is the ONE thing a declared gateway is
@@ -5181,6 +5230,26 @@ pub fn set_l4_guard(conn_rate: u32, conn_max: u32) -> Result<()> {
 /// Removes the L4 DDoS protection (idempotent).
 pub fn clear_l4_guard() -> Result<()> {
     control_send("l4guard-clear")
+}
+
+/// The L4 DDoS guard's live rules, with their counters — `(rule text without
+/// the counter values, packets, bytes)`. Empty means the guard is not active
+/// (either never set, or degraded because the kernel does not support `meter`
+/// — [`set_l4_guard`] cannot tell those two apart, and neither can this: an
+/// operator asking "is it on" only cares whether traffic is actually being
+/// governed, not why not).
+///
+/// An `Err` here means "could not ask" (holder unreachable/too old), never
+/// "the guard is off" — same discipline as [`network_routes_live`].
+pub fn l4_guard_status() -> Result<Vec<(String, u64, u64)>> {
+    let body = control_query("l4guard-show")?;
+    let listing = hex_decode(body.trim())
+        .and_then(|b| String::from_utf8(b).ok())
+        .ok_or_else(|| Error::Runtime {
+            context: "l4guard",
+            message: "could not decode the holder's reply".to_string(),
+        })?;
+    Ok(parse_fw_counters(&listing))
 }
 
 /// Brings up the WireGuard interface `<iface>` in the infra netns (req #6) with the node's

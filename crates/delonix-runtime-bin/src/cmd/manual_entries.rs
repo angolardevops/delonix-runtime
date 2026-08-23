@@ -837,6 +837,40 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["network ls", "container run", "container update", "network create"],
     },
     Entry {
+        path: "net l4guard",
+        group: "Configure",
+        examples: &[
+            ("turn on the ingress-wide DDoS guard: at most 20 new connections/s and 100 concurrent connections per source IP", "delonix net l4guard set 20 100"),
+            ("check whether it's actually doing anything, with its drop counters", "delonix net l4guard status"),
+            ("turn it off", "delonix net l4guard clear"),
+        ],
+        see_also: &["net ingress ls", "net egress net", "net netns status"],
+    },
+    Entry {
+        path: "net l4guard set",
+        group: "Configure",
+        examples: &[
+            ("a conservative default for a public-facing node", "delonix net l4guard set 20 100"),
+        ],
+        see_also: &["net l4guard status", "net l4guard clear"],
+    },
+    Entry {
+        path: "net l4guard clear",
+        group: "Configure",
+        examples: &[
+            ("stop rate-limiting inbound connections", "delonix net l4guard clear"),
+        ],
+        see_also: &["net l4guard set", "net l4guard status"],
+    },
+    Entry {
+        path: "net l4guard status",
+        group: "Inspect",
+        examples: &[
+            ("is the guard on, and has it dropped anything", "delonix net l4guard status"),
+        ],
+        see_also: &["net l4guard set", "net ingress ls"],
+    },
+    Entry {
         path: "net flow",
         group: "Inspect",
         examples: &[

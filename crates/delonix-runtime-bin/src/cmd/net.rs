@@ -36,6 +36,11 @@ pub enum NetCmd {
         #[command(subcommand)]
         action: super::firewall::EgressCmd,
     },
+    /// Ingress-wide L4 DDoS guard (per-source connection rate + concurrent cap).
+    L4guard {
+        #[command(subcommand)]
+        action: super::firewall::L4guardCmd,
+    },
     /// Embedded L7/HTTP reverse-proxy (`kind: HTTPRoute`): ls/apply/rm.
     Httproute {
         #[command(subcommand)]
@@ -62,6 +67,7 @@ pub fn run(action: NetCmd) -> Result<()> {
         NetCmd::Flow { iface, watch } => super::flow::run(iface, watch),
         NetCmd::Ingress { action } => super::firewall::run_ingress(action),
         NetCmd::Egress { action } => super::firewall::run_egress(action),
+        NetCmd::L4guard { action } => super::firewall::run_l4guard(action),
         NetCmd::Httproute { action } => super::httproute::run(action),
         NetCmd::Tunnel { action } => super::tunnel::run(action),
         NetCmd::Boot { action } => super::boot::run(action),
