@@ -508,23 +508,39 @@ if [ "$WITH_VM" = 1 ]; then
   # que o delonix auto-detecta.
   # Backend PREFERIDO do motor (delonix-vm tenta-o primeiro; virsh é fallback).
   # Onde a distro não o empacota (famílias Debian/Ubuntu), instala o binário
-  # ESTÁTICO oficial do upstream — HTTPS do repo oficial; o upstream não publica
-  # checksums, por isso não há verificação de hash (fica anotado).
+  # ESTÁTICO oficial do upstream. O upstream não publica um SHA256SUMS nem
+  # assinatura (ao contrário das nossas próprias releases, ver acima) — por
+  # isso os três firmwares desta secção são PINADOS por nós: versão/tag fixa
+  # (nunca `releases/latest`) + hash calculado uma vez e verificado aqui.
+  # Actualizar exige mudar os dois — versão e hash — no MESMO commit, a
+  # mesma disciplina do `lang_ratchet.py --update`. Sem isto, um upstream
+  # comprometido ou um TLS-stripping serviriam um binário diferente sem
+  # detecção nenhuma — achado MÉDIO da auditoria de segurança #2.
+  CH_STATIC_VERSION="v53.0"
+  CH_STATIC_SHA256="448af3d4e59b22c2987f7df94c213ad40fb53a10d437e42b5ee6c4fce7c29ecc"
+  EDK2_TAG="ch-f308d878a6"
+  EDK2_SHA256="edd3ceb8de672ec4317a9d68de1f5edc9f48ef2c0283853c7c681332573ff46a"
+  HYPFW_VERSION="0.5.0"
+  HYPFW_SHA256="4a0a1e977368f6b15d2198a216bdedf9a350bf5e5ae07e29e695373ec16ad958"
+  verify_pinned_sha256() { # $1=ficheiro local  $2=hash esperado
+    [ "$(sha256sum "$1" | awk '{print $1}')" = "$2" ]
+  }
   if ! command -v cloud-hypervisor >/dev/null 2>&1; then
     if pkg_install cloud-hypervisor >/dev/null 2>&1; then
       stepok vm cloud-hypervisor
     else
-      CH_URL="https://github.com/cloud-hypervisor/cloud-hypervisor/releases/latest/download/cloud-hypervisor-static"
+      CH_URL="https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/$CH_STATIC_VERSION/cloud-hypervisor-static"
       fetch_ch() {
         curl -fsSL -o /tmp/cloud-hypervisor-static.$$ "$CH_URL" \
+          && verify_pinned_sha256 /tmp/cloud-hypervisor-static.$$ "$CH_STATIC_SHA256" \
           && $SUDO install -m 0755 /tmp/cloud-hypervisor-static.$$ /usr/local/bin/cloud-hypervisor
       }
-      if spin vm cloud-hypervisor "not packaged on this distro — fetching the official static binary..." fetch_ch; then
+      if spin vm cloud-hypervisor "not packaged on this distro — fetching the pinned static binary ($CH_STATIC_VERSION)..." fetch_ch; then
         rm -f /tmp/cloud-hypervisor-static.$$
         stepok vm "cloud-hypervisor -> /usr/local/bin/cloud-hypervisor ($(/usr/local/bin/cloud-hypervisor --version 2>/dev/null | head -1))"
       else
         rm -f /tmp/cloud-hypervisor-static.$$
-        warn "could not fetch cloud-hypervisor — the libvirt backend below remains the fallback"
+        warn "could not fetch/verify cloud-hypervisor $CH_STATIC_VERSION (checksum mismatch means a tampered or corrupted download — not installed) — the libvirt backend below remains the fallback"
       fi
     fi
   else
@@ -545,36 +561,38 @@ if [ "$WITH_VM" = 1 ]; then
   # que hoje dependa dele).
   EDK2_DEST=/usr/local/share/delonix/CLOUDHV.fd
   if [ ! -e "$EDK2_DEST" ]; then
-    EDK2_URL="https://github.com/cloud-hypervisor/edk2/releases/latest/download/CLOUDHV.fd"
+    EDK2_URL="https://github.com/cloud-hypervisor/edk2/releases/download/$EDK2_TAG/CLOUDHV.fd"
     fetch_edk2() {
       $SUDO mkdir -p /usr/local/share/delonix \
         && curl -fsSL -o /tmp/CLOUDHV.fd.$$ "$EDK2_URL" \
+        && verify_pinned_sha256 /tmp/CLOUDHV.fd.$$ "$EDK2_SHA256" \
         && $SUDO install -m 0644 /tmp/CLOUDHV.fd.$$ "$EDK2_DEST"
     }
-    if spin vm CLOUDHV.fd "fetching the EDK2 firmware for Cloud Hypervisor (boots cloud images)..." fetch_edk2; then
+    if spin vm CLOUDHV.fd "fetching the EDK2 firmware for Cloud Hypervisor ($EDK2_TAG)..." fetch_edk2; then
       rm -f /tmp/CLOUDHV.fd.$$
       stepok vm "CLOUDHV.fd -> $EDK2_DEST"
     else
       rm -f /tmp/CLOUDHV.fd.$$
-      warn "could not fetch the EDK2 firmware — a Cloud Hypervisor VM will fall back to rust-hypervisor-fw, which boots none of the delonix images (use --backend libvirt)"
+      warn "could not fetch/verify the EDK2 firmware $EDK2_TAG (checksum mismatch means a tampered or corrupted download — not installed) — a Cloud Hypervisor VM will fall back to rust-hypervisor-fw, which boots none of the delonix images (use --backend libvirt)"
     fi
   else
     skip vm CLOUDHV.fd
   fi
   FW_DEST=/usr/local/share/delonix/hypervisor-fw
   if [ ! -e "$FW_DEST" ]; then
-    FW_URL="https://github.com/cloud-hypervisor/rust-hypervisor-firmware/releases/latest/download/hypervisor-fw"
+    FW_URL="https://github.com/cloud-hypervisor/rust-hypervisor-firmware/releases/download/$HYPFW_VERSION/hypervisor-fw"
     fetch_fw() {
       $SUDO mkdir -p /usr/local/share/delonix \
         && curl -fsSL -o /tmp/hypervisor-fw.$$ "$FW_URL" \
+        && verify_pinned_sha256 /tmp/hypervisor-fw.$$ "$HYPFW_SHA256" \
         && $SUDO install -m 0644 /tmp/hypervisor-fw.$$ "$FW_DEST"
     }
-    if spin vm hypervisor-fw "fetching the Cloud Hypervisor firmware (boots cloud images)..." fetch_fw; then
+    if spin vm hypervisor-fw "fetching the Cloud Hypervisor firmware ($HYPFW_VERSION)..." fetch_fw; then
       rm -f /tmp/hypervisor-fw.$$
       stepok vm "hypervisor-fw -> $FW_DEST"
     else
       rm -f /tmp/hypervisor-fw.$$
-      warn "could not fetch rust-hypervisor-fw — `vm create` of a cloud image will need --firmware or --backend libvirt"
+      warn "could not fetch/verify rust-hypervisor-fw $HYPFW_VERSION (checksum mismatch means a tampered or corrupted download — not installed) — `vm create` of a cloud image will need --firmware or --backend libvirt"
     fi
   else
     skip vm hypervisor-fw

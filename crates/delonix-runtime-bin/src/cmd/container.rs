@@ -2888,6 +2888,36 @@ pub(crate) fn dns_config_of(c: &Container) -> Option<runtime::DnsConfig> {
     (!cfg.is_empty()).then_some(cfg)
 }
 
+/// Warns, loudly, when `--namespace <ns>` was requested but the kernel is
+/// not actually filtering intra-bridge traffic — the precondition namespace
+/// isolation silently depends on (see AGENTS.md, "O isolamento de namespace
+/// é INERTE sem `br_netfilter`", measured 2026-08-12). Without the module
+/// (or with `bridge-nf-call-iptables=0`), every rule installs, `stack ls`/
+/// the firewall listing report success, and a container in a DIFFERENT
+/// namespace on the same bridge is reachable anyway — a security property
+/// that reads as applied while it does nothing.
+///
+/// Called on every attach of a NAMED namespace rather than once, matching
+/// the existing style for `--network-alias`/`--expose` (see nearby): an
+/// operator who fixes the host later stops seeing it, one who does not is
+/// reminded every time, not just the first.
+///
+/// Never refuses — this host may be one where the fix is not in the
+/// operator's hands yet. A query failure (holder unreachable/too old) stays
+/// silent: "could not ask" is not "it's off", same discipline as
+/// `infra::network_routes_live`.
+pub(crate) fn warn_if_namespace_isolation_inert(namespace: &str) {
+    if namespace.is_empty() || namespace == "default" {
+        return;
+    }
+    if let Ok(false) = infra::br_netfilter_active() {
+        super::output::warn(&super::po::tf(
+            "--namespace '{namespace}' is active, but this host is not filtering bridge traffic (br_netfilter not loaded, or net.bridge.bridge-nf-call-iptables=0) — isolation between namespaces on the SAME network reports success but does not actually block traffic. Fix: modprobe br_netfilter && sysctl -w net.bridge.bridge-nf-call-iptables=1 net.bridge.bridge-nf-call-ip6tables=1 (persist via /etc/modules-load.d and /etc/sysctl.d, or `install.sh --tune`)",
+            &[("namespace", namespace)],
+        ));
+    }
+}
+
 pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Result<()> {
     // Intact copy for the re-exec (the destructuring below consumes opts).
     let opts_copy = opts.clone();
@@ -3543,6 +3573,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             // 1st pass: creates the netns on the holder's side and RE-EXECUTES itself inside it.
             delonix_net::NetworkStore::open(super::util::state_root())?.get(n)?;
             let (netns, ip) = infra::attach_container(&id, n, &namespace)?;
+            warn_if_namespace_isolation_inert(&namespace);
             // `--expose`: auto-register in the L7 proxy HERE, on the HOST side — the
             // proxy spawn is via `nsenter` into the holder, which fails from the
             // already-reexec'd process (inside the container's netns). `c.expose` is
@@ -4885,6 +4916,7 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
     if let Some(n) = c.network.clone() {
         if !reexec {
             let (netns, ip) = infra::attach_container(&c.id, &n, &c.namespace)?;
+            warn_if_namespace_isolation_inert(&c.namespace);
             // Re-register in the L7 proxy (`--expose`) HERE, on the host — the spawn via
             // nsenter doesn't run from the reexec'd process.
             if let Some(port) = c.expose {
