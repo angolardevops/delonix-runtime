@@ -2890,8 +2890,9 @@ pub(crate) fn dns_config_of(c: &Container) -> Option<runtime::DnsConfig> {
 
 /// Warns, loudly, when `--namespace <ns>` was requested but the kernel is
 /// not actually filtering intra-bridge traffic — the precondition namespace
-/// isolation silently depends on (see AGENTS.md, "O isolamento de namespace
-/// é INERTE sem `br_netfilter`", measured 2026-08-12). Without the module
+/// isolation silently depends on (see the `br_netfilter` section of
+/// AGENTS.md — isolation is INERT without it, measured 2026-08-12). Without
+/// the module
 /// (or with `bridge-nf-call-iptables=0`), every rule installs, `stack ls`/
 /// the firewall listing report success, and a container in a DIFFERENT
 /// namespace on the same bridge is reachable anyway — a security property
