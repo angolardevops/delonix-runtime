@@ -417,6 +417,40 @@ fn should_signal(kind: PidKind, argv: Option<&[String]>) -> bool {
     argv.is_some_and(|a| argv_matches(kind, a))
 }
 
+/// The pid in `path`, but ONLY when the live process wearing that number really
+/// is the `kind` the pidfile claims. `None` covers all three ways a pidfile can
+/// be a lie: no file, a number nothing is using, and a number something ELSE is
+/// using.
+///
+/// This is the read-side twin of [`kill_pidfile`], and it exists because the two
+/// halves were not written at the same time. `kill_pidfile` learned that a pid is
+/// not an identity and started checking the argv before signalling. Every READ of
+/// the same pidfiles kept the weaker test — `read_pid(..).filter(pid_alive)`,
+/// which answers "is there *a* process with this number", a different question.
+///
+/// The read side is the one that matters more. Those pids are handed to
+/// `nsenter -t <pid> -U -m -n`: a stale pidfile plus one pid wrap-around is
+/// enough for `disable_ipv6_live`, `netns_names_live` and the rest to enter the
+/// namespaces of an unrelated process. On a host with heavy container churn —
+/// this one routinely runs pids past 300k, which is the same measurement that
+/// motivated the kill-side guard — the recycled pid most often belongs to an
+/// ordinary process sitting in the HOST namespaces, so the commands would take
+/// effect there. Signalling the wrong process is loud; reconfiguring the host's
+/// network while reporting success is not.
+///
+/// It also closes the zombie case for free. A child that died but was never
+/// waited on keeps its `/proc/<pid>` directory, so `pid_alive` stays true for as
+/// long as the parent lives; its `cmdline` is empty, so `argv_matches` correctly
+/// calls it dead.
+fn read_pid_verified(kind: PidKind, path: &Path) -> Option<i32> {
+    let pid = read_pid(path)?;
+    if !pid_alive(pid) {
+        return None;
+    }
+    proc_argv(pid).filter(|argv| argv_matches(kind, argv))?;
+    Some(pid)
+}
+
 // ---- ingress nft (inside the infra netns) -----------------------------------
 
 /// The ingress's BASE `nft` *ruleset*: `pre` chain (DNAT of published ports),
@@ -802,9 +836,9 @@ pub struct InfraStatus {
 
 /// Reads the current state from the pidfiles (without touching the kernel).
 pub fn status() -> InfraStatus {
-    let holder = read_pid(&holder_pid_path()).filter(|&p| pid_alive(p));
-    let control = read_pid(&control_pid_path()).filter(|&p| pid_alive(p));
-    let slirp = read_pid(&slirp_pid_path()).filter(|&p| pid_alive(p));
+    let holder = read_pid_verified(PidKind::Pin, &holder_pid_path());
+    let control = read_pid_verified(PidKind::Control, &control_pid_path());
+    let slirp = read_pid_verified(PidKind::Slirp, &slirp_pid_path());
     InfraStatus {
         up: holder.is_some() && slirp.is_some(),
         holder_pid: holder,
@@ -850,7 +884,7 @@ pub fn ensure_up() -> Result<()> {
 fn ensure_up_locked() -> Result<()> {
     // The pin is alive: the namespaces, and everything plugged into them, are
     // intact. The only question is whether the CONTROL plane is there.
-    if let Some(pin) = read_pid(&holder_pid_path()).filter(|&p| pid_alive(p)) {
+    if let Some(pin) = read_pid_verified(PidKind::Pin, &holder_pid_path()) {
         if control_reachable() {
             return Ok(());
         }
@@ -881,10 +915,7 @@ fn ensure_up_locked() -> Result<()> {
         start_control(pin)?;
         // The slirp is the uplink and belongs to the pin, not to the control — it
         // only needs restarting if it, too, is gone.
-        if read_pid(&slirp_pid_path())
-            .filter(|&p| pid_alive(p))
-            .is_none()
-        {
+        if read_pid_verified(PidKind::Slirp, &slirp_pid_path()).is_none() {
             start_slirp(pin)?;
         }
         return Ok(());
@@ -2114,7 +2145,7 @@ pub fn ingress_v6_refusal_ruleset() -> String {
 /// already uses (`infra_join_argv`), and the same one that was used by hand to prove
 /// this is possible at all.
 pub fn disable_ipv6_live() -> Result<usize> {
-    let Some(holder) = read_pid(&holder_pid_path()).filter(|&p| pid_alive(p)) else {
+    let Some(holder) = read_pid_verified(PidKind::Pin, &holder_pid_path()) else {
         return Ok(0); // holder down: nothing is running to protect
     };
     // `-m` as well as `-U -n`: `ip netns exec` reads `/run/netns`, which lives in the
@@ -5434,7 +5465,7 @@ pub fn vm_detach(vm: &str, ip: Option<&str>) {
 /// `argv` to run a process (QEMU) INSIDE the holder's infra netns
 /// (where the bridges and taps live). `None` if the infra isn't up.
 pub fn infra_join_argv() -> Option<Vec<String>> {
-    let holder = read_pid(&holder_pid_path()).filter(|&p| pid_alive(p))?;
+    let holder = read_pid_verified(PidKind::Pin, &holder_pid_path())?;
     Some(vec![
         "nsenter".into(),
         "-t".into(),
@@ -5453,7 +5484,7 @@ pub fn infra_join_argv() -> Option<Vec<String>> {
 /// infra netns: entering the holder's userns (`-U`) would namespace the caps
 /// away and the `bpf()` syscall would be refused. `None` if the holder is down.
 pub fn infra_netns_argv() -> Option<Vec<String>> {
-    let holder = read_pid(&holder_pid_path()).filter(|&p| pid_alive(p))?;
+    let holder = read_pid_verified(PidKind::Pin, &holder_pid_path())?;
     Some(vec![
         "nsenter".into(),
         "-t".into(),
@@ -5503,7 +5534,7 @@ pub fn dhcp_ip_for_mac(net: &str, mac: &str) -> Option<String> {
 /// neither reachable nor unreachable for it.
 pub fn sdn_reachable(net: &str, ip: &str, mac: &str, timeout: std::time::Duration) -> Option<bool> {
     let bridge = resolve_net(net).ok()?.bridge;
-    let holder = read_pid(&holder_pid_path()).filter(|&p| pid_alive(p))?;
+    let holder = read_pid_verified(PidKind::Pin, &holder_pid_path())?;
     // `-m` as well as `-U -n`, as everywhere else that reaches into the holder:
     // the netns is entered through the holder's own user namespace, where this
     // uid maps to 0 and therefore has CAP_NET_ADMIN over that netns.
@@ -5839,7 +5870,7 @@ pub fn slirp_remove_hostfwd(sock: &Path, host_port: &str) -> Result<()> {
 /// the `setgroups` error) and does `ip netns exec <netns>`. The runtime prefixes this to the
 /// container's command. `None` if the infra isn't up.
 pub fn join_argv(id: &str) -> Option<Vec<String>> {
-    let holder = read_pid(&holder_pid_path()).filter(|&p| pid_alive(p))?;
+    let holder = read_pid_verified(PidKind::Pin, &holder_pid_path())?;
     let netns = sanitize(id);
     Some(vec![
         "nsenter".into(),
@@ -7030,7 +7061,7 @@ pub fn container_ip6(ip4: &str) -> Option<String> {
 /// IPv6 of a MAC via the infra netns's v6 `neigh` table (via nsenter, from the host).
 /// To display a VM's (SLAAC) IPv6. `None` if it hasn't appeared yet.
 pub fn dhcp_ip6_for_mac(_net: &str, mac: &str) -> Option<String> {
-    let holder = read_pid(&holder_pid_path()).filter(|&p| pid_alive(p))?;
+    let holder = read_pid_verified(PidKind::Pin, &holder_pid_path())?;
     let mac = mac.to_lowercase();
     let out = crate::capture(
         "nsenter",
@@ -8707,6 +8738,75 @@ mod tests_identidade_do_pidfile {
         ));
         assert!(!argv_matches(PidKind::Slirp, &[]));
     }
+}
+
+/// The READ side of the same question: a pidfile is only an identity once the
+/// live process behind the number has been asked who it is. This module is what
+/// fails if `read_pid_verified` is ever weakened back to `pid_alive`.
+#[cfg(test)]
+mod tests_pidfile_read_identity {
+    use super::*;
+
+    fn tmp_pidfile(tag: &str, body: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("dlx-pidfile-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join(tag);
+        std::fs::write(&p, body).unwrap();
+        p
+    }
+
+    #[test]
+    fn no_pidfile_is_none() {
+        let missing = std::env::temp_dir().join(format!("dlx-absent-{}", std::process::id()));
+        let _ = std::fs::remove_file(&missing);
+        assert_eq!(read_pid_verified(PidKind::Pin, &missing), None);
+    }
+
+    #[test]
+    fn a_number_nothing_is_using_is_none() {
+        // `i32::MAX` is above every kernel's `pid_max`, so it is never assigned.
+        let f = tmp_pidfile("dead", &i32::MAX.to_string());
+        assert_eq!(read_pid_verified(PidKind::Pin, &f), None);
+    }
+
+    /// THE finding, as a test: the pid is alive, and it is not ours.
+    ///
+    /// This test process is very much running, so `pid_alive` says `true` and the
+    /// old `read_pid(..).filter(pid_alive)` would have handed this number to
+    /// `nsenter -t <pid> -U -m -n`. The argv is a cargo test binary, not
+    /// `delonix netns pin`, so the identity check refuses it.
+    ///
+    /// The mirror image of the recycled-pid case on the kill side, which has had
+    /// its own test since the guard was written there. Both halves have one now.
+    #[test]
+    fn a_live_pid_that_is_not_ours_is_none() {
+        let mine = std::process::id() as i32;
+        assert!(pid_alive(mine), "the test process must be alive");
+        let f = tmp_pidfile("recycled", &mine.to_string());
+        assert_eq!(read_pid_verified(PidKind::Pin, &f), None);
+        assert_eq!(read_pid_verified(PidKind::Control, &f), None);
+        assert_eq!(read_pid_verified(PidKind::Slirp, &f), None);
+    }
+
+    /// Garbage in the pidfile is not a pid — and must not become one.
+    #[test]
+    fn a_pidfile_that_is_not_a_number_is_none() {
+        for body in ["", "   ", "-1", "0", "not-a-pid", "1 2 3"] {
+            let f = tmp_pidfile("garbage", body);
+            assert_eq!(
+                read_pid_verified(PidKind::Pin, &f),
+                None,
+                "pidfile body {body:?} must not resolve"
+            );
+        }
+    }
+
+    // The POSITIVE path — a live process whose argv really is `delonix netns pin`
+    // — is not asserted here on purpose: `/proc/<pid>/cmdline` cannot be faked,
+    // so proving it would mean spawning the real holder, which needs the
+    // namespaces this suite must not touch. `argv_matches` owns that half in
+    // `tests_identidade_do_pidfile`, and `read_pid_verified` is the composition
+    // of the two halves each of which is covered.
 }
 
 /// A decisão do `kill_pidfile`, isolada — é este módulo que falha se alguém

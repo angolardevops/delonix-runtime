@@ -170,11 +170,28 @@ impl Streamer {
 }
 
 /// Resolves the `pid` of a pod sandbox's infra container (`pod-cri-<id>`), whose
-/// netns is where the port-forward TCP proxy runs. `None` if absent/stopped.
+/// netns is where the port-forward TCP proxy runs. `None` if absent/stopped —
+/// **or if the recorded pid is no longer the process we recorded**.
+///
+/// `safe_to_signal`, not `is_alive`, and the difference is not defensive here:
+/// this pid goes straight to `spdy::connect_in_netns`, which does
+/// `setns(CLONE_NEWNET)` on `/proc/<pid>/ns/net` and then connects to
+/// `127.0.0.1:<port>` inside it. A sandbox that died without cleanup leaves the
+/// record behind; the kernel then hands that number to some other process, and
+/// with `is_alive` the port-forward would join THAT process's network namespace.
+/// The likely one on a Kubernetes node is the host's, where the loopback ports
+/// are the kubelet's, etcd's and the apiserver's — a `kubectl port-forward` that
+/// silently reaches the control plane instead of the pod.
+///
+/// The engine closed exactly this window on the container side (sixteen call
+/// sites, `reconcile_status` included) using the `pid_starttime` the record
+/// already carries. This call site was left on the weaker test; the record here
+/// is the same `Container`, so the same guard applies unchanged.
 fn pod_sandbox_pid(base: &std::path::Path, sandbox_id: &str) -> Option<i32> {
     let store = delonix_runtime_core::Store::open(base.join("containers")).ok()?;
     let c = store.load(&format!("pod-cri-{sandbox_id}")).ok()?;
-    c.pid.filter(|p| delonix_runtime::is_alive(*p))
+    c.pid
+        .filter(|p| delonix_runtime::safe_to_signal(*p, c.pid_starttime))
 }
 
 /// HTTP handler → SPDY upgrade for `PortForward`.
@@ -651,5 +668,89 @@ pub(crate) fn write_all(fd: i32, mut data: &[u8]) {
             break;
         }
         data = &data[n as usize..];
+    }
+}
+
+/// The pid a port-forward is about to `setns` into has to be the pid we
+/// recorded — not merely *a* live pid. This module is what fails if
+/// `pod_sandbox_pid` is ever weakened back to `is_alive`.
+#[cfg(test)]
+mod tests_sandbox_pid_identity {
+    use delonix_runtime_core::{Container, Store};
+
+    fn store_with(tag: &str, pid: Option<i32>, starttime: Option<u64>) -> std::path::PathBuf {
+        let base =
+            std::env::temp_dir().join(format!("dlx-sandbox-pid-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("containers")).unwrap();
+        let store = Store::open(base.join("containers")).unwrap();
+        let mut c = Container::new(
+            "pod-cri-sandbox1".to_string(),
+            "pod-cri-sandbox1".to_string(),
+            "pause".to_string(),
+            vec!["/pause".to_string()],
+            "64m".to_string(),
+        );
+        c.pid = pid;
+        c.pid_starttime = starttime;
+        c.status = delonix_runtime_core::Status::Running;
+        store.save(&c).unwrap();
+        base
+    }
+
+    /// A live pid whose `starttime` does NOT match the record is a recycled pid.
+    /// The port-forward must refuse it rather than join a stranger's netns.
+    ///
+    /// This test process is alive, so the old `is_alive` check returned `Some`
+    /// here and `connect_in_netns` would have `setns`'d into the test binary's
+    /// own network namespace. On a node, the equivalent is the host's.
+    #[test]
+    fn a_recycled_pid_is_refused() {
+        let mine = std::process::id() as i32;
+        let real = delonix_runtime::proc_starttime(mine).expect("own starttime is readable");
+        let base = store_with("recycled", Some(mine), Some(real.wrapping_add(1)));
+        assert_eq!(super::pod_sandbox_pid(&base, "sandbox1"), None);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The positive path, and it is a real one: same pid, same `starttime`.
+    /// Without this the test above would also pass with `pod_sandbox_pid`
+    /// hardcoded to `None`.
+    #[test]
+    fn the_same_process_is_accepted() {
+        let mine = std::process::id() as i32;
+        let real = delonix_runtime::proc_starttime(mine).expect("own starttime is readable");
+        let base = store_with("same", Some(mine), Some(real));
+        assert_eq!(super::pod_sandbox_pid(&base, "sandbox1"), Some(mine));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A record written before `pid_starttime` existed carries `None`, and
+    /// `safe_to_signal` documents that as "legacy behaviour: allow". Asserted so
+    /// the compatibility choice is visible instead of implied — an upgrade must
+    /// not break port-forward against pods that were already running.
+    #[test]
+    fn a_legacy_record_without_starttime_still_resolves() {
+        let mine = std::process::id() as i32;
+        let base = store_with("legacy", Some(mine), None);
+        assert_eq!(super::pod_sandbox_pid(&base, "sandbox1"), Some(mine));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A sandbox with no pid at all (created, never started) has no netns.
+    #[test]
+    fn no_pid_is_none() {
+        let base = store_with("nopid", None, None);
+        assert_eq!(super::pod_sandbox_pid(&base, "sandbox1"), None);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// An unknown sandbox is `None`, not a panic — the handler turns it into a
+    /// `409 CONFLICT`.
+    #[test]
+    fn an_unknown_sandbox_is_none() {
+        let base = store_with("unknown", Some(1), None);
+        assert_eq!(super::pod_sandbox_pid(&base, "does-not-exist"), None);
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
