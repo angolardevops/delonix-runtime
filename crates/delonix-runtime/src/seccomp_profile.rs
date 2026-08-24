@@ -14,7 +14,8 @@
 use seccompiler::{SeccompAction, SeccompFilter, SeccompRule};
 use std::collections::BTreeMap;
 
-/// Syscall NAME to number, for THIS architecture.
+/// Syscall NAME to number, for THIS architecture — the calls every supported
+/// architecture has.
 ///
 /// Built from `libc::SYS_*` and not from a table of literals: the numbers
 /// differ between x86_64 and aarch64, and a hardcoded table would be silently
@@ -23,6 +24,11 @@ use std::collections::BTreeMap;
 ///
 /// Generated from the kernel's own `unistd` header, both halves of each pair
 /// from the same name, so they cannot disagree.
+///
+/// The calls that exist on ONE architecture only live in [`SYSCALLS_ARCH`] —
+/// putting them here made this crate fail to compile for aarch64 altogether
+/// (60 × `E0425`, `libc::SYS_access` and friends), which took the whole Free
+/// binary for arm64 with it. See the note there.
 // These names are DELIBERATELY kept even though libc marks a handful of them
 // deprecated (`create_module`, `get_kernel_syms`, `query_module` — dead since
 // 2.6). A seccomp profile exists to DENY syscalls, and the ones nobody uses any
@@ -32,21 +38,15 @@ use std::collections::BTreeMap;
 const SYSCALLS: &[(&str, i64)] = &[
     ("accept", libc::SYS_accept),
     ("accept4", libc::SYS_accept4),
-    ("access", libc::SYS_access),
     ("acct", libc::SYS_acct),
     ("add_key", libc::SYS_add_key),
     ("adjtimex", libc::SYS_adjtimex),
-    ("afs_syscall", libc::SYS_afs_syscall),
-    ("alarm", libc::SYS_alarm),
-    ("arch_prctl", libc::SYS_arch_prctl),
     ("bind", libc::SYS_bind),
     ("bpf", libc::SYS_bpf),
     ("brk", libc::SYS_brk),
     ("capget", libc::SYS_capget),
     ("capset", libc::SYS_capset),
     ("chdir", libc::SYS_chdir),
-    ("chmod", libc::SYS_chmod),
-    ("chown", libc::SYS_chown),
     ("chroot", libc::SYS_chroot),
     ("clock_adjtime", libc::SYS_clock_adjtime),
     ("clock_getres", libc::SYS_clock_getres),
@@ -59,21 +59,13 @@ const SYSCALLS: &[(&str, i64)] = &[
     ("close_range", libc::SYS_close_range),
     ("connect", libc::SYS_connect),
     ("copy_file_range", libc::SYS_copy_file_range),
-    ("creat", libc::SYS_creat),
-    ("create_module", libc::SYS_create_module),
     ("delete_module", libc::SYS_delete_module),
     ("dup", libc::SYS_dup),
-    ("dup2", libc::SYS_dup2),
     ("dup3", libc::SYS_dup3),
-    ("epoll_create", libc::SYS_epoll_create),
     ("epoll_create1", libc::SYS_epoll_create1),
     ("epoll_ctl", libc::SYS_epoll_ctl),
-    ("epoll_ctl_old", libc::SYS_epoll_ctl_old),
     ("epoll_pwait", libc::SYS_epoll_pwait),
     ("epoll_pwait2", libc::SYS_epoll_pwait2),
-    ("epoll_wait", libc::SYS_epoll_wait),
-    ("epoll_wait_old", libc::SYS_epoll_wait_old),
-    ("eventfd", libc::SYS_eventfd),
     ("eventfd2", libc::SYS_eventfd2),
     ("execve", libc::SYS_execve),
     ("execveat", libc::SYS_execveat),
@@ -81,14 +73,12 @@ const SYSCALLS: &[(&str, i64)] = &[
     ("exit_group", libc::SYS_exit_group),
     ("faccessat", libc::SYS_faccessat),
     ("faccessat2", libc::SYS_faccessat2),
-    ("fadvise64", libc::SYS_fadvise64),
     ("fallocate", libc::SYS_fallocate),
     ("fanotify_init", libc::SYS_fanotify_init),
     ("fanotify_mark", libc::SYS_fanotify_mark),
     ("fchdir", libc::SYS_fchdir),
     ("fchmod", libc::SYS_fchmod),
     ("fchmodat", libc::SYS_fchmodat),
-    ("fchmodat2", libc::SYS_fchmodat2),
     ("fchown", libc::SYS_fchown),
     ("fchownat", libc::SYS_fchownat),
     ("fcntl", libc::SYS_fcntl),
@@ -97,7 +87,6 @@ const SYSCALLS: &[(&str, i64)] = &[
     ("finit_module", libc::SYS_finit_module),
     ("flistxattr", libc::SYS_flistxattr),
     ("flock", libc::SYS_flock),
-    ("fork", libc::SYS_fork),
     ("fremovexattr", libc::SYS_fremovexattr),
     ("fsconfig", libc::SYS_fsconfig),
     ("fsetxattr", libc::SYS_fsetxattr),
@@ -110,23 +99,18 @@ const SYSCALLS: &[(&str, i64)] = &[
     ("ftruncate", libc::SYS_ftruncate),
     ("futex", libc::SYS_futex),
     ("futex_waitv", libc::SYS_futex_waitv),
-    ("futimesat", libc::SYS_futimesat),
     ("getcpu", libc::SYS_getcpu),
     ("getcwd", libc::SYS_getcwd),
-    ("getdents", libc::SYS_getdents),
     ("getdents64", libc::SYS_getdents64),
     ("getegid", libc::SYS_getegid),
     ("geteuid", libc::SYS_geteuid),
     ("getgid", libc::SYS_getgid),
     ("getgroups", libc::SYS_getgroups),
     ("getitimer", libc::SYS_getitimer),
-    ("get_kernel_syms", libc::SYS_get_kernel_syms),
     ("get_mempolicy", libc::SYS_get_mempolicy),
     ("getpeername", libc::SYS_getpeername),
     ("getpgid", libc::SYS_getpgid),
-    ("getpgrp", libc::SYS_getpgrp),
     ("getpid", libc::SYS_getpid),
-    ("getpmsg", libc::SYS_getpmsg),
     ("getppid", libc::SYS_getppid),
     ("getpriority", libc::SYS_getpriority),
     ("getrandom", libc::SYS_getrandom),
@@ -138,22 +122,18 @@ const SYSCALLS: &[(&str, i64)] = &[
     ("getsid", libc::SYS_getsid),
     ("getsockname", libc::SYS_getsockname),
     ("getsockopt", libc::SYS_getsockopt),
-    ("get_thread_area", libc::SYS_get_thread_area),
     ("gettid", libc::SYS_gettid),
     ("gettimeofday", libc::SYS_gettimeofday),
     ("getuid", libc::SYS_getuid),
     ("getxattr", libc::SYS_getxattr),
     ("init_module", libc::SYS_init_module),
     ("inotify_add_watch", libc::SYS_inotify_add_watch),
-    ("inotify_init", libc::SYS_inotify_init),
     ("inotify_init1", libc::SYS_inotify_init1),
     ("inotify_rm_watch", libc::SYS_inotify_rm_watch),
     ("io_cancel", libc::SYS_io_cancel),
     ("ioctl", libc::SYS_ioctl),
     ("io_destroy", libc::SYS_io_destroy),
     ("io_getevents", libc::SYS_io_getevents),
-    ("ioperm", libc::SYS_ioperm),
-    ("iopl", libc::SYS_iopl),
     ("ioprio_get", libc::SYS_ioprio_get),
     ("ioprio_set", libc::SYS_ioprio_set),
     ("io_setup", libc::SYS_io_setup),
@@ -162,16 +142,13 @@ const SYSCALLS: &[(&str, i64)] = &[
     ("io_uring_register", libc::SYS_io_uring_register),
     ("io_uring_setup", libc::SYS_io_uring_setup),
     ("kcmp", libc::SYS_kcmp),
-    ("kexec_file_load", libc::SYS_kexec_file_load),
     ("kexec_load", libc::SYS_kexec_load),
     ("keyctl", libc::SYS_keyctl),
     ("kill", libc::SYS_kill),
     ("landlock_add_rule", libc::SYS_landlock_add_rule),
     ("landlock_create_ruleset", libc::SYS_landlock_create_ruleset),
     ("landlock_restrict_self", libc::SYS_landlock_restrict_self),
-    ("lchown", libc::SYS_lchown),
     ("lgetxattr", libc::SYS_lgetxattr),
-    ("link", libc::SYS_link),
     ("linkat", libc::SYS_linkat),
     ("listen", libc::SYS_listen),
     ("listxattr", libc::SYS_listxattr),
@@ -180,7 +157,6 @@ const SYSCALLS: &[(&str, i64)] = &[
     ("lremovexattr", libc::SYS_lremovexattr),
     ("lseek", libc::SYS_lseek),
     ("lsetxattr", libc::SYS_lsetxattr),
-    ("lstat", libc::SYS_lstat),
     ("madvise", libc::SYS_madvise),
     ("mbind", libc::SYS_mbind),
     ("membarrier", libc::SYS_membarrier),
@@ -188,15 +164,12 @@ const SYSCALLS: &[(&str, i64)] = &[
     ("memfd_secret", libc::SYS_memfd_secret),
     ("migrate_pages", libc::SYS_migrate_pages),
     ("mincore", libc::SYS_mincore),
-    ("mkdir", libc::SYS_mkdir),
     ("mkdirat", libc::SYS_mkdirat),
-    ("mknod", libc::SYS_mknod),
     ("mknodat", libc::SYS_mknodat),
     ("mlock", libc::SYS_mlock),
     ("mlock2", libc::SYS_mlock2),
     ("mlockall", libc::SYS_mlockall),
     ("mmap", libc::SYS_mmap),
-    ("modify_ldt", libc::SYS_modify_ldt),
     ("mount", libc::SYS_mount),
     ("mount_setattr", libc::SYS_mount_setattr),
     ("move_mount", libc::SYS_move_mount),
@@ -221,24 +194,20 @@ const SYSCALLS: &[(&str, i64)] = &[
     ("nanosleep", libc::SYS_nanosleep),
     ("newfstatat", libc::SYS_newfstatat),
     ("nfsservctl", libc::SYS_nfsservctl),
-    ("open", libc::SYS_open),
     ("openat", libc::SYS_openat),
     ("openat2", libc::SYS_openat2),
     ("open_by_handle_at", libc::SYS_open_by_handle_at),
     ("open_tree", libc::SYS_open_tree),
-    ("pause", libc::SYS_pause),
     ("perf_event_open", libc::SYS_perf_event_open),
     ("personality", libc::SYS_personality),
     ("pidfd_getfd", libc::SYS_pidfd_getfd),
     ("pidfd_open", libc::SYS_pidfd_open),
     ("pidfd_send_signal", libc::SYS_pidfd_send_signal),
-    ("pipe", libc::SYS_pipe),
     ("pipe2", libc::SYS_pipe2),
     ("pivot_root", libc::SYS_pivot_root),
     ("pkey_alloc", libc::SYS_pkey_alloc),
     ("pkey_free", libc::SYS_pkey_free),
     ("pkey_mprotect", libc::SYS_pkey_mprotect),
-    ("poll", libc::SYS_poll),
     ("ppoll", libc::SYS_ppoll),
     ("prctl", libc::SYS_prctl),
     ("pread64", libc::SYS_pread64),
@@ -251,16 +220,13 @@ const SYSCALLS: &[(&str, i64)] = &[
     ("process_vm_writev", libc::SYS_process_vm_writev),
     ("pselect6", libc::SYS_pselect6),
     ("ptrace", libc::SYS_ptrace),
-    ("putpmsg", libc::SYS_putpmsg),
     ("pwrite64", libc::SYS_pwrite64),
     ("pwritev", libc::SYS_pwritev),
     ("pwritev2", libc::SYS_pwritev2),
-    ("query_module", libc::SYS_query_module),
     ("quotactl", libc::SYS_quotactl),
     ("quotactl_fd", libc::SYS_quotactl_fd),
     ("read", libc::SYS_read),
     ("readahead", libc::SYS_readahead),
-    ("readlink", libc::SYS_readlink),
     ("readlinkat", libc::SYS_readlinkat),
     ("readv", libc::SYS_readv),
     ("reboot", libc::SYS_reboot),
@@ -269,12 +235,10 @@ const SYSCALLS: &[(&str, i64)] = &[
     ("recvmsg", libc::SYS_recvmsg),
     ("remap_file_pages", libc::SYS_remap_file_pages),
     ("removexattr", libc::SYS_removexattr),
-    ("rename", libc::SYS_rename),
     ("renameat", libc::SYS_renameat),
     ("renameat2", libc::SYS_renameat2),
     ("request_key", libc::SYS_request_key),
     ("restart_syscall", libc::SYS_restart_syscall),
-    ("rmdir", libc::SYS_rmdir),
     ("rseq", libc::SYS_rseq),
     ("rt_sigaction", libc::SYS_rt_sigaction),
     ("rt_sigpending", libc::SYS_rt_sigpending),
@@ -297,13 +261,10 @@ const SYSCALLS: &[(&str, i64)] = &[
     ("sched_setscheduler", libc::SYS_sched_setscheduler),
     ("sched_yield", libc::SYS_sched_yield),
     ("seccomp", libc::SYS_seccomp),
-    ("security", libc::SYS_security),
-    ("select", libc::SYS_select),
     ("semctl", libc::SYS_semctl),
     ("semget", libc::SYS_semget),
     ("semop", libc::SYS_semop),
     ("semtimedop", libc::SYS_semtimedop),
-    ("sendfile", libc::SYS_sendfile),
     ("sendmmsg", libc::SYS_sendmmsg),
     ("sendmsg", libc::SYS_sendmsg),
     ("sendto", libc::SYS_sendto),
@@ -327,7 +288,6 @@ const SYSCALLS: &[(&str, i64)] = &[
     ("set_robust_list", libc::SYS_set_robust_list),
     ("setsid", libc::SYS_setsid),
     ("setsockopt", libc::SYS_setsockopt),
-    ("set_thread_area", libc::SYS_set_thread_area),
     ("set_tid_address", libc::SYS_set_tid_address),
     ("settimeofday", libc::SYS_settimeofday),
     ("setuid", libc::SYS_setuid),
@@ -338,28 +298,22 @@ const SYSCALLS: &[(&str, i64)] = &[
     ("shmget", libc::SYS_shmget),
     ("shutdown", libc::SYS_shutdown),
     ("sigaltstack", libc::SYS_sigaltstack),
-    ("signalfd", libc::SYS_signalfd),
     ("signalfd4", libc::SYS_signalfd4),
     ("socket", libc::SYS_socket),
     ("socketpair", libc::SYS_socketpair),
     ("splice", libc::SYS_splice),
-    ("stat", libc::SYS_stat),
     ("statfs", libc::SYS_statfs),
     ("statx", libc::SYS_statx),
     ("swapoff", libc::SYS_swapoff),
     ("swapon", libc::SYS_swapon),
-    ("symlink", libc::SYS_symlink),
     ("symlinkat", libc::SYS_symlinkat),
     ("sync", libc::SYS_sync),
     ("sync_file_range", libc::SYS_sync_file_range),
     ("syncfs", libc::SYS_syncfs),
-    ("_sysctl", libc::SYS__sysctl),
-    ("sysfs", libc::SYS_sysfs),
     ("sysinfo", libc::SYS_sysinfo),
     ("syslog", libc::SYS_syslog),
     ("tee", libc::SYS_tee),
     ("tgkill", libc::SYS_tgkill),
-    ("time", libc::SYS_time),
     ("timer_create", libc::SYS_timer_create),
     ("timer_delete", libc::SYS_timer_delete),
     ("timerfd_create", libc::SYS_timerfd_create),
@@ -371,36 +325,120 @@ const SYSCALLS: &[(&str, i64)] = &[
     ("times", libc::SYS_times),
     ("tkill", libc::SYS_tkill),
     ("truncate", libc::SYS_truncate),
-    ("tuxcall", libc::SYS_tuxcall),
     ("umask", libc::SYS_umask),
     ("umount2", libc::SYS_umount2),
     ("uname", libc::SYS_uname),
-    ("unlink", libc::SYS_unlink),
     ("unlinkat", libc::SYS_unlinkat),
     ("unshare", libc::SYS_unshare),
-    ("uselib", libc::SYS_uselib),
     ("userfaultfd", libc::SYS_userfaultfd),
-    ("ustat", libc::SYS_ustat),
-    ("utime", libc::SYS_utime),
     ("utimensat", libc::SYS_utimensat),
-    ("utimes", libc::SYS_utimes),
-    ("vfork", libc::SYS_vfork),
     ("vhangup", libc::SYS_vhangup),
     ("vmsplice", libc::SYS_vmsplice),
-    ("vserver", libc::SYS_vserver),
     ("wait4", libc::SYS_wait4),
     ("waitid", libc::SYS_waitid),
     ("write", libc::SYS_write),
     ("writev", libc::SYS_writev),
 ];
 
+/// The calls this architecture has and the others do not.
+///
+/// arm64 was designed after these were already legacy, so it never got them:
+/// the kernel offers `openat` and not `open`, `newfstatat` and not `stat`,
+/// `pselect6` and not `select`, `clone` and not `fork`. Sixty of them, plus the
+/// x86-only oddities (`arch_prctl`, `iopl`, `modify_ldt`, `_sysctl`).
+///
+/// They are still named here because a hardening profile written for x86 names
+/// them, and [`syscall_number`] answering `None` is exactly the right answer on
+/// an architecture that has no such call — the caller already treats `None` as
+/// "this kernel/arch has no such call" and skips the rule. What is NOT
+/// acceptable is what happened before: referencing them unconditionally, so the
+/// crate did not build at all off x86_64.
+///
+/// Adding a name here that arm64 DOES have is harmless (it just moves where it
+/// is found); adding one to [`SYSCALLS`] that arm64 does NOT have breaks the
+/// build for arm64. The gate that catches it is the `aarch64` leg of
+/// `release-binaries` — which only helps when the CI actually runs.
+#[cfg(target_arch = "x86_64")]
+#[allow(deprecated)]
+const SYSCALLS_ARCH: &[(&str, i64)] = &[
+    ("access", libc::SYS_access),
+    ("afs_syscall", libc::SYS_afs_syscall),
+    ("alarm", libc::SYS_alarm),
+    ("arch_prctl", libc::SYS_arch_prctl),
+    ("chmod", libc::SYS_chmod),
+    ("chown", libc::SYS_chown),
+    ("creat", libc::SYS_creat),
+    ("create_module", libc::SYS_create_module),
+    ("dup2", libc::SYS_dup2),
+    ("epoll_create", libc::SYS_epoll_create),
+    ("epoll_ctl_old", libc::SYS_epoll_ctl_old),
+    ("epoll_wait", libc::SYS_epoll_wait),
+    ("epoll_wait_old", libc::SYS_epoll_wait_old),
+    ("eventfd", libc::SYS_eventfd),
+    ("fadvise64", libc::SYS_fadvise64),
+    ("fchmodat2", libc::SYS_fchmodat2),
+    ("fork", libc::SYS_fork),
+    ("futimesat", libc::SYS_futimesat),
+    ("getdents", libc::SYS_getdents),
+    ("get_kernel_syms", libc::SYS_get_kernel_syms),
+    ("getpgrp", libc::SYS_getpgrp),
+    ("getpmsg", libc::SYS_getpmsg),
+    ("get_thread_area", libc::SYS_get_thread_area),
+    ("inotify_init", libc::SYS_inotify_init),
+    ("ioperm", libc::SYS_ioperm),
+    ("iopl", libc::SYS_iopl),
+    ("kexec_file_load", libc::SYS_kexec_file_load),
+    ("lchown", libc::SYS_lchown),
+    ("link", libc::SYS_link),
+    ("lstat", libc::SYS_lstat),
+    ("mkdir", libc::SYS_mkdir),
+    ("mknod", libc::SYS_mknod),
+    ("modify_ldt", libc::SYS_modify_ldt),
+    ("open", libc::SYS_open),
+    ("pause", libc::SYS_pause),
+    ("pipe", libc::SYS_pipe),
+    ("poll", libc::SYS_poll),
+    ("putpmsg", libc::SYS_putpmsg),
+    ("query_module", libc::SYS_query_module),
+    ("readlink", libc::SYS_readlink),
+    ("rename", libc::SYS_rename),
+    ("rmdir", libc::SYS_rmdir),
+    ("security", libc::SYS_security),
+    ("select", libc::SYS_select),
+    ("sendfile", libc::SYS_sendfile),
+    ("set_thread_area", libc::SYS_set_thread_area),
+    ("signalfd", libc::SYS_signalfd),
+    ("stat", libc::SYS_stat),
+    ("symlink", libc::SYS_symlink),
+    ("_sysctl", libc::SYS__sysctl),
+    ("sysfs", libc::SYS_sysfs),
+    ("time", libc::SYS_time),
+    ("tuxcall", libc::SYS_tuxcall),
+    ("unlink", libc::SYS_unlink),
+    ("uselib", libc::SYS_uselib),
+    ("ustat", libc::SYS_ustat),
+    ("utime", libc::SYS_utime),
+    ("utimes", libc::SYS_utimes),
+    ("vfork", libc::SYS_vfork),
+    ("vserver", libc::SYS_vserver),
+];
+
+/// Every other architecture: nothing extra beyond the common table.
+#[cfg(not(target_arch = "x86_64"))]
+const SYSCALLS_ARCH: &[(&str, i64)] = &[];
+
 /// Resolves a syscall name. `None` = this kernel/arch has no such call.
 ///
-/// Linear scan over ~370 entries, once per profile rule at container start.
+/// Linear scan over the two tables (~360 entries), once per profile rule at
+/// container start.
 /// A map would be faster and is not worth the code: this runs once, and the
 /// numbers are already in the binary.
 pub fn syscall_number(name: &str) -> Option<i64> {
-    SYSCALLS.iter().find(|(n, _)| *n == name).map(|(_, nr)| *nr)
+    SYSCALLS
+        .iter()
+        .chain(SYSCALLS_ARCH.iter())
+        .find(|(n, _)| *n == name)
+        .map(|(_, nr)| *nr)
 }
 
 /// A parsed OCI seccomp profile, reduced to what this engine can enforce.
@@ -607,6 +645,64 @@ mod tests {
         assert_eq!(syscall_number("read"), Some(libc::SYS_read));
         assert_eq!(syscall_number("mount"), Some(libc::SYS_mount));
         assert_eq!(syscall_number("nao_existe_isto"), None);
+    }
+
+    /// The two tables must not name the same syscall twice.
+    ///
+    /// Splitting the table by architecture is a copy of 60 lines from one const
+    /// to another, and the way that goes wrong is a name left behind in both.
+    /// A duplicate is not fatal at run time (the first hit wins) but it means
+    /// one of the two is unreachable and nobody notices.
+    #[test]
+    fn no_name_appears_in_both_tables() {
+        for (name, _) in SYSCALLS_ARCH {
+            assert!(
+                !SYSCALLS.iter().any(|(n, _)| n == name),
+                "{name} is in the common table AND in the arch one"
+            );
+        }
+    }
+
+    /// The common table may only name calls EVERY supported architecture has.
+    ///
+    /// This is the invariant that broke the build for arm64: `access`, `open`,
+    /// `stat`, `fork`, `select` and 55 others do not exist there, and naming
+    /// them in the common table made the crate fail to compile with 60 ×
+    /// `E0425` — taking the Free binary for aarch64 with it. A unit test cannot
+    /// prove the other architecture compiles (only a cross build does), so what
+    /// it guards here is the shape: the arch-only table is where they live, and
+    /// on x86_64 they still resolve.
+    #[test]
+    fn x86_only_calls_live_in_the_arch_table() {
+        for name in [
+            "access",
+            "open",
+            "stat",
+            "fork",
+            "select",
+            "dup2",
+            "arch_prctl",
+        ] {
+            #[cfg(target_arch = "x86_64")]
+            {
+                assert!(
+                    SYSCALLS_ARCH.iter().any(|(n, _)| *n == name),
+                    "{name} should be in the arch table"
+                );
+                assert!(
+                    syscall_number(name).is_some(),
+                    "{name} should resolve on x86_64"
+                );
+            }
+            // Off x86_64 the right answer is `None` — the caller already reads
+            // that as "this arch has no such call" and skips the rule.
+            #[cfg(not(target_arch = "x86_64"))]
+            assert_eq!(
+                syscall_number(name),
+                None,
+                "{name} does not exist on this architecture"
+            );
+        }
     }
 
     #[test]
