@@ -4334,6 +4334,7 @@ pub(crate) fn k8s_customization_steps_offline(
             .into_iter()
             .map(|r| CustomizeOp::RunCommand(r.apply_offline().to_string())),
     );
+    ops.extend(k8s_node_debloat_steps(distro));
     ops.extend(install_cri_steps(cri_bin, delonix_bin, cri_service));
     ops.extend(shared_account_steps(extra_run, distro, root_password));
     if let Some(root) = preseed_images_root {
@@ -4364,9 +4365,95 @@ pub(crate) fn k8s_customization_steps(
             .into_iter()
             .map(|r| CustomizeOp::RunCommand(r.apply_offline().to_string()))
             .collect();
+    ops.extend(k8s_node_debloat_steps(distro));
     ops.extend(install_cri_steps(cri_bin, delonix_bin, cri_service));
     ops.extend(shared_account_steps(extra_run, distro, root_password));
     ops
+}
+
+/// Packages the Ubuntu/Debian cloud image ships that a Kubernetes WORKER node
+/// never uses — pure attack surface and dead weight carried into every
+/// tenant's node. The build only ever ADDED (kubeadm/kubelet/CNI) and never
+/// SUBTRACTED, so a `delonix-vm-k8s` node inherited `snapd`, `lxd-installer`,
+/// `ModemManager`, `bpftrace`+LLVM/Clang (~230 MiB), `fwupd`, telemetry
+/// (`pollinate`/`landscape-common`/`ubuntu-pro-client`) and more — none of
+/// which a kubeadm node calls, all of which is a listening socket or a CVE
+/// surface on a machine handed to someone else.
+///
+/// **PROVEN safe, not assumed.** Every name below was checked to fall OUTSIDE
+/// the forward-dependency closure of the essentials
+/// (kubelet/kubeadm/kubectl/kubernetes-cni + kernel + systemd + cloud-init +
+/// sshd + sudo) computed against a real `delonix-vm-k8s:1.34`'s
+/// `/var/lib/dpkg/status`: 151 packages in that closure, zero of these in it.
+/// `apt-get autoremove --purge` then drags out the orphaned libraries
+/// (`libllvm18`/`libclang*` behind `bpftrace`, etc.) without naming them.
+///
+/// **Deliberately KEPT, though also outside the closure:** `open-iscsi` and
+/// `multipath-tools`. Storage CSI drivers a tenant may run (Longhorn and any
+/// iSCSI-backed PV) need `iscsid`/`multipathd` ON THE NODE; purging them would
+/// break tenant volumes silently — the exact "reports success, does nothing"
+/// failure this repo hunts. Debloat stops at attack surface, not at anything a
+/// tenant workload might legitimately call.
+///
+/// **Debian family only.** The k8s golden is Ubuntu-based; these are apt/dpkg
+/// package names. On any other family this is a no-op (returns empty) rather
+/// than a build-breaking `apt-get` on a system that has none.
+///
+/// Runs OFFLINE-safe: `apt-get purge`/`autoremove` operate on the local dpkg
+/// database (no lists fetch), and `systemctl mask` is a symlink into
+/// `/etc/systemd/system` — both work in the `virt-customize` chroot exactly
+/// like the `systemctl enable` this build already does for `delonix-cri`.
+///
+/// NOT `|| true` on the purge: a purge that fails is a signal (a renamed
+/// package, a held dependency we did not expect) and must stop the build, not
+/// be swallowed — the same lesson as the AppArmor `|| true` that once hid a
+/// broken redirect. The only tolerated failure is a package already absent,
+/// which `apt-get purge` treats as success anyway.
+pub(crate) fn k8s_node_debloat_steps(distro: Distro) -> Vec<CustomizeOp> {
+    match distro {
+        Distro::Ubuntu | Distro::Debian => {}
+        Distro::Rocky | Distro::Fedora => return Vec::new(),
+    }
+    // Explicit names only — never a glob. Grouped by why they go.
+    let purge = [
+        // Alternative runtimes / installers — a kubeadm node needs neither.
+        "snapd",
+        "lxd-installer",
+        // Hardware managers with no hardware to manage on a VM node.
+        "modemmanager",
+        "fwupd",
+        // Tracing toolchain — pulls LLVM/Clang, the single biggest win. An
+        // operator who needs it installs it on demand; it does not ship to
+        // every tenant node by default.
+        "bpftrace",
+        "bpfcc-tools",
+        // Canonical telemetry / support tooling, inert on a managed node.
+        "pollinate",
+        "byobu",
+        "landscape-common",
+        "ubuntu-pro-client",
+        "sosreport",
+        "python3-botocore",
+        // Background package activity that fights the dpkg lock and can reboot
+        // a node mid-`kubeadm`/drain. The package goes; the timers it is not
+        // the sole owner of are masked below.
+        "unattended-upgrades",
+        // Host git is unused (in-cluster GitOps runs in containers).
+        "git",
+    ];
+    vec![
+        CustomizeOp::RunCommand(format!(
+            "DEBIAN_FRONTEND=noninteractive apt-get purge -y {}",
+            purge.join(" ")
+        )),
+        CustomizeOp::RunCommand(
+            "DEBIAN_FRONTEND=noninteractive apt-get autoremove --purge -y".into(),
+        ),
+        // `apt-daily`/`apt-daily-upgrade` belong to `apt` (essential, cannot be
+        // purged), so their timers are masked instead — no background apt on a
+        // node whose package set is managed by the golden, not by the node.
+        CustomizeOp::RunCommand("systemctl mask apt-daily.timer apt-daily-upgrade.timer".into()),
+    ]
 }
 
 /// `delonix-cri` install — CRI endpoint for the kubelet (replaces containerd).
@@ -5245,6 +5332,79 @@ mod tests {
             .expect("devia haver um RunCommand de apt-get install");
         assert!(install_step.contains("kubeadm"));
         assert!(install_step.contains("htop"));
+    }
+
+    #[test]
+    fn debloat_purga_a_superficie_e_poupa_o_storage_csi() {
+        let ops = k8s_node_debloat_steps(Distro::Ubuntu);
+        let purge = ops
+            .iter()
+            .find_map(|op| match op {
+                CustomizeOp::RunCommand(c) if c.contains("apt-get purge") => Some(c),
+                _ => None,
+            })
+            .expect("there must be a purge step");
+        // The attack surface a kubeadm node never uses is gone.
+        for pkg in [
+            "snapd",
+            "lxd-installer",
+            "modemmanager",
+            "bpftrace",
+            "fwupd",
+        ] {
+            assert!(purge.contains(pkg), "missing purge of {pkg}: {purge}");
+        }
+        // The tenant's storage CSI needs these ON the node — they must not go.
+        for keep in ["open-iscsi", "multipath-tools"] {
+            assert!(
+                !purge.contains(keep),
+                "{keep} must never be purged (Longhorn/iSCSI needs it): {purge}"
+            );
+        }
+        // Never a glob — explicit names only.
+        assert!(!purge.contains('*'), "the purge never uses a glob: {purge}");
+        // And the failure is not swallowed: a failed purge must stop the build.
+        assert!(!purge.contains("|| true"), "the purge must not be silenced");
+    }
+
+    #[test]
+    fn debloat_e_no_op_fora_da_familia_debian() {
+        assert!(k8s_node_debloat_steps(Distro::Rocky).is_empty());
+        assert!(k8s_node_debloat_steps(Distro::Fedora).is_empty());
+    }
+
+    #[test]
+    fn debloat_entra_nos_dois_caminhos_k8s() {
+        let cri = PathBuf::from("/tmp/delonix-cri");
+        let eng = PathBuf::from("/tmp/delonix");
+        let svc = PathBuf::from("/tmp/delonix-cri.service");
+        let has_purge = |ops: &[CustomizeOp]| {
+            ops.iter()
+                .any(|op| matches!(op, CustomizeOp::RunCommand(c) if c.contains("apt-get purge")))
+        };
+        let online =
+            k8s_customization_steps(None, &[], &[], &cri, &eng, &svc, Distro::Ubuntu, None);
+        assert!(has_purge(&online), "the online path must purge");
+        let offline =
+            k8s_customization_steps_offline(&[], &[], &cri, &eng, &svc, None, Distro::Ubuntu, None);
+        assert!(has_purge(&offline), "the offline path must purge");
+    }
+
+    #[test]
+    fn debloat_corre_antes_do_inventario_de_pacotes() {
+        // `packages.tsv` must reflect the ALREADY-slim image: the purge runs
+        // before the shared tail that generates the inventory and cleans cache.
+        let cri = PathBuf::from("/tmp/delonix-cri");
+        let eng = PathBuf::from("/tmp/delonix");
+        let svc = PathBuf::from("/tmp/delonix-cri.service");
+        let ops = k8s_customization_steps(None, &[], &[], &cri, &eng, &svc, Distro::Ubuntu, None);
+        let at = |needle: &str| {
+            ops.iter()
+                .position(|op| matches!(op, CustomizeOp::RunCommand(c) if c.contains(needle)))
+                .unwrap_or_else(|| panic!("missing step: {needle}"))
+        };
+        assert!(at("apt-get purge") < at("packages.tsv"));
+        assert!(at("apt-get purge") < at("apt-get clean"));
     }
 
     #[test]
