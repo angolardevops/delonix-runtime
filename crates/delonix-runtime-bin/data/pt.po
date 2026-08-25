@@ -9351,3 +9351,17 @@ msgstr "repetir a revisão 3"
 
 msgid "and also remove what was created after it — without this, a rollback undoes no creation"
 msgstr "e remover também o que foi criado depois dela — sem isto, um rollback não desfaz criação nenhuma"
+
+# ---- matriz de compatibilidade da Docker Engine API ------------------------
+
+msgid "Docker Engine API coverage — delonix {version}: {served} served, {refused} refused with a reason."
+msgstr "Cobertura da Docker Engine API — delonix {version}: {served} servidas, {refused} recusadas com uma razão."
+
+msgid "What real tooling calls, and where each was observed — every row here is in one of the two tables above, and a test enforces that:"
+msgstr "O que as ferramentas a sério chamam, e onde cada uma foi observada — cada linha daqui está numa das duas tabelas acima, e há um teste a exigi-lo:"
+
+msgid "served"
+msgstr "servida"
+
+msgid "refused"
+msgstr "recusada"

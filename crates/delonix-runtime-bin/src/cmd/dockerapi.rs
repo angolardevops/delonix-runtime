@@ -491,25 +491,201 @@ pub(crate) const API_UNIMPLEMENTED: &[(&str, &str, &str)] = &[
         "not written yet; `delonix network` covers it",
     ),
     (
+        "POST",
+        "/networks/create",
+        "not written yet; `delonix network create` covers it",
+    ),
+    (
+        "GET",
+        "/networks/{id}",
+        "not written yet; `delonix network inspect` covers it",
+    ),
+    // The one that hurts most, and saying so is the point of this row: it is
+    // the FIRST call most tools make, so its absence is not a missing feature
+    // at the edge — it is the door. Writing it means streaming the pull
+    // progress in Docker's own chunked JSON format, which is a slice of its
+    // own, not a line here.
+    (
+        "POST",
+        "/images/create",
+        "not written yet — this is the pull, and most tools call it first; \
+         `delonix image pull` covers it from the CLI",
+    ),
+    (
+        "GET",
+        "/images/{name}/json",
+        "not written yet; `delonix image inspect` covers it",
+    ),
+    (
+        "GET",
+        "/containers/{id}/stats",
+        "not written yet — it is a live metric stream, and this engine exposes \
+         those over Prometheus (`/metrics`) instead; `delonix dash` covers the \
+         interactive case",
+    ),
+    (
         "GET|POST|DELETE",
         "/volumes",
         "not written yet; `delonix volumes` covers it",
     ),
 ];
 
+/// The routes real tooling actually calls, and where each one was OBSERVED.
+///
+/// # Why a third list exists
+///
+/// [`API_MATRIX`] says what is served and [`API_UNIMPLEMENTED`] says what will
+/// not be — two states. A reader of those two cannot tell «not implemented» from
+/// «nobody ever considered it», and the difference decides whether they wait or
+/// go elsewhere. This repo's own rule for talking about compatibility is three
+/// states, never two: served, refused with a reason, and **missing**.
+///
+/// Measured 2026-08-25 against this file: `POST /images/create` (the pull every
+/// tool does FIRST) and `GET /containers/{id}/stats` appeared in neither list.
+/// Someone reading the published matrix would not learn they are absent.
+///
+/// # Where these entries come from
+///
+/// Not «the Docker Engine API», which has hundreds of routes most tools never
+/// touch — the routes the tools this engine targets were SEEN using, with the
+/// source named per row. Guessing a list here would make the gate below enforce
+/// a fiction.
+///
+/// `kind`: captured live in this repo by wrapping the real `docker` binary
+/// during a full `kind create cluster` — 52 invocations, transcribed in
+/// `AGENTS.md` §«Superfície capturada». The CLI verbs map to routes the usual
+/// way (`docker pull` → `POST /images/create`, `docker logs` → `GET
+/// /containers/{id}/logs`).
+///
+/// `compose`: the create→start→inspect→stop→rm sequence this layer was built
+/// against and validated with, per `AGENTS.md` §«serve docker-api».
+pub(crate) const API_UPSTREAM_USED: &[(&str, &str, &str)] = &[
+    (
+        "GET",
+        "/_ping",
+        "compose, kind — the first call any client makes",
+    ),
+    ("GET", "/version", "compose, kind"),
+    ("GET", "/info", "kind — `info --format {{json .}}`"),
+    (
+        "GET",
+        "/containers/json",
+        "kind — `ps -a --filter label=...`",
+    ),
+    ("POST", "/containers/create", "kind, compose — `run`"),
+    ("POST", "/containers/{id}/start", "compose"),
+    ("POST", "/containers/{id}/stop", "compose"),
+    ("POST", "/containers/{id}/kill", "compose"),
+    ("POST", "/containers/{id}/wait", "compose"),
+    ("POST", "/containers/{id}/restart", "compose"),
+    ("POST", "/containers/{id}/rename", "compose"),
+    ("DELETE", "/containers/{id}", "kind — `rm -f -v <n>`"),
+    (
+        "GET",
+        "/containers/{id}/json",
+        "kind — four distinct `inspect --format`",
+    ),
+    ("GET", "/containers/{id}/logs", "kind — `logs -f <n>`"),
+    (
+        "POST",
+        "/containers/{id}/exec",
+        "kind — `exec --privileged [-i] <n> <cmd>`",
+    ),
+    ("POST", "/images/create", "kind — `pull <ref>`"),
+    (
+        "GET",
+        "/images/{name}/json",
+        "kind — `inspect --type=image <ref>`",
+    ),
+    (
+        "GET",
+        "/networks",
+        "kind — `network ls --filter=name=^kind$`",
+    ),
+    (
+        "POST",
+        "/networks/create",
+        "kind — `network create -d=bridge …`",
+    ),
+    (
+        "GET",
+        "/networks/{id}",
+        "kind — `network inspect bridge -f …`",
+    ),
+    // Not from a capture of our own, and the row says so. `AGENTS.md` names
+    // `stats` among the routes Testcontainers, Dev Containers and the GitLab
+    // Runner use; that is an assertion this repo makes, not something measured
+    // here. It earns a row because the gate's job is to force a CLASSIFICATION,
+    // and «we were told this matters and never said whether we serve it» is the
+    // exact silence being closed.
+    (
+        "GET",
+        "/containers/{id}/stats",
+        "Testcontainers, Dev Containers, GitLab Runner — per AGENTS.md, not captured here",
+    ),
+];
+
 /// Prints [`API_MATRIX`] and [`API_UNIMPLEMENTED`] as a table.
 pub(crate) fn print_matrix() {
+    // The header carries the NUMBERS and the VERSION, because this repo's rule
+    // for talking about compatibility is that «Docker-compatible» never travels
+    // without them. A reader who quotes this table quotes a measurement.
+    println!(
+        "{}",
+        super::po::tf(
+            "Docker Engine API coverage — delonix {version}: {served} served, {refused} refused \
+             with a reason.",
+            &[
+                ("version", env!("CARGO_PKG_VERSION")),
+                ("served", &API_MATRIX.len().to_string()),
+                ("refused", &API_UNIMPLEMENTED.len().to_string()),
+            ],
+        )
+    );
+    println!();
     let mut t = super::output::Table::new(&["METHOD", "PATH", "MAPS TO"]);
     for (m, p, to) in API_MATRIX {
         t.row(vec![m.to_string(), p.to_string(), to.to_string()]);
     }
     t.print();
-    println!("\nNOT implemented (a 404 names the route, never a silent success):");
+    println!(
+        "\n{}",
+        super::po::t("NOT implemented (a 404 names the route, never a silent success):")
+    );
     let mut u = super::output::Table::new(&["METHOD", "PATH", "WHY"]);
     for (m, p, why) in API_UNIMPLEMENTED {
         u.row(vec![m.to_string(), p.to_string(), why.to_string()]);
     }
     u.print();
+    // The third state, and the reason this function was touched at all. Two
+    // lists answer «what works» and «what never will»; a reader still cannot
+    // tell whether the route THEY need was ever considered. This column says
+    // which tool asked for each one, so «refused» stops reading as arbitrary.
+    println!(
+        "\n{}",
+        super::po::t(
+            "What real tooling calls, and where each was observed — every row here is in one \
+             of the two tables above, and a test enforces that:"
+        )
+    );
+    let mut w = super::output::Table::new(&["METHOD", "PATH", "STATE", "SEEN IN"]);
+    for (m, p, seen) in API_UPSTREAM_USED {
+        let state = if API_MATRIX
+            .iter()
+            .any(|(mm, pp, _)| pp == p && mm.contains(m))
+        {
+            super::po::t("served")
+        } else {
+            super::po::t("refused")
+        };
+        w.row(vec![
+            m.to_string(),
+            p.to_string(),
+            state.to_string(),
+            seen.to_string(),
+        ]);
+    }
+    w.print();
 }
 
 async fn handle(
@@ -1326,7 +1502,43 @@ fn images_json(state: &AppState) -> Result<Vec<u8>> {
 
 #[cfg(test)]
 mod matrix_tests {
-    use super::{API_MATRIX, API_UNIMPLEMENTED};
+    use super::{API_MATRIX, API_UNIMPLEMENTED, API_UPSTREAM_USED};
+
+    /// **Every route real tooling uses has to be CLASSIFIED** — served or
+    /// refused with a reason. Silence is the third state, and it is the one that
+    /// wastes somebody's afternoon.
+    ///
+    /// The sibling test below guards the other direction (nothing served is
+    /// missing from the matrix). Together they say: the published table promises
+    /// no more than the code does, and hides no less than the tools ask for.
+    ///
+    /// This failed when it was written, which is the whole reason it exists —
+    /// `POST /images/create`, `GET /containers/{id}/stats` and the image/network
+    /// inspect routes were in neither list.
+    #[test]
+    fn every_route_real_tooling_calls_is_classified() {
+        let unclassified: Vec<String> = API_UPSTREAM_USED
+            .iter()
+            .filter(|(m, p, _)| {
+                let served = API_MATRIX
+                    .iter()
+                    .any(|(mm, pp, _)| pp == p && mm.contains(m));
+                let refused = API_UNIMPLEMENTED
+                    .iter()
+                    .any(|(mm, pp, _)| pp == p && mm.contains(m));
+                !served && !refused
+            })
+            .map(|(m, p, why)| format!("{m} {p}  (used by: {why})"))
+            .collect();
+        assert!(
+            unclassified.is_empty(),
+            "{} route(s) that real tooling calls are in NEITHER list — a reader of the \
+             published matrix cannot tell they are absent. Put each one in API_MATRIX (if it \
+             is served) or in API_UNIMPLEMENTED with the reason:\n  {}",
+            unclassified.len(),
+            unclassified.join("\n  "),
+        );
+    }
 
     /// Reads THIS FILE'S OWN SOURCE and requires every dispatch arm to have a
     /// row in the matrix.
