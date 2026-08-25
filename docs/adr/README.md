@@ -21,11 +21,17 @@ never rewritten — supersede them with a new one.
 | [0008](0008-proxmox-vm-backend.md) | Add a Proxmox VE backend as a separate crate, and make backends registrable | **Accepted, in 2 phases** — the registry now, the Proxmox backend blocked on a real host |
 | [0009](0009-truenas-storage-provisioner.md) | Provision TrueNAS datasets over its API, as a separate crate | **Accepted** — with a `runtime-sec` pass and a chaos scenario for the destructive path |
 | [0010](0010-remote-management-api.md) | What it would take for the management API to be remote | **Rejected** — the API stays local; remoteness belongs to the PaaS |
+| [0011](0011-dns-namespace-scoping.md) | Namespace scoping for internal DNS, and per-namespace names | **Accepted** — implemented; names are unique per (namespace, name) |
 | [0012](0012-vm-reboot-convergence.md) | A third convergence class for VMs: reboot, between update and replace | **Proposed** — deliberately after the production launch |
 | [0013](0013-network-topology.md) | Routed topologies — external gateway/DNS, subnets and VLANs, without leaving rootless | **Accepted** — tier A/B rootless (B spiked GO), tier C privileged |
 | [0014](0014-runtime-dir-per-root.md) | The network runtime dir is scoped to the state root, not just to the uid | **Accepted** — implemented; default root unchanged, only alternative roots move |
 | [0015](0015-intermediate-cgroup-level.md) | An intermediate cgroup level with an aggregate ceiling (tenancy-free) | **Accepted** — implemented; opaque group name, `None` changes nothing |
 | [0016](0016-filesystem-under-the-state-root.md) | Keep ext4 under the state root; revisit btrfs only for a measured need | **Accepted** — the disk was full of duplicates, not compressible data; written triggers to reopen |
+| [0017](0017-signing-vm-images.md) | Sign VM images with cosign, not with the release keypair | **Accepted** |
+| [0018](0018-vm-images-stay-amd64.md) | VM images stay amd64 until the release pipeline publishes arm64 | **Accepted** |
+| [0019](0019-namespaced-network-kinds.md) | Network Kinds stay node-scoped; the collision is a NAME collision | **Accepted** — measured: isolation already holds in nftables, the name space is what is shared |
+| [0020](0020-network-command-grouping.md) | `network` and `net` stay two groups, split resource vs plumbing | **Accepted** — no command moves; one alias and two `--help` sentences |
+| [0021](0021-firewall-policy-selector.md) | A `FirewallPolicy` gains a label selector, and an empty match stays open | **Accepted** — `target` unchanged; empty match warns and succeeds, not refuses |
 
 ## Roadmap (from `AGENTS.md` "Universal Runtime" — each phase needs its own accepted ADR)
 
