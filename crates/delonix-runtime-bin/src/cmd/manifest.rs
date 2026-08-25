@@ -564,11 +564,19 @@ pub fn load_str(text: &str, label: &str) -> Result<Vec<ManifestDoc>> {
         // propagates its namespace to every child it expands into, so warning afterwards
         // would fire once per child for a field the user never wrote on that child. Only
         // a namespace written on the document itself is worth a word.
+        //
+        // The list of Kinds comes from the TABLE and is not spelled out here.
+        // It used to be, and it had drifted to three of seven — a warning about
+        // namespaces telling someone that `Stack` has none.
         if doc.metadata.namespace.is_some() && !kind_honors_namespace(&doc.kind) {
             super::output::warn(&super::po::tf(
-                "{kind} '{name}': metadata.namespace has no effect — only Container, Pod \
-                 and Vm are namespaced (it scopes network isolation, not naming)",
-                &[("kind", &doc.kind), ("name", &doc.metadata.name)],
+                "{kind} '{name}': metadata.namespace has no effect — it is honored by \
+                 {kinds} (it scopes network isolation, not naming)",
+                &[
+                    ("kind", &doc.kind),
+                    ("name", &doc.metadata.name),
+                    ("kinds", &crate::cmd::kinds::namespaced_kinds().join(", ")),
+                ],
             ));
         }
         // A grouped `kind: Stack` expands into its constituent resource docs

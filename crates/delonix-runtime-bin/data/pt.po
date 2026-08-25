@@ -3795,8 +3795,8 @@ msgid "What to do with a pod that asks for more than `--cap-ceiling`: `reject` (
 msgstr "O que fazer a um pod que pede mais do que o `--cap-ceiling`: `reject` (omissão, faz o CreateContainer falhar para o kubelet o reportar) ou `clamp` (corta ao tecto e regista um aviso). Prevalece sobre `$DELONIX_CRI_CAP_CEILING_MODE`."
 
 # aviso de namespace sem efeito (bloco A2)
-msgid "{kind} '{name}': metadata.namespace has no effect — only Container, Pod and Vm are namespaced (it scopes network isolation, not naming)"
-msgstr "{kind} '{name}': o metadata.namespace não tem efeito — só Container, Pod e Vm têm namespace (delimita o isolamento de rede, não a nomeação)"
+msgid "{kind} '{name}': metadata.namespace has no effect — it is honored by {kinds} (it scopes network isolation, not naming)"
+msgstr "{kind} '{name}': o metadata.namespace não tem efeito — quem o honra é {kinds} (delimita o isolamento de rede, não a nomeação)"
 
 # ---------------------------------------------------------------------------
 # Reconciliação declarativa (`stack plan`) — bloco 2 do IaC nativo
