@@ -3226,6 +3226,44 @@ errado.
 
 **Continua em aberto**: o `refcount` do ingress vaza (16 com 3 containers vivos).
 
+### O IPAM vaza, e o ceifador que existe não é o dele (medido 2026-08-25)
+
+Medido no root real deste host, e cruzado — não deduzido: `ipam/10.210.json` tem **391
+leases** e só **47** correspondem a um container que ainda existe (`container ps -a
+--output json`). 88% não têm dono vivo. Não é uma leitura de fora que engana, como o
+`_data` `chmod 700`: o ficheiro é nosso, é JSON, e as chaves são ids de container.
+
+**Onde se perde**, seguido caminho a caminho:
+
+- `ipam::release` tem **dois chamadores em toda a árvore**, os dois dentro do
+  `infra::detach_container`/`detach_extra_container` (`infra.rs:5170` e `5180`).
+- O `container rm` só chama o detach `if let Some(ip) = &c.ip` — um registo sem IP não
+  liberta nada.
+- O backstop para quem morre e nunca é `rm`'d é o `reap_orphan_refs` do `system prune`,
+  e **ele remove o MARCADOR DE REFERÊNCIA, não o lease**: lido inteiro, toca em
+  `refs_dir()` e em mais nada. O comentário do `cmd_rm` chama-lhe «the backstop for
+  containers that die and are never `rm`'d at all» — e é, para o refcount. Para o IPAM
+  não há ceifador nenhum: `grep ipam::` fora do próprio módulo dá allocate/reserve/lookup
+  /release e zero varreduras.
+
+**A classe é a já catalogada, com um nome novo**: *o ceifador de uma coisa não é o
+ceifador da outra*. As duas vivem no mesmo `<root>/ingress`, são libertadas pelo mesmo
+`detach`, e por isso lêem-se como uma só — mas só uma tem quem a limpe quando o caminho
+normal não corre.
+
+**Porque é que NÃO se escreveu já o ceifador** (e a ordem importa): reclamar um lease que
+afinal está em uso entrega o mesmo IP a dois containers. O critério «não há container com
+este id» é quase certo e não é prova — um container a ser criado tem lease antes de ter
+registo, que é precisamente o que o `REF_MARKER_GRACE` do `reap_orphan_refs` existe para
+respeitar. Um ceifador de IPAM precisa do mesmo período de graça, do mesmo `FileLock`, e
+de um cenário de caos que o exercite contra um attach concorrente — o precedente é o
+`volumes rm` da v0.37.0, e o contra-exemplo é o `reap_orphan_hostfwds`, que falhava ABERTO
+com lista vazia e matou portas publicadas de um motor sem relação nenhuma.
+
+Enquanto não existir, o tecto é largo (um `/16` dá 65 mil endereços por rede) e o sintoma
+é invisível — mas é monótono, e hoje não há um único comando que o mostre. O
+`network ipam ls` (só leitura) é o passo que vem antes de qualquer ceifa.
+
 Ver [docs/RELATORIO-PRE-PRODUCAO.md](docs/RELATORIO-PRE-PRODUCAO.md) para a bateria E2E completa
 (139 PASS / 1 FAIL) e a lista de gaps.
 
