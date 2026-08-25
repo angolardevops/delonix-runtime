@@ -46,6 +46,23 @@ passagem deu seis falsos positivos que faziam comentários já ingleses contar c
 dívida. Um contador com falsos positivos não é um contador — é ruído com um
 número à frente.
 
+**`num` FICA, e a medição é que decide — não a intuição.** É homógrafo («num» =
+«em um» em PT, abreviatura de *number* em EN) e a regra acima sugere tirá-lo.
+Medido a 2026-08-25, correndo o ratchet com e sem ele: dependem exclusivamente
+do `num` **20 hits** — comments 3479→3465, identifiers 1050→1044. Lidos um a um,
+**11 são falsos positivos** (`num`/`num_ok`/`cap_num`/`StringOrNum`, e quatro
+comentários INGLESES que citam `cap_num`) e **9 são português genuíno** («num
+runner LIMPO», «num apply falhado», «Só num manifesto»).
+
+Não é o caso do `nas`, que dava seis falsos e zero reais. Aqui tirá-lo perde 9
+detecções verdadeiras para eliminar 11 falsas, e obriga a baixar a linha de base
+em 20 — folga permanente para vinte hits PT novos entrarem sem o gate dar por
+isso. Fica como está.
+
+O que é seguro é **não escrever identificadores novos chamados `num`**: um
+`format!("{num:04}")` conta como dívida portuguesa. `number` ou `count` não têm
+o problema, e são melhor inglês na mesma.
+
 Acrescentar uma palavra ao léxico **sobe** a contagem e faz o gate falhar. Está
 certo: significa que se descobriu dívida que já lá estava. Baixa a linha de base
 no mesmo commit em que acrescentas a palavra.
