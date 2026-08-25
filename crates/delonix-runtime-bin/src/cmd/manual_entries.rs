@@ -1754,6 +1754,17 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["stack apply", "stack validate", "stack describe", "stack destroy"],
     },
     Entry {
+        path: "stack history",
+        group: "Inspect",
+        examples: &[
+            ("what this stack applied, and when", "delonix stack history -f prod.yaml"),
+            ("the rendered manifest of one revision, to diff against today's", "delonix stack history -f prod.yaml --show 3"),
+            ("machine-readable, and the only form carrying the FULL error of a failed apply", "delonix stack history -f prod.yaml -o json"),
+            ("a stack whose manifest has since moved or been deleted", "delonix stack history --name shop"),
+        ],
+        see_also: &["stack apply", "stack plan", "stack describe", "system events"],
+    },
+    Entry {
         path: "stack validate",
         group: "Inspect",
         examples: &[
