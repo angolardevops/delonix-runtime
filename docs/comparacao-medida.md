@@ -133,6 +133,42 @@ fronteira de privilégio nova pelo meio.
 Verificado de passagem, e **não** é bug: o aviso de cgroup delegation vai para **stderr**, não
 polui o stdout. Um `run … | cat` devolve exactamente a saída do container.
 
+## A recontagem de 2026-08-25 foi TENTADA e RECUSADA
+
+O motor está na **v0.63.1** e esta tabela é da **v0.53.0**. Uma tabela de
+desempenho que envelhece dez versões merece ser remedida, e foi tentado.
+
+**Recusou-se, e a recusa é o resultado.** O host de desenvolvimento tinha, no
+momento da tentativa, `load average` de **55 a 72** em **32 threads** — mais do
+dobro da capacidade — com 189 containers a correr e compilações de Rust em
+paralelo. As primeiras corridas cruas deram docker **5080 ms** e podman
+**4149 ms**, contra os 208/268 desta tabela.
+
+Isso não é uma regressão de ninguém: é a bancada, e é **exactamente** o que
+retirou a bateria de 2026-08-10. A prova está na dispersão, que uma mediana
+esconderia — três corridas forçadas deram:
+
+| motor | mediana | mínimo | máximo |
+|---|---|---|---|
+| docker | 540 ms | 509 | **5 660** |
+| podman | 628 ms | 584 | 709 |
+| delonix | 169 ms | 144 | **7 922** |
+
+Um factor de **11×** entre a corrida mais rápida e a mais lenta do docker, e de
+**55×** no delonix. Publicar a mediana disto seria publicar ruído com um número
+à frente.
+
+**A lição passou a ser código.** O `scripts/bench.sh` caracteriza a bancada
+ANTES de medir seja o que for e **recusa-se a correr** (exit 3) quando o
+`load average` passa metade dos threads, dizendo porquê. `--force` corre na
+mesma e marca o resultado como NÃO PUBLICÁVEL. Publica sempre a dispersão ao
+lado da mediana, e a **densidade do nó** — que é parte da bancada e não um
+detalhe: duas chamadas do caminho de attach são dumps de `nft` que crescem com o
+número de containers, e a bateria abaixo correu num nó **vazio**.
+
+Para remedir a sério é preciso o mesmo que a bateria de 2026-08-13 usou: uma
+máquina ociosa e dedicada. Fica **por fazer**, e não convertido num número.
+
 ## O que ficou por medir
 
 - `docker compose` e `podman-compose` (linha 9): os plugins não estão instalados nesta VM.
