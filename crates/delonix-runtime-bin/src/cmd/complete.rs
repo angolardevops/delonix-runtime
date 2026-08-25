@@ -204,7 +204,7 @@ pub fn workloads() -> Vec<CompletionCandidate> {
 enum NsSource {
     /// This module reads the Kind's own store — and the collector IS the table
     /// entry, so [`namespaces`] cannot drift from what the table claims.
-    Store(fn() -> Vec<String>),
+    Store(fn(&std::path::Path) -> Vec<String>),
     /// The Kind carries no store of its own here — the namespace travels to the
     /// resource named, and that one IS scanned. The string says which, and why.
     ///
@@ -256,8 +256,8 @@ const NAMESPACE_SOURCES: &[(&str, NsSource)] = &[
     ),
 ];
 
-fn ns_from_containers() -> Vec<String> {
-    let Ok(store) = delonix_runtime_core::Store::open(state_root().join("containers")) else {
+fn ns_from_containers(root: &std::path::Path) -> Vec<String> {
+    let Ok(store) = delonix_runtime_core::Store::open(root.join("containers")) else {
         return Vec::new();
     };
     store
@@ -268,8 +268,8 @@ fn ns_from_containers() -> Vec<String> {
         .collect()
 }
 
-fn ns_from_vms() -> Vec<String> {
-    delonix_vm::list(&state_root())
+fn ns_from_vms(root: &std::path::Path) -> Vec<String> {
+    delonix_vm::list(root)
         .unwrap_or_default()
         .into_iter()
         .map(|v| v.namespace)
@@ -285,8 +285,8 @@ fn ns_from_vms() -> Vec<String> {
 /// `list_all()` would reach the same names by reading every volume record and
 /// dropping the `None` owners, which is a second copy of "where the records
 /// live" — the thing the rule at the top of this file forbids.
-fn ns_from_volumes() -> Vec<String> {
-    let Ok(store) = delonix_volume::VolumeStore::open(state_root()) else {
+fn ns_from_volumes(root: &std::path::Path) -> Vec<String> {
+    let Ok(store) = delonix_volume::VolumeStore::open(root) else {
         return Vec::new();
     };
     store.namespaces()
@@ -299,15 +299,33 @@ fn ns_from_volumes() -> Vec<String> {
 /// `default` is always offered: it is where everything lands, and a node with
 /// nothing running would otherwise complete nothing at all.
 pub fn namespaces() -> Vec<CompletionCandidate> {
-    let mut nomes: Vec<String> = vec!["default".to_string()];
+    cands(namespace_names())
+}
+
+/// The names themselves, so a caller that is not a completer can ask the same
+/// question and get the same answer.
+///
+/// `cmd::namespace::ls` is that caller, and a test pins the two together — a
+/// namespace offered by TAB and absent from the listing is a namespace that
+/// exists and does not, which is exactly what happened before this existed.
+pub(crate) fn namespace_names() -> Vec<String> {
+    namespace_names_in(&state_root())
+}
+
+/// The root is a PARAMETER so a caller can ask about a root that is not this
+/// machine's. Mixing an injected root with an ambient one is how a listing
+/// seeds itself from one place and counts from another — measured, and the
+/// reason this signature changed.
+pub(crate) fn namespace_names_in(root: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = vec!["default".to_string()];
     for (_, src) in NAMESPACE_SOURCES {
         if let NsSource::Store(collect_from) = src {
-            nomes.extend(collect_from());
+            names.extend(collect_from(root));
         }
     }
-    nomes.sort();
-    nomes.dedup();
-    cands(nomes)
+    names.sort();
+    names.dedup();
+    names
 }
 
 /// What `cluster kube generate` accepts: a container name OR a pod name (it

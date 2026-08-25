@@ -583,6 +583,30 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
                  'delonix volumes prune -A -f')]},
         },
     },
+    "namespace": {
+        "title": "delonix namespace",
+        "tagline": "Namespaces de isolamento: ls, describe — quem está de cada lado da fronteira.",
+        "intro": """Uma namespace <strong>não tem registo próprio</strong>: existe enquanto algo
+estiver nela, e por isso este grupo DERIVA — tal como o <code>cluster ls</code> (das etiquetas) e o
+<code>pod ls</code>. Não há <code>create</code>/<code>rm</code> de propósito: uma namespace vazia
+seria um recurso com ciclo de vida, quotas e teardown — matéria de ADR, não de uma listagem.
+<br><br>
+A fronteira são chains nftables no hook <code>forward</code>, e o tráfego entre dois containers da
+MESMA bridge só lá chega através do <code>br_netfilter</code>. Sem ele todas as regras instalam,
+todos os comandos reportam sucesso, e as namespaces <strong>não isolam</strong> — por isso o
+<code>ls</code> diz isso em voz alta quando o host não está a filtrar, e o <code>describe</code>
+distingue <em>não</em> de <em>não sei</em>.""",
+        "subs": {
+            "ls": {"examples": [
+                ("Todas as namespaces em uso, e o que está em cada uma",
+                 "delonix namespace ls"),
+                ("Para um script — contagens por Kind",
+                 "delonix namespace ls -o json")]},
+            "describe": {"examples": [
+                ("O conteúdo de uma, mais o set nft que carrega a fronteira",
+                 "delonix namespace describe inquilino-b")]},
+        },
+    },
     "network": {
         "title": "delonix network",
         "tagline": "Redes de utilizador: create, ls, route, inspect, rm, apply — bridge e overlay realizados fisicamente.",

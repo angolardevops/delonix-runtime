@@ -117,6 +117,17 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::volume::VolumeCmd,
     },
+    // A namespace has no record of its own — it exists while something is in
+    // it — so there is deliberately no `create`/`rm`: an empty namespace would
+    // be a resource with a lifecycle, and that is an ADR, not a listing. Said
+    // in the `about` (one paragraph, so `about == long_about`) rather than a
+    // second paragraph: the catalog looks the rendered string up VERBATIM, and
+    // a multi-paragraph help comes out untranslated under `--l18n=pt`.
+    /// Isolation namespaces: ls/describe — a namespace exists while something is in it, so there is no create/rm.
+    Namespace {
+        #[command(subcommand)]
+        action: cmd::namespace::NamespaceCmd,
+    },
     /// User networks: ls/create/rm/inspect.
     Network {
         #[command(subcommand)]
@@ -363,6 +374,7 @@ fn run() -> Result<()> {
         Cmd::Vm { action } => cmd::vm::run(action),
         Cmd::Workload { action } => cmd::workload::run(action),
         Cmd::Volumes { action } => cmd::volume::run(action),
+        Cmd::Namespace { action } => cmd::namespace::run(action),
         Cmd::Network { action } => cmd::network::run(action),
         Cmd::Secret { action } => cmd::secret::run(action),
         Cmd::Storage { action } => cmd::storage::run(action),
