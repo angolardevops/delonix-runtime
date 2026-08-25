@@ -72,8 +72,20 @@ sha256sum -c SHA256SUMS --ignore-missing
   descarrega-o primeiro, confere-o contra o `SHA256SUMS` assinado (o `install.sh` está
   lá listado) e só depois o corres.
 - **Um compromisso da própria máquina de build.** A assinatura prova que o artefacto
-  saiu do nosso pipeline, não que o pipeline estava íntegro. Provenance reprodutível
-  (SLSA/attestations) é o passo seguinte, não este.
+  saiu do nosso pipeline, não que o pipeline estava íntegro. **Desde 2026-08-25 há
+  proveniência SLSA** (`actions/attest-build-provenance`, assinada com uma identidade
+  OIDC efémera do runner via Sigstore — sem chave privada a guardar), que diz de que
+  commit e de que workflow o binário saiu:
+
+  ```bash
+  gh attestation verify delonix-x86_64-linux --repo angolardevops/delonix-runtime
+  ```
+
+  As duas assinaturas coexistem de propósito e respondem a perguntas diferentes: o
+  minisign prova que a release é **nossa** a quem tem a chave pública embutida no
+  `install.sh`; a proveniência prova **onde** foi construída, a quem não confia em nós
+  à partida. Continua a não ser build reprodutível — isso é outra coisa, e nenhuma das
+  duas a promete.
 - **`cloud-hypervisor-static` e `hypervisor-fw`**, instalados do upstream só por HTTPS
   — o upstream não publica checksums num formato conveniente. Risco conhecido e
   registado; ver o comentário no `install.sh`.
@@ -85,3 +97,23 @@ Publica a pública nova no site e nas notas da release **antes** de a usar, e ma
 antiga documentada. O workflow verifica, antes de publicar, que a assinatura bate com
 a pública embutida no `install.sh` — uma troca esquecida a meio falha em CI, não nas
 máquinas dos utilizadores.
+
+## SBOM
+
+Cada release publica **`delonix-sbom.spdx.json`** — SPDX 2.3, gerado do
+`Cargo.lock` por `scripts/sbom.py`. É o que responde a «esta CVE afecta-me?»:
+380 pacotes com nome, versão e o checksum do registo.
+
+**Entra no `SHA256SUMS`, e portanto na assinatura.** Publicá-lo fora dela daria
+um inventário que qualquer um pode substituir — e um SBOM adulterado é pior que
+nenhum, porque é acreditado.
+
+Sai de um script nosso e não de um `syft`/`cyclonedx` pela mesma razão por que a
+proveniência usa a acção do próprio GitHub: acrescentar uma ferramenta de
+terceiros ao passo que existe para garantir a cadeia de fornecimento é aumentar
+a superfície exactamente onde ela conta. O `Cargo.lock` **é** a árvore
+resolvida; o script traduz, não descobre.
+
+**O que ele não cobre, e está escrito no próprio documento:** o que é ligado do
+sistema (libc, o que o `protoc` gera) e qualquer alegação de reprodutibilidade.
+

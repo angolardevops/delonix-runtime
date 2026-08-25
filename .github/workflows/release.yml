@@ -28,6 +28,15 @@ on:
 
 permissions:
   contents: write
+  # For `actions/attest-build-provenance`: it signs with an ephemeral OIDC
+  # identity of the runner itself (Sigstore/Fulcio), so there is no private key
+  # to store anywhere — unlike minisign, whose key is a secret. The two coexist
+  # on purpose and answer different questions: minisign proves the release is
+  # OURS to whoever has the public key embedded in `install.sh`; provenance
+  # proves WHERE and from WHICH COMMIT it was built, to whoever does not trust
+  # us up front.
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -81,6 +90,13 @@ jobs:
           strip dist-release/delonix-*-linux
           cp scripts/install.sh dist-release/install.sh
           cd dist-release && sha256sum delonix-x86_64-linux delonix-x86_64-v3-linux delonix-cri-x86_64-linux delonix-cri-x86_64-v3-linux install.sh > SHA256SUMS
+      - name: SBOM (SPDX 2.3, do Cargo.lock)
+        run: |
+          python3 scripts/sbom.py --version "${GITHUB_REF_NAME#v}" > dist-release/delonix-sbom.spdx.json
+          # The SBOM goes into the SHA256SUMS that is signed below. Publishing
+          # it outside the signature would give an inventory anyone can swap —
+          # and a tampered SBOM is worse than none, because it is believed.
+          cd dist-release && sha256sum delonix-sbom.spdx.json >> SHA256SUMS
       - name: Sanidade — o binário arranca e reporta a versão da tag
         run: |
           V=$(dist-release/delonix-x86_64-linux --version)
@@ -138,6 +154,21 @@ jobs:
           echo "$PUB" >> /tmp/pub.pub
           minisign -V -p /tmp/pub.pub -m SHA256SUMS \
             || { echo "::error::a assinatura NÃO verifica com a chave pública embutida no install.sh — chave trocada?"; exit 1; }
+      # SLSA provenance for the published binaries. The action is GitHub's own,
+      # not a third party — the alternative (installing cosign on the runner)
+      # would add supply-chain surface to the step that exists to guarantee it,
+      # which is also why the SBOM comes from a script of ours and not a `syft`.
+      #
+      # Verify with: gh attestation verify <file> --repo angolardevops/delonix-runtime
+      - name: Proveniência (SLSA) dos binários
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: |
+            dist-release/delonix-x86_64-linux
+            dist-release/delonix-x86_64-v3-linux
+            dist-release/delonix-cri-x86_64-linux
+            dist-release/delonix-cri-x86_64-v3-linux
+            dist-release/delonix-sbom.spdx.json
       - name: Publica a release
         env:
           GH_TOKEN: ${{ github.token }}
