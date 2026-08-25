@@ -343,6 +343,44 @@ check "network ls mostra-a" ok bash -c "'$BIN' network ls | grep -q '$NET'"
 check "network inspect" ok "$BIN" network inspect "$NET"
 check "network describe" ok "$BIN" network describe "$NET"
 
+# --- `network route` sem argumentos LISTA (B-1) ---------------------------
+# As rotas eram persistidas (`ingress/routes/<from>--<to>.json`) e enumeráveis
+# (`infra::route_list` é público), e NADA as mostrava: dava para abrir uma
+# excepção ao isolamento entre redes e depois não havia comando que a visse.
+# Estes checks EXECUTAM — a bateria já verificava o `--help` de 100% das folhas
+# e corria um quarto delas, e foi em folhas nunca executadas que os dois
+# achados de `net` desta série apareceram.
+check "network route sem argumentos lista" ok "$BIN" network route
+check "network route -o json é JSON a sério" ok bash -c \
+  "'$BIN' network route -o json | python3 -c 'import json,sys; json.load(sys.stdin)'"
+# Um argumento só: a identidade de uma rota é o PAR. Adivinhar qual das pontas
+# faltava seria escolher por quem escreveu.
+check "network route com um argumento só recusa" fail "$BIN" network route "$NET"
+check "a recusa NOMEIA a forma que funciona" ok bash -c \
+  "'$BIN' network route '$NET' 2>&1 | grep -q 'PAIR'"
+
+NET2="net2-e2e-$PFX"
+if "$BIN" network create "$NET2" --subnet 10.252.0.0/16 >/dev/null 2>&1 \
+   && "$BIN" network route "$NET" "$NET2" >/dev/null 2>&1; then
+  # O CICLO, que é a única coisa que prova alguma coisa aqui: cada passo
+  # isolado devolve 0 mesmo com a listagem partida.
+  check "a rota aberta aparece na listagem" ok bash -c \
+    "'$BIN' network route | grep -q '$NET2'"
+  check "e aparece no json" ok bash -c \
+    "'$BIN' network route -o json | python3 -c \"import json,sys; sys.exit(0 if any(r['to']=='$NET2' for r in json.load(sys.stdin)) else 1)\""
+  # «não consegui perguntar ao holder» NUNCA se lê como «a rota está fechada» —
+  # o `@netpair` vive na netns efémera e num nó ocioso está vazio.
+  check "o estado nunca diz 'closed'" ok bash -c \
+    "! '$BIN' network route | grep -qi 'closed'"
+  "$BIN" network route "$NET" "$NET2" --rm >/dev/null 2>&1 || true
+  check "fechada, sai da listagem" ok bash -c \
+    "! '$BIN' network route | grep -q '$NET2'"
+  "$BIN" network rm "$NET2" >/dev/null 2>&1 || true
+else
+  "$BIN" network rm "$NET2" >/dev/null 2>&1 || true
+  skip "ciclo de uma rota" "não foi possível criar a 2.ª rede ou abrir a rota neste host"
+fi
+
 # --- `--gateway` declarado: validado SEMPRE, e relatado como está em vigor ---
 # Um teste unitário do validador não prova nada aqui, porque o bug não estava no
 # validador: estava na LIGAÇÃO. A chamada vivia dentro do braço `Some(--subnet)`

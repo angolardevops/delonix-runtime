@@ -143,7 +143,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 </nav>
 <main>
 <h1>delonix network</h1>
-<p class='tagline lang-pt'>Redes de utilizador: create, ls, inspect, rm, apply — bridge e overlay realizados fisicamente.</p><p class='tagline lang-en'>User networks: create, ls, inspect, rm, apply — bridge and overlay are physically realized.</p>
+<p class='tagline lang-pt'>Redes de utilizador: create, ls, route, inspect, rm, apply — bridge e overlay realizados fisicamente.</p><p class='tagline lang-en'>User networks: create, ls, inspect, rm, apply — bridge and overlay are physically realized.</p>
 <p class='lang-pt'>Para os drivers <code>bridge</code> e <code>overlay</code>, o <code>create</code>
 orquestra o registo declarativo (<code>NetworkStore</code>) E o plano físico rootless em conjunto —
 <code>bridge</code> dentro do netns do holder; <code>overlay</code> sobe um uplink VXLAN cifrado com
@@ -386,6 +386,46 @@ SEE ALSO:
 
   delonix › network › ls</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix network ls</code></pre></div>
+<h2 id='route'><code>network route</code></h2>
+<p class='intro'>Open a DIRECTED path from one network to another (ADR-0013 tier B).</p>
+<p class='intro'>Networks are isolated from each other by default. A route says a packet MAY cross; it does not say it is allowed — the per-workload firewall still decides, and a namespace boundary still needs its own policy.</p>
+<div class='help'><pre><code>Usage: delonix network route [OPTIONS] [FROM] [TO]
+
+Arguments:
+  [FROM]
+          Source network (the side that may initiate). Omit BOTH to list every route this node declares
+
+  [TO]
+          Destination network
+
+Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --rm
+          Close the path instead of opening it
+
+  -o, --output &lt;OUTPUT&gt;
+          Output format: `table` (default) or `json` (ADR-0005). Applies to the listing and to the single route the command just acted on
+          
+          [default: table]
+          [possible values: table, json]
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # open a DIRECTED path: web may reach db, db may not reach web
+  delonix network route web db
+
+  # close it again
+  delonix network route web db --rm
+
+SEE ALSO:
+  delonix network create · delonix net ingress · delonix container run
+
+  delonix › network › route</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class="cap">Todas as rotas declaradas neste nó — com o que o dataplane está a fazer a cada uma</div><pre><code>delonix network route</code></pre></div><div class="ex"><div class="cap">Abre um caminho DIRIGIDO: web alcança db, db não alcança web</div><pre><code>delonix network route web db</code></pre></div><div class="ex"><div class="cap">Fecha-o outra vez</div><pre><code>delonix network route web db --rm</code></pre></div><div class="ex"><div class="cap">Para um script: contadores por rota, e null (nunca 0) quando não está viva</div><pre><code>delonix network route -o json</code></pre></div>
 <h2 id='inspect'><code>network inspect</code></h2>
 <p class='intro'>Detail of a network</p>
 <div class='help'><pre><code>Usage: delonix network inspect [OPTIONS] &lt;NAME&gt;
