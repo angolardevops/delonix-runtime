@@ -380,11 +380,14 @@ tokens get replaced with the project name.</p></div>
 <div class='help'><pre><code>Usage: delonix stack apply [OPTIONS]
 
 Options:
-  -f, --file &lt;FILE&gt;
-          
-
       --l18n &lt;en|pt&gt;
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --name &lt;NAME&gt;
+          Stack name (the owner stamped on every resource). Default: a `kind: Stack`&#x27;s name, else the manifest&#x27;s directory
+
+  -f, --file &lt;FILE&gt;
+          
 
       --dry-run
           Don&#x27;t apply anything — print the full manifest with every default filled in (like `kubectl apply --dry-run=client -o yaml`). Stacks are expanded and Kinds canonicalized, so you see exactly what WOULD run
