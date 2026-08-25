@@ -128,7 +128,7 @@ pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
 }
 
 /// The name of the pod's shared SDN netns (created once on the holder).
-fn pod_netns_name(name: &str) -> String {
+pub(crate) fn pod_netns_name(name: &str) -> String {
     format!("pod-{name}")
 }
 

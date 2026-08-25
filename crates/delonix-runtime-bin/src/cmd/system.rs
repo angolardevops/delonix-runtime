@@ -83,6 +83,7 @@ pub enum SystemCmd {
     /// `--force`, and proves afterwards that the restored secrets decrypt.
     Restore {
         /// The archive written by `system backup`.
+        #[arg(value_hint = clap::ValueHint::FilePath)]
         archive: String,
         /// Restore even with containers/VMs still running (their registry is
         /// replaced underneath them).

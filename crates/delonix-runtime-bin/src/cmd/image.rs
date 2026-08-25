@@ -468,7 +468,7 @@ pub enum VmSub {
     /// unreadable rather than freeing anything.
     Rm {
         /// Image name(s), as shown by `image vm ls`.
-        #[arg(required = true)]
+        #[arg(required = true, add = ArgValueCandidates::new(super::complete::vm_images))]
         names: Vec<String>,
         /// Remove it even while VMs back onto it — **those VMs stop being
         /// readable**.

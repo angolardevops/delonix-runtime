@@ -180,6 +180,32 @@ check "system df" ok "$BIN" system df
 check "system events" ok "$BIN" system events
 check "completion bash" ok "$BIN" completion bash
 
+# --- os NOMES completam-se, e não só o script de registo (C-2) ------------
+# O `completion bash` acima prova que o script de registo SAI; não prova que um
+# TAB sobre um argumento sugere alguma coisa. A distinção não é teórica: o
+# `image vm rm` — o comando DESTRUTIVO — não sugeria nada enquanto o `describe`
+# ao lado sugeria, e ninguém deu por isso porque o registo saía na mesma.
+#
+# Sonda o motor dinâmico do clap com a MESMA forma que o script de registo usa
+# (`COMPLETE=bash <bin> -- <palavras>`), e falha quando não vem candidato nenhum.
+completa() {                      # $@ = a linha, com "" na posição a completar
+  local n
+  n=$(COMPLETE=bash _CLAP_COMPLETE_INDEX=$(( $# - 1 )) _CLAP_IFS=$'\n' \
+      _CLAP_COMPLETE_SPACE=true "$BIN" -- "$@" 2>/dev/null | grep -vc '^-')
+  [ "${n:-0}" -gt 0 ]
+}
+# Estes dois não dependem de estado nenhum do host: o `man` lê o catálogo de
+# páginas, o `restore` é um caminho de ficheiro.
+check "man completa nomes de comando" ok completa delonix man ""
+check "system restore completa caminhos" ok completa delonix system restore ""
+# Este só vale onde o recurso existe — zero num host sem imagens VM é a resposta
+# honesta, não uma falha, e um SKIP declarado conta como NÃO COBERTO.
+if [ "$("$BIN" image vm ls 2>/dev/null | tail -n +2 | wc -l)" -gt 0 ]; then
+  check "image vm rm completa (o destrutivo)" ok completa delonix image vm rm ""
+else
+  skip "image vm rm completa" "não há imagens VM neste host"
+fi
+
 ########################################
 section "erros: a CLI tem de RECUSAR o que é inválido"
 ########################################
