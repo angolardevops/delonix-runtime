@@ -3809,6 +3809,16 @@ checklist para quem mexer aqui do que como lista de correcções:
 - o **`ENOENT` de um `Command::status()`** não é um ficheiro em falta — é a FERRAMENTA não
   existir, e a frase «No such file or directory» manda o leitor procurar um caminho
   (`vmimage::tool_package`, v0.45.0);
+- **varrer duas fontes não é varrer a lista toda**, e uma derivação parcial lê-se exactamente como
+  uma completa. O `complete::namespaces` colhia dos containers e das VMs; a tabela `cmd::kinds` diz
+  que SETE Kinds carregam namespace. Quatro vinham por transitividade e ninguém o tinha escrito
+  (um pod é os seus membros, um `Workload`/`Stack` carimba os filhos) — mas o `Volume` não: um
+  inquilino cujo único recurso fosse uma share volume **não existia** para o TAB, porque nada dele
+  está a correr. Medido lado a lado no mesmo root: o binário anterior oferecia `default` e mais
+  nada, com duas namespaces em disco. A correcção que interessa não é a fonte que faltava — é a
+  **tabela `NAMESPACE_SOURCES`, que passa a GOVERNAR a derivação** e obriga cada Kind namespaced a
+  declarar-se `Store` (este módulo lê-lhe o registo) ou `Via` (o namespace viaja, e para onde). Um
+  classificador que ninguém consulta seria a sétima lista que este repo já pagou uma vez;
 - **`/sys/fs/cgroup/cgroup.subtree_control` conter `memory`** não é «a MINHA sessão tem
   delegação» — é do cgroup RAIZ do host, e contém-no sempre (v0.42.2, ver abaixo);
 - **um lease PREVISTO não é uma VM VIVA** — em cloud-hypervisor o IP não é observado, é
