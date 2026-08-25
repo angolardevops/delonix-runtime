@@ -30,10 +30,17 @@
 | Testes no workspace | **1207** | `#[test]` + `#[tokio::test]` em `crates/` |
 | Checks da bateria E2E | **270** | `scripts/e2e.sh` |
 | Cenários de caos | **8** | `scripts/chaos.sh` |
-| Rotas servidas na Docker Engine API | **21** | literais de rota em `cmd/dockerapi.rs` |
+| Rotas na Docker Engine API | **14 servidas, 12 recusadas com razão** | `API_MATRIX` / `API_UNIMPLEMENTED` em `cmd/dockerapi.rs` |
 | Kinds no manifesto | **19** | tabela `cmd/kinds.rs` |
 | ADRs | **18** (13 Accepted, 2 Proposed, 1 Rejected, 2 sem estado parseável) | `docs/adr/` |
 | Jobs de CI | **7** (`fmt`, `lang`, `clippy`, `test`, `deny`, `docs` + caos à parte) | `.github/workflows/ci.yml` |
+
+> **Correcção a esta baseline (2026-08-25).** A primeira versão desta linha dizia
+> «21 rotas servidas», contadas por literais de rota no ficheiro. Estava errada:
+> 21 é a soma das servidas com as **recusadas** — a `API_UNIMPLEMENTED` também
+> guarda literais de path. O número certo é 14 servidas. Fica registado em vez de
+> corrigido em silêncio, porque foi exactamente o erro que este programa existe
+> para apanhar, cometido pelo próprio documento que o mede.
 
 > **A superfície não é a cobertura.** As 229 folhas têm o `--help` verificado; o
 > número das que a bateria **executa** não foi remedido nesta passagem e a
@@ -48,7 +55,7 @@ Estados: `NOT_STARTED`, `IN_PROGRESS`, `PARTIAL`, `BLOCKED`, `DONE`.
 | ID | Melhoria | Estado | Baseline medida | Entregáveis em falta | Testes | Dep. | Risco | PR | DoD |
 |---|---|---|---|---|---|---|---|---|---|
 | **M01** | Posicionamento e arquitectura | `IN_PROGRESS` | `ARCHITECTURE.md` tem C4 1–3 e mini-ADRs; **omitia 3 de 13 crates** e a contagem dizia 10. Nenhum gate arquitectural existia. | capability discovery; política de estabilidade por API (parcial em `cli-stability.md`); gate de dependência proibida (fronteira PaaS) | `tests/architecture.rs` — 3 gates, verdes; regressão verificada nos dois sentidos | — | baixo | — | 3 de 5 |
-| **M02** | Compatibilidade e migração | `PARTIAL` | CRI **77/103** (`critest` v1.36.0, motor v0.42.2 — **desactualizado**). Docker API **21 rotas**; `images/create` e `stats` **ausentes**. `compose` nativo; `compatibility`/`migrate assess` **não existem**. | comandos `compatibility {docker,compose,oci}` e `migrate assess`; matrizes versionadas; recontagem do `critest` na versão actual | `tests/compat/` (2 ficheiros) | M01 | **alto** | — | 0 de 4 |
+| **M02** | Compatibilidade e migração | `IN_PROGRESS` | CRI **77/103** (`critest` v1.36.0, motor v0.42.2 — **desactualizado**). Docker API: **14 servidas, 12 recusadas com razão**, e agora um **terceiro estado** — 21 rotas que o `kind`/compose usam, das quais **8 recusadas** (`serve docker-api --matrix`). `compose` nativo; `compatibility`/`migrate assess` **não existem**. | comandos `compatibility {compose,oci}` e `migrate assess`; recontagem do `critest` na versão actual; matriz do Compose | `tests/compat/` + 3 gates da matriz Docker | M01 | médio | #123 | 1 de 4 |
 | **M03** | Build de produção | `PARTIAL` | `build` tem `--secret`, `--platform`, `--no-cache`, `--build-arg`, cache por instrução (rootless), multi-stage. **Sem** `--ssh`, cache distribuída, SBOM/provenance no artefacto de build. | mounts `type=ssh`/`cache`; cache em registry; SBOM+provenance por imagem construída; comparação medida com BuildKit | `crates/delonix-image/benches` existe | M04 | médio | — | 1 de 4 |
 | **M04** | Segurança verificável | `PARTIAL` | Releases **assinadas** (minisign, `release.yml`) e `cargo-deny` no CI. **Sem** SBOM de release, **sem** provenance/SLSA, **sem** fuzzing no CI, **sem** `kind: RuntimePolicy` (0 ocorrências). 3 auditorias ofensivas anteriores registadas. | SBOM + attestation de release; `kind: RuntimePolicy`; job de fuzz; processo de advisory publicado | 1207 testes; auditorias em `AGENTS.md` | — | **alto** | — | 1 de 4 |
 | **M05** | Desired State e GitOps | `IN_PROGRESS` | `stack` serve **11** verbos: `init apply destroy prune plan ls describe wait validate history rollback`. `plan` não muda estado e tem `--detailed-exitcode`; diff de 3 vias sem ficheiro de estado; **revisões persistidas** (ADR-0019). **Faltam `diff`, `drift`, `reconcile`** — `drift` e `diff` são hoje o `plan` com outro nome; o `reconcile` contínuo é o que resta a sério, e traz a pergunta do daemon. O `apply` continua fail-fast sem rollback, por desenho, e já não deixa órfãos invisíveis. | `drift`/`diff` como verbos próprios; reconciler opcional com rate-limit | caos `stack_converge` + `stack_partial_apply`; **19 checks E2E** de `history`+`rollback`, um a apagar `stacks/` e outro a exigir o ciclo completo | M01 | médio | #120, #121, #122 | 5 de 6 |
@@ -154,6 +161,28 @@ repetir um manifesto que não aplica também falha, por isso o `rc` não disting
 inteira. Passou a exigir a frase que só a recusa produz. Sem a passagem de
 reversão, ficava um gate verde a guardar nada.
 
+## M02 — o terceiro estado da matriz Docker
+
+A matriz publicada tinha **dois** estados: servido, e recusado com razão. Faltava
+o que este repo escreve como regra e não estava a cumprir — o **em falta**. Um
+leitor das duas listas não distingue «não implementado» de «ninguém pensou
+nisto», e a diferença decide se ele espera ou vai a outro lado.
+
+Medido: `POST /images/create` (o pull que quase toda a ferramenta faz PRIMEIRO)
+e `GET /containers/{id}/stats` não apareciam em lista nenhuma. Duas rotas de rede
+que o `kind` chama também não, porque o `/networks` genérico não casa com
+`/networks/create` nem com `/networks/{id}`.
+
+A `API_UPSTREAM_USED` fecha-o com uma fonte por linha — a captura das 52
+invocações do `docker` real durante um `kind create cluster`, transcrita no
+`AGENTS.md`, e a sequência do compose contra a qual esta camada foi construída.
+Uma linha sem captura própria (o `stats`) **diz que não a tem**. Um gate exige
+que cada rota dessa lista esteja classificada; falhou com 4 quando foi escrito.
+
+O que a tabela passou a mostrar, e antes não mostrava: das **21** rotas que
+ferramentas reais chamam, **8 estão recusadas** — incluindo o pull. Isso é o que
+separa «tem uma API Docker» de «o Testcontainers corre contra isto».
+
 ## Ordem de execução
 
 A do programa, com uma alteração justificada: M01 entrega primeiro os **gates**
@@ -173,6 +202,7 @@ deixou 3 crates fora do C4 sem ninguém dar por isso.
 | Data | Alteração |
 |---|---|
 | 2026-08-25 | Baseline inicial medida contra `b4653002b`/v0.63.1. M01 passa a `IN_PROGRESS`: `tests/architecture.rs` instalado, 3 crates repostos no C4, contagem corrigida em dois documentos. |
+| 2026-08-25 | M02 passa a `IN_PROGRESS`: a matriz Docker ganha o terceiro estado (o «em falta») e um gate que o obriga. Baseline corrigida — eram 14 servidas e não 21. |
 | 2026-08-25 | `stack rollback`: as revisões passam a ter caminho de volta. M05 fica com 11 verbos e o `reconcile` contínuo como único item a sério em falta. |
 | 2026-08-25 | Fase D (adiantada). `stack history` + ADR-0019: revisões persistidas, com a propriedade «apagar `stacks/` não parte nada» fixada por gate. M05 sobe para 5 de 6. |
 | 2026-08-25 | Fase B. M05 passa a `IN_PROGRESS`: fechada a fuga de recursos de um `apply` parcial (`salvage_ownership`), com o cenário de caos `stack_partial_apply` a fixá-la. O risco de M05 baixa de **alto** para médio — o que resta (`history`/`rollback`) é superfície em falta, não perda de dados. |

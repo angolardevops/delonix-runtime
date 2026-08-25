@@ -619,6 +619,24 @@ check "volumes describe depois do destroy recusa" fail "$BIN" volumes describe "
 "$BIN" network rm "sn-$PFX" >/dev/null 2>&1
 
 # ---------------------------------------------------------------------------
+# A matriz de compatibilidade da Docker Engine API tem de dizer TRÊS estados.
+#
+# A regra da casa é que «Docker-compatible» nunca viaja sem número, data e
+# versão, e que a matriz mostra servido / recusado com razão / em falta — nunca
+# dois. Tinha dois: quem lia não distinguia «não implementado» de «ninguém
+# pensou nisto», e `POST /images/create` (o pull que quase toda a ferramenta faz
+# primeiro) não aparecia em lista nenhuma.
+check "serve docker-api --matrix corre" ok "$BIN" serve docker-api --matrix
+check "…e traz o número e a versão no cabeçalho" ok \
+  bash -c "'$BIN' serve docker-api --matrix | head -1 | grep -qE 'delonix [0-9]+\\.[0-9]+.*served.*refused'"
+check "…e mostra o terceiro estado (o que as ferramentas usam)" ok \
+  bash -c "'$BIN' serve docker-api --matrix | grep -q 'SEEN IN'"
+# A rota que decide se o Testcontainers arranca. Estar recusada é uma resposta;
+# não estar em lado nenhum não é.
+check "…e o pull aparece classificado, não em silêncio" ok \
+  bash -c "'$BIN' serve docker-api --matrix | grep '/images/create' | grep -qE 'refused|not written'"
+
+# ---------------------------------------------------------------------------
 # `stack history` (ADR-0019) — e a propriedade que o desenho inteiro promete.
 #
 # Uma revisão é um REGISTO do que foi pedido, nunca uma fonte de verdade sobre o
