@@ -169,6 +169,7 @@ Commands:
   wait      Blocks until every declared resource is present and, where it has one, healthy
   init      Initializes a COMPLETE project: Delonixfile + manifest + cluster + README
   describe  Stack detail in `kubectl describe` style
+  history   What this stack applied, and when (ADR-0019)
   ls        List the structure the manifest composes, and whether each resource exists
   plan      Shows what an `apply` WOULD change, without changing anything
   validate  Validates the manifest WITHOUT touching anything (dry-run)
@@ -185,7 +186,7 @@ Options:
 COMMAND MAP:
   Lifecycle    apply · destroy · wait
   Create       init
-  Inspect      plan · ls · describe · validate
+  Inspect      plan · ls · describe · validate · history
   Maintenance  prune
 
 EXAMPLES:

@@ -227,6 +227,28 @@ pub enum StackCmd {
         #[arg(long)]
         strict: bool,
     },
+    /// What this stack applied, and when (ADR-0019).
+    ///
+    /// One revision per `apply`, failed ones included and marked — after an
+    /// incident the question is what the machine was ASKED to do, not what it
+    /// managed to do. `--show <n>` prints that revision's rendered manifest.
+    ///
+    /// This is a RECORD, never a source of truth: nothing here is read to decide
+    /// what exists. Delete `<root>/stacks/` and every other stack command keeps
+    /// working — only the history is lost.
+    History {
+        /// Stack name. Default: a `kind: Stack`'s name, else the manifest's directory.
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
+        file: Option<PathBuf>,
+        /// Print the rendered manifest of revision N instead of the list.
+        #[arg(long, value_name = "N")]
+        show: Option<u32>,
+        /// Output format: `table` (default) or `json` (ADR-0005) — `json` carries the FULL error of a failed revision, which the table truncates.
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: super::output::OutputFormat,
+    },
 }
 
 pub fn run(action: StackCmd) -> Result<()> {
@@ -288,6 +310,12 @@ pub fn run(action: StackCmd) -> Result<()> {
         StackCmd::Ls { file } => ls(file),
         StackCmd::Describe { file } => describe(file),
         StackCmd::Validate { file, strict } => validate(file, strict),
+        StackCmd::History {
+            name,
+            file,
+            show,
+            output,
+        } => history(name, file, show, output),
     }
 }
 
@@ -1295,8 +1323,35 @@ fn apply(file: Option<PathBuf>, replace: Vec<String>, do_prune: bool) -> Result<
     // stays fail-fast without rollback — nothing below undoes anything — but
     // what the successful layers CREATED must not be left ownerless; see
     // `salvage_ownership`.
+    // The rendered manifest, captured BEFORE the layers run: it is what this
+    // apply is about to act on, and rendering it after a failure would be
+    // rendering documents that may no longer parse the same way. Rendering can
+    // itself fail on a manifest the engine still accepts, and a revision is a
+    // record — it never gets to stop an apply (ADR-0019).
+    let rendered = manifest::render_with_defaults(&docs).ok();
+    let counts: std::collections::BTreeMap<String, usize> = reconcile::summary(&changes)
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
+    let manifest_shown = path.display().to_string();
+
     if let Err(e) = run_layers(&mut layers, &docs, base) {
         salvage_ownership(&docs, &stack, &changes);
+        // Recorded as FAILED, not skipped. After an incident the interesting
+        // question is what the machine was asked to do, not what it managed to
+        // do — a failed apply that created half a stack is precisely the
+        // revision someone needs to read.
+        if let Some(r) = &rendered {
+            super::revision::record(
+                &super::util::state_root(),
+                &stack,
+                &manifest_shown,
+                r,
+                false,
+                Some(&e.to_string()),
+                counts,
+            );
+        }
         return Err(e);
     }
     layers.done();
@@ -1311,6 +1366,18 @@ fn apply(file: Option<PathBuf>, replace: Vec<String>, do_prune: bool) -> Result<
     // it — the resource is only really unused once everything else has settled.
     if do_prune {
         prune(&changes)?;
+    }
+
+    if let Some(r) = &rendered {
+        super::revision::record(
+            &super::util::state_root(),
+            &stack,
+            &manifest_shown,
+            r,
+            true,
+            None,
+            counts,
+        );
     }
 
     // After creating everything, say what was created but will NOT work as it
@@ -1814,6 +1881,100 @@ fn stamp_all(
             );
         }
     }
+    Ok(())
+}
+
+/// `stack history` — what this stack applied, and when.
+///
+/// Reads the record and nothing else. Deliberately does NOT probe the machine:
+/// «what was applied» and «what is there now» are different questions, and
+/// `stack ls`/`plan` already answer the second. Mixing them here would invite
+/// exactly the reading this design refuses — treating the history as a statement
+/// about what exists.
+fn history(
+    name: Option<String>,
+    file: Option<PathBuf>,
+    show: Option<u32>,
+    output: super::output::OutputFormat,
+) -> Result<()> {
+    // The manifest is read for its NAME, not its contents — a stack whose file
+    // has since been deleted still has a history, so a missing file is only an
+    // error when no `--name` was given to stand in for it.
+    let stack = match (&name, manifest::resolve_path(file)) {
+        (Some(n), _) => n.clone(),
+        (None, Ok(p)) => stack_name(&p, None),
+        (None, Err(e)) => return Err(e),
+    };
+    let root = super::util::state_root();
+
+    if let Some(n) = show {
+        print!("{}", super::revision::manifest_of(&root, &stack, n)?);
+        return Ok(());
+    }
+
+    let revs = super::revision::list(&root, &stack);
+    if matches!(output, super::output::OutputFormat::Json) {
+        println!("{}", serde_json::to_string_pretty(&revs)?);
+        return Ok(());
+    }
+    if revs.is_empty() {
+        // Not an error, and it says which stack it looked for: the commonest
+        // cause is a name that does not match, not an absent history.
+        println!(
+            "{}",
+            super::po::tf(
+                "no revisions recorded for stack '{stack}' — one is written per `stack apply`",
+                &[("stack", &stack)],
+            )
+        );
+        return Ok(());
+    }
+    let mut t = super::output::Table::new(&["REV", "WHEN", "RESULT", "MANIFEST", "CHANGES"]);
+    for r in revs.iter().rev() {
+        let changes = if r.summary.is_empty() {
+            "-".to_string()
+        } else {
+            r.summary
+                .iter()
+                .filter(|(_, n)| **n > 0)
+                .map(|(k, n)| format!("{n} {k}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        // The reason is shown on the RESULT column rather than hidden behind
+        // another command: a failed revision with no reason next to it sends the
+        // reader looking somewhere else for the one thing they came for.
+        //
+        // TRUNCATED here, and only here. Measured live: a registry error is ~200
+        // characters with a `hint:` glued on, the column widens to fit it, and
+        // every other column is pushed off the terminal — the table stops being
+        // a table to carry one cell. The full text stays in the record and comes
+        // out whole under `-o json`, which is where a reader who wants all of it
+        // is already going.
+        let result = if r.ok {
+            "ok".to_string()
+        } else {
+            match &r.error {
+                Some(e) => {
+                    let short: String = e.chars().take(48).collect();
+                    if e.chars().count() > 48 {
+                        format!("failed: {short}…")
+                    } else {
+                        format!("failed: {short}")
+                    }
+                }
+                None => "failed".to_string(),
+            }
+        };
+        t.row(vec![
+            r.number.to_string(),
+            delonix_runtime_core::fmt_local_ts(r.ts),
+            result,
+            r.manifest.clone(),
+            changes,
+        ]);
+    }
+    t.print();
     Ok(())
 }
 

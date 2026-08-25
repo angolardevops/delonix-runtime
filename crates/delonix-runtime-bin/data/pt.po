@@ -9257,3 +9257,41 @@ msgstr "pára de limitar a taxa de ligações de entrada"
 msgid "is the guard on, and has it dropped anything"
 msgstr "a guarda está ligada, e já descartou alguma coisa"
 
+# ---- stack history (ADR-0019) ----------------------------------------------
+
+msgid "What this stack applied, and when (ADR-0019)"
+msgstr "O que esta stack aplicou, e quando (ADR-0019)"
+
+msgid ""
+"What this stack applied, and when (ADR-0019).\n"
+"\n"
+"One revision per `apply`, failed ones included and marked — after an incident the question is what the machine was ASKED to do, not what it managed to do. `--show <n>` prints that revision's rendered manifest.\n"
+"\n"
+"This is a RECORD, never a source of truth: nothing here is read to decide what exists. Delete `<root>/stacks/` and every other stack command keeps working — only the history is lost."
+msgstr ""
+"O que esta stack aplicou, e quando (ADR-0019).\n"
+"\n"
+"Uma revisão por `apply`, incluindo as falhadas e marcadas como tal — depois de um incidente a pergunta é o que a máquina foi MANDADA fazer, não o que conseguiu. `--show <n>` imprime o manifesto renderizado dessa revisão.\n"
+"\n"
+"Isto é um REGISTO, nunca uma fonte de verdade: nada aqui é lido para decidir o que existe. Apaga `<root>/stacks/` e todos os outros comandos de stack continuam a funcionar — só se perde o histórico."
+
+msgid "Print the rendered manifest of revision N instead of the list"
+msgstr "Imprime o manifesto renderizado da revisão N em vez da lista"
+
+msgid "Output format: `table` (default) or `json` (ADR-0005) — `json` carries the FULL error of a failed revision, which the table truncates"
+msgstr "Formato de saída: `table` (omissão) ou `json` (ADR-0005) — o `json` traz o erro COMPLETO de uma revisão falhada, que a tabela trunca"
+
+msgid "no revisions recorded for stack '{stack}' — one is written per `stack apply`"
+msgstr "sem revisões registadas para a stack '{stack}' — grava-se uma por cada `stack apply`"
+
+msgid "what this stack applied, and when"
+msgstr "o que esta stack aplicou, e quando"
+
+msgid "the rendered manifest of one revision, to diff against today's"
+msgstr "o manifesto renderizado de uma revisão, para comparar com o de hoje"
+
+msgid "machine-readable, and the only form carrying the FULL error of a failed apply"
+msgstr "legível por máquina, e a única forma que traz o erro COMPLETO de um apply falhado"
+
+msgid "a stack whose manifest has since moved or been deleted"
+msgstr "uma stack cujo manifesto entretanto mudou de sítio ou foi apagado"

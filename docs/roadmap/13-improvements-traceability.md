@@ -51,7 +51,7 @@ Estados: `NOT_STARTED`, `IN_PROGRESS`, `PARTIAL`, `BLOCKED`, `DONE`.
 | **M02** | Compatibilidade e migração | `PARTIAL` | CRI **77/103** (`critest` v1.36.0, motor v0.42.2 — **desactualizado**). Docker API **21 rotas**; `images/create` e `stats` **ausentes**. `compose` nativo; `compatibility`/`migrate assess` **não existem**. | comandos `compatibility {docker,compose,oci}` e `migrate assess`; matrizes versionadas; recontagem do `critest` na versão actual | `tests/compat/` (2 ficheiros) | M01 | **alto** | — | 0 de 4 |
 | **M03** | Build de produção | `PARTIAL` | `build` tem `--secret`, `--platform`, `--no-cache`, `--build-arg`, cache por instrução (rootless), multi-stage. **Sem** `--ssh`, cache distribuída, SBOM/provenance no artefacto de build. | mounts `type=ssh`/`cache`; cache em registry; SBOM+provenance por imagem construída; comparação medida com BuildKit | `crates/delonix-image/benches` existe | M04 | médio | — | 1 de 4 |
 | **M04** | Segurança verificável | `PARTIAL` | Releases **assinadas** (minisign, `release.yml`) e `cargo-deny` no CI. **Sem** SBOM de release, **sem** provenance/SLSA, **sem** fuzzing no CI, **sem** `kind: RuntimePolicy` (0 ocorrências). 3 auditorias ofensivas anteriores registadas. | SBOM + attestation de release; `kind: RuntimePolicy`; job de fuzz; processo de advisory publicado | 1207 testes; auditorias em `AGENTS.md` | — | **alto** | — | 1 de 4 |
-| **M05** | Desired State e GitOps | `IN_PROGRESS` | `stack` serve **9** verbos: `init apply destroy prune plan ls describe wait validate`. `plan` não muda estado e tem `--detailed-exitcode`; diff de 3 vias sem ficheiro de estado. **Faltam `diff`, `drift`, `history`, `rollback`, `reconcile`.** O `apply` continua fail-fast sem rollback — por desenho — mas **já não deixa órfãos invisíveis** (ver abaixo). | os 5 verbos em falta; revisões persistidas; reconciler opcional com rate-limit | caos `stack_converge` + **`stack_partial_apply`** (novo) | M01 | médio | #119 | 4 de 6 |
+| **M05** | Desired State e GitOps | `IN_PROGRESS` | `stack` serve **10** verbos: `init apply destroy prune plan ls describe wait validate history`. `plan` não muda estado e tem `--detailed-exitcode`; diff de 3 vias sem ficheiro de estado; **revisões persistidas** (ADR-0019). **Faltam `diff`, `drift`, `rollback`, `reconcile`** — `drift` e `diff` são hoje o `plan` com outro nome, `rollback` é superfície a sério. O `apply` continua fail-fast sem rollback, por desenho, e já não deixa órfãos invisíveis. | `rollback`; `drift`/`diff` como verbos próprios; reconciler opcional com rate-limit | caos `stack_converge` + `stack_partial_apply`; **8 checks E2E** do `history`, um deles a apagar `stacks/` | M01 | médio | #120, #121 | 5 de 6 |
 | **M06** | Gestão de frota | `BLOCKED` | `node`/`cordon`/`drain` **não existem** (0 ocorrências). **O ADR-0010 RECUSOU a API de gestão remota** (2026-08-10) e o `AGENTS.md` diz que `delonix node add` está bloqueado. | **ADR sucessor** que nomeie o consumidor concreto — ver a nota abaixo | — | ADR | — | — | bloqueado |
 | **M07** | Observabilidade OTel | `PARTIAL` | OpenTelemetry **0.32** e `prometheus-client` na árvore (`delonix-runtime-core`); `/metrics` no `delonix-cri` e no `delonix-mgmt`; `system events`; `dash --json`. **Sem** `observe`/`trace`/`diagnose` como comandos; correlação e bundle sanitizado por fazer. | comandos `observe`/`diagnose`; schemas de evento versionados; overhead medido | — | M01 | médio | — | 2 de 4 |
 | **M08** | SLOs e health | `NOT_STARTED` | `slo` tem **0 ocorrências** em toda a CLI. Existem `--health-*` no `run` e probes de compose. Sem SLI/SLO, sem error budget, sem reason codes. | tudo | — | M07 | médio | — | 0 de 5 |
@@ -115,6 +115,25 @@ chega mais tarde — o `last-applied` é o que autoriza **reverter** um campo qu
 saiu do manifesto, por isso carimbá-lo sem ter aplicado faz o motor reclamar
 autoria de um valor que não pôs.
 
+## M05 — revisões (ADR-0019)
+
+Uma stack passa a gravar **uma revisão por apply**, em
+`<root>/stacks/<stack>/revisions/`: o manifesto renderizado mais um cabeçalho
+(número, instante, caminho, se correu bem, contagens do plano). Applies falhados
+são gravados **e marcados** — depois de um incidente a pergunta é o que a máquina
+foi MANDADA fazer, não o que conseguiu.
+
+**A propriedade que separa isto de um `terraform.tfstate`, e é a única razão de
+o ADR ter sido aceite:** um `.tfstate` é a fonte de verdade sobre o que existe,
+por isso quando deriva a ferramenta age sobre uma mentira. Aqui nada é lido para
+decidir o que existe — a posse e o diff de 3 vias continuam a vir do carimbo no
+próprio recurso. **Apagar `<root>/stacks/` e o `plan`/`apply`/`prune`/`destroy`
+funcionam na mesma**, e isso não é uma afirmação: são três checks da bateria E2E
+que correm logo a seguir a um `rm -rf`.
+
+Retenção de 20, podada pelo escritor (não há daemon), e **best-effort**: uma
+revisão que não se consiga escrever nunca faz falhar um apply que funcionou.
+
 ## Ordem de execução
 
 A do programa, com uma alteração justificada: M01 entrega primeiro os **gates**
@@ -134,4 +153,5 @@ deixou 3 crates fora do C4 sem ninguém dar por isso.
 | Data | Alteração |
 |---|---|
 | 2026-08-25 | Baseline inicial medida contra `b4653002b`/v0.63.1. M01 passa a `IN_PROGRESS`: `tests/architecture.rs` instalado, 3 crates repostos no C4, contagem corrigida em dois documentos. |
+| 2026-08-25 | Fase D (adiantada). `stack history` + ADR-0019: revisões persistidas, com a propriedade «apagar `stacks/` não parte nada» fixada por gate. M05 sobe para 5 de 6. |
 | 2026-08-25 | Fase B. M05 passa a `IN_PROGRESS`: fechada a fuga de recursos de um `apply` parcial (`salvage_ownership`), com o cenário de caos `stack_partial_apply` a fixá-la. O risco de M05 baixa de **alto** para médio — o que resta (`history`/`rollback`) é superfície em falta, não perda de dados. |

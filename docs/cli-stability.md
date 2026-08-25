@@ -190,6 +190,12 @@ diz quais são, em vez de os omitir.
   conveniência de depuração.
 * **O formato dos ficheiros de estado** em `$DELONIX_ROOT`. Lê-se pelo `inspect`,
   nunca do disco.
+* **`stack history`** e o conteúdo de `$DELONIX_ROOT/stacks/` (ADR-0019). É um
+  registo do que foi aplicado, e o desenho promete explicitamente que **nada o
+  lê para decidir o que existe**: apagar essa pasta não muda o que o `plan`, o
+  `apply`, o `prune` ou o `destroy` fazem — só perde o histórico, e há gate na
+  bateria E2E a exigi-lo. Automação que dependa da presença de uma revisão está
+  a apostar contra essa promessa.
 
 ## Como uma quebra é feita, quando tem de acontecer
 

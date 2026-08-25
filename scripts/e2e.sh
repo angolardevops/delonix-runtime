@@ -618,6 +618,55 @@ check "volumes describe depois do destroy recusa" fail "$BIN" volumes describe "
 "$BIN" volumes rm "sv-$PFX" >/dev/null 2>&1
 "$BIN" network rm "sn-$PFX" >/dev/null 2>&1
 
+# ---------------------------------------------------------------------------
+# `stack history` (ADR-0019) — e a propriedade que o desenho inteiro promete.
+#
+# Uma revisão é um REGISTO do que foi pedido, nunca uma fonte de verdade sobre o
+# que existe. É essa distinção que separa isto de um `terraform.tfstate`, e ela
+# só vale se for verificável — daí os últimos checks: **apagar `<root>/stacks/`
+# e todo o resto continua a funcionar**. Sem esse gate, a promessa é uma frase.
+#
+# **Directório próprio, e a primeira versão deste bloco não o tinha.** Sem um
+# `kind: Stack`, a identidade de uma stack é o DIRECTÓRIO do manifesto — e este
+# `$WORK` já teve outros applies antes deste ponto, por isso `--show 1` devolvia
+# a revisão de OUTRO ficheiro e o check falhava com o motor certo. Vale a pena
+# reter: manifestos vizinhos partilham histórico, tal como já partilham posse.
+#
+# **Assimetria encontrada aqui, e não corrigida neste bloco**: `plan`, `destroy`
+# e `prune` aceitam `--name` e o `apply` NÃO. Logo pode planear-se e destruir-se
+# sob um nome que nenhum apply alguma vez usou. Está registado; mexer no `apply`
+# é a superfície mais sensível do grupo e não pertence a um check de E2E.
+HWORK="$WORK/h-$PFX"
+mkdir -p "$HWORK"
+cat >"$HWORK/hist.yaml" <<YAML
+apiVersion: delonix.io/v1
+kind: Volume
+metadata:
+  name: hv-$PFX
+spec: {}
+YAML
+check "stack apply num directório próprio" ok "$BIN" stack apply -f "$HWORK/hist.yaml"
+# Mede a GRAVAÇÃO e não o apply: um check pelo rc do `apply` passaria com o
+# registo por escrever, que é exactamente o defeito que este bloco existe para
+# apanhar.
+check "o apply gravou mesmo uma revisão" ok \
+  bash -c "test \$('$BIN' stack history -f '$HWORK/hist.yaml' -o json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))') -ge 1"
+check "stack history lista" ok "$BIN" stack history -f "$HWORK/hist.yaml"
+# O manifesto renderizado da revisão 1 tem de nomear o recurso que ela aplicou —
+# um `--show` que devolva 0 com o ficheiro errado passaria um check por rc.
+check "stack history --show devolve o manifesto aplicado" ok \
+  bash -c "'$BIN' stack history -f '$HWORK/hist.yaml' --show 1 | grep -q 'hv-$PFX'"
+# Uma revisão que não existe é «não existe» (classe 4), não um 1 genérico.
+check "stack history --show inexistente devolve 4" 4 \
+  "$BIN" stack history -f "$HWORK/hist.yaml" --show 999
+# A propriedade central do ADR-0019: o registo não é fonte de verdade nenhuma.
+rm -rf "$DELONIX_ROOT/stacks"
+check "sem stacks/: o plan continua a funcionar" ok "$BIN" stack plan -f "$HWORK/hist.yaml"
+check "sem stacks/: o destroy continua a funcionar" ok "$BIN" stack destroy -f "$HWORK/hist.yaml"
+check "sem stacks/: o history diz que não há, sem falhar" ok \
+  "$BIN" stack history -f "$HWORK/hist.yaml"
+"$BIN" volumes rm "hv-$PFX" >/dev/null 2>&1
+
 # `stack wait` não tinha UM check — e era o balde dos comandos nunca executados a
 # pagar-se outra vez. O `wait` decidia prontidão com `present == "yes"`, e os
 # Kinds declarativos devolvem `-`: QUALQUER manifesto com um deles esgotava o
