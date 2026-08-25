@@ -51,9 +51,15 @@ pub enum EgressMode {
 pub enum IngressCmd {
     /// Allow inbound traffic to a container: `[proto/]port` from an optional CIDR.
     Allow {
+        /// Container the rule belongs to. Must be on the SDN (`--net <network>`) —
+        /// a `--net host`/`none` container has no firewall to govern.
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         container: String,
-        /// `tcp/5432`, `udp/53`, `5432` (any proto), or `tcp/*` (all ports).
+        // ONE paragraph on purpose: clap turns a second one into `long_help`, and
+        // the catalog looks the rendered string up VERBATIM — a multi-paragraph
+        // help comes out untranslated under `--l18n=pt`. The fact is the whole
+        // point of the line, so it goes in the sentence and not below it.
+        /// `tcp/5432`, `udp/53`, `5432` (any proto), or `tcp/*` (all ports) — the CONTAINER's port and never the host's, because the DNAT already rewrote it in `prerouting`.
         port: String,
         /// Only from this source CIDR (default: anywhere).
         #[arg(long)]
@@ -64,8 +70,15 @@ pub enum IngressCmd {
     },
     /// Deny inbound traffic to a container (same shape as `allow`).
     Deny {
+        /// Container the rule belongs to. Must be on the SDN (`--net <network>`) —
+        /// a `--net host`/`none` container has no firewall to govern.
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         container: String,
+        // ONE paragraph on purpose: clap turns a second one into `long_help`, and
+        // the catalog looks the rendered string up VERBATIM — a multi-paragraph
+        // help comes out untranslated under `--l18n=pt`. The fact is the whole
+        // point of the line, so it goes in the sentence and not below it.
+        /// `tcp/5432`, `udp/53`, `5432` (any proto), or `tcp/*` (all ports) — the CONTAINER's port and never the host's, because the DNAT already rewrote it in `prerouting`.
         port: String,
         #[arg(long)]
         from: Option<String>,
@@ -74,12 +87,14 @@ pub enum IngressCmd {
     },
     /// Set the default inbound policy when no rule matches.
     Policy {
+        /// Container to govern. Must be on the SDN (`--net <network>`).
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         container: String,
         policy: Action,
     },
     /// Publish a host port to the container (DNAT through the ingress).
     Publish {
+        /// Container to govern. Must be on the SDN (`--net <network>`).
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         container: String,
         /// `hostPort:containerPort[/tcp|udp]` or just `port`.
@@ -87,8 +102,11 @@ pub enum IngressCmd {
     },
     /// Remove a published host port.
     Unpublish {
+        /// Container to govern. Must be on the SDN (`--net <network>`).
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         container: String,
+        /// The HOST port to stop publishing — this one IS the host's, because a
+        /// publish is `hostPort:containerPort` and the host side is its identity.
         host_port: String,
     },
     /// Show the inbound firewall (policy + rules) and published ports.
@@ -105,9 +123,11 @@ pub enum IngressCmd {
     },
     /// Remove inbound rule(s) matching `[proto/]port` (all protos if none given).
     Rm {
+        /// Container to govern. Must be on the SDN (`--net <network>`).
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         container: String,
-        /// `tcp/5432`, `5432` (any proto), or `*` (all ports).
+        /// `tcp/5432`, `5432` (any proto), or `*` (all ports) — the CONTAINER's
+        /// port, the same one the rule was written with.
         port: String,
         /// Only rules from this source CIDR (default: any recorded source).
         #[arg(long)]
@@ -115,6 +135,7 @@ pub enum IngressCmd {
     },
     /// Remove all inbound rules (keeps published ports).
     Clear {
+        /// Container to govern. Must be on the SDN (`--net <network>`).
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         container: String,
     },
@@ -124,8 +145,10 @@ pub enum IngressCmd {
 pub enum EgressCmd {
     /// Allow outbound traffic from a container: `[proto/]port` to an optional CIDR.
     Allow {
+        /// Container to govern. Must be on the SDN (`--net <network>`).
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         container: String,
+        /// `tcp/5432`, `udp/53`, `5432` (any proto), or `tcp/*` (all ports) — the port on the DESTINATION this container is reaching for.
         port: String,
         /// Only to this destination CIDR (default: anywhere).
         #[arg(long)]
@@ -135,8 +158,10 @@ pub enum EgressCmd {
     },
     /// Deny outbound traffic from a container (same shape as `allow`).
     Deny {
+        /// Container to govern. Must be on the SDN (`--net <network>`).
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         container: String,
+        /// `tcp/5432`, `udp/53`, `5432` (any proto), or `tcp/*` (all ports) — the port on the DESTINATION this container is reaching for.
         port: String,
         #[arg(long)]
         to: Option<String>,
@@ -145,12 +170,14 @@ pub enum EgressCmd {
     },
     /// Set the default outbound policy when no rule matches.
     Policy {
+        /// Container to govern. Must be on the SDN (`--net <network>`).
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         container: String,
         policy: Action,
     },
     /// Govern a whole network's egress to the Internet.
     Net {
+        /// Network whose egress this governs — the policy applies to every workload attached to it.
         #[arg(add = ArgValueCandidates::new(super::complete::networks))]
         network: String,
         mode: EgressMode,
@@ -163,6 +190,7 @@ pub enum EgressCmd {
     /// Learnt live from DNS answers — the FQDN allowlist nft/CIDR can't
     /// express.
     Host {
+        /// Network whose egress this governs — the policy applies to every workload attached to it.
         #[arg(add = ArgValueCandidates::new(super::complete::networks))]
         network: String,
         /// e.g. `github.com` (matches `github.com` and `*.github.com`).
@@ -182,9 +210,11 @@ pub enum EgressCmd {
     },
     /// Remove outbound rule(s) matching `[proto/]port` (all protos if none given).
     Rm {
+        /// Container to govern. Must be on the SDN (`--net <network>`).
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         container: String,
-        /// `tcp/5432`, `5432` (any proto), or `*` (all ports).
+        /// `tcp/5432`, `5432` (any proto), or `*` (all ports) — the CONTAINER's
+        /// port, the same one the rule was written with.
         port: String,
         /// Only rules to this destination CIDR (default: any recorded destination).
         #[arg(long)]
@@ -195,11 +225,13 @@ pub enum EgressCmd {
     /// CIDR allowlist, FQDN hosts, and the IPs currently learnt from DNS for
     /// those hosts.
     Show {
+        /// Network whose egress this governs — the policy applies to every workload attached to it.
         #[arg(add = ArgValueCandidates::new(super::complete::networks))]
         network: String,
     },
     /// Remove all outbound rules.
     Clear {
+        /// Container to govern. Must be on the SDN (`--net <network>`).
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         container: String,
     },
@@ -217,7 +249,12 @@ pub enum EgressCmd {
 #[derive(Subcommand)]
 pub enum L4guardCmd {
     /// Turn the guard on (or update it): new conns/s and concurrent conns, per source IP.
-    Set { conn_rate: u32, conn_max: u32 },
+    Set {
+        /// New connections per second allowed from ONE source address.
+        conn_rate: u32,
+        /// Concurrent connections allowed from ONE source address at a time.
+        conn_max: u32,
+    },
     /// Turn the guard off.
     Clear,
     /// Show whether the guard is active, with its drop counters.
