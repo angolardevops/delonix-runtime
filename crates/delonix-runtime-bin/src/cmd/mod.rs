@@ -43,6 +43,7 @@ pub mod prune;
 pub mod rbackup;
 pub mod reconcile;
 pub mod remote;
+pub mod revision;
 pub mod scaffold;
 pub mod scan;
 pub mod schema;
