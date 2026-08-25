@@ -619,6 +619,50 @@ check "volumes describe depois do destroy recusa" fail "$BIN" volumes describe "
 "$BIN" network rm "sn-$PFX" >/dev/null 2>&1
 
 # ---------------------------------------------------------------------------
+# `scripts/sbom.py` — o SBOM que a release publica.
+#
+# Uma release assinada diz «isto veio de nós»; um SBOM diz «isto é feito disto»,
+# e é o segundo que responde a «esta CVE afecta-me?». O gerador sai do
+# `Cargo.lock`, que É a árvore resolvida — sem ferramenta de terceiros no passo
+# que existe para garantir a cadeia de fornecimento.
+#
+# O que os checks exigem é o que um consumidor lê: SPDX válido, todo o pacote com
+# versão, e o mesmo lock a dar o MESMO ficheiro (um SBOM que muda a cada corrida
+# não tem nada para comparar entre duas releases).
+if [[ -f "$PWD/scripts/sbom.py" ]]; then
+  check "sbom.py gera" ok bash -c "python3 '$PWD/scripts/sbom.py' > '$WORK/sbom.json'"
+  check "…e é SPDX 2.3 com pacotes" ok bash -c \
+    "python3 -c \"import json;d=json.load(open('$WORK/sbom.json'));assert d['spdxVersion']=='SPDX-2.3';assert len(d['packages'])>50\""
+  check "…todo o pacote tem nome e versão" ok bash -c \
+    "python3 -c \"import json;d=json.load(open('$WORK/sbom.json'));assert all(p.get('name') and p.get('versionInfo') for p in d['packages'])\""
+  # Determinístico: duas gerações do mesmo lock têm de ser byte a byte iguais.
+  check "…e o mesmo lock dá o mesmo ficheiro" ok bash -c \
+    "python3 '$PWD/scripts/sbom.py' > '$WORK/sbom2.json' && cmp -s '$WORK/sbom.json' '$WORK/sbom2.json'"
+else
+  skip "sbom.py" "não está nesta árvore"
+fi
+
+# ---------------------------------------------------------------------------
+# `scripts/bench.sh` — um harness que se recusa a mentir sobre a bancada.
+#
+# A bateria de 2026-08-10 foi retirada por medir a contenção da máquina em vez
+# das ferramentas: três motores seis vezes mais lentos ao mesmo tempo não é uma
+# propriedade de nenhum. O harness passou a caracterizar a bancada ANTES e a
+# recusar-se quando o load passa o limiar.
+#
+# Os dois checks são de CLASSE DE SAÍDA, e é isso que os torna determinísticos
+# numa máquina cuja carga não controlamos: `2` = binário ausente, `3` = bancada
+# recusada. Verificar o RESULTADO da medição aqui seria repetir o erro que este
+# script existe para impedir — e numa máquina de CI daria ruído a cada corrida.
+check "bench.sh sem binário devolve 2, e diz qual" 2 \
+  bash scripts/bench.sh --bin /nao/existe/delonix
+# `--max-load 0` força a recusa sem depender da carga real desta máquina. Não é
+# uma flag só para teste: quem corre numa máquina DEDICADA quer ser mais estrito
+# do que metade dos threads, onde um load de 1 já é alguém a fazer login.
+check "bench.sh recusa uma bancada acima do limiar (3)" 3 \
+  bash scripts/bench.sh --bin "$BIN" --max-load 0
+
+# ---------------------------------------------------------------------------
 # `system doctor` — o host mente em silêncio, e alguém tem de perguntar.
 #
 # Vários pré-requisitos falham SEM DIZER: sem `br_netfilter` o isolamento de
