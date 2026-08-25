@@ -194,27 +194,117 @@ pub fn workloads() -> Vec<CompletionCandidate> {
     cands(nomes)
 }
 
-/// Isolation namespaces IN USE — derived from the containers and VMs that
-/// carry them (a namespace has no record of its own; it exists while something
-/// is in it). `default` is always offered: it is where everything lands, and a
-/// node with nothing running would otherwise complete nothing at all.
+/// How a namespaced Kind's namespaces are found. Three Kinds keep a record this
+/// module can read; the rest stamp the namespace onto whatever they lower to,
+/// and are covered by scanning THAT.
+///
+/// The distinction is written down instead of being left to whoever reads
+/// [`namespaces`] next, because "covered transitively" and "forgotten" look
+/// exactly alike in a function that just scans two stores.
+enum NsSource {
+    /// This module reads the Kind's own store — and the collector IS the table
+    /// entry, so [`namespaces`] cannot drift from what the table claims.
+    Store(fn() -> Vec<String>),
+    /// The Kind carries no store of its own here — the namespace travels to the
+    /// resource named, and that one IS scanned. The string says which, and why.
+    ///
+    /// At runtime only the VARIANT matters (it is skipped); the reason is read
+    /// by `every_via_points_at_a_scanned_kind`, which is the point of it being
+    /// data and not a comment — a comment claiming "Pod is covered via
+    /// Container" cannot be checked when someone removes the Container source.
+    #[cfg_attr(not(test), allow(dead_code))]
+    Via(&'static str),
+}
+
+/// Every Kind that answers something other than [`kinds::Namespaced::Never`],
+/// and where its namespaces come from.
+///
+/// A Kind missing from here is a namespace the completion cannot offer, which
+/// is how a whole tenant becomes untypable. `every_namespaced_kind_declares_a_source`
+/// makes leaving one out a test failure rather than a silent gap — the same
+/// reason `cmd::kinds` exists at all.
+///
+/// The table GOVERNS: [`namespaces`] runs the `Store` collectors from here and
+/// keeps no second list. A classifier nothing consults is the seventh list this
+/// codebase already paid for once.
+const NAMESPACE_SOURCES: &[(&str, NsSource)] = &[
+    ("Container", NsSource::Store(ns_from_containers)),
+    ("Vm", NsSource::Store(ns_from_vms)),
+    // `PerDocument`: a plain volume is global, one with a `share:` block is
+    // scoped, and `list_all` is the call that returns the owner alongside the
+    // record (`VolumeStore::list` deliberately does NOT see the scoped ones).
+    ("Volume", NsSource::Store(ns_from_volumes)),
+    (
+        "Pod",
+        NsSource::Via(
+            "Container — `pod_member_run_opts` stamps the pod's namespace onto every member",
+        ),
+    ),
+    (
+        "Workload",
+        NsSource::Via("Container/Vm — it lowers to one of them and the namespace goes with it"),
+    ),
+    (
+        "ShareVolume",
+        NsSource::Via("Volume — it lowers to a `kind: Volume` with a `share:` block"),
+    ),
+    (
+        "Stack",
+        NsSource::Via(
+            "Container/Vm — `manifest::load` propagates the namespace onto every child it expands",
+        ),
+    ),
+];
+
+fn ns_from_containers() -> Vec<String> {
+    let Ok(store) = delonix_runtime_core::Store::open(state_root().join("containers")) else {
+        return Vec::new();
+    };
+    store
+        .list()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|c| c.namespace)
+        .collect()
+}
+
+fn ns_from_vms() -> Vec<String> {
+    delonix_vm::list(&state_root())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|v| v.namespace)
+        .collect()
+}
+
+/// A tenant whose only resource is a share volume was invisible until this
+/// existed: nothing of theirs is running, so neither store above knows the name.
+///
+/// Asks `VolumeStore::namespaces()` — the owning module's own answer, which
+/// exists so a caller can walk every namespace WITHOUT knowing the on-disk
+/// layout (the `.ns` sub-tree name is private precisely so it can change).
+/// `list_all()` would reach the same names by reading every volume record and
+/// dropping the `None` owners, which is a second copy of "where the records
+/// live" — the thing the rule at the top of this file forbids.
+fn ns_from_volumes() -> Vec<String> {
+    let Ok(store) = delonix_volume::VolumeStore::open(state_root()) else {
+        return Vec::new();
+    };
+    store.namespaces()
+}
+
+/// Isolation namespaces IN USE — a namespace has no record of its own; it
+/// exists while something is in it. The sources are declared in
+/// [`NAMESPACE_SOURCES`] and this runs them; the `Via` Kinds come with them.
+///
+/// `default` is always offered: it is where everything lands, and a node with
+/// nothing running would otherwise complete nothing at all.
 pub fn namespaces() -> Vec<CompletionCandidate> {
     let mut nomes: Vec<String> = vec!["default".to_string()];
-    if let Ok(store) = delonix_runtime_core::Store::open(state_root().join("containers")) {
-        nomes.extend(
-            store
-                .list()
-                .unwrap_or_default()
-                .into_iter()
-                .map(|c| c.namespace),
-        );
+    for (_, src) in NAMESPACE_SOURCES {
+        if let NsSource::Store(collect_from) = src {
+            nomes.extend(collect_from());
+        }
     }
-    nomes.extend(
-        delonix_vm::list(&state_root())
-            .unwrap_or_default()
-            .into_iter()
-            .map(|v| v.namespace),
-    );
     nomes.sort();
     nomes.dedup();
     cands(nomes)
@@ -233,4 +323,84 @@ pub fn containers_or_pods() -> Vec<CompletionCandidate> {
 /// `image logout` has anything to remove.
 pub fn registries() -> Vec<CompletionCandidate> {
     cands(delonix_image::auth::hosts(&state_root()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{NsSource, NAMESPACE_SOURCES};
+    use crate::cmd::kinds::{self, Namespaced};
+
+    /// The gate this module exists to hold: a Kind that `cmd::kinds` says
+    /// carries a namespace, and that nothing here knows how to reach, is a
+    /// tenant whose name TAB can never offer.
+    ///
+    /// It failed when written — `Volume` answers `PerDocument` and the
+    /// derivation only read the container and VM stores, so a tenant whose
+    /// single resource was a share volume did not exist as far as completion
+    /// was concerned.
+    #[test]
+    fn every_namespaced_kind_declares_a_source() {
+        let missing: Vec<&str> = kinds::all()
+            .filter(|f| f.namespaced != Namespaced::Never)
+            .map(|f| f.kind)
+            .filter(|k| !NAMESPACE_SOURCES.iter().any(|(kind, _)| kind == k))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "namespaced Kind(s) with no source declared in NAMESPACE_SOURCES: {}. \
+             Add the row: `Store` if this module reads its registry, \
+             `Via(...)` if the namespace travels to another Kind that IS already scanned.",
+            missing.join(", ")
+        );
+    }
+
+    /// The other direction, and it is not symmetry for its own sake: an entry
+    /// for a Kind that is `Never` claims to cover a namespace that does not
+    /// exist, and an entry for a Kind that was REMOVED reads as coverage while
+    /// covering nothing. Both make the table above lie in the reassuring
+    /// direction.
+    #[test]
+    fn no_declared_source_is_left_over() {
+        let leftover: Vec<&str> = NAMESPACE_SOURCES
+            .iter()
+            .map(|(kind, _)| *kind)
+            .filter(|k| !kinds::all().any(|f| f.kind == *k && f.namespaced != Namespaced::Never))
+            .collect();
+        assert!(
+            leftover.is_empty(),
+            "source declared for a Kind that does not exist or is not namespaced: {}",
+            leftover.join(", ")
+        );
+    }
+
+    /// A `Via` has to name Kinds that are THEMSELVES scanned, or the chain ends
+    /// in nothing and the entry reads as coverage while covering zero. Reads the
+    /// prefix up to the em dash, which is where the table writes the target
+    /// before the reason.
+    ///
+    /// Requires EVERY named target to be backed by a `Store`, not just one: a
+    /// `Workload` lowers to a Container *or* a Vm, and covering one of the two
+    /// leaves the other invisible.
+    #[test]
+    fn every_via_points_at_a_scanned_kind() {
+        for (kind, src) in NAMESPACE_SOURCES {
+            let NsSource::Via(texto) = src else { continue };
+            let targets = texto.split('—').next().unwrap_or("").trim();
+            assert!(
+                !targets.is_empty(),
+                "{kind}: a `Via` source has to name the Kind before the em dash"
+            );
+            for target in targets.split('/') {
+                let target = target.trim();
+                let scanned = NAMESPACE_SOURCES
+                    .iter()
+                    .any(|(o, s)| *o == target && matches!(s, NsSource::Store(_)));
+                assert!(
+                    scanned,
+                    "{kind} says the namespace travels to {target:?}, \
+                     which no `Store` source scans"
+                );
+            }
+        }
+    }
 }
