@@ -2333,7 +2333,10 @@ fn libvirt_cpu_xml(cfg: &VmConfig) -> String {
 /// network is 100% abstracted (no hand-written XML). **Pure function** — tested without a daemon.
 fn libvirt_interface_xml(cfg: &VmConfig, mac: &str) -> String {
     let mac = xml_escape(mac);
-    let model = "      <model type='virtio'/>\n    </interface>\n";
+    let model = &format!(
+        "      <model type='virtio'/>\n{}    </interface>\n",
+        libvirt_filterref_xml(cfg.net_mode.as_deref())
+    )[..];
     match cfg.net_mode.as_deref().unwrap_or("user") {
         "nat" | "network" => {
             // NAT network managed by libvirt (DHCP + IP via domifaddr). `bridge` = name
@@ -2409,6 +2412,177 @@ fn parse_pci_addr(dev: &str) -> Option<(String, String, String, String)> {
     ))
 }
 
+/// The nwfilter every engine-created libvirt VM's NIC references.
+///
+/// # Why a filter of ours and not `clean-traffic`
+///
+/// libvirt ships `clean-traffic`, and it is the obvious choice until you read
+/// it. Measured on libvirt 10.0.0, its last two members are
+/// `no-other-l2-traffic` — a bare `<rule action='drop' direction='inout'
+/// priority='1000'/>` — after rules that accept only IPv4 and ARP. Referencing
+/// it would therefore drop **all IPv6** out of every VM, silently, as a side
+/// effect of asking for anti-spoofing. That is a functional regression wearing
+/// a security label, so this composes the anti-spoofing members and stops
+/// there.
+///
+/// # Why `no-ip-spoofing` is deliberately NOT in here
+///
+/// It pins the source IPv4 to the one address libvirt knows for the NIC. That
+/// is correct for a plain workload and **wrong for a router-shaped one**: a DKS
+/// worker running a CNI emits pod traffic with POD source addresses, none of
+/// which is the node's, so pinning the source IP would black-hole every pod's
+/// egress. The two members below have no such failure mode — pods share the
+/// node's MAC — which is why they are safe as an unconditional floor while IP
+/// pinning is not. Pinning belongs to a per-VM opt-in, with a name that says
+/// what it costs; it is not smuggled into the default.
+///
+/// So what this DOES guarantee is exactly: the guest cannot emit a frame with a
+/// source MAC that is not its own, and cannot answer ARP for one. What it does
+/// NOT guarantee — and no caller should be told otherwise — is IPv4 source
+/// pinning, IPv6/NDP anti-spoofing, or any L2/L3 filtering beyond those two.
+const ANTISPOOF_FILTER: &str = "delonix-antispoof";
+
+/// The uuid used when NOTHING of this name exists yet. Never assume it is the
+/// one in the daemon — see [`antispoof_filter_xml`].
+const ANTISPOOF_FILTER_UUID: &str = "de102000-0000-4000-8000-000000000001";
+
+/// The filter's definition, carrying `uuid`. **Pure.**
+///
+/// # Why the uuid is a parameter and not baked in
+///
+/// `nwfilter-define` is "define **or update**", and which of the two it does
+/// turns entirely on the uuid: given a name that already exists under a
+/// DIFFERENT uuid it refuses outright — `filter 'delonix-antispoof' already
+/// exists with uuid …`. So a hard-coded uuid is idempotent only on a host that
+/// has never seen this filter under another one, and a host that HAS (an older
+/// engine, an operator, a leftover) would have every `vm create` fail, because
+/// [`ensure_antispoof_filter`] fails closed.
+///
+/// That is not hypothetical: it is how this function came to take a parameter.
+/// The first cut pinned the uuid, passed every unit test, and then failed on
+/// the first live run against a daemon that already had the name. Hence
+/// [`ensure_antispoof_filter`] reads the uuid in place and hands it back here —
+/// the define then UPDATES, which is also what makes it self-healing if someone
+/// weakened the members out of band (measured, libvirt 10.0.0).
+fn antispoof_filter_xml(uuid: &str) -> String {
+    format!(
+        "<filter name='{ANTISPOOF_FILTER}' chain='root'>\n  \
+         <uuid>{uuid}</uuid>\n  \
+         <filterref filter='no-mac-spoofing'/>\n  \
+         <filterref filter='no-arp-mac-spoofing'/>\n</filter>\n"
+    )
+}
+
+/// The `<uuid>` out of a `nwfilter-dumpxml`. **Pure** — there is no
+/// `nwfilter-info` in virsh, so the XML is the only place the uuid is legible.
+fn parse_nwfilter_uuid(xml: &str) -> Option<String> {
+    let rest = xml.split_once("<uuid>")?.1;
+    let uuid = rest.split_once("</uuid>")?.0.trim();
+    (!uuid.is_empty()).then(|| uuid.to_string())
+}
+
+/// The `<filterref>` line injected into `<interface>`. Kept as one literal so
+/// the emitted name cannot drift from [`ANTISPOOF_FILTER`] (a test pins them
+/// together).
+const ANTISPOOF_FILTERREF: &str = "      <filterref filter='delonix-antispoof'/>\n";
+
+/// Whether a nwfilter can attach to this NIC at all. **Pure.**
+///
+/// `nat`/`network` and `bridge` give the guest a tap device on the host, which
+/// is what libvirt applies a filter to. `user` mode (SLIRP/passt) has no tap —
+/// the traffic never reaches a host interface libvirt can program — so a
+/// `filterref` there would be accepted and do nothing. Emitting one anyway is
+/// the anti-pattern this codebase has already had to correct three times over
+/// (`--security-opt seccomp=`, `-v …:z`, `--network-alias`): an option
+/// accepted, ignored, and believed.
+fn antispoof_applies(net_mode: Option<&str>) -> bool {
+    matches!(net_mode, Some("nat") | Some("network") | Some("bridge"))
+}
+
+/// The `<filterref>` block for this NIC, or empty. **Pure** — tested without a
+/// daemon.
+fn libvirt_filterref_xml(net_mode: Option<&str>) -> &'static str {
+    if antispoof_applies(net_mode) {
+        ANTISPOOF_FILTERREF
+    } else {
+        ""
+    }
+}
+
+/// Defines [`ANTISPOOF_FILTER`] on `uri`, idempotently.
+///
+/// **Fails closed, and that is the whole point.** A domain whose NIC references
+/// a filter the daemon does not have is refused by `virsh define`, so the only
+/// alternatives are "abort with a reason" and "quietly drop the filterref and
+/// boot an unfiltered VM the operator believes is filtered". The second is how
+/// a security control becomes a comment, so this returns the error and lets
+/// `boot` carry it up.
+///
+/// Only reached for the modes [`antispoof_applies`] accepts, which already
+/// require the system connection — so in practice the daemon is reachable by
+/// the time this runs.
+fn ensure_antispoof_filter(uri: &str) -> Result<()> {
+    // Adopt the uuid already in the daemon when the name is taken; only mint
+    // ours when nothing is there. See `antispoof_filter_xml` for what a pinned
+    // uuid costs on a host that has seen this name before.
+    let uuid = capture(
+        "virsh",
+        &["-c", uri, "nwfilter-dumpxml", "--", ANTISPOOF_FILTER],
+    )
+    .as_deref()
+    .and_then(parse_nwfilter_uuid)
+    .unwrap_or_else(|| ANTISPOOF_FILTER_UUID.to_string());
+    if virsh_define_xml(
+        uri,
+        "nwfilter-define",
+        "nwfilter",
+        &antispoof_filter_xml(&uuid),
+    ) {
+        return Ok(());
+    }
+    Err(Error::Runtime {
+        context: "libvirt",
+        message: format!(
+            "could not define the '{ANTISPOOF_FILTER}' network filter on {uri} — refusing to \
+             create the VM rather than boot it without the anti-spoofing it is supposed to have. \
+             Check that the connection is reachable (`virsh -c {uri} nwfilter-list`)."
+        ),
+    })
+}
+
+/// Writes `xml` to a private temp file and runs `virsh <subcommand> <path>`,
+/// returning whether it succeeded.
+///
+/// The temp-file discipline is not incidental and must not be re-derived by the
+/// next caller: a PREDICTABLE name in the world-writable `/tmp` let another
+/// local user pre-create a symlink and divert the write (audit finding).
+/// `create_new` (`O_EXCL`) fails if the path already exists — without following
+/// symlinks — and `0600` closes reading by others. One copy, so a second
+/// definition site cannot get it subtly wrong.
+fn virsh_define_xml(uri: &str, subcommand: &str, tag: &str, xml: &str) -> bool {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let path = std::env::temp_dir().join(format!("delonix-{tag}-{}.xml", std::process::id()));
+    let _ = std::fs::remove_file(&path); // cleans up a leftover OF OURS from a previous run
+    let Ok(mut f) = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)
+    else {
+        return false;
+    };
+    let ok = f.write_all(xml.as_bytes()).is_ok()
+        && stable_cmd("virsh")
+            .args(["-c", uri, subcommand, &path.to_string_lossy()])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+    drop(f);
+    let _ = std::fs::remove_file(&path);
+    ok
+}
+
 /// Ensures a ready NAT libvirt network (`--net-mode nat` → host-pingable IP).
 /// Best-effort: if `net` does not exist and is the `default`, it defines the standard NAT
 /// network (virbr0, 192.168.122.0/24, DHCP); then `net-start` + `net-autostart`. A
@@ -2425,30 +2599,9 @@ fn ensure_libvirt_network(uri: &str, net: &str) {
     if !exists && net == "default" {
         // XML of the standard libvirt NAT network (the one most distros ship).
         let xml = "<network>\n  <name>default</name>\n  <forward mode='nat'/>\n                     <bridge name='virbr0' stp='on' delay='0'/>\n                     <ip address='192.168.122.1' netmask='255.255.255.0'>\n                       <dhcp><range start='192.168.122.2' end='192.168.122.254'/></dhcp>\n                     </ip>\n</network>\n";
-        // Audit finding: a PREDICTABLE name in /tmp (world-writable)
-        // allowed another local user to pre-create a symlink and divert the
-        // write. `create_new` (O_EXCL) fails if the path already exists — without
-        // following symlinks — and 0600 closes reading by others.
-        use std::io::Write as _;
-        use std::os::unix::fs::OpenOptionsExt as _;
-        let path = std::env::temp_dir().join(format!(
-            "delonix-libvirt-default-{}.xml",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_file(&path); // cleans up a leftover OF OURS from a previous run
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&path)
-        {
-            if f.write_all(xml.as_bytes()).is_ok() {
-                let _ = stable_cmd("virsh")
-                    .args(["-c", uri, "net-define", &path.to_string_lossy()])
-                    .output();
-            }
-            let _ = std::fs::remove_file(&path);
-        }
+        // The symlink-in-/tmp audit finding this used to carry inline now lives
+        // once, in `virsh_define_xml` — see the note there.
+        let _ = virsh_define_xml(uri, "net-define", "libvirt-default", xml);
     }
     // `.output()` (not `.status()`) so the "Network default started / marked as
     // autostarted" chatter does not leak into the clean `vm create` progress.
@@ -2520,6 +2673,14 @@ impl VmBackend for LibvirtBackend {
             if let Some(ip) = cfg.static_ip.as_deref() {
                 libvirt_reserve_ip(uri, net, &mac, ip)?;
             }
+        }
+        // The NIC's `<filterref>` is emitted by `libvirt_domain_xml` below, and
+        // `virsh define` REFUSES a domain naming a filter the daemon does not
+        // have. So the filter has to exist first, and a failure here has to
+        // abort — see `ensure_antispoof_filter` for why the alternative (drop
+        // the filterref and boot anyway) is the one thing not on the table.
+        if antispoof_applies(cfg.net_mode.as_deref()) {
+            ensure_antispoof_filter(uri)?;
         }
         let mut xml = libvirt_domain_xml(cfg, &overlay_abs, &mac);
         // On `qemu:///system` the QEMU process runs as the `libvirt-qemu` user,
@@ -4798,6 +4959,144 @@ Format specific information:
         assert_eq!(parse_pci_addr("0000:65:0.1"), None); // slot too short
         assert_eq!(parse_pci_addr("0000:65:00.12"), None); // func too long
         assert_eq!(parse_pci_addr("000g:65:00.1"), None); // non-hex digit
+    }
+
+    /// Live proof, against this machine's `qemu:///system`. `#[ignore]` — it
+    /// needs a running libvirt and permission to define, so it stays out of the
+    /// normal battery; run it with
+    /// `cargo test -p delonix-vm -- --ignored antispoof_live`.
+    ///
+    /// It exists because both design decisions came from MEASURED daemon
+    /// behaviour (the uuid-dependent define, and the second `filterref` dropped
+    /// in silence), and an assertion about strings proves neither.
+    #[test]
+    #[ignore]
+    fn antispoof_live_defines_and_survives_the_domain() {
+        let uri = "qemu:///system";
+        if super::capture("virsh", &["-c", uri, "nwfilter-list"]).is_none() {
+            eprintln!("{uri} unreachable — nothing to prove here");
+            return;
+        }
+        // 1. The define is idempotent: three times running, no error.
+        for _ in 0..3 {
+            super::ensure_antispoof_filter(uri).expect("nwfilter-define");
+        }
+        // 2. The domain the production code generates really does define...
+        let mut cfg = test_vm_cfg("128M");
+        cfg.name = "dlx-itest-antispoof".into();
+        cfg.net_mode = Some("nat".into());
+        let xml =
+            super::libvirt_domain_xml(&cfg, "/var/tmp/dlx-itest.qcow2", &super::mac_for(&cfg.name));
+        assert!(super::virsh_define_xml(
+            uri,
+            "define",
+            "itest-antispoof",
+            &xml
+        ));
+        // 3. ...and libvirt KEPT the reference to the filter.
+        let dumped =
+            super::capture("virsh", &["-c", uri, "dumpxml", "--", &cfg.name]).expect("dumpxml");
+        let _ = super::quiet("virsh", &["-c", uri, "undefine", "--", &cfg.name]);
+        assert!(
+            dumped.contains(super::ANTISPOOF_FILTER),
+            "the filter did not survive the define: {dumped}"
+        );
+    }
+
+    #[test]
+    fn filterref_only_where_libvirt_can_apply_it() {
+        // nat/network/bridge give the guest a tap — libvirt has something to
+        // apply the filter to.
+        assert_eq!(
+            super::libvirt_filterref_xml(Some("nat")),
+            super::ANTISPOOF_FILTERREF
+        );
+        assert_eq!(
+            super::libvirt_filterref_xml(Some("network")),
+            super::ANTISPOOF_FILTERREF
+        );
+        assert_eq!(
+            super::libvirt_filterref_xml(Some("bridge")),
+            super::ANTISPOOF_FILTERREF
+        );
+        // `user` (SLIRP/passt) has no tap. Emitting there would be accepted and
+        // ignored — exactly what this repo has already corrected three times.
+        assert_eq!(super::libvirt_filterref_xml(Some("user")), "");
+        assert_eq!(super::libvirt_filterref_xml(None), "");
+    }
+
+    #[test]
+    fn the_emitted_name_cannot_drift_from_the_defined_one() {
+        // Two literals, one name: rename one and every domain references a
+        // filter `nwfilter-define` never created, so `virsh define` refuses
+        // EVERY VM. Cheap to pin here.
+        assert!(super::ANTISPOOF_FILTERREF.contains(super::ANTISPOOF_FILTER));
+        assert!(super::antispoof_filter_xml(super::ANTISPOOF_FILTER_UUID)
+            .contains(super::ANTISPOOF_FILTER));
+    }
+
+    #[test]
+    fn the_uuid_round_trips_or_the_define_is_not_idempotent() {
+        // Measured: `nwfilter-define` refuses a name that already exists under
+        // a DIFFERENT uuid. Without carrying the right one, the second VM on
+        // the machine failed to create.
+        let xml = super::antispoof_filter_xml(super::ANTISPOOF_FILTER_UUID);
+        assert!(xml.contains(&format!("<uuid>{}</uuid>", super::ANTISPOOF_FILTER_UUID)));
+        // And the uuid MUST come out as it went in — that is what turns the
+        // define into an update instead of a collision.
+        let other = "abcdef01-2345-4678-89ab-cdef01234567";
+        assert!(super::antispoof_filter_xml(other).contains(other));
+        // Round trip: what we write is what we know how to read back.
+        assert_eq!(
+            super::parse_nwfilter_uuid(&super::antispoof_filter_xml(other)).as_deref(),
+            Some(other)
+        );
+        assert_eq!(super::parse_nwfilter_uuid("<filter/>"), None);
+    }
+
+    #[test]
+    fn the_filter_is_anti_spoofing_and_not_an_l2_firewall() {
+        let xml = super::antispoof_filter_xml(super::ANTISPOOF_FILTER_UUID);
+        // What it promises:
+        assert!(xml.contains("no-mac-spoofing"));
+        assert!(xml.contains("no-arp-mac-spoofing"));
+        // What it must not gain by accident — each with the measured cost:
+        //  · clean-traffic / no-other-l2-traffic end in a blanket drop and
+        //    would throw away ALL of the guest's IPv6;
+        //  · no-ip-spoofing pins the source IPv4 and would black-hole the
+        //    egress of every pod on a DKS node running a CNI.
+        assert!(!xml.contains("clean-traffic"), "clean-traffic drops IPv6");
+        assert!(
+            !xml.contains("no-other-l2-traffic"),
+            "blanket drop at priority 1000"
+        );
+        assert!(!xml.contains("no-ip-spoofing"), "breaks a DKS node's CNI");
+        assert!(
+            !xml.contains("no-ipv6-spoofing"),
+            "the ipv6-ip chain ends in a drop"
+        );
+    }
+
+    #[test]
+    fn the_domain_carries_exactly_one_filterref() {
+        // Measured against libvirt 10.0.0: an `<interface>` with TWO
+        // `filterref` is accepted by `define` with success and the second is
+        // DISCARDED in silence. That is why the filter is composed on the
+        // libvirt side and only one reference leaves here — if two ever did,
+        // half the protection would stop existing with nobody noticing.
+        let mut cfg = test_vm_cfg("1G");
+        cfg.net_mode = Some("nat".into());
+        let xml = super::libvirt_domain_xml(&cfg, "/x.qcow2", "52:54:00:aa:bb:cc");
+        assert_eq!(xml.matches("<filterref").count(), 1, "{xml}");
+        assert!(xml.contains("</interface>"));
+    }
+
+    #[test]
+    fn user_mode_carries_no_filterref_at_all() {
+        let mut cfg = test_vm_cfg("1G");
+        cfg.net_mode = Some("user".into());
+        let xml = super::libvirt_domain_xml(&cfg, "/x.qcow2", "52:54:00:aa:bb:cc");
+        assert_eq!(xml.matches("<filterref").count(), 0, "{xml}");
     }
 
     #[test]
