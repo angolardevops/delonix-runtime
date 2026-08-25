@@ -26,15 +26,20 @@ pub enum NetnsCmd {
     /// Attach a netns to delonix0 via veth (the holder is the netns/veth factory).
     Attach {
         /// Netns name (typically a container id/short-id).
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::netns))]
         name: String,
         /// IP in the infra subnet. Defaults to a deterministic one derived from `name`.
         #[arg(long)]
         ip: Option<String>,
     },
     /// Detach (and destroy) a previously attached netns.
-    Detach { name: String },
+    Detach {
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::netns))]
+        name: String,
+    },
     /// Run a command inside an attached netns (exercises the runtime join path).
     Exec {
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::netns))]
         name: String,
         #[arg(trailing_var_arg = true, required = true)]
         command: Vec<String>,
@@ -42,6 +47,7 @@ pub enum NetnsCmd {
     /// Publish a port through the ingress (add_hostfwd + DNAT) to a container.
     Publish {
         /// Netns/container name (its IP is derived unless `--ip` is given).
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::netns))]
         name: String,
         /// Port mapping `hostPort:containerPort[/tcp|udp]`.
         spec: String,
@@ -54,6 +60,7 @@ pub enum NetnsCmd {
     /// Apply (or clear) a container's parameterizable firewall AT THE INGRESS.
     Firewall {
         /// Netns/container name.
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::netns))]
         name: String,
         /// ContainerFw as JSON, e.g. `{"enabled":true,"policyIn":"deny","rules":[...]}`.
         #[arg(long, conflicts_with = "clear")]

@@ -3819,6 +3819,17 @@ checklist para quem mexer aqui do que como lista de correcções:
   **tabela `NAMESPACE_SOURCES`, que passa a GOVERNAR a derivação** e obriga cada Kind namespaced a
   declarar-se `Store` (este módulo lê-lhe o registo) ou `Via` (o namespace viaja, e para onde). Um
   classificador que ninguém consulta seria a sétima lista que este repo já pagou uma vez;
+- **corrigir o enum de EXECUÇÃO não é corrigir a CLI.** Os três caminhos de imagem VM
+  convergem no `VmImageCmd` do `cmd/vmimage.rs`, mas a DECLARAÇÃO `clap` de cada um vive
+  onde o utilizador lhe chega: pus o completador no `VmImageCmd::Rm` e o
+  `delonix image vm rm <TAB>` continuou a oferecer zero, porque quem ele parseia é o
+  `image.rs::VmSub::Rm` — uma segunda declaração do mesmo comando, dezasseis linhas acima
+  de um `VmSub::Describe` que já completava. **A prova não é o código compilar, é sondar
+  os três pontos de entrada** (`COMPLETE=bash <bin> -- delonix image vm rm ''`), que é o
+  passo 4 da `delonix-feature-dev` e que aqui deu 0 / 18 / 37 antes e 18 / 18 / 37 depois.
+  O terceiro é `image --vm rm`, que **recusa sempre** (`rc=1`, a nomear a alternativa) e
+  cujos 37 candidatos são de imagens de container — ruído cosmético que o mecanismo do
+  clap não consegue evitar, porque um `ArgValueCandidates` não vê a flag `--vm`;
 - **`/sys/fs/cgroup/cgroup.subtree_control` conter `memory`** não é «a MINHA sessão tem
   delegação» — é do cgroup RAIZ do host, e contém-no sempre (v0.42.2, ver abaixo);
 - **um lease PREVISTO não é uma VM VIVA** — em cloud-hypervisor o IP não é observado, é

@@ -476,7 +476,7 @@ pub enum VmImageCmd {
     /// unreadable. `--force` overrides, and says what it is breaking.
     Rm {
         /// Image name(s), as shown by `image vm ls`.
-        #[arg(required = true)]
+        #[arg(required = true, add = clap_complete::engine::ArgValueCandidates::new(super::complete::vm_images))]
         names: Vec<String>,
         /// Remove it even while VMs back onto it — **those VMs stop being
         /// readable**, and there is no way back.
