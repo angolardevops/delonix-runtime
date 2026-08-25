@@ -64,6 +64,9 @@ pub enum PodCmd {
         /// Output format: `table` (default) or `json` (ADR-0005).
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: output::OutputFormat,
+        /// Show only the pods of this isolation namespace. Omit to list every one.
+        #[arg(short = 'n', long, add = clap_complete::engine::ArgValueCandidates::new(super::complete::namespaces))]
+        namespace: Option<String>,
     },
     /// Details of one or more pods (containers + the shared IP), `kubectl` style.
     Describe {
@@ -97,7 +100,7 @@ pub fn run(action: PodCmd) -> Result<()> {
             let docs = manifest::load(&path)?;
             apply(&docs)
         }
-        PodCmd::Ls { output } => ls(output),
+        PodCmd::Ls { output, namespace } => ls(output, namespace.as_deref()),
         PodCmd::Describe { names } => describe(&names),
         PodCmd::Rm { names, force } => {
             for n in &names {
@@ -492,6 +495,9 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
 #[derive(serde::Serialize)]
 struct PodLsRow {
     name: String,
+    /// The pod's namespace, read off its MEMBERS: `pod_member_run_opts` stamps
+    /// the pod's onto every one of them, so any member answers for the pod.
+    namespace: String,
     running: usize,
     total: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -499,7 +505,7 @@ struct PodLsRow {
     status: String,
 }
 
-fn ls(format: output::OutputFormat) -> Result<()> {
+fn ls(format: output::OutputFormat, namespace: Option<&str>) -> Result<()> {
     let (_images, store) = open_stores()?;
     let mut pods: BTreeMap<String, Vec<Container>> = BTreeMap::new();
     for c in store.list()? {
@@ -525,6 +531,10 @@ fn ls(format: output::OutputFormat) -> Result<()> {
             "Degraded"
         };
         rows.push(PodLsRow {
+            namespace: members
+                .first()
+                .map(|c| c.namespace.clone())
+                .unwrap_or_default(),
             name: pod,
             running,
             total: members.len(),
@@ -532,19 +542,32 @@ fn ls(format: output::OutputFormat) -> Result<()> {
             status: status.to_string(),
         });
     }
+    // BEFORE the format branch — a `--namespace` that narrows the table and
+    // leaves the JSON alone is a flag that works in one output and not the other.
+    if let Some(ns) = namespace {
+        rows.retain(|r| {
+            let owner = if r.namespace.is_empty() {
+                "default"
+            } else {
+                &r.namespace
+            };
+            owner == ns
+        });
+    }
     if format == output::OutputFormat::Json {
         return output::print_json(&rows);
     }
-    let mut t = output::Table::new(&["POD", "CONTAINERS", "IP", "STATUS"]);
+    let mut t = output::Table::new(&["POD", "CONTAINERS", "IP", "STATUS", "NAMESPACE"]);
     for r in rows {
         t.row(vec![
             r.name,
             format!("{}/{}", r.running, r.total),
             r.ip.unwrap_or_else(|| "-".to_string()),
             r.status,
+            output::namespace_cell(&r.namespace, namespace.is_some()),
         ]);
     }
-    t.print();
+    t.drop_uninformative().print();
     Ok(())
 }
 

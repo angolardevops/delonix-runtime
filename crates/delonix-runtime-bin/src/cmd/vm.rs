@@ -2450,6 +2450,7 @@ pub(crate) fn workload_rows() -> Result<Vec<super::workload::WorkloadRow>> {
             name: vm.name.clone(),
             status: fmt_vm_status(&vm.status),
             info: format!("{} vCPU, {}", vm.vcpus, vm.memory),
+            namespace: vm.namespace.clone(),
         });
     }
     Ok(rows)

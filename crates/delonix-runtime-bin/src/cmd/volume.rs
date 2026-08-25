@@ -452,6 +452,15 @@ pub enum VolumeCmd {
         /// Output format: `table` (default) or `json` (ADR-0005).
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: output::OutputFormat,
+        // Without it the listing is exactly what it always was — the scoped
+        // sub-tree is deliberately invisible to `VolumeStore::list`, and
+        // widening the default would add rows to everyone's `volumes ls`. In a
+        // `//` comment and not a second paragraph: the catalog looks the
+        // rendered help up VERBATIM, so a multi-paragraph `long_help` comes out
+        // untranslated under `--l18n=pt`.
+        /// Show this namespace's volumes instead of the unscoped ones.
+        #[arg(short = 'n', long, add = clap_complete::engine::ArgValueCandidates::new(super::complete::namespaces))]
+        namespace: Option<String>,
     },
     /// Details of a volume (includes real on-disk usage).
     Inspect {
@@ -570,7 +579,7 @@ pub fn run(action: VolumeCmd) -> Result<()> {
             println!("{}", vol.name);
             Ok(())
         }
-        VolumeCmd::Ls { output } => cmd_ls(&store, output),
+        VolumeCmd::Ls { output, namespace } => cmd_ls(&store, output, namespace.as_deref()),
         VolumeCmd::Inspect { name, output } => cmd_inspect(&store, &name, output),
         VolumeCmd::Describe { names } => cmd_describe(&store, &names),
         VolumeCmd::Rm {
@@ -844,26 +853,60 @@ struct VolumeLsRow {
     name: String,
     driver: String,
     mountpoint: String,
+    /// Absent unless a namespace was asked for — an unscoped volume belongs to
+    /// no tenant, and emitting `null` on every row of the common case is a
+    /// field that says nothing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    namespace: Option<String>,
 }
 
-fn cmd_ls(store: &VolumeStore, format: output::OutputFormat) -> Result<()> {
-    let vols = store.list()?;
+fn cmd_ls(
+    store: &VolumeStore,
+    format: output::OutputFormat,
+    namespace: Option<&str>,
+) -> Result<()> {
+    // Without the flag this is EXACTLY what it always was: `VolumeStore::list`
+    // deliberately does not see the scoped sub-tree, and widening the default
+    // would silently add rows to everyone's `volumes ls`.
+    //
+    // With it, the question is a different one — «what does this tenant have» —
+    // and `list_all` is the call that answers it, because it returns the owner
+    // attached to each record.
+    let vols: Vec<(String, delonix_volume::Volume)> = match namespace {
+        None => store
+            .list()?
+            .into_iter()
+            .map(|v| (String::new(), v))
+            .collect(),
+        Some(ns) => store
+            .list_all()?
+            .into_iter()
+            .filter(|ov| ov.namespace.as_deref() == Some(ns))
+            .map(|ov| (ns.to_string(), ov.volume))
+            .collect(),
+    };
     if format == output::OutputFormat::Json {
         let rows: Vec<VolumeLsRow> = vols
             .into_iter()
-            .map(|v| VolumeLsRow {
+            .map(|(ns, v)| VolumeLsRow {
                 name: v.name,
                 driver: v.driver,
                 mountpoint: v.mountpoint,
+                namespace: (!ns.is_empty()).then_some(ns),
             })
             .collect();
         return output::print_json(&rows);
     }
-    let mut t = output::Table::new(&["NAME", "DRIVER", "MOUNTPOINT"]);
-    for v in vols {
-        t.row(vec![v.name, v.driver, v.mountpoint]);
+    let mut t = output::Table::new(&["NAME", "DRIVER", "MOUNTPOINT", "NAMESPACE"]);
+    for (ns, v) in vols {
+        t.row(vec![
+            v.name,
+            v.driver,
+            v.mountpoint,
+            output::namespace_cell(&ns, namespace.is_some()),
+        ]);
     }
-    t.print();
+    t.drop_uninformative().print();
     Ok(())
 }
 
