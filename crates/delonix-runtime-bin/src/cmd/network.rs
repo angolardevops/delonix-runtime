@@ -23,7 +23,7 @@
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
 use delonix_net::{infra, Network, NetworkStore};
-use delonix_runtime_core::Result;
+use delonix_runtime_core::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -397,13 +397,20 @@ pub enum NetworkCmd {
     /// MAY cross; it does not say it is allowed — the per-workload firewall
     /// still decides, and a namespace boundary still needs its own policy.
     Route {
-        /// Source network (the side that may initiate).
-        from: String,
+        /// Source network (the side that may initiate). Omit BOTH to list every
+        /// route this node declares.
+        #[arg(add = ArgValueCandidates::new(super::complete::networks))]
+        from: Option<String>,
         /// Destination network.
-        to: String,
+        #[arg(add = ArgValueCandidates::new(super::complete::networks))]
+        to: Option<String>,
         /// Close the path instead of opening it.
         #[arg(long)]
         rm: bool,
+        /// Output format: `table` (default) or `json` (ADR-0005). Applies to the
+        /// listing and to the single route the command just acted on.
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: output::OutputFormat,
     },
     /// Dashboard (KPIs + table) of the networks — interactive TUI, or `--once` snapshot.
     Dash {
@@ -499,21 +506,39 @@ pub fn run(action: NetworkCmd) -> Result<()> {
             rm,
             apply,
         } => super::vlan::run(&parent, id, rm, apply),
-        NetworkCmd::Route { from, to, rm } => {
-            delonix_net::infra::network_route(&from, &to, !rm)?;
-            println!(
-                "{}",
-                super::po::tf(
-                    if rm {
-                        "route closed: {from} -> {to}"
-                    } else {
-                        "route open: {from} -> {to}"
-                    },
-                    &[("from", &from), ("to", &to)],
-                )
-            );
-            Ok(())
-        }
+        NetworkCmd::Route {
+            from,
+            to,
+            rm,
+            output,
+        } => match (from, to) {
+            // No arguments: the listing. Routes were persisted and enumerable
+            // (`infra::route_list`) since they gained a record, and nothing
+            // surfaced them — an operator could open an exemption to the
+            // isolation between networks and then had no way to see it.
+            (None, None) => super::netroute::cmd_ls(output),
+            // One of the two: name the form instead of guessing which end was
+            // meant. A route is a PAIR — that is its whole identity.
+            (Some(_), None) | (None, Some(_)) => Err(Error::Invalid(
+                super::po::t("a route is a PAIR: give both `<FROM> <TO>`, or neither to list")
+                    .into(),
+            )),
+            (Some(from), Some(to)) => {
+                delonix_net::infra::network_route(&from, &to, !rm)?;
+                println!(
+                    "{}",
+                    super::po::tf(
+                        if rm {
+                            "route closed: {from} -> {to}"
+                        } else {
+                            "route open: {from} -> {to}"
+                        },
+                        &[("from", &from), ("to", &to)],
+                    )
+                );
+                Ok(())
+            }
+        },
         NetworkCmd::Ls { output } => cmd_ls(&store, output),
         NetworkCmd::Node { action } => cmd_node(action),
         NetworkCmd::Create {

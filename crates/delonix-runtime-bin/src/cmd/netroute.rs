@@ -149,6 +149,150 @@ pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
     delonix_net::infra::network_route(from, to, false)
 }
 
+/// What the dataplane is doing about a route that IS declared.
+///
+/// Three states and not two, and the third is the one that matters: «I could
+/// not ask the holder» is not «the route is not live». The `@netpair` lives in
+/// the holder's EPHEMERAL netns — on an idle node it does not exist at all —
+/// and reading that as «the path closed» is the mistake this Kind already paid
+/// for once, with the drift gate red every day over a manifest nobody touched.
+pub(crate) enum LiveState {
+    /// The counters answer **«did this route ever carry traffic?»** — the
+    /// question ADR-0013 left marked as unanswerable, because the exemptions
+    /// were the one family of rules in this engine without a `counter`. An open
+    /// path that never passed a packet and one passing thousands read exactly
+    /// alike until they existed.
+    Open { packets: u64, bytes: u64 },
+    /// Declared, absent from the map. The holder puts it back from the record
+    /// when the bridge is reborn.
+    NotLive,
+    /// The holder did not answer. Says nothing about the route.
+    Unreachable,
+}
+
+/// ONE query to the holder, to be reused for every route in a listing.
+///
+/// `handle_control` is the serialization point of the whole ingress: a caller
+/// queues behind every attach in front of it, and the measured tail is not
+/// short. Asking once per route would turn a listing of N routes into N trips
+/// through that queue for an answer that does not change between them.
+pub(crate) fn live_snapshot() -> Option<Vec<(String, String, u64, u64)>> {
+    delonix_net::infra::network_routes_live_counted().ok()
+}
+
+/// Resolves one route against a snapshot taken by [`live_snapshot`].
+pub(crate) fn live_state(
+    snapshot: &Option<Vec<(String, String, u64, u64)>>,
+    from: &str,
+    to: &str,
+) -> LiveState {
+    let Some(live) = snapshot else {
+        return LiveState::Unreachable;
+    };
+    match live.iter().find(|(a, b, _, _)| a == from && b == to) {
+        Some((_, _, packets, bytes)) => LiveState::Open {
+            packets: *packets,
+            bytes: *bytes,
+        },
+        None => LiveState::NotLive,
+    }
+}
+
+/// The sentence for a state — SHARED by `stack ls` and `network route`.
+///
+/// One owner for the wording, for the reason `fw_rule_tail` has one: two
+/// readings of the same state that phrase it separately drift the day one of
+/// them is edited, and then the same route reads as two different things
+/// depending on which command was typed.
+pub(crate) fn live_label(state: &LiveState) -> String {
+    match state {
+        LiveState::Open { packets, .. } if *packets == 0 => {
+            super::po::t("open, no traffic yet").into()
+        }
+        LiveState::Open { packets, .. } => super::po::tf(
+            "open ({packets} packets)",
+            &[("packets", &packets.to_string())],
+        ),
+        LiveState::NotLive => super::po::t("declared, not live").into(),
+        LiveState::Unreachable => super::po::t("declared, holder unreachable").into(),
+    }
+}
+
+/// One row of `delonix network route` with no arguments.
+#[derive(Serialize)]
+struct RouteLsRow {
+    from: String,
+    to: String,
+    state: String,
+    /// `null` when the holder could not be asked or the route is not live —
+    /// never `0`, which would read as «open and silent».
+    packets: Option<u64>,
+    bytes: Option<u64>,
+    /// Owning stack (`delonix.io/stack`), when the route was applied by one.
+    stack: Option<String>,
+}
+
+/// `delonix network route` with no arguments — every route this node declares.
+///
+/// Shows BOTH sides on purpose: the record (what was asked for) and the live
+/// map (what the kernel is doing). They disagree routinely and legitimately,
+/// and a listing that showed only one of them would be the dishonest half.
+pub(crate) fn cmd_ls(format: super::output::OutputFormat) -> Result<()> {
+    let mut routes = delonix_net::infra::route_list();
+    // The pair IS the identity of a route (there is no name someone chose), so
+    // it is also the only stable sort key.
+    routes.sort_by(|a, b| (&a.from, &a.to).cmp(&(&b.from, &b.to)));
+    let snapshot = live_snapshot();
+
+    if format == super::output::OutputFormat::Json {
+        let rows: Vec<RouteLsRow> = routes
+            .iter()
+            .map(|r| {
+                let st = live_state(&snapshot, &r.from, &r.to);
+                let (packets, bytes) = match st {
+                    LiveState::Open { packets, bytes } => (Some(packets), Some(bytes)),
+                    _ => (None, None),
+                };
+                RouteLsRow {
+                    from: r.from.clone(),
+                    to: r.to.clone(),
+                    state: live_label(&st),
+                    packets,
+                    bytes,
+                    stack: r.labels.get(super::reconcile::STACK_LABEL).cloned(),
+                }
+            })
+            .collect();
+        return super::output::print_json(&rows);
+    }
+
+    let mut t = super::output::Table::new(&["FROM", "TO", "STATE", "PACKETS", "BYTES", "STACK"]);
+    for r in &routes {
+        let st = live_state(&snapshot, &r.from, &r.to);
+        let (packets, bytes) = match st {
+            LiveState::Open { packets, bytes } => {
+                (packets.to_string(), super::output::fmt_size(bytes))
+            }
+            _ => ("-".to_string(), "-".to_string()),
+        };
+        t.row(vec![
+            r.from.clone(),
+            r.to.clone(),
+            live_label(&st),
+            packets,
+            bytes,
+            r.labels
+                .get(super::reconcile::STACK_LABEL)
+                .cloned()
+                .unwrap_or_else(|| "-".to_string()),
+        ]);
+    }
+    // STACK disappears on a node where no route was applied by a manifest —
+    // the same reason `vm ls` hides NAMESPACE when every row says `default`.
+    t.drop_uninformative().print();
+    Ok(())
+}
+
 /// For `stack ls`: whether the route is declared, and what the dataplane is
 /// actually doing about it.
 ///
@@ -163,41 +307,12 @@ pub(crate) fn presence_of(doc: &ManifestDoc) -> (String, String) {
     if delonix_net::infra::route_get(&spec.from, &spec.to).is_none() {
         return ("no".into(), "-".into());
     }
-    match delonix_net::infra::network_routes_live_counted() {
-        Ok(live) => {
-            if let Some((_, _, packets, _)) = live
-                .iter()
-                .find(|(a, b, _, _)| *a == spec.from && *b == spec.to)
-            {
-                // **«Esta rota passou tráfego?»** — a pergunta que o ADR-0013
-                // deixou assinalada como sem resposta, porque as isenções eram a
-                // única família de regras deste motor sem `counter`. Um caminho
-                // aberto que nunca passou um pacote e um que passa milhares
-                // liam-se exactamente igual.
-                (
-                    "yes".into(),
-                    if *packets == 0 {
-                        super::po::t("open, no traffic yet").into()
-                    } else {
-                        super::po::tf(
-                            "open ({packets} packets)",
-                            &[("packets", &packets.to_string())],
-                        )
-                    },
-                )
-            } else {
-                // Declared but not in the map: the holder will put it back from
-                // the record when the bridge is reborn.
-                ("yes".into(), super::po::t("declared, not live").into())
-            }
-        }
-        // Could not ASK is not «there is none» — the distinction this engine
-        // keeps having to relearn.
-        Err(_) => (
-            "yes".into(),
-            super::po::t("declared, holder unreachable").into(),
-        ),
-    }
+    // The wording lives in `live_label`, shared with `network route`. Two
+    // readings of one state phrased separately drift the day one of them is
+    // edited, and then the same route reads as two different things depending
+    // on which command was typed.
+    let state = live_state(&live_snapshot(), &spec.from, &spec.to);
+    ("yes".into(), live_label(&state))
 }
 
 /// Dry-run: the spec with every `#[serde(default)]` materialized.
