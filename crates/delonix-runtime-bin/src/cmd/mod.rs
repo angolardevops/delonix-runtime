@@ -29,6 +29,7 @@ pub mod manifest;
 pub mod manual;
 pub mod mapped;
 pub mod names;
+pub mod namespace;
 pub mod net;
 pub mod netns;
 pub mod netroute;

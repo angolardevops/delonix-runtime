@@ -8699,6 +8699,38 @@ msgstr "Abre um caminho DIRIGIDO de uma rede para outra (ADR-0013, camada B)"
 msgid "Open a DIRECTED path from one network to another (ADR-0013 tier B).\n\nNetworks are isolated from each other by default. A route says a packet MAY cross; it does not say it is allowed — the per-workload firewall still decides, and a namespace boundary still needs its own policy."
 msgstr "Abre um caminho DIRIGIDO de uma rede para outra (ADR-0013, camada B).\n\nAs redes estão isoladas umas das outras por omissão. Uma rota diz que um pacote PODE atravessar; não diz que é permitido — a firewall por-workload continua a decidir, e uma fronteira de namespace continua a precisar da sua própria política."
 
+# delonix namespace (A-1) — comentários dos exemplos do manual
+msgid "every namespace in use, and what is in each"
+msgstr "todas as namespaces em uso, e o que está em cada uma"
+
+msgid "what one tenant holds, and whether the boundary is enforced here"
+msgstr "o que um inquilino tem, e se a fronteira é imposta neste host"
+
+msgid "counts by Kind, per namespace"
+msgstr "contagens por Kind, por namespace"
+
+msgid "for a script"
+msgstr "para um script"
+
+msgid "the contents by Kind, plus the nft set that carries the boundary"
+msgstr "o conteúdo por Kind, mais o set nft que carrega a fronteira"
+
+# delonix namespace (A-1)
+msgid "Isolation namespaces: ls/describe — a namespace exists while something is in it, so there is no create/rm"
+msgstr "Namespaces de isolamento: ls/describe — uma namespace existe enquanto algo estiver nela, por isso não há create/rm"
+
+msgid "List the isolation namespaces IN USE, with what is in each"
+msgstr "Lista as namespaces de isolamento EM USO, e o que está em cada uma"
+
+msgid "What is inside ONE namespace, by Kind, `kubectl describe` style"
+msgstr "O que está dentro de UMA namespace, por Kind, ao estilo do `kubectl describe`"
+
+msgid "namespace {name} (nothing is in it; see `delonix namespace ls`)"
+msgstr "namespace {name} (não está lá nada; ver `delonix namespace ls`)"
+
+msgid "these namespaces do NOT isolate on this host: bridge traffic is not filtered (br_netfilter not loaded, or net.bridge.bridge-nf-call-iptables=0), so every rule installs and reports success while traffic crosses anyway. Fix: modprobe br_netfilter && sysctl -w net.bridge.bridge-nf-call-iptables=1 net.bridge.bridge-nf-call-ip6tables=1 (persist via /etc/modules-load.d and /etc/sysctl.d, or `install.sh --tune`)"
+msgstr "estas namespaces NÃO isolam neste host: o tráfego de bridge não é filtrado (br_netfilter não carregado, ou net.bridge.bridge-nf-call-iptables=0), logo toda a regra instala e reporta sucesso enquanto o tráfego atravessa na mesma. Correcção: modprobe br_netfilter && sysctl -w net.bridge.bridge-nf-call-iptables=1 net.bridge.bridge-nf-call-ip6tables=1 (persistir via /etc/modules-load.d e /etc/sysctl.d, ou `install.sh --tune`)"
+
 msgid "Source network (the side that may initiate)"
 msgstr "Rede de origem (o lado que pode iniciar)"
 

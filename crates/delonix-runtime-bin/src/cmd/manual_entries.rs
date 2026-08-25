@@ -1271,6 +1271,32 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["net netns publish", "net ingress unpublish"],
     },
     Entry {
+        path: "namespace",
+        group: "",
+        examples: &[
+            ("every namespace in use, and what is in each", "delonix namespace ls"),
+            ("what one tenant holds, and whether the boundary is enforced here", "delonix namespace describe inquilino-b"),
+        ],
+        see_also: &["container run", "vm create", "net ingress", "volumes prune"],
+    },
+    Entry {
+        path: "namespace ls",
+        group: "Inspect",
+        examples: &[
+            ("counts by Kind, per namespace", "delonix namespace ls"),
+            ("for a script", "delonix namespace ls -o json"),
+        ],
+        see_also: &["namespace describe"],
+    },
+    Entry {
+        path: "namespace describe",
+        group: "Inspect",
+        examples: &[
+            ("the contents by Kind, plus the nft set that carries the boundary", "delonix namespace describe inquilino-b"),
+        ],
+        see_also: &["namespace ls", "net netns firewall"],
+    },
+    Entry {
         path: "network",
         group: "",
         examples: &[
