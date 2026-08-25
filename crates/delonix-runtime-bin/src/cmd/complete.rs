@@ -319,6 +319,63 @@ pub fn containers_or_pods() -> Vec<CompletionCandidate> {
     all
 }
 
+/// Named SDN netns the holder serves — what `net netns attach/exec/…` take.
+///
+/// Derived, because the names live in the holder's `/run/netns`, inside ITS
+/// mount namespace: unreachable from here without a re-exec, which is far too
+/// much for one TAB. The two producers are the source instead — a container on
+/// a custom network gets a netns named by its ID (`infra::attach_container`
+/// takes `c.id`), and a pod gets `pod-<name>`.
+///
+/// `--net host`/`none` containers are filtered out: they have no netns at all,
+/// and offering them would be a TAB suggesting a name no command can resolve —
+/// the exact failure the rule at the top of this file forbids.
+pub fn netns() -> Vec<CompletionCandidate> {
+    let mut names: Vec<String> = Vec::new();
+    if let Ok(store) = delonix_runtime_core::Store::open(state_root().join("containers")) {
+        let all = store.list().unwrap_or_default();
+        names.extend(
+            all.iter()
+                // `network` is what the container ENDED UP on; `None` is `--net
+                // host`/`none`, which has no netns at all. The field that records
+                // what `--net` ASKED FOR is a different one, and using it here
+                // would offer `host` as a netns name.
+                .filter(|c| c.network.is_some())
+                .map(|c| c.id.clone()),
+        );
+        // The pod's netns is named by the POD, not by any member — the format
+        // has one owner (`pod::pod_netns_name`) and this asks it, rather than
+        // writing `pod-{name}` a second time.
+        let mut pods: Vec<String> = all
+            .iter()
+            .filter_map(|c| c.labels.get(super::pod::POD_LABEL).cloned())
+            .collect();
+        pods.sort();
+        pods.dedup();
+        names.extend(pods.iter().map(|p| super::pod::pod_netns_name(p)));
+    }
+    names.sort();
+    names.dedup();
+    cands(names)
+}
+
+/// Top-level commands, for `delonix man <TAB>`.
+///
+/// Reads the SAME `manual::ENTRIES` that `man` renders, so a TAB can never
+/// offer a page that does not exist. Only the first token: the argument is a
+/// `Vec<String>` and this completer cannot see which position it is filling, so
+/// completing `container run` would need position awareness it does not have.
+/// The first word is the one worth having — it is where the tree branches.
+pub fn man_commands() -> Vec<CompletionCandidate> {
+    let mut names: Vec<String> = super::manual::ENTRIES
+        .iter()
+        .filter_map(|e| e.path.split_whitespace().next().map(str::to_string))
+        .collect();
+    names.sort();
+    names.dedup();
+    cands(names)
+}
+
 /// Registries this node is logged in to (`<root>/auth.json`) — the only ones
 /// `image logout` has anything to remove.
 pub fn registries() -> Vec<CompletionCandidate> {

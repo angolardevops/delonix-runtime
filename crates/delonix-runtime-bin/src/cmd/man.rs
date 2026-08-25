@@ -36,6 +36,7 @@ use super::po;
 #[derive(clap::Args)]
 pub struct ManArgs {
     /// Command to document (e.g. `container run`). With none, the top-level page.
+    #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::man_commands))]
     pub command: Vec<String>,
     /// Write EVERY page as `<dir>/man1/delonix*.1` instead of printing one to stdout.
     #[arg(long, value_name = "DIR")]
