@@ -8702,6 +8702,15 @@ msgstr "Abre um caminho DIRIGIDO de uma rede para outra (ADR-0013, camada B).\n\
 msgid "Source network (the side that may initiate)"
 msgstr "Rede de origem (o lado que pode iniciar)"
 
+msgid "Source network (the side that may initiate). Omit BOTH to list every route this node declares"
+msgstr "Rede de origem (o lado que pode iniciar). Omite AMBAS para listar todas as rotas que este nó declara"
+
+msgid "Output format: `table` (default) or `json` (ADR-0005). Applies to the listing and to the single route the command just acted on"
+msgstr "Formato de saída: `table` (omissão) ou `json` (ADR-0005). Aplica-se à listagem e à rota única sobre a qual o comando acabou de agir"
+
+msgid "a route is a PAIR: give both `<FROM> <TO>`, or neither to list"
+msgstr "uma rota é um PAR: dá os dois `<FROM> <TO>`, ou nenhum para listar"
+
 msgid "Destination network"
 msgstr "Rede de destino"
 

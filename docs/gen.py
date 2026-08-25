@@ -585,7 +585,7 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
     },
     "network": {
         "title": "delonix network",
-        "tagline": "Redes de utilizador: create, ls, inspect, rm, apply — bridge e overlay realizados fisicamente.",
+        "tagline": "Redes de utilizador: create, ls, route, inspect, rm, apply — bridge e overlay realizados fisicamente.",
         "intro": """Para os drivers <code>bridge</code> e <code>overlay</code>, o <code>create</code>
 orquestra o registo declarativo (<code>NetworkStore</code>) E o plano físico rootless em conjunto —
 <code>bridge</code> dentro do netns do holder; <code>overlay</code> sobe um uplink VXLAN cifrado com
@@ -610,6 +610,15 @@ registados no store — o <code>create</code> AVISA alto que a rede não foi rea
                 ("Overlay cifrado entre nós (VXLAN + WireGuard)", "delonix network create mesh --driver overlay --vni 42 --peer 10.0.0.2"),
             ]},
             "ls": {"examples": [("", "delonix network ls")]},
+            "route": {"examples": [
+                ('Todas as rotas declaradas neste nó — com o que o dataplane está a fazer a cada uma',
+                 'delonix network route'),
+                ('Abre um caminho DIRIGIDO: web alcança db, db não alcança web',
+                 'delonix network route web db'),
+                ('Fecha-o outra vez',
+                 'delonix network route web db --rm'),
+                ('Para um script: contadores por rota, e null (nunca 0) quando não está viva',
+                 'delonix network route -o json')]},
             "inspect": {"examples": [("", "delonix network inspect backend")]},
             "rm": {"examples": [("", "delonix network rm backend")]},
             "apply": {"examples": [("", "delonix network apply -f delonix-manifest.yaml")]},
