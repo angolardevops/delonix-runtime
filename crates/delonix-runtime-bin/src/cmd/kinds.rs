@@ -518,6 +518,30 @@ pub(crate) fn honors_namespace(kind: &str) -> bool {
     facts(kind).is_some_and(|f| f.namespaced != Namespaced::Never)
 }
 
+/// The Kinds `metadata.namespace` actually does something on, sorted.
+///
+/// DERIVED and not written out, because a hand-kept copy of this list is
+/// exactly what this module exists to have ended. The warning that consumes it
+/// said "only Container, Pod and Vm" while the table already had SEVEN — so
+/// someone who wrote `namespace:` on a `kind: Stack` was being told, by a
+/// warning ABOUT namespaces, that Stack has none. The condition next to it was
+/// right all along (`honors_namespace`, off this same table); only the sentence
+/// had drifted, which is the quiet way a message becomes wrong.
+///
+/// Deprecated spellings are left out: `ShareVolume` honors the field and is
+/// rewritten into `Volume` at load time, so naming both would advertise a
+/// spelling we are retiring. Sugar and aggregates stay — `Workload` and `Stack`
+/// are things a person legitimately writes.
+pub(crate) fn namespaced_kinds() -> Vec<&'static str> {
+    let mut out: Vec<&'static str> = all()
+        .filter(|f| f.namespaced != Namespaced::Never)
+        .filter(|f| !matches!(f.form, Form::Deprecated(_)))
+        .map(|f| f.kind)
+        .collect();
+    out.sort_unstable();
+    out
+}
+
 // There is deliberately no `is_declarative(kind)` helper. `stack wait` decides
 // on the presence MARKER the store actually returned (`-`), not on what the
 // table says the Kind should return: a second path to the same answer would let
@@ -533,6 +557,41 @@ pub(crate) fn domain_label(kind: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+
+    // Regression for a message that had drifted: the warning named three Kinds
+    // ("only Container, Pod and Vm") while the table honored seven. Asserted
+    // against the TABLE and not against a written-out list, so the day a Kind
+    // becomes namespaced the sentence follows it without anyone remembering.
+    #[test]
+    fn the_namespaced_list_is_the_table_and_hides_the_deprecated_spelling() {
+        let got = namespaced_kinds();
+        for kind in &got {
+            assert!(
+                honors_namespace(kind),
+                "{kind} is advertised as namespaced and the table disagrees"
+            );
+        }
+        for f in all() {
+            if f.namespaced != Namespaced::Never && !matches!(f.form, Form::Deprecated(_)) {
+                assert!(
+                    got.contains(&f.kind),
+                    "{} honors the namespace and the message never names it",
+                    f.kind
+                );
+            }
+        }
+        // ShareVolume honors it AND is rewritten into Volume at load time —
+        // naming it would advertise the spelling we are retiring.
+        assert!(
+            !got.contains(&"ShareVolume"),
+            "a deprecated spelling leaked in"
+        );
+        // The exact shape of the drift this closes: the old sentence.
+        assert!(
+            got.len() > 3,
+            "back down to the stale trio — the list stopped coming off the table"
+        );
+    }
     use super::*;
 
     /// Two rows for one Kind means half the code reads one and half the other.
