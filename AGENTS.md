@@ -2,7 +2,7 @@
 
 Motor de **containers e microVMs daemonless, rootless-first, kernel-native, em Rust**.
 Repositório **público** (`angolardevops/delonix-runtime`, Apache-2.0) — extraído do monorepo
-privado `delonix-paas` (ver [README.md](README.md) para a arquitectura dos 10 crates).
+privado `delonix-paas` (ver [README.md](README.md) para a arquitectura dos 13 crates).
 
 ## Comandos
 
@@ -4823,13 +4823,14 @@ Este código **não pode depender de nada privado**. Antes de qualquer commit:
    genuína (fica aqui). O broker de control-plane que decide QUANDO publicar portas
    (`Router`, multi-tenant) ficou no lado privado (`delonix-overlay`, em `delonix-paas`).
 
-## Arquitetura (12 crates)
+## Arquitetura (13 crates)
 
 | Crate | Responsabilidade |
 |---|---|
 | `delonix-runtime-core` | tipos partilhados: `Container`, `Vm`, `Status` (6 estados), `Store`/`JsonStore`, typestate, deteção de virtualização, Secret Manager |
 | `delonix-runtime` / `delonix-runtime-bin` | runtime de containers (clone/namespaces/cgroups, create/stop/exec, reconcile_status) + a CLI `delonix` completa (container/image/build/vm/volumes/network — ver secção "CLI" acima) |
 | `delonix-net` | SDN rootless: holder netns + bridge + slirp único, DNAT/firewall nft, compat CNI, overlay WireGuard inter-nó |
+| `delonix-net-rules` | regras de rede PURAS, **zero dependências** — `Cidr`, nome de bridge, IPAM dentro de um prefixo, leitura de taxas. Existe para o control-plane do `delonix-paas` calcular o MESMO que o motor sem um salto de rede pelo meio; o `delonix-net` re-exporta tudo, por isso nenhum consumidor teve de mudar |
 | `delonix-image` | imagens OCI: pull/registry/build, buildpacks CNB, registo interno, verificação de assinatura |
 | `delonix-vm` | microVMs declarativas — trait `VmBackend` + o **registo** de backends (Cloud Hypervisor e libvirt vêm semeados; um terceiro entra por `register_backend`) |
 | `delonix-proxmox` | backend `VmBackend` remoto contra a API de UM nó Proxmox VE (ADR-0008). Fora do `delonix-vm` porque um cliente HTTP não entra num crate de motor; registado pelo `-bin`, que é quem conhece o alvo |

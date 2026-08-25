@@ -1,0 +1,109 @@
+# Programa das 13 melhorias — matriz de rastreabilidade
+
+> **O que este documento é.** O registo único do estado de M01–M13, com a
+> **baseline medida** de cada um. Uma célula que diz um número diz onde ele foi
+> obtido; uma célula sem medição diz `por medir` — nunca uma estimativa.
+>
+> **O que não é.** Um plano de intenções. Um `DONE` aqui exige as quatro coisas
+> ao mesmo tempo: código, testes, documentação e evidência reproduzível.
+>
+> **Porque é que ele existe.** O `docs/AUDITORIA-E2E.md` deste repo passou
+> semanas a dar 27 problemas resolvidos por dívida viva, por não ter sido
+> actualizado à medida que as correcções entravam. Uma tabela que não acompanha
+> o código mente nos dois sentidos. Esta tem de ser actualizada no MESMO commit
+> que muda o estado que descreve.
+
+| Campo | Valor |
+|---|---|
+| Baseline medida em | **2026-08-25** |
+| Contra | `origin/main` `b4653002b`, versão `0.63.1` |
+| Onde | host de desenvolvimento, Linux 7.0, rootless, cgroup v2 |
+| Binário | `cargo build -p delonix-runtime-bin` do próprio commit |
+
+## Baseline factual do motor (medida hoje, não citada)
+
+| Grandeza | Valor | Como foi obtida |
+|---|---|---|
+| Crates no workspace | **13** | `ls crates/` + `Cargo.toml` por directório |
+| Comandos de topo | **28** | travessia de `--help` a partir do binário |
+| Folhas invocáveis da CLI | **229** | a mesma travessia, contando as que não têm subcomandos |
+| Testes no workspace | **1207** | `#[test]` + `#[tokio::test]` em `crates/` |
+| Checks da bateria E2E | **270** | `scripts/e2e.sh` |
+| Cenários de caos | **8** | `scripts/chaos.sh` |
+| Rotas servidas na Docker Engine API | **21** | literais de rota em `cmd/dockerapi.rs` |
+| Kinds no manifesto | **19** | tabela `cmd/kinds.rs` |
+| ADRs | **18** (13 Accepted, 2 Proposed, 1 Rejected, 2 sem estado parseável) | `docs/adr/` |
+| Jobs de CI | **7** (`fmt`, `lang`, `clippy`, `test`, `deny`, `docs` + caos à parte) | `.github/workflows/ci.yml` |
+
+> **A superfície não é a cobertura.** As 229 folhas têm o `--help` verificado; o
+> número das que a bateria **executa** não foi remedido nesta passagem e a
+> fracção citada no `AGENTS.md` é de outra data. Fica `por medir` em M02/M11 até
+> ser recontado com o `scripts/e2e.sh` do dia — citar um total que subiu faria a
+> cobertura parecer melhor sem uma única folha nova exercitada.
+
+## Matriz
+
+Estados: `NOT_STARTED`, `IN_PROGRESS`, `PARTIAL`, `BLOCKED`, `DONE`.
+
+| ID | Melhoria | Estado | Baseline medida | Entregáveis em falta | Testes | Dep. | Risco | PR | DoD |
+|---|---|---|---|---|---|---|---|---|---|
+| **M01** | Posicionamento e arquitectura | `IN_PROGRESS` | `ARCHITECTURE.md` tem C4 1–3 e mini-ADRs; **omitia 3 de 13 crates** e a contagem dizia 10. Nenhum gate arquitectural existia. | capability discovery; política de estabilidade por API (parcial em `cli-stability.md`); gate de dependência proibida (fronteira PaaS) | `tests/architecture.rs` — 3 gates, verdes; regressão verificada nos dois sentidos | — | baixo | — | 3 de 5 |
+| **M02** | Compatibilidade e migração | `PARTIAL` | CRI **77/103** (`critest` v1.36.0, motor v0.42.2 — **desactualizado**). Docker API **21 rotas**; `images/create` e `stats` **ausentes**. `compose` nativo; `compatibility`/`migrate assess` **não existem**. | comandos `compatibility {docker,compose,oci}` e `migrate assess`; matrizes versionadas; recontagem do `critest` na versão actual | `tests/compat/` (2 ficheiros) | M01 | **alto** | — | 0 de 4 |
+| **M03** | Build de produção | `PARTIAL` | `build` tem `--secret`, `--platform`, `--no-cache`, `--build-arg`, cache por instrução (rootless), multi-stage. **Sem** `--ssh`, cache distribuída, SBOM/provenance no artefacto de build. | mounts `type=ssh`/`cache`; cache em registry; SBOM+provenance por imagem construída; comparação medida com BuildKit | `crates/delonix-image/benches` existe | M04 | médio | — | 1 de 4 |
+| **M04** | Segurança verificável | `PARTIAL` | Releases **assinadas** (minisign, `release.yml`) e `cargo-deny` no CI. **Sem** SBOM de release, **sem** provenance/SLSA, **sem** fuzzing no CI, **sem** `kind: RuntimePolicy` (0 ocorrências). 3 auditorias ofensivas anteriores registadas. | SBOM + attestation de release; `kind: RuntimePolicy`; job de fuzz; processo de advisory publicado | 1207 testes; auditorias em `AGENTS.md` | — | **alto** | — | 1 de 4 |
+| **M05** | Desired State e GitOps | `PARTIAL` | `stack` serve **9** verbos: `init apply destroy prune plan ls describe wait validate`. `plan` não muda estado e tem `--detailed-exitcode`; diff de 3 vias sem ficheiro de estado. **Faltam `diff`, `drift`, `history`, `rollback`, `reconcile`** — e o `apply` é fail-fast **sem rollback**, limitação já registada no `AGENTS.md`. | os 5 verbos em falta; revisões persistidas; reconciler opcional com rate-limit | cenário de caos `stack_converge` | M01 | **alto** | — | 3 de 6 |
+| **M06** | Gestão de frota | `BLOCKED` | `node`/`cordon`/`drain` **não existem** (0 ocorrências). **O ADR-0010 RECUSOU a API de gestão remota** (2026-08-10) e o `AGENTS.md` diz que `delonix node add` está bloqueado. | **ADR sucessor** que nomeie o consumidor concreto — ver a nota abaixo | — | ADR | — | — | bloqueado |
+| **M07** | Observabilidade OTel | `PARTIAL` | OpenTelemetry **0.32** e `prometheus-client` na árvore (`delonix-runtime-core`); `/metrics` no `delonix-cri` e no `delonix-mgmt`; `system events`; `dash --json`. **Sem** `observe`/`trace`/`diagnose` como comandos; correlação e bundle sanitizado por fazer. | comandos `observe`/`diagnose`; schemas de evento versionados; overhead medido | — | M01 | médio | — | 2 de 4 |
+| **M08** | SLOs e health | `NOT_STARTED` | `slo` tem **0 ocorrências** em toda a CLI. Existem `--health-*` no `run` e probes de compose. Sem SLI/SLO, sem error budget, sem reason codes. | tudo | — | M07 | médio | — | 0 de 5 |
+| **M09** | MicroVMs e isolamento | `PARTIAL` | 3 backends (`cloud-hypervisor`, `libvirt`, `proxmox`) por trás de `VmBackend` **com registo**; ADR-0006 fixou `type: microvm`; snapshots nos dois backends locais. **Sem** `isolation: {container,microvm,vm,auto}` (0 ocorrências de `isolation` no `cmd/workload.rs`). | eixo `isolation` com `auto` explicável; Firecracker/Kata avaliados; capability model SEV-SNP/TDX | 28 folhas `vm`; secção CH no `e2e.sh` | M01 | médio | — | 2 de 5 |
+| **M10** | Plugin SDK e providers | `PARTIAL` | **Um** trait de provider em todo o workspace: `VmBackend` (`delonix-vm`), com registo e `BackendRegistration`. Providers reais: Proxmox (ADR-0008), TrueNAS (ADR-0009). **Sem** interfaces versionadas para network/storage/secrets/tunnel/registry, sem contract tests. | SDK versionado; contract tests comuns; isolamento e assinatura de plugin | `crates/delonix-proxmox/tests/live.rs`, `delonix-truenas/tests/live.rs` | M01 | médio | — | 1 de 5 |
+| **M11** | Performance comprovada | `PARTIAL` | `docs/comparacao-medida.md` compara as três ferramentas na mesma máquina no mesmo dia — mas **da v0.53.0, 2026-08-13**. `crates/delonix-image/benches` existe. **Sem** harness versionado nem thresholds de regressão em CI. | harness reproduzível; thresholds; recontagem na versão actual | benches de `delonix-image` | M01 | médio | — | 1 de 4 |
+| **M12** | Developer Experience | `PARTIAL` | `completion`, `explain`, `man`, `syntax`, `init` com **11 templates**, `install.sh` com verificação de assinatura, exit codes com classe (v0.49.0). **`doctor` tem 0 ocorrências**; sem error IDs; sem hot reload/file sync. | `doctor`; error IDs estáveis; golden paths local→CI→k8s medidos | 270 checks E2E | M01 | baixo | — | 3 de 4 |
+| **M13** | Maturidade e certificação | `PARTIAL` | `docs/cli-stability.md` define estável/não-estável e o contrato de exit codes; releases assinadas. **Sem** `feature status`, `release verify`, `conformance report`; sem níveis por capability. | os 3 comandos; níveis derivados de evidência; release gates | — | todos | médio | — | 1 de 5 |
+
+## M06 — porque está `BLOCKED` e não `NOT_STARTED`
+
+A diferença não é de grau. `NOT_STARTED` diz «ninguém chegou lá»; aqui alguém
+chegou, mediu e **decidiu que não**: o **ADR-0010 está `Rejected`** (2026-08-10),
+com a razão escrita — dos consumidores que enumerava, a evidência apontava para
+o control-plane de frota, e isso é o `delonix-paas`; *remoteness* sem identidade,
+autorização e auditoria não é *remoteness* que valha a pena. O `AGENTS.md`
+repete-o e acrescenta a condição de reabertura: **um ADR sucessor que nomeie o
+consumidor concreto**, nunca um comando.
+
+Duas consequências, e nenhuma é negociável por este programa:
+
+1. **Implementar `node add`/`cordon`/`drain` agora contrariaria uma decisão
+   aceite do repositório**, e a regra da casa é que um ADR se sucede com outro
+   ADR — não se revoga por uma linha noutro documento nem por um pedido de
+   funcionalidade. É também o que a regra 9 do próprio programa manda («preservar
+   contratos») e o que o guarda-rio da fronteira com o PaaS exige (o motor não
+   tem noção de inquilino).
+2. **O trabalho de M06 que NÃO depende da decisão pode avançar** e não está
+   bloqueado: identidade de nó, mTLS e o modelo de capacidades já têm o ADR-0003
+   em `Proposed`. O que fica travado é a superfície de comando e o controller.
+
+O desbloqueio é uma peça de M01 (fronteiras), não de M06: escrever o ADR
+sucessor com o consumidor nomeado, ou registar formalmente que M06 sai do âmbito
+deste motor. Enquanto nenhuma das duas acontecer, M06 permanece `BLOCKED` — e
+**não** contará como `DONE` por omissão.
+
+## Ordem de execução
+
+A do programa, com uma alteração justificada: M01 entrega primeiro os **gates**
+e só depois a prosa. Um documento de arquitectura sem gate foi exactamente o que
+deixou 3 crates fora do C4 sem ninguém dar por isso.
+
+1. **Fase A** — M01 + esta matriz.
+2. **Fase B** — M04 e os P0 de reliability (o `apply` sem rollback é o maior).
+3. **Fase C** — M02, M03 e a fundação de M13.
+4. **Fase D** — M05, M07, M08.
+5. **Fase E** — M09, M10.
+6. **Fase F** — M06, **se e quando** o ADR sucessor existir.
+7. **Fase G** — M11, M12 e o fecho de M13.
+
+## Registo de alterações
+
+| Data | Alteração |
+|---|---|
+| 2026-08-25 | Baseline inicial medida contra `b4653002b`/v0.63.1. M01 passa a `IN_PROGRESS`: `tests/architecture.rs` instalado, 3 crates repostos no C4, contagem corrigida em dois documentos. |
