@@ -8762,6 +8762,52 @@ msgstr "Formato de saída: `table` (omissão) ou `json` (ADR-0005). O `json` lev
 msgid "Output format: `table` (default) or `json` (ADR-0005). `json` gives `running` as a boolean and the uptime in SECONDS, not the humanized `Up 3m` the table prints"
 msgstr "Formato de saída: `table` (omissão) ou `json` (ADR-0005). O `json` dá o `running` como booleano e o uptime em SEGUNDOS, não o `Up 3m` humanizado que a tabela imprime"
 
+# ajuda dos posicionais do grupo net (C-1a)
+msgid "Command and arguments to run in there. Everything after the name"
+msgstr "Comando e argumentos a correr lá dentro. Tudo o que vem depois do nome"
+
+msgid "Concurrent connections allowed from ONE source address at a time"
+msgstr "Ligações em simultâneo permitidas a UM endereço de origem de cada vez"
+
+msgid "Netns to destroy — a container id, or `pod-<name>` for a pod's shared one"
+msgstr "Netns a destruir — um id de container, ou `pod-<nome>` para a partilhada de um pod"
+
+msgid "Netns to enter — a container id, or `pod-<name>` for a pod's shared one"
+msgstr "Netns onde entrar — um id de container, ou `pod-<nome>` para a partilhada de um pod"
+
+msgid "Network whose egress this governs — the policy applies to every workload attached to it"
+msgstr "Rede cujo egress isto governa — a política aplica-se a toda a carga ligada a ela"
+
+msgid "New connections per second allowed from ONE source address"
+msgstr "Ligações novas por segundo permitidas a UM endereço de origem"
+
+msgid "`tcp/5432`, `udp/53`, `5432` (any proto), or `tcp/*` (all ports) — the port on the DESTINATION this container is reaching for"
+msgstr "`tcp/5432`, `udp/53`, `5432` (qualquer proto), ou `tcp/*` (todas as portas) — a porta no DESTINO que este container está a alcançar"
+
+msgid "The HOST port to stop forwarding, as it was given to `publish`"
+msgstr "A porta do HOST a deixar de encaminhar, tal como foi dada ao `publish`"
+
+msgid "Tunnel to inspect, as shown by `net tunnel ls`"
+msgstr "Túnel a inspeccionar, tal como o `net tunnel ls` o mostra"
+
+msgid "Tunnel to tear down, as shown by `net tunnel ls`"
+msgstr "Túnel a desmontar, tal como o `net tunnel ls` o mostra"
+
+msgid "Container the rule belongs to. Must be on the SDN (`--net <network>`) — a `--net host`/`none` container has no firewall to govern"
+msgstr "Container a que a regra pertence. Tem de estar na SDN (`--net <rede>`) — um container `--net host`/`none` não tem firewall para governar"
+
+msgid "Container to govern. Must be on the SDN (`--net <network>`)"
+msgstr "Container a governar. Tem de estar na SDN (`--net <rede>`)"
+
+msgid "`tcp/5432`, `udp/53`, `5432` (any proto), or `tcp/*` (all ports) — the CONTAINER's port and never the host's, because the DNAT already rewrote it in `prerouting`"
+msgstr "`tcp/5432`, `udp/53`, `5432` (qualquer proto), ou `tcp/*` (todas as portas) — a porta do CONTAINER e nunca a do host, porque o DNAT já a reescreveu no `prerouting`"
+
+msgid "`tcp/5432`, `5432` (any proto), or `*` (all ports) — the CONTAINER's port, the same one the rule was written with"
+msgstr "`tcp/5432`, `5432` (qualquer proto), ou `*` (todas as portas) — a porta do CONTAINER, a mesma com que a regra foi escrita"
+
+msgid "The HOST port to stop publishing — this one IS the host's, because a publish is `hostPort:containerPort` and the host side is its identity"
+msgstr "A porta do HOST a deixar de publicar — esta É a do host, porque um publish é `hostPort:containerPort` e o lado do host é a sua identidade"
+
 msgid "Source network (the side that may initiate)"
 msgstr "Rede de origem (o lado que pode iniciar)"
 
