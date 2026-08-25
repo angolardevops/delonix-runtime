@@ -1810,6 +1810,9 @@ pub enum ContainerCmd {
         /// `--all` (same filter as the table) and ignores `--quiet`.
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: super::output::OutputFormat,
+        /// Show only the containers of this isolation namespace. Omit to list every one.
+        #[arg(short = 'n', long, add = ArgValueCandidates::new(super::complete::namespaces))]
+        namespace: Option<String>,
     },
     /// (Re)start stopped/crashed containers. Always detached.
     ///
@@ -2270,7 +2273,12 @@ pub fn run(action: ContainerCmd) -> Result<()> {
                 log_cri,
             },
         ),
-        ContainerCmd::Ps { all, quiet, output } => cmd_ps(&store, all, quiet, output),
+        ContainerCmd::Ps {
+            all,
+            quiet,
+            output,
+            namespace,
+        } => cmd_ps(&store, all, quiet, output, namespace.as_deref()),
         ContainerCmd::Start { ids } => for_each_id(&ids, |id| cmd_start(&images, &store, id)),
         ContainerCmd::Stop { ids, time } => for_each_id(&ids, |id| cmd_stop(&store, id, time)),
         ContainerCmd::Kill { ids, signal } => for_each_id(&ids, |id| cmd_kill(&store, id, &signal)),
@@ -4083,6 +4091,7 @@ pub(crate) fn workload_rows() -> Result<Vec<super::workload::WorkloadRow>> {
             name: c.name.clone(),
             status: fmt_status_of(c, uptime),
             info: output::display_ref(&c.image),
+            namespace: c.namespace.clone(),
         });
     }
     Ok(rows)
@@ -4336,8 +4345,23 @@ fn cmd_ps(
     all: bool,
     quiet: bool,
     format: super::output::OutputFormat,
+    namespace: Option<&str>,
 ) -> Result<()> {
     let mut cs = store.list()?;
+    // The filter runs BEFORE anything else reads the list — `--namespace` that
+    // narrowed the table and left the JSON, the `--quiet` ids or the counts
+    // untouched would be a flag that works in one output and not in another,
+    // which is worse than no flag at all.
+    if let Some(ns) = namespace {
+        cs.retain(|c| {
+            let owner = if c.namespace.is_empty() {
+                "default"
+            } else {
+                &c.namespace
+            };
+            owner == ns
+        });
+    }
     // Stable, useful order: most recent first, like `docker ps`.
     cs.sort_by_key(|c| std::cmp::Reverse(c.created_unix));
     // Reconcile + apply the `--all` filter once, then render in the chosen format.
@@ -4385,6 +4409,11 @@ fn cmd_ps(
         "STATUS",
         "PORTS",
         "NAMES",
+        // Last, and it hides itself on a host that uses no namespaces — see
+        // `output::namespace_cell`. Until it existed, the boundary the engine
+        // enforces in nftables was invisible in the listing an operator reads
+        // most.
+        "NAMESPACE",
     ]);
     for c in &included {
         t.row(vec![
@@ -4398,9 +4427,12 @@ fn cmd_ps(
             fmt_status_of(c, uptime_of(c)),
             output::truncate(&fmt_ports(&c.ports), 28),
             c.name.clone(),
+            output::namespace_cell(&c.namespace, namespace.is_some()),
         ]);
     }
-    t.print();
+    // Drops NAMESPACE on a host where every row would say `default` — the
+    // column exists to show a boundary, and a column of dashes shows none.
+    t.drop_uninformative().print();
     Ok(())
 }
 

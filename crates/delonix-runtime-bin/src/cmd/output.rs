@@ -149,6 +149,31 @@ pub struct Table {
     right: Vec<usize>,
 }
 
+/// What a NAMESPACE cell says, for every listing that has one.
+///
+/// `default` becomes a dash when nobody asked for a namespace, so
+/// [`Table::drop_uninformative`] removes the whole column on a host that uses
+/// none — printing `default` on every row is a column of noise.
+///
+/// **Unless the operator named a namespace**: then it prints verbatim, because
+/// dropping it would remove the one thing `--namespace default` was run to see.
+/// Filtering is also the only way to read the value off a listing whose column
+/// hides itself.
+///
+/// One owner for the rule, and not a copy in each of the six listings that have
+/// the column: they have to agree, and the day one of them is edited is the day
+/// the same host reads two different ways depending on which command was typed
+/// — the discipline `fw_rule_tail` already enforces.
+pub fn namespace_cell(namespace: &str, filtered: bool) -> String {
+    if !filtered && (namespace.is_empty() || namespace == "default") {
+        "-".to_string()
+    } else if namespace.is_empty() {
+        "default".to_string()
+    } else {
+        namespace.to_string()
+    }
+}
+
 impl Table {
     pub fn new(headers: &[&str]) -> Self {
         Self {
@@ -1004,6 +1029,54 @@ impl Drop for Progress {
         // A step left open (error midway) closes with ✗ instead of leaving the
         // spinner hanging.
         self.close_line('✗');
+    }
+}
+
+#[cfg(test)]
+mod namespace_cell_tests {
+    use super::{namespace_cell, Table};
+
+    /// The rule the six listings share, pinned in one place.
+    ///
+    /// `default` unfiltered is a dash so the whole column can disappear; named
+    /// explicitly it prints, because dropping it would remove the one thing
+    /// `--namespace default` was run to see. An EMPTY namespace is `default` —
+    /// records written before the field existed have it empty, and printing an
+    /// empty cell would read as «this row has no namespace», which no workload
+    /// ever has.
+    #[test]
+    fn default_hides_unless_it_was_asked_for() {
+        assert_eq!(namespace_cell("default", false), "-");
+        assert_eq!(namespace_cell("", false), "-");
+        assert_eq!(namespace_cell("default", true), "default");
+        assert_eq!(namespace_cell("", true), "default");
+        assert_eq!(namespace_cell("inquilino-b", false), "inquilino-b");
+        assert_eq!(namespace_cell("inquilino-b", true), "inquilino-b");
+    }
+
+    /// The two halves have to work TOGETHER: the cell makes the column droppable
+    /// and `drop_uninformative` is what drops it. Testing either alone proves
+    /// nothing about what an operator sees.
+    #[test]
+    fn a_node_with_no_namespaces_loses_the_column_entirely() {
+        let mut t = Table::new(&["NAME", "NAMESPACE"]);
+        for name in ["a", "b"] {
+            t.row(vec![name.to_string(), namespace_cell("default", false)]);
+        }
+        let out = t.drop_uninformative().render_all();
+        assert!(
+            !out.contains("NAMESPACE"),
+            "a column of dashes shows no boundary; got:\n{out}"
+        );
+
+        let mut t = Table::new(&["NAME", "NAMESPACE"]);
+        t.row(vec!["a".to_string(), namespace_cell("default", false)]);
+        t.row(vec!["b".to_string(), namespace_cell("inquilino-b", false)]);
+        let out = t.drop_uninformative().render_all();
+        assert!(
+            out.contains("NAMESPACE") && out.contains("inquilino-b"),
+            "two namespaces IS the boundary worth showing; got:\n{out}"
+        );
     }
 }
 

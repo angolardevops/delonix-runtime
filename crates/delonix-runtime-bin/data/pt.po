@@ -8739,6 +8739,18 @@ msgstr "namespace {name} (não está lá nada; ver `delonix namespace ls`)"
 
 msgid "these namespaces do NOT isolate on this host: bridge traffic is not filtered (br_netfilter not loaded, or net.bridge.bridge-nf-call-iptables=0), so every rule installs and reports success while traffic crosses anyway. Fix: modprobe br_netfilter && sysctl -w net.bridge.bridge-nf-call-iptables=1 net.bridge.bridge-nf-call-ip6tables=1 (persist via /etc/modules-load.d and /etc/sysctl.d, or `install.sh --tune`)"
 msgstr "estas namespaces NÃO isolam neste host: o tráfego de bridge não é filtrado (br_netfilter não carregado, ou net.bridge.bridge-nf-call-iptables=0), logo toda a regra instala e reporta sucesso enquanto o tráfego atravessa na mesma. Correcção: modprobe br_netfilter && sysctl -w net.bridge.bridge-nf-call-iptables=1 net.bridge.bridge-nf-call-ip6tables=1 (persistir via /etc/modules-load.d e /etc/sysctl.d, ou `install.sh --tune`)"
+# --namespace nas listagens (A-2/A-3)
+msgid "Show only the containers of this isolation namespace. Omit to list every one"
+msgstr "Mostra só os containers desta namespace de isolamento. Omite para listar todos"
+
+msgid "Show only the pods of this isolation namespace. Omit to list every one"
+msgstr "Mostra só os pods desta namespace de isolamento. Omite para listar todos"
+
+msgid "Show only the workloads of this isolation namespace. Omit to list every one"
+msgstr "Mostra só as cargas desta namespace de isolamento. Omite para listar todas"
+
+msgid "Show this namespace's volumes instead of the unscoped ones"
+msgstr "Mostra os volumes desta namespace em vez dos sem dono"
 
 msgid "Source network (the side that may initiate)"
 msgstr "Rede de origem (o lado que pode iniciar)"
