@@ -1671,7 +1671,7 @@ pub(crate) fn volume_refs(store: &VolumeStore, name: &str) -> VolumeRefs {
                 if !uses {
                     continue;
                 }
-                let alive = c.pid.map(delonix_runtime::is_alive).unwrap_or(false);
+                let alive = c.is_live();
                 let state = if alive {
                     super::po::t("running")
                 } else {

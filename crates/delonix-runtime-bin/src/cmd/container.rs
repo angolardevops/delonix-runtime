@@ -5914,7 +5914,7 @@ fn cmd_healthcheck(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
         .healthcheck
         .clone()
         .ok_or_else(|| Error::Invalid(format!("image '{}' defines no HEALTHCHECK", c.image)))?;
-    if !c.pid.map(runtime::is_alive).unwrap_or(false) {
+    if !c.is_live() {
         return Err(Error::NotRunning(short_id(&c.id).to_string()));
     }
     let code = runtime::exec(&c, &["/bin/sh".to_string(), "-c".to_string(), hc], false)?;
@@ -5934,7 +5934,7 @@ fn cmd_healthcheck(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
 /// `HOST-PID` so as not to mislead anyone comparing with a `ps` from inside.
 fn cmd_top(store: &Store, id: &str) -> Result<()> {
     let c = find(store, id)?;
-    if !c.pid.map(runtime::is_alive).unwrap_or(false) {
+    if !c.is_live() {
         return Err(Error::NotRunning(short_id(&c.id).to_string()));
     }
     // `Container::cgroup()` is the path the engine TRIED to use
@@ -6060,7 +6060,7 @@ impl FsRoot {
 }
 
 fn container_fs_root(images: &ImageStore, c: &Container) -> Result<FsRoot> {
-    if let Some(pid) = c.pid.filter(|p| runtime::is_alive(*p)) {
+    if let Some(pid) = c.pid.filter(|_| c.is_live()) {
         return Ok(FsRoot {
             path: std::path::PathBuf::from(format!("/proc/{pid}/root")),
             _hold: None,
@@ -6756,7 +6756,7 @@ pub(crate) fn unpublish_live(store: &Store, c: &mut Container, host_port: &str) 
                 // which dies with it. On a stopped container there's no dataplane to clean up,
                 // only the record (before: an error "container is not running" and the publish
                 // stayed stuck in the record forever — a real bug report).
-                if let Some(pid) = c.pid.filter(|&p| runtime::is_alive(p)) {
+                if let Some(pid) = c.pid.filter(|_| c.is_live()) {
                     let sock = delonix_net::slirp_container_sock(pid);
                     if sock.exists() {
                         infra::slirp_remove_hostfwd_proto(&sock, host_port, proto.as_deref())?;
@@ -7225,7 +7225,7 @@ fn health_monitor_loop(id: String, cfg: HealthConfig) {
         // fresh "unhealthy" over a container the user stopped on purpose. The
         // supervisor's own restart loop is what brings it back, and the next
         // probe after that will speak for itself.
-        if !c.pid.map(runtime::is_alive).unwrap_or(false) {
+        if !c.is_live() {
             continue;
         }
         let Some(cmd) = health_command(&images, &c) else {
