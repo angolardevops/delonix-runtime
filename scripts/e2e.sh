@@ -659,6 +659,83 @@ check "stack history --show devolve o manifesto aplicado" ok \
 # Uma revisão que não existe é «não existe» (classe 4), não um 1 genérico.
 check "stack history --show inexistente devolve 4" 4 \
   "$BIN" stack history -f "$HWORK/hist.yaml" --show 999
+# `stack rollback` — o CICLO, e não os comandos um a um.
+#
+# Cada passo isolado devolve 0 com e sem a funcionalidade a funcionar; o que
+# distingue é o ESTADO no fim. Por isso: aplica-se A, aplica-se B, volta-se a A,
+# e verifica-se o que voltou (a quota) e o que NÃO voltou (o recurso criado em
+# B, que só sai com `--prune`) — que é a promessa que o comando faz e a que ele
+# recusa fazer.
+cat >"$HWORK/hist.yaml" <<YAML
+apiVersion: delonix.io/v1
+kind: Volume
+metadata:
+  name: hv-$PFX
+spec:
+  quota: 9G
+---
+apiVersion: delonix.io/v1
+kind: Volume
+metadata:
+  name: hv2-$PFX
+spec: {}
+YAML
+check "um segundo apply, com um recurso novo e um campo mudado" ok \
+  "$BIN" stack apply -f "$HWORK/hist.yaml"
+check "rollback --dry-run não muda nada" ok \
+  "$BIN" stack rollback --to 1 -f "$HWORK/hist.yaml" --dry-run
+check "…e o recurso da 2.ª revisão continua lá depois do dry-run" ok \
+  "$BIN" volumes inspect "hv2-$PFX"
+# Uma revisão que não existe é «não existe» (4); uma revisão FALHADA é um
+# argumento inválido (1) — está no registo para ser LIDA, não para ser repetida.
+check "rollback para uma revisão inexistente devolve 4" 4 \
+  "$BIN" stack rollback --to 999 -f "$HWORK/hist.yaml"
+# Uma revisão falhada de verdade, e barata: um `kind: Vm` com um disco que não
+# existe morre DEPOIS da camada Volume, é local e é instantâneo — nada de rede,
+# que num gate seria lento e dependeria do host ter saída.
+cat >"$HWORK/mau.yaml" <<YAML
+apiVersion: delonix.io/v1
+kind: Volume
+metadata:
+  name: hv-$PFX
+spec: {}
+---
+apiVersion: delonix.io/v1
+kind: Vm
+metadata:
+  name: hvm-$PFX
+spec:
+  disk: /nao/existe/de/todo.qcow2
+YAML
+check "um apply falhado é gravado na história" fail "$BIN" stack apply -f "$HWORK/mau.yaml"
+check "…e aparece marcado como falhado" ok \
+  bash -c "'$BIN' stack history -f '$HWORK/hist.yaml' | grep -q 'failed'"
+# A revisão falhada é a última; o rollback para ela tem de ser RECUSADO.
+#
+# **Verifica a MENSAGEM e não o código de saída, e a primeira versão fazia o
+# contrário.** Medido: com a recusa desactivada o check continuava a passar,
+# porque replicar um manifesto que não aplica também falha — o rc não distingue
+# «recusado à cabeça» de «tentou e rebentou a meio», e a diferença entre os dois
+# é a funcionalidade inteira. A frase que só a recusa produz é «FAILED apply».
+check "rollback para uma revisão FALHADA é recusado à cabeça" ok bash -c \
+  "N=\$('$BIN' stack history -f '$HWORK/hist.yaml' -o json | python3 -c 'import json,sys; print([r[\"number\"] for r in json.load(sys.stdin) if not r[\"ok\"]][-1])'); '$BIN' stack rollback --to \$N -f '$HWORK/hist.yaml' 2>&1 | grep -q 'FAILED apply'"
+check "rollback --to 1 corre" ok "$BIN" stack rollback --to 1 -f "$HWORK/hist.yaml"
+# O que VOLTOU: o campo que a revisão 1 declarava. Sem `quota:`, o volume da
+# revisão 1 não tem cap, por isso o `inspect` não pode mostrar os 9G de B.
+check "o campo mudado voltou ao valor da revisão 1" ok \
+  bash -c "! '$BIN' volumes inspect 'hv-$PFX' | grep -qi '9663676416'"
+# O que NÃO voltou, e é dito em vez de escondido: um rollback não apaga sozinho.
+check "o recurso criado depois SOBREVIVE a um rollback sem --prune" ok \
+  "$BIN" volumes inspect "hv2-$PFX"
+check "…e o rollback avisa que é preciso --prune para o levar" ok \
+  bash -c "'$BIN' stack rollback --to 1 -f '$HWORK/hist.yaml' --dry-run 2>&1 | grep -q -- '--prune'"
+check "rollback --prune leva-o" ok \
+  "$BIN" stack rollback --to 1 -f "$HWORK/hist.yaml" --prune
+check "…e agora já não está" fail "$BIN" volumes inspect "hv2-$PFX"
+# Um rollback É um apply: ganha revisão própria, e a história diz de qual veio.
+check "a história marca o rollback e diz que revisão replicou" ok \
+  bash -c "'$BIN' stack history -f '$HWORK/hist.yaml' | grep -q 'rollback of 1'"
+
 # A propriedade central do ADR-0019: o registo não é fonte de verdade nenhuma.
 rm -rf "$DELONIX_ROOT/stacks"
 check "sem stacks/: o plan continua a funcionar" ok "$BIN" stack plan -f "$HWORK/hist.yaml"
