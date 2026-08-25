@@ -66,6 +66,13 @@ pub(crate) struct Revision {
     /// Plan counts (`create`, `update`, …), for the summary column.
     #[serde(default)]
     pub summary: std::collections::BTreeMap<String, usize>,
+    /// The revision this one replayed, when it came from `stack rollback`.
+    ///
+    /// A rollback IS an apply, so it gets a revision of its own — and without
+    /// this the history would show two identical-looking entries with no way to
+    /// tell that the second was a deliberate step backwards.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rollback_of: Option<u32>,
 }
 
 /// `<root>/stacks/<stack>/revisions`.
@@ -99,6 +106,25 @@ fn now() -> u64 {
         .unwrap_or(0)
 }
 
+/// What an apply is telling the record about itself.
+///
+/// A struct and not six more parameters: `record` had grown to eight, which is
+/// where clippy draws its line and where a caller starts passing two booleans in
+/// the wrong order without the compiler noticing. Every field here is named at
+/// the call site.
+pub(crate) struct Outcome<'a> {
+    /// The manifest path as given, for a human to recognise the apply.
+    pub manifest_path: &'a str,
+    /// Whether the apply succeeded.
+    pub ok: bool,
+    /// The error, when it did not.
+    pub error: Option<&'a str>,
+    /// Plan counts, for the summary column.
+    pub summary: std::collections::BTreeMap<String, usize>,
+    /// The revision this one replayed, for a `stack rollback`.
+    pub rollback_of: Option<u32>,
+}
+
 /// Records one revision. **Best-effort and infallible by design.**
 ///
 /// A revision that cannot be written must never fail an apply that worked —
@@ -106,15 +132,14 @@ fn now() -> u64 {
 /// is read-only is worse. Same rule the ownership stamp and `events::emit`
 /// already follow, and the one an implementer is most likely to get wrong by
 /// making this `?`-propagate.
-pub(crate) fn record(
-    root: &Path,
-    stack: &str,
-    manifest_path: &str,
-    rendered: &str,
-    ok: bool,
-    error: Option<&str>,
-    summary: std::collections::BTreeMap<String, usize>,
-) {
+pub(crate) fn record(root: &Path, stack: &str, rendered: &str, what: Outcome<'_>) {
+    let Outcome {
+        manifest_path,
+        ok,
+        error,
+        summary,
+        rollback_of,
+    } = what;
     let d = dir(root, stack);
     if std::fs::create_dir_all(&d).is_err() {
         return;
@@ -158,6 +183,7 @@ pub(crate) fn record(
             }
         }),
         summary,
+        rollback_of,
     };
     // The manifest goes FIRST: a header on disk claims a revision exists, so
     // writing it before its content would leave `history show` pointing at
@@ -254,11 +280,14 @@ mod tests {
         record(
             &root,
             "s",
-            "m.yaml",
             "kind: Volume\n",
-            true,
-            None,
-            Default::default(),
+            Outcome {
+                manifest_path: "m.yaml",
+                ok: true,
+                error: None,
+                summary: Default::default(),
+                rollback_of: None,
+            },
         );
         let l = list(&root, "s");
         assert_eq!(l.len(), 1);
@@ -276,11 +305,14 @@ mod tests {
         record(
             &root,
             "s",
-            "m.yaml",
             "kind: Volume\n",
-            false,
-            Some("boom"),
-            Default::default(),
+            Outcome {
+                manifest_path: "m.yaml",
+                ok: false,
+                error: Some("boom"),
+                summary: Default::default(),
+                rollback_of: None,
+            },
         );
         let l = list(&root, "s");
         assert!(!l[0].ok);
@@ -298,11 +330,14 @@ mod tests {
             record(
                 &root,
                 "s",
-                "m.yaml",
                 &format!("n: {i}\n"),
-                true,
-                None,
-                Default::default(),
+                Outcome {
+                    manifest_path: "m.yaml",
+                    ok: true,
+                    error: None,
+                    summary: Default::default(),
+                    rollback_of: None,
+                },
             );
         }
         let l = list(&root, "s");
@@ -327,11 +362,14 @@ mod tests {
         record(
             &root,
             "../../etc",
-            "m.yaml",
             "x: 1\n",
-            true,
-            None,
-            Default::default(),
+            Outcome {
+                manifest_path: "m.yaml",
+                ok: true,
+                error: None,
+                summary: Default::default(),
+                rollback_of: None,
+            },
         );
         assert!(
             root.join("stacks").exists(),
@@ -355,11 +393,14 @@ mod tests {
                     record(
                         &r,
                         "s",
-                        "m.yaml",
                         &format!("i: {i}\n"),
-                        true,
-                        None,
-                        Default::default(),
+                        Outcome {
+                            manifest_path: "m.yaml",
+                            ok: true,
+                            error: None,
+                            summary: Default::default(),
+                            rollback_of: None,
+                        },
                     )
                 });
             }

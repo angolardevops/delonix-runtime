@@ -337,7 +337,7 @@ manifesto em git merece um degrau em vez de um erro.</p>
   conveniência de depuração.</li>
 <li><strong>O formato dos ficheiros de estado</strong> em <code>$DELONIX_ROOT</code>. Lê-se pelo <code>inspect</code>,
   nunca do disco.</li>
-<li><strong><code>stack history</code></strong> e o conteúdo de <code>$DELONIX_ROOT/stacks/</code> (ADR-0019). É um
+<li><strong><code>stack history</code></strong>, <strong><code>stack rollback</code></strong> e o conteúdo de <code>$DELONIX_ROOT/stacks/</code> (ADR-0019). É um
   registo do que foi aplicado, e o desenho promete explicitamente que <strong>nada o
   lê para decidir o que existe</strong>: apagar essa pasta não muda o que o <code>plan</code>, o
   <code>apply</code>, o <code>prune</code> ou o <code>destroy</code> fazem — só perde o histórico, e há gate na

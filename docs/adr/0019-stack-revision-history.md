@@ -121,12 +121,15 @@ wrong by making the write `?`-propagate.
 
 ## What is NOT decided here
 
-- **`stack rollback`.** It follows in its own slice, and it has its own
-  questions — what is reversible (a re-applied manifest converges what converges)
-  and what is not (data deleted by `--prune` does not come back; an image that
-  left the registry cannot be re-pulled). Recording revisions is its
-  precondition, and shipping the record first means the history is already
-  accumulating when the verb arrives.
+- ~~**`stack rollback`.**~~ **Shipped in the slice right after this one**, and
+  the questions it left open were answered there: a rollback replays the recorded
+  manifest through `apply_docs` — the same path a normal apply takes — and gets a
+  revision of its own, marked with the one it replayed. What it cannot undo is
+  printed BEFORE anything runs, counted from this rollback's own plan rather than
+  as a general disclaimer: resources created after the target stay unless
+  `--prune`, a recreated resource comes back EMPTY (the record holds a manifest,
+  never the bytes), and a cold field still needs `--replace`. A revision recorded
+  as FAILED is refused as a target — it is on record so it can be READ.
 - **A revision as a rollback GUARANTEE.** Re-applying an old manifest is not a
   time machine, and this ADR does not let anything claim it is.
 - **Cross-node or remote history.** Out of scope by guardrail — that is the

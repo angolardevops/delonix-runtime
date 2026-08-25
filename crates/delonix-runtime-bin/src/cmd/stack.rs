@@ -227,6 +227,32 @@ pub enum StackCmd {
         #[arg(long)]
         strict: bool,
     },
+    /// Re-apply a recorded revision (ADR-0019).
+    ///
+    /// A rollback IS an apply: it replays the manifest of revision N through the
+    /// same path a normal apply takes, and gets a revision of its own. It is not
+    /// a time machine, and the differences are printed before anything runs —
+    /// what was created after N stays unless `--prune`, and data that was
+    /// deleted does not come back.
+    Rollback {
+        /// Revision to replay. `stack history` lists them.
+        #[arg(long, value_name = "N")]
+        to: u32,
+        /// Stack name. Default: a `kind: Stack`'s name, else the manifest's directory.
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
+        file: Option<PathBuf>,
+        /// Show the plan and change nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Authorize destroying and recreating a resource whose change does not converge live — same meaning as in `apply`.
+        #[arg(long, value_name = "KIND/NAME")]
+        replace: Vec<String>,
+        /// Also REMOVE what this stack owns and the replayed revision does not declare — this is what makes a rollback actually undo a creation.
+        #[arg(long)]
+        prune: bool,
+    },
     /// What this stack applied, and when (ADR-0019).
     ///
     /// One revision per `apply`, failed ones included and marked — after an
@@ -316,6 +342,14 @@ pub fn run(action: StackCmd) -> Result<()> {
             show,
             output,
         } => history(name, file, show, output),
+        StackCmd::Rollback {
+            to,
+            name,
+            file,
+            dry_run,
+            replace,
+            prune,
+        } => rollback(to, name, file, dry_run, replace, prune),
     }
 }
 
@@ -1261,11 +1295,34 @@ fn apply(file: Option<PathBuf>, replace: Vec<String>, do_prune: bool) -> Result<
     }
     let path = manifest::resolve_path(file)?;
     let docs = manifest::load(&path)?;
+    apply_docs(&docs, &path, None, replace, do_prune, None)
+}
+
+/// The apply itself, on documents already in hand.
+///
+/// Split out of `apply` so `rollback` can replay a recorded revision through
+/// EXACTLY this path instead of growing a second one. `base` still comes from
+/// `path` — a replayed manifest may reference files (`fromEnvFile`, a build
+/// context) relative to where the manifest lives, and the record does not move
+/// them.
+///
+/// `stack_override` lets `rollback` name the stack it was asked about, so a
+/// manifest that has since moved directories still lands on the right owner.
+/// `rollback_of` is recorded on the new revision: a rollback IS an apply, and
+/// the history should say which one it replayed.
+fn apply_docs(
+    docs: &[manifest::ManifestDoc],
+    path: &Path,
+    stack_override: Option<&str>,
+    replace: Vec<String>,
+    do_prune: bool,
+    rollback_of: Option<u32>,
+) -> Result<()> {
     // Validate the graph BEFORE touching anything: the `apply` is fail-fast without
     // rollback, so a broken reference (an `Ingress` pointing to a container that
     // nobody declares) must stop everything BEFORE the first creation, not halfway
     // with half the stack already in the kernel.
-    let issues = validate_graph(&docs);
+    let issues = validate_graph(docs);
     if !issues.is_empty() {
         for i in &issues {
             eprintln!("  ✗ {i}");
@@ -1278,8 +1335,8 @@ fn apply(file: Option<PathBuf>, replace: Vec<String>, do_prune: bool) -> Result<
     // Decide EVERYTHING before changing anything, and refuse up front what this
     // invocation is not allowed to do (a conflict, or a recreation nobody asked
     // for). Only then start creating.
-    let stack = stack_name(&path, None);
-    let changes = build_plan(&docs, &stack)?;
+    let stack = stack_name(path, stack_override);
+    let changes = build_plan(docs, &stack)?;
     // A `--replace` that names nothing in this manifest is a typo, and a typo in
     // the flag that authorises a DESTRUCTIVE recreate has to be loud. Without
     // this, `--replace Container/wev` reads as authorised, the recreate is then
@@ -1318,7 +1375,7 @@ fn apply(file: Option<PathBuf>, replace: Vec<String>, do_prune: bool) -> Result<
     // happened. A spinner would fight them for the same row, and folding them
     // would hide the one thing worth keeping. The animation belongs where a step
     // is SILENT for seconds — see `Progress` in `vm build`/`vm create`.
-    let mut layers = super::output::Layers::new(count_of_kinds(&docs));
+    let mut layers = super::output::Layers::new(count_of_kinds(docs));
     // Every layer is grouped so a failure has somewhere to be caught. `apply`
     // stays fail-fast without rollback — nothing below undoes anything — but
     // what the successful layers CREATED must not be left ownerless; see
@@ -1328,15 +1385,15 @@ fn apply(file: Option<PathBuf>, replace: Vec<String>, do_prune: bool) -> Result<
     // rendering documents that may no longer parse the same way. Rendering can
     // itself fail on a manifest the engine still accepts, and a revision is a
     // record — it never gets to stop an apply (ADR-0019).
-    let rendered = manifest::render_with_defaults(&docs).ok();
+    let rendered = manifest::render_with_defaults(docs).ok();
     let counts: std::collections::BTreeMap<String, usize> = reconcile::summary(&changes)
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))
         .collect();
     let manifest_shown = path.display().to_string();
 
-    if let Err(e) = run_layers(&mut layers, &docs, base) {
-        salvage_ownership(&docs, &stack, &changes);
+    if let Err(e) = run_layers(&mut layers, docs, base) {
+        salvage_ownership(docs, &stack, &changes);
         // Recorded as FAILED, not skipped. After an incident the interesting
         // question is what the machine was asked to do, not what it managed to
         // do — a failed apply that created half a stack is precisely the
@@ -1345,11 +1402,14 @@ fn apply(file: Option<PathBuf>, replace: Vec<String>, do_prune: bool) -> Result<
             super::revision::record(
                 &super::util::state_root(),
                 &stack,
-                &manifest_shown,
                 r,
-                false,
-                Some(&e.to_string()),
-                counts,
+                super::revision::Outcome {
+                    manifest_path: &manifest_shown,
+                    ok: false,
+                    error: Some(&e.to_string()),
+                    summary: counts,
+                    rollback_of,
+                },
             );
         }
         return Err(e);
@@ -1359,7 +1419,7 @@ fn apply(file: Option<PathBuf>, replace: Vec<String>, do_prune: bool) -> Result<
     // Everything that exists is now created; converge what differs, and stamp
     // ownership + the applied spec on all of it. The stamp is what makes the
     // NEXT plan a three-way diff instead of a two-way one.
-    converge_and_stamp(&docs, &stack, &changes)?;
+    converge_and_stamp(docs, &stack, &changes)?;
 
     // Pruning LAST, and only when asked. Removing before converging could pull a
     // network out from under a container this same apply is about to attach to
@@ -1372,11 +1432,14 @@ fn apply(file: Option<PathBuf>, replace: Vec<String>, do_prune: bool) -> Result<
         super::revision::record(
             &super::util::state_root(),
             &stack,
-            &manifest_shown,
             r,
-            true,
-            None,
-            counts,
+            super::revision::Outcome {
+                manifest_path: &manifest_shown,
+                ok: true,
+                error: None,
+                summary: counts,
+                rollback_of,
+            },
         );
     }
 
@@ -1884,6 +1947,121 @@ fn stamp_all(
     Ok(())
 }
 
+/// `stack rollback --to N` — replay a recorded revision.
+///
+/// A rollback IS an apply. It loads the manifest of revision N from the record
+/// and runs it through `apply_docs`, which is the same path a normal apply
+/// takes — not a second one that would drift away from it. It also records a
+/// revision of its own, marked with the one it replayed.
+///
+/// # What it does NOT put back, and why that is said out loud
+///
+/// «Rollback» promises more than any manifest replay can deliver, so the gap is
+/// printed before anything runs rather than discovered afterwards:
+///
+/// - **Resources created after N stay.** The replayed manifest does not declare
+///   them, and an apply never deletes what it was not asked to. `--prune` is
+///   what removes them, and it is opt-in for the same reason it is opt-in on
+///   `apply`.
+/// - **Deleted data does not come back.** A volume dropped since N is recreated
+///   EMPTY — the record holds a manifest, not the bytes. This is the one that
+///   costs somebody a bad afternoon, so it leads the warning.
+/// - **A cold field still needs `--replace`.** Reverting an image tag destroys
+///   and recreates the container, exactly as it would through `apply`, and the
+///   refusal is the same one.
+///
+/// A FAILED revision is refused as a target. Its manifest is on record because
+/// reading it after an incident is the point, but replaying a manifest that is
+/// known not to have applied cleanly is not a way back to anything.
+fn rollback(
+    to: u32,
+    name: Option<String>,
+    file: Option<PathBuf>,
+    dry_run: bool,
+    replace: Vec<String>,
+    do_prune: bool,
+) -> Result<()> {
+    // The manifest is resolved for its DIRECTORY and its name, not its contents:
+    // a replayed manifest may reference files next to it, and `base` has to keep
+    // pointing there.
+    let path = manifest::resolve_path(file)?;
+    let stack = stack_name(&path, name.as_deref());
+    let root = super::util::state_root();
+
+    let revs = super::revision::list(&root, &stack);
+    let Some(rev) = revs.iter().find(|r| r.number == to) else {
+        return Err(delonix_runtime_core::Error::NotFound(super::po::tf(
+            "revision {n} of stack '{stack}' (`stack history` lists them)",
+            &[("n", &to.to_string()), ("stack", &stack)],
+        )));
+    };
+    if !rev.ok {
+        return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+            "revision {n} of stack '{stack}' is a FAILED apply — it is on record so it can be \
+             read, not replayed. Pick one that succeeded (`stack history`).",
+            &[("n", &to.to_string()), ("stack", &stack)],
+        )));
+    }
+
+    let yaml = super::revision::manifest_of(&root, &stack, to)?;
+    let docs = manifest::load_str(
+        &yaml,
+        &super::po::tf(
+            "revision {n} of stack '{stack}'",
+            &[("n", &to.to_string()), ("stack", &stack)],
+        ),
+    )?;
+
+    // The plan FIRST, always — printed whether or not this is a dry run. A
+    // rollback is the command most likely to surprise, and the surprise is
+    // cheapest before it happens.
+    let changes = build_plan(&docs, &stack)?;
+    println!(
+        "{}",
+        super::po::tf(
+            "Rollback of stack \"{stack}\" to revision {n} ({when})",
+            &[
+                ("stack", &stack),
+                ("n", &to.to_string()),
+                ("when", &delonix_runtime_core::fmt_local_ts(rev.ts)),
+            ],
+        )
+    );
+    // The same renderer `stack plan` uses. A rollback that printed its own
+    // shape would be a second way to describe the same decision, and the two
+    // would drift — the failure this file already carries three lessons about.
+    render_plan(&path, &stack, &changes);
+
+    // What the replay cannot undo. Counted from the plan, so the numbers are
+    // this rollback's and not a general disclaimer.
+    let to_delete = changes
+        .iter()
+        .filter(|c| c.action == Action::Delete)
+        .count();
+    let to_create = changes
+        .iter()
+        .filter(|c| c.action == Action::Create)
+        .count();
+    if to_delete > 0 && !do_prune {
+        super::output::warn(&super::po::tf(
+            "{n} resource(s) exist that revision {rev} does not declare. A rollback does not \
+             delete on its own — pass `--prune` to remove them.",
+            &[("n", &to_delete.to_string()), ("rev", &to.to_string())],
+        ));
+    }
+    if to_create > 0 {
+        super::output::warn(&super::po::tf(
+            "{n} resource(s) will be RECREATED, and a recreated resource is EMPTY — the record \
+             holds the manifest, never the data that was in it.",
+            &[("n", &to_create.to_string())],
+        ));
+    }
+    if dry_run {
+        return Ok(());
+    }
+    apply_docs(&docs, &path, Some(&stack), replace, do_prune, Some(to))
+}
+
 /// `stack history` — what this stack applied, and when.
 ///
 /// Reads the record and nothing else. Deliberately does NOT probe the machine:
@@ -1952,7 +2130,14 @@ fn history(
         // out whole under `-o json`, which is where a reader who wants all of it
         // is already going.
         let result = if r.ok {
-            "ok".to_string()
+            // A rollback IS an apply, so without saying so the history shows two
+            // entries that look alike with no way to tell the second was a
+            // deliberate step backwards. That is the whole reason the field
+            // exists, and not printing it would have made it decorative.
+            match r.rollback_of {
+                Some(n) => super::po::tf("ok (rollback of {n})", &[("n", &n.to_string())]),
+                None => "ok".to_string(),
+            }
         } else {
             match &r.error {
                 Some(e) => {

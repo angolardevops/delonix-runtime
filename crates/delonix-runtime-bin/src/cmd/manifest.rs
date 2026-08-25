@@ -404,21 +404,29 @@ pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
             path.display()
         ))
     })?;
+    load_str(&text, &path.display().to_string())
+}
+
+/// The same load, from text already in hand.
+///
+/// `label` is what an error message calls the source — a path for a file, and
+/// for `stack rollback` the revision it came from. It exists because a revision
+/// is replayed from the record and never from disk (ADR-0019): writing it to a
+/// temporary file first would work, and would then resolve every relative path
+/// in it against the WRONG directory.
+pub fn load_str(text: &str, label: &str) -> Result<Vec<ManifestDoc>> {
     if text.trim().is_empty() {
         return Err(Error::Invalid(super::po::tf(
             "{path} is empty (no YAML documents)",
-            &[("path", &path.display().to_string())],
+            &[("path", label)],
         )));
     }
     let mut docs = Vec::new();
-    for de in serde_yaml::Deserializer::from_str(&text) {
+    for de in serde_yaml::Deserializer::from_str(text) {
         let mut doc = ManifestDoc::deserialize(de).map_err(|e| {
             Error::Invalid(format!(
                 "{}: {e}",
-                super::po::tf(
-                    "invalid manifest in {path}",
-                    &[("path", &path.display().to_string())],
-                )
+                super::po::tf("invalid manifest in {path}", &[("path", label)],)
             ))
         })?;
         // Canonicalize early: everything else (of_kind, stack::KINDS, describe) speaks
@@ -490,7 +498,7 @@ pub fn load(path: &Path) -> Result<Vec<ManifestDoc>> {
     if docs.is_empty() {
         return Err(Error::Invalid(super::po::tf(
             "{path} is empty (no YAML documents)",
-            &[("path", &path.display().to_string())],
+            &[("path", label)],
         )));
     }
     // `kind: Dependency` lowers to `kind: FirewallPolicy`, LAST and over the whole
