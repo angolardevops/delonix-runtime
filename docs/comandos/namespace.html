@@ -163,28 +163,85 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-      --l18n &lt;en|pt&gt;  Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -h, --help          Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+COMMAND MAP:
+  Inspect  ls · describe
+
+EXAMPLES:
+  # every namespace in use, and what is in each
+  delonix namespace ls
+
+  # what one tenant holds, and whether the boundary is enforced here
+  delonix namespace describe inquilino-b
+
+SEE ALSO:
+  delonix container run · delonix vm create · delonix net ingress · delonix
+  volumes prune
+
+  delonix › namespace</code></pre></div>
 <h2 id='ls'><code>namespace ls</code></h2>
 <p class='intro'>List the isolation namespaces IN USE, with what is in each</p>
 <div class='help'><pre><code>Usage: delonix namespace ls [OPTIONS]
 
 Options:
-      --l18n &lt;en|pt&gt;     Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -o, --output &lt;OUTPUT&gt;  Output format: `table` (default) or `json` (ADR-0005) [default: table] [possible values: table, json]
-  -h, --help             Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -o, --output &lt;OUTPUT&gt;
+          Output format: `table` (default) or `json` (ADR-0005)
+          
+          [default: table]
+          [possible values: table, json]
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # counts by Kind, per namespace
+  delonix namespace ls
+
+  # for a script
+  delonix namespace ls -o json
+
+SEE ALSO:
+  delonix namespace describe
+
+  delonix › namespace › ls</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class="cap">Todas as namespaces em uso, e o que está em cada uma</div><pre><code>delonix namespace ls</code></pre></div><div class="ex"><div class="cap">Para um script — contagens por Kind</div><pre><code>delonix namespace ls -o json</code></pre></div>
 <h2 id='describe'><code>namespace describe</code></h2>
 <p class='intro'>What is inside ONE namespace, by Kind, <code>kubectl describe</code> style</p>
 <div class='help'><pre><code>Usage: delonix namespace describe [OPTIONS] &lt;NAME&gt;
 
 Arguments:
-  &lt;NAME&gt;  
+  &lt;NAME&gt;
+          
 
 Options:
-      --l18n &lt;en|pt&gt;     Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-  -o, --output &lt;OUTPUT&gt;  Output format: `table` (default) or `json` (ADR-0005) [default: table] [possible values: table, json]
-  -h, --help             Print help</code></pre></div>
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -o, --output &lt;OUTPUT&gt;
+          Output format: `table` (default) or `json` (ADR-0005)
+          
+          [default: table]
+          [possible values: table, json]
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # the contents by Kind, plus the nft set that carries the boundary
+  delonix namespace describe inquilino-b
+
+SEE ALSO:
+  delonix namespace ls · delonix net netns firewall
+
+  delonix › namespace › describe</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class="cap">O conteúdo de uma, mais o set nft que carrega a fronteira</div><pre><code>delonix namespace describe inquilino-b</code></pre></div>
 <footer><span class='lang-pt'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</span><span class='lang-en'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.</span></footer>
 </main>

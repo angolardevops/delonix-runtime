@@ -145,7 +145,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <h1>Arquitectura — Delonix Engine</h1>
 <p>Modelo C4 (Contexto → Contentores → Componentes) e system design funcional do
 <strong>Delonix Engine</strong>: motor de containers e microVMs <strong>daemonless, rootless-first,
-kernel-native</strong>, em Rust (10 crates, workspace <code>crates/</code>). Este documento é canónico
+kernel-native</strong>, em Rust (13 crates, workspace <code>crates/</code>). Este documento é canónico
 e mantido contra o código — cada afirmação estrutural tem a referência do
 crate/ficheiro onde foi confirmada. Onde há limites, eles aparecem nos diagramas,
 não escondidos em rodapés.</p>
@@ -297,7 +297,7 @@ leitura — <code>reconcile_status</code> (<code>crates/delonix-runtime/src/lib.
 de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused</code>. O CRI chama-o em
 <code>load_reconciled</code> antes de responder ao kubelet.</p>
 <hr />
-<h2>C4 — Nível 3: Componentes (os 10 crates)</h2>
+<h2>C4 — Nível 3: Componentes (os 13 crates)</h2>
 <p>Setas = dependências <strong>reais</strong>, confirmadas nos <code>Cargo.toml</code> de <code>crates/*/</code> e nos
 <code>use delonix_*</code> dos <code>src/</code>. Não há ciclos; <code>delonix-runtime-core</code> é a raiz comum.</p>
 <pre class="mermaid">graph TB
@@ -311,6 +311,9 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     CORE[&quot;delonix-runtime-core&lt;br&gt;Container, Vm, Status, Store e JsonStore, Mount,&lt;br&gt;typestate, virt, secret e cred_vault — Secret Manager&quot;]
     MGMT[&quot;delonix-mgmt&lt;br&gt;API de gestao LOCAL (HTTP+JSON num socket unix, so o proprio uid)&lt;br&gt;registo Prometheus partilhado e spans OpenTelemetry&quot;]
     SCAN[&quot;delonix-scan&lt;br&gt;SBOM e varredura de CVE — image scan&lt;br&gt;e a imposicao de scan-on-pull&quot;]
+    RULES[&quot;delonix-net-rules&lt;br&gt;regras de rede PURAS, ZERO dependencias — Cidr, nome de bridge,&lt;br&gt;IPAM dentro de um prefixo, leitura de taxas; partilhado com o PaaS&quot;]
+    PVE[&quot;delonix-proxmox&lt;br&gt;backend VmBackend REMOTO contra a API de UM no Proxmox VE&lt;br&gt;(ADR-0008) — fora do delonix-vm por trazer cliente HTTP&quot;]
+    NAS[&quot;delonix-truenas&lt;br&gt;provisiona dataset, quota, permissoes e export numa NAS&lt;br&gt;pela API do TrueNAS (ADR-0009) — mesma razao de crate a parte&quot;]
 
     BIN --&gt; RT
     BIN --&gt; IMG
@@ -321,6 +324,8 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     BIN --&gt; CRI
     BIN --&gt; MGMT
     BIN --&gt; SCAN
+    BIN --&gt; PVE
+    BIN --&gt; NAS
 
     MGMT --&gt; RT
     MGMT --&gt; IMG
@@ -345,6 +350,11 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     NET --&gt; CORE
     IMG --&gt; CORE
     VOL --&gt; CORE
+
+    NET --&gt; RULES
+    PVE --&gt; VM2
+    PVE --&gt; CORE
+    NAS --&gt; CORE
 </pre>
 <p>Notas de leitura do grafo (todas verificadas):</p>
 <ul>
@@ -366,6 +376,23 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
 <li><strong><code>delonix-vm</code> → <code>delonix-net</code></strong> existe porque o backend Cloud Hypervisor liga o
   <code>tap</code> da VM à bridge do ingress (<code>infra::vm_attach</code>, doc-comment de
   <code>crates/delonix-vm/src/lib.rs</code>).</li>
+<li><strong><code>delonix-net-rules</code> não tem UMA dependência</strong> — nem interna nem externa, e é isso
+  que o torna atravessável: é o que o <code>delonix-net</code> e o control-plane do <code>delonix-paas</code>
+  compilam os dois para responderem o MESMO nome de bridge, o mesmo IP dentro de um
+  prefixo, a mesma leitura de <code>10mbit</code>. Pôr isso atrás de um endpoint HTTP pagaria um
+  salto de rede — e um modo de falha novo — para calcular o que os dois lados já sabem
+  calcular; e duas implementações que TÊM de concordar são duas que um dia não
+  concordam. O <code>delonix-net</code> re-exporta tudo, portanto nenhum consumidor mudou.</li>
+<li><strong><code>delonix-proxmox</code> e <code>delonix-truenas</code> estão fora dos crates de motor de propósito, e
+  pela mesma razão escrita nos dois <code>Cargo.toml</code></strong>: trazem um cliente HTTP (<code>reqwest</code>),
+  e um crate de motor não cresce um. O <code>delonix-vm</code> tem quatro dependências e o
+  <code>delonix-volume</code> três — meter lá o cliente para falar com UM alvo remoto trocaria isso
+  por uma árvore que todo o motor passa a arrastar. Por isso o backend Proxmox
+  (ADR-0008) implementa o <code>VmBackend</code> a partir de fora e <strong>regista-se</strong> (<code>register_backend</code>),
+  e quem conhece o alvo é o <code>-bin</code>, não o motor.</li>
+<li><strong>Nada depende de <code>delonix-proxmox</code> nem de <code>delonix-truenas</code> a não ser o <code>-bin</code></strong> — são
+  folhas do grafo, e é o que permite que um alvo remoto mal configurado avise e siga em
+  vez de parar um <code>container ls</code>.</li>
 <li>Módulos internos que importam ao desenho:</li>
 <li><code>delonix-net::infra</code> — todo o plano rootless (holder, slirp único, publish/DNAT,
     DNS/DHCP/RA, firewall por container, egress policy, <code>attach_container</code>);</li>
