@@ -26,9 +26,11 @@
 //! separate registry, same "derive membership from the manifest" philosophy
 //! `stack describe`/`cluster ls` already use.
 //!
-//! **v1 scope, explicit ship/defer** (never a silent no-op — see
-//! `KNOWN_UNSUPPORTED_TOP`/`KNOWN_UNSUPPORTED_SERVICE` for the exact ones
-//! that reject with a clear reason): ships `image`/`build`/`environment`/
+//! **v1 scope, explicit ship/defer** (never a silent no-op — the denylists
+//! `KNOWN_UNSUPPORTED_TOP`/`KNOWN_UNSUPPORTED_SERVICE` carry the specific
+//! reasons, and `SUPPORTED_TOP`/`SUPPORTED_SERVICE` are the ALLOWLIST behind
+//! them, so a key nobody remembered to deny is refused too instead of dropped):
+//! ships `image`/`build`/`environment`/
 //! `env_file`/`ports`/`volumes`/`command`/`entrypoint`/`depends_on`
 //! (all 3 conditions)/`healthcheck`/`restart`/`networks`/`labels`/`user`/
 //! `cap_add`/`cap_drop`/`privileged`/`tmpfs`/`deploy.resources.limits`/
@@ -81,6 +83,77 @@ const KNOWN_UNSUPPORTED_SERVICE: &[(&str, &str)] = &[
         "profiles",
         "per-service `profiles:` is not supported in v1 — every service always runs",
     ),
+];
+
+/// Every top-level key of the Compose Specification this implementation reads.
+///
+/// **An ALLOWLIST, and that is the whole point.** `KNOWN_UNSUPPORTED_*` above is
+/// a denylist, and a denylist can only refuse what someone remembered to write
+/// down: every other key of the specification — and there are dozens — was
+/// parsed into a typed struct that dropped it without a word. `security_opt:`,
+/// `devices:`, `sysctls:`, `network_mode:` all read as accepted and none of them
+/// did anything, which is precisely the failure this engine refuses by policy
+/// ("accepted and ignored is worse than missing"). The denylist stays because it
+/// carries the good, specific reasons; this closes the hole behind it.
+///
+/// `version:` is here although nothing reads it: the Compose Specification
+/// dropped it, real files still carry it, and erroring on it would refuse most
+/// of the compose files in the world for a key whose absence changes nothing.
+const SUPPORTED_TOP: &[&str] = &["version", "name", "services", "networks", "volumes"];
+
+/// Every per-service key this implementation reads — the field list of
+/// [`ComposeService`], and `struct_fields_are_all_in_the_allowlist` reads
+/// THIS FILE'S OWN SOURCE to prove the two never drift. Same discipline the
+/// `API_MATRIX` of `dockerapi.rs` uses, for the same reason.
+const SUPPORTED_SERVICE: &[&str] = &[
+    "image",
+    "build",
+    "environment",
+    "env_file",
+    "ports",
+    "volumes",
+    "command",
+    "entrypoint",
+    "depends_on",
+    "healthcheck",
+    "restart",
+    "networks",
+    "labels",
+    "working_dir",
+    "user",
+    "cap_add",
+    "cap_drop",
+    "privileged",
+    "tmpfs",
+    "extra_hosts",
+    "deploy",
+    "container_name",
+    "hostname",
+    "read_only",
+];
+
+/// Keys of a top-level `networks:`/`volumes:` entry that are read.
+const SUPPORTED_NETWORK: &[&str] = &["external", "name"];
+const SUPPORTED_VOLUME: &[&str] = &["external", "name"];
+
+/// (service key, the flag that already does it) — the engine HAS the capability
+/// and `compose` simply does not wire it through yet.
+///
+/// Kept apart from `KNOWN_UNSUPPORTED_SERVICE` because the answer is genuinely
+/// different: "we decided not to" and "we can, just not from here" send the
+/// reader to different places. Several of these change ISOLATION
+/// (`security_opt`, `pid`, `ipc`, `network_mode`), which is why dropping them in
+/// silence was the worst case of all — the container ran less confined than the
+/// file said and nothing reported it.
+const ENGINE_HAS_IT_SERVICE: &[(&str, &str)] = &[
+    ("devices", "container run --device"),
+    ("dns", "container run --dns"),
+    ("security_opt", "container run --security-opt"),
+    ("group_add", "container run --group-add"),
+    ("logging", "container run --log-driver"),
+    ("network_mode", "container run --net"),
+    ("pid", "container run --host-pid"),
+    ("ipc", "container run --host-ipc"),
 ];
 
 #[derive(Subcommand)]
@@ -841,9 +914,19 @@ fn resolve_volume_names(project: &str, compose: &ComposeFile) -> BTreeMap<String
         .collect()
 }
 
-/// KNOWN_UNSUPPORTED scan — against the RAW parsed YAML (typed-struct parsing
-/// would just silently drop an unrecognized key; this is what gives it a
-/// clear, actionable error instead).
+/// Refuses every key this implementation does not read — against the RAW parsed
+/// YAML, because the typed structs drop an unrecognized key without a word.
+///
+/// Three answers, never two, and the order is deliberate — most specific first:
+///
+/// 1. **`KNOWN_UNSUPPORTED_*`** — decided against, with the reason and the
+///    Delonix equivalent.
+/// 2. **`ENGINE_HAS_IT_SERVICE`** — the engine does it, `compose` does not wire
+///    it through; the message names the flag that does.
+/// 3. **Not in the allowlist** — refused generically, and the message prints
+///    what IS read so the fix is one line away.
+///
+/// PURE (`&str` in, `Result` out), so every one of those paths is a data test.
 fn check_unsupported_fields(text: &str) -> Result<()> {
     let raw: serde_yaml::Value = serde_yaml::from_str(text)
         .map_err(|e| Error::Invalid(format!("parsing compose file: {e}")))?;
@@ -857,22 +940,81 @@ fn check_unsupported_fields(text: &str) -> Result<()> {
             )));
         }
     }
+    for key in mapping_keys(top) {
+        if !SUPPORTED_TOP.contains(&key.as_str()) {
+            return Err(Error::Invalid(format!(
+                "compose: top-level `{key}:` is not understood and was refused rather \
+                 than ignored — this implementation reads {}",
+                SUPPORTED_TOP.join(", ")
+            )));
+        }
+    }
+    for (section, allowed) in [
+        ("networks", SUPPORTED_NETWORK),
+        ("volumes", SUPPORTED_VOLUME),
+    ] {
+        let Some(serde_yaml::Value::Mapping(entries)) = top.get(section) else {
+            continue;
+        };
+        for (entry_name, entry_val) in entries {
+            let serde_yaml::Value::Mapping(entry_map) = entry_val else {
+                continue; // `mynet:` with no body is legal and means "defaults"
+            };
+            for key in mapping_keys(entry_map) {
+                if !allowed.contains(&key.as_str()) {
+                    return Err(Error::Invalid(format!(
+                        "compose: {section} '{}': `{key}:` is not understood and was \
+                         refused rather than ignored — this implementation reads {}",
+                        entry_name.as_str().unwrap_or("?"),
+                        allowed.join(", ")
+                    )));
+                }
+            }
+        }
+    }
     if let Some(serde_yaml::Value::Mapping(services)) = top.get("services") {
         for (svc_name, svc_val) in services {
             let serde_yaml::Value::Mapping(svc_map) = svc_val else {
                 continue;
             };
+            let svc = svc_name.as_str().unwrap_or("?");
             for (key, reason) in KNOWN_UNSUPPORTED_SERVICE {
                 if svc_map.contains_key(serde_yaml::Value::String((*key).to_string())) {
                     return Err(Error::Invalid(format!(
-                        "compose: service '{}': `{key}:` is not supported — {reason}",
-                        svc_name.as_str().unwrap_or("?")
+                        "compose: service '{svc}': `{key}:` is not supported — {reason}"
+                    )));
+                }
+            }
+            for (key, flag) in ENGINE_HAS_IT_SERVICE {
+                if svc_map.contains_key(serde_yaml::Value::String((*key).to_string())) {
+                    return Err(Error::Invalid(format!(
+                        "compose: service '{svc}': `{key}:` is not read by `compose` — \
+                         the engine does it (`delonix {flag}`), so this is refused \
+                         instead of silently dropped"
+                    )));
+                }
+            }
+            for key in mapping_keys(svc_map) {
+                if !SUPPORTED_SERVICE.contains(&key.as_str()) {
+                    return Err(Error::Invalid(format!(
+                        "compose: service '{svc}': `{key}:` is not understood and was \
+                         refused rather than ignored — this implementation reads {}",
+                        SUPPORTED_SERVICE.join(", ")
                     )));
                 }
             }
         }
     }
     Ok(())
+}
+
+/// The string keys of a YAML mapping, in order. A non-string key (YAML allows
+/// them) is skipped rather than refused: it cannot collide with any name in the
+/// allowlists, and refusing it would be a second, unrelated opinion.
+fn mapping_keys(m: &serde_yaml::Mapping) -> Vec<String> {
+    m.keys()
+        .filter_map(|k| k.as_str().map(|s| s.to_string()))
+        .collect()
 }
 
 fn simple_doc(kind: &str, name: &str) -> ManifestDoc {
@@ -1998,6 +2140,187 @@ services:
         assert_ne!(
             a, b,
             "colisão real entre dois pares projecto/chave distintos"
+        );
+    }
+}
+
+/// The allowlist behind the denylist. This module is what fails if
+/// `check_unsupported_fields` ever goes back to refusing only what someone
+/// remembered to write down.
+#[cfg(test)]
+mod tests_unknown_keys {
+    use super::*;
+
+    fn err_of(yaml: &str) -> String {
+        check_unsupported_fields(yaml)
+            .expect_err("this compose file must be refused")
+            .to_string()
+    }
+
+    /// THE finding: keys of the Compose Specification that no denylist named
+    /// were parsed into a typed struct and dropped without a word.
+    ///
+    /// Four of these six change ISOLATION or resource limits, so "accepted and
+    /// ignored" meant the container ran differently from what the file said and
+    /// nothing reported it.
+    #[test]
+    fn a_service_key_outside_both_lists_is_refused() {
+        for key in [
+            "sysctls",
+            "ulimits",
+            "shm_size",
+            "mem_limit",
+            "expose",
+            "init",
+        ] {
+            let e = err_of(&format!(
+                "services:\n  web:\n    image: nginx\n    {key}: x\n"
+            ));
+            assert!(e.contains(key), "the message must name the key: {e}");
+            assert!(e.contains("web"), "the message must name the service: {e}");
+            assert!(
+                e.contains("refused rather than ignored"),
+                "the message must say it was refused, not dropped: {e}"
+            );
+        }
+    }
+
+    /// A key the ENGINE supports gets a different answer from one it does not:
+    /// the message names the flag that already does the job.
+    #[test]
+    fn a_key_the_engine_has_names_the_flag() {
+        let e = err_of("services:\n  web:\n    image: nginx\n    security_opt: [x]\n");
+        assert!(e.contains("--security-opt"), "must name the flag: {e}");
+        let e = err_of("services:\n  web:\n    image: nginx\n    network_mode: host\n");
+        assert!(e.contains("--net"), "must name the flag: {e}");
+    }
+
+    /// The specific reasons still win over the generic message — a denied key
+    /// must not regress into "not understood".
+    #[test]
+    fn the_specific_reason_wins_over_the_generic() {
+        let e = err_of("services:\n  web:\n    image: nginx\n    extends: {}\n");
+        assert!(e.contains("inline the service"), "specific reason: {e}");
+        let e = err_of("configs:\n  a: {}\nservices:\n  web:\n    image: nginx\n");
+        assert!(e.contains("kind: Secret"), "specific reason: {e}");
+    }
+
+    #[test]
+    fn a_top_level_key_outside_the_list_is_refused() {
+        let e = err_of("x-custom: 1\nservices:\n  web:\n    image: nginx\n");
+        assert!(e.contains("x-custom"), "{e}");
+    }
+
+    /// `version:` is dead in the specification and alive in the real world.
+    /// Refusing it would reject most compose files over a key that changes
+    /// nothing.
+    #[test]
+    fn version_still_parses() {
+        check_unsupported_fields("version: '3.8'\nservices:\n  web:\n    image: nginx\n")
+            .expect("`version:` must keep parsing");
+    }
+
+    /// A file made only of keys this implementation reads must still pass —
+    /// without this, the tests above would also pass with the function
+    /// hardcoded to refuse everything.
+    #[test]
+    fn a_fully_supported_file_passes() {
+        let yaml = "\
+name: proj
+services:
+  web:
+    image: nginx
+    ports: ['8080:80']
+    environment: {A: b}
+    volumes: ['data:/x']
+    depends_on: [db]
+    healthcheck: {test: ['CMD', 'true']}
+    restart: always
+    networks: [front]
+    labels: {a: b}
+    working_dir: /app
+    user: '1000'
+    cap_add: [NET_ADMIN]
+    cap_drop: [ALL]
+    privileged: false
+    tmpfs: ['/tmp']
+    extra_hosts: ['a:1.2.3.4']
+    deploy: {resources: {limits: {memory: 1g}}}
+    container_name: web1
+    hostname: web
+    read_only: true
+    command: ['nginx']
+    entrypoint: ['/bin/sh']
+    env_file: ['.env']
+    build: .
+  db:
+    image: postgres
+networks:
+  front:
+    external: true
+    name: real
+volumes:
+  data:
+    external: false
+    name: realvol
+";
+        check_unsupported_fields(yaml).expect("every key here is in the allowlist");
+    }
+
+    /// A `networks:`/`volumes:` entry with no body means "defaults" and is
+    /// legal — measured against real files, not assumed.
+    #[test]
+    fn a_network_entry_with_no_body_is_legal() {
+        check_unsupported_fields("services:\n  w:\n    image: n\nnetworks:\n  front:\n")
+            .expect("`front:` with no body is the common form");
+    }
+
+    #[test]
+    fn a_network_key_outside_the_list_is_refused() {
+        let e = err_of("services:\n  w:\n    image: n\nnetworks:\n  front:\n    driver: bridge\n");
+        assert!(e.contains("driver"), "{e}");
+        assert!(e.contains("front"), "{e}");
+    }
+
+    /// The guard that stops the allowlist from drifting away from the struct it
+    /// describes: reads THIS FILE'S OWN SOURCE, the same idiom the API matrix
+    /// coverage test of `dockerapi.rs` uses.
+    ///
+    /// Without it, adding a field to `ComposeService` and forgetting the
+    /// allowlist would make a key the parser DOES read be refused — the
+    /// opposite failure, and just as silent to whoever wrote the field.
+    #[test]
+    fn struct_fields_are_all_in_the_allowlist() {
+        let src = include_str!("compose.rs");
+        let body = src
+            .split("struct ComposeService {")
+            .nth(1)
+            .expect("`struct ComposeService` must exist")
+            .split("\n}")
+            .next()
+            .unwrap();
+        let mut missing = Vec::new();
+        for line in body.lines() {
+            let l = line.trim();
+            if l.starts_with('#') || l.starts_with("//") || l.is_empty() {
+                continue;
+            }
+            // `name: Type,` — and `rename = "x"` is what the YAML really says,
+            // so the renamed form is the one that has to be in the list.
+            let Some((name, _)) = l.split_once(':') else {
+                continue;
+            };
+            let name = name.trim();
+            if name.is_empty() || !name.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
+                continue;
+            }
+            if !SUPPORTED_SERVICE.contains(&name) {
+                missing.push(name.to_string());
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "fields of ComposeService missing from SUPPORTED_SERVICE: {missing:?}"
         );
     }
 }
