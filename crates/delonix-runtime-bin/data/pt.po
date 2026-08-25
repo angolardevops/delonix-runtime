@@ -9365,3 +9365,44 @@ msgstr "servida"
 
 msgid "refused"
 msgstr "recusada"
+
+# ---- system doctor ---------------------------------------------------------
+
+msgid "Check the HOST prerequisites this engine needs, and say how to fix each"
+msgstr "Verifica os pré-requisitos do HOST que este motor precisa, e diz como corrigir cada um"
+
+msgid ""
+"Check the HOST prerequisites this engine needs, and say how to fix each.\n"
+"\n"
+"`info` reports state and `setup` fixes cgroup delegation. This answers a third question — «is this host able to do what the engine promises?» — and it exists because several of those promises fail SILENTLY when a prerequisite is missing. Read-only: it changes nothing."
+msgstr ""
+"Verifica os pré-requisitos do HOST que este motor precisa, e diz como corrigir cada um.\n"
+"\n"
+"O `info` relata estado e o `setup` corrige a delegação de cgroup. Isto responde a uma terceira pergunta — «este host consegue fazer o que o motor promete?» — e existe porque várias dessas promessas falham em SILÊNCIO quando falta um pré-requisito. Só leitura: não muda nada."
+
+msgid "Exit non-zero when a check fails, for a CI or provisioning gate"
+msgstr "Sai com não-zero quando uma verificação falha, para um gate de CI ou de provisionamento"
+
+msgid "Stack name (the owner stamped on every resource). Default: a `kind: Stack`'s name, else the manifest's directory"
+msgstr "Nome da stack (o dono carimbado em cada recurso). Omissão: o nome de um `kind: Stack`, senão o directório do manifesto"
+
+msgid "FAILED"
+msgstr "FALHOU"
+
+msgid "unknown"
+msgstr "desconhecido"
+
+msgid "every prerequisite holds."
+msgstr "todos os pré-requisitos se verificam."
+
+msgid "{failed} failing, {unknown} unmeasurable — {silent} break a promise SILENTLY (success is reported and the thing does not happen)."
+msgstr "{failed} a falhar, {unknown} sem medição possível — {silent} quebram uma promessa em SILÊNCIO (é reportado sucesso e a coisa não acontece)."
+
+msgid "{n} host prerequisite(s) not met"
+msgstr "{n} pré-requisito(s) do host por cumprir"
+
+msgid "check whether this host can do what the engine promises"
+msgstr "verificar se este host consegue fazer o que o motor promete"
+
+msgid "as a provisioning or CI gate — non-zero when something is missing"
+msgstr "como gate de provisionamento ou de CI — não-zero quando falta alguma coisa"
