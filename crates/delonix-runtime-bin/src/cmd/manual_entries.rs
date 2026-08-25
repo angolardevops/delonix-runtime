@@ -1754,6 +1754,16 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["stack apply", "stack validate", "stack describe", "stack destroy"],
     },
     Entry {
+        path: "stack rollback",
+        group: "Declarative",
+        examples: &[
+            ("see what going back to revision 3 would change, and change nothing", "delonix stack rollback --to 3 --dry-run"),
+            ("replay revision 3", "delonix stack rollback --to 3"),
+            ("and also remove what was created after it — without this, a rollback undoes no creation", "delonix stack rollback --to 3 --prune"),
+        ],
+        see_also: &["stack history", "stack apply", "stack plan", "stack destroy"],
+    },
+    Entry {
         path: "stack history",
         group: "Inspect",
         examples: &[

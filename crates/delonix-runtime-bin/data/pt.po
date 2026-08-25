@@ -9295,3 +9295,59 @@ msgstr "legível por máquina, e a única forma que traz o erro COMPLETO de um a
 
 msgid "a stack whose manifest has since moved or been deleted"
 msgstr "uma stack cujo manifesto entretanto mudou de sítio ou foi apagado"
+
+# ---- stack rollback (ADR-0019) ---------------------------------------------
+
+msgid "Re-apply a recorded revision (ADR-0019)"
+msgstr "Volta a aplicar uma revisão registada (ADR-0019)"
+
+msgid ""
+"Re-apply a recorded revision (ADR-0019).\n"
+"\n"
+"A rollback IS an apply: it replays the manifest of revision N through the same path a normal apply takes, and gets a revision of its own. It is not a time machine, and the differences are printed before anything runs — what was created after N stays unless `--prune`, and data that was deleted does not come back."
+msgstr ""
+"Volta a aplicar uma revisão registada (ADR-0019).\n"
+"\n"
+"Um rollback É um apply: repete o manifesto da revisão N pelo mesmo caminho que um apply normal segue, e ganha uma revisão própria. Não é uma máquina do tempo, e as diferenças são impressas antes de correr fosse o que for — o que foi criado depois da N fica, a não ser com `--prune`, e dados apagados não voltam."
+
+msgid "Revision to replay. `stack history` lists them"
+msgstr "Revisão a repetir. O `stack history` lista-as"
+
+msgid "Show the plan and change nothing"
+msgstr "Mostra o plano e não muda nada"
+
+msgid "Authorize destroying and recreating a resource whose change does not converge live — same meaning as in `apply`"
+msgstr "Autoriza destruir e recriar um recurso cuja mudança não converge a quente — o mesmo sentido que tem no `apply`"
+
+msgid "Also REMOVE what this stack owns and the replayed revision does not declare — this is what makes a rollback actually undo a creation"
+msgstr "REMOVE também o que esta stack possui e a revisão repetida não declara — é isto que faz um rollback desfazer mesmo uma criação"
+
+msgid "revision {n} of stack '{stack}' (`stack history` lists them)"
+msgstr "revisão {n} da stack '{stack}' (o `stack history` lista-as)"
+
+msgid "revision {n} of stack '{stack}' is a FAILED apply — it is on record so it can be read, not replayed. Pick one that succeeded (`stack history`)."
+msgstr "a revisão {n} da stack '{stack}' é um apply FALHADO — está registada para ser lida, não repetida. Escolhe uma que tenha corrido bem (`stack history`)."
+
+msgid "revision {n} of stack '{stack}'"
+msgstr "revisão {n} da stack '{stack}'"
+
+msgid "Rollback of stack \"{stack}\" to revision {n} ({when})"
+msgstr "Rollback da stack \"{stack}\" para a revisão {n} ({when})"
+
+msgid "{n} resource(s) exist that revision {rev} does not declare. A rollback does not delete on its own — pass `--prune` to remove them."
+msgstr "existem {n} recurso(s) que a revisão {rev} não declara. Um rollback não apaga por si — passa `--prune` para os remover."
+
+msgid "{n} resource(s) will be RECREATED, and a recreated resource is EMPTY — the record holds the manifest, never the data that was in it."
+msgstr "{n} recurso(s) vão ser RECRIADOS, e um recurso recriado está VAZIO — o registo guarda o manifesto, nunca os dados que estavam nele."
+
+msgid "ok (rollback of {n})"
+msgstr "ok (rollback da {n})"
+
+msgid "see what going back to revision 3 would change, and change nothing"
+msgstr "ver o que voltar à revisão 3 mudaria, sem mudar nada"
+
+msgid "replay revision 3"
+msgstr "repetir a revisão 3"
+
+msgid "and also remove what was created after it — without this, a rollback undoes no creation"
+msgstr "e remover também o que foi criado depois dela — sem isto, um rollback não desfaz criação nenhuma"
