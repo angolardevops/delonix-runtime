@@ -1,17 +1,60 @@
 # Conformidade CRI — resultado medido
 
 > Suite: **cri-tools `critest` v1.36.0** (a de upstream, não uma nossa).
-> Motor: `delonix-cri` v0.42.2, **rootless**, host Linux 7.0, cgroup v2.
-> Reproduzir: `tests/compat/cri-conformance.sh`.
+> Motor: `delonix-cri` **v0.63.1**, **rootless**, host Linux 7.0, cgroup v2.
+> Medido: **2026-08-25**. Reproduzir: `scripts/critest.sh` (ou
+> `tests/compat/cri-conformance.sh`, que corre a mesma suite).
 
 ## Resultado
 
 ```
-Ran 103 of 122 Specs in 570 seconds
-77 Passed | 26 Failed | 19 Skipped
+Ran 103 of 122 Specs in 777.277 seconds
+79 Passed | 24 Failed | 19 Skipped
 ```
 
-> Progressão medida: **65 → 69 → 71 → 72 → 77**. O que fechou os quatro está na secção «Segunda ronda» abaixo.
+> Progressão medida: **65 → 69 → 71 → 72 → 77 → 79**.
+
+### A recontagem de 2026-08-25
+
+Este documento dizia **77/103** e era do motor **v0.42.2** — vinte e uma versões
+atrás. Um número de conformidade é a afirmação de compatibilidade mais visível
+deste projecto, e um que ninguém revalida deixa de ser uma medição para passar a
+ser uma citação.
+
+Remedido contra a MESMA suite e o MESMO total: **79 passados, 24 falhados**. Não
+regrediu — melhorou dois.
+
+**E a recontagem foi, sem o saber, uma verificação independente.** O `README.rst`
+e o gerador do site já publicavam `79 Passed | 24 Failed` há algum tempo; era só
+este documento — o que tem o detalhe — que ficara para trás. Uma corrida cega ao
+que estava escrito aqui chegou exactamente aos mesmos números que a página
+pública. Vale mais do que a actualização em si: o valor publicado ao cliente
+estava certo, e agora o detalhe volta a suportá-lo.
+
+**Nota de método que quase estragou a comparação.** A primeira recontagem usou o
+`critest` **v1.34.0**, e deu `70 Passed | 26 Failed` de 96 specs. Comparar esse
+70 com o 77 publicado e concluir «regrediu sete» teria sido falso: são suites
+diferentes, com totais diferentes (113 specs contra 122). O número só compara
+com o mesmo `critest`, e é por isso que a versão da suite está no cabeçalho.
+
+### As 24 que falham hoje, por área
+
+| área | quantas | nota |
+|---|---|---|
+| AppArmor | 9 | o perfil por-container não é traduzido do CRI; o motor tem o seu (`install.sh` escreve `unconfined+userns`) |
+| Container Mount Propagation | 3 | `rshared`/`rslave` não são propagados |
+| Security Context | 4 | `PodPID`, `RunAsUserName`, `SeccompProfilePath` nil, `NoNewPrivs=false` |
+| Image Manager | 2 | pull por digest, e `Uid`/`Username` no `image status` |
+| Streaming | 2 | `portforward` e um segundo caso de streaming |
+| Multiple Containers | 1 | |
+| Networking | 1 | port mapping só com porta de container |
+| Container Mount Readonly | 1 | mounts read-only não-recursivos |
+| Container OOM | 1 | `OOMKilled`/137 — ver a nota do `AGENTS.md`: o cgroup do container desaparece com ele, logo não há detecção post-mortem possível |
+
+> **Correr sempre num root LIMPO**: com estado acumulado de várias execuções,
+> três specs de «preserving attributes»/«Image Identifier Consistency» falham por
+> poluição e não por conformidade — confirmado a passar num root virgem. O
+> `scripts/critest.sh` já cria um `DELONIX_ROOT` novo por execução.
 > **Correr sempre num root LIMPO**: com estado acumulado de várias execuções,
 > três specs de «preserving attributes»/«Image Identifier Consistency» falham por
 > poluição e não por conformidade — confirmado a passar num root virgem.

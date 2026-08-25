@@ -1934,6 +1934,15 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["system info", "container logs", "system monitor"],
     },
     Entry {
+        path: "system doctor",
+        group: "Inspect",
+        examples: &[
+            ("check whether this host can do what the engine promises", "delonix system doctor"),
+            ("as a provisioning or CI gate — non-zero when something is missing", "delonix system doctor --strict"),
+        ],
+        see_also: &["system info", "system setup", "net netns status"],
+    },
+    Entry {
         path: "system info",
         group: "Inspect",
         examples: &[

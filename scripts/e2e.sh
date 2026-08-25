@@ -619,6 +619,27 @@ check "volumes describe depois do destroy recusa" fail "$BIN" volumes describe "
 "$BIN" network rm "sn-$PFX" >/dev/null 2>&1
 
 # ---------------------------------------------------------------------------
+# `system doctor` — o host mente em silêncio, e alguém tem de perguntar.
+#
+# Vários pré-requisitos falham SEM DIZER: sem `br_netfilter` o isolamento de
+# namespace é instalado, os sets são preenchidos, todo o comando reporta
+# sucesso — e a fronteira não existe (medido 2026-08-12 numa VM limpa: teamA
+# alcançou teamB). Sem delegação de cgroup, `-m`/`--cpus` são aceites e
+# ignorados. O `doctor` não recusa nada e não muda nada: só pergunta.
+check "system doctor corre" ok "$BIN" system doctor
+check "…e nomeia o pré-requisito que falha em silêncio" ok \
+  bash -c "'$BIN' system doctor | grep -q br_netfilter"
+# Um diagnóstico não é um portão: sem `--strict` devolve 0 mesmo num host
+# imperfeito, senão ninguém o corre duas vezes.
+check "system doctor sem --strict não falha" ok \
+  bash -c "PATH=/nonexistent '$BIN' system doctor >/dev/null 2>&1"
+# Com `--strict` é que vira portão — e tem de DETECTAR mesmo. Um doctor que só
+# sabe dizer «está tudo bem» não vale nada, por isso o teste é contra um host
+# onde as ferramentas não existem.
+check "system doctor --strict detecta um host sem as ferramentas" fail \
+  bash -c "PATH=/nonexistent '$BIN' system doctor --strict"
+
+# ---------------------------------------------------------------------------
 # A matriz de compatibilidade da Docker Engine API tem de dizer TRÊS estados.
 #
 # A regra da casa é que «Docker-compatible» nunca viaja sem número, data e
@@ -677,6 +698,38 @@ check "stack history --show devolve o manifesto aplicado" ok \
 # Uma revisão que não existe é «não existe» (classe 4), não um 1 genérico.
 check "stack history --show inexistente devolve 4" 4 \
   "$BIN" stack history -f "$HWORK/hist.yaml" --show 999
+# `stack apply --name` — o nome que se destrói tem de poder ser CRIADO.
+#
+# Medido a 2026-08-25: `plan`, `destroy`, `prune`, `history` e `rollback`
+# aceitavam `--name`; o `apply` não. Ou seja, dava para planear e destruir sob um
+# nome que nenhum apply alguma vez usara — o `apply` derivava sempre a posse do
+# directório do manifesto. O ciclo abaixo é o que a assimetria tornava
+# impossível, e cada passo isolado devolve 0 mesmo com ela presente.
+#
+# **Recurso PRÓPRIO, e a primeira versão não o tinha.** Reutilizava o volume do
+# bloco acima, que já pertence a outra stack — e o motor RECUSA, correctamente,
+# dois donos para o mesmo recurso (`Conflict`). O teste falhava com o código
+# certo. Vale a pena reter: um manifesto novo sob um nome novo precisa de
+# recursos novos, senão o que se mede é a regra de posse e não o `--name`.
+OWORK="$WORK/own-$PFX"
+mkdir -p "$OWORK"
+cat >"$OWORK/m.yaml" <<YAML
+apiVersion: delonix.io/v1
+kind: Volume
+metadata:
+  name: ov-$PFX
+spec: {}
+YAML
+check "stack apply --name carimba a posse com esse nome" ok \
+  "$BIN" stack apply -f "$OWORK/m.yaml" --name "own-$PFX"
+check "…e o history desse nome vê a revisão" ok \
+  bash -c "test \$('$BIN' stack history --name 'own-$PFX' -o json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))') -ge 1"
+# A prova de que o carimbo é MESMO aquele nome: sem `--name` o apply teria
+# carimbado o directório, e um destroy sob `own-…` não encontraria nada.
+check "…e o destroy desse nome leva o que ele criou" ok \
+  "$BIN" stack destroy -f "$OWORK/m.yaml" --name "own-$PFX"
+check "…e já não está" fail "$BIN" volumes inspect "ov-$PFX"
+
 # `stack rollback` — o CICLO, e não os comandos um a um.
 #
 # Cada passo isolado devolve 0 com e sem a funcionalidade a funcionar; o que
@@ -1089,8 +1142,14 @@ check "restore recusa-se com o container a correr" fail bash -c \
   "'$BIN' restore container \$(ls '$BKDIR'/container-$BKC-*.tar.gz | head -1)"
 check "restore --force pára, repõe e arranca" ok bash -c \
   "'$BIN' restore container \$(ls '$BKDIR'/container-$BKC-*.tar.gz | head -1) --force"
+# Espera por CONDIÇÃO e não por tempo. Era `sleep 1` a seguir a um
+# `restore --force` que PÁRA e ARRANCA o container — e um segundo só chega
+# quando a máquina está folgada. Medido a 2026-08-25: falhou numa corrida e
+# passou na seguinte, sem nada ter mudado no motor. É a mesma armadilha que o
+# AGENTS.md já regista a propósito da captura das imagens Proxmox — esperar por
+# tempo na operação que mede o resultado.
 check "os dados voltaram" ok bash -c \
-  "sleep 1; '$BIN' container exec '$BKC' cat /data/f.txt | grep -q prova"
+  "for _ in \$(seq 30); do '$BIN' container exec '$BKC' cat /data/f.txt 2>/dev/null | grep -q prova && exit 0; sleep 0.2; done; exit 1"
 
 # Classes de saída: «não existe» tem de ser distinguível de «rebentou».
 check "backup de inexistente devolve 4" 4 "$BIN" backup container "nao-existe-$PFX" --to "$BKDIR"

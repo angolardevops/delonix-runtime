@@ -92,6 +92,9 @@ pub enum StackCmd {
     },
     /// Applies all the manifest Kinds (Network → Volume → Image → Vm → Container).
     Apply {
+        /// Stack name (the owner stamped on every resource). Default: a `kind: Stack`'s name, else the manifest's directory.
+        #[arg(long)]
+        name: Option<String>,
         #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
         /// Don't apply anything — print the full manifest with every default
@@ -301,6 +304,7 @@ pub fn run(action: StackCmd) -> Result<()> {
         // Handled at the top of `run` (it does a `return`).
         StackCmd::Init { .. } => unreachable!("handled above"),
         StackCmd::Apply {
+            name,
             file,
             dry_run,
             replace,
@@ -312,7 +316,7 @@ pub fn run(action: StackCmd) -> Result<()> {
                 print!("{}", manifest::render_with_defaults(&docs)?);
                 Ok(())
             } else {
-                apply(file, replace, prune)
+                apply(file, name, replace, prune)
             }
         }
         StackCmd::Plan {
@@ -1272,7 +1276,12 @@ fn count_of_kinds(docs: &[manifest::ManifestDoc]) -> std::collections::BTreeMap<
     m
 }
 
-fn apply(file: Option<PathBuf>, replace: Vec<String>, do_prune: bool) -> Result<()> {
+fn apply(
+    file: Option<PathBuf>,
+    name: Option<String>,
+    replace: Vec<String>,
+    do_prune: bool,
+) -> Result<()> {
     // `--replace` is the flag that AUTHORIZES a destructive recreate, so a value
     // it cannot possibly match is refused here rather than ignored. Accepting
     // `--replace lixo` in silence gives the illusion of having authorised
@@ -1295,7 +1304,7 @@ fn apply(file: Option<PathBuf>, replace: Vec<String>, do_prune: bool) -> Result<
     }
     let path = manifest::resolve_path(file)?;
     let docs = manifest::load(&path)?;
-    apply_docs(&docs, &path, None, replace, do_prune, None)
+    apply_docs(&docs, &path, name.as_deref(), replace, do_prune, None)
 }
 
 /// The apply itself, on documents already in hand.

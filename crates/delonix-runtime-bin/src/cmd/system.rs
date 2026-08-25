@@ -30,6 +30,17 @@ pub enum SystemCmd {
     },
     /// Engine state: rootless?, cgroup delegation, network infra, counts.
     Info,
+    /// Check the HOST prerequisites this engine needs, and say how to fix each.
+    ///
+    /// `info` reports state and `setup` fixes cgroup delegation. This answers a
+    /// third question — «is this host able to do what the engine promises?» —
+    /// and it exists because several of those promises fail SILENTLY when a
+    /// prerequisite is missing. Read-only: it changes nothing.
+    Doctor {
+        /// Exit non-zero when a check fails, for a CI or provisioning gate.
+        #[arg(long)]
+        strict: bool,
+    },
     /// Diagnose — and, with `--delegate`, fix — cgroup delegation.
     ///
     /// It is the prerequisite for `--memory`/`--cpus`/`--pids-limit` to mean
@@ -198,6 +209,7 @@ pub fn run(action: SystemCmd) -> Result<()> {
             output,
         } => cmd_events(follow, tail, output),
         SystemCmd::Info => cmd_info(),
+        SystemCmd::Doctor { strict } => cmd_doctor(strict),
         SystemCmd::Setup { delegate } => cmd_setup(delegate),
         SystemCmd::Df => cmd_df(),
         SystemCmd::Backup {
@@ -910,6 +922,228 @@ fn cmd_df() -> Result<()> {
 /// `system info` — what the engine IS on this machine. Without it, diagnosing
 /// "why the limits don't apply" or "why `-p` fails"
 /// forces reading code.
+/// One host prerequisite: what it is, whether it holds, and how to fix it.
+struct Check {
+    name: &'static str,
+    /// `Some(true)` holds, `Some(false)` does not, `None` could not be measured
+    /// — which is a THIRD answer and never folded into «fails». A sysctl this
+    /// user cannot read is not a sysctl set to zero.
+    ok: Option<bool>,
+    /// What was actually read, so the verdict can be checked rather than trusted.
+    detail: String,
+    /// Empty when it holds. When it does not, the exact command to fix it.
+    fix: String,
+    /// Whether failing this one breaks a SAFETY promise rather than a feature.
+    /// The distinction drives the ordering: a silently inert isolation boundary
+    /// outranks a port that will not bind, because the second one tells you.
+    silent: bool,
+}
+
+fn read_sysctl(name: &str) -> Option<String> {
+    let path = format!("/proc/sys/{}", name.replace('.', "/"));
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| s.trim().to_string())
+}
+
+fn have_tool(bin: &str) -> bool {
+    std::env::var_os("PATH")
+        .map(|paths| {
+            std::env::split_paths(&paths).any(|d| {
+                let p = d.join(bin);
+                p.is_file() && {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::metadata(&p)
+                        .map(|m| m.permissions().mode() & 0o111 != 0)
+                        .unwrap_or(false)
+                }
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// `system doctor` — the host prerequisites, measured.
+///
+/// # Why this is a command and not a paragraph in the README
+///
+/// Several of this engine's promises fail SILENTLY when the host is not ready,
+/// and each one has already cost somebody a session:
+///
+/// - **`br_netfilter`.** Namespace isolation lives in nftables chains on the
+///   `forward` hook. Traffic between two containers on the SAME bridge only
+///   reaches that layer if `br_netfilter` carries it there. Without the module
+///   the chains ARE installed, the sets ARE populated, every command reports
+///   success — and the boundary does not exist. Measured 2026-08-12 in a clean
+///   VM: `teamA` reached `teamB`. It is the most expensive silent failure this
+///   engine can have, because the thing that fails reads as applied.
+/// - **cgroup delegation.** Without it `-m`/`--cpus`/`--pids-limit` are
+///   accepted and ignored — the limits go nowhere and nothing says so.
+/// - **subuid/subgid.** Without a range the userns maps a single uid, and
+///   images that need more than one user break in confusing ways.
+///
+/// It does NOT refuse anything and does NOT change anything. Whether the engine
+/// should REFUSE to promise isolation on a host without `br_netfilter` is a
+/// policy decision the AGENTS.md deliberately leaves open: warning is the floor,
+/// refusing would be genuinely fail-closed and would break everyone running that
+/// way today. This is the floor, and it breaks nobody.
+fn cmd_doctor(strict: bool) -> Result<()> {
+    let rootless = runtime::is_rootless();
+    let mut checks: Vec<Check> = Vec::new();
+
+    // The silent safety one goes first, on purpose.
+    let module = std::path::Path::new("/sys/module/br_netfilter").is_dir();
+    let call = read_sysctl("net.bridge.bridge-nf-call-iptables");
+    let (ok, detail) = match (module, call.as_deref()) {
+        (true, Some("1")) => (
+            Some(true),
+            "module loaded, bridge-nf-call-iptables=1".to_string(),
+        ),
+        (true, Some(other)) => (
+            Some(false),
+            format!("module loaded but bridge-nf-call-iptables={other}"),
+        ),
+        // The sysctl only EXISTS once the module is loaded, so «module absent»
+        // and «cannot read the sysctl» are the same observation here.
+        (false, _) => (Some(false), "module not loaded".to_string()),
+        (true, None) => (None, "module loaded, sysctl unreadable".to_string()),
+    };
+    checks.push(Check {
+        name: "br_netfilter (namespace isolation)",
+        ok,
+        detail,
+        fix: "sudo modprobe br_netfilter && sudo sysctl -w net.bridge.bridge-nf-call-iptables=1               (persist: scripts/install.sh, which writes /etc/modules-load.d and /etc/sysctl.d)"
+            .to_string(),
+        silent: true,
+    });
+
+    let limits = runtime::cgroup_limits_apply();
+    checks.push(Check {
+        name: "cgroup2 delegation (--memory/--cpus/--pids-limit)",
+        ok: Some(limits),
+        detail: runtime::current_cgroup_v2().unwrap_or_else(|| "<unknown>".into()),
+        fix: "systemd-run --user --scope -p Delegate=yes -- delonix …  (or, if that still               lacks `cpu`: sudo delonix system setup --delegate)"
+            .to_string(),
+        silent: true,
+    });
+
+    if rootless {
+        // Read the user's own line rather than assuming the login name matches.
+        let user = std::env::var("USER").unwrap_or_default();
+        let subid = std::fs::read_to_string("/etc/subuid").ok().map(|t| {
+            t.lines()
+                .filter(|l| !user.is_empty() && l.starts_with(&format!("{user}:")))
+                .count()
+        });
+        checks.push(Check {
+            name: "subuid range (more than one uid inside the container)",
+            ok: subid.map(|n| n > 0),
+            detail: match subid {
+                Some(n) => format!("{n} line(s) for '{user}' in /etc/subuid"),
+                None => "/etc/subuid unreadable".to_string(),
+            },
+            fix: format!(
+                "sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 {user}"
+            ),
+            silent: true,
+        });
+    }
+
+    // NOT a pass/fail check, and the first version got it wrong twice: it tested
+    // `== 0` (so this host's perfectly working `80` read as broken) and printed
+    // ✗ FAILED next to a `fix` that said OPTIONAL. The default (1024) is the
+    // SAFE one — lowering it lets every local program bind 80-1023 — so calling
+    // it a failure is how a doctor teaches people to ignore its output. It
+    // reports the threshold and what it means.
+    let low = read_sysctl("net.ipv4.ip_unprivileged_port_start");
+    let threshold = low.as_deref().and_then(|v| v.parse::<u32>().ok());
+    checks.push(Check {
+        name: "lowest publishable port",
+        ok: Some(true),
+        detail: match threshold {
+            Some(1024) => {
+                "1024 (the default) — publishing below it needs `--low-ports` or root".to_string()
+            }
+            Some(v) => format!("{v} — `-p {v}:…` and up work without root"),
+            None => "ip_unprivileged_port_start unreadable".to_string(),
+        },
+        fix: String::new(),
+        silent: false,
+    });
+
+    for (bin, why) in [
+        ("slirp4netns", "rootless networking"),
+        ("nft", "firewall and isolation"),
+        ("ip", "every network operation"),
+    ] {
+        checks.push(Check {
+            name: "tool",
+            ok: Some(have_tool(bin)),
+            detail: format!("{bin} — {why}"),
+            fix: format!("install {bin} (see scripts/install.sh)"),
+            silent: false,
+        });
+    }
+
+    let mut failed = 0usize;
+    let mut unknown = 0usize;
+    for c in &checks {
+        let (mark, label) = match c.ok {
+            Some(true) => ("✓", super::po::t("ok")),
+            Some(false) => ("✗", super::po::t("FAILED")),
+            None => ("?", super::po::t("unknown")),
+        };
+        let name = if c.name == "tool" { &c.detail } else { c.name };
+        println!("  {mark} {label:<8} {name}");
+        if c.name != "tool" {
+            println!("      {}", super::output::dim(&c.detail));
+        }
+        match c.ok {
+            Some(false) => {
+                failed += 1;
+                println!("      → {}", c.fix);
+            }
+            None => {
+                unknown += 1;
+                // An unmeasurable check gets the fix printed too: the reader
+                // still has to decide, and hiding it would make «unknown» read
+                // as «fine».
+                println!("      → {}", c.fix);
+            }
+            Some(true) => {}
+        }
+    }
+
+    println!();
+    // The count of SILENT failures is called out separately, because that is
+    // the number that decides whether this host is lying to its operator.
+    let silent_failed = checks
+        .iter()
+        .filter(|c| c.ok == Some(false) && c.silent)
+        .count();
+    if failed == 0 && unknown == 0 {
+        println!("{}", super::po::t("every prerequisite holds."));
+    } else {
+        println!(
+            "{}",
+            super::po::tf(
+                "{failed} failing, {unknown} unmeasurable — {silent} break a promise SILENTLY (success is reported and the thing does not happen).",
+                &[
+                    ("failed", &failed.to_string()),
+                    ("unknown", &unknown.to_string()),
+                    ("silent", &silent_failed.to_string()),
+                ],
+            )
+        );
+    }
+    if strict && failed > 0 {
+        return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+            "{n} host prerequisite(s) not met",
+            &[("n", &failed.to_string())],
+        )));
+    }
+    Ok(())
+}
+
 fn cmd_info() -> Result<()> {
     let (_, store) = open_stores()?;
     let cs = store.list()?;

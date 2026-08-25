@@ -156,6 +156,7 @@ connections/conntrack; <code>system events</code> the event stream.</p>
 
 Commands:
   df       Disk usage by area (images, containers, volumes, VM images)
+  doctor   Check the HOST prerequisites this engine needs, and say how to fix each
   events   Engine events (create/start/die/remove/…), from oldest to most recent
   info     Engine state: rootless?, cgroup delegation, network infra, counts
   backup   Save this node&#x27;s state into one archive
@@ -175,7 +176,7 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 COMMAND MAP:
-  Inspect      events · info · df
+  Inspect      events · info · doctor · df
   Configure    setup · backup · restore · virt
   Maintenance  prune · thermal
   Dashboards   monitor
