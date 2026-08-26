@@ -27,6 +27,8 @@
 //! | 3    | the resource exists but is NOT RUNNING    |
 //! | 4    | no such resource                          |
 //! | 5    | conflict — it already exists              |
+//! | 69   | a capability this host does not have      |
+//! | 124  | the deadline passed                       |
 //!
 //! **3 and 4 are not invented numbers.** They are the LSB init-script status
 //! codes that `systemctl` still speaks today: 3 = «program is not running»,
@@ -35,6 +37,17 @@
 //! those two in their fingers. 5 has no convention behind it; it is the next
 //! free number below the shell's own range.
 //!
+//! **69 and 124 are not invented either.** 69 is `EX_UNAVAILABLE` from
+//! `sysexits.h`; 124 is what `timeout(1)` returns when the deadline passes, and
+//! is therefore already in the fingers of anyone who wraps a command in one.
+//!
+//! Both were added because they had **real producers being misclassified**, not
+//! because a table looked incomplete. `stack wait` answered 1 on a timeout —
+//! the same number as a broken apply, on the command whose entire job is to be
+//! read by CI. A missing `wg`/`virt-customize`/`ngrok` answered 1 too,
+//! indistinguishable from a typo in a flag. The two calls a reconciler makes
+//! next are opposite: wait longer, or stop and install something.
+
 //! **What is deliberately NOT here**, because each one would be a number that
 //! can never come back:
 //!
@@ -42,6 +55,13 @@
 //!   is not an error variant at all — the engine warns and carries on, so there
 //!   is nothing to classify. Giving it a code would mean inventing the
 //!   condition first.
+//! * *Permission denied* (77) and *retryable* (75), which the CLI restructuring
+//!   proposed, have **no producer today**: permission failures arrive wrapped
+//!   as `Error::Io(EACCES)` or `Runtime{EPERM}` from deep inside a syscall
+//!   path, and the retrying that exists (`publish_with_retry`) happens inside
+//!   the engine and never reaches a caller. Publishing either would repeat the
+//!   mistake `Error::Conflict` documents in its own doc-comment: a code nothing
+//!   constructs, that can never be observed.
 //! * `Error::Invalid` and `Error::Registry` keep 1. Splitting «your argument is
 //!   wrong» from «the registry answered badly» is defensible, but neither
 //!   changes what a reconciler does next, and every extra number is a promise
@@ -79,6 +99,12 @@ pub const NOT_FOUND: i32 = 4;
 /// The desired state conflicts with what is already there (it already exists).
 pub const CONFLICT: i32 = 5;
 
+/// A capability this host does not have (`sysexits.h`: `EX_UNAVAILABLE`).
+pub const UNAVAILABLE: i32 = 69;
+
+/// The deadline passed with the work unfinished (`timeout(1)`'s own code).
+pub const TIMEOUT: i32 = 124;
+
 /// The single place an engine error becomes an exit code.
 ///
 /// Pure on purpose: two places deciding the same number is how they start
@@ -89,6 +115,8 @@ pub fn for_error(e: &Error) -> i32 {
         Error::NotFound(_) | Error::VmNotFound(_) => NOT_FOUND,
         Error::NotRunning(_) => NOT_RUNNING,
         Error::Conflict(_) => CONFLICT,
+        Error::Unavailable(_) => UNAVAILABLE,
+        Error::Timeout(_) => TIMEOUT,
         Error::Io(_) | Error::Json(_) | Error::Runtime { .. } => GENERIC,
         Error::Invalid(_) | Error::Registry(_) => GENERIC,
     }
@@ -147,6 +175,27 @@ mod tests {
     }
 
     #[test]
+    fn a_missing_capability_is_not_a_wrong_argument() {
+        // Both used to be `Invalid` → 1. The caller's next move is opposite:
+        // fix the flag, or go install something.
+        assert_eq!(
+            for_error(&Error::Unavailable("'wg' is not available".into())),
+            UNAVAILABLE
+        );
+        assert_eq!(for_error(&Error::Invalid("bad port".into())), GENERIC);
+    }
+
+    #[test]
+    fn an_expired_deadline_is_not_a_failure() {
+        // `stack wait` answered 1 on a timeout — the same number as a broken
+        // apply, on the command whose whole job is to be read by CI.
+        assert_eq!(
+            for_error(&Error::Timeout("waiting for 2 resource(s)".into())),
+            TIMEOUT
+        );
+    }
+
+    #[test]
     fn tudo_o_resto_continua_a_ser_um() {
         // The conservative half of the contract: nothing that used to be 1 and
         // has no class moves.
@@ -165,9 +214,12 @@ mod tests {
         // 2 is clap's usage error AND `stack plan --detailed-exitcode`'s "there
         // are changes"; 126/127 are the shell's; 128+N is a signal. A class
         // landing on any of those would be read as something else entirely.
-        for c in [NOT_RUNNING, NOT_FOUND, CONFLICT] {
+        for c in [NOT_RUNNING, NOT_FOUND, CONFLICT, UNAVAILABLE, TIMEOUT] {
             assert_ne!(c, 0);
             assert_ne!(c, 2);
+            // 126 = "found but not executable", 127 = "not found", 128+N = a
+            // signal. 124 sits just below and is `timeout(1)`'s own code, which
+            // is the reason to pick it rather than a free number.
             assert!((3..126).contains(&c), "code {c} collides with the shell");
         }
     }

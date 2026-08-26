@@ -72,6 +72,8 @@ const ERROR_WRAPPERS: &[(&str, &str)] = &[
     ("invalid argument: ", ""),
     ("registry error: ", ""),
     ("conflict: ", ""),
+    ("unavailable: ", ""),
+    ("timed out: ", ""),
 ];
 
 /// Variant for DYNAMIC strings — the clap help and the ERROR PRINTER of
@@ -278,6 +280,71 @@ pub fn peek_lang() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every translatable `Error` variant must have a wrapper in the table, or
+    /// its message silently stays English under `--l18n=pt` — the exact gap
+    /// that let `Unavailable`/`Timeout` ship untranslated when they were added.
+    ///
+    /// The `match` is exhaustive on purpose, like `exitcode::for_error`'s: a
+    /// variant added tomorrow stops the build here and forces someone to say
+    /// which half it belongs to. A `_ =>` arm would file it under «not ours to
+    /// translate» without telling anyone.
+    #[test]
+    fn every_translatable_variant_has_a_wrapper() {
+        use delonix_runtime_core::Error;
+
+        let sample = [
+            Error::NotFound("container: web".into()),
+            Error::VmNotFound("dev".into()),
+            Error::NotRunning("web".into()),
+            Error::Invalid("bad port".into()),
+            Error::Registry("401".into()),
+            Error::Conflict("network 'app' already exists".into()),
+            Error::Unavailable("'wg' is not available".into()),
+            Error::Timeout("waiting for 2 resource(s)".into()),
+            Error::Io(std::io::Error::other("boom")),
+            Error::Runtime {
+                context: "clone",
+                message: "EPERM".into(),
+            },
+        ];
+
+        for e in &sample {
+            // Whether the variable part is OURS to translate. `Io`/`Json`/
+            // `Runtime` carry an OS errno or a serde message — translating
+            // those would be inventing a wording the kernel did not use.
+            let ours = match e {
+                Error::NotFound(_)
+                | Error::VmNotFound(_)
+                | Error::NotRunning(_)
+                | Error::Invalid(_)
+                | Error::Registry(_)
+                | Error::Conflict(_)
+                | Error::Unavailable(_)
+                | Error::Timeout(_) => true,
+                Error::Io(_) | Error::Json(_) | Error::Runtime { .. } => false,
+            };
+            let rendered = e.to_string();
+            let matched = split_error_wrapper(&rendered).is_some();
+            assert_eq!(
+                matched, ours,
+                "{rendered:?}: wrapper={matched}, translatable={ours}"
+            );
+        }
+    }
+
+    /// The wrapper is useless without the catalog entry beside it: a template
+    /// in the table with no `pt.po` msgid translates to itself, which reads as
+    /// a working translation and is not one.
+    #[test]
+    fn every_wrapper_has_a_catalog_entry() {
+        for &(prefix, _) in ERROR_WRAPPERS {
+            assert!(
+                catalog().contains_key(prefix),
+                "wrapper {prefix:?} has no msgid in pt.po"
+            );
+        }
+    }
 
     #[test]
     fn parse_po_entrada_simples() {

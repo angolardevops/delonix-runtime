@@ -239,6 +239,36 @@ check "inexistente: lote de ids mantém a classe" 4 \
 # A classe não pode depender da língua — é essa a razão de existir do número.
 check "inexistente em PT continua a dizer 4" 4 \
   "$BIN" --l18n=pt container inspect naoexiste-$PFX
+# --- as duas classes novas ---
+# As duas só entraram porque tinham PRODUTORES reais mal classificados: as duas
+# respondiam `1`, o mesmo número de um apply rebentado. E a ligação só se prova
+# aqui — o mapa em `cmd::exitcode` passa nos testes na mesma com o `main` a
+# ignorá-lo, que é a razão de esta secção existir.
+#
+# 124 é o do `timeout(1)`: um prazo esgotado não é uma falha, e um reconciliador
+# que o leia como «rebentou» recria um recurso que estava a subir.
+E2E_WAITMF=$(mktemp "${TMPDIR:-/tmp}/e2e-wait-XXXXXX.yaml")
+cat > "$E2E_WAITMF" <<YAML
+apiVersion: delonix.io/v1
+kind: Container
+metadata: { name: naovaisubir-$PFX }
+spec:
+  image: naoexiste.invalid/naoexiste:0
+YAML
+check "prazo esgotado no stack wait diz 124" 124 \
+  "$BIN" stack wait -f "$E2E_WAITMF" --timeout 1
+rm -f "$E2E_WAITMF"
+
+# 69 é o `EX_UNAVAILABLE` do sysexits.h. Só é exercitável num host a que falte
+# mesmo a ferramenta — com ela instalada o caminho não existe e o honesto é
+# SKIP, nunca um verde que não correu nada (a mesma regra do bloco do `wg`).
+if command -v virt-customize >/dev/null 2>&1; then
+  skip "ferramenta em falta diz 69" "este host TEM virt-customize — o caminho não é exercitável aqui"
+else
+  check "ferramenta em falta diz 69" 69 \
+    "$BIN" image vm build --no-k8s --distro ubuntu --ubuntu-release 24.04 -t e2e-nao-$PFX
+fi
+
 # Convenções instaladas que NÃO podem ter mudado.
 check "uso inválido continua a ser o 2 do clap" 2 "$BIN" subcomando-que-nao-existe
 check "sucesso continua a ser 0" 0 "$BIN" container ps
@@ -450,7 +480,10 @@ fi
 if command -v wg >/dev/null 2>&1; then
   skip "wg ausente: caminho de falha" "este host TEM wg — o caminho não é exercitável aqui"
 else
-  check "node key sem wg: recusa (classe 1)" 1 "$BIN" network node key
+  # Era `1` até os códigos ganharem a classe «capacidade que este host não
+  # tem»: indistinguível de um erro de escrita numa flag, quando a acção
+  # seguinte é oposta (instalar wireguard-tools, não corrigir o comando).
+  check "node key sem wg: recusa (classe 69)" 69 "$BIN" network node key
   check "node key sem wg: nomeia a ferramenta, não o errno" ok bash -c \
     "o=\$('$BIN' network node key 2>&1); grep -q wireguard-tools <<<\"\$o\" && ! grep -q 'No such file' <<<\"\$o\""
   check "overlay cifrado sem wg: recusa em vez de sair 0" fail \

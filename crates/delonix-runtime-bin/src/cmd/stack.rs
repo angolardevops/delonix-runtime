@@ -891,8 +891,11 @@ fn wait(file: Option<PathBuf>, timeout: u64) -> Result<()> {
             for p in &pending {
                 eprintln!("  ✗ {p}");
             }
-            return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
-                "timed out after {secs}s waiting for {n} resource(s)",
+            // Not `Invalid`: nothing about the arguments is wrong, and the
+            // resources may well be coming up right now. A reconciler waits
+            // longer; it must not read this as «it broke».
+            return Err(delonix_runtime_core::Error::Timeout(super::po::tf(
+                "{n} resource(s) still not ready after {secs}s",
                 &[
                     ("secs", &timeout.to_string()),
                     ("n", &pending.len().to_string()),

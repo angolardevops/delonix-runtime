@@ -338,6 +338,12 @@ fn err_response(e: Error) -> Response {
         Error::NotFound(m) => (StatusCode::NOT_FOUND, m),
         Error::Invalid(m) => (StatusCode::BAD_REQUEST, m),
         Error::Conflict(m) => (StatusCode::CONFLICT, m),
+        // The same two classes the exit codes publish, in the transport that
+        // already has words for them. Without these they fell into the catch-all
+        // 500, which tells a caller «this server is broken» when what happened
+        // is «this host lacks a tool» or «it is still coming up».
+        Error::Unavailable(m) => (StatusCode::SERVICE_UNAVAILABLE, m),
+        Error::Timeout(m) => (StatusCode::GATEWAY_TIMEOUT, m),
         other => (StatusCode::INTERNAL_SERVER_ERROR, other.to_string()),
     };
     (code, Json(serde_json::json!({ "error": msg }))).into_response()

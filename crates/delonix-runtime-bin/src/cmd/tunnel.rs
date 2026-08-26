@@ -780,7 +780,7 @@ fn spawn_ngrok(
     store: &JsonStore<TunnelRecord>,
 ) -> Result<()> {
     which("ngrok").ok_or_else(|| {
-        Error::Invalid(
+        Error::Unavailable(
             super::po::t(
                 "`ngrok` not found in PATH — install it (https://ngrok.com/download) before \
                  using provider=ngrok",
@@ -891,7 +891,7 @@ fn spawn_cloudflare(
     insecure_skip_tls_verify: bool,
 ) -> Result<()> {
     which("cloudflared").ok_or_else(|| {
-        Error::Invalid(
+        Error::Unavailable(
             super::po::t(
                 "`cloudflared` not found in PATH — install it \
                  (https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/) \

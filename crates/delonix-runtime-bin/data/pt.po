@@ -196,6 +196,12 @@ msgstr "erro de registo: "
 msgid "conflict: "
 msgstr "conflito: "
 
+msgid "unavailable: "
+msgstr "indisponível: "
+
+msgid "timed out: "
+msgstr "esgotou o tempo: "
+
 # ---- mensagens migradas do tr() inline -------------------------------------
 
 msgid "active connections (conntrack)"
@@ -4114,8 +4120,8 @@ msgstr "Desiste ao fim destes segundos (omissão: 120)."
 msgid "stack \"{stack}\" is up"
 msgstr "a stack \"{stack}\" está de pé"
 
-msgid "timed out after {secs}s waiting for {n} resource(s)"
-msgstr "esgotou o tempo ao fim de {secs}s à espera de {n} recurso(s)"
+msgid "{n} resource(s) still not ready after {secs}s"
+msgstr "{n} recurso(s) ainda não prontos ao fim de {secs}s"
 
 msgid "{kind}/{name}: {message}"
 msgstr "{kind}/{name}: {message}"

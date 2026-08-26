@@ -70,6 +70,31 @@ pub enum Error {
     /// next move is different (adopt/skip vs. fix the argument).
     #[error("conflict: {0}")]
     Conflict(String),
+
+    /// A capability this host does not have: a tool that is not installed, a
+    /// backend that is not available, a kernel feature that is off.
+    ///
+    /// Its own variant because the caller's next move is different from every
+    /// other failure — nothing about the ARGUMENTS is wrong, and retrying
+    /// changes nothing. Somebody has to install something. Before this existed
+    /// these refusals said [`Error::Invalid`] and came back as a generic exit
+    /// 1, indistinguishable from a typo in a flag: `wg` missing,
+    /// `virt-customize` missing, `ngrok`/`cloudflared` not in `PATH`.
+    ///
+    /// **The message must name the tool or feature and how to get it.** The raw
+    /// `ENOENT` of a spawn is NOT a missing file — "No such file or directory"
+    /// sends the reader looking for a path that was never the problem.
+    #[error("unavailable: {0}")]
+    Unavailable(String),
+
+    /// The operation was still not done when its deadline passed.
+    ///
+    /// Distinct from a failure: nothing said no, and the work may well be
+    /// finishing right now. A reconciler waits longer or comes back; it must
+    /// not read this as «it broke» and recreate the resource on top of one that
+    /// is still coming up.
+    #[error("timed out: {0}")]
+    Timeout(String),
 }
 
 /// Convenience alias.

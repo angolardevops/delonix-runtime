@@ -120,6 +120,23 @@ retryable, `77` permission denied, `124` timeout. `2` keeps its double duty
 the parser must be configured so a usage error cannot be mistaken for a plan
 with changes — which is what §19 asked for in the first place.
 
+**Two of the four new codes, not four.** §19 proposed `69`/`75`/`77`/`124`.
+`69` (capability unavailable) and `124` (timeout) shipped: both had **real
+producers being misclassified** — `stack wait` answered 1 on a timeout, the same
+number as a broken apply, on the command whose entire job is to be read by CI;
+a missing `wg`/`virt-customize`/`ngrok`/`cloudflared`/`systemd-run` answered 1
+too, indistinguishable from a typo in a flag.
+
+`75` (retryable) and `77` (permission denied) did **not** ship, and the reason is
+the one `Error::Conflict` already documents in its own doc-comment: it sat in the
+enum with **zero producers** while `delonix-mgmt` matched on it for a 409 and the
+real refusals said `Invalid`. Permission failures arrive wrapped as
+`Error::Io(EACCES)` or `Runtime{EPERM}` from inside a syscall path, and the
+retrying that exists (`publish_with_retry`) happens inside the engine and never
+reaches a caller. Publishing either would be a number that can never be
+observed — decoration, the same shape as the digest-pinning that audit #3 found.
+They reopen the day something constructs them.
+
 **Manifests — `delonix.io/v1` keeps loading.** It lowers to the new Kinds in
 `load`, through `Form::Deprecated`, with a deprecation warning. `kind: Container`
 lowers to a one-container `kind: Pod`. `Vm` stays accepted as a spelling of

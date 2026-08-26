@@ -50,11 +50,40 @@ Concretamente, garante-se:
 | `3` | o recurso existe mas **não está a correr** |
 | `4` | **não existe** esse recurso |
 | `5` | **conflito** — o nome já está tomado |
+| `69` | **capacidade que este host não tem** — uma ferramenta por instalar, um backend indisponível |
+| `124` | **o prazo esgotou-se** — `stack wait --timeout`, e o que vier a ter prazo |
 
 `3` e `4` não são números inventados: são os códigos de estado do LSB que o
 `systemctl` ainda fala (`3` = o programa não está a correr, `4` = não há tal
 unidade). `5` não tem convenção por trás — é o número livre seguinte, abaixo da
 gama que a shell usa (`126`/`127`, e `128+N` para sinais).
+
+**`69` e `124` também não.** `69` é o `EX_UNAVAILABLE` do `sysexits.h`; `124` é
+o que o `timeout(1)` devolve quando o prazo passa, e está portanto já nos dedos
+de quem embrulha um comando num. Entraram porque tinham **produtores reais mal
+classificados**, não para completar uma tabela: um `stack wait` que esgotava o
+tempo respondia `1` — o mesmo número de um apply rebentado, no comando cuja
+função inteira é ser lido por CI — e um `wg`/`virt-customize`/`ngrok` em falta
+respondia `1` também, indistinguível de um erro de escrita numa flag. As duas
+chamadas seguintes de um reconciliador são opostas: esperar mais, ou parar e
+instalar alguma coisa.
+
+```bash
+delonix stack wait -f delonix-manifest.yaml --timeout 120
+case $? in
+  0)   ;;                     # tudo de pé
+  124) exit 0 ;;              # ainda a subir — o pipeline seguinte volta a tentar
+  69)  echo "falta uma ferramenta neste nó" >&2; exit 1 ;;
+  *)   exit 1 ;;              # qualquer outra coisa: pára
+esac
+```
+
+**O que continua sem código próprio, e é honesto dizê-lo:** *permissão negada* e
+*falha temporária* foram considerados e ficaram de fora — não há hoje uma
+variante de erro que os produza (as falhas de permissão chegam embrulhadas no
+`errno` de uma syscall, e o retry que existe acontece dentro do motor e nunca
+chega a quem chama). Publicar um número que nada constrói é um número que nunca
+pode voltar.
 
 O que isto resolve é concreto: um reconciliador — o `Makefile`, o passo de CI, o
 ciclo em bash que conduz esta CLI — não conseguia separar «cria, porque falta»

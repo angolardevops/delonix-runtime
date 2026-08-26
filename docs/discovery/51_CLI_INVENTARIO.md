@@ -356,3 +356,30 @@ Kinds (12)  →  CLI-1 (contratos)  →  CLI-2 (verbos)  →  CLI-3 (day-2)
 
 A Fase CLI-1 (ResourceRef, contexts, output, erros JSON, exit codes,
 cancelamento) é independente dos Kinds e é o trabalho que pode arrancar hoje.
+
+## 6. Duas armadilhas de método que esta fase pagou
+
+Ficam registadas porque nenhuma das duas é sobre a CLI — são sobre como se mede,
+e as duas já estavam catalogadas no `AGENTS.md` antes de eu voltar a cair nelas.
+
+**O `$?` depois de um pipe é do último comando.** Corri
+`cargo test --workspace 2>&1 | tee log | grep …` e o harness anunciou **exit code
+0**. O `grep` saiu 0; o `cargo` tinha falhado. Se tivesse aceitado o número, teria
+reportado a bateria verde sobre uma suite com um teste vermelho. O que deu por
+isso foi contar as suites (**4**, quando uma só corrida do binário já tinha 672
+testes) — um número bom demais é o sinal para desligar o filtro e voltar a contar.
+
+**Meia-isolação é pior que nenhuma.** O teste que falhou
+(`delonix-mgmt::redes_lista_get_e_estado`) passa **29/29 duas vezes** quando a
+suite corre sozinha, e falha quando o `--workspace` corre vários binários de
+teste em paralelo contra o mesmo estado real da máquina. Não é fragilidade do
+teste nem efeito da alteração — é o `DELONIX_ROOT` e o `DELONIX_NET_RUNTIME_DIR`
+partilhados, exactamente o incidente de 2026-08-12 que reiniciou um container de
+produção. A bateria desta fase corre com **os dois** redireccionados:
+
+```bash
+DELONIX_ROOT=<iso>/root DELONIX_NET_RUNTIME_DIR=<iso>/netrt cargo test --workspace
+```
+
+Isto é dívida a fechar antes da Fase CLI-2: o `cargo test --workspace` a seco não
+é reprodutível neste repo e ninguém o diz em lado nenhum.

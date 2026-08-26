@@ -1133,7 +1133,7 @@ fn install_timer(kind: Kind, name: &str, calendar: &str, dir: &Path, keep: usize
         .args(&argv)
         .status()
         .map_err(|e| {
-            Error::Invalid(po::tf(
+            Error::Unavailable(po::tf(
                 "backup: cannot schedule — systemd-run is not available ({err}). Without it there \
                  is no daemonless way to run a timer; use your own cron entry calling this same \
                  command",
