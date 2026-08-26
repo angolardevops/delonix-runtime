@@ -2920,6 +2920,26 @@ pub(crate) fn warn_if_namespace_isolation_inert(namespace: &str) {
 }
 
 pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Result<()> {
+    // The node's runtime policy, BEFORE anything is created or pulled. Same
+    // placement reason as the capability ceiling in the CRI: everything reaching
+    // here was already authorised by whoever called it, and a policy that lives
+    // only in a cluster's admission chain runs on another machine this node
+    // cannot verify.
+    //
+    // Ahead of the image resolution on purpose: a policy that bans a registry
+    // stops the request before a single byte is fetched from it.
+    //
+    // No policy file = no ceiling, byte for byte the old behaviour. A file that
+    // exists and does not parse is an ERROR: somebody's intent is unknown, and
+    // running anyway is the silent degradation this engine refuses elsewhere.
+    super::policy::enforce(
+        &super::util::state_root(),
+        &super::policy::Request {
+            image: &opts.image,
+            privileged: opts.privileged,
+            host_network: opts.net.is_empty() || opts.net == "host",
+        },
+    )?;
     // Intact copy for the re-exec (the destructuring below consumes opts).
     let opts_copy = opts.clone();
     let RunOpts {

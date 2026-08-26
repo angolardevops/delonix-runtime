@@ -155,18 +155,19 @@ connections/conntrack; <code>system events</code> the event stream.</p>
 <div class='help'><pre><code>Usage: delonix system [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  df       Disk usage by area (images, containers, volumes, VM images)
-  doctor   Check the HOST prerequisites this engine needs, and say how to fix each
-  events   Engine events (create/start/die/remove/…), from oldest to most recent
-  info     Engine state: rootless?, cgroup delegation, network infra, counts
-  backup   Save this node&#x27;s state into one archive
-  restore  Put a node&#x27;s state back from a `system backup` archive
-  setup    Diagnose — and, with `--delegate`, fix — cgroup delegation
-  virt     Host virtualization: hypervisor, KVM, virtio — and what there is to tune
-  prune    Reclaim space taken by what nothing uses any more
-  thermal  Thermal governor for Delonix&#x27;s CPU budget. Runs continuously (see `--once`)
-  monitor  Active network connections per container (via conntrack)
-  help     Print this message or the help of the given subcommand(s)
+  df        Disk usage by area (images, containers, volumes, VM images)
+  doctor    Check the HOST prerequisites this engine needs, and say how to fix each
+  events    Engine events (create/start/die/remove/…), from oldest to most recent
+  features  What each capability promises, and the EVIDENCE for it
+  info      Engine state: rootless?, cgroup delegation, network infra, counts
+  backup    Save this node&#x27;s state into one archive
+  restore   Put a node&#x27;s state back from a `system backup` archive
+  setup     Diagnose — and, with `--delegate`, fix — cgroup delegation
+  virt      Host virtualization: hypervisor, KVM, virtio — and what there is to tune
+  prune     Reclaim space taken by what nothing uses any more
+  thermal   Thermal governor for Delonix&#x27;s CPU budget. Runs continuously (see `--once`)
+  monitor   Active network connections per container (via conntrack)
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
       --l18n &lt;en|pt&gt;
@@ -176,7 +177,7 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 COMMAND MAP:
-  Inspect      events · info · doctor · df
+  Inspect      events · info · features · doctor · df
   Configure    setup · backup · restore · virt
   Maintenance  prune · thermal
   Dashboards   monitor

@@ -9406,3 +9406,61 @@ msgstr "verificar se este host consegue fazer o que o motor promete"
 
 msgid "as a provisioning or CI gate — non-zero when something is missing"
 msgstr "como gate de provisionamento ou de CI — não-zero quando falta alguma coisa"
+
+# ---- system features (niveis de maturidade) --------------------------------
+
+msgid "What each capability promises, and the EVIDENCE for it"
+msgstr "O que cada capacidade promete, e a EVIDÊNCIA que a sustenta"
+
+msgid ""
+"What each capability promises, and the EVIDENCE for it.\n"
+"\n"
+"A maturity level without evidence is an opinion with a badge, so every row names something a reader can go and check — a gate that runs, a measurement with a date, a conformance number with its suite. A test refuses a row whose evidence is empty."
+msgstr ""
+"O que cada capacidade promete, e a EVIDÊNCIA que a sustenta.\n"
+"\n"
+"Um nível de maturidade sem evidência é uma opinião com um crachá, por isso cada linha nomeia algo que o leitor pode ir verificar — um gate que corre, uma medição com data, um número de conformidade com a suite que o produziu. Um teste recusa uma linha cuja evidência esteja vazia."
+
+msgid "Only show capabilities at this level or above (`experimental`, `preview`, `stable`, `production-ready`, `certified`)"
+msgstr "Mostra só as capacidades neste nível ou acima (`experimental`, `preview`, `stable`, `production-ready`, `certified`)"
+
+msgid "delonix {version} — what each capability promises, and the evidence for it."
+msgstr "delonix {version} — o que cada capacidade promete, e a evidência que a sustenta."
+
+msgid "Nothing is `certified`: that level means a validated matrix of kernels, distros and providers, and this engine is measured on one host. Claiming it would be the failure this table exists to prevent."
+msgstr "Nada está `certified`: esse nível quer dizer uma matriz validada de kernels, distros e providers, e este motor é medido num único host. Reclamá-lo seria a falha que esta tabela existe para impedir."
+
+msgid "--min '{value}': expected experimental, preview, stable, production-ready or certified"
+msgstr "--min '{value}': esperava experimental, preview, stable, production-ready ou certified"
+
+msgid "what each capability promises, and the evidence for it"
+msgstr "o que cada capacidade promete, e a evidência que a sustenta"
+
+msgid "only what is stable or better"
+msgstr "só o que é estável ou melhor"
+
+msgid "machine-readable, for a release gate"
+msgstr "legível por máquina, para um gate de release"
+
+# ---- politica de runtime do no ---------------------------------------------
+
+msgid "--privileged is refused by this node's runtime policy"
+msgstr "o --privileged é recusado pela política de runtime deste nó"
+
+msgid "--net host is refused by this node's runtime policy"
+msgstr "o --net host é recusado pela política de runtime deste nó"
+
+msgid "image '{image}': this node's runtime policy refuses `:latest` and untagged references — pin a version or a digest"
+msgstr "imagem '{image}': a política de runtime deste nó recusa `:latest` e referências sem tag — fixa uma versão ou um digest"
+
+msgid "image '{image}': registry '{host}' is not in this node's allowed list ({allowed})"
+msgstr "imagem '{image}': o registo '{host}' não está na lista permitida deste nó ({allowed})"
+
+msgid "refused by this node's runtime policy ({path}):"
+msgstr "recusado pela política de runtime deste nó ({path}):"
+
+msgid "runtime policy {path}: {err} — a policy that cannot be read is not an absent policy"
+msgstr "política de runtime {path}: {err} — uma política que não se consegue ler não é uma política ausente"
+
+msgid "runtime policy {path}: {err}"
+msgstr "política de runtime {path}: {err}"
