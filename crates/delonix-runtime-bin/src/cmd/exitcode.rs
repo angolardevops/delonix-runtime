@@ -195,6 +195,73 @@ mod tests {
         );
     }
 
+    /// The `DX_*` code and the exit code are two spellings of ONE
+    /// classification, for two kinds of caller. Nothing in the type system
+    /// makes them agree, and two tables answering the same question is exactly
+    /// how they start disagreeing.
+    ///
+    /// The invariant is **asymmetric, and deliberately so**:
+    ///
+    /// * every `DX_*` code maps to exactly ONE number — a code that spanned two
+    ///   would make `$?` and the text contradict each other;
+    /// * every number EXCEPT [`GENERIC`] maps to exactly one code;
+    /// * [`GENERIC`] (1) spans several codes on purpose. It is the «no class of
+    ///   its own» bucket, and the text is allowed to be finer there because a
+    ///   text namespace is not scarce: every NUMBER is a promise that has to
+    ///   hold for the rest of the `0.x`, while `DX_REGISTRY` costs nothing
+    ///   beside `DX_INVALID_ARGUMENT`. That is the whole reason both exist.
+    #[test]
+    fn the_text_class_and_the_number_cannot_diverge() {
+        use std::collections::HashMap;
+        let sample = [
+            Error::NotFound("container: web".into()),
+            Error::VmNotFound("dev".into()),
+            Error::NotRunning("web".into()),
+            Error::Conflict("taken".into()),
+            Error::Unavailable("no wg".into()),
+            Error::Timeout("still waiting".into()),
+            Error::Invalid("bad port".into()),
+            Error::Registry("401".into()),
+            Error::Runtime {
+                context: "clone",
+                message: "EPERM".into(),
+            },
+            Error::Io(std::io::Error::other("boom")),
+        ];
+
+        let mut by_exit_code: HashMap<i32, &str> = HashMap::new();
+        let mut by_dx_code: HashMap<&str, i32> = HashMap::new();
+        for e in &sample {
+            let (n, c) = (for_error(e), e.code());
+            assert!(
+                c.starts_with("DX_"),
+                "{c}: every code is part of the published DX_ namespace"
+            );
+            // A code that spanned two numbers would make `$?` and the text
+            // contradict each other for the same failure.
+            if let Some(prev) = by_dx_code.insert(c, n) {
+                assert_eq!(prev, n, "{c} maps to two different exit codes");
+            }
+            if n != GENERIC {
+                if let Some(prev) = by_exit_code.insert(n, c) {
+                    assert_eq!(prev, c, "exit code {n} maps to two different DX codes");
+                }
+            }
+        }
+
+        // And the bucket really is a bucket — if this ever became 1:1, one of
+        // the two classifications silently grew a promise the other did not.
+        let in_the_bucket = sample
+            .iter()
+            .filter(|e| for_error(e) == GENERIC)
+            .map(|e| e.code())
+            .collect::<std::collections::HashSet<_>>();
+        assert!(
+            in_the_bucket.len() > 1,
+            "GENERIC is meant to carry several DX codes; found {in_the_bucket:?}"
+        );
+    }
+
     #[test]
     fn tudo_o_resto_continua_a_ser_um() {
         // The conservative half of the contract: nothing that used to be 1 and

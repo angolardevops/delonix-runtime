@@ -78,6 +78,37 @@ case $? in
 esac
 ```
 
+### A identidade textual: `DX_*`
+
+O número serve quem lê `$?`. Quem lê **texto** — um cliente HTTP, um consumidor
+de `-o json`, um pipeline de logs — tem o código `DX_*`, que é a mesma
+classificação noutra grafia:
+
+| `DX_*` | código | quando |
+|---|---|---|
+| `DX_NOT_FOUND` | `4` | não existe esse recurso |
+| `DX_NOT_RUNNING` | `3` | existe, mas não está a correr |
+| `DX_CONFLICT` | `5` | o nome já está tomado |
+| `DX_UNAVAILABLE` | `69` | capacidade que este host não tem |
+| `DX_TIMEOUT` | `124` | o prazo esgotou-se |
+| `DX_INVALID_ARGUMENT` · `DX_REGISTRY` · `DX_SYSCALL_FAILED` · `DX_INVALID_STATE` · `DX_IO` | `1` | falhas sem número próprio |
+
+**Estes nomes são contrato**: um código pode ser ACRESCENTADO; um existente
+nunca muda de grafia nem de significado.
+
+A relação é **assimétrica de propósito**. Um `DX_*` mapeia sempre para UM
+número — se mapeasse para dois, o `$?` e o texto contradiziam-se para a mesma
+falha. Mas o `1` carrega VÁRIOS códigos, porque é o balde «sem classe própria» e
+o texto pode dar-se ao luxo de ser mais fino: cada NÚMERO é uma promessa que tem
+de valer o resto do `0.x`, enquanto `DX_REGISTRY` ao lado de
+`DX_INVALID_ARGUMENT` não custa nada. Há teste a exigir as duas metades desta
+regra, incluindo que o balde continue a ser um balde.
+
+Hoje o código sai na **API de gestão** (`delonix serve api`), como campo
+acrescentado ao corpo de erro — `{"error": "...", "code": "DX_NOT_FOUND"}`. O
+campo `error` não foi tocado: a regra do ADR-0005 (acrescentar sim, remover ou
+mudar de tipo não) vale aqui como vale no `-o json`.
+
 **O que continua sem código próprio, e é honesto dizê-lo:** *permissão negada* e
 *falha temporária* foram considerados e ficaram de fora — não há hoje uma
 variante de erro que os produza (as falhas de permissão chegam embrulhadas no

@@ -333,7 +333,23 @@ fn invalid_name() -> Response {
 
 /// Maps an engine `Error` to (HTTP code, JSON body) — the client
 /// reconstructs its own `RuntimeError` from the code + message.
+///
+/// The body carries `code` (the stable `DX_*` identity, see
+/// [`Error::code`]) beside the message. **Additive on purpose**: the field was
+/// added, `error` was not touched. A client outside this repo already reads
+/// `.error`, and the discipline ADR-0005 fixed for `-o json` — fields may be
+/// ADDED, never removed nor retyped — is the same one that applies here. The
+/// nested `{"error": {"code", "message"}}` envelope the CLI restructuring
+/// specifies is a DIFFERENT surface (the CLI's own `-o json`), and building it
+/// there costs nothing here.
+///
+/// Why the message alone was not enough: it is the half that gets translated,
+/// so a client that classifies by matching text works on the machine it was
+/// written on and stops classifying on a node with another locale. That is the
+/// same reason the exit codes exist.
 fn err_response(e: Error) -> Response {
+    // Read BEFORE the match: it destructures `e` by value.
+    let dx = e.code();
     let (code, msg) = match e {
         Error::NotFound(m) => (StatusCode::NOT_FOUND, m),
         Error::Invalid(m) => (StatusCode::BAD_REQUEST, m),
@@ -346,7 +362,7 @@ fn err_response(e: Error) -> Response {
         Error::Timeout(m) => (StatusCode::GATEWAY_TIMEOUT, m),
         other => (StatusCode::INTERNAL_SERVER_ERROR, other.to_string()),
     };
-    (code, Json(serde_json::json!({ "error": msg }))).into_response()
+    (code, Json(serde_json::json!({ "error": msg, "code": dx }))).into_response()
 }
 
 /// Runs a synchronous `VolumeStore` operation on a blocking thread (the store
