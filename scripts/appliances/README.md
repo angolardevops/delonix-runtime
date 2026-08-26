@@ -67,7 +67,7 @@ builds — the checksum is what makes that safe.
 | `build-proxmox.sh pmg` | Proxmox Mail Gateway | 9.1-1 | `pmg-9.1-1.qcow2` |
 | `build-proxmox.sh pdm` | Proxmox Datacenter Manager | 1.1-1 | `pdm-1.1-1.qcow2` |
 | `build-truenas.sh` | TrueNAS SCALE | 25.10.5 | `truenas-25.10.5.qcow2` |
-| `build-openstack.sh` | OpenStack (kolla-ansible) | 2026.1 Gazpacho | `openstack-2026.1-ubuntu-24.04.qcow2` |
+| `build-openstack.sh` | OpenStack via kolla-ansible 22.1.0 | 2026.1 Gazpacho | `openstack-2026.1-ubuntu-24.04.qcow2` |
 
 The version is in the output name on purpose: without it, building 9.2 quietly
 overwrites the 9.1 image sitting in the same directory, and both tags are meant
@@ -216,6 +216,19 @@ Three consequences worth knowing before reading the script:
   second is worse. Keystone on `:5000` is proved by the deploy role, on a host
   that has a VIP. What this script proves instead, and does prove, is read back
   out of the finished disk with `virt-cat` before it will publish.
+- **kolla-ansible comes from PyPI, not from `stable/<release>`.** Upstream's
+  quickstart installs `git+https://opendev.org/openstack/kolla-ansible@stable/…`,
+  and two measured things argue against it here. A `git clone` that STALLS never
+  returns, so a retry wrapper never gets its turn — this build hung 31 silent
+  minutes on exactly that, console quiet and disk not growing. And the branch
+  head is a dev snapshot (`22.1.1.dev5` on the day), whose content changes
+  daily; that is not a pin, in a script whose whole point is that two builds a
+  month apart make the same image. The published wheel carries the data files
+  the build needs — checked, not assumed: `etc_examples/kolla/globals.yml`,
+  `ansible/inventory/all-in-one` and `ansible/site.yml` are all in it. Every
+  network step is additionally wrapped in `timeout`, because the general lesson
+  is that **a stalled connection is not a failure**, and nothing that only
+  handles failure will save you from one.
 - **The build's `globals.yml` is moved aside, not kept.** It ships as
   `/etc/kolla/globals.yml.build` with an unroutable VIP and the build VM's
   interface names. Leaving a plausible one in place is exactly how Proxmox VE

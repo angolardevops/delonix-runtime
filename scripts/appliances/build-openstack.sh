@@ -56,6 +56,32 @@ case "$RELEASE" in
   *) echo "!! '$RELEASE' is not an OpenStack release name (want e.g. 2026.1)" >&2; exit 1 ;;
 esac
 
+# Which kolla-ansible is which OpenStack. NOT derivable from the release name,
+# and guessing it installs a deployment tool for a different cloud than the one
+# whose images get pulled -- a mismatch that fails deep inside a play, at a
+# container tag. Read off PyPI and the version selector of
+# docs.openstack.org/kolla-ansible on 2026-08-26.
+#
+# A PUBLISHED release and not the `git+...@stable/<rel>` the quickstart shows.
+# The branch head is a dev snapshot (`22.1.1.dev5` on that day) whose content
+# changes daily, which is not a pin; and a `git clone` that stalls never
+# returns, so nothing that retries on failure ever gets its turn -- measured,
+# a 31-minute silent hang.
+case "$RELEASE" in
+  2026.1) DEFAULT_KOLLA=22.1.0 ;;
+  2025.2) DEFAULT_KOLLA=21.2.0 ;;
+  2025.1) DEFAULT_KOLLA=20.5.0 ;;
+  *) DEFAULT_KOLLA="" ;;
+esac
+KOLLA_VERSION=${KOLLA_VERSION:-$DEFAULT_KOLLA}
+if [ -z "$KOLLA_VERSION" ]; then
+  echo "!! no kolla-ansible version is mapped to OpenStack $RELEASE." >&2
+  echo "   Mapped here: 2026.1, 2025.2, 2025.1. For another release, find the" >&2
+  echo "   matching series at docs.openstack.org/kolla-ansible/<release>/ and" >&2
+  echo "   pass it: KOLLA_VERSION=23.0.0 $0 $RELEASE" >&2
+  exit 1
+fi
+
 SLUG="openstack-$RELEASE-$BASE_DISTRO-$UBUNTU_VER"
 RAW="$OUT/$SLUG.raw.qcow2"
 FINAL="$OUT/$SLUG.qcow2"
@@ -64,7 +90,7 @@ SEED="$HERE/.$SLUG-seed.iso"
 BASE_IMG="ubuntu-$UBUNTU_VER-server-cloudimg-amd64.img"
 MIRROR=${UBUNTU_MIRROR:-https://cloud-images.ubuntu.com/releases/$UBUNTU_SERIES/release}
 
-echo "############ OpenStack $RELEASE on $BASE_DISTRO $UBUNTU_VER"
+echo "############ OpenStack $RELEASE on $BASE_DISTRO $UBUNTU_VER (kolla-ansible $KOLLA_VERSION)"
 
 # --------------------------------------------------------------------------
 #  The base image, and proof it is the one Canonical published
@@ -103,6 +129,7 @@ fi
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 sed -e "s/@RELEASE@/$RELEASE/g" -e "s/@BASE_DISTRO@/$BASE_DISTRO/g" \
+    -e "s/@KOLLA_VERSION@/$KOLLA_VERSION/g" \
     "$HERE/openstack-build.yaml" > "$TMP/user-data"
 cat > "$TMP/meta-data" <<META
 instance-id: delonix-osbuild-$RELEASE-$$
