@@ -2338,8 +2338,11 @@ msgstr "{path} está vazio (sem documentos YAML)"
 msgid "invalid manifest in {path}"
 msgstr "manifesto inválido em {path}"
 
-msgid "{kind} '{name}': unknown apiVersion '{version}' (only '{SUPPORTED_API_VERSION}' is supported)"
-msgstr "{kind} '{name}': apiVersion '{version}' desconhecida (só '{SUPPORTED_API_VERSION}' é suportada)"
+msgid "{kind} '{name}': unknown apiVersion '{version}' (expected '{group}' or '{legacy}')"
+msgstr "{kind} '{name}': apiVersion '{version}' desconhecida (esperava '{group}' ou '{legacy}')"
+
+msgid "{kind} '{name}': unknown apiVersion '{version}' (expected '{legacy}')"
+msgstr "{kind} '{name}': apiVersion '{version}' desconhecida (esperava '{legacy}')"
 
 msgid "{kind} '{name}': invalid spec"
 msgstr "{kind} '{name}': spec inválido"

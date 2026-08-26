@@ -116,9 +116,42 @@ pub fn resolve_path(explicit: Option<PathBuf>) -> Result<PathBuf> {
     }
 }
 
-/// The only `apiVersion` recognized today — refuses early (instead of advancing
-/// silently) if the manifest comes from a future/incompatible version.
-const SUPPORTED_API_VERSION: &str = "delonix.io/v1";
+/// The single `apiVersion` every Kind used to share, and which **keeps
+/// loading**.
+///
+/// Not a legacy spelling to be renamed away: `docs/cli-stability.md` promises
+/// that `apiVersion: delonix.io/v1` only changes with a `v2`, and that a `v2`
+/// does not ship without `v1` still being accepted. ADR-0020 chose to keep that
+/// promise — clean cut for COMMANDS, a step down for MANIFESTS. A file in git,
+/// reviewed in a PR and pointed at by `$schema` in an editor, does not break
+/// because the engine reorganised its groups.
+const LEGACY_API_VERSION: &str = "delonix.io/v1";
+
+/// «Is this file a delonix manifest at all», for the guards over `examples/`.
+///
+/// Deliberately the GROUP suffix and not [`LEGACY_API_VERSION`]: a
+/// `contains("delonix.io/v1")` also matches `compute.delonix.io/v1alpha1`, but
+/// only by substring accident — it stops being true the day a group is spelled
+/// differently, and a guard that silently stops matching goes vacuously green.
+#[cfg(test)]
+const MANIFEST_MARKER: &str = "delonix.io/";
+
+/// Whether this document's `apiVersion` is one this engine serves.
+///
+/// Two accepted forms, and the newer one is checked **per Kind**: the group is
+/// part of the identity, so `apiVersion: storage.delonix.io/v1alpha1` on a
+/// `kind: Pod` is a mistake worth catching rather than a spelling to shrug at.
+/// That is what Kubernetes does with its own groups, and the reason the version
+/// is a column in [`super::kinds`] instead of a shared constant.
+///
+/// `None` means «not this engine's», and the caller composes the error — it
+/// needs the Kind and the name, which this does not have.
+fn api_version_accepted(kind: &str, version: &str) -> bool {
+    if version == LEGACY_API_VERSION {
+        return true;
+    }
+    super::kinds::all().any(|f| f.kind == kind && f.api_version == version)
+}
 
 /// Normalizes the `kind` to its canonical form, accepting common synonyms —
 /// the Kind match is by exact string (`of_kind`), so a `VirtualMachine`
@@ -269,7 +302,16 @@ fn expand_stack(doc: &ManifestDoc) -> Result<Vec<ManifestDoc>> {
     for (kind, items) in groups {
         for it in items {
             out.push(ManifestDoc {
-                api_version: SUPPORTED_API_VERSION.to_string(),
+                // A child of a `kind: Stack` is synthesised, so it carries the
+                // CANONICAL version of its own Kind rather than the parent's:
+                // each Kind now lives in its own group, and a `--dry-run` that
+                // printed them all under one version would be teaching a
+                // spelling the loader accepts only for compatibility.
+                api_version: super::kinds::all()
+                    .find(|f| f.kind == kind)
+                    .map(|f| f.api_version)
+                    .unwrap_or(LEGACY_API_VERSION)
+                    .to_string(),
                 kind: kind.to_string(),
                 metadata: Metadata {
                     name: it.name,
@@ -436,16 +478,41 @@ pub fn load_str(text: &str, label: &str) -> Result<Vec<ManifestDoc>> {
             doc.kind = canon.to_string();
         }
         lower_legacy_kind(&mut doc)?;
-        if doc.api_version != SUPPORTED_API_VERSION {
-            return Err(Error::Invalid(super::po::tf(
-                "{kind} '{name}': unknown apiVersion '{version}' (only '{SUPPORTED_API_VERSION}' is supported)",
-                &[
-                    ("kind", &doc.kind),
-                    ("name", &doc.metadata.name),
-                    ("version", &doc.api_version),
-                    ("SUPPORTED_API_VERSION", SUPPORTED_API_VERSION),
-                ],
-            )));
+        if !api_version_accepted(&doc.kind, &doc.api_version) {
+            // Names BOTH accepted forms. Saying only «delonix.io/v1 is
+            // supported» would send someone who wrote a slightly-wrong group
+            // back to the old spelling instead of to the right one.
+            //
+            // Two templates and not one with a pre-built «'A' or 'B'» string:
+            // the connector belongs to the SENTENCE, and interpolating an
+            // English «or» into a translated message leaves «esperava 'A' or
+            // 'B'» — measured, not hypothetical. A placeholder carries a value,
+            // never a piece of grammar.
+            let group = super::kinds::all()
+                .find(|f| f.kind == doc.kind)
+                .map(|f| f.api_version);
+            let msg = match group {
+                Some(g) => super::po::tf(
+                    "{kind} '{name}': unknown apiVersion '{version}' (expected '{group}' or '{legacy}')",
+                    &[
+                        ("kind", &doc.kind),
+                        ("name", &doc.metadata.name),
+                        ("version", &doc.api_version),
+                        ("group", g),
+                        ("legacy", LEGACY_API_VERSION),
+                    ],
+                ),
+                None => super::po::tf(
+                    "{kind} '{name}': unknown apiVersion '{version}' (expected '{legacy}')",
+                    &[
+                        ("kind", &doc.kind),
+                        ("name", &doc.metadata.name),
+                        ("version", &doc.api_version),
+                        ("legacy", LEGACY_API_VERSION),
+                    ],
+                ),
+            };
+            return Err(Error::Invalid(msg));
         }
         // `metadata.namespace` was accepted on EVERY Kind and honored by three
         // (`docs/discovery/46_GAPS_ENCONTRADOS.md` §5). On the rest it parsed and went
@@ -869,6 +936,83 @@ pub fn unknown_fields(doc: &ManifestDoc, known: &[&str]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    /// The promise `docs/cli-stability.md` makes and ADR-0020 chose to keep:
+    /// `apiVersion: delonix.io/v1` only changes with a `v2`, and a `v2` does not
+    /// ship without `v1` still being accepted. Clean cut for COMMANDS, a step
+    /// down for MANIFESTS — a file in git does not break because the engine
+    /// reorganised its groups.
+    #[test]
+    fn the_legacy_api_version_keeps_loading_for_every_kind() {
+        for f in super::super::kinds::all() {
+            assert!(
+                api_version_accepted(f.kind, LEGACY_API_VERSION),
+                "{}: delonix.io/v1 stopped loading",
+                f.kind
+            );
+        }
+    }
+
+    /// And the new group is accepted too — otherwise the column would be a
+    /// value nothing reads, which is the decoration this repo keeps deleting.
+    #[test]
+    fn each_kind_accepts_its_own_group() {
+        for f in super::super::kinds::all() {
+            assert!(
+                api_version_accepted(f.kind, f.api_version),
+                "{}: does not accept its own {}",
+                f.kind,
+                f.api_version
+            );
+        }
+    }
+
+    /// The group is part of the identity: a `kind: Pod` under
+    /// `storage.delonix.io/…` is a mistake worth catching, not a spelling to
+    /// shrug at. Without this, the per-Kind check could be relaxed to «any
+    /// known version» and nothing would notice.
+    #[test]
+    fn a_kind_does_not_accept_another_kinds_group() {
+        let volume = super::super::kinds::all()
+            .find(|f| f.kind == "Volume")
+            .unwrap();
+        let pod = super::super::kinds::all()
+            .find(|f| f.kind == "Pod")
+            .unwrap();
+        assert_ne!(
+            volume.api_version, pod.api_version,
+            "pick two Kinds that differ"
+        );
+        assert!(!api_version_accepted("Volume", pod.api_version));
+        assert!(!api_version_accepted("Pod", volume.api_version));
+    }
+
+    #[test]
+    fn an_invented_group_is_refused() {
+        assert!(!api_version_accepted("Volume", "acme.io/v9"));
+        assert!(!api_version_accepted("Volume", ""));
+        // A Kind this engine does not serve gets the legacy form and nothing
+        // else — there is no group of its own to name.
+        assert!(api_version_accepted("NoSuchKind", LEGACY_API_VERSION));
+        assert!(!api_version_accepted(
+            "NoSuchKind",
+            "compute.delonix.io/v1alpha1"
+        ));
+    }
+
+    /// Every group is `<name>.delonix.io/v1alpha1` — one shape, so a reader can
+    /// predict the next one. The legacy form is the deliberate exception.
+    #[test]
+    fn every_group_follows_one_shape() {
+        for f in super::super::kinds::all() {
+            let v = f.api_version;
+            assert!(
+                v.ends_with(".delonix.io/v1alpha1") && !v.starts_with('.'),
+                "{}: {v:?} is not <group>.delonix.io/v1alpha1",
+                f.kind
+            );
+        }
+    }
+
     use super::*;
 
     #[test]
@@ -1228,7 +1372,7 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
             // marker but the load fails — the test MUST fail, otherwise a
             // malformed example passes unnoticed). Without this distinction, the
             // guard would stay vacuously green for a broken example.
-            if !text.contains(SUPPORTED_API_VERSION) {
+            if !text.contains(MANIFEST_MARKER) {
                 continue;
             }
             let docs = load(&path).unwrap_or_else(|e| {
@@ -1273,7 +1417,7 @@ kind: Container
 metadata: {}
 spec: { image: alpine }
 ";
-        assert!(text.contains(SUPPORTED_API_VERSION));
+        assert!(text.contains(MANIFEST_MARKER));
         let p = std::env::temp_dir().join(format!(
             "delonix-manifest-partido-{}.yaml",
             std::process::id()

@@ -1511,6 +1511,33 @@ async fn vm_action_ep(
 
 #[cfg(test)]
 mod tests {
+    /// Serialises the two tests below, which both write the PROCESS-GLOBAL
+    /// `DELONIX_ROOT` while cargo runs them on parallel threads.
+    ///
+    /// The mechanism is not a guess — the doc-comment on the first of them
+    /// already states it: those routes read through `infra`, which resolves the
+    /// root from the ENVIRONMENT and not from the `AppState`, so each test
+    /// points the global at a temp dir of its own. What that reasoning did not
+    /// cover is the two of them doing it AT THE SAME TIME. Two tests writing
+    /// one process-global is a hazard on its own terms, and that is the whole
+    /// justification for this lock.
+    ///
+    /// **It is not claimed to fix the flake that led here, because that flake
+    /// was never reproduced.** What was observed: under
+    /// `cargo test --workspace`, the first test failed twice with the LIST
+    /// returning one network and the GET of that network returning 404 — a list
+    /// from one root, a lookup in another, which is the shape the shared global
+    /// would produce. Run alone it passes 29/29, ten times over; with a 300 ms
+    /// window opened right after the `set_var`, it still passes five times
+    /// over, with and without this lock. So: plausible mechanism, documented in
+    /// this very file, and no measurement. This comment will not pretend
+    /// otherwise.
+    ///
+    /// A `tokio::sync::Mutex` and not a `std` one: the guard is held across
+    /// `.await`, which `clippy::await_holding_lock` refuses — and this repo runs
+    /// clippy with `-D warnings`.
+    static ROOT_ENV: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     use super::*;
     use axum::body::Body;
     use axum::http::Request;
@@ -2152,6 +2179,7 @@ mod tests {
     #[tokio::test]
     async fn redes_lista_get_e_estado() {
         let (st, d) = test_state();
+        let _root = ROOT_ENV.lock().await;
         std::env::set_var("DELONIX_ROOT", d.path());
         let app = router(st);
 
@@ -2394,6 +2422,7 @@ mod tests {
     #[tokio::test]
     async fn dhcp_e_attach_validam_o_que_recebem() {
         let (st, d) = test_state();
+        let _root = ROOT_ENV.lock().await;
         std::env::set_var("DELONIX_ROOT", d.path());
         let app = router(st);
 
