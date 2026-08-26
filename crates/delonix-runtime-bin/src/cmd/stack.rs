@@ -1291,23 +1291,14 @@ fn apply(file: Option<PathBuf>, replace: Vec<String>, do_prune: bool) -> Result<
     // would hide the one thing worth keeping. The animation belongs where a step
     // is SILENT for seconds — see `Progress` in `vm build`/`vm create`.
     let mut layers = super::output::Layers::new(count_of_kinds(&docs));
-    layers.run("Secret", "🔑", || super::secret::apply(&docs, base))?;
-    layers.run("Network", "🌐", || super::network::apply(&docs))?;
-    // Logo a seguir às redes: uma rota nomeia DUAS que têm de existir, e nada
-    // do que vem abaixo depende dela para ser criado.
-    layers.run("NetworkRoute", "🔗", || super::netroute::apply(&docs))?;
-    layers.run("Volume", "💽", || super::volume::apply(&docs))?;
-    layers.run("Image", "📦", || super::image::apply(&docs))?;
-    layers.run("Vm", "🖥", || super::vm::apply(&docs, base))?;
-    layers.run("Container", "📦", || super::container::apply(&docs))?;
-    layers.run("Pod", "🧩", || super::pod::apply(&docs))?;
-    layers.run("FirewallPolicy", "🧱", || super::firewall::apply(&docs))?;
-    // HTTPRoute LAST: it needs the backend containers already created (with IP) to
-    // resolve the routes; brings up/reloads the L7 reverse-proxy.
-    layers.run("HTTPRoute", "🔀", || super::httproute::apply(&docs))?;
-    // Tunnel LAST of all: its `localPort` is typically the HTTPRoute proxy's own
-    // listening port (see `cmd::tunnel`'s module doc) — must already be up.
-    layers.run("Tunnel", "🌍", || super::tunnel::apply(&docs))?;
+    // Every layer is grouped so a failure has somewhere to be caught. `apply`
+    // stays fail-fast without rollback — nothing below undoes anything — but
+    // what the successful layers CREATED must not be left ownerless; see
+    // `salvage_ownership`.
+    if let Err(e) = run_layers(&mut layers, &docs, base) {
+        salvage_ownership(&docs, &stack, &changes);
+        return Err(e);
+    }
     layers.done();
 
     // Everything that exists is now created; converge what differs, and stamp
@@ -1326,6 +1317,134 @@ fn apply(file: Option<PathBuf>, replace: Vec<String>, do_prune: bool) -> Result<
     // appears without a host prerequisite (network mount in rootless, etc.) —
     // it is here, in the real creation flow, that the user needs to know it.
     print_missing_conditions(&changes);
+    Ok(())
+}
+
+/// After a layer fails: stamp ownership on what THIS apply created, so a
+/// half-finished apply does not leak resources that nothing can reach.
+///
+/// `apply` is fail-fast without rollback, and that stays — destroying halfway is
+/// worse than stopping. The defect this closes is not the abort, it is what the
+/// abort left behind: the stamp was only written at the END, by
+/// `converge_and_stamp`, so a failure before that left everything the earlier
+/// layers had created WITHOUT an owner.
+///
+/// Measured 2026-08-25 against `b465300`: a volume created by such an apply did
+/// not show in `stack plan` at all — not even as `Adopt`, because the corrected
+/// manifest no longer declares it — and `stack destroy` took its stamped
+/// siblings and left it behind, silently. In an engine whose `destroy` promises
+/// to «remove everything this stack owns», that is a manifest-driven resource
+/// leak.
+///
+/// **Only what this run CREATED, and only the resources that are really there.**
+/// Two exclusions, and each one prevents a bug worse than the one being fixed:
+///
+/// - **Not `Update`.** The stamp writes `last-applied`, which is this engine's
+///   answer to «did WE set this field?» — `reconcile::diff_fields` consults it
+///   in exactly one branch, the one where a field is gone from the manifest but
+///   still on the machine, to decide whether reverting it would be the tool
+///   fighting its own user. Recording a spec that was never applied makes the
+///   engine claim authorship of a value it did not set, and the bill arrives
+///   later: the day that field leaves the manifest, it reverts something that
+///   belonged to a human's `container update`. A resource that already existed
+///   was stamped by the apply that created it, so it is not leaking either way.
+///
+///   (The first version of this comment claimed the change would instead read
+///   as «already applied» and be lost. That is wrong, and reading the diff said
+///   so: for a field the manifest still declares, `diff_fields` compares desired
+///   against the machine and never looks at `last-applied` at all. The two rows
+///   that DO depend on it — a hand-set field surviving untouched, and a field we
+///   set being reverted once it leaves the manifest — are already pinned by a
+///   pair of tests in `reconcile::tests`, which is why this exclusion gets no
+///   third test of its own: a duplicate of a rule already fixed elsewhere is one
+///   more thing to drift.)
+/// - **Not `Adopt`.** Those existed BEFORE this run; leaving them alone
+///   preserves the prior state, and taking ownership without converging would
+///   claim a resource this apply never finished configuring.
+///
+/// Presence is probed with `actual_of` — the same probe the plan itself uses —
+/// rather than assuming a layer that ran got everything created: the layer may
+/// itself have failed halfway.
+fn salvage_ownership(docs: &[manifest::ManifestDoc], stack: &str, changes: &[Change]) {
+    let created: std::collections::BTreeSet<(String, String)> = changes
+        .iter()
+        .filter(|c| c.action == Action::Create)
+        .map(|c| (c.kind.clone(), c.name.clone()))
+        .collect();
+    if created.is_empty() {
+        return;
+    }
+    // Probing can itself fail while the machine is in a half-applied state.
+    // Losing the stamp is bad; turning a failed apply into a panic or a second,
+    // more confusing error is worse — the user still has to read the error that
+    // actually stopped the apply.
+    let Ok(actual) = actual_of(docs) else { return };
+    let present: std::collections::BTreeSet<(String, String)> = actual
+        .iter()
+        .map(|a| (a.kind.clone(), a.name.clone()))
+        .filter(|k| created.contains(k))
+        .collect();
+    if present.is_empty() {
+        return;
+    }
+    // Said out loud, not silently: the apply FAILED, and a line claiming work
+    // was done has to explain that this is bookkeeping, not progress.
+    eprintln!(
+        "{}",
+        super::po::tf(
+            "apply stopped; recording stack ownership of the {n} resource(s) it had already \
+             created, so `stack destroy`/`--prune` can still reach them",
+            &[("n", &present.len().to_string())],
+        )
+    );
+    if let Err(e) = stamp_all(docs, stack, Some(&present)) {
+        eprintln!(
+            "{}",
+            super::po::tf(
+                "WARNING: could not record ownership after the failed apply ({err}) — the \
+                 resources it created are on the machine and no stack claims them",
+                &[("err", &e.to_string())],
+            )
+        );
+    }
+}
+
+/// The creation pass, one LAYER per Kind, in dependency order.
+///
+/// Extracted from `cmd_apply` so the whole pass has a single failure point to
+/// catch. Each layer is announced before it runs and ticked with the time it
+/// took — the shape a CI log has, because that is what an apply is: a pipeline
+/// whose stages depend on the previous one.
+///
+/// No spinner and no fold here, deliberately: each layer prints its own
+/// per-resource lines (`container/web: created`), which are the record of what
+/// happened. A spinner would fight them for the same row, and folding them would
+/// hide the one thing worth keeping. The animation belongs where a step is
+/// SILENT for seconds — see `Progress` in `vm build`/`vm create`.
+fn run_layers(
+    layers: &mut super::output::Layers,
+    docs: &[manifest::ManifestDoc],
+    base: &std::path::Path,
+) -> Result<()> {
+    // Secrets first: `Storage.passwordSecret` and `Container.secret` reference
+    // them. `base` = the manifest folder, so `fromEnvFile` resolves next to it.
+    layers.run("Secret", "🔑", || super::secret::apply(docs, base))?;
+    layers.run("Network", "🌐", || super::network::apply(docs))?;
+    // Logo a seguir às redes: uma rota nomeia DUAS que têm de existir, e nada
+    // do que vem abaixo depende dela para ser criado.
+    layers.run("NetworkRoute", "🔗", || super::netroute::apply(docs))?;
+    layers.run("Volume", "💽", || super::volume::apply(docs))?;
+    layers.run("Image", "📦", || super::image::apply(docs))?;
+    layers.run("Vm", "🖥", || super::vm::apply(docs, base))?;
+    layers.run("Container", "📦", || super::container::apply(docs))?;
+    layers.run("Pod", "🧩", || super::pod::apply(docs))?;
+    layers.run("FirewallPolicy", "🧱", || super::firewall::apply(docs))?;
+    // HTTPRoute LAST: it needs the backend containers already created (with IP) to
+    // resolve the routes; brings up/reloads the L7 reverse-proxy.
+    layers.run("HTTPRoute", "🔀", || super::httproute::apply(docs))?;
+    // Tunnel LAST of all: its `localPort` is typically the HTTPRoute proxy's own
+    // listening port (see `cmd::tunnel`'s module doc) — must already be up.
+    layers.run("Tunnel", "🌍", || super::tunnel::apply(docs))?;
     Ok(())
 }
 
@@ -1641,9 +1760,28 @@ fn converge_and_stamp(
     // Re-derive the desired fields from the manifest (not from the plan): the
     // stamp must record what was ASKED for, which is also what the next run will
     // compare against.
+    stamp_all(docs, stack, None)?;
+    Ok(())
+}
+
+/// Stamps ownership + last-applied on what the manifest declares.
+///
+/// `only` restricts it to a set of `(kind, name)`. `None` means «everything the
+/// manifest declares», which is the successful path: every layer ran, so every
+/// declared resource is on the machine with the spec that was asked for.
+fn stamp_all(
+    docs: &[manifest::ManifestDoc],
+    stack: &str,
+    only: Option<&std::collections::BTreeSet<(String, String)>>,
+) -> Result<()> {
     for d in desired_of(docs)? {
         if !super::kinds::converges(&d.kind) {
             continue;
+        }
+        if let Some(set) = only {
+            if !set.contains(&(d.kind.clone(), d.name.clone())) {
+                continue;
+            }
         }
         let r = match d.kind.as_str() {
             "Container" => super::container::stamp(&d.name, stack, &d.fields),

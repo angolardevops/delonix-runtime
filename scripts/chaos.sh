@@ -783,6 +783,94 @@ YAML
 }
 
 # ---------------------------------------------------------------------------
+# stack-partial-apply — um apply que morre a meio nao deixa orfaos INVISIVEIS
+#
+# O `stack apply` e fail-fast sem rollback, e isso e desenho: destruir a meio e
+# pior do que parar. O defeito nao era esse — era o que ficava para tras.
+#
+# O carimbo de posse (`delonix.io/stack`) so era escrito no FIM, pelo
+# `converge_and_stamp`, DEPOIS de todas as camadas. Uma camada a falhar abortava
+# antes disso, por isso tudo o que as camadas anteriores tinham criado ficava
+# SEM DONO. Medido a 2026-08-25 contra b465300: um volume criado por esse apply
+# nao aparecia no `stack plan` (nem sequer como Adopt), e o `stack destroy`
+# levava os irmaos carimbados e deixava-o para tras, em silencio. Uma fuga de
+# recursos conduzida por manifesto, num motor cujo destroy promete «remove tudo
+# o que esta stack possui».
+#
+# E o CICLO que distingue, nao um comando: o apply falhado devolve 1 com e sem
+# a correccao, e o `volumes ls` mostra o volume nos dois casos. O que muda e se
+# o `destroy` o leva.
+scen_stack_partial_apply() {
+  head_ "stack-partial-apply — o que um apply falhado cria continua a ser da stack"
+  local dir="$SANDBOX/stack-partial"
+  rm -rf "$dir"; mkdir -p "$dir"
+
+  # v1: so volumes, e passa.
+  cat > "$dir/m.yaml" <<'YAML'
+apiVersion: delonix.io/v1
+kind: Volume
+metadata: { name: spa-base }
+spec: {}
+YAML
+  if ! dlx stack apply -f "$dir/m.yaml" >/dev/null 2>&1; then
+    skip "stack-partial-apply" "o apply inicial nao passou"; rm -rf "$dir"; return
+  fi
+
+  # v2: acrescenta um volume E uma imagem impossivel. A camada Volume corre
+  # ANTES da camada Image, por isso `spa-novo` e criado e o apply morre a
+  # seguir. O host nao precisa de rede para isto: o registo e inexistente de
+  # proposito, e a falha de resolucao e o que interessa.
+  cat > "$dir/m.yaml" <<'YAML'
+apiVersion: delonix.io/v1
+kind: Volume
+metadata: { name: spa-base }
+spec: {}
+---
+apiVersion: delonix.io/v1
+kind: Volume
+metadata: { name: spa-novo }
+spec: {}
+---
+apiVersion: delonix.io/v1
+kind: Image
+metadata: { name: spa-quebra }
+spec: { pull: "registry.invalid/nao-existe:0.0.0" }
+YAML
+  if dlx stack apply -f "$dir/m.yaml" >/dev/null 2>&1; then
+    bad "stack-partial-apply" "o apply com uma imagem impossivel devolveu sucesso"
+    dlx volumes rm spa-base spa-novo >/dev/null 2>&1; rm -rf "$dir"; return
+  fi
+  if ! dlx volumes inspect spa-novo >/dev/null 2>&1; then
+    skip "stack-partial-apply" "o apply morreu antes da camada Volume"; rm -rf "$dir"; return
+  fi
+
+  # A prova: o destroy tem de o levar. Volta-se ao manifesto v1 de proposito —
+  # e o caso real (corrigiu-se o ficheiro e arrumou-se), e e onde o orfao fica
+  # invisivel: nao esta declarado, logo so a POSSE o pode alcancar.
+  cat > "$dir/m.yaml" <<'YAML'
+apiVersion: delonix.io/v1
+kind: Volume
+metadata: { name: spa-base }
+spec: {}
+YAML
+  # Um volume alheio, para provar que a correccao nao passou a levar tudo.
+  dlx volumes create spa-alheio >/dev/null 2>&1
+  dlx stack destroy -f "$dir/m.yaml" >/dev/null 2>&1
+
+  if dlx volumes inspect spa-novo >/dev/null 2>&1; then
+    bad "stack-partial-apply" "o destroy deixou para tras o volume que o apply falhado criou"
+  elif dlx volumes inspect spa-base >/dev/null 2>&1; then
+    bad "stack-partial-apply" "o destroy nao levou o volume declarado"
+  elif ! dlx volumes inspect spa-alheio >/dev/null 2>&1; then
+    bad "stack-partial-apply" "o destroy apagou um volume que a stack nao possui"
+  else
+    ok "stack-partial-apply: o destroy levou o orfao do apply falhado e poupou o alheio"
+  fi
+  dlx volumes rm spa-alheio spa-novo spa-base >/dev/null 2>&1
+  rm -rf "$dir"
+}
+
+# ---------------------------------------------------------------------------
 # stack-netroute — o manifesto FECHA a excepção que abre (ADR-0013 camada B)
 #
 # Uma `kind: NetworkRoute` é a excepção ao isolamento entre redes. Antes desta
@@ -1021,7 +1109,7 @@ $(cat "/sys/fs/cgroup$cg1/memory.max" 2>/dev/null || echo ausente))"
   dlx container rm -f ckg0 ckg1 >/dev/null 2>&1
 }
 
-ALL=(holder_kill control_restart posse_destrutiva holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_holder_respawn scale abrupt_kill aggregate_ceiling delegated_scope cgroup_netns disk_full write_failure stack_converge stack_netroute truenas_destroy)
+ALL=(holder_kill control_restart posse_destrutiva holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_holder_respawn scale abrupt_kill aggregate_ceiling delegated_scope cgroup_netns disk_full write_failure stack_converge stack_netroute stack_partial_apply truenas_destroy)
 
 while [ $# -gt 0 ]; do
   case "$1" in
