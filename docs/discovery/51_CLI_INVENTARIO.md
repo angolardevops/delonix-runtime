@@ -436,3 +436,35 @@ classe de código-sem-consumidor de que o `ResourceRef` acabou de sair. O que
 **não** colide, e é a parte útil, é um contexto puramente LOCAL: namespace por
 omissão, formato de output preferido, `DELONIX_ROOT`. Fica como decisão a tomar
 antes de a CLI-1 fechar.
+
+## 8. O contrato de output do §18 — medido antes de mexer
+
+A especificação lista onze regras para o que a automação lê. Medi-as contra o
+binário **antes** de escrever código, e o resultado inverteu o plano: das que são
+testáveis hoje, **todas já se cumpriam**.
+
+| regra do §18 | estado medido |
+|---|---|
+| arrays vazios continuam arrays | **cumpre** — `[]` nos seis `ls`/`ps` |
+| JSON sem texto traduzido | **cumpre** — `-o json` byte a byte igual em EN e PT, em listagem e em plano |
+| sem ANSI quando o stdout não é TTY | **cumpre** — zero escapes num pipe |
+| dados no stdout, o resto no stderr | **cumpre** — `-o json` não escreve nada no stderr |
+| segredos redigidos | **cumpre** — `ls` traz nomes de chave, `inspect` redige e diz como revelar |
+| `table`/`wide`/`name`/`yaml` | **`wide`, `name` e `yaml` não existem** |
+
+Portanto o trabalho útil aqui **não era acrescentar formatos**. Primeiro porque
+`yaml`/`name`/`wide` nos `ls` actuais é trabalho que a CLI-2 deita fora quando o
+`get` os substituir; e depois porque o que estava mesmo em falta era outra coisa:
+**nenhuma das cinco propriedades que já se cumprem estava travada por um gate**.
+O que ninguém verifica é o que volta a partir-se, e cada uma delas parte em
+silêncio — um `[]` que vire `""` rebenta todo o `jq '.[]'` lá fora sem uma
+mensagem, e um escape ANSI que passe a sair num pipe faz um `grep` deixar de
+casar por uma razão invisível a olho nu.
+
+Ficam 13 checks novos no `scripts/e2e.sh`, e são propriedades do OUTPUT e não de
+um comando: quando o `get` substituir estes `ls`, o bloco muda de alvo e não de
+sentido. As três asserções cuja lógica podia estar subtilmente errada foram
+verificadas a discriminar contra entrada deliberadamente má — sobretudo a do
+ANSI, cujo `$'\033'` dentro de citação aninhada era o ponto frágil.
+
+**Por decidir**: `wide`, `name` e `yaml` entram com o `get` (CLI-2) e não antes.

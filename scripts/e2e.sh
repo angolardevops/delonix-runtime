@@ -1566,6 +1566,67 @@ else
   check "net netns down é idempotente" ok "$BIN" net netns down
 fi
 
+section "contrato de output: o que a automação lê não pode mudar sozinho"
+########################################
+# Medido a 2026-08-26 antes de existir este bloco: as cinco propriedades abaixo
+# JÁ se cumpriam. O que não existia era um gate — nada apanhava a regressão de
+# nenhuma delas, e o que ninguém verifica é o que volta a partir-se.
+#
+# São propriedades do OUTPUT e não de um comando, por isso sobrevivem à
+# reestruturação da CLI: quando `get` substituir estes `ls`, o bloco muda de
+# alvo e não de sentido.
+
+# As fixturas do bloco: um segredo com um valor reconhecível (para se poder
+# provar que NÃO sai) e um manifesto que produz um plano com texto humano
+# dentro — é aí que uma tradução escaparia para o JSON, não numa lista vazia.
+E2E_SEC="outsec-$PFX"
+"$BIN" secret create "$E2E_SEC" --from-literal senha=s3nha-do-gate >/dev/null 2>&1
+E2E_OUTMF=$(mktemp "${TMPDIR:-/tmp}/e2e-out-XXXXXX.yaml")
+cat > "$E2E_OUTMF" <<YAML
+apiVersion: delonix.io/v1
+kind: Volume
+metadata: { name: outvol-$PFX }
+spec: {}
+YAML
+
+# 1. Uma lista vazia continua a ser um ARRAY. Um `[]` que virasse `""` ou `null`
+#    parte todo o `jq '.[]'` que exista lá fora, e parte-o em silêncio.
+for g in "container ps" "image ls" "volumes ls" "network ls" "vm ls" "secret ls"; do
+  check "lista vazia de '$g' é um array JSON" ok bash -c \
+    "'$BIN' $g -o json 2>/dev/null | python3 -c 'import json,sys; v=json.load(sys.stdin); assert isinstance(v, list)'"
+done
+
+# 2. O JSON não muda com a LÍNGUA. É a razão de ser do `-o json`: uma automação
+#    que classifique por texto traduzido funciona na máquina onde foi escrita e
+#    deixa de classificar num nó com outra locale — o mesmo defeito que os
+#    códigos de saída existem para fechar, na outra ponta.
+check "o -o json de uma listagem é idêntico em EN e PT" ok bash -c \
+  "diff <('$BIN' volumes ls -o json 2>/dev/null) <('$BIN' --l18n=pt volumes ls -o json 2>/dev/null)"
+check "o -o json de um plano é idêntico em EN e PT" ok bash -c \
+  "diff <('$BIN' stack plan -f '$E2E_OUTMF' -o json 2>/dev/null) <('$BIN' --l18n=pt stack plan -f '$E2E_OUTMF' -o json 2>/dev/null)"
+
+# 3. Sem ANSI quando o stdout não é um terminal. Um `| grep` que passe a apanhar
+#    escapes deixa de casar, e a causa é invisível a olho nu.
+check "num pipe não saem sequências ANSI" ok bash -c \
+  "! '$BIN' container ps 2>/dev/null | grep -q \$'\033'"
+
+# 4. Dados no stdout, tudo o resto no stderr. Um aviso que caia no stdout entra
+#    no meio do JSON e o parser do outro lado rebenta.
+check "o -o json não leva nada no stderr" ok bash -c \
+  "[ -z \"\$('$BIN' image ls -o json 2>&1 >/dev/null)\" ]"
+
+# 5. Um segredo nunca sai em claro sem se pedir. `secret ls` mostra os NOMES das
+#    chaves e nunca os valores; o `inspect` redige e diz como revelar.
+check "secret ls não traz valores" ok bash -c \
+  "! '$BIN' secret ls -o json 2>/dev/null | grep -q 's3nha-do-gate'"
+check "secret inspect redige por omissão" ok bash -c \
+  "! '$BIN' secret inspect '$E2E_SEC' 2>/dev/null | grep -q 's3nha-do-gate'"
+check "secret inspect --reveal mostra, e só então" ok bash -c \
+  "'$BIN' secret inspect '$E2E_SEC' --reveal 2>/dev/null | grep -q 's3nha-do-gate'"
+
+"$BIN" secret rm "$E2E_SEC" >/dev/null 2>&1
+rm -f "$E2E_OUTMF"
+
 section "limpeza"
 ########################################
 "$BIN" container rm -f "$C" >/dev/null 2>&1
