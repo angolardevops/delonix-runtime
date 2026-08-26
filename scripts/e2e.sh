@@ -1566,6 +1566,72 @@ else
   check "net netns down é idempotente" ok "$BIN" net netns down
 fi
 
+section "cancelamento: um terminal em modo raw não é nosso para deixar partido"
+########################################
+# BUG MEDIDO a 2026-08-26, antes de haver correcção: um `SIGTERM` a um
+# `container exec -it` deixava a shell de quem chamou com `ECHO` e `ICANON`
+# desligados — sem eco e sem edição de linha, até se escrever `reset` às cegas.
+#
+# A causa não é descuido: o `restore_mode` corre em todas as saídas NORMAIS,
+# incluindo a de erro (é por isso que o `?` do `exec` está depois dele). Um
+# sinal é que não corre código Rust nenhum — nem destrutores, nem unwinding.
+# Acontece com qualquer morte por sinal: um `kill`, um timeout de CI, um
+# teardown de sessão, o OOM killer.
+#
+# O gate mede o TERMINAL, não o comando: um `check` por exit code ficaria verde
+# sobre o bug, porque o processo morria na mesma e com o mesmo estado.
+if ! "$BIN" image ls 2>/dev/null | grep -qE "^${IMG%%:*}[[:space:]:]"; then
+  skip "TTY reposto após um sinal" "sem a imagem $IMG no store — nada para exec"
+else
+  TTYC="ttysig-$PFX"
+  "$BIN" container run -d --net none --name "$TTYC" "$IMG" sleep 300 >/dev/null 2>&1
+  check "um sinal repõe o terminal, e a morte continua a ser por sinal" ok \
+    python3 - "$BIN" "$TTYC" <<'PYPROBE'
+import os, pty, signal, subprocess, sys, termios, time
+
+BIN, NAME = sys.argv[1], sys.argv[2]
+
+def is_raw(a):
+    return not (a[3] & termios.ECHO) and not (a[3] & termios.ICANON)
+
+# Os quatro sinais que um operador ou um CI mandam. SIGKILL não entra: não é
+# capturável, e prometer repor o terminal nesse caso seria mentira.
+for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGQUIT):
+    master, slave = pty.openpty()
+    p = subprocess.Popen([BIN, "container", "exec", "-it", NAME, "sh"],
+                         stdin=slave, stdout=slave, stderr=slave,
+                         preexec_fn=os.setsid)
+    time.sleep(2.5)
+    if not is_raw(termios.tcgetattr(slave)):
+        sys.exit(f"{sig}: a sessão nem chegou a pôr o terminal em raw")
+    os.kill(p.pid, sig)
+    try:
+        p.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        p.kill(); p.wait(); sys.exit(f"{sig}: nao morreu")
+    time.sleep(0.4)
+    if is_raw(termios.tcgetattr(slave)):
+        sys.exit(f"{sig}: o terminal FICOU em modo raw")
+    # Re-raise com a disposição default: quem espera por este processo tem de
+    # continuar a ver uma morte por sinal, não uma saída limpa.
+    if p.returncode != -sig:
+        sys.exit(f"{sig}: rc={p.returncode}, esperava {-sig}")
+    os.close(master); os.close(slave)
+
+# E o caminho normal não pode ter regredido — repõe por outro mecanismo (o
+# `restore_mode` explícito) e propaga o código do workload.
+master, slave = pty.openpty()
+p = subprocess.Popen([BIN, "container", "exec", "-it", NAME, "sh", "-c", "exit 7"],
+                     stdin=slave, stdout=slave, stderr=slave, preexec_fn=os.setsid)
+p.wait(timeout=20)
+if is_raw(termios.tcgetattr(slave)):
+    sys.exit("saída normal: o terminal ficou em modo raw")
+if p.returncode != 7:
+    sys.exit(f"saída normal: rc={p.returncode}, esperava 7")
+PYPROBE
+  "$BIN" container rm -f "$TTYC" >/dev/null 2>&1
+fi
+
 section "contrato de output: o que a automação lê não pode mudar sozinho"
 ########################################
 # Medido a 2026-08-26 antes de existir este bloco: as cinco propriedades abaixo

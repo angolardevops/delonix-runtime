@@ -468,3 +468,51 @@ verificadas a discriminar contra entrada deliberadamente má — sobretudo a do
 ANSI, cujo `$'\033'` dentro de citação aninhada era o ponto frágil.
 
 **Por decidir**: `wide`, `name` e `yaml` entram com o `get` (CLI-2) e não antes.
+
+## 9. Cancelamento — e o único bug real que a CLI-1 encontrou
+
+O §20 pede «TTY restaurado após falha». Medido a **2026-08-26**, não estava:
+
+```
+antes:   raw=False
+durante: raw=True     (sessão interactiva, correcto)
+SIGTERM →
+depois:  raw=True     ← a shell de quem chamou fica sem eco e sem edição de linha
+```
+
+Um `SIGTERM` a um `container exec -it` deixava o terminal em modo raw. Quem o
+apanhava ficava a escrever às cegas até se lembrar de `reset`.
+
+**A causa não é descuido.** O `restore_mode` corre em todas as saídas normais —
+incluindo a de erro, e é por isso que o `?` do `exec` está DEPOIS dele, o que
+alguém pensou com cuidado. O que não corre em código Rust nenhum é um sinal: sem
+destrutores, sem unwinding. Acontece com qualquer morte por sinal — um `kill`,
+um timeout de CI, um teardown de sessão, o OOM killer.
+
+**A correcção fica na fronteira** (`set_raw_mode`, no motor) e não no comando,
+para todos os chamadores da via interactiva a herdarem — a mesma disciplina do
+`missing_wg`. Um `AtomicPtr` e não um `static mut`, porque o handler lê isto de
+contexto assíncrono e uma leitura atómica é das poucas coisas legais aí;
+`tcsetattr`, `signal` e `raise` estão na lista de async-signal-safe do POSIX e
+mais nada no handler aloca, tranca ou formata.
+
+**O re-raise com disposição default é o que mantém o estado de saída honesto**:
+um processo morto por `SIGTERM` tem de continuar a parecer morto por `SIGTERM`
+(`128+15`) a quem espera por ele. Engolir o sinal para sair limpo trocava um
+terminal partido por uma mentira sobre como o processo acabou. Medido nos
+quatro: `rc=-15`, `-2`, `-1`, `-3`.
+
+**O gate mede o TERMINAL e não o comando** — um `check` por exit code ficava
+verde sobre o bug, porque o processo morria na mesma e com o mesmo estado.
+Verificado a falhar com a correcção revertida: `15: o terminal FICOU em modo
+raw`. `SIGKILL` fica de fora de propósito: não é capturável, e prometer repor
+nesse caso seria mentira.
+
+### O que NÃO se fez, e porquê
+
+`delonix` continua **sem handler de SIGINT** para as operações não interactivas.
+É deliberado por agora: a pergunta «um Ctrl-C a meio de um `stack apply` deixa a
+stack meio convergida?» tem resposta conhecida e escrita — o apply é fail-fast
+sem rollback, e o que já foi aplicado FICA aplicado. Dar-lhe um handler que
+tentasse desfazer seria inventar transacionalidade que o motor não tem, e é
+matéria de ADR, não de uma fatia de CLI.
