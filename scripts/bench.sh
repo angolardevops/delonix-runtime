@@ -156,6 +156,22 @@ mkdir -p "$SANDBOX/root" "$SANDBOX/run"
 dlx() { env DELONIX_ROOT="$SANDBOX/root" DELONIX_NET_RUNTIME_DIR="$SANDBOX/run" "$BIN" "$@"; }
 export -f dlx 2>/dev/null || true
 
+# AQUECIMENTO, e não é cosmética: o root do delonix é isolado e nasce VAZIO, por
+# isso a primeira corrida paga o pull e a extracção da imagem — enquanto o docker
+# e o podman a têm local. Medido: 6 275 / 7 408 / 7 359 ms num root virgem contra
+# 88 ms a seguir, e uma amostra de 16 782 ms na primeira versão desta bancada.
+#
+# A mediana absorveu-o, o que é precisamente o perigo: com `--runs 1` o número
+# publicado seria dezasseis segundos, e a média teria ficado destruída sem nada
+# na tabela a dizer porquê. Comparar um motor a frio com dois a quente não é a
+# comparação que esta linha diz fazer.
+echo "== aquecimento (o root do delonix nasce vazio; docker e podman já têm a imagem) =="
+env DELONIX_ROOT="$SANDBOX/root" DELONIX_NET_RUNTIME_DIR="$SANDBOX/run" \
+  "$BIN" container run --rm alpine true >/dev/null 2>&1
+docker run --rm alpine true >/dev/null 2>&1
+podman run --rm alpine true >/dev/null 2>&1
+echo
+
 echo "== 4a: latência de \`run --rm\`, no DEFAULT de cada motor (n=$RUNS) =="
 row "docker (bridge)" docker run --rm alpine true
 row "podman (slirp)"  podman run --rm alpine true

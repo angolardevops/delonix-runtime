@@ -1943,6 +1943,16 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["system info", "system setup", "net netns status"],
     },
     Entry {
+        path: "system features",
+        group: "Inspect",
+        examples: &[
+            ("what each capability promises, and the evidence for it", "delonix system features"),
+            ("only what is stable or better", "delonix system features --min stable"),
+            ("machine-readable, for a release gate", "delonix system features -o json"),
+        ],
+        see_also: &["system info", "system doctor", "serve docker-api"],
+    },
+    Entry {
         path: "system info",
         group: "Inspect",
         examples: &[

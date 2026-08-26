@@ -133,7 +133,52 @@ fronteira de privilégio nova pelo meio.
 Verificado de passagem, e **não** é bug: o aviso de cgroup delegation vai para **stderr**, não
 polui o stdout. Um `run … | cat` devolve exactamente a saída do container.
 
-## A recontagem de 2026-08-25 foi TENTADA e RECUSADA
+## Recontagem de 2026-08-25 (delonix 0.63.1) — feita, e o que a atrasou
+
+**À primeira tentativa foi RECUSADA**, e a recusa vale como registo. O host
+tinha `load average` de **55 a 72** em **32 threads** e as corridas cruas deram
+docker **5080 ms** e podman **4149 ms**. Isso não é regressão de ninguém — é a
+bancada, e é o que retirou a bateria de 2026-08-10. Horas depois, com o host em
+**load 3,3**, a mesma bancada passou e os números abaixo são dela.
+
+| Campo | Valor |
+|---|---|
+| Data | **2026-08-25** |
+| Onde | host de desenvolvimento — AMD Ryzen 9 8940HX (32 threads), 31 GiB, kernel 7.0.0-30 |
+| Delonix | **0.63.1** (rootless, root e runtime-dir isolados) |
+| Docker | 29.7.2 · Podman | 4.9.3 |
+| Harness | `scripts/bench.sh` (novo) |
+
+| # | linha | docker | podman | delonix |
+|---|---|---|---|---|
+| 4a | `run --rm`, default de cada um (mediana de 10) | **299 ms** (min 267, max 351) | **277 ms** (min 270, max 296) | **80 ms** (min 69, max 92) |
+| 4b | rede isolada por container, plano JÁ de pé | — | — | **~300 ms** (297 / 297 / 392) |
+| 4c | idem, com o plano a subir DO ZERO | — | — | **~520 ms** (498 / 545) |
+
+**O rácio sobreviveu, que é o que estas tabelas ensinam a olhar.** No default o
+Delonix continua ~3,5× mais rápido; com rede isolada continua em empate técnico
+com o docker (300 contra 299), exactamente como a bateria de 2026-08-13
+descrevia com outros valores absolutos (216 contra 208).
+
+**O que NÃO foi atribuído:** as linhas 4b/4c são maiores do que em 2026-08-13
+(300 contra 216, 520 contra 344). O hardware é mais rápido e o root do bench é
+isolado, portanto a densidade do nó de produção não entra. Não medi a causa, e
+por isso não a nomeio.
+
+### Dois erros de método apanhados a fazer esta recontagem
+
+1. **O harness comparava um motor a frio com dois a quente.** O root do Delonix
+   é isolado e nasce VAZIO, por isso a primeira corrida pagava o pull e a
+   extracção da imagem — 6 275 / 7 408 / 7 359 ms num root virgem, e uma amostra
+   de **16 782 ms** na primeira versão desta bancada. A mediana absorveu-o, o que
+   é precisamente o perigo: com `--runs 1` o número publicado seria dezasseis
+   segundos. O `bench.sh` passou a aquecer os três explicitamente.
+2. **A primeira medição da linha 4c não mediu a linha 4c.** Foi feita com
+   `--net host`, que é o default e **não levanta plano de rede nenhum** — dava
+   74 ms contra 63-78 do controlo, ou seja, mediu a 4a três vezes. A 4c precisa
+   de `--net <rede-custom>`, que é o que obriga o holder a subir.
+
+## A tentativa recusada, em detalhe
 
 O motor está na **v0.63.1** e esta tabela é da **v0.53.0**. Uma tabela de
 desempenho que envelhece dez versões merece ser remedida, e foi tentado.
