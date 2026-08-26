@@ -50,7 +50,7 @@ const TYPED_KINDS: &[&str] = &[
     "Vm",
     "Secret",
     "Image",
-    "Tunnel",
+    "Gateway",
     "Dependency",
     "NetworkRoute",
     "HTTPRoute",
@@ -191,7 +191,7 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
                 "ImageSpec",
                 super::image::IMAGE_SPEC_FIELDS,
             ),
-            "Tunnel" => (
+            "Gateway" => (
                 generator.subschema_for::<super::tunnel::TunnelSpec>(),
                 "TunnelSpec",
                 super::tunnel::TUNNEL_SPEC_FIELDS,

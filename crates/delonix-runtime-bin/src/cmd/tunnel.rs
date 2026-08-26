@@ -258,7 +258,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
         f.insert("insecureSkipTlsVerify".into(), "true".into());
     }
     Ok(super::reconcile::Desired {
-        kind: "Tunnel".into(),
+        kind: "Gateway".into(),
         name: doc.metadata.name.clone(),
         fields: f,
         converges: true,
@@ -271,7 +271,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
 pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actual>> {
     let store = record_store()?;
     let mut out = Vec::new();
-    for doc in manifest::of_kind(docs, "Tunnel") {
+    for doc in manifest::of_kind(docs, "Gateway") {
         let Ok(rec) = store.load(&doc.metadata.name) else {
             continue;
         };
@@ -285,7 +285,7 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
             f.insert("insecureSkipTlsVerify".into(), "true".into());
         }
         out.push(super::reconcile::Actual {
-            kind: "Tunnel".into(),
+            kind: "Gateway".into(),
             name: doc.metadata.name.clone(),
             fields: f,
             owner: None,
@@ -320,7 +320,7 @@ pub(crate) fn converge_doc(doc: &ManifestDoc) -> Result<()> {
 }
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
-    for doc in manifest::of_kind(docs, "Tunnel") {
+    for doc in manifest::of_kind(docs, "Gateway") {
         let spec: TunnelSpec = manifest::spec_of(doc)?;
         apply_one(&doc.metadata.name, &spec)?;
     }

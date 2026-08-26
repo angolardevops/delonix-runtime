@@ -325,9 +325,9 @@ const FACTS: &[KindFacts] = &[
         presence: Presence::Declarative,
     },
     KindFacts {
-        kind: "Tunnel",
-        plural: "tunnels",
-        short: &["tun"],
+        kind: "Gateway",
+        plural: "gateways",
+        short: &["gw"],
         api_version: "gateway.delonix.io/v1alpha1",
         domain: Domain::NetExposure,
         form: Form::Primary,

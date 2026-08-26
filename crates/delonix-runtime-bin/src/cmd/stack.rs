@@ -379,7 +379,7 @@ fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Desired>>
                 "Vm" => super::vm::desired(doc)?,
                 "FirewallPolicy" => super::firewall::desired(doc)?,
                 "HTTPRoute" | "Ingress" => super::httproute::desired(doc)?,
-                "Tunnel" => super::tunnel::desired(doc)?,
+                "Gateway" => super::tunnel::desired(doc)?,
                 _ => reconcile::Desired {
                     kind: kind.to_string(),
                     name: doc.metadata.name.clone(),
@@ -642,7 +642,7 @@ pub(crate) fn compared_fields_table() -> Vec<(&'static str, &'static [&'static s
         ("FirewallPolicy", super::firewall::RECONCILED_FW_FIELDS),
         ("HTTPRoute", super::httproute::RECONCILED_HTTPROUTE_FIELDS),
         ("Ingress", super::httproute::RECONCILED_HTTPROUTE_FIELDS),
-        ("Tunnel", super::tunnel::RECONCILED_TUNNEL_FIELDS),
+        ("Gateway", super::tunnel::RECONCILED_TUNNEL_FIELDS),
         ("Pod", super::pod::RECONCILED_POD_FIELDS),
     ]
 }
@@ -1214,7 +1214,7 @@ fn presence(
         // both and why guessing it is not an option.
         // A tunnel's record says whether an agent was started; the public URL
         // is status and deliberately not part of "is it there".
-        "Tunnel" => super::tunnel::presence_of(name),
+        "Gateway" => super::tunnel::presence_of(name),
         _ => ("?".into(), super::po::t("unsupported kind").into()),
     }
 }
@@ -1617,7 +1617,7 @@ fn run_layers(
     layers.run("HTTPRoute", "🔀", || super::httproute::apply(docs))?;
     // Tunnel LAST of all: its `localPort` is typically the HTTPRoute proxy's own
     // listening port (see `cmd::tunnel`'s module doc) — must already be up.
-    layers.run("Tunnel", "🌍", || super::tunnel::apply(docs))?;
+    layers.run("Gateway", "🌍", || super::tunnel::apply(docs))?;
     Ok(())
 }
 
@@ -1672,7 +1672,7 @@ pub(crate) fn no_teardown_reason(kind: &str) -> Option<&'static str> {
         "HTTPRoute" | "Ingress" => {
             "routes live in the proxy's shared config, with no per-document provenance"
         }
-        "Tunnel" => "a tunnel has no labels to stamp ownership on",
+        "Gateway" => "a tunnel has no labels to stamp ownership on",
         _ => return None,
     })
 }
@@ -1906,7 +1906,7 @@ fn converge_and_stamp(
                 // whole thing — which is what `apply` does, and it SIGHUPs the
                 // live proxy instead of restarting it.
                 "HTTPRoute" | "Ingress" => super::httproute::converge_all(docs)?,
-                "Tunnel" => {
+                "Gateway" => {
                     let doc = docs
                         .iter()
                         .find(|d| d.kind == c.kind && d.metadata.name == c.name)

@@ -2827,7 +2827,7 @@
       "if": {
         "properties": {
           "kind": {
-            "const": "Tunnel"
+            "const": "Gateway"
           }
         },
         "required": [

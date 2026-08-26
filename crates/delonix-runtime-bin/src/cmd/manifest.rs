@@ -166,6 +166,13 @@ pub fn canonical_kind(kind: &str) -> &str {
     let lower = kind.to_ascii_lowercase();
     match lower.as_str() {
         "vm" | "virtualmachine" => "Vm",
+        // A RENAME, so the old spelling is an alias and not a deprecation: no
+        // warning, nothing to migrate. `docs/cli-stability.md` draws that line
+        // — a renamed name stays accepted as an alias — and it is the same
+        // treatment `restart`→`restartPolicy` already gets. A MERGE is the
+        // other case (`Egress`→`FirewallPolicy`), and that one does warn,
+        // because the semantics moved.
+        "tunnel" | "gateway" => "Gateway",
         // `KnowDepends` is the name the user asked for; `Dependency` is the canonical one.
         "knowdepends" | "dependency" => "Dependency",
         "stack" => "Stack",
@@ -296,7 +303,7 @@ fn expand_stack(doc: &ManifestDoc) -> Result<Vec<ManifestDoc>> {
         ("FirewallPolicy", spec.firewall_policies),
         ("HTTPRoute", spec.http_routes),
         ("Dependency", spec.dependencies),
-        ("Tunnel", spec.tunnels),
+        ("Gateway", spec.tunnels),
     ];
     let mut out = Vec::new();
     for (kind, items) in groups {
@@ -383,7 +390,7 @@ pub(crate) fn spec_fields_for(kind: &str) -> Option<&'static [&'static str]> {
         "HTTPRoute" => Some(crate::cmd::httproute::HTTP_ROUTE_SPEC_FIELDS),
         "Dependency" => Some(crate::cmd::dependency::DEPENDENCY_SPEC_FIELDS),
         "NetworkRoute" => Some(crate::cmd::netroute::NETWORK_ROUTE_SPEC_FIELDS),
-        "Tunnel" => Some(crate::cmd::tunnel::TUNNEL_SPEC_FIELDS),
+        "Gateway" => Some(crate::cmd::tunnel::TUNNEL_SPEC_FIELDS),
         "ShareVolume" => Some(crate::cmd::sharevolume::SHAREVOLUME_SPEC_FIELDS),
         "Workload" => Some(crate::cmd::workload::WORKLOAD_SPEC_FIELDS),
         "Stack" => Some(STACK_SPEC_FIELDS),
@@ -936,6 +943,31 @@ pub fn unknown_fields(doc: &ManifestDoc, known: &[&str]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    /// Every Kind this restructuring RENAMES keeps its old spelling working.
+    ///
+    /// The table is the point: each row is a promise made in
+    /// `docs/cli-stability.md` — a renamed name stays accepted as an alias —
+    /// and a rename landing without its row here is a manifest in somebody's
+    /// git that stops loading. Grows one line per rename as the remaining ones
+    /// land.
+    ///
+    /// An alias is SILENT, unlike a deprecation. A rename changes nothing about
+    /// what the document means, so there is nothing for the writer to migrate;
+    /// a MERGE (`Egress`→`FirewallPolicy`) does warn, because the semantics
+    /// moved. Warning on a pure rename would train people to ignore warnings.
+    #[test]
+    fn a_renamed_kind_keeps_answering_to_its_old_name() {
+        for (old, new) in [("Tunnel", "Gateway"), ("VirtualMachine", "Vm")] {
+            assert_eq!(canonical_kind(old), new, "{old} stopped resolving");
+            assert_eq!(canonical_kind(new), new, "{new} does not resolve to itself");
+            // Casing is not part of the promise being kept, but it is part of
+            // the one `canonical_kind` already made — a half-measure would let
+            // a `kind: tunnel` be ignored in silence.
+            assert_eq!(canonical_kind(&old.to_ascii_lowercase()), new);
+            assert_eq!(canonical_kind(&old.to_ascii_uppercase()), new);
+        }
+    }
+
     /// The promise `docs/cli-stability.md` makes and ADR-0020 chose to keep:
     /// `apiVersion: delonix.io/v1` only changes with a `v2`, and a `v2` does not
     /// ship without `v1` still being accepted. Clean cut for COMMANDS, a step
