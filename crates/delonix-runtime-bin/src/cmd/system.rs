@@ -30,6 +30,13 @@ pub enum SystemCmd {
     },
     /// Engine state: rootless?, cgroup delegation, network infra, counts.
     Info,
+    /// What each capability promises, and the EVIDENCE for it.
+    ///
+    /// A maturity level without evidence is an opinion with a badge, so every
+    /// row names something a reader can go and check — a gate that runs, a
+    /// measurement with a date, a conformance number with its suite. A test
+    /// refuses a row whose evidence is empty.
+    Features(super::features::FeaturesArgs),
     /// Check the HOST prerequisites this engine needs, and say how to fix each.
     ///
     /// `info` reports state and `setup` fixes cgroup delegation. This answers a
@@ -209,6 +216,7 @@ pub fn run(action: SystemCmd) -> Result<()> {
             output,
         } => cmd_events(follow, tail, output),
         SystemCmd::Info => cmd_info(),
+        SystemCmd::Features(a) => super::features::run(a),
         SystemCmd::Doctor { strict } => cmd_doctor(strict),
         SystemCmd::Setup { delegate } => cmd_setup(delegate),
         SystemCmd::Df => cmd_df(),

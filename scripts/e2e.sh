@@ -619,6 +619,59 @@ check "volumes describe depois do destroy recusa" fail "$BIN" volumes describe "
 "$BIN" network rm "sn-$PFX" >/dev/null 2>&1
 
 # ---------------------------------------------------------------------------
+# `system features` — níveis de maturidade derivados de EVIDÊNCIA.
+#
+# «Está pronto?» é a primeira pergunta que se faz a um motor 0.x, e a resposta
+# vivia em prosa sem nada a prendê-la ao código. Cada linha nomeia agora a
+# evidência que a sustenta, e um teste recusa uma linha sem ela.
+check "system features lista" ok "$BIN" system features
+check "system features -o json" ok "$BIN" system features -o json
+check "…toda a capacidade traz evidência" ok bash -c \
+  "'$BIN' system features -o json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert all(len(f[\"evidence\"])>40 for f in d)'"
+# Nada pode dizer-se `certified` sem a matriz de kernels/distros/providers que
+# define esse nível — e essa matriz não existe.
+check "…e nada se diz certified" ok bash -c \
+  "! '$BIN' system features -o json | grep -q certified"
+check "--min inválido recusa" fail "$BIN" system features --min lixo
+
+# ---------------------------------------------------------------------------
+# `policy.json` — o tecto que o NÓ põe, e que vale mesmo com a admissão do
+# cluster mal configurada.
+#
+# Mesma razão que pôs o tecto de capabilities no CRI: tudo o que chega ao
+# `cmd_run` já vem autorizado por quem chamou, e uma política que só vive na
+# cadeia de admissão de um cluster corre noutra máquina que este nó não vê.
+#
+# Guardado por `E2E_HAVE_IMAGE`: um root isolado sem rede não tem imagem, e sem
+# imagem estes checks mediriam a falta dela em vez da política.
+if [[ "$E2E_HAVE_IMAGE" == "1" ]]; then
+  # 1. SEM ficheiro = SEM tecto. É o caminho de upgrade: um host que nunca
+  #    escreveu política comporta-se exactamente como antes.
+  check "sem política, um run normal passa" ok \
+    "$BIN" container run --rm --net host "$IMG" true
+  # 2. Com política, recusa — e nomeia VÁRIAS razões, não só a primeira.
+  cat >"$DELONIX_ROOT/policy.json" <<'JSON'
+{"denyPrivileged": true, "denyHostNetwork": true, "denyLatestTag": true, "allowedRegistries": ["ghcr.io"]}
+JSON
+  check "com política, o run é recusado" fail \
+    "$BIN" container run --rm --net host "$IMG" true
+  check "…e nomeia várias razões de uma vez" ok bash -c \
+    "test \$('$BIN' container run --rm --net host '$IMG' true 2>&1 | grep -c 'runtime policy') -ge 2"
+  # 3. Um ficheiro que não parseia é ERRO, nunca «sem política» — um typo não
+  #    pode desligar o tecto do nó em silêncio.
+  echo '{ nao json' >"$DELONIX_ROOT/policy.json"
+  check "uma política ilegível é erro, não ausência" fail \
+    "$BIN" container run --rm --net host "$IMG" true
+  # 4. E uma política que só restringe uma coisa deixa passar o resto.
+  echo '{"denyPrivileged": true}' >"$DELONIX_ROOT/policy.json"
+  check "política parcial: o que ela não proíbe passa" ok \
+    "$BIN" container run --rm --net host "$IMG" true
+  rm -f "$DELONIX_ROOT/policy.json"
+else
+  skip "policy.json" "sem imagem no store — ver o skip do image pull"
+fi
+
+# ---------------------------------------------------------------------------
 # `scripts/sbom.py` — o SBOM que a release publica.
 #
 # Uma release assinada diz «isto veio de nós»; um SBOM diz «isto é feito disto»,
