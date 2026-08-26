@@ -135,6 +135,17 @@ pub(crate) enum Namespaced {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct KindFacts {
     pub kind: &'static str,
+    /// The lowercase plural a caller types (`delonix get pods`). Its own field
+    /// and not derived by appending `s`: `Dependency`→`dependencies` and
+    /// `Ingress`→`ingresses` do not follow that rule, and a resolver that
+    /// guessed would answer «no such resource» for a Kind that is right there.
+    pub plural: &'static str,
+    /// Accepted abbreviations. Deliberately sparse — a shortname exists when it
+    /// is unambiguous AND worth typing; inventing one per Kind only multiplies
+    /// the ways two Kinds can collide. Uniqueness across the whole registry is
+    /// a TEST, not a convention: a duplicate would silently shadow, which is
+    /// the defect class this module exists to have removed.
+    pub short: &'static [&'static str],
     pub domain: Domain,
     pub form: Form,
     /// Applied by `stack apply`. **The order of the rows below is the order of
@@ -154,6 +165,8 @@ pub(crate) struct KindFacts {
 const FACTS: &[KindFacts] = &[
     KindFacts {
         kind: "Secret",
+        plural: "secrets",
+        short: &["sec"],
         domain: Domain::Artifact,
         form: Form::Primary,
         in_stack: true,
@@ -167,6 +180,8 @@ const FACTS: &[KindFacts] = &[
     },
     KindFacts {
         kind: "Network",
+        plural: "networks",
+        short: &["net"],
         domain: Domain::NetConnectivity,
         form: Form::Primary,
         in_stack: true,
@@ -177,6 +192,8 @@ const FACTS: &[KindFacts] = &[
     },
     KindFacts {
         kind: "NetworkRoute",
+        plural: "networkroutes",
+        short: &["nr"],
         domain: Domain::NetConnectivity,
         form: Form::Primary,
         in_stack: true,
@@ -187,6 +204,8 @@ const FACTS: &[KindFacts] = &[
     },
     KindFacts {
         kind: "Volume",
+        plural: "volumes",
+        short: &["vol"],
         domain: Domain::Storage,
         form: Form::Primary,
         in_stack: true,
@@ -199,6 +218,8 @@ const FACTS: &[KindFacts] = &[
     },
     KindFacts {
         kind: "Image",
+        plural: "images",
+        short: &["img"],
         domain: Domain::Artifact,
         form: Form::Primary,
         in_stack: true,
@@ -211,6 +232,8 @@ const FACTS: &[KindFacts] = &[
     },
     KindFacts {
         kind: "Vm",
+        plural: "vms",
+        short: &[],
         domain: Domain::Compute,
         form: Form::Primary,
         in_stack: true,
@@ -221,6 +244,8 @@ const FACTS: &[KindFacts] = &[
     },
     KindFacts {
         kind: "Container",
+        plural: "containers",
+        short: &[],
         domain: Domain::Compute,
         form: Form::Primary,
         in_stack: true,
@@ -231,6 +256,8 @@ const FACTS: &[KindFacts] = &[
     },
     KindFacts {
         kind: "Pod",
+        plural: "pods",
+        short: &["po"],
         domain: Domain::Compute,
         form: Form::Primary,
         in_stack: true,
@@ -241,6 +268,8 @@ const FACTS: &[KindFacts] = &[
     },
     KindFacts {
         kind: "Ingress",
+        plural: "ingresses",
+        short: &["ing"],
         domain: Domain::NetExposure,
         form: Form::Compat("HTTPRoute"),
         in_stack: true,
@@ -251,6 +280,8 @@ const FACTS: &[KindFacts] = &[
     },
     KindFacts {
         kind: "FirewallPolicy",
+        plural: "firewallpolicies",
+        short: &["fwp"],
         domain: Domain::NetPolicy,
         form: Form::Primary,
         in_stack: true,
@@ -261,6 +292,8 @@ const FACTS: &[KindFacts] = &[
     },
     KindFacts {
         kind: "HTTPRoute",
+        plural: "httproutes",
+        short: &["hr"],
         domain: Domain::NetExposure,
         form: Form::Primary,
         in_stack: true,
@@ -271,6 +304,8 @@ const FACTS: &[KindFacts] = &[
     },
     KindFacts {
         kind: "Tunnel",
+        plural: "tunnels",
+        short: &["tun"],
         domain: Domain::NetExposure,
         form: Form::Primary,
         in_stack: true,
@@ -283,6 +318,8 @@ const FACTS: &[KindFacts] = &[
     // local resources at all. ---
     KindFacts {
         kind: "Workload",
+        plural: "workloads",
+        short: &["wl"],
         domain: Domain::Compute,
         form: Form::Sugar("Container/Pod/Vm"),
         in_stack: false,
@@ -294,6 +331,8 @@ const FACTS: &[KindFacts] = &[
     },
     KindFacts {
         kind: "Dependency",
+        plural: "dependencies",
+        short: &["dep"],
         domain: Domain::NetPolicy,
         form: Form::Sugar("FirewallPolicy"),
         in_stack: false,
@@ -307,6 +346,8 @@ const FACTS: &[KindFacts] = &[
     },
     KindFacts {
         kind: "ShareVolume",
+        plural: "sharevolumes",
+        short: &["sv"],
         domain: Domain::Storage,
         form: Form::Deprecated("Volume"),
         in_stack: false,
@@ -319,6 +360,8 @@ const FACTS: &[KindFacts] = &[
     },
     KindFacts {
         kind: "Storage",
+        plural: "storages",
+        short: &[],
         domain: Domain::Storage,
         form: Form::Deprecated("Volume"),
         in_stack: false,
@@ -329,6 +372,8 @@ const FACTS: &[KindFacts] = &[
     },
     KindFacts {
         kind: "Egress",
+        plural: "egresses",
+        short: &[],
         domain: Domain::NetPolicy,
         form: Form::Deprecated("FirewallPolicy"),
         in_stack: false,
@@ -339,6 +384,8 @@ const FACTS: &[KindFacts] = &[
     },
     KindFacts {
         kind: "Stack",
+        plural: "stacks",
+        short: &[],
         domain: Domain::Composition,
         form: Form::Aggregate,
         in_stack: false,
@@ -350,6 +397,8 @@ const FACTS: &[KindFacts] = &[
     },
     KindFacts {
         kind: "Cluster",
+        plural: "clusters",
+        short: &[],
         domain: Domain::Composition,
         form: Form::Primary,
         // Deliberately outside the stack cycle: it is a remote procedure over

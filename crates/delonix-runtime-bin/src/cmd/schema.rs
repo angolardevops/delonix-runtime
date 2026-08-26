@@ -427,9 +427,23 @@ pub fn explain(path: &str) -> Result<()> {
         Some((k, r)) => (k, Some(r)),
         None => (path, None),
     };
+    // The registry resolves the plural and the shortnames too, so `explain po`
+    // and `explain pods` reach `Pod` — before this, only the exact canonical
+    // spelling did, which is not the one a caller has in their fingers after
+    // typing `get pods`. One resolver for every verb is the point: a second
+    // table of abbreviations here is how `po` starts meaning two things.
+    //
+    // A token the registry does not know falls through to the ORIGINAL refusal
+    // on purpose: `no_typed_schema` carries a targeted hint (a Kind can be real
+    // and still have no typed schema — `Storage` is rewritten into `Volume`),
+    // and «no such resource kind» would read as a defect in the manifest when
+    // it is a property of the Kind.
+    let asked = super::resource::resolve_kind(kind)
+        .map(|f| f.kind)
+        .unwrap_or(kind);
     let canon = TYPED_KINDS
         .iter()
-        .find(|k| k.eq_ignore_ascii_case(kind))
+        .find(|k| k.eq_ignore_ascii_case(asked))
         .ok_or_else(|| no_typed_schema(kind))?;
     let doc = manifest_schema(Some(canon))?;
     let defs = doc.get("$defs").cloned().unwrap_or(serde_json::json!({}));

@@ -383,3 +383,56 @@ DELONIX_ROOT=<iso>/root DELONIX_NET_RUNTIME_DIR=<iso>/netrt cargo test --workspa
 
 Isto é dívida a fechar antes da Fase CLI-2: o `cargo test --workspace` a seco não
 é reprodutível neste repo e ninguém o diz em lado nenhum.
+
+## 7. Fase CLI-1 — o que já aterrou
+
+| contrato | estado | consumidor real hoje |
+|---|---|---|
+| exit codes (`69`, `124`) | **feito** | `stack wait`, `wg`, `virt-customize`, `ngrok`, `cloudflared`, `systemd-run` |
+| identidade textual `DX_*` | **feito** | corpo de erro do `serve api` |
+| shortnames vindos do registo | **feito** | `explain`, `stack apply --replace` |
+| `ResourceRef` (o TIPO) | **adiado, de propósito** | — |
+| contexts (`config set-context`) | **em conflito com o ADR-0010** | — |
+| formatos de output, cancelamento, request IDs | por fazer | — |
+
+### O `ResourceRef` foi escrito e apagado
+
+O tipo (`kind`/`kind/name`, com testes) chegou a existir e saiu antes do commit:
+nada consome uma REFERÊNCIA de recurso até os verbos declarativos existirem, e
+este repo já apagou quatro APIs públicas que ficaram sem chamador e criaram bugs
+latentes que ninguém podia notar — `publish_port_allow`, `Net`, e os parâmetros
+ignorados no `mount_live` e no `reexec_start`. Uma quinta, escrita pela mesma
+mão que escreve esta frase, não seria melhor.
+
+O que ficou registado no doc do módulo, para não ser re-derivado: `kind/name` é
+um argumento e `kind name` são dois; nomear o recurso duas vezes recusa-se em
+vez de se resolver; e `pod/` recusa-se em vez de se ler como a colecção —
+senão um erro de escrita num `delete` passa a ser todos os pods.
+
+Ficou o que TEM chamador: `resolve_kind`, mais as colunas `plural` e `short` na
+tabela de Kinds. Duas arestas reais fecharam-se de caminho:
+
+- **`explain` só aceitava a grafia canónica exacta.** `explain pods` e
+  `explain po` falhavam — e `pods` é precisamente o que se tem nos dedos depois
+  de escrever `get pods`. As quatro grafias funcionam agora, e as duas recusas
+  (Kind sem schema tipado, token que não é Kind) mantêm as dicas dirigidas.
+- **`stack apply --replace` comparava strings.** `--replace container/web`
+  (minúsculas) não casava: a autorização era ignorada em silêncio e o apply
+  recusado a mandar passar a flag que a pessoa julgava ter passado. Num portão
+  destrutivo, é a pior maneira de falhar. O KIND passa pelo registo; o **NOME
+  nunca** — resolver nomes é como um `--replace` começa a autorizar um recurso
+  que ninguém mencionou.
+
+### Contexts: o §16 colide com o ADR-0010
+
+O §16 pede `config set-context --endpoint`, com identidade e TLS, «para preparar
+a CLI para gestão local e remota». O **ADR-0010 deste repo recusou a API de
+gestão remota**, e a razão aplica-se tal e qual ao cliente: *remoteness* sem
+identidade, autorização e auditoria não é remoteness que valha a pena, e essa
+metade vive no `delonix-paas`.
+
+Construir o lado-cliente de uma capacidade que o motor decidiu não ter é a mesma
+classe de código-sem-consumidor de que o `ResourceRef` acabou de sair. O que
+**não** colide, e é a parte útil, é um contexto puramente LOCAL: namespace por
+omissão, formato de output preferido, `DELONIX_ROOT`. Fica como decisão a tomar
+antes de a CLI-1 fechar.

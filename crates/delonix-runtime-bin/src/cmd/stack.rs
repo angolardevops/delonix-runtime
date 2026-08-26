@@ -1233,6 +1233,37 @@ fn yes_no(b: bool) -> (String, String) {
 /// rollback, so a stack containing one resource that needs recreating must not
 /// get half-applied and only then complain — the user would be left with a
 /// partially converged stack and a refusal, which is the worst of both.
+/// Whether one `--replace` token authorises this change.
+///
+/// The comparison used to be raw string equality against `"{kind}/{name}"`,
+/// so only the EXACT canonical spelling of the Kind counted: `--replace
+/// container/web` and `--replace po/web` were silently no-ops, and the apply
+/// was refused telling the caller to pass a flag they believed they had passed.
+/// Recoverable — the message prints the canonical key — but the caller typed an
+/// authorisation and it did not take, which is the worst way for a destructive
+/// gate to behave.
+///
+/// The Kind half now goes through the same registry every other verb uses
+/// ([`super::resource`]), so the plural and the shortnames work too. A token
+/// whose head is not a Kind at all keeps the historical BARE NAME meaning
+/// (`--replace web`) rather than becoming an error: that form is documented and
+/// in use.
+///
+/// What deliberately did NOT get looser: the NAME still has to match exactly.
+/// Resolving names is how `--replace` would start authorising a resource the
+/// caller never mentioned.
+fn replace_matches(token: &str, c: &Change) -> bool {
+    match token.split_once('/') {
+        Some((kind_tok, name)) => {
+            name == c.name
+                && super::resource::resolve_kind(kind_tok)
+                    .map(|f| f.kind == c.kind)
+                    .unwrap_or(false)
+        }
+        None => token == c.name,
+    }
+}
+
 fn refuse_unallowed(changes: &[Change], replace: &[String]) -> Result<()> {
     let allow_all = replace.iter().any(|r| r == "all");
     let mut blocked = Vec::new();
@@ -1246,7 +1277,7 @@ fn refuse_unallowed(changes: &[Change], replace: &[String]) -> Result<()> {
             )),
             Action::Replace if !allow_all => {
                 let key = format!("{}/{}", c.kind, c.name);
-                if !replace.iter().any(|r| *r == key || *r == c.name) {
+                if !replace.iter().any(|r| replace_matches(r, c)) {
                     blocked.push(super::po::tf(
                         "{key}: {reason} — pass `--replace {key}` (or `--replace all`) to \
                          destroy and recreate it",
@@ -2715,6 +2746,57 @@ pub(crate) fn init_for(
 
 #[cfg(test)]
 mod tests {
+    fn a_change(kind: &str, name: &str) -> Change {
+        Change {
+            kind: kind.to_string(),
+            name: name.to_string(),
+            action: Action::Replace,
+            reason: None,
+            cold_fields: vec![],
+            owner: None,
+            changed: Default::default(),
+            conditions: Default::default(),
+            diffs: Default::default(),
+        }
+    }
+
+    /// The gate is destructive, so the two halves are asymmetric on purpose:
+    /// the KIND resolves through the registry (canonical, lowercase, plural,
+    /// shortname), the NAME never does.
+    #[test]
+    fn replace_accepts_every_spelling_of_the_kind() {
+        let c = a_change("Pod", "api");
+        for t in ["Pod/api", "pod/api", "pods/api", "po/api"] {
+            assert!(replace_matches(t, &c), "{t} should authorise");
+        }
+    }
+
+    /// The bug this closed: only the exact canonical spelling counted, so a
+    /// caller who typed `--replace container/web` had their authorisation
+    /// silently ignored and the apply refused telling them to pass it.
+    #[test]
+    fn replace_used_to_ignore_a_lowercase_kind() {
+        assert!(replace_matches(
+            "container/web",
+            &a_change("Container", "web")
+        ));
+    }
+
+    #[test]
+    fn replace_still_accepts_a_bare_name() {
+        assert!(replace_matches("web", &a_change("Container", "web")));
+    }
+
+    /// Resolving NAMES would be how `--replace` starts authorising a resource
+    /// the caller never mentioned.
+    #[test]
+    fn replace_never_matches_another_resource() {
+        let c = a_change("Pod", "api");
+        for t in ["pod/web", "web", "network/api", "net/api", "naoexiste/api"] {
+            assert!(!replace_matches(t, &c), "{t} must NOT authorise");
+        }
+    }
+
     use super::*;
 
     /// Parses multi-doc YAML to `Vec<ManifestDoc>` via the same real `load`
