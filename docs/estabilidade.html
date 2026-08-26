@@ -212,12 +212,101 @@ falha específica</strong>. Ver a nota de migração no fim desta secção.</p>
 <td><code>5</code></td>
 <td><strong>conflito</strong> — o nome já está tomado</td>
 </tr>
+<tr>
+<td><code>69</code></td>
+<td><strong>capacidade que este host não tem</strong> — uma ferramenta por instalar, um backend indisponível</td>
+</tr>
+<tr>
+<td><code>124</code></td>
+<td><strong>o prazo esgotou-se</strong> — <code>stack wait --timeout</code>, e o que vier a ter prazo</td>
+</tr>
 </tbody>
 </table>
 <p><code>3</code> e <code>4</code> não são números inventados: são os códigos de estado do LSB que o
 <code>systemctl</code> ainda fala (<code>3</code> = o programa não está a correr, <code>4</code> = não há tal
 unidade). <code>5</code> não tem convenção por trás — é o número livre seguinte, abaixo da
 gama que a shell usa (<code>126</code>/<code>127</code>, e <code>128+N</code> para sinais).</p>
+<p><strong><code>69</code> e <code>124</code> também não.</strong> <code>69</code> é o <code>EX_UNAVAILABLE</code> do <code>sysexits.h</code>; <code>124</code> é
+o que o <code>timeout(1)</code> devolve quando o prazo passa, e está portanto já nos dedos
+de quem embrulha um comando num. Entraram porque tinham <strong>produtores reais mal
+classificados</strong>, não para completar uma tabela: um <code>stack wait</code> que esgotava o
+tempo respondia <code>1</code> — o mesmo número de um apply rebentado, no comando cuja
+função inteira é ser lido por CI — e um <code>wg</code>/<code>virt-customize</code>/<code>ngrok</code> em falta
+respondia <code>1</code> também, indistinguível de um erro de escrita numa flag. As duas
+chamadas seguintes de um reconciliador são opostas: esperar mais, ou parar e
+instalar alguma coisa.</p>
+<pre><code class="language-bash">delonix stack wait -f delonix-manifest.yaml --timeout 120
+case $? in
+  0)   ;;                     # tudo de pé
+  124) exit 0 ;;              # ainda a subir — o pipeline seguinte volta a tentar
+  69)  echo &quot;falta uma ferramenta neste nó&quot; &gt;&amp;2; exit 1 ;;
+  *)   exit 1 ;;              # qualquer outra coisa: pára
+esac
+</code></pre>
+<h3 id="a-identidade-textual-dx_">A identidade textual: <code>DX_*</code></h3>
+<p>O número serve quem lê <code>$?</code>. Quem lê <strong>texto</strong> — um cliente HTTP, um consumidor
+de <code>-o json</code>, um pipeline de logs — tem o código <code>DX_*</code>, que é a mesma
+classificação noutra grafia:</p>
+<table>
+<thead>
+<tr>
+<th><code>DX_*</code></th>
+<th>código</th>
+<th>quando</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DX_NOT_FOUND</code></td>
+<td><code>4</code></td>
+<td>não existe esse recurso</td>
+</tr>
+<tr>
+<td><code>DX_NOT_RUNNING</code></td>
+<td><code>3</code></td>
+<td>existe, mas não está a correr</td>
+</tr>
+<tr>
+<td><code>DX_CONFLICT</code></td>
+<td><code>5</code></td>
+<td>o nome já está tomado</td>
+</tr>
+<tr>
+<td><code>DX_UNAVAILABLE</code></td>
+<td><code>69</code></td>
+<td>capacidade que este host não tem</td>
+</tr>
+<tr>
+<td><code>DX_TIMEOUT</code></td>
+<td><code>124</code></td>
+<td>o prazo esgotou-se</td>
+</tr>
+<tr>
+<td><code>DX_INVALID_ARGUMENT</code> · <code>DX_REGISTRY</code> · <code>DX_SYSCALL_FAILED</code> · <code>DX_INVALID_STATE</code> · <code>DX_IO</code></td>
+<td><code>1</code></td>
+<td>falhas sem número próprio</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Estes nomes são contrato</strong>: um código pode ser ACRESCENTADO; um existente
+nunca muda de grafia nem de significado.</p>
+<p>A relação é <strong>assimétrica de propósito</strong>. Um <code>DX_*</code> mapeia sempre para UM
+número — se mapeasse para dois, o <code>$?</code> e o texto contradiziam-se para a mesma
+falha. Mas o <code>1</code> carrega VÁRIOS códigos, porque é o balde «sem classe própria» e
+o texto pode dar-se ao luxo de ser mais fino: cada NÚMERO é uma promessa que tem
+de valer o resto do <code>0.x</code>, enquanto <code>DX_REGISTRY</code> ao lado de
+<code>DX_INVALID_ARGUMENT</code> não custa nada. Há teste a exigir as duas metades desta
+regra, incluindo que o balde continue a ser um balde.</p>
+<p>Hoje o código sai na <strong>API de gestão</strong> (<code>delonix serve api</code>), como campo
+acrescentado ao corpo de erro — <code>{"error": "...", "code": "DX_NOT_FOUND"}</code>. O
+campo <code>error</code> não foi tocado: a regra do ADR-0005 (acrescentar sim, remover ou
+mudar de tipo não) vale aqui como vale no <code>-o json</code>.</p>
+<p><strong>O que continua sem código próprio, e é honesto dizê-lo:</strong> <em>permissão negada</em> e
+<em>falha temporária</em> foram considerados e ficaram de fora — não há hoje uma
+variante de erro que os produza (as falhas de permissão chegam embrulhadas no
+<code>errno</code> de uma syscall, e o retry que existe acontece dentro do motor e nunca
+chega a quem chama). Publicar um número que nada constrói é um número que nunca
+pode voltar.</p>
 <p>O que isto resolve é concreto: um reconciliador — o <code>Makefile</code>, o passo de CI, o
 ciclo em bash que conduz esta CLI — não conseguia separar «cria, porque falta»
 de «pára, porque falhou» sem ler a MENSAGEM de erro. E a mensagem é traduzida

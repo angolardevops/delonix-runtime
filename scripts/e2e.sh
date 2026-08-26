@@ -1566,6 +1566,54 @@ else
   check "net netns down é idempotente" ok "$BIN" net netns down
 fi
 
+section "api-resources: o registo que os outros verbos leem"
+########################################
+# É o primeiro comando da árvore-alvo a aterrar, e o único da CLI-2 que não
+# depende da reestruturação dos Kinds: lista o que houver no registo, e as
+# LINHAS mudam com a reestruturação sem o mecanismo mudar.
+#
+# Não há segunda tabela por baixo — a listagem deriva do mesmo `cmd::kinds`
+# que o parser, o schema, a completação e o reconciliador leem. Por isso o que
+# se verifica aqui não é o conteúdo (isso é teste unitário, e derivado não pode
+# divergir): é que o comando existe, responde nos dois formatos, e que o JSON
+# cumpre o contrato que a automação lê.
+check "api-resources responde" ok "$BIN" api-resources
+check "api-resources -o json é um array não vazio" ok bash -c \
+  "'$BIN' api-resources -o json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert isinstance(v, list) and v'"
+check "cada linha traz as colunas que a automação lê" ok bash -c \
+  "'$BIN' api-resources -o json | python3 -c \"
+import json,sys
+for r in json.load(sys.stdin):
+    for k in ('name','shortNames','apiVersion','kind','namespaced','domain','form'):
+        assert k in r, (r.get('kind'), k)
+    assert isinstance(r['shortNames'], list)   # array vazio continua array
+    assert isinstance(r['namespaced'], bool)   # nunca a string 'true'
+\""
+# A mesma regra do resto do `-o json`: o que a automação lê não muda de língua.
+check "api-resources -o json é idêntico em EN e PT" ok bash -c \
+  "diff <('$BIN' api-resources -o json) <('$BIN' --l18n=pt api-resources -o json)"
+# E o registo tem de bater com o RESOLVEDOR: um plural listado que o `explain`
+# não aceitasse seria a tabela a documentar um nome que não funciona. As duas
+# respostas legítimas são explicar, ou recusar com «no typed schema» — que é uma
+# propriedade do Kind (o `Storage` é reescrito para `Volume`), não do nome.
+check "todo o plural listado resolve no explain" ok \
+  python3 - "$BIN" <<'PYNAMES'
+import json, subprocess, sys
+
+BIN = sys.argv[1]
+rows = json.loads(subprocess.run([BIN, "api-resources", "-o", "json"],
+                                 capture_output=True, text=True, check=True).stdout)
+assert rows, "api-resources devolveu vazio"
+for r in rows:
+    for name in (r["name"], r["kind"], *r["shortNames"]):
+        p = subprocess.run([BIN, "explain", name], capture_output=True, text=True)
+        if p.returncode == 0:
+            continue
+        if "no typed schema" in p.stdout + p.stderr:
+            continue
+        sys.exit(f"{r['kind']}: `explain {name}` nao resolve — {p.stderr.strip()[:120]}")
+PYNAMES
+
 section "cancelamento: um terminal em modo raw não é nosso para deixar partido"
 ########################################
 # BUG MEDIDO a 2026-08-26, antes de haver correcção: um `SIGTERM` a um

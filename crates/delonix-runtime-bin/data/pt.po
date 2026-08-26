@@ -9470,3 +9470,19 @@ msgstr "política de runtime {path}: {err} — uma política que não se consegu
 
 msgid "runtime policy {path}: {err}"
 msgstr "política de runtime {path}: {err}"
+
+# ---- api-resources (CLI-2) --------------------------------------------------
+msgid "Every Kind this engine serves: plural, shortnames, apiVersion and form"
+msgstr "Cada Kind que este motor serve: plural, abreviaturas, apiVersion e forma"
+
+msgid "Every Kind this engine serves: plural, shortnames, apiVersion and form.\n\nRead from the same registry the parser, the schema and the reconciler read — there is no second table to disagree with them. It answers «what can I write in a manifest, and what do I type after `explain`».\n\n`FORM` is the column that cannot be guessed: it says whether a document of that Kind survives the load under its own name, which is why a `kind: Egress` never appears in a plan as `Egress`."
+msgstr "Cada Kind que este motor serve: plural, abreviaturas, apiVersion e forma.\n\nLidos do mesmo registo que o parser, o schema e o reconciliador leem — não há uma segunda tabela para discordar deles. Responde a «o que posso escrever num manifesto, e o que escrevo a seguir ao `explain`».\n\nO `FORM` é a coluna que não se adivinha: diz se um documento desse Kind sobrevive ao load com o próprio nome, que é a razão de um `kind: Egress` nunca aparecer num plano como `Egress`."
+
+msgid "every Kind, with the plural and the shortnames a caller can type"
+msgstr "cada Kind, com o plural e as abreviaturas que se podem escrever"
+
+msgid "the stable half, for automation (ADR-0005)"
+msgstr "a metade estável, para automação (ADR-0005)"
+
+msgid "what a Kind lowers to — why `kind: Egress` never shows up as `Egress`"
+msgstr "para o que um Kind baixa — porque é que um `kind: Egress` nunca aparece como `Egress`"

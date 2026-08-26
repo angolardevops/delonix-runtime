@@ -617,3 +617,67 @@ com um servidor do outro lado, em vez de esperar por um.
 
 **A Fase CLI-0 fecha aqui.** O que resta antes da CLI-2 não é decisão nenhuma —
 é a reestruturação dos 12 Kinds, que é o outro prompt.
+
+## 11. O primeiro comando da CLI-2: `api-resources`
+
+A CLI-2 está bloqueada nos 12 Kinds — **excepto num comando**. O `api-resources`
+lista o que houver no registo, portanto as LINHAS mudam com a reestruturação sem
+o mecanismo mudar. É por isso o primeiro a aterrar, e é o que dá superfície
+visível a tudo o que a CLI-0 e a CLI-1 construíram.
+
+```
+NAME               SHORTNAMES   APIVERSION      KIND             NAMESPACED   DOMAIN         FORM
+secrets            sec          delonix.io/v1   Secret           false        artifact       primary
+pods               po           delonix.io/v1   Pod              true         compute        primary
+egresses                        delonix.io/v1   Egress           false        net-policy     deprecated → FirewallPolicy
+```
+
+**Não há segunda tabela por baixo.** A listagem deriva do mesmo `cmd::kinds` que
+o parser, o schema, a completação e o reconciliador leem — uma listagem escrita à
+mão ao lado é como as duas começam a discordar sobre que Kinds existem, que é o
+defeito que aquele módulo foi escrito para remover.
+
+**O `FORM` não está na tabela do `kubectl` e é a coluna que não se adivinha:**
+diz se um documento daquele Kind sobrevive ao load com o próprio nome. É a
+resposta a «porque é que o meu `kind: Egress` nunca aparece no plano com esse
+nome».
+
+**O `apiVersion` passou a COLUNA e não constante**, apesar de hoje as 19 linhas
+direm o mesmo. A reestruturação parte-o por domínio, e um Kind cuja versão viva
+num `const` partilhado não se consegue mover um de cada vez — que é a única forma
+de essa migração ser revista.
+
+### Dois invariantes que ficaram travados
+
+* **O `NAMESPACED` não pode discordar do carregador.** O `honors_namespace` é
+  quem decide se um `metadata.namespace` é honrado ou avisado; a tabela dizer
+  outra coisa era pior que não dizer nada — a pessoa escreve a namespace porque a
+  tabela disse que o Kind a leva, e o load ignora-a em silêncio. O
+  `PerDocument` é o que torna isto não-trivial.
+* **Todo o plural listado resolve no `explain`** (E2E). Um nome documentado que
+  não funcionasse era a tabela a publicar uma grafia inválida.
+
+### Duas notas de honestidade
+
+O `api-resources` **não ganhou página no site**, e é uma escolha: das 234
+folhas, o gerador documenta 32 GRUPOS, e o `explain` — o irmão mais próximo — também
+não tem página. Uma entrada nova ali custa título, tagline, intro e exemplos em
+PT e EN, e faz mais sentido escrita de uma vez para o conjunto de verbos da
+CLI-2 do que para um comando isolado.
+
+**Mas «o site não exige cobertura» não é «nada exige»**, e escrevi isso antes de
+medir. O **manual** exige: o `todo_o_comando_tem_entrada_no_manual` chumbou com
+«1 comando(s) sem entrada em manual_entries.rs: api-resources», e o
+`a_descricao_curta_cabe_numa_linha` chumbou a par, porque o `about` que escrevi
+tinha 140 caracteres para um tecto de 110. As duas são exigências reais que eu
+tinha dado por inexistentes depois de olhar só para o `docs/gen.py`. Ambas
+fechadas — a descrição curta partida em duas (o resto passou a `long_about`,
+nada se perdeu) e a entrada escrita, com os comentários dos exemplos traduzidos.
+
+A lição é a de sempre neste repo: **procurar num sítio e concluir sobre todos**.
+A cobertura da CLI é vigiada em dois sítios diferentes, e eu tinha visto um.
+
+E o gate da superfície **disparou numa alteração real**, não fabricada: a folha
+nova apareceu como não classificada e obrigou a decidir a classe (`=`, porque
+nasce no destino e nunca teve outra grafia). É a primeira prova de que ele
+funciona fora de um teste negativo.

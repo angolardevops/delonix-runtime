@@ -475,6 +475,16 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["container dash", "vm dash", "system info", "serve api"],
     },
     Entry {
+        path: "api-resources",
+        group: "",
+        examples: &[
+            ("every Kind, with the plural and the shortnames a caller can type", "delonix api-resources"),
+            ("the stable half, for automation (ADR-0005)", "delonix api-resources -o json"),
+            ("what a Kind lowers to — why `kind: Egress` never shows up as `Egress`", "delonix api-resources | grep -- '->'"),
+        ],
+        see_also: &["explain", "schema print", "stack plan", "stack apply"],
+    },
+    Entry {
         path: "explain",
         group: "",
         examples: &[

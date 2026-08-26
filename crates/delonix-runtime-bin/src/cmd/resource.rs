@@ -75,10 +75,138 @@ pub(crate) fn resolve_kind(token: &str) -> Result<&'static KindFacts, Error> {
     }
 }
 
+/// One row of `delonix api-resources` (ADR-0005: the JSON is the stable half).
+///
+/// Field names follow the table a caller already knows from `kubectl
+/// api-resources`, because the whole point of the command is that they do not
+/// have to learn a second vocabulary to ask the same question.
+#[derive(serde::Serialize)]
+struct ApiResourceRow {
+    name: &'static str,
+    #[serde(rename = "shortNames")]
+    short_names: &'static [&'static str],
+    #[serde(rename = "apiVersion")]
+    api_version: &'static str,
+    kind: &'static str,
+    namespaced: bool,
+    domain: &'static str,
+    /// What a document of this Kind BECOMES. Not in `kubectl`'s table, and the
+    /// one column here that cannot be guessed: it is the answer to «why does my
+    /// `kind: Egress` never show up in the plan under that name».
+    form: String,
+}
+
+/// `delonix api-resources` — what this engine serves, read from the registry
+/// every other verb reads.
+///
+/// There is deliberately no second table: the CLI, the schema, the parser, the
+/// completion and the reconciler all resolve Kinds through
+/// [`super::kinds::FACTS`], and a hand-written listing beside it is how the two
+/// start disagreeing about which Kinds exist — the defect that module was
+/// written to remove.
+pub(crate) fn api_resources(output: super::output::OutputFormat) -> Result<(), Error> {
+    use super::kinds::{Form, Namespaced};
+
+    let rows: Vec<ApiResourceRow> = kinds::all()
+        .map(|f| ApiResourceRow {
+            name: f.plural,
+            short_names: f.short,
+            api_version: f.api_version,
+            kind: f.kind,
+            // `PerDocument` answers `true`: a `Volume` with a `share:` block is
+            // namespaced and a plain one is not, and the honest summary of «it
+            // depends» is «yes, it can» — the same answer `honors_namespace`
+            // gives, so the table cannot disagree with the loader.
+            namespaced: !matches!(f.namespaced, Namespaced::Never),
+            domain: f.domain.label(),
+            form: match f.form {
+                Form::Primary => "primary".to_string(),
+                Form::Aggregate => "aggregate".to_string(),
+                Form::Sugar(k) => format!("sugar → {k}"),
+                Form::Deprecated(k) => format!("deprecated → {k}"),
+                Form::Compat(k) => format!("compat → {k}"),
+            },
+        })
+        .collect();
+
+    if matches!(output, super::output::OutputFormat::Json) {
+        println!("{}", serde_json::to_string_pretty(&rows)?);
+        return Ok(());
+    }
+
+    let mut t = super::output::Table::new(&[
+        "NAME",
+        "SHORTNAMES",
+        "APIVERSION",
+        "KIND",
+        "NAMESPACED",
+        "DOMAIN",
+        "FORM",
+    ]);
+    for r in &rows {
+        t.row(vec![
+            r.name.to_string(),
+            r.short_names.join(","),
+            r.api_version.to_string(),
+            r.kind.to_string(),
+            r.namespaced.to_string(),
+            r.domain.to_string(),
+            r.form.clone(),
+        ]);
+    }
+    t.print();
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    /// The NAMESPACED column has to answer what the LOADER answers.
+    ///
+    /// `honors_namespace` is what decides whether a `metadata.namespace` is
+    /// honoured or warned away, and the table printing a different answer would
+    /// be worse than printing none: a caller writes the namespace because the
+    /// table said the Kind takes one, and the load silently tells them it does
+    /// nothing. `PerDocument` is the case that makes this non-trivial — a
+    /// `Volume` with a `share:` block is namespaced and a plain one is not.
+    #[test]
+    fn the_namespaced_column_cannot_disagree_with_the_loader() {
+        for f in kinds::all() {
+            let shown = !matches!(f.namespaced, kinds::Namespaced::Never);
+            assert_eq!(
+                shown,
+                kinds::honors_namespace(f.kind),
+                "{}: api-resources says namespaced={shown}, the loader disagrees",
+                f.kind
+            );
+        }
+    }
+
+    /// Every Kind in the registry reaches the listing, and by the same name a
+    /// caller can then type. Derived rather than hand-written on purpose — a
+    /// second list beside `FACTS` is how the two start disagreeing about which
+    /// Kinds exist — so this checks the derivation, not the contents.
+    #[test]
+    fn every_registry_kind_is_listed_and_resolvable_by_its_listed_name() {
+        let mut seen = 0;
+        for f in kinds::all() {
+            assert_eq!(resolve_kind(f.plural).unwrap().kind, f.kind);
+            for sh in f.short {
+                assert_eq!(resolve_kind(sh).unwrap().kind, f.kind, "{sh}");
+            }
+            assert!(
+                f.api_version.starts_with("delonix.io/") || f.api_version.contains(".delonix.io/"),
+                "{}: apiVersion {:?} is outside the delonix.io namespace",
+                f.kind,
+                f.api_version
+            );
+            seen += 1;
+        }
+        assert_eq!(seen, kinds::all().count());
+        assert!(seen >= 12, "the registry lost Kinds: {seen}");
+    }
 
     /// The invariant the whole module rests on. A duplicate anywhere in the
     /// registry — canonical name, plural or shortname — makes one Kind

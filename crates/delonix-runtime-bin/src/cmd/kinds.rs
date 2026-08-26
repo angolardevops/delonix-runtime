@@ -146,6 +146,17 @@ pub(crate) struct KindFacts {
     /// a TEST, not a convention: a duplicate would silently shadow, which is
     /// the defect class this module exists to have removed.
     pub short: &'static [&'static str],
+    /// The `apiVersion` a manifest writes for this Kind.
+    ///
+    /// A column and not a constant, even though every row says the same thing
+    /// today. The CLI restructuring splits it per domain
+    /// (`compute.delonix.io/…`, `networking.delonix.io/…`), and a Kind whose
+    /// version lives in a shared `const` cannot be moved one at a time — which
+    /// is the only way that migration can be reviewed. `delonix.io/v1` also has
+    /// to keep LOADING afterwards (ADR-0020, and the promise in
+    /// `docs/cli-stability.md`), so the old spelling stays reachable rather
+    /// than being renamed away.
+    pub api_version: &'static str,
     pub domain: Domain,
     pub form: Form,
     /// Applied by `stack apply`. **The order of the rows below is the order of
@@ -167,6 +178,7 @@ const FACTS: &[KindFacts] = &[
         kind: "Secret",
         plural: "secrets",
         short: &["sec"],
+        api_version: "delonix.io/v1",
         domain: Domain::Artifact,
         form: Form::Primary,
         in_stack: true,
@@ -182,6 +194,7 @@ const FACTS: &[KindFacts] = &[
         kind: "Network",
         plural: "networks",
         short: &["net"],
+        api_version: "delonix.io/v1",
         domain: Domain::NetConnectivity,
         form: Form::Primary,
         in_stack: true,
@@ -194,6 +207,7 @@ const FACTS: &[KindFacts] = &[
         kind: "NetworkRoute",
         plural: "networkroutes",
         short: &["nr"],
+        api_version: "delonix.io/v1",
         domain: Domain::NetConnectivity,
         form: Form::Primary,
         in_stack: true,
@@ -206,6 +220,7 @@ const FACTS: &[KindFacts] = &[
         kind: "Volume",
         plural: "volumes",
         short: &["vol"],
+        api_version: "delonix.io/v1",
         domain: Domain::Storage,
         form: Form::Primary,
         in_stack: true,
@@ -220,6 +235,7 @@ const FACTS: &[KindFacts] = &[
         kind: "Image",
         plural: "images",
         short: &["img"],
+        api_version: "delonix.io/v1",
         domain: Domain::Artifact,
         form: Form::Primary,
         in_stack: true,
@@ -234,6 +250,7 @@ const FACTS: &[KindFacts] = &[
         kind: "Vm",
         plural: "vms",
         short: &[],
+        api_version: "delonix.io/v1",
         domain: Domain::Compute,
         form: Form::Primary,
         in_stack: true,
@@ -246,6 +263,7 @@ const FACTS: &[KindFacts] = &[
         kind: "Container",
         plural: "containers",
         short: &[],
+        api_version: "delonix.io/v1",
         domain: Domain::Compute,
         form: Form::Primary,
         in_stack: true,
@@ -258,6 +276,7 @@ const FACTS: &[KindFacts] = &[
         kind: "Pod",
         plural: "pods",
         short: &["po"],
+        api_version: "delonix.io/v1",
         domain: Domain::Compute,
         form: Form::Primary,
         in_stack: true,
@@ -270,6 +289,7 @@ const FACTS: &[KindFacts] = &[
         kind: "Ingress",
         plural: "ingresses",
         short: &["ing"],
+        api_version: "delonix.io/v1",
         domain: Domain::NetExposure,
         form: Form::Compat("HTTPRoute"),
         in_stack: true,
@@ -282,6 +302,7 @@ const FACTS: &[KindFacts] = &[
         kind: "FirewallPolicy",
         plural: "firewallpolicies",
         short: &["fwp"],
+        api_version: "delonix.io/v1",
         domain: Domain::NetPolicy,
         form: Form::Primary,
         in_stack: true,
@@ -294,6 +315,7 @@ const FACTS: &[KindFacts] = &[
         kind: "HTTPRoute",
         plural: "httproutes",
         short: &["hr"],
+        api_version: "delonix.io/v1",
         domain: Domain::NetExposure,
         form: Form::Primary,
         in_stack: true,
@@ -306,6 +328,7 @@ const FACTS: &[KindFacts] = &[
         kind: "Tunnel",
         plural: "tunnels",
         short: &["tun"],
+        api_version: "delonix.io/v1",
         domain: Domain::NetExposure,
         form: Form::Primary,
         in_stack: true,
@@ -320,6 +343,7 @@ const FACTS: &[KindFacts] = &[
         kind: "Workload",
         plural: "workloads",
         short: &["wl"],
+        api_version: "delonix.io/v1",
         domain: Domain::Compute,
         form: Form::Sugar("Container/Pod/Vm"),
         in_stack: false,
@@ -333,6 +357,7 @@ const FACTS: &[KindFacts] = &[
         kind: "Dependency",
         plural: "dependencies",
         short: &["dep"],
+        api_version: "delonix.io/v1",
         domain: Domain::NetPolicy,
         form: Form::Sugar("FirewallPolicy"),
         in_stack: false,
@@ -348,6 +373,7 @@ const FACTS: &[KindFacts] = &[
         kind: "ShareVolume",
         plural: "sharevolumes",
         short: &["sv"],
+        api_version: "delonix.io/v1",
         domain: Domain::Storage,
         form: Form::Deprecated("Volume"),
         in_stack: false,
@@ -362,6 +388,7 @@ const FACTS: &[KindFacts] = &[
         kind: "Storage",
         plural: "storages",
         short: &[],
+        api_version: "delonix.io/v1",
         domain: Domain::Storage,
         form: Form::Deprecated("Volume"),
         in_stack: false,
@@ -374,6 +401,7 @@ const FACTS: &[KindFacts] = &[
         kind: "Egress",
         plural: "egresses",
         short: &[],
+        api_version: "delonix.io/v1",
         domain: Domain::NetPolicy,
         form: Form::Deprecated("FirewallPolicy"),
         in_stack: false,
@@ -386,6 +414,7 @@ const FACTS: &[KindFacts] = &[
         kind: "Stack",
         plural: "stacks",
         short: &[],
+        api_version: "delonix.io/v1",
         domain: Domain::Composition,
         form: Form::Aggregate,
         in_stack: false,
@@ -399,6 +428,7 @@ const FACTS: &[KindFacts] = &[
         kind: "Cluster",
         plural: "clusters",
         short: &[],
+        api_version: "delonix.io/v1",
         domain: Domain::Composition,
         form: Form::Primary,
         // Deliberately outside the stack cycle: it is a remote procedure over

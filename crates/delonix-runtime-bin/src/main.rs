@@ -170,6 +170,21 @@ enum Cmd {
         /// `<Kind>[.field[.field…]]`.
         path: String,
     },
+    /// Every Kind this engine serves: plural, shortnames, apiVersion and form.
+    ///
+    /// Read from the same registry the parser, the schema and the reconciler
+    /// read — there is no second table to disagree with them. It answers «what
+    /// can I write in a manifest, and what do I type after `explain`».
+    ///
+    /// `FORM` is the column that cannot be guessed: it says whether a document
+    /// of that Kind survives the load under its own name, which is why a
+    /// `kind: Egress` never appears in a plan as `Egress`.
+    #[command(name = "api-resources")]
+    ApiResources {
+        /// Output format: `table` (default) or `json` (ADR-0005).
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: cmd::output::OutputFormat,
+    },
     /// Apply a whole manifest (`delonix-manifest.yaml`) — every Kind, in dependency order.
     Stack {
         #[command(subcommand)]
@@ -381,6 +396,7 @@ fn run() -> Result<()> {
         Cmd::Sharevolume { action } => cmd::sharevolume::run(action),
         Cmd::Schema { action } => cmd::schema::run(action),
         Cmd::Explain { path } => cmd::schema::explain(&path),
+        Cmd::ApiResources { output } => cmd::resource::api_resources(output),
         Cmd::Stack { action } => cmd::stack::run(action),
         Cmd::Compose { action } => cmd::compose::run(action),
         // clap prints "<name> <long_version>"; reproduced here so `delonix version` and
