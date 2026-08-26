@@ -77,8 +77,8 @@ commit, or it starts lying.
 |---|---|---|---|
 | 1 | top-level shortcuts (`ps`/`run`/`exec`/`logs`/`rm`/`images`) are **stable** | removed (§3.4) | accept as a **major**, not as tidying |
 | 2 | `delonix build` is **stable** | becomes `image build --type container` | same |
-| 3 | exit codes `3`/`4`/`5`, with a published bash example | replaced by `64`–`77` | **keep `3`/`4`/`5`**, only ADD new classes |
-| 4 | manifest schema — "stable, and it is what matters most" | `kind: Container` disappears; `v1` → `v1alpha1` | **a step down, not a clean cut** |
+| 3 | exit codes `3`/`4`/`5`, with a published bash example | replaced by `64`–`77` | **DECIDED: keep `3`/`4`/`5`**, only ADD new classes |
+| 4 | manifest schema — "stable, and it is what matters most" | `kind: Container` disappears; `v1` → `v1alpha1` | **DECIDED: a step down, not a clean cut** |
 
 Point 3 is the one that breaks silently. `4` does not become invalid — it comes
 to mean something else, and the `case $? in 4)` the published documentation
@@ -106,6 +106,30 @@ keeps loading and lowers to the new Kinds in `load`, through the
 `Form::Deprecated` mechanism `cmd/kinds.rs` already models and that
 `Egress`→`FirewallPolicy` and `Storage`→`Volume` already use. `kind: Container`
 lowers to a one-container `kind: Pod` — which is literally what §3.3 says it is.
+
+### Decisions taken on the two conflicts that fork the work
+
+Both were the product owner's call, taken 2026-08-26, and both keep a published
+promise rather than spend it:
+
+**Exit codes — `3`/`4`/`5` stay.** The v0.49.0 table is unchanged, including the
+`case $? in 4)` the documentation recommends. Phase CLI-1 only ADDS classes that
+have no code today: `69` capability/provider unavailable, `75` temporary or
+retryable, `77` permission denied, `124` timeout. `2` keeps its double duty
+(clap usage error, and "there are changes" under `plan --detailed-exitcode`), so
+the parser must be configured so a usage error cannot be mistaken for a plan
+with changes — which is what §19 asked for in the first place.
+
+**Manifests — `delonix.io/v1` keeps loading.** It lowers to the new Kinds in
+`load`, through `Form::Deprecated`, with a deprecation warning. `kind: Container`
+lowers to a one-container `kind: Pod`. `Vm` stays accepted as a spelling of
+`VirtualMachine`. The clean cut applies to commands only, on the v0.30.0
+precedent; a manifest in git gets a step.
+
+This means `scripts/schema-diff.sh` must keep passing across the restructuring:
+no field of `Container`, `Pod`, `Volume` or `Network` is removed — `Container`'s
+move to a lowering path, and the gate stays the check that this ADR did not
+quietly spend the promise.
 
 ### The dependency that orders the work
 
