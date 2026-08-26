@@ -516,3 +516,104 @@ stack meio convergida?» tem resposta conhecida e escrita — o apply é fail-fa
 sem rollback, e o que já foi aplicado FICA aplicado. Dar-lhe um handler que
 tentasse desfazer seria inventar transacionalidade que o motor não tem, e é
 matéria de ADR, não de uma fatia de CLI.
+
+## 10. As decisões em aberto, fechadas (2026-08-26)
+
+A Fase CLI-0 expôs 17 folhas sem destino e dois conflitos de especificação. Ficam
+todos decididos aqui, para a CLI-5 não os apagar por omissão e a CLI-2 poder
+arrancar sem nada pendurado.
+
+### 10.1 `net netns` (9 folhas) → subcomando OCULTO
+
+`net netns {up,down,status,exec,attach,detach,firewall,publish,unpublish}` passa
+a `__netns`, fora da árvore pública, como o `ingress-proxy` já é.
+
+Não é uma remoção de capacidade: o `docs/cli-stability.md` já declara «**tudo o
+que começa por `net netns`** — plumbing interno exposto por conveniência de
+depuração» como NÃO estável. O que muda é deixar de estar à mesma distância do
+utilizador que o `container run`. O `net netns down` continua a ser o comando de
+recuperação de um upgrade in-place, e a mensagem do `stale_holder_message` tem de
+passar a nomear a forma nova — senão a diagnose manda escrever um comando que já
+não existe.
+
+### 10.2 `net l4guard` (3 folhas) → `network l4guard`
+
+É um guarda L4 **do nó** (taxa de ligação por origem e tecto de concorrentes),
+ingress-wide, não uma política por workload. Por isso **não** vira campo de
+`NetworkPolicy`: essa Kind descreve o que é permitido a UM alvo, e um limiar
+global espremido lá dentro seria a mesma fusão de duas perguntas que este motor
+recusa entre `NetworkRoute` e `FirewallPolicy`.
+
+Fica no grupo de rede day-2, ao lado do `diagnose`/`flow`/`capture`. Entrou
+depois de a especificação ser escrita, o que é a razão de não estar na árvore
+dela.
+
+### 10.3 `stack history` / `stack rollback` → `get revisions` e `apply --revision`
+
+O `rollback` **é um apply** — o próprio `--help` di-lo: repete o manifesto da
+revisão N pelo caminho normal e ganha revisão própria. Um verbo próprio para
+«apply com outra entrada» seria um segundo caminho a manter de acordo com o
+primeiro.
+
+* `stack rollback --to N` → **`apply --revision N`**
+* `stack history` → **`get revisions`**, com `--show N` a manter-se
+
+Isto acrescenta uma linha ao registo de Kinds (`Revision`, `revisions`, sem
+abreviatura). É um REGISTO e nunca fonte de verdade — o ADR-0019 é explícito — e
+o `presence` dele é `Registry`, porque há mesmo um store por baixo.
+
+### 10.4 `container ssh` → REMOVIDO, com o comportamento absorvido pelo `exec`
+
+O nome promete SSH e entrega outra coisa: o `--help` diz «shortcut for `exec -t`»
+e o que faz é tentar `bash` e cair para `sh`. Nem o Docker nem o Podman têm este
+verbo, e o `container` existe precisamente para espelhar o que eles ensinaram.
+
+A capacidade útil não é o comando, é o **fallback**: `container exec -it <id>`
+sem comando passa a tentar `bash` e a cair para `sh`, que é o que a pessoa
+queria. Feito isso, `ssh` não acrescenta nada e sai no corte limpo da CLI-5.
+
+### 10.5 `vm bridge` / `vm unbridge` → `network bridge` / `network unbridge`
+
+**Recebem uma REDE como argumento** (`vm bridge <NETWORK>`), o que decide a
+questão: é uma operação sobre a rede, não sobre uma VM. Passam para o grupo de
+rede day-2 com tudo o que as protege intacto — o dry-run por omissão, a
+exigência de root, e o rótulo EXPERIMENTAL.
+
+Continua a ser a **única excepção declarada ao modelo rootless**, e mudar de
+grupo não muda isso. A árvore proposta não tinha sítio para um comando
+privilegiado; passa a ter, e é o mesmo sítio onde já vive o `capture`, que
+também exige autorização.
+
+### 10.6 Contexts (§16) → **só o contexto LOCAL**
+
+O §16 pede `endpoint`, `identity` e `tls configuration`. O **ADR-0010 recusou a
+API de gestão remota**, e a razão aplica-se tal e qual ao lado cliente:
+*remoteness* sem identidade, autorização e auditoria não é remoteness que valha a
+pena, e essa metade vive no `delonix-paas`. Construir o cliente de uma capacidade
+que o motor decidiu não ter é a mesma classe de código-sem-consumidor de que o
+`ResourceRef` já saiu.
+
+Fica o que é útil e não conflitua — um contexto **puramente local**:
+
+```
+namespace   o `-n` por omissão
+output      o `-o` por omissão
+root        o `DELONIX_ROOT` a usar
+```
+
+`endpoint`, `identity` e `tls` **não entram**. Reabrem com o ADR sucessor do
+0010, que terá de nomear o consumidor concreto — e nessa altura o campo nasce
+com um servidor do outro lado, em vez de esperar por um.
+
+### 10.7 A matriz fica sem folhas em aberto
+
+| classe | antes | agora |
+|---|---|---|
+| `~` muda de grafia | 144 | 144 |
+| `=` sem quebra | 70 | 70 |
+| `?` em aberto | **17** | **0** |
+| `!` quebra contrato | 2 | 2 |
+| `→` movida por decisão desta secção | — | **17** |
+
+**A Fase CLI-0 fecha aqui.** O que resta antes da CLI-2 não é decisão nenhuma —
+é a reestruturação dos 12 Kinds, que é o outro prompt.

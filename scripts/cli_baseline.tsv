@@ -1,0 +1,233 @@
+~	backup
+!	build
+~	cluster apply
+~	cluster create
+~	cluster delete
+~	cluster init
+~	cluster kubeadm
+~	cluster kube generate
+=	cluster load
+~	cluster ls
+~	cluster prune
+=	completion
+=	compose config
+=	compose down
+=	compose logs
+=	compose ps
+=	compose up
+!	container apply
+=	container attach
+=	container commit
+=	container cp
+=	container dash
+=	container describe
+=	container diff
+=	container exec
+=	container healthcheck
+=	container init
+=	container inspect
+=	container kill
+=	container logs
+=	container pause
+=	container port
+=	container prune
+=	container ps
+=	container rename
+=	container restart
+=	container rm
+=	container run
+→	container ssh
+=	container start
+=	container stats
+=	container stop
+=	container top
+=	container unpause
+=	container update
+=	container wait
+~	dash
+=	explain
+~	image apply
+=	image build
+=	image convert
+~	image dash
+~	image describe
+=	image export
+~	image history
+=	image import
+~	image init
+~	image load
+=	image login
+=	image logout
+~	image ls
+~	image ls-remote
+~	image prune
+=	image pull
+=	image push
+~	image rm
+~	image save
+=	image scan
+=	image tag
+=	image verify
+~	image vm build
+~	image vm convert
+~	image vm describe
+~	image vm import
+~	image vm init
+~	image vm ls
+~	image vm ls-remote
+~	image vm pull
+~	image vm push
+~	image vm rm
+=	init
+=	man
+~	namespace describe
+~	namespace ls
+~	net boot disable
+~	net boot enable
+~	net boot status
+~	net egress allow
+~	net egress clear
+~	net egress deny
+~	net egress host
+~	net egress ls
+~	net egress net
+~	net egress policy
+~	net egress rm
+~	net egress show
+~	net flow
+~	net httproute apply
+~	net httproute ls
+~	net httproute rm
+~	net ingress allow
+~	net ingress clear
+~	net ingress deny
+~	net ingress ls
+~	net ingress policy
+~	net ingress publish
+~	net ingress rm
+~	net ingress unpublish
+→	net l4guard clear
+→	net l4guard set
+→	net l4guard status
+→	net netns attach
+→	net netns detach
+→	net netns down
+→	net netns exec
+→	net netns firewall
+→	net netns publish
+→	net netns status
+→	net netns unpublish
+→	net netns up
+~	net tunnel apply
+~	net tunnel describe
+~	net tunnel expose
+~	net tunnel ls
+~	net tunnel rm
+~	network apply
+~	network create
+~	network dash
+~	network describe
+~	network inspect
+~	network ls
+~	network node init
+~	network node key
+~	network rm
+~	network route
+~	network vlan
+~	pod create
+~	pod describe
+=	pod logs
+~	pod ls
+~	pod rm
+~	restore
+~	schema print
+~	secret apply
+=	secret create
+~	secret inspect
+~	secret ls
+~	secret rm
+~	secret rotate-key
+~	secret set
+~	secret unset
+~	serve api
+=	serve cri
+=	serve docker-api
+~	sharevolume apply
+~	sharevolume describe
+~	sharevolume ls
+~	sharevolume migrate
+~	sharevolume rm
+~	stack apply
+~	stack describe
+~	stack destroy
+→	stack history
+=	stack init
+~	stack ls
+~	stack plan
+~	stack prune
+→	stack rollback
+~	stack validate
+~	stack wait
+~	storage apply
+~	storage create
+~	storage dash
+~	storage inspect
+~	storage ls
+~	storage rm
+~	syntax
+~	system backup
+=	system df
+=	system doctor
+=	system events
+=	system features
+=	system info
+~	system monitor
+=	system prune
+~	system restore
+=	system setup
+~	system thermal
+~	system virt
+=	version
+~	vm apply
+→	vm bridge
+~	vm build
+=	vm console
+~	vm convert
+~	vm create
+~	vm dash
+~	vm default-backend
+~	vm describe
+~	vm init
+~	vm ls
+~	vm ls-remote
+~	vm prune
+~	vm pull
+~	vm push
+~	vm reach
+=	vm restart
+~	vm rm
+=	vm snapshot create
+=	vm snapshot ls
+=	vm snapshot restore
+=	vm snapshot rm
+=	vm ssh
+=	vm start
+~	vm status
+=	vm stop
+→	vm unbridge
+~	vm vnc
+~	volumes apply
+~	volumes create
+~	volumes describe
+~	volumes inspect
+~	volumes ls
+~	volumes prune
+~	volumes rm
+~	volumes snapshot create
+~	volumes snapshot ls
+~	volumes snapshot restore
+~	volumes snapshot rm
+~	workload describe
+~	workload ls
+~	workload rm
+~	workload stop
