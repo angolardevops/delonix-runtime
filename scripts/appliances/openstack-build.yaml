@@ -22,24 +22,55 @@ write_files:
       echo "=== delonix openstack build: @RELEASE@ on @BASE_DISTRO@ ==="
 
       export DEBIAN_FRONTEND=noninteractive
-      apt-get update
+
+      # Every network step in this build is retried, and the reason is
+      # measured rather than defensive: on the second build attempt
+      # (2026-08-26) pip reported
+      #   `ansible-core!=2.19.0,<2.21,>=2.19 (from versions: none)`
+      # -- an index that returned nothing. The same index, queried from the
+      # host minutes later, listed 2.11.0 through 2.21.3. Nothing was wrong
+      # with the requirement or with pip; the guest's slirp NAT dropped one
+      # metadata fetch on a 3.3 MB/s link with a 240 ms round trip to Europe.
+      #
+      # A build that spends an hour pulling twenty gigabytes and then throws it
+      # away because one HTTPS request failed is a build nobody runs twice.
+      retry() {
+        local n=0 max=${2:-4}
+        until eval "$1"; do
+          n=$((n+1))
+          [ "$n" -ge "$max" ] && { echo "!! gave up after $max attempts: $1"; return 1; }
+          echo "==> attempt $n failed, retrying in $((n*15))s: $1"
+          sleep $((n*15))
+        done
+      }
+
+      # apt has its own retry knob; it covers the download, not the whole
+      # transaction, which is why the retry() wrapper is still there.
+      echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/99delonix-retries
+      retry "apt-get update"
 
       # Verbatim from the kolla-ansible @RELEASE@ quickstart, "Install Python
       # build dependencies" + "Install dependencies for the virtual
       # environment". Not a guessed superset: a package this list does not name
       # is a package upstream does not ask for.
-      apt-get install -y git python3-dev libffi-dev gcc libssl-dev \
-                         libdbus-glib-1-dev python3-venv
+      retry "apt-get install -y git python3-dev libffi-dev gcc libssl-dev libdbus-glib-1-dev python3-venv"
 
       python3 -m venv /opt/kolla-venv
-      /opt/kolla-venv/bin/pip install -U pip
+      # The venv on PATH, and not just called by absolute path. `kolla-ansible`
+      # is a shell wrapper that execs `ansible-playbook` and `ansible-galaxy`
+      # BY NAME, so an absolute call reaches kolla-ansible and then dies inside
+      # it with `[Errno 2] No such file or directory: 'ansible-galaxy'` --
+      # measured here on the first build, 2026-08-26. Upstream says "activate
+      # the venv" for exactly this reason; this is that, without a login shell.
+      export PATH=/opt/kolla-venv/bin:$PATH
+      retry "pip install -U pip"
 
       # PINNED to the stable branch of one release. `master` would make two
       # builds a month apart carry two different OpenStacks under the same
       # image name -- the same reason the Proxmox builds refuse an unpinned
       # version.
-      /opt/kolla-venv/bin/pip install \
-          "git+https://opendev.org/openstack/kolla-ansible@stable/@RELEASE@"
+      retry "pip install --retries 10 --timeout 60 \
+          'git+https://opendev.org/openstack/kolla-ansible@stable/@RELEASE@'"
 
       mkdir -p /etc/kolla
       cp -r /opt/kolla-venv/share/kolla-ansible/etc_examples/kolla/* /etc/kolla/
@@ -51,7 +82,7 @@ write_files:
       # not tidiness.
       cp /etc/kolla/passwords.yml /etc/kolla/passwords.yml.example
 
-      /opt/kolla-venv/bin/kolla-ansible install-deps
+      retry "kolla-ansible install-deps"
 
       # ------------------------------------------------------------------
       #  Build-time globals.yml
@@ -79,7 +110,7 @@ write_files:
 
       # `pull` reads passwords.yml as variables. Blank values abort the play,
       # so they are generated here and DESTROYED at the end of the build.
-      /opt/kolla-venv/bin/kolla-genpwd
+      kolla-genpwd
 
       # ------------------------------------------------------------------
       #  Host-level dependencies, then the images themselves
@@ -90,13 +121,15 @@ write_files:
       # idempotent and stays in the deploy path anyway, because the target's
       # own identity (hostname, /etc/hosts, docker storage) is not this
       # machine's.
-      /opt/kolla-venv/bin/kolla-ansible bootstrap-servers -i /etc/kolla/all-in-one
+      retry "kolla-ansible bootstrap-servers -i /etc/kolla/all-in-one"
 
       # THE reason this image exists. Pulling ~20 GiB of container images over
       # a 3.3 MB/s link (measured from this workspace, 2026-08-26) takes over
       # an hour; paying it once at build time instead of once per deploy is the
       # whole difference between an image and a set of instructions.
-      /opt/kolla-venv/bin/kolla-ansible pull -i /etc/kolla/all-in-one
+      # Idempotent: a retry re-pulls only what is missing, so a drop an hour
+      # in costs the failed layer and not the hour.
+      retry "kolla-ansible pull -i /etc/kolla/all-in-one" 5
 
       # ------------------------------------------------------------------
       #  Strip everything that belongs to THIS machine
@@ -116,12 +149,12 @@ write_files:
       # image. Same two-carrier idea as the golden template: the filename says
       # what was asked for, this file says what is there.
       mkdir -p /etc/delonix
-      /opt/kolla-venv/bin/kolla-ansible version > /etc/delonix/kolla-version.txt 2>&1 || true
+      kolla-ansible version > /etc/delonix/kolla-version.txt 2>&1 || true
       {
         echo "{"
         echo "  \"openstack_release\": \"@RELEASE@\","
         echo "  \"kolla_base_distro\": \"@BASE_DISTRO@\","
-        echo "  \"kolla_ansible\": \"$(/opt/kolla-venv/bin/pip show kolla-ansible | awk '/^Version:/{print $2}')\","
+        echo "  \"kolla_ansible\": \"$(pip show kolla-ansible | awk '/^Version:/{print $2}')\","
         echo "  \"images\": $(docker images -q | sort -u | wc -l),"
         echo "  \"venv\": \"/opt/kolla-venv\""
         echo "}"

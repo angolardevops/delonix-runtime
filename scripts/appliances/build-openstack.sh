@@ -73,7 +73,18 @@ echo "############ OpenStack $RELEASE on $BASE_DISTRO $UBUNTU_VER"
 # is GNU format with the binary marker (`hash *file`), so the filename column
 # carries a leading `*` that has to come off before comparing -- getting that
 # wrong yields "no checksum for ..." for a file that is right there.
-SUMS=$(curl -fsSL --retry 3 "$MIRROR/SHA256SUMS")
+# `--max-time` and `--connect-timeout` are not decoration. Without them this
+# exact call hung for six minutes on a 3 KiB file (measured 2026-08-26, the
+# same flaky link that made pip report `ansible-core (from versions: none)`
+# inside the guest). `--retry` never fires on a stall, because curl does not
+# give up on a connection it still considers open -- and a build that blocks
+# forever on its first step is worse than one that fails.
+SUMS=$(curl -fsSL --retry 5 --retry-delay 3 --retry-connrefused \
+            --connect-timeout 20 --max-time 120 "$MIRROR/SHA256SUMS") || {
+  echo "!! could not fetch $MIRROR/SHA256SUMS -- the base image cannot be" >&2
+  echo "   verified, so the build stops here rather than trusting a cache." >&2
+  exit 1
+}
 WANT=$(echo "$SUMS" | awk -v f="$BASE_IMG" '{ n=$2; sub(/^\*/, "", n); if (n == f) print $1 }')
 if [ -z "$WANT" ]; then
   echo "!! no checksum for $BASE_IMG in $MIRROR/SHA256SUMS" >&2
