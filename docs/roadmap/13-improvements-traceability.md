@@ -51,7 +51,7 @@ Estados: `NOT_STARTED`, `IN_PROGRESS`, `PARTIAL`, `BLOCKED`, `DONE`.
 | **M02** | Compatibilidade e migração | `PARTIAL` | CRI **77/103** (`critest` v1.36.0, motor v0.42.2 — **desactualizado**). Docker API **21 rotas**; `images/create` e `stats` **ausentes**. `compose` nativo; `compatibility`/`migrate assess` **não existem**. | comandos `compatibility {docker,compose,oci}` e `migrate assess`; matrizes versionadas; recontagem do `critest` na versão actual | `tests/compat/` (2 ficheiros) | M01 | **alto** | — | 0 de 4 |
 | **M03** | Build de produção | `PARTIAL` | `build` tem `--secret`, `--platform`, `--no-cache`, `--build-arg`, cache por instrução (rootless), multi-stage. **Sem** `--ssh`, cache distribuída, SBOM/provenance no artefacto de build. | mounts `type=ssh`/`cache`; cache em registry; SBOM+provenance por imagem construída; comparação medida com BuildKit | `crates/delonix-image/benches` existe | M04 | médio | — | 1 de 4 |
 | **M04** | Segurança verificável | `PARTIAL` | Releases **assinadas** (minisign, `release.yml`) e `cargo-deny` no CI. **Sem** SBOM de release, **sem** provenance/SLSA, **sem** fuzzing no CI, **sem** `kind: RuntimePolicy` (0 ocorrências). 3 auditorias ofensivas anteriores registadas. | SBOM + attestation de release; `kind: RuntimePolicy`; job de fuzz; processo de advisory publicado | 1207 testes; auditorias em `AGENTS.md` | — | **alto** | — | 1 de 4 |
-| **M05** | Desired State e GitOps | `PARTIAL` | `stack` serve **9** verbos: `init apply destroy prune plan ls describe wait validate`. `plan` não muda estado e tem `--detailed-exitcode`; diff de 3 vias sem ficheiro de estado. **Faltam `diff`, `drift`, `history`, `rollback`, `reconcile`** — e o `apply` é fail-fast **sem rollback**, limitação já registada no `AGENTS.md`. | os 5 verbos em falta; revisões persistidas; reconciler opcional com rate-limit | cenário de caos `stack_converge` | M01 | **alto** | — | 3 de 6 |
+| **M05** | Desired State e GitOps | `IN_PROGRESS` | `stack` serve **9** verbos: `init apply destroy prune plan ls describe wait validate`. `plan` não muda estado e tem `--detailed-exitcode`; diff de 3 vias sem ficheiro de estado. **Faltam `diff`, `drift`, `history`, `rollback`, `reconcile`.** O `apply` continua fail-fast sem rollback — por desenho — mas **já não deixa órfãos invisíveis** (ver abaixo). | os 5 verbos em falta; revisões persistidas; reconciler opcional com rate-limit | caos `stack_converge` + **`stack_partial_apply`** (novo) | M01 | médio | #119 | 4 de 6 |
 | **M06** | Gestão de frota | `BLOCKED` | `node`/`cordon`/`drain` **não existem** (0 ocorrências). **O ADR-0010 RECUSOU a API de gestão remota** (2026-08-10) e o `AGENTS.md` diz que `delonix node add` está bloqueado. | **ADR sucessor** que nomeie o consumidor concreto — ver a nota abaixo | — | ADR | — | — | bloqueado |
 | **M07** | Observabilidade OTel | `PARTIAL` | OpenTelemetry **0.32** e `prometheus-client` na árvore (`delonix-runtime-core`); `/metrics` no `delonix-cri` e no `delonix-mgmt`; `system events`; `dash --json`. **Sem** `observe`/`trace`/`diagnose` como comandos; correlação e bundle sanitizado por fazer. | comandos `observe`/`diagnose`; schemas de evento versionados; overhead medido | — | M01 | médio | — | 2 de 4 |
 | **M08** | SLOs e health | `NOT_STARTED` | `slo` tem **0 ocorrências** em toda a CLI. Existem `--health-*` no `run` e probes de compose. Sem SLI/SLO, sem error budget, sem reason codes. | tudo | — | M07 | médio | — | 0 de 5 |
@@ -88,6 +88,33 @@ sucessor com o consumidor nomeado, ou registar formalmente que M06 sai do âmbit
 deste motor. Enquanto nenhuma das duas acontecer, M06 permanece `BLOCKED` — e
 **não** contará como `DONE` por omissão.
 
+## M05 — o que a Fase B fechou, e o que fica
+
+**Fechado:** um `apply` que morre a meio deixava, sem dono, tudo o que as
+camadas anteriores tinham criado — o carimbo só era escrito no fim. Medido
+contra `b465300`: o `stack plan` seguinte não mencionava o recurso de todo, e o
+`stack destroy` levava os irmãos carimbados e deixava-o para trás. Numa
+ferramenta cujo `destroy` promete «remove tudo o que esta stack possui», isso é
+uma fuga de recursos conduzida por manifesto. Gate: cenário de caos
+`stack_partial_apply`, que corre o **ciclo** — cada comando isolado devolve o
+mesmo com e sem o defeito; o que distingue é se o `destroy` alcança o órfão.
+
+**Não fechado, e é decisão de desenho e não dívida:** o `apply` continua
+fail-fast **sem rollback**. Desfazer a meio é pior do que parar, e o próprio
+código o diz em três sítios. O que falta para dar um caminho de volta a sério
+não é rollback transaccional — é `history` + `rollback`, ou seja **revisões
+persistidas**, que é o próximo slice de M05 e é superfície nova (onde vivem, o
+que uma revisão guarda, o que é reversível e o que não é).
+
+**Correcção de raciocínio registada no código.** A primeira justificação escrita
+para excluir os `Update` do carimbo de salvamento estava errada — dizia que a
+mudança se leria como «já aplicada» e se perderia. Ler o `diff_fields` mostrou
+que não: para um campo que o manifesto ainda declara, o desejado é comparado com
+a máquina e o `last-applied` nunca é consultado. A razão verdadeira é outra e
+chega mais tarde — o `last-applied` é o que autoriza **reverter** um campo que
+saiu do manifesto, por isso carimbá-lo sem ter aplicado faz o motor reclamar
+autoria de um valor que não pôs.
+
 ## Ordem de execução
 
 A do programa, com uma alteração justificada: M01 entrega primeiro os **gates**
@@ -107,3 +134,4 @@ deixou 3 crates fora do C4 sem ninguém dar por isso.
 | Data | Alteração |
 |---|---|
 | 2026-08-25 | Baseline inicial medida contra `b4653002b`/v0.63.1. M01 passa a `IN_PROGRESS`: `tests/architecture.rs` instalado, 3 crates repostos no C4, contagem corrigida em dois documentos. |
+| 2026-08-25 | Fase B. M05 passa a `IN_PROGRESS`: fechada a fuga de recursos de um `apply` parcial (`salvage_ownership`), com o cenário de caos `stack_partial_apply` a fixá-la. O risco de M05 baixa de **alto** para médio — o que resta (`history`/`rollback`) é superfície em falta, não perda de dados. |
