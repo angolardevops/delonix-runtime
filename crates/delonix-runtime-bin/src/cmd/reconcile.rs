@@ -46,6 +46,7 @@
 //! A resource with no `last-applied` at all (adopted, or created by hand) falls
 //! into the last row for every field: the first apply only ever adds.
 
+use super::kinds as k;
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
@@ -245,22 +246,22 @@ impl Change {
 /// - `Network`: `NetworkStore::add_overlay_peer`.
 fn hot_fields(kind: &str) -> &'static [&'static str] {
     match kind {
-        "Container" => &["ports", "volumes", "memory", "cpus", "netBps", "netBurst"],
+        k::CONTAINER => &["ports", "volumes", "memory", "cpus", "netBps", "netBurst"],
         // `alertPct` joins `quota` as bookkeeping on the record. `parent` does
         // NOT: a share is a subdirectory of the volume it names, so repointing
         // it means a different directory and the bytes already written stay in
         // the old one — cold, which turns it into a refused `Replace` rather
         // than a silent move.
-        "Volume" => &["quota", "alertPct"],
-        "Network" => &["peers"],
+        k::VOLUME => &["quota", "alertPct"],
+        k::NETWORK => &["peers"],
         // Fetching a ref destroys nothing — an image is shared cache, so its
         // whole comparable surface converges without recreating anything.
-        "Image" => &["ref", "digest"],
+        k::IMAGE => &["ref", "digest"],
         // `apply_fw_doc` replaces the whole direction in place, with no restart.
         // `target`/`direction` stay cold: they identify WHICH direction of WHICH
         // container the policy governs, so changing one leaves the old target's
         // rules exactly where they were.
-        "FirewallPolicy" => &["defaultPolicy", "rules", "scope"],
+        k::FIREWALL_POLICY => &["defaultPolicy", "rules", "scope"],
         // The proxy's config is COLLECTIVE and `httproute::converge_all`
         // recomposes ALL of it, so every comparable field converges without
         // destroying anything — `rules` by SIGHUP (same PID, no downtime),
@@ -274,7 +275,7 @@ fn hot_fields(kind: &str) -> &'static [&'static str] {
         // unreachable. Meanwhile `RECONCILED_HTTPROUTE_FIELDS` documented
         // «everything converges hot». The table is a promise — this is it being
         // kept.
-        "HTTPRoute" | "Ingress" => &["entrypoints", "tls", "rules"],
+        k::HTTP_ROUTE | k::INGRESS => &["entrypoints", "tls", "rules"],
         _ => &[],
     }
 }

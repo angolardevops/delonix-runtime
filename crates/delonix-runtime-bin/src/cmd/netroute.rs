@@ -17,6 +17,7 @@
 //! bug `FirewallPolicy` already pays for by REFUSING two policies for the same
 //! target and direction.
 
+use super::kinds as k;
 use serde::{Deserialize, Serialize};
 
 use super::manifest::{self, ManifestDoc};
@@ -72,7 +73,7 @@ fn route_fields(from: &str, to: &str) -> std::collections::BTreeMap<String, Stri
 pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     let spec: NetworkRouteSpec = manifest::spec_of(doc)?;
     Ok(super::reconcile::Desired {
-        kind: "NetworkRoute".into(),
+        kind: k::NETWORK_ROUTE.into(),
         name: route_name(&spec.from, &spec.to),
         fields: route_fields(&spec.from, &spec.to),
         converges: true,
@@ -93,7 +94,7 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
     Ok(delonix_net::infra::route_list()
         .into_iter()
         .map(|r| super::reconcile::Actual {
-            kind: "NetworkRoute".into(),
+            kind: k::NETWORK_ROUTE.into(),
             name: route_name(&r.from, &r.to),
             fields: route_fields(&r.from, &r.to),
             owner: r.labels.get(super::reconcile::STACK_LABEL).cloned(),
@@ -327,7 +328,7 @@ pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
 /// Idempotent, like every other apply here: `nft add element` on an element that
 /// is already there is a no-op, so re-applying a manifest opens nothing twice.
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
-    for doc in manifest::of_kind(docs, "NetworkRoute") {
+    for doc in manifest::of_kind(docs, k::NETWORK_ROUTE) {
         let spec: NetworkRouteSpec = manifest::spec_of(doc)?;
         delonix_net::infra::network_route(&spec.from, &spec.to, true)?;
         println!(

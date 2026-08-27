@@ -5156,13 +5156,13 @@ pub(crate) fn run_tool(bin: &str, args: &[&str]) -> Result<()> {
         if e.kind() == std::io::ErrorKind::NotFound {
             let fam = host_family();
             if let Some((deb, rpm, arch)) = tool_package(bin) {
-                return Error::Invalid(format!(
+                return Error::Unavailable(format!(
                     "{}\n  {}",
                     super::po::tf("`{bin}` is not installed.", &[("bin", bin)]),
                     install_cmd(fam, deb, rpm, arch),
                 ));
             }
-            return Error::Invalid(super::po::tf(
+            return Error::Unavailable(super::po::tf(
                 "`{bin}` is not installed, and it is needed here.",
                 &[("bin", bin)],
             ));

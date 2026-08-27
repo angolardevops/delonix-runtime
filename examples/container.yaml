@@ -7,7 +7,7 @@
 # manifest — both shapes are accepted, this is just the one the docs/examples
 # show. (The k8s-style Pod shape — `spec.containers[]` — is unaffected: it
 # already mirrors k8s's own grouping, see examples/pod.yaml.)
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Container
 metadata:
   name: web
@@ -31,7 +31,7 @@ spec:
   network:
     name: host                  # host | none | <a network created by `network create`>
     ports: []                   # ["8080:80"] — gives the container its own netns + slirp NAT
-    expose: null                # HTTP port to auto-register in the embedded L7 proxy (see kind: Tunnel)
+    expose: null                # HTTP port to auto-register in the embedded L7 proxy (see kind: Gateway)
     alias: []                   # DNS aliases on the network
     knows: []                   # restrict name resolution to these containers (isolation)
     rateBps: null                # egress rate limit (e.g. "10mbit"), only with a custom network

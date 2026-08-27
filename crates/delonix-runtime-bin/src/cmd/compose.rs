@@ -42,6 +42,7 @@
 //! bare container port with no host port DOES get a random free host port
 //! (resolved once, before the container is created — see `free_host_port`).
 
+use super::kinds as k;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -938,11 +939,11 @@ fn translate(compose: &ComposeFile, project: &str, base_dir: &Path) -> Result<Tr
         if net.external {
             continue;
         }
-        network_docs.push(simple_doc("Network", &network_names[key]));
+        network_docs.push(simple_doc(k::NETWORK, &network_names[key]));
     }
     let default_real = network_names["default"].clone();
     if !network_docs.iter().any(|d| d.metadata.name == default_real) {
-        network_docs.push(simple_doc("Network", &default_real));
+        network_docs.push(simple_doc(k::NETWORK, &default_real));
     }
 
     let mut volume_docs: Vec<ManifestDoc> = Vec::new();
@@ -950,7 +951,7 @@ fn translate(compose: &ComposeFile, project: &str, base_dir: &Path) -> Result<Tr
         if vol.external {
             continue;
         }
-        volume_docs.push(simple_doc("Volume", &volume_names[key]));
+        volume_docs.push(simple_doc(k::VOLUME, &volume_names[key]));
     }
 
     let mut image_docs = Vec::new();
@@ -1053,7 +1054,7 @@ fn service_build_to_image_doc(
     };
     Ok(ManifestDoc {
         api_version: "delonix.io/v1".to_string(),
-        kind: "Image".to_string(),
+        kind: k::IMAGE.to_string(),
         metadata: Metadata {
             name: format!("{service}-image"),
             namespace: None,

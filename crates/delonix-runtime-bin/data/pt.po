@@ -49,8 +49,8 @@ msgstr "Aplica um manifesto (`delonix-manifest.yaml`) inteiro — todos os Kinds
 msgid "The engine itself: events, state and disk usage."
 msgstr "O motor em si: eventos, estado e uso de disco."
 
-msgid "Idempotent `kubeadm` bootstrap over SSH (`kind: Cluster`), full VM provisioning, or generating a k8s manifest from a running container/pod (`cluster kube generate`)."
-msgstr "Bootstrap `kubeadm` idempotente sobre SSH (`kind: Cluster`), provisionamento completo de VMs, ou geração de um manifesto k8s a partir de um container/pod já a correr (`cluster kube generate`)."
+msgid "Idempotent `kubeadm` bootstrap over SSH (`kind: KubernetesCluster`), full VM provisioning, or generating a k8s manifest from a running container/pod (`cluster kube generate`)."
+msgstr "Bootstrap `kubeadm` idempotente sobre SSH (`kind: KubernetesCluster`), provisionamento completo de VMs, ou geração de um manifesto k8s a partir de um container/pod já a correr (`cluster kube generate`)."
 
 msgid "Generate a Kubernetes manifest from a container/pod already running locally (`kube generate`) — the \"ran it locally, now give me the YAML for k8s\" path (equivalent to `podman generate kube`)."
 msgstr "Gera um manifesto Kubernetes a partir de um container/pod já a correr localmente (`kube generate`) — o caminho \"correu localmente, agora dá-me o YAML para k8s\" (equivalente ao `podman generate kube`)."
@@ -195,6 +195,12 @@ msgstr "erro de registo: "
 
 msgid "conflict: "
 msgstr "conflito: "
+
+msgid "unavailable: "
+msgstr "indisponível: "
+
+msgid "timed out: "
+msgstr "esgotou o tempo: "
 
 # ---- mensagens migradas do tr() inline -------------------------------------
 
@@ -1852,8 +1858,8 @@ msgstr "Lista os clusters e o estado dos seus nós."
 msgid "Remove a kind-mode cluster (stops and deletes the nodes + kubeconfig)."
 msgstr "Remove um cluster do modo kind (pára e apaga os nós + kubeconfig)."
 
-msgid "Apply the `kind: Cluster` document(s) of a manifest."
-msgstr "Aplica o(s) documento(s) `kind: Cluster` de um manifesto."
+msgid "Apply the `kind: KubernetesCluster` document(s) of a manifest."
+msgstr "Aplica o(s) documento(s) `kind: KubernetesCluster` de um manifesto."
 
 msgid "Provision VMs (golden VM image) + `kubeadm` bootstrap — from zero to a working cluster, without writing a manifest by hand."
 msgstr "Provisiona VMs (imagem VM dourada) + bootstrap `kubeadm` — do zero a um cluster a funcionar, sem escrever um manifesto à mão."
@@ -2053,8 +2059,8 @@ msgstr "Pára (se a correr) e depois arranca — reinício real sempre, ao contr
 msgid "Remove the VM (stops + deletes overlay/state)."
 msgstr "Remove a VM (pára + apaga overlay/estado)."
 
-msgid "Apply the `kind: Vm` documents of a manifest (`delonix_vm::create` is already idempotent by name — creates or auto-recovers)."
-msgstr "Aplica os documentos `kind: Vm` de um manifesto (`delonix_vm::create` já é idempotente por nome — cria ou auto-recupera)."
+msgid "Apply the `kind: VirtualMachine` documents of a manifest (`delonix_vm::create` is already idempotent by name — creates or auto-recovers)."
+msgstr "Aplica os documentos `kind: VirtualMachine` de um manifesto (`delonix_vm::create` já é idempotente por nome — cria ou auto-recupera)."
 
 msgid "Initializes a COMPLETE project: Delonixfile + manifest + cluster + README — files ALREADY FILLED IN (images included), ready to use without editing anything."
 msgstr "Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + README — ficheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada."
@@ -2332,8 +2338,11 @@ msgstr "{path} está vazio (sem documentos YAML)"
 msgid "invalid manifest in {path}"
 msgstr "manifesto inválido em {path}"
 
-msgid "{kind} '{name}': unknown apiVersion '{version}' (only '{SUPPORTED_API_VERSION}' is supported)"
-msgstr "{kind} '{name}': apiVersion '{version}' desconhecida (só '{SUPPORTED_API_VERSION}' é suportada)"
+msgid "{kind} '{name}': unknown apiVersion '{version}' (expected '{group}' or '{legacy}')"
+msgstr "{kind} '{name}': apiVersion '{version}' desconhecida (esperava '{group}' ou '{legacy}')"
+
+msgid "{kind} '{name}': unknown apiVersion '{version}' (expected '{legacy}')"
+msgstr "{kind} '{name}': apiVersion '{version}' desconhecida (esperava '{legacy}')"
 
 msgid "{kind} '{name}': invalid spec"
 msgstr "{kind} '{name}': spec inválido"
@@ -3948,14 +3957,14 @@ msgstr "`<Kind>[.campo[.campo…]]`."
 
 # fusao Egress -> FirewallPolicy (fase A1)
 
-msgid "Egress '{name}': spec.direction is '{other}', but `kind: Egress` means outbound — write `kind: FirewallPolicy` with the direction you want"
-msgstr "Egress '{name}': o spec.direction é '{other}', mas `kind: Egress` significa saída — escreve `kind: FirewallPolicy` com a direcção que queres"
+msgid "Egress '{name}': spec.direction is '{other}', but `kind: Egress` means outbound — write `kind: NetworkPolicy` with the direction you want"
+msgstr "Egress '{name}': o spec.direction é '{other}', mas `kind: Egress` significa saída — escreve `kind: NetworkPolicy` com a direcção que queres"
 
 msgid "Egress '{name}': spec must be a mapping"
 msgstr "Egress '{name}': o spec tem de ser uma mapping"
 
-msgid "Egress '{name}': `kind: Egress` is deprecated — use `kind: FirewallPolicy` with `direction: egress` (same fields, same behaviour)"
-msgstr "Egress '{name}': `kind: Egress` está depreciado — usa `kind: FirewallPolicy` com `direction: egress` (mesmos campos, mesmo comportamento)"
+msgid "Egress '{name}': `kind: Egress` is deprecated — use `kind: NetworkPolicy` with `direction: egress` (same fields, same behaviour)"
+msgstr "Egress '{name}': `kind: Egress` está depreciado — usa `kind: NetworkPolicy` com `direction: egress` (mesmos campos, mesmo comportamento)"
 
 # Dependency -> FirewallPolicy e regras por workload (fase A2)
 
@@ -4114,8 +4123,8 @@ msgstr "Desiste ao fim destes segundos (omissão: 120)."
 msgid "stack \"{stack}\" is up"
 msgstr "a stack \"{stack}\" está de pé"
 
-msgid "timed out after {secs}s waiting for {n} resource(s)"
-msgstr "esgotou o tempo ao fim de {secs}s à espera de {n} recurso(s)"
+msgid "{n} resource(s) still not ready after {secs}s"
+msgstr "{n} recurso(s) ainda não prontos ao fim de {secs}s"
 
 msgid "{kind}/{name}: {message}"
 msgstr "{kind}/{name}: {message}"
@@ -4485,11 +4494,11 @@ msgstr "Mostra a política de saída de uma REDE: allowlist de CIDR, hosts por F
 msgid "Remove all outbound rules."
 msgstr "Remove todas as regras de saída."
 
-msgid "Expose a local port to the public internet via pinggy/ngrok/cloudflare (`kind: Tunnel`) — pair with `httproute`'s listening port to route by Host header behind ONE public URL."
-msgstr "Expõe uma porta local à internet pública via pinggy/ngrok/cloudflare (`kind: Tunnel`) — junta-o à porta de escuta do `httproute` para rotear pelo header Host atrás de UMA só URL pública."
+msgid "Expose a local port to the public internet via pinggy/ngrok/cloudflare (`kind: Gateway`) — pair with `httproute`'s listening port to route by Host header behind ONE public URL."
+msgstr "Expõe uma porta local à internet pública via pinggy/ngrok/cloudflare (`kind: Gateway`) — junta-o à porta de escuta do `httproute` para rotear pelo header Host atrás de UMA só URL pública."
 
-msgid "Apply the `kind: Tunnel` documents of a manifest (idempotent)."
-msgstr "Aplica os documentos `kind: Tunnel` de um manifesto (idempotente)."
+msgid "Apply the `kind: Gateway` documents of a manifest (idempotent)."
+msgstr "Aplica os documentos `kind: Gateway` de um manifesto (idempotente)."
 
 msgid "One-shot expose of a local port, no manifest needed."
 msgstr "Exposição pontual de uma porta local, sem precisar de manifesto."
@@ -6279,8 +6288,8 @@ msgstr "os túneis e as URLs públicas que receberam"
 msgid "stop one when the demo is over"
 msgstr "pára um quando a demonstração acabar"
 
-msgid "the `kind: Tunnel` documents of the manifest here — idempotent, an unchanged tunnel is left alone"
-msgstr "os documentos `kind: Tunnel` do manifesto daqui — idempotente, um túnel inalterado fica como está"
+msgid "the `kind: Gateway` documents of the manifest here — idempotent, an unchanged tunnel is left alone"
+msgstr "os documentos `kind: Gateway` do manifesto daqui — idempotente, um túnel inalterado fica como está"
 
 msgid "from a file, where the token comes from a `kind: Secret` instead of the shell history"
 msgstr "de um ficheiro, onde o token vem de um `kind: Secret` em vez do histórico da shell"
@@ -6963,8 +6972,8 @@ msgstr "de volta a qcow2 e comprimido — só o qcow2 e o vmdk conseguem, os res
 msgid "Hyper-V and Azure take vhdx; the older vhd is a different format, not another spelling"
 msgstr "o Hyper-V e o Azure aceitam vhdx; o vhd mais antigo é outro formato, não outra grafia"
 
-msgid "a `kind: Vm` manifest already filled in, applicable as it is"
-msgstr "um manifesto `kind: Vm` já preenchido, aplicável tal como está"
+msgid "a `kind: VirtualMachine` manifest already filled in, applicable as it is"
+msgstr "um manifesto `kind: VirtualMachine` já preenchido, aplicável tal como está"
 
 msgid "name the project and pin the image it should boot"
 msgstr "dá nome ao projecto e fixa a imagem que ele deve arrancar"
@@ -6975,8 +6984,8 @@ msgstr "um `VMfile`, em vez disso — a receita para construir o teu próprio qc
 msgid "generate into a directory of its own, overwriting what is there"
 msgstr "gera num directório próprio, por cima do que lá estiver"
 
-msgid "apply the `kind: Vm` documents of ./delonix-manifest.yaml — idempotent by name, so it creates or recovers"
-msgstr "aplica os documentos `kind: Vm` do ./delonix-manifest.yaml — idempotente por nome, por isso cria ou recupera"
+msgid "apply the `kind: VirtualMachine` documents of ./delonix-manifest.yaml — idempotent by name, so it creates or recovers"
+msgstr "aplica os documentos `kind: VirtualMachine` do ./delonix-manifest.yaml — idempotente por nome, por isso cria ou recupera"
 
 msgid "from a manifest of your own"
 msgstr "de um manifesto teu"
@@ -7306,8 +7315,8 @@ msgstr ""
 "\n"
 "Sem argumento, a imagem OFICIAL do Delonix (pronta para `vm create`/`cluster kubeadm`)."
 
-msgid "Apply the `kind: Vm` documents of a manifest."
-msgstr "Aplica os documentos `kind: Vm` de um manifesto."
+msgid "Apply the `kind: VirtualMachine` documents of a manifest."
+msgstr "Aplica os documentos `kind: VirtualMachine` de um manifesto."
 
 msgid ""
 "`delonix_vm::create` is already idempotent by name — creates or auto-recovers."
@@ -7315,12 +7324,12 @@ msgstr ""
 "O `delonix_vm::create` já é idempotente por nome — cria ou recupera automaticamente."
 
 msgid ""
-"Apply the `kind: Vm` documents of a manifest."
+"Apply the `kind: VirtualMachine` documents of a manifest."
 "\n"
 "\n"
 "`delonix_vm::create` is already idempotent by name — creates or auto-recovers."
 msgstr ""
-"Aplica os documentos `kind: Vm` de um manifesto."
+"Aplica os documentos `kind: VirtualMachine` de um manifesto."
 "\n"
 "\n"
 "O `delonix_vm::create` já é idempotente por nome — cria ou recupera automaticamente."
@@ -7927,8 +7936,8 @@ msgstr "Ligações de rede activas por container (via conntrack).\n\nQuem entra,
 msgid "Kubernetes clusters: `kubeadm` bootstrap, VM provisioning, manifest generation."
 msgstr "Clusters Kubernetes: bootstrap `kubeadm`, provisionamento de VMs, geração de manifestos."
 
-msgid "Kubernetes clusters: `kubeadm` bootstrap, VM provisioning, manifest generation.\n\nIdempotent `kubeadm` bootstrap over SSH (`kind: Cluster`), full VM provisioning, or generating a k8s manifest from a running container/pod (`cluster kube generate`)."
-msgstr "Clusters Kubernetes: bootstrap `kubeadm`, provisionamento de VMs, geração de manifestos.\n\nBootstrap `kubeadm` idempotente sobre SSH (`kind: Cluster`), provisionamento completo de VMs, ou geração de um manifesto k8s a partir de um container/pod já a correr (`cluster kube generate`)."
+msgid "Kubernetes clusters: `kubeadm` bootstrap, VM provisioning, manifest generation.\n\nIdempotent `kubeadm` bootstrap over SSH (`kind: KubernetesCluster`), full VM provisioning, or generating a k8s manifest from a running container/pod (`cluster kube generate`)."
+msgstr "Clusters Kubernetes: bootstrap `kubeadm`, provisionamento de VMs, geração de manifestos.\n\nBootstrap `kubeadm` idempotente sobre SSH (`kind: KubernetesCluster`), provisionamento completo de VMs, ou geração de um manifesto k8s a partir de um container/pod já a correr (`cluster kube generate`)."
 
 msgid "Create a local Kubernetes cluster **without a manifest and without Docker**."
 msgstr "Cria um cluster Kubernetes local **sem manifesto e sem Docker**."
@@ -7948,11 +7957,11 @@ msgstr "Gera um manifesto Kubernetes a partir de um container/pod já a correr l
 msgid "Generate a Kubernetes manifest from a container/pod already running locally.\n\n`kube generate` — the \"ran it locally, now give me the YAML for k8s\" path (equivalent to `podman generate kube`)."
 msgstr "Gera um manifesto Kubernetes a partir de um container/pod já a correr localmente.\n\n`kube generate` — o caminho \"correu localmente, agora dá-me o YAML para k8s\" (equivalente ao `podman generate kube`)."
 
-msgid "Expose a local port to the public internet (`kind: Tunnel`)."
-msgstr "Expõe uma porta local à internet pública (`kind: Tunnel`)."
+msgid "Expose a local port to the public internet (`kind: Gateway`)."
+msgstr "Expõe uma porta local à internet pública (`kind: Gateway`)."
 
-msgid "Expose a local port to the public internet (`kind: Tunnel`).\n\nVia pinggy/ngrok/cloudflare — pair with `httproute`'s listening port to route by Host header behind ONE public URL."
-msgstr "Expõe uma porta local à internet pública (`kind: Tunnel`).\n\nVia pinggy/ngrok/cloudflare — junta-o à porta de escuta do `httproute` para rotear pelo header Host atrás de UMA só URL pública."
+msgid "Expose a local port to the public internet (`kind: Gateway`).\n\nVia pinggy/ngrok/cloudflare — pair with `httproute`'s listening port to route by Host header behind ONE public URL."
+msgstr "Expõe uma porta local à internet pública (`kind: Gateway`).\n\nVia pinggy/ngrok/cloudflare — junta-o à porta de escuta do `httproute` para rotear pelo header Host atrás de UMA só URL pública."
 
 msgid "Serve a slice of the Docker Engine API on a unix socket."
 msgstr "Serve uma fatia da Docker Engine API num socket unix."
@@ -8635,7 +8644,7 @@ msgstr "'wg' não está disponível neste host — instala wireguard-tools (Debi
 msgid "pod network"
 msgstr "rede do pod"
 
-# `kind: Vm` com bloco `build:` (o mesmo princípio do `kind: Image`): recusas
+# `kind: VirtualMachine` com bloco `build:` (o mesmo princípio do `kind: Image`): recusas
 # fail-closed dos dois lados da exclusividade, e a linha de progresso do build.
 msgid "Vm '{name}': `disk` and `build` are both set — a VM boots ONE disk. Keep `build` to produce it, or `disk` to name one that already exists"
 msgstr "Vm '{name}': tem `disk` E `build` — uma VM arranca de UM disco. Fica com o `build` para o produzir, ou com o `disk` para nomear um que já existe"
@@ -9464,3 +9473,22 @@ msgstr "política de runtime {path}: {err} — uma política que não se consegu
 
 msgid "runtime policy {path}: {err}"
 msgstr "política de runtime {path}: {err}"
+
+# ---- api-resources (CLI-2) --------------------------------------------------
+msgid "Every Kind this engine serves: plural, shortnames, apiVersion and form"
+msgstr "Cada Kind que este motor serve: plural, abreviaturas, apiVersion e forma"
+
+msgid "Every Kind this engine serves: plural, shortnames, apiVersion and form.\n\nRead from the same registry the parser, the schema and the reconciler read — there is no second table to disagree with them. It answers «what can I write in a manifest, and what do I type after `explain`».\n\n`FORM` is the column that cannot be guessed: it says whether a document of that Kind survives the load under its own name, which is why a `kind: Egress` never appears in a plan as `Egress`."
+msgstr "Cada Kind que este motor serve: plural, abreviaturas, apiVersion e forma.\n\nLidos do mesmo registo que o parser, o schema e o reconciliador leem — não há uma segunda tabela para discordar deles. Responde a «o que posso escrever num manifesto, e o que escrevo a seguir ao `explain`».\n\nO `FORM` é a coluna que não se adivinha: diz se um documento desse Kind sobrevive ao load com o próprio nome, que é a razão de um `kind: Egress` nunca aparecer num plano como `Egress`."
+
+msgid "every Kind, with the plural and the shortnames a caller can type"
+msgstr "cada Kind, com o plural e as abreviaturas que se podem escrever"
+
+msgid "the stable half, for automation (ADR-0005)"
+msgstr "a metade estável, para automação (ADR-0005)"
+
+msgid "what a Kind lowers to — why `kind: Egress` never shows up as `Egress`"
+msgstr "para o que um Kind baixa — porque é que um `kind: Egress` nunca aparece como `Egress`"
+
+msgid "`kind: {kind}` still works, but `kind: {to}` is the way forward ({n} document(s) here)"
+msgstr "`kind: {kind}` continua a funcionar, mas `kind: {to}` é o caminho ({n} documento(s) aqui)"

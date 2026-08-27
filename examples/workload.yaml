@@ -4,11 +4,11 @@
 #   delonix stack apply --dry-run -f examples/workload.yaml   # see what it lowers to
 #
 # A `kind: Workload` is sugar: it does NOT survive the load — it is rewritten into
-# a `kind: Container` or `kind: Vm` and flows through the normal per-Kind apply,
+# a `kind: Container` or `kind: VirtualMachine` and flows through the normal per-Kind apply,
 # exactly like a `kind: Stack` child. `spec.type` picks the type; the block named
 # after the type (`container:` / `vm:`) is the SAME spec the standalone Kind takes
 # (see examples/container.yaml and examples/vm.yaml for every field).
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Workload
 metadata:
   name: web
@@ -21,18 +21,18 @@ spec:
     env:
       - TZ=Africa/Luanda
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Workload
 metadata:
   name: db
 spec:
-  type: vm                 # lowers to kind: Vm
-  vm:                      # == kind: Vm spec (examples/vm.yaml)
+  type: vm                 # lowers to kind: VirtualMachine
+  vm:                      # == kind: VirtualMachine spec (examples/vm.yaml)
     disk: delonix-vm-k8s:1.34
     vcpus: 2
     memory: 4G
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Workload
 metadata:
   name: web-app
@@ -43,13 +43,13 @@ spec:
       - { name: web, image: nginx:latest }
       - { name: sidecar, image: busybox:latest }
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Workload
 metadata:
   name: fast-vm
 spec:
-  type: microvm            # lowers to kind: Vm, forcing the microVM hypervisor
-  microvm:                 # == kind: Vm spec, but backend is forced to cloud-hypervisor
+  type: microvm            # lowers to kind: VirtualMachine, forcing the microVM hypervisor
+  microvm:                 # == kind: VirtualMachine spec, but backend is forced to cloud-hypervisor
     disk: ubuntu-24.04.qcow2   # needs a CH-bootable image (not the libvirt-only k8s golden)
     vcpus: 2
     memory: 2G

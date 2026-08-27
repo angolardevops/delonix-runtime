@@ -4,7 +4,7 @@
 # conhece a app — a DB deixa de ficar exposta a todos os containers da rede.
 #
 # É AÇÚCAR, e agora diz-se: no `load` cada Dependency é reescrita para um
-# `kind: FirewallPolicy` com `direction: ingress`, default-deny no `to` + um allow
+# `kind: NetworkPolicy` com `direction: ingress`, default-deny no `to` + um allow
 # por `from`. Corre `stack apply --dry-run` para ver a política real — antes desta
 # fusão a tradução era invisível, e um `to` nomeado por uma Dependency E por uma
 # FirewallPolicy obrigava o motor a AVISAR sobre o seu próprio gémeo.
@@ -16,29 +16,34 @@
 # que deixa de casar com o workload para que foi escrita.
 # Aplicar com `delonix stack apply -f dependency.yaml`.
 ---
-apiVersion: delonix.io/v1
+apiVersion: networking.delonix.io/v1alpha1
 kind: Network
 metadata: { name: appnet }
 spec:
   driver: bridge
 ---
-apiVersion: delonix.io/v1
-kind: Container
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
 metadata: { name: db }
 spec:
-  image: "postgres:16"
   network: appnet
-  env: { POSTGRES_PASSWORD: dev }
+  containers:
+    - name: db
+      image: "postgres:16"
+      env:
+        - { name: POSTGRES_PASSWORD, value: dev }
 ---
-apiVersion: delonix.io/v1
-kind: Container
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
 metadata: { name: app }
 spec:
-  image: "alpine:3.19"
   network: appnet
-  command: ["sleep", "infinity"]
+  containers:
+    - name: app
+      image: "alpine:3.19"
+      command: ["sleep", "infinity"]
 ---
-apiVersion: delonix.io/v1
+apiVersion: networking.delonix.io/v1alpha1
 kind: Dependency
 metadata: { name: app-knows-db }
 spec:

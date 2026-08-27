@@ -239,6 +239,36 @@ check "inexistente: lote de ids mantém a classe" 4 \
 # A classe não pode depender da língua — é essa a razão de existir do número.
 check "inexistente em PT continua a dizer 4" 4 \
   "$BIN" --l18n=pt container inspect naoexiste-$PFX
+# --- as duas classes novas ---
+# As duas só entraram porque tinham PRODUTORES reais mal classificados: as duas
+# respondiam `1`, o mesmo número de um apply rebentado. E a ligação só se prova
+# aqui — o mapa em `cmd::exitcode` passa nos testes na mesma com o `main` a
+# ignorá-lo, que é a razão de esta secção existir.
+#
+# 124 é o do `timeout(1)`: um prazo esgotado não é uma falha, e um reconciliador
+# que o leia como «rebentou» recria um recurso que estava a subir.
+E2E_WAITMF=$(mktemp "${TMPDIR:-/tmp}/e2e-wait-XXXXXX.yaml")
+cat > "$E2E_WAITMF" <<YAML
+apiVersion: delonix.io/v1
+kind: Container
+metadata: { name: naovaisubir-$PFX }
+spec:
+  image: naoexiste.invalid/naoexiste:0
+YAML
+check "prazo esgotado no stack wait diz 124" 124 \
+  "$BIN" stack wait -f "$E2E_WAITMF" --timeout 1
+rm -f "$E2E_WAITMF"
+
+# 69 é o `EX_UNAVAILABLE` do sysexits.h. Só é exercitável num host a que falte
+# mesmo a ferramenta — com ela instalada o caminho não existe e o honesto é
+# SKIP, nunca um verde que não correu nada (a mesma regra do bloco do `wg`).
+if command -v virt-customize >/dev/null 2>&1; then
+  skip "ferramenta em falta diz 69" "este host TEM virt-customize — o caminho não é exercitável aqui"
+else
+  check "ferramenta em falta diz 69" 69 \
+    "$BIN" image vm build --no-k8s --distro ubuntu --ubuntu-release 24.04 -t e2e-nao-$PFX
+fi
+
 # Convenções instaladas que NÃO podem ter mudado.
 check "uso inválido continua a ser o 2 do clap" 2 "$BIN" subcomando-que-nao-existe
 check "sucesso continua a ser 0" 0 "$BIN" container ps
@@ -450,7 +480,10 @@ fi
 if command -v wg >/dev/null 2>&1; then
   skip "wg ausente: caminho de falha" "este host TEM wg — o caminho não é exercitável aqui"
 else
-  check "node key sem wg: recusa (classe 1)" 1 "$BIN" network node key
+  # Era `1` até os códigos ganharem a classe «capacidade que este host não
+  # tem»: indistinguível de um erro de escrita numa flag, quando a acção
+  # seguinte é oposta (instalar wireguard-tools, não corrigir o comando).
+  check "node key sem wg: recusa (classe 69)" 69 "$BIN" network node key
   check "node key sem wg: nomeia a ferramenta, não o errno" ok bash -c \
     "o=\$('$BIN' network node key 2>&1); grep -q wireguard-tools <<<\"\$o\" && ! grep -q 'No such file' <<<\"\$o\""
   check "overlay cifrado sem wg: recusa em vez de sair 0" fail \
@@ -1532,6 +1565,181 @@ else
   # down duas vezes é idempotente (é o comando de recuperação de um host).
   check "net netns down é idempotente" ok "$BIN" net netns down
 fi
+
+section "api-resources: o registo que os outros verbos leem"
+########################################
+# É o primeiro comando da árvore-alvo a aterrar, e o único da CLI-2 que não
+# depende da reestruturação dos Kinds: lista o que houver no registo, e as
+# LINHAS mudam com a reestruturação sem o mecanismo mudar.
+#
+# Não há segunda tabela por baixo — a listagem deriva do mesmo `cmd::kinds`
+# que o parser, o schema, a completação e o reconciliador leem. Por isso o que
+# se verifica aqui não é o conteúdo (isso é teste unitário, e derivado não pode
+# divergir): é que o comando existe, responde nos dois formatos, e que o JSON
+# cumpre o contrato que a automação lê.
+check "api-resources responde" ok "$BIN" api-resources
+check "api-resources -o json é um array não vazio" ok bash -c \
+  "'$BIN' api-resources -o json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert isinstance(v, list) and v'"
+check "cada linha traz as colunas que a automação lê" ok bash -c \
+  "'$BIN' api-resources -o json | python3 -c \"
+import json,sys
+for r in json.load(sys.stdin):
+    for k in ('name','shortNames','apiVersion','kind','namespaced','domain','form'):
+        assert k in r, (r.get('kind'), k)
+    assert isinstance(r['shortNames'], list)   # array vazio continua array
+    assert isinstance(r['namespaced'], bool)   # nunca a string 'true'
+\""
+# A mesma regra do resto do `-o json`: o que a automação lê não muda de língua.
+check "api-resources -o json é idêntico em EN e PT" ok bash -c \
+  "diff <('$BIN' api-resources -o json) <('$BIN' --l18n=pt api-resources -o json)"
+# E o registo tem de bater com o RESOLVEDOR: um plural listado que o `explain`
+# não aceitasse seria a tabela a documentar um nome que não funciona. As duas
+# respostas legítimas são explicar, ou recusar com «no typed schema» — que é uma
+# propriedade do Kind (o `Storage` é reescrito para `Volume`), não do nome.
+check "todo o plural listado resolve no explain" ok \
+  python3 - "$BIN" <<'PYNAMES'
+import json, subprocess, sys
+
+BIN = sys.argv[1]
+rows = json.loads(subprocess.run([BIN, "api-resources", "-o", "json"],
+                                 capture_output=True, text=True, check=True).stdout)
+assert rows, "api-resources devolveu vazio"
+for r in rows:
+    for name in (r["name"], r["kind"], *r["shortNames"]):
+        p = subprocess.run([BIN, "explain", name], capture_output=True, text=True)
+        if p.returncode == 0:
+            continue
+        if "no typed schema" in p.stdout + p.stderr:
+            continue
+        sys.exit(f"{r['kind']}: `explain {name}` nao resolve — {p.stderr.strip()[:120]}")
+PYNAMES
+
+section "cancelamento: um terminal em modo raw não é nosso para deixar partido"
+########################################
+# BUG MEDIDO a 2026-08-26, antes de haver correcção: um `SIGTERM` a um
+# `container exec -it` deixava a shell de quem chamou com `ECHO` e `ICANON`
+# desligados — sem eco e sem edição de linha, até se escrever `reset` às cegas.
+#
+# A causa não é descuido: o `restore_mode` corre em todas as saídas NORMAIS,
+# incluindo a de erro (é por isso que o `?` do `exec` está depois dele). Um
+# sinal é que não corre código Rust nenhum — nem destrutores, nem unwinding.
+# Acontece com qualquer morte por sinal: um `kill`, um timeout de CI, um
+# teardown de sessão, o OOM killer.
+#
+# O gate mede o TERMINAL, não o comando: um `check` por exit code ficaria verde
+# sobre o bug, porque o processo morria na mesma e com o mesmo estado.
+if ! "$BIN" image ls 2>/dev/null | grep -qE "^${IMG%%:*}[[:space:]:]"; then
+  skip "TTY reposto após um sinal" "sem a imagem $IMG no store — nada para exec"
+else
+  TTYC="ttysig-$PFX"
+  "$BIN" container run -d --net none --name "$TTYC" "$IMG" sleep 300 >/dev/null 2>&1
+  check "um sinal repõe o terminal, e a morte continua a ser por sinal" ok \
+    python3 - "$BIN" "$TTYC" <<'PYPROBE'
+import os, pty, signal, subprocess, sys, termios, time
+
+BIN, NAME = sys.argv[1], sys.argv[2]
+
+def is_raw(a):
+    return not (a[3] & termios.ECHO) and not (a[3] & termios.ICANON)
+
+# Os quatro sinais que um operador ou um CI mandam. SIGKILL não entra: não é
+# capturável, e prometer repor o terminal nesse caso seria mentira.
+for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGQUIT):
+    master, slave = pty.openpty()
+    p = subprocess.Popen([BIN, "container", "exec", "-it", NAME, "sh"],
+                         stdin=slave, stdout=slave, stderr=slave,
+                         preexec_fn=os.setsid)
+    time.sleep(2.5)
+    if not is_raw(termios.tcgetattr(slave)):
+        sys.exit(f"{sig}: a sessão nem chegou a pôr o terminal em raw")
+    os.kill(p.pid, sig)
+    try:
+        p.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        p.kill(); p.wait(); sys.exit(f"{sig}: nao morreu")
+    time.sleep(0.4)
+    if is_raw(termios.tcgetattr(slave)):
+        sys.exit(f"{sig}: o terminal FICOU em modo raw")
+    # Re-raise com a disposição default: quem espera por este processo tem de
+    # continuar a ver uma morte por sinal, não uma saída limpa.
+    if p.returncode != -sig:
+        sys.exit(f"{sig}: rc={p.returncode}, esperava {-sig}")
+    os.close(master); os.close(slave)
+
+# E o caminho normal não pode ter regredido — repõe por outro mecanismo (o
+# `restore_mode` explícito) e propaga o código do workload.
+master, slave = pty.openpty()
+p = subprocess.Popen([BIN, "container", "exec", "-it", NAME, "sh", "-c", "exit 7"],
+                     stdin=slave, stdout=slave, stderr=slave, preexec_fn=os.setsid)
+p.wait(timeout=20)
+if is_raw(termios.tcgetattr(slave)):
+    sys.exit("saída normal: o terminal ficou em modo raw")
+if p.returncode != 7:
+    sys.exit(f"saída normal: rc={p.returncode}, esperava 7")
+PYPROBE
+  "$BIN" container rm -f "$TTYC" >/dev/null 2>&1
+fi
+
+section "contrato de output: o que a automação lê não pode mudar sozinho"
+########################################
+# Medido a 2026-08-26 antes de existir este bloco: as cinco propriedades abaixo
+# JÁ se cumpriam. O que não existia era um gate — nada apanhava a regressão de
+# nenhuma delas, e o que ninguém verifica é o que volta a partir-se.
+#
+# São propriedades do OUTPUT e não de um comando, por isso sobrevivem à
+# reestruturação da CLI: quando `get` substituir estes `ls`, o bloco muda de
+# alvo e não de sentido.
+
+# As fixturas do bloco: um segredo com um valor reconhecível (para se poder
+# provar que NÃO sai) e um manifesto que produz um plano com texto humano
+# dentro — é aí que uma tradução escaparia para o JSON, não numa lista vazia.
+E2E_SEC="outsec-$PFX"
+"$BIN" secret create "$E2E_SEC" --from-literal senha=s3nha-do-gate >/dev/null 2>&1
+E2E_OUTMF=$(mktemp "${TMPDIR:-/tmp}/e2e-out-XXXXXX.yaml")
+cat > "$E2E_OUTMF" <<YAML
+apiVersion: delonix.io/v1
+kind: Volume
+metadata: { name: outvol-$PFX }
+spec: {}
+YAML
+
+# 1. Uma lista vazia continua a ser um ARRAY. Um `[]` que virasse `""` ou `null`
+#    parte todo o `jq '.[]'` que exista lá fora, e parte-o em silêncio.
+for g in "container ps" "image ls" "volumes ls" "network ls" "vm ls" "secret ls"; do
+  check "lista vazia de '$g' é um array JSON" ok bash -c \
+    "'$BIN' $g -o json 2>/dev/null | python3 -c 'import json,sys; v=json.load(sys.stdin); assert isinstance(v, list)'"
+done
+
+# 2. O JSON não muda com a LÍNGUA. É a razão de ser do `-o json`: uma automação
+#    que classifique por texto traduzido funciona na máquina onde foi escrita e
+#    deixa de classificar num nó com outra locale — o mesmo defeito que os
+#    códigos de saída existem para fechar, na outra ponta.
+check "o -o json de uma listagem é idêntico em EN e PT" ok bash -c \
+  "diff <('$BIN' volumes ls -o json 2>/dev/null) <('$BIN' --l18n=pt volumes ls -o json 2>/dev/null)"
+check "o -o json de um plano é idêntico em EN e PT" ok bash -c \
+  "diff <('$BIN' stack plan -f '$E2E_OUTMF' -o json 2>/dev/null) <('$BIN' --l18n=pt stack plan -f '$E2E_OUTMF' -o json 2>/dev/null)"
+
+# 3. Sem ANSI quando o stdout não é um terminal. Um `| grep` que passe a apanhar
+#    escapes deixa de casar, e a causa é invisível a olho nu.
+check "num pipe não saem sequências ANSI" ok bash -c \
+  "! '$BIN' container ps 2>/dev/null | grep -q \$'\033'"
+
+# 4. Dados no stdout, tudo o resto no stderr. Um aviso que caia no stdout entra
+#    no meio do JSON e o parser do outro lado rebenta.
+check "o -o json não leva nada no stderr" ok bash -c \
+  "[ -z \"\$('$BIN' image ls -o json 2>&1 >/dev/null)\" ]"
+
+# 5. Um segredo nunca sai em claro sem se pedir. `secret ls` mostra os NOMES das
+#    chaves e nunca os valores; o `inspect` redige e diz como revelar.
+check "secret ls não traz valores" ok bash -c \
+  "! '$BIN' secret ls -o json 2>/dev/null | grep -q 's3nha-do-gate'"
+check "secret inspect redige por omissão" ok bash -c \
+  "! '$BIN' secret inspect '$E2E_SEC' 2>/dev/null | grep -q 's3nha-do-gate'"
+check "secret inspect --reveal mostra, e só então" ok bash -c \
+  "'$BIN' secret inspect '$E2E_SEC' --reveal 2>/dev/null | grep -q 's3nha-do-gate'"
+
+"$BIN" secret rm "$E2E_SEC" >/dev/null 2>&1
+rm -f "$E2E_OUTMF"
 
 section "limpeza"
 ########################################

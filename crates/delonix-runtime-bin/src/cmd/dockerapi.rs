@@ -30,6 +30,7 @@
 //! every other control socket in this codebase; an operator who wants group
 //! access can `chmod`/`chgrp` it themselves after the fact.
 
+use super::kinds as k;
 use std::convert::Infallible;
 use std::sync::Arc;
 
@@ -967,12 +968,12 @@ fn handle_inspect(state: &Arc<AppState>, id: &str) -> (StatusCode, Vec<u8>) {
             "ExitCode": c.status.exit_code(),
         },
         "Config": {
-            "Image": c.image,
+            k::IMAGE: c.image,
             "Cmd": c.command,
             "Env": c.env,
             "Labels": c.labels,
         },
-        "Image": c.image,
+        k::IMAGE: c.image,
         "NetworkSettings": {
             "Networks": {
                 c.network.clone().unwrap_or_else(|| "host".to_string()): {
@@ -1006,7 +1007,7 @@ fn handle_inspect(state: &Arc<AppState>, id: &str) -> (StatusCode, Vec<u8>) {
 /// usá-lo e este tradutor ficou com a razão da era anterior. Uma limitação
 /// documentada envelhece para mentira sem ninguém lhe tocar.
 fn docker_config_to_run_opts(name: String, cfg: &serde_json::Value) -> Result<RunOpts> {
-    let image = cfg["Image"]
+    let image = cfg[k::IMAGE]
         .as_str()
         .ok_or_else(|| Error::Invalid("container config: 'Image' is required".into()))?
         .to_string();
@@ -1185,7 +1186,7 @@ fn docker_config_to_run_opts(name: String, cfg: &serde_json::Value) -> Result<Ru
 fn unconsumed_config_warnings(cfg: &serde_json::Value) -> Vec<String> {
     /// Consumidos por `docker_config_to_run_opts`, ou irrelevantes por desenho.
     const CONSUMIDOS_TOPO: &[&str] = &[
-        "Image",
+        k::IMAGE,
         "Cmd",
         "Entrypoint",
         "Env",
@@ -1455,7 +1456,7 @@ fn containers_json(state: &AppState) -> Result<Vec<u8>> {
             json!({
                 "Id": c.id,
                 "Names": [format!("/{}", c.name)],
-                "Image": c.image,
+                k::IMAGE: c.image,
                 "ImageID": c.image,
                 "Command": c.command.join(" "),
                 "Created": c.created_unix,

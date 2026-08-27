@@ -1,5 +1,6 @@
 //! `delonix volumes` — named volumes (create/ls/rm/inspect).
 
+use super::kinds as k;
 use std::path::PathBuf;
 
 use clap::Subcommand;
@@ -377,7 +378,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
         None => doc.metadata.name.clone(),
     };
     Ok(super::reconcile::Desired {
-        kind: "Volume".into(),
+        kind: k::VOLUME.into(),
         // The FIELDS are computed from the document's own name: a share's
         // directory is `<parent>/shares/<ns>/<name>`, and the qualifier belongs
         // to the plan's identity, not to anything on disk.
@@ -416,7 +417,7 @@ fn actual_of(name: String, v: &delonix_volume::Volume) -> super::reconcile::Actu
     {
         let v = v.clone();
         super::reconcile::Actual {
-            kind: "Volume".into(),
+            kind: k::VOLUME.into(),
             name,
             fields: actual_volume_fields(&v),
             owner: v.labels.get(super::reconcile::STACK_LABEL).cloned(),
@@ -632,7 +633,7 @@ pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let store = VolumeStore::open(state_root())?;
-    for doc in manifest::of_kind(docs, "Volume") {
+    for doc in manifest::of_kind(docs, k::VOLUME) {
         let name = &doc.metadata.name;
         let spec: VolumeSpec = manifest::spec_of(doc)?;
         spec.check_share_exclusivity()?;

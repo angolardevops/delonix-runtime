@@ -70,6 +70,69 @@ pub enum Error {
     /// next move is different (adopt/skip vs. fix the argument).
     #[error("conflict: {0}")]
     Conflict(String),
+
+    /// A capability this host does not have: a tool that is not installed, a
+    /// backend that is not available, a kernel feature that is off.
+    ///
+    /// Its own variant because the caller's next move is different from every
+    /// other failure — nothing about the ARGUMENTS is wrong, and retrying
+    /// changes nothing. Somebody has to install something. Before this existed
+    /// these refusals said [`Error::Invalid`] and came back as a generic exit
+    /// 1, indistinguishable from a typo in a flag: `wg` missing,
+    /// `virt-customize` missing, `ngrok`/`cloudflared` not in `PATH`.
+    ///
+    /// **The message must name the tool or feature and how to get it.** The raw
+    /// `ENOENT` of a spawn is NOT a missing file — "No such file or directory"
+    /// sends the reader looking for a path that was never the problem.
+    #[error("unavailable: {0}")]
+    Unavailable(String),
+
+    /// The operation was still not done when its deadline passed.
+    ///
+    /// Distinct from a failure: nothing said no, and the work may well be
+    /// finishing right now. A reconciler waits longer or comes back; it must
+    /// not read this as «it broke» and recreate the resource on top of one that
+    /// is still coming up.
+    #[error("timed out: {0}")]
+    Timeout(String),
+}
+
+impl Error {
+    /// The stable, machine-readable identity of a failure.
+    ///
+    /// The pair of the exit code, for callers that read text rather than `$?`:
+    /// an HTTP client, a `-o json` consumer, a log pipeline. It exists for the
+    /// same reason the numbers do — the MESSAGE is translated, so a caller that
+    /// greps it works on the machine it was written on and silently stops
+    /// classifying on a node with another locale.
+    ///
+    /// **The granularity deliberately matches the exit-code classification, not
+    /// the variant list.** `NotFound` and `VmNotFound` share a code because they
+    /// are one question for a caller — «it is not there» — exactly as they
+    /// share exit code 4. A finer split here would be a distinction the numbers
+    /// do not make, and the two classifications would drift apart.
+    ///
+    /// **These strings are a contract.** A code may be ADDED; an existing one
+    /// never changes spelling and never changes meaning. Renaming one is the
+    /// same breakage as renaming an exit code, with none of the visibility.
+    ///
+    /// The `match` is exhaustive on purpose, like `cmd::exitcode::for_error`'s:
+    /// a variant added tomorrow stops the build here instead of being filed
+    /// under a catch-all nobody ever revisits.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Error::NotFound(_) | Error::VmNotFound(_) => "DX_NOT_FOUND",
+            Error::NotRunning(_) => "DX_NOT_RUNNING",
+            Error::Conflict(_) => "DX_CONFLICT",
+            Error::Unavailable(_) => "DX_UNAVAILABLE",
+            Error::Timeout(_) => "DX_TIMEOUT",
+            Error::Invalid(_) => "DX_INVALID_ARGUMENT",
+            Error::Registry(_) => "DX_REGISTRY",
+            Error::Runtime { .. } => "DX_SYSCALL_FAILED",
+            Error::Json(_) => "DX_INVALID_STATE",
+            Error::Io(_) => "DX_IO",
+        }
+    }
 }
 
 /// Convenience alias.

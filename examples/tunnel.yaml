@@ -1,4 +1,4 @@
-# kind: Tunnel — exposes ONE local TCP port to the public internet via a
+# kind: Gateway — exposes ONE local TCP port to the public internet via a
 # 3rd-party provider (pinggy/ngrok/cloudflare). Deliberately single-purpose:
 # it does the outbound transport only. Point `localPort` at the HTTPRoute
 # proxy's own listening port (see httproute.yaml) to combine the two — one
@@ -7,8 +7,8 @@
 # Apply with:  delonix net tunnel apply -f tunnel.yaml
 # One-shot equivalent, no manifest (pinggy is the default provider):
 #   delonix net tunnel expose 80
-apiVersion: delonix.io/v1
-kind: Tunnel
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Gateway
 metadata:
   name: public
 spec:

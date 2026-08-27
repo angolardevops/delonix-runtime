@@ -14,6 +14,7 @@
 //! already-probed `Env`), so it is testable without depending on the machine's
 //! real state.
 
+use super::kinds as k;
 use super::manifest::ManifestDoc;
 
 /// A condition of a resource — `ok=false` is what matters (the missing
@@ -125,13 +126,13 @@ fn spec_str<'a>(doc: &'a ManifestDoc, keys: &[&str]) -> Option<&'a str> {
 /// The conditions of a document. Empty = nothing to flag (the common case).
 pub fn conditions_for(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
     match doc.kind.as_str() {
-        "Volume" => {
+        k::VOLUME => {
             let mut c = volume(doc, env);
             c.extend(network_share(doc, env));
             c
         }
-        "Network" => network(doc, env),
-        "Vm" => {
+        k::NETWORK => network(doc, env),
+        k::VM => {
             let mut c = vm(doc, env);
             c.extend(vm_volumes(doc));
             c
@@ -271,7 +272,7 @@ fn network(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
 /// skips it on a `Create`, the same shape `Vm`'s unconverged-fields condition
 /// uses.
 pub(crate) fn network_not_realized(doc: &ManifestDoc, env: &Env) -> Option<Condition> {
-    if doc.kind != "Network" {
+    if doc.kind != k::NETWORK {
         return None;
     }
     // macvlan/ipvlan have their own, more specific reason above; overlay and
@@ -564,7 +565,7 @@ mod tests {
         // volumes + explicit cloud-hypervisor backend → condition.
         let c = conditions_for(
             &doc(
-                "Vm",
+                "VirtualMachine",
                 "disk: d\nbackend: cloud-hypervisor\nvolumes: [ { name: x, mountPath: /x } ]",
             ),
             &env(false, true, true, true),
@@ -576,7 +577,10 @@ mod tests {
         );
         // volumes with no explicit backend (auto → libvirt) → without this condition.
         let c = conditions_for(
-            &doc("Vm", "disk: d\nvolumes: [ { name: x, mountPath: /x } ]"),
+            &doc(
+                "VirtualMachine",
+                "disk: d\nvolumes: [ { name: x, mountPath: /x } ]",
+            ),
             &env(false, true, true, true),
         );
         assert!(
@@ -589,13 +593,16 @@ mod tests {
     fn vm_restart_no_cloud_hypervisor_nao_e_supervisionado() {
         // backend absent (auto → CH) + canonical restartPolicy → not supervised.
         let c = conditions_for(
-            &doc("Vm", "disk: d\nrestartPolicy: always"),
+            &doc("VirtualMachine", "disk: d\nrestartPolicy: always"),
             &env(false, true, true, true),
         );
         assert_eq!(c[0].reason, "BackendCloudHypervisor");
         // legacy alias restart_policy + libvirt backend → supervised.
         let c = conditions_for(
-            &doc("Vm", "disk: d\nrestart_policy: always\nbackend: libvirt"),
+            &doc(
+                "VirtualMachine",
+                "disk: d\nrestart_policy: always\nbackend: libvirt",
+            ),
             &env(false, true, true, true),
         );
         assert!(c[0].ok);
@@ -605,15 +612,22 @@ mod tests {
             cloud_hypervisor: false,
             ..env(false, true, true, true)
         };
-        let c = conditions_for(&doc("Vm", "disk: d\nrestartPolicy: always"), &sem_ch);
+        let c = conditions_for(
+            &doc("VirtualMachine", "disk: d\nrestartPolicy: always"),
+            &sem_ch,
+        );
         assert!(
             c[0].ok,
             "sem cloud-hypervisor o auto cai para libvirt, que supervisiona"
         );
         // no restartPolicy (or `no`) → no condition.
-        assert!(conditions_for(&doc("Vm", "disk: d"), &env(false, true, true, true)).is_empty());
         assert!(conditions_for(
-            &doc("Vm", "disk: d\nrestartPolicy: no"),
+            &doc("VirtualMachine", "disk: d"),
+            &env(false, true, true, true)
+        )
+        .is_empty());
+        assert!(conditions_for(
+            &doc("VirtualMachine", "disk: d\nrestartPolicy: no"),
             &env(false, true, true, true)
         )
         .is_empty());

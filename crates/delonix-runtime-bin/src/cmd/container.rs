@@ -1,5 +1,6 @@
 //! `delonix container` — container lifecycle (run/ps/stop/rm/exec/logs).
 
+use super::kinds as k;
 use std::path::PathBuf;
 
 use clap::Subcommand;
@@ -80,7 +81,7 @@ pub(crate) struct ContainerSpec {
     /// `no` (default) | `on-failure[:max]` | `always` | `unless-stopped` —
     /// a detached supervisor becomes the container's parent and restarts it (see
     /// `run_supervised`). This is what makes a manifest resilient. Canonical
-    /// field name is `restartPolicy` (uniform with `kind: Vm`); the legacy
+    /// field name is `restartPolicy` (uniform with `kind: VirtualMachine`); the legacy
     /// `restart` stays accepted so existing manifests don't break.
     #[serde(
         rename = "restartPolicy",
@@ -201,7 +202,7 @@ pub(crate) const RECONCILED_CONTAINER_FIELDS: &[&str] = &[
     "restartPolicy",
     "network",
     "hostname",
-    // These two were in `hot_fields("Container")` and in `converge`, and NOT
+    // These two were in `hot_fields(k::CONTAINER)` and in `converge`, and NOT
     // here — so `diff_fields` (which iterates desired ∪ actual ∪ last) never saw
     // the key, the two `converge` arms were unreachable, and changing `netBps`
     // in an applied manifest was a no-op that `stack plan` reported as «no
@@ -580,7 +581,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
         desired_container_fields(&container_spec_of(doc)?)
     };
     Ok(super::reconcile::Desired {
-        kind: "Container".into(),
+        kind: k::CONTAINER.into(),
         name: doc.metadata.name.clone(),
         fields,
         converges: true,
@@ -600,7 +601,7 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
         // container the stack should adopt.
         .filter(|c| c.pod.is_none() && !c.labels.contains_key(super::pod::POD_LABEL))
         .map(|c| super::reconcile::Actual {
-            kind: "Container".into(),
+            kind: k::CONTAINER.into(),
             name: c.name.clone(),
             fields: actual_container_fields(&c, &volumes_root),
             owner: c.labels.get(super::reconcile::STACK_LABEL).cloned(),
@@ -2373,7 +2374,7 @@ pub fn pod_spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let (images, store) = open_stores()?;
-    for doc in manifest::of_kind(docs, "Container") {
+    for doc in manifest::of_kind(docs, k::CONTAINER) {
         let name = &doc.metadata.name;
         // Pod-shaped (k8s-like) when `spec.containers` is present; otherwise the
         // flat spec. The two shapes never mix.
@@ -6061,7 +6062,7 @@ fn describe_one(c: &Container) {
     // printed it since namespaces landed — omitting it here made the isolation boundary
     // invisible on the resource that uses it most.
     d.field("Namespace", &c.namespace);
-    d.field("Image", &c.image);
+    d.field(k::IMAGE, &c.image);
     d.field("Command", c.command.join(" "));
     d.field_opt("Workdir", c.workdir.as_deref());
     d.field("Created", output::fmt_local(c.created_unix));
@@ -6081,7 +6082,7 @@ fn describe_one(c: &Container) {
             d.field("Crashed at", output::fmt_local(ts));
         }
     }
-    d.field_opt("Pod", c.pod.as_deref());
+    d.field_opt(k::POD, c.pod.as_deref());
 
     d.section("Resources");
     d.sub("CPUs", &c.cpus);
@@ -6091,7 +6092,7 @@ fn describe_one(c: &Container) {
     d.sub_opt("IO weight", c.io_weight.as_deref());
     d.sub_opt("Nice", c.nice.map(|n| n.to_string()));
 
-    d.section("Network");
+    d.section(k::NETWORK);
     // Diz a VERDADE sobre os três casos que `network: None` esconde: pedi
     // host, pedi none, ou pedi uma rede e fiquei sem ela. O terceiro é o que
     // interessa — um contentor assim está vivo, sem resolução de nomes e sem
@@ -7175,7 +7176,7 @@ mod unconverged_container_tests {
     fn doc(spec: &str) -> ManifestDoc {
         ManifestDoc {
             api_version: "delonix.io/v1".into(),
-            kind: "Container".into(),
+            kind: k::CONTAINER.into(),
             metadata: super::super::manifest::Metadata {
                 name: "c".into(),
                 namespace: None,

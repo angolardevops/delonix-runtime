@@ -333,14 +333,36 @@ fn invalid_name() -> Response {
 
 /// Maps an engine `Error` to (HTTP code, JSON body) — the client
 /// reconstructs its own `RuntimeError` from the code + message.
+///
+/// The body carries `code` (the stable `DX_*` identity, see
+/// [`Error::code`]) beside the message. **Additive on purpose**: the field was
+/// added, `error` was not touched. A client outside this repo already reads
+/// `.error`, and the discipline ADR-0005 fixed for `-o json` — fields may be
+/// ADDED, never removed nor retyped — is the same one that applies here. The
+/// nested `{"error": {"code", "message"}}` envelope the CLI restructuring
+/// specifies is a DIFFERENT surface (the CLI's own `-o json`), and building it
+/// there costs nothing here.
+///
+/// Why the message alone was not enough: it is the half that gets translated,
+/// so a client that classifies by matching text works on the machine it was
+/// written on and stops classifying on a node with another locale. That is the
+/// same reason the exit codes exist.
 fn err_response(e: Error) -> Response {
+    // Read BEFORE the match: it destructures `e` by value.
+    let dx = e.code();
     let (code, msg) = match e {
         Error::NotFound(m) => (StatusCode::NOT_FOUND, m),
         Error::Invalid(m) => (StatusCode::BAD_REQUEST, m),
         Error::Conflict(m) => (StatusCode::CONFLICT, m),
+        // The same two classes the exit codes publish, in the transport that
+        // already has words for them. Without these they fell into the catch-all
+        // 500, which tells a caller «this server is broken» when what happened
+        // is «this host lacks a tool» or «it is still coming up».
+        Error::Unavailable(m) => (StatusCode::SERVICE_UNAVAILABLE, m),
+        Error::Timeout(m) => (StatusCode::GATEWAY_TIMEOUT, m),
         other => (StatusCode::INTERNAL_SERVER_ERROR, other.to_string()),
     };
-    (code, Json(serde_json::json!({ "error": msg }))).into_response()
+    (code, Json(serde_json::json!({ "error": msg, "code": dx }))).into_response()
 }
 
 /// Runs a synchronous `VolumeStore` operation on a blocking thread (the store
@@ -1489,6 +1511,33 @@ async fn vm_action_ep(
 
 #[cfg(test)]
 mod tests {
+    /// Serialises the two tests below, which both write the PROCESS-GLOBAL
+    /// `DELONIX_ROOT` while cargo runs them on parallel threads.
+    ///
+    /// The mechanism is not a guess — the doc-comment on the first of them
+    /// already states it: those routes read through `infra`, which resolves the
+    /// root from the ENVIRONMENT and not from the `AppState`, so each test
+    /// points the global at a temp dir of its own. What that reasoning did not
+    /// cover is the two of them doing it AT THE SAME TIME. Two tests writing
+    /// one process-global is a hazard on its own terms, and that is the whole
+    /// justification for this lock.
+    ///
+    /// **It is not claimed to fix the flake that led here, because that flake
+    /// was never reproduced.** What was observed: under
+    /// `cargo test --workspace`, the first test failed twice with the LIST
+    /// returning one network and the GET of that network returning 404 — a list
+    /// from one root, a lookup in another, which is the shape the shared global
+    /// would produce. Run alone it passes 29/29, ten times over; with a 300 ms
+    /// window opened right after the `set_var`, it still passes five times
+    /// over, with and without this lock. So: plausible mechanism, documented in
+    /// this very file, and no measurement. This comment will not pretend
+    /// otherwise.
+    ///
+    /// A `tokio::sync::Mutex` and not a `std` one: the guard is held across
+    /// `.await`, which `clippy::await_holding_lock` refuses — and this repo runs
+    /// clippy with `-D warnings`.
+    static ROOT_ENV: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     use super::*;
     use axum::body::Body;
     use axum::http::Request;
@@ -2130,6 +2179,7 @@ mod tests {
     #[tokio::test]
     async fn redes_lista_get_e_estado() {
         let (st, d) = test_state();
+        let _root = ROOT_ENV.lock().await;
         std::env::set_var("DELONIX_ROOT", d.path());
         let app = router(st);
 
@@ -2372,6 +2422,7 @@ mod tests {
     #[tokio::test]
     async fn dhcp_e_attach_validam_o_que_recebem() {
         let (st, d) = test_state();
+        let _root = ROOT_ENV.lock().await;
         std::env::set_var("DELONIX_ROOT", d.path());
         let app = router(st);
 

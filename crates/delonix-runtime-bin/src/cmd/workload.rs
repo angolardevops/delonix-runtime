@@ -2,7 +2,7 @@
 //! (`Container`/`Vm`). See `docs/adr/0001-workload-kind-schema.md`.
 //!
 //! A `Workload` is sugar: it does NOT survive [`super::manifest::load`]. It is
-//! rewritten into a synthetic `kind: Container`/`kind: Vm`/`kind: Pod` doc
+//! rewritten into a synthetic `kind: Container`/`kind: VirtualMachine`/`kind: Pod` doc
 //! (inheriting the Workload's `metadata`) that then flows through the normal
 //! per-Kind apply — exactly like a `kind: Stack` child. Nothing downstream
 //! (`apply`, per-Kind `apply -f`, `stack apply`, `--dry-run`, `ls`, `describe`)
@@ -12,9 +12,10 @@
 //! (`spec.container` / `spec.vm` / `spec.pod` / `spec.microvm`) and is deserialized
 //! by the SAME typed structs the standalone Kinds use (`ContainerSpec`/`VmSpec`/
 //! `PodSpec`) — the Workload spec cannot drift from the spec it wraps, because it
-//! does not redefine a single field. `type: microvm` lowers to `kind: Vm` with the
+//! does not redefine a single field. `type: microvm` lowers to `kind: VirtualMachine` with the
 //! backend forced to cloud-hypervisor (ADR-0006); no reserved types remain.
 
+use super::kinds as k;
 use clap::Subcommand;
 use delonix_runtime_core::{Error, Result};
 use serde::Deserialize;
@@ -39,7 +40,7 @@ pub const WORKLOAD_SPEC_FIELDS: &[&str] = &["type", "container", "vm", "pod", "m
 /// `ContainerSpec`, so anything the schema would accept here and that type would
 /// reject is a manifest that fails at apply.
 ///
-/// `microvm` maps to `VmSpec` for the same reason it lowers to `kind: Vm` — it
+/// `microvm` maps to `VmSpec` for the same reason it lowers to `kind: VirtualMachine` — it
 /// is a `VmSpec` with the backend forced to `cloud-hypervisor` (ADR-0006).
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub(crate) struct WorkloadSpec {
@@ -59,7 +60,7 @@ pub(crate) struct WorkloadSpec {
     microvm: Option<serde_yaml::Value>,
 }
 
-/// Lowers a `kind: Workload` doc into its underlying `kind: Container`/`kind: Vm`
+/// Lowers a `kind: Workload` doc into its underlying `kind: Container`/`kind: VirtualMachine`
 /// doc. Fail-closed: an unsupported/reserved `type`, a missing block, or a block
 /// that does not match the `type` is an explicit error — never silently ignored,
 /// never defaulted (guardrail: no silent failure).
@@ -72,7 +73,7 @@ pub fn lower_workload(doc: &ManifestDoc) -> Result<ManifestDoc> {
     let (child_kind, block) =
         match ty.as_str() {
             "container" => (
-                "Container",
+                k::CONTAINER,
                 select_block(
                     &name,
                     "container",
@@ -85,7 +86,7 @@ pub fn lower_workload(doc: &ManifestDoc) -> Result<ManifestDoc> {
                 )?,
             ),
             "vm" => (
-                "Vm",
+                k::VM,
                 select_block(
                     &name,
                     "vm",
@@ -100,7 +101,7 @@ pub fn lower_workload(doc: &ManifestDoc) -> Result<ManifestDoc> {
             // `kind: Pod` (a real multi-container pod) — the block is the same `PodSpec`
             // (`spec.containers[]`) the standalone Kind takes.
             "pod" => (
-                "Pod",
+                k::POD,
                 select_block(
                     &name,
                     "pod",
@@ -112,7 +113,7 @@ pub fn lower_workload(doc: &ManifestDoc) -> Result<ManifestDoc> {
                     ],
                 )?,
             ),
-            // `microvm` = a VM on the microVM hypervisor: lowers to `kind: Vm` (same
+            // `microvm` = a VM on the microVM hypervisor: lowers to `kind: VirtualMachine` (same
             // `VmSpec`) with the backend forced to cloud-hypervisor (ADR-0006).
             "microvm" => {
                 let mut b = select_block(
@@ -126,7 +127,7 @@ pub fn lower_workload(doc: &ManifestDoc) -> Result<ManifestDoc> {
                     ],
                 )?;
                 force_microvm_backend(&name, &mut b)?;
-                ("Vm", b)
+                (k::VM, b)
             }
             "" => {
                 return Err(Error::Invalid(super::po::tf(
@@ -424,7 +425,7 @@ mod tests {
     #[test]
     fn lowers_vm() {
         let child = lower_workload(&wl("type: vm\nvm: { disk: golden.qcow2, vcpus: 2 }")).unwrap();
-        assert_eq!(child.kind, "Vm");
+        assert_eq!(child.kind, "VirtualMachine");
         assert_eq!(child.spec.get("vcpus").unwrap().as_u64(), Some(2));
     }
 
@@ -440,7 +441,7 @@ mod tests {
             lower_workload(&wl("type: VM\nvm: { disk: x }"))
                 .unwrap()
                 .kind,
-            "Vm"
+            "VirtualMachine"
         );
     }
 
@@ -495,7 +496,7 @@ mod tests {
     fn lowers_microvm_forcing_ch_backend() {
         // microvm → kind: Vm with backend forced to cloud-hypervisor (ADR-0006).
         let child = lower_workload(&wl("type: microvm\nmicrovm: { disk: golden.qcow2 }")).unwrap();
-        assert_eq!(child.kind, "Vm");
+        assert_eq!(child.kind, "VirtualMachine");
         assert_eq!(
             child.spec.get("backend").unwrap().as_str(),
             Some("cloud-hypervisor")

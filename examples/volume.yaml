@@ -2,7 +2,7 @@
 # storage (NFS/SMB/WebDAV) the SAME Kind takes an `nfs:`/`cifs:`/`webdav:` block
 # (see examples/storage.yaml).
 # Apply with:  delonix volumes apply -f examples/volume.yaml
-apiVersion: delonix.io/v1
+apiVersion: storage.delonix.io/v1alpha1
 kind: Volume
 metadata:
   name: appdata

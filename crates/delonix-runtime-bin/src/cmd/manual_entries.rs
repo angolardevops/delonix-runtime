@@ -475,6 +475,16 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["container dash", "vm dash", "system info", "serve api"],
     },
     Entry {
+        path: "api-resources",
+        group: "",
+        examples: &[
+            ("every Kind, with the plural and the shortnames a caller can type", "delonix api-resources"),
+            ("the stable half, for automation (ADR-0005)", "delonix api-resources -o json"),
+            ("what a Kind lowers to — why `kind: Egress` never shows up as `Egress`", "delonix api-resources | grep -- '->'"),
+        ],
+        see_also: &["explain", "schema print", "stack plan", "stack apply"],
+    },
+    Entry {
         path: "explain",
         group: "",
         examples: &[
@@ -1141,7 +1151,7 @@ pub static ENTRIES: &[Entry] = &[
         path: "net tunnel apply",
         group: "Declarative",
         examples: &[
-            ("the `kind: Tunnel` documents of the manifest here — idempotent, an unchanged tunnel is left alone", "delonix net tunnel apply"),
+            ("the `kind: Gateway` documents of the manifest here — idempotent, an unchanged tunnel is left alone", "delonix net tunnel apply"),
             ("from a file, where the token comes from a `kind: Secret` instead of the shell history", "delonix net tunnel apply -f delonix-manifest.yaml"),
         ],
         see_also: &["net tunnel expose", "net tunnel ls", "secret create", "stack apply"],
@@ -2231,7 +2241,7 @@ pub static ENTRIES: &[Entry] = &[
         path: "vm apply",
         group: "Declarative",
         examples: &[
-            ("apply the `kind: Vm` documents of ./delonix-manifest.yaml — idempotent by name, so it creates or recovers", "delonix vm apply"),
+            ("apply the `kind: VirtualMachine` documents of ./delonix-manifest.yaml — idempotent by name, so it creates or recovers", "delonix vm apply"),
             ("from a manifest of your own", "delonix vm apply -f examples/vm.yaml"),
         ],
         see_also: &["vm init", "stack apply", "stack plan", "vm create"],
@@ -2240,7 +2250,7 @@ pub static ENTRIES: &[Entry] = &[
         path: "vm init",
         group: "Declarative",
         examples: &[
-            ("a `kind: Vm` manifest already filled in, applicable as it is", "delonix vm init"),
+            ("a `kind: VirtualMachine` manifest already filled in, applicable as it is", "delonix vm init"),
             ("name the project and pin the image it should boot", "delonix vm init --name lab --image delonix-vm-base:ubuntu-24.04"),
             ("a `VMfile` instead — the recipe for building your own qcow2, not for running an existing one", "delonix vm init --vmfile"),
             ("generate into a directory of its own, overwriting what is there", "delonix vm init ./lab --name lab --force"),

@@ -1,4 +1,4 @@
-//! `delonix net tunnel` (`kind: Tunnel`) — exposes ONE local TCP port to the
+//! `delonix net tunnel` (`kind: Gateway`) — exposes ONE local TCP port to the
 //! public internet via a 3rd-party tunnel provider (`pinggy`/`ngrok`/
 //! `cloudflare`). Deliberately single-purpose: Tunnel's only job is the
 //! outbound transport (no account/router/public IP needed on this host).
@@ -42,6 +42,7 @@
 //! guard pattern (`/proc/<pid>/cmdline` contains the provider's binary name)
 //! so a recycled PID never gets signalled by mistake.
 
+use super::kinds as k;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -147,7 +148,7 @@ struct TunnelRecord {
 
 #[derive(Subcommand, Debug)]
 pub enum TunnelCmd {
-    /// Apply the `kind: Tunnel` documents of a manifest (idempotent).
+    /// Apply the `kind: Gateway` documents of a manifest (idempotent).
     Apply {
         #[arg(value_hint = clap::ValueHint::FilePath, short, long)]
         file: Option<PathBuf>,
@@ -229,7 +230,7 @@ pub fn run(action: TunnelCmd) -> Result<()> {
     }
 }
 
-/// Fields the reconciler compares for a `kind: Tunnel`.
+/// Fields the reconciler compares for a `kind: Gateway`.
 ///
 /// **The public URL is deliberately absent — it is STATUS.** A provider hands it
 /// out when the agent connects, and a free tier hands out a different one every
@@ -258,7 +259,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
         f.insert("insecureSkipTlsVerify".into(), "true".into());
     }
     Ok(super::reconcile::Desired {
-        kind: "Tunnel".into(),
+        kind: k::GATEWAY.into(),
         name: doc.metadata.name.clone(),
         fields: f,
         converges: true,
@@ -271,7 +272,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
 pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actual>> {
     let store = record_store()?;
     let mut out = Vec::new();
-    for doc in manifest::of_kind(docs, "Tunnel") {
+    for doc in manifest::of_kind(docs, k::GATEWAY) {
         let Ok(rec) = store.load(&doc.metadata.name) else {
             continue;
         };
@@ -285,7 +286,7 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
             f.insert("insecureSkipTlsVerify".into(), "true".into());
         }
         out.push(super::reconcile::Actual {
-            kind: "Tunnel".into(),
+            kind: k::GATEWAY.into(),
             name: doc.metadata.name.clone(),
             fields: f,
             owner: None,
@@ -320,7 +321,7 @@ pub(crate) fn converge_doc(doc: &ManifestDoc) -> Result<()> {
 }
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
-    for doc in manifest::of_kind(docs, "Tunnel") {
+    for doc in manifest::of_kind(docs, k::GATEWAY) {
         let spec: TunnelSpec = manifest::spec_of(doc)?;
         apply_one(&doc.metadata.name, &spec)?;
     }
@@ -780,7 +781,7 @@ fn spawn_ngrok(
     store: &JsonStore<TunnelRecord>,
 ) -> Result<()> {
     which("ngrok").ok_or_else(|| {
-        Error::Invalid(
+        Error::Unavailable(
             super::po::t(
                 "`ngrok` not found in PATH — install it (https://ngrok.com/download) before \
                  using provider=ngrok",
@@ -891,7 +892,7 @@ fn spawn_cloudflare(
     insecure_skip_tls_verify: bool,
 ) -> Result<()> {
     which("cloudflared").ok_or_else(|| {
-        Error::Invalid(
+        Error::Unavailable(
             super::po::t(
                 "`cloudflared` not found in PATH — install it \
                  (https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/) \

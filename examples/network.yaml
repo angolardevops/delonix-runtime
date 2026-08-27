@@ -1,6 +1,6 @@
 # Network — a user-defined network. Containers join it with `--net <name>`.
 # Apply with:  delonix network apply -f examples/network.yaml
-apiVersion: delonix.io/v1
+apiVersion: networking.delonix.io/v1alpha1
 kind: Network
 metadata:
   name: appnet
