@@ -220,7 +220,7 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
             // `Egress` used to share this arm: one struct, two Kinds, both
             // listed because the schema describes what is ACCEPTED. v0.65.0
             // removed the Kind and the arm outlived it — see
-            // [`nenhum_kind_tipado_sobrevive_a_sua_remocao`].
+            // [`no_typed_kind_outlives_its_removal`].
             k::FIREWALL_POLICY => (
                 generator.subschema_for::<super::firewall::FwDocSpec>(),
                 "FwDocSpec",
@@ -696,7 +696,7 @@ mod tests {
     /// matching no branch satisfies every `then` vacuously. Measured before the
     /// enum existed — `Contaner`, `Banana` and `Egress` all validated clean.
     #[test]
-    fn um_kind_que_o_motor_nao_conhece_e_recusado() {
+    fn a_kind_the_engine_does_not_know_is_refused() {
         let s = manifest_schema(None).unwrap();
         let accepted: Vec<&str> = s["properties"]["kind"]["enum"]
             .as_array()
@@ -707,8 +707,8 @@ mod tests {
         for bogus in ["Contaner", "Banana", "Egress", "Storage", "ShareVolume"] {
             assert!(
                 !accepted.contains(&bogus),
-                "o schema aceita `kind: {bogus}`, que o motor recusa — o editor \
-                 daria visto verde a um manifesto que não aplica"
+                "the schema accepts `kind: {bogus}`, which the engine refuses — the \
+                 editor would green-tick a manifest that cannot apply"
             );
         }
     }
@@ -717,7 +717,7 @@ mod tests {
     /// spelling the LOADER resolves has to validate, or the schema flags a
     /// document the engine applies without complaint.
     #[test]
-    fn toda_a_grafia_que_o_loader_aceita_e_aceite_pelo_schema() {
+    fn every_spelling_the_loader_takes_is_taken_here() {
         let s = manifest_schema(None).unwrap();
         let accepted: Vec<&str> = s["properties"]["kind"]["enum"]
             .as_array()
@@ -727,12 +727,12 @@ mod tests {
             .collect();
         for (spelling, canonical) in super::super::manifest::KIND_ALIASES {
             if crate::cmd::kinds::facts(canonical).is_none() {
-                continue; // alias de um Kind removido
+                continue; // alias of a removed Kind
             }
             assert!(
                 accepted.contains(spelling),
-                "`kind: {spelling}` resolve para {canonical} no loader e o schema \
-                 recusa-o"
+                "`kind: {spelling}` resolves to {canonical} in the loader and the \
+                 schema refuses it"
             );
         }
     }
@@ -742,7 +742,7 @@ mod tests {
     /// v0.64.0 rename introduced — flagging the spelling `api-resources`
     /// publishes as the canonical one.
     #[test]
-    fn cada_kind_traz_o_grupo_de_apiversion_que_e_o_seu() {
+    fn each_kind_carries_its_own_apiversion_group() {
         let s = manifest_schema(None).unwrap();
         let top: Vec<&str> = s["properties"]["apiVersion"]["enum"]
             .as_array()
@@ -753,7 +753,7 @@ mod tests {
         for f in crate::cmd::kinds::all() {
             assert!(
                 top.contains(&f.api_version),
-                "{} vive em {} e o schema não aceita esse grupo",
+                "{} lives in {} and the schema does not accept that group",
                 f.kind,
                 f.api_version
             );
@@ -770,7 +770,7 @@ mod tests {
             assert_eq!(
                 allowed,
                 vec![own, super::super::manifest::LEGACY_API_VERSION],
-                "{kind} devia aceitar só o grupo dele e o legado"
+                "{kind} should accept only its own group and the legacy one"
             );
         }
     }
@@ -790,14 +790,15 @@ mod tests {
     /// once already: a second list of Kinds, kept by hand, next to the registry
     /// that governs everything else.
     #[test]
-    fn nenhum_kind_tipado_sobrevive_a_sua_remocao() {
+    fn no_typed_kind_outlives_its_removal() {
         let live: Vec<&str> = crate::cmd::kinds::all().map(|f| f.kind).collect();
         for kind in TYPED_KINDS {
             assert!(
                 live.contains(kind),
-                "{kind} tem schema tipado e já não está no registo — o schema \
-                 publicado valida um Kind que o motor recusa. Tira-o do \
-                 TYPED_KINDS no MESMO commit que o tira do `cmd::kinds`."
+                "{kind} has a typed schema and is no longer in the registry — the \
+                 published schema validates a Kind the engine refuses. Drop it \
+                 from TYPED_KINDS in the SAME commit that drops it from \
+                 `cmd::kinds`."
             );
         }
     }
