@@ -3568,6 +3568,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     } else {
         None
     };
+    c.log_path = log_path.clone();
 
     // `--net`: host (default, no own netns) | none (isolated netns, no
     // connectivity) | <name> (joins the NAMED netns that the holder creates in
@@ -6800,13 +6801,15 @@ pub(crate) fn cmd_logs(
 ) -> Result<()> {
     use std::io::{Read, Seek, Write};
     let c = find(store, id)?;
-    let p = images.root().join("containers").join(&c.id).join("log");
-    let mut f = std::fs::File::open(&p).map_err(|_| {
-        Error::Invalid(format!(
-            "no logs for {} (only detached containers have logs)",
-            c.name
-        ))
-    })?;
+    // The recorded path wins: `--log-file` puts the log elsewhere, and the
+    // fallback keeps records written before this field existed readable.
+    let p = c
+        .log_path
+        .as_deref()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| images.root().join("containers").join(&c.id).join("log"));
+    let mut f = std::fs::File::open(&p)
+        .map_err(|e| Error::Invalid(format!("no logs for {} at {}: {e}", c.name, p.display())))?;
     let mut out = std::io::stdout();
     let needs_cri = tail.is_some() || since.is_some() || timestamps;
 
