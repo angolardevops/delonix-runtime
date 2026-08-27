@@ -19,6 +19,7 @@
 #   --no-vm        não instala as dependências de VMs (libvirt/qemu/cloud-init)
 #   --no-tune      não aplica o tuning de kernel (sysctls/módulos)
 #   --no-binary    só dependências/configuração (usa um binário já instalado)
+#   --no-editor-plugin  não instala a extensão nos editores VS Code encontrados
 #   --with-cri     instala também o delonix-cri (nó Kubernetes)
 #   --low-ports    permite publicar portas <1024 (ex.: 80/443) sem root.
 #   --with-image-build
@@ -86,6 +87,7 @@ WITH_DELEGATE=1
 WITH_TUNE=1
 WITH_BINARY=1
 WITH_CRI=0
+WITH_EDITOR_PLUGIN=1
 USER_INSTALL=0
 LOW_PORTS=0
 WITH_IMAGE_BUILD=0
@@ -154,6 +156,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --no-vm)      WITH_VM=0 ;;
     --no-tune)    WITH_TUNE=0 ;;
+    --no-editor-plugin) WITH_EDITOR_PLUGIN=0 ;;
     --no-binary)  WITH_BINARY=0 ;;
     --with-cri)   WITH_CRI=1 ;;
     --low-ports)  LOW_PORTS=1 ;;
@@ -399,6 +402,25 @@ if [ "$WITH_BINARY" = 1 ]; then
   DELONIX_ASSET=$(cat "$TMP/.asset-delonix")
   verify_asset "$DELONIX_ASSET"
   step binary delonix "sha256 verified ($DELONIX_ASSET)"
+  # ---- Aviso de migração 0.64 -> 0.65+ ------------------------------------
+  # A v0.64.0 diz, em três sítios, «nada é obrigatório; os manifestos
+  # existentes carregam sem alteração». A v0.65.0 tornou isso falso no MESMO
+  # dia: removeu `kind: Storage`, `ShareVolume` e `Egress`. Quem leu as notas da
+  # 0.64 e adiou a migração tinha razão nesse dia e fica preso neste upgrade.
+  #
+  # O aviso corre ANTES de o binário ser substituído — depois já não há como
+  # saber de onde se veio — e só quando se vem MESMO de uma 0.64.x, para não
+  # ser ruído numa instalação nova.
+  PREV_VER=$(command -v delonix >/dev/null 2>&1 && delonix --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+  case "$PREV_VER" in
+    0.64.*)
+      warn "upgrading from $PREV_VER: three Kinds were REMOVED in 0.65.0 and manifests using them stop loading."
+      warn "  kind: Storage      -> kind: Volume with an nfs:/cifs:/webdav: block"
+      warn "  kind: ShareVolume  -> kind: Volume with a share: block"
+      warn "  kind: Egress       -> kind: NetworkPolicy with direction: egress"
+      warn "  migration: https://angolardevops.github.io/delonix-runtime/estrutura.html"
+      ;;
+  esac
   # Guarda explícita: sem `--user` isto é a 1ª chamada a sudo do script (a
   # autenticação eager foi adiada para depois desta secção — ver a nota mais
   # abaixo). Sem `|| die`, um sudo sem TTY/credencial cache abortava aqui por
@@ -420,6 +442,44 @@ if [ "$WITH_BINARY" = 1 ]; then
   # Um delonix ANTIGO mais à frente no PATH faz sombra ao acabado de instalar
   # (caso real: um build 0.3.0 em ~/.local/bin escondia o 0.4.2 e ressuscitava
   # bugs já corrigidos). Detectar e dizer alto qual apagar.
+  # ---- Extensão de editor -------------------------------------------------
+  # Um só caminho serve VS Code E os seus forks: o Cursor, o Windsurf, o
+  # VSCodium e o Antigravity partilham a CLI de extensões, verificado neste host
+  # (`antigravity --list-extensions` responde tal como o `code`).
+  #
+  # O `codex` NÃO entra: é um agente de linha de comandos da OpenAI, não um
+  # editor com extensões — não há onde instalar um `.vsix`.
+  #
+  # BEST-EFFORT, e a razão é a mesma da etiqueta de GPU que já chumbou este
+  # script num host sem VGA: uma conveniência não pode falhar a instalação do
+  # motor. Cada editor é tentado, uma falha avisa e segue.
+  if [ "$WITH_EDITOR_PLUGIN" = 1 ]; then
+    EDITORS_FOUND=""
+    for ed in code code-insiders codium cursor windsurf antigravity; do
+      command -v "$ed" >/dev/null 2>&1 && EDITORS_FOUND="$EDITORS_FOUND $ed"
+    done
+    if [ -z "$EDITORS_FOUND" ]; then
+      skip editor "no VS Code-family editor on this host"
+    else
+      dl_vsix() { fetch_asset delonix-vscode > "$TMP/.asset-vsix" 2>/dev/null; }
+      if spin editor plugin "downloading..." dl_vsix; then
+        VSIX_ASSET=$(cat "$TMP/.asset-vsix")
+        verify_asset "$VSIX_ASSET"
+        for ed in $EDITORS_FOUND; do
+          if "$ed" --install-extension "$TMP/$VSIX_ASSET" --force >/dev/null 2>&1; then
+            stepok editor "$ed"
+          else
+            warn "could not install the extension into $ed — install it by hand: $ed --install-extension <the .vsix from the release>"
+          fi
+        done
+      else
+        # Uma release anterior à extensão não traz o asset. Não é uma falha do
+        # host, e dizer «download failed» mandaria alguém procurar rede partida.
+        skip editor "this release ships no editor extension"
+      fi
+    fi
+  fi
+
   ACTIVE=$(command -v delonix 2>/dev/null || true)
   if [ -n "$ACTIVE" ] && [ "$ACTIVE" != "$BIN_DIR/delonix" ]; then
     warn "another delonix shadows the one just installed: '$ACTIVE' ($("$ACTIVE" --version 2>/dev/null || echo unknown version)) comes first in PATH — remove it (rm $ACTIVE) to use $BIN_DIR/delonix"
