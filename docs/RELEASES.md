@@ -4,6 +4,142 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.64.0 — os Kinds ganham grupos e nomes definitivos, e o `delonix.io/v1` continua a carregar
+
+A reorganização dos recursos do motor. **Nada do que está escrito hoje deixa de
+funcionar** — é o ponto de partida desta versão, não uma nota de rodapé.
+
+### O que se mediu antes de mexer
+
+| | valor |
+|---|---|
+| comandos na árvore pública | **263** (233 folhas) |
+| literais do NOME de um Kind espalhados pelo código | **284** |
+| … estimados na primeira contagem | 106 |
+| verbos declarativos repetidos (`ls`, `apply`, `rm`, `describe`) | **10 cópias cada** |
+
+A estimativa errou por um factor de quase três, e só o compilador a corrigiu: as
+regex contavam padrões, não sítios. Está registado porque é o número que decidiu
+introduzir constantes em vez de continuar a renomear à mão.
+
+### Os grupos
+
+Cada Kind passa a viver num grupo, e o grupo faz parte da identidade — um
+`apiVersion: storage.delonix.io/v1alpha1` num `kind: Pod` é recusado, com as
+**duas** formas aceites nomeadas no erro.
+
+```
+core.delonix.io/v1alpha1             Secret · Stack
+compute.delonix.io/v1alpha1          Pod · VirtualMachine · Container · Workload
+networking.delonix.io/v1alpha1       Network · NetworkRoute · NetworkPolicy · Dependency · Egress
+gateway.delonix.io/v1alpha1          Gateway · HTTPRoute · Ingress
+storage.delonix.io/v1alpha1          Volume · Storage · ShareVolume
+artifact.delonix.io/v1alpha1         Image
+infrastructure.delonix.io/v1alpha1   KubernetesCluster
+```
+
+**O `apiVersion: delonix.io/v1` continua a carregar.** A promessa de
+estabilidade diz que só muda com um `v2` que o continue a aceitar, e mantém-se:
+os 27 exemplos publicados foram migrados para os grupos novos e **os antigos
+validam na mesma**, verificado e não afirmado.
+
+### Quatro renomeações, com o nome antigo aceite
+
+| antes | agora |
+|---|---|
+| `Vm` | `VirtualMachine` |
+| `FirewallPolicy` | `NetworkPolicy` |
+| `Tunnel` | `Gateway` |
+| `Cluster` | `KubernetesCluster` |
+
+Alias **silencioso**, não depreciação: uma renomeação não muda o que o documento
+significa, portanto não há nada para migrar — e avisar sobre isso treinava as
+pessoas a ignorar avisos. Uma **fusão** (`Egress`→`NetworkPolicy`) continua a
+avisar, porque aí a semântica mudou.
+
+O alias vale em todo o lado, não só no carregador. Isso era um bug: o
+`explain Cluster` recusava um nome que o manifesto aceitava.
+
+### `kind: Container` é anunciado, não reescrito
+
+O `kind: Pod` passa a ser o caminho para declarar containers, e o
+`kind: Container` ganha um aviso por carregamento a dizê-lo. **Não é reescrito**,
+e a razão é a que quase nos escapou: um Pod constrói sempre uma netns partilhada
+e os membros entram nela por re-exec, portanto baixar o `Container` daria a cada
+container declarado um holder de netns extra e um caminho de rede diferente.
+Isso não é um degrau de grafia — é uma mudança de forma de execução aplicada em
+silêncio a manifestos que já correm.
+
+Daí uma forma nova no registo, `sunset`, distinta de `deprecated`: aquele é
+reescrito, este não. Ver [Estrutura de recursos](../estrutura.html).
+
+### `delonix api-resources`
+
+O primeiro comando da árvore nova. Lista o que o motor serve — plural,
+abreviaturas, `apiVersion` e o que cada documento se torna — a partir do mesmo
+registo que o parser, o schema, a completação e o reconciliador leem.
+
+```
+NAME               SHORTNAMES  APIVERSION                      KIND            FORM
+pods               po          compute.delonix.io/v1alpha1     Pod             primary
+containers                     compute.delonix.io/v1alpha1     Container       sunset → Pod
+egresses                       networking.delonix.io/v1alpha1  Egress          deprecated → NetworkPolicy
+```
+
+`get`, `describe` e `explain` aceitam agora as quatro grafias: `Pod`, `pod`,
+`pods`, `po`.
+
+### Códigos de saída: duas classes novas
+
+| código | quando |
+|---|---|
+| `69` | capacidade que este host não tem (`wg`, `virt-customize`, `ngrok`… por instalar) |
+| `124` | o prazo esgotou-se (`stack wait --timeout`) |
+
+As duas respondiam `1` — o mesmo número de um apply rebentado. Um `stack wait`
+que esgota o tempo lido como «rebentou» faz um reconciliador recriar um recurso
+que estava a subir. `69` é o `EX_UNAVAILABLE` do `sysexits.h`; `124` é o do
+`timeout(1)`. **`3`, `4` e `5` não mudam.**
+
+Os erros ganham também identidade textual (`DX_NOT_FOUND`, `DX_TIMEOUT`, …),
+visível no corpo de erro do `serve api`, para quem classifica por texto em vez
+de `$?`.
+
+### Três bugs corrigidos
+
+* **Um sinal deixava o terminal em modo raw.** Um `SIGTERM` a um
+  `container exec -it` deixava a shell sem eco e sem edição de linha até se
+  escrever `reset` às cegas. Acontecia com qualquer morte por sinal — um `kill`,
+  um timeout de CI, o OOM killer.
+* **`stack apply --replace` ignorava autorizações em silêncio.** `--replace
+  container/web` (minúsculas) não casava, e o apply era recusado a mandar passar
+  a flag que a pessoa julgava ter passado. Num portão destrutivo é a pior
+  maneira de falhar.
+* **`kind: Pod` estava recomendado e inutilizável ao mesmo tempo.** As
+  referências de `Dependency`, `NetworkPolicy` e `HTTPRoute` só reconheciam
+  `kind: Container`.
+
+Os três foram encontrados a **usar** o caminho novo, não a lê-lo.
+
+### O que NÃO entra
+
+* **`kind: Service`** — previsto, não implementado. A publicação de portas
+  continua a fazer-se pelo `-p` do `container run` e pelo
+  `delonix net ingress publish`.
+* Os verbos declarativos (`get`, `describe`, `delete`, `wait`) — o
+  `api-resources` é o primeiro; os restantes vêm a seguir.
+
+### Migrar
+
+* **Nada é obrigatório.** Os manifestos existentes carregam sem alteração.
+* Quem quiser o vocabulário novo: trocar o `apiVersion` pelo grupo do Kind e o
+  nome pelo canónico. `delonix api-resources` diz qual é qual.
+* Quem tem `kind: Container` verá um aviso por carregamento. Migrar para
+  `kind: Pod` **muda a forma de execução** (netns partilhada) — não é uma troca
+  de nome, e a página de estrutura explica porquê.
+
+---
+
 ## v0.63.1 — o instalador que não instalava a sua própria actualização
 
 Bug report real: `~/.local/bin/delonix` de um host de desenvolvimento estava preso
@@ -1308,12 +1444,12 @@ dependência nova. A forma legada de um octeto continua a querer dizer
    `forward` (0), que tem `policy drop`. O mesmo mapa passa a ser consultado nas
    duas chains, com teste a exigir as duas consultas.
 2. **O `vm init` gerava um projecto que falhava o seu próprio `stack validate`** —
-   um `kind: VirtualMachine` com `network: <nome>-net` e nenhum `kind: Network` que a criasse.
+   um `kind: Vm` com `network: <nome>-net` e nenhum `kind: Network` que a criasse.
    Passa a gerar os três Kinds.
 
 ### Também nesta versão
 
-* **`kind: VirtualMachine` ganha `build:`** — a face declarativa do `delonix vm build`, com a
+* **`kind: Vm` ganha `build:`** — a face declarativa do `delonix vm build`, com a
   regra «exactamente um de `disk`/`build`». A tag deixa de ser copiada à mão
   entre dois comandos.
 * **`vm ls` diz o que a VM É** — `IMAGE`, `BACKEND`, `AGE`, `NAMESPACE`. E uma
@@ -1620,7 +1756,7 @@ Duas consequências, ambas medidas:
 - **`vm start`/`restart` reiniciava uma máquina materialmente diferente** da que
   o operador criara. O próprio `--help` documentava a perda como se fosse um
   limite natural.
-- **O reconciliador não pode comparar o que o registo não guarda.** Um `kind: VirtualMachine`
+- **O reconciliador não pode comparar o que o registo não guarda.** Um `kind: Vm`
   aceita 36 campos e convergia cinco.
 
 **Quinta vez que esta base paga a mesma regra** (antes: `-v`, `-p` em rede
@@ -1689,7 +1825,7 @@ funcionar* ser recusado cinco vezes.
 seria a segunda cópia à mão que o ADR-0007 existe para abolir; a recusa diz o que
 escrever em vez dele), e os filhos de um `kind: Stack` continuam por validar.
 
-## `kind: VirtualMachine` ganha `build:`, e o `vm ls` diz o que a VM É
+## `kind: Vm` ganha `build:`, e o `vm ls` diz o que a VM É
 
 Construir uma imagem de VM a partir de um `VMfile` exigia dois passos e uma tag
 copiada à mão entre eles (`delonix vm build -t x`, depois um manifesto com
@@ -1774,7 +1910,7 @@ condição que discorde de quem realiza é pior que condição nenhuma.
 ## `vm init` gerava um projecto que se recusava a si mesmo
 
 Medido num `vm init` acabado de correr: o manifesto trazia `network: <nome>-net`
-no `kind: VirtualMachine` e **nenhum `kind: Network` que a criasse** — o projecto falhava o
+no `kind: Vm` e **nenhum `kind: Network` que a criasse** — o projecto falhava o
 seu próprio `stack validate` («is not declared nor does it exist»,
 `1 unresolved reference(s)`). **Um scaffold cujo primeiro acto é produzir algo
 que não aplica ensina a coisa errada sobre a ferramenta.** Passa a gerar os três
@@ -1948,7 +2084,7 @@ juntas mentiam. Agora o veredicto condiz, e `--strict` transforma-o em exit code
 para a CI que quer que o erro de escrita pare o pipeline. Um manifesto limpo
 imprime exactamente o que imprimia antes.
 
-## `kind: VirtualMachine` deixa de ser um `type: object` para o editor
+## `kind: Vm` deixa de ser um `type: object` para o editor
 
 A linha que a doc manda pôr no topo do manifesto —
 `# yaml-language-server: $schema=…` — cobria 4 dos 17 Kinds. O `Vm` era o pior
@@ -2108,7 +2244,7 @@ recurso tem de ser persistido e replicado, não só usado na criação*.
 antes de montar seja o que for.
 
 **`--net-burst` tinha DUAS bases** e os limites saturavam em silêncio; o
-`ssh.port` do `kind: KubernetesCluster` estava no schema e ligava sempre a 22; o `secret`
+`ssh.port` do `kind: Cluster` estava no schema e ligava sempre a 22; o `secret`
 acumulava `$` no dry-run e recusava um manifesto escrito à mão.
 
 ## Varredura das 70 flags do `container run`
@@ -4204,7 +4340,7 @@ no dia em que a pool mudasse, e o sintoma seria o pior possível: uma VM com
 firewall num endereço que ninguém usa, reportada como isolada.
 
 Novidades de superfície: `vm create --namespace <ns>`, `metadata.namespace` no
-`kind: VirtualMachine`, e a namespace visível no `vm describe`. `Vm.namespace` é persistido
+`kind: Vm`, e a namespace visível no `vm describe`. `Vm.namespace` é persistido
 (registos antigos ficam em `default`, que é exactamente o que eram) e
 reconstruído pelo `config_from`, com teste dedicado — a namespace desaparecer no
 primeiro `vm start` seria a quarta ocorrência de uma armadilha já documentada
@@ -5044,7 +5180,7 @@ spec:
   `kind: Container`/`Vm`/`Pod` sintético (herda `metadata`) e segue o apply por-Kind normal,
   tal como um filho de `kind: Stack`. `apply`/`stack apply`/`--dry-run`/`ls`/`describe` e o
   `apply -f` por-Kind vêem o filho **sem wiring novo**.
-- **`type: microvm`** (ADR-0006) baixa para `kind: VirtualMachine` com o **backend forçado a
+- **`type: microvm`** (ADR-0006) baixa para `kind: Vm` com o **backend forçado a
   `cloud-hypervisor`** (o VMM de microVM). Um bloco que peça outro backend (`backend: libvirt`)
   é contradição → erro dirigido. Precisa de CH instalado + imagem CH-bootável (não o golden k8s,
   que é libvirt-only).
@@ -7818,7 +7954,7 @@ corrigidos de imediato em vez de só reportados.
   `sharevolume rm --purge-data` nessa fatia apaga o NAS partilhado inteiro. Corrigido na
   raiz: `valid_name` passa a recusar qualquer nome a começar por `.` ou a conter `..`,
   protegendo todos os consumidores do store, não só o ShareVolume.
-- **Injecção de argv SSH via token do `kind: Gateway`.** O token do provider `pinggy`
+- **Injecção de argv SSH via token do `kind: Tunnel`.** O token do provider `pinggy`
   era embutido como o ÚLTIMO argumento posicional do `ssh`, sem `--` a separar. Um
   token a começar por `-` (ex.: `-oProxyCommand=<comando>`) é interpretado pelo `ssh`
   como uma OPÇÃO, executando o comando do atacante via `/bin/sh -c` antes de qualquer
@@ -7865,7 +8001,7 @@ próprio alvo final.
 
 ---
 
-## v0.10.0 — kind: Gateway, kind: ShareVolume, e um `cluster kubeadm` finalmente real
+## v0.10.0 — kind: Tunnel, kind: ShareVolume, e um `cluster kubeadm` finalmente real
 
 O caminho `delonix cluster kubeadm`/`cluster apply` (modo `vm`) nunca tinha corrido de
 ponta a ponta antes desta release — cada tentativa real de o levar até um cluster
@@ -7873,7 +8009,7 @@ Kubernetes a funcionar encontrou um bug novo, corrigido no acto. Também dois Ki
 (`Tunnel`, `ShareVolume`), ambos validados ao vivo com tráfego/isolamento reais, não
 simulados.
 
-### `kind: Gateway` — expor um serviço à internet pública
+### `kind: Tunnel` — expor um serviço à internet pública
 
 `delonix tunnel apply|expose|ls|describe|rm`: leva tráfego da internet pública até UMA
 porta local, sem conta, sem IP público, sem tocar no router. Três providers, cada um o
@@ -7953,7 +8089,7 @@ um `--ports` opt-in (sonda TCP a um punhado de portas conhecidas). `image --vm l
 coluna `UBUNTU` renomeada para `DISTRO`, mais uma coluna `KERNEL` nova (a versão do
 kernel instalado, lida via `virt-cat` sem nunca arrancar a imagem).
 
-### Layout YAML agrupado para `kind: VirtualMachine`/`kind: Container`
+### Layout YAML agrupado para `kind: Vm`/`kind: Container`
 
 Os specs destes dois Kinds tinham crescido para 30-40 campos sem estrutura nenhuma além
 de comentários. Passam a aceitar uma forma AGRUPADA (`resources:`/`network:`/`boot:`/
@@ -8470,7 +8606,7 @@ com o fix da conexão do console. Esta release traz o que faltava.
 - **`vm create --wait [--boot-timeout N]`** — spinner `a arrancar…` até a VM
   ganhar IP, depois `up — ip …`. Em rede user-mode (libvirt rootless, sem IP
   alcançável) orienta para a consola em vez de esperar o timeout em vão.
-- `vnc` reconhecido no `kind: VirtualMachine` (deixa de dar falso aviso de campo desconhecido).
+- `vnc` reconhecido no `kind: Vm` (deixa de dar falso aviso de campo desconhecido).
 
 ```
 delonix vm pull
@@ -8876,7 +9012,7 @@ Binário `delonix` reestruturado em grupos semânticos (`container`/`image`/`bui
 - **CLI reorganizado**: `delonix container run` (-v/--volume, --net <rede-custom>), `delonix image`, `delonix build` (Dockerfile/Delonixfile), `delonix vm`, `delonix volumes`, `delonix network`.
 - **Manifesto declarativo** (`delonix-manifest.yaml`, estilo Kubernetes): `apply` idempotente por-Kind em cada grupo + `delonix stack apply` para todos os Kinds de uma vez.
 - **`delonix image --vm ls|pull|push|build`**: imagem VM dourada (Ubuntu 26.04 LTS + kubeadm/kubelet/kubectl + `delonix-cri` pré-instalado), publicável/obtível como artefacto OCI.
-- **`delonix cluster apply -f cloud.yaml`**: bootstrap `kubeadm` idempotente sobre SSH em hosts já vivos (`kind: KubernetesCluster`) — idempotência sem-estado, progresso por-etapa.
+- **`delonix cluster apply -f cloud.yaml`**: bootstrap `kubeadm` idempotente sobre SSH em hosts já vivos (`kind: Cluster`) — idempotência sem-estado, progresso por-etapa.
 - **`delonix completion <shell>`**: autocompletion (bash/zsh/fish/elvish/powershell).
 - **`delonix-cri`**: primeiro binário standalone (`dist/delonix-cri.service` incluído) — endpoint CRI para o kubelet.
 
