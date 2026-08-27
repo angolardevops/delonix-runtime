@@ -203,6 +203,17 @@ check "df: paralelo e sequencial dao o mesmo" ok bash -c '
 # Sem `--force` e sem terminal, o gc RECUSA-SE — nunca termina nada por engano.
 check "netns gc recusa sem --force" fail "$BIN" net netns gc
 check "netns gc --help" ok "$BIN" net netns gc --help
+# Um `down` contra uma raiz APAGADA não a pode recriar: o `FileLock` fazia
+# `create_dir_all`, e a raiz-fantasma resultante fazia o `gc` responder «esta
+# raiz ainda existe» sobre os processos que a remoção acabara de orfanar —
+# escondendo-os do único comando que ainda lhes chega. Medido ao vivo: a
+# varredura listou 32 órfãos e saltou os três que lhe tinham acabado de ser
+# mostrados.
+check "netns down nao recria uma raiz apagada" ok bash -c '
+  t=$(mktemp -d); rmdir "$t"
+  DELONIX_ROOT="$t" DELONIX_NET_RUNTIME_DIR="$t-run" '"'$BIN'"' net netns down >/dev/null 2>&1
+  rc=0; [ -d "$t" ] && rc=1
+  rm -rf "$t" "$t-run"; exit $rc'
 check "completion bash" ok "$BIN" completion bash
 
 # --- os NOMES completam-se, e não só o script de registo (C-2) ------------

@@ -1087,6 +1087,20 @@ fn start_control(pin: i32) -> Result<i32> {
 /// Tears down the infra: kills the slirp and the holder (which frees the netns) and cleans up the
 /// artifacts. Best-effort and idempotent.
 pub fn teardown() {
+    // A state root that does not exist has no infra registered against it, and
+    // building one to find that out is worse than useless — it is actively
+    // harmful. `FileLock::acquire` does `create_dir_all(<root>/ingress)`, so a
+    // `netns down` against a deleted root RECREATES it, holding nothing but a
+    // lock file. That ghost root then makes `gc::classify_stray` answer "this
+    // root still exists" for the very pin, control and slirp the deletion
+    // orphaned — hiding them from the only command that can still reach them.
+    //
+    // Measured live while validating `net netns gc`: the sweep listed 32 stray
+    // processes and skipped the three it had just been shown, because a
+    // `netns down` a moment earlier had put their root back on disk.
+    if !base_root().exists() {
+        return;
+    }
     let _lock = FileLock::acquire();
     teardown_locked();
 }
