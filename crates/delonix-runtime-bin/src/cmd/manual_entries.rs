@@ -1211,6 +1211,15 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["net netns up", "net netns status", "container start"],
     },
     Entry {
+        path: "net netns gc",
+        group: "Lifecycle",
+        examples: &[
+            ("what is abandoned, and nothing else — the default only reports", "delonix net netns gc"),
+            ("reclaim it: pin, control process and slirp of every state root that no longer exists", "delonix net netns gc --force"),
+        ],
+        see_also: &["net netns down", "net netns status", "system prune"],
+    },
+    Entry {
         path: "net netns up",
         group: "Lifecycle",
         examples: &[

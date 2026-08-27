@@ -550,7 +550,13 @@ pub fn run(config_path: &Path) -> Result<()> {
     // uses the process default; without this, it panics. Idempotent (ignores if
     // already installed by another part of the process).
     let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
+    delonix_runtime_core::alloc_tuning::limit_malloc_arenas();
     let rt = tokio::runtime::Builder::new_multi_thread()
+        // `worker_threads` is DELIBERATELY left at the default here, unlike the
+        // three unix-socket servers. This one carries real traffic — it is the
+        // L7 path in front of every auto-registered container — and nobody has
+        // measured it under load. Capping the pool on an argument that only
+        // holds for idle local sockets would be a guess dressed as a decision.
         .enable_all()
         .build()
         .map_err(|e| Error::Runtime {

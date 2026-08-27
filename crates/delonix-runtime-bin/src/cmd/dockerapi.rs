@@ -285,7 +285,12 @@ pub fn run(addr: Option<String>) -> Result<()> {
     let store = Store::open(root.join("containers"))?;
     let state = Arc::new(AppState { images, store });
 
+    delonix_runtime_core::alloc_tuning::limit_malloc_arenas();
     let rt = tokio::runtime::Builder::new_multi_thread()
+        // Same shape as the CRI and management servers: a unix socket serving
+        // `docker` and `docker compose`, whose work is spawning containers and
+        // reading the store, never computing.
+        .worker_threads(2)
         .enable_all()
         .build()
         .map_err(|e| Error::Runtime {

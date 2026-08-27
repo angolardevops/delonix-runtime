@@ -459,12 +459,13 @@ fn print_plan(p: &super::prune::PrunePlan, auto: bool, would_run: bool) {
     println!(
         "{}",
         super::po::tf(
-            "  {d} orphan dir(s), {b} blob(s), {g} cgroup(s), {n} network(s) — {size}",
+            "  {d} orphan dir(s), {b} blob(s), {g} cgroup(s), {n} network(s), {k} build-cache entr(y/ies) — {size}",
             &[
                 ("d", &p.dirs.to_string()),
                 ("b", &p.blobs.to_string()),
                 ("g", &p.cgroups.to_string()),
                 ("n", &p.networks.to_string()),
+                ("k", &p.build_cache.to_string()),
                 ("size", &p.bytes_b().fmt()),
             ]
         )
@@ -557,13 +558,18 @@ fn cmd_prune(all: bool, force: bool, auto: bool, threshold: u8, dry_run: bool) -
     }
     let i = super::prune::sweep_images(&images, &store, all)?;
     let rmn = super::prune::sweep_networks(&store)?;
+    // Build-cache entries nothing has asked for in a week. Debris in the same
+    // sense as an orphan blob: rebuildable content that no longer earns the
+    // space. See `prune::BUILD_CACHE_TTL_DAYS` for why it is last-USE and not age.
+    let (bc, bc_bytes) = super::prune::sweep_build_cache(images.root());
 
     let mut total = c.freed;
     total.add(i.freed);
+    total.add(bc_bytes);
     println!(
         "{}",
         super::po::tf(
-            "removed: {c} container(s), {d} orphan dir(s), {i} image(s), {b} blob(s), {g} cgroup(s), {p} orphan port(s), {n} orphan network(s) — {size} freed",
+            "removed: {c} container(s), {d} orphan dir(s), {i} image(s), {b} blob(s), {g} cgroup(s), {p} orphan port(s), {n} orphan network(s), {k} build-cache entr(y/ies) — {size} freed",
             &[
                 ("c", &c.containers.to_string()),
                 ("d", &c.dirs.to_string()),
@@ -572,6 +578,7 @@ fn cmd_prune(all: bool, force: bool, auto: bool, threshold: u8, dry_run: bool) -
                 ("g", &c.cgroups.to_string()),
                 ("p", &c.ports.to_string()),
                 ("n", &rmn.to_string()),
+                ("k", &bc.to_string()),
                 ("size", &total.fmt()),
             ]
         )
@@ -871,9 +878,45 @@ fn human(b: u64) -> String {
     format!("{v:.1} {}", U[i])
 }
 
+/// The areas of the state root `system df` accounts for, and the subdirectory
+/// each one measures.
+///
+/// **This list is not the whole answer, and that is the point.** It used to be,
+/// and the result was measured on the host this was written against: the state
+/// root held **166 GB**, `system df` reported **94 GiB**, and the 72 GB
+/// difference — `vms/` (59 G), `build-cache/` (9.8 G) and a directory a
+/// neighbouring script had put there — was invisible to the one command whose
+/// entire job is to say where the disk went. The `RECLAIMABLE` column, the
+/// column that exists to be acted on, said **4 KiB**.
+///
+/// A hardcoded list can only ever describe the areas somebody remembered to add
+/// to it, so the sweep below ALSO walks the root and reports whatever is left
+/// over as `other`. A directory added by a future feature — or by something
+/// that is not this engine at all — then shows up as an unnamed row rather than
+/// as nothing, which is the difference between a number to investigate and a
+/// silence to be misled by.
+const DF_AREAS: &[(&str, &str)] = &[
+    ("images", "blobs"),
+    ("layers", "layers"),
+    ("containers", "containers"),
+    ("volumes", "volumes"),
+    ("VM images", "vm-images"),
+    ("VMs", "vms"),
+    ("build cache", "build-cache"),
+];
+
 /// `system df` — where the disk is. It exists for a concrete reason: orphan
 /// rootfs dirs once piled up 45 GiB with nothing reporting them, until the kubelet marked
 /// the node with `disk-pressure`. The `RECLAIMABLE` column is the one that matters.
+///
+/// Each area's reclaimable share is decided by the SAME code the matching
+/// `prune` uses, never by a second walk that agrees with it today:
+/// `containers` by the orphan-directory test `system prune` applies, `VMs` by
+/// [`super::prune::doomed_vm_entries`] — whose own doc comment calls itself the
+/// single place that decision is made — and `build cache` in full, because it
+/// is a content-addressed cache whose loss costs a slower next build and
+/// nothing else. An area with no reclaimable notion of its own reports `-`,
+/// which means *not known*, never *zero*.
 fn cmd_df() -> Result<()> {
     let root = state_root();
     let (_, store) = open_stores()?;
@@ -894,27 +937,71 @@ fn cmd_df() -> Result<()> {
         }
     }
 
-    println!(
-        "{:<16}  {:>10}  {:>12}",
+    // Both questions about `vms/` come from ONE scan, through the prune's own
+    // classifier: what a prune would free, and what nothing accounts for but
+    // prune deliberately leaves alone. A second walk here would be a second
+    // opinion, and the whole point is that there is only one.
+    let vm_scan = super::prune::scan_vm_state(&root).ok();
+    let vms_dir = root.join("vms");
+    let measure_entries =
+        |names: &[String]| -> u64 { names.iter().map(|e| dir_size(&vms_dir.join(e))).sum() };
+    let doomed_vms = vm_scan.as_ref().map(|s| s.doomed()).unwrap_or_default();
+    let unref_vms = vm_scan
+        .as_ref()
+        .map(|s| s.unreferenced())
+        .unwrap_or_default();
+    let vm_recl: u64 = measure_entries(&doomed_vms);
+    let vm_unref: u64 = measure_entries(&unref_vms);
+
+    let mut table = super::output::Table::new(&[
         super::po::t("AREA"),
         super::po::t("SIZE"),
-        super::po::t("RECLAIMABLE")
-    );
-    for (label, dir) in [
-        (super::po::t("images"), root.join("blobs")),
-        ("layers", root.join("layers")),
-        ("containers", containers_dir.clone()),
-        ("volumes", root.join("volumes")),
-        (super::po::t("VM images"), root.join("vm-images")),
-    ] {
-        let size = dir_size(&dir);
-        let recl = if label == "containers" {
-            human(orphan)
-        } else {
-            "-".to_string()
+        super::po::t("RECLAIMABLE"),
+    ])
+    .right_align(1)
+    .right_align(2);
+
+    let mut accounted = 0u64;
+    for (label, sub) in DF_AREAS {
+        let size = dir_size(&root.join(sub));
+        accounted += size;
+        let recl = match *sub {
+            "containers" => human(orphan),
+            "vms" => human(vm_recl),
+            // A content-addressed build cache: every byte of it is rebuildable,
+            // and nothing in the engine ever expires it (`save_to_cache` only
+            // ever adds). Reporting it as reclaimable is what makes it visible
+            // to the operator BEFORE the disk fills.
+            "build-cache" => human(size),
+            _ => "-".to_string(),
         };
-        println!("{label:<16}  {:>10}  {recl:>12}", human(size));
+        table.row(vec![super::po::t(label).to_string(), human(size), recl]);
     }
+
+    // Whatever else lives in the state root. Counted, never named: this row
+    // exists precisely for the things nobody catalogued, so it cannot pretend
+    // to know what they are or whether they are safe to remove.
+    let (other, other_n) = df_unaccounted(&root);
+    if other_n > 0 {
+        table.row(vec![
+            super::po::t("other").to_string(),
+            human(other),
+            "-".to_string(),
+        ]);
+    }
+    table.print();
+
+    println!(
+        "\n{}",
+        super::po::tf(
+            "total {size} in {root}",
+            &[
+                ("size", &human(accounted + other)),
+                ("root", &root.display().to_string()),
+            ]
+        )
+    );
+
     if orphan_n > 0 {
         println!(
             "\n{}",
@@ -924,7 +1011,71 @@ fn cmd_df() -> Result<()> {
             )
         );
     }
+    if !doomed_vms.is_empty() {
+        println!(
+            "\n{}",
+            super::po::tf(
+                "{n} VM state entr(y/ies) nothing references — {size} reclaimable via `delonix vm prune`.",
+                &[("n", &doomed_vms.len().to_string()), ("size", &human(vm_recl))]
+            )
+        );
+    }
+    if !unref_vms.is_empty() {
+        println!(
+            "\n{}",
+            super::po::tf(
+                "{n} director(y/ies) under `vms/` ({size}) that no VM record points into: {list}\n\
+                 `vm prune` will NOT take these — a bare directory is somebody's data, and that \
+                 rule once stopped a sweep from destroying 53 GiB of live disks. They are named \
+                 here because until now nothing named them at all; removing them is your call.",
+                &[
+                    ("n", &unref_vms.len().to_string()),
+                    ("size", &human(vm_unref)),
+                    ("list", &unref_vms.join(", ")),
+                ]
+            )
+        );
+    }
+    if other_n > 0 {
+        println!(
+            "\n{}",
+            super::po::tf(
+                "{n} entr(y/ies) in the state root this engine does not manage ({size}) — listed as `other` because nothing here can say whether they are safe to remove.",
+                &[("n", &other_n.to_string()), ("size", &human(other))]
+            )
+        );
+    }
     Ok(())
+}
+
+/// `(bytes, entries)` of everything at the top of the state root that no
+/// [`DF_AREAS`] row already counts — the catch-all that stops a future
+/// directory from going missing the way `vms/` did.
+///
+/// Deliberately shallow: it names top-level entries only, and never descends
+/// looking for a better label. Guessing at the identity of something the engine
+/// did not create is how a cleanup command ends up removing somebody's data.
+fn df_unaccounted(root: &std::path::Path) -> (u64, usize) {
+    let known: std::collections::HashSet<&str> = DF_AREAS.iter().map(|(_, sub)| *sub).collect();
+    let mut bytes = 0u64;
+    let mut n = 0usize;
+    let Ok(rd) = std::fs::read_dir(root) else {
+        return (0, 0);
+    };
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if known.contains(name.as_str()) {
+            continue;
+        }
+        let size = if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            dir_size(&e.path())
+        } else {
+            e.metadata().map(|m| m.len()).unwrap_or(0)
+        };
+        bytes += size;
+        n += 1;
+    }
+    (bytes, n)
 }
 
 /// `system info` — what the engine IS on this machine. Without it, diagnosing

@@ -8,6 +8,7 @@
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub mod alloc_tuning;
 pub mod cred_vault;
 mod error;
 pub mod events;

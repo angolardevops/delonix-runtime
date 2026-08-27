@@ -354,11 +354,22 @@ fn read_pid(path: &Path) -> Option<i32> {
 /// pid this way and says why; this is the same guard on the path that kills the
 /// holder, the control plane and the slirp.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum PidKind {
+pub enum PidKind {
     Slirp,
     Control,
     /// The pin — and, deliberately, a PRE-SPLIT holder too (see [`argv_matches`]).
     Pin,
+}
+
+impl PidKind {
+    /// How this process is named in a report.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PidKind::Slirp => "slirp",
+            PidKind::Control => "control",
+            PidKind::Pin => "pin",
+        }
+    }
 }
 
 /// Whether `argv` is the process `kind` claims. PURE, so the recycled-pid and
@@ -370,7 +381,7 @@ enum PidKind {
 /// was started by a PRE-v0.42.0 binary and spells itself `holder`. Matching only
 /// today's argv would make the recovery command refuse to kill the very process
 /// it exists to remove — and it would fail silently, since a mismatch is a no-op.
-fn argv_matches(kind: PidKind, argv: &[String]) -> bool {
+pub(crate) fn argv_matches(kind: PidKind, argv: &[String]) -> bool {
     let pair = |a: &str, b: &str| argv.windows(2).any(|w| w[0] == a && w[1] == b);
     match kind {
         // Not `contains`: the target pid trails the argv, so a container whose pid
@@ -381,8 +392,20 @@ fn argv_matches(kind: PidKind, argv: &[String]) -> bool {
     }
 }
 
+/// Which of the three infra processes `argv` is, if any.
+///
+/// The read-side counterpart of [`argv_matches`], for a caller that has an argv
+/// and no claim to check it against — [`crate::gc`] scanning `/proc`. Sharing
+/// the same matcher is what keeps the sweep and the teardown agreeing on what a
+/// pin is, including the pre-split `netns holder` spelling.
+pub(crate) fn argv_kind(argv: &[String]) -> Option<PidKind> {
+    [PidKind::Pin, PidKind::Control, PidKind::Slirp]
+        .into_iter()
+        .find(|&kind| argv_matches(kind, argv))
+}
+
 /// The argv of a live process, NUL-separated in `/proc/<pid>/cmdline`.
-fn proc_argv(pid: i32) -> Option<Vec<String>> {
+pub(crate) fn proc_argv(pid: i32) -> Option<Vec<String>> {
     let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
     Some(
         raw.split(|b| *b == 0)
@@ -1326,6 +1349,9 @@ fn start_slirp(holder_pid: i32) -> Result<()> {
 /// newer one is safe by construction (see `stale_holder_message` for what that
 /// used to cost).
 pub fn pin_main() -> ! {
+    // The longest-lived process this engine has: it holds the namespaces for
+    // the whole life of the infra and never restarts. See `alloc_tuning`.
+    delonix_runtime_core::alloc_tuning::limit_malloc_arenas();
     write_status("pinned");
     // Nothing to serve, nothing to poll — just stay alive holding the namespaces.
     loop {
@@ -1344,6 +1370,9 @@ pub fn pin_main() -> ! {
 /// reattaches instead — see `setup_infra_netns` for why re-running the build
 /// would be actively destructive.
 pub fn control_main() -> ! {
+    // Measured on the host this was written against: 637 MB of `VmSize` and
+    // nine 64 MiB arenas, for 2.3 MB of RSS and six threads. See `alloc_tuning`.
+    delonix_runtime_core::alloc_tuning::limit_malloc_arenas();
     let started = reattach_or_setup_infra_netns().and_then(|_| {
         let _ = std::fs::remove_file(control_sock_path());
         let listener =

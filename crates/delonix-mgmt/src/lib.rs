@@ -54,7 +54,12 @@ pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), Error> {
 /// Like [`serve_blocking`], but with the CLI binary explicit (for tests).
 pub fn serve_blocking_with(base: PathBuf, bin: PathBuf, addr: &str) -> Result<(), Error> {
     let path = addr.strip_prefix("unix://").unwrap_or(addr).to_string();
+    delonix_runtime_core::alloc_tuning::limit_malloc_arenas();
     let rt = tokio::runtime::Builder::new_multi_thread()
+        // A local control-plane API on a unix socket — see the CRI server for
+        // the reasoning. The expensive endpoint here (`/v1/dash`) is a disk
+        // walk, which is I/O-bound too.
+        .worker_threads(2)
         .enable_all()
         .build()
         .map_err(|e| Error::Runtime {

@@ -23,6 +23,19 @@ pub enum NetnsCmd {
     },
     /// Force tear-down of the ingress infra (kills slirp + holder, frees the netns).
     Down,
+    /// Reclaim infra left behind by state roots that no longer exist.
+    ///
+    /// `down` tears the infra down BY PIDFILE, and the pidfiles live inside
+    /// `$DELONIX_ROOT/ingress/`. Delete the root — a test harness cleaning up, a
+    /// `/tmp` root swept by the system — and the pin, the control process and
+    /// the slirp keep running with no name any command can reach. This finds
+    /// them by asking `/proc` instead, and never touches a root that still
+    /// exists, this one least of all.
+    Gc {
+        /// Terminate them. Without this, the sweep only reports.
+        #[arg(long, short)]
+        force: bool,
+    },
     /// Attach a netns to delonix0 via veth (the holder is the netns/veth factory).
     Attach {
         /// Netns name (typically a container id/short-id).
@@ -321,6 +334,7 @@ pub fn run(action: NetnsCmd) -> Result<()> {
             println!("ingress DOWN — infra netns torn down.");
             Ok(())
         }
+        NetnsCmd::Gc { force } => cmd_gc(force),
         NetnsCmd::Attach { name, ip } => {
             let (netns, assigned) = infra::attach_container(&name, "ingress", "default")?;
             println!(
@@ -381,6 +395,93 @@ pub fn run(action: NetnsCmd) -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// `net netns gc` — the reaper for infra whose state root is gone.
+///
+/// # Why a reaper was needed at all
+///
+/// Measured on the host this was written against: **11 pin/control pairs and 14
+/// slirps running, 10 of the 11 pairs pointing at a `DELONIX_ROOT` that had been
+/// deleted**, holding 107 MiB of swap between them. The binary that started
+/// several of them was gone too. Every integration-test run that makes a
+/// temporary root, uses it and removes the directory leaks one of each, for the
+/// life of the machine — and `net netns down` cannot help, because the pidfiles
+/// it reads went with the directory.
+///
+/// # Reports first, and by default only reports
+///
+/// A command that scans `/proc` and signals what it finds is one classification
+/// bug away from killing another engine's networking — which is exactly the
+/// mistake `reap_orphan_slirp` had to be corrected for. So: the current root is
+/// never a candidate, another root that still exists is never a candidate, and
+/// an unreadable environment is *unknown* rather than *abandoned*. Without
+/// `--force` nothing is signalled at all.
+fn cmd_gc(force: bool) -> Result<()> {
+    let root = delonix_runtime_core::Store::default_root();
+    // `Store::default_root()` is `<root>/containers`; the state root is its parent.
+    let state_root = root.parent().unwrap_or(&root).to_path_buf();
+    let strays = delonix_net::gc::find_strays(&state_root);
+
+    if strays.is_empty() {
+        println!(
+            "{}",
+            super::po::t("no abandoned network infra — nothing to reclaim")
+        );
+        return Ok(());
+    }
+
+    let mut table = super::output::Table::new(&["PID", "KIND", "STATE ROOT", "COMMAND"]);
+    for s in &strays {
+        table.row(vec![
+            s.pid.to_string(),
+            s.kind.as_str().to_string(),
+            s.root
+                .as_ref()
+                .map(|r| r.display().to_string())
+                .unwrap_or_else(|| "—".into()),
+            s.argv0.clone(),
+        ]);
+    }
+    table.print();
+
+    if !super::prune::confirm(
+        force,
+        super::po::t(
+            "`net netns gc` terminates processes — pass --force to confirm when not on a terminal",
+        ),
+        None,
+        super::po::tf(
+            "Terminate {n} abandoned process(es)? Their state roots are gone, so nothing else              can. [y/N]",
+            &[("n", &strays.len().to_string())],
+        )
+        .as_str(),
+    )? {
+        return Ok(());
+    }
+
+    let (mut done, mut skipped) = (0usize, 0usize);
+    for s in &strays {
+        if delonix_net::gc::terminate(s) {
+            done += 1;
+        } else {
+            // Not an error: between the scan and here the process may simply
+            // have exited, or its pid been reused — in which case declining to
+            // signal is the correct outcome, not a failure.
+            skipped += 1;
+        }
+    }
+    println!(
+        "{}",
+        super::po::tf(
+            "reclaimed {done} process(es); {skipped} no longer matched and were left alone",
+            &[
+                ("done", &done.to_string()),
+                ("skipped", &skipped.to_string())
+            ]
+        )
+    );
+    Ok(())
 }
 
 fn fmt_pid(p: Option<i32>) -> String {

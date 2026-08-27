@@ -1153,13 +1153,41 @@ fn hash_path_into(path: &Path, h: &mut Sha256) -> Result<()> {
 /// ALREADY-LIVE container's rootfs — see `build_one_stage`'s doc comment for
 /// why that corrupts its `/proc`/`/sys`/`/dev` mounts. `Ok(None)` on a miss.
 fn try_clone_cached(images: &ImageStore, hash: &str) -> Result<Option<(String, String)>> {
-    let cached = build_cache_dir().join(hash).join("rootfs");
+    let entry = build_cache_dir().join(hash);
+    let cached = entry.join("rootfs");
     if !cached.exists() {
         return Ok(None);
     }
+    // Stamp the hit. Without it the cache has no notion of USE at all — only of
+    // creation — and anything that later expires entries would be choosing by
+    // age rather than by whether anyone still wants them, throwing out the hot
+    // base layer every project rebuilds against. One `utimensat` per hit, on a
+    // path that is about to be copied wholesale.
+    touch(&entry);
     let new_id = generate_id();
     let rootfs = clone_rootfs(images, &cached.to_string_lossy(), &new_id)?;
     Ok(Some((new_id, rootfs)))
+}
+
+/// Sets a path's mtime to now — the cache's "last used" mark.
+///
+/// `utimensat` with `UTIME_NOW` rather than a marker file: a file inside the
+/// entry would be copied along with it by `clone_rootfs` and end up inside
+/// somebody's image. Best-effort — a cache that fails to record a hit is only
+/// a cache that may be evicted sooner than it deserved.
+fn touch(path: &Path) {
+    let Ok(c) = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()) else {
+        return;
+    };
+    let now = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: libc::UTIME_NOW,
+    };
+    // SAFETY: a valid NUL-terminated path and a two-element `timespec` array,
+    // both live for the duration of the call.
+    unsafe {
+        libc::utimensat(libc::AT_FDCWD, c.as_ptr(), [now, now].as_ptr(), 0);
+    }
 }
 
 /// Snapshots `rootfs`'s current content into the cache under `hash`, for a

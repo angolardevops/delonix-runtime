@@ -178,6 +178,31 @@ check "cluster ls" ok "$BIN" cluster ls
 check "system info" ok "$BIN" system info
 check "system df" ok "$BIN" system df
 check "system events" ok "$BIN" system events
+
+# --- o `df` conta a raiz INTEIRA, e o `gc` vê o que o `down` não alcança -----
+# Os dois medidos a 2026-08-27 num host real: o `system df` reportava 94 GiB de
+# um estado de 166 GB — `vms/`, `build-cache/` e um directório de outro programa
+# não estavam na sua lista — e a coluna RECLAIMABLE, que é a razão do comando,
+# dizia 4 KiB. Ao lado, 11 pares pin/control e 14 slirps corriam com o
+# `DELONIX_ROOT` apagado, fora do alcance de qualquer `netns down`.
+#
+# Um `ok` não apanharia nenhum dos dois: o comando SEMPRE devolveu 0 enquanto
+# omitia metade do disco. O que fixa é a PRESENÇA das linhas.
+check "system df conta as VMs" ok \
+  bash -c "'$BIN' system df | grep -qiE '^(VMs|VMs) '"
+check "system df conta a cache de build" ok \
+  bash -c "'$BIN' system df | grep -qi 'build cache'"
+check "system df soma a raiz toda" ok \
+  bash -c "'$BIN' system df | grep -q 'total '"
+# A travessia paralela TEM de dar o mesmo número que a sequencial — é este
+# número que impõe a quota rootless.
+check "df: paralelo e sequencial dao o mesmo" ok bash -c '
+  a=$('"'$BIN'"' system df | grep "^total ")
+  b=$(DELONIX_WALK_THREADS=1 '"'$BIN'"' system df | grep "^total ")
+  [ "$a" = "$b" ]'
+# Sem `--force` e sem terminal, o gc RECUSA-SE — nunca termina nada por engano.
+check "netns gc recusa sem --force" fail "$BIN" net netns gc
+check "netns gc --help" ok "$BIN" net netns gc --help
 check "completion bash" ok "$BIN" completion bash
 
 # --- os NOMES completam-se, e não só o script de registo (C-2) ------------

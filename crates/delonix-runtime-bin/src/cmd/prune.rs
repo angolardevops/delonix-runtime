@@ -488,6 +488,9 @@ pub(crate) struct PrunePlan {
     pub blobs_bytes: u64,
     /// B — empty auto-created `dlx-*` networks.
     pub networks: usize,
+    /// B — build-cache entries nothing has used for [`BUILD_CACHE_TTL_DAYS`].
+    pub build_cache: usize,
+    pub build_cache_bytes: Reclaimed,
 }
 
 impl PrunePlan {
@@ -503,6 +506,7 @@ impl PrunePlan {
             bytes: self.blobs_bytes,
             partial: false,
         });
+        r.add(self.build_cache_bytes);
         r
     }
 
@@ -513,7 +517,83 @@ impl PrunePlan {
             && self.cgroups == 0
             && self.blobs == 0
             && self.networks == 0
+            && self.build_cache == 0
     }
+}
+
+/// How long a build-cache entry survives without being used.
+///
+/// # Why an expiry exists at all
+///
+/// `save_to_cache` only ever ADDS. Nothing in the engine has ever removed a
+/// build-cache entry, and `system prune` — whose help promises to "reclaim the
+/// space nothing uses any more" — did not know the directory existed. Measured
+/// on the host this was written against: **9.8 GB in 25 entries, every one of
+/// them from a single day six days earlier**, invisible to `system df` and
+/// untouched by every prune.
+///
+/// # Why by last USE and not by age
+///
+/// A content-addressed layer cache has no dangling entries to sweep — every
+/// entry is a valid answer to some build. The only thing that distinguishes
+/// junk from the hot base layer three projects rebuild against is whether
+/// anyone still asks for it, which is why `try_clone_cached` now stamps a hit.
+/// Sweeping by creation date instead would evict precisely the entries that
+/// earn their keep.
+///
+/// Seven days is a working week: a project rebuilt at any point in its own
+/// sprint keeps its cache, and one abandoned a fortnight ago does not.
+pub(crate) const BUILD_CACHE_TTL_DAYS: u64 = 7;
+
+/// **PURE** — is a build-cache entry last used longer ago than `ttl_days`?
+///
+/// `None` for the age (an unreadable mtime) is NOT stale. A cache entry the
+/// engine cannot measure is unknown, and this repo does not fold unknown into
+/// a verdict that deletes something.
+pub(crate) fn build_cache_is_stale(age_secs: Option<u64>, ttl_days: u64) -> bool {
+    age_secs.is_some_and(|a| a > ttl_days * 24 * 60 * 60)
+}
+
+/// `(entries, bytes)` of the build-cache entries no build has used in
+/// [`BUILD_CACHE_TTL_DAYS`]. Reports only — see [`sweep_build_cache`].
+pub(crate) fn plan_build_cache(root: &std::path::Path) -> (Vec<std::path::PathBuf>, Reclaimed) {
+    let dir = root.join("build-cache");
+    let now = std::time::SystemTime::now();
+    let mut doomed = Vec::new();
+    let mut freed = Reclaimed::default();
+    let Ok(rd) = std::fs::read_dir(&dir) else {
+        return (doomed, freed);
+    };
+    for e in rd.flatten() {
+        let p = e.path();
+        // `.<hash>.<pid>.tmp` — a snapshot interrupted mid-write. Always debris:
+        // `save_to_cache` renames into place, so a `.tmp` that outlived its
+        // build is one no future build can ever find.
+        let interrupted = e.file_name().to_string_lossy().starts_with('.');
+        let age = e
+            .metadata()
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| now.duration_since(t).ok())
+            .map(|d| d.as_secs());
+        if interrupted || build_cache_is_stale(age, BUILD_CACHE_TTL_DAYS) {
+            freed.add(measure(&p));
+            doomed.push(p);
+        }
+    }
+    (doomed, freed)
+}
+
+/// Removes what [`plan_build_cache`] named. Returns `(entries, bytes)`.
+pub(crate) fn sweep_build_cache(root: &std::path::Path) -> (usize, Reclaimed) {
+    let (doomed, freed) = plan_build_cache(root);
+    let mut n = 0;
+    for p in doomed {
+        if std::fs::remove_dir_all(&p).is_ok() {
+            n += 1;
+        }
+    }
+    (n, freed)
 }
 
 /// Everything [`sweep_containers`] + [`sweep_images`] + [`sweep_networks`] would
@@ -610,6 +690,11 @@ pub(crate) fn plan(images: &ImageStore, store: &Store, all: bool) -> Result<Prun
 
     // B — empty auto-created `dlx-*` networks.
     out.networks = doomed_networks(store)?.len();
+
+    // B — build-cache entries no build has asked for in a week.
+    let (bc, bc_bytes) = plan_build_cache(images.root());
+    out.build_cache = bc.len();
+    out.build_cache_bytes = bc_bytes;
 
     Ok(out)
 }
@@ -1144,12 +1229,93 @@ pub(crate) fn classify_vm_debris(
     doomed
 }
 
+/// **PURE** — the entries of `vms/` that no live VM accounts for and that
+/// prune deliberately **leaves alone**: directories nothing points into.
+///
+/// This is the OTHER half of [`classify_vm_debris`], and it exists because the
+/// gap between the two halves is where 55 GB went missing on the host this was
+/// written against. `hadata/`, `pbs/` and `labdata/` fail tests 1 and 2 — no VM
+/// by that name, no live record mentioning them — and are saved by test 3,
+/// which is exactly the rule that once stopped a name-based sweep from
+/// destroying 53 GiB of live disks. That rule is right and stays.
+///
+/// What was wrong is that nothing then *reported* them. `vm prune` correctly
+/// refuses to touch them, `system df` did not know `vms/` existed, and the
+/// result was tens of gigabytes no command in the engine would name. This
+/// function names them, and nothing more: no caller may remove what it returns.
+/// The judgement of whether somebody's data is still wanted belongs to the
+/// person who created it, and the engine's job is to make sure they can see it.
+pub(crate) fn unreferenced_vm_dirs(
+    entries: &[String],
+    live: &HashSet<String>,
+    refs: &str,
+    stems_with_record: &HashSet<String>,
+) -> Vec<String> {
+    let mut out: Vec<String> = entries
+        .iter()
+        .filter(|e| {
+            // Only the shape prune declines to reason about: a plain directory
+            // with no `NAME.json`/`NAME.qcow2` sibling. Anything with a
+            // recognised VM-state shape is already `classify_vm_debris`'s.
+            vm_state_owner(e).is_none()
+                && !stems_with_record.contains(*e)
+                && !live.contains(*e)
+                && !refs.contains(e.as_str())
+        })
+        .cloned()
+        .collect();
+    out.sort();
+    out
+}
+
 /// The entries of `vms/` a prune would remove — the preview that turns a blind
 /// `[y/N]` into an informed one, and the single place the decision is made.
 ///
 /// `sweep_vms` calls exactly this: a preview computed by a second code path is
 /// a preview that can lie about what the sweep is about to do.
 pub(crate) fn doomed_vm_entries(base: &std::path::Path) -> Result<Vec<String>> {
+    let scan = scan_vm_state(base)?;
+    Ok(scan.doomed())
+}
+
+/// One read of `vms/` and of the live registry, so that the two questions asked
+/// about that directory — *what may prune take* and *what does nothing account
+/// for* — are answered from the SAME snapshot.
+///
+/// Two callers reading the directory separately is how they end up disagreeing
+/// about a VM created between the two reads: the sweep would take an entry the
+/// preview never showed.
+pub(crate) struct VmStateScan {
+    pub entries: Vec<String>,
+    live: HashSet<String>,
+    refs: String,
+    stems_with_record: HashSet<String>,
+}
+
+impl VmStateScan {
+    /// What a prune would remove — see [`classify_vm_debris`].
+    pub fn doomed(&self) -> Vec<String> {
+        classify_vm_debris(
+            &self.entries,
+            &self.live,
+            &self.refs,
+            &self.stems_with_record,
+        )
+    }
+
+    /// What nothing accounts for and prune deliberately leaves — see
+    /// [`unreferenced_vm_dirs`]. **Reporting only.**
+    pub fn unreferenced(&self) -> Vec<String> {
+        unreferenced_vm_dirs(
+            &self.entries,
+            &self.live,
+            &self.refs,
+            &self.stems_with_record,
+        )
+    }
+}
+
+pub(crate) fn scan_vm_state(base: &std::path::Path) -> Result<VmStateScan> {
     let dir = base.join("vms");
     let live: HashSet<String> = delonix_vm::list(base)?
         .into_iter()
@@ -1182,12 +1348,12 @@ pub(crate) fn doomed_vm_entries(base: &std::path::Path) -> Result<Vec<String>> {
         .filter_map(|e| vm_state_owner(e).map(str::to_string))
         .collect();
 
-    Ok(classify_vm_debris(
-        &entries,
-        &live,
-        &refs,
-        &stems_with_record,
-    ))
+    Ok(VmStateScan {
+        entries,
+        live,
+        refs,
+        stems_with_record,
+    })
 }
 
 /// What [`sweep_vms`] reclaimed.
@@ -1279,6 +1445,63 @@ mod tests {
         // lone directory with no sibling record is never swept.
         let doomed = super::classify_vm_debris(&entries, &live, refs, &set(&["pve-ha-1"]));
         assert_eq!(doomed, vec![".morta.lock".to_string()]);
+    }
+
+    /// The other half of the guard above. `hadata`/`labdata`/`pbs` are exactly
+    /// the entries prune must NOT take — and, until this existed, exactly the
+    /// entries nothing in the engine ever named. 53 GiB with no command able
+    /// to mention them is how a disk fills without anyone being able to say
+    /// what filled it.
+    ///
+    /// The discrimination is what matters: a directory a live record points
+    /// INTO is accounted for and must not be listed; a directory nothing
+    /// mentions must.
+    #[test]
+    fn os_dados_de_vm_que_ninguem_refere_sao_nomeados_mas_nunca_condenados() {
+        let entries: Vec<String> = ["hadata", "labdata", "pbs", "pve-ha-1.json", ".morta.lock"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let live = set(&["pve-ha-1"]);
+        // Only `labdata` is cited by the live record.
+        let refs = "<disk file='/home/w/.local/share/delonix/vms/labdata/nas.qcow2'/>";
+        let stems = set(&["pve-ha-1"]);
+
+        let unref = super::unreferenced_vm_dirs(&entries, &live, refs, &stems);
+        assert_eq!(
+            unref,
+            vec!["hadata".to_string(), "pbs".to_string()],
+            "um directório citado por um registo vivo não é órfão; um que ninguém cita é"
+        );
+
+        // And nothing this half reports may ever appear in the half that deletes.
+        let doomed = super::classify_vm_debris(&entries, &live, refs, &stems);
+        for d in &unref {
+            assert!(
+                !doomed.contains(d),
+                "`{d}` foi listado como órfão E como condenado — as duas metades \
+                 têm de ser disjuntas, senão um relatório vira uma remoção"
+            );
+        }
+    }
+
+    /// Um mtime ilegível é *desconhecido*, nunca *velho*. A regra vale em toda a
+    /// casa e aqui apaga dados: uma entrada que o motor não consegue medir não
+    /// pode ser condenada por isso.
+    #[test]
+    fn a_cache_de_build_expira_por_ultimo_uso_e_nunca_por_desconhecimento() {
+        let dia = 24 * 60 * 60;
+        let ttl = super::BUILD_CACHE_TTL_DAYS;
+        assert!(!super::build_cache_is_stale(Some(0), ttl), "usada agora");
+        assert!(
+            !super::build_cache_is_stale(Some(ttl * dia), ttl),
+            "exactamente no limite ainda conta como viva"
+        );
+        assert!(super::build_cache_is_stale(Some(ttl * dia + 1), ttl));
+        assert!(
+            !super::build_cache_is_stale(None, ttl),
+            "mtime ilegível não é prova de abandono"
+        );
     }
 
     #[test]

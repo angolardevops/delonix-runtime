@@ -9492,3 +9492,58 @@ msgstr "para o que um Kind baixa — porque é que um `kind: Egress` nunca apare
 
 msgid "`kind: {kind}` still works, but `kind: {to}` is the way forward ({n} document(s) here)"
 msgstr "`kind: {kind}` continua a funcionar, mas `kind: {to}` é o caminho ({n} documento(s) aqui)"
+
+# ---- net netns gc + system df exaustivo (auditoria de recursos) -------------
+msgid "Reclaim infra left behind by state roots that no longer exist"
+msgstr "Reclama a infra deixada por raízes de estado que já não existem"
+
+msgid "Reclaim infra left behind by state roots that no longer exist.\n\n`down` tears the infra down BY PIDFILE, and the pidfiles live inside `$DELONIX_ROOT/ingress/`. Delete the root — a test harness cleaning up, a `/tmp` root swept by the system — and the pin, the control process and the slirp keep running with no name any command can reach. This finds them by asking `/proc` instead, and never touches a root that still exists, this one least of all."
+msgstr "Reclama a infra deixada por raízes de estado que já não existem.\n\nO `down` derruba a infra POR PIDFILE, e os pidfiles vivem dentro de `$DELONIX_ROOT/ingress/`. Apaga a raiz — um arnês de testes a limpar-se, uma raiz em `/tmp` varrida pelo sistema — e o pin, o processo de controlo e o slirp continuam a correr sem um nome que comando nenhum alcance. Este encontra-os perguntando ao `/proc`, e nunca toca numa raiz que ainda exista, muito menos nesta."
+
+msgid "Terminate them. Without this, the sweep only reports"
+msgstr "Termina-os. Sem isto, a varredura apenas relata"
+
+msgid "no abandoned network infra — nothing to reclaim"
+msgstr "nenhuma infra de rede abandonada — não há nada a reclamar"
+
+msgid "`net netns gc` terminates processes — pass --force to confirm when not on a terminal"
+msgstr "`net netns gc` termina processos — passa --force para confirmar quando não estás num terminal"
+
+msgid "Terminate {n} abandoned process(es)? Their state roots are gone, so nothing else can. [y/N]"
+msgstr "Terminar {n} processo(s) abandonado(s)? As raízes de estado deles desapareceram, por isso mais nada o consegue fazer. [y/N]"
+
+msgid "reclaimed {done} process(es); {skipped} no longer matched and were left alone"
+msgstr "reclamados {done} processo(s); {skipped} já não correspondiam e ficaram intocados"
+
+msgid "VMs"
+msgstr "VMs"
+
+msgid "build cache"
+msgstr "cache de build"
+
+msgid "other"
+msgstr "outros"
+
+msgid "total {size} in {root}"
+msgstr "total {size} em {root}"
+
+msgid "{n} VM state entr(y/ies) nothing references — {size} reclaimable via `delonix vm prune`."
+msgstr "{n} entrada(s) de estado de VM que nada referencia — {size} reclamáveis com `delonix vm prune`."
+
+msgid "{n} director(y/ies) under `vms/` ({size}) that no VM record points into: {list}\n`vm prune` will NOT take these — a bare directory is somebody's data, and that rule once stopped a sweep from destroying 53 GiB of live disks. They are named here because until now nothing named them at all; removing them is your call."
+msgstr "{n} directório(s) em `vms/` ({size}) para onde nenhum registo de VM aponta: {list}\nO `vm prune` NÃO os leva — um directório nu são dados de alguém, e foi essa regra que travou uma varredura de destruir 53 GiB de discos vivos. Ficam aqui nomeados porque até agora nada os nomeava; removê-los é decisão tua."
+
+msgid "{n} entr(y/ies) in the state root this engine does not manage ({size}) — listed as `other` because nothing here can say whether they are safe to remove."
+msgstr "{n} entrada(s) na raiz de estado que este motor não gere ({size}) — listadas como `outros` porque nada aqui consegue dizer se é seguro removê-las."
+
+msgid "  {d} orphan dir(s), {b} blob(s), {g} cgroup(s), {n} network(s), {k} build-cache entr(y/ies) — {size}"
+msgstr "  {d} directório(s) órfão(s), {b} blob(s), {g} cgroup(s), {n} rede(s), {k} entrada(s) de cache de build — {size}"
+
+msgid "removed: {c} container(s), {d} orphan dir(s), {i} image(s), {b} blob(s), {g} cgroup(s), {p} orphan port(s), {n} orphan network(s), {k} build-cache entr(y/ies) — {size} freed"
+msgstr "removidos: {c} container(s), {d} directório(s) órfão(s), {i} imagem(ns), {b} blob(s), {g} cgroup(s), {p} porta(s) órfã(s), {n} rede(s) órfã(s), {k} entrada(s) de cache de build — {size} libertados"
+
+msgid "what is abandoned, and nothing else — the default only reports"
+msgstr "o que está abandonado, e mais nada — por omissão só relata"
+
+msgid "reclaim it: pin, control process and slirp of every state root that no longer exists"
+msgstr "reclamá-los: pin, processo de controlo e slirp de cada raiz de estado que já não existe"
