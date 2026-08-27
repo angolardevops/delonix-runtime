@@ -485,6 +485,25 @@ if [ "$WITH_BINARY" = 1 ]; then
         # e instala-se com uma cópia que tem a extensão que o editor pede.
         cp "$TMP/$VSIX_ASSET" "$TMP/$VSIX_ASSET.vsix"
         for ed in $EDITORS_FOUND; do
+          # NUNCA sobrepor uma extensão já instalada. A release do motor traz a
+          # versão que existia quando ela foi construída, e essa pode ser MAIS
+          # VELHA do que a que o editor tem — foi o que aconteceu neste host:
+          # um `--force` cego trocou a 0.2.0 pela 0.1.0 e levou a árvore de
+          # recursos com ele, sem uma palavra. Quando a extensão estiver nas
+          # galerias, é o editor que a mantém em dia; o trabalho deste script é
+          # a PRIMEIRA instalação, e mais nenhum.
+          # `|| true`: um `grep` sem correspondência sai 1 e, sob `set -e` com
+          # `pipefail`, a atribuição inteira falha — o script morria em silêncio
+          # AQUI, no caso mais comum que existe (ainda não ter a extensão). É o
+          # mesmo defeito que a etiqueta de GPU já custou a este ficheiro, e só
+          # apareceu com um editor de teste sem extensões: contra um editor que
+          # JÁ a tinha, o grep casava e nada se via.
+          HAVE=$("$ed" --list-extensions --show-versions 2>/dev/null \
+                   | grep -i '^angolardevops\.delonix@' | head -1 || true)
+          if [ -n "$HAVE" ]; then
+            skip editor "$ed already has ${HAVE#*@} — the editor keeps it up to date"
+            continue
+          fi
           if "$ed" --install-extension "$TMP/$VSIX_ASSET.vsix" --force >/dev/null 2>&1; then
             stepok editor "$ed"
           else
