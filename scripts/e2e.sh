@@ -1792,6 +1792,16 @@ for par in "get:pods|pod:ls" "get:networks|network:ls" "get:volumes|volumes:ls" 
     check "get ${novo_v#*:} == ${velho_v/:/ }" ok false
   fi
 done
+# Os Kinds que o `get` cobre, um a um — uma lista que encolhe em silêncio é
+# indistinguível de uma que nunca cresceu.
+for k in pods virtualmachines networks volumes secrets images \
+         kubernetesclusters gateways httproutes; do
+  check "get $k" ok "$BIN" get "$k"
+done
+# O container é a superfície IMPERATIVA (§3.3 da especificação), não declarativa.
+check "get containers explica-se"  1 "$BIN" get containers
+# Um formato que o grupo não sabe produzir é RECUSADO, não ignorado.
+check "get -o json onde não há"    1 "$BIN" get kubernetesclusters -o json
 # As três grafias de um Kind são a mesma pergunta.
 check "get aceita o plural"       ok "$BIN" get pods
 check "get aceita o singular"     ok "$BIN" get pod
