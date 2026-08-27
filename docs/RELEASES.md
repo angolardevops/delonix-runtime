@@ -4,6 +4,100 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+# v0.66.0 — o validador concordava com o motor em nada
+
+A v0.64.0 deu a cada Kind o grupo do seu domínio e a v0.65.0 removeu três Kinds.
+O schema publicado não soube de nenhuma das duas coisas, e é o ficheiro que um
+editor consome.
+
+## O achado
+
+Medido contra o schema que o site servia, não contra uma teoria sobre ele:
+
+| documento | schema | motor |
+|---|---|---|
+| `kind: Egress` | valida limpo | recusa — «was removed» |
+| `kind: Contaner` (typo) | valida limpo | recusa |
+| `kind: Banana` | valida limpo | recusa |
+| `apiVersion: compute.delonix.io/v1alpha1` | **recusa** | aceita |
+
+Errado nos dois sentidos ao mesmo tempo: visto verde a um typo, sublinhado
+vermelho na grafia que o `api-resources` publica como canónica. É a pior
+combinação que um validador pode ter — quem confia no verde aplica um manifesto
+que não aplica, e quem vê o vermelho deixa de confiar no linter.
+
+## Três causas, e nenhuma é a mesma
+
+**Uma segunda lista de Kinds, à mão.** O `TYPED_KINDS` do gerador de schema vive
+ao lado do registo e é escrito à parte. A v0.65.0 tirou o `Egress` do registo e a
+entrada aqui sobreviveu-lhe. O gate que existia pedia que todo Kind **vivo**
+tivesse schema; ninguém pedia o inverso — e é o inverso que uma remoção parte.
+Mesma família das três listas convergentes que já derivaram uma vez.
+
+**Um `allOf` de `if`/`then` é advisório sem o `kind` fechado no topo.** Um
+documento que não casa com ramo nenhum satisfaz todos os `then` por vacuidade.
+O `kind` era `{"type": "string"}` — daí o `Banana` passar. E é por isto que
+corrigir só a primeira causa não mudava nada: tirado o ramo do `Egress`, o
+documento continuava a validar.
+
+**O `apiVersion` era `const "delonix.io/v1"`**, de antes dos grupos por domínio.
+O motor decide **por Kind** — um `Pod` sob `networking.` é recusado a nomear o
+grupo certo — e o schema não sabia disso.
+
+## O que muda
+
+`kind` e `apiVersion` de topo passam a enums **derivados**, e cada ramo fixa
+também o grupo do seu Kind.
+
+As grafias saem do `KIND_ALIASES`, que passa a ser tabela em vez de um `match`:
+o conjunto de nomes aceites existia só como fluxo de controlo, ilegível de fora,
+e o schema precisa exactamente dele. Derivá-lo à mão seria a primeira causa outra
+vez. Uma tabela, dois consumidores.
+
+**Nada a migrar.** Os 65 documentos dos `examples/` continuam a validar — era o
+risco real de fechar um enum: recusar o que sempre foi bom. O que passa a ser
+recusado é o que o motor já recusava.
+
+## A extensão de VS Code
+
+Repo próprio: [`angolardevops/delonix-vscode`](https://github.com/angolardevops/delonix-vscode).
+
+Validação e autocomplete contra o schema que este motor publica — buscado **ao
+vivo**, não embutido, por isso o editor e o `stack apply` não podem discordar e
+um Kind acrescentado a montante é conhecido sem a extensão ser relançada. Mais um
+template por Kind, gerado do registo, e realce para `VMfile` e `Delonixfile`.
+
+Serve o VS Code e os forks que partilham a sua CLI de extensões — VSCodium,
+Cursor, Windsurf, Antigravity. O `install.sh` instala-a em todos os que encontrar,
+com `--no-editor-plugin` para não o fazer, e o artefacto entra no **mesmo
+`SHA256SUMS` assinado** que o resto da release: um caminho de confiança, uma
+assinatura.
+
+O que ela **não** faz, e está escrito com o comando que o prova: não há integração
+com Dev Containers. Essa extensão conduz um daemon Docker, e o `serve docker-api`
+serve 14 rotas e recusa 12 — entre elas `exec` e `attach`, que precisam de HTTP
+hijacking que este motor decidiu não implementar. É uma fronteira de desenho, não
+uma tarde de trabalho em falta.
+
+## Quem vem de uma 0.64.x
+
+O instalador avisa **antes** de trocar o binário. A v0.64.0 diz em três sítios
+que «nada é obrigatório; os manifestos existentes carregam sem alteração», e a
+v0.65.0 tornou isso falso no mesmo dia ao remover `Storage`, `ShareVolume` e
+`Egress`. Quem leu as notas da 0.64 e adiou a migração tinha razão nesse dia.
+
+## Também
+
+O README deixou de escrever a lista de Kinds: passa a ser `delonix api-resources`,
+a única cópia que não pode envelhecer. Estava a mentir em seis pontos, todos da
+mesma causa. E o exemplo dele estava errado — `ports: ["5432:5432"]` num
+`kind: Pod`, a grafia do docker numa forma que é k8s; o schema e o motor
+recusaram-no os dois, que é esta série a funcionar contra o texto que a anuncia.
+Os três documentos passaram a ser validados contra o schema no ar e aplicados com
+`--dry-run`.
+
+---
+
 ## v0.65.0 — QUEBRA: três Kinds foram removidos
 
 **Esta versão parte manifestos.** É a primeira desde que a promessa de
