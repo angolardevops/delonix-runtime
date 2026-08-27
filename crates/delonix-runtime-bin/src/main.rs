@@ -185,6 +185,39 @@ enum Cmd {
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: cmd::output::OutputFormat,
     },
+    /// List resources of a Kind — the generic form of ten `ls` commands.
+    ///
+    /// The Kind is resolved through the same registry `api-resources` prints,
+    /// so `pods`, `pod` and `po` are the same question, and a Kind renamed in
+    /// v0.64.0 still answers to the name it had.
+    Get {
+        /// Kind, plural or short name: `pods`, `pod`, `po`.
+        kind: String,
+        /// Name a resource to get its detail instead of the list.
+        names: Vec<String>,
+        /// Output format: `table` (default) or `json` (ADR-0005).
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: cmd::output::OutputFormat,
+    },
+    /// Detail of one resource, in blocks — the generic form of ten `describe`s.
+    Describe {
+        /// Kind, plural or short name.
+        kind: String,
+        #[arg(required = true)]
+        names: Vec<String>,
+    },
+    /// Remove resources by Kind and name.
+    ///
+    /// With no name it REFUSES rather than removing every resource of the Kind:
+    /// a missing argument is a typo far more often than an intention, and this
+    /// verb does not get a second chance to ask.
+    Delete {
+        /// Kind, plural or short name.
+        kind: String,
+        names: Vec<String>,
+        #[arg(short, long)]
+        force: bool,
+    },
     /// Apply a whole manifest (`delonix-manifest.yaml`) — every Kind, in dependency order.
     Stack {
         #[command(subcommand)]
@@ -397,6 +430,13 @@ fn run() -> Result<()> {
         Cmd::Schema { action } => cmd::schema::run(action),
         Cmd::Explain { path } => cmd::schema::explain(&path),
         Cmd::ApiResources { output } => cmd::resource::api_resources(output),
+        Cmd::Get {
+            kind,
+            names,
+            output,
+        } => cmd::verbs::get(&kind, &names, output),
+        Cmd::Describe { kind, names } => cmd::verbs::describe(&kind, &names),
+        Cmd::Delete { kind, names, force } => cmd::verbs::delete(&kind, &names, force),
         Cmd::Stack { action } => cmd::stack::run(action),
         Cmd::Compose { action } => cmd::compose::run(action),
         // clap prints "<name> <long_version>"; reproduced here so `delonix version` and

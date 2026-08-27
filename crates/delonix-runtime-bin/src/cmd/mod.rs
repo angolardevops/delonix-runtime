@@ -58,6 +58,7 @@ pub mod storage;
 pub mod system;
 pub mod tunnel;
 pub mod util;
+pub(crate) mod verbs;
 pub mod vlan;
 pub mod vm;
 pub mod vmbackends;

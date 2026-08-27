@@ -46,7 +46,10 @@
 =	container update
 =	container wait
 ~	dash
+~	delete
+~	describe
 =	explain
+~	get
 ~	image apply
 =	image build
 =	image convert
