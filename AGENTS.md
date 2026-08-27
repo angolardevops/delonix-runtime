@@ -3940,6 +3940,31 @@ checklist para quem mexer aqui do que como lista de correcções:
   erro sem sujeito; aqui era um falso sucesso. O `slirp_api` (o outro) devolvia `Ok("")`, que o
   `slirp_remove_hostfwd` parseia como JSON `Null` e conclui que não há nada a remover — um
   unpublish a reportar sucesso sem ter removido nada, com a porta do host presa;
+- **o `mtime` de um directório não é «alguma coisa lá dentro mudou»** — só muda quando ENTRADAS
+  são acrescentadas ou removidas nele; um ficheiro que CRESCE deixa-o intacto (medido a
+  2026-08-27, com um `stat` antes e depois). Uma cache de medição de disco invalidada por
+  `mtime` daria, portanto, o tamanho ERRADO exactamente no caso que a quota existe para apanhar
+  — uma base de dados a encher-se nos mesmos ficheiros. A proposta estava escrita num relatório
+  meu e foi retirada por causa desta medição; o que se fez em vez dela foi paralelizar a
+  travessia, que não troca correcção por velocidade;
+- **um pidfile não é o único nome de um processo, mas é o único que este motor guardava** — o
+  `teardown` mata por `$DELONIX_ROOT/ingress/*.pid`, e quando a raiz é apagada o pin, o control
+  e o slirp continuam a correr sem nome nenhum que um comando alcance. Medido: 11 pares e 14
+  slirps, 10 pares com a raiz APAGADA, 107 MiB de swap. Ver o `net netns gc`;
+- **«o argv diz slirp4netns e o alvo morreu» não é «é meu para ceifar», e o inverso também não**
+  — o `is_ours()` do `reap_orphan_slirp` compara com o socket da raiz ACTUAL, o que está certo
+  no sítio dele (corre de qualquer processo, e reapar o slirp de outra raiz viva derrubava a
+  rede de outro motor) e cego no `gc`, que só corre depois de a raiz do processo estar provada
+  como desaparecida. A mesma pergunta tem respostas diferentes conforme o que já se sabe, e é
+  por isso que são duas funções e não um `is_ours` mais esperto;
+- **um binário `debug` e um `release` não são a mesma medição** — a primeira comparação de RSS
+  desta série pôs os dois lado a lado e mostrou uma subida de 13,7 para 34,9 MB que era só o
+  tamanho do `.text` com símbolos. Release contra release, o RSS não mexe. Comparar builds de
+  perfis diferentes mede o compilador, não a alteração;
+- **uma média não é uma medição quando a variância é grande** — a média de 6 corridas do
+  `docker run` com bridge deu **3120 ms**, e três corridas isoladas a seguir deram 1105/649/549.
+  Reportar 14,7× teria sido falso. Com a MEDIANA de 11 corridas o número é 531 ms, e o factor
+  2,3×. Quando um resultado parecer bom demais, troca a média pela mediana e volta a contar;
 - **«não está no store de containers» não é «não é local»** — o `image scan` de uma imagem VM
   anunciava «not local», ia à Docker Hub buscar `library/<nome>` e morria num **401**. Recusa
   agora com o nome da alternativa; percorrer o sistema de ficheiros de um convidado é outro
@@ -5218,3 +5243,128 @@ pergunta do filesystem que deu origem a tudo.
 **Armadilha de método que vale por si**: os containers só passam a partilhar quando o binário EM
 USO é o novo. Durante esta série o host criou containers flat com o `--version` a dizer o número
 certo — ver «duas builds com a mesma versão não são a mesma build».
+
+
+## Onde o motor deixava peso (auditoria de recursos, 2026-08-27)
+
+Auditoria de RAM, CPU e lixo no host, medida contra a máquina real com 10 containers e 2 VMs a
+correr. **A conclusão que enquadra tudo o resto: o código Rust não era o problema.** Os comandos
+quentes respondiam em 4–5 ms e o plano de controlo inteiro ocupava 44 MiB de RSS. O peso vinha de
+ceifadores que não existiam, de caches sem prazo, e de uma configuração de alocador que ninguém
+tinha travado.
+
+### O `system df` não contava 43% do estado, e o RECLAIMABLE dizia 4 KiB
+
+Estado real 166 GB, `system df` a reportar 94,2 GiB. Faltavam `vms/` (59 G), `build-cache/`
+(9,8 G) e o que outros programas põem na raiz (2,6 G). O comando que existe para dizer onde está
+o disco não via quase metade dele — e a coluna que se lê para AGIR anunciava 4 KiB.
+
+- A lista de áreas passou a ter as que faltavam **e uma linha `other`**, que soma tudo o que está
+  no topo da raiz e não é área conhecida. É a parte que interessa: uma lista escrita à mão só
+  descreve o que alguém se lembrou de lá pôr, e foi assim que o `vms/` desapareceu. Com o
+  catch-all, um directório novo aparece como número por investigar em vez de como silêncio.
+- **O reclaimable de cada área vem do MESMO código que o `prune` respectivo usa.** O
+  `doomed_vm_entries` já se chamava, no próprio doc-comment, «o único sítio onde a decisão é
+  tomada» — passou a ser chamado, em vez de reimplementado ao lado.
+- **`scan_vm_state`**: as duas perguntas sobre o `vms/` (o que o prune leva, o que ninguém
+  reclama) saem de UMA leitura. Duas leituras separadas discordam sobre uma VM criada entre elas.
+
+### Os 53 GiB que nenhum comando nomeava
+
+`vms/hadata` e `vms/pbs` não são condenados pelo `classify_vm_debris`, e **essa decisão está
+certa** — foi ela que travou uma varredura de destruir 53 GiB de discos vivos. O que faltava era
+alguém REPORTÁ-LOS: invisíveis ao `df` e intocáveis pelo `prune`, eram dezenas de gigabytes sem
+nome. O `unreferenced_vm_dirs` é a outra metade do classificador, com teste a exigir que as duas
+sejam **disjuntas** — um relatório que se sobrepusesse à condenação viraria uma remoção.
+
+### `net netns gc` — o ceifador que não podia existir
+
+Ver a entrada na classe «X não é Y». Contra este host identifica **32 processos** e deixa a infra
+viva de fora. Três regras que não se negoceiam: a raiz actual **nunca** é candidata, outra raiz
+que ainda EXISTE nunca é candidata (dois motores no mesmo host é suportado, e matar o outro não é
+limpeza), e um `environ` ilegível é *desconhecido* e nunca *abandonado*. Sem `--force`, relata e
+não toca em nada — um comando que varre o `/proc` e sinaliza o que encontra está a um erro de
+classificação de distância de derrubar a rede de outra pessoa.
+
+O `PidKind` do `infra` é reutilizado em vez de um enum paralelo no `gc`: duas tabelas para os
+mesmos três processos é como uma delas fica sem saber que um pin pré-split se escreve `holder`.
+
+### As arenas do glibc: 2,3 GiB de espaço de endereçamento por servidor
+
+Medido com o binário publicado, `serve api`, release contra release:
+
+```
+                   VmSize        VmRSS      threads   arenas de 64 MiB
+antes              2 329 180 kB  13 484 kB     34          34
+depois               104 748 kB  14 136 kB      4           1
+```
+
+O glibc dá 64 MiB de heap a cada thread que contenda na arena principal, e o tecto é
+`8 × ncores` — 256 aqui, por isso nada o trava antes do número de threads. Um servidor com uma
+worker por core reserva gigabytes que nunca toca. **Não é memória residente** (as arenas são
+`PROT_NONE`, e o RSS acima é a prova) mas custa três coisas reais: o *commit charge* sob
+`vm.overcommit_memory=2`, as VMAs, e o número que qualquer monitor mostra ao operador — vinte
+vezes a verdade, na altura em que alguém decide se um nó está sem memória.
+
+`mallopt(M_ARENA_MAX, 2)` nos processos de vida longa. **`libc` já era dependência**, ao
+contrário de trocar o alocador global por `mimalloc`/`jemalloc` — que faria o mesmo e mais, à
+custa da supply-chain de um runtime público. Não é chamado do `main`: uma CLI de vida curta sai
+antes de as arenas importarem, e alguns comandos (um pull paralelo, um build multi-estágio)
+alocam a sério entre threads, onde menos arenas é a troca errada. Um `MALLOC_ARENA_MAX` posto
+pelo operador continua a mandar — uma escapatória que não escapa não é escapatória.
+
+`worker_threads(2)` nos três servidores de socket unix local (CRI, mgmt, docker-api): o trabalho
+deles é I/O contra o store e o holder, e o default comprava 32 stacks de 8 MiB sem throughput
+nenhum. O **`ingress-proxy` fica DELIBERADAMENTE no default** — é o único que carrega tráfego a
+sério e ninguém o mediu sob carga; limitá-lo com um argumento que só vale para sockets locais
+ociosos seria um palpite vestido de decisão.
+
+### A travessia de disco é 5,9x mais rápida que o `du`
+
+`system df` de **1881 → 329 ms** (`DELONIX_WALK_THREADS=1` repõe a sequencial), e 5,9x mais
+rápido que o `du` do coreutils na mesma árvore de 630 mil inodes.
+
+- **Fila de trabalho e não «uma thread por entrada de topo»**, porque as duas árvores que isto
+  mede são opostas: `layers/` são 118 subtrees irmãs (dividir o topo paraleliza na perfeição) e
+  um volume é `<nome>/_data/…`, uma só entrada no topo (dividir o topo não faz nada). A fila
+  distribui directórios à medida que os descobre.
+- **Os hardlinks são deduplicados por FUSÃO de mapas `(dev, ino) → bytes` por worker**, não por
+  um `Mutex<HashSet>` no caminho quente nem por uma segunda travessia. O número tem de bater ao
+  byte com o sequencial — é ele que impõe a quota rootless, a única imposição que o rootless tem
+  — e há teste com o mesmo inode alcançável por workers diferentes.
+- O ganho satura nos 8 (medido: 1 thread 1,098 s · 8 threads 0,381 s · 16 threads 0,360 s). É
+  uma travessia limitada por syscalls, não por largura de banda.
+
+### A cache de build ganhou prazo, e o `try_clone_cached` passou a carimbar o uso
+
+9,8 GB em 25 entradas, todas do mesmo dia, e o `save_to_cache` só ACRESCENTA. O `system prune`,
+cujo `--help` promete «reclamar o espaço que já nada usa», não sabia que o directório existia.
+
+O carimbo vem antes do prazo e não é detalhe: sem ele a cache só conhece a data de CRIAÇÃO, e
+expirar por idade deitaria fora exactamente a layer base que três projectos reconstroem. Uma
+cache endereçada por conteúdo não tem entradas penduradas para varrer — só se distingue lixo de
+cache quente perguntando se alguém ainda a pede. Sete dias é uma semana de trabalho. Um `mtime`
+ilegível é *desconhecido* e nunca *velho*.
+
+### Contra o Docker e o Podman, na mesma máquina no mesmo dia
+
+Docker 29.7.2 (daemon **root**), Podman 4.9.3 (**rootless**), delonix 0.64.0 (rootless), a mesma
+`alpine:latest` (`d529dd0c6e55`) nos três. Medianas de 11 corridas, depois de aquecer:
+
+| | delonix | docker | podman |
+|---|---|---|---|
+| `ps` | **6 ms** | 11 ms | 15 ms |
+| `images` | **4 ms** | 12 ms | 28 ms |
+| `version` | **4 ms** | 16 ms | 14 ms |
+| `run --rm` **com rede própria** | **229 ms** | 531 ms | 521 ms |
+| `run --rm --network host` | **72 ms** | 380 ms | 540 ms |
+| RSS do plano de controlo parado | **20,8 MiB** | 72,5 MiB | — |
+
+**A armadilha que quase estragou este quadro**: sem `--net`, o `delonix` usa `--net host` — o
+container vê o `wlp4s0` do host. A primeira medição comparou isso com o bridge do docker e deu
+17x, um número que não queria dizer nada. A tabela acima compara como-por-como, e para a linha
+da rede própria foi criada (e removida) uma rede custom só para o efeito.
+
+**O que isto NÃO mede**: throughput de rede sob carga, tempo de pull, build, nem nada com I/O de
+disco a sério. É latência de arranque e de comandos de leitura — onde a ausência de daemon evita
+um round-trip de IPC por comando, que é precisamente a diferença estrutural.
