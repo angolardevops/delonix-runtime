@@ -31,14 +31,33 @@ pub(crate) const GET_ROUTES: &[&str] = &[
     kinds::VOLUME,
     kinds::SECRET,
     kinds::VM,
+    kinds::IMAGE,
+    kinds::CLUSTER,
+    kinds::GATEWAY,
+    kinds::HTTP_ROUTE,
 ];
-pub(crate) const DESCRIBE_ROUTES: &[&str] = &[kinds::POD, kinds::NETWORK, kinds::VOLUME, kinds::VM];
+
+/// Kinds whose group has no `-o json` today. Listed rather than discovered,
+/// because the alternative is accepting `-o json` and printing a table — the
+/// silently-ignored flag this engine refuses everywhere else.
+const NO_JSON_YET: &[&str] = &[kinds::CLUSTER, kinds::GATEWAY, kinds::HTTP_ROUTE];
+pub(crate) const DESCRIBE_ROUTES: &[&str] = &[
+    kinds::POD,
+    kinds::NETWORK,
+    kinds::VOLUME,
+    kinds::VM,
+    kinds::IMAGE,
+    kinds::GATEWAY,
+];
 pub(crate) const DELETE_ROUTES: &[&str] = &[
     kinds::POD,
     kinds::NETWORK,
     kinds::VOLUME,
     kinds::VM,
     kinds::SECRET,
+    kinds::IMAGE,
+    kinds::CLUSTER,
+    kinds::GATEWAY,
 ];
 
 /// The CLI group that still owns a Kind's imperative verbs.
@@ -88,6 +107,14 @@ pub(crate) fn no_verb_reason(kind: &str) -> &'static str {
         }
         k if k == kinds::DEPENDENCY => "`Dependency` lowers to NetworkPolicy — ask for that",
         k if k == kinds::INGRESS => "`Ingress` is the k8s spelling of HTTPRoute — ask for that",
+        // The CLI restructuring separates the two surfaces on purpose: a
+        // container made by `container run` is an IMPERATIVE resource, and
+        // answering it through the declarative verb would put it back in the
+        // API the split exists to keep it out of. `container ps` is not a
+        // lesser spelling of `get containers`; it is the other surface.
+        k if k == kinds::CONTAINER => {
+            "`container` is the imperative surface — use `container ps`; declarative containers live in `kind: Pod`"
+        }
         _ => "",
     }
 }
@@ -102,6 +129,16 @@ pub(crate) fn get(kind: &str, names: &[String], output: OutputFormat) -> Result<
         // filtered list keeps one implementation per question.
         return describe(kind, names);
     }
+    // A format accepted and ignored is worse than one refused: whoever asks for
+    // `-o json` in a pipeline gets a table and only finds out downstream.
+    if output != OutputFormat::Table && NO_JSON_YET.contains(&f.kind) {
+        return Err(Error::Invalid(format!(
+            "`get {}` has no JSON yet — `{} ls` is table-only, and answering a \
+             table to `-o json` would break whatever reads it",
+            f.plural,
+            cli_group(f.kind)
+        )));
+    }
     if !GET_ROUTES.contains(&f.kind) {
         return Err(Error::Invalid(format!(
             "`get {}` is not wired yet — use `{} ls` meanwhile",
@@ -114,6 +151,10 @@ pub(crate) fn get(kind: &str, names: &[String], output: OutputFormat) -> Result<
         k if k == kinds::NETWORK => super::network::run(super::network::NetworkCmd::Ls { output }),
         k if k == kinds::VOLUME => super::volume::run(super::volume::VolumeCmd::Ls { output }),
         k if k == kinds::SECRET => super::secret::run(super::secret::SecretCmd::Ls { output }),
+        k if k == kinds::IMAGE => super::image::run(false, super::image::ImageCmd::Ls { output }),
+        k if k == kinds::CLUSTER => super::cluster::run(super::cluster::ClusterCmd::Ls),
+        k if k == kinds::GATEWAY => super::tunnel::run(super::tunnel::TunnelCmd::Ls),
+        k if k == kinds::HTTP_ROUTE => super::httproute::run(super::httproute::HttpRouteCmd::Ls),
         // `ports` stays FALSE: `vm ls --ports` does real network I/O against
         // every VM, and a `get` must not probe the network unasked.
         k if k == kinds::VM => super::vm::run(super::vm::VmCmd::Ls {
@@ -157,6 +198,15 @@ pub(crate) fn describe(kind: &str, names: &[String]) -> Result<()> {
             super::volume::run(super::volume::VolumeCmd::Describe { names: n })
         }
         k if k == kinds::VM => super::vm::run(super::vm::VmCmd::Describe { names: n }),
+        k if k == kinds::IMAGE => {
+            super::image::run(false, super::image::ImageCmd::Describe { names: n })
+        }
+        k if k == kinds::GATEWAY => {
+            for name in names {
+                super::tunnel::run(super::tunnel::TunnelCmd::Describe { name: name.clone() })?;
+            }
+            Ok(())
+        }
         // The list above already decided this Kind routes; reaching here means the
         // two halves disagree, which is our defect and not the caller's.
         _ => Err(Error::Invalid(format!(
@@ -224,6 +274,30 @@ pub(crate) fn delete(kind: &str, names: &[String], force: bool) -> Result<()> {
             }
             Ok(())
         }
+        k if k == kinds::IMAGE => {
+            for n in names {
+                super::image::run(
+                    false,
+                    super::image::ImageCmd::Rm {
+                        image: n.clone(),
+                        force,
+                    },
+                )?;
+            }
+            Ok(())
+        }
+        k if k == kinds::CLUSTER => {
+            for n in names {
+                super::cluster::run(super::cluster::ClusterCmd::Delete { name: n.clone() })?;
+            }
+            Ok(())
+        }
+        k if k == kinds::GATEWAY => {
+            for n in names {
+                super::tunnel::run(super::tunnel::TunnelCmd::Rm { name: n.clone() })?;
+            }
+            Ok(())
+        }
         // The list above already decided this Kind routes; reaching here means the
         // two halves disagree, which is our defect and not the caller's.
         _ => Err(Error::Invalid(format!(
@@ -266,6 +340,18 @@ mod tests {
                 !(blocked && GET_ROUTES.contains(&f.kind)),
                 "{} both routes and declares itself blocked",
                 f.kind
+            );
+        }
+    }
+
+    /// A Kind listed as table-only has to be a Kind `get` actually routes —
+    /// otherwise the refusal never fires and the list is decoration.
+    #[test]
+    fn table_only_kinds_are_kinds_get_routes() {
+        for k in NO_JSON_YET {
+            assert!(
+                GET_ROUTES.contains(k),
+                "{k} is in NO_JSON_YET without being in GET_ROUTES"
             );
         }
     }
