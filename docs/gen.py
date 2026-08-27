@@ -2621,6 +2621,7 @@ def sidebar(active, depth=0):
     items_docs = [
         ("index.html", "Início", "Home"),
         ("cheatsheet.html", "Cheatsheet", "Cheatsheet"),
+        ("estrutura.html", "Estrutura de recursos", "Resource structure"),
         ("kinds.html", "Kinds e templates", "Kinds & templates"),
         ("gitops.html", "GitOps e CI", "GitOps & CI"),
         ("estabilidade.html", "Promessa de estabilidade", "Stability promise"),
@@ -4905,9 +4906,11 @@ def kinds_page():
         'Cada Kind com um template COMPLETO e funcional — '
         'todos os campos, com os defaults e um comentário. Aplica um só com '
         '<code>delonix &lt;grupo&gt; apply -f</code>, ou todos de uma vez com <code>delonix stack apply</code> '
-        '(ordem por dependência: Secret → Network → NetworkRoute → Volume → Image → Vm → Container → '
-        'Pod → Ingress → FirewallPolicy → HTTPRoute → Tunnel — <code>ShareVolume</code> baixa para '
-        '<code>Volume</code> antes desta ordem entrar em jogo).',
+        '(ordem por dependência: Secret → Network → NetworkRoute → Volume → Image → VirtualMachine → '
+        'Container → Pod → Ingress → NetworkPolicy → HTTPRoute → Gateway; <code>Storage</code> e '
+        '<code>ShareVolume</code> baixam para <code>Volume</code> antes desta ordem entrar em jogo). '
+        'A lista completa, com os grupos e o que cada documento se torna, está em '
+        '<a href="estrutura.html">Estrutura de recursos</a>.',
         'Each Kind with a COMPLETE, functional template — '
         'every field, with defaults and a comment. Apply just one with '
         '<code>delonix &lt;group&gt; apply -f</code>, or all at once with <code>delonix stack apply</code> '
@@ -5266,6 +5269,7 @@ def main():
     page("cloud.html", "cloud-init, cloud image e Cloud Hypervisor", bi("div", CLOUD, CLOUD_EN))
     labs_page()
     md_page("gitops.md", "gitops.html", "GitOps e CI")
+    md_page("estrutura.md", "estrutura.html", "Estrutura de recursos")
     md_page("cli-stability.md", "estabilidade.html", "Promessa de estabilidade")
     # O guia de VMs é escrito à mão em Markdown (legível no GitHub) e publicado
     # daqui — a MESMA fonte, nunca uma segunda cópia do texto.
