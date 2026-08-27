@@ -295,6 +295,8 @@ section "share volumes (kind: Volume com bloco share:)"
 # executados» a pagar-se outra vez, e logo no caminho que acabou de mudar de
 # forma: um share deixou de ser `kind: ShareVolume` e passou a ser um
 # `kind: Volume` com bloco `share:`, com o registo antigo absorvido pelo volume.
+# A v0.65.0 fechou o degrau — a grafia antiga já não é reescrita com um aviso,
+# é RECUSADA, e o que se exercita abaixo é a recusa.
 #
 # O que prova a fusão é o CICLO, não um comando isolado: cada passo devolve 0
 # sozinho mesmo com a posse partida. As asserções que valem são três — o plano
@@ -306,12 +308,13 @@ SHPAI="shpai-$PFX"
 check "volume pai para os shares" ok "$BIN" volumes create "$SHPAI"
 cat >"$SHWORK/shares.yaml" <<YAML
 apiVersion: delonix.io/v1
-kind: ShareVolume
+kind: Volume
 metadata:
   name: sh-$PFX
   namespace: shteam-a
 spec:
-  storageRef: $SHPAI
+  share:
+    storageRef: $SHPAI
   quota: 5G
   alertPct: 80
 ---
@@ -325,12 +328,39 @@ spec:
     from: $SHPAI
   quota: 2G
 YAML
-# As duas grafias no MESMO ficheiro, de propósito: a antiga tem de continuar a
-# carregar (reescrita, com aviso) e a produzir exactamente o que a nova produz.
-check "apply das duas grafias (antiga + nova)" ok \
+# As duas escritas do PAI no mesmo ficheiro, de propósito: saiu o Kind, não o
+# campo — `share.storageRef` é a grafia que o `kind: ShareVolume` usava e
+# continua a ser um alias de `share.from`, para que um manifesto que só renomeie
+# o Kind não tenha de renomear também o campo. É a promessa que o
+# examples/sharevolume.yaml faz por escrito, e ninguém a exercitava.
+#
+# Dentro do bloco `share:`, e não em `spec.storageRef` — medido: um
+# `spec.storageRef` solto é campo DESCONHECIDO, sai um WARNING e o apply devolve
+# 0 tendo criado um volume local vulgar. Uma renomeação mecânica do Kind cai
+# exactamente nesse buraco, que é a razão de a escrita antiga ser exercitada
+# aqui em vez de se assumir que ainda funciona.
+check "apply das duas escritas do pai (storageRef + share.from)" ok \
   "$BIN" volumes apply -f "$SHWORK/shares.yaml"
-check "o aviso de depreciação sai, e nomeia a forma nova" ok \
-  bash -c "'$BIN' volumes apply -f '$SHWORK/shares.yaml' 2>&1 | grep -q 'share: {from'"
+# A v0.65.0 REMOVEU `kind: ShareVolume`. O que aqui se prova não é que recusa —
+# um «unknown kind» genérico também recusaria — é que a recusa NOMEIA o que
+# escrever em vez dele: sem isso, quem apanha um manifesto correcto-até-ontem
+# fica sem saber se escreveu mal ou se algo mudou debaixo dele.
+cat >"$SHWORK/velho.yaml" <<YAML
+apiVersion: delonix.io/v1
+kind: ShareVolume
+metadata:
+  name: shvelho-$PFX
+  namespace: shteam-a
+spec:
+  storageRef: $SHPAI
+  quota: 5G
+YAML
+check "kind: ShareVolume é recusado" fail \
+  "$BIN" volumes apply -f "$SHWORK/velho.yaml"
+# Sem backticks no padrão de propósito: o texto do erro tem-nos, e dentro das
+# aspas duplas deste `bash -c` seriam substituição de comandos. Os `.` cobrem-nos.
+check "a recusa nomeia a forma nova" ok \
+  bash -c "'$BIN' volumes apply -f '$SHWORK/velho.yaml' 2>&1 | grep -q 'kind: Volume. with a .share:. block'"
 check "sharevolume ls mostra os dois" ok \
   bash -c "test \$('$BIN' sharevolume ls | grep -c 'sh-$PFX') -eq 2"
 # Dois inquilinos com o MESMO nome de share: o reconciliador identifica por
@@ -1047,12 +1077,17 @@ check "init repetido não sobrescreve" ok "$BIN" init "$INITDIR"
 # cujo primeiro acto é produzir algo que não aplica ensina a coisa errada sobre
 # a ferramenta — e é um erro que só se vê correndo o comando, nunca lendo o
 # `--help`, que é a lacuna que esta bateria tem por fechar.
+#
+# A lista abaixo diz `VirtualMachine` e não `Vm`: o Kind foi renomeado (com
+# alias) e o scaffold passou a escrever a forma nova, mas este check continuou a
+# procurar a antiga — verificava uma grafia que já ninguém gerava, e falhava por
+# isso. Um check sobre drift do scaffold a fazer drift ele próprio.
 VMINIT="$OUT/vminit-$PFX"; mkdir -p "$VMINIT"
 if "$BIN" vm init "$VMINIT" --name "v$PFX" >/dev/null 2>&1; then
   check "vm init: o projecto que gera valida-se" ok \
     "$BIN" stack validate -f "$VMINIT/delonix-manifest.yaml"
   check "vm init: gera os três Kinds" ok bash -c "
-    for k in Network Volume Vm; do
+    for k in Network Volume VirtualMachine; do
       grep -q \"kind: \$k\" '$VMINIT/delonix-manifest.yaml' || { echo \"falta kind: \$k\"; exit 1; }
     done
   "
