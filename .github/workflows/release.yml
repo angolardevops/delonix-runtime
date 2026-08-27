@@ -107,12 +107,17 @@ jobs:
         # separate repository has no artefact yet; without the asset the
         # installer takes its `skip editor` path, which says so out loud.
         run: |
-          if gh release download --repo angolardevops/delonix-vscode \
-               --pattern '*.vsix' --dir /tmp/vsix 2>/dev/null; then
+          # The failure is REPORTED, not guessed at. A bare `else` here would
+          # announce "no extension release yet" for a token that cannot read the
+          # other repository, or for a network blip — sending whoever reads the
+          # log to look in the wrong place. `2>&1` into a variable keeps the
+          # reason and still lets the step succeed.
+          if ERR=$(gh release download --repo angolardevops/delonix-vscode \
+                     --pattern '*.vsix' --dir /tmp/vsix 2>&1); then
             cp /tmp/vsix/*.vsix dist-release/delonix-vscode
             cd dist-release && sha256sum delonix-vscode >> SHA256SUMS
           else
-            echo "::notice::no extension release yet — this engine release ships without it"
+            echo "::notice::this engine release ships without the editor extension: $ERR"
           fi
         env:
           GH_TOKEN: ${{ github.token }}
