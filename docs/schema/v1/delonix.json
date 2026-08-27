@@ -2696,6 +2696,12 @@
       },
       "then": {
         "properties": {
+          "apiVersion": {
+            "enum": [
+              "compute.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
           "spec": {
             "anyOf": [
               {
@@ -2722,6 +2728,12 @@
       },
       "then": {
         "properties": {
+          "apiVersion": {
+            "enum": [
+              "compute.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
           "spec": {
             "$ref": "#/$defs/PodSpec"
           }
@@ -2741,6 +2753,12 @@
       },
       "then": {
         "properties": {
+          "apiVersion": {
+            "enum": [
+              "storage.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
           "spec": {
             "$ref": "#/$defs/VolumeSpec"
           }
@@ -2760,6 +2778,12 @@
       },
       "then": {
         "properties": {
+          "apiVersion": {
+            "enum": [
+              "networking.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
           "spec": {
             "$ref": "#/$defs/NetworkSpec"
           }
@@ -2779,6 +2803,12 @@
       },
       "then": {
         "properties": {
+          "apiVersion": {
+            "enum": [
+              "compute.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
           "spec": {
             "$ref": "#/$defs/VmSpec"
           }
@@ -2798,6 +2828,12 @@
       },
       "then": {
         "properties": {
+          "apiVersion": {
+            "enum": [
+              "core.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
           "spec": {
             "$ref": "#/$defs/SecretSpec"
           }
@@ -2817,6 +2853,12 @@
       },
       "then": {
         "properties": {
+          "apiVersion": {
+            "enum": [
+              "artifact.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
           "spec": {
             "$ref": "#/$defs/ImageSpec"
           }
@@ -2836,6 +2878,12 @@
       },
       "then": {
         "properties": {
+          "apiVersion": {
+            "enum": [
+              "gateway.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
           "spec": {
             "$ref": "#/$defs/TunnelSpec"
           }
@@ -2855,6 +2903,12 @@
       },
       "then": {
         "properties": {
+          "apiVersion": {
+            "enum": [
+              "networking.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
           "spec": {
             "$ref": "#/$defs/DependencySpec"
           }
@@ -2874,6 +2928,12 @@
       },
       "then": {
         "properties": {
+          "apiVersion": {
+            "enum": [
+              "networking.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
           "spec": {
             "$ref": "#/$defs/NetworkRouteSpec"
           }
@@ -2893,6 +2953,12 @@
       },
       "then": {
         "properties": {
+          "apiVersion": {
+            "enum": [
+              "gateway.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
           "spec": {
             "$ref": "#/$defs/HttpRouteSpec"
           }
@@ -2912,6 +2978,12 @@
       },
       "then": {
         "properties": {
+          "apiVersion": {
+            "enum": [
+              "gateway.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
           "spec": {
             "$ref": "#/$defs/IngressSpec"
           }
@@ -2931,25 +3003,12 @@
       },
       "then": {
         "properties": {
-          "spec": {
-            "$ref": "#/$defs/FwDocSpec"
-          }
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "kind": {
-            "const": "Egress"
-          }
-        },
-        "required": [
-          "kind"
-        ]
-      },
-      "then": {
-        "properties": {
+          "apiVersion": {
+            "enum": [
+              "networking.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
           "spec": {
             "$ref": "#/$defs/FwDocSpec"
           }
@@ -2969,6 +3028,12 @@
       },
       "then": {
         "properties": {
+          "apiVersion": {
+            "enum": [
+              "compute.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
           "spec": {
             "$ref": "#/$defs/WorkloadSpec"
           }
@@ -2988,6 +3053,12 @@
       },
       "then": {
         "properties": {
+          "apiVersion": {
+            "enum": [
+              "infrastructure.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
           "spec": {
             "$ref": "#/$defs/ClusterSpec"
           }
@@ -3007,6 +3078,12 @@
       },
       "then": {
         "properties": {
+          "apiVersion": {
+            "enum": [
+              "core.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
           "spec": {
             "$ref": "#/$defs/StackSpec"
           }
@@ -3016,10 +3093,41 @@
   ],
   "properties": {
     "apiVersion": {
-      "const": "delonix.io/v1"
+      "enum": [
+        "artifact.delonix.io/v1alpha1",
+        "compute.delonix.io/v1alpha1",
+        "core.delonix.io/v1alpha1",
+        "delonix.io/v1",
+        "gateway.delonix.io/v1alpha1",
+        "infrastructure.delonix.io/v1alpha1",
+        "networking.delonix.io/v1alpha1",
+        "storage.delonix.io/v1alpha1"
+      ]
     },
     "kind": {
-      "type": "string"
+      "enum": [
+        "Cluster",
+        "Container",
+        "Dependency",
+        "FirewallPolicy",
+        "Gateway",
+        "HTTPRoute",
+        "Image",
+        "Ingress",
+        "KnowDepends",
+        "KubernetesCluster",
+        "Network",
+        "NetworkPolicy",
+        "NetworkRoute",
+        "Pod",
+        "Secret",
+        "Stack",
+        "Tunnel",
+        "VirtualMachine",
+        "Vm",
+        "Volume",
+        "Workload"
+      ]
     },
     "metadata": {
       "properties": {

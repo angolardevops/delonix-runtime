@@ -374,21 +374,38 @@ garante-se, dentro do <code>0.x</code>:</p>
   acontece com <code>restart</code>→<code>restartPolicy</code>, <code>options</code>→<code>mountOptions</code>,
   <code>wg_ip</code>→<code>wgIp</code>).</li>
 <li><strong><code>apiVersion: delonix.io/v1</code> só muda com um <code>v2</code></strong>, e um <code>v2</code> não sai sem o
-  <code>v1</code> continuar a ser aceite.</li>
+  <code>v1</code> continuar a ser aceite. Desde a v0.64.0 cada Kind tem também o grupo do
+  seu domínio (<code>compute.delonix.io/v1alpha1</code>, <code>networking.…</code>, …) — o
+  <code>delonix api-resources</code> diz qual é o de cada um. As duas grafias são aceites;
+  a de grupo é a canónica, e o Kind só aceita <strong>o grupo dele</strong> ou o legado.</li>
 </ul>
 <p>A verdade não é este texto, é o schema: <strong><code>delonix schema print</code></strong> emite-o a
 partir do próprio código (ADR-0007), e o mesmo ficheiro está publicado em
 <a href="schema/v1/delonix.json"><code>schema/v1/delonix.json</code></a>. Um teste do repositório
 falha se o publicado deixar de ser o gerado, precisamente para esta página não
 voltar a poder mentir.</p>
+<p>O que o schema RECUSA, e vale saber porque é o que aparece sublinhado no editor:
+um campo desconhecido (um typo), <strong>um <code>kind</code> que o motor não conhece</strong> — um typo
+no nome, ou um Kind removido — e <strong>um <code>apiVersion</code> que não é o grupo daquele
+Kind</strong>. Até à v0.65.x o <code>kind</code> era uma string livre e qualquer nome passava, por
+isso um <code>kind: Contaner</code> validava limpo e um <code>Egress</code> já removido também; e o
+<code>apiVersion</code> era fixo no legado, por isso a grafia de grupo — a canónica — era
+sublinhada como se fosse erro. Um validador que discorda do motor é pior do que
+nenhum, porque o visto verde é o que as pessoas seguem.</p>
 <p>Aponta o editor e escreve manifestos com completação e validação:</p>
 <pre><code class="language-yaml"># yaml-language-server: $schema=https://angolardevops.github.io/delonix-runtime/schema/v1/delonix.json
-apiVersion: delonix.io/v1
-kind: Container
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
 metadata: { name: web }
 spec:
-  image: nginx:1.27
+  containers:
+    - name: web
+      image: nginx:1.27
 </code></pre>
+<p>Há também uma extensão de VS Code que traz isto já ligado, mais um template por
+Kind: <a href="https://github.com/angolardevops/delonix-vscode"><code>angolardevops/delonix-vscode</code></a>.
+Aponta para o MESMO ficheiro publicado acima — buscado ao vivo, não embutido —
+por isso o editor e o <code>stack apply</code> não podem discordar.</p>
 <p>Para saber o que mudou entre duas versões, não há uma página escrita à mão —
 haveria a segunda fonte de verdade que a ADR-0007 aboliu. Há um comando:</p>
 <pre><code class="language-bash">scripts/schema-diff.sh v0.46.0          # dessa tag até à árvore actual

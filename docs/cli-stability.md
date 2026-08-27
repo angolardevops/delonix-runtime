@@ -190,7 +190,10 @@ garante-se, dentro do `0.x`:
   acontece com `restart`→`restartPolicy`, `options`→`mountOptions`,
   `wg_ip`→`wgIp`).
 * **`apiVersion: delonix.io/v1` só muda com um `v2`**, e um `v2` não sai sem o
-  `v1` continuar a ser aceite.
+  `v1` continuar a ser aceite. Desde a v0.64.0 cada Kind tem também o grupo do
+  seu domínio (`compute.delonix.io/v1alpha1`, `networking.…`, …) — o
+  `delonix api-resources` diz qual é o de cada um. As duas grafias são aceites;
+  a de grupo é a canónica, e o Kind só aceita **o grupo dele** ou o legado.
 
 A verdade não é este texto, é o schema: **`delonix schema print`** emite-o a
 partir do próprio código (ADR-0007), e o mesmo ficheiro está publicado em
@@ -198,16 +201,32 @@ partir do próprio código (ADR-0007), e o mesmo ficheiro está publicado em
 falha se o publicado deixar de ser o gerado, precisamente para esta página não
 voltar a poder mentir.
 
+O que o schema RECUSA, e vale saber porque é o que aparece sublinhado no editor:
+um campo desconhecido (um typo), **um `kind` que o motor não conhece** — um typo
+no nome, ou um Kind removido — e **um `apiVersion` que não é o grupo daquele
+Kind**. Até à v0.65.x o `kind` era uma string livre e qualquer nome passava, por
+isso um `kind: Contaner` validava limpo e um `Egress` já removido também; e o
+`apiVersion` era fixo no legado, por isso a grafia de grupo — a canónica — era
+sublinhada como se fosse erro. Um validador que discorda do motor é pior do que
+nenhum, porque o visto verde é o que as pessoas seguem.
+
 Aponta o editor e escreve manifestos com completação e validação:
 
 ```yaml
 # yaml-language-server: $schema=https://angolardevops.github.io/delonix-runtime/schema/v1/delonix.json
-apiVersion: delonix.io/v1
-kind: Container
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
 metadata: { name: web }
 spec:
-  image: nginx:1.27
+  containers:
+    - name: web
+      image: nginx:1.27
 ```
+
+Há também uma extensão de VS Code que traz isto já ligado, mais um template por
+Kind: [`angolardevops/delonix-vscode`](https://github.com/angolardevops/delonix-vscode).
+Aponta para o MESMO ficheiro publicado acima — buscado ao vivo, não embutido —
+por isso o editor e o `stack apply` não podem discordar.
 
 Para saber o que mudou entre duas versões, não há uma página escrita à mão —
 haveria a segunda fonte de verdade que a ADR-0007 aboliu. Há um comando:
