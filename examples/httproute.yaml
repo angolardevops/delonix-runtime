@@ -10,14 +10,14 @@
 # Aplicar com:  delonix stack apply -f httproute.yaml
 # (os containers backend têm de existir — declara-os no mesmo stack).
 ---
-apiVersion: delonix.io/v1
+apiVersion: networking.delonix.io/v1alpha1
 kind: Network
 metadata:
   name: appnet
 spec:
   driver: bridge           # rede custom: dá IP interno aos backends (o proxy alcança-os por IP)
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Container
 metadata:
   name: web
@@ -25,7 +25,7 @@ spec:
   image: "nginx:1.27-alpine"
   network: appnet          # numa rede custom, para o proxy o alcançar por IP
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Container
 metadata:
   name: api
@@ -34,7 +34,7 @@ spec:
   command: ["-listen=:3000", "-text=hello from api"]
   network: appnet
 ---
-apiVersion: delonix.io/v1
+apiVersion: gateway.delonix.io/v1alpha1
 kind: HTTPRoute
 metadata:
   name: loja

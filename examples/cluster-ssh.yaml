@@ -10,8 +10,8 @@
 # tem um `check` (comando shell; êxito = já satisfeito) e um `apply`. Correr
 # duas vezes não faz nada de novo — e nunca dessincroniza de um estado paralelo,
 # porque não existe nenhum.
-apiVersion: delonix.io/v1
-kind: Cluster
+apiVersion: infrastructure.delonix.io/v1alpha1
+kind: KubernetesCluster
 metadata:
   name: prod
 spec:

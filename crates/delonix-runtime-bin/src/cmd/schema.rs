@@ -29,6 +29,8 @@ use clap::Subcommand;
 use delonix_runtime_core::{Error, Result};
 use schemars::generate::SchemaSettings;
 
+use super::kinds as k;
+
 /// The Kinds that have a TYPED spec, and therefore a real schema.
 ///
 /// A Kind missing from this list is reported as «no typed schema» rather than
@@ -43,23 +45,23 @@ use schemars::generate::SchemaSettings;
 /// to abolish. So it stays untyped and [`no_typed_schema`] names the spelling to
 /// use instead.
 const TYPED_KINDS: &[&str] = &[
-    "Container",
-    "Pod",
-    "Volume",
-    "Network",
-    "Vm",
-    "Secret",
-    "Image",
-    "Tunnel",
-    "Dependency",
-    "NetworkRoute",
-    "HTTPRoute",
-    "Ingress",
-    "FirewallPolicy",
-    "Egress",
-    "Workload",
-    "Cluster",
-    "Stack",
+    k::CONTAINER,
+    k::POD,
+    k::VOLUME,
+    k::NETWORK,
+    k::VM,
+    k::SECRET,
+    k::IMAGE,
+    k::GATEWAY,
+    k::DEPENDENCY,
+    k::NETWORK_ROUTE,
+    k::HTTP_ROUTE,
+    k::INGRESS,
+    k::FIREWALL_POLICY,
+    k::EGRESS,
+    k::WORKLOAD,
+    k::CLUSTER,
+    k::STACK,
 ];
 
 /// Fields of NESTED types that serde accepts under a second name, as
@@ -101,11 +103,11 @@ fn no_typed_schema(kind: &str) -> Error {
 /// X», which reads as a defect in the manifest when the truth is a property of
 /// the Kind. Same shape as `not_converged_reason` and `no_teardown_reason`.
 fn untyped_hint(kind: &str) -> &'static str {
-    if kind.eq_ignore_ascii_case("ShareVolume") {
+    if kind.eq_ignore_ascii_case(k::SHARE_VOLUME) {
         return " — `kind: ShareVolume` is the deprecated spelling: write `kind: Volume` with a \
                 `share: {from: ...}` block, which is what it is rewritten to at load";
     }
-    if kind.eq_ignore_ascii_case("Storage") {
+    if kind.eq_ignore_ascii_case(k::STORAGE) {
         " — `kind: Storage` is the deprecated spelling: write `kind: Volume` with an \
          `nfs:`/`cifs:`/`webdav:` block, which is what it is rewritten to at load"
     } else {
@@ -150,22 +152,22 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
         // shape this schema exists to abolish, so the name is now written down
         // next to the type it belongs to, and a miss is a hard error.
         let (spec, def_name, accepted) = match *kind {
-            "Container" => (
+            k::CONTAINER => (
                 generator.subschema_for::<super::container::ContainerSpec>(),
                 "ContainerSpec",
                 super::container::CONTAINER_SPEC_FIELDS,
             ),
-            "Pod" => (
+            k::POD => (
                 generator.subschema_for::<super::container::PodSpec>(),
                 "PodSpec",
                 super::container::POD_SPEC_FIELDS,
             ),
-            "Volume" => (
+            k::VOLUME => (
                 generator.subschema_for::<super::volume::VolumeSpec>(),
                 "VolumeSpec",
                 super::volume::VOLUME_SPEC_FIELDS,
             ),
-            "Network" => (
+            k::NETWORK => (
                 generator.subschema_for::<super::network::NetworkSpec>(),
                 "NetworkSpec",
                 super::network::NETWORK_SPEC_FIELDS,
@@ -176,42 +178,42 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
             // grouped-form keys (`resources:`/`boot:`/`cloudInit:`/`libvirt:`) —
             // hoisted to flat fields before `VmSpec` is deserialized, so they
             // exist in a valid manifest and not in the struct.
-            "Vm" => (
+            k::VM => (
                 generator.subschema_for::<super::vm::VmSpec>(),
                 "VmSpec",
                 super::vm::VM_SPEC_FIELDS,
             ),
-            "Secret" => (
+            k::SECRET => (
                 generator.subschema_for::<super::secret::SecretSpec>(),
                 "SecretSpec",
                 super::secret::SECRET_SPEC_FIELDS,
             ),
-            "Image" => (
+            k::IMAGE => (
                 generator.subschema_for::<super::image::ImageSpec>(),
                 "ImageSpec",
                 super::image::IMAGE_SPEC_FIELDS,
             ),
-            "Tunnel" => (
+            k::GATEWAY => (
                 generator.subschema_for::<super::tunnel::TunnelSpec>(),
                 "TunnelSpec",
                 super::tunnel::TUNNEL_SPEC_FIELDS,
             ),
-            "Dependency" => (
+            k::DEPENDENCY => (
                 generator.subschema_for::<super::dependency::DependencySpec>(),
                 "DependencySpec",
                 super::dependency::DEPENDENCY_SPEC_FIELDS,
             ),
-            "NetworkRoute" => (
+            k::NETWORK_ROUTE => (
                 generator.subschema_for::<super::netroute::NetworkRouteSpec>(),
                 "NetworkRouteSpec",
                 super::netroute::NETWORK_ROUTE_SPEC_FIELDS,
             ),
-            "HTTPRoute" => (
+            k::HTTP_ROUTE => (
                 generator.subschema_for::<super::httproute::HttpRouteSpec>(),
                 "HttpRouteSpec",
                 super::httproute::HTTP_ROUTE_SPEC_FIELDS,
             ),
-            "Ingress" => (
+            k::INGRESS => (
                 generator.subschema_for::<super::httproute::IngressSpec>(),
                 "IngressSpec",
                 super::httproute::INGRESS_SPEC_FIELDS,
@@ -220,22 +222,22 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
             // share `FwDocSpec` whole — which is why they were merged. Both are
             // listed so a document written either way gets checked; the schema
             // describes what is ACCEPTED, and `Egress` still is.
-            "FirewallPolicy" | "Egress" => (
+            k::FIREWALL_POLICY | k::EGRESS => (
                 generator.subschema_for::<super::firewall::FwDocSpec>(),
                 "FwDocSpec",
                 super::firewall::FW_SPEC_FIELDS,
             ),
-            "Workload" => (
+            k::WORKLOAD => (
                 generator.subschema_for::<super::workload::WorkloadSpec>(),
                 "WorkloadSpec",
                 super::workload::WORKLOAD_SPEC_FIELDS,
             ),
-            "Cluster" => (
+            k::CLUSTER => (
                 generator.subschema_for::<super::cluster::ClusterSpec>(),
                 "ClusterSpec",
                 super::cluster::CLUSTER_SPEC_FIELDS,
             ),
-            "Stack" => (
+            k::STACK => (
                 generator.subschema_for::<super::manifest::StackSpec>(),
                 "StackSpec",
                 super::manifest::STACK_SPEC_FIELDS,
@@ -249,7 +251,7 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
         // `spec.containers`, so the schema has to offer both — describing only
         // the flat one would reject `examples/pod.yaml`, which is a documented,
         // working manifest.
-        let spec = if *kind == "Container" {
+        let spec = if *kind == k::CONTAINER {
             let pod = generator.subschema_for::<super::container::PodSpec>();
             serde_json::json!({ "anyOf": [spec, pod] })
         } else {
@@ -360,9 +362,9 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
             // object instead would have kept rejecting the very form the example
             // uses while looking like it had been handled.
             let dual_shaped: &[(&str, &str)] = match kind.as_str() {
-                "Container" => &[("network", "object"), ("env", "object")],
-                "Vm" => &[("network", "object")],
-                "Dependency" => &[("to", "string")],
+                k::CONTAINER => &[("network", "object"), ("env", "object")],
+                k::VM => &[("network", "object")],
+                k::DEPENDENCY => &[("to", "string")],
                 _ => &[],
             };
             for (dual, other) in dual_shaped.iter().copied() {
@@ -427,9 +429,23 @@ pub fn explain(path: &str) -> Result<()> {
         Some((k, r)) => (k, Some(r)),
         None => (path, None),
     };
+    // The registry resolves the plural and the shortnames too, so `explain po`
+    // and `explain pods` reach `Pod` — before this, only the exact canonical
+    // spelling did, which is not the one a caller has in their fingers after
+    // typing `get pods`. One resolver for every verb is the point: a second
+    // table of abbreviations here is how `po` starts meaning two things.
+    //
+    // A token the registry does not know falls through to the ORIGINAL refusal
+    // on purpose: `no_typed_schema` carries a targeted hint (a Kind can be real
+    // and still have no typed schema — `Storage` is rewritten into `Volume`),
+    // and «no such resource kind» would read as a defect in the manifest when
+    // it is a property of the Kind.
+    let asked = super::resource::resolve_kind(kind)
+        .map(|f| f.kind)
+        .unwrap_or(kind);
     let canon = TYPED_KINDS
         .iter()
-        .find(|k| k.eq_ignore_ascii_case(kind))
+        .find(|k| k.eq_ignore_ascii_case(asked))
         .ok_or_else(|| no_typed_schema(kind))?;
     let doc = manifest_schema(Some(canon))?;
     let defs = doc.get("$defs").cloned().unwrap_or(serde_json::json!({}));
@@ -695,7 +711,7 @@ mod tests {
     /// por isso o schema exigia justamente o que ninguém é mandado escrever.
     #[test]
     fn um_alias_de_campo_aninhado_e_aceite_sem_deixar_de_exigir_um_dos_dois() {
-        let s = manifest_schema(Some("Cluster")).unwrap();
+        let s = manifest_schema(Some("KubernetesCluster")).unwrap();
         let host = &s["$defs"]["HostSpec"];
         for grafia in ["ip", "address"] {
             assert!(
@@ -724,7 +740,7 @@ mod tests {
     /// nu: um tipo sem campos nenhuns.
     #[test]
     fn um_anyof_ao_lado_de_properties_e_restricao_e_nao_uma_uniao() {
-        let s = manifest_schema(Some("Cluster")).unwrap();
+        let s = manifest_schema(Some("KubernetesCluster")).unwrap();
         let defs = &s["$defs"];
         let host = deref(defs["HostSpec"].clone(), defs);
         assert!(

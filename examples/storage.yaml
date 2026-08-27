@@ -19,21 +19,21 @@
 # As credenciais do NAS. Ficam num `kind: Secret` (cofre cifrado) e NUNCA em
 # texto no manifesto do storage — é essa a razão de existir do `passwordSecret`.
 # ---------------------------------------------------------------------------
-apiVersion: delonix.io/v1
+apiVersion: core.delonix.io/v1alpha1
 kind: Secret
 metadata:
   name: nas-creds
 stringData:
   password: troca-me
 ---
-apiVersion: delonix.io/v1
+apiVersion: core.delonix.io/v1alpha1
 kind: Secret
 metadata:
   name: cloud-creds
 stringData:
   password: troca-me
 ---
-apiVersion: delonix.io/v1
+apiVersion: storage.delonix.io/v1alpha1
 kind: Volume
 metadata:
   name: media
@@ -45,7 +45,7 @@ spec:
     mountOptions: "vers=4.1,soft" # extra `mount -o` options (optional)
 ---
 # ── SMB / CIFS (Samba, Windows shares, TrueNAS "Windows (SMB) Shares") ────────
-apiVersion: delonix.io/v1
+apiVersion: storage.delonix.io/v1alpha1
 kind: Volume
 metadata:
   name: backups
@@ -62,7 +62,7 @@ spec:
     mountOptions: "vers=3.0"
 ---
 # ── WebDAV (Nextcloud / ownCloud) ─────────────────────────────────────────────
-apiVersion: delonix.io/v1
+apiVersion: storage.delonix.io/v1alpha1
 kind: Volume
 metadata:
   name: cloud

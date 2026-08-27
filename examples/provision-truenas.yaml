@@ -17,7 +17,7 @@
 # Without that flag, `volumes rm` removes only the local volume and leaves the
 # dataset alone. And it is refused outright for a volume that merely mounts a
 # share somebody else made — there is no claim of ownership to act on.
-apiVersion: delonix.io/v1
+apiVersion: core.delonix.io/v1alpha1
 kind: Secret
 metadata:
   name: nas-cred
@@ -27,7 +27,7 @@ spec:
   stringData:
     password: delonix-admin
 ---
-apiVersion: delonix.io/v1
+apiVersion: storage.delonix.io/v1alpha1
 kind: Volume
 metadata:
   name: dados

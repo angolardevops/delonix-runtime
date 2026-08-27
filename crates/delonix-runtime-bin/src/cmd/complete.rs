@@ -33,6 +33,7 @@
 //! it. A second copy of "where the records live" is exactly how a TAB starts
 //! suggesting names that no command can resolve.
 
+use super::kinds as k;
 use clap_complete::engine::CompletionCandidate;
 
 use super::util::state_root;
@@ -228,30 +229,30 @@ enum NsSource {
 /// keeps no second list. A classifier nothing consults is the seventh list this
 /// codebase already paid for once.
 const NAMESPACE_SOURCES: &[(&str, NsSource)] = &[
-    ("Container", NsSource::Store(ns_from_containers)),
-    ("Vm", NsSource::Store(ns_from_vms)),
+    (k::CONTAINER, NsSource::Store(ns_from_containers)),
+    (k::VM, NsSource::Store(ns_from_vms)),
     // `PerDocument`: a plain volume is global, one with a `share:` block is
     // scoped, and `list_all` is the call that returns the owner alongside the
     // record (`VolumeStore::list` deliberately does NOT see the scoped ones).
-    ("Volume", NsSource::Store(ns_from_volumes)),
+    (k::VOLUME, NsSource::Store(ns_from_volumes)),
     (
-        "Pod",
+        k::POD,
         NsSource::Via(
             "Container — `pod_member_run_opts` stamps the pod's namespace onto every member",
         ),
     ),
     (
-        "Workload",
-        NsSource::Via("Container/Vm — it lowers to one of them and the namespace goes with it"),
+        k::WORKLOAD,
+        NsSource::Via("Container/VirtualMachine — it lowers to one of them and the namespace goes with it"),
     ),
     (
-        "ShareVolume",
+        k::SHARE_VOLUME,
         NsSource::Via("Volume — it lowers to a `kind: Volume` with a `share:` block"),
     ),
     (
-        "Stack",
+        k::STACK,
         NsSource::Via(
-            "Container/Vm — `manifest::load` propagates the namespace onto every child it expands",
+            "Container/VirtualMachine — `manifest::load` propagates the namespace onto every child it expands",
         ),
     ),
 ];

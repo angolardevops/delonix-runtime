@@ -7,7 +7,7 @@
 # Dependency → HTTPRoute → Tunnel). Each child inherits the Stack's namespace
 # unless it sets its own. You can still write the resources as separate documents
 # — the Stack is just a convenient single place to bundle them.
-apiVersion: delonix.io/v1
+apiVersion: core.delonix.io/v1alpha1
 kind: Stack
 metadata:
   name: blog

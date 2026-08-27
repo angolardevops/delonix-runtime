@@ -617,7 +617,7 @@ fn manifest_vm(o: &InitOpts) -> String {
         .replace("{image}", &img)
 }
 
-/// Complete reference for `kind: Vm` (mirrors `delonix_vm::VmConfig`), plus the
+/// Complete reference for `kind: VirtualMachine` (mirrors `delonix_vm::VmConfig`), plus the
 /// two resources it needs around it.
 ///
 /// **The Network is here because the VM already referenced it and nothing
@@ -655,7 +655,7 @@ spec:
   # quota: 2g                 # hard cap as root, monitored in rootless
 ---
 apiVersion: delonix.io/v1
-kind: Vm
+kind: VirtualMachine
 metadata:
   name: {name}
 spec:
@@ -759,7 +759,7 @@ fn cluster_kind(o: &InitOpts) -> String {
          #   delonix cluster create --name {name}       # não precisa deste ficheiro\n\
          #   delonix cluster apply -f cluster-kind.yaml # versiona a config no git\n\
          apiVersion: delonix.io/v1\n\
-         kind: Cluster\n\
+         kind: KubernetesCluster\n\
          metadata:\n  name: {name}\n\
          spec:\n  \
          # kind = containers aqui | vm = VMs douradas | ssh = hosts remotos\n  \
@@ -789,7 +789,7 @@ fn cluster_vm(o: &InitOpts) -> String {
          #   delonix network create {name}-net\n\
          #   delonix cluster apply -f cluster-vm.yaml\n\
          apiVersion: delonix.io/v1\n\
-         kind: Cluster\n\
+         kind: KubernetesCluster\n\
          metadata:\n  name: {name}\n\
          spec:\n  \
          mode: vm\n  \
@@ -820,7 +820,7 @@ fn cluster_ssh(o: &InitOpts) -> String {
          # Idempotente SEM ficheiro de estado (\"Terraform sem .tfstate\"): cada passo\n\
          # tem um `check` e um `apply`. Correr duas vezes não faz nada de novo.\n\
          apiVersion: delonix.io/v1\n\
-         kind: Cluster\n\
+         kind: KubernetesCluster\n\
          metadata:\n  name: {name}\n\
          spec:\n  \
          mode: ssh\n  \

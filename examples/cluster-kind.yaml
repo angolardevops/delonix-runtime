@@ -5,8 +5,8 @@
 # Equivale a `delonix cluster create --name lab` (que não precisa de manifesto
 # nenhum). Usa-se o manifesto quando queres versionar a configuração no git ou
 # afinar campos que as flags não expõem.
-apiVersion: delonix.io/v1
-kind: Cluster
+apiVersion: infrastructure.delonix.io/v1alpha1
+kind: KubernetesCluster
 metadata:
   name: lab
 spec:

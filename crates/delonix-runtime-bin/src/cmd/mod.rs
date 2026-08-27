@@ -45,6 +45,7 @@ pub mod prune;
 pub mod rbackup;
 pub mod reconcile;
 pub mod remote;
+pub(crate) mod resource;
 pub mod revision;
 pub mod scaffold;
 pub mod scan;

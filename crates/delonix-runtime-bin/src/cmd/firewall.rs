@@ -8,6 +8,7 @@
 //! IP on the `delonix0` bridge) — `--net host` containers share the host stack
 //! and are rejected honestly.
 
+use super::kinds as k;
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
 use delonix_net::infra;
@@ -973,7 +974,7 @@ fn egress_net(network: &str, mode: EgressMode, to: Option<String>) -> Result<()>
 /// k8s NetworkPolicy.
 #[derive(Deserialize, Serialize, schemars::JsonSchema)]
 pub(crate) struct FwDocSpec {
-    /// `ingress`|`egress` — only for `kind: FirewallPolicy` (the direction comes
+    /// `ingress`|`egress` — only for `kind: NetworkPolicy` (the direction comes
     /// from the Kind for the legacy `Egress`). Captured so the dry-run round-trip
     /// preserves it; `apply` reads it directly from `doc.spec`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1079,12 +1080,12 @@ pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let (_images, store) = open_stores()?;
-    // `kind: FirewallPolicy` is now the ONLY firewall Kind. `kind: Ingress` stopped
+    // `kind: NetworkPolicy` is now the ONLY firewall Kind. `kind: Ingress` stopped
     // being firewall a while back (it is the k8s-shaped L7 Ingress, see
     // `cmd::httproute`), and `kind: Egress` is rewritten into a FirewallPolicy with
     // `direction: egress` at load time (`manifest::lower_egress`) — so by the time
     // anything reaches here there is one Kind, one struct and one direction field.
-    for doc in manifest::of_kind(docs, "FirewallPolicy") {
+    for doc in manifest::of_kind(docs, k::FIREWALL_POLICY) {
         let dir = match doc.spec.get("direction").and_then(|v| v.as_str()) {
             Some("ingress") => "in",
             Some("egress") => "out",
@@ -1100,7 +1101,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     Ok(())
 }
 
-/// Fields the reconciler compares for a `kind: FirewallPolicy`.
+/// Fields the reconciler compares for a `kind: NetworkPolicy`.
 ///
 /// `defaultPolicy` and `rules` converge HOT — `apply_fw_doc` already replaces
 /// the whole direction, in place, with no container restart. `target` and
@@ -1183,7 +1184,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     keys.sort();
     f.insert("rules".into(), keys.join(","));
     Ok(super::reconcile::Desired {
-        kind: "FirewallPolicy".into(),
+        kind: k::FIREWALL_POLICY.into(),
         name: doc.metadata.name.clone(),
         fields: f,
         converges: true,
@@ -1206,7 +1207,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
 pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actual>> {
     let (_images, store) = open_stores()?;
     let mut out = Vec::new();
-    for doc in manifest::of_kind(docs, "FirewallPolicy") {
+    for doc in manifest::of_kind(docs, k::FIREWALL_POLICY) {
         let Ok(spec) = manifest::spec_of::<FwDocSpec>(doc) else {
             continue;
         };
@@ -1251,7 +1252,7 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
         keys.sort();
         f.insert("rules".into(), keys.join(","));
         out.push(super::reconcile::Actual {
-            kind: "FirewallPolicy".into(),
+            kind: k::FIREWALL_POLICY.into(),
             name: doc.metadata.name.clone(),
             fields: f,
             owner: c.labels.get(super::reconcile::STACK_LABEL).cloned(),

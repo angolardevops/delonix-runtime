@@ -11,6 +11,8 @@
 //! aligner and a `localtime_r` are too small to justify growing the
 //! supply-chain surface of a container runtime.
 
+use super::kinds as k;
+
 /// Gap between columns, like in `docker ps`.
 const GAP: usize = 3;
 
@@ -645,8 +647,8 @@ impl Layers {
     {
         let n = self.counts.get(kind).copied().unwrap_or(0);
         // `Ingress` folds into `HTTPRoute` at load, so both count toward that layer.
-        let n = if kind == "HTTPRoute" {
-            n + self.counts.get("Ingress").copied().unwrap_or(0)
+        let n = if kind == k::HTTP_ROUTE {
+            n + self.counts.get(k::INGRESS).copied().unwrap_or(0)
         } else {
             n
         };

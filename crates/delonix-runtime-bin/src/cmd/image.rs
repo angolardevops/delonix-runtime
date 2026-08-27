@@ -1,5 +1,6 @@
 //! `delonix image` — pull/ls/rm/export.
 
+use super::kinds as k;
 use std::path::PathBuf;
 
 use clap::Subcommand;
@@ -97,7 +98,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
         }
     }
     Ok(super::reconcile::Desired {
-        kind: "Image".into(),
+        kind: k::IMAGE.into(),
         name: doc.metadata.name.clone(),
         fields: f,
         converges: !built,
@@ -111,7 +112,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
 pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actual>> {
     let (images, _) = open_stores()?;
     let mut out = Vec::new();
-    for doc in manifest::of_kind(docs, "Image") {
+    for doc in manifest::of_kind(docs, k::IMAGE) {
         let Some(r) = image_ref(doc) else { continue };
         let Ok(img) = images.resolve(&r) else {
             continue;
@@ -120,7 +121,7 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
         f.insert("ref".into(), r);
         f.insert("digest".into(), img.id.clone());
         out.push(super::reconcile::Actual {
-            kind: "Image".into(),
+            kind: k::IMAGE.into(),
             name: doc.metadata.name.clone(),
             fields: f,
             owner: None,
@@ -1012,7 +1013,7 @@ fn registry_creds_from_secret(image: &str, secret: &str) -> Result<(String, Stri
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let (images, _store) = open_stores()?;
-    for doc in manifest::of_kind(docs, "Image") {
+    for doc in manifest::of_kind(docs, k::IMAGE) {
         let name = &doc.metadata.name;
         let spec: ImageSpec = manifest::spec_of(doc)?;
         // WHERE the field applies is checked BEFORE the secret is resolved. The

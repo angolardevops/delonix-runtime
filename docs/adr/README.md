@@ -26,6 +26,10 @@ never rewritten — supersede them with a new one.
 | [0014](0014-runtime-dir-per-root.md) | The network runtime dir is scoped to the state root, not just to the uid | **Accepted** — implemented; default root unchanged, only alternative roots move |
 | [0015](0015-intermediate-cgroup-level.md) | An intermediate cgroup level with an aggregate ceiling (tenancy-free) | **Accepted** — implemented; opaque group name, `None` changes nothing |
 | [0016](0016-filesystem-under-the-state-root.md) | Keep ext4 under the state root; revisit btrfs only for a measured need | **Accepted** — the disk was full of duplicates, not compressible data; written triggers to reopen |
+| [0017](0017-signing-vm-images.md) | Sign VM images with cosign, not with the release keypair | **Accepted** |
+| [0018](0018-vm-images-stay-amd64.md) | VM images stay amd64 until the release pipeline publishes arm64 | **Accepted** |
+| [0019](0019-stack-revision-history.md) | A stack keeps a revision history — a record, never a source of truth | **Accepted** |
+| [0020](0020-cli-restructuring.md) | The CLI splits into three surfaces, and the declarative CRUD is written once | **Proposed** — measured baseline in `docs/discovery/51_CLI_INVENTARIO.md`; flags four published promises it breaks |
 
 ## Roadmap (from `AGENTS.md` "Universal Runtime" — each phase needs its own accepted ADR)
 

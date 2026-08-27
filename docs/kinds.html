@@ -134,7 +134,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <span class="i-moon">🌙</span><span class="i-sun">☀️</span></button>
 </div></div>
 <h5><span class='lang-pt'>Documentação</span><span class='lang-en'>Docs</span></h5>
-<a href="index.html"><span class='lang-pt'>Início</span><span class='lang-en'>Home</span></a><a href="cheatsheet.html"><span class='lang-pt'>Cheatsheet</span><span class='lang-en'>Cheatsheet</span></a><a href="kinds.html" class="on"><span class='lang-pt'>Kinds e templates</span><span class='lang-en'>Kinds &amp; templates</span></a><a href="gitops.html"><span class='lang-pt'>GitOps e CI</span><span class='lang-en'>GitOps &amp; CI</span></a><a href="estabilidade.html"><span class='lang-pt'>Promessa de estabilidade</span><span class='lang-en'>Stability promise</span></a><a href="cloud.html"><span class='lang-pt'>cloud-init, cloud-img e CH</span><span class='lang-en'>cloud-init, cloud-img &amp; CH</span></a><a href="labs.html"><span class='lang-pt'>Laboratórios</span><span class='lang-en'>Labs</span></a><a href="guia-vm.html"><span class='lang-pt'>Guia de VMs e lab de rede</span><span class='lang-en'>VM &amp; network lab guide</span></a><a href="arquitectura.html"><span class='lang-pt'>Arquitectura</span><span class='lang-en'>Architecture</span></a><a href="c4.html"><span class='lang-pt'>Modelo C4 e system design</span><span class='lang-en'>C4 model &amp; system design</span></a><a href="cri.html"><span class='lang-pt'>CRI — kubelet sem containerd</span><span class='lang-en'>CRI — kubelet without containerd</span></a><a href="comparacao.html"><span class='lang-pt'>Delonix vs Docker vs Podman</span><span class='lang-en'>Delonix vs Docker vs Podman</span></a><a href="tutorial-delonix-temp.html"><span class='lang-pt'>Projecto completo: Delonix Temp</span><span class='lang-en'>Full project: Delonix Temp</span></a>
+<a href="index.html"><span class='lang-pt'>Início</span><span class='lang-en'>Home</span></a><a href="cheatsheet.html"><span class='lang-pt'>Cheatsheet</span><span class='lang-en'>Cheatsheet</span></a><a href="estrutura.html"><span class='lang-pt'>Estrutura de recursos</span><span class='lang-en'>Resource structure</span></a><a href="kinds.html" class="on"><span class='lang-pt'>Kinds e templates</span><span class='lang-en'>Kinds &amp; templates</span></a><a href="gitops.html"><span class='lang-pt'>GitOps e CI</span><span class='lang-en'>GitOps &amp; CI</span></a><a href="estabilidade.html"><span class='lang-pt'>Promessa de estabilidade</span><span class='lang-en'>Stability promise</span></a><a href="cloud.html"><span class='lang-pt'>cloud-init, cloud-img e CH</span><span class='lang-en'>cloud-init, cloud-img &amp; CH</span></a><a href="labs.html"><span class='lang-pt'>Laboratórios</span><span class='lang-en'>Labs</span></a><a href="guia-vm.html"><span class='lang-pt'>Guia de VMs e lab de rede</span><span class='lang-en'>VM &amp; network lab guide</span></a><a href="arquitectura.html"><span class='lang-pt'>Arquitectura</span><span class='lang-en'>Architecture</span></a><a href="c4.html"><span class='lang-pt'>Modelo C4 e system design</span><span class='lang-en'>C4 model &amp; system design</span></a><a href="cri.html"><span class='lang-pt'>CRI — kubelet sem containerd</span><span class='lang-en'>CRI — kubelet without containerd</span></a><a href="comparacao.html"><span class='lang-pt'>Delonix vs Docker vs Podman</span><span class='lang-en'>Delonix vs Docker vs Podman</span></a><a href="tutorial-delonix-temp.html"><span class='lang-pt'>Projecto completo: Delonix Temp</span><span class='lang-en'>Full project: Delonix Temp</span></a>
 <h5><span class='lang-pt'>Referência CLI</span><span class='lang-en'>CLI reference</span></h5>
 <a href="comandos/init.html">delonix init</a><a href="comandos/container.html">delonix container</a><a href="comandos/workload.html">delonix workload</a><a href="comandos/pod.html">delonix pod</a><a href="comandos/image.html">delonix image</a><a href="comandos/build.html">delonix build</a><a href="comandos/vm.html">delonix vm</a><a href="comandos/volumes.html">delonix volumes</a><a href="comandos/namespace.html">delonix namespace</a><a href="comandos/network.html">delonix network</a><a href="comandos/stack.html">delonix stack</a><a href="comandos/compose.html">delonix compose</a><a href="comandos/cluster.html">delonix cluster</a><a href="comandos/secret.html">delonix secret</a><a href="comandos/storage.html">delonix storage</a><a href="comandos/sharevolume.html">delonix sharevolume</a><a href="comandos/ingress.html">delonix net ingress</a><a href="comandos/egress.html">delonix net egress</a><a href="comandos/httproute.html">delonix net httproute</a><a href="comandos/tunnel.html">delonix net tunnel</a><a href="comandos/flow.html">delonix net flow</a><a href="comandos/boot.html">delonix net boot</a><a href="comandos/backup.html">delonix backup</a><a href="comandos/restore.html">delonix restore</a><a href="comandos/system.html">delonix system</a><a href="comandos/dash.html">delonix dash</a><a href="comandos/docker-api.html">delonix serve docker-api</a><a href="comandos/kube.html">delonix cluster kube</a><a href="comandos/netns.html">delonix net netns</a><a href="comandos/completion.html">delonix completion</a><a href="comandos/syntax.html">delonix syntax</a><a href="comandos/schema.html">delonix schema · explain</a>
 <h5><span class='lang-pt'>Projecto</span><span class='lang-en'>Project</span></h5>
@@ -142,7 +142,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
 </nav>
 <main>
-<h1>Kinds do manifesto</h1><p class='tagline lang-pt'>Cada Kind com um template COMPLETO e funcional — todos os campos, com os defaults e um comentário. Aplica um só com <code>delonix &lt;grupo&gt; apply -f</code>, ou todos de uma vez com <code>delonix stack apply</code> (ordem por dependência: Secret → Network → NetworkRoute → Volume → Image → Vm → Container → Pod → Ingress → FirewallPolicy → HTTPRoute → Tunnel — <code>ShareVolume</code> baixa para <code>Volume</code> antes desta ordem entrar em jogo).</p><p class='tagline lang-en'>Each Kind with a COMPLETE, functional template — every field, with defaults and a comment. Apply just one with <code>delonix &lt;group&gt; apply -f</code>, or all at once with <code>delonix stack apply</code> (dependency order: Secret → Network → NetworkRoute → Volume → Image → Vm → Container → Pod → Ingress → FirewallPolicy → HTTPRoute → Tunnel — <code>ShareVolume</code> lowers into <code>Volume</code> before this order comes into play).</p>
+<h1>Kinds do manifesto</h1><p class='tagline lang-pt'>Cada Kind com um template COMPLETO e funcional — todos os campos, com os defaults e um comentário. Aplica um só com <code>delonix &lt;grupo&gt; apply -f</code>, ou todos de uma vez com <code>delonix stack apply</code> (ordem por dependência: Secret → Network → NetworkRoute → Volume → Image → VirtualMachine → Container → Pod → Ingress → NetworkPolicy → HTTPRoute → Gateway; <code>Storage</code> e <code>ShareVolume</code> baixam para <code>Volume</code> antes desta ordem entrar em jogo). A lista completa, com os grupos e o que cada documento se torna, está em <a href="estrutura.html">Estrutura de recursos</a>.</p><p class='tagline lang-en'>Each Kind with a COMPLETE, functional template — every field, with defaults and a comment. Apply just one with <code>delonix &lt;group&gt; apply -f</code>, or all at once with <code>delonix stack apply</code> (dependency order: Secret → Network → NetworkRoute → Volume → Image → Vm → Container → Pod → Ingress → FirewallPolicy → HTTPRoute → Tunnel — <code>ShareVolume</code> lowers into <code>Volume</code> before this order comes into play).</p>
 <p class='lang-pt'>Desde a v0.47.0 o <code>apply</code> <strong>converge</strong>: o <code>stack plan</code> diz o que mudaria e porquê, e o <code>apply</code> reconfigura portas, volumes, redes, memória e CPU <strong>a quente, sem mudar o PID</strong> — recusando, com o nome do campo, o que obrigaria a recriar (a não ser com <code>--replace</code>). Sem ficheiro de estado: o último spec aplicado vive no próprio recurso. Continua fail-fast e sem rollback, e é convergência <em>a pedido</em> — não um loop. Os templates abaixo são os ficheiros reais em <a href='https://github.com/angolardevops/delonix-runtime/tree/main/examples'><code>examples/</code></a>.</p><p class='lang-en'>Since v0.47.0 <code>apply</code> <strong>converges</strong>: <code>stack plan</code> says what would change and why, and <code>apply</code> reconfigures ports, volumes, networks, memory and CPU <strong>hot, with the PID unchanged</strong> — refusing, by field name, anything that would need a recreate (unless you pass <code>--replace</code>). No state file: the last applied spec lives on the resource itself. Still fail-fast and without rollback, and still convergence <em>on demand</em> — not a loop. The templates below are the real files in <a href='https://github.com/angolardevops/delonix-runtime/tree/main/examples'><code>examples/</code></a>.</p>
 <h2 id='secret'>Secret</h2>
 <p class='lang-pt'>Um segredo do cofre cifrado em repouso. Consumido por <code>run --secret</code>/<code>--secret-files</code> e por <code>passwordSecret</code> do Storage. Os valores NUNCA ficam no registo do container em texto — são resolvidos no arranque a partir do NOME.</p><p class='lang-en'>A secret from the vault, encrypted at rest. Consumed by <code>run --secret</code>/<code>--secret-files</code> and by Storage's <code>passwordSecret</code>. Values are NEVER kept in the container's registry as plaintext — they're resolved at startup from the NAME.</p>
@@ -157,7 +157,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 
 # ── Inline (stringData) — cómodo para dev, mas os VALORES ficam em CLARO no
 #    ficheiro. NÃO commites um manifesto destes num repositório. ───────────────
-apiVersion: delonix.io/v1
+apiVersion: core.delonix.io/v1alpha1
 kind: Secret
 metadata:
   name: nas-creds
@@ -167,7 +167,7 @@ spec:
 ---
 # ── fromEnvFile — mantém os valores FORA do manifesto (carrega linhas
 #    KEY=value de um ficheiro .env, tipicamente fora do controlo de versões). ──
-apiVersion: delonix.io/v1
+apiVersion: core.delonix.io/v1alpha1
 kind: Secret
 metadata:
   name: app-env
@@ -190,14 +190,14 @@ spec:
 # ---------------------------------------------------------------------------
 # A rede que o pod usa, declarada aqui para o exemplo validar sozinho.
 # ---------------------------------------------------------------------------
-apiVersion: delonix.io/v1
+apiVersion: networking.delonix.io/v1alpha1
 kind: Network
 metadata:
   name: web-net
 spec:
   driver: bridge
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Pod
 metadata:
   name: web
@@ -251,11 +251,11 @@ spec:
 #   delonix stack apply --dry-run -f examples/workload.yaml   # see what it lowers to
 #
 # A `kind: Workload` is sugar: it does NOT survive the load — it is rewritten into
-# a `kind: Container` or `kind: Vm` and flows through the normal per-Kind apply,
+# a `kind: Container` or `kind: VirtualMachine` and flows through the normal per-Kind apply,
 # exactly like a `kind: Stack` child. `spec.type` picks the type; the block named
 # after the type (`container:` / `vm:`) is the SAME spec the standalone Kind takes
 # (see examples/container.yaml and examples/vm.yaml for every field).
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Workload
 metadata:
   name: web
@@ -268,18 +268,18 @@ spec:
     env:
       - TZ=Africa/Luanda
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Workload
 metadata:
   name: db
 spec:
-  type: vm                 # lowers to kind: Vm
-  vm:                      # == kind: Vm spec (examples/vm.yaml)
+  type: vm                 # lowers to kind: VirtualMachine
+  vm:                      # == kind: VirtualMachine spec (examples/vm.yaml)
     disk: delonix-vm-k8s:1.34
     vcpus: 2
     memory: 4G
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Workload
 metadata:
   name: web-app
@@ -290,26 +290,26 @@ spec:
       - { name: web, image: nginx:latest }
       - { name: sidecar, image: busybox:latest }
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Workload
 metadata:
   name: fast-vm
 spec:
-  type: microvm            # lowers to kind: Vm, forcing the microVM hypervisor
-  microvm:                 # == kind: Vm spec, but backend is forced to cloud-hypervisor
+  type: microvm            # lowers to kind: VirtualMachine, forcing the microVM hypervisor
+  microvm:                 # == kind: VirtualMachine spec, but backend is forced to cloud-hypervisor
     disk: ubuntu-24.04.qcow2   # needs a CH-bootable image (not the libvirt-only k8s golden)
     vcpus: 2
     memory: 2G
     # backend: libvirt       # &lt;- a contradiction: type: microvm rejects it (use type: vm)</code></pre>
 <h2 id='dependency'>Dependency</h2>
-<p class='lang-pt'>Alcançabilidade DIRIGIDA entre containers (ao contrário da rede, que é bidireccional): <code>from</code> alcança <code>to</code>, e <code>to</code> não fica exposto aos outros. É açúcar reduzido no load para <code>kind: FirewallPolicy</code> — sem dataplane novo. Várias dependências para o mesmo alvo ACUMULAM os allows (por isso são fundidas por alvo, e não uma política por dependência).</p><p class='lang-en'>DIRECTED reachability between containers (unlike a network, which is bidirectional): <code>from</code> reaches <code>to</code>, and <code>to</code> stays unexposed to the others. Sugar lowered on load into <code>kind: FirewallPolicy</code> — no new dataplane. Several dependencies on the same target ACCUMULATE their allows, which is why they are merged by target rather than one policy per dependency.</p>
+<p class='lang-pt'>Alcançabilidade DIRIGIDA entre containers (ao contrário da rede, que é bidireccional): <code>from</code> alcança <code>to</code>, e <code>to</code> não fica exposto aos outros. É açúcar reduzido no load para <code>kind: NetworkPolicy</code> — sem dataplane novo. Várias dependências para o mesmo alvo ACUMULAM os allows (por isso são fundidas por alvo, e não uma política por dependência).</p><p class='lang-en'>DIRECTED reachability between containers (unlike a network, which is bidirectional): <code>from</code> reaches <code>to</code>, and <code>to</code> stays unexposed to the others. Sugar lowered on load into <code>kind: NetworkPolicy</code> — no new dataplane. Several dependencies on the same target ACCUMULATE their allows, which is why they are merged by target rather than one policy per dependency.</p>
 <pre><code># kind: Dependency (alias: KnowDepends) — alcançabilidade DIRIGIDA entre containers.
 # Ao contrário de uma Network (bidirecional), abre UM sentido: `from` alcança `to`,
 # mas `to` NÃO inicia para `from`. Caso clássico: a app conhece a DB, a DB não
 # conhece a app — a DB deixa de ficar exposta a todos os containers da rede.
 #
 # É AÇÚCAR, e agora diz-se: no `load` cada Dependency é reescrita para um
-# `kind: FirewallPolicy` com `direction: ingress`, default-deny no `to` + um allow
+# `kind: NetworkPolicy` com `direction: ingress`, default-deny no `to` + um allow
 # por `from`. Corre `stack apply --dry-run` para ver a política real — antes desta
 # fusão a tradução era invisível, e um `to` nomeado por uma Dependency E por uma
 # FirewallPolicy obrigava o motor a AVISAR sobre o seu próprio gémeo.
@@ -321,29 +321,34 @@ spec:
 # que deixa de casar com o workload para que foi escrita.
 # Aplicar com `delonix stack apply -f dependency.yaml`.
 ---
-apiVersion: delonix.io/v1
+apiVersion: networking.delonix.io/v1alpha1
 kind: Network
 metadata: { name: appnet }
 spec:
   driver: bridge
 ---
-apiVersion: delonix.io/v1
-kind: Container
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
 metadata: { name: db }
 spec:
-  image: &quot;postgres:16&quot;
   network: appnet
-  env: { POSTGRES_PASSWORD: dev }
+  containers:
+    - name: db
+      image: &quot;postgres:16&quot;
+      env:
+        - { name: POSTGRES_PASSWORD, value: dev }
 ---
-apiVersion: delonix.io/v1
-kind: Container
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
 metadata: { name: app }
 spec:
-  image: &quot;alpine:3.19&quot;
   network: appnet
-  command: [&quot;sleep&quot;, &quot;infinity&quot;]
+  containers:
+    - name: app
+      image: &quot;alpine:3.19&quot;
+      command: [&quot;sleep&quot;, &quot;infinity&quot;]
 ---
-apiVersion: delonix.io/v1
+apiVersion: networking.delonix.io/v1alpha1
 kind: Dependency
 metadata: { name: app-knows-db }
 spec:
@@ -401,19 +406,19 @@ spec:
 # nada, o plano imprime `NetworkRoute web-&gt;api`, e dois documentos a declarar o
 # mesmo par são recusados.
 ---
-apiVersion: delonix.io/v1
+apiVersion: networking.delonix.io/v1alpha1
 kind: Network
 metadata: { name: frontend }
 spec:
   driver: bridge
 ---
-apiVersion: delonix.io/v1
+apiVersion: networking.delonix.io/v1alpha1
 kind: Network
 metadata: { name: backend }
 spec:
   driver: bridge
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Container
 metadata: { name: web }
 spec:
@@ -421,7 +426,7 @@ spec:
   network: frontend
   command: [&quot;sleep&quot;, &quot;infinity&quot;]
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Container
 metadata: { name: api }
 spec:
@@ -430,7 +435,7 @@ spec:
   command: [&quot;sleep&quot;, &quot;infinity&quot;]
 ---
 # 1ª pergunta: HÁ CAMINHO? — frontend alcança backend, e não o contrário.
-apiVersion: delonix.io/v1
+apiVersion: networking.delonix.io/v1alpha1
 kind: NetworkRoute
 metadata: { name: frontend-to-backend }
 spec:
@@ -439,7 +444,7 @@ spec:
 ---
 # 2ª pergunta: É PERMITIDO? — a rota não abriu o `api` a ninguém; isto abre-o
 # ao `web` e só a ele (default-deny no `api` + um allow para o `web`).
-apiVersion: delonix.io/v1
+apiVersion: networking.delonix.io/v1alpha1
 kind: Dependency
 metadata: { name: web-knows-api }
 spec:
@@ -447,9 +452,9 @@ spec:
   to: api
   ports: [&quot;8080&quot;]
   proto: tcp</code></pre>
-<h2 id='firewallpolicy'>FirewallPolicy</h2>
+<h2 id='networkpolicy'>NetworkPolicy</h2>
 <p class='lang-pt'>Firewall L4 por container, estilo NetworkPolicy do k8s, com a direcção em <code>spec.direction</code>. Aplicar substitui as regras dessa direcção e deixa a outra intacta.</p><p class='lang-en'>Per-container L4 firewall, k8s NetworkPolicy-style, with the direction in <code>spec.direction</code>. Applying replaces that direction's rules and leaves the other intact.</p>
-<pre><code># kind: FirewallPolicy — a forma UNIFICADA do firewall declarativo. A direcção
+<pre><code># kind: NetworkPolicy — a forma UNIFICADA do firewall declarativo. A direcção
 # vem de `spec.direction` (ingress|egress) em vez do nome do Kind. Resolve a
 # confusão de que, aqui, `kind: Ingress` é firewall L4 (não o Ingress L7/HTTP do
 # k8s). `kind: Egress` continua a ser aceite (é reescrito no load, com aviso) — este é
@@ -462,14 +467,14 @@ spec:
 # quem o copia, e copiar é a primeira coisa que se faz com um exemplo.
 # ---------------------------------------------------------------------------
 ---
-apiVersion: delonix.io/v1
+apiVersion: networking.delonix.io/v1alpha1
 kind: Network
 metadata:
   name: sdn-demo
 spec:
   driver: bridge
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Container
 metadata:
   name: dbapp
@@ -479,8 +484,8 @@ spec:
   env:
     - POSTGRES_PASSWORD=exemplo
 ---
-apiVersion: delonix.io/v1
-kind: FirewallPolicy
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
 metadata:
   name: db-inbound
 spec:
@@ -493,8 +498,8 @@ spec:
       from: 10.219.0.0/16
       note: postgres-from-sdn
 ---
-apiVersion: delonix.io/v1
-kind: FirewallPolicy
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
 metadata:
   name: db-outbound
 spec:
@@ -517,21 +522,21 @@ spec:
 #   delonix net httproute apply -f examples/ingress.yaml   (or `stack apply`)
 #
 # NOTE: `kind: Ingress` used to be the L4 firewall — that moved to
-# `kind: FirewallPolicy` (direction: ingress); see examples/firewall.yaml.
+# `kind: NetworkPolicy` (direction: ingress); see examples/firewall.yaml.
 # Backends must be containers WITH an IP on a custom SDN network (not --net host/none).
 # ---------------------------------------------------------------------------
 # Os backends e o certificado que a rota abaixo referencia. Estão aqui DE
 # PROPÓSITO: sem eles o exemplo não valida, e quem o copia recebe
 # `unresolved reference(s)` em vez de um ingress a funcionar.
 # ---------------------------------------------------------------------------
-apiVersion: delonix.io/v1
+apiVersion: networking.delonix.io/v1alpha1
 kind: Network
 metadata:
   name: sdn-demo
 spec:
   driver: bridge
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Container
 metadata:
   name: web
@@ -539,7 +544,7 @@ spec:
   image: nginx:alpine
   network: sdn-demo          # o proxy L7 só alcança backends na SDN
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Container
 metadata:
   name: api
@@ -547,7 +552,7 @@ spec:
   image: caddy:alpine
   network: sdn-demo
 ---
-apiVersion: delonix.io/v1
+apiVersion: core.delonix.io/v1alpha1
 kind: Secret
 metadata:
   name: shop-tls
@@ -557,7 +562,7 @@ stringData:
   tls_crt: &quot;-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----&quot;
   tls_key: &quot;-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----&quot;
 ---
-apiVersion: delonix.io/v1
+apiVersion: gateway.delonix.io/v1alpha1
 kind: Ingress
 metadata:
   name: shop
@@ -597,7 +602,7 @@ spec:
 # Dependency → HTTPRoute → Tunnel). Each child inherits the Stack&#x27;s namespace
 # unless it sets its own. You can still write the resources as separate documents
 # — the Stack is just a convenient single place to bundle them.
-apiVersion: delonix.io/v1
+apiVersion: core.delonix.io/v1alpha1
 kind: Stack
 metadata:
   name: blog
@@ -627,7 +632,7 @@ spec:
       spec:
         from: web
         to: db</code></pre>
-<h2 id='cluster'>Cluster</h2>
+<h2 id='kubernetescluster'>KubernetesCluster</h2>
 <p class='lang-pt'>Bootstrap kubeadm idempotente sobre hosts JÁ vivos, por SSH. Sem ficheiro de estado: cada passo tem um <code>check</code>, por isso nunca dessincroniza. Ver também <code>cluster-vm.yaml</code> (provisiona as VMs) e <code>cluster-kind.yaml</code> (modo kind).</p><p class='lang-en'>Idempotent kubeadm bootstrap on hosts that are ALREADY alive, over SSH. No state file: every step has a <code>check</code>, so it can never drift. See also <code>cluster-vm.yaml</code> (provisions the VMs) and <code>cluster-kind.yaml</code> (kind mode).</p>
 <pre><code># Cluster Kubernetes em **hosts remotos JÁ EXISTENTES** (bare-metal ou VMs de
 # outrem), via SSH.
@@ -641,8 +646,8 @@ spec:
 # tem um `check` (comando shell; êxito = já satisfeito) e um `apply`. Correr
 # duas vezes não faz nada de novo — e nunca dessincroniza de um estado paralelo,
 # porque não existe nenhum.
-apiVersion: delonix.io/v1
-kind: Cluster
+apiVersion: infrastructure.delonix.io/v1alpha1
+kind: KubernetesCluster
 metadata:
   name: prod
 spec:
@@ -684,7 +689,7 @@ spec:
 <p class='lang-pt'>Uma rede de utilizador. Os containers juntam-se com <code>--net &lt;nome&gt;</code>; as VMs com <code>network:</code>. Driver <code>bridge</code> é o único a que containers se atacham hoje.</p><p class='lang-en'>A user network. Containers join it with <code>--net &lt;name&gt;</code>; VMs with <code>network:</code>. <code>bridge</code> is the only driver containers can attach to today.</p>
 <pre><code># Network — a user-defined network. Containers join it with `--net &lt;name&gt;`.
 # Apply with:  delonix network apply -f examples/network.yaml
-apiVersion: delonix.io/v1
+apiVersion: networking.delonix.io/v1alpha1
 kind: Network
 metadata:
   name: appnet
@@ -702,7 +707,7 @@ spec:
 # storage (NFS/SMB/WebDAV) the SAME Kind takes an `nfs:`/`cifs:`/`webdav:` block
 # (see examples/storage.yaml).
 # Apply with:  delonix volumes apply -f examples/volume.yaml
-apiVersion: delonix.io/v1
+apiVersion: storage.delonix.io/v1alpha1
 kind: Volume
 metadata:
   name: appdata
@@ -734,21 +739,21 @@ spec:
 # As credenciais do NAS. Ficam num `kind: Secret` (cofre cifrado) e NUNCA em
 # texto no manifesto do storage — é essa a razão de existir do `passwordSecret`.
 # ---------------------------------------------------------------------------
-apiVersion: delonix.io/v1
+apiVersion: core.delonix.io/v1alpha1
 kind: Secret
 metadata:
   name: nas-creds
 stringData:
   password: troca-me
 ---
-apiVersion: delonix.io/v1
+apiVersion: core.delonix.io/v1alpha1
 kind: Secret
 metadata:
   name: cloud-creds
 stringData:
   password: troca-me
 ---
-apiVersion: delonix.io/v1
+apiVersion: storage.delonix.io/v1alpha1
 kind: Volume
 metadata:
   name: media
@@ -760,7 +765,7 @@ spec:
     mountOptions: &quot;vers=4.1,soft&quot; # extra `mount -o` options (optional)
 ---
 # ── SMB / CIFS (Samba, Windows shares, TrueNAS &quot;Windows (SMB) Shares&quot;) ────────
-apiVersion: delonix.io/v1
+apiVersion: storage.delonix.io/v1alpha1
 kind: Volume
 metadata:
   name: backups
@@ -777,7 +782,7 @@ spec:
     mountOptions: &quot;vers=3.0&quot;
 ---
 # ── WebDAV (Nextcloud / ownCloud) ─────────────────────────────────────────────
-apiVersion: delonix.io/v1
+apiVersion: storage.delonix.io/v1alpha1
 kind: Volume
 metadata:
   name: cloud
@@ -792,7 +797,7 @@ spec:
 <p class='lang-pt'>Pré-puxa (ou constrói) uma imagem antes dos containers que dependem dela. Com <code>--vm</code> o mesmo Kind cobre as imagens VM douradas.</p><p class='lang-en'>Pre-pulls (or builds) an image before the containers that depend on it. With <code>--vm</code> the same Kind covers golden VM images.</p>
 <pre><code># Image — ensure an image is present: either pull it, or build it. Mutually exclusive.
 # Apply with:  delonix image apply -f examples/image.yaml
-apiVersion: delonix.io/v1
+apiVersion: artifact.delonix.io/v1alpha1
 kind: Image
 metadata:
   name: app
@@ -801,7 +806,7 @@ spec:
   pullSecret: null          # `kind: Secret` with the registry credentials, for a private one
                             # (full example: examples/image-private-registry.yaml)
 ---
-apiVersion: delonix.io/v1
+apiVersion: artifact.delonix.io/v1alpha1
 kind: Image
 metadata:
   name: app-built
@@ -810,7 +815,7 @@ spec:
     tag: app:dev            # required — the tag to produce
     context: .              # build context (default &quot;.&quot;)
     file: null              # Delonixfile/Dockerfile path (default: ./Delonixfile then ./Dockerfile)</code></pre>
-<h2 id='vm'>Vm</h2>
+<h2 id='virtualmachine'>VirtualMachine</h2>
 <p class='lang-pt'>Uma microVM declarativa (Cloud Hypervisor ou libvirt), com cloud-init por instância. É a camada que o <code>delonix cluster kubeadm</code> usa para provisionar nós.</p><p class='lang-en'>A declarative microVM (Cloud Hypervisor or libvirt), with per-instance cloud-init. It's the layer <code>delonix cluster kubeadm</code> uses to provision nodes.</p>
 <pre><code># Vm — a declarative microVM (Cloud Hypervisor or libvirt). Apply with:
 #   delonix vm apply -f examples/vm.yaml
@@ -820,8 +825,8 @@ spec:
 # a spec this size stays readable. The OLD flat form (every field at the top
 # level, no groups) still works exactly as before on any existing manifest —
 # both shapes are accepted, this is just the one the docs/examples show.
-apiVersion: delonix.io/v1
-kind: Vm
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
 metadata:
   name: node1
 spec:
@@ -883,7 +888,7 @@ spec:
 # manifest — both shapes are accepted, this is just the one the docs/examples
 # show. (The k8s-style Pod shape — `spec.containers[]` — is unaffected: it
 # already mirrors k8s&#x27;s own grouping, see examples/pod.yaml.)
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Container
 metadata:
   name: web
@@ -907,7 +912,7 @@ spec:
   network:
     name: host                  # host | none | &lt;a network created by `network create`&gt;
     ports: []                   # [&quot;8080:80&quot;] — gives the container its own netns + slirp NAT
-    expose: null                # HTTP port to auto-register in the embedded L7 proxy (see kind: Tunnel)
+    expose: null                # HTTP port to auto-register in the embedded L7 proxy (see kind: Gateway)
     alias: []                   # DNS aliases on the network
     knows: []                   # restrict name resolution to these containers (isolation)
     rateBps: null                # egress rate limit (e.g. &quot;10mbit&quot;), only with a custom network
@@ -955,7 +960,7 @@ spec:
 # containers are allowed and they share the pod sandbox. The web + sidecar reach
 # each other on `localhost` (shared netns). IPC/UTS/PID sharing
 # (shareProcessNamespace) are honored by later runtime slices.
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Pod
 metadata:
   name: web-app
@@ -974,7 +979,7 @@ spec:
       command: [&quot;sh&quot;, &quot;-c&quot;, &quot;while true; do wget -qO- http://localhost:80/ &gt;/dev/null 2&gt;&amp;1; sleep 10; done&quot;]</code></pre>
 <h2 id='firewallpolicy'>FirewallPolicy (as duas direcções)</h2>
 <p class='lang-pt'>Firewall L4 declarativo por direcção (estilo k8s NetworkPolicy). Cada documento é o estado desejado de UMA direcção de um container-alvo — allowlist + default-deny, idempotente. <strong>O <code>kind: Egress</code> deixou de existir</strong>: é <code>direction: egress</code> nesta mesma política (partilhavam a struct inteira). Duas políticas para o mesmo par (alvo, direcção) são RECUSADAS — a segunda apagaria as regras da primeira com ambas a dizer que correu bem.</p><p class='lang-en'>Declarative per-direction L4 firewall (k8s NetworkPolicy-style). Each document is the desired state of one direction for one target container — allowlist + default-deny, idempotent.</p>
-<pre><code># kind: FirewallPolicy — firewall L4 declarativo por container (estilo k8s
+<pre><code># kind: NetworkPolicy — firewall L4 declarativo por container (estilo k8s
 # NetworkPolicy), com a direcção em `spec.direction`. Cada documento é o ESTADO
 # DESEJADO de uma direcção do container-alvo: aplicar substitui as regras dessa
 # direcção (allowlist + default-deny), deixando a outra intacta. Aplicado por
@@ -982,7 +987,7 @@ spec:
 #
 # NOTA: `kind: Ingress` já NÃO é firewall — passou a ser o Ingress L7/HTTP estilo
 # k8s (host/path→backend, ver examples/ingress.yaml). Para o firewall inbound usa
-# `kind: FirewallPolicy` com `direction: ingress` (como abaixo). E `kind: Egress`
+# `kind: NetworkPolicy` com `direction: ingress` (como abaixo). E `kind: Egress`
 # FUNDIU-SE aqui: é reescrito no load para `direction: egress`, com aviso de
 # depreciação — havia uma struct, um validador, um apply e um dataplane para os
 # dois, e nenhum modelo conhecido (NetworkPolicy, security groups, NSGs) separa
@@ -993,14 +998,14 @@ spec:
 # quem o copia, e copiar é a primeira coisa que se faz com um exemplo.
 # ---------------------------------------------------------------------------
 ---
-apiVersion: delonix.io/v1
+apiVersion: networking.delonix.io/v1alpha1
 kind: Network
 metadata:
   name: sdn-demo
 spec:
   driver: bridge
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Container
 metadata:
   name: dbapp
@@ -1010,8 +1015,8 @@ spec:
   env:
     - POSTGRES_PASSWORD=exemplo
 ---
-apiVersion: delonix.io/v1
-kind: FirewallPolicy
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
 metadata:
   name: db-inbound
 spec:
@@ -1025,8 +1030,8 @@ spec:
       action: allow        # allow | deny (default: allow)
       note: postgres-from-sdn
 ---
-apiVersion: delonix.io/v1
-kind: FirewallPolicy
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
 metadata:
   name: db-outbound
 spec:
@@ -1055,14 +1060,14 @@ spec:
 # Aplicar com:  delonix stack apply -f httproute.yaml
 # (os containers backend têm de existir — declara-os no mesmo stack).
 ---
-apiVersion: delonix.io/v1
+apiVersion: networking.delonix.io/v1alpha1
 kind: Network
 metadata:
   name: appnet
 spec:
   driver: bridge           # rede custom: dá IP interno aos backends (o proxy alcança-os por IP)
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Container
 metadata:
   name: web
@@ -1070,7 +1075,7 @@ spec:
   image: &quot;nginx:1.27-alpine&quot;
   network: appnet          # numa rede custom, para o proxy o alcançar por IP
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Container
 metadata:
   name: api
@@ -1079,7 +1084,7 @@ spec:
   command: [&quot;-listen=:3000&quot;, &quot;-text=hello from api&quot;]
   network: appnet
 ---
-apiVersion: delonix.io/v1
+apiVersion: gateway.delonix.io/v1alpha1
 kind: HTTPRoute
 metadata:
   name: loja
@@ -1097,9 +1102,9 @@ spec:
           backend: { service: web, port: 80 }
         - path: /api          # prefixos mais específicos ganham
           backend: { service: api, port: 3000 }</code></pre>
-<h2 id='tunnel'>Tunnel</h2>
+<h2 id='gateway'>Gateway</h2>
 <p class='lang-pt'>Expõe UMA porta local à internet pública via pinggy/ngrok/cloudflare — sem conta, sem IP público. Junta-se ao <code>HTTPRoute</code> apontando <code>localPort</code> para onde o proxy L7 escuta: uma URL pública, routing por Host do lado de lá para vários backends.</p><p class='lang-en'>Exposes ONE local port to the public internet via pinggy/ngrok/cloudflare — no account, no public IP. Pairs with <code>HTTPRoute</code> by pointing <code>localPort</code> at where the L7 proxy listens: one public URL, Host-based routing on the other end to several backends.</p>
-<pre><code># kind: Tunnel — exposes ONE local TCP port to the public internet via a
+<pre><code># kind: Gateway — exposes ONE local TCP port to the public internet via a
 # 3rd-party provider (pinggy/ngrok/cloudflare). Deliberately single-purpose:
 # it does the outbound transport only. Point `localPort` at the HTTPRoute
 # proxy&#x27;s own listening port (see httproute.yaml) to combine the two — one
@@ -1108,8 +1113,8 @@ spec:
 # Apply with:  delonix net tunnel apply -f tunnel.yaml
 # One-shot equivalent, no manifest (pinggy is the default provider):
 #   delonix net tunnel expose 80
-apiVersion: delonix.io/v1
-kind: Tunnel
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Gateway
 metadata:
   name: public
 spec:
@@ -1140,7 +1145,7 @@ spec:
 #
 # Apply with:  delonix volumes apply -f sharevolume.yaml
 # (or `delonix sharevolume apply -f ...`, which applies only the shares)
-apiVersion: delonix.io/v1
+apiVersion: storage.delonix.io/v1alpha1
 kind: Volume
 metadata:
   name: nas
@@ -1149,7 +1154,7 @@ spec:
     server: 10.0.0.5
     share: /pool/data
 ---
-apiVersion: delonix.io/v1
+apiVersion: storage.delonix.io/v1alpha1
 kind: Volume
 metadata:
   name: app-a
@@ -1163,7 +1168,7 @@ spec:
   quota: 5G                   # optional; SOFT quota (measured usage + alert), omit = unlimited
   alertPct: 90                # optional; usage % above which ls/describe flag a WARN (default 90)
 ---
-apiVersion: delonix.io/v1
+apiVersion: storage.delonix.io/v1alpha1
 kind: Volume
 metadata:
   name: app-b

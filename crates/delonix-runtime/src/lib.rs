@@ -5169,8 +5169,48 @@ fn pump_fd(from: i32, to: i32) {
     }
 }
 
+/// The terminal state to put back if we die from a signal.
+///
+/// A raw terminal is not ours to leak. `restore_mode` runs on every NORMAL exit
+/// from the interactive path — including the error one, which is why the `?` in
+/// `exec` sits after it — but a signal runs no Rust code at all: no destructors,
+/// no unwinding. **Measured**, not deduced: a `SIGTERM` to a
+/// `delonix container exec -it` left the caller's shell with `ECHO` and
+/// `ICANON` off, i.e. no echo and no line editing until they typed `reset`
+/// blind. Any signal death does it — a `kill`, a CI timeout, a session
+/// teardown, the OOM killer.
+///
+/// An `AtomicPtr` and not a `static mut`: the handler has to read this from
+/// asynchronous context, and an atomic load is one of the few things that is
+/// legal there. `tcsetattr`, `signal` and `raise` are on POSIX's
+/// async-signal-safe list; nothing else in the handler allocates, locks or
+/// formats.
+static TTY_ORIGINAL: std::sync::atomic::AtomicPtr<libc::termios> =
+    std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+
+/// Restores the terminal, then dies of the signal we were asked to die of.
+///
+/// Re-raising with the default disposition is what keeps the exit status
+/// honest: a process killed by `SIGTERM` must still look killed by `SIGTERM`
+/// (`128+15`) to whatever is waiting on it. Swallowing the signal to exit
+/// cleanly would trade a broken terminal for a lie about how the process ended.
+extern "C" fn restore_tty_on_signal(sig: libc::c_int) {
+    unsafe {
+        let p = TTY_ORIGINAL.load(std::sync::atomic::Ordering::Acquire);
+        if !p.is_null() {
+            libc::tcsetattr(0, libc::TCSANOW, p);
+        }
+        libc::signal(sig, libc::SIG_DFL);
+        libc::raise(sig);
+    }
+}
+
 /// Puts the user's terminal in raw mode (for the interactive shell). Returns
 /// the previous state to restore. `None` if the stdin is not a terminal.
+///
+/// Also arms the signal safety net above — here and not at the call site, so
+/// every caller of the interactive path inherits it. Same reason `missing_wg`
+/// was fixed at the module boundary rather than in one command.
 fn set_raw_mode() -> Option<libc::termios> {
     unsafe {
         if libc::isatty(0) == 0 {
@@ -5181,6 +5221,27 @@ fn set_raw_mode() -> Option<libc::termios> {
             return None;
         }
         let saved = t;
+
+        // Publish BEFORE going raw: the other order leaves a window in which
+        // the terminal is already raw and the handler has nothing to put back.
+        let prev = TTY_ORIGINAL.swap(
+            Box::into_raw(Box::new(saved)),
+            std::sync::atomic::Ordering::AcqRel,
+        );
+        if !prev.is_null() {
+            // A nested interactive session: the OUTER state is the one worth
+            // keeping, so put it back and drop the inner copy we just replaced.
+            // (Not reachable today — one process runs one session — and cheap
+            // enough that «not reachable» does not have to stay true.)
+            drop(Box::from_raw(prev));
+        }
+        for sig in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP, libc::SIGQUIT] {
+            libc::signal(
+                sig,
+                restore_tty_on_signal as extern "C" fn(libc::c_int) as libc::sighandler_t,
+            );
+        }
+
         libc::cfmakeraw(&mut t);
         libc::tcsetattr(0, libc::TCSANOW, &t);
         Some(saved)
@@ -5191,6 +5252,18 @@ fn restore_mode(saved: Option<libc::termios>) {
     if let Some(t) = saved {
         unsafe {
             libc::tcsetattr(0, libc::TCSANOW, &t);
+        }
+    }
+    // Disarm whether or not we had a terminal: leaving the handlers installed
+    // would make a later, unrelated `SIGINT` run `tcsetattr` on whatever fd 0
+    // happens to be by then.
+    let p = TTY_ORIGINAL.swap(std::ptr::null_mut(), std::sync::atomic::Ordering::AcqRel);
+    if !p.is_null() {
+        unsafe {
+            drop(Box::from_raw(p));
+            for sig in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP, libc::SIGQUIT] {
+                libc::signal(sig, libc::SIG_DFL);
+            }
         }
     }
 }

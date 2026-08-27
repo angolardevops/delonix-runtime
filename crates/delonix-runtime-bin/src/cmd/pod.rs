@@ -17,6 +17,7 @@
 //! `--pod` re-exec already put us in the holder's userns (which owns them).
 //! Shared **PID** (`shareProcessNamespace`) lands next.
 
+use super::kinds as k;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -114,7 +115,7 @@ pub fn run(action: PodCmd) -> Result<()> {
 
 /// Applies the `kind: Pod` documents of a manifest.
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
-    for doc in manifest::of_kind(docs, "Pod") {
+    for doc in manifest::of_kind(docs, k::POD) {
         let spec: PodSpec = manifest::spec_of(doc)?;
         create_pod(&doc.metadata.name, doc.metadata.namespace.clone(), spec)?;
     }
@@ -423,7 +424,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     f.insert("network".into(), spec.network.clone());
     f.insert("restartPolicy".into(), spec.restart_policy.clone());
     Ok(super::reconcile::Desired {
-        kind: "Pod".into(),
+        kind: k::POD.into(),
         name: doc.metadata.name.clone(),
         fields: f,
         converges: true,
@@ -475,7 +476,7 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
             // deterministic.
             let head = members.first();
             super::reconcile::Actual {
-                kind: "Pod".into(),
+                kind: k::POD.into(),
                 name: pod,
                 fields: f,
                 owner: head.and_then(|c| c.labels.get(super::reconcile::STACK_LABEL).cloned()),
@@ -557,7 +558,7 @@ fn describe(names: &[String]) -> Result<()> {
             )));
         }
         let mut d = output::Describe::new();
-        d.field("Pod", name);
+        d.field(k::POD, name);
         d.field("Namespace", &members[0].namespace);
         d.field("IP", pod_ip(&members, &pod_netns_name(name)));
         d.field("Netns", pod_netns_name(name));

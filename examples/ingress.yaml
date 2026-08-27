@@ -4,21 +4,21 @@
 #   delonix net httproute apply -f examples/ingress.yaml   (or `stack apply`)
 #
 # NOTE: `kind: Ingress` used to be the L4 firewall — that moved to
-# `kind: FirewallPolicy` (direction: ingress); see examples/firewall.yaml.
+# `kind: NetworkPolicy` (direction: ingress); see examples/firewall.yaml.
 # Backends must be containers WITH an IP on a custom SDN network (not --net host/none).
 # ---------------------------------------------------------------------------
 # Os backends e o certificado que a rota abaixo referencia. Estão aqui DE
 # PROPÓSITO: sem eles o exemplo não valida, e quem o copia recebe
 # `unresolved reference(s)` em vez de um ingress a funcionar.
 # ---------------------------------------------------------------------------
-apiVersion: delonix.io/v1
+apiVersion: networking.delonix.io/v1alpha1
 kind: Network
 metadata:
   name: sdn-demo
 spec:
   driver: bridge
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Container
 metadata:
   name: web
@@ -26,7 +26,7 @@ spec:
   image: nginx:alpine
   network: sdn-demo          # o proxy L7 só alcança backends na SDN
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Container
 metadata:
   name: api
@@ -34,7 +34,7 @@ spec:
   image: caddy:alpine
   network: sdn-demo
 ---
-apiVersion: delonix.io/v1
+apiVersion: core.delonix.io/v1alpha1
 kind: Secret
 metadata:
   name: shop-tls
@@ -44,7 +44,7 @@ stringData:
   tls_crt: "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"
   tls_key: "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
 ---
-apiVersion: delonix.io/v1
+apiVersion: gateway.delonix.io/v1alpha1
 kind: Ingress
 metadata:
   name: shop

@@ -6,6 +6,7 @@
 //! **Values are never printed** by default (`inspect` redacts them; `--reveal`
 //! is explicit opt-in) — a `secret` is routinely pasted into issues/chats.
 
+use super::kinds as k;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -373,7 +374,7 @@ fn load_env_file(base: &Path, f: &Path) -> Result<BTreeMap<String, String>> {
 /// the manifest folder, to resolve `fromEnvFile` relative to it.
 pub fn apply(docs: &[ManifestDoc], base: &Path) -> Result<()> {
     let store = SecretStore::open(state_root())?;
-    for doc in manifest::of_kind(docs, "Secret") {
+    for doc in manifest::of_kind(docs, k::SECRET) {
         let name = &doc.metadata.name;
         let spec: SecretSpec = manifest::spec_of(doc)?;
 

@@ -50,11 +50,71 @@ Concretamente, garante-se:
 | `3` | o recurso existe mas **não está a correr** |
 | `4` | **não existe** esse recurso |
 | `5` | **conflito** — o nome já está tomado |
+| `69` | **capacidade que este host não tem** — uma ferramenta por instalar, um backend indisponível |
+| `124` | **o prazo esgotou-se** — `stack wait --timeout`, e o que vier a ter prazo |
 
 `3` e `4` não são números inventados: são os códigos de estado do LSB que o
 `systemctl` ainda fala (`3` = o programa não está a correr, `4` = não há tal
 unidade). `5` não tem convenção por trás — é o número livre seguinte, abaixo da
 gama que a shell usa (`126`/`127`, e `128+N` para sinais).
+
+**`69` e `124` também não.** `69` é o `EX_UNAVAILABLE` do `sysexits.h`; `124` é
+o que o `timeout(1)` devolve quando o prazo passa, e está portanto já nos dedos
+de quem embrulha um comando num. Entraram porque tinham **produtores reais mal
+classificados**, não para completar uma tabela: um `stack wait` que esgotava o
+tempo respondia `1` — o mesmo número de um apply rebentado, no comando cuja
+função inteira é ser lido por CI — e um `wg`/`virt-customize`/`ngrok` em falta
+respondia `1` também, indistinguível de um erro de escrita numa flag. As duas
+chamadas seguintes de um reconciliador são opostas: esperar mais, ou parar e
+instalar alguma coisa.
+
+```bash
+delonix stack wait -f delonix-manifest.yaml --timeout 120
+case $? in
+  0)   ;;                     # tudo de pé
+  124) exit 0 ;;              # ainda a subir — o pipeline seguinte volta a tentar
+  69)  echo "falta uma ferramenta neste nó" >&2; exit 1 ;;
+  *)   exit 1 ;;              # qualquer outra coisa: pára
+esac
+```
+
+### A identidade textual: `DX_*`
+
+O número serve quem lê `$?`. Quem lê **texto** — um cliente HTTP, um consumidor
+de `-o json`, um pipeline de logs — tem o código `DX_*`, que é a mesma
+classificação noutra grafia:
+
+| `DX_*` | código | quando |
+|---|---|---|
+| `DX_NOT_FOUND` | `4` | não existe esse recurso |
+| `DX_NOT_RUNNING` | `3` | existe, mas não está a correr |
+| `DX_CONFLICT` | `5` | o nome já está tomado |
+| `DX_UNAVAILABLE` | `69` | capacidade que este host não tem |
+| `DX_TIMEOUT` | `124` | o prazo esgotou-se |
+| `DX_INVALID_ARGUMENT` · `DX_REGISTRY` · `DX_SYSCALL_FAILED` · `DX_INVALID_STATE` · `DX_IO` | `1` | falhas sem número próprio |
+
+**Estes nomes são contrato**: um código pode ser ACRESCENTADO; um existente
+nunca muda de grafia nem de significado.
+
+A relação é **assimétrica de propósito**. Um `DX_*` mapeia sempre para UM
+número — se mapeasse para dois, o `$?` e o texto contradiziam-se para a mesma
+falha. Mas o `1` carrega VÁRIOS códigos, porque é o balde «sem classe própria» e
+o texto pode dar-se ao luxo de ser mais fino: cada NÚMERO é uma promessa que tem
+de valer o resto do `0.x`, enquanto `DX_REGISTRY` ao lado de
+`DX_INVALID_ARGUMENT` não custa nada. Há teste a exigir as duas metades desta
+regra, incluindo que o balde continue a ser um balde.
+
+Hoje o código sai na **API de gestão** (`delonix serve api`), como campo
+acrescentado ao corpo de erro — `{"error": "...", "code": "DX_NOT_FOUND"}`. O
+campo `error` não foi tocado: a regra do ADR-0005 (acrescentar sim, remover ou
+mudar de tipo não) vale aqui como vale no `-o json`.
+
+**O que continua sem código próprio, e é honesto dizê-lo:** *permissão negada* e
+*falha temporária* foram considerados e ficaram de fora — não há hoje uma
+variante de erro que os produza (as falhas de permissão chegam embrulhadas no
+`errno` de uma syscall, e o retry que existe acontece dentro do motor e nunca
+chega a quem chama). Publicar um número que nada constrói é um número que nunca
+pode voltar.
 
 O que isto resolve é concreto: um reconciliador — o `Makefile`, o passo de CI, o
 ciclo em bash que conduz esta CLI — não conseguia separar «cria, porque falta»

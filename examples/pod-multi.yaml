@@ -7,7 +7,7 @@
 # containers are allowed and they share the pod sandbox. The web + sidecar reach
 # each other on `localhost` (shared netns). IPC/UTS/PID sharing
 # (shareProcessNamespace) are honored by later runtime slices.
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Pod
 metadata:
   name: web-app

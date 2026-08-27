@@ -1,6 +1,6 @@
 # Image — ensure an image is present: either pull it, or build it. Mutually exclusive.
 # Apply with:  delonix image apply -f examples/image.yaml
-apiVersion: delonix.io/v1
+apiVersion: artifact.delonix.io/v1alpha1
 kind: Image
 metadata:
   name: app
@@ -9,7 +9,7 @@ spec:
   pullSecret: null          # `kind: Secret` with the registry credentials, for a private one
                             # (full example: examples/image-private-registry.yaml)
 ---
-apiVersion: delonix.io/v1
+apiVersion: artifact.delonix.io/v1alpha1
 kind: Image
 metadata:
   name: app-built

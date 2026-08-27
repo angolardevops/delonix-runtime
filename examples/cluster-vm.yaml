@@ -8,8 +8,8 @@
 # real com kernel próprio — isolamento de hipervisor. A imagem dourada já traz
 # kubeadm/kubelet/kubectl e o `delonix-cri`: arrancar um nó NÃO instala nada,
 # só corre `kubeadm init`/`join`.
-apiVersion: delonix.io/v1
-kind: Cluster
+apiVersion: infrastructure.delonix.io/v1alpha1
+kind: KubernetesCluster
 metadata:
   name: lab
 spec:

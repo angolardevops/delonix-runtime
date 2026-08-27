@@ -32,7 +32,7 @@ fn rt(ctx: &'static str, e: impl std::fmt::Display) -> Error {
 /// already refused with an actionable message. Fixed at the boundary so every
 /// caller of this module inherits it. Same class as `vmimage::tool_package`.
 fn missing_wg() -> Error {
-    Error::Invalid(
+    Error::Unavailable(
         "'wg' is not available on this host — install wireguard-tools (Debian/Ubuntu: \
          `apt install wireguard-tools`; Fedora/RHEL: `dnf install wireguard-tools`; \
          Arch: `pacman -S wireguard-tools`). It is only needed for WireGuard node keys \

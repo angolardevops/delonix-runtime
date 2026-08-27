@@ -1,5 +1,5 @@
 //! `delonix cluster apply -f cloud.yaml` — idempotent `kubeadm` bootstrap
-//! over SSH, on already-live hosts (`kind: Cluster`). Does not create VMs — that is
+//! over SSH, on already-live hosts (`kind: KubernetesCluster`). Does not create VMs — that is
 //! `delonix vm create` (optionally with the golden image from `delonix image
 //! --vm build`). Idempotency WITHOUT a state file: each step checks the
 //! real condition on the host (`remote::ssh_check`) before acting.
@@ -10,6 +10,7 @@
 //! an explicit `spec.controlPlaneEndpoint` (kubeadm needs a stable endpoint
 //! — LB/VIP — in front of several control-planes).
 
+use super::kinds as k;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -107,7 +108,7 @@ impl HostSpec {
     }
 }
 
-/// Field names accepted in the `spec` of `kind: Cluster`, for the unknown-field
+/// Field names accepted in the `spec` of `kind: KubernetesCluster`, for the unknown-field
 /// guard (`manifest::spec_fields_for`). Cluster was the last Kind outside it:
 /// its sub-specs are nested, which is why it was skipped, but the TOP level is
 /// as flat as any other and a typo there was ignored in silence like the rest.
@@ -540,7 +541,7 @@ pub enum ClusterCmd {
         #[command(subcommand)]
         action: super::kube::KubeCmd,
     },
-    /// Apply the `kind: Cluster` document(s) of a manifest.
+    /// Apply the `kind: KubernetesCluster` document(s) of a manifest.
     Apply {
         #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
@@ -756,7 +757,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
 }
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
-    for doc in manifest::of_kind(docs, "Cluster") {
+    for doc in manifest::of_kind(docs, k::CLUSTER) {
         let name = &doc.metadata.name;
         let spec: ClusterSpec = manifest::spec_of(doc)?;
         validate(&spec)?;

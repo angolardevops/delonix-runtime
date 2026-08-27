@@ -1,4 +1,4 @@
-# kind: FirewallPolicy — firewall L4 declarativo por container (estilo k8s
+# kind: NetworkPolicy — firewall L4 declarativo por container (estilo k8s
 # NetworkPolicy), com a direcção em `spec.direction`. Cada documento é o ESTADO
 # DESEJADO de uma direcção do container-alvo: aplicar substitui as regras dessa
 # direcção (allowlist + default-deny), deixando a outra intacta. Aplicado por
@@ -6,7 +6,7 @@
 #
 # NOTA: `kind: Ingress` já NÃO é firewall — passou a ser o Ingress L7/HTTP estilo
 # k8s (host/path→backend, ver examples/ingress.yaml). Para o firewall inbound usa
-# `kind: FirewallPolicy` com `direction: ingress` (como abaixo). E `kind: Egress`
+# `kind: NetworkPolicy` com `direction: ingress` (como abaixo). E `kind: Egress`
 # FUNDIU-SE aqui: é reescrito no load para `direction: egress`, com aviso de
 # depreciação — havia uma struct, um validador, um apply e um dataplane para os
 # dois, e nenhum modelo conhecido (NetworkPolicy, security groups, NSGs) separa
@@ -17,14 +17,14 @@
 # quem o copia, e copiar é a primeira coisa que se faz com um exemplo.
 # ---------------------------------------------------------------------------
 ---
-apiVersion: delonix.io/v1
+apiVersion: networking.delonix.io/v1alpha1
 kind: Network
 metadata:
   name: sdn-demo
 spec:
   driver: bridge
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Container
 metadata:
   name: dbapp
@@ -34,8 +34,8 @@ spec:
   env:
     - POSTGRES_PASSWORD=exemplo
 ---
-apiVersion: delonix.io/v1
-kind: FirewallPolicy
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
 metadata:
   name: db-inbound
 spec:
@@ -49,8 +49,8 @@ spec:
       action: allow        # allow | deny (default: allow)
       note: postgres-from-sdn
 ---
-apiVersion: delonix.io/v1
-kind: FirewallPolicy
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
 metadata:
   name: db-outbound
 spec:

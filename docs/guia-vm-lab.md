@@ -18,7 +18,7 @@ pior do que um guia incompleto.
 4. [Cheatsheet: acesso](#4-cheatsheet-acesso)
 5. [Cheatsheet: imagens](#5-cheatsheet-imagens)
 6. [Cheatsheet: instantâneos](#6-cheatsheet-instantâneos)
-7. [`kind: Vm` — a VM declarada](#7-kind-vm--a-vm-declarada)
+7. [`kind: VirtualMachine` — a VM declarada](#7-kind-virtualmachine--a-vm-declarada)
 8. [`kind: Network` — e a fronteira que engana toda a gente](#8-kind-network--e-a-fronteira-que-engana-toda-a-gente)
 9. [O laboratório completo](#9-o-laboratório-completo)
 10. [Armadilhas medidas](#10-armadilhas-medidas)
@@ -284,11 +284,11 @@ AUSENTE (restore reverteu)
 
 ---
 
-## 7. `kind: Vm` — a VM declarada
+## 7. `kind: VirtualMachine` — a VM declarada
 
 ```yaml
 apiVersion: delonix.io/v1
-kind: Vm
+kind: VirtualMachine
 metadata:
   name: dev
 spec:

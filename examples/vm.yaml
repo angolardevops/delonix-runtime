@@ -6,8 +6,8 @@
 # a spec this size stays readable. The OLD flat form (every field at the top
 # level, no groups) still works exactly as before on any existing manifest —
 # both shapes are accepted, this is just the one the docs/examples show.
-apiVersion: delonix.io/v1
-kind: Vm
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
 metadata:
   name: node1
 spec:

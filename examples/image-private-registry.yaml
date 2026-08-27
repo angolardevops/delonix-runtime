@@ -8,7 +8,7 @@
 # credential for. Naming a Secret makes the document self-contained.
 #
 #   REGISTRY_USER=… REGISTRY_TOKEN=… delonix stack apply -f examples/image-private-registry.yaml
-apiVersion: delonix.io/v1
+apiVersion: core.delonix.io/v1alpha1
 kind: Secret
 metadata:
   name: registry-cred
@@ -19,7 +19,7 @@ spec:
     username: REGISTRY_USER
     password: REGISTRY_TOKEN
 ---
-apiVersion: delonix.io/v1
+apiVersion: artifact.delonix.io/v1alpha1
 kind: Image
 metadata:
   name: app

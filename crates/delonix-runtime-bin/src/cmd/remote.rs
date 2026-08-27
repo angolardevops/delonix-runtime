@@ -15,7 +15,7 @@ pub struct SshTarget {
     pub key: Option<PathBuf>,
     /// SSH port. `None` = the client's default (22).
     ///
-    /// `ssh.port` was in the `kind: Cluster` schema, was parsed, and reached
+    /// `ssh.port` was in the `kind: KubernetesCluster` schema, was parsed, and reached
     /// nothing — every connection went to 22 regardless. A bastion on a
     /// non-standard port failed with a timeout that named no cause; worse, if
     /// something else answered on 22 (another service, another machine behind

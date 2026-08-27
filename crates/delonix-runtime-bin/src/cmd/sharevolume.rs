@@ -33,6 +33,7 @@
 //! shared data (a subdirectory of the parent Storage) survives unless
 //! `--purge-data` is passed explicitly.
 
+use super::kinds as k;
 use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
@@ -143,7 +144,7 @@ pub fn run(action: ShareVolumeCmd) -> Result<()> {
             // than the command's name says.
             let shares: Vec<ManifestDoc> = docs
                 .into_iter()
-                .filter(|d| d.kind == "Volume" && d.spec.get("share").is_some())
+                .filter(|d| d.kind == k::VOLUME && d.spec.get("share").is_some())
                 .collect();
             super::volume::apply(&shares)
         }
@@ -595,7 +596,7 @@ fn cmd_describe(root: &Path, vstore: &VolumeStore, name: &str, namespace: &str) 
     let (warn, over) = (qs.in_alert, qs.above_quota);
     let mut d = output::Describe::new();
     d.field("Name", &rec.name);
-    d.field("Storage", &rec.storage_ref);
+    d.field(k::STORAGE, &rec.storage_ref);
     d.field("Mountpoint", &rec.mountpoint);
     d.field("Used", super::volume::fmt_measured(u, None));
     d.field_opt("Quota", rec.quota_bytes.map(output::fmt_size).as_deref());
