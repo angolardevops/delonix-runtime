@@ -3961,6 +3961,17 @@ checklist para quem mexer aqui do que como lista de correcções:
   desta série pôs os dois lado a lado e mostrou uma subida de 13,7 para 34,9 MB que era só o
   tamanho do `.text` com símbolos. Release contra release, o RSS não mexe. Comparar builds de
   perfis diferentes mede o compilador, não a alteração;
+- **duas baterias em paralelo não são duas medições** — o `scripts/e2e.sh` usa
+  `OUT=/tmp/delonix-e2e` FIXO e deriva dele o `DELONIX_ROOT`, logo duas corridas
+  ao mesmo tempo partilham a raiz e o `results.jsonl`. Corri a bateria da `main`
+  e a do meu ramo em paralelo para as comparar, e a comparação foi o que se
+  estragou: um check meu falhou por a outra corrida lhe ter mexido no registo.
+  Sozinha, passou. `OUT=<próprio>` isola;
+- **um check que passa por não haver o que verificar não verifica nada** — o
+  primeiro gate do `network ipam --gc` era um `fail` numa raiz limpa. Sem leases
+  órfãos o comando responde «every lease is claimed» e sai a **0**, que é a
+  resposta CERTA — por isso o gate mediria o vazio para sempre. Semeia-se o
+  lease órfão de propósito, e só então a recusa quer dizer alguma coisa;
 - **um ficheiro com a forma certa não é um registo válido** — um
   `containers/<id>.json` escrito à mão para um teste não desserializava, o
   `Store::list` saltava-o em SILÊNCIO, e o lease do container aparecia como

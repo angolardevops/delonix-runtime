@@ -209,8 +209,25 @@ check "network ipam -o json é JSON a sério" ok bash -c \
   "'$BIN' network ipam -o json | python3 -c 'import json,sys; json.load(sys.stdin)'"
 # A ceifa NUNCA corre sem confirmação: um lease é escrito antes do ref-marker,
 # e levá-lo cedo demais põe dois containers no mesmo endereço.
+#
+# O lease órfão é SEMEADO de propósito. A primeira versão deste check era um
+# `fail` sobre `--gc` numa raiz limpa, e passava a testar o caminho errado: sem
+# nada a reclamar o comando diz «every lease is claimed» e sai a 0, que é a
+# resposta CERTA. Um check que só passa por não haver o que verificar não
+# verifica coisa nenhuma.
+seed_lease() { mkdir -p "$DELONIX_ROOT/ipam"; printf '{"orfao000000dead":"10.253.0.9"}' >"$DELONIX_ROOT/ipam/10.253.json"; }
+seed_lease
 check "network ipam --gc recusa sem --force" fail "$BIN" network ipam --gc
-check "netns gc recusa sem --force" fail "$BIN" net netns gc
+check "network ipam --gc --force reclama o lease sem dono" ok \
+  bash -c "'$BIN' network ipam --gc --force | grep -q 'reclaimed 1 lease'"
+check "e o lease reclamado desapareceu do registo" ok \
+  bash -c "! '$BIN' network ipam | grep -q orfao000000dead"
+# O `netns gc` não se pode semear aqui — fabricar um pin órfão obriga a subir e
+# matar infra real. O que ESTE gate fixa, então, é o comportamento seguro no
+# caso em que não há nada: relata e não termina nada. A recusa sem `--force`
+# está coberta por teste unitário e foi validada ao vivo contra 32 processos.
+check "netns gc relata sem terminar nada" ok \
+  bash -c "! '$BIN' net netns gc | grep -q reclaimed"
 check "netns gc --help" ok "$BIN" net netns gc --help
 # Um `down` contra uma raiz APAGADA não a pode recriar: o `FileLock` fazia
 # `create_dir_all`, e a raiz-fantasma resultante fazia o `gc` responder «esta
