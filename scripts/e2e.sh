@@ -1776,6 +1776,34 @@ check "secret inspect --reveal mostra, e só então" ok bash -c \
 "$BIN" secret rm "$E2E_SEC" >/dev/null 2>&1
 rm -f "$E2E_OUTMF"
 
+########################################
+section "verbos genéricos — encaminham, não reimplementam"
+########################################
+# A promessa do `cmd::verbs` é que `get pods` e `pod ls` são a MESMA execução.
+# Um teste unitário não o pode mostrar: prova-se comparando as duas saídas, e é
+# a igualdade BYTE A BYTE que distingue encaminhar de reescrever parecido.
+for par in "get:pods|pod:ls" "get:networks|network:ls" "get:volumes|volumes:ls" \
+           "get:secrets|secret:ls" "get:virtualmachines|vm:ls"; do
+  novo_v="${par%%|*}"; velho_v="${par##*|}"
+  # shellcheck disable=SC2086
+  if [[ "$("$BIN" ${novo_v/:/ } -o json 2>&1)" == "$("$BIN" ${velho_v/:/ } -o json 2>&1)" ]]; then
+    check "get ${novo_v#*:} == ${velho_v/:/ }" ok true
+  else
+    check "get ${novo_v#*:} == ${velho_v/:/ }" ok false
+  fi
+done
+# As três grafias de um Kind são a mesma pergunta.
+check "get aceita o plural"       ok "$BIN" get pods
+check "get aceita o singular"     ok "$BIN" get pod
+check "get aceita a abreviatura"  ok "$BIN" get po
+# Um Kind que não se pergunta assim DIZ porquê, e não responde vazio.
+check "get stacks explica-se"     1 "$BIN" get stacks
+check "get workloads explica-se"  1 "$BIN" get workloads
+# Kind inexistente é 4 (não existe), não 1 genérico.
+check "get de Kind inexistente"   4 "$BIN" get bananas
+# E um delete sem nome nunca pode ser lido como «todos».
+check "delete sem nome recusa"    1 "$BIN" delete pods
+
 section "limpeza"
 ########################################
 "$BIN" container rm -f "$C" >/dev/null 2>&1

@@ -731,3 +731,63 @@ Uma renomeação passou de 15 sítios em cinco ficheiros para **uma linha**, mai
 alias no `canonical_kind` e a sua linha no teste que mantém os nomes antigos a
 carregar. As três que faltam — incluindo o `Vm`, que era o mais caro com 54
 sítios — passam a ter o mesmo custo.
+
+---
+
+## 10. Fase CLI-2 — a primeira fatia, e porque é ADITIVA
+
+A matriz do §3 descreve um corte: `network ls` **passa a ser** `get networks`, e
+o antigo desaparece. Esta fatia faz metade disso — acrescenta o verbo genérico e
+**não remove nada** —, e a razão não é cautela, é uma ordem que a matriz não diz.
+
+**Um corte só é honesto quando o destino já faz tudo o que a origem fazia.**
+Hoje o `get` encaminha cinco Kinds dos dezasseis. Remover `network ls` agora
+deixava sete Kinds sem forma nenhuma de serem listados — a reestruturação a
+tirar capacidade em vez de a arrumar. O corte é a fatia seguinte, e só pode
+acontecer quando as três listas de routing cobrirem tudo o que hoje tem `ls`.
+
+### O que aterrou
+
+`get`, `describe` e `delete` no topo, resolvidos pelo MESMO registo que o
+`api-resources` imprime — logo `pods`, `pod` e `po` são a mesma pergunta, e um
+Kind renomeado na v0.64.0 continua a responder ao nome antigo.
+
+Encaminham para o `run` de cada grupo em vez de reimplementar. Isso é
+verificável e é verificado: a bateria compara a saída JSON das duas grafias e
+exige **igualdade byte a byte** — cinco pares, todos iguais. Um teste unitário
+não podia mostrar isto.
+
+### Três coisas que a fatia decidiu
+
+**`delete` sem nome RECUSA.** Nunca «todos os desse Kind». Um argumento em falta
+é um erro de escrita muito mais vezes do que uma intenção, e este verbo não tem
+segunda oportunidade de perguntar.
+
+**Um Kind que não se pergunta assim explica-se.** `get stacks` diz que uma Stack
+se lê de um manifesto; `get workloads` diz que o Kind baixa para outros três.
+Responder uma lista vazia seria pior do que recusar: lê-se como «não há nenhum».
+
+**As listas de routing GOVERNAM o despacho.** A primeira versão tinha-as ao lado
+de um `match` e usava-as só nos testes — a segunda lista que este repo já pagou
+várias vezes. Agora a lista decide, e o `match` sem arm correspondente devolve um
+erro que se identifica como defeito interno, não como comando mal escrito.
+
+### O defeito que a fatia encontrou em si própria
+
+A mensagem de recurso era construída com o PLURAL do registo, e mandava usar
+`virtualmachines ls` — um comando que esta CLI nunca teve. O grupo que uma
+pessoa escreve é `vm`. Um sinal de trânsito errado é pior do que nenhum: custa o
+tempo de descobrir que estava errado.
+
+Fechado com `cli_group()` e um gate que percorre a árvore `clap` REAL e recusa
+uma sugestão que não exista lá. Verificado por reversão: com o plural de volta,
+falha a dizer «sugere `virtualmachines`, e `virtualmachines` não existe na
+árvore».
+
+### O que falta para o corte
+
+Onze Kinds por encaminhar (`Image`, `Container`, `HTTPRoute`, `Gateway`,
+`NetworkPolicy`, `NetworkRoute`, `KubernetesCluster` e os quatro que se
+explicam), mais `apply`/`plan`/`wait`/`diff` promovidos do `stack`, mais o grupo
+`manifest`. Só depois disso é que remover `network ls` deixa de tirar
+capacidade.
