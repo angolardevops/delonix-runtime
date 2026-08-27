@@ -58,7 +58,6 @@ const TYPED_KINDS: &[&str] = &[
     k::HTTP_ROUTE,
     k::INGRESS,
     k::FIREWALL_POLICY,
-    k::EGRESS,
     k::WORKLOAD,
     k::CLUSTER,
     k::STACK,
@@ -218,11 +217,11 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
                 "IngressSpec",
                 super::httproute::INGRESS_SPEC_FIELDS,
             ),
-            // One struct, two Kinds: `FirewallPolicy` and the legacy `Egress`
-            // share `FwDocSpec` whole — which is why they were merged. Both are
-            // listed so a document written either way gets checked; the schema
-            // describes what is ACCEPTED, and `Egress` still is.
-            k::FIREWALL_POLICY | k::EGRESS => (
+            // `Egress` used to share this arm: one struct, two Kinds, both
+            // listed because the schema describes what is ACCEPTED. v0.65.0
+            // removed the Kind and the arm outlived it — see
+            // [`nenhum_kind_tipado_sobrevive_a_sua_remocao`].
+            k::FIREWALL_POLICY => (
                 generator.subschema_for::<super::firewall::FwDocSpec>(),
                 "FwDocSpec",
                 super::firewall::FW_SPEC_FIELDS,
@@ -257,9 +256,22 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
         } else {
             serde_json::to_value(spec).unwrap_or(serde_json::json!({}))
         };
+        // The branch pins the Kind's OWN apiVersion as well as its spec. The
+        // engine already does (`api_version_accepted`): a `kind: Pod` under
+        // `networking.delonix.io/v1alpha1` is refused, naming the group it
+        // belongs to. A schema that checked only the spec would green-light the
+        // wrong group and leave the engine to say no later.
+        let group = super::kinds::facts(kind)
+            .map(|f| f.api_version)
+            .unwrap_or(super::manifest::LEGACY_API_VERSION);
         branches.push(serde_json::json!({
             "if": { "properties": { "kind": { "const": kind } }, "required": ["kind"] },
-            "then": { "properties": { "spec": spec } },
+            "then": {
+                "properties": {
+                    "spec": spec,
+                    "apiVersion": { "enum": [group, super::manifest::LEGACY_API_VERSION] },
+                },
+            },
         }));
     }
     if branches.is_empty() {
@@ -381,14 +393,37 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
             serde_json::Value::Bool(false),
         );
     }
+    // **Without these two enums the whole `allOf` below is advisory.** A branch
+    // only fires when its `if` matches, so a document whose `kind` matches NO
+    // branch satisfies every `then` vacuously and validates clean — `Contaner`,
+    // `Banana` and a Kind removed three versions ago all passed. Measured
+    // against the published schema before this: `kind: Egress` validated with a
+    // green tick while the engine refused it by name. An editor that disagrees
+    // with the engine is worse than no editor check, because the green tick is
+    // the thing people act on.
+    //
+    // Both lists are DERIVED — the spellings from `KIND_ALIASES` (the same table
+    // `canonical_kind` resolves with) and the groups from the Kind registry — so
+    // neither can drift from what the loader accepts.
+    let mut kind_spellings: Vec<&str> = super::kinds::all().map(|f| f.kind).collect();
+    for (spelling, canonical) in super::manifest::KIND_ALIASES {
+        if super::kinds::facts(canonical).is_some() && !kind_spellings.contains(spelling) {
+            kind_spellings.push(spelling);
+        }
+    }
+    kind_spellings.sort_unstable();
+    let mut api_versions: Vec<&str> = super::kinds::all().map(|f| f.api_version).collect();
+    api_versions.push(super::manifest::LEGACY_API_VERSION);
+    api_versions.sort_unstable();
+    api_versions.dedup();
     Ok(serde_json::json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": "Delonix manifest (delonix.io/v1)",
         "type": "object",
         "required": ["apiVersion", "kind", "metadata"],
         "properties": {
-            "apiVersion": { "const": "delonix.io/v1" },
-            "kind": { "type": "string" },
+            "apiVersion": { "enum": api_versions },
+            "kind": { "enum": kind_spellings },
             "metadata": {
                 "type": "object",
                 "required": ["name"],
@@ -657,6 +692,116 @@ mod tests {
     /// propriedade do Kind. Ou tem schema tipado, ou escreve-se o obstáculo:
     /// a mesma exigência que o `not_converged_reason` e o `no_teardown_reason`
     /// já fazem do lado do stack.
+    /// The `allOf` is advisory unless `kind` is closed at the top: a document
+    /// matching no branch satisfies every `then` vacuously. Measured before the
+    /// enum existed — `Contaner`, `Banana` and `Egress` all validated clean.
+    #[test]
+    fn um_kind_que_o_motor_nao_conhece_e_recusado() {
+        let s = manifest_schema(None).unwrap();
+        let accepted: Vec<&str> = s["properties"]["kind"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        for bogus in ["Contaner", "Banana", "Egress", "Storage", "ShareVolume"] {
+            assert!(
+                !accepted.contains(&bogus),
+                "o schema aceita `kind: {bogus}`, que o motor recusa — o editor \
+                 daria visto verde a um manifesto que não aplica"
+            );
+        }
+    }
+
+    /// The other direction, and the one that turns a linter into noise: every
+    /// spelling the LOADER resolves has to validate, or the schema flags a
+    /// document the engine applies without complaint.
+    #[test]
+    fn toda_a_grafia_que_o_loader_aceita_e_aceite_pelo_schema() {
+        let s = manifest_schema(None).unwrap();
+        let accepted: Vec<&str> = s["properties"]["kind"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        for (spelling, canonical) in super::super::manifest::KIND_ALIASES {
+            if crate::cmd::kinds::facts(canonical).is_none() {
+                continue; // alias de um Kind removido
+            }
+            assert!(
+                accepted.contains(spelling),
+                "`kind: {spelling}` resolve para {canonical} no loader e o schema \
+                 recusa-o"
+            );
+        }
+    }
+
+    /// `api_version_accepted` refuses a Kind under another domain's group. The
+    /// schema said `const: delonix.io/v1` and therefore refused every group the
+    /// v0.64.0 rename introduced — flagging the spelling `api-resources`
+    /// publishes as the canonical one.
+    #[test]
+    fn cada_kind_traz_o_grupo_de_apiversion_que_e_o_seu() {
+        let s = manifest_schema(None).unwrap();
+        let top: Vec<&str> = s["properties"]["apiVersion"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        for f in crate::cmd::kinds::all() {
+            assert!(
+                top.contains(&f.api_version),
+                "{} vive em {} e o schema não aceita esse grupo",
+                f.kind,
+                f.api_version
+            );
+        }
+        for b in s["allOf"].as_array().unwrap() {
+            let kind = b["if"]["properties"]["kind"]["const"].as_str().unwrap();
+            let allowed: Vec<&str> = b["then"]["properties"]["apiVersion"]["enum"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|v| v.as_str())
+                .collect();
+            let own = crate::cmd::kinds::facts(kind).unwrap().api_version;
+            assert_eq!(
+                allowed,
+                vec![own, super::super::manifest::LEGACY_API_VERSION],
+                "{kind} devia aceitar só o grupo dele e o legado"
+            );
+        }
+    }
+
+    /// The gate below asks that every LIVE Kind has a schema. Nothing asked the
+    /// reverse — that every typed Kind is still live — and that is the direction
+    /// a removal breaks.
+    ///
+    /// Measured: v0.65.0 removed `kind: Egress` from the registry and the entry
+    /// stayed here, so the published schema kept a branch for it. The engine
+    /// refused the document and the schema validated it CLEAN — an editor
+    /// checking against `docs/schema/v1/delonix.json` showed a green tick for a
+    /// manifest that cannot apply. A validator that disagrees with the engine is
+    /// worse than no validator: the green tick is the thing people act on.
+    ///
+    /// This is the same family as the three converging-Kind lists that drifted
+    /// once already: a second list of Kinds, kept by hand, next to the registry
+    /// that governs everything else.
+    #[test]
+    fn nenhum_kind_tipado_sobrevive_a_sua_remocao() {
+        let live: Vec<&str> = crate::cmd::kinds::all().map(|f| f.kind).collect();
+        for kind in TYPED_KINDS {
+            assert!(
+                live.contains(kind),
+                "{kind} tem schema tipado e já não está no registo — o schema \
+                 publicado valida um Kind que o motor recusa. Tira-o do \
+                 TYPED_KINDS no MESMO commit que o tira do `cmd::kinds`."
+            );
+        }
+    }
+
     #[test]
     fn todo_kind_conhecido_tem_schema_ou_dica() {
         for f in crate::cmd::kinds::all() {
