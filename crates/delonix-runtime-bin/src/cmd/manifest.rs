@@ -126,7 +126,7 @@ pub fn resolve_path(explicit: Option<PathBuf>) -> Result<PathBuf> {
 /// promise — clean cut for COMMANDS, a step down for MANIFESTS. A file in git,
 /// reviewed in a PR and pointed at by `$schema` in an editor, does not break
 /// because the engine reorganised its groups.
-const LEGACY_API_VERSION: &str = "delonix.io/v1";
+pub(crate) const LEGACY_API_VERSION: &str = "delonix.io/v1";
 
 /// «Is this file a delonix manifest at all», for the guards over `examples/`.
 ///
@@ -171,30 +171,49 @@ fn api_version_accepted(kind: &str, version: &str) -> bool {
 /// or `VM` in a manifest has to resolve to the same `Vm` that the rest of the code
 /// uses. Returns the canonical form if known, otherwise the `kind` as-is (unknown
 /// Kinds are handled downstream, see `cmd::stack::describe`).
+/// Every spelling of a Kind the loader accepts, as `(spelling, canonical)`.
+///
+/// This used to live inside [`canonical_kind`] as a `match` on the lowercased
+/// name, which meant the set of accepted spellings existed only as control flow
+/// — unreadable from anywhere else. The schema needs exactly this set (a `kind`
+/// it does not list is refused), and deriving it by hand would be a second list
+/// of Kinds kept next to the first: the drift this repo has already paid for
+/// three times. One table, two consumers.
+///
+/// The spelling is written the way a person types it; matching stays
+/// case-insensitive, so `vm`/`VM`/`Vm` all land on the same row.
+pub(crate) const KIND_ALIASES: &[(&str, &str)] = &[
+    // A RENAME, so the old spelling is an alias and not a deprecation: no
+    // warning, nothing to migrate. `docs/cli-stability.md` draws that line — a
+    // renamed name stays accepted as an alias — and it is the same treatment
+    // `restart`->`restartPolicy` already gets. A MERGE is the other case, and
+    // that one warns, because the semantics moved.
+    ("Vm", k::VM),
+    ("VirtualMachine", k::VM),
+    ("FirewallPolicy", k::FIREWALL_POLICY),
+    ("NetworkPolicy", k::FIREWALL_POLICY),
+    ("Cluster", k::CLUSTER),
+    ("KubernetesCluster", k::CLUSTER),
+    ("Tunnel", k::GATEWAY),
+    ("Gateway", k::GATEWAY),
+    // `KnowDepends` is the name the user asked for; `Dependency` is canonical.
+    ("KnowDepends", k::DEPENDENCY),
+    ("Dependency", k::DEPENDENCY),
+    ("Stack", k::STACK),
+    ("Pod", k::POD),
+    ("Workload", k::WORKLOAD),
+];
+
 pub fn canonical_kind(kind: &str) -> &str {
-    // Case-insensitive on purpose: `Vm`/`VM`/`vm`/`VirtualMachine`/`virtualMachine`
-    // (any casing) all resolve to the canonical `Vm` — a half-measure
-    // (only some casings) would be worse than nothing, leaving a `kind: vm` to be
-    // ignored silently by the `stack apply`.
-    let lower = kind.to_ascii_lowercase();
-    match lower.as_str() {
-        "vm" | "virtualmachine" => k::VM,
-        "firewallpolicy" | "networkpolicy" => k::FIREWALL_POLICY,
-        "cluster" | "kubernetescluster" => k::CLUSTER,
-        // A RENAME, so the old spelling is an alias and not a deprecation: no
-        // warning, nothing to migrate. `docs/cli-stability.md` draws that line
-        // — a renamed name stays accepted as an alias — and it is the same
-        // treatment `restart`→`restartPolicy` already gets. A MERGE is the
-        // other case (`Egress`→`FirewallPolicy`), and that one does warn,
-        // because the semantics moved.
-        "tunnel" | "gateway" => k::GATEWAY,
-        // `KnowDepends` is the name the user asked for; `Dependency` is the canonical one.
-        "knowdepends" | "dependency" => k::DEPENDENCY,
-        "stack" => k::STACK,
-        "pod" => k::POD,
-        "workload" => k::WORKLOAD,
-        _ => kind,
-    }
+    // Case-insensitive on purpose: `Vm`/`VM`/`vm`/`VirtualMachine` (any casing)
+    // all resolve to the canonical spelling — a half-measure (only some casings)
+    // would be worse than nothing, leaving a `kind: vm` to be silently ignored
+    // by the `stack apply`.
+    KIND_ALIASES
+        .iter()
+        .find(|(spelling, _)| spelling.eq_ignore_ascii_case(kind))
+        .map(|(_, canonical)| *canonical)
+        .unwrap_or(kind)
 }
 
 /// A grouped `kind: Stack` — bundles resources of several Kinds in ONE document

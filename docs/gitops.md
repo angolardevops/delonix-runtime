@@ -213,7 +213,13 @@ como `+~` (por adoptar) e o apply seguinte resolve-o.
 
 Uma linha, e o editor passa a dar completação, verificação de tipos e a
 documentação de cada campo enquanto escreves. O schema é gerado do próprio
-código (ADR-0007), por isso não pode divergir dele.
+código (ADR-0007), por isso não pode divergir dele — apanha um typo num nome de
+campo, um `kind` que o motor não conhece, e um `apiVersion` que não é o grupo
+daquele Kind.
+
+Num PR, isto vale mais do que parece: um manifesto que o editor sublinha nunca
+chega ao `plan`, e o erro aparece a quem o escreveu em vez de aparecer no CI de
+outra pessoa.
 
 No terminal:
 
