@@ -397,7 +397,19 @@ mod tests {
 
     fn with_root<T>(tag: &str, f: impl FnOnce() -> T) -> T {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let dir = std::env::temp_dir().join(format!("dlx-ipam-test-{tag}"));
+        // The PID in the path, not just the tag. `ENV_LOCK` above serializes
+        // within the PROCESS; nothing serializes across processes, and this
+        // workspace runs several sessions at once (one worktree per task). With
+        // a fixed path, two `cargo test -p delonix-net` runs delete each other's
+        // directory in the entry and exit `remove_dir_all`, and whichever is
+        // midway through this test's 2000 allocations dies writing.
+        //
+        // Measured 2026-08-28: the suite failed the pre-push gate, passed when
+        // run alone, and `pgrep` caught ANOTHER session running this very test
+        // at that moment, chasing the same failure. The neighbour
+        // `dlx-ipam-nolock-{pid}`, 114 lines below, already did this — the fix
+        // was written in the same file.
+        let dir = std::env::temp_dir().join(format!("dlx-ipam-test-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         // SAFETY: single-thread test under the Mutex above.
         unsafe { std::env::set_var("DELONIX_ROOT", &dir) };
