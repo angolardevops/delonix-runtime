@@ -374,14 +374,29 @@ pub fn silence_cgroup_warning() {
 mod tests {
     use super::*;
 
+    /// Six tests share this helper and cargo runs them in PARALLEL, in one
+    /// process — so `pid` is the same for all of them and only the timestamp
+    /// separates the directories. Two threads that read the clock in the same
+    /// tick get the SAME path, and each test ends with `remove_dir_all`: one
+    /// deletes the other's store mid-run, and the victim fails on whichever
+    /// assertion it happened to reach. That is the shape of the CI flake seen
+    /// on 2026-08-27 (`a_unique_bare_name_still_resolves_exactly_as_before`
+    /// getting something other than `NotFound` for a name that was never
+    /// there) — it passed on every local run, because losing that race needs
+    /// the timing a loaded runner gives.
+    ///
+    /// A counter cannot tie. The clock is kept because it also separates one
+    /// RUN from the next, which the counter alone would not.
     fn tmp_store() -> (Store, PathBuf) {
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "delonix-util-test-{}-{}",
+            "delonix-util-test-{}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         (Store::open(&dir).unwrap(), dir)
     }
