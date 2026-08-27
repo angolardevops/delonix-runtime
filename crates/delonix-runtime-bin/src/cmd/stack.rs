@@ -594,7 +594,6 @@ fn form_label(form: super::kinds::Form) -> String {
         Form::Primary => "primary",
         Form::Aggregate => "aggregate",
         Form::Sugar(_) => "sugar",
-        Form::Deprecated(_) => "deprecated",
         Form::Compat(_) => "compat",
         Form::Sunset(_) => "sunset",
     });
@@ -2981,14 +2980,14 @@ metadata: { name: prod-net }
 spec: { driver: bridge }
 ---
 apiVersion: delonix.io/v1
-kind: Egress
+kind: NetworkPolicy
 metadata: { name: e1 }
-spec: { scope: network, target: prod-net, defaultPolicy: deny }
+spec: { direction: egress, scope: network, target: prod-net, defaultPolicy: deny }
 ---
 apiVersion: delonix.io/v1
-kind: Egress
+kind: NetworkPolicy
 metadata: { name: e2 }
-spec: { scope: network, target: rede-fantasma, defaultPolicy: deny }
+spec: { direction: egress, scope: network, target: rede-fantasma, defaultPolicy: deny }
 ",
         );
         assert_eq!(issues.len(), 1, "{issues:?}");
@@ -3003,9 +3002,9 @@ spec: { scope: network, target: rede-fantasma, defaultPolicy: deny }
         let issues = check(
             "\
 apiVersion: delonix.io/v1
-kind: Egress
+kind: NetworkPolicy
 metadata: { name: out }
-spec: { target: nao-existe }
+spec: { direction: ingress, target: nao-existe }
 ",
         );
         assert_eq!(issues.len(), 1);
@@ -3037,9 +3036,9 @@ spec: {}
         let issues = check(
             "\
 apiVersion: delonix.io/v1
-kind: Storage
+kind: Volume
 metadata: { name: dados }
-spec: { type: nfs, server: h, share: /s }
+spec: { nfs: { server: h, share: /s } }
 ---
 apiVersion: delonix.io/v1
 kind: VirtualMachine
@@ -3066,9 +3065,9 @@ metadata: { name: web }
 spec: { image: nginx, secret: [creds, fantasma] }
 ---
 apiVersion: delonix.io/v1
-kind: Storage
+kind: Volume
 metadata: { name: nas }
-spec: { type: nfs, server: h, share: /s, passwordSecret: outro-fantasma }
+spec: { nfs: { server: h, share: /s, passwordSecret: outro-fantasma } }
 ",
         );
         // `creds` resolves; `fantasma` (container) and `outro-fantasma` (storage) do not.
@@ -3096,9 +3095,9 @@ metadata: { name: creds }
 spec: { stringData: { token: x } }
 ---
 apiVersion: delonix.io/v1
-kind: Storage
+kind: Volume
 metadata: { name: nas }
-spec: { type: cifs, server: h, share: /s, passwordSecret: creds }
+spec: { cifs: { server: h, share: /s, passwordSecret: creds } }
 ",
         );
         assert_eq!(issues.len(), 1, "{issues:?}");
@@ -3116,7 +3115,7 @@ metadata: { name: creds }
 spec: { stringData: { password: x } }
 ---
 apiVersion: delonix.io/v1
-kind: Storage
+kind: Volume
 metadata: { name: nas }
 spec: { type: cifs, server: h, share: /s, passwordSecret: creds }
 ",
@@ -3133,7 +3132,7 @@ metadata: { name: creds }
 spec: { fromEnvFile: ./x.env }
 ---
 apiVersion: delonix.io/v1
-kind: Storage
+kind: Volume
 metadata: { name: nas }
 spec: { type: cifs, server: h, share: /s, passwordSecret: creds }
 ",
