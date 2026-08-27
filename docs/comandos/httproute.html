@@ -150,14 +150,14 @@ containers backend na SDN. TLS termina no proxy (self-signed ou <code>secretRef<
 quente por SIGHUP (as rotas trocam sem downtime, os listeners ficam fixos no arranque). Um container
 com <code>--expose &lt;porta&gt;</code> auto-regista-se sob
 <code>&lt;nome&gt;.&lt;namespace&gt;.delonix.internal</code>, sem precisar de nenhum
-<code>kind: HTTPRoute</code> manual. É o que o <code>kind: Tunnel</code> normalmente põe à frente
+<code>kind: HTTPRoute</code> manual. É o que o <code>kind: Gateway</code> normalmente põe à frente
 para dar uma única URL pública a vários backends.</p><p class='lang-en'>A <strong>built-in</strong> HTTP/HTTPS reverse proxy (pure hyper, no
 Nginx/Envoy), running inside the holder's netns and routing by <code>Host</code> + <code>path</code>
 prefix to backend containers on the SDN. TLS terminates at the proxy (self-signed or
 <code>secretRef</code>); hot reload via SIGHUP (routes swap with no downtime, listeners stay fixed
 at startup). A container with <code>--expose &lt;port&gt;</code> self-registers under
 <code>&lt;name&gt;.&lt;namespace&gt;.delonix.internal</code>, with no manual
-<code>kind: HTTPRoute</code> needed. It's what <code>kind: Tunnel</code> normally sits in front of
+<code>kind: HTTPRoute</code> needed. It's what <code>kind: Gateway</code> normally sits in front of
 to give several backends a single public URL.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/httproute.rs"><code>cmd/httproute.rs</code></a></p>
 <div class='help'><pre><code>Usage: delonix net httproute [OPTIONS] &lt;COMMAND&gt;

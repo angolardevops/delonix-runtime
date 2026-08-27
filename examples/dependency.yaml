@@ -4,7 +4,7 @@
 # conhece a app — a DB deixa de ficar exposta a todos os containers da rede.
 #
 # É AÇÚCAR, e agora diz-se: no `load` cada Dependency é reescrita para um
-# `kind: FirewallPolicy` com `direction: ingress`, default-deny no `to` + um allow
+# `kind: NetworkPolicy` com `direction: ingress`, default-deny no `to` + um allow
 # por `from`. Corre `stack apply --dry-run` para ver a política real — antes desta
 # fusão a tradução era invisível, e um `to` nomeado por uma Dependency E por uma
 # FirewallPolicy obrigava o motor a AVISAR sobre o seu próprio gémeo.

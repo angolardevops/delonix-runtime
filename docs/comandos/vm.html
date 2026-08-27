@@ -176,7 +176,7 @@ Commands:
   ls-remote        List the tags available in a remote OCI repository
   pull             Pull a golden VM image from an OCI registry
   push             Push a local golden VM image to an OCI registry (`vm push &lt;name&gt; &lt;target&gt;`)
-  apply            Apply the `kind: Vm` documents of a manifest
+  apply            Apply the `kind: VirtualMachine` documents of a manifest
   init             Bootstrap a project with a VM manifest
   prune            Reclaim the VM state directory: everything in it no VM record accounts for
   snapshot         Point-in-time snapshots of a VM (checkpoints in the VM&#x27;s own disk)
@@ -803,7 +803,7 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 EXAMPLES:
-  # a `kind: Vm` manifest already filled in, applicable as it is
+  # a `kind: VirtualMachine` manifest already filled in, applicable as it is
   delonix vm init
 
   # name the project and pin the image it should boot
@@ -1111,7 +1111,7 @@ SEE ALSO:
   delonix › vm › rm</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix vm rm node1</code></pre></div>
 <h2 id='apply'><code>vm apply</code></h2>
-<p class='intro'>Apply the <code>kind: Vm</code> documents of a manifest.</p>
+<p class='intro'>Apply the <code>kind: VirtualMachine</code> documents of a manifest.</p>
 <p class='intro'><code>delonix_vm::create</code> is already idempotent by name — creates or auto-recovers.</p>
 <div class='help'><pre><code>Usage: delonix vm apply [OPTIONS]
 
@@ -1126,8 +1126,8 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 EXAMPLES:
-  # apply the `kind: Vm` documents of ./delonix-manifest.yaml — idempotent by
-  # name, so it creates or recovers
+  # apply the `kind: VirtualMachine` documents of ./delonix-manifest.yaml —
+  # idempotent by name, so it creates or recovers
   delonix vm apply
 
   # from a manifest of your own

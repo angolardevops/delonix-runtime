@@ -1,4 +1,4 @@
-# kind: Tunnel — exposes ONE local TCP port to the public internet via a
+# kind: Gateway — exposes ONE local TCP port to the public internet via a
 # 3rd-party provider (pinggy/ngrok/cloudflare). Deliberately single-purpose:
 # it does the outbound transport only. Point `localPort` at the HTTPRoute
 # proxy's own listening port (see httproute.yaml) to combine the two — one

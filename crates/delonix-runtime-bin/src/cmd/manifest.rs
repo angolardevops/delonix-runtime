@@ -564,7 +564,7 @@ pub fn load_str(text: &str, label: &str) -> Result<Vec<ManifestDoc>> {
                 docs.push(child);
             }
         } else if doc.kind == k::WORKLOAD {
-            // A `kind: Workload` lowers to a synthetic `kind: Container`/`kind: Vm`
+            // A `kind: Workload` lowers to a synthetic `kind: Container`/`kind: VirtualMachine`
             // doc (ADR-0001), which then flows through the normal per-Kind apply —
             // exactly like a Stack child. The Workload doc does not survive.
             docs.push(crate::cmd::workload::lower_workload(&doc)?);

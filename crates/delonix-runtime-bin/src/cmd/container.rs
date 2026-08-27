@@ -81,7 +81,7 @@ pub(crate) struct ContainerSpec {
     /// `no` (default) | `on-failure[:max]` | `always` | `unless-stopped` —
     /// a detached supervisor becomes the container's parent and restarts it (see
     /// `run_supervised`). This is what makes a manifest resilient. Canonical
-    /// field name is `restartPolicy` (uniform with `kind: Vm`); the legacy
+    /// field name is `restartPolicy` (uniform with `kind: VirtualMachine`); the legacy
     /// `restart` stays accepted so existing manifests don't break.
     #[serde(
         rename = "restartPolicy",

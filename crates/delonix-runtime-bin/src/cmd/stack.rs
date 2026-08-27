@@ -463,7 +463,7 @@ pub(crate) fn build_plan(docs: &[manifest::ManifestDoc], stack: &str) -> Result<
             .into_iter()
             .filter(|x| !x.ok)
             .collect();
-        // A `kind: Vm` accepts 36 spec fields and the reconciler compares five.
+        // A `kind: VirtualMachine` accepts 36 spec fields and the reconciler compares five.
         // On a Create that is harmless — creation applies the whole spec. On a
         // VM that ALREADY EXISTS it was a silent drop: the plan said "no
         // changes" for a manifest declaring a TPM, a CPU topology and two extra

@@ -52,7 +52,7 @@ pub(crate) fn resolve_kind(token: &str) -> Result<&'static KindFacts, Error> {
         return Err(Error::Invalid("a resource kind is missing".into()));
     }
     // Through `canonical_kind` first, so a RENAMED Kind answers to its old name
-    // here too. Without this the alias was half a promise: `kind: Cluster` kept
+    // here too. Without this the alias was half a promise: `kind: KubernetesCluster` kept
     // loading in a manifest while `explain Cluster` answered «no such resource
     // kind» — the engine accepting a spelling that its own resolver rejects.
     // Measured the moment the rename landed, by a test that spells the old name.

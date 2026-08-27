@@ -15,7 +15,7 @@ use super::manifest::{self, ManifestDoc};
 use super::output;
 use super::util::state_root;
 
-/// `spec.build` of a `kind: Vm` — the declarative face of `delonix vm build`.
+/// `spec.build` of a `kind: VirtualMachine` — the declarative face of `delonix vm build`.
 ///
 /// The fields are the flags of that command, one for one, so the two paths
 /// cannot describe different builds. Nothing here is a second implementation:
@@ -55,14 +55,14 @@ fn default_true() -> bool {
     true
 }
 
-/// `spec` for `kind: Vm` — mirrors `delonix_vm::VmConfig` (minus `name`, which
+/// `spec` for `kind: VirtualMachine` — mirrors `delonix_vm::VmConfig` (minus `name`, which
 /// comes from `metadata.name`).
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 pub(crate) struct VmSpec {
     /// The base disk: a VM image name in the store, or a path.
     ///
     /// Optional ONLY because [`build`](Self::build) can produce it. Exactly one
-    /// of the two — a `kind: Vm` with neither has no disk to boot, and one with
+    /// of the two — a `kind: VirtualMachine` with neither has no disk to boot, and one with
     /// both is two answers to the same question (see [`VmSpec::resolve_disk`]).
     #[serde(default)]
     disk: String,
@@ -165,7 +165,7 @@ pub(crate) struct VmSpec {
     libvirt_xml: Option<String>,
 }
 
-/// `spec.cpuTopology` of a `kind: Vm`.
+/// `spec.cpuTopology` of a `kind: VirtualMachine`.
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct CpuTopologySpec {
     #[serde(default)]
@@ -222,7 +222,7 @@ struct VmVolumeSpec {
     read_only: bool,
 }
 
-/// Field names accepted in the `spec` of `kind: Vm` (canonical + legacy aliases),
+/// Field names accepted in the `spec` of `kind: VirtualMachine` (canonical + legacy aliases),
 /// for the unknown-field warning. Kept aligned with `VmSpec` by the
 /// test `manifest::tests::examples_nao_tem_campos_desconhecidos`.
 pub(crate) const VM_SPEC_FIELDS: &[&str] = &[
@@ -280,7 +280,7 @@ pub(crate) const VM_SPEC_FIELDS: &[&str] = &[
     "libvirt",
 ];
 
-/// Re-deserializes a `kind: Vm` document's spec, accepting BOTH the historic
+/// Re-deserializes a `kind: VirtualMachine` document's spec, accepting BOTH the historic
 /// flat shape (every field at the top level — still fully supported, never
 /// breaks an existing manifest) and a newer GROUPED one (`resources:`/
 /// `network:`/`boot:`/`cloudInit:`/`libvirt:`) that reads better for a spec
@@ -863,7 +863,7 @@ pub enum VmCmd {
         #[command(subcommand)]
         action: VmSnapshotCmd,
     },
-    /// Apply the `kind: Vm` documents of a manifest.
+    /// Apply the `kind: VirtualMachine` documents of a manifest.
     ///
     /// `delonix_vm::create` is already idempotent by name — creates or
     /// auto-recovers.
@@ -1004,7 +1004,7 @@ pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
     serde_yaml::to_value(spec).map_err(|e| Error::Invalid(format!("dry-run: {e}")))
 }
 
-/// Fields the reconciler compares for a `kind: Vm`.
+/// Fields the reconciler compares for a `kind: VirtualMachine`.
 ///
 /// **None of them converge hot, and that is not a gap.** This engine does not
 /// hotplug: changing a VM's vCPUs, memory or disk means booting a different
@@ -1016,7 +1016,7 @@ pub(crate) const RECONCILED_VM_FIELDS: &[&str] = &["disk", "vcpus", "memory", "n
 /// The spec fields this manifest declares that the reconciler does NOT compare
 /// — named, on a VM that already exists, instead of dropped in silence.
 ///
-/// **The measurement that made this necessary.** A `kind: Vm` accepts 36 spec
+/// **The measurement that made this necessary.** A `kind: VirtualMachine` accepts 36 spec
 /// fields; `RECONCILED_VM_FIELDS` has five. A plan for an existing VM declaring
 /// `cpuTopology`, `tpm`, `vnc`, `machine`, `bootOrder`, an `extraDisks` and an
 /// `extraNics` printed `Summary: 1 to adopt` and nothing else — and the control
@@ -1349,7 +1349,7 @@ fn refuse_cloud_init_on_appliance(asked: &[(bool, &str)]) -> Result<()> {
     )))
 }
 
-/// The disk a `kind: Vm` boots from, BUILDING it first when the manifest says to.
+/// The disk a `kind: VirtualMachine` boots from, BUILDING it first when the manifest says to.
 ///
 /// Fail-closed on both sides of the exclusivity, and the two errors say
 /// different things because the mistakes are different: neither field is a
@@ -1442,7 +1442,7 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
         // Same rule as the CLI `vm create`: unless an explicit `seed` is given,
         // ALWAYS generate a NoCloud seed. Without a datasource the cloud image's
         // cloud-init skips the network phase and the VM boots with no IP/route —
-        // so the declarative path used to leave a volume-less `kind: Vm` offline.
+        // so the declarative path used to leave a volume-less `kind: VirtualMachine` offline.
         // The seed also carries hostname/sshKeys/userData (CLI parity) and the
         // 9p volume mounts.
         //
@@ -1694,7 +1694,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                         .into_owned()
                 }
                 (None, Some(d)) => {
-                    // The same lookup `kind: Vm` performs — one function, so a
+                    // The same lookup `kind: VirtualMachine` performs — one function, so a
                     // string cannot mean two things depending on which entry
                     // point read it.
                     let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
@@ -1836,7 +1836,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                 volumes: vec![],
                 vnc,
                 static_ip: ip,
-                // Advanced libvirt knobs are declarative-only (`kind: Vm`), not CLI flags.
+                // Advanced libvirt knobs are declarative-only (`kind: VirtualMachine`), not CLI flags.
                 ..Default::default()
             };
             // Staged progress on STDERR (human), while STDOUT stays the bare VM

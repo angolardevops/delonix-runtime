@@ -166,7 +166,7 @@ Commands:
   init     Initialize a project with the cluster manifests (kind/vm/ssh)
   ls       List the clusters and the state of their nodes [alias: list]
   load     Load local images into a kind-mode cluster&#x27;s nodes, **without a registry**
-  apply    Apply the `kind: Cluster` document(s) of a manifest
+  apply    Apply the `kind: KubernetesCluster` document(s) of a manifest
   kube     Generate a Kubernetes manifest from a container/pod already running locally
   prune    Reclaim the state of clusters that have no nodes left
   help     Print this message or the help of the given subcommand(s)
@@ -417,7 +417,7 @@ SEE ALSO:
   delonix › cluster › init</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Scaffold de um cloud.yaml para cluster apply</div><div class='cap lang-en'>Scaffold a cloud.yaml for cluster apply</div><pre><code>delonix cluster init ./meu-cluster</code></pre></div>
 <h2 id='apply'><code>cluster apply</code></h2>
-<p class='intro'>Apply the <code>kind: Cluster</code> document(s) of a manifest</p>
+<p class='intro'>Apply the <code>kind: KubernetesCluster</code> document(s) of a manifest</p>
 <div class='help'><pre><code>Usage: delonix cluster apply [OPTIONS]
 
 Options:
@@ -450,7 +450,7 @@ auditoria ofensiva do projecto, com testes a replicar o exploit.</p></div><div c
 (<code>controlPlaneEndpoint</code>, subnets, version) goes through strict validation before any
 interpolation — command injection via the manifest was one of the CRITICAL findings closed in the
 project's offensive audit, with tests replicating the exploit.</p></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Bootstrap num manifesto `kind: Cluster`</div><div class='cap lang-en'>Bootstrap from a `kind: Cluster` manifest</div><pre><code>delonix cluster apply -f cloud.yaml</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Bootstrap num manifesto `kind: KubernetesCluster`</div><div class='cap lang-en'>Bootstrap from a `kind: KubernetesCluster` manifest</div><pre><code>delonix cluster apply -f cloud.yaml</code></pre></div>
 <h2 id='kubeadm'><code>cluster kubeadm</code></h2>
 <p class='intro'>Provision VMs (golden VM image) + <code>kubeadm</code> bootstrap.</p>
 <p class='intro'>From zero to a working cluster, without writing a manifest by hand.</p>

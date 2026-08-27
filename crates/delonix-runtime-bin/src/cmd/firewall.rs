@@ -974,7 +974,7 @@ fn egress_net(network: &str, mode: EgressMode, to: Option<String>) -> Result<()>
 /// k8s NetworkPolicy.
 #[derive(Deserialize, Serialize, schemars::JsonSchema)]
 pub(crate) struct FwDocSpec {
-    /// `ingress`|`egress` — only for `kind: FirewallPolicy` (the direction comes
+    /// `ingress`|`egress` — only for `kind: NetworkPolicy` (the direction comes
     /// from the Kind for the legacy `Egress`). Captured so the dry-run round-trip
     /// preserves it; `apply` reads it directly from `doc.spec`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1080,7 +1080,7 @@ pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let (_images, store) = open_stores()?;
-    // `kind: FirewallPolicy` is now the ONLY firewall Kind. `kind: Ingress` stopped
+    // `kind: NetworkPolicy` is now the ONLY firewall Kind. `kind: Ingress` stopped
     // being firewall a while back (it is the k8s-shaped L7 Ingress, see
     // `cmd::httproute`), and `kind: Egress` is rewritten into a FirewallPolicy with
     // `direction: egress` at load time (`manifest::lower_egress`) — so by the time
@@ -1101,7 +1101,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     Ok(())
 }
 
-/// Fields the reconciler compares for a `kind: FirewallPolicy`.
+/// Fields the reconciler compares for a `kind: NetworkPolicy`.
 ///
 /// `defaultPolicy` and `rules` converge HOT — `apply_fw_doc` already replaces
 /// the whole direction, in place, with no container restart. `target` and

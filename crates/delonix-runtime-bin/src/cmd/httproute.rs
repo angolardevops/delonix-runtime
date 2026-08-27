@@ -1,6 +1,6 @@
 //! `kind: HTTPRoute` — declarative L7/HTTP reverse-proxy (routing by Host/path to
 //! backend containers). `kind: Ingress` (k8s-shaped) ALSO compiles here (see
-//! `ingress_to_httproute`); the L4 firewall lives under `kind: FirewallPolicy`
+//! `ingress_to_httproute`); the L4 firewall lives under `kind: NetworkPolicy`
 //! (see `cmd/firewall.rs`).
 //!
 //! **Architecture** (see `cmd/ingress_proxy.rs` / `realize` in Phase 4): the schema
@@ -369,7 +369,7 @@ pub fn ingress_spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value
 // `kind: Ingress` — Kubernetes-shaped L7 HTTP Ingress (host/path → backend).
 // Compiles to an `HttpRouteSpec` (the embedded reverse-proxy). This is the k8s
 // networking.k8s.io/v1 Ingress schema; the L4 firewall that used to own this
-// Kind now lives under `kind: FirewallPolicy` (direction: ingress).
+// Kind now lives under `kind: NetworkPolicy` (direction: ingress).
 // ============================================================================
 
 /// Field names accepted in a `kind: Ingress` `spec` (unknown-field warning).

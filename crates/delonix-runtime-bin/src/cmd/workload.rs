@@ -2,7 +2,7 @@
 //! (`Container`/`Vm`). See `docs/adr/0001-workload-kind-schema.md`.
 //!
 //! A `Workload` is sugar: it does NOT survive [`super::manifest::load`]. It is
-//! rewritten into a synthetic `kind: Container`/`kind: Vm`/`kind: Pod` doc
+//! rewritten into a synthetic `kind: Container`/`kind: VirtualMachine`/`kind: Pod` doc
 //! (inheriting the Workload's `metadata`) that then flows through the normal
 //! per-Kind apply — exactly like a `kind: Stack` child. Nothing downstream
 //! (`apply`, per-Kind `apply -f`, `stack apply`, `--dry-run`, `ls`, `describe`)
@@ -12,7 +12,7 @@
 //! (`spec.container` / `spec.vm` / `spec.pod` / `spec.microvm`) and is deserialized
 //! by the SAME typed structs the standalone Kinds use (`ContainerSpec`/`VmSpec`/
 //! `PodSpec`) — the Workload spec cannot drift from the spec it wraps, because it
-//! does not redefine a single field. `type: microvm` lowers to `kind: Vm` with the
+//! does not redefine a single field. `type: microvm` lowers to `kind: VirtualMachine` with the
 //! backend forced to cloud-hypervisor (ADR-0006); no reserved types remain.
 
 use super::kinds as k;
@@ -40,7 +40,7 @@ pub const WORKLOAD_SPEC_FIELDS: &[&str] = &["type", "container", "vm", "pod", "m
 /// `ContainerSpec`, so anything the schema would accept here and that type would
 /// reject is a manifest that fails at apply.
 ///
-/// `microvm` maps to `VmSpec` for the same reason it lowers to `kind: Vm` — it
+/// `microvm` maps to `VmSpec` for the same reason it lowers to `kind: VirtualMachine` — it
 /// is a `VmSpec` with the backend forced to `cloud-hypervisor` (ADR-0006).
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub(crate) struct WorkloadSpec {
@@ -60,7 +60,7 @@ pub(crate) struct WorkloadSpec {
     microvm: Option<serde_yaml::Value>,
 }
 
-/// Lowers a `kind: Workload` doc into its underlying `kind: Container`/`kind: Vm`
+/// Lowers a `kind: Workload` doc into its underlying `kind: Container`/`kind: VirtualMachine`
 /// doc. Fail-closed: an unsupported/reserved `type`, a missing block, or a block
 /// that does not match the `type` is an explicit error — never silently ignored,
 /// never defaulted (guardrail: no silent failure).
@@ -113,7 +113,7 @@ pub fn lower_workload(doc: &ManifestDoc) -> Result<ManifestDoc> {
                     ],
                 )?,
             ),
-            // `microvm` = a VM on the microVM hypervisor: lowers to `kind: Vm` (same
+            // `microvm` = a VM on the microVM hypervisor: lowers to `kind: VirtualMachine` (same
             // `VmSpec`) with the backend forced to cloud-hypervisor (ADR-0006).
             "microvm" => {
                 let mut b = select_block(

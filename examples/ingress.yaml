@@ -4,7 +4,7 @@
 #   delonix net httproute apply -f examples/ingress.yaml   (or `stack apply`)
 #
 # NOTE: `kind: Ingress` used to be the L4 firewall — that moved to
-# `kind: FirewallPolicy` (direction: ingress); see examples/firewall.yaml.
+# `kind: NetworkPolicy` (direction: ingress); see examples/firewall.yaml.
 # Backends must be containers WITH an IP on a custom SDN network (not --net host/none).
 # ---------------------------------------------------------------------------
 # Os backends e o certificado que a rota abaixo referencia. Estão aqui DE

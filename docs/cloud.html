@@ -229,7 +229,7 @@ final_message: "pronto em $UPTIME segundos"</code></pre>
 <em>todas</em> as VMs feitas a partir dela. O <code>--user-data</code> do
 <code>vm create</code> é POR INSTÂNCIA e assenta por cima. Uma é a receita da
 imagem, a outra é a configuração daquela VM.</p>
-<p class="note"><strong>Armadilha real, já paga:</strong> um <code>kind: Vm</code>
+<p class="note"><strong>Armadilha real, já paga:</strong> um <code>kind: VirtualMachine</code>
 sem seed nenhum fazia o cloud-init saltar a fase de rede, e a VM ficava sem IP e
 sem rota (<em>Network is unreachable</em> lá dentro). Por isso o motor gera
 <strong>sempre</strong> um seed mínimo, mesmo quando não pedes nada — não é
@@ -308,7 +308,7 @@ delonix vm create pesada --backend libvirt          # default quando CH não est
     (o <code>--firmware</code> que uma cloud image precisa para arrancar em CH).</li>
 <li><a href="https://libvirt.org/formatdomain.html">Formato do domínio libvirt</a> —
     útil se usares os escape-hatches <code>libvirtXml</code>/<code>libvirtXmlOverlay</code>
-    do <code>kind: Vm</code>.</li>
+    do <code>kind: VirtualMachine</code>.</li>
 </ul>
 </div><div class='lang-en'>
 <h1>cloud-init, cloud image and Cloud Hypervisor</h1>
@@ -397,7 +397,7 @@ VMfile's <code>CLOUDINIT</code> is baked INTO THE IMAGE (it lands in
 <em>every</em> VM made from it. <code>vm create</code>'s <code>--user-data</code>
 is PER INSTANCE and sits on top. One is the image's recipe, the other is that
 particular VM's configuration.</p>
-<p class="note"><strong>Real trap, already paid for:</strong> a <code>kind: Vm</code>
+<p class="note"><strong>Real trap, already paid for:</strong> a <code>kind: VirtualMachine</code>
 with no seed at all made cloud-init skip the networking phase, leaving the VM
 with no IP and no route (<em>Network is unreachable</em> inside). That's why the
 engine <strong>always</strong> generates a minimal seed, even when you ask for
@@ -475,7 +475,7 @@ delonix vm create heavy --backend libvirt          # default when CH isn't insta
     <a href="https://github.com/cloud-hypervisor/rust-hypervisor-firmware">rust-hypervisor-firmware</a>
     (the <code>--firmware</code> a cloud image needs to boot under CH).</li>
 <li><a href="https://libvirt.org/formatdomain.html">libvirt domain format</a> —
-    useful if you use the <code>kind: Vm</code> escape hatches
+    useful if you use the <code>kind: VirtualMachine</code> escape hatches
     <code>libvirtXml</code>/<code>libvirtXmlOverlay</code>.</li>
 </ul>
 </div>

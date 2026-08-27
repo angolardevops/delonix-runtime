@@ -210,7 +210,7 @@ enum Cmd {
     Restore(cmd::rbackup::RestoreArgs),
     /// Kubernetes clusters: `kubeadm` bootstrap, VM provisioning, manifest generation.
     ///
-    /// Idempotent `kubeadm` bootstrap over SSH (`kind: Cluster`), full VM
+    /// Idempotent `kubeadm` bootstrap over SSH (`kind: KubernetesCluster`), full VM
     /// provisioning, or generating a k8s manifest from a running
     /// container/pod (`cluster kube generate`).
     Cluster {

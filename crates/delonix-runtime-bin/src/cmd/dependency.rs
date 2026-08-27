@@ -11,12 +11,12 @@
 //! `app`'s IP. The reverse direction (db→app) is never opened, and the return
 //! of the app↔db conversation flows because the SDN is stateful (`ct state
 //! established,related accept`). Reuses the same `ContainerFw`/`infra::apply_firewall`
-//! as `kind: FirewallPolicy` — zero new dataplane. Multiple `Dependency` for the
+//! as `kind: NetworkPolicy` — zero new dataplane. Multiple `Dependency` for the
 //! same `to` ACCUMULATE the `allow`s.
 //!
 //! **Teardown ("ensure present", not a reconciler):** removing the `Dependency`
 //! from a manifest and reapplying does NOT unprotect the `to` — the default-deny
-//! ingress stays (same L4 firewall as `kind: FirewallPolicy`). To reopen, apply a
+//! ingress stays (same L4 firewall as `kind: NetworkPolicy`). To reopen, apply a
 //! `FirewallPolicy` (direction: ingress) with `defaultPolicy: allow` to the
 //! container, or clear its firewall by hand. (`kind: Ingress` is now the L7 HTTP
 //! Ingress — unrelated to this L4 firewall.)
@@ -52,7 +52,7 @@ pub const DEPENDENCY_SPEC_FIELDS: &[&str] = &["from", "to", "ports", "proto"];
 /// and nobody could tell where a rule came from.
 pub const FROM_DEPENDENCIES: &str = "delonix.io/from-dependencies";
 
-/// Lowers every `kind: Dependency` into `kind: FirewallPolicy` documents.
+/// Lowers every `kind: Dependency` into `kind: NetworkPolicy` documents.
 ///
 /// `Dependency` is **sugar**, and always was: it compiled to "on the `to`,
 /// default-deny inbound plus an allow for the `from`" — exactly what a

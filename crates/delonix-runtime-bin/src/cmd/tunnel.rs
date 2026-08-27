@@ -1,4 +1,4 @@
-//! `delonix net tunnel` (`kind: Tunnel`) — exposes ONE local TCP port to the
+//! `delonix net tunnel` (`kind: Gateway`) — exposes ONE local TCP port to the
 //! public internet via a 3rd-party tunnel provider (`pinggy`/`ngrok`/
 //! `cloudflare`). Deliberately single-purpose: Tunnel's only job is the
 //! outbound transport (no account/router/public IP needed on this host).
@@ -148,7 +148,7 @@ struct TunnelRecord {
 
 #[derive(Subcommand, Debug)]
 pub enum TunnelCmd {
-    /// Apply the `kind: Tunnel` documents of a manifest (idempotent).
+    /// Apply the `kind: Gateway` documents of a manifest (idempotent).
     Apply {
         #[arg(value_hint = clap::ValueHint::FilePath, short, long)]
         file: Option<PathBuf>,
@@ -230,7 +230,7 @@ pub fn run(action: TunnelCmd) -> Result<()> {
     }
 }
 
-/// Fields the reconciler compares for a `kind: Tunnel`.
+/// Fields the reconciler compares for a `kind: Gateway`.
 ///
 /// **The public URL is deliberately absent — it is STATUS.** A provider hands it
 /// out when the agent connects, and a free tier hands out a different one every

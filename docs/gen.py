@@ -804,7 +804,7 @@ comando, do zero a um cluster com o <code>delonix-cri</code> como runtime (sem c
                 ('Scaffold de um cloud.yaml para cluster apply',
                  'delonix cluster init ./meu-cluster')]},
             "apply": {"examples": [
-                ("Bootstrap num manifesto `kind: Cluster`", "delonix cluster apply -f cloud.yaml"),
+                ("Bootstrap num manifesto `kind: KubernetesCluster`", "delonix cluster apply -f cloud.yaml"),
             ], "notes": """<p>Todas as entradas do manifesto que chegam a comandos remotos
 (<code>controlPlaneEndpoint</code>, subnets, versão) passam por validação estrita antes de qualquer
 interpolação — a injecção de comandos via manifesto foi um dos CRÍTICOS encontrados e fechados na
@@ -980,7 +980,7 @@ containers backend na SDN. TLS termina no proxy (self-signed ou <code>secretRef<
 quente por SIGHUP (as rotas trocam sem downtime, os listeners ficam fixos no arranque). Um container
 com <code>--expose &lt;porta&gt;</code> auto-regista-se sob
 <code>&lt;nome&gt;.&lt;namespace&gt;.delonix.internal</code>, sem precisar de nenhum
-<code>kind: HTTPRoute</code> manual. É o que o <code>kind: Tunnel</code> normalmente põe à frente
+<code>kind: HTTPRoute</code> manual. É o que o <code>kind: Gateway</code> normalmente põe à frente
 para dar uma única URL pública a vários backends.""",
         "subs": {
             "apply": {"examples": [
@@ -997,7 +997,7 @@ para dar uma única URL pública a vários backends.""",
     },
     "tunnel": {
         "title": "delonix net tunnel",
-        "tagline": "Expõe uma porta local à internet pública via pinggy/ngrok/cloudflare (`kind: Tunnel`).",
+        "tagline": "Expõe uma porta local à internet pública via pinggy/ngrok/cloudflare (`kind: Gateway`).",
         "intro": """Faz UMA coisa: leva tráfego da internet pública até UMA porta local — sem conta,
 sem IP público, sem configurar o router. Junta-se ao <code>httproute</code> apontando
 a porta local do túnel para a porta onde o proxy L7 escuta, e o routing por <code>Host</code>
@@ -1010,7 +1010,7 @@ por agora só o quick-tunnel efémero <code>*.trycloudflare.com</code>, sem cont
 NOMEADO com domínio próprio precisa da API do Cloudflare, ainda por implementar).""",
         "subs": {
             "apply": {"examples": [
-                ('Declarar o túnel num manifesto kind: Tunnel',
+                ('Declarar o túnel num manifesto kind: Gateway',
                  'delonix net tunnel apply -f tunel.yaml')]},
             "expose": {"examples": [
                 ("Expor uma porta local sem escrever manifesto (pinggy, grátis, efémero)",
@@ -1478,11 +1478,11 @@ prefix to backend containers on the SDN. TLS terminates at the proxy (self-signe
 <code>secretRef</code>); hot reload via SIGHUP (routes swap with no downtime, listeners stay fixed
 at startup). A container with <code>--expose &lt;port&gt;</code> self-registers under
 <code>&lt;name&gt;.&lt;namespace&gt;.delonix.internal</code>, with no manual
-<code>kind: HTTPRoute</code> needed. It's what <code>kind: Tunnel</code> normally sits in front of
+<code>kind: HTTPRoute</code> needed. It's what <code>kind: Gateway</code> normally sits in front of
 to give several backends a single public URL.""",
     },
     "tunnel": {
-        "tagline": "Exposes a local port to the public internet via pinggy/ngrok/cloudflare (`kind: Tunnel`).",
+        "tagline": "Exposes a local port to the public internet via pinggy/ngrok/cloudflare (`kind: Gateway`).",
         "intro": """Does ONE thing: carries traffic from the public internet down to ONE local
 port — no account, no public IP, no router config. Pairs with <code>httproute</code> by pointing
 the tunnel's local port at the port the L7 proxy listens on, and <code>Host</code>-based routing
@@ -2414,7 +2414,7 @@ EXAMPLES_EN = {
     ("cluster", "ls"): ["Which clusters exist on this host"],
     ("cluster", "create"): ["Local cluster in kind mode (containers as nodes, no Docker)", "With workers"],
     ("cluster", "init"): ["Scaffold a cloud.yaml for cluster apply"],
-    ("cluster", "apply"): ["Bootstrap from a `kind: Cluster` manifest"],
+    ("cluster", "apply"): ["Bootstrap from a `kind: KubernetesCluster` manifest"],
     ("cluster", "kubeadm"): [
         "From scratch: 1 control-plane + 2 workers",
         "HA: 2 control-planes + 3 workers (automatic HAProxy)",
@@ -2458,7 +2458,7 @@ EXAMPLES_EN = {
     ("httproute", "apply"): ["Apply the HTTPRoutes from a manifest (brings up/reloads the proxy)"],
     ("httproute", "ls"): ["Proxy status + active routes"],
     ("httproute", "rm"): ["Stop the proxy and unpublish the ports"],
-    ("tunnel", "apply"): ["Declare the tunnel in a kind: Tunnel manifest"],
+    ("tunnel", "apply"): ["Declare the tunnel in a kind: Gateway manifest"],
     ("tunnel", "expose"): ["Expose a local port with no manifest (pinggy, free, ephemeral)"],
     ("tunnel", "ls"): ["List tunnels (status + public URL)"],
     ("tunnel", "describe"): ["Tunnel detail"],
@@ -3860,7 +3860,7 @@ KINDS_DOC = [
      "correspondente no load — não redefine um único campo, por isso não pode divergir dele."),
     ("Dependency", "dependency.yaml", "Alcançabilidade DIRIGIDA entre containers (ao contrário da rede, que é "
      "bidireccional): <code>from</code> alcança <code>to</code>, e <code>to</code> não fica exposto aos outros. "
-     "É açúcar reduzido no load para <code>kind: FirewallPolicy</code> — sem dataplane novo. Várias dependências "
+     "É açúcar reduzido no load para <code>kind: NetworkPolicy</code> — sem dataplane novo. Várias dependências "
      "para o mesmo alvo ACUMULAM os allows (por isso são fundidas por alvo, e não uma política por dependência)."),
     ("NetworkRoute", "netroute.yaml", "O grau ACIMA do <code>Dependency</code>: aquele liga dois WORKLOADS, este "
      "liga duas REDES — isoladas por omissão. Uma rota diz que o pacote PODE atravessar; <strong>nunca</strong> diz "
@@ -3868,14 +3868,14 @@ KINDS_DOC = [
      "cada extremidade. São duas perguntas em série (há caminho? → é aceite?), por isso são dois Kinds e não um "
      "campo <code>routes:</code> dentro de <code>Network</code>. Dirigida (<code>from</code> inicia, o retorno "
      "flui; <code>to</code> nunca inicia de volta); custo constante, não cresce com o número de redes."),
-    ("FirewallPolicy", "firewallpolicy.yaml", "Firewall L4 por container, estilo NetworkPolicy do k8s, com a "
+    ("NetworkPolicy", "firewallpolicy.yaml", "Firewall L4 por container, estilo NetworkPolicy do k8s, com a "
      "direcção em <code>spec.direction</code>. Aplicar substitui as regras dessa direcção e deixa a outra intacta."),
     ("Ingress", "ingress.yaml", "Ingress L7 no formato <code>networking.k8s.io/v1</code> (host/path → backend), "
      "compilado para o proxy embutido. Limitações herdadas: um só certificado (sem SNI) e "
      "<code>pathType: Exact</code> tratado como prefixo."),
     ("Stack", "stack.yaml", "Agrupa vários recursos num só documento. Expandido no load para os Kinds individuais, "
      "em ordem de dependência — o Stack não sobrevive ao load, tudo o resto vê os filhos."),
-    ("Cluster", "cluster-ssh.yaml", "Bootstrap kubeadm idempotente sobre hosts JÁ vivos, por SSH. Sem ficheiro de "
+    ("KubernetesCluster", "cluster-ssh.yaml", "Bootstrap kubeadm idempotente sobre hosts JÁ vivos, por SSH. Sem ficheiro de "
      "estado: cada passo tem um <code>check</code>, por isso nunca dessincroniza. Ver também "
      "<code>cluster-vm.yaml</code> (provisiona as VMs) e <code>cluster-kind.yaml</code> (modo kind)."),
     ("Network", "network.yaml", "Uma rede de utilizador. Os containers juntam-se com <code>--net &lt;nome&gt;</code>; "
@@ -3890,7 +3890,7 @@ KINDS_DOC = [
      "depreciação — descreviam a mesma montagem de duas maneiras e aterravam no mesmo store."),
     ("Image", "image.yaml", "Pré-puxa (ou constrói) uma imagem antes dos containers que dependem dela. Com "
      "<code>--vm</code> o mesmo Kind cobre as imagens VM douradas."),
-    ("Vm", "vm.yaml", "Uma microVM declarativa (Cloud Hypervisor ou libvirt), com cloud-init por instância. É a "
+    ("VirtualMachine", "vm.yaml", "Uma microVM declarativa (Cloud Hypervisor ou libvirt), com cloud-init por instância. É a "
      "camada que o <code>delonix cluster kubeadm</code> usa para provisionar nós."),
     ("Container", "container.yaml", "A carga do dia a dia. Só <code>image</code> é obrigatório; todos os outros campos "
      "têm default. Cobre rede, storage, recursos (cgroup v2), segredos, segurança, devices e limites."),
@@ -3908,7 +3908,7 @@ KINDS_DOC = [
     ("HTTPRoute", "httproute.yaml", "Reverse-proxy L7/HTTP embutido — routing por <code>Host</code> + prefixo de "
      "<code>path</code> para containers backend. TLS termina no proxy (self-signed ou <code>secretRef</code>); "
      "reload a quente por SIGHUP."),
-    ("Tunnel", "tunnel.yaml", "Expõe UMA porta local à internet pública via pinggy/ngrok/cloudflare — sem conta, "
+    ("Gateway", "tunnel.yaml", "Expõe UMA porta local à internet pública via pinggy/ngrok/cloudflare — sem conta, "
      "sem IP público. Junta-se ao <code>HTTPRoute</code> apontando <code>localPort</code> para onde o proxy L7 "
      "escuta: uma URL pública, routing por Host do lado de lá para vários backends."),
     ("ShareVolume", "sharevolume.yaml", "Uma fatia ISOLADA e com quota própria de uma partilha de rede — vários "
@@ -3934,7 +3934,7 @@ KINDS_DOC_EN = [
     "matching Kind on load — it doesn't redefine a single field, so it can never drift from it.",
     "DIRECTED reachability between containers (unlike a network, which is "
     "bidirectional): <code>from</code> reaches <code>to</code>, and <code>to</code> stays unexposed to the "
-    "others. Sugar lowered on load into <code>kind: FirewallPolicy</code> — no new dataplane. Several "
+    "others. Sugar lowered on load into <code>kind: NetworkPolicy</code> — no new dataplane. Several "
     "dependencies on the same target ACCUMULATE their allows, which is why they are merged by target rather "
     "than one policy per dependency.",
     "The grade ABOVE <code>Dependency</code>: that one links two WORKLOADS, this one "
@@ -4641,7 +4641,7 @@ final_message: "pronto em $UPTIME segundos"</code></pre>
 <em>todas</em> as VMs feitas a partir dela. O <code>--user-data</code> do
 <code>vm create</code> é POR INSTÂNCIA e assenta por cima. Uma é a receita da
 imagem, a outra é a configuração daquela VM.</p>
-<p class="note"><strong>Armadilha real, já paga:</strong> um <code>kind: Vm</code>
+<p class="note"><strong>Armadilha real, já paga:</strong> um <code>kind: VirtualMachine</code>
 sem seed nenhum fazia o cloud-init saltar a fase de rede, e a VM ficava sem IP e
 sem rota (<em>Network is unreachable</em> lá dentro). Por isso o motor gera
 <strong>sempre</strong> um seed mínimo, mesmo quando não pedes nada — não é
@@ -4720,7 +4720,7 @@ delonix vm create pesada --backend libvirt          # default quando CH não est
     (o <code>--firmware</code> que uma cloud image precisa para arrancar em CH).</li>
 <li><a href="https://libvirt.org/formatdomain.html">Formato do domínio libvirt</a> —
     útil se usares os escape-hatches <code>libvirtXml</code>/<code>libvirtXmlOverlay</code>
-    do <code>kind: Vm</code>.</li>
+    do <code>kind: VirtualMachine</code>.</li>
 </ul>
 """
 
@@ -4811,7 +4811,7 @@ VMfile's <code>CLOUDINIT</code> is baked INTO THE IMAGE (it lands in
 <em>every</em> VM made from it. <code>vm create</code>'s <code>--user-data</code>
 is PER INSTANCE and sits on top. One is the image's recipe, the other is that
 particular VM's configuration.</p>
-<p class="note"><strong>Real trap, already paid for:</strong> a <code>kind: Vm</code>
+<p class="note"><strong>Real trap, already paid for:</strong> a <code>kind: VirtualMachine</code>
 with no seed at all made cloud-init skip the networking phase, leaving the VM
 with no IP and no route (<em>Network is unreachable</em> inside). That's why the
 engine <strong>always</strong> generates a minimal seed, even when you ask for
@@ -4889,7 +4889,7 @@ delonix vm create heavy --backend libvirt          # default when CH isn't insta
     <a href="https://github.com/cloud-hypervisor/rust-hypervisor-firmware">rust-hypervisor-firmware</a>
     (the <code>--firmware</code> a cloud image needs to boot under CH).</li>
 <li><a href="https://libvirt.org/formatdomain.html">libvirt domain format</a> —
-    useful if you use the <code>kind: Vm</code> escape hatches
+    useful if you use the <code>kind: VirtualMachine</code> escape hatches
     <code>libvirtXml</code>/<code>libvirtXmlOverlay</code>.</li>
 </ul>
 """
@@ -5080,7 +5080,7 @@ INFO:     10.0.2.2:57802 - "GET /api/weather/Luanda HTTP/1.1" 200 OK</code></pre
 
 <h2>4. Expor à internet</h2>
 <p>Uma porta local não chega — o objectivo é uma URL que qualquer pessoa, em qualquer rede,
-consiga abrir. É aqui que entra o <a href="comandos/tunnel.html"><code>kind: Tunnel</code></a>:</p>
+consiga abrir. É aqui que entra o <a href="comandos/tunnel.html"><code>kind: Gateway</code></a>:</p>
 <pre><code>delonix net tunnel expose 8080 --name delonix-temp</code></pre>
 <div class="out"><pre><code>tunnel/delonix-temp: running — https://lfdhz-197-148-40-67.free.pinggy.net</code></pre></div>
 <p>Essa URL é REAL — foi a que este guião recebeu ao correr o comando. (A tua vai ser diferente
@@ -5203,7 +5203,7 @@ INFO:     10.0.2.2:57802 - "GET /api/weather/Luanda HTTP/1.1" 200 OK</code></pre
 
 <h2>4. Expose it to the internet</h2>
 <p>A local port isn't enough — the goal is a URL anyone, on any network, can open. This is where
-<a href="comandos/tunnel.html"><code>kind: Tunnel</code></a> comes in:</p>
+<a href="comandos/tunnel.html"><code>kind: Gateway</code></a> comes in:</p>
 <pre><code>delonix net tunnel expose 8080 --name delonix-temp</code></pre>
 <div class="out"><pre><code>tunnel/delonix-temp: running — https://lfdhz-197-148-40-67.free.pinggy.net</code></pre></div>
 <p>That URL is REAL — it's the one this guide got when the command was actually run. (Yours will

@@ -605,7 +605,7 @@ fn reject_vpc_vocabulary(doc: &ManifestDoc) -> Result<()> {
         (
             "privateSubnets",
             "not implemented: there is no per-subnet routing policy yet — use a \
-             separate network plus `kind: FirewallPolicy` to control who reaches whom",
+             separate network plus `kind: NetworkPolicy` to control who reaches whom",
         ),
         (
             "singleNatGateway",

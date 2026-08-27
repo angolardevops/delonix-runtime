@@ -1,4 +1,4 @@
-# kind: FirewallPolicy — a forma UNIFICADA do firewall declarativo. A direcção
+# kind: NetworkPolicy — a forma UNIFICADA do firewall declarativo. A direcção
 # vem de `spec.direction` (ingress|egress) em vez do nome do Kind. Resolve a
 # confusão de que, aqui, `kind: Ingress` é firewall L4 (não o Ingress L7/HTTP do
 # k8s). `kind: Egress` continua a ser aceite (é reescrito no load, com aviso) — este é
