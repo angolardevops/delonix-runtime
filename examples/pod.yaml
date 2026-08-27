@@ -13,14 +13,14 @@
 # ---------------------------------------------------------------------------
 # A rede que o pod usa, declarada aqui para o exemplo validar sozinho.
 # ---------------------------------------------------------------------------
-apiVersion: delonix.io/v1
+apiVersion: networking.delonix.io/v1alpha1
 kind: Network
 metadata:
   name: web-net
 spec:
   driver: bridge
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Pod
 metadata:
   name: web

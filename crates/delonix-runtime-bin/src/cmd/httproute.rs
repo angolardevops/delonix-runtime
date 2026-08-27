@@ -14,6 +14,7 @@
 //! delivers only the **parsing + validation** (schema, `valid_*`, reference graph);
 //! the proxy and the lifecycle come in the following phases.
 
+use super::kinds as k;
 use clap::Subcommand;
 use serde::{Deserialize, Serialize};
 
@@ -329,14 +330,14 @@ pub fn validate_spec(name: &str, spec: &HttpRouteSpec) -> Result<()> {
 /// unknown field.
 pub fn parse_and_validate(docs: &[ManifestDoc]) -> Result<Vec<(String, HttpRouteSpec)>> {
     let mut out = Vec::new();
-    for doc in manifest::of_kind(docs, "HTTPRoute") {
+    for doc in manifest::of_kind(docs, k::HTTP_ROUTE) {
         let spec: HttpRouteSpec = manifest::spec_of(doc)?;
         validate_spec(&doc.metadata.name, &spec)?;
         out.push((doc.metadata.name.clone(), spec));
     }
     // `kind: Ingress` (k8s-shaped) compiles to the SAME L7 proxy — the k8s
     // Ingress IS the reverse-proxy, so it shares HTTPRoute's whole pipeline.
-    for doc in manifest::of_kind(docs, "Ingress") {
+    for doc in manifest::of_kind(docs, k::INGRESS) {
         let spec = ingress_spec_of(doc)?;
         validate_spec(&doc.metadata.name, &spec)?;
         out.push((doc.metadata.name.clone(), spec));
@@ -682,7 +683,7 @@ fn spec_tls_mode(doc: &ManifestDoc) -> String {
 /// the other grammar reported as non-converging for a reason (no provenance)
 /// that stopped being true the moment routes started recording their source.
 fn spec_of_either(doc: &ManifestDoc) -> Result<HttpRouteSpec> {
-    if doc.kind == "Ingress" {
+    if doc.kind == k::INGRESS {
         ingress_spec_of(doc)
     } else {
         manifest::spec_of(doc)
@@ -755,9 +756,9 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
         return Ok(Vec::new());
     };
     let mut out = Vec::new();
-    let both: Vec<&ManifestDoc> = manifest::of_kind(docs, "HTTPRoute")
+    let both: Vec<&ManifestDoc> = manifest::of_kind(docs, k::HTTP_ROUTE)
         .into_iter()
-        .chain(manifest::of_kind(docs, "Ingress"))
+        .chain(manifest::of_kind(docs, k::INGRESS))
         .collect();
     for doc in both {
         let name = &doc.metadata.name;

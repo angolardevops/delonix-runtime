@@ -9489,3 +9489,6 @@ msgstr "a metade estável, para automação (ADR-0005)"
 
 msgid "what a Kind lowers to — why `kind: Egress` never shows up as `Egress`"
 msgstr "para o que um Kind baixa — porque é que um `kind: Egress` nunca aparece como `Egress`"
+
+msgid "`kind: {kind}` still works, but `kind: {to}` is the way forward ({n} document(s) here)"
+msgstr "`kind: {kind}` continua a funcionar, mas `kind: {to}` é o caminho ({n} documento(s) aqui)"

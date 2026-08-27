@@ -15,6 +15,7 @@
 //! does not redefine a single field. `type: microvm` lowers to `kind: Vm` with the
 //! backend forced to cloud-hypervisor (ADR-0006); no reserved types remain.
 
+use super::kinds as k;
 use clap::Subcommand;
 use delonix_runtime_core::{Error, Result};
 use serde::Deserialize;
@@ -72,7 +73,7 @@ pub fn lower_workload(doc: &ManifestDoc) -> Result<ManifestDoc> {
     let (child_kind, block) =
         match ty.as_str() {
             "container" => (
-                "Container",
+                k::CONTAINER,
                 select_block(
                     &name,
                     "container",
@@ -85,7 +86,7 @@ pub fn lower_workload(doc: &ManifestDoc) -> Result<ManifestDoc> {
                 )?,
             ),
             "vm" => (
-                "Vm",
+                k::VM,
                 select_block(
                     &name,
                     "vm",
@@ -100,7 +101,7 @@ pub fn lower_workload(doc: &ManifestDoc) -> Result<ManifestDoc> {
             // `kind: Pod` (a real multi-container pod) — the block is the same `PodSpec`
             // (`spec.containers[]`) the standalone Kind takes.
             "pod" => (
-                "Pod",
+                k::POD,
                 select_block(
                     &name,
                     "pod",
@@ -126,7 +127,7 @@ pub fn lower_workload(doc: &ManifestDoc) -> Result<ManifestDoc> {
                     ],
                 )?;
                 force_microvm_backend(&name, &mut b)?;
-                ("Vm", b)
+                (k::VM, b)
             }
             "" => {
                 return Err(Error::Invalid(super::po::tf(
@@ -424,7 +425,7 @@ mod tests {
     #[test]
     fn lowers_vm() {
         let child = lower_workload(&wl("type: vm\nvm: { disk: golden.qcow2, vcpus: 2 }")).unwrap();
-        assert_eq!(child.kind, "Vm");
+        assert_eq!(child.kind, "VirtualMachine");
         assert_eq!(child.spec.get("vcpus").unwrap().as_u64(), Some(2));
     }
 
@@ -440,7 +441,7 @@ mod tests {
             lower_workload(&wl("type: VM\nvm: { disk: x }"))
                 .unwrap()
                 .kind,
-            "Vm"
+            "VirtualMachine"
         );
     }
 
@@ -495,7 +496,7 @@ mod tests {
     fn lowers_microvm_forcing_ch_backend() {
         // microvm → kind: Vm with backend forced to cloud-hypervisor (ADR-0006).
         let child = lower_workload(&wl("type: microvm\nmicrovm: { disk: golden.qcow2 }")).unwrap();
-        assert_eq!(child.kind, "Vm");
+        assert_eq!(child.kind, "VirtualMachine");
         assert_eq!(
             child.spec.get("backend").unwrap().as_str(),
             Some("cloud-hypervisor")

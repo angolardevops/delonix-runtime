@@ -2770,7 +2770,7 @@
       "if": {
         "properties": {
           "kind": {
-            "const": "Vm"
+            "const": "VirtualMachine"
           }
         },
         "required": [
@@ -2922,7 +2922,7 @@
       "if": {
         "properties": {
           "kind": {
-            "const": "FirewallPolicy"
+            "const": "NetworkPolicy"
           }
         },
         "required": [
@@ -2979,7 +2979,7 @@
       "if": {
         "properties": {
           "kind": {
-            "const": "Cluster"
+            "const": "KubernetesCluster"
           }
         },
         "required": [

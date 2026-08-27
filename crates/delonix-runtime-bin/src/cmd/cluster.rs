@@ -10,6 +10,7 @@
 //! an explicit `spec.controlPlaneEndpoint` (kubeadm needs a stable endpoint
 //! — LB/VIP — in front of several control-planes).
 
+use super::kinds as k;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -756,7 +757,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
 }
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
-    for doc in manifest::of_kind(docs, "Cluster") {
+    for doc in manifest::of_kind(docs, k::CLUSTER) {
         let name = &doc.metadata.name;
         let spec: ClusterSpec = manifest::spec_of(doc)?;
         validate(&spec)?;

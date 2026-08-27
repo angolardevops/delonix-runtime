@@ -6,6 +6,7 @@
 //! already applied before the error STAYS applied (there is no rollback) — same
 //! "ensure present" semantics documented in `cmd::manifest`.
 
+use super::kinds as k;
 use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
@@ -56,7 +57,7 @@ fn stack_kind_name(path: &Path) -> Option<String> {
     for doc in serde_yaml::Deserializer::from_str(&text) {
         let v = serde_yaml::Value::deserialize(doc).ok()?;
         let kind = v.get("kind")?.as_str().unwrap_or_default();
-        if manifest::canonical_kind(kind) == "Stack" {
+        if manifest::canonical_kind(kind) == k::STACK {
             return v.get("metadata")?.get("name")?.as_str().map(str::to_string);
         }
     }
@@ -370,16 +371,16 @@ fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Desired>>
     for kind in super::kinds::stack_kinds() {
         for doc in manifest::of_kind(docs, kind) {
             out.push(match kind {
-                "Container" => super::container::desired(doc)?,
-                "Volume" => super::volume::desired(doc)?,
-                "Network" => super::network::desired(doc)?,
-                "NetworkRoute" => super::netroute::desired(doc)?,
-                "Pod" => super::pod::desired(doc)?,
-                "Image" => super::image::desired(doc)?,
-                "Vm" => super::vm::desired(doc)?,
-                "FirewallPolicy" => super::firewall::desired(doc)?,
-                "HTTPRoute" | "Ingress" => super::httproute::desired(doc)?,
-                "Gateway" => super::tunnel::desired(doc)?,
+                k::CONTAINER => super::container::desired(doc)?,
+                k::VOLUME => super::volume::desired(doc)?,
+                k::NETWORK => super::network::desired(doc)?,
+                k::NETWORK_ROUTE => super::netroute::desired(doc)?,
+                k::POD => super::pod::desired(doc)?,
+                k::IMAGE => super::image::desired(doc)?,
+                k::VM => super::vm::desired(doc)?,
+                k::FIREWALL_POLICY => super::firewall::desired(doc)?,
+                k::HTTP_ROUTE | k::INGRESS => super::httproute::desired(doc)?,
+                k::GATEWAY => super::tunnel::desired(doc)?,
                 _ => reconcile::Desired {
                     kind: kind.to_string(),
                     name: doc.metadata.name.clone(),
@@ -472,7 +473,7 @@ pub(crate) fn build_plan(docs: &[manifest::ManifestDoc], stack: &str) -> Result<
         // (see the ADR on the reboot class): converging these means rebooting
         // the VM, which is a capability, whereas saying so is honesty. The
         // engine ships the honesty first.
-        if c.kind == "Vm" && c.action != reconcile::Action::Create {
+        if c.kind == k::VM && c.action != reconcile::Action::Create {
             if let Some(cond) = super::vm::unconverged_fields_condition(doc) {
                 c.conditions.push(cond);
             }
@@ -483,7 +484,7 @@ pub(crate) fn build_plan(docs: &[manifest::ManifestDoc], stack: &str) -> Result<
         // `--detailed-exitcode` 0, ou seja um gate de deriva em CI verde por cima
         // de deriva real. O raciocínio já estava escrito aqui em cima e aplicava-se
         // só ao `Vm`; era o Container que precisava dele mais.
-        if c.kind == "Container" && c.action != reconcile::Action::Create {
+        if c.kind == k::CONTAINER && c.action != reconcile::Action::Create {
             if let Some(cond) = super::container::unconverged_fields_condition(doc) {
                 c.conditions.push(cond);
             }
@@ -492,7 +493,7 @@ pub(crate) fn build_plan(docs: &[manifest::ManifestDoc], stack: &str) -> Result<
         // by this very apply, so «it has no physical plane» is not a finding.
         // On anything else it is — and it was invisible, because `Realized` was
         // computed from the document and never from the machine.
-        if c.kind == "Network" && c.action != reconcile::Action::Create {
+        if c.kind == k::NETWORK && c.action != reconcile::Action::Create {
             if let Some(cond) = super::conditions::network_not_realized(doc, &env) {
                 c.conditions.push(cond);
             }
@@ -526,7 +527,7 @@ fn not_converged_reason(kind: &str) -> &'static str {
         // never read back for display. A diff would either say nothing useful or
         // decrypt to compare — and decrypting to draw a plan is not a trade
         // worth making.
-        "Secret" => {
+        k::SECRET => {
             "the state is the encrypted values, and a plan will not decrypt them to compare"
         }
         _ => NOT_CONVERGED_GENERIC,
@@ -595,10 +596,13 @@ fn form_label(form: super::kinds::Form) -> String {
         Form::Sugar(_) => "sugar",
         Form::Deprecated(_) => "deprecated",
         Form::Compat(_) => "compat",
+        Form::Sunset(_) => "sunset",
     });
-    // The target comes from `lowers_to` and not from this `match`, so the two
-    // cannot disagree about which forms have one.
-    match form.lowers_to() {
+    // The target comes from `successor` and not from this `match`, so the two
+    // cannot disagree about which forms have one. `successor` and not
+    // `lowers_to`: a `Sunset` Kind names a replacement without lowering to it,
+    // and printing no arrow for it would hide the only thing worth saying.
+    match form.successor() {
         Some(to) => format!("{word} → {to}"),
         None => word.to_string(),
     }
@@ -633,17 +637,17 @@ fn presence_label(p: super::kinds::Presence) -> &'static str {
 /// test that keeps it aligned with the `converges` column of `cmd::kinds`.
 pub(crate) fn compared_fields_table() -> Vec<(&'static str, &'static [&'static str])> {
     vec![
-        ("Container", super::container::RECONCILED_CONTAINER_FIELDS),
-        ("Volume", super::volume::RECONCILED_VOLUME_FIELDS),
-        ("Network", super::network::RECONCILED_NETWORK_FIELDS),
-        ("NetworkRoute", super::netroute::RECONCILED_ROUTE_FIELDS),
-        ("Image", super::image::RECONCILED_IMAGE_FIELDS),
-        ("Vm", super::vm::RECONCILED_VM_FIELDS),
-        ("FirewallPolicy", super::firewall::RECONCILED_FW_FIELDS),
-        ("HTTPRoute", super::httproute::RECONCILED_HTTPROUTE_FIELDS),
-        ("Ingress", super::httproute::RECONCILED_HTTPROUTE_FIELDS),
-        ("Gateway", super::tunnel::RECONCILED_TUNNEL_FIELDS),
-        ("Pod", super::pod::RECONCILED_POD_FIELDS),
+        (k::CONTAINER, super::container::RECONCILED_CONTAINER_FIELDS),
+        (k::VOLUME, super::volume::RECONCILED_VOLUME_FIELDS),
+        (k::NETWORK, super::network::RECONCILED_NETWORK_FIELDS),
+        (k::NETWORK_ROUTE, super::netroute::RECONCILED_ROUTE_FIELDS),
+        (k::IMAGE, super::image::RECONCILED_IMAGE_FIELDS),
+        (k::VM, super::vm::RECONCILED_VM_FIELDS),
+        (k::FIREWALL_POLICY, super::firewall::RECONCILED_FW_FIELDS),
+        (k::HTTP_ROUTE, super::httproute::RECONCILED_HTTPROUTE_FIELDS),
+        (k::INGRESS, super::httproute::RECONCILED_HTTPROUTE_FIELDS),
+        (k::GATEWAY, super::tunnel::RECONCILED_TUNNEL_FIELDS),
+        (k::POD, super::pod::RECONCILED_POD_FIELDS),
     ]
 }
 
@@ -948,10 +952,10 @@ fn ready_status(kind: &str, status: &str) -> bool {
         // a container with a healthcheck is exactly the case this command
         // exists for, and treating "starting" as done would return the moment
         // the process forks — which is the `sleep 5` this replaces.
-        "Container" | "Pod" => {
+        k::CONTAINER | k::POD => {
             status.starts_with("Running") || status.starts_with("running") || status == "healthy"
         }
-        "Vm" => status.starts_with("Running") || status.starts_with("running"),
+        k::VM => status.starts_with("Running") || status.starts_with("running"),
         _ => true,
     }
 }
@@ -1124,7 +1128,7 @@ fn presence(
     let root = super::util::state_root();
     let name = doc.metadata.name.as_str();
     match kind {
-        "Container" => match containers.iter().find(|c| c.name == name) {
+        k::CONTAINER => match containers.iter().find(|c| c.name == name) {
             Some(c) => {
                 let mut c = c.clone();
                 delonix_runtime::reconcile_status(&mut c);
@@ -1133,7 +1137,7 @@ fn presence(
             None => ("no".into(), "-".into()),
         },
         // A Pod is present if it has member containers (label `delonix.io/pod`).
-        "Pod" => {
+        k::POD => {
             let members = containers
                 .iter()
                 .filter(|c| {
@@ -1153,7 +1157,7 @@ fn presence(
         // A volume with a `share:` block lives in ITS NAMESPACE's sub-tree, not
         // the global store — looking only at the latter reported every share as
         // absent, which `wait` reads as «not up yet» forever.
-        "Volume" => {
+        k::VOLUME => {
             let store = match delonix_volume::VolumeStore::open(&root) {
                 Ok(s) => s,
                 Err(e) => return ("?".into(), e.to_string()),
@@ -1170,25 +1174,25 @@ fn presence(
                 Err(e) => ("?".into(), e.to_string()),
             }
         }
-        "Network" => match delonix_net::NetworkStore::open(&root).and_then(|s| s.list()) {
+        k::NETWORK => match delonix_net::NetworkStore::open(&root).and_then(|s| s.list()) {
             Ok(ns) => yes_no(ns.iter().any(|n| n.name == name)),
             Err(e) => ("?".into(), e.to_string()),
         },
         // An image's identity is its REF, never the document name.
-        "Image" => match delonix_image::ImageStore::open(&root) {
+        k::IMAGE => match delonix_image::ImageStore::open(&root) {
             Ok(s) => yes_no(
                 s.resolve(super::image::image_ref(doc).as_deref().unwrap_or(name))
                     .is_ok(),
             ),
             Err(e) => ("?".into(), e.to_string()),
         },
-        "Secret" => match delonix_runtime_core::SecretStore::open(&root) {
+        k::SECRET => match delonix_runtime_core::SecretStore::open(&root) {
             Ok(s) => yes_no(s.list().iter().any(|sec| sec.name == name)),
             Err(e) => ("?".into(), e.to_string()),
         },
         // `status` (and not the raw record) so the state comes reconciled with the
         // backend — a VM that died externally shows as Stopped, not Running.
-        "Vm" => match delonix_vm::status(&root, name) {
+        k::VM => match delonix_vm::status(&root, name) {
             Ok(vm) => ("yes".into(), vm.status.to_string()),
             Err(_) => ("no".into(), "-".into()),
         },
@@ -1202,19 +1206,19 @@ fn presence(
         // it in this arm made the one below unreachable, which `clippy` caught
         // and the tests did not: a route would report `-` (ready, nothing to
         // observe) whether or not it existed.
-        "Ingress" | "FirewallPolicy" | "HTTPRoute" | "Dependency" => {
+        k::INGRESS | k::FIREWALL_POLICY | k::HTTP_ROUTE | k::DEPENDENCY => {
             ("-".into(), super::po::t("declarative").into())
         }
         // Declared vs. live are different questions for a route, and the answer
         // names which. Before any of this it fell through to `?`/`unsupported
         // kind` — `stack ls` could not say anything about a path it had opened.
-        "NetworkRoute" => super::netroute::presence_of(doc),
+        k::NETWORK_ROUTE => super::netroute::presence_of(doc),
         // A share has a record of its own, keyed by (namespace, name) — the
         // namespace comes from the document, which is why `load_record` takes
         // both and why guessing it is not an option.
         // A tunnel's record says whether an agent was started; the public URL
         // is status and deliberately not part of "is it there".
-        "Gateway" => super::tunnel::presence_of(name),
+        k::GATEWAY => super::tunnel::presence_of(name),
         _ => ("?".into(), super::po::t("unsupported kind").into()),
     }
 }
@@ -1601,23 +1605,23 @@ fn run_layers(
 ) -> Result<()> {
     // Secrets first: `Storage.passwordSecret` and `Container.secret` reference
     // them. `base` = the manifest folder, so `fromEnvFile` resolves next to it.
-    layers.run("Secret", "🔑", || super::secret::apply(docs, base))?;
-    layers.run("Network", "🌐", || super::network::apply(docs))?;
+    layers.run(k::SECRET, "🔑", || super::secret::apply(docs, base))?;
+    layers.run(k::NETWORK, "🌐", || super::network::apply(docs))?;
     // Logo a seguir às redes: uma rota nomeia DUAS que têm de existir, e nada
     // do que vem abaixo depende dela para ser criado.
-    layers.run("NetworkRoute", "🔗", || super::netroute::apply(docs))?;
-    layers.run("Volume", "💽", || super::volume::apply(docs))?;
-    layers.run("Image", "📦", || super::image::apply(docs))?;
-    layers.run("Vm", "🖥", || super::vm::apply(docs, base))?;
-    layers.run("Container", "📦", || super::container::apply(docs))?;
-    layers.run("Pod", "🧩", || super::pod::apply(docs))?;
-    layers.run("FirewallPolicy", "🧱", || super::firewall::apply(docs))?;
+    layers.run(k::NETWORK_ROUTE, "🔗", || super::netroute::apply(docs))?;
+    layers.run(k::VOLUME, "💽", || super::volume::apply(docs))?;
+    layers.run(k::IMAGE, "📦", || super::image::apply(docs))?;
+    layers.run(k::VM, "🖥", || super::vm::apply(docs, base))?;
+    layers.run(k::CONTAINER, "📦", || super::container::apply(docs))?;
+    layers.run(k::POD, "🧩", || super::pod::apply(docs))?;
+    layers.run(k::FIREWALL_POLICY, "🧱", || super::firewall::apply(docs))?;
     // HTTPRoute LAST: it needs the backend containers already created (with IP) to
     // resolve the routes; brings up/reloads the L7 reverse-proxy.
-    layers.run("HTTPRoute", "🔀", || super::httproute::apply(docs))?;
+    layers.run(k::HTTP_ROUTE, "🔀", || super::httproute::apply(docs))?;
     // Tunnel LAST of all: its `localPort` is typically the HTTPRoute proxy's own
     // listening port (see `cmd::tunnel`'s module doc) — must already be up.
-    layers.run("Gateway", "🌍", || super::tunnel::apply(docs))?;
+    layers.run(k::GATEWAY, "🌍", || super::tunnel::apply(docs))?;
     Ok(())
 }
 
@@ -1658,7 +1662,7 @@ pub(crate) fn no_teardown_reason(kind: &str) -> Option<&'static str> {
         // nowhere — the manifest holds the new one. Leaving stale rules on a
         // container nobody is looking at any more is the worst outcome
         // available, so the user is told exactly what to run.
-        "FirewallPolicy" => {
+        k::FIREWALL_POLICY => {
             "changing `target` or `direction` cannot be undone automatically — the \
              previous target keeps its rules, because a policy has no record of its own (it lives \
              on the target's). Clear them by hand with `delonix net ingress clear <old-target>` \
@@ -1666,13 +1670,13 @@ pub(crate) fn no_teardown_reason(kind: &str) -> Option<&'static str> {
         }
         // Shared content-addressed cache: not ownable, so it never reaches a
         // prune or a destroy, and a `Replace` is just a pull.
-        "Image" => "an image is shared content-addressed cache, owned by no stack",
+        k::IMAGE => "an image is shared content-addressed cache, owned by no stack",
         // Routes live in the shared proxy config with no per-document
         // provenance; a tunnel's record is keyed by a live agent.
-        "HTTPRoute" | "Ingress" => {
+        k::HTTP_ROUTE | k::INGRESS => {
             "routes live in the proxy's shared config, with no per-document provenance"
         }
-        "Gateway" => "a tunnel has no labels to stamp ownership on",
+        k::GATEWAY => "a tunnel has no labels to stamp ownership on",
         _ => return None,
     })
 }
@@ -1698,12 +1702,12 @@ fn destroy_one(kind: &str, name: &str) -> Result<()> {
         ));
     }
     match kind {
-        "Container" => super::container::remove_for_replace(name),
-        "Volume" => super::volume::remove_for_replace(name),
-        "Network" => super::network::remove_for_replace(name),
-        "NetworkRoute" => super::netroute::remove_for_replace(name),
-        "Pod" => super::pod::remove_pod(name, true),
-        "Vm" => super::vm::remove_for_replace(name),
+        k::CONTAINER => super::container::remove_for_replace(name),
+        k::VOLUME => super::volume::remove_for_replace(name),
+        k::NETWORK => super::network::remove_for_replace(name),
+        k::NETWORK_ROUTE => super::netroute::remove_for_replace(name),
+        k::POD => super::pod::remove_pod(name, true),
+        k::VM => super::vm::remove_for_replace(name),
         // Unreachable: the guard above already refused everything outside
         // the `teardown` column. Kept so flipping that column without an arm
         // here fails instead of silently doing nothing.
@@ -1877,15 +1881,15 @@ fn converge_and_stamp(
                 )
             );
             match c.kind.as_str() {
-                "Container" => super::container::converge(&c.name, &c.diffs)?,
-                "Volume" => super::volume::converge(&c.name, &c.diffs)?,
-                "Network" => super::network::converge(&c.name, &c.diffs)?,
-                "Image" => super::image::converge(&c.name, &c.diffs)?,
+                k::CONTAINER => super::container::converge(&c.name, &c.diffs)?,
+                k::VOLUME => super::volume::converge(&c.name, &c.diffs)?,
+                k::NETWORK => super::network::converge(&c.name, &c.diffs)?,
+                k::IMAGE => super::image::converge(&c.name, &c.diffs)?,
                 // A firewall policy re-applies WHOLE: `apply_fw_doc` already
                 // replaces the entire direction, so there is no per-field path
                 // to write — and writing one would be a second way to build the
                 // same nft chain, which is how two ways start to disagree.
-                "FirewallPolicy" => {
+                k::FIREWALL_POLICY => {
                     let doc = docs
                         .iter()
                         .find(|d| d.kind == c.kind && d.metadata.name == c.name)
@@ -1905,8 +1909,8 @@ fn converge_and_stamp(
                 // apply to call, so converging one route means recomposing the
                 // whole thing — which is what `apply` does, and it SIGHUPs the
                 // live proxy instead of restarting it.
-                "HTTPRoute" | "Ingress" => super::httproute::converge_all(docs)?,
-                "Gateway" => {
+                k::HTTP_ROUTE | k::INGRESS => super::httproute::converge_all(docs)?,
+                k::GATEWAY => {
                     let doc = docs
                         .iter()
                         .find(|d| d.kind == c.kind && d.metadata.name == c.name)
@@ -1957,15 +1961,15 @@ fn stamp_all(
             }
         }
         let r = match d.kind.as_str() {
-            "Container" => super::container::stamp(&d.name, stack, &d.fields),
-            "Volume" => super::volume::stamp(&d.name, stack, &d.fields),
-            "Network" => super::network::stamp(&d.name, stack, &d.fields),
-            "NetworkRoute" => super::netroute::stamp(&d.name, stack, &d.fields),
-            "Pod" => super::pod::stamp(&d.name, stack, &d.fields),
-            "Vm" => super::vm::stamp(&d.name, stack, &d.fields),
+            k::CONTAINER => super::container::stamp(&d.name, stack, &d.fields),
+            k::VOLUME => super::volume::stamp(&d.name, stack, &d.fields),
+            k::NETWORK => super::network::stamp(&d.name, stack, &d.fields),
+            k::NETWORK_ROUTE => super::netroute::stamp(&d.name, stack, &d.fields),
+            k::POD => super::pod::stamp(&d.name, stack, &d.fields),
+            k::VM => super::vm::stamp(&d.name, stack, &d.fields),
             // `Image` is shared content and deliberately not ownable — stamping
             // it for one stack would hand another stack's cache an owner.
-            "Image" => Ok(()),
+            k::IMAGE => Ok(()),
             _ => Ok(()),
         };
         // A stamp that fails must not fail the apply — the resource IS created
@@ -2331,10 +2335,10 @@ fn validate_graph_with(
             .map(|d| d.metadata.name.clone())
             .collect()
     };
-    let mut networks = declared(&["Network"]);
-    let mut volumes = declared(&["Volume", "Storage"]);
-    let mut containers = declared(&["Container"]);
-    let mut secrets = declared(&["Secret"]);
+    let mut networks = declared(&[k::NETWORK]);
+    let mut volumes = declared(&[k::VOLUME, k::STORAGE]);
+    let mut containers = declared(&[k::CONTAINER]);
+    let mut secrets = declared(&[k::SECRET]);
     networks.extend(existing_networks.iter().cloned());
     volumes.extend(existing_volumes.iter().cloned());
     containers.extend(existing_containers.iter().cloned());
@@ -2347,7 +2351,7 @@ fn validate_graph_with(
     // specific `password` key.
     let mut declared_secret_keys: std::collections::HashMap<String, Option<HashSet<String>>> =
         std::collections::HashMap::new();
-    for doc in docs.iter().filter(|d| d.kind == "Secret") {
+    for doc in docs.iter().filter(|d| d.kind == k::SECRET) {
         let has_env_file = doc.spec.get("fromEnvFile").is_some_and(|v| !v.is_null());
         let keys = if has_env_file {
             None
@@ -2370,7 +2374,7 @@ fn validate_graph_with(
     // Uma rota nomeia DUAS redes, e nomear uma que não existe é o mesmo engano
     // que o `vm init` cometia: um manifesto que se recusa a si próprio. Ambas
     // as pontas são verificadas, e a mensagem diz QUAL delas falta.
-    for doc in docs.iter().filter(|d| d.kind == "NetworkRoute") {
+    for doc in docs.iter().filter(|d| d.kind == k::NETWORK_ROUTE) {
         if let Ok(spec) = manifest::spec_of::<super::netroute::NetworkRouteSpec>(doc) {
             for (lado, rede) in [("from", &spec.from), ("to", &spec.to)] {
                 if !networks.contains(rede) {
@@ -2396,7 +2400,7 @@ fn validate_graph_with(
     // already refuses for one target and direction, and refused rather than
     // merged for the same reason: this is two answers to one question.
     let mut pares: HashSet<(String, String)> = HashSet::new();
-    for doc in docs.iter().filter(|d| d.kind == "NetworkRoute") {
+    for doc in docs.iter().filter(|d| d.kind == k::NETWORK_ROUTE) {
         if let Ok(spec) = manifest::spec_of::<super::netroute::NetworkRouteSpec>(doc) {
             if !pares.insert((spec.from.clone(), spec.to.clone())) {
                 issues.push(super::po::tf(
@@ -2423,7 +2427,7 @@ fn validate_graph_with(
     // — the very thing that used to work would stop applying.
     let mut seen: HashSet<(String, String, String)> = HashSet::new();
     for doc in docs {
-        let scoped = doc.kind == "Volume" && doc.spec.get("share").is_some();
+        let scoped = doc.kind == k::VOLUME && doc.spec.get("share").is_some();
         let ns = match scoped {
             true => doc.metadata.namespace.clone().unwrap_or_default(),
             // Everything else keeps ONE key space, exactly as before: a plain
@@ -2443,8 +2447,8 @@ fn validate_graph_with(
     for doc in docs {
         let name = &doc.metadata.name;
         match doc.kind.as_str() {
-            "Container" | "Vm" => {
-                let is_vm = doc.kind == "Vm";
+            k::CONTAINER | k::VM => {
+                let is_vm = doc.kind == k::VM;
                 if let Some(net) = doc.spec.get("network").and_then(|v| v.as_str()) {
                     if !is_builtin_net(net, is_vm) && !networks.contains(net) {
                         issues.push(super::po::tf(
@@ -2491,7 +2495,7 @@ fn validate_graph_with(
                     }
                 }
             }
-            "Volume" => {
+            k::VOLUME => {
                 // A network share's `passwordSecret` references a Secret (the mount
                 // reads that Secret's `password` key — `storage::resolve_password`).
                 //
@@ -2524,7 +2528,7 @@ fn validate_graph_with(
                     }
                 }
             }
-            "FirewallPolicy" => {
+            k::FIREWALL_POLICY => {
                 let scope = doc
                     .spec
                     .get("scope")
@@ -2532,7 +2536,7 @@ fn validate_graph_with(
                     .unwrap_or("container");
                 // FirewallPolicy requires `direction` ∈ {ingress, egress} — catch it
                 // HERE (before the apply creates anything) instead of only at apply.
-                if doc.kind == "FirewallPolicy" {
+                if doc.kind == k::FIREWALL_POLICY {
                     let dir = doc.spec.get("direction").and_then(|v| v.as_str());
                     if !matches!(dir, Some("ingress" | "egress")) {
                         issues.push(super::po::tf(
@@ -2570,12 +2574,12 @@ fn validate_graph_with(
                     }
                 }
             }
-            "HTTPRoute" | "Ingress" => {
+            k::HTTP_ROUTE | k::INGRESS => {
                 // Each backend.service must be a declared/existing Container;
                 // the tls.secretRef (if used) a Secret. Reuses the typed parser to
                 // avoid duplicating the schema (and catches an invalid spec right away).
                 // `kind: Ingress` (k8s-shaped) is converted to the same HttpRouteSpec.
-                let parsed = if doc.kind == "Ingress" {
+                let parsed = if doc.kind == k::INGRESS {
                     super::httproute::ingress_spec_of(doc)
                 } else {
                     manifest::spec_of::<super::httproute::HttpRouteSpec>(doc)
@@ -2611,7 +2615,7 @@ fn validate_graph_with(
                     Err(e) => issues.push(e.to_string()),
                 }
             }
-            "Dependency" => {
+            k::DEPENDENCY => {
                 // `from` and each `to` must be declared/existing containers.
                 let from = doc.spec.get("from").and_then(|v| v.as_str());
                 match from {
@@ -2667,7 +2671,7 @@ fn validate_graph_with(
     // answers to the same question, and on a firewall a contradiction must not
     // be resolved by document order.
     let mut seen: std::collections::HashMap<(String, String, String), String> = Default::default();
-    for doc in docs.iter().filter(|d| d.kind == "FirewallPolicy") {
+    for doc in docs.iter().filter(|d| d.kind == k::FIREWALL_POLICY) {
         let get = |k: &str, dflt: &str| {
             doc.spec
                 .get(k)
@@ -2843,7 +2847,7 @@ metadata: { name: web }
 spec: { image: nginx, network: appnet, volumes: [\"data:/var\", \"/host/x:/y:ro\"] }
 ---
 apiVersion: delonix.io/v1
-kind: FirewallPolicy
+kind: NetworkPolicy
 metadata: { name: web-in }
 spec: { direction: ingress, target: web }
 ",
@@ -2879,7 +2883,7 @@ metadata: { name: c1 }
 spec: { image: nginx, network: host }
 ---
 apiVersion: delonix.io/v1
-kind: Vm
+kind: VirtualMachine
 metadata: { name: v1 }
 spec: { disk: d, network: bridge }
 ",
@@ -2912,12 +2916,12 @@ metadata: { name: dbapp }
 spec: { image: postgres }
 ---
 apiVersion: delonix.io/v1
-kind: FirewallPolicy
+kind: NetworkPolicy
 metadata: { name: ok }
 spec: { direction: ingress, target: dbapp }
 ---
 apiVersion: delonix.io/v1
-kind: FirewallPolicy
+kind: NetworkPolicy
 metadata: { name: bad }
 spec: { direction: egress, target: fantasma }
 ",
@@ -2929,7 +2933,7 @@ spec: { direction: egress, target: fantasma }
     #[test]
     fn firewallpolicy_direction_e_scope_incompativel_apanhados_no_validate() {
         // invalid direction.
-        let i = check("apiVersion: delonix.io/v1\nkind: FirewallPolicy\nmetadata: { name: a }\nspec: { direction: sideways, target: x }\n");
+        let i = check("apiVersion: delonix.io/v1\nkind: NetworkPolicy\nmetadata: { name: a }\nspec: { direction: sideways, target: x }\n");
         assert!(
             i.iter().any(|s| s.contains("direction is required")),
             "{i:?}"
@@ -2943,7 +2947,7 @@ metadata: { name: n }
 spec: { driver: bridge }
 ---
 apiVersion: delonix.io/v1
-kind: FirewallPolicy
+kind: NetworkPolicy
 metadata: { name: b }
 spec: { direction: ingress, scope: network, target: n }
 ",
@@ -3027,7 +3031,7 @@ metadata: { name: dados }
 spec: { type: nfs, server: h, share: /s }
 ---
 apiVersion: delonix.io/v1
-kind: Vm
+kind: VirtualMachine
 metadata: { name: v }
 spec: { disk: d, volumes: [ { name: dados, mountPath: /mnt/d }, { name: fantasma, mountPath: /mnt/f } ] }
 ",
@@ -3258,7 +3262,7 @@ spec: {}
     fn duas_politicas_para_o_mesmo_alvo_e_direccao_sao_recusadas() {
         let mk = |name: &str, dir: &str| -> super::manifest::ManifestDoc {
             serde_yaml::from_str(&format!(
-                "apiVersion: delonix.io/v1\nkind: FirewallPolicy\nmetadata: {{ name: {name} }}\nspec: {{ direction: {dir}, target: db }}\n"
+                "apiVersion: delonix.io/v1\nkind: NetworkPolicy\nmetadata: {{ name: {name} }}\nspec: {{ direction: {dir}, target: db }}\n"
             ))
             .unwrap()
         };
@@ -3372,7 +3376,7 @@ spec: {}
         }
         // Ausente continua pendente — é o que o `wait` existe para esperar.
         assert!(super::is_pending("no", "Container", "-"));
-        assert!(super::is_pending("no", "Vm", "-"));
+        assert!(super::is_pending("no", "VirtualMachine", "-"));
         // Presente é julgado pelo estado, como antes.
         assert!(!super::is_pending("yes", "Container", "Running"));
         assert!(super::is_pending("yes", "Container", "Exited"));

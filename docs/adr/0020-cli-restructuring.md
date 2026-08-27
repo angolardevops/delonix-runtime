@@ -143,6 +143,23 @@ lowers to a one-container `kind: Pod`. `Vm` stays accepted as a spelling of
 `VirtualMachine`. The clean cut applies to commands only, on the v0.30.0
 precedent; a manifest in git gets a step.
 
+**Correction (2026-08-27): `kind: Container` is NOT lowered.** This ADR first
+said it would become a one-container `kind: Pod`, taking §3.3 at its word. That
+was written without checking what this repo had already measured, and the repo
+was right: a Pod always builds a shared netns and its members join it through
+the `--pod` re-exec, so lowering would give every declarative container an extra
+netns holder and a different network path. The NAME half was solvable —
+`pod.rs` honours a member's own name instead of appending `-c0` — but the netns
+half is not. That is not a step down in spelling, it is a change of runtime
+shape, applied silently to manifests already running.
+
+So `Container` is **announced, not rewritten**: a new `Form::Sunset(Pod)` in the
+Kind registry, a `sunset → Pod` in `api-resources`, and one warning per load
+naming the count. It keeps its own apply and survives the load. A future major
+removes it, once manifests have moved. This meets what §3.3 is FOR — `Pod` is
+the canonical way to declare containers — without changing what anybody's
+engine does today.
+
 This means `scripts/schema-diff.sh` must keep passing across the restructuring:
 no field of `Container`, `Pod`, `Volume` or `Network` is removed — `Container`'s
 move to a lowering path, and the gate stays the check that this ADR did not

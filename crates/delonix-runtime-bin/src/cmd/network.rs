@@ -20,6 +20,7 @@
 //! `create` registers but WARNS loudly that the network was not realized
 //! (Realized=False), instead of faking success.
 
+use super::kinds as k;
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
 use delonix_net::{infra, Network, NetworkStore};
@@ -345,7 +346,7 @@ pub(crate) fn stamp(
 pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     let spec: NetworkSpec = manifest::spec_of(doc)?;
     Ok(super::reconcile::Desired {
-        kind: "Network".into(),
+        kind: k::NETWORK.into(),
         name: doc.metadata.name.clone(),
         fields: desired_network_fields(&spec),
         converges: true,
@@ -359,7 +360,7 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
         .list()?
         .into_iter()
         .map(|n| super::reconcile::Actual {
-            kind: "Network".into(),
+            kind: k::NETWORK.into(),
             name: n.name.clone(),
             fields: actual_network_fields(&n, effective_default_route(&n.name).as_deref()),
             owner: n.labels.get(super::reconcile::STACK_LABEL).cloned(),
@@ -628,7 +629,7 @@ fn reject_vpc_vocabulary(doc: &ManifestDoc) -> Result<()> {
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     let store = NetworkStore::open(state_root())?;
-    for doc in manifest::of_kind(docs, "Network") {
+    for doc in manifest::of_kind(docs, k::NETWORK) {
         let name = &doc.metadata.name;
         // Warn about typos BEFORE the early-continue (see container::apply): a
         // re-apply against an already existing network must also see the warning.
@@ -1114,7 +1115,7 @@ fn describe_one(n: &Network) {
     // derives — on a network with a declared gateway they are different addresses
     // and this is the field people read to decide where the traffic goes.
     let gw = effective_default_route(&n.name).unwrap_or_else(|| n.gateway.clone());
-    d.field("Gateway", if gw.is_empty() { "<none>" } else { &gw });
+    d.field(k::GATEWAY, if gw.is_empty() { "<none>" } else { &gw });
     d.field("Prefix", &n.prefix);
     // Only on the physical-LAN drivers (macvlan/ipvlan).
     d.field_opt("Parent", n.parent.as_deref());

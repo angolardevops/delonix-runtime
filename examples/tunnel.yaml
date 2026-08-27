@@ -7,8 +7,8 @@
 # Apply with:  delonix net tunnel apply -f tunnel.yaml
 # One-shot equivalent, no manifest (pinggy is the default provider):
 #   delonix net tunnel expose 80
-apiVersion: delonix.io/v1
-kind: Tunnel
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Gateway
 metadata:
   name: public
 spec:

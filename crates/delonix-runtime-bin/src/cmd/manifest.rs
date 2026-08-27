@@ -9,6 +9,7 @@
 //! not, it creates it with the same logic as the equivalent `create`/`run`/`pull` command.
 //! See `cmd::stack` for the composition of all the Kinds (`stack apply`).
 
+use super::kinds as k;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -78,25 +79,25 @@ pub fn render_with_defaults(docs: &[ManifestDoc]) -> Result<String> {
 fn filled_spec(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
     use crate::cmd;
     match doc.kind.as_str() {
-        "Network" => cmd::network::spec_with_defaults(doc),
-        "NetworkRoute" => cmd::netroute::spec_with_defaults(doc),
-        "Volume" => cmd::volume::spec_with_defaults(doc),
+        k::NETWORK => cmd::network::spec_with_defaults(doc),
+        k::NETWORK_ROUTE => cmd::netroute::spec_with_defaults(doc),
+        k::VOLUME => cmd::volume::spec_with_defaults(doc),
         // Secret DOES get a round-trip, and its values are redacted on the way
         // (`secret::spec_with_defaults`). It used to be the one Kind skipped
         // here, which made the most sensitive document in the manifest the only
         // one with no `--dry-run` — the one place you most want to check what
         // was read before applying was the one place you could not.
-        "Secret" => cmd::secret::spec_with_defaults(doc),
-        "Image" => cmd::image::spec_with_defaults(doc),
-        "Vm" => cmd::vm::spec_with_defaults(doc),
-        "Pod" => cmd::pod::spec_with_defaults(doc),
-        "HTTPRoute" => cmd::httproute::spec_with_defaults(doc),
-        "Ingress" => cmd::httproute::ingress_spec_with_defaults(doc),
-        "FirewallPolicy" => cmd::firewall::spec_with_defaults(doc),
-        "Container" if doc.spec.get("containers").is_some() => {
+        k::SECRET => cmd::secret::spec_with_defaults(doc),
+        k::IMAGE => cmd::image::spec_with_defaults(doc),
+        k::VM => cmd::vm::spec_with_defaults(doc),
+        k::POD => cmd::pod::spec_with_defaults(doc),
+        k::HTTP_ROUTE => cmd::httproute::spec_with_defaults(doc),
+        k::INGRESS => cmd::httproute::ingress_spec_with_defaults(doc),
+        k::FIREWALL_POLICY => cmd::firewall::spec_with_defaults(doc),
+        k::CONTAINER if doc.spec.get("containers").is_some() => {
             cmd::container::pod_spec_with_defaults(doc)
         }
-        "Container" => cmd::container::spec_with_defaults(doc),
+        k::CONTAINER => cmd::container::spec_with_defaults(doc),
         _ => Ok(doc.spec.clone()),
     }
 }
@@ -165,19 +166,21 @@ pub fn canonical_kind(kind: &str) -> &str {
     // ignored silently by the `stack apply`.
     let lower = kind.to_ascii_lowercase();
     match lower.as_str() {
-        "vm" | "virtualmachine" => "Vm",
+        "vm" | "virtualmachine" => k::VM,
+        "firewallpolicy" | "networkpolicy" => k::FIREWALL_POLICY,
+        "cluster" | "kubernetescluster" => k::CLUSTER,
         // A RENAME, so the old spelling is an alias and not a deprecation: no
         // warning, nothing to migrate. `docs/cli-stability.md` draws that line
         // — a renamed name stays accepted as an alias — and it is the same
         // treatment `restart`→`restartPolicy` already gets. A MERGE is the
         // other case (`Egress`→`FirewallPolicy`), and that one does warn,
         // because the semantics moved.
-        "tunnel" | "gateway" => "Gateway",
+        "tunnel" | "gateway" => k::GATEWAY,
         // `KnowDepends` is the name the user asked for; `Dependency` is the canonical one.
-        "knowdepends" | "dependency" => "Dependency",
-        "stack" => "Stack",
-        "pod" => "Pod",
-        "workload" => "Workload",
+        "knowdepends" | "dependency" => k::DEPENDENCY,
+        "stack" => k::STACK,
+        "pod" => k::POD,
+        "workload" => k::WORKLOAD,
         _ => kind,
     }
 }
@@ -289,21 +292,21 @@ fn expand_stack(doc: &ManifestDoc) -> Result<Vec<ManifestDoc>> {
         ));
     }
     let groups: Vec<(&str, Vec<StackItem>)> = vec![
-        ("Secret", spec.secrets),
-        ("Network", spec.networks),
-        ("Volume", spec.volumes),
-        ("Storage", spec.storage),
-        ("ShareVolume", spec.share_volumes),
-        ("Image", spec.images),
-        ("Vm", spec.vms),
-        ("Container", spec.containers),
-        ("Pod", spec.pods),
-        ("Ingress", spec.ingress),
-        ("Egress", spec.egress),
-        ("FirewallPolicy", spec.firewall_policies),
-        ("HTTPRoute", spec.http_routes),
-        ("Dependency", spec.dependencies),
-        ("Gateway", spec.tunnels),
+        (k::SECRET, spec.secrets),
+        (k::NETWORK, spec.networks),
+        (k::VOLUME, spec.volumes),
+        (k::STORAGE, spec.storage),
+        (k::SHARE_VOLUME, spec.share_volumes),
+        (k::IMAGE, spec.images),
+        (k::VM, spec.vms),
+        (k::CONTAINER, spec.containers),
+        (k::POD, spec.pods),
+        (k::INGRESS, spec.ingress),
+        (k::EGRESS, spec.egress),
+        (k::FIREWALL_POLICY, spec.firewall_policies),
+        (k::HTTP_ROUTE, spec.http_routes),
+        (k::DEPENDENCY, spec.dependencies),
+        (k::GATEWAY, spec.tunnels),
     ];
     let mut out = Vec::new();
     for (kind, items) in groups {
@@ -375,26 +378,26 @@ pub(crate) fn kind_honors_namespace(kind: &str) -> bool {
 /// `None` for a Kind with no flat list of its own (`Cluster` nests its specs).
 pub(crate) fn spec_fields_for(kind: &str) -> Option<&'static [&'static str]> {
     match kind {
-        "Container" => Some(crate::cmd::container::CONTAINER_SPEC_FIELDS),
-        "Pod" => Some(crate::cmd::container::POD_SPEC_FIELDS),
-        "Vm" => Some(crate::cmd::vm::VM_SPEC_FIELDS),
-        "Volume" => Some(crate::cmd::volume::VOLUME_SPEC_FIELDS),
-        "Storage" => Some(crate::cmd::storage::STORAGE_SPEC_FIELDS),
-        "Network" => Some(crate::cmd::network::NETWORK_SPEC_FIELDS),
-        "Image" => Some(crate::cmd::image::IMAGE_SPEC_FIELDS),
-        "Secret" => Some(crate::cmd::secret::SECRET_SPEC_FIELDS),
+        k::CONTAINER => Some(crate::cmd::container::CONTAINER_SPEC_FIELDS),
+        k::POD => Some(crate::cmd::container::POD_SPEC_FIELDS),
+        k::VM => Some(crate::cmd::vm::VM_SPEC_FIELDS),
+        k::VOLUME => Some(crate::cmd::volume::VOLUME_SPEC_FIELDS),
+        k::STORAGE => Some(crate::cmd::storage::STORAGE_SPEC_FIELDS),
+        k::NETWORK => Some(crate::cmd::network::NETWORK_SPEC_FIELDS),
+        k::IMAGE => Some(crate::cmd::image::IMAGE_SPEC_FIELDS),
+        k::SECRET => Some(crate::cmd::secret::SECRET_SPEC_FIELDS),
         // `Ingress` is the k8s-shaped L7 Ingress (→ HTTPRoute); the L4 firewall
         // keeps `Egress`/`FirewallPolicy`.
-        "Ingress" => Some(crate::cmd::httproute::INGRESS_SPEC_FIELDS),
-        "Egress" | "FirewallPolicy" => Some(crate::cmd::firewall::FW_SPEC_FIELDS),
-        "HTTPRoute" => Some(crate::cmd::httproute::HTTP_ROUTE_SPEC_FIELDS),
-        "Dependency" => Some(crate::cmd::dependency::DEPENDENCY_SPEC_FIELDS),
-        "NetworkRoute" => Some(crate::cmd::netroute::NETWORK_ROUTE_SPEC_FIELDS),
-        "Gateway" => Some(crate::cmd::tunnel::TUNNEL_SPEC_FIELDS),
-        "ShareVolume" => Some(crate::cmd::sharevolume::SHAREVOLUME_SPEC_FIELDS),
-        "Workload" => Some(crate::cmd::workload::WORKLOAD_SPEC_FIELDS),
-        "Stack" => Some(STACK_SPEC_FIELDS),
-        "Cluster" => Some(crate::cmd::cluster::CLUSTER_SPEC_FIELDS),
+        k::INGRESS => Some(crate::cmd::httproute::INGRESS_SPEC_FIELDS),
+        k::EGRESS | k::FIREWALL_POLICY => Some(crate::cmd::firewall::FW_SPEC_FIELDS),
+        k::HTTP_ROUTE => Some(crate::cmd::httproute::HTTP_ROUTE_SPEC_FIELDS),
+        k::DEPENDENCY => Some(crate::cmd::dependency::DEPENDENCY_SPEC_FIELDS),
+        k::NETWORK_ROUTE => Some(crate::cmd::netroute::NETWORK_ROUTE_SPEC_FIELDS),
+        k::GATEWAY => Some(crate::cmd::tunnel::TUNNEL_SPEC_FIELDS),
+        k::SHARE_VOLUME => Some(crate::cmd::sharevolume::SHAREVOLUME_SPEC_FIELDS),
+        k::WORKLOAD => Some(crate::cmd::workload::WORKLOAD_SPEC_FIELDS),
+        k::STACK => Some(STACK_SPEC_FIELDS),
+        k::CLUSTER => Some(crate::cmd::cluster::CLUSTER_SPEC_FIELDS),
         _ => None,
     }
 }
@@ -409,7 +412,7 @@ pub(crate) fn spec_fields_for(kind: &str) -> Option<&'static [&'static str]> {
 /// choice `container::apply` was already making inline before the guard moved
 /// here.
 pub(crate) fn spec_fields_for_doc(doc: &ManifestDoc) -> Option<&'static [&'static str]> {
-    if doc.kind == "Container" && doc.spec.get("containers").is_some() {
+    if doc.kind == k::CONTAINER && doc.spec.get("containers").is_some() {
         return Some(crate::cmd::container::POD_SPEC_FIELDS);
     }
     spec_fields_for(&doc.kind)
@@ -428,8 +431,8 @@ fn check_unknown_fields(doc: &ManifestDoc) {
         warn_unknown_fields(doc, fields);
     }
     let nested = match doc.kind.as_str() {
-        "Container" => crate::cmd::container::unknown_group_keys(&doc.spec),
-        "Vm" => crate::cmd::vm::unknown_group_keys(&doc.spec),
+        k::CONTAINER => crate::cmd::container::unknown_group_keys(&doc.spec),
+        k::VM => crate::cmd::vm::unknown_group_keys(&doc.spec),
         _ => Vec::new(),
     };
     for key in nested {
@@ -548,7 +551,7 @@ pub fn load_str(text: &str, label: &str) -> Result<Vec<ManifestDoc>> {
         // warning they already had. Measured: `Dependency` and `Workload` warned
         // before the move and went silent after it.
         check_unknown_fields(&doc);
-        if doc.kind == "Stack" {
+        if doc.kind == k::STACK {
             // A Stack's children are built HERE, so they never passed through the
             // loop's own lowering — a `kind: Stack` with an `egress:` group would
             // produce `kind: Egress` docs that no handler claims any more, and
@@ -560,7 +563,7 @@ pub fn load_str(text: &str, label: &str) -> Result<Vec<ManifestDoc>> {
                 check_unknown_fields(&child);
                 docs.push(child);
             }
-        } else if doc.kind == "Workload" {
+        } else if doc.kind == k::WORKLOAD {
             // A `kind: Workload` lowers to a synthetic `kind: Container`/`kind: Vm`
             // doc (ADR-0001), which then flows through the normal per-Kind apply —
             // exactly like a Stack child. The Workload doc does not survive.
@@ -575,14 +578,14 @@ pub fn load_str(text: &str, label: &str) -> Result<Vec<ManifestDoc>> {
             &[("path", label)],
         )));
     }
-    // `kind: Dependency` lowers to `kind: FirewallPolicy`, LAST and over the whole
+    // `kind: Dependency` lowers to `kind: NetworkPolicy`, LAST and over the whole
     // list — unlike the per-document lowerings above, it has to see every
     // Dependency at once, because several pointing at the same target accumulate
     // into ONE policy (see `dependency::lower_dependencies`). Doing it per
     // document would silently drop every peer but the last.
     let lowered = crate::cmd::dependency::lower_dependencies(&docs)?;
     if !lowered.is_empty() {
-        docs.retain(|d| d.kind != "Dependency");
+        docs.retain(|d| d.kind != k::DEPENDENCY);
         docs.extend(lowered);
     }
     // The unknown-field guard, for EVERY document and therefore for every
@@ -593,7 +596,36 @@ pub fn load_str(text: &str, label: &str) -> Result<Vec<ManifestDoc>> {
     // After the lowering on purpose: by now `Egress` is already `FirewallPolicy`
     // and the two share one list, so a Kind is checked against the fields it will
     // actually be parsed with rather than the ones it was written as.
+    warn_sunset_kinds(&docs);
     Ok(docs)
+}
+
+/// Announces the Kinds that still work but have a successor, ONCE per load.
+///
+/// Once and not per document: a manifest with twenty containers would bury the
+/// rest of the output, and a warning nobody can read is a warning that teaches
+/// people to ignore warnings.
+///
+/// This is the SUNSET half of the deprecation policy, and it is deliberately
+/// quieter than the rewriting half: nothing is being changed under the writer,
+/// so there is nothing they must do today — only something they should plan.
+fn warn_sunset_kinds(docs: &[ManifestDoc]) {
+    use std::collections::BTreeMap;
+    let mut seen: BTreeMap<&str, (usize, &str)> = BTreeMap::new();
+    for d in docs {
+        if let Some(f) = super::kinds::facts(&d.kind) {
+            if let super::kinds::Form::Sunset(to) = f.form {
+                let e = seen.entry(f.kind).or_insert((0, to));
+                e.0 += 1;
+            }
+        }
+    }
+    for (kind, (n, to)) in seen {
+        super::output::warn(&super::po::tf(
+            "`kind: {kind}` still works, but `kind: {to}` is the way forward ({n} document(s) here)",
+            &[("kind", kind), ("to", to), ("n", &n.to_string())],
+        ));
+    }
 }
 
 /// Rewrites the Kinds that folded into another one.
@@ -603,7 +635,7 @@ pub fn load_str(text: &str, label: &str) -> Result<Vec<ManifestDoc>> {
 /// only covers one of them turns a merged Kind into a document nobody claims —
 /// silently, which is the failure this whole exercise exists to remove.
 fn lower_legacy_kind(doc: &mut ManifestDoc) -> Result<()> {
-    // `kind: Egress` folds into `kind: FirewallPolicy`. The two were the SAME
+    // `kind: Egress` folds into `kind: NetworkPolicy`. The two were the SAME
     // object: one struct (`firewall::FwDocSpec`), one validator, one apply, one
     // dataplane — the only difference being where the direction came from. Three
     // nouns for "network policy" means three places to look during an incident,
@@ -614,7 +646,7 @@ fn lower_legacy_kind(doc: &mut ManifestDoc) -> Result<()> {
     // Not in `canonical_kind` because this is not a rename: the direction the old
     // Kind implied has to be written into the spec, and `canonical_kind` is a
     // pure name map with no spec to write into.
-    if doc.kind == "Egress" {
+    if doc.kind == k::EGRESS {
         lower_egress(doc)?;
     }
     // `kind: Storage` folds into `kind: Volume`. Both landed in the SAME
@@ -623,7 +655,7 @@ fn lower_legacy_kind(doc: &mut ManifestDoc) -> Result<()> {
     // `type: nfs`/`server: nas`/`share: /export`, and nothing said which to use.
     // `volumes ls` listed both (one store) while `storage ls` listed only some,
     // so the same question got different answers depending on the command.
-    if doc.kind == "Storage" {
+    if doc.kind == k::STORAGE {
         lower_storage(doc)?;
     }
     // `kind: ShareVolume` folds into `kind: Volume` with a `share:` block. A
@@ -632,7 +664,7 @@ fn lower_legacy_kind(doc: &mut ManifestDoc) -> Result<()> {
     // unique field was the parent's name. Two records for one object is how the
     // two start disagreeing, and it is why a share could never be owned by a
     // stack: ownership is stamped in `labels`, which only the volume has.
-    if doc.kind == "ShareVolume" {
+    if doc.kind == k::SHARE_VOLUME {
         lower_sharevolume(doc)?;
     }
     // `kind: Container` with `spec.containers[]` — the k8s Pod grammar applied to
@@ -657,7 +689,7 @@ fn lower_legacy_kind(doc: &mut ManifestDoc) -> Result<()> {
     //
     // What is left is the honest half: say it is the deprecated spelling, name
     // the difference concretely, and change nothing.
-    if doc.kind == "Container" && doc.spec.get("containers").is_some() {
+    if doc.kind == k::CONTAINER && doc.spec.get("containers").is_some() {
         super::output::warn(&super::po::tf(
             "Container '{name}': `spec.containers[]` on a `kind: Container` is the deprecated \
              spelling — it still runs ONE container, named '{name}'. For containers that share \
@@ -723,7 +755,7 @@ fn lower_storage(doc: &mut ManifestDoc) -> Result<()> {
         serde_yaml::Value::Mapping(inner),
     );
     doc.spec = serde_yaml::Value::Mapping(outer);
-    doc.kind = "Volume".to_string();
+    doc.kind = k::VOLUME.to_string();
     super::output::warn(&super::po::tf(
         "Storage '{name}': `kind: Storage` is deprecated — use `kind: Volume` with a \
          `{block}:` block (same fields, same behaviour)",
@@ -774,7 +806,7 @@ fn lower_sharevolume(doc: &mut ManifestDoc) -> Result<()> {
         serde_yaml::Value::Mapping(share),
     );
     doc.spec = serde_yaml::Value::Mapping(out);
-    doc.kind = "Volume".to_string();
+    doc.kind = k::VOLUME.to_string();
     super::output::warn(&super::po::tf(
         "ShareVolume '{name}': `kind: ShareVolume` is deprecated — use `kind: Volume` with a \
          `share: {from: ...}` block (same fields, same behaviour, and now ownable by a stack)",
@@ -783,7 +815,7 @@ fn lower_sharevolume(doc: &mut ManifestDoc) -> Result<()> {
     Ok(())
 }
 
-/// Rewrites a legacy `kind: Egress` into the canonical `kind: FirewallPolicy`,
+/// Rewrites a legacy `kind: Egress` into the canonical `kind: NetworkPolicy`,
 /// writing the direction the old Kind used to imply into `spec.direction`.
 ///
 /// **Fail-closed on a contradiction.** `kind: Egress` with `direction: ingress`
@@ -798,7 +830,7 @@ fn lower_egress(doc: &mut ManifestDoc) -> Result<()> {
         Some(other) => {
             return Err(Error::Invalid(super::po::tf(
                 "Egress '{name}': spec.direction is '{other}', but `kind: Egress` means \
-                 outbound — write `kind: FirewallPolicy` with the direction you want",
+                 outbound — write `kind: NetworkPolicy` with the direction you want",
                 &[("name", &doc.metadata.name), ("other", other)],
             )))
         }
@@ -820,15 +852,15 @@ fn lower_egress(doc: &mut ManifestDoc) -> Result<()> {
         }
     }
     super::output::warn(&super::po::tf(
-        "Egress '{name}': `kind: Egress` is deprecated — use `kind: FirewallPolicy` with \
+        "Egress '{name}': `kind: Egress` is deprecated — use `kind: NetworkPolicy` with \
          `direction: egress` (same fields, same behaviour)",
         &[("name", &doc.metadata.name)],
     ));
-    doc.kind = "FirewallPolicy".to_string();
+    doc.kind = k::FIREWALL_POLICY.to_string();
     Ok(())
 }
 
-/// Filters the documents of a specific `kind` (exact comparison, e.g. `"Container"`).
+/// Filters the documents of a specific `kind` (exact comparison, e.g. `k::CONTAINER`).
 pub fn of_kind<'a>(docs: &'a [ManifestDoc], kind: &str) -> Vec<&'a ManifestDoc> {
     docs.iter().filter(|d| d.kind == kind).collect()
 }
@@ -957,7 +989,12 @@ mod tests {
     /// moved. Warning on a pure rename would train people to ignore warnings.
     #[test]
     fn a_renamed_kind_keeps_answering_to_its_old_name() {
-        for (old, new) in [("Tunnel", "Gateway"), ("VirtualMachine", "Vm")] {
+        for (old, new) in [
+            ("Tunnel", "Gateway"),
+            ("VirtualMachine", "VirtualMachine"),
+            ("NetworkPolicy", "NetworkPolicy"),
+            ("Cluster", "KubernetesCluster"),
+        ] {
             assert_eq!(canonical_kind(old), new, "{old} stopped resolving");
             assert_eq!(canonical_kind(new), new, "{new} does not resolve to itself");
             // Casing is not part of the promise being kept, but it is part of
@@ -1103,7 +1140,7 @@ spec:
         assert_eq!(docs[0].kind, "Container");
         assert_eq!(docs[0].metadata.name, "web");
         assert_eq!(docs[0].metadata.namespace.as_deref(), Some("prod"));
-        assert_eq!(docs[1].kind, "Vm");
+        assert_eq!(docs[1].kind, "VirtualMachine");
         assert_eq!(docs[1].metadata.name, "db");
         // No `Workload` doc survives the load.
         assert!(of_kind(&docs, "Workload").is_empty());
@@ -1131,12 +1168,12 @@ spec: {}
         let docs = load(&p).unwrap();
         assert_eq!(of_kind(&docs, "Network").len(), 1);
         assert_eq!(of_kind(&docs, "Volume").len(), 1);
-        assert_eq!(of_kind(&docs, "Vm").len(), 0);
+        assert_eq!(of_kind(&docs, "VirtualMachine").len(), 0);
         let _ = std::fs::remove_file(&p);
     }
 
     #[test]
-    fn kind_virtualmachine_canonicaliza_para_vm() {
+    fn kind_vm_canonicaliza_para_virtualmachine() {
         let text = "\
 apiVersion: delonix.io/v1
 kind: VirtualMachine
@@ -1155,9 +1192,9 @@ spec: { disk: k8s-golden }
         std::fs::write(&p, text).unwrap();
         let docs = load(&p).unwrap();
         // Both synonyms become the canonical `Vm`, caught by `of_kind`.
-        assert_eq!(of_kind(&docs, "Vm").len(), 2);
-        assert_eq!(docs[0].kind, "Vm");
-        assert_eq!(docs[1].kind, "Vm");
+        assert_eq!(of_kind(&docs, "VirtualMachine").len(), 2);
+        assert_eq!(docs[0].kind, "VirtualMachine");
+        assert_eq!(docs[1].kind, "VirtualMachine");
         let _ = std::fs::remove_file(&p);
     }
 
@@ -1234,7 +1271,7 @@ spec: { disk: k8s-golden }
         );
         // Os Kinds com renderizador tipado tem MESMO de aparecer, senao o teste passa por
         // nao ter exercitado nada deles.
-        for k in ["Container", "Network", "Volume", "Vm", "Pod"] {
+        for k in ["Container", "Network", "Volume", "VirtualMachine", "Pod"] {
             assert!(
                 kinds.contains(k),
                 "nenhum exemplo cobre o kind {k}: {kinds:?}"
@@ -1245,11 +1282,18 @@ spec: { disk: k8s-golden }
     /// `metadata.namespace` is honored exactly where the engine applies it, and the alias
     /// forms must not fall through the crack: `kind: VirtualMachine` is canonicalized
     /// BEFORE the check, so it has to end up on the honored side. Asserting the two
-    /// functions together is the point — checking `kind_honors_namespace("Vm")` alone
+    /// functions together is the point — checking `kind_honors_namespace("VirtualMachine")` alone
     /// would still pass the day an alias stopped being canonicalized.
     #[test]
     fn a_namespace_e_honrada_exactamente_onde_o_motor_a_aplica() {
-        for kind in ["Container", "Pod", "Vm", "Workload", "Stack", "ShareVolume"] {
+        for kind in [
+            "Container",
+            "Pod",
+            "VirtualMachine",
+            "Workload",
+            "Stack",
+            "ShareVolume",
+        ] {
             assert!(kind_honors_namespace(kind), "{kind} tem de honrar");
         }
         for alias in ["VirtualMachine", "VM", "vm", "pod", "workload"] {
@@ -1278,7 +1322,7 @@ spec: { disk: k8s-golden }
             "HTTPRoute",
             "Ingress",
             "Egress",
-            "FirewallPolicy",
+            "NetworkPolicy",
             "Dependency",
             "Cluster",
         ] {
@@ -1287,10 +1331,10 @@ spec: { disk: k8s-golden }
     }
 
     #[test]
-    fn canonical_kind_e_case_insensitive_para_vm() {
+    fn canonical_kind_e_case_insensitive_para_a_vm() {
         // Any plausible casing from another tool resolves to `Vm`.
         for k in [
-            "Vm",
+            "VirtualMachine",
             "VM",
             "vm",
             "VirtualMachine",
@@ -1299,8 +1343,8 @@ spec: { disk: k8s-golden }
         ] {
             assert_eq!(
                 canonical_kind(k),
-                "Vm",
-                "kind {k:?} devia canonicalizar para Vm"
+                "VirtualMachine",
+                "kind {k:?} devia canonicalizar para VirtualMachine"
             );
         }
         // Non-Vm Kinds pass through intact (we don't invent synonyms).
@@ -1545,7 +1589,7 @@ spec:
         assert_eq!(docs[2].metadata.namespace.as_deref(), Some("data")); // per-item override
     }
 
-    /// `kind: Egress` e `kind: FirewallPolicy` eram o MESMO objecto — uma
+    /// `kind: Egress` e `kind: NetworkPolicy` eram o MESMO objecto — uma
     /// struct, um validador, um apply, um dataplane. Depois da fusão só há um
     /// Kind no fim, e o antigo é reescrito com a direcção que implicava.
     #[test]
@@ -1555,7 +1599,7 @@ spec:
         )
         .unwrap();
         lower_legacy_kind(&mut doc).unwrap();
-        assert_eq!(doc.kind, "FirewallPolicy");
+        assert_eq!(doc.kind, "NetworkPolicy");
         assert_eq!(
             doc.spec.get("direction").unwrap().as_str(),
             Some("egress"),
@@ -1583,7 +1627,7 @@ spec:
         let e = lower_legacy_kind(&mut doc).unwrap_err().to_string();
         assert!(e.contains("ingress"), "{e}");
         assert!(
-            e.contains("FirewallPolicy"),
+            e.contains("NetworkPolicy"),
             "a mensagem tem de dizer o que fazer: {e}"
         );
     }
@@ -1609,7 +1653,7 @@ spec:
         let _ = std::fs::remove_file(&p);
         assert_eq!(docs.len(), 1);
         assert_eq!(
-            docs[0].kind, "FirewallPolicy",
+            docs[0].kind, "NetworkPolicy",
             "o filho do Stack ficou por reescrever"
         );
         assert_eq!(

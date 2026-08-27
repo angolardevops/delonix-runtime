@@ -8,7 +8,7 @@
 # Nota: scope: network só faz sentido em Egress (não há política de INGRESS
 # por-rede). Para firewall L4 POR-CONTAINER, ver examples/firewall.yaml.
 ---
-apiVersion: delonix.io/v1
+apiVersion: networking.delonix.io/v1alpha1
 kind: Network
 metadata:
   name: prod-net
@@ -16,8 +16,8 @@ spec:
   driver: bridge
   subnet: 10.219.0.0/24
 ---
-apiVersion: delonix.io/v1
-kind: FirewallPolicy
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
 metadata:
   name: prod-egress
 spec:

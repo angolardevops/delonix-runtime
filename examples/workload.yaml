@@ -8,7 +8,7 @@
 # exactly like a `kind: Stack` child. `spec.type` picks the type; the block named
 # after the type (`container:` / `vm:`) is the SAME spec the standalone Kind takes
 # (see examples/container.yaml and examples/vm.yaml for every field).
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Workload
 metadata:
   name: web
@@ -21,7 +21,7 @@ spec:
     env:
       - TZ=Africa/Luanda
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Workload
 metadata:
   name: db
@@ -32,7 +32,7 @@ spec:
     vcpus: 2
     memory: 4G
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Workload
 metadata:
   name: web-app
@@ -43,7 +43,7 @@ spec:
       - { name: web, image: nginx:latest }
       - { name: sidecar, image: busybox:latest }
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Workload
 metadata:
   name: fast-vm

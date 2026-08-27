@@ -17,7 +17,7 @@
 #
 # Apply with:  delonix volumes apply -f sharevolume.yaml
 # (or `delonix sharevolume apply -f ...`, which applies only the shares)
-apiVersion: delonix.io/v1
+apiVersion: storage.delonix.io/v1alpha1
 kind: Volume
 metadata:
   name: nas
@@ -26,7 +26,7 @@ spec:
     server: 10.0.0.5
     share: /pool/data
 ---
-apiVersion: delonix.io/v1
+apiVersion: storage.delonix.io/v1alpha1
 kind: Volume
 metadata:
   name: app-a
@@ -40,7 +40,7 @@ spec:
   quota: 5G                   # optional; SOFT quota (measured usage + alert), omit = unlimited
   alertPct: 90                # optional; usage % above which ls/describe flag a WARN (default 90)
 ---
-apiVersion: delonix.io/v1
+apiVersion: storage.delonix.io/v1alpha1
 kind: Volume
 metadata:
   name: app-b

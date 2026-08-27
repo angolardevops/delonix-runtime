@@ -681,3 +681,53 @@ E o gate da superfície **disparou numa alteração real**, não fabricada: a fo
 nova apareceu como não classificada e obrigou a decidir a classe (`=`, porque
 nasce no destino e nunca teve outra grafia). É a primeira prova de que ele
 funciona fora de um teste negativo.
+
+## 12. O nome de um Kind passou a ter um sítio
+
+A primeira renomeação (`Tunnel`→`Gateway`) custou **15 sítios de string em cinco
+ficheiros**, e mediu o problema: o nome de um Kind era um literal repetido, com
+nada a apanhar um sítio esquecido. E um sítio esquecido **não falha alto** — faz
+um caminho de código deixar de reconhecer um Kind que o resto do motor continua a
+servir.
+
+É o mesmo defeito que o `cmd/kinds.rs` já tinha removido para os FACTOS sobre um
+Kind — seis listas que tinham de concordar e derivaram — deixado de pé para o
+NOME.
+
+### O que a medição mudou no plano
+
+A estimativa inicial era 106 literais. **São 460.** O número anterior era só dos
+quatro Kinds a renomear. Mas a contagem crua não é a resposta, porque a maioria
+não é identidade de Kind:
+
+| categoria | sítios | decisão |
+|---|---|---|
+| despacho (`match`, `of_kind`, `kind:`) | **113** | migrados para constantes |
+| fixtures de teste | ~138 | **ficam literais** |
+| rótulos, documentação, `manual_entries` | o resto | não tocados |
+
+**Os testes ficam com literais, e é deliberado.** Um teste que escreve
+`"Gateway"` à mão testa o formato REAL que vai para o disco; trocá-lo pela
+constante torna-o tautológico — passaria a SEGUIR uma renomeação em vez de a
+APANHAR. A rede de segurança tem de estar do lado de fora do que vigia.
+
+### O idioma é seguro por causa de uma configuração deste repo
+
+Uma constante `&'static str` é um padrão de `match` legal, e um nome mal escrito
+degrada para um BINDING que apanha tudo — footgun conhecido. Verifiquei-o com um
+programa de dois minutos antes de adoptar o idioma, em vez de assumir: o binding
+torna os ramos seguintes inalcançáveis, e este repo corre com `-D warnings`,
+portanto é erro de compilação. **Quem desligar o `-D warnings` perde esta
+garantia**, e é por isso que está escrita no doc-comment das constantes.
+
+### O retorno, medido
+
+```
+pub(crate) const CLUSTER: &str = "KubernetesCluster";   ← uma linha
+→ 0 erros de compilação
+```
+
+Uma renomeação passou de 15 sítios em cinco ficheiros para **uma linha**, mais o
+alias no `canonical_kind` e a sua linha no teste que mantém os nomes antigos a
+carregar. As três que faltam — incluindo o `Vm`, que era o mais caro com 54
+sítios — passam a ter o mesmo custo.

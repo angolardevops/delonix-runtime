@@ -26,6 +26,58 @@
 //! would be a seventh list with nothing forcing it to agree with the real
 //! value — the exact arrangement this module exists to remove.
 
+/// The name of each Kind, in the one place a rename has to touch.
+///
+/// # Why these exist
+///
+/// Measured while renaming `Tunnel`→`Gateway`: the name of a Kind was a bare
+/// string literal repeated **106 times across ten files**, plus a second
+/// hand-kept list of them in `schema.rs`. Renaming one meant a careful sweep
+/// with nothing to catch a site that was missed — and a missed site does not
+/// fail loudly, it makes one code path stop recognising a Kind the rest of the
+/// engine still serves.
+///
+/// That is the same defect this module already removed for the FACTS about a
+/// Kind — six lists that had to agree and drifted — left standing for the NAME.
+///
+/// # Safe as `match` patterns
+///
+/// A `&'static str` const is a legal pattern, and a mistyped one degrades to a
+/// catch-all BINDING rather than an error. That footgun is closed here by the
+/// build itself: the binding makes every later arm unreachable, and this repo
+/// runs with `-D warnings`. Verified with a throwaway program before adopting
+/// the idiom, not assumed.
+///
+/// # What a rename now costs
+///
+/// One line here, one alias arm in `manifest::canonical_kind`, and one row in
+/// the test that keeps old spellings loading. Not a sweep.
+pub(crate) const SECRET: &str = "Secret";
+pub(crate) const NETWORK: &str = "Network";
+pub(crate) const NETWORK_ROUTE: &str = "NetworkRoute";
+pub(crate) const VOLUME: &str = "Volume";
+pub(crate) const IMAGE: &str = "Image";
+pub(crate) const VM: &str = "VirtualMachine";
+pub(crate) const CONTAINER: &str = "Container";
+pub(crate) const POD: &str = "Pod";
+pub(crate) const INGRESS: &str = "Ingress";
+pub(crate) const FIREWALL_POLICY: &str = "NetworkPolicy";
+pub(crate) const HTTP_ROUTE: &str = "HTTPRoute";
+pub(crate) const GATEWAY: &str = "Gateway";
+pub(crate) const WORKLOAD: &str = "Workload";
+pub(crate) const DEPENDENCY: &str = "Dependency";
+pub(crate) const SHARE_VOLUME: &str = "ShareVolume";
+pub(crate) const STORAGE: &str = "Storage";
+pub(crate) const EGRESS: &str = "Egress";
+pub(crate) const STACK: &str = "Stack";
+/// The three Kinds a `Workload` becomes, in the slash spelling `lowers_to`
+/// splits on. A `const` and not a literal for the same reason as the names it
+/// joins: it stopped being true the moment `Vm` was renamed, and only a test
+/// noticed.
+pub(crate) const WORKLOAD_LOWERS_TO: &str = "Container/Pod/VirtualMachine";
+
+pub(crate) const CLUSTER: &str = "KubernetesCluster";
+
 /// The area a Kind acts on. Printed as a column, so the names are short and the
 /// three network ones are split: they answer different questions and a single
 /// `network` label would hide that `NetworkRoute` opens a PATH while
@@ -84,14 +136,44 @@ pub(crate) enum Form {
     /// Kind's mechanism. It DOES survive the load — that is what separates it
     /// from [`Form::Deprecated`].
     Compat(&'static str),
+    /// Still primary — own apply, survives the load — but a successor is
+    /// announced and this spelling is on its way out.
+    ///
+    /// Distinct from [`Form::Deprecated`], and the difference is the whole
+    /// point: a `Deprecated` Kind is REWRITTEN at load and the writer gets the
+    /// successor's behaviour for free. A `Sunset` one is not rewritten, because
+    /// rewriting it would change what the engine DOES.
+    ///
+    /// `Container` is the case that forced this variant. Lowering it to a
+    /// one-container `Pod` looks like a rename and is not: a Pod always builds
+    /// a shared netns and its members join it through the `--pod` re-exec, so
+    /// every declarative container would silently change its runtime shape —
+    /// an extra netns holder each, and a different network path. The name half
+    /// was solvable (`pod.rs` honours a member's own name), the netns half is
+    /// not. So it is announced, not rewritten, and a future major removes it
+    /// once manifests have moved.
+    Sunset(&'static str),
 }
 
 impl Form {
+    /// The Kind this one hands over to, whether by lowering or by announcement.
+    /// Used by the gate that keeps a target from naming a Kind that never
+    /// existed.
+    pub(crate) fn successor(self) -> Option<&'static str> {
+        match self {
+            Form::Sunset(k) => Some(k),
+            other => other.lowers_to(),
+        }
+    }
+
     /// The Kind a document of this one ends up as, if it is not itself.
     pub(crate) fn lowers_to(self) -> Option<&'static str> {
         match self {
             Form::Deprecated(k) | Form::Sugar(k) | Form::Compat(k) => Some(k),
-            Form::Primary | Form::Aggregate => None,
+            // `Sunset` is deliberately not here: it does not lower, it is
+            // merely announced. Its successor is checked by the same test,
+            // through `successor`.
+            Form::Primary | Form::Aggregate | Form::Sunset(_) => None,
         }
     }
 }
@@ -175,7 +257,7 @@ pub(crate) struct KindFacts {
 /// see [`KindFacts::in_stack`] — and the rest follow.
 const FACTS: &[KindFacts] = &[
     KindFacts {
-        kind: "Secret",
+        kind: SECRET,
         plural: "secrets",
         short: &["sec"],
         api_version: "core.delonix.io/v1alpha1",
@@ -191,7 +273,7 @@ const FACTS: &[KindFacts] = &[
         presence: Presence::Registry,
     },
     KindFacts {
-        kind: "Network",
+        kind: NETWORK,
         plural: "networks",
         short: &["net"],
         api_version: "networking.delonix.io/v1alpha1",
@@ -204,7 +286,7 @@ const FACTS: &[KindFacts] = &[
         presence: Presence::Registry,
     },
     KindFacts {
-        kind: "NetworkRoute",
+        kind: NETWORK_ROUTE,
         plural: "networkroutes",
         short: &["nr"],
         api_version: "networking.delonix.io/v1alpha1",
@@ -217,7 +299,7 @@ const FACTS: &[KindFacts] = &[
         presence: Presence::Registry,
     },
     KindFacts {
-        kind: "Volume",
+        kind: VOLUME,
         plural: "volumes",
         short: &["vol"],
         api_version: "storage.delonix.io/v1alpha1",
@@ -232,7 +314,7 @@ const FACTS: &[KindFacts] = &[
         presence: Presence::Registry,
     },
     KindFacts {
-        kind: "Image",
+        kind: IMAGE,
         plural: "images",
         short: &["img"],
         api_version: "artifact.delonix.io/v1alpha1",
@@ -247,9 +329,9 @@ const FACTS: &[KindFacts] = &[
         presence: Presence::Registry,
     },
     KindFacts {
-        kind: "Vm",
-        plural: "vms",
-        short: &[],
+        kind: VM,
+        plural: "virtualmachines",
+        short: &["vm"],
         api_version: "compute.delonix.io/v1alpha1",
         domain: Domain::Compute,
         form: Form::Primary,
@@ -260,12 +342,12 @@ const FACTS: &[KindFacts] = &[
         presence: Presence::Registry,
     },
     KindFacts {
-        kind: "Container",
+        kind: CONTAINER,
         plural: "containers",
         short: &[],
         api_version: "compute.delonix.io/v1alpha1",
         domain: Domain::Compute,
-        form: Form::Primary,
+        form: Form::Sunset(POD),
         in_stack: true,
         converges: true,
         teardown: true,
@@ -273,7 +355,7 @@ const FACTS: &[KindFacts] = &[
         presence: Presence::Registry,
     },
     KindFacts {
-        kind: "Pod",
+        kind: POD,
         plural: "pods",
         short: &["po"],
         api_version: "compute.delonix.io/v1alpha1",
@@ -286,12 +368,12 @@ const FACTS: &[KindFacts] = &[
         presence: Presence::Derived,
     },
     KindFacts {
-        kind: "Ingress",
+        kind: INGRESS,
         plural: "ingresses",
         short: &["ing"],
         api_version: "gateway.delonix.io/v1alpha1",
         domain: Domain::NetExposure,
-        form: Form::Compat("HTTPRoute"),
+        form: Form::Compat(HTTP_ROUTE),
         in_stack: true,
         converges: true,
         teardown: false,
@@ -299,9 +381,9 @@ const FACTS: &[KindFacts] = &[
         presence: Presence::Declarative,
     },
     KindFacts {
-        kind: "FirewallPolicy",
-        plural: "firewallpolicies",
-        short: &["fwp"],
+        kind: FIREWALL_POLICY,
+        plural: "networkpolicies",
+        short: &["np"],
         api_version: "networking.delonix.io/v1alpha1",
         domain: Domain::NetPolicy,
         form: Form::Primary,
@@ -312,7 +394,7 @@ const FACTS: &[KindFacts] = &[
         presence: Presence::Declarative,
     },
     KindFacts {
-        kind: "HTTPRoute",
+        kind: HTTP_ROUTE,
         plural: "httproutes",
         short: &["hr"],
         api_version: "gateway.delonix.io/v1alpha1",
@@ -325,7 +407,7 @@ const FACTS: &[KindFacts] = &[
         presence: Presence::Declarative,
     },
     KindFacts {
-        kind: "Gateway",
+        kind: GATEWAY,
         plural: "gateways",
         short: &["gw"],
         api_version: "gateway.delonix.io/v1alpha1",
@@ -340,12 +422,12 @@ const FACTS: &[KindFacts] = &[
     // --- Not resources of the stack: they become one of the above, or are not
     // local resources at all. ---
     KindFacts {
-        kind: "Workload",
+        kind: WORKLOAD,
         plural: "workloads",
         short: &["wl"],
         api_version: "compute.delonix.io/v1alpha1",
         domain: Domain::Compute,
-        form: Form::Sugar("Container/Pod/Vm"),
+        form: Form::Sugar(WORKLOAD_LOWERS_TO),
         in_stack: false,
         converges: false,
         teardown: false,
@@ -354,12 +436,12 @@ const FACTS: &[KindFacts] = &[
         presence: Presence::NotObservable,
     },
     KindFacts {
-        kind: "Dependency",
+        kind: DEPENDENCY,
         plural: "dependencies",
         short: &["dep"],
         api_version: "networking.delonix.io/v1alpha1",
         domain: Domain::NetPolicy,
-        form: Form::Sugar("FirewallPolicy"),
+        form: Form::Sugar(FIREWALL_POLICY),
         in_stack: false,
         converges: false,
         teardown: false,
@@ -370,12 +452,12 @@ const FACTS: &[KindFacts] = &[
         presence: Presence::Declarative,
     },
     KindFacts {
-        kind: "ShareVolume",
+        kind: SHARE_VOLUME,
         plural: "sharevolumes",
         short: &["sv"],
         api_version: "storage.delonix.io/v1alpha1",
         domain: Domain::Storage,
-        form: Form::Deprecated("Volume"),
+        form: Form::Deprecated(VOLUME),
         in_stack: false,
         converges: false,
         teardown: false,
@@ -385,12 +467,12 @@ const FACTS: &[KindFacts] = &[
         presence: Presence::NotObservable,
     },
     KindFacts {
-        kind: "Storage",
+        kind: STORAGE,
         plural: "storages",
         short: &[],
         api_version: "storage.delonix.io/v1alpha1",
         domain: Domain::Storage,
-        form: Form::Deprecated("Volume"),
+        form: Form::Deprecated(VOLUME),
         in_stack: false,
         converges: false,
         teardown: false,
@@ -398,12 +480,12 @@ const FACTS: &[KindFacts] = &[
         presence: Presence::NotObservable,
     },
     KindFacts {
-        kind: "Egress",
+        kind: EGRESS,
         plural: "egresses",
         short: &[],
         api_version: "networking.delonix.io/v1alpha1",
         domain: Domain::NetPolicy,
-        form: Form::Deprecated("FirewallPolicy"),
+        form: Form::Deprecated(FIREWALL_POLICY),
         in_stack: false,
         converges: false,
         teardown: false,
@@ -411,7 +493,7 @@ const FACTS: &[KindFacts] = &[
         presence: Presence::NotObservable,
     },
     KindFacts {
-        kind: "Stack",
+        kind: STACK,
         plural: "stacks",
         short: &[],
         api_version: "core.delonix.io/v1alpha1",
@@ -425,9 +507,9 @@ const FACTS: &[KindFacts] = &[
         presence: Presence::NotObservable,
     },
     KindFacts {
-        kind: "Cluster",
-        plural: "clusters",
-        short: &[],
+        kind: CLUSTER,
+        plural: "kubernetesclusters",
+        short: &["kc"],
         api_version: "infrastructure.delonix.io/v1alpha1",
         domain: Domain::Composition,
         form: Form::Primary,
@@ -595,7 +677,7 @@ mod tests {
     #[test]
     fn o_destino_de_uma_reducao_existe() {
         for f in all() {
-            let Some(to) = f.form.lowers_to() else {
+            let Some(to) = f.form.successor() else {
                 continue;
             };
             // `Workload` names three, and the slash is the honest spelling.

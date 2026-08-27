@@ -16,13 +16,13 @@
 # que deixa de casar com o workload para que foi escrita.
 # Aplicar com `delonix stack apply -f dependency.yaml`.
 ---
-apiVersion: delonix.io/v1
+apiVersion: networking.delonix.io/v1alpha1
 kind: Network
 metadata: { name: appnet }
 spec:
   driver: bridge
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Container
 metadata: { name: db }
 spec:
@@ -30,7 +30,7 @@ spec:
   network: appnet
   env: { POSTGRES_PASSWORD: dev }
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Container
 metadata: { name: app }
 spec:
@@ -38,7 +38,7 @@ spec:
   network: appnet
   command: ["sleep", "infinity"]
 ---
-apiVersion: delonix.io/v1
+apiVersion: networking.delonix.io/v1alpha1
 kind: Dependency
 metadata: { name: app-knows-db }
 spec:

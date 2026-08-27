@@ -7,7 +7,7 @@
 # manifest — both shapes are accepted, this is just the one the docs/examples
 # show. (The k8s-style Pod shape — `spec.containers[]` — is unaffected: it
 # already mirrors k8s's own grouping, see examples/pod.yaml.)
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Container
 metadata:
   name: web

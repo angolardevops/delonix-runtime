@@ -1,5 +1,6 @@
 //! `delonix vm` — declarative microVMs (create/ls/stop/rm/status).
 
+use super::kinds as k;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -1101,7 +1102,7 @@ fn desired_vm_fields(
 pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     let spec: VmSpec = vm_spec_of(doc)?;
     Ok(super::reconcile::Desired {
-        kind: "Vm".into(),
+        kind: k::VM.into(),
         name: doc.metadata.name.clone(),
         fields: desired_vm_fields(
             &super::vmimage::VmImageStore::open(state_root())?,
@@ -1133,7 +1134,7 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
             f.insert("network".into(), vm.network.clone());
             f.insert("backend".into(), vm.backend.clone());
             super::reconcile::Actual {
-                kind: "Vm".into(),
+                kind: k::VM.into(),
                 name: vm.name.clone(),
                 fields: f,
                 owner: vm.labels.get(super::reconcile::STACK_LABEL).cloned(),
@@ -1416,7 +1417,7 @@ fn resolve_vm_disk(
 pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
     let base = state_root();
     let images = super::vmimage::VmImageStore::open(&base)?;
-    for doc in manifest::of_kind(docs, "Vm") {
+    for doc in manifest::of_kind(docs, k::VM) {
         let name = &doc.metadata.name;
         let spec: VmSpec = vm_spec_of(doc)?;
         let (disk, image_meta) = resolve_vm_disk(&images, name, &spec, base_dir)?;
@@ -3262,8 +3263,8 @@ fn describe_one(vm: &delonix_runtime_core::Vm) {
     // REAL on-disk size of the overlay (what the VM wrote on top of the base).
     d.sub_opt("Overlay size", file_size(&vm.overlay).map(output::fmt_size));
 
-    d.section("Network");
-    d.sub("Network", &vm.network);
+    d.section(k::NETWORK);
+    d.sub(k::NETWORK, &vm.network);
     // An isolation boundary that is invisible is an isolation boundary nobody
     // audits — shown always, `default` included, so "which namespace is this VM
     // in" never needs a guess or a look at the JSON.

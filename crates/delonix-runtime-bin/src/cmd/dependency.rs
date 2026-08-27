@@ -21,6 +21,7 @@
 //! container, or clear its firewall by hand. (`kind: Ingress` is now the L7 HTTP
 //! Ingress — unrelated to this L4 firewall.)
 
+use super::kinds as k;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::manifest::{self, ManifestDoc};
@@ -81,7 +82,7 @@ pub fn lower_dependencies(docs: &[ManifestDoc]) -> Result<Vec<ManifestDoc>> {
         std::collections::BTreeMap::new();
     let mut namespaces: std::collections::BTreeMap<String, Option<String>> = Default::default();
 
-    for doc in manifest::of_kind(docs, "Dependency") {
+    for doc in manifest::of_kind(docs, k::DEPENDENCY) {
         let spec: DependencySpec = manifest::spec_of(doc)?;
         let name = &doc.metadata.name;
         if spec.from.trim().is_empty() {
@@ -159,7 +160,7 @@ pub fn lower_dependencies(docs: &[ManifestDoc]) -> Result<Vec<ManifestDoc>> {
             .insert(FROM_DEPENDENCIES.to_string(), origins.join(","));
         out.push(ManifestDoc {
             api_version: "delonix.io/v1".to_string(),
-            kind: "FirewallPolicy".to_string(),
+            kind: k::FIREWALL_POLICY.to_string(),
             metadata: meta,
             spec: Value::Mapping(spec),
         });
@@ -230,7 +231,7 @@ mod tests {
         );
         let out = super::lower_dependencies(&d).unwrap();
         assert_eq!(out.len(), 1, "um alvo, uma politica: {out:#?}");
-        assert_eq!(out[0].kind, "FirewallPolicy");
+        assert_eq!(out[0].kind, "NetworkPolicy");
         assert_eq!(out[0].metadata.name, "dependency-db");
         let rules = out[0].spec.get("rules").unwrap().as_sequence().unwrap();
         assert_eq!(rules.len(), 2, "os dois peers têm de sobreviver");

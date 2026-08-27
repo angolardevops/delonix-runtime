@@ -51,7 +51,13 @@ pub(crate) fn resolve_kind(token: &str) -> Result<&'static KindFacts, Error> {
     if token.is_empty() {
         return Err(Error::Invalid("a resource kind is missing".into()));
     }
-    let want = token.to_ascii_lowercase();
+    // Through `canonical_kind` first, so a RENAMED Kind answers to its old name
+    // here too. Without this the alias was half a promise: `kind: Cluster` kept
+    // loading in a manifest while `explain Cluster` answered «no such resource
+    // kind» — the engine accepting a spelling that its own resolver rejects.
+    // Measured the moment the rename landed, by a test that spells the old name.
+    let canonical = super::manifest::canonical_kind(token);
+    let want = canonical.to_ascii_lowercase();
     let hits: Vec<&KindFacts> = kinds::all()
         .filter(|f| {
             f.kind.to_ascii_lowercase() == want
@@ -125,6 +131,7 @@ pub(crate) fn api_resources(output: super::output::OutputFormat) -> Result<(), E
                 Form::Sugar(k) => format!("sugar → {k}"),
                 Form::Deprecated(k) => format!("deprecated → {k}"),
                 Form::Compat(k) => format!("compat → {k}"),
+                Form::Sunset(k) => format!("sunset → {k}"),
             },
         })
         .collect();
@@ -251,6 +258,27 @@ mod tests {
     fn a_kind_is_reachable_by_all_four_spellings() {
         for t in ["Pod", "pod", "pods", "po", "POD", "Po"] {
             assert_eq!(resolve_kind(t).unwrap().kind, "Pod", "{t}");
+        }
+    }
+
+    /// A renamed Kind answers to its old name in the RESOLVER too, not only in
+    /// the manifest loader.
+    ///
+    /// The two used to disagree: `kind: Cluster` loaded and `explain Cluster`
+    /// answered «no such resource kind». An engine that accepts a spelling its
+    /// own resolver rejects is worse than one that rejects it everywhere —
+    /// the caller is told the name is wrong by the very tool that would have
+    /// explained it.
+    #[test]
+    fn the_resolver_honours_the_same_aliases_as_the_loader() {
+        for (old, new) in [
+            ("Tunnel", "Gateway"),
+            ("Vm", "VirtualMachine"),
+            ("FirewallPolicy", "NetworkPolicy"),
+            ("Cluster", "KubernetesCluster"),
+        ] {
+            assert_eq!(resolve_kind(old).unwrap().kind, new, "{old}");
+            assert_eq!(resolve_kind(new).unwrap().kind, new, "{new}");
         }
     }
 

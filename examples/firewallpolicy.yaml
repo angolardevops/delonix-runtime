@@ -11,14 +11,14 @@
 # quem o copia, e copiar é a primeira coisa que se faz com um exemplo.
 # ---------------------------------------------------------------------------
 ---
-apiVersion: delonix.io/v1
+apiVersion: networking.delonix.io/v1alpha1
 kind: Network
 metadata:
   name: sdn-demo
 spec:
   driver: bridge
 ---
-apiVersion: delonix.io/v1
+apiVersion: compute.delonix.io/v1alpha1
 kind: Container
 metadata:
   name: dbapp
@@ -28,8 +28,8 @@ spec:
   env:
     - POSTGRES_PASSWORD=exemplo
 ---
-apiVersion: delonix.io/v1
-kind: FirewallPolicy
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
 metadata:
   name: db-inbound
 spec:
@@ -42,8 +42,8 @@ spec:
       from: 10.219.0.0/16
       note: postgres-from-sdn
 ---
-apiVersion: delonix.io/v1
-kind: FirewallPolicy
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
 metadata:
   name: db-outbound
 spec:

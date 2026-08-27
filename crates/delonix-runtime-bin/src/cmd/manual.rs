@@ -42,6 +42,7 @@
 //! `--l18n=pt` does not leave an English block in the middle of a Portuguese
 //! screen. `see_also` and command names are identifiers — never translated.
 
+use super::kinds as k;
 use super::po;
 
 /// The editorial material for one command. Everything structural (the tree, the
@@ -71,7 +72,7 @@ const GROUP_ORDER: &[&str] = &[
     "Interact",
     "Configure",
     "Networking",
-    "Storage",
+    k::STORAGE,
     "Declarative",
     "Maintenance",
     "Dashboards",

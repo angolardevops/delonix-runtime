@@ -13,7 +13,7 @@
 #    `stack validate` confirma a referência).
 ---
 # Um volume de rede (NAS) — vira o directório partilhado para a VM.
-apiVersion: delonix.io/v1
+apiVersion: storage.delonix.io/v1alpha1
 kind: Volume
 metadata:
   name: dados-nas
@@ -22,8 +22,8 @@ spec:
     server: 10.0.0.5
     share: /mnt/pool/dados
 ---
-apiVersion: delonix.io/v1
-kind: Vm
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
 metadata:
   name: app-vm
 spec:

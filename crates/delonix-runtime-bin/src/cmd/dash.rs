@@ -10,6 +10,7 @@
 //! Data collection (`DashData::collect`) and snapshot formatting are pure
 //! over the stores — testable without a terminal. The TUI is a thin shell on top.
 
+use super::kinds as k;
 use std::collections::{HashMap, VecDeque};
 use std::io::IsTerminal;
 use std::time::{Duration, Instant};
@@ -55,7 +56,7 @@ impl DashScope {
             DashScope::Containers => "Containers",
             DashScope::Vms => "VMs",
             DashScope::Networks => "Networks",
-            DashScope::Storage => "Storage",
+            DashScope::Storage => k::STORAGE,
             DashScope::Images => "Images",
         }
     }
@@ -399,7 +400,7 @@ impl DashData {
                     .map(super::output::fmt_duration_secs)
                     .unwrap_or_else(|| "-".to_string());
                 rows.push(Row {
-                    kind: "Container".into(),
+                    kind: k::CONTAINER.into(),
                     name: name.clone(),
                     status: st.to_string(),
                     up,
@@ -417,7 +418,7 @@ impl DashData {
         if want_v {
             for v in &vms {
                 rows.push(Row {
-                    kind: "Vm".into(),
+                    kind: k::VM.into(),
                     name: v.name.clone(),
                     status: v.status.to_string(),
                     up: "-".to_string(),
@@ -435,7 +436,7 @@ impl DashData {
         if want_n {
             for n in &networks {
                 rows.push(Row {
-                    kind: "Network".into(),
+                    kind: k::NETWORK.into(),
                     name: n.name.clone(),
                     status: n.driver.clone(),
                     up: "-".to_string(),
@@ -453,7 +454,7 @@ impl DashData {
         if want_s {
             for vol in &volumes {
                 rows.push(Row {
-                    kind: "Volume".into(),
+                    kind: k::VOLUME.into(),
                     name: vol.name.clone(),
                     status: vol.driver.clone(),
                     up: "-".to_string(),
@@ -476,7 +477,7 @@ impl DashData {
                     .cloned()
                     .unwrap_or_else(|| img.short_id());
                 rows.push(Row {
-                    kind: "Image".into(),
+                    kind: k::IMAGE.into(),
                     name,
                     status: img.short_id(),
                     up: "-".to_string(),
@@ -1682,7 +1683,7 @@ mod tui {
 
         fn row(name: &str, status: &str, mem: Option<u64>) -> Row {
             Row {
-                kind: "Container".into(),
+                kind: k::CONTAINER.into(),
                 name: name.into(),
                 status: status.into(),
                 up: "-".into(),

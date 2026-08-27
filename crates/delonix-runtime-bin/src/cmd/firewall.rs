@@ -8,6 +8,7 @@
 //! IP on the `delonix0` bridge) — `--net host` containers share the host stack
 //! and are rejected honestly.
 
+use super::kinds as k;
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
 use delonix_net::infra;
@@ -1084,7 +1085,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     // `cmd::httproute`), and `kind: Egress` is rewritten into a FirewallPolicy with
     // `direction: egress` at load time (`manifest::lower_egress`) — so by the time
     // anything reaches here there is one Kind, one struct and one direction field.
-    for doc in manifest::of_kind(docs, "FirewallPolicy") {
+    for doc in manifest::of_kind(docs, k::FIREWALL_POLICY) {
         let dir = match doc.spec.get("direction").and_then(|v| v.as_str()) {
             Some("ingress") => "in",
             Some("egress") => "out",
@@ -1183,7 +1184,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     keys.sort();
     f.insert("rules".into(), keys.join(","));
     Ok(super::reconcile::Desired {
-        kind: "FirewallPolicy".into(),
+        kind: k::FIREWALL_POLICY.into(),
         name: doc.metadata.name.clone(),
         fields: f,
         converges: true,
@@ -1206,7 +1207,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
 pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actual>> {
     let (_images, store) = open_stores()?;
     let mut out = Vec::new();
-    for doc in manifest::of_kind(docs, "FirewallPolicy") {
+    for doc in manifest::of_kind(docs, k::FIREWALL_POLICY) {
         let Ok(spec) = manifest::spec_of::<FwDocSpec>(doc) else {
             continue;
         };
@@ -1251,7 +1252,7 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
         keys.sort();
         f.insert("rules".into(), keys.join(","));
         out.push(super::reconcile::Actual {
-            kind: "FirewallPolicy".into(),
+            kind: k::FIREWALL_POLICY.into(),
             name: doc.metadata.name.clone(),
             fields: f,
             owner: c.labels.get(super::reconcile::STACK_LABEL).cloned(),
