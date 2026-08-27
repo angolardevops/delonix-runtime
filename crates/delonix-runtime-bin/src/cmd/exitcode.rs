@@ -55,17 +55,31 @@
 //!   is not an error variant at all — the engine warns and carries on, so there
 //!   is nothing to classify. Giving it a code would mean inventing the
 //!   condition first.
-//! * *Permission denied* (77) and *retryable* (75), which the CLI restructuring
-//!   proposed, have **no producer today**: permission failures arrive wrapped
-//!   as `Error::Io(EACCES)` or `Runtime{EPERM}` from deep inside a syscall
-//!   path, and the retrying that exists (`publish_with_retry`) happens inside
-//!   the engine and never reaches a caller. Publishing either would repeat the
-//!   mistake `Error::Conflict` documents in its own doc-comment: a code nothing
+//! * *Retryable* (75), which the CLI restructuring proposed, has **no producer
+//!   today**: the retrying that exists (`publish_with_retry`) happens inside the
+//!   engine and never reaches a caller. Publishing it would repeat the mistake
+//!   `Error::Conflict` documents in its own doc-comment: a code nothing
 //!   constructs, that can never be observed.
+//!
+//!   *Permission denied* (77) was on this list for the same reason, and the
+//!   reason was WRONG — corrected by measurement rather than by re-reading.
+//!   There is no `Error::PermissionDenied` variant, which is what the earlier
+//!   note checked; but the failure does reach a caller, wrapped as
+//!   `Error::Io` whose `kind()` is `PermissionDenied`. Measured against a state
+//!   root with the write bit cleared: `volumes create` and `secret create` both
+//!   come back exactly that way. «No variant» and «no producer» are different
+//!   claims, and the first was used to conclude the second.
 //! * `Error::Invalid` and `Error::Registry` keep 1. Splitting «your argument is
 //!   wrong» from «the registry answered badly» is defensible, but neither
 //!   changes what a reconciler does next, and every extra number is a promise
 //!   that has to hold for the rest of the `0.x`.
+//!
+//!   The CLI restructuring asks for `65` (invalid manifest or data) here, and
+//!   that is NOT a rename of this arm: `Error::Invalid` is constructed at 643
+//!   sites in this binary, covering both «your manifest is wrong» (65 in that
+//!   proposal) and «your flag is wrong» (64 in the same proposal). Mapping the
+//!   variant wholesale would give one number to two classes the proposal itself
+//!   separates. Splitting it needs the variant split first.
 //!
 //! # Where the numbers must NOT reach
 //!
@@ -102,6 +116,19 @@ pub const CONFLICT: i32 = 5;
 /// A capability this host does not have (`sysexits.h`: `EX_UNAVAILABLE`).
 pub const UNAVAILABLE: i32 = 69;
 
+/// The filesystem said no on a path this engine needs (`sysexits.h`: `EX_IOERR`).
+pub const IO: i32 = 74;
+
+/// The operating system refused, and the fix is a permission (`EX_NOPERM`).
+///
+/// Carved out of [`IO`] rather than given a variant of its own, because that is
+/// where it actually arrives: measured against a state root with the write bit
+/// cleared, both `volumes create` and `secret create` come back as
+/// `Error::Io(Permission denied (os error 13))`. It is the single most
+/// actionable failure a caller can get — fix the permission and retry — and
+/// answering the same `1` as every other I/O problem threw that away.
+pub const NO_PERMISSION: i32 = 77;
+
 /// The deadline passed with the work unfinished (`timeout(1)`'s own code).
 pub const TIMEOUT: i32 = 124;
 
@@ -117,7 +144,12 @@ pub fn for_error(e: &Error) -> i32 {
         Error::Conflict(_) => CONFLICT,
         Error::Unavailable(_) => UNAVAILABLE,
         Error::Timeout(_) => TIMEOUT,
-        Error::Io(_) | Error::Json(_) | Error::Runtime { .. } => GENERIC,
+        // The KIND is inspected rather than the variant: `Error::Io` is the
+        // wrapper every filesystem refusal arrives in, and EACCES inside it is
+        // a different answer for the caller than a full disk or a bad path.
+        Error::Io(e) if e.kind() == std::io::ErrorKind::PermissionDenied => NO_PERMISSION,
+        Error::Io(_) => IO,
+        Error::Json(_) | Error::Runtime { .. } => GENERIC,
         Error::Invalid(_) | Error::Registry(_) => GENERIC,
     }
 }
@@ -164,6 +196,20 @@ mod tests {
     #[test]
     fn existe_mas_parado_tem_codigo_proprio() {
         assert_eq!(for_error(&Error::NotRunning("web".into())), NOT_RUNNING);
+        // The KIND decides, not the variant: two `Error::Io` values give
+        // different numbers, and that distinction is what 77 exists for.
+        assert_eq!(
+            for_error(&Error::Io(std::io::Error::from(
+                std::io::ErrorKind::PermissionDenied
+            ))),
+            NO_PERMISSION
+        );
+        assert_eq!(
+            for_error(&Error::Io(std::io::Error::from(
+                std::io::ErrorKind::NotFound
+            ))),
+            IO
+        );
     }
 
     #[test]
@@ -227,6 +273,11 @@ mod tests {
                 message: "EPERM".into(),
             },
             Error::Io(std::io::Error::other("boom")),
+            // The sample held ONE `Error::Io` and therefore could not see the
+            // divergence it exists to forbid: the permission kind gives another
+            // number, so it must give another DX_ code. A test blind to half the
+            // case passes for the wrong reason.
+            Error::Io(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
         ];
 
         let mut by_exit_code: HashMap<i32, &str> = HashMap::new();
@@ -266,11 +317,15 @@ mod tests {
     fn tudo_o_resto_continua_a_ser_um() {
         // The conservative half of the contract: nothing that used to be 1 and
         // has no class moves.
+        //
+        // `Error::Io` LEFT this list when 74/77 landed, and that is the whole
+        // point of the list — it is the gate that made the move visible instead
+        // of letting it happen quietly. What stays here is what still has no
+        // class of its own.
         for e in [
             Error::Invalid("bad port".into()),
             Error::Registry("401".into()),
             Error::Json(serde_json::from_str::<u8>("{").unwrap_err()),
-            Error::Io(std::io::Error::other("boom")),
         ] {
             assert_eq!(for_error(&e), GENERIC, "{e}");
         }
@@ -281,7 +336,15 @@ mod tests {
         // 2 is clap's usage error AND `stack plan --detailed-exitcode`'s "there
         // are changes"; 126/127 are the shell's; 128+N is a signal. A class
         // landing on any of those would be read as something else entirely.
-        for c in [NOT_RUNNING, NOT_FOUND, CONFLICT, UNAVAILABLE, TIMEOUT] {
+        for c in [
+            NOT_RUNNING,
+            NOT_FOUND,
+            CONFLICT,
+            UNAVAILABLE,
+            IO,
+            NO_PERMISSION,
+            TIMEOUT,
+        ] {
             assert_ne!(c, 0);
             assert_ne!(c, 2);
             // 126 = "found but not executable", 127 = "not found", 128+N = a
