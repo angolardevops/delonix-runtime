@@ -120,22 +120,55 @@ retryable, `77` permission denied, `124` timeout. `2` keeps its double duty
 the parser must be configured so a usage error cannot be mistaken for a plan
 with changes — which is what §19 asked for in the first place.
 
-**Two of the four new codes, not four.** §19 proposed `69`/`75`/`77`/`124`.
+**Two of the four new codes, not four.** *(Superseded by the correction
+below: three of the four shipped, plus `74`. Kept as written — what the
+decision was at the time is the point of the record.)* §19 proposed
+`69`/`75`/`77`/`124`.
 `69` (capability unavailable) and `124` (timeout) shipped: both had **real
 producers being misclassified** — `stack wait` answered 1 on a timeout, the same
 number as a broken apply, on the command whose entire job is to be read by CI;
 a missing `wg`/`virt-customize`/`ngrok`/`cloudflared`/`systemd-run` answered 1
 too, indistinguishable from a typo in a flag.
 
-`75` (retryable) and `77` (permission denied) did **not** ship, and the reason is
-the one `Error::Conflict` already documents in its own doc-comment: it sat in the
-enum with **zero producers** while `delonix-mgmt` matched on it for a 409 and the
-real refusals said `Invalid`. Permission failures arrive wrapped as
-`Error::Io(EACCES)` or `Runtime{EPERM}` from inside a syscall path, and the
-retrying that exists (`publish_with_retry`) happens inside the engine and never
-reaches a caller. Publishing either would be a number that can never be
-observed — decoration, the same shape as the digest-pinning that audit #3 found.
-They reopen the day something constructs them.
+`75` (retryable) did **not** ship, and the reason is the one `Error::Conflict`
+already documents in its own doc-comment: it sat in the enum with **zero
+producers** while `delonix-mgmt` matched on it for a 409 and the real refusals
+said `Invalid`. The retrying that exists (`publish_with_retry`) happens inside
+the engine and never reaches a caller. Publishing it would be a number that can
+never be observed — decoration, the same shape as the digest-pinning that audit
+#3 found. It reopens the day something constructs it.
+
+**Correction (2026-08-27): `77` DID ship, and `74` came with it.** This ADR put
+`77` in the same bucket as `75` and refused both on one argument — that
+permission failures "arrive wrapped as `Error::Io(EACCES)` from inside a syscall
+path", so nothing constructs them. The observation was right and the conclusion
+was wrong: a code does not need a variant of its own, it needs somewhere honest
+to be read from. `for_error` inspects the **kind inside the wrapper**
+(`Error::Io(e) if e.kind() == PermissionDenied`), and that is measured rather
+than assumed — against a state root with the write bit cleared, both
+`volumes create` and `secret create` come back exactly that way. `74`
+(`EX_IOERR`) follows from it: carving `77` out of the I/O bucket is what leaves
+the rest of that bucket a class worth naming.
+
+Neither spends a published promise, and that is the whole test. Both are carved
+out of `1`, which the published table describes as "a failure with no class of
+its own", so a script whose last arm is `*) exit 1` keeps matching. `3`/`4`/`5`
+are untouched, `case $? in 4)` still means what it meant.
+
+`65` (invalid data) stays out, for a reason of its own rather than the one
+above: `Error::Invalid` covers both "your manifest is wrong" (`65` in the
+specification) and "your flag is wrong" (`64` in the same one), and it is
+constructed in too many places to retag wholesale — **924 across the workspace,
+635 of them in the CLI crate**
+(`grep -rIn 'Error::Invalid(' --include=*.rs crates/ | wc -l`; the slice that
+shipped `74`/`77` quoted 643, which is the CLI crate alone). Mapping the whole
+variant would hand ONE number to two classes the specification is careful to
+separate. It needs the variant split first.
+
+The table in force after this correction is `1` · `3` · `4` · `5` · `69` · `74`
+· `77` · `124`. `cmd/exitcode.rs` is the single place that decides it, and
+`docs/cli-stability.md` publishes it — the two new rows land there with the
+CLI-2 slice, not with this correction.
 
 **Manifests — `delonix.io/v1` keeps loading.** It lowers to the new Kinds in
 `load`, through `Form::Deprecated`, with a deprecation warning. `kind: Container`
