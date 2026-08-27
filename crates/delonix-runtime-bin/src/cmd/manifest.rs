@@ -130,12 +130,24 @@ const LEGACY_API_VERSION: &str = "delonix.io/v1";
 
 /// «Is this file a delonix manifest at all», for the guards over `examples/`.
 ///
-/// Deliberately the GROUP suffix and not [`LEGACY_API_VERSION`]: a
-/// `contains("delonix.io/v1")` also matches `compute.delonix.io/v1alpha1`, but
-/// only by substring accident — it stops being true the day a group is spelled
-/// differently, and a guard that silently stops matching goes vacuously green.
+/// One function and not a `contains` at each call site, because the three that
+/// existed already disagreed. One of them looked for the literal
+/// `"apiVersion: delonix.io/"`, which stopped matching the day the examples
+/// moved to `apiVersion: compute.delonix.io/v1alpha1` — it then skipped EVERY
+/// example, and only a `files >= 20` guard turned that into a failure instead
+/// of a vacuously green run over nothing.
+///
+/// So the question is asked properly: a line that declares an `apiVersion`
+/// whose value lives under `delonix.io`. A bare `contains("delonix.io/")` would
+/// also match a URL in a comment.
 #[cfg(test)]
-const MANIFEST_MARKER: &str = "delonix.io/";
+fn is_delonix_manifest(text: &str) -> bool {
+    text.lines().any(|l| {
+        l.trim_start()
+            .strip_prefix("apiVersion:")
+            .is_some_and(|v| v.trim().contains("delonix.io/"))
+    })
+}
 
 /// Whether this document's `apiVersion` is one this engine serves.
 ///
@@ -1238,7 +1250,7 @@ spec: { disk: k8s-golden }
                 continue;
             }
             let text = std::fs::read_to_string(&path).expect("exemplo legivel");
-            if !text.contains("apiVersion: delonix.io/") {
+            if !is_delonix_manifest(&text) {
                 continue; // cloud-init e afins: nao sao manifestos deste motor
             }
             files += 1;
@@ -1448,7 +1460,7 @@ spec: { image: alpine, memroy: 2G, restartPolicy: always }
             // marker but the load fails — the test MUST fail, otherwise a
             // malformed example passes unnoticed). Without this distinction, the
             // guard would stay vacuously green for a broken example.
-            if !text.contains(MANIFEST_MARKER) {
+            if !is_delonix_manifest(&text) {
                 continue;
             }
             let docs = load(&path).unwrap_or_else(|e| {
@@ -1493,7 +1505,7 @@ kind: Container
 metadata: {}
 spec: { image: alpine }
 ";
-        assert!(text.contains(MANIFEST_MARKER));
+        assert!(is_delonix_manifest(text));
         let p = std::env::temp_dir().join(format!(
             "delonix-manifest-partido-{}.yaml",
             std::process::id()

@@ -362,7 +362,7 @@
         "restart": {},
         "restartPolicy": {
           "default": "no",
-          "description": "`no` (default) | `on-failure[:max]` | `always` | `unless-stopped` —\na detached supervisor becomes the container's parent and restarts it (see\n`run_supervised`). This is what makes a manifest resilient. Canonical\nfield name is `restartPolicy` (uniform with `kind: Vm`); the legacy\n`restart` stays accepted so existing manifests don't break.",
+          "description": "`no` (default) | `on-failure[:max]` | `always` | `unless-stopped` —\na detached supervisor becomes the container's parent and restarts it (see\n`run_supervised`). This is what makes a manifest resilient. Canonical\nfield name is `restartPolicy` (uniform with `kind: VirtualMachine`); the legacy\n`restart` stays accepted so existing manifests don't break.",
           "type": "string"
         },
         "secret": {
@@ -438,7 +438,7 @@
       "type": "object"
     },
     "CpuTopologySpec": {
-      "description": "`spec.cpuTopology` of a `kind: Vm`.",
+      "description": "`spec.cpuTopology` of a `kind: VirtualMachine`.",
       "properties": {
         "cores": {
           "default": 0,
@@ -727,7 +727,7 @@
           ]
         },
         "direction": {
-          "description": "`ingress`|`egress` — only for `kind: FirewallPolicy` (the direction comes\nfrom the Kind for the legacy `Egress`). Captured so the dry-run round-trip\npreserves it; `apply` reads it directly from `doc.spec`.",
+          "description": "`ingress`|`egress` — only for `kind: NetworkPolicy` (the direction comes\nfrom the Kind for the legacy `Egress`). Captured so the dry-run round-trip\npreserves it; `apply` reads it directly from `doc.spec`.",
           "type": [
             "string",
             "null"
@@ -2155,7 +2155,7 @@
       "type": "object"
     },
     "VmBuildSpec": {
-      "description": "`spec.build` of a `kind: Vm` — the declarative face of `delonix vm build`.\n\nThe fields are the flags of that command, one for one, so the two paths\ncannot describe different builds. Nothing here is a second implementation:\n`apply` calls the SAME `vmfile::build`.",
+      "description": "`spec.build` of a `kind: VirtualMachine` — the declarative face of `delonix vm build`.\n\nThe fields are the flags of that command, one for one, so the two paths\ncannot describe different builds. Nothing here is a second implementation:\n`apply` calls the SAME `vmfile::build`.",
       "properties": {
         "compress": {
           "default": true,
@@ -2241,7 +2241,7 @@
     },
     "VmSpec": {
       "additionalProperties": false,
-      "description": "`spec` for `kind: Vm` — mirrors `delonix_vm::VmConfig` (minus `name`, which\ncomes from `metadata.name`).",
+      "description": "`spec` for `kind: VirtualMachine` — mirrors `delonix_vm::VmConfig` (minus `name`, which\ncomes from `metadata.name`).",
       "properties": {
         "backend": {
           "type": [
@@ -2321,7 +2321,7 @@
         },
         "disk": {
           "default": "",
-          "description": "The base disk: a VM image name in the store, or a path.\n\nOptional ONLY because [`build`](Self::build) can produce it. Exactly one\nof the two — a `kind: Vm` with neither has no disk to boot, and one with\nboth is two answers to the same question (see [`VmSpec::resolve_disk`]).",
+          "description": "The base disk: a VM image name in the store, or a path.\n\nOptional ONLY because [`build`](Self::build) can produce it. Exactly one\nof the two — a `kind: VirtualMachine` with neither has no disk to boot, and one with\nboth is two answers to the same question (see [`VmSpec::resolve_disk`]).",
           "type": "string"
         },
         "extraDisks": {
@@ -2627,7 +2627,7 @@
     },
     "WorkloadSpec": {
       "additionalProperties": false,
-      "description": "The `spec` of a `kind: Workload`: a `type` discriminator plus the single\ntype-named block that holds the underlying spec, kept raw until the target\nKind re-deserializes it.\nThe four blocks are `serde_yaml::Value` because the lowering hands them to\nthe target Kind to re-deserialize, and holding them raw is what keeps this\ntype from restating a spec it does not own.\n\nFor the SCHEMA that is not good enough: `Value` describes as «anything», so\nan editor would have nothing to say inside the block that carries the entire\nworkload. `#[schemars(with = ...)]` names the type the block actually IS —\nstill derived from the real spec, never a second copy of its fields. That is\nalso the truth of the lowering: `spec.container` is re-read as a\n`ContainerSpec`, so anything the schema would accept here and that type would\nreject is a manifest that fails at apply.\n\n`microvm` maps to `VmSpec` for the same reason it lowers to `kind: Vm` — it\nis a `VmSpec` with the backend forced to `cloud-hypervisor` (ADR-0006).",
+      "description": "The `spec` of a `kind: Workload`: a `type` discriminator plus the single\ntype-named block that holds the underlying spec, kept raw until the target\nKind re-deserializes it.\nThe four blocks are `serde_yaml::Value` because the lowering hands them to\nthe target Kind to re-deserialize, and holding them raw is what keeps this\ntype from restating a spec it does not own.\n\nFor the SCHEMA that is not good enough: `Value` describes as «anything», so\nan editor would have nothing to say inside the block that carries the entire\nworkload. `#[schemars(with = ...)]` names the type the block actually IS —\nstill derived from the real spec, never a second copy of its fields. That is\nalso the truth of the lowering: `spec.container` is re-read as a\n`ContainerSpec`, so anything the schema would accept here and that type would\nreject is a manifest that fails at apply.\n\n`microvm` maps to `VmSpec` for the same reason it lowers to `kind: VirtualMachine` — it\nis a `VmSpec` with the backend forced to `cloud-hypervisor` (ADR-0006).",
       "properties": {
         "container": {
           "anyOf": [
