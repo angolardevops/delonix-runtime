@@ -501,7 +501,10 @@ if [ "$WITH_BINARY" = 1 ]; then
           HAVE=$("$ed" --list-extensions --show-versions 2>/dev/null \
                    | grep -i '^angolardevops\.delonix@' | head -1 || true)
           if [ -n "$HAVE" ]; then
-            skip editor "$ed already has ${HAVE#*@} — the editor keeps it up to date"
+            # A frase NÃO promete que o editor a actualiza: isso só passa a ser
+            # verdade quando a extensão estiver nas galerias, e hoje não está.
+            # Diz o que é verdade em qualquer dos dois estados.
+            skip editor "$ed already has ${HAVE#*@} — leaving it alone (update it from the editor, or install a .vsix by hand)"
             continue
           fi
           if "$ed" --install-extension "$TMP/$VSIX_ASSET.vsix" --force >/dev/null 2>&1; then
