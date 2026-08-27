@@ -97,6 +97,25 @@ jobs:
           # it outside the signature would give an inventory anyone can swap —
           # and a tampered SBOM is worse than none, because it is believed.
           cd dist-release && sha256sum delonix-sbom.spdx.json >> SHA256SUMS
+      - name: The editor extension, from its own repository
+        # The extension lives in `angolardevops/delonix-vscode` and releases on
+        # its own cadence. It is copied in here — instead of being fetched from
+        # there by the installer — so it lands inside the SAME signed
+        # SHA256SUMS as everything else: one supply chain, one signature.
+        #
+        # Best-effort ON PURPOSE. A release of the engine cannot fail because a
+        # separate repository has no artefact yet; without the asset the
+        # installer takes its `skip editor` path, which says so out loud.
+        run: |
+          if gh release download --repo angolardevops/delonix-vscode \
+               --pattern '*.vsix' --dir /tmp/vsix 2>/dev/null; then
+            cp /tmp/vsix/*.vsix dist-release/delonix-vscode
+            cd dist-release && sha256sum delonix-vscode >> SHA256SUMS
+          else
+            echo "::notice::no extension release yet — this engine release ships without it"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
       - name: Sanidade — o binário arranca e reporta a versão da tag
         run: |
           V=$(dist-release/delonix-x86_64-linux --version)
