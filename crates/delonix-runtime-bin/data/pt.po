@@ -9535,3 +9535,98 @@ msgstr "remove por Kind e nome"
 
 msgid "with no name it REFUSES — it will not take every one of them"
 msgstr "sem nome RECUSA — não leva todos"
+
+# --- verbos de manifesto no topo: apply / plan / wait / manifest (CLI-2) ---
+msgid "Converge a manifest — the canonical spelling of `stack apply`"
+msgstr "Converge um manifesto — a grafia canónica de `stack apply`"
+
+msgid "Converge a manifest — the canonical spelling of `stack apply`.\n\nPromoted to the top because the verb belongs to the MANIFEST, not to one group: a file with a Network, a Volume and a Pod in it is not a «stack» operation any more than it is a «network» one."
+msgstr "Converge um manifesto — a grafia canónica de `stack apply`.\n\nPromovido ao topo porque o verbo pertence ao MANIFESTO, e não a um grupo: um ficheiro com uma Network, um Volume e um Pod lá dentro não é uma operação de «stack» mais do que é uma de «network»."
+
+msgid "Show what an apply would change, and change nothing"
+msgstr "Mostra o que um apply mudaria, e não muda nada"
+
+msgid "Block until the manifest's resources are ready"
+msgstr "Bloqueia até os recursos do manifesto estarem prontos"
+
+msgid "Work on a manifest without touching the host"
+msgstr "Trabalha um manifesto sem tocar na máquina"
+
+msgid "Check a manifest against the schema, the references and the graph"
+msgstr "Verifica um manifesto contra o schema, as referências e o grafo"
+
+msgid "Print the manifest as the engine will read it, with defaults filled in"
+msgstr "Imprime o manifesto tal como o motor o vai ler, com os defaults preenchidos"
+
+msgid "Print the manifest as the engine will read it, with defaults filled in.\n\nThe spelling the CLI restructuring asks for is `render`; what it does is what `stack apply --dry-run` already did — round-trip every document through its typed spec so the `#[serde(default)]` values become visible. Secrets are NOT resolved: a rendered manifest is meant to be read by a person and pasted into a review."
+msgstr "Imprime o manifesto tal como o motor o vai ler, com os defaults preenchidos.\n\nA grafia que a reestruturação da CLI pede é `render`; o que ele faz é o que o `stack apply --dry-run` já fazia — passar cada documento pela sua spec tipada para os valores `#[serde(default)]` ficarem visíveis. Os segredos NÃO são resolvidos: um manifesto renderizado é para ser lido por uma pessoa e colado numa revisão."
+
+msgid "The JSON Schema, generated from the Rust types (ADR-0007)"
+msgstr "O JSON Schema, gerado dos tipos Rust (ADR-0007)"
+
+msgid "Stack name to own the resources with (`delonix.io/stack`)"
+msgstr "Nome da stack que fica dona dos recursos (`delonix.io/stack`)"
+
+msgid "Print what would be applied, and apply nothing"
+msgstr "Imprime o que seria aplicado, e não aplica nada"
+
+msgid "Authorize the recreate of a resource whose cold field changed"
+msgstr "Autoriza a recriação de um recurso cujo campo frio mudou"
+
+msgid "0 = no changes, 2 = there are changes, 1 = error (`terraform plan`)"
+msgstr "0 = sem alterações, 2 = há alterações, 1 = erro (`terraform plan`)"
+
+msgid "Print WHICH fields the plan compares, per Kind, and exit"
+msgstr "Imprime QUE campos o plano compara, por Kind, e sai"
+
+msgid "Seconds to wait before giving up (exit 124)"
+msgstr "Segundos a esperar antes de desistir (saída 124)"
+
+msgid "Refuse an unknown field instead of warning about it"
+msgstr "Recusa um campo desconhecido em vez de avisar"
+
+msgid "One Kind instead of the whole document"
+msgstr "Um Kind em vez do documento inteiro"
+
+# --- exemplos do manual: apply / plan / wait / manifest ---
+msgid "converge a manifest — creates, updates hot, and refuses a recreate"
+msgstr "converge um manifesto — cria, actualiza a quente, e recusa uma recriação"
+
+msgid "see it first, change nothing"
+msgstr "vê primeiro, não muda nada"
+
+msgid "also remove what this stack owns and the file no longer declares"
+msgstr "remove também o que esta stack possui e o ficheiro já não declara"
+
+msgid "what an apply would change"
+msgstr "o que um apply mudaria"
+
+msgid "a drift gate for CI: 0 none, 2 changes, 1 error"
+msgstr "um portão de deriva para a CI: 0 nenhuma, 2 há, 1 erro"
+
+msgid "which fields are compared, per Kind"
+msgstr "que campos são comparados, por Kind"
+
+msgid "block until the manifest's resources are ready"
+msgstr "bloqueia até os recursos do manifesto estarem prontos"
+
+msgid "give up after a minute (exit 124)"
+msgstr "desiste ao fim de um minuto (saída 124)"
+
+msgid "schema, references and graph — without touching the host"
+msgstr "schema, referências e grafo — sem tocar na máquina"
+
+msgid "refuse an unknown field instead of warning"
+msgstr "recusa um campo desconhecido em vez de avisar"
+
+msgid "the manifest as the engine reads it, defaults filled in"
+msgstr "o manifesto tal como o motor o lê, com os defaults preenchidos"
+
+msgid "the JSON Schema, generated from the Rust types"
+msgstr "o JSON Schema, gerado dos tipos Rust"
+
+msgid "one Kind instead of the whole document"
+msgstr "um Kind em vez do documento inteiro"
+
+msgid "everything here is host-free — it reads the file, not the machine"
+msgstr "tudo aqui é livre de máquina — lê o ficheiro, não o host"

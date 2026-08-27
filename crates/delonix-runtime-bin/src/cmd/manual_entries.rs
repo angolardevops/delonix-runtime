@@ -485,6 +485,69 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["explain", "schema print", "stack plan", "stack apply"],
     },
     Entry {
+        path: "apply",
+        group: "",
+        examples: &[
+            ("converge a manifest — creates, updates hot, and refuses a recreate", "delonix apply -f delonix-manifest.yaml"),
+            ("see it first, change nothing", "delonix apply -f delonix-manifest.yaml --dry-run"),
+            ("also remove what this stack owns and the file no longer declares", "delonix apply -f delonix-manifest.yaml --prune"),
+        ],
+        see_also: &["plan", "wait", "manifest validate", "stack destroy"],
+    },
+    Entry {
+        path: "plan",
+        group: "",
+        examples: &[
+            ("what an apply would change", "delonix plan -f delonix-manifest.yaml"),
+            ("a drift gate for CI: 0 none, 2 changes, 1 error", "delonix plan -f delonix-manifest.yaml --detailed-exitcode"),
+            ("which fields are compared, per Kind", "delonix plan --fields"),
+        ],
+        see_also: &["apply", "wait", "manifest validate"],
+    },
+    Entry {
+        path: "wait",
+        group: "",
+        examples: &[
+            ("block until the manifest's resources are ready", "delonix wait -f delonix-manifest.yaml"),
+            ("give up after a minute (exit 124)", "delonix wait -f delonix-manifest.yaml --timeout 60"),
+        ],
+        see_also: &["apply", "plan"],
+    },
+    Entry {
+        path: "manifest",
+        group: "",
+        examples: &[
+            ("everything here is host-free — it reads the file, not the machine", "delonix manifest validate -f delonix-manifest.yaml"),
+        ],
+        see_also: &["apply", "plan", "explain"],
+    },
+    Entry {
+        path: "manifest validate",
+        group: "manifest",
+        examples: &[
+            ("schema, references and graph — without touching the host", "delonix manifest validate -f delonix-manifest.yaml"),
+            ("refuse an unknown field instead of warning", "delonix manifest validate -f delonix-manifest.yaml --strict"),
+        ],
+        see_also: &["manifest render", "manifest schema", "plan"],
+    },
+    Entry {
+        path: "manifest render",
+        group: "manifest",
+        examples: &[
+            ("the manifest as the engine reads it, defaults filled in", "delonix manifest render -f delonix-manifest.yaml"),
+        ],
+        see_also: &["manifest validate", "manifest schema", "apply"],
+    },
+    Entry {
+        path: "manifest schema",
+        group: "manifest",
+        examples: &[
+            ("the JSON Schema, generated from the Rust types", "delonix manifest schema"),
+            ("one Kind instead of the whole document", "delonix manifest schema --kind Pod"),
+        ],
+        see_also: &["manifest validate", "explain", "api-resources"],
+    },
+    Entry {
         path: "get",
         group: "",
         examples: &[

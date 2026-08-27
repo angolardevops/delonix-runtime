@@ -51,12 +51,23 @@ Concretamente, garante-se:
 | `4` | **não existe** esse recurso |
 | `5` | **conflito** — o nome já está tomado |
 | `69` | **capacidade que este host não tem** — uma ferramenta por instalar, um backend indisponível |
+| `74` | **o sistema de ficheiros disse que não** — disco cheio, caminho impossível |
+| `77` | **permissão negada** — o remédio é uma permissão, e depois repetir |
 | `124` | **o prazo esgotou-se** — `stack wait --timeout`, e o que vier a ter prazo |
 
 `3` e `4` não são números inventados: são os códigos de estado do LSB que o
 `systemctl` ainda fala (`3` = o programa não está a correr, `4` = não há tal
 unidade). `5` não tem convenção por trás — é o número livre seguinte, abaixo da
 gama que a shell usa (`126`/`127`, e `128+N` para sinais).
+
+**`74` e `77` saíram do balde do `1`, e não de nenhuma classe publicada.** Até
+à v0.66.1 uma falha de I/O respondia `1`, que a linha de cima descreve como
+«falha sem classe própria» — dar-lhe classe é o que esta tabela existe para
+fazer, e um script com `*) exit 1` continua a cair no mesmo ramo. O `77` é
+recortado do `74` pelo `kind` do erro, porque é assim que ele chega: medido
+contra um state root sem bit de escrita, `volumes create` e `secret create`
+vêm ambos como permissão negada. É a falha mais accionável que existe — corrige
+a permissão e repete — e respondia o mesmo número que um disco cheio.
 
 **`69` e `124` também não.** `69` é o `EX_UNAVAILABLE` do `sysexits.h`; `124` é
 o que o `timeout(1)` devolve quando o prazo passa, e está portanto já nos dedos

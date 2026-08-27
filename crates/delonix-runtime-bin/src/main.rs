@@ -185,6 +185,56 @@ enum Cmd {
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: cmd::output::OutputFormat,
     },
+    /// Converge a manifest — the canonical spelling of `stack apply`.
+    ///
+    /// Promoted to the top because the verb belongs to the MANIFEST, not to one
+    /// group: a file with a Network, a Volume and a Pod in it is not a «stack»
+    /// operation any more than it is a «network» one.
+    Apply {
+        #[arg(short = 'f', long = "file", value_hint = clap::ValueHint::FilePath)]
+        file: Option<std::path::PathBuf>,
+        /// Stack name to own the resources with (`delonix.io/stack`).
+        #[arg(long)]
+        name: Option<String>,
+        /// Print what would be applied, and apply nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Authorize the recreate of a resource whose cold field changed.
+        #[arg(long, value_name = "Kind/name")]
+        replace: Vec<String>,
+        /// Remove what this stack owns and the manifest no longer declares.
+        #[arg(long)]
+        prune: bool,
+    },
+    /// Show what an apply would change, and change nothing.
+    Plan {
+        #[arg(short = 'f', long = "file", value_hint = clap::ValueHint::FilePath)]
+        file: Option<std::path::PathBuf>,
+        #[arg(long)]
+        name: Option<String>,
+        /// Output format: `table` (default) or `json` (ADR-0005).
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: cmd::output::OutputFormat,
+        /// 0 = no changes, 2 = there are changes, 1 = error (`terraform plan`).
+        #[arg(long)]
+        detailed_exitcode: bool,
+        /// Print WHICH fields the plan compares, per Kind, and exit.
+        #[arg(long)]
+        fields: bool,
+    },
+    /// Block until the manifest's resources are ready.
+    Wait {
+        #[arg(short = 'f', long = "file", value_hint = clap::ValueHint::FilePath)]
+        file: Option<std::path::PathBuf>,
+        /// Seconds to wait before giving up (exit 124).
+        #[arg(long, default_value_t = 300)]
+        timeout: u64,
+    },
+    /// Work on a manifest without touching the host.
+    Manifest {
+        #[command(subcommand)]
+        action: cmd::manifestcmd::ManifestCmd,
+    },
     /// List resources of a Kind — the generic form of ten `ls` commands.
     ///
     /// The Kind is resolved through the same registry `api-resources` prints,
@@ -430,6 +480,36 @@ fn run() -> Result<()> {
         Cmd::Schema { action } => cmd::schema::run(action),
         Cmd::Explain { path } => cmd::schema::explain(&path),
         Cmd::ApiResources { output } => cmd::resource::api_resources(output),
+        Cmd::Apply {
+            file,
+            name,
+            dry_run,
+            replace,
+            prune,
+        } => cmd::stack::run(cmd::stack::StackCmd::Apply {
+            name,
+            file,
+            dry_run,
+            replace,
+            prune,
+        }),
+        Cmd::Plan {
+            file,
+            name,
+            output,
+            detailed_exitcode,
+            fields,
+        } => cmd::stack::run(cmd::stack::StackCmd::Plan {
+            file,
+            name,
+            output,
+            detailed_exitcode,
+            fields,
+        }),
+        Cmd::Wait { file, timeout } => {
+            cmd::stack::run(cmd::stack::StackCmd::Wait { file, timeout })
+        }
+        Cmd::Manifest { action } => cmd::manifestcmd::run(action),
         Cmd::Get {
             kind,
             names,

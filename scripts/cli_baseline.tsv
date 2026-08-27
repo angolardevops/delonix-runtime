@@ -1,4 +1,5 @@
 =	api-resources
+~	apply
 ~	backup
 !	build
 ~	cluster apply
@@ -84,6 +85,9 @@
 ~	image vm rm
 =	init
 =	man
+~	manifest render
+~	manifest schema
+~	manifest validate
 ~	namespace describe
 ~	namespace ls
 ~	net boot disable
@@ -138,6 +142,7 @@
 ~	network rm
 ~	network route
 ~	network vlan
+~	plan
 ~	pod create
 ~	pod describe
 =	pod logs
@@ -231,6 +236,7 @@
 ~	volumes snapshot ls
 ~	volumes snapshot restore
 ~	volumes snapshot rm
+~	wait
 ~	workload describe
 ~	workload ls
 ~	workload rm

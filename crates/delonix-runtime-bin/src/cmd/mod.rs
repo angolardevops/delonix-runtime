@@ -27,6 +27,7 @@ pub mod kubeadm_config;
 pub mod lb;
 pub mod man;
 pub mod manifest;
+pub(crate) mod manifestcmd;
 pub mod manual;
 pub mod mapped;
 pub mod names;

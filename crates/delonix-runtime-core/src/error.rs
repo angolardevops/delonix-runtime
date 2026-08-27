@@ -130,6 +130,12 @@ impl Error {
             Error::Registry(_) => "DX_REGISTRY",
             Error::Runtime { .. } => "DX_SYSCALL_FAILED",
             Error::Json(_) => "DX_INVALID_STATE",
+            // The KIND decides, as it does for the exit code: one DX_ spanning
+            // two numbers would make `$?` and the text contradict each other for
+            // the SAME failure, which is what the `exitcode` invariant forbids.
+            Error::Io(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                "DX_PERMISSION_DENIED"
+            }
             Error::Io(_) => "DX_IO",
         }
     }

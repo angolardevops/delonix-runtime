@@ -217,6 +217,14 @@ falha específica</strong>. Ver a nota de migração no fim desta secção.</p>
 <td><strong>capacidade que este host não tem</strong> — uma ferramenta por instalar, um backend indisponível</td>
 </tr>
 <tr>
+<td><code>74</code></td>
+<td><strong>o sistema de ficheiros disse que não</strong> — disco cheio, caminho impossível</td>
+</tr>
+<tr>
+<td><code>77</code></td>
+<td><strong>permissão negada</strong> — o remédio é uma permissão, e depois repetir</td>
+</tr>
+<tr>
 <td><code>124</code></td>
 <td><strong>o prazo esgotou-se</strong> — <code>stack wait --timeout</code>, e o que vier a ter prazo</td>
 </tr>
@@ -226,6 +234,14 @@ falha específica</strong>. Ver a nota de migração no fim desta secção.</p>
 <code>systemctl</code> ainda fala (<code>3</code> = o programa não está a correr, <code>4</code> = não há tal
 unidade). <code>5</code> não tem convenção por trás — é o número livre seguinte, abaixo da
 gama que a shell usa (<code>126</code>/<code>127</code>, e <code>128+N</code> para sinais).</p>
+<p><strong><code>74</code> e <code>77</code> saíram do balde do <code>1</code>, e não de nenhuma classe publicada.</strong> Até
+à v0.66.1 uma falha de I/O respondia <code>1</code>, que a linha de cima descreve como
+«falha sem classe própria» — dar-lhe classe é o que esta tabela existe para
+fazer, e um script com <code>*) exit 1</code> continua a cair no mesmo ramo. O <code>77</code> é
+recortado do <code>74</code> pelo <code>kind</code> do erro, porque é assim que ele chega: medido
+contra um state root sem bit de escrita, <code>volumes create</code> e <code>secret create</code>
+vêm ambos como permissão negada. É a falha mais accionável que existe — corrige
+a permissão e repete — e respondia o mesmo número que um disco cheio.</p>
 <p><strong><code>69</code> e <code>124</code> também não.</strong> <code>69</code> é o <code>EX_UNAVAILABLE</code> do <code>sysexits.h</code>; <code>124</code> é
 o que o <code>timeout(1)</code> devolve quando o prazo passa, e está portanto já nos dedos
 de quem embrulha um comando num. Entraram porque tinham <strong>produtores reais mal
