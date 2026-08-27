@@ -485,6 +485,34 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["explain", "schema print", "stack plan", "stack apply"],
     },
     Entry {
+        path: "get",
+        group: "",
+        examples: &[
+            ("list a Kind — plural, singular and shortname are the same question", "delonix get pods"),
+            ("the stable half, for automation (ADR-0005)", "delonix get pods -o json"),
+            ("a renamed Kind still answers to the name it had", "delonix get virtualmachines"),
+        ],
+        see_also: &["describe", "delete", "api-resources", "stack ls"],
+    },
+    Entry {
+        path: "describe",
+        group: "",
+        examples: &[
+            ("detail of one resource, in blocks", "delonix describe pod api"),
+            ("a Kind with no name lists them instead", "delonix describe network backend"),
+        ],
+        see_also: &["get", "delete", "api-resources"],
+    },
+    Entry {
+        path: "delete",
+        group: "",
+        examples: &[
+            ("remove by Kind and name", "delonix delete pod api"),
+            ("with no name it REFUSES — it will not take every one of them", "delonix delete pods"),
+        ],
+        see_also: &["get", "describe", "stack destroy"],
+    },
+    Entry {
         path: "explain",
         group: "",
         examples: &[

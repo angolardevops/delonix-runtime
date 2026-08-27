@@ -9492,3 +9492,46 @@ msgstr "para o que um Kind baixa — porque é que um `kind: Egress` nunca apare
 
 msgid "`kind: {kind}` still works, but `kind: {to}` is the way forward ({n} document(s) here)"
 msgstr "`kind: {kind}` continua a funcionar, mas `kind: {to}` é o caminho ({n} documento(s) aqui)"
+
+# --- verbos genéricos: get / describe / delete (CLI-2) ---
+msgid "List resources of a Kind — the generic form of ten `ls` commands"
+msgstr "Lista os recursos de um Kind — a forma genérica de dez comandos `ls`"
+
+msgid "List resources of a Kind — the generic form of ten `ls` commands.\n\nThe Kind is resolved through the same registry `api-resources` prints, so `pods`, `pod` and `po` are the same question, and a Kind renamed in v0.64.0 still answers to the name it had."
+msgstr "Lista os recursos de um Kind — a forma genérica de dez comandos `ls`.\n\nO Kind é resolvido pelo mesmo registo que o `api-resources` imprime, por isso `pods`, `pod` e `po` são a mesma pergunta, e um Kind renomeado na v0.64.0 continua a responder ao nome que tinha."
+
+msgid "Detail of one resource, in blocks — the generic form of ten `describe`s"
+msgstr "O detalhe de um recurso, em blocos — a forma genérica de dez `describe`"
+
+msgid "Remove resources by Kind and name"
+msgstr "Remove recursos por Kind e nome"
+
+msgid "Remove resources by Kind and name.\n\nWith no name it REFUSES rather than removing every resource of the Kind: a missing argument is a typo far more often than an intention, and this verb does not get a second chance to ask."
+msgstr "Remove recursos por Kind e nome.\n\nSem nome RECUSA, em vez de remover todos os recursos do Kind: um argumento em falta é um erro de escrita muito mais vezes do que uma intenção, e este verbo não tem uma segunda oportunidade de perguntar."
+
+msgid "Kind, plural or short name: `pods`, `pod`, `po`"
+msgstr "Kind, plural ou abreviatura: `pods`, `pod`, `po`"
+
+msgid "Name a resource to get its detail instead of the list"
+msgstr "Nomeia um recurso para obter o detalhe dele em vez da lista"
+
+msgid "Kind, plural or short name"
+msgstr "Kind, plural ou abreviatura"
+
+msgid "list a Kind — plural, singular and shortname are the same question"
+msgstr "lista um Kind — plural, singular e abreviatura são a mesma pergunta"
+
+msgid "a renamed Kind still answers to the name it had"
+msgstr "um Kind renomeado continua a responder ao nome que tinha"
+
+msgid "detail of one resource, in blocks"
+msgstr "o detalhe de um recurso, em blocos"
+
+msgid "a Kind with no name lists them instead"
+msgstr "um Kind sem nome lista-os"
+
+msgid "remove by Kind and name"
+msgstr "remove por Kind e nome"
+
+msgid "with no name it REFUSES — it will not take every one of them"
+msgstr "sem nome RECUSA — não leva todos"
