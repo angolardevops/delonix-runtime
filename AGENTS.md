@@ -5110,22 +5110,52 @@ uma layer de um chunk só, o adaptador errado acerta por acidente).
 `--name`, a forma legada `image --vm pull` não — divergência entre os três pontos de entrada que o
 resto do grupo mantém alinhados.
 
-## `delonix backup` / `restore` — o grupo que faltava a este guia
+## `delonix backup` — seis verbos, um objecto (consolidado no ciclo da CLI)
 
 A varredura acima encontrou-o pela ausência: um guia que documenta tudo o resto não tinha **uma
 linha** sobre backup (a única ocorrência da palavra era incidental, sobre exit codes), apesar de o
 grupo ter página de documentação e ciclo completo na bateria E2E. É o primeiro sítio onde um SRE
 olha, e era o único onde não havia nada escrito.
 
-**O que o arquivo leva, e é a decisão que define o resto**: `backup <container|pod|vm|stack>
+**A superfície mudou, corte limpo sem aliases**: `backup <kind> <nome>` passou a
+`backup create <kind> <nome>`; o `restore` de RAIZ desapareceu e é `backup restore <arquivo>`; e o
+agendamento saiu de flags do backup para `backup schedule`. Entraram três verbos que **não
+existiam** — `list`, `inspect` e `remove`: até aqui a pergunta «que arquivos tenho» respondia-se
+com `ls` e apagar um era `rm`. A forma antiga falha com `unrecognized subcommand` (rc=2), nunca em
+silêncio.
+
+**`system backup` NÃO foi dobrado aqui, e o ADR-0020 chegou a dizer que devia ser.** Listava-o em
+«várias portas para um objecto», ao lado do `backup`. Medido, são dois OBJECTOS: este grupo arquiva
+UM recurso com os dados dos seus volumes; o `system backup` arquiva o **state root inteiro** de um
+nó (registos, segredos, PKI de cluster, config do HTTPRoute, o registo de eventos, com as áreas
+pesadas e reobtíveis opt-in). Fundi-los teria apagado uma capacidade a chamar-lhe arrumação. A
+correcção está escrita no próprio ADR, e há dois checks na bateria a exigir que os dois continuem
+a existir separados.
+
+**O que o arquivo leva, e é a decisão que define o resto**: `backup create <container|pod|vm|stack>
 <nome>` escreve um `.tar.gz` com o **registo** e os **DADOS dos volumes** — **não** a imagem e
-**não** o rootfs, que o `restore` deriva por pull. A **VM é a excepção**: o disco overlay dela É o
+**não** o rootfs, que o `backup restore` deriva por pull. A **VM é a excepção**: o disco overlay dela É o
 seu estado, logo esse viaja dentro do arquivo. A regra por trás é a mesma do resto do motor: o que
 tem endereço de conteúdo e se volta a obter não se duplica; o que só existe naquele host, sim.
 
-`restore <kind> <arquivo>` aceita um caminho ou o **nome nu** de um arquivo em `--from` (default
+`backup restore <arquivo>` aceita um caminho ou o **nome nu** de um arquivo em `--from` (default
 `.`). **Recusa-se com o recurso a correr** e só `--force` pára, repõe e volta a arrancar — a
 mesma disciplina de não destruir o que está vivo sem o operador o dizer.
+
+**O `<kind>` deixou de ser posicional, e a razão do autor original manteve-se.** Ele exigia-o com
+um argumento correcto — «restaurar pelo kind do arquivo faria `restore vm <arquivo-de-container>`
+fazer em silêncio algo diferente do que foi escrito». Mas o arquivo JÁ regista o que leva, e
+obrigar quem chama a repeti-lo é a repetição que a especificação tira. O compromisso: `--kind` é
+**opcional e continua a recusar** uma discordância, e o kind do arquivo é **sempre impresso**. A
+guarda fica; a repetição sai.
+
+**Três funções passaram a ser partilhadas por três verbos, e uma mentia.** O `read_meta` prefixava
+os erros com `restore:` — um `backup remove` apontado a um `.tar.gz` alheio respondia
+«restore: … failed to read entire block», a nomear um comando que ninguém correu. Passou a
+`backup:`. O `remove` recusa qualquer arquivo que este grupo não tenha escrito, verificado **lendo
+o arquivo** e não o nome: um `.tar.gz` de outra ferramenta na mesma pasta seria apagado de outra
+forma — e há check na bateria a confirmar que o ficheiro alheio CONTINUA lá depois da recusa (um
+`remove` que recusa e apaga na mesma devolveria não-zero e teria destruído os dados à mesma).
 
 **O que a bateria já prova** (`scripts/e2e.sh`, secção «backup / restore por recurso»), e é o
 modelo a seguir para o resto da CLI: o ciclo REAL — arquivar, **destruir os dados**, repor, e
@@ -5135,9 +5165,12 @@ ficheiro depois de os dados terem sido apagados. Daí os checks olharem para DEN
 como facto), o `--dry-run` não deixar um único ficheiro, e os caminhos de erro devolverem a classe
 **4** (não existe) em vez de um 1 genérico.
 
-**Por confirmar**: o agendamento («on demand or on a schedule», no próprio `--help`) não foi
-exercitado nesta passagem — não sei dizer se o agendador é interno, um `systemd --user` timer, ou
-uma linha de cron que o utilizador escreve. Quem lá chegar primeiro, mede e escreve aqui.
+**O agendamento está respondido** (esta entrada dizia «por confirmar… não sei dizer se o agendador
+é interno, um timer ou uma linha de cron»): é um **timer de utilizador do systemd**, um por
+recurso, instalado pelo `backup schedule`. E ele tira **também o primeiro arquivo, já** — a razão
+está no código e é boa: um agendamento cuja primeira corrida é daqui a horas deixa quem o instalou
+sem backup e com a impressão de ter um. `schedule` sem `--cron` nem `--max-for-day` **recusa** em
+vez de se comportar como um `create` silencioso, com teste que falha se a recusa for removida.
 
 ## Containers rootless partilham as layers em vez de as copiarem (v0.59.0)
 

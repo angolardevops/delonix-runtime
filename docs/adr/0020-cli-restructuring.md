@@ -24,8 +24,19 @@ surface, where the user pays for it.
 Three other shapes of the same problem:
 
 - **Several doors to one object.** A VM image is reachable through `vm pull`,
-  `image vm pull` and `image --vm pull`. A backup through `backup` or
-  `system backup`, restored through `restore` or `system restore`.
+  `image vm pull` and `image --vm pull`. A resource backup is taken through
+  `backup` and restored through a SEPARATE top-level `restore`, and neither can
+  answer "what archives do I have".
+
+  **Correction (2026-08-27): `system backup` is NOT one of those doors.** This
+  list first named it alongside `backup`, and measured that is wrong: `backup
+  <container|pod|vm|stack> <name>` archives ONE resource with its volume data,
+  while `system backup` archives the whole state root of a node — registries,
+  secrets, cluster PKI, HTTPRoute config, the event log, with the heavy
+  re-obtainable areas opt-in. Two scopes, not two doors. Folding them, which is
+  what this bullet invited, would have deleted a capability while calling it
+  tidying. `system backup`/`system restore` stay in `system`, where the scope
+  they cover is.
 - **A flag that switches domain.** `image --vm` swaps the whole store. This repo
   already catalogued that trap elsewhere; here a global flag decides which
   engine the command talks to.

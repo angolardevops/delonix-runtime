@@ -136,7 +136,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <h5><span class='lang-pt'>Documentação</span><span class='lang-en'>Docs</span></h5>
 <a href="index.html"><span class='lang-pt'>Início</span><span class='lang-en'>Home</span></a><a href="cheatsheet.html"><span class='lang-pt'>Cheatsheet</span><span class='lang-en'>Cheatsheet</span></a><a href="estrutura.html"><span class='lang-pt'>Estrutura de recursos</span><span class='lang-en'>Resource structure</span></a><a href="kinds.html"><span class='lang-pt'>Kinds e templates</span><span class='lang-en'>Kinds &amp; templates</span></a><a href="gitops.html"><span class='lang-pt'>GitOps e CI</span><span class='lang-en'>GitOps &amp; CI</span></a><a href="estabilidade.html" class="on"><span class='lang-pt'>Promessa de estabilidade</span><span class='lang-en'>Stability promise</span></a><a href="cloud.html"><span class='lang-pt'>cloud-init, cloud-img e CH</span><span class='lang-en'>cloud-init, cloud-img &amp; CH</span></a><a href="labs.html"><span class='lang-pt'>Laboratórios</span><span class='lang-en'>Labs</span></a><a href="guia-vm.html"><span class='lang-pt'>Guia de VMs e lab de rede</span><span class='lang-en'>VM &amp; network lab guide</span></a><a href="arquitectura.html"><span class='lang-pt'>Arquitectura</span><span class='lang-en'>Architecture</span></a><a href="c4.html"><span class='lang-pt'>Modelo C4 e system design</span><span class='lang-en'>C4 model &amp; system design</span></a><a href="cri.html"><span class='lang-pt'>CRI — kubelet sem containerd</span><span class='lang-en'>CRI — kubelet without containerd</span></a><a href="comparacao.html"><span class='lang-pt'>Delonix vs Docker vs Podman</span><span class='lang-en'>Delonix vs Docker vs Podman</span></a><a href="tutorial-delonix-temp.html"><span class='lang-pt'>Projecto completo: Delonix Temp</span><span class='lang-en'>Full project: Delonix Temp</span></a>
 <h5><span class='lang-pt'>Referência CLI</span><span class='lang-en'>CLI reference</span></h5>
-<a href="comandos/init.html">delonix init</a><a href="comandos/container.html">delonix container</a><a href="comandos/workload.html">delonix workload</a><a href="comandos/pod.html">delonix pod</a><a href="comandos/image.html">delonix image</a><a href="comandos/build.html">delonix build</a><a href="comandos/vm.html">delonix vm</a><a href="comandos/volumes.html">delonix volumes</a><a href="comandos/namespace.html">delonix namespace</a><a href="comandos/network.html">delonix network</a><a href="comandos/stack.html">delonix stack</a><a href="comandos/compose.html">delonix compose</a><a href="comandos/cluster.html">delonix cluster</a><a href="comandos/secret.html">delonix secret</a><a href="comandos/storage.html">delonix storage</a><a href="comandos/sharevolume.html">delonix sharevolume</a><a href="comandos/ingress.html">delonix net ingress</a><a href="comandos/egress.html">delonix net egress</a><a href="comandos/httproute.html">delonix net httproute</a><a href="comandos/tunnel.html">delonix net tunnel</a><a href="comandos/flow.html">delonix net flow</a><a href="comandos/boot.html">delonix net boot</a><a href="comandos/backup.html">delonix backup</a><a href="comandos/restore.html">delonix restore</a><a href="comandos/system.html">delonix system</a><a href="comandos/dash.html">delonix dash</a><a href="comandos/docker-api.html">delonix serve docker-api</a><a href="comandos/kube.html">delonix cluster kube</a><a href="comandos/netns.html">delonix net netns</a><a href="comandos/completion.html">delonix completion</a><a href="comandos/syntax.html">delonix syntax</a><a href="comandos/schema.html">delonix schema · explain</a>
+<a href="comandos/init.html">delonix init</a><a href="comandos/container.html">delonix container</a><a href="comandos/workload.html">delonix workload</a><a href="comandos/pod.html">delonix pod</a><a href="comandos/image.html">delonix image</a><a href="comandos/build.html">delonix build</a><a href="comandos/vm.html">delonix vm</a><a href="comandos/volumes.html">delonix volumes</a><a href="comandos/namespace.html">delonix namespace</a><a href="comandos/network.html">delonix network</a><a href="comandos/stack.html">delonix stack</a><a href="comandos/compose.html">delonix compose</a><a href="comandos/cluster.html">delonix cluster</a><a href="comandos/secret.html">delonix secret</a><a href="comandos/storage.html">delonix storage</a><a href="comandos/sharevolume.html">delonix sharevolume</a><a href="comandos/ingress.html">delonix net ingress</a><a href="comandos/egress.html">delonix net egress</a><a href="comandos/httproute.html">delonix net httproute</a><a href="comandos/tunnel.html">delonix net tunnel</a><a href="comandos/flow.html">delonix net flow</a><a href="comandos/boot.html">delonix net boot</a><a href="comandos/backup.html">delonix backup</a><a href="comandos/system.html">delonix system</a><a href="comandos/dash.html">delonix dash</a><a href="comandos/docker-api.html">delonix serve docker-api</a><a href="comandos/kube.html">delonix cluster kube</a><a href="comandos/netns.html">delonix net netns</a><a href="comandos/completion.html">delonix completion</a><a href="comandos/syntax.html">delonix syntax</a><a href="comandos/schema.html">delonix schema · explain</a>
 <h5><span class='lang-pt'>Projecto</span><span class='lang-en'>Project</span></h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
@@ -455,17 +455,33 @@ manifesto em git merece um degrau em vez de um erro.</p>
 <li><strong><code>cluster</code>, <code>vm</code>, <code>pod</code>, <code>workload</code>, <code>storage</code>, <code>sharevolume</code>, <code>net</code></strong> —
   a superfície ainda está a assentar. (O <em>schema</em> de <code>kind: Pod</code> é estável, ver
   acima; o que não é estável é o grupo de comandos <code>delonix pod</code>.)</li>
-<li><strong>Tudo o que começa por <code>net netns</code></strong> — plumbing interno exposto por
-  conveniência de depuração.</li>
-<li><strong>O formato dos ficheiros de estado</strong> em <code>$DELONIX_ROOT</code>. Lê-se pelo <code>inspect</code>,
-  nunca do disco.</li>
-<li><strong><code>stack history</code></strong>, <strong><code>stack rollback</code></strong> e o conteúdo de <code>$DELONIX_ROOT/stacks/</code> (ADR-0019). É um
+<li><strong><code>backup</code></strong> — o grupo não estava declarado de nenhum dos lados, e essa
+  omissão é ela própria um defeito: quem quisesse saber se podia depender de
+  <code>delonix backup vm x</code> não tinha resposta. Fica NÃO estável enquanto os
+  arquivos ganham verbos. O <strong>formato do arquivo</strong> é outra coisa e tem a sua
+  própria guarda: o <code>backup.json</code> traz um número de versão e um leitor que não o
+  conheça RECUSA em vez de adivinhar uma disposição que nunca viu.</li>
+</ul>
+<p><strong>Mudou na v0.67.0:</strong> <code>delonix backup &lt;kind&gt; &lt;nome&gt;</code> passou a
+  <code>delonix backup create &lt;kind&gt; &lt;nome&gt;</code>, e o <code>delonix restore</code> de raiz passou a
+  <code>delonix backup restore &lt;arquivo&gt;</code> — sem o <code>&lt;kind&gt;</code> posicional, que o arquivo
+  já regista (continua a poder afirmar-se com <code>--kind</code> para que uma discordância
+  seja recusada). O agendamento saiu de flags do backup para
+  <code>delonix backup schedule</code>, com a mesma semântica: instala o temporizador <strong>e</strong>
+  tira o primeiro arquivo. Corte limpo, sem aliases — a forma antiga falha com
+  «unrecognized subcommand», nunca em silêncio.</p>
+<p><strong><code>delonix system backup</code> não foi tocado.</strong> É outro âmbito — o state root
+  inteiro de um nó — e não uma segunda porta para este grupo.
+* <strong>Tudo o que começa por <code>net netns</code></strong> — plumbing interno exposto por
+  conveniência de depuração.
+* <strong>O formato dos ficheiros de estado</strong> em <code>$DELONIX_ROOT</code>. Lê-se pelo <code>inspect</code>,
+  nunca do disco.
+* <strong><code>stack history</code></strong>, <strong><code>stack rollback</code></strong> e o conteúdo de <code>$DELONIX_ROOT/stacks/</code> (ADR-0019). É um
   registo do que foi aplicado, e o desenho promete explicitamente que <strong>nada o
   lê para decidir o que existe</strong>: apagar essa pasta não muda o que o <code>plan</code>, o
   <code>apply</code>, o <code>prune</code> ou o <code>destroy</code> fazem — só perde o histórico, e há gate na
   bateria E2E a exigi-lo. Automação que dependa da presença de uma revisão está
-  a apostar contra essa promessa.</li>
-</ul>
+  a apostar contra essa promessa.</p>
 <h2 id="como-uma-quebra-e-feita-quando-tem-de-acontecer">Como uma quebra é feita, quando tem de acontecer</h2>
 <p>Precedente já cumprido pelo projecto: a reorganização da v0.30.0 (<code>netns</code> →
 <code>net netns</code>, <code>cri</code> → <code>serve cri</code>, …) foi um <strong>corte limpo, sem aliases</strong> — a
