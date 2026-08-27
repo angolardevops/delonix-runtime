@@ -173,7 +173,7 @@ duas formas aceites nomeadas no erro.</p>
 </tr>
 <tr>
 <td><code>networking.delonix.io/v1alpha1</code></td>
-<td><code>Network</code>, <code>NetworkRoute</code>, <code>NetworkPolicy</code>, <code>Dependency</code>, <code>Egress</code></td>
+<td><code>Network</code>, <code>NetworkRoute</code>, <code>NetworkPolicy</code>, <code>Dependency</code></td>
 </tr>
 <tr>
 <td><code>gateway.delonix.io/v1alpha1</code></td>
@@ -181,7 +181,7 @@ duas formas aceites nomeadas no erro.</p>
 </tr>
 <tr>
 <td><code>storage.delonix.io/v1alpha1</code></td>
-<td><code>Volume</code>, <code>Storage</code>, <code>ShareVolume</code></td>
+<td><code>Volume</code></td>
 </tr>
 <tr>
 <td><code>artifact.delonix.io/v1alpha1</code></td>
@@ -203,7 +203,7 @@ PR e apontado por <code>$schema</code> num editor, ganha um degrau — não um e
 <h2 id="o-que-acontece-a-cada-documento">O que acontece a cada documento</h2>
 <p>A coluna <code>FORM</code> do <code>api-resources</code> é a que não se adivinha: diz se um documento
 daquele Kind <strong>sobrevive ao load com o próprio nome</strong>. É a resposta a «porque é
-que o meu <code>kind: Egress</code> nunca aparece no plano como <code>Egress</code>».</p>
+que o meu <code>kind: Dependency</code> nunca aparece no plano com esse nome».</p>
 <table>
 <thead>
 <tr>
@@ -219,10 +219,6 @@ que o meu <code>kind: Egress</code> nunca aparece no plano como <code>Egress</co
 <tr>
 <td><code>sugar → X</code></td>
 <td>é reescrito em <code>X</code> por conveniência</td>
-</tr>
-<tr>
-<td><code>deprecated → X</code></td>
-<td>é reescrito em <code>X</code>; a grafia antiga continua aceite, com aviso</td>
 </tr>
 <tr>
 <td><code>compat → X</code></td>
@@ -250,6 +246,35 @@ rede diferente. A metade do nome era solúvel; a da netns não é.</p>
 <p>Por isso é <strong>anunciado, não reescrito</strong>: continua a funcionar, com um aviso por
 carregamento a dizer que <code>kind: Pod</code> é o caminho. Uma major futura remove-o,
 depois de os manifestos terem migrado.</p>
+<h2 id="kinds-removidos">Kinds removidos</h2>
+<p>Três Kinds <strong>deixaram de existir</strong>. A recusa nomeia o que escrever em vez deles,
+em vez de dizer «Kind desconhecido» — que faria um manifesto correcto até ontem
+parecer um erro de escrita:</p>
+<table>
+<thead>
+<tr>
+<th>removido</th>
+<th>escrever</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Storage</code></td>
+<td><code>kind: Volume</code> com um bloco <code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code></td>
+</tr>
+<tr>
+<td><code>ShareVolume</code></td>
+<td><code>kind: Volume</code> com um bloco <code>share:</code></td>
+</tr>
+<tr>
+<td><code>Egress</code></td>
+<td><code>kind: NetworkPolicy</code> com <code>direction: egress</code></td>
+</tr>
+</tbody>
+</table>
+<p>Os três eram <strong>reescritos</strong> no load para exactamente estas formas, portanto o que
+o motor faz não mudou — mudou quem tem de escrever a forma final. Ver as notas
+da versão que os removeu para a migração.</p>
 <h2 id="nomes-antigos-que-continuam-a-resolver">Nomes antigos que continuam a resolver</h2>
 <p>Quatro Kinds foram renomeados. O nome antigo é um <strong>alias silencioso</strong> — não há
 aviso, porque uma renomeação não muda o que o documento significa e não há nada

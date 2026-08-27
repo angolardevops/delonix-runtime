@@ -129,7 +129,6 @@ pub(crate) fn api_resources(output: super::output::OutputFormat) -> Result<(), E
                 Form::Primary => "primary".to_string(),
                 Form::Aggregate => "aggregate".to_string(),
                 Form::Sugar(k) => format!("sugar → {k}"),
-                Form::Deprecated(k) => format!("deprecated → {k}"),
                 Form::Compat(k) => format!("compat → {k}"),
                 Form::Sunset(k) => format!("sunset → {k}"),
             },

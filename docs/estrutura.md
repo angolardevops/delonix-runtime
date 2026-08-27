@@ -22,9 +22,9 @@ duas formas aceites nomeadas no erro.
 |---|---|
 | `core.delonix.io/v1alpha1` | `Secret`, `Stack` |
 | `compute.delonix.io/v1alpha1` | `Pod`, `VirtualMachine`, `Container`, `Workload` |
-| `networking.delonix.io/v1alpha1` | `Network`, `NetworkRoute`, `NetworkPolicy`, `Dependency`, `Egress` |
+| `networking.delonix.io/v1alpha1` | `Network`, `NetworkRoute`, `NetworkPolicy`, `Dependency` |
 | `gateway.delonix.io/v1alpha1` | `Gateway`, `HTTPRoute`, `Ingress` |
-| `storage.delonix.io/v1alpha1` | `Volume`, `Storage`, `ShareVolume` |
+| `storage.delonix.io/v1alpha1` | `Volume` |
 | `artifact.delonix.io/v1alpha1` | `Image` |
 | `infrastructure.delonix.io/v1alpha1` | `KubernetesCluster` |
 
@@ -42,13 +42,12 @@ PR e apontado por `$schema` num editor, ganha um degrau — não um erro.
 
 A coluna `FORM` do `api-resources` é a que não se adivinha: diz se um documento
 daquele Kind **sobrevive ao load com o próprio nome**. É a resposta a «porque é
-que o meu `kind: Egress` nunca aparece no plano como `Egress`».
+que o meu `kind: Dependency` nunca aparece no plano com esse nome».
 
 | forma | significado |
 |---|---|
 | `primary` | tem apply próprio e sobrevive ao load |
 | `sugar → X` | é reescrito em `X` por conveniência |
-| `deprecated → X` | é reescrito em `X`; a grafia antiga continua aceite, com aviso |
 | `compat → X` | schema estrangeiro aceite tal e qual, compilado sobre o mecanismo de `X` |
 | `aggregate` | expande-se nos documentos que contém |
 | `sunset → X` | **funciona e não é reescrito** — mas `X` é o caminho a seguir |
@@ -68,6 +67,22 @@ rede diferente. A metade do nome era solúvel; a da netns não é.
 Por isso é **anunciado, não reescrito**: continua a funcionar, com um aviso por
 carregamento a dizer que `kind: Pod` é o caminho. Uma major futura remove-o,
 depois de os manifestos terem migrado.
+
+## Kinds removidos
+
+Três Kinds **deixaram de existir**. A recusa nomeia o que escrever em vez deles,
+em vez de dizer «Kind desconhecido» — que faria um manifesto correcto até ontem
+parecer um erro de escrita:
+
+| removido | escrever |
+|---|---|
+| `Storage` | `kind: Volume` com um bloco `nfs:`/`cifs:`/`webdav:` |
+| `ShareVolume` | `kind: Volume` com um bloco `share:` |
+| `Egress` | `kind: NetworkPolicy` com `direction: egress` |
+
+Os três eram **reescritos** no load para exactamente estas formas, portanto o que
+o motor faz não mudou — mudou quem tem de escrever a forma final. Ver as notas
+da versão que os removeu para a migração.
 
 ## Nomes antigos que continuam a resolver
 

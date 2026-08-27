@@ -4,7 +4,7 @@
 # a named volume that any container mounts with `-v <name>:/path`.
 #
 # These are `kind: Volume` with a network-share BLOCK (`nfs:`/`cifs:`/`webdav:`).
-# `kind: Storage` still loads — it is rewritten into exactly this, with a
+# `kind: Storage` was REMOVED — this is what to write instead. The load
 # deprecation warning — but the two described the same mount two ways and landed
 # in the same store, and nothing said which to use. The block's NAME is the type,
 # so a type can no longer contradict its own declaration.

@@ -7,10 +7,10 @@
 # It is a `kind: Volume` with a `share:` block, not a Kind of its own: a share
 # always WAS a volume (that is how `-v` could consume it), and the separate
 # `kind: ShareVolume` only added a second record beside it whose one unique
-# field was the parent's name. `kind: ShareVolume` still loads, rewritten into
-# exactly this with a deprecation warning; `storageRef` is still accepted as a
-# spelling of `share.from`. What the merge buys: a share is now ownable by a
-# stack (`delonix.io/stack`), so `--prune` and `destroy` can reach it.
+# field was the parent's name. `kind: ShareVolume` was REMOVED: the load refuses
+# it and names this form. `storageRef` is still accepted as a spelling of
+# `share.from`. What the merge bought: a share is ownable by a stack
+# (`delonix.io/stack`), so `--prune` and `destroy` can reach it.
 #
 # The parent is a `kind: Volume` with a network-share block (`nfs:`/`cifs:`/
 # `webdav:`) — see examples/storage.yaml.

@@ -246,10 +246,6 @@ const NAMESPACE_SOURCES: &[(&str, NsSource)] = &[
         NsSource::Via("Container/VirtualMachine — it lowers to one of them and the namespace goes with it"),
     ),
     (
-        k::SHARE_VOLUME,
-        NsSource::Via("Volume — it lowers to a `kind: Volume` with a `share:` block"),
-    ),
-    (
         k::STACK,
         NsSource::Via(
             "Container/VirtualMachine — `manifest::load` propagates the namespace onto every child it expands",

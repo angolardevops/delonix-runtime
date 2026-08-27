@@ -123,10 +123,6 @@ impl Domain {
 pub(crate) enum Form {
     /// Has its own apply and survives the `load`.
     Primary,
-    /// Rewritten into another Kind at load time, and the old spelling still
-    /// works. Names the replacement, because a deprecation without one is just
-    /// a complaint.
-    Deprecated(&'static str),
     /// Rewritten into another Kind at load time as a convenience, not because it
     /// is going away.
     Sugar(&'static str),
@@ -134,15 +130,18 @@ pub(crate) enum Form {
     Aggregate,
     /// A foreign schema this engine accepts verbatim, compiled onto another
     /// Kind's mechanism. It DOES survive the load — that is what separates it
-    /// from [`Form::Deprecated`].
+    /// from [`Form::Sugar`], which is rewritten into its target and disappears.
     Compat(&'static str),
     /// Still primary — own apply, survives the load — but a successor is
     /// announced and this spelling is on its way out.
     ///
-    /// Distinct from [`Form::Deprecated`], and the difference is the whole
-    /// point: a `Deprecated` Kind is REWRITTEN at load and the writer gets the
-    /// successor's behaviour for free. A `Sunset` one is not rewritten, because
-    /// rewriting it would change what the engine DOES.
+    /// The engine once had a `Deprecated` variant beside this one — REWRITTEN
+    /// at load, so the writer got the successor's behaviour for free. It was
+    /// removed with the last three Kinds that used it, because a variant with
+    /// no constructor is dead weight and `-D warnings` says so. Bring it back
+    /// when a Kind needs rewriting rather than announcing: the distinction is
+    /// real, and the reason a `Sunset` Kind is NOT rewritten is that rewriting
+    /// it would change what the engine DOES.
     ///
     /// `Container` is the case that forced this variant. Lowering it to a
     /// one-container `Pod` looks like a rename and is not: a Pod always builds
@@ -169,7 +168,7 @@ impl Form {
     /// The Kind a document of this one ends up as, if it is not itself.
     pub(crate) fn lowers_to(self) -> Option<&'static str> {
         match self {
-            Form::Deprecated(k) | Form::Sugar(k) | Form::Compat(k) => Some(k),
+            Form::Sugar(k) | Form::Compat(k) => Some(k),
             // `Sunset` is deliberately not here: it does not lower, it is
             // merely announced. Its successor is checked by the same test,
             // through `successor`.
@@ -452,47 +451,6 @@ const FACTS: &[KindFacts] = &[
         presence: Presence::Declarative,
     },
     KindFacts {
-        kind: SHARE_VOLUME,
-        plural: "sharevolumes",
-        short: &["sv"],
-        api_version: "storage.delonix.io/v1alpha1",
-        domain: Domain::Storage,
-        form: Form::Deprecated(VOLUME),
-        in_stack: false,
-        converges: false,
-        teardown: false,
-        // It carried a namespace and still does — as a `kind: Volume` with a
-        // `share:` block, which is what it lowers to.
-        namespaced: Namespaced::Always,
-        presence: Presence::NotObservable,
-    },
-    KindFacts {
-        kind: STORAGE,
-        plural: "storages",
-        short: &[],
-        api_version: "storage.delonix.io/v1alpha1",
-        domain: Domain::Storage,
-        form: Form::Deprecated(VOLUME),
-        in_stack: false,
-        converges: false,
-        teardown: false,
-        namespaced: Namespaced::Never,
-        presence: Presence::NotObservable,
-    },
-    KindFacts {
-        kind: EGRESS,
-        plural: "egresses",
-        short: &[],
-        api_version: "networking.delonix.io/v1alpha1",
-        domain: Domain::NetPolicy,
-        form: Form::Deprecated(FIREWALL_POLICY),
-        in_stack: false,
-        converges: false,
-        teardown: false,
-        namespaced: Namespaced::Never,
-        presence: Presence::NotObservable,
-    },
-    KindFacts {
         kind: STACK,
         plural: "stacks",
         short: &[],
@@ -605,10 +563,7 @@ mod tests {
     #[test]
     fn um_kind_que_baixa_para_outro_nao_pertence_ao_ciclo_do_stack() {
         for f in all() {
-            if matches!(
-                f.form,
-                Form::Deprecated(_) | Form::Sugar(_) | Form::Aggregate
-            ) {
+            if matches!(f.form, Form::Sugar(_) | Form::Aggregate) {
                 assert!(
                     !f.in_stack,
                     "{} é reescrito no load e está no ciclo do stack",

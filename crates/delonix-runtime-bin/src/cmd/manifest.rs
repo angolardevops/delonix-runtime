@@ -647,229 +647,40 @@ fn warn_sunset_kinds(docs: &[ManifestDoc]) {
 /// only covers one of them turns a merged Kind into a document nobody claims —
 /// silently, which is the failure this whole exercise exists to remove.
 fn lower_legacy_kind(doc: &mut ManifestDoc) -> Result<()> {
-    // `kind: Egress` folds into `kind: NetworkPolicy`. The two were the SAME
-    // object: one struct (`firewall::FwDocSpec`), one validator, one apply, one
-    // dataplane — the only difference being where the direction came from. Three
-    // nouns for "network policy" means three places to look during an incident,
-    // and no model anyone knows (k8s NetworkPolicy, AWS security groups, Azure
-    // NSGs) splits inbound from outbound into separate TYPES; they split them
-    // with a field.
-    //
-    // Not in `canonical_kind` because this is not a rename: the direction the old
-    // Kind implied has to be written into the spec, and `canonical_kind` is a
-    // pure name map with no spec to write into.
-    if doc.kind == k::EGRESS {
-        lower_egress(doc)?;
-    }
-    // `kind: Storage` folds into `kind: Volume`. Both landed in the SAME
-    // `VolumeStore` and described the same mount two ways — a `Volume` with
-    // `driver: nfs`/`device: nas:/export` IS a `Storage` with
-    // `type: nfs`/`server: nas`/`share: /export`, and nothing said which to use.
-    // `volumes ls` listed both (one store) while `storage ls` listed only some,
-    // so the same question got different answers depending on the command.
-    if doc.kind == k::STORAGE {
-        lower_storage(doc)?;
-    }
-    // `kind: ShareVolume` folds into `kind: Volume` with a `share:` block. A
-    // share was ALREADY a volume — `VolumeStore::register_external` wrote one —
-    // and the separate Kind only added a second record beside it whose single
-    // unique field was the parent's name. Two records for one object is how the
-    // two start disagreeing, and it is why a share could never be owned by a
-    // stack: ownership is stamped in `labels`, which only the volume has.
-    if doc.kind == k::SHARE_VOLUME {
-        lower_sharevolume(doc)?;
-    }
-    // `kind: Container` with `spec.containers[]` — the k8s Pod grammar applied to
-    // a single container. It gets a WARNING and **no rewrite**, unlike the two
-    // above, and the reason is worth writing down because the obvious move here
-    // is wrong.
-    //
-    // The plan for this merge was to rewrite it into `kind: Pod`, on the reading
-    // that a one-element Pod and a pod-shaped Container are the same object.
-    // They are not, and the code says so:
-    //
-    //   * `pod_to_run_opts` builds ONE container named `<metadata.name>`, with
-    //     no shared namespace;
-    //   * `pod::create_pod` creates a shared netns `pod-<name>` and names its
-    //     members `<name>-<member>` (`c0` when unnamed).
-    //
-    // So the rewrite would rename the container — `web` becomes `web-c0` — and
-    // every reference to the old name would break: the internal DNS record, an
-    // `HTTPRoute` backend, a `Dependency`'s `from`/`to`, `stack validate`'s
-    // cross-references. Renaming somebody's running container as a side effect
-    // of a tidy-up is not a merge, it is an outage.
-    //
-    // What is left is the honest half: say it is the deprecated spelling, name
-    // the difference concretely, and change nothing.
-    if doc.kind == k::CONTAINER && doc.spec.get("containers").is_some() {
-        super::output::warn(&super::po::tf(
-            "Container '{name}': `spec.containers[]` on a `kind: Container` is the deprecated \
-             spelling — it still runs ONE container, named '{name}'. For containers that share \
-             a namespace use `kind: Pod` (its members are named '{name}-<member>', which is why \
-             this is not rewritten for you)",
-            &[("name", &doc.metadata.name)],
-        ));
-    }
-    Ok(())
-}
-
-/// Rewrites a legacy `kind: Storage` into a `kind: Volume` carrying the matching
-/// network-share block.
-///
-/// A pure spec rewrite: no vault, no credentials file, nothing on disk. Those
-/// belong to the apply — a `--dry-run` that wrote a credentials file would make
-/// planning a side effect.
-fn lower_storage(doc: &mut ManifestDoc) -> Result<()> {
-    let ty = doc
-        .spec
-        .get("type")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            Error::Invalid(super::po::tf(
-                "Storage '{name}': spec.type is required (nfs|cifs|smb|webdav)",
-                &[("name", &doc.metadata.name)],
-            ))
-        })?
-        .to_string();
-    // `smb` is an alias of `cifs` and always was (`build_mount` maps them to the
-    // same driver); the BLOCK has one name so the two do not become two.
-    let block = match ty.as_str() {
-        "nfs" => "nfs",
-        "cifs" | "smb" => "cifs",
-        "webdav" => "webdav",
-        other => {
-            return Err(Error::Invalid(super::po::tf(
-                "Storage '{name}': unknown type '{other}' (nfs|cifs|smb|webdav)",
-                &[("name", &doc.metadata.name), ("other", other)],
-            )))
-        }
-    };
-    // Warned at the STORAGE level, before the rewrite: a typo named against the
-    // Kind the user actually wrote is worth more than the same typo reported
-    // against a `spec.nfs` block they never typed.
-    warn_unknown_fields(doc, crate::cmd::storage::STORAGE_SPEC_FIELDS);
-    let serde_yaml::Value::Mapping(m) = &doc.spec else {
+    // Os três Kinds que estas reduções serviam foram REMOVIDOS. A recusa nomeia
+    // o que escrever em vez deles: deixá-los cair no «unknown kind» genérico
+    // faria um manifesto correcto-até-ontem parecer um erro de escrita, e quem o
+    // apanha não saberia se errou ou se algo mudou debaixo dele.
+    if let Some((write, why)) = removed_kind_hint(&doc.kind) {
         return Err(Error::Invalid(super::po::tf(
-            "Storage '{name}': spec must be a mapping",
-            &[("name", &doc.metadata.name)],
+            "`kind: {kind}` was removed — write {write} instead ({why})",
+            &[("kind", &doc.kind), ("write", write), ("why", why)],
         )));
-    };
-    let mut inner = serde_yaml::Mapping::new();
-    for (k, v) in m {
-        if k.as_str() == Some("type") {
-            continue;
-        }
-        inner.insert(k.clone(), v.clone());
     }
-    let mut outer = serde_yaml::Mapping::new();
-    outer.insert(
-        serde_yaml::Value::from(block),
-        serde_yaml::Value::Mapping(inner),
-    );
-    doc.spec = serde_yaml::Value::Mapping(outer);
-    doc.kind = k::VOLUME.to_string();
-    super::output::warn(&super::po::tf(
-        "Storage '{name}': `kind: Storage` is deprecated — use `kind: Volume` with a \
-         `{block}:` block (same fields, same behaviour)",
-        &[("name", &doc.metadata.name), ("block", block)],
-    ));
     Ok(())
 }
 
-/// Rewrites a legacy `kind: ShareVolume` into `kind: Volume` with a `share:` block.
+/// What to write instead of a Kind that was removed, and why.
 ///
-/// `quota`/`alertPct` move UNCHANGED to the volume's own fields — they mean the
-/// same thing there and always did; only `storageRef` moves, into `share.from`.
-/// Which is the whole point: one field was all the separate Kind ever added.
-fn lower_sharevolume(doc: &mut ManifestDoc) -> Result<()> {
-    // Warned against the Kind the user actually wrote, before the rewrite —
-    // the same order `lower_storage` uses, and for the same reason.
-    warn_unknown_fields(doc, crate::cmd::sharevolume::SHAREVOLUME_SPEC_FIELDS);
-    let serde_yaml::Value::Mapping(m) = &doc.spec else {
-        return Err(Error::Invalid(super::po::tf(
-            "ShareVolume '{name}': spec must be a mapping",
-            &[("name", &doc.metadata.name)],
-        )));
-    };
-    let from = m
-        .get(serde_yaml::Value::from("storageRef"))
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            Error::Invalid(super::po::tf(
-                "ShareVolume '{name}': spec.storageRef is required",
-                &[("name", &doc.metadata.name)],
-            ))
-        })?
-        .to_string();
-    let mut out = serde_yaml::Mapping::new();
-    for (k, v) in m {
-        if k.as_str() == Some("storageRef") {
-            continue;
-        }
-        out.insert(k.clone(), v.clone());
+/// A function and not a `match` at the point of refusal: the same question is
+/// asked by the load and by the guard over the published examples, and two
+/// copies drift the day a fourth Kind goes.
+fn removed_kind_hint(kind: &str) -> Option<(&'static str, &'static str)> {
+    match kind {
+        "Storage" => Some((
+            "`kind: Volume` with an `nfs:`/`cifs:`/`webdav:` block",
+            "the same VolumeStore, described once instead of twice",
+        )),
+        "ShareVolume" => Some((
+            "`kind: Volume` with a `share:` block",
+            "a share always was a volume with a parent",
+        )),
+        "Egress" => Some((
+            "`kind: NetworkPolicy` with `direction: egress`",
+            "one struct, one validator, one apply — the direction is a field",
+        )),
+        _ => None,
     }
-    let mut share = serde_yaml::Mapping::new();
-    share.insert(
-        serde_yaml::Value::from("from"),
-        serde_yaml::Value::from(from),
-    );
-    out.insert(
-        serde_yaml::Value::from("share"),
-        serde_yaml::Value::Mapping(share),
-    );
-    doc.spec = serde_yaml::Value::Mapping(out);
-    doc.kind = k::VOLUME.to_string();
-    super::output::warn(&super::po::tf(
-        "ShareVolume '{name}': `kind: ShareVolume` is deprecated — use `kind: Volume` with a \
-         `share: {from: ...}` block (same fields, same behaviour, and now ownable by a stack)",
-        &[("name", &doc.metadata.name)],
-    ));
-    Ok(())
-}
-
-/// Rewrites a legacy `kind: Egress` into the canonical `kind: NetworkPolicy`,
-/// writing the direction the old Kind used to imply into `spec.direction`.
-///
-/// **Fail-closed on a contradiction.** `kind: Egress` with `direction: ingress`
-/// is not a mistake worth guessing at — it is two statements that cannot both be
-/// true, and silently honouring one of them on a FIREWALL is the worst possible
-/// place to guess. Same treatment `force_microvm_backend` gives a `type: microvm`
-/// that asks for a non-microVM backend.
-fn lower_egress(doc: &mut ManifestDoc) -> Result<()> {
-    let declared = doc.spec.get("direction").and_then(|v| v.as_str());
-    match declared {
-        Some("egress") | None => {}
-        Some(other) => {
-            return Err(Error::Invalid(super::po::tf(
-                "Egress '{name}': spec.direction is '{other}', but `kind: Egress` means \
-                 outbound — write `kind: NetworkPolicy` with the direction you want",
-                &[("name", &doc.metadata.name), ("other", other)],
-            )))
-        }
-    }
-    if declared.is_none() {
-        if let serde_yaml::Value::Mapping(m) = &mut doc.spec {
-            m.insert(
-                serde_yaml::Value::from("direction"),
-                serde_yaml::Value::from("egress"),
-            );
-        } else {
-            // A non-mapping spec has nowhere to put the direction, and letting it
-            // through would reach `apply` as "direction missing" — an error about
-            // a field the user never wrote.
-            return Err(Error::Invalid(super::po::tf(
-                "Egress '{name}': spec must be a mapping",
-                &[("name", &doc.metadata.name)],
-            )));
-        }
-    }
-    super::output::warn(&super::po::tf(
-        "Egress '{name}': `kind: Egress` is deprecated — use `kind: NetworkPolicy` with \
-         `direction: egress` (same fields, same behaviour)",
-        &[("name", &doc.metadata.name)],
-    ));
-    doc.kind = k::FIREWALL_POLICY.to_string();
-    Ok(())
 }
 
 /// Filters the documents of a specific `kind` (exact comparison, e.g. `k::CONTAINER`).
@@ -999,6 +810,35 @@ mod tests {
     /// what the document means, so there is nothing for the writer to migrate;
     /// a MERGE (`Egress`→`FirewallPolicy`) does warn, because the semantics
     /// moved. Warning on a pure rename would train people to ignore warnings.
+    /// Os três Kinds removidos recusam NOMEANDO o substituto.
+    ///
+    /// Uma remoção que caísse no «unknown kind» genérico faria um manifesto
+    /// correcto-até-ontem parecer um erro de escrita, e quem o apanha não
+    /// saberia se errou ou se algo mudou debaixo dele. Este teste substitui os
+    /// sete que provavam a REDUÇÃO — o comportamento que deixou de existir.
+    #[test]
+    fn a_removed_kind_refuses_by_naming_its_replacement() {
+        for (kind, expect) in [
+            ("Storage", "`kind: Volume`"),
+            ("ShareVolume", "`share:`"),
+            ("Egress", "`kind: NetworkPolicy`"),
+        ] {
+            let mut doc: ManifestDoc = serde_yaml::from_str(&format!(
+                "apiVersion: delonix.io/v1\nkind: {kind}\nmetadata: {{ name: x }}\nspec: {{}}\n"
+            ))
+            .unwrap();
+            let e = lower_legacy_kind(&mut doc).unwrap_err().to_string();
+            assert!(e.contains("was removed"), "{kind}: {e}");
+            assert!(e.contains(expect), "{kind} nao nomeia o substituto: {e}");
+        }
+        // E um Kind que FICA nao e apanhado pela recusa.
+        let mut ok: ManifestDoc = serde_yaml::from_str(
+            "apiVersion: storage.delonix.io/v1alpha1\nkind: Volume\nmetadata: { name: v }\nspec: {}\n",
+        )
+        .unwrap();
+        assert!(lower_legacy_kind(&mut ok).is_ok());
+    }
+
     #[test]
     fn a_renamed_kind_keeps_answering_to_its_old_name() {
         for (old, new) in [
@@ -1304,7 +1144,9 @@ spec: { disk: k8s-golden }
             "VirtualMachine",
             "Workload",
             "Stack",
-            "ShareVolume",
+            // `ShareVolume` saiu da lista com o Kind: quem honra a namespace de
+            // uma share e agora o `Volume` com bloco `share:`, verificado logo
+            // a seguir.
         ] {
             assert!(kind_honors_namespace(kind), "{kind} tem de honrar");
         }
@@ -1320,15 +1162,13 @@ spec: { disk: k8s-golden }
         // e por isso `honors_namespace` diz que sim — o aviso do `load` seria
         // errado num share, e um aviso errado e pior que nenhum.
         assert!(kind_honors_namespace("Volume"));
-        assert!(
-            kind_honors_namespace("ShareVolume"),
-            "a grafia antiga tambem"
-        );
+        // A grafia antiga JA NAO honra nada: o Kind foi removido, e o `load`
+        // recusa-a nomeando o substituto antes de a namespace sequer ser lida.
+        assert!(!kind_honors_namespace("ShareVolume"));
         // Sem semantica de namespace hoje: aceitam o campo e nao fazem nada com ele,
         // que e precisamente o que passa a ser avisado no `load`.
         for kind in [
             "Network",
-            "Storage",
             "Secret",
             "Image",
             "HTTPRoute",
@@ -1599,158 +1439,6 @@ spec:
         assert_eq!(docs[2].kind, "Container");
         assert_eq!(docs[2].metadata.name, "db");
         assert_eq!(docs[2].metadata.namespace.as_deref(), Some("data")); // per-item override
-    }
-
-    /// `kind: Egress` e `kind: NetworkPolicy` eram o MESMO objecto — uma
-    /// struct, um validador, um apply, um dataplane. Depois da fusão só há um
-    /// Kind no fim, e o antigo é reescrito com a direcção que implicava.
-    #[test]
-    fn egress_e_reescrito_como_firewallpolicy_com_a_direccao() {
-        let mut doc: ManifestDoc = serde_yaml::from_str(
-            "apiVersion: delonix.io/v1\nkind: Egress\nmetadata: { name: db-out }\nspec: { target: db }\n",
-        )
-        .unwrap();
-        lower_legacy_kind(&mut doc).unwrap();
-        assert_eq!(doc.kind, "NetworkPolicy");
-        assert_eq!(
-            doc.spec.get("direction").unwrap().as_str(),
-            Some("egress"),
-            "a direcção que o Kind antigo implicava tem de ficar escrita no spec"
-        );
-        // Um `direction: egress` já escrito não é duplicado nem alterado.
-        let mut ja: ManifestDoc = serde_yaml::from_str(
-            "apiVersion: delonix.io/v1\nkind: Egress\nmetadata: { name: x }\nspec: { target: db, direction: egress }\n",
-        )
-        .unwrap();
-        lower_legacy_kind(&mut ja).unwrap();
-        assert_eq!(ja.spec.get("direction").unwrap().as_str(), Some("egress"));
-    }
-
-    /// Uma contradicção não se adivinha, e muito menos numa firewall: `kind:
-    /// Egress` com `direction: ingress` são duas afirmações que não podem ser
-    /// ambas verdadeiras. Fail-closed, como o `force_microvm_backend` faz a um
-    /// `type: microvm` que pede outro backend.
-    #[test]
-    fn egress_com_direccao_contraditoria_e_recusado() {
-        let mut doc: ManifestDoc = serde_yaml::from_str(
-            "apiVersion: delonix.io/v1\nkind: Egress\nmetadata: { name: x }\nspec: { target: db, direction: ingress }\n",
-        )
-        .unwrap();
-        let e = lower_legacy_kind(&mut doc).unwrap_err().to_string();
-        assert!(e.contains("ingress"), "{e}");
-        assert!(
-            e.contains("NetworkPolicy"),
-            "a mensagem tem de dizer o que fazer: {e}"
-        );
-    }
-
-    /// Os filhos de um `kind: Stack` são construídos DENTRO do `load` e nunca
-    /// passaram pelo ciclo, por isso um grupo `egress:` produziria documentos
-    /// que nenhum handler reclama — e seriam largados em silêncio, que é
-    /// exactamente a falha que esta fusão existe para tirar.
-    #[test]
-    fn um_grupo_egress_dentro_de_um_stack_tambem_e_reescrito() {
-        let text = "\
-apiVersion: delonix.io/v1
-kind: Stack
-metadata: { name: s }
-spec:
-  egress:
-    - name: dentro
-      spec: { target: db }
-";
-        let p = std::env::temp_dir().join(format!("dlx-stack-egress-{}.yaml", std::process::id()));
-        std::fs::write(&p, text).unwrap();
-        let docs = load(&p).unwrap();
-        let _ = std::fs::remove_file(&p);
-        assert_eq!(docs.len(), 1);
-        assert_eq!(
-            docs[0].kind, "NetworkPolicy",
-            "o filho do Stack ficou por reescrever"
-        );
-        assert_eq!(
-            docs[0].spec.get("direction").unwrap().as_str(),
-            Some("egress")
-        );
-    }
-
-    /// `kind: Volume` e `kind: Storage` descreviam a MESMA montagem de duas
-    /// maneiras e acabavam no MESMO store, sem nada a dizer qual usar. O tipo
-    /// passa a ser o NOME do bloco — a forma do `kind: Workload` — por isso um
-    /// tipo não pode contradizer a sua própria declaração.
-    #[test]
-    fn storage_e_reescrito_como_volume_com_o_bloco_do_tipo() {
-        let mut doc: ManifestDoc = serde_yaml::from_str(
-            "apiVersion: delonix.io/v1\nkind: Storage\nmetadata: { name: media }\nspec: { type: nfs, server: 10.0.0.5, share: /pool/media, mountOptions: 'vers=4.1' }\n",
-        )
-        .unwrap();
-        lower_legacy_kind(&mut doc).unwrap();
-        assert_eq!(doc.kind, "Volume");
-        let b = doc.spec.get("nfs").expect("bloco nfs em falta");
-        assert_eq!(b.get("server").unwrap().as_str(), Some("10.0.0.5"));
-        assert_eq!(b.get("mountOptions").unwrap().as_str(), Some("vers=4.1"));
-        // O `type` não sobrevive: passou a ser o nome do bloco.
-        assert!(doc.spec.get("type").is_none());
-        assert!(b.get("type").is_none());
-    }
-
-    /// Um `kind: ShareVolume` era um `kind: Volume` com um registo a mais ao
-    /// lado, cujo único campo próprio era o pai. Passa a ser o bloco `share:`,
-    /// e o que a reescrita tem de garantir é que **só** o `storageRef` se move:
-    /// `quota` e `alertPct` já significavam num volume exactamente o que
-    /// significavam aqui, e movê-los para dentro do bloco criaria um segundo
-    /// sítio para os escrever.
-    #[test]
-    fn sharevolume_e_reescrito_como_volume_com_bloco_share() {
-        let mut doc: ManifestDoc = serde_yaml::from_str(
-            "apiVersion: delonix.io/v1\nkind: ShareVolume\nmetadata: { name: db, namespace: teamA }\nspec: { storageRef: nas, quota: 5G, alertPct: 80 }\n",
-        )
-        .unwrap();
-        lower_legacy_kind(&mut doc).unwrap();
-        assert_eq!(doc.kind, "Volume");
-        assert_eq!(
-            doc.spec.get("share").unwrap().get("from").unwrap().as_str(),
-            Some("nas")
-        );
-        assert_eq!(doc.spec.get("quota").unwrap().as_str(), Some("5G"));
-        assert_eq!(doc.spec.get("alertPct").unwrap().as_u64(), Some(80));
-        // O `storageRef` não sobrevive à solta: passou a ser `share.from`, e
-        // deixá-lo nos dois sítios é como os dois passam a discordar.
-        assert!(doc.spec.get("storageRef").is_none());
-        // A namespace segue com o documento — é ela que decide o directório dos
-        // dados, e um share que a perdesse na reescrita mudaria de sítio.
-        assert_eq!(doc.metadata.namespace.as_deref(), Some("teamA"));
-    }
-
-    /// Sem `storageRef` não há share nenhum — o campo é o que o Kind existia
-    /// para carregar. Recusar nomeia o campo; deixar passar produziria um
-    /// `kind: Volume` com um bloco `share:` sem `from`, e o erro apareceria
-    /// mais à frente contra um documento que o utilizador nunca escreveu.
-    #[test]
-    fn um_sharevolume_sem_storage_ref_e_recusado() {
-        let mut doc: ManifestDoc = serde_yaml::from_str(
-            "apiVersion: delonix.io/v1\nkind: ShareVolume\nmetadata: { name: db }\nspec: { quota: 5G }\n",
-        )
-        .unwrap();
-        let e = lower_legacy_kind(&mut doc).unwrap_err().to_string();
-        assert!(e.contains("storageRef"), "{e}");
-    }
-
-    /// `smb` sempre foi um alias de `cifs` (o `build_mount` manda os dois para o
-    /// mesmo driver). O bloco tem UM nome, por isso os dois não voltam a ser dois.
-    #[test]
-    fn smb_e_cifs_caem_no_mesmo_bloco() {
-        for ty in ["cifs", "smb"] {
-            let mut doc: ManifestDoc = serde_yaml::from_str(&format!(
-                "apiVersion: delonix.io/v1\nkind: Storage\nmetadata: {{ name: b }}\nspec: {{ type: {ty}, server: nas, share: media }}\n"
-            ))
-            .unwrap();
-            lower_legacy_kind(&mut doc).unwrap();
-            assert!(
-                doc.spec.get("cifs").is_some(),
-                "{ty} não caiu no bloco cifs"
-            );
-        }
     }
 
     #[test]

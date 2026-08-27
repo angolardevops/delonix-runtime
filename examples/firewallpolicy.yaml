@@ -1,7 +1,7 @@
 # kind: NetworkPolicy — a forma UNIFICADA do firewall declarativo. A direcção
 # vem de `spec.direction` (ingress|egress) em vez do nome do Kind. Resolve a
 # confusão de que, aqui, `kind: Ingress` é firewall L4 (não o Ingress L7/HTTP do
-# k8s). `kind: Egress` continua a ser aceite (é reescrito no load, com aviso) — este é
+# k8s). `kind: Egress` foi REMOVIDO; o load recusa-o nomeando esta forma — este é
 # só a superfície unificada equivalente.
 #
 #   delonix stack apply -f examples/firewallpolicy.yaml
@@ -47,7 +47,7 @@ kind: NetworkPolicy
 metadata:
   name: db-outbound
 spec:
-  direction: egress          # = kind: Egress
+  direction: egress          # o kind: Egress foi removido
   target: dbapp
   defaultPolicy: deny
   rules:
