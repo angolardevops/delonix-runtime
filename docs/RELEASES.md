@@ -4,6 +4,85 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v0.65.0 — QUEBRA: três Kinds foram removidos
+
+**Esta versão parte manifestos.** É a primeira desde que a promessa de
+estabilidade existe que o faz de propósito, e a nota está no topo em vez de no
+fim porque é o que interessa saber antes de actualizar.
+
+### O que sai
+
+| removido | escrever em vez dele |
+|---|---|
+| `kind: Storage` | `kind: Volume` com um bloco `nfs:`/`cifs:`/`webdav:` |
+| `kind: ShareVolume` | `kind: Volume` com um bloco `share:` |
+| `kind: Egress` | `kind: NetworkPolicy` com `direction: egress` |
+
+Os três **já eram reescritos** para exactamente estas formas no carregamento. O
+que o motor FAZ não mudou; mudou quem tem de escrever a forma final.
+
+### A recusa nomeia o substituto
+
+```
+$ delonix stack validate -f antigo.yaml
+error invalid argument: `kind: Storage` was removed — write `kind: Volume` with
+an `nfs:`/`cifs:`/`webdav:` block instead (the same VolumeStore, described once
+instead of twice)
+```
+
+Não é «unknown kind». Um manifesto correcto até ontem a receber um erro genérico
+faria quem o apanha duvidar se escreveu mal, em vez de saber que algo mudou.
+
+### Isto contradiz a v0.64.0, e é deliberado
+
+A v0.64.0 saiu há horas a dizer «nada é obrigatório; os manifestos existentes
+carregam sem alteração». **Deixou de ser verdade nesta.** Não houve um degrau
+intermédio — a decisão foi cortar, e o número da versão e este texto existem
+para que ninguém descubra isso pelo erro.
+
+Quem seguiu o conselho da v0.64.0 e adiou a migração tem de a fazer agora. Os
+`sed` são estes:
+
+```bash
+# kind: Egress → NetworkPolicy com direction
+sed -i 's/^kind: Egress$/kind: NetworkPolicy/' *.yaml   # e acrescentar `direction: egress` ao spec
+```
+
+Para o `Storage` e o `ShareVolume` não há `sed` honesto: o corpo do documento
+muda de forma (`type: nfs, server: h` passa a `nfs: { server: h }`). Os
+exemplos publicados mostram as duas formas finais.
+
+### Efeito lateral: a forma `deprecated` desapareceu
+
+O registo de Kinds tinha seis formas; ficou com cinco. A `Deprecated` — um Kind
+REESCRITO no carregamento, com aviso — ficou sem um único utilizador e saiu, que
+é o que este repo faz a código sem chamador. A distinção que ela guardava fica
+escrita no `Sunset`, que é quem a contrastava: um `Sunset` **não** é reescrito,
+porque reescrevê-lo mudaria o que o motor faz. Volta quando um Kind precisar de
+ser reescrito em vez de anunciado.
+
+### O que NÃO sai
+
+Os grupos de comandos `delonix storage` e `delonix sharevolume` **ficam**. A
+medição que o decidiu: o `storage create` tem flags que o `volumes create` não
+tem — `--type`, `--server`, `--share`, `--username`, `--password-secret`,
+`--options`. Remover o grupo perdia a criação imperativa de armazenamento de
+rede; remover o Kind não perde nada.
+
+Também ficam, e não são depreciações: `kind: Container` (`sunset`, tem apply
+próprio), `kind: Ingress` (`compat`, é schema do k8s aceite de propósito), e o
+açúcar `kind: Workload` e `kind: Dependency`.
+
+### Medido
+
+36 suites · **1249 testes** · 0 falhas, com os dois roots isolados.
+`fmt` · `clippy -D warnings` 0 · `lang_ratchet` · gate da superfície da CLI —
+todos verdes. A dívida de língua **desceu** com os Kinds (1050→1042
+identificadores, 3479→3460 comentários), e a linha de base foi baixada no mesmo
+commit, como o ratchet exige.
+
+---
+
 ## v0.64.0 — os Kinds ganham grupos e nomes definitivos, e o `delonix.io/v1` continua a carregar
 
 A reorganização dos recursos do motor. **Nada do que está escrito hoje deixa de
