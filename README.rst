@@ -63,7 +63,7 @@ Why it's different
    * - Firewall
      - basic
      - basic
-     - per-container L4 (``ingress``/``egress``) + declarative ``kind: FirewallPolicy``
+     - per-container L4 (``ingress``/``egress``) + declarative ``kind: NetworkPolicy``
    * - Observability
      - ``stats``
      - ``stats``
@@ -176,11 +176,12 @@ Highlights
 - **Real pods.** ``kind: Pod`` and ``delonix pod`` run N containers as one unit,
   sharing the pod's network namespace (same IP, ``localhost`` between them), IPC
   and UTS — a Kubernetes-style pod, rootless (PID sharing is a follow-up).
-- **Declarative microVMs.** ``kind: Vm`` on a pluggable ``VmBackend`` (Cloud
+- **Declarative microVMs.** ``kind: VirtualMachine`` on a pluggable ``VmBackend`` (Cloud
   Hypervisor or libvirt), with per-instance cloud-init and libvirt system
   checkpoints (``vm snapshot``/``restore``).
 - **One workload model.** ``kind: Workload`` (``spec.type: container | vm |
-  pod | microvm``) is a single declarative object that lowers to the right Kind,
+  pod | microvm``) is a single declarative object that lowers to ``Pod``,
+  ``VirtualMachine`` or ``Container`` at load time,
   and ``delonix workload ls/describe/stop/rm`` manages containers **and** VMs
   from one imperative surface.
 - **Structured output.** ``-o json`` on every list command emits stable,
@@ -197,10 +198,10 @@ Highlights
   natively under ``delonix compose up``.
 - **Network storage.** A ``kind: Volume`` with an ``nfs:``/``cifs:``/``webdav:``
   block mounts a share from a NAS (TrueNAS/Synology/Samba/Nextcloud) as a named
-  volume, k8s-PersistentVolume style. (``kind: Storage`` still loads, rewritten
-  into exactly this with a deprecation warning.)
+  volume, k8s-PersistentVolume style. (``kind: Storage`` said the same thing a
+  second way and was removed in v0.65.0; writing one is refused by name.)
 - **Firewall as code.** A unified ``ingress``/``egress`` command surface and
-  declarative ``kind: FirewallPolicy`` manifests (k8s NetworkPolicy style,
+  declarative ``kind: NetworkPolicy`` manifests (k8s shape,
   ``direction: ingress``/``egress``) that compile to nftables — plus a
   separate ``kind: Ingress`` for k8s-style L7 HTTP routing (host/path →
   backend service), not to be confused with the L4 firewall.
@@ -390,12 +391,32 @@ get readable names drawn from Angolan kings, queens and places
 Manifests
 =========
 
-The declarative face, Kubernetes-style: a multi-document YAML
-(``apiVersion: delonix.io/v1``) with Kinds — ``Network``, ``Volume``,
-``Image``, ``Vm``, ``Container``, ``Pod``, ``Workload``, ``FirewallPolicy``,
-``Ingress`` (k8s-style L7 HTTP routing), ``HTTPRoute``, ``Secret``,
-``ShareVolume``, ``Tunnel``, ``Cluster``, ``Stack`` — applied in dependency
-order by ``delonix stack apply``.
+The declarative face, Kubernetes-style: a multi-document YAML applied in
+dependency order by ``delonix stack apply``. **The list of Kinds is not written
+here** — it is printed by the engine, which is the only copy that cannot go
+stale:
+
+.. code-block:: console
+
+   $ delonix api-resources
+   NAME              SHORTNAMES   APIVERSION                      KIND            ...
+   pods              po           compute.delonix.io/v1alpha1     Pod             ...
+   virtualmachines   vm           compute.delonix.io/v1alpha1     VirtualMachine  ...
+   networks          net          networking.delonix.io/v1alpha1  Network         ...
+
+Sixteen at the time of writing, each in the group of its domain
+(``compute``/``networking``/``gateway``/``storage``/``artifact``/``core``/
+``infrastructure``). ``apiVersion: delonix.io/v1`` is still accepted everywhere
+— a Kind takes **its own group or the legacy one**, and nothing else.
+
+Four of them are not destinations: ``Workload`` and ``Dependency`` are sugar
+that lowers at load time, ``Ingress`` is the k8s spelling of an ``HTTPRoute``,
+and ``Container`` is on its way out in favour of ``Pod``. The ``FORM`` column
+says which is which, so a manifest never has to guess.
+
+``Storage``, ``ShareVolume`` and ``Egress`` were **removed** in v0.65.0 — each
+was a second way to say something a surviving Kind already said. Writing one now
+is refused by name, with the replacement spelled out.
 
 **It converges** (since v0.47.0): ``stack plan`` shows what would change and
 why, ``stack apply`` reconfigures ports, volumes, networks, memory and CPU
@@ -409,10 +430,21 @@ never touched. ``stack destroy`` removes what the stack owns, in reverse order.
 drift gate in CI one command.
 
 The schema is **generated from the code** (``delonix schema print``,
-``delonix explain Container.ports``) and published, so an editor gives you
-completion and type checking from one comment at the top of the file — see
-`the stability promise <docs/cli-stability.md>`_ and `the GitOps guide
-<docs/gitops.md>`_.
+``delonix explain Pod.containers``) and published, so an editor gives you
+completion and type checking from one comment at the top of the file. It catches
+a typo in a field name, a ``kind`` the engine does not know, and an
+``apiVersion`` that is not that Kind's group — the editor and ``stack apply``
+cannot disagree, because they read the same file.
+
+There is a **VS Code extension** that wires this up and adds a template per
+Kind: `angolardevops/delonix-vscode
+<https://github.com/angolardevops/delonix-vscode>`_. It works in VS Code and in
+the forks that share its extension CLI (VSCodium, Cursor, Windsurf,
+Antigravity); ``install.sh`` installs it into whichever it finds, unless you
+pass ``--no-editor-plugin``.
+
+See also `the stability promise <docs/cli-stability.md>`_, `the resource
+structure <docs/estrutura.md>`_ and `the GitOps guide <docs/gitops.md>`_.
 
 ``kind: Pod`` is a real multi-container pod: N
 containers sharing the pod's netns (same IP, ``localhost`` between them), IPC
@@ -426,21 +458,27 @@ ls/describe/stop/rm``, which routes by name across containers and VMs.
 
 .. code-block:: yaml
 
-   apiVersion: delonix.io/v1
+   apiVersion: networking.delonix.io/v1alpha1
    kind: Network
    metadata: { name: backend }
    ---
-   apiVersion: delonix.io/v1
-   kind: Container
+   apiVersion: compute.delonix.io/v1alpha1
+   kind: Pod
    metadata: { name: db }
    spec:
-     image: postgres:16-alpine
      network: backend
-     volumes: [ "data:/var/lib/postgresql/data" ]
-     ports: [ "5432:5432" ]
+     containers:
+       - name: db
+         image: postgres:16-alpine
+         ports:
+           - { containerPort: 5432, hostPort: 5432 }
+         volumeMounts:
+           - { name: data, mountPath: /var/lib/postgresql/data }
+     volumes:
+       - { name: data, persistentVolumeClaim: { claimName: data } }
    ---
-   apiVersion: delonix.io/v1
-   kind: FirewallPolicy          # L4 firewall, k8s-NetworkPolicy style
+   apiVersion: networking.delonix.io/v1alpha1
+   kind: NetworkPolicy           # L4 firewall, k8s-NetworkPolicy style
    metadata: { name: db-in }
    spec:
      target: db
