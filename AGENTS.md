@@ -3967,6 +3967,11 @@ checklist para quem mexer aqui do que como lista de correcções:
   órfão. O `container ps -a` também não o via, e era essa a pista. Vale para
   qualquer teste que fabrique estado: se o comando normal não o mostra, o teste
   não está a medir o que julga;
+- **uma secção de binário não é o custo do NOSSO código** — estimei que
+  `panic = "abort"` poupava 2,2 MiB somando `.eh_frame` e `.gcc_except_table`.
+  Medido, poupa **zero**: essas tabelas vêm quase todas do `libstd`
+  pré-compilado, que o perfil não reconstrói. Antes de estimar um ganho a
+  partir do tamanho de uma secção, perguntar quem a gerou;
 - **uma transferência que devolve 0 não é uma transferência** — o harness do
   spike do `pasta` reportou 200 MB em 96 ms através de `slirp4netns`, com zero
   ticks de CPU. Impossível, portanto o que ele mediu não foram bytes. Um
@@ -5419,6 +5424,32 @@ terceiro nó, não de um alvo no host.
 Portanto o ADR continua por escrever, mas deixou de estar bloqueado na pergunta
 errada. O que falta é o número, e o número precisa de um harness que verifique
 que os bytes chegaram.
+
+### `panic = "abort"` não entrega nada — medido, contra a estimativa
+
+Estava registado num relatório meu como valendo **~2,2 MiB** (`.eh_frame` +
+`.gcc_except_table` do binário) e como uma decisão a pesar contra o custo
+semântico. **Medido, o ganho é ZERO**, e por isso não há nada para pesar.
+
+Dois binários do mesmo commit, só o perfil a diferir:
+
+```text
+                    tamanho     .text     .eh_frame  .gcc_except_table
+unwind (actual)    24 671 008  17 366 224  1 003 200         10 076
+panic = "abort"    24 671 008  17 366 224  1 003 200         10 076
+```
+
+Idênticos ao byte. O mecanismo FUNCIONA neste toolchain — um crate mínimo
+encolhe 430 816 → 426 928 bytes (0,9 %) — mas o grosso das tabelas de
+unwind vem do **`libstd`, que é pré-compilado com unwind** e não é reconstruído
+sem `-Z build-std`. O que `panic="abort"` remove é o que o NOSSO código gera, e
+neste binário isso já era residual.
+
+O custo semântico continua a ser real (o tokio usa `catch_unwind` para isolar
+uma tarefa que entra em pânico; com `abort`, um pânico numa ligação HTTP mata o
+servidor inteiro). Só que agora nem precisa de ser discutido: **paga-se um
+custo por zero bytes.** Fica RECUSADO, e a razão é a ausência de ganho, não a
+presença de risco. Reabre-se se algum dia se compilar o `libstd` junto.
 
 ### Contra o Docker e o Podman, na mesma máquina no mesmo dia
 
