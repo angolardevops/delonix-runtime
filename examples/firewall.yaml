@@ -6,7 +6,7 @@
 #
 # NOTA: `kind: Ingress` já NÃO é firewall — passou a ser o Ingress L7/HTTP estilo
 # k8s (host/path→backend, ver examples/ingress.yaml). Para o firewall inbound usa
-# `kind: NetworkPolicy` com `direction: ingress` (como abaixo). E `kind: Egress`
+# `kind: NetworkPolicy` com `direction: ingress` (como abaixo). E `kind: Egress` (removido)
 # FUNDIU-SE aqui: é reescrito no load para `direction: egress`, com aviso de
 # depreciação — havia uma struct, um validador, um apply e um dataplane para os
 # dois, e nenhum modelo conhecido (NetworkPolicy, security groups, NSGs) separa
@@ -54,7 +54,7 @@ kind: NetworkPolicy
 metadata:
   name: db-outbound
 spec:
-  direction: egress          # era `kind: Egress`
+  direction: egress          # o `kind: Egress` foi removido
   target: dbapp
   defaultPolicy: deny
   rules:
