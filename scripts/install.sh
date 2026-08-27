@@ -361,6 +361,16 @@ if [ "$WITH_BINARY" = 1 ]; then
     curl -fsSL -o "$TMP/$asset" "$BASE_URL/$asset" || return 1
     echo "$asset"
   }
+  # Um asset cujo nome é o nome, sem sufixo de arquitectura. O `fetch_asset`
+  # acima existe para BINÁRIOS e compõe sempre `-x86_64[-v3]-linux`; um `.vsix`
+  # é independente de arquitectura e chama-se `delonix-vscode` e mais nada.
+  # Reutilizar aquele aqui pedia dois nomes que não existem, levava 404 nos dois,
+  # e reportava «this release ships no editor extension» sobre uma release que a
+  # traz — medido contra a v0.66.0.
+  fetch_named_asset() { # $1 nome EXACTO do asset
+    curl -fsSL -o "$TMP/$1" "$BASE_URL/$1" || return 1
+    echo "$1"
+  }
   verify_asset() { # nunca instalar um download sem conferir contra o SHA256SUMS
     [ -s "$TMP/SHA256SUMS" ] \
       || die "could not download SHA256SUMS — check your network and re-run (this is a download failure, not a corrupted/tampered file)"
@@ -461,12 +471,21 @@ if [ "$WITH_BINARY" = 1 ]; then
     if [ -z "$EDITORS_FOUND" ]; then
       skip editor "no VS Code-family editor on this host"
     else
-      dl_vsix() { fetch_asset delonix-vscode > "$TMP/.asset-vsix" 2>/dev/null; }
+      # Sem `2>/dev/null`: foi silenciar este stderr que escondeu o 404 e fez o
+      # SKIP abaixo afirmar uma coisa falsa durante uma release inteira.
+      dl_vsix() { fetch_named_asset delonix-vscode > "$TMP/.asset-vsix"; }
       if spin editor plugin "downloading..." dl_vsix; then
         VSIX_ASSET=$(cat "$TMP/.asset-vsix")
         verify_asset "$VSIX_ASSET"
+        # O CLI do VS Code EXIGE que o ficheiro termine em `.vsix`: sem isso lê o
+        # argumento como um ID de extensão e responde «make sure you use the full
+        # extension ID, including the publisher», uma frase que não tem nada que
+        # ver com a causa. O asset chama-se `delonix-vscode` porque é esse o nome
+        # que o SHA256SUMS assinado cobre — por isso verifica-se com o nome dele
+        # e instala-se com uma cópia que tem a extensão que o editor pede.
+        cp "$TMP/$VSIX_ASSET" "$TMP/$VSIX_ASSET.vsix"
         for ed in $EDITORS_FOUND; do
-          if "$ed" --install-extension "$TMP/$VSIX_ASSET" --force >/dev/null 2>&1; then
+          if "$ed" --install-extension "$TMP/$VSIX_ASSET.vsix" --force >/dev/null 2>&1; then
             stepok editor "$ed"
           else
             warn "could not install the extension into $ed — install it by hand: $ed --install-extension <the .vsix from the release>"
