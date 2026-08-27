@@ -2337,7 +2337,18 @@ fn validate_graph_with(
     };
     let mut networks = declared(&[k::NETWORK]);
     let mut volumes = declared(&[k::VOLUME, k::STORAGE]);
-    let mut containers = declared(&[k::CONTAINER]);
+    // A Pod is a workload target like any other, and leaving it out made the
+    // RECOMMENDED spelling unusable: with `Container` on sunset, a manifest that
+    // follows the advice and writes `kind: Pod` had every `Dependency`,
+    // `NetworkPolicy` and `HTTPRoute` reference to it rejected as «not a
+    // declared or existing Container». Found by converting the published
+    // examples, not by reading — the reference check only ever saw one Kind
+    // because, when it was written, one Kind was all there was.
+    //
+    // A Pod's members are named `<pod>-cN` unless the member names itself, but
+    // the reference is to the POD: that is the name the netns, the address and
+    // the firewall chain all hang off.
+    let mut containers = declared(&[k::CONTAINER, k::POD]);
     let mut secrets = declared(&[k::SECRET]);
     networks.extend(existing_networks.iter().cloned());
     volumes.extend(existing_volumes.iter().cloned());
@@ -3255,6 +3266,26 @@ spec: {}
     /// referências resolvidas» para exactamente esse manifesto.
     ///
     /// Recusado e não fundido, ao contrário do `kind: Dependency`: uma
+    /// A `kind: Pod` is a reference target like any other workload.
+    ///
+    /// Before this, `Pod` was recommended and unusable at the same time: with
+    /// `Container` on sunset, a manifest that followed the advice had EVERY
+    /// reference to it — `Dependency`, `NetworkPolicy`, `HTTPRoute` — rejected
+    /// with «not a declared or existing Container». Found by converting the
+    /// published examples, not by reading the code.
+    #[test]
+    fn a_pod_is_a_reference_target_like_a_container() {
+        let docs: Vec<super::manifest::ManifestDoc> = [
+            "apiVersion: compute.delonix.io/v1alpha1\nkind: Pod\nmetadata: { name: db }\nspec: { containers: [{ name: db, image: alpine }] }\n",
+            "apiVersion: networking.delonix.io/v1alpha1\nkind: Dependency\nmetadata: { name: d }\nspec: { from: db, to: db }\n",
+        ]
+        .iter()
+        .map(|y| serde_yaml::from_str(y).unwrap())
+        .collect();
+        let issues = super::validate_graph_with(&docs, &[], &[], &[], &[]);
+        assert!(issues.is_empty(), "{issues:?}");
+    }
+
     /// Dependency declara o acesso de UM peer e várias somam-se; uma
     /// FirewallPolicy declara o estado desejado INTEIRO de uma direcção,
     /// `defaultPolicy` incluído, logo duas são duas respostas à mesma pergunta.

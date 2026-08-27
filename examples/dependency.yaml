@@ -23,20 +23,25 @@ spec:
   driver: bridge
 ---
 apiVersion: compute.delonix.io/v1alpha1
-kind: Container
+kind: Pod
 metadata: { name: db }
 spec:
-  image: "postgres:16"
   network: appnet
-  env: { POSTGRES_PASSWORD: dev }
+  containers:
+    - name: db
+      image: "postgres:16"
+      env:
+        - { name: POSTGRES_PASSWORD, value: dev }
 ---
 apiVersion: compute.delonix.io/v1alpha1
-kind: Container
+kind: Pod
 metadata: { name: app }
 spec:
-  image: "alpine:3.19"
   network: appnet
-  command: ["sleep", "infinity"]
+  containers:
+    - name: app
+      image: "alpine:3.19"
+      command: ["sleep", "infinity"]
 ---
 apiVersion: networking.delonix.io/v1alpha1
 kind: Dependency
