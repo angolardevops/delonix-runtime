@@ -201,6 +201,15 @@ check "df: paralelo e sequencial dao o mesmo" ok bash -c '
   b=$(DELONIX_WALK_THREADS=1 '"'$BIN'"' system df | grep "^total ")
   [ "$a" = "$b" ]'
 # Sem `--force` e sem terminal, o gc RECUSA-SE — nunca termina nada por engano.
+# O registo do IPAM não tinha LEITOR: cada função responde sobre um id, e
+# «quantos leases há e ainda são de alguém» não tinha comando. Foi assim que
+# chegou a 352 leases contra 10 containers vivos sem ninguém dar por isso.
+check "network ipam lista" ok "$BIN" network ipam
+check "network ipam -o json é JSON a sério" ok bash -c \
+  "'$BIN' network ipam -o json | python3 -c 'import json,sys; json.load(sys.stdin)'"
+# A ceifa NUNCA corre sem confirmação: um lease é escrito antes do ref-marker,
+# e levá-lo cedo demais põe dois containers no mesmo endereço.
+check "network ipam --gc recusa sem --force" fail "$BIN" network ipam --gc
 check "netns gc recusa sem --force" fail "$BIN" net netns gc
 check "netns gc --help" ok "$BIN" net netns gc --help
 # Um `down` contra uma raiz APAGADA não a pode recriar: o `FileLock` fazia

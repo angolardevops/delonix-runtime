@@ -1211,6 +1211,16 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["net netns up", "net netns status", "container start"],
     },
     Entry {
+        path: "network ipam",
+        group: "Inspect",
+        examples: &[
+            ("every lease this node handed out, and whether anything still claims it", "delonix network ipam"),
+            ("for a script or a dashboard (ADR-0005)", "delonix network ipam -o json"),
+            ("reclaim the ones nothing claims — checked twice, twenty seconds apart", "delonix network ipam --gc"),
+        ],
+        see_also: &["network ls", "net netns gc", "system prune"],
+    },
+    Entry {
         path: "net netns gc",
         group: "Lifecycle",
         examples: &[

@@ -150,6 +150,109 @@ fn store(prefix: &str, map: &BTreeMap<String, String>) -> Result<()> {
     })
 }
 
+/// Every `/16` prefix that has a lease registry on disk.
+///
+/// Exists because until now **nothing could see this file**. `allocate`,
+/// `reserve`, `lookup` and `release` are the whole public surface, and every
+/// one of them answers about ONE id. There was no way to ask "how many leases
+/// are there, and do they still belong to anybody" — which is how the registry
+/// on the host this was written against reached **391 leases against 47 live
+/// containers** with nobody noticing. A leak nothing can display is a leak
+/// nobody fixes.
+pub fn prefixes() -> Vec<String> {
+    let Ok(rd) = std::fs::read_dir(ipam_dir()) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = rd
+        .flatten()
+        .filter_map(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .strip_suffix(".json")
+                .map(str::to_string)
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// The `id → ip` map of a prefix, for reporting. Empty when the prefix has no
+/// registry — never creates one, same contract as [`load`].
+pub fn entries(prefix: &str) -> BTreeMap<String, String> {
+    load(prefix).unwrap_or_default()
+}
+
+/// **PURE** — which leases of a prefix no longer belong to anybody.
+///
+/// Two independent tests, and neither is enough on its own:
+///
+/// * `live` — the ids the CALLER knows are alive, assembled by it exactly as
+///   [`crate::infra::reap_orphan_refs`] receives its own. Never discovered
+///   here: a reaper that decides for itself what is alive is the shape that
+///   made published ports die on a host where the caller's list was partial.
+/// * `attached` — the ids holding a ref-marker in the ingress. A marker means
+///   the id has a wire inside the holder, which is a different question from
+///   whether a container record exists, and it is the one that covers the
+///   window this reaper has to survive: `attach_container` writes the LEASE
+///   first and the marker immediately after, so an id mid-attach has a lease
+///   and, a moment later, a marker.
+///
+/// A lease is a candidate only when BOTH say no. Even then the caller must not
+/// act on one reading — see [`crate::infra::confirm_orphan_leases`] for why the
+/// verdict is taken twice.
+///
+/// # The failure mode this leaves, and why the marker covers it
+///
+/// `Store::list` skips, silently, any container record that fails to
+/// deserialize — so a corrupt `containers/<id>.json` makes its owner vanish
+/// from `live` while the container keeps running. On the `live` test alone,
+/// this reaper would then take a running container's address and hand it to
+/// the next one.
+///
+/// The `attached` test is what stops that: a container on a custom network
+/// holds a ref-marker for as long as it has a wire in the holder, and the
+/// marker is a plain file whose presence does not depend on any record parsing.
+/// The two tests fail in different ways, which is the only reason having both
+/// is worth more than having the stricter one twice.
+///
+/// Found while writing the proof for this, not by reading it: a hand-written
+/// test record that did not deserialize made its lease read `unclaimed`, and it
+/// took a real container to tell the difference.
+pub fn orphan_leases(
+    entries: &BTreeMap<String, String>,
+    live: &std::collections::HashSet<String>,
+    attached: &std::collections::HashSet<String>,
+) -> Vec<String> {
+    entries
+        .keys()
+        .filter(|id| !live.contains(*id) && !attached.contains(*id))
+        .cloned()
+        .collect()
+}
+
+/// Drops `ids` from a prefix's registry. Under `flock`, idempotent, and it
+/// re-reads under the lock — the list was computed outside it.
+///
+/// Returns how many leases were actually dropped.
+pub fn release_many(prefix: &str, ids: &[String]) -> usize {
+    let Some(_lock) = IpamLock::acquire() else {
+        return 0;
+    };
+    let Some(mut map) = load(prefix) else {
+        return 0;
+    };
+    let mut n = 0;
+    for id in ids {
+        if map.remove(id).is_some() {
+            n += 1;
+        }
+    }
+    if n > 0 && store(prefix, &map).is_err() {
+        return 0;
+    }
+    n
+}
+
 /// Allocates (or returns the existing lease of) a unique IP in `prefix`'s `/16` for
 /// `id`. Idempotent: an already-registered id always returns the SAME IP. For a new id,
 /// it starts from the preferred hash IP and, if held by another id, linearly probes the
@@ -325,6 +428,84 @@ pub fn prefix_of(ip: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// As duas condições são independentes, e ambas são precisas.
+    ///
+    /// A do ref-marker existe por causa de uma janela de duas linhas: o
+    /// `attach_container` escreve o LEASE e só depois o marcador, por isso um
+    /// id a meio de um attach não tem registo de container nenhum. Ceifá-lo aí
+    /// entrega o mesmo endereço a um segundo container enquanto o primeiro
+    /// ainda está a ser construído — a colisão que este módulo existe para
+    /// eliminar.
+    #[test]
+    fn um_lease_so_e_orfao_quando_nem_o_container_nem_o_marcador_o_reclamam() {
+        let entries: std::collections::BTreeMap<String, String> = [
+            ("vivo", "10.210.0.2"),
+            ("so-marcador", "10.210.0.3"),
+            ("abandonado", "10.210.0.4"),
+        ]
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+
+        let live: std::collections::HashSet<String> = ["vivo".to_string()].into_iter().collect();
+        let attached: std::collections::HashSet<String> =
+            ["so-marcador".to_string()].into_iter().collect();
+
+        assert_eq!(
+            super::orphan_leases(&entries, &live, &attached),
+            vec!["abandonado".to_string()],
+            "um id a meio de um attach tem marcador e nenhum registo — não é órfão"
+        );
+
+        // Sem a metade do marcador, o id em voo era condenado.
+        let sem_marcador = std::collections::HashSet::new();
+        let mut sem = super::orphan_leases(&entries, &live, &sem_marcador);
+        sem.sort();
+        assert_eq!(
+            sem,
+            vec!["abandonado".to_string(), "so-marcador".to_string()]
+        );
+
+        // E um registo vazio não condena nada.
+        assert!(super::orphan_leases(
+            &Default::default(),
+            &Default::default(),
+            &Default::default()
+        )
+        .is_empty());
+    }
+
+    /// O `release_many` é idempotente e só toca no que lhe foi nomeado — a
+    /// lista é calculada FORA do lock, por isso a remoção volta a lê-la debaixo
+    /// dele e um id que entretanto desapareceu não conta.
+    #[test]
+    fn a_ceifa_de_leases_e_idempotente_e_cirurgica() {
+        // `with_root` e não um tmpdir próprio: o `DELONIX_ROOT` é global ao
+        // processo, e um mutex próprio não serializa nada — é o bug que o
+        // doc-comment do `ENV_LOCK` descreve, e que este teste apanhou ao ser
+        // escrito assim à primeira.
+        with_root("gc", || {
+            let pfx = "10.251";
+            super::reserve(pfx, "a", "10.251.0.2");
+            super::reserve(pfx, "b", "10.251.0.3");
+            super::reserve(pfx, "c", "10.251.0.4");
+            assert_eq!(super::entries(pfx).len(), 3);
+
+            let levados = super::release_many(pfx, &["b".to_string(), "inexistente".to_string()]);
+            assert_eq!(levados, 1, "só o que existia conta");
+            let restam = super::entries(pfx);
+            assert_eq!(restam.len(), 2);
+            assert!(restam.contains_key("a") && restam.contains_key("c"));
+
+            // Repetir não muda nada.
+            assert_eq!(super::release_many(pfx, &["b".to_string()]), 0);
+            assert_eq!(super::entries(pfx).len(), 2);
+
+            // E o prefixo aparece na listagem, que é a razão de ela existir.
+            assert!(super::prefixes().iter().any(|p| p == pfx));
+        });
+    }
 
     /// **Esgotar um prefixo por inteiro** — a prova anti-colisão que um /16
     /// nunca dá, porque ninguém enche 65 mil endereços num teste.

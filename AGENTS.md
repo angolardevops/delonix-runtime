@@ -3961,6 +3961,17 @@ checklist para quem mexer aqui do que como lista de correcções:
   desta série pôs os dois lado a lado e mostrou uma subida de 13,7 para 34,9 MB que era só o
   tamanho do `.text` com símbolos. Release contra release, o RSS não mexe. Comparar builds de
   perfis diferentes mede o compilador, não a alteração;
+- **um ficheiro com a forma certa não é um registo válido** — um
+  `containers/<id>.json` escrito à mão para um teste não desserializava, o
+  `Store::list` saltava-o em SILÊNCIO, e o lease do container aparecia como
+  órfão. O `container ps -a` também não o via, e era essa a pista. Vale para
+  qualquer teste que fabrique estado: se o comando normal não o mostra, o teste
+  não está a medir o que julga;
+- **uma transferência que devolve 0 não é uma transferência** — o harness do
+  spike do `pasta` reportou 200 MB em 96 ms através de `slirp4netns`, com zero
+  ticks de CPU. Impossível, portanto o que ele mediu não foram bytes. Um
+  benchmark de rede tem de contar o que CHEGOU, não o tempo entre duas chamadas
+  a `date`;
 - **uma média não é uma medição quando a variância é grande** — a média de 6 corridas do
   `docker run` com bridge deu **3120 ms**, e três corridas isoladas a seguir deram 1105/649/549.
   Reportar 14,7× teria sido falso. Com a MEDIANA de 11 corridas o número é 531 ms, e o factor
@@ -5345,6 +5356,69 @@ expirar por idade deitaria fora exactamente a layer base que três projectos rec
 cache endereçada por conteúdo não tem entradas penduradas para varrer — só se distingue lixo de
 cache quente perguntando se alguém ainda a pede. Sete dias é uma semana de trabalho. Um `mtime`
 ilegível é *desconhecido* e nunca *velho*.
+
+### O IPAM tinha um leitor a menos antes de ter um ceifador a menos
+
+`allocate`, `reserve`, `lookup` e `release` — cada um responde sobre UM id, e
+«quantos leases há, e ainda são de alguém» não tinha comando. Foi assim que o
+registo chegou a **352 leases contra 10 containers vivos** (361/353 na medição
+final) sem ninguém dar por isso. Um vazamento que nada consegue mostrar é um
+vazamento que ninguém corrige, por isso o `network ipam` (listagem, com
+`-o json`) vem antes do `--gc`.
+
+**A ceifa assenta em três coisas, e precisa das três:**
+
+1. **O `live` é montado pelo CHAMADOR**, do store de containers — o mesmo
+   contrato do `reap_orphan_refs`. O `delonix-net` nunca decide sozinho o que
+   está vivo; foi a versão que decidia que matou as portas publicadas de um
+   motor sem relação nenhuma.
+2. **Um lease com ref-marker é poupado**, mesmo sem registo de container. O
+   marcador diz que o id tem um fio no holder, que é outra pergunta.
+3. **O veredicto é tomado DUAS vezes**, com 20 s de intervalo. O
+   `attach_container` escreve o lease e só depois o marcador (`infra.rs`, duas
+   linhas consecutivas), por isso um id a meio de um attach parece abandonado a
+   qualquer leitura única — e levá-lo aí dá o endereço dele a um segundo
+   container enquanto o primeiro ainda está a ser construído. É a colisão que o
+   módulo inteiro existe para eliminar.
+
+**A falha que isto deixa, e porque é o marcador que a tapa**: o `Store::list`
+salta em SILÊNCIO um registo que não desserializa, logo um
+`containers/<id>.json` corrompido faz o dono desaparecer do `live` com o
+container a correr. Só a metade do ref-marker o salva. As duas metades falham
+de maneiras diferentes, e é essa a única razão pela qual ter as duas vale mais
+do que ter a mais estrita duas vezes.
+
+**Encontrado a escrever a prova, não a lê-la**: um registo de container escrito
+à mão para o teste não desserializava, e o lease dele aparecia `unclaimed`.
+Levou um container REAL a mostrar a diferença — e o `container ps -a` também
+não o via, que era a pista. *Um ficheiro com a forma certa não é um registo
+válido.*
+
+Validado ao vivo com dois containers reais numa raiz isolada: o lease do vivo
+preservado, o do que perdeu registo e marcador reclamado, nada mais tocado.
+
+### O `pasta` funciona neste host — e o comparativo de CPU NÃO foi medido
+
+Spike feito, e as duas metades importam:
+
+**Medido**: o `pasta` (`passt` 0.0~git20240220, o pacote do Ubuntu 24.04)
+**configura uma netns nossa com sucesso** — `--config-net` contra um
+`unshare --user --net` deu interface e endereço. Isto **corrige uma nota deste
+ficheiro**: o `passt` que falha é o que o **libguestfs** invoca com as suas
+flags, não o `pasta` a servir uma namespace. A distinção estava por fazer e
+bloqueava o assunto sem razão.
+
+**NÃO medido, e não se inventa**: quanto CPU o `pasta` gasta face aos 227 s que
+o `slirp4netns` levou em 3h41. O harness montado para isso deu
+`slirp4netns: 200 MB em 96 ms com 0 ticks de CPU` — impossível, logo o que ele
+mediu não foi a transferência. E o `pasta` copia o endereço do interface
+template para dentro da namespace, por isso o alvo do teste (o IP da LAN do
+host) passa a resolver para o próprio guest: um comparativo justo precisa de um
+terceiro nó, não de um alvo no host.
+
+Portanto o ADR continua por escrever, mas deixou de estar bloqueado na pergunta
+errada. O que falta é o número, e o número precisa de um harness que verifique
+que os bytes chegaram.
 
 ### Contra o Docker e o Podman, na mesma máquina no mesmo dia
 

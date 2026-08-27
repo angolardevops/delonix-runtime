@@ -392,6 +392,29 @@ pub enum NetworkCmd {
         #[arg(long)]
         apply: bool,
     },
+    /// The IP leases this node has handed out, and the ones nobody claims.
+    ///
+    /// The IPAM registry had no reader at all. Every function it exposes answers
+    /// about ONE id, so "how many leases are there, and are they still
+    /// anybody's" had no command at all. Measured on the host this was written
+    /// against: **352 leases against 10 live containers**.
+    Ipam {
+        /// Reclaim the leases nothing claims, instead of only listing them.
+        ///
+        /// Takes TWO readings, twenty seconds apart, and reclaims only what
+        /// both condemn: a lease is written before its ref-marker, so a single
+        /// reading cannot tell an abandoned lease from an attach in flight —
+        /// and getting that wrong puts two containers on one address.
+        #[arg(long)]
+        gc: bool,
+        /// Skip the confirmation prompt (REQUIRED with `--gc` when stdin is not
+        /// a terminal).
+        #[arg(long, short)]
+        force: bool,
+        /// Output format: `table` (default) or `json` (ADR-0005).
+        #[arg(long, short = 'o', default_value = "table")]
+        output: String,
+    },
     /// Open a DIRECTED path from one network to another (ADR-0013 tier B).
     ///
     /// Networks are isolated from each other by default. A route says a packet
@@ -507,6 +530,7 @@ pub fn run(action: NetworkCmd) -> Result<()> {
             rm,
             apply,
         } => super::vlan::run(&parent, id, rm, apply),
+        NetworkCmd::Ipam { gc, force, output } => cmd_ipam(gc, force, &output),
         NetworkCmd::Route {
             from,
             to,
@@ -1185,6 +1209,131 @@ fn cmd_node(action: NodeCmd) -> Result<()> {
         // Just the key, no noise: this usually goes into another command.
         NodeCmd::Key => println!("{}", key.public),
     }
+    Ok(())
+}
+
+/// `network ipam ls`/`--gc` — the leases this node handed out.
+///
+/// # Why the listing came first
+///
+/// The reclaim half is the one people ask for, and it is the one that had to
+/// wait. Nothing in the engine could DISPLAY the registry, so the leak was
+/// invisible: 352 leases against 10 containers, growing monotonically, with no
+/// command able to show it. A reaper written before a reader is a reaper nobody
+/// can check.
+///
+/// # What makes the reclaim safe
+///
+/// Three things, and the design needs all three:
+///
+/// 1. `live` is assembled HERE, by the caller, from the container store — the
+///    same contract `reap_orphan_refs` has. `delonix_net` never decides for
+///    itself what is alive.
+/// 2. A lease with a ref-marker is spared even when no container record names
+///    it: the marker means the id holds a wire in the holder.
+/// 3. The verdict is taken TWICE, twenty seconds apart. `attach_container`
+///    writes the lease and then the marker, so an id caught between the two
+///    looks abandoned to any single reading — and reclaiming it there gives its
+///    address to a second container while the first is still being built.
+fn cmd_ipam(gc: bool, force: bool, output: &str) -> Result<()> {
+    let store = delonix_runtime_core::Store::open(delonix_runtime_core::Store::default_root())?;
+    let live: std::collections::HashSet<String> = store.list()?.into_iter().map(|c| c.id).collect();
+    let attached: std::collections::HashSet<String> = infra::attached_refs().into_iter().collect();
+
+    #[derive(Serialize)]
+    struct Lease {
+        prefix: String,
+        id: String,
+        ip: String,
+        /// `held` = a live container or an ingress ref-marker claims it.
+        /// `unclaimed` = neither does. NOT "reclaimable": that verdict needs
+        /// the second reading, and this listing takes only one.
+        state: &'static str,
+    }
+
+    let mut rows: Vec<Lease> = Vec::new();
+    for prefix in delonix_net::ipam::prefixes() {
+        for (id, ip) in delonix_net::ipam::entries(&prefix) {
+            let held = live.contains(&id) || attached.contains(&id);
+            rows.push(Lease {
+                prefix: prefix.clone(),
+                id,
+                ip,
+                state: if held { "held" } else { "unclaimed" },
+            });
+        }
+    }
+    let unclaimed = rows.iter().filter(|r| r.state == "unclaimed").count();
+
+    if !gc {
+        if output == "json" {
+            return super::output::print_json(&rows);
+        }
+        let mut t = super::output::Table::new(&["PREFIX", "ID", "IP", "STATE"]);
+        for r in &rows {
+            t.row(vec![
+                r.prefix.clone(),
+                r.id.clone(),
+                r.ip.clone(),
+                r.state.to_string(),
+            ]);
+        }
+        t.print();
+        println!(
+            "\n{}",
+            super::po::tf(
+                "{n} lease(s), {u} claimed by nothing — `delonix network ipam --gc` reclaims them.",
+                &[
+                    ("n", &rows.len().to_string()),
+                    ("u", &unclaimed.to_string())
+                ]
+            )
+        );
+        return Ok(());
+    }
+
+    if unclaimed == 0 {
+        println!(
+            "{}",
+            super::po::t("every lease is claimed — nothing to reclaim")
+        );
+        return Ok(());
+    }
+    if !super::prune::confirm(
+        force,
+        super::po::t(
+            "`network ipam --gc` reclaims IP leases — pass --force to confirm when not on a terminal",
+        ),
+        None,
+        super::po::tf(
+            "Reclaim up to {n} unclaimed lease(s)? Each is checked twice, {s}s apart, and only \
+             what both readings condemn is taken. [y/N]",
+            &[("n", &unclaimed.to_string()), ("s", "20")],
+        )
+        .as_str(),
+    )? {
+        return Ok(());
+    }
+
+    println!(
+        "{}",
+        super::po::t("confirming (a lease is written before its ref-marker, so one reading is not enough)...")
+    );
+    let confirmed = infra::confirm_orphan_leases(&live);
+    let mut freed = 0usize;
+    for (prefix, ids) in &confirmed {
+        freed += delonix_net::ipam::release_many(prefix, ids);
+    }
+    println!(
+        "{}",
+        super::po::tf(
+            "reclaimed {n} lease(s); {s} were spared by the second reading",
+            &[
+                ("n", &freed.to_string()),
+                ("s", &unclaimed.saturating_sub(freed).to_string())
+            ]
+        )
+    );
     Ok(())
 }
 

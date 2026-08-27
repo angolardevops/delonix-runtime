@@ -823,6 +823,81 @@ pub fn reap_orphan_refs(live: &std::collections::HashSet<String>) -> usize {
     orphans.len()
 }
 
+/// How long a lease candidate has to stay a candidate before it is reclaimed.
+///
+/// The IPAM registry has no per-lease timestamp — it is a `BTreeMap<id, ip>` in
+/// one JSON file — so there is no `mtime` to test the way
+/// [`REF_MARKER_GRACE`] tests a marker's. What replaces it is asking TWICE:
+/// a lease still orphaned after this long, across two independent readings, was
+/// not an attach in flight.
+///
+/// The window being covered is real and is two lines wide. `attach_container`
+/// does `ipam::allocate` and THEN `acquire(id)`, so between them an id has a
+/// lease, no marker, and no container record — indistinguishable from an
+/// abandoned lease by any single reading. Reclaiming it there would hand the
+/// same IP to a second container while the first is still being built, with the
+/// firewall and DNAT rules indexed on the wrong one: precisely the collision
+/// this module exists to eliminate.
+///
+/// Generous on purpose, for the same reason the marker grace is: skipping a
+/// genuinely dead lease for a few more seconds costs nothing (a `/16` holds
+/// ~65 000), while getting it wrong costs two containers on one address.
+const IPAM_LEASE_GRACE: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Leases that were orphaned in BOTH readings, taken [`IPAM_LEASE_GRACE`] apart.
+///
+/// `live` comes from the caller and is never discovered here — the same
+/// contract as [`reap_orphan_refs`], and for the same reason: a sweep over
+/// shared state that assembles its own idea of what is alive is how
+/// `reap_orphan_hostfwds` once killed the published ports of an unrelated
+/// engine.
+///
+/// Deliberately SLOW. It sleeps the grace between the two readings, which makes
+/// it unfit for a hot path and perfectly fit for what it is: an explicit
+/// reclaim an operator asks for.
+pub fn confirm_orphan_leases(
+    live: &std::collections::HashSet<String>,
+) -> Vec<(String, Vec<String>)> {
+    let read = || -> Vec<(String, Vec<String>)> {
+        let attached: std::collections::HashSet<String> = attached_refs().into_iter().collect();
+        crate::ipam::prefixes()
+            .into_iter()
+            .map(|prefix| {
+                let entries = crate::ipam::entries(&prefix);
+                let orphans = crate::ipam::orphan_leases(&entries, live, &attached);
+                (prefix, orphans)
+            })
+            .filter(|(_, o)| !o.is_empty())
+            .collect()
+    };
+
+    let first = read();
+    if first.is_empty() {
+        return first;
+    }
+    std::thread::sleep(IPAM_LEASE_GRACE);
+    let second = read();
+
+    // The intersection: only what BOTH readings condemned. A candidate that
+    // gained a marker or a record in between was an attach in flight, and is
+    // exactly what this second pass exists to spare.
+    let confirmed: std::collections::HashMap<String, std::collections::HashSet<String>> = second
+        .into_iter()
+        .map(|(p, o)| (p, o.into_iter().collect()))
+        .collect();
+    first
+        .into_iter()
+        .filter_map(|(prefix, orphans)| {
+            let still = confirmed.get(&prefix)?;
+            let kept: Vec<String> = orphans
+                .into_iter()
+                .filter(|id| still.contains(id))
+                .collect();
+            (!kept.is_empty()).then_some((prefix, kept))
+        })
+        .collect()
+}
+
 // ---- state / observation ----------------------------------------------------
 
 /// Observable state of the ingress infra (for `ingress status` and the Console).

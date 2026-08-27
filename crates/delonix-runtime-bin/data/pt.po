@@ -9547,3 +9547,46 @@ msgstr "o que está abandonado, e mais nada — por omissão só relata"
 
 msgid "reclaim it: pin, control process and slirp of every state root that no longer exists"
 msgstr "reclamá-los: pin, processo de controlo e slirp de cada raiz de estado que já não existe"
+
+# ---- network ipam (fuga de leases) ------------------------------------------
+msgid "The IP leases this node has handed out, and the ones nobody claims"
+msgstr "Os leases de IP que este nó entregou, e os que ninguém reclama"
+
+msgid "The IP leases this node has handed out, and the ones nobody claims.\n\nThe IPAM registry had no reader at all. Every function it exposes answers about ONE id, so \"how many leases are there, and are they still anybody's\" had no command at all. Measured on the host this was written against: **352 leases against 10 live containers**."
+msgstr "Os leases de IP que este nó entregou, e os que ninguém reclama.\n\nO registo do IPAM não tinha leitor nenhum. Cada função que expõe responde sobre UM id, por isso «quantos leases há, e ainda são de alguém» não tinha comando nenhum. Medido no host onde isto foi escrito: **352 leases contra 10 containers vivos**."
+
+msgid "Reclaim the leases nothing claims, instead of only listing them"
+msgstr "Reclama os leases que nada reclama, em vez de apenas os listar"
+
+msgid "Reclaim the leases nothing claims, instead of only listing them.\n\nTakes TWO readings, twenty seconds apart, and reclaims only what both condemn: a lease is written before its ref-marker, so a single reading cannot tell an abandoned lease from an attach in flight — and getting that wrong puts two containers on one address."
+msgstr "Reclama os leases que nada reclama, em vez de apenas os listar.\n\nFaz DUAS leituras, com vinte segundos de intervalo, e leva só o que ambas condenam: um lease é escrito antes do seu ref-marker, por isso uma leitura só não distingue um lease abandonado de um attach em voo — e errar aí põe dois containers no mesmo endereço."
+
+msgid "Skip the confirmation prompt (REQUIRED with `--gc` when stdin is not a terminal)"
+msgstr "Salta a confirmação (OBRIGATÓRIO com `--gc` quando o stdin não é um terminal)"
+
+msgid "{n} lease(s), {u} claimed by nothing — `delonix network ipam --gc` reclaims them."
+msgstr "{n} lease(s), {u} que nada reclama — o `delonix network ipam --gc` reclama-os."
+
+msgid "every lease is claimed — nothing to reclaim"
+msgstr "todos os leases têm dono — não há nada a reclamar"
+
+msgid "`network ipam --gc` reclaims IP leases — pass --force to confirm when not on a terminal"
+msgstr "`network ipam --gc` reclama leases de IP — passa --force para confirmar quando não estás num terminal"
+
+msgid "Reclaim up to {n} unclaimed lease(s)? Each is checked twice, {s}s apart, and only what both readings condemn is taken. [y/N]"
+msgstr "Reclamar até {n} lease(s) sem dono? Cada um é verificado duas vezes, com {s}s de intervalo, e só o que ambas as leituras condenam é levado. [y/N]"
+
+msgid "confirming (a lease is written before its ref-marker, so one reading is not enough)..."
+msgstr "a confirmar (um lease é escrito antes do seu ref-marker, por isso uma leitura não chega)..."
+
+msgid "reclaimed {n} lease(s); {s} were spared by the second reading"
+msgstr "reclamados {n} lease(s); {s} foram poupados pela segunda leitura"
+
+msgid "every lease this node handed out, and whether anything still claims it"
+msgstr "cada lease que este nó entregou, e se alguma coisa ainda o reclama"
+
+msgid "for a script or a dashboard (ADR-0005)"
+msgstr "para um script ou um painel (ADR-0005)"
+
+msgid "reclaim the ones nothing claims — checked twice, twenty seconds apart"
+msgstr "reclamar os que nada reclama — verificados duas vezes, com vinte segundos de intervalo"
