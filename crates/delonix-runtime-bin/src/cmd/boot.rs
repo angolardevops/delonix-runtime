@@ -1,5 +1,7 @@
-//! `delonix net boot` — install systemd units so the running containers come back
-//! UP automatically when the host boots, with no manual restart.
+//! `delonix system boot` — install systemd units so the running containers
+//! come back UP automatically when the host boots, with no manual restart.
+//! Moved here from `net boot` (B2 of the CLI restructuring): this is about
+//! the ENGINE surviving a reboot, not about SDN plumbing.
 //!
 //! Rootless installs USER units + linger (start at boot without a login);
 //! root installs system units. There's no daemon: each unit's `ExecStart` is
@@ -46,7 +48,7 @@ pub enum BootCmd {
 /// reach a unit somebody else installed.
 const UNIT_PREFIX: &str = "delonix-boot-";
 
-/// Is this a unit `net boot enable` generated?
+/// Is this a unit `system boot enable` generated?
 ///
 /// The legacy `delonix-<name>.service` form is still recognised, so a `disable`
 /// cleans up what an older binary installed — but `delonix-cri.service` is
@@ -141,7 +143,7 @@ pub fn run(action: BootCmd) -> Result<()> {
                 }
             }
             if !any {
-                println!("  (no boot units — run `delonix net boot enable`)");
+                println!("  (no boot units — run `delonix system boot enable`)");
             }
             Ok(())
         }
@@ -328,7 +330,9 @@ fn enable(
             sysctl(&["daemon-reload"]);
             println!("boot: removed {} stale unit(s).", pruned.len());
         }
-        println!("boot: no running containers — start them first, then `delonix net boot enable`.");
+        println!(
+            "boot: no running containers — start them first, then `delonix system boot enable`."
+        );
         return Ok(());
     }
     sysctl(&["daemon-reload"]);

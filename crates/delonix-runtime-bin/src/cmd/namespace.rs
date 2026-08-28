@@ -1,4 +1,7 @@
-//! `delonix namespace` — the isolation boundary, made visible.
+//! `delonix system namespace` — the isolation boundary, made visible. Moved
+//! here from the top level (B2 of the CLI restructuring): a namespace is a
+//! property of the ENGINE's isolation model, not a peer of `container`/
+//! `image`/`vm`.
 //!
 //! A namespace has **no record of its own**: it exists while something is in
 //! it. So this group derives, exactly like `cluster ls` (from labels) and
@@ -247,7 +250,7 @@ pub fn run(cmd: NamespaceCmd) -> Result<()> {
             let all = collect();
             let c = all.get(&name).ok_or_else(|| {
                 delonix_runtime_core::Error::NotFound(super::po::tf(
-                    "namespace {name} (nothing is in it; see `delonix namespace ls`)",
+                    "namespace {name} (nothing is in it; see `delonix system namespace ls`)",
                     &[("name", &name)],
                 ))
             })?;

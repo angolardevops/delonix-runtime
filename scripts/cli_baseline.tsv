@@ -66,15 +66,15 @@
 ~	image history
 =	image import
 ~	image init
+~	image list
 ~	image load
 =	image login
 =	image logout
-~	image ls
 ~	image ls-remote
 ~	image prune
 =	image pull
 =	image push
-~	image rm
+~	image remove
 ~	image save
 =	image scan
 =	image tag
@@ -94,11 +94,6 @@
 ~	manifest render
 ~	manifest schema
 ~	manifest validate
-~	namespace describe
-~	namespace ls
-~	net boot disable
-~	net boot enable
-~	net boot status
 ~	net egress allow
 ~	net egress clear
 ~	net egress deny
@@ -190,12 +185,17 @@
 ~	storage ls
 ~	storage rm
 ~	system backup
+~	system boot disable
+~	system boot enable
+~	system boot status
 =	system df
 =	system doctor
 =	system events
 =	system features
 =	system info
 ~	system monitor
+~	system namespace describe
+~	system namespace ls
 =	system prune
 ~	system restore
 =	system setup
