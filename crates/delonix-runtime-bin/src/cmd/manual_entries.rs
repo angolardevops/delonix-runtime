@@ -1463,6 +1463,16 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["network describe", "network ls", "net ingress ls"],
     },
     Entry {
+        path: "network diagnose",
+        group: "Inspect",
+        examples: &[
+            ("is this node's network coherent right now", "delonix network diagnose"),
+            ("for a script or a health check", "delonix network diagnose -o json"),
+            ("only the address registry, when chasing a leak", "delonix network diagnose -o json"),
+        ],
+        see_also: &["network ls", "system doctor", "net netns status"],
+    },
+    Entry {
         path: "network ls",
         group: "Inspect",
         examples: &[

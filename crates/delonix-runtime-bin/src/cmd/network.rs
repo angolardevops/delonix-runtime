@@ -374,6 +374,21 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
 
 #[derive(Subcommand)]
 pub enum NetworkCmd {
+    /// The LIVE state of this node's network, and what disagrees with it.
+    ///
+    /// Answers a different question than `system doctor`, and deliberately does
+    /// not repeat it: the doctor asks whether this HOST can do the job
+    /// (`br_netfilter`, cgroup delegation, subuid) — static capability, checked
+    /// once. This asks whether the network that IS here right now is coherent:
+    /// is the control plane answering, is every declared network actually
+    /// realized, and does the address registry still match the workloads.
+    ///
+    /// Read-only. It reclaims nothing — see the note on orphan leases below.
+    Diagnose {
+        /// `table` (default) or `json` for a stable, scriptable shape.
+        #[arg(short, long, value_enum, default_value_t = output::OutputFormat::Table)]
+        output: output::OutputFormat,
+    },
     /// 802.1Q VLAN on a physical NIC — **the one command here that needs root**.
     ///
     /// Dry-run by default: it prints the plan and changes nothing until
@@ -540,6 +555,7 @@ pub fn run(action: NetworkCmd) -> Result<()> {
                 Ok(())
             }
         },
+        NetworkCmd::Diagnose { output } => cmd_diagnose(&store, output),
         NetworkCmd::Ls { output } => cmd_ls(&store, output),
         NetworkCmd::Node { action } => cmd_node(action),
         NetworkCmd::Create {
@@ -708,6 +724,201 @@ struct NetworkLsRow {
     driver: String,
     bridge: String,
     subnet: String,
+}
+
+/// One line of the report: a fact, its verdict, and what to do when it is bad.
+#[derive(Serialize)]
+struct Finding {
+    check: &'static str,
+    /// `ok` / `warn` / `down`. A string and not a bool because "the control
+    /// plane is absent" and "no network is realized" are different answers, and
+    /// a caller scripting this needs to tell them apart.
+    status: &'static str,
+    detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fix: Option<String>,
+}
+
+/// `delonix network diagnose`.
+///
+/// The three questions, in the order a failure actually reaches the operator:
+/// is the control plane answering, is every declared network realized, and does
+/// the address registry still match the workloads.
+fn cmd_diagnose(store: &NetworkStore, format: output::OutputFormat) -> Result<()> {
+    let mut f: Vec<Finding> = Vec::new();
+    let st = infra::status();
+
+    // 1. The control plane. `control_reachable` is a real connect, not a
+    //    `path.exists()` — a socket FILE outlives the process that made it, and
+    //    this engine has already paid for that mistake three times.
+    let pin = st.holder_pid.is_some();
+    f.push(match (pin, st.control_reachable) {
+        (false, _) => Finding {
+            check: "control plane",
+            status: "down",
+            detail: "no pin: the network namespace is not held by anything".into(),
+            fix: Some("delonix net netns up".into()),
+        },
+        (true, false) => Finding {
+            check: "control plane",
+            status: "down",
+            // The pin holding while the control plane is gone is the exact shape
+            // the v0.42.0 split was built for: workloads keep their wires, but
+            // nothing accepts attach/publish/DNS until the control plane is back.
+            detail: format!(
+                "pin {} alive, control socket NOT answering — running workloads keep \
+                 their networking, but no new attach, publish or DNS will be served",
+                st.holder_pid.unwrap_or(0)
+            ),
+            fix: Some("delonix net netns up".into()),
+        },
+        (true, true) => Finding {
+            check: "control plane",
+            status: "ok",
+            detail: format!(
+                "pin {}, control {}, slirp {}, refcount {}",
+                st.holder_pid.unwrap_or(0),
+                st.control_pid
+                    .map(|p| p.to_string())
+                    // A PRE-SPLIT holder serves the socket with no control
+                    // pidfile at all, so «absent» here is not a fault.
+                    .unwrap_or_else(|| "in the pin (pre-split)".into()),
+                st.slirp_pid
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|| "-".into()),
+                st.refcount,
+            ),
+            fix: None,
+        },
+    });
+
+    // 2. Declared vs REALIZED. The store is a declaration; `resolve_net` reads
+    //    what the holder actually has. A network that only exists on paper
+    //    answers `network ls` with a bridge and a subnet, and then refuses
+    //    `container run --net <it>` with "does not exist".
+    let nets = store.list().unwrap_or_default();
+    let mut unrealized: Vec<String> = Vec::new();
+    for n in &nets {
+        if infra::resolve_net(&n.name).is_err() {
+            unrealized.push(format!("{} ({})", n.name, n.driver));
+        }
+    }
+    f.push(if nets.is_empty() {
+        Finding {
+            check: "networks",
+            status: "ok",
+            detail: "none declared".into(),
+            fix: None,
+        }
+    } else if unrealized.is_empty() {
+        Finding {
+            check: "networks",
+            status: "ok",
+            detail: format!("{} declared, all realized", nets.len()),
+            fix: None,
+        }
+    } else {
+        Finding {
+            check: "networks",
+            status: "warn",
+            detail: format!(
+                "{} of {} declared but NOT realized here: {}",
+                unrealized.len(),
+                nets.len(),
+                unrealized.join(", ")
+            ),
+            // Without a pin there is nothing to realize INTO, and saying
+            // "recreate the network" then sends the operator down the wrong path.
+            fix: Some(if pin {
+                concat!(
+                    "macvlan/ipvlan are never realized in rootless; for a bridge or ",
+                    "overlay, `delonix network rm <name>` and declare it again",
+                )
+                .into()
+            } else {
+                "bring the infra up first: delonix net netns up".into()
+            }),
+        }
+    });
+
+    // 3. The address registry against its owners. A lease is held BEFORE the
+    //    container has a record, so "no record" is not proof the lease is dead —
+    //    which is precisely why this SHOWS and never reclaims.
+    let leases = delonix_net::ipam::all_leases();
+    let live: std::collections::HashSet<String> = super::util::open_stores()
+        .ok()
+        .and_then(|(_, s)| s.list().ok())
+        .map(|cs| cs.into_iter().map(|c| c.id).collect())
+        .unwrap_or_default();
+    let ownerless = leases
+        .iter()
+        .filter(|(_, id, _)| !live.contains(id))
+        .count();
+    f.push(if leases.is_empty() {
+        Finding {
+            check: "address registry",
+            status: "ok",
+            detail: "no leases".into(),
+            fix: None,
+        }
+    } else if ownerless == 0 {
+        Finding {
+            check: "address registry",
+            status: "ok",
+            detail: format!("{} leases, all owned", leases.len()),
+            fix: None,
+        }
+    } else {
+        Finding {
+            check: "address registry",
+            status: "warn",
+            detail: format!(
+                "{ownerless} of {} leases have no live container ({}%)",
+                leases.len(),
+                ownerless * 100 / leases.len().max(1),
+            ),
+            // No `fix` that reclaims, on purpose. Reclaiming a lease that is
+            // still in use hands one IP to two containers, and deciding that
+            // needs the allocator's lock and a grace period. A `/16` holds ~65k
+            // addresses, so this is monotonic rather than urgent — and it is now
+            // at least VISIBLE, which it was not before.
+            fix: Some(
+                concat!(
+                    "monotonic leak, not urgent: a /16 holds ~65k addresses. There is no ",
+                    "reaper yet — reclaiming needs the allocator lock and a grace period, ",
+                    "because a container holds its lease before it has a record",
+                )
+                .into(),
+            ),
+        }
+    });
+
+    if format == output::OutputFormat::Json {
+        return output::print_json(&f);
+    }
+
+    let mut t = output::Table::new(&["CHECK", "STATUS", "DETAIL"]);
+    for x in &f {
+        t.row(vec![
+            x.check.to_string(),
+            x.status.to_string(),
+            x.detail.clone(),
+        ]);
+    }
+    t.print();
+    for x in f.iter().filter(|x| x.status != "ok") {
+        if let Some(fix) = &x.fix {
+            println!("  {}: {}", x.check, fix);
+        }
+    }
+    // The host's static capabilities are the doctor's question, and naming it
+    // beats repeating it: two commands checking `br_netfilter` are two answers
+    // that start disagreeing.
+    println!(
+        "{}",
+        super::po::t("host capabilities (br_netfilter, cgroup delegation): delonix system doctor")
+    );
+    Ok(())
 }
 
 fn cmd_ls(store: &NetworkStore, format: output::OutputFormat) -> Result<()> {

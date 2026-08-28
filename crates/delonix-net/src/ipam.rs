@@ -314,6 +314,40 @@ pub fn registry_key(prefix: &str) -> String {
     }
 }
 
+/// Every lease this node holds, as `(prefix, id, ip)`, sorted.
+///
+/// READ-ONLY, and deliberately without the `flock`: this exists for `network
+/// diagnose` to SHOW the registry, and taking the allocator's lock to look at it
+/// would let a report block an attach. A torn read is impossible anyway — `store`
+/// writes through `write_atomic`, so a reader sees the old map or the new one.
+///
+/// It does not reap, and the distinction matters: deciding a lease is dead needs
+/// a grace period and the lock, because a container holds its lease BEFORE it has
+/// a record. Showing is safe; reclaiming is not, and the reclaim is why this is
+/// the command that comes first.
+pub fn all_leases() -> Vec<(String, String, String)> {
+    let mut out = Vec::new();
+    let Ok(rd) = std::fs::read_dir(ipam_dir()) else {
+        return out;
+    };
+    for e in rd.flatten() {
+        let path = e.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let Some(prefix) = name.strip_suffix(".json") else {
+            continue; // the `lock` file, and anything else that is not a registry
+        };
+        if let Some(map) = load(prefix) {
+            for (id, ip) in map {
+                out.push((prefix.to_string(), id, ip));
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
 pub fn prefix_of(ip: &str) -> String {
     let o: Vec<&str> = ip.split('.').collect();
     if o.len() == 4 {
@@ -459,6 +493,34 @@ mod tests {
             // the freed IP goes back to being the preferred one of whoever derived it.
             let reuse = allocate("10.88", "deadbeef1234").unwrap();
             assert_eq!(reuse, ip);
+        });
+    }
+
+    /// `all_leases` sees every prefix and skips what is not a registry — the
+    /// `lock` file sits in the same directory, and a reader that tried to parse
+    /// it would report an empty registry on a node that has leases.
+    #[test]
+    fn all_leases_sees_every_prefix_and_skips_the_lock() {
+        with_root("alllease", || {
+            allocate("10.88", "aaaa0001").unwrap();
+            allocate("10.88", "bbbb0002").unwrap();
+            allocate("10.99", "cccc0003").unwrap();
+            // The allocator's own lock file lives beside the registries.
+            let _ = IpamLock::acquire();
+
+            let all = all_leases();
+            assert_eq!(all.len(), 3, "{all:?}");
+            let prefixes: std::collections::BTreeSet<&str> =
+                all.iter().map(|(p, _, _)| p.as_str()).collect();
+            assert_eq!(
+                prefixes,
+                ["10.88", "10.99"].into_iter().collect(),
+                "both prefixes, and nothing from `lock`"
+            );
+            // Sorted, so a report does not reorder between runs.
+            let mut sorted = all.clone();
+            sorted.sort();
+            assert_eq!(all, sorted);
         });
     }
 

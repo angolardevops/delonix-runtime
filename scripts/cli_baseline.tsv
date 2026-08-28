@@ -140,6 +140,7 @@
 ~	network create
 ~	network dash
 ~	network describe
+~	network diagnose
 ~	network inspect
 ~	network ls
 ~	network node init

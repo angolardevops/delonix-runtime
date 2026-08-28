@@ -452,6 +452,36 @@ check "network ls mostra-a" ok bash -c "'$BIN' network ls | grep -q '$NET'"
 check "network inspect" ok "$BIN" network inspect "$NET"
 check "network describe" ok "$BIN" network describe "$NET"
 
+# --- `network diagnose`: o estado VIVO, não a capacidade do host ----------
+# A pergunta que faltava. O `system doctor` responde «este host CONSEGUE?»
+# (br_netfilter, delegação de cgroup) — capacidade estática. Este responde «a
+# rede que ESTÁ aqui é coerente?». Não se repetem de propósito: dois comandos a
+# verificar o br_netfilter são duas respostas que começam a discordar.
+check "network diagnose responde" ok "$BIN" network diagnose
+check "network diagnose cobre as três perguntas" ok bash -c \
+  "'$BIN' network diagnose -o json | grep -q 'control plane' && \
+   '$BIN' network diagnose -o json | grep -q 'networks' && \
+   '$BIN' network diagnose -o json | grep -q 'address registry'"
+check "network diagnose -o json é JSON válido" ok bash -c \
+  "'$BIN' network diagnose -o json | python3 -c 'import json,sys; json.load(sys.stdin)'"
+# O `status` é o campo que um health check lê, e tem de ser uma das três
+# palavras — não um booleano: «sem plano de controlo» e «nenhuma rede realizada»
+# são respostas diferentes.
+check "cada linha tem um status conhecido" ok bash -c \
+  "'$BIN' network diagnose -o json | python3 -c \"
+import json,sys
+d=json.load(sys.stdin)
+assert d, 'sem linhas'
+assert all(x['status'] in ('ok','warn','down') for x in d), d
+\""
+# NÃO ceifa. É a garantia que separa este comando de um `prune`: mostrar um
+# lease é seguro, reclamá-lo não — um container tem lease ANTES de ter registo.
+check "diagnose não mexe no registo de endereços" ok bash -c \
+  "before=\$(find \"\${DELONIX_ROOT:-\$HOME/.local/share/delonix}/ipam\" -name '*.json' -newermt '-1 second' 2>/dev/null | wc -l)
+   '$BIN' network diagnose >/dev/null 2>&1
+   after=\$(find \"\${DELONIX_ROOT:-\$HOME/.local/share/delonix}/ipam\" -name '*.json' -newermt '-1 second' 2>/dev/null | wc -l)
+   [ \"\$before\" = \"\$after\" ]"
+
 # --- `network route` sem argumentos LISTA (B-1) ---------------------------
 # As rotas eram persistidas (`ingress/routes/<from>--<to>.json`) e enumeráveis
 # (`infra::route_list` é público), e NADA as mostrava: dava para abrir uma
@@ -1331,7 +1361,22 @@ BKDIR="$OUT/backups"; rm -rf "$BKDIR"; mkdir -p "$BKDIR"
 BKC="bk-$PFX"; BKV="bkvol-$PFX"
 "$BIN" volumes create "$BKV" >/dev/null 2>&1
 "$BIN" container run -d --name "$BKC" -v "$BKV":/data alpine:latest sleep 300 >/dev/null 2>&1
-"$BIN" container exec "$BKC" sh -c 'echo prova > /data/f.txt' >/dev/null 2>&1
+# Esperar que a escrita PERSISTA, e não que o comando devolva 0.
+#
+# Medido a 2026-08-28, seis ciclos: em DOIS deles um `exec` disparado logo a
+# seguir ao `run -d` escreveu e o `cat` seguinte não encontrou nada. O `run -d`
+# devolve antes de o volume estar montado, e o `exec` que apanha essa janela
+# escreve para o `/data` do rootfs em vez de para o volume — devolvendo 0.
+#
+# É a causa REAL da falha intermitente de «os dados voltaram», que este ficheiro
+# já registava desde 2026-08-25 e atribuía ao restore. Não era o restore: nunca
+# havia dados para repor. Um backup de um volume vazio restaura um volume vazio,
+# e o check chumbava três passos depois do sítio onde o problema estava.
+for _ in $(seq 50); do
+  "$BIN" container exec "$BKC" sh -c 'echo prova > /data/f.txt' >/dev/null 2>&1
+  "$BIN" container exec "$BKC" cat /data/f.txt 2>/dev/null | grep -q prova && break
+  sleep 0.2
+done
 
 check "backup create --dry-run não escreve nada" ok "$BIN" backup create container "$BKC" --to "$BKDIR" --dry-run
 check "backup create --dry-run mesmo não escreveu" ok bash -c "[[ -z \"\$(ls -A '$BKDIR')\" ]]"

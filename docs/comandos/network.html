@@ -167,6 +167,7 @@ Commands:
   route     Open a DIRECTED path from one network to another (ADR-0013 tier B)
   vlan      802.1Q VLAN on a physical NIC — **the one command here that needs root**
   describe  Readable detail of one or more networks, `kubectl describe` style
+  diagnose  The LIVE state of this node&#x27;s network, and what disagrees with it
   inspect   Detail of a network
   ls        List the networks
   apply     Apply the `kind: Network` documents of a manifest (idempotent by name)
@@ -183,7 +184,7 @@ Options:
 
 COMMAND MAP:
   Lifecycle    vlan · route · create · rm
-  Inspect      ls · inspect · describe
+  Inspect      diagnose · ls · inspect · describe
   Declarative  apply
   Dashboards   dash
   Advanced     node

@@ -9750,3 +9750,35 @@ msgstr "apagar um (recusa o que não foi este comando a escrever)"
 
 msgid "from the directory the backups live in"
 msgstr "a partir da pasta onde os backups vivem"
+
+# ---- help: `network diagnose` ----------------------------------------------
+
+msgid "The LIVE state of this node's network, and what disagrees with it"
+msgstr "O estado VIVO da rede deste nó, e o que discorda dele"
+
+msgid ""
+"The LIVE state of this node's network, and what disagrees with it.\n"
+"\n"
+"Answers a different question than `system doctor`, and deliberately does not repeat it: the doctor asks whether this HOST can do the job (`br_netfilter`, cgroup delegation, subuid) — static capability, checked once. This asks whether the network that IS here right now is coherent: is the control plane answering, is every declared network actually realized, and does the address registry still match the workloads.\n"
+"\n"
+"Read-only. It reclaims nothing — see the note on orphan leases below."
+msgstr ""
+"O estado VIVO da rede deste nó, e o que discorda dele.\n"
+"\n"
+"Responde a uma pergunta diferente do `system doctor`, e não a repete de propósito: o doctor pergunta se este HOST consegue fazer o trabalho (`br_netfilter`, delegação de cgroup, subuid) — capacidade estática, verificada uma vez. Este pergunta se a rede que ESTÁ aqui agora é coerente: o plano de controlo responde, cada rede declarada está mesmo realizada, e o registo de endereços ainda bate certo com as cargas.\n"
+"\n"
+"Só leitura. Não reclama nada — ver a nota sobre leases órfãos abaixo."
+
+msgid "`table` (default) or `json` for a stable, scriptable shape"
+msgstr "`table` (por omissão) ou `json`, para uma forma estável e legível por programa"
+
+# ---- manual: exemplos de `network diagnose` --------------------------------
+
+msgid "is this node's network coherent right now"
+msgstr "a rede deste nó está coerente agora"
+
+msgid "for a script or a health check"
+msgstr "para um script ou um health check"
+
+msgid "only the address registry, when chasing a leak"
+msgstr "só o registo de endereços, a perseguir uma fuga"
