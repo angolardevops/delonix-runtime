@@ -832,6 +832,17 @@ pub struct Container {
     /// Log driver (`file` by default, or `journald`/`syslog`).
     #[serde(default)]
     pub log_driver: Option<String>,
+    /// Where the log actually lives when `--log-file` moved it off the default
+    /// path (`<root>/containers/<id>/log`). `None` = the default path.
+    ///
+    /// Persisted because `delonix logs` had no other way to find it: it looked
+    /// only at the default path and, when the file was not there, reported "only
+    /// detached containers have logs" — naming the victim and hiding the cause.
+    /// Every container the CRI starts takes this branch (the kubelet always
+    /// passes `--log-file`), so `logs` was broken for exactly the containers an
+    /// operator most needs to read.
+    #[serde(default)]
+    pub log_path: Option<String>,
     /// Network bandwidth limit (`--net-bps`, e.g.: `10mbit`) — `tc`
     /// TBF/police on the host-side `veth`. `None` = no limit (free flow).
     #[serde(default)]
@@ -960,6 +971,7 @@ impl Container {
             stopped_by_user: false,
             mounts: Vec::new(),
             log_driver: None,
+            log_path: None,
             net_bps: None,
             net_burst: None,
             nice: None,
