@@ -5110,6 +5110,38 @@ uma layer de um chunk só, o adaptador errado acerta por acidente).
 `--name`, a forma legada `image --vm pull` não — divergência entre os três pontos de entrada que o
 resto do grupo mantém alinhados.
 
+## Um `exec` logo a seguir ao `run -d` pode escrever para o sítio errado (medido 2026-08-28)
+
+Encontrado a perseguir um check da bateria que falhava de vez em quando desde
+2026-08-25 — o «os dados voltaram», do ciclo de backup. O ficheiro atribuía-o ao
+tempo e trocou o `sleep 1` por uma espera por condição na LEITURA. Não era o
+tempo da leitura, e não era o restore.
+
+**Medido, seis ciclos, DOIS a falhar**: um `container exec` disparado
+imediatamente a seguir a um `container run -d -v <vol>:/data` escreve o ficheiro,
+**devolve 0**, e o `cat` seguinte não encontra nada. Com o container já
+estabelecido, escrever num `exec` e ler noutro funciona sempre — e o ficheiro
+aparece no `_data` do volume do lado do host.
+
+A leitura é que o `run -d` devolve antes de o volume estar montado, e o `exec`
+que apanha essa janela escreve para o `/data` do **rootfs** em vez de para o
+volume. Não há erro: o directório existe (é o do rootfs), a escrita passa, e o
+que se perde é o destino.
+
+**A consequência no gate era enganadora de propósito.** Um backup tirado de um
+volume vazio restaura um volume vazio, e o check chumbava **três passos depois**
+do sítio onde o problema estava — em «os dados voltaram», que aponta para o
+restore. Foi o que fez este defeito passar por flakiness de tempo durante três
+dias.
+
+**O que ficou feito**: a bateria passou a esperar que a escrita PERSISTA (escreve
+e relê até bater), em vez de confiar no rc do `exec`. **O que NÃO ficou feito**: o
+motor continua a aceitar o `exec` nessa janela. As duas saídas possíveis são o
+`run -d` só devolver quando os mounts estão de pé, ou o `exec` recusar enquanto
+não estiverem — as duas mexem na fronteira do `spawn`, que este guia já assinala
+como função de risco de ~405 linhas, e nenhuma se decide de passagem. Fica com o
+número ao lado: **~33% de incidência** nesta máquina, sob carga.
+
 ## `delonix backup` — seis verbos, um objecto (consolidado no ciclo da CLI)
 
 A varredura acima encontrou-o pela ausência: um guia que documenta tudo o resto não tinha **uma
