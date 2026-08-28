@@ -147,14 +147,22 @@ pub(crate) fn get(kind: &str, names: &[String], output: OutputFormat) -> Result<
         )));
     }
     match f.kind {
-        k if k == kinds::POD => super::pod::run(super::pod::PodCmd::Ls { output }),
+        k if k == kinds::POD => super::pod::run(super::pod::PodCmd::Ls {
+            output,
+            namespace: None,
+        }),
         k if k == kinds::NETWORK => super::network::run(super::network::NetworkCmd::Ls { output }),
-        k if k == kinds::VOLUME => super::volume::run(super::volume::VolumeCmd::Ls { output }),
+        k if k == kinds::VOLUME => super::volume::run(super::volume::VolumeCmd::Ls {
+            output,
+            namespace: None,
+        }),
         k if k == kinds::SECRET => super::secret::run(super::secret::SecretCmd::Ls { output }),
         k if k == kinds::IMAGE => super::image::run(false, super::image::ImageCmd::Ls { output }),
         k if k == kinds::CLUSTER => super::cluster::run(super::cluster::ClusterCmd::Ls),
-        k if k == kinds::GATEWAY => super::tunnel::run(super::tunnel::TunnelCmd::Ls),
-        k if k == kinds::HTTP_ROUTE => super::httproute::run(super::httproute::HttpRouteCmd::Ls),
+        k if k == kinds::GATEWAY => super::tunnel::run(super::tunnel::TunnelCmd::Ls { output }),
+        k if k == kinds::HTTP_ROUTE => {
+            super::httproute::run(super::httproute::HttpRouteCmd::Ls { output })
+        }
         // `ports` stays FALSE: `vm ls --ports` does real network I/O against
         // every VM, and a `get` must not probe the network unasked.
         k if k == kinds::VM => super::vm::run(super::vm::VmCmd::Ls {
