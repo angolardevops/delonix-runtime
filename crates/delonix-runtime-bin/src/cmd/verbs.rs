@@ -160,7 +160,7 @@ pub(crate) fn get(kind: &str, names: &[String], output: OutputFormat) -> Result<
             namespace: None,
         }),
         k if k == kinds::SECRET => super::secret::run(super::secret::SecretCmd::Ls { output }),
-        k if k == kinds::IMAGE => super::image::run(false, super::image::ImageCmd::Ls { output }),
+        k if k == kinds::IMAGE => super::image::run(false, super::image::ImageCmd::List { output }),
         k if k == kinds::CLUSTER => super::cluster::run(super::cluster::ClusterCmd::Ls),
         k if k == kinds::GATEWAY => super::tunnel::run(super::tunnel::TunnelCmd::Ls { output }),
         k if k == kinds::HTTP_ROUTE => {
@@ -319,7 +319,7 @@ pub(crate) fn delete(kind: &str, names: &[String], force: bool) -> Result<()> {
             for n in names {
                 super::image::run(
                     false,
-                    super::image::ImageCmd::Rm {
+                    super::image::ImageCmd::Remove {
                         image: n.clone(),
                         force,
                     },

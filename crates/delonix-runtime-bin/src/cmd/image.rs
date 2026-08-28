@@ -214,9 +214,9 @@ pub enum ImageCmd {
         no_k8s: bool,
     },
     /// List local images.
-    Ls {
+    List {
         /// Output format: `table` (default) or `json` (ADR-0005). Works for both
-        /// `image ls` and `image --vm ls`.
+        /// `image list` and `image --vm list`.
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: super::output::OutputFormat,
     },
@@ -271,7 +271,7 @@ pub enum ImageCmd {
         feed: Option<String>,
     },
     /// Remove a local image.
-    Rm {
+    Remove {
         #[arg(add = ArgValueCandidates::new(super::complete::images))]
         image: String,
         /// Remove it even if a container still uses it.
@@ -763,7 +763,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
             )
             .into(),
         )),
-        ImageCmd::Ls { output } => cmd_ls(&images, output),
+        ImageCmd::List { output } => cmd_ls(&images, output),
         ImageCmd::Describe { names } => cmd_describe(&images, &names),
         ImageCmd::Tag { source, target } => cmd_tag(&images, &source, &target),
         ImageCmd::History { image } => cmd_history(&images, &image),
@@ -783,7 +783,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
                 super::scan::cmd_scan(&image, sbom, fail_on.as_deref())
             }
         }
-        ImageCmd::Rm { image, force } => cmd_rm(&images, &store, &image, force),
+        ImageCmd::Remove { image, force } => cmd_rm(&images, &store, &image, force),
         ImageCmd::Prune { force, all } => cmd_prune(&images, &store, force, all),
         ImageCmd::Export { image, dir } => cmd_export(&images, &image, &dir),
         ImageCmd::Save { image, output } => cmd_save(&images, &image, &output),
@@ -865,7 +865,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
     use super::vmimage::{self, VmImageCmd};
     let mapped = match action {
         ImageCmd::Dash { .. } => unreachable!("tratado no topo de run"),
-        ImageCmd::Ls { output } => VmImageCmd::Ls { output },
+        ImageCmd::List { output } => VmImageCmd::Ls { output },
         ImageCmd::Describe { names } => VmImageCmd::Describe { names },
         ImageCmd::Init { name, dir, force } => VmImageCmd::Init { name, dir, force },
         // BUG FIXED HERE, found live on a real host: `delonix image --vm
@@ -960,14 +960,14 @@ fn run_vm(action: ImageCmd) -> Result<()> {
             )
             .into(),
         )),
-        ImageCmd::Rm { .. }
+        ImageCmd::Remove { .. }
         | ImageCmd::Prune { .. }
         | ImageCmd::Export { .. }
         | ImageCmd::Save { .. }
         | ImageCmd::Load { .. }
         | ImageCmd::Apply { .. } => {
             return Err(Error::Invalid(
-                super::po::t("command not available for VM images (--vm) — use ls/pull/push/build")
+                super::po::t("command not available for VM images (--vm) — use list/pull/push/build")
                     .into(),
             ))
         }

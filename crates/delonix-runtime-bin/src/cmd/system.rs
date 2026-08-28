@@ -3,7 +3,9 @@
 //! It is a GROUP, not standalone commands: `events`/`info`/`df` are about the
 //! engine, not about a particular container or image — just like docker
 //! (`docker system ...`). Whatever is per-object stays in the object's group
-//! (`container stats`, `image ls`).
+//! (`container stats`, `image list`). `namespace` and `boot` moved in here
+//! (B2 of the CLI restructuring, from top-level and from `net boot`): both
+//! are properties of the ENGINE, not of one resource group.
 
 use clap::Subcommand;
 use delonix_runtime::{self as runtime};
@@ -206,6 +208,26 @@ pub enum SystemCmd {
         #[arg(long)]
         once: bool,
     },
+    // A namespace has no record of its own — it exists while something is in
+    // it — so there is deliberately no `create`/`rm`: an empty namespace would
+    // be a resource with a lifecycle, and that is an ADR, not a listing. Said
+    // in the `about` (one paragraph, so `about == long_about`) rather than a
+    // second paragraph: the catalog looks the rendered string up VERBATIM, and
+    // a multi-paragraph help comes out untranslated under `--l18n=pt`.
+    /// Isolation namespaces: ls/describe — a namespace exists while something is in it, so there is no create/rm.
+    Namespace {
+        #[command(subcommand)]
+        action: super::namespace::NamespaceCmd,
+    },
+    // Moved here from `net boot` (B2 of the CLI restructuring): this is about
+    // the ENGINE surviving a reboot, not about SDN plumbing. Kept as a plain
+    // comment and not a second doc paragraph — same reason as `Namespace`
+    // above: `about == long_about` is what keeps the catalog lookup exact.
+    /// Boot persistence: systemd units so containers come back up after a reboot.
+    Boot {
+        #[command(subcommand)]
+        action: super::boot::BootCmd,
+    },
 }
 
 pub fn run(action: SystemCmd) -> Result<()> {
@@ -260,6 +282,8 @@ pub fn run(action: SystemCmd) -> Result<()> {
             interval,
             once,
         } => cmd_thermal(high, low, floor, interval, once),
+        SystemCmd::Namespace { action } => super::namespace::run(action),
+        SystemCmd::Boot { action } => super::boot::run(action),
     }
 }
 

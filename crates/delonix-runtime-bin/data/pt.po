@@ -19,8 +19,8 @@ msgstr "Língua do output: `en` (default) ou `pt` (português, pt_AO). Também v
 msgid "Containers: run/ps/stop/rm/exec/logs/update/describe."
 msgstr "Containers: run/ps/stop/rm/exec/logs/update/describe."
 
-msgid "OCI images: pull/ls/rm/export (with `--vm`: golden VM images — ls/pull/push/build)."
-msgstr "Imagens OCI: pull/ls/rm/export (com `--vm`: imagens VM douradas — ls/pull/push/build)."
+msgid "OCI images: pull/list/remove/export (with `--vm`: golden VM images — ls/pull/push/build)."
+msgstr "Imagens OCI: pull/list/remove/export (com `--vm`: imagens VM douradas — ls/pull/push/build)."
 
 msgid "Operate on VM images (`<root>/vm-images/`) instead of container images — enables the `push`/`build` subcommands."
 msgstr "Opera sobre imagens VM (`<root>/vm-images/`) em vez de imagens de container — activa os subcomandos `push`/`build`."
@@ -55,8 +55,8 @@ msgstr "Bootstrap `kubeadm` idempotente sobre SSH (`kind: KubernetesCluster`), p
 msgid "Generate a Kubernetes manifest from a container/pod already running locally (`kube generate`) — the \"ran it locally, now give me the YAML for k8s\" path (equivalent to `podman generate kube`)."
 msgstr "Gera um manifesto Kubernetes a partir de um container/pod já a correr localmente (`kube generate`) — o caminho \"correu localmente, agora dá-me o YAML para k8s\" (equivalente ao `podman generate kube`)."
 
-msgid "Low-level network/infra plumbing, grouped: netns/flow/ingress/egress/httproute/tunnel/boot."
-msgstr "Plumbing de rede/infra de baixo nível, agrupada: netns/flow/ingress/egress/httproute/tunnel/boot."
+msgid "Low-level network/infra plumbing, grouped: netns/flow/ingress/egress/httproute/tunnel."
+msgstr "Plumbing de rede/infra de baixo nível, agrupada: netns/flow/ingress/egress/httproute/tunnel."
 
 msgid "Serve a protocol endpoint on a unix socket, grouped: cri/api/docker-api."
 msgstr "Serve um endpoint de protocolo num socket unix, agrupado: cri/api/docker-api."
@@ -4905,8 +4905,8 @@ msgstr "Formato de saída: `table` (por omissão, o texto de sempre) ou `json` (
 msgid "Output format: `table` (default) or `json` (ADR-0005)"
 msgstr "Formato de saída: `table` (por omissão) ou `json` (ADR-0005)"
 
-msgid "Output format: `table` (default) or `json` (ADR-0005). Works for both `image ls` and `image --vm ls`"
-msgstr "Formato de saída: `table` (por omissão) ou `json` (ADR-0005). Vale para o `image ls` e para o `image --vm ls`"
+msgid "Output format: `table` (default) or `json` (ADR-0005). Works for both `image list` and `image --vm list`"
+msgstr "Formato de saída: `table` (por omissão) ou `json` (ADR-0005). Vale para o `image list` e para o `image --vm list`"
 
 msgid "Path to a `.qcow2` (or any format `qemu-img` reads — it is converted)"
 msgstr "Caminho para um `.qcow2` (ou qualquer formato que o `qemu-img` leia — é convertido)"
@@ -8708,7 +8708,7 @@ msgstr "Abre um caminho DIRIGIDO de uma rede para outra (ADR-0013, camada B)"
 msgid "Open a DIRECTED path from one network to another (ADR-0013 tier B).\n\nNetworks are isolated from each other by default. A route says a packet MAY cross; it does not say it is allowed — the per-workload firewall still decides, and a namespace boundary still needs its own policy."
 msgstr "Abre um caminho DIRIGIDO de uma rede para outra (ADR-0013, camada B).\n\nAs redes estão isoladas umas das outras por omissão. Uma rota diz que um pacote PODE atravessar; não diz que é permitido — a firewall por-workload continua a decidir, e uma fronteira de namespace continua a precisar da sua própria política."
 
-# delonix namespace (A-1) — comentários dos exemplos do manual
+# delonix system namespace (A-1) — comentários dos exemplos do manual
 msgid "every namespace in use, and what is in each"
 msgstr "todas as namespaces em uso, e o que está em cada uma"
 
@@ -8724,7 +8724,7 @@ msgstr "para um script"
 msgid "the contents by Kind, plus the nft set that carries the boundary"
 msgstr "o conteúdo por Kind, mais o set nft que carrega a fronteira"
 
-# delonix namespace (A-1)
+# delonix system namespace (A-1)
 msgid "Isolation namespaces: ls/describe — a namespace exists while something is in it, so there is no create/rm"
 msgstr "Namespaces de isolamento: ls/describe — uma namespace existe enquanto algo estiver nela, por isso não há create/rm"
 
@@ -8734,8 +8734,8 @@ msgstr "Lista as namespaces de isolamento EM USO, e o que está em cada uma"
 msgid "What is inside ONE namespace, by Kind, `kubectl describe` style"
 msgstr "O que está dentro de UMA namespace, por Kind, ao estilo do `kubectl describe`"
 
-msgid "namespace {name} (nothing is in it; see `delonix namespace ls`)"
-msgstr "namespace {name} (não está lá nada; ver `delonix namespace ls`)"
+msgid "namespace {name} (nothing is in it; see `delonix system namespace ls`)"
+msgstr "namespace {name} (não está lá nada; ver `delonix system namespace ls`)"
 
 msgid "these namespaces do NOT isolate on this host: bridge traffic is not filtered (br_netfilter not loaded, or net.bridge.bridge-nf-call-iptables=0), so every rule installs and reports success while traffic crosses anyway. Fix: modprobe br_netfilter && sysctl -w net.bridge.bridge-nf-call-iptables=1 net.bridge.bridge-nf-call-ip6tables=1 (persist via /etc/modules-load.d and /etc/sysctl.d, or `install.sh --tune`)"
 msgstr "estas namespaces NÃO isolam neste host: o tráfego de bridge não é filtrado (br_netfilter não carregado, ou net.bridge.bridge-nf-call-iptables=0), logo toda a regra instala e reporta sucesso enquanto o tráfego atravessa na mesma. Correcção: modprobe br_netfilter && sysctl -w net.bridge.bridge-nf-call-iptables=1 net.bridge.bridge-nf-call-ip6tables=1 (persistir via /etc/modules-load.d e /etc/sysctl.d, ou `install.sh --tune`)"
@@ -8953,7 +8953,7 @@ msgstr "não é possível validar o --gateway contra a subnet {subnet}"
 
 msgid "WARNING: network '{name}': the manifest asks for gateway {want} but its workloads route via {have} — NOT changed (they are already attached). Remove and recreate it to change the gateway."
 msgstr "AVISO: rede '{name}': o manifesto pede o gateway {want} mas os seus workloads roteiam por {have} — NÃO alterado (já estão ligados). Remove-a e recria-a para mudar o gateway."
-# net boot enable --restart (long_help)
+# system boot enable --restart (long_help)
 msgid ""
 "Restart policy baked into the units (`no|on-failure[:max]|always|unless-stopped`).\n"
 "\n"
