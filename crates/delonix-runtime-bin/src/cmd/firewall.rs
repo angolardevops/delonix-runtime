@@ -1286,17 +1286,31 @@ pub(crate) fn converge_doc(doc: &ManifestDoc) -> Result<()> {
 /// producing an empty source instead would silently widen the rule to
 /// `0.0.0.0/0` — turning "allow this one peer" into "allow everyone", which is
 /// the worst possible way for a firewall to fail.
+///
+/// Resolves through `Store::load`, and that is the whole point of this line.
+/// The scan it replaced was `list().find(|c| c.name == name)` — first match
+/// wins — while names stopped being globally unique in ADR-0011 §3, precisely
+/// so two tenants can both own a `db`. `Store::load`'s own doc-comment already
+/// names this failure ("an `apply` touching `db` would silently pick a
+/// tenant"); the target of a policy was moved over to it and the OTHER END of
+/// a rule was left behind. Measured on `origin/main` before the fix: a
+/// `FirewallPolicy` in namespace `teamA` with `fromWorkload: db` resolved to
+/// **teamB's** address and wrote an `allow` for it. That is a firewall failing
+/// OPEN, across a tenant boundary, without a word — the qualified
+/// `<namespace>/<name>` form is the way to say which one you meant.
 fn workload_cidr(store: &Store, name: &str) -> Result<String> {
-    let c = store
-        .list()?
-        .into_iter()
-        .find(|c| c.name == name)
-        .ok_or_else(|| {
-            Error::Invalid(super::po::tf(
-                "workload '{name}' does not exist (a rule names it as the other end)",
-                &[("name", name)],
-            ))
-        })?;
+    let c = store.load(name).map_err(|e| match e {
+        // The store says "no such container"; here the useful sentence names
+        // the ROLE the missing thing was playing, so keep it.
+        Error::NotFound(_) => Error::Invalid(super::po::tf(
+            "workload '{name}' does not exist (a rule names it as the other end)",
+            &[("name", name)],
+        )),
+        // The ambiguity refusal is passed through verbatim: it already lists
+        // the candidates, and rewording it here would give the same condition
+        // two voices depending on which path reached it.
+        other => other,
+    })?;
     let ip = c.ip.as_deref().filter(|s| !s.is_empty()).ok_or_else(|| {
         Error::Invalid(super::po::tf(
             "workload '{name}' has no address on the SDN (is it on a custom network?) — \
@@ -1585,6 +1599,58 @@ fn egress_host(network: &str, hostname: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Writes a container record straight into a temp store. Only the fields
+    /// the resolver reads are set; everything else comes from `Default`, which
+    /// is what keeps this test about name resolution and nothing else.
+    fn seed(root: &std::path::Path, id: &str, name: &str, namespace: &str, ip: &str) {
+        let store = Store::open(root.to_path_buf()).unwrap();
+        let mut c = delonix_runtime_core::Container::new(
+            id.into(),
+            name.into(),
+            "img".into(),
+            vec!["x".into()],
+            "max".into(),
+        );
+        c.namespace = namespace.into();
+        c.ip = Some(ip.into());
+        store.save(&c).unwrap();
+    }
+
+    // Cross-tenant regression, measured against `origin/main` before the fix:
+    // two containers named `db` in different namespaces, and the rule endpoint
+    // resolved to ONE of them silently — a `FirewallPolicy` for teamA writing
+    // an `allow` for teamB's address.
+    //
+    // Verified to fail with the fix reverted: the old
+    // `list().find(|c| c.name == name)` returns Ok("10.0.0.22/32") here.
+    #[test]
+    fn a_rule_refuses_a_workload_name_that_two_namespaces_share() {
+        let root = std::env::temp_dir().join(format!("dlx-fwns-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        seed(&root, "aaaa000000000001", "db", "teamA", "10.0.0.11");
+        seed(&root, "bbbb000000000002", "db", "teamB", "10.0.0.22");
+        let store = Store::open(root.clone()).unwrap();
+
+        let err = workload_cidr(&store, "db").unwrap_err().to_string();
+        assert!(
+            err.contains("several namespaces")
+                && err.contains("teamA/db")
+                && err.contains("teamB/db"),
+            "an ambiguous name had to be refused naming both candidates, got: {err}"
+        );
+
+        // And the qualified form still resolves — a refusal with no way to say
+        // what you meant would just be the capability removed.
+        assert_eq!(
+            workload_cidr(&store, "teamB/db").unwrap(),
+            "10.0.0.22/32",
+            "the qualified form has to keep working"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     fn rule(dir: &str, proto: &str, port: &str, src: &str, action: &str) -> FwRule {
         FwRule {
