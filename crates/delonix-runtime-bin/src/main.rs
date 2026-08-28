@@ -74,6 +74,10 @@ enum CompletionCmd {
 }
 
 #[derive(Subcommand)]
+// Subcommand structs vary wildly in size by design (Container carries the
+// biggest arg surface in the CLI) — boxing them would ripple through every
+// match arm that destructures `action` by value, for no runtime benefit.
+#[allow(clippy::large_enum_variant)]
 enum Cmd {
     /// Start the right project for THIS directory.
     ///
