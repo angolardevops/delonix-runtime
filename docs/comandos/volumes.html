@@ -315,6 +315,11 @@ Options:
           [default: table]
           [possible values: table, json]
 
+  -n, --namespace &lt;NAMESPACE&gt;
+          Show this namespace&#x27;s volumes instead of the unscoped ones.
+          
+          Without it the listing is exactly what it always was — the scoped sub-tree is deliberately invisible to `VolumeStore::list`, and widening the default would add rows to everyone&#x27;s `volumes ls`.
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 

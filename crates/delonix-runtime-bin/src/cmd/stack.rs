@@ -967,7 +967,18 @@ fn ls(file: Option<PathBuf>) -> Result<()> {
     // DOMAIN says WHAT AREA the Kind acts on (compute/storage/net-*/...), which
     // is the column that makes a mixed manifest readable: a `NetworkRoute` and a
     // `FirewallPolicy` sit next to each other and answer different questions.
-    let mut t = super::output::Table::new(&["KIND", "DOMAIN", "NAME", "PRESENT", "STATUS"]);
+    // NAMESPACE joins them for the same reason DOMAIN did: a manifest can
+    // declare resources in more than one, and until this column existed the two
+    // sat side by side looking alike. It hides itself when every row would say
+    // `default` (`output::namespace_cell`).
+    //
+    // **No `--namespace` filter here, and that is deliberate.** This lists what
+    // a FILE declares, not what a node holds — hiding part of the file reads as
+    // «that resource is not declared», which is the same dishonesty the plan
+    // already refuses when it prints a Kind it cannot converge instead of
+    // omitting it.
+    let mut t =
+        super::output::Table::new(&["KIND", "DOMAIN", "NAME", "PRESENT", "STATUS", "NAMESPACE"]);
     for kind in super::kinds::stack_kinds() {
         for doc in manifest::of_kind(&docs, kind) {
             let name = &doc.metadata.name;
@@ -978,10 +989,14 @@ fn ls(file: Option<PathBuf>) -> Result<()> {
                 name.clone(),
                 present,
                 status,
+                super::output::namespace_cell(
+                    doc.metadata.namespace.as_deref().unwrap_or_default(),
+                    false,
+                ),
             ]);
         }
     }
-    t.print();
+    t.drop_uninformative().print();
     Ok(())
 }
 

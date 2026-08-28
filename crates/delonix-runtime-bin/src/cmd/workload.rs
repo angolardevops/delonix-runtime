@@ -229,6 +229,11 @@ pub struct WorkloadRow {
     pub status: String,
     /// Type-specific one-liner: the image (container) or `"2 vCPU, 4G"` (vm).
     pub info: String,
+    /// Isolation namespace. Belongs on the UNION type because `Workload` is
+    /// `Namespaced::Always` in `cmd::kinds` — a row that cannot say which
+    /// tenant it belongs to is the one listing where containers and VMs of
+    /// different tenants sit side by side and look alike.
+    pub namespace: String,
 }
 
 /// A compute backend the Workload layer drives uniformly (ADR-0002). The
@@ -326,6 +331,9 @@ pub enum WorkloadCmd {
         /// field names — see ADR-0005). `-o json | jq` is the automation path.
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: super::output::OutputFormat,
+        /// Show only the workloads of this isolation namespace. Omit to list every one.
+        #[arg(short = 'n', long, add = clap_complete::engine::ArgValueCandidates::new(super::complete::namespaces))]
+        namespace: Option<String>,
     },
     /// Describe a workload by name (routed to the owning backend, kubectl-style).
     Describe {
@@ -352,7 +360,7 @@ pub enum WorkloadCmd {
 
 pub fn run(action: WorkloadCmd) -> Result<()> {
     match action {
-        WorkloadCmd::Ls { output } => ls(output),
+        WorkloadCmd::Ls { output, namespace } => ls(output, namespace.as_deref()),
         WorkloadCmd::Describe { name } => owner(&drivers(), &name)?.describe(&name),
         // The adapters delegate to each engine's own stop/rm, which already emit
         // the success line (container → id, vm → name) — mirroring what the
@@ -363,25 +371,38 @@ pub fn run(action: WorkloadCmd) -> Result<()> {
     }
 }
 
-fn ls(format: super::output::OutputFormat) -> Result<()> {
+fn ls(format: super::output::OutputFormat, namespace: Option<&str>) -> Result<()> {
     // Collect first: `-o json` needs the whole array; the table path is unchanged.
     let mut rows = Vec::new();
     for d in drivers() {
         rows.extend(d.list()?);
     }
+    // BEFORE the format branch: a `--namespace` that narrowed the table and
+    // left the JSON alone is a flag that works in one output and not the other.
+    if let Some(ns) = namespace {
+        rows.retain(|r: &WorkloadRow| {
+            let owner = if r.namespace.is_empty() {
+                "default"
+            } else {
+                &r.namespace
+            };
+            owner == ns
+        });
+    }
     match format {
         super::output::OutputFormat::Json => super::output::print_json(&rows),
         super::output::OutputFormat::Table => {
-            let mut t = super::output::Table::new(&["TYPE", "NAME", "STATUS", "INFO"]);
+            let mut t = super::output::Table::new(&["TYPE", "NAME", "STATUS", "INFO", "NAMESPACE"]);
             for r in &rows {
                 t.row(vec![
                     r.kind.to_string(),
                     r.name.clone(),
                     r.status.clone(),
                     r.info.clone(),
+                    super::output::namespace_cell(&r.namespace, namespace.is_some()),
                 ]);
             }
-            t.print();
+            t.drop_uninformative().print();
             Ok(())
         }
     }
