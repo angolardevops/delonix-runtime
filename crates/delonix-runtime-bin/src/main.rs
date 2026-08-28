@@ -5,7 +5,7 @@
 //!
 //! Commands grouped semantically (instead of a flat list): `container`
 //! (run/ps/stop/rm/exec/logs), `image` (pull/list/remove/export), `build`
-//! (Dockerfile/Delonixfile → image), `vm` (declarative microVMs), `volumes`
+//! (Dockerfile/Delonixfile → image), `vm` (declarative microVMs), `volume`
 //! (named volumes), `network` (user networks) and `stack` (applies a whole
 //! `delonix-manifest.yaml`). Each group with `apply` also accepts a per-Kind
 //! manifest (`delonix <group> apply [-f file]`) — see `cmd::manifest`. Each
@@ -136,7 +136,7 @@ enum Cmd {
         action: cmd::workload::WorkloadCmd,
     },
     /// Named volumes and bind mounts: create/ls/rm/inspect.
-    Volumes {
+    Volume {
         #[command(subcommand)]
         action: cmd::volume::VolumeCmd,
     },
@@ -489,7 +489,7 @@ fn run() -> Result<()> {
         Cmd::Build(args) => cmd::build::run(args),
         Cmd::Vm { action } => cmd::vm::run(action),
         Cmd::Workload { action } => cmd::workload::run(action),
-        Cmd::Volumes { action } => cmd::volume::run(action),
+        Cmd::Volume { action } => cmd::volume::run(action),
         Cmd::Network { action } => cmd::network::run(action),
         Cmd::Secret { action } => cmd::secret::run(action),
         Cmd::Storage { action } => cmd::storage::run(action),

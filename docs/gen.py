@@ -35,6 +35,7 @@ GROUP_PATH = {
     "boot": ("system", "boot"),
     "namespace": ("system", "namespace"),
     "dash": ("dashboard",),
+    "volumes": ("volume",),
     "cri": ("serve", "cri"),
     "api": ("serve", "api"),
     "docker-api": ("serve", "docker-api"),
@@ -547,7 +548,7 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
         },
     },
     "volumes": {
-        "title": "delonix volumes",
+        "title": "delonix volume",
         "tagline": "Volumes nomeados e bind mounts: create, ls, inspect, rm, apply.",
         "intro": """Wrapper fino sobre o <code>VolumeStore</code>. No <code>container run</code>,
 <code>-v nome:/destino[:ro]</code> resolve para um volume nomeado (criado on-demand) e
@@ -555,19 +556,19 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
         "subs": {
             "snapshot": {"examples": [
                 ('Tirar e listar snapshots de um volume',
-                 'delonix volumes snapshot create dados antes-da-migracao\ndelonix volumes snapshot ls dados'),
+                 'delonix volume snapshot create dados antes-da-migracao\ndelonix volume snapshot ls dados'),
                 ('Voltar a um snapshot (o conteúdo actual do volume é substituído)',
-                 'delonix volumes snapshot restore dados antes-da-migracao'),
+                 'delonix volume snapshot restore dados antes-da-migracao'),
                 ('Apagar um snapshot que já não serve',
-                 'delonix volumes snapshot rm dados antes-da-migracao')]},
+                 'delonix volume snapshot rm dados antes-da-migracao')]},
             "describe": {"examples": [
                 ('Detalhe de um volume (uso, quota, montagens)',
-                 'delonix volumes describe dados')]},
-            "create": {"examples": [("Com quota e driver nfs disponíveis", "delonix volumes create dados --quota 10G")]},
-            "ls": {"examples": [("", "delonix volumes ls")]},
-            "inspect": {"examples": [("", "delonix volumes inspect dados")]},
-            "rm": {"examples": [("", "delonix volumes rm dados")]},
-            "apply": {"examples": [("", "delonix volumes apply -f delonix-manifest.yaml")]},
+                 'delonix volume describe dados')]},
+            "create": {"examples": [("Com quota e driver nfs disponíveis", "delonix volume create dados --quota 10G")]},
+            "ls": {"examples": [("", "delonix volume ls")]},
+            "inspect": {"examples": [("", "delonix volume inspect dados")]},
+            "rm": {"examples": [("", "delonix volume rm dados")]},
+            "apply": {"examples": [("", "delonix volume apply -f delonix-manifest.yaml")]},
             # `prune` faltava aqui, e a consequência não era estética: a página
             # listava o subcomando na tabela do grupo e nunca documentava uma
             # única flag dele. O âmbito por dono (`--namespace`/`-A`) existia no
@@ -575,12 +576,12 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
             # porque só compara o que ESTE mapa manda gerar.
             "prune": {"examples": [
                 ('DESTRUIR todos os volumes locais que nada referencia (só a raiz sem dono)',
-                 'delonix volumes prune'),
+                 'delonix volume prune'),
                 ('Recuperar o disco de um inquilino que já não existe — os volumes dele vivem\n'
                  '# no seu próprio namespace, onde um prune sem âmbito nunca olha',
-                 'delonix volumes prune --namespace acme -f'),
+                 'delonix volume prune --namespace acme -f'),
                 ('A loja inteira: a raiz sem dono E todos os inquilinos',
-                 'delonix volumes prune -A -f')]},
+                 'delonix volume prune -A -f')]},
         },
     },
     "namespace": {
@@ -1776,22 +1777,22 @@ delonix vm restore dev before-the-change</code></pre>"""},
     "volumes": {
         "lab": {"pt": """<p>Prova que um volume nomeado sobrevive a um restart do container —
 ao contrário de escrever directamente no rootfs.</p>
-<pre><code>delonix volumes create dados
+<pre><code>delonix volume create dados
 delonix container run -d --name db -v dados:/var/lib/data alpine sleep infinity
 delonix container exec db sh -c 'echo ok > /var/lib/data/marca'
 delonix container stop db && delonix container start db
 delonix container exec db cat /var/lib/data/marca</code></pre>""",
                 "en": """<p>Prove a named volume survives a container restart — unlike writing
 straight to the rootfs.</p>
-<pre><code>delonix volumes create data
+<pre><code>delonix volume create data
 delonix container run -d --name db -v data:/var/lib/data alpine sleep infinity
 delonix container exec db sh -c 'echo ok > /var/lib/data/mark'
 delonix container stop db && delonix container start db
 delonix container exec db cat /var/lib/data/mark</code></pre>"""},
         "challenge": {"pt": """<p>Tira um <code>snapshot</code> do volume <code>dados</code> depois
-de escrever nele, e usa <code>volumes describe</code> para veres o histórico de snapshots.</p>""",
+de escrever nele, e usa <code>volume describe</code> para veres o histórico de snapshots.</p>""",
                 "en": """<p>Take a <code>snapshot</code> of the <code>data</code> volume after
-writing to it, and use <code>volumes describe</code> to see the snapshot history.</p>"""},
+writing to it, and use <code>volume describe</code> to see the snapshot history.</p>"""},
     },
     "network": {
         "lab": {"pt": """<p>Cria uma rede própria e confirma a descoberta por nome (DNS interno)
@@ -1841,10 +1842,10 @@ after the database is healthy (<code>depends_on: condition: service_healthy</cod
 delonix compose ps
 delonix compose logs -f app</code></pre>"""},
         "challenge": {"pt": """<p>Corre <code>compose down -v</code> e confirma com
-<code>delonix volumes ls</code> que o volume nomeado do projecto foi mesmo removido — não só os
+<code>delonix volume ls</code> que o volume nomeado do projecto foi mesmo removido — não só os
 containers.</p>""",
                 "en": """<p>Run <code>compose down -v</code> and confirm with
-<code>delonix volumes ls</code> that the project's named volume was actually removed — not just
+<code>delonix volume ls</code> that the project's named volume was actually removed — not just
 the containers.</p>"""},
     },
     "cluster": {

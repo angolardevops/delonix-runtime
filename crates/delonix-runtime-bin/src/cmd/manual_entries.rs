@@ -166,7 +166,7 @@ pub static ENTRIES: &[Entry] = &[
             ("what belongs to this project", "delonix compose ps"),
             ("tear it down, named volumes included", "delonix compose down -v"),
         ],
-        see_also: &["stack apply", "container run", "volumes ls", "network ls"],
+        see_also: &["stack apply", "container run", "volume ls", "network ls"],
     },
     Entry {
         path: "compose down",
@@ -260,7 +260,7 @@ pub static ENTRIES: &[Entry] = &[
             ("force it even while running, and drop its anonymous volumes", "delonix container rm -f -v web"),
             ("everything that has already exited", "delonix container rm $(delonix container ps -aq)"),
         ],
-        see_also: &["container stop", "container ps", "volumes rm"],
+        see_also: &["container stop", "container ps", "volume rm"],
     },
     Entry {
         path: "container prune",
@@ -1396,7 +1396,7 @@ pub static ENTRIES: &[Entry] = &[
             ("every namespace in use, and what is in each", "delonix system namespace ls"),
             ("what one tenant holds, and whether the boundary is enforced here", "delonix system namespace describe inquilino-b"),
         ],
-        see_also: &["container run", "vm create", "net ingress", "volumes prune"],
+        see_also: &["container run", "vm create", "net ingress", "volume prune"],
     },
     Entry {
         path: "system namespace ls",
@@ -1506,7 +1506,7 @@ pub static ENTRIES: &[Entry] = &[
             ("apply only the `kind: Network` documents of a manifest, idempotent by name", "delonix network apply -f delonix-manifest.yaml"),
             ("the networks of a shipped example, leaving the other kinds alone", "delonix network apply -f examples/network.yaml"),
         ],
-        see_also: &["stack apply", "stack plan", "network create", "volumes apply"],
+        see_also: &["stack apply", "stack plan", "network create", "volume apply"],
     },
     Entry {
         path: "network dash",
@@ -1745,7 +1745,7 @@ pub static ENTRIES: &[Entry] = &[
             ("what slices exist, with parent storage, quota and live usage", "delonix sharevolume ls"),
             ("how close one of them is to its quota", "delonix sharevolume describe app-data"),
         ],
-        see_also: &["storage", "volumes ls", "stack apply", "container run"],
+        see_also: &["storage", "volume ls", "stack apply", "container run"],
     },
     Entry {
         path: "sharevolume rm",
@@ -1755,7 +1755,7 @@ pub static ENTRIES: &[Entry] = &[
             ("un-register and delete the underlying subdirectory as well", "delonix sharevolume rm app-data --purge-data"),
             ("a slice owned by a namespace other than `default`", "delonix sharevolume rm app-data -n backend"),
         ],
-        see_also: &["sharevolume ls", "storage rm", "volumes rm"],
+        see_also: &["sharevolume ls", "storage rm", "volume rm"],
     },
     Entry {
         path: "sharevolume describe",
@@ -1764,7 +1764,7 @@ pub static ENTRIES: &[Entry] = &[
             ("quota, alert threshold and real usage of one slice", "delonix sharevolume describe app-data"),
             ("a slice owned by another namespace", "delonix sharevolume describe app-data -n backend"),
         ],
-        see_also: &["sharevolume ls", "storage inspect", "volumes describe"],
+        see_also: &["sharevolume ls", "storage inspect", "volume describe"],
     },
     Entry {
         path: "sharevolume ls",
@@ -1773,7 +1773,7 @@ pub static ENTRIES: &[Entry] = &[
             ("parent storage, quota and measured usage of each slice", "delonix sharevolume ls"),
             ("as JSON, to alert on a slice approaching its quota", "delonix sharevolume ls -o json"),
         ],
-        see_also: &["sharevolume describe", "storage ls", "volumes inspect"],
+        see_also: &["sharevolume describe", "storage ls", "volume inspect"],
     },
     Entry {
         path: "sharevolume apply",
@@ -1920,7 +1920,7 @@ pub static ENTRIES: &[Entry] = &[
             ("what is mounted, and from where", "delonix storage ls"),
             ("the server, export and mount options really in use", "delonix storage inspect nas"),
         ],
-        see_also: &["sharevolume", "volumes create", "secret create", "container run"],
+        see_also: &["sharevolume", "volume create", "secret create", "container run"],
     },
     Entry {
         path: "storage create",
@@ -1931,7 +1931,7 @@ pub static ENTRIES: &[Entry] = &[
             ("read-only, with extra mount options appended to the derived ones", "delonix storage create media --type nfs --server 10.0.0.5 --share /mnt/pool/media --read-only --options vers=4.1,soft"),
             ("WebDAV from a Nextcloud instance", "delonix storage create cloud --type webdav --server https://cloud.example.org --share /remote.php/dav/files/delonix --username delonix --password-secret cloud-creds"),
         ],
-        see_also: &["storage ls", "sharevolume apply", "secret create", "volumes create"],
+        see_also: &["storage ls", "sharevolume apply", "secret create", "volume create"],
     },
     Entry {
         path: "storage rm",
@@ -1939,7 +1939,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("unmount and unregister it — the DATA stays on the NAS, only the local mount goes", "delonix storage rm nas"),
         ],
-        see_also: &["storage ls", "sharevolume rm", "volumes rm"],
+        see_also: &["storage ls", "sharevolume rm", "volume rm"],
     },
     Entry {
         path: "storage inspect",
@@ -1947,7 +1947,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("server, export and the mount options actually derived for it", "delonix storage inspect nas"),
         ],
-        see_also: &["storage ls", "volumes inspect", "sharevolume describe"],
+        see_also: &["storage ls", "volume inspect", "sharevolume describe"],
     },
     Entry {
         path: "storage ls",
@@ -1956,7 +1956,7 @@ pub static ENTRIES: &[Entry] = &[
             ("the network storages, with type and mountpoint", "delonix storage ls"),
             ("as JSON, for automation", "delonix storage ls -o json"),
         ],
-        see_also: &["storage inspect", "volumes ls", "sharevolume ls"],
+        see_also: &["storage inspect", "volume ls", "sharevolume ls"],
     },
     Entry {
         path: "storage apply",
@@ -1965,7 +1965,7 @@ pub static ENTRIES: &[Entry] = &[
             ("declare the shares in a manifest instead of typing credentials on the command line", "delonix storage apply -f examples/storage.yaml"),
             ("the storages of your own manifest", "delonix storage apply -f delonix-manifest.yaml"),
         ],
-        see_also: &["stack apply", "sharevolume apply", "secret apply", "volumes apply"],
+        see_also: &["stack apply", "sharevolume apply", "secret apply", "volume apply"],
     },
     Entry {
         path: "storage dash",
@@ -2069,7 +2069,7 @@ pub static ENTRIES: &[Entry] = &[
             ("take the volumes' data with it (this is the part that can be hundreds of GiB)", "delonix system backup --volumes"),
             ("to rebuild a node from scratch: without the key the secrets never decrypt there", "delonix system backup --volumes --include-master-key"),
         ],
-        see_also: &["system restore", "volumes snapshot", "system df", "secret ls"],
+        see_also: &["system restore", "volume snapshot", "system df", "secret ls"],
     },
     Entry {
         path: "system restore",
@@ -2087,7 +2087,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("disk usage by area: images, containers, volumes and VM images", "delonix system df"),
         ],
-        see_also: &["system prune", "image list", "volumes ls", "system info"],
+        see_also: &["system prune", "image list", "volume ls", "system info"],
     },
     Entry {
         path: "system events",
@@ -2156,7 +2156,7 @@ pub static ENTRIES: &[Entry] = &[
             ("see what it WOULD take, split into declared resources and debris, and take nothing — the report to read before putting `--auto` in a timer", "delonix system prune --dry-run"),
             ("what the scheduled sweep would do right now, threshold gate included", "delonix system prune --dry-run --auto"),
         ],
-        see_also: &["system df", "image remove", "container rm", "volumes ls"],
+        see_also: &["system df", "image remove", "container rm", "volume ls"],
     },
     Entry {
         path: "system thermal",
@@ -2420,7 +2420,7 @@ pub static ENTRIES: &[Entry] = &[
             ("a checkpoint before an upgrade — of a RUNNING VM it takes the memory too", "delonix vm snapshot create dev before-upgrade"),
             ("which checkpoints a VM has, before reverting to one", "delonix vm snapshot ls dev"),
         ],
-        see_also: &["vm stop", "vm status", "volumes snapshot", "vm default-backend"],
+        see_also: &["vm stop", "vm status", "volume snapshot", "vm default-backend"],
     },
     Entry {
         path: "vm snapshot create",
@@ -2466,122 +2466,122 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["vm ls", "vm status", "dash", "container dash"],
     },
     Entry {
-        path: "volumes",
+        path: "volume",
         group: "",
         examples: &[
-            ("a named volume, so the data outlives the container that writes to it", "delonix volumes create pgdata"),
-            ("what exists, with driver and mountpoint", "delonix volumes ls"),
-            ("how much disk one of them really holds, measured from inside the userns", "delonix volumes inspect pgdata"),
+            ("a named volume, so the data outlives the container that writes to it", "delonix volume create pgdata"),
+            ("what exists, with driver and mountpoint", "delonix volume ls"),
+            ("how much disk one of them really holds, measured from inside the userns", "delonix volume inspect pgdata"),
         ],
-        see_also: &["container run", "storage", "sharevolume", "volumes snapshot"],
+        see_also: &["container run", "storage", "sharevolume", "volume snapshot"],
     },
     Entry {
-        path: "volumes create",
+        path: "volume create",
         group: "Lifecycle",
         examples: &[
-            ("a local named volume — the default driver", "delonix volumes create pgdata"),
-            ("with a size cap, so one workload cannot fill the whole disk", "delonix volumes create pgdata --quota 20g"),
-            ("an NFS export straight as a volume, without the friendlier `storage` declaration", "delonix volumes create backups --driver nfs --device 10.0.0.5:/mnt/pool/backups --options vers=4.1,soft"),
+            ("a local named volume — the default driver", "delonix volume create pgdata"),
+            ("with a size cap, so one workload cannot fill the whole disk", "delonix volume create pgdata --quota 20g"),
+            ("an NFS export straight as a volume, without the friendlier `storage` declaration", "delonix volume create backups --driver nfs --device 10.0.0.5:/mnt/pool/backups --options vers=4.1,soft"),
         ],
-        see_also: &["volumes ls", "volumes inspect", "storage create", "container run"],
+        see_also: &["volume ls", "volume inspect", "storage create", "container run"],
     },
     Entry {
-        path: "volumes rm",
+        path: "volume rm",
         group: "Lifecycle",
         examples: &[
-            ("remove a volume nothing references any more", "delonix volumes rm pgdata"),
-            ("force it past a live reference — this DESTROYS the data of whatever still uses it", "delonix volumes rm -f pgdata"),
+            ("remove a volume nothing references any more", "delonix volume rm pgdata"),
+            ("force it past a live reference — this DESTROYS the data of whatever still uses it", "delonix volume rm -f pgdata"),
         ],
-        see_also: &["volumes ls", "volumes snapshot create", "container rm", "sharevolume rm"],
+        see_also: &["volume ls", "volume snapshot create", "container rm", "sharevolume rm"],
     },
     Entry {
-        path: "volumes prune",
+        path: "volume prune",
         group: "Maintenance",
         examples: &[
-            ("DESTROY every local volume nothing references — the data does not come back", "delonix volumes prune"),
-            ("in CI, where there is no terminal to confirm at", "delonix volumes prune -f"),
-            ("reclaim the disk of a tenant that no longer exists — its volumes live under its own namespace, where an unscoped prune never looks", "delonix volumes prune --namespace acme -f"),
-            ("the whole store: the unscoped root AND every tenant", "delonix volumes prune -A -f"),
+            ("DESTROY every local volume nothing references — the data does not come back", "delonix volume prune"),
+            ("in CI, where there is no terminal to confirm at", "delonix volume prune -f"),
+            ("reclaim the disk of a tenant that no longer exists — its volumes live under its own namespace, where an unscoped prune never looks", "delonix volume prune --namespace acme -f"),
+            ("the whole store: the unscoped root AND every tenant", "delonix volume prune -A -f"),
         ],
-        see_also: &["volumes rm", "volumes ls", "volumes snapshot create", "system prune"],
+        see_also: &["volume rm", "volume ls", "volume snapshot create", "system prune"],
     },
     Entry {
-        path: "volumes describe",
+        path: "volume describe",
         group: "Inspect",
         examples: &[
-            ("a kubectl-style block, meant to be read rather than parsed", "delonix volumes describe pgdata"),
-            ("several at once, to compare them side by side", "delonix volumes describe pgdata backups"),
+            ("a kubectl-style block, meant to be read rather than parsed", "delonix volume describe pgdata"),
+            ("several at once, to compare them side by side", "delonix volume describe pgdata backups"),
         ],
-        see_also: &["volumes inspect", "volumes ls", "sharevolume describe"],
+        see_also: &["volume inspect", "volume ls", "sharevolume describe"],
     },
     Entry {
-        path: "volumes inspect",
+        path: "volume inspect",
         group: "Inspect",
         examples: &[
-            ("driver, mountpoint, quota and the REAL usage — an unreadable directory is reported as unknown, never as zero", "delonix volumes inspect pgdata"),
+            ("driver, mountpoint, quota and the REAL usage — an unreadable directory is reported as unknown, never as zero", "delonix volume inspect pgdata"),
         ],
-        see_also: &["volumes describe", "volumes ls", "sharevolume describe"],
+        see_also: &["volume describe", "volume ls", "sharevolume describe"],
     },
     Entry {
-        path: "volumes ls",
+        path: "volume ls",
         group: "Inspect",
         examples: &[
-            ("every volume, with driver and mountpoint", "delonix volumes ls"),
-            ("as JSON, for a backup job or a monitoring script", "delonix volumes ls -o json"),
+            ("every volume, with driver and mountpoint", "delonix volume ls"),
+            ("as JSON, for a backup job or a monitoring script", "delonix volume ls -o json"),
         ],
-        see_also: &["volumes inspect", "volumes describe", "storage ls", "system df"],
+        see_also: &["volume inspect", "volume describe", "storage ls", "system df"],
     },
     Entry {
-        path: "volumes apply",
+        path: "volume apply",
         group: "Declarative",
         examples: &[
-            ("apply only the `kind: Volume` documents of a manifest, idempotent by name", "delonix volumes apply -f delonix-manifest.yaml"),
-            ("the volumes of a shipped example, leaving the other kinds untouched", "delonix volumes apply -f examples/volume.yaml"),
+            ("apply only the `kind: Volume` documents of a manifest, idempotent by name", "delonix volume apply -f delonix-manifest.yaml"),
+            ("the volumes of a shipped example, leaving the other kinds untouched", "delonix volume apply -f examples/volume.yaml"),
         ],
-        see_also: &["stack apply", "stack plan", "volumes create", "storage apply"],
+        see_also: &["stack apply", "stack plan", "volume create", "storage apply"],
     },
     Entry {
-        path: "volumes snapshot",
+        path: "volume snapshot",
         group: "Maintenance",
         examples: &[
-            ("freeze the current contents of a volume as a tar.gz, safe in rootless", "delonix volumes snapshot create pgdata"),
-            ("what has been kept, and when", "delonix volumes snapshot ls pgdata"),
+            ("freeze the current contents of a volume as a tar.gz, safe in rootless", "delonix volume snapshot create pgdata"),
+            ("what has been kept, and when", "delonix volume snapshot ls pgdata"),
         ],
-        see_also: &["volumes inspect", "volumes rm", "vm snapshot"],
+        see_also: &["volume inspect", "volume rm", "vm snapshot"],
     },
     Entry {
-        path: "volumes snapshot create",
+        path: "volume snapshot create",
         group: "Lifecycle",
         examples: &[
-            ("a point-in-time copy, named with the UTC timestamp", "delonix volumes snapshot create pgdata"),
-            ("a name of your own, so the restore reads clearly months later", "delonix volumes snapshot create pgdata --name before-upgrade"),
+            ("a point-in-time copy, named with the UTC timestamp", "delonix volume snapshot create pgdata"),
+            ("a name of your own, so the restore reads clearly months later", "delonix volume snapshot create pgdata --name before-upgrade"),
         ],
-        see_also: &["volumes snapshot ls", "volumes snapshot restore", "volumes inspect"],
+        see_also: &["volume snapshot ls", "volume snapshot restore", "volume inspect"],
     },
     Entry {
-        path: "volumes snapshot rm",
+        path: "volume snapshot rm",
         group: "Lifecycle",
         examples: &[
-            ("drop a snapshot you no longer keep, freeing the space it holds under the volume", "delonix volumes snapshot rm pgdata before-upgrade"),
+            ("drop a snapshot you no longer keep, freeing the space it holds under the volume", "delonix volume snapshot rm pgdata before-upgrade"),
         ],
-        see_also: &["volumes snapshot ls", "volumes rm", "system df"],
+        see_also: &["volume snapshot ls", "volume rm", "system df"],
     },
     Entry {
-        path: "volumes snapshot ls",
+        path: "volume snapshot ls",
         group: "Inspect",
         examples: &[
-            ("the snapshots of one volume", "delonix volumes snapshot ls pgdata"),
-            ("of every volume — omit the name", "delonix volumes snapshot ls"),
+            ("the snapshots of one volume", "delonix volume snapshot ls pgdata"),
+            ("of every volume — omit the name", "delonix volume snapshot ls"),
         ],
-        see_also: &["volumes snapshot create", "volumes snapshot restore", "volumes snapshot rm"],
+        see_also: &["volume snapshot create", "volume snapshot restore", "volume snapshot rm"],
     },
     Entry {
-        path: "volumes snapshot restore",
+        path: "volume snapshot restore",
         group: "Maintenance",
         examples: &[
-            ("put the data back as it was — it REPLACES the contents, so stop the consumers first", "delonix volumes snapshot restore pgdata before-upgrade"),
+            ("put the data back as it was — it REPLACES the contents, so stop the consumers first", "delonix volume snapshot restore pgdata before-upgrade"),
         ],
-        see_also: &["volumes snapshot ls", "volumes snapshot create", "container stop"],
+        see_also: &["volume snapshot ls", "volume snapshot create", "container stop"],
     },
     Entry {
         path: "workload",

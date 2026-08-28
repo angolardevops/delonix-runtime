@@ -282,7 +282,7 @@ pub enum ImageCmd {
     ///
     /// By default only the DANGLING ones (no tag); `--all` also drops tagged
     /// images that no container uses. Containers and volumes are untouched —
-    /// see `container prune` and `volumes prune`.
+    /// see `container prune` and `volume prune`.
     Prune {
         /// Skip the confirmation prompt (REQUIRED when stdin is not a terminal).
         #[arg(short = 'f', long)]

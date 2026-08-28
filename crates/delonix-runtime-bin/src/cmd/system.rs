@@ -142,7 +142,7 @@ pub enum SystemCmd {
         /// bandwidth and start-up time and reclaims nothing that was a problem.
         ///
         /// It implies `--force` — an unattended sweep has nobody to answer a
-        /// prompt — and it never touches volumes (see `volumes prune`).
+        /// prompt — and it never touches volumes (see `volume prune`).
         #[arg(long)]
         auto: bool,
         /// Occupancy percentage at or above which `--auto` acts.
