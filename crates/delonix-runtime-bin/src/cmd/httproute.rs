@@ -26,7 +26,11 @@ use delonix_runtime_core::{Error, Result};
 #[derive(Subcommand)]
 pub enum HttpRouteCmd {
     /// State of the proxy + active routes (from the config in effect).
-    Ls,
+    Ls {
+        /// Output format: `table` (default) or `json` (ADR-0005). `json` carries a `state` of stopped, serving or config-unreadable.
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: super::output::OutputFormat,
+    },
     /// Apply the HTTPRoutes of a manifest (brings up/reloads the proxy).
     Apply {
         /// Manifest file (default `./delonix-manifest.yaml`).
@@ -37,9 +41,83 @@ pub enum HttpRouteCmd {
     Rm,
 }
 
+/// `net httproute ls -o json`.
+///
+/// THREE states, and the third is why this is not a bare list: a proxy that is
+/// running with a config that would not parse is neither «stopped» nor «serving
+/// these routes». Collapsing it into an empty list would tell a script that
+/// nothing is exposed while the proxy is answering requests.
+#[derive(serde::Serialize)]
+struct HttpRouteLs {
+    /// `stopped` | `serving` | `config-unreadable`.
+    state: &'static str,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    listeners: Vec<ListenerRow>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    routes: Vec<RouteRow>,
+}
+
+#[derive(serde::Serialize)]
+struct ListenerRow {
+    port: u16,
+    tls: bool,
+}
+
+#[derive(serde::Serialize)]
+struct RouteRow {
+    /// `null` for the catch-all the table prints as `*` — a script matching on
+    /// the literal `"*"` would also match a host actually named that.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    host: Option<String>,
+    path: String,
+    backend: String,
+}
+
 pub fn run(action: HttpRouteCmd) -> Result<()> {
     match action {
-        HttpRouteCmd::Ls => {
+        HttpRouteCmd::Ls {
+            output: super::output::OutputFormat::Json,
+        } => {
+            if !ingress_proxy::is_running() {
+                return super::output::print_json(&[HttpRouteLs {
+                    state: "stopped",
+                    listeners: Vec::new(),
+                    routes: Vec::new(),
+                }]);
+            }
+            let cfg = std::fs::read(ingress_proxy::config_path())
+                .ok()
+                .and_then(|b| serde_json::from_slice::<ProxyConfig>(&b).ok());
+            let row = match cfg {
+                Some(c) => HttpRouteLs {
+                    state: "serving",
+                    listeners: c
+                        .listeners
+                        .iter()
+                        .map(|l| ListenerRow {
+                            port: l.port,
+                            tls: l.tls,
+                        })
+                        .collect(),
+                    routes: c
+                        .routes
+                        .iter()
+                        .map(|r| RouteRow {
+                            host: (!r.host.is_empty()).then(|| r.host.clone()),
+                            path: r.path.clone(),
+                            backend: r.backend.clone(),
+                        })
+                        .collect(),
+                },
+                None => HttpRouteLs {
+                    state: "config-unreadable",
+                    listeners: Vec::new(),
+                    routes: Vec::new(),
+                },
+            };
+            super::output::print_json(&[row])
+        }
+        HttpRouteCmd::Ls { .. } => {
             if !ingress_proxy::is_running() {
                 println!(
                     "{}",

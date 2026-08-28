@@ -184,7 +184,13 @@ pub enum TunnelCmd {
         insecure_skip_tls_verify: bool,
     },
     /// List tunnels (state + public URL).
-    Ls,
+    Ls {
+        /// Output format: `table` (default) or `json` (ADR-0005). `json` gives
+        /// `running` as a boolean and the uptime in SECONDS, not the humanized
+        /// `Up 3m` the table prints.
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: output::OutputFormat,
+    },
     /// Human-readable detail of one tunnel.
     Describe {
         #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::tunnels))]
@@ -224,7 +230,7 @@ pub fn run(action: TunnelCmd) -> Result<()> {
             };
             apply_one(&name, &spec)
         }
-        TunnelCmd::Ls => cmd_ls(),
+        TunnelCmd::Ls { output } => cmd_ls(output),
         TunnelCmd::Describe { name } => cmd_describe(&name),
         TunnelCmd::Rm { name } => cmd_rm(&name),
     }
@@ -985,8 +991,50 @@ fn spawn_cloudflare_named(
     spawn_and_capture(rec, "cloudflared", &args, |_| None)
 }
 
-fn cmd_ls() -> Result<()> {
+/// One row of `net tunnel ls`.
+///
+/// `running` is a boolean and the uptime is SECONDS, not the `Up 3m` the table
+/// prints: a script that has to parse «Up 2 weeks» to decide whether a tunnel
+/// is old is a script that breaks when the humanizer changes a bucket — which
+/// this repo already ported from docker precisely because those buckets are
+/// fiddly.
+#[derive(serde::Serialize)]
+struct TunnelLsRow {
+    name: String,
+    provider: String,
+    local_port: u16,
+    /// `null` while the provider has not confirmed one — never a dash, which is
+    /// a table's way of saying nothing and a script's way of saying "-".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    public_url: Option<String>,
+    running: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    uptime_seconds: Option<u64>,
+}
+
+fn cmd_ls(format: output::OutputFormat) -> Result<()> {
     let store = record_store()?;
+    if format == output::OutputFormat::Json {
+        let rows: Vec<TunnelLsRow> = store
+            .list()?
+            .into_iter()
+            .map(|rec| {
+                let running = is_alive(&rec);
+                TunnelLsRow {
+                    name: rec.name,
+                    provider: rec.provider,
+                    local_port: rec.local_port,
+                    public_url: rec.public_url,
+                    running,
+                    uptime_seconds: match (running, rec.started_unix) {
+                        (true, Some(s)) => Some(output::now_unix().saturating_sub(s)),
+                        _ => None,
+                    },
+                }
+            })
+            .collect();
+        return output::print_json(&rows);
+    }
     let mut t = output::Table::new(&[
         "NAME",
         "PROVIDER",

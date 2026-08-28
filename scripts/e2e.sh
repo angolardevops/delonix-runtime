@@ -1627,6 +1627,21 @@ else
 
   # --- ingress / egress: as regras por-container ------------------------------
   check "net ingress ls" ok "$BIN" net ingress ls
+
+# --- as leituras do `net` passam a ser legíveis por PROGRAMA (C-3) ---------
+# O grupo inteiro era tabela-e-só: toda a observabilidade de rede deste motor
+# obrigava um script a parsear colunas alinhadas E TRADUZIDAS (`--l18n=pt` muda
+# os cabeçalhos). Estes checks passam a saída por um parser de JSON a sério, e
+# não por `grep` — um `grep` passa numa tabela com aspas.
+for leitura in "net ingress ls" "net egress ls" "net tunnel ls" "net httproute ls"; do
+  check "$leitura -o json é JSON a sério" ok bash -c \
+    "'$BIN' $leitura -o json | python3 -c 'import json,sys; json.load(sys.stdin)'"
+done
+# O `governed` existe para separar «não governado» de «aberto» — a tabela
+# dobra os dois numa frase (`n/a (host net)` contra `allow (default)`), e era
+# essa a razão de ADR-0005 aqui.
+check "ingress ls json separa governado de aberto" ok bash -c \
+  "'$BIN' net ingress ls -o json | python3 -c \"import json,sys; d=json.load(sys.stdin); sys.exit(0 if all('governed' in r for r in d) else 1)\""
   check "net egress ls" ok "$BIN" net egress ls
   check "net ingress de um container inexistente diz 4" 4 \
     "$BIN" net ingress allow naoexiste-$PFX 80

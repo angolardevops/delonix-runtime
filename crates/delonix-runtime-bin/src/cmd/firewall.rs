@@ -96,6 +96,12 @@ pub enum IngressCmd {
         /// Container to inspect (omit to list every container's inbound state).
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         container: Option<String>,
+        /// Output format: `table` (default) or `json` (ADR-0005). `json` carries
+        /// `governed` as its own field — a container off the SDN cannot HAVE a
+        /// firewall, and a script must tell that from «open» without parsing a
+        /// human sentence.
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: output::OutputFormat,
     },
     /// Remove inbound rule(s) matching `[proto/]port` (all protos if none given).
     Rm {
@@ -167,6 +173,12 @@ pub enum EgressCmd {
         /// Container to inspect (omit to list every container's outbound state).
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         container: Option<String>,
+        /// Output format: `table` (default) or `json` (ADR-0005). `json` carries
+        /// `governed` as its own field — a container off the SDN cannot HAVE a
+        /// firewall, and a script must tell that from «open» without parsing a
+        /// human sentence.
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: output::OutputFormat,
     },
     /// Remove outbound rule(s) matching `[proto/]port` (all protos if none given).
     Rm {
@@ -278,9 +290,9 @@ pub fn run_ingress(cmd: IngressCmd) -> Result<()> {
             let mut c = store.load(&container)?;
             super::container::unpublish_live(&store, &mut c, &host_port)
         }
-        IngressCmd::Ls { container } => match container {
+        IngressCmd::Ls { container, output } => match container {
             Some(c) => list_rules(&store, &c, "in"),
-            None => list_all(&store, "in"),
+            None => list_all(&store, "in", output),
         },
         IngressCmd::Rm {
             container,
@@ -310,9 +322,9 @@ pub fn run_egress(cmd: EgressCmd) -> Result<()> {
         EgressCmd::Net { network, mode, to } => egress_net(&network, mode, to),
         EgressCmd::Host { network, hostname } => egress_host(&network, &hostname),
         EgressCmd::Show { network } => egress_show(&network),
-        EgressCmd::Ls { container } => match container {
+        EgressCmd::Ls { container, output } => match container {
             Some(c) => list_rules(&store, &c, "out"),
-            None => list_all(&store, "out"),
+            None => list_all(&store, "out", output),
         },
         EgressCmd::Rm {
             container,
@@ -644,9 +656,66 @@ fn set_policy(store: &Store, name: &str, dir: &str, policy: Action) -> Result<()
     Ok(())
 }
 
+/// One row of `net ingress ls` / `net egress ls`.
+///
+/// `governed` is the field the TABLE folds into the POLICY cell as
+/// `n/a (host net)`: a container off the SDN cannot HAVE a firewall
+/// (`require_sdn_ip` rejects every mutation for it). A script must be able to
+/// tell «open» from «not governed at all» without parsing a human sentence —
+/// that is the whole reason ADR-0005 exists.
+#[derive(serde::Serialize)]
+struct FwLsRow {
+    name: String,
+    /// `null` when the container is not governed — never `"allow"`, which would
+    /// read as a decision that nothing is making.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    policy: Option<String>,
+    governed: bool,
+    rules: usize,
+    /// Published ports (ingress) or the networks the policy targets (egress).
+    targets: Vec<String>,
+}
+
 /// Overview of every container's firewall state in one table — `ls` without an
 /// argument, like `docker ps`. Per-container detail stays in `ls <container>`.
-fn list_all(store: &Store, dir: &str) -> Result<()> {
+fn list_all(store: &Store, dir: &str, format: output::OutputFormat) -> Result<()> {
+    if format == output::OutputFormat::Json {
+        let rows: Vec<FwLsRow> = store
+            .list()?
+            .into_iter()
+            .map(|c| {
+                let fw = c.firewall.clone().unwrap_or_default();
+                let policy = if dir == "in" {
+                    &fw.policy_in
+                } else {
+                    &fw.policy_out
+                };
+                let governed = c.ip.as_deref().map(|s| !s.is_empty()).unwrap_or(false);
+                let mut targets: Vec<String> = if dir == "in" {
+                    c.ports.clone()
+                } else {
+                    let mut nets: Vec<String> = c.network.clone().into_iter().collect();
+                    nets.extend(c.extra_networks.iter().map(|e| e.network.clone()));
+                    nets
+                };
+                targets.retain(|t| !t.is_empty());
+                FwLsRow {
+                    name: c.name.clone(),
+                    policy: governed.then(|| {
+                        if policy.is_empty() {
+                            "allow".to_string()
+                        } else {
+                            policy.clone()
+                        }
+                    }),
+                    governed,
+                    rules: fw.rules.iter().filter(|r| r.dir == dir).count(),
+                    targets,
+                }
+            })
+            .collect();
+        return output::print_json(&rows);
+    }
     let mut t = output::Table::new(&[
         "NAME",
         "POLICY",

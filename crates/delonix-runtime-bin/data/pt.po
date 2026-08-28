@@ -8740,6 +8740,16 @@ msgstr "namespace {name} (não está lá nada; ver `delonix namespace ls`)"
 msgid "these namespaces do NOT isolate on this host: bridge traffic is not filtered (br_netfilter not loaded, or net.bridge.bridge-nf-call-iptables=0), so every rule installs and reports success while traffic crosses anyway. Fix: modprobe br_netfilter && sysctl -w net.bridge.bridge-nf-call-iptables=1 net.bridge.bridge-nf-call-ip6tables=1 (persist via /etc/modules-load.d and /etc/sysctl.d, or `install.sh --tune`)"
 msgstr "estas namespaces NÃO isolam neste host: o tráfego de bridge não é filtrado (br_netfilter não carregado, ou net.bridge.bridge-nf-call-iptables=0), logo toda a regra instala e reporta sucesso enquanto o tráfego atravessa na mesma. Correcção: modprobe br_netfilter && sysctl -w net.bridge.bridge-nf-call-iptables=1 net.bridge.bridge-nf-call-ip6tables=1 (persistir via /etc/modules-load.d e /etc/sysctl.d, ou `install.sh --tune`)"
 
+# -o json nas leituras do net (C-3)
+msgid "Output format: `table` (default) or `json` (ADR-0005). `json` carries `governed` as its own field — a container off the SDN cannot HAVE a firewall, and a script must tell that from «open» without parsing a human sentence"
+msgstr "Formato de saída: `table` (omissão) ou `json` (ADR-0005). O `json` leva o `governed` como campo próprio — um container fora da SDN não pode TER firewall, e um script tem de distinguir isso de «aberto» sem parsear uma frase humana"
+
+msgid "Output format: `table` (default) or `json` (ADR-0005). `json` carries a `state` of stopped, serving or config-unreadable"
+msgstr "Formato de saída: `table` (omissão) ou `json` (ADR-0005). O `json` leva um `state` de stopped, serving ou config-unreadable"
+
+msgid "Output format: `table` (default) or `json` (ADR-0005). `json` gives `running` as a boolean and the uptime in SECONDS, not the humanized `Up 3m` the table prints"
+msgstr "Formato de saída: `table` (omissão) ou `json` (ADR-0005). O `json` dá o `running` como booleano e o uptime em SEGUNDOS, não o `Up 3m` humanizado que a tabela imprime"
+
 msgid "Source network (the side that may initiate)"
 msgstr "Rede de origem (o lado que pode iniciar)"
 
