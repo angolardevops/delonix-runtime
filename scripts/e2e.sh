@@ -173,6 +173,29 @@ check "image ls" ok "$BIN" image ls
 check "image --vm ls" ok "$BIN" image --vm ls
 check "volumes ls" ok "$BIN" volumes ls
 check "network ls" ok "$BIN" network ls
+
+# --- `-n/--namespace` FILTRA mesmo, e a coluna esconde-se (A-2/A-3) --------
+# A armadilha que isto existe para apanhar é a que este repo já corrigiu três
+# vezes (`--security-opt seccomp=`, `-v …:z`, `--network-alias`): uma flag
+# ACEITE e depois IGNORADA. Um check do `--help` passaria com a filtragem por
+# ligar — por isso estes EXECUTAM e comparam contagens.
+ns_rows() { "$BIN" $1 2>/dev/null | tail -n +2 | grep -c . || true; }
+for grupo in "container ps -a" "workload ls" "pod ls"; do
+  todos=$(ns_rows "$grupo")
+  # Um namespace que não existe tem de dar ZERO. Se a flag fosse ignorada daria
+  # `$todos` — que é exactamente o sintoma do aceite-e-ignorado.
+  check "$grupo -n inexistente devolve zero" ok bash -c \
+    "[ \"\$('$BIN' $grupo -n zzz-nao-existe-$PFX 2>/dev/null | tail -n +2 | grep -c . || true)\" -eq 0 ]"
+  # E `-n default` não pode devolver MENOS do que existe num host sem namespaces.
+  check "$grupo -n default não esconde nada" ok bash -c \
+    "[ \"\$('$BIN' $grupo -n default 2>/dev/null | tail -n +2 | grep -c . || true)\" -le $todos ]"
+done
+# A coluna esconde-se sem namespaces e aparece quando o filtro a nomeia — as
+# duas metades da mesma regra (`output::namespace_cell` + `drop_uninformative`).
+check "sem filtro a coluna NAMESPACE esconde-se" ok bash -c \
+  "! '$BIN' container ps -a | head -1 | grep -q NAMESPACE"
+check "com -n default a coluna aparece" ok bash -c \
+  "'$BIN' container ps -a -n default | head -1 | grep -q NAMESPACE"
 check "vm ls" ok "$BIN" vm ls
 check "cluster ls" ok "$BIN" cluster ls
 check "system info" ok "$BIN" system info
