@@ -147,9 +147,9 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 quem o aplica. Não é preciso Terraform nem Ansible por cima — esta página é o
 fluxo completo.</p>
 <blockquote>
-<p>Aplica-se aos Kinds que <strong>convergem</strong>, que são doze dos treze: <code>Network</code>,
-<code>NetworkRoute</code>, <code>Volume</code>, <code>ShareVolume</code>, <code>Image</code>, <code>Vm</code>, <code>Container</code>, <code>Pod</code>,
-<code>FirewallPolicy</code>, <code>HTTPRoute</code>, <code>Ingress</code> e <code>Tunnel</code>. Só o <code>Secret</code> continua «garante presente»
+<p>Aplica-se aos Kinds que <strong>convergem</strong>, que são onze: <code>Network</code>,
+<code>NetworkRoute</code>, <code>Volume</code>, <code>Image</code>, <code>VirtualMachine</code>, <code>Container</code>, <code>Pod</code>,
+<code>NetworkPolicy</code>, <code>HTTPRoute</code>, <code>Ingress</code> e <code>Gateway</code>. Só o <code>Secret</code> continua «garante presente»
 (criado se faltar, nunca actualizado), porque o estado são valores cifrados e
 um plano não os decifra para comparar — e o <code>plan</code> marca-o com <code>!</code> em vez de o
 esconder, com o obstáculo nomeado. A lista autoritativa não é este parágrafo:
@@ -215,12 +215,9 @@ mexe).</p>
 </code></pre>
 <p>Diz exactamente que campos são comparados por Kind, e quais não são e porquê
 (<code>env</code> e <code>command</code> vêm fundidos com os da imagem; <code>user</code> é guardado como uid
-resolvido). E, para os Kinds que ainda não convergem, <strong>porque não</strong> — o
-<code>HTTPRoute</code> porque a config do proxy funde todos os documentos num só sem
-registar proveniência, o <code>Secret</code> porque o estado são valores cifrados e um
-plano não os decifra para comparar, o <code>Tunnel</code> porque a URL vem do provider e é
-status. Um obstáculo nomeado é uma decisão; «ainda não converge» seria só
-silêncio.</p>
+resolvido). E, para o Kind que ainda não converge, <strong>porque não</strong> — o <code>Secret</code>,
+porque o estado são valores cifrados e um plano não os decifra para comparar. Um
+obstáculo nomeado é uma decisão; «ainda não converge» seria só silêncio.</p>
 <h2 id="quem-e-o-dono">Quem é o dono</h2>
 <p>A posse vem da label <code>delonix.io/stack</code>, carimbada em cada recurso pelo próprio
 <code>apply</code>. O nome da stack é, por esta ordem: <code>--name</code>, o <code>metadata.name</code> de um
@@ -233,9 +230,9 @@ silêncio.</p>
 <li><strong>Nem tudo é possuível, e isso é deliberado.</strong> Uma <code>Image</code> é cache partilhada
   com endereço de conteúdo — o mesmo <code>alpine:latest</code> serve todas as stacks do
   host, por isso carimbá-la para uma e removê-la quando essa deixasse de a
-  declarar tirava-a debaixo das outras. Uma <code>FirewallPolicy</code> e uma
-  <code>ShareVolume</code> não têm registo próprio onde carimbar. Nenhuma das três é
-  adoptada nem podada; todas convergem.</li>
+  declarar tirava-a debaixo das outras. Uma <code>NetworkPolicy</code>, um <code>HTTPRoute</code> e um
+  <code>Gateway</code> não têm registo próprio onde carimbar. Nenhum dos quatro é adoptado
+  nem podado; todos convergem.</li>
 <li>Duas stacks a declarar o mesmo nome dão <strong>conflito</strong> (<code>✗</code>), não uma corrida.
   O <code>apply</code> recusa antes de tocar em nada.</li>
 </ul>
@@ -424,9 +421,12 @@ restart disfarçado, e é a diferença de fundo entre este motor e recriar o
 container como o Docker faria.</p>
 <h2 id="o-que-este-fluxo-nao-faz">O que este fluxo não faz</h2>
 <ul>
-<li><strong>Não reconcilia continuamente.</strong> Converge quando lhe chamas. Um loop de
-  controlo é trabalho de orquestrador, fora de escopo por desenho — o que aqui
-  existe é um gate de deriva, que é o mesmo resultado sem um daemon.</li>
+<li><strong>Não reconcilia continuamente.</strong> Converge quando lhe chamas. O repositório
+  não é consultado por ninguém no nó — quem corre o <code>apply</code> é o CI ou o
+  operador, e o que aqui existe é um gate de deriva. Fechar essa metade sem
+  trazer um daemon é o que o <a href="adr/0021-gitops-pull-reconciler.md">ADR-0021</a>
+  propõe (<code>delonix gitops</code>, por timer e opt-in); enquanto estiver <em>Proposed</em>,
+  esta linha continua a ser o estado do motor.</li>
 <li><strong>Não tem rollback transaccional</strong> (ver acima).</li>
 <li><strong>Não gere frota.</strong> É um runtime de nó: um manifesto, uma máquina. Vários nós
   são várias corridas.</li>

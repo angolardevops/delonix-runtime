@@ -4,9 +4,9 @@ O manifesto é a fonte de verdade; o repositório é onde ele vive; o `delonix` 
 quem o aplica. Não é preciso Terraform nem Ansible por cima — esta página é o
 fluxo completo.
 
-> Aplica-se aos Kinds que **convergem**, que são doze dos treze: `Network`,
-> `NetworkRoute`, `Volume`, `ShareVolume`, `Image`, `Vm`, `Container`, `Pod`,
-> `FirewallPolicy`, `HTTPRoute`, `Ingress` e `Tunnel`. Só o `Secret` continua «garante presente»
+> Aplica-se aos Kinds que **convergem**, que são onze: `Network`,
+> `NetworkRoute`, `Volume`, `Image`, `VirtualMachine`, `Container`, `Pod`,
+> `NetworkPolicy`, `HTTPRoute`, `Ingress` e `Gateway`. Só o `Secret` continua «garante presente»
 > (criado se faltar, nunca actualizado), porque o estado são valores cifrados e
 > um plano não os decifra para comparar — e o `plan` marca-o com `!` em vez de o
 > esconder, com o obstáculo nomeado. A lista autoritativa não é este parágrafo:
@@ -49,12 +49,9 @@ delonix stack plan --fields
 
 Diz exactamente que campos são comparados por Kind, e quais não são e porquê
 (`env` e `command` vêm fundidos com os da imagem; `user` é guardado como uid
-resolvido). E, para os Kinds que ainda não convergem, **porque não** — o
-`HTTPRoute` porque a config do proxy funde todos os documentos num só sem
-registar proveniência, o `Secret` porque o estado são valores cifrados e um
-plano não os decifra para comparar, o `Tunnel` porque a URL vem do provider e é
-status. Um obstáculo nomeado é uma decisão; «ainda não converge» seria só
-silêncio.
+resolvido). E, para o Kind que ainda não converge, **porque não** — o `Secret`,
+porque o estado são valores cifrados e um plano não os decifra para comparar. Um
+obstáculo nomeado é uma decisão; «ainda não converge» seria só silêncio.
 
 ## Quem é o dono
 
@@ -70,9 +67,9 @@ Consequências que interessam:
 * **Nem tudo é possuível, e isso é deliberado.** Uma `Image` é cache partilhada
   com endereço de conteúdo — o mesmo `alpine:latest` serve todas as stacks do
   host, por isso carimbá-la para uma e removê-la quando essa deixasse de a
-  declarar tirava-a debaixo das outras. Uma `FirewallPolicy` e uma
-  `ShareVolume` não têm registo próprio onde carimbar. Nenhuma das três é
-  adoptada nem podada; todas convergem.
+  declarar tirava-a debaixo das outras. Uma `NetworkPolicy`, um `HTTPRoute` e um
+  `Gateway` não têm registo próprio onde carimbar. Nenhum dos quatro é adoptado
+  nem podado; todos convergem.
 * Duas stacks a declarar o mesmo nome dão **conflito** (`✗`), não uma corrida.
   O `apply` recusa antes de tocar em nada.
 
@@ -253,9 +250,12 @@ container como o Docker faria.
 
 ## O que este fluxo não faz
 
-* **Não reconcilia continuamente.** Converge quando lhe chamas. Um loop de
-  controlo é trabalho de orquestrador, fora de escopo por desenho — o que aqui
-  existe é um gate de deriva, que é o mesmo resultado sem um daemon.
+* **Não reconcilia continuamente.** Converge quando lhe chamas. O repositório
+  não é consultado por ninguém no nó — quem corre o `apply` é o CI ou o
+  operador, e o que aqui existe é um gate de deriva. Fechar essa metade sem
+  trazer um daemon é o que o [ADR-0021](adr/0021-gitops-pull-reconciler.md)
+  propõe (`delonix gitops`, por timer e opt-in); enquanto estiver *Proposed*,
+  esta linha continua a ser o estado do motor.
 * **Não tem rollback transaccional** (ver acima).
 * **Não gere frota.** É um runtime de nó: um manifesto, uma máquina. Vários nós
   são várias corridas.
