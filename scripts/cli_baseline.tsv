@@ -230,17 +230,17 @@
 =	vm stop
 →	vm unbridge
 ~	vm vnc
-~	volumes apply
-~	volumes create
-~	volumes describe
-~	volumes inspect
-~	volumes ls
-~	volumes prune
-~	volumes rm
-~	volumes snapshot create
-~	volumes snapshot ls
-~	volumes snapshot restore
-~	volumes snapshot rm
+~	volume apply
+~	volume create
+~	volume describe
+~	volume inspect
+~	volume ls
+~	volume prune
+~	volume rm
+~	volume snapshot create
+~	volume snapshot ls
+~	volume snapshot restore
+~	volume snapshot rm
 ~	wait
 ~	workload describe
 ~	workload ls

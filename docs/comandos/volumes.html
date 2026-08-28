@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>delonix volumes · Delonix Engine</title>
+<title>delonix volume · Delonix Engine</title>
 <script>(function(){try{
 var t=localStorage.getItem('delonix-docs-theme');
 if(t)document.documentElement.setAttribute('data-theme',t);
@@ -136,13 +136,13 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <h5><span class='lang-pt'>Documentação</span><span class='lang-en'>Docs</span></h5>
 <a href="../index.html"><span class='lang-pt'>Início</span><span class='lang-en'>Home</span></a><a href="../cheatsheet.html"><span class='lang-pt'>Cheatsheet</span><span class='lang-en'>Cheatsheet</span></a><a href="../estrutura.html"><span class='lang-pt'>Estrutura de recursos</span><span class='lang-en'>Resource structure</span></a><a href="../kinds.html"><span class='lang-pt'>Kinds e templates</span><span class='lang-en'>Kinds &amp; templates</span></a><a href="../gitops.html"><span class='lang-pt'>GitOps e CI</span><span class='lang-en'>GitOps &amp; CI</span></a><a href="../estabilidade.html"><span class='lang-pt'>Promessa de estabilidade</span><span class='lang-en'>Stability promise</span></a><a href="../cloud.html"><span class='lang-pt'>cloud-init, cloud-img e CH</span><span class='lang-en'>cloud-init, cloud-img &amp; CH</span></a><a href="../labs.html"><span class='lang-pt'>Laboratórios</span><span class='lang-en'>Labs</span></a><a href="../guia-vm.html"><span class='lang-pt'>Guia de VMs e lab de rede</span><span class='lang-en'>VM &amp; network lab guide</span></a><a href="../arquitectura.html"><span class='lang-pt'>Arquitectura</span><span class='lang-en'>Architecture</span></a><a href="../c4.html"><span class='lang-pt'>Modelo C4 e system design</span><span class='lang-en'>C4 model &amp; system design</span></a><a href="../cri.html"><span class='lang-pt'>CRI — kubelet sem containerd</span><span class='lang-en'>CRI — kubelet without containerd</span></a><a href="../comparacao.html"><span class='lang-pt'>Delonix vs Docker vs Podman</span><span class='lang-en'>Delonix vs Docker vs Podman</span></a><a href="../tutorial-delonix-temp.html"><span class='lang-pt'>Projecto completo: Delonix Temp</span><span class='lang-en'>Full project: Delonix Temp</span></a>
 <h5><span class='lang-pt'>Referência CLI</span><span class='lang-en'>CLI reference</span></h5>
-<a href="../comandos/init.html">delonix init</a><a href="../comandos/container.html">delonix container</a><a href="../comandos/workload.html">delonix workload</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html" class="on">delonix volumes</a><a href="../comandos/namespace.html">delonix system namespace</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/compose.html">delonix compose</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html">delonix net egress</a><a href="../comandos/httproute.html">delonix net httproute</a><a href="../comandos/tunnel.html">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix system boot</a><a href="../comandos/backup.html">delonix backup</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dashboard</a><a href="../comandos/docker-api.html">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a><a href="../comandos/schema.html">delonix schema · explain</a>
+<a href="../comandos/init.html">delonix init</a><a href="../comandos/container.html">delonix container</a><a href="../comandos/workload.html">delonix workload</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html" class="on">delonix volume</a><a href="../comandos/namespace.html">delonix system namespace</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/compose.html">delonix compose</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html">delonix net egress</a><a href="../comandos/httproute.html">delonix net httproute</a><a href="../comandos/tunnel.html">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix system boot</a><a href="../comandos/backup.html">delonix backup</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dashboard</a><a href="../comandos/docker-api.html">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a><a href="../comandos/schema.html">delonix schema · explain</a>
 <h5><span class='lang-pt'>Projecto</span><span class='lang-en'>Project</span></h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
 </nav>
 <main>
-<h1>delonix volumes</h1>
+<h1>delonix volume</h1>
 <p class='tagline lang-pt'>Volumes nomeados e bind mounts: create, ls, inspect, rm, apply.</p><p class='tagline lang-en'>Named volumes and bind mounts: create, ls, inspect, rm, apply.</p>
 <p class='lang-pt'>Wrapper fino sobre o <code>VolumeStore</code>. No <code>container run</code>,
 <code>-v nome:/destino[:ro]</code> resolve para um volume nomeado (criado on-demand) e
@@ -150,7 +150,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <code>-v name:/dest[:ro]</code> resolves to a named volume (created on demand) and
 <code>-v /host:/dest[:ro]</code> to a bind mount — the distinction is automatic.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/volume.rs"><code>cmd/volume.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix volumes [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix volume [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   create    Create a named volume
@@ -178,22 +178,22 @@ COMMAND MAP:
 
 EXAMPLES:
   # a named volume, so the data outlives the container that writes to it
-  delonix volumes create pgdata
+  delonix volume create pgdata
 
   # what exists, with driver and mountpoint
-  delonix volumes ls
+  delonix volume ls
 
   # how much disk one of them really holds, measured from inside the userns
-  delonix volumes inspect pgdata
+  delonix volume inspect pgdata
 
 SEE ALSO:
   delonix container run · delonix storage · delonix sharevolume · delonix
-  volumes snapshot
+  volume snapshot
 
-  delonix › volumes</code></pre></div>
+  delonix › volume</code></pre></div>
 <h2 id='snapshot'><code>volumes snapshot</code></h2>
 <p class='intro'>Point-in-time snapshots of a volume (tar.gz under the volume; safe in rootless)</p>
-<div class='help'><pre><code>Usage: delonix volumes snapshot [OPTIONS] &lt;COMMAND&gt;
+<div class='help'><pre><code>Usage: delonix volume snapshot [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
   create   Create a snapshot NOW (default name: UTC timestamp)
@@ -216,21 +216,21 @@ COMMAND MAP:
 
 EXAMPLES:
   # freeze the current contents of a volume as a tar.gz, safe in rootless
-  delonix volumes snapshot create pgdata
+  delonix volume snapshot create pgdata
 
   # what has been kept, and when
-  delonix volumes snapshot ls pgdata
+  delonix volume snapshot ls pgdata
 
 SEE ALSO:
-  delonix volumes inspect · delonix volumes rm · delonix vm snapshot
+  delonix volume inspect · delonix volume rm · delonix vm snapshot
 
-  delonix › volumes › snapshot</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Tirar e listar snapshots de um volume</div><div class='cap lang-en'>Take and list a volume&#x27;s snapshots</div><pre><code>delonix volumes snapshot create dados antes-da-migracao
-delonix volumes snapshot ls dados</code></pre></div><div class="ex"><div class='cap lang-pt'>Voltar a um snapshot (o conteúdo actual do volume é substituído)</div><div class='cap lang-en'>Roll back to a snapshot (the volume&#x27;s current contents are replaced)</div><pre><code>delonix volumes snapshot restore dados antes-da-migracao</code></pre></div><div class="ex"><div class='cap lang-pt'>Apagar um snapshot que já não serve</div><div class='cap lang-en'>Delete a snapshot that is no longer useful</div><pre><code>delonix volumes snapshot rm dados antes-da-migracao</code></pre></div>
+  delonix › volume › snapshot</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Tirar e listar snapshots de um volume</div><div class='cap lang-en'>Take and list a volume&#x27;s snapshots</div><pre><code>delonix volume snapshot create dados antes-da-migracao
+delonix volume snapshot ls dados</code></pre></div><div class="ex"><div class='cap lang-pt'>Voltar a um snapshot (o conteúdo actual do volume é substituído)</div><div class='cap lang-en'>Roll back to a snapshot (the volume&#x27;s current contents are replaced)</div><pre><code>delonix volume snapshot restore dados antes-da-migracao</code></pre></div><div class="ex"><div class='cap lang-pt'>Apagar um snapshot que já não serve</div><div class='cap lang-en'>Delete a snapshot that is no longer useful</div><pre><code>delonix volume snapshot rm dados antes-da-migracao</code></pre></div>
 <h2 id='describe'><code>volumes describe</code></h2>
 <p class='intro'>Readable detail of one or more volumes, <code>kubectl describe</code> style.</p>
 <p class='intro'>For humans; use <code>inspect</code> for the usual compact view.</p>
-<div class='help'><pre><code>Usage: delonix volumes describe [OPTIONS] &lt;NAMES&gt;...
+<div class='help'><pre><code>Usage: delonix volume describe [OPTIONS] &lt;NAMES&gt;...
 
 Arguments:
   &lt;NAMES&gt;...
@@ -245,19 +245,19 @@ Options:
 
 EXAMPLES:
   # a kubectl-style block, meant to be read rather than parsed
-  delonix volumes describe pgdata
+  delonix volume describe pgdata
 
   # several at once, to compare them side by side
-  delonix volumes describe pgdata backups
+  delonix volume describe pgdata backups
 
 SEE ALSO:
-  delonix volumes inspect · delonix volumes ls · delonix sharevolume describe
+  delonix volume inspect · delonix volume ls · delonix sharevolume describe
 
-  delonix › volumes › describe</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Detalhe de um volume (uso, quota, montagens)</div><div class='cap lang-en'>Volume detail (usage, quota, mounts)</div><pre><code>delonix volumes describe dados</code></pre></div>
+  delonix › volume › describe</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Detalhe de um volume (uso, quota, montagens)</div><div class='cap lang-en'>Volume detail (usage, quota, mounts)</div><pre><code>delonix volume describe dados</code></pre></div>
 <h2 id='create'><code>volumes create</code></h2>
 <p class='intro'>Create a named volume</p>
-<div class='help'><pre><code>Usage: delonix volumes create [OPTIONS] &lt;NAME&gt;
+<div class='help'><pre><code>Usage: delonix volume create [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;
@@ -286,24 +286,24 @@ Options:
 
 EXAMPLES:
   # a local named volume — the default driver
-  delonix volumes create pgdata
+  delonix volume create pgdata
 
   # with a size cap, so one workload cannot fill the whole disk
-  delonix volumes create pgdata --quota 20g
+  delonix volume create pgdata --quota 20g
 
   # an NFS export straight as a volume, without the friendlier `storage`
   # declaration
-  delonix volumes create backups --driver nfs --device 10.0.0.5:/mnt/pool/backups --options vers=4.1,soft
+  delonix volume create backups --driver nfs --device 10.0.0.5:/mnt/pool/backups --options vers=4.1,soft
 
 SEE ALSO:
-  delonix volumes ls · delonix volumes inspect · delonix storage create ·
+  delonix volume ls · delonix volume inspect · delonix storage create ·
   delonix container run
 
-  delonix › volumes › create</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Com quota e driver nfs disponíveis</div><div class='cap lang-en'>With quota and the nfs driver available</div><pre><code>delonix volumes create dados --quota 10G</code></pre></div>
+  delonix › volume › create</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Com quota e driver nfs disponíveis</div><div class='cap lang-en'>With quota and the nfs driver available</div><pre><code>delonix volume create dados --quota 10G</code></pre></div>
 <h2 id='ls'><code>volumes ls</code></h2>
 <p class='intro'>List the volumes</p>
-<div class='help'><pre><code>Usage: delonix volumes ls [OPTIONS]
+<div class='help'><pre><code>Usage: delonix volume ls [OPTIONS]
 
 Options:
       --l18n &lt;en|pt&gt;
@@ -323,20 +323,20 @@ Options:
 
 EXAMPLES:
   # every volume, with driver and mountpoint
-  delonix volumes ls
+  delonix volume ls
 
   # as JSON, for a backup job or a monitoring script
-  delonix volumes ls -o json
+  delonix volume ls -o json
 
 SEE ALSO:
-  delonix volumes inspect · delonix volumes describe · delonix storage ls ·
+  delonix volume inspect · delonix volume describe · delonix storage ls ·
   delonix system df
 
-  delonix › volumes › ls</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix volumes ls</code></pre></div>
+  delonix › volume › ls</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix volume ls</code></pre></div>
 <h2 id='inspect'><code>volumes inspect</code></h2>
 <p class='intro'>Details of a volume (includes real on-disk usage)</p>
-<div class='help'><pre><code>Usage: delonix volumes inspect [OPTIONS] &lt;NAME&gt;
+<div class='help'><pre><code>Usage: delonix volume inspect [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;
@@ -358,17 +358,17 @@ Options:
 EXAMPLES:
   # driver, mountpoint, quota and the REAL usage — an unreadable directory is
   # reported as unknown, never as zero
-  delonix volumes inspect pgdata
+  delonix volume inspect pgdata
 
 SEE ALSO:
-  delonix volumes describe · delonix volumes ls · delonix sharevolume describe
+  delonix volume describe · delonix volume ls · delonix sharevolume describe
 
-  delonix › volumes › inspect</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix volumes inspect dados</code></pre></div>
+  delonix › volume › inspect</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix volume inspect dados</code></pre></div>
 <h2 id='rm'><code>volumes rm</code></h2>
 <p class='intro'>Remove a volume.</p>
 <p class='intro'>Refuses while a container or a <code>kind: ShareVolume</code> still references it (use <code>--force</code> to remove it anyway).</p>
-<div class='help'><pre><code>Usage: delonix volumes rm [OPTIONS] &lt;NAME&gt;
+<div class='help'><pre><code>Usage: delonix volume rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
   &lt;NAME&gt;
@@ -389,21 +389,21 @@ Options:
 
 EXAMPLES:
   # remove a volume nothing references any more
-  delonix volumes rm pgdata
+  delonix volume rm pgdata
 
   # force it past a live reference — this DESTROYS the data of whatever still
   # uses it
-  delonix volumes rm -f pgdata
+  delonix volume rm -f pgdata
 
 SEE ALSO:
-  delonix volumes ls · delonix volumes snapshot create · delonix container rm
-  · delonix sharevolume rm
+  delonix volume ls · delonix volume snapshot create · delonix container rm ·
+  delonix sharevolume rm
 
-  delonix › volumes › rm</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix volumes rm dados</code></pre></div>
+  delonix › volume › rm</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix volume rm dados</code></pre></div>
 <h2 id='apply'><code>volumes apply</code></h2>
 <p class='intro'>Apply the <code>kind: Volume</code> documents from a manifest (idempotent by name)</p>
-<div class='help'><pre><code>Usage: delonix volumes apply [OPTIONS]
+<div class='help'><pre><code>Usage: delonix volume apply [OPTIONS]
 
 Options:
   -f, --file &lt;FILE&gt;
@@ -417,21 +417,21 @@ Options:
 
 EXAMPLES:
   # apply only the `kind: Volume` documents of a manifest, idempotent by name
-  delonix volumes apply -f delonix-manifest.yaml
+  delonix volume apply -f delonix-manifest.yaml
 
   # the volumes of a shipped example, leaving the other kinds untouched
-  delonix volumes apply -f examples/volume.yaml
+  delonix volume apply -f examples/volume.yaml
 
 SEE ALSO:
-  delonix stack apply · delonix stack plan · delonix volumes create · delonix
+  delonix stack apply · delonix stack plan · delonix volume create · delonix
   storage apply
 
-  delonix › volumes › apply</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix volumes apply -f delonix-manifest.yaml</code></pre></div>
+  delonix › volume › apply</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix volume apply -f delonix-manifest.yaml</code></pre></div>
 <h2 id='prune'><code>volumes prune</code></h2>
 <p class='intro'>DESTROY every local volume that nothing references.</p>
 <p class='intro'><strong>This deletes data.</strong> It only takes a volume that is unreferenced by any container (running OR stopped), is not a share carved out of another volume, was not provisioned on a remote NAS, and uses the <code>local</code> driver. Anything else is kept and the reason is printed — a prune that silently skips is worse than one that refuses.</p>
-<div class='help'><pre><code>Usage: delonix volumes prune [OPTIONS]
+<div class='help'><pre><code>Usage: delonix volume prune [OPTIONS]
 
 Options:
   -f, --force
@@ -454,43 +454,43 @@ Options:
 EXAMPLES:
   # DESTROY every local volume nothing references — the data does not come
   # back
-  delonix volumes prune
+  delonix volume prune
 
   # in CI, where there is no terminal to confirm at
-  delonix volumes prune -f
+  delonix volume prune -f
 
   # reclaim the disk of a tenant that no longer exists — its volumes live
   # under its own namespace, where an unscoped prune never looks
-  delonix volumes prune --namespace acme -f
+  delonix volume prune --namespace acme -f
 
   # the whole store: the unscoped root AND every tenant
-  delonix volumes prune -A -f
+  delonix volume prune -A -f
 
 SEE ALSO:
-  delonix volumes rm · delonix volumes ls · delonix volumes snapshot create ·
+  delonix volume rm · delonix volume ls · delonix volume snapshot create ·
   delonix system prune
 
-  delonix › volumes › prune</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class="cap">DESTRUIR todos os volumes locais que nada referencia (só a raiz sem dono)</div><pre><code>delonix volumes prune</code></pre></div><div class="ex"><div class="cap">Recuperar o disco de um inquilino que já não existe — os volumes dele vivem
-# no seu próprio namespace, onde um prune sem âmbito nunca olha</div><pre><code>delonix volumes prune --namespace acme -f</code></pre></div><div class="ex"><div class="cap">A loja inteira: a raiz sem dono E todos os inquilinos</div><pre><code>delonix volumes prune -A -f</code></pre></div>
+  delonix › volume › prune</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class="cap">DESTRUIR todos os volumes locais que nada referencia (só a raiz sem dono)</div><pre><code>delonix volume prune</code></pre></div><div class="ex"><div class="cap">Recuperar o disco de um inquilino que já não existe — os volumes dele vivem
+# no seu próprio namespace, onde um prune sem âmbito nunca olha</div><pre><code>delonix volume prune --namespace acme -f</code></pre></div><div class="ex"><div class="cap">A loja inteira: a raiz sem dono E todos os inquilinos</div><pre><code>delonix volume prune -A -f</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Prova que um volume nomeado sobrevive a um restart do container —
 ao contrário de escrever directamente no rootfs.</p>
-<pre><code>delonix volumes create dados
+<pre><code>delonix volume create dados
 delonix container run -d --name db -v dados:/var/lib/data alpine sleep infinity
 delonix container exec db sh -c 'echo ok > /var/lib/data/marca'
 delonix container stop db && delonix container start db
 delonix container exec db cat /var/lib/data/marca</code></pre></div><div class='callout lang-en'><p>Prove a named volume survives a container restart — unlike writing
 straight to the rootfs.</p>
-<pre><code>delonix volumes create data
+<pre><code>delonix volume create data
 delonix container run -d --name db -v data:/var/lib/data alpine sleep infinity
 delonix container exec db sh -c 'echo ok > /var/lib/data/mark'
 delonix container stop db && delonix container start db
 delonix container exec db cat /var/lib/data/mark</code></pre></div>
 <h2><span class='lang-pt'>Desafio</span><span class='lang-en'>Challenge</span></h2>
 <div class='callout lang-pt'><p>Tira um <code>snapshot</code> do volume <code>dados</code> depois
-de escrever nele, e usa <code>volumes describe</code> para veres o histórico de snapshots.</p></div><div class='callout lang-en'><p>Take a <code>snapshot</code> of the <code>data</code> volume after
-writing to it, and use <code>volumes describe</code> to see the snapshot history.</p></div>
+de escrever nele, e usa <code>volume describe</code> para veres o histórico de snapshots.</p></div><div class='callout lang-en'><p>Take a <code>snapshot</code> of the <code>data</code> volume after
+writing to it, and use <code>volume describe</code> to see the snapshot history.</p></div>
 <footer><span class='lang-pt'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</span><span class='lang-en'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.</span></footer>
 </main>
 <aside class="toc" id="pagetoc"><div class="toc-inner"><h5><span class='lang-pt'>Nesta página</span><span class='lang-en'>On this page</span></h5><nav id="toc-nav"></nav></div></aside>

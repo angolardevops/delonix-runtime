@@ -136,7 +136,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <h5><span class='lang-pt'>Documentação</span><span class='lang-en'>Docs</span></h5>
 <a href="../index.html"><span class='lang-pt'>Início</span><span class='lang-en'>Home</span></a><a href="../cheatsheet.html"><span class='lang-pt'>Cheatsheet</span><span class='lang-en'>Cheatsheet</span></a><a href="../estrutura.html"><span class='lang-pt'>Estrutura de recursos</span><span class='lang-en'>Resource structure</span></a><a href="../kinds.html"><span class='lang-pt'>Kinds e templates</span><span class='lang-en'>Kinds &amp; templates</span></a><a href="../gitops.html"><span class='lang-pt'>GitOps e CI</span><span class='lang-en'>GitOps &amp; CI</span></a><a href="../estabilidade.html"><span class='lang-pt'>Promessa de estabilidade</span><span class='lang-en'>Stability promise</span></a><a href="../cloud.html"><span class='lang-pt'>cloud-init, cloud-img e CH</span><span class='lang-en'>cloud-init, cloud-img &amp; CH</span></a><a href="../labs.html"><span class='lang-pt'>Laboratórios</span><span class='lang-en'>Labs</span></a><a href="../guia-vm.html"><span class='lang-pt'>Guia de VMs e lab de rede</span><span class='lang-en'>VM &amp; network lab guide</span></a><a href="../arquitectura.html"><span class='lang-pt'>Arquitectura</span><span class='lang-en'>Architecture</span></a><a href="../c4.html"><span class='lang-pt'>Modelo C4 e system design</span><span class='lang-en'>C4 model &amp; system design</span></a><a href="../cri.html"><span class='lang-pt'>CRI — kubelet sem containerd</span><span class='lang-en'>CRI — kubelet without containerd</span></a><a href="../comparacao.html"><span class='lang-pt'>Delonix vs Docker vs Podman</span><span class='lang-en'>Delonix vs Docker vs Podman</span></a><a href="../tutorial-delonix-temp.html"><span class='lang-pt'>Projecto completo: Delonix Temp</span><span class='lang-en'>Full project: Delonix Temp</span></a>
 <h5><span class='lang-pt'>Referência CLI</span><span class='lang-en'>CLI reference</span></h5>
-<a href="../comandos/init.html">delonix init</a><a href="../comandos/container.html">delonix container</a><a href="../comandos/workload.html">delonix workload</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/namespace.html">delonix system namespace</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/compose.html">delonix compose</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html" class="on">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html">delonix net egress</a><a href="../comandos/httproute.html">delonix net httproute</a><a href="../comandos/tunnel.html">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix system boot</a><a href="../comandos/backup.html">delonix backup</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dashboard</a><a href="../comandos/docker-api.html">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a><a href="../comandos/schema.html">delonix schema · explain</a>
+<a href="../comandos/init.html">delonix init</a><a href="../comandos/container.html">delonix container</a><a href="../comandos/workload.html">delonix workload</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volume</a><a href="../comandos/namespace.html">delonix system namespace</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/compose.html">delonix compose</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html" class="on">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html">delonix net egress</a><a href="../comandos/httproute.html">delonix net httproute</a><a href="../comandos/tunnel.html">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix system boot</a><a href="../comandos/backup.html">delonix backup</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dashboard</a><a href="../comandos/docker-api.html">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a><a href="../comandos/schema.html">delonix schema · explain</a>
 <h5><span class='lang-pt'>Projecto</span><span class='lang-en'>Project</span></h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
@@ -188,7 +188,7 @@ EXAMPLES:
   delonix storage inspect nas
 
 SEE ALSO:
-  delonix sharevolume · delonix volumes create · delonix secret create ·
+  delonix sharevolume · delonix volume create · delonix secret create ·
   delonix container run
 
   delonix › storage</code></pre></div>
@@ -216,7 +216,7 @@ EXAMPLES:
 
 SEE ALSO:
   delonix stack apply · delonix sharevolume apply · delonix secret apply ·
-  delonix volumes apply
+  delonix volume apply
 
   delonix › storage › apply</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Declarar o NAS num manifesto kind: Storage</div><div class='cap lang-en'>Declare the NAS in a kind: Storage manifest</div><pre><code>delonix storage apply -f storage.yaml</code></pre></div>
@@ -246,7 +246,7 @@ EXAMPLES:
   delonix storage inspect nas
 
 SEE ALSO:
-  delonix storage ls · delonix volumes inspect · delonix sharevolume describe
+  delonix storage ls · delonix volume inspect · delonix sharevolume describe
 
   delonix › storage › inspect</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>JSON do storage (para scripts)</div><div class='cap lang-en'>Storage as JSON (for scripts)</div><pre><code>delonix storage inspect nas-fotos</code></pre></div>
@@ -340,7 +340,7 @@ EXAMPLES:
 
 SEE ALSO:
   delonix storage ls · delonix sharevolume apply · delonix secret create ·
-  delonix volumes create
+  delonix volume create
 
   delonix › storage › create</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>NFS de um TrueNAS</div><div class='cap lang-en'>NFS from a TrueNAS</div><pre><code>delonix storage create media --type nfs --server 10.0.0.5 --share /mnt/pool/media</code></pre></div><div class="ex"><div class='cap lang-pt'>SMB/CIFS com password do cofre</div><div class='cap lang-en'>SMB/CIFS with the password from the vault</div><pre><code>delonix storage create docs --type cifs --server nas --share docs --username user --password-secret nas-pass</code></pre></div>
@@ -369,7 +369,7 @@ EXAMPLES:
   delonix storage ls -o json
 
 SEE ALSO:
-  delonix storage inspect · delonix volumes ls · delonix sharevolume ls
+  delonix storage inspect · delonix volume ls · delonix sharevolume ls
 
   delonix › storage › ls</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix storage ls</code></pre></div>
@@ -394,7 +394,7 @@ EXAMPLES:
   delonix storage rm nas
 
 SEE ALSO:
-  delonix storage ls · delonix sharevolume rm · delonix volumes rm
+  delonix storage ls · delonix sharevolume rm · delonix volume rm
 
   delonix › storage › rm</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Desmonta; os dados ficam no NAS</div><div class='cap lang-en'>Unmounts; the data stays on the NAS</div><pre><code>delonix storage rm media</code></pre></div>

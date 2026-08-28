@@ -1,4 +1,4 @@
-//! `delonix volumes` — named volumes (create/ls/rm/inspect).
+//! `delonix volume` — named volumes (create/ls/rm/inspect).
 
 use super::kinds as k;
 use std::path::PathBuf;
@@ -454,7 +454,7 @@ pub enum VolumeCmd {
         output: output::OutputFormat,
         // Without it the listing is exactly what it always was — the scoped
         // sub-tree is deliberately invisible to `VolumeStore::list`, and
-        // widening the default would add rows to everyone's `volumes ls`. In a
+        // widening the default would add rows to everyone's `volume ls`. In a
         // `//` comment and not a second paragraph: the catalog looks the
         // rendered help up VERBATIM, so a multi-paragraph `long_help` comes out
         // untranslated under `--l18n=pt`.
@@ -529,7 +529,7 @@ pub enum VolumeCmd {
     },
 }
 
-/// `delonix volumes snapshot` — crash-consistent (taken with the workload
+/// `delonix volume snapshot` — crash-consistent (taken with the workload
 /// running). For application consistency (e.g. a DB), stop/dump the consumer
 /// first. In rootless the tar runs in a mapped userns (effective owner of the
 /// subuid files) — see `runtime::reexec_mapped`/`__volsnap`.
@@ -815,7 +815,7 @@ fn create_volume(
     quota: Option<String>,
 ) -> Result<delonix_volume::Volume> {
     // VALIDATE BEFORE CREATING. This used to create the volume first and parse
-    // `--quota` after, so `volumes create v --quota abc` exited 1 with "invalid
+    // `--quota` after, so `volume create v --quota abc` exited 1 with "invalid
     // quota" while leaving a REAL volume `v` behind — with no quota at all. A
     // control plane that retries on the non-zero exit then reuses that unlimited
     // volume, and the quota it asked for is silently absent forever.
@@ -847,7 +847,7 @@ fn create_volume(
     Ok(vol)
 }
 
-/// `volumes ls -o json` row (ADR-0005): stable keys mirroring the table columns.
+/// `volume ls -o json` row (ADR-0005): stable keys mirroring the table columns.
 #[derive(serde::Serialize)]
 struct VolumeLsRow {
     name: String,
@@ -867,7 +867,7 @@ fn cmd_ls(
 ) -> Result<()> {
     // Without the flag this is EXACTLY what it always was: `VolumeStore::list`
     // deliberately does not see the scoped sub-tree, and widening the default
-    // would silently add rows to everyone's `volumes ls`.
+    // would silently add rows to everyone's `volume ls`.
     //
     // With it, the question is a different one — «what does this tenant have» —
     // and `list_all` is the call that answers it, because it returns the owner
@@ -930,7 +930,7 @@ fn fmt_usage(used: u64, quota: Option<u64>) -> String {
     }
 }
 
-/// `volumes describe` — readable detail in `kubectl describe` style.
+/// `volume describe` — readable detail in `kubectl describe` style.
 /// Complements `inspect` (the usual compact view, stable for scripts).
 fn cmd_describe(store: &VolumeStore, names: &[String]) -> Result<()> {
     for (i, name) in names.iter().enumerate() {
@@ -1311,7 +1311,7 @@ pub(crate) fn volume_refs(store: &VolumeStore, name: &str) -> VolumeRefs {
     out
 }
 
-/// `volumes prune` — destroys every LOCAL volume nothing references.
+/// `volume prune` — destroys every LOCAL volume nothing references.
 ///
 /// This is the most dangerous of the four prunes and the only one `system
 /// prune` deliberately does not include (nor does `docker system prune`):
@@ -1392,7 +1392,7 @@ fn cmd_prune(
     if !super::prune::confirm(
         force,
         super::po::t(
-            "`volumes prune` DESTROYS the data of every unreferenced volume — pass --force to \
+            "`volume prune` DESTROYS the data of every unreferenced volume — pass --force to \
              confirm when not on a terminal",
         ),
         Some(super::po::tf(
@@ -1446,7 +1446,7 @@ fn note_unswept_owners(scope: &super::prune::Scope, owners: &[String]) {
 }
 
 /// `storage rm`'s removal: the same reference check and mapped-tree removal as
-/// `volumes rm`, without a `--force` escape (a `kind: Storage` is shared
+/// `volume rm`, without a `--force` escape (a `kind: Storage` is shared
 /// infrastructure — the operator should take the shares down explicitly).
 pub(crate) fn cmd_rm_storage(store: &VolumeStore, name: &str) -> Result<()> {
     cmd_rm(store, name, false)
@@ -1518,7 +1518,7 @@ pub(crate) fn cmd_rm_with(
     // thing that says WHICH dataset on WHICH appliance belongs to this volume;
     // deleting it first and then failing to reach the NAS would leave a dataset
     // orphaned with nothing left anywhere pointing at it. Same rule the v0.37.0
-    // audit wrote down after `volumes rm` deleted the bookkeeping ahead of the
+    // audit wrote down after `volume rm` deleted the bookkeeping ahead of the
     // data: destroy in order, and take the accounting down last.
     if destroy_remote {
         let what = super::provision::destroy_remote(&vol.annotations)?;

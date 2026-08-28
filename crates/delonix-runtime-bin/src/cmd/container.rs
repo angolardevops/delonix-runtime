@@ -1886,7 +1886,7 @@ pub enum ContainerCmd {
     /// (containers killed by SIGKILL/crash with no registry entry left), empty
     /// cgroups, orphan ingress refs and host ports held by processes that are
     /// already gone. Images and volumes are untouched — see `image prune` and
-    /// `volumes prune`.
+    /// `volume prune`.
     Prune {
         /// Skip the confirmation prompt (REQUIRED when stdin is not a terminal).
         #[arg(short = 'f', long)]

@@ -8228,14 +8228,14 @@ msgstr "repor à mesma, aceitando que os workloads a correr percam o registo"
 msgid "Remove every stopped container and the rootfs debris they left behind."
 msgstr "Remove todos os containers parados e o lixo de rootfs que deixaram para trás."
 
-msgid "Remove every stopped container and the rootfs debris they left behind.\n\nAlso sweeps what no `rm` will ever reach: **orphan rootfs directories** (containers killed by SIGKILL/crash with no registry entry left), empty cgroups, orphan ingress refs and host ports held by processes that are already gone. Images and volumes are untouched — see `image prune` and `volumes prune`."
-msgstr "Remove todos os containers parados e o lixo de rootfs que deixaram para trás.\n\nVarre também o que nenhum `rm` alcança: **directórios de rootfs órfãos** (containers mortos por SIGKILL/crash sem entrada no registo), cgroups vazios, refs de ingress órfãs e portas do host seguras por processos que já morreram. Imagens e volumes ficam intocados — ver `image prune` e `volumes prune`."
+msgid "Remove every stopped container and the rootfs debris they left behind.\n\nAlso sweeps what no `rm` will ever reach: **orphan rootfs directories** (containers killed by SIGKILL/crash with no registry entry left), empty cgroups, orphan ingress refs and host ports held by processes that are already gone. Images and volumes are untouched — see `image prune` and `volume prune`."
+msgstr "Remove todos os containers parados e o lixo de rootfs que deixaram para trás.\n\nVarre também o que nenhum `rm` alcança: **directórios de rootfs órfãos** (containers mortos por SIGKILL/crash sem entrada no registo), cgroups vazios, refs de ingress órfãs e portas do host seguras por processos que já morreram. Imagens e volumes ficam intocados — ver `image prune` e `volume prune`."
 
 msgid "Remove unused images and the CAS blobs nobody references any more."
 msgstr "Remove imagens sem uso e os blobs do CAS que já ninguém referencia."
 
-msgid "Remove unused images and the CAS blobs nobody references any more.\n\nBy default only the DANGLING ones (no tag); `--all` also drops tagged images that no container uses. Containers and volumes are untouched — see `container prune` and `volumes prune`."
-msgstr "Remove imagens sem uso e os blobs do CAS que já ninguém referencia.\n\nPor omissão só as PENDURADAS (sem tag); com `--all` remove também imagens com tag que nenhum container usa. Containers e volumes ficam intocados — ver `container prune` e `volumes prune`."
+msgid "Remove unused images and the CAS blobs nobody references any more.\n\nBy default only the DANGLING ones (no tag); `--all` also drops tagged images that no container uses. Containers and volumes are untouched — see `container prune` and `volume prune`."
+msgstr "Remove imagens sem uso e os blobs do CAS que já ninguém referencia.\n\nPor omissão só as PENDURADAS (sem tag); com `--all` remove também imagens com tag que nenhum container usa. Containers e volumes ficam intocados — ver `container prune` e `volume prune`."
 
 msgid "DESTROY every local volume that nothing references."
 msgstr "DESTRÓI todos os volumes locais que ninguém referencia."
@@ -8276,8 +8276,8 @@ msgstr "Remove imagens sem uso e os blobs do CAS que ninguém referencia. Contin
 msgid "removed: {i} image(s), {b} blob(s) — {size} freed"
 msgstr "removidas: {i} imagem(ns), {b} blob(s) — {size} libertados"
 
-msgid "`volumes prune` DESTROYS the data of every unreferenced volume — pass --force to confirm when not on a terminal"
-msgstr "`volumes prune` DESTRÓI os dados de todos os volumes sem referências — passa --force para confirmar fora de um terminal"
+msgid "`volume prune` DESTROYS the data of every unreferenced volume — pass --force to confirm when not on a terminal"
+msgstr "`volume prune` DESTRÓI os dados de todos os volumes sem referências — passa --force para confirmar fora de um terminal"
 
 msgid "This will DESTROY the data of {n} volume(s): {list}"
 msgstr "Isto vai DESTRUIR os dados de {n} volume(s): {list}"
@@ -8294,8 +8294,8 @@ msgstr "mantido {name}: {reason}"
 msgid "SCHEDULED mode: reclaim only when the disk is at or above `--threshold`, and do nothing at all below it"
 msgstr "modo AGENDADO: só recupera espaço com o disco no limiar de `--threshold` ou acima, e abaixo disso não faz rigorosamente nada"
 
-msgid "SCHEDULED mode: reclaim only when the disk is at or above `--threshold`, and do nothing at all below it.\n\nThis is the flag that makes `system prune` safe to put in a timer. Below the threshold it exits 0 having changed nothing, and that is SUCCESS, not a no-op to be fixed: pruning every night by habit deletes images that get pulled again in the morning, which costs bandwidth and start-up time and reclaims nothing that was a problem.\n\nIt implies `--force` — an unattended sweep has nobody to answer a prompt — and it never touches volumes (see `volumes prune`)."
-msgstr "modo AGENDADO: só recupera espaço com o disco no limiar de `--threshold` ou acima, e abaixo disso não faz rigorosamente nada.\n\nÉ esta a flag que torna o `system prune` seguro dentro de um temporizador. Abaixo do limiar sai com 0 sem ter mudado nada, e isso é SUCESSO, não um nada-feito para corrigir: podar todas as noites por hábito apaga imagens que voltam a ser puxadas de manhã — custa banda e tempo de arranque, e não recupera nada que fosse problema.\n\nImplica `--force` — uma varredura não assistida não tem quem responda a uma pergunta — e nunca toca em volumes (ver `volumes prune`)."
+msgid "SCHEDULED mode: reclaim only when the disk is at or above `--threshold`, and do nothing at all below it.\n\nThis is the flag that makes `system prune` safe to put in a timer. Below the threshold it exits 0 having changed nothing, and that is SUCCESS, not a no-op to be fixed: pruning every night by habit deletes images that get pulled again in the morning, which costs bandwidth and start-up time and reclaims nothing that was a problem.\n\nIt implies `--force` — an unattended sweep has nobody to answer a prompt — and it never touches volumes (see `volume prune`)."
+msgstr "modo AGENDADO: só recupera espaço com o disco no limiar de `--threshold` ou acima, e abaixo disso não faz rigorosamente nada.\n\nÉ esta a flag que torna o `system prune` seguro dentro de um temporizador. Abaixo do limiar sai com 0 sem ter mudado nada, e isso é SUCESSO, não um nada-feito para corrigir: podar todas as noites por hábito apaga imagens que voltam a ser puxadas de manhã — custa banda e tempo de arranque, e não recupera nada que fosse problema.\n\nImplica `--force` — uma varredura não assistida não tem quem responda a uma pergunta — e nunca toca em volumes (ver `volume prune`)."
 
 msgid "Occupancy percentage at or above which `--auto` acts"
 msgstr "percentagem de ocupação a partir da qual o `--auto` age"
@@ -8339,14 +8339,14 @@ msgstr "a loja inteira: a raiz sem dono E todos os inquilinos"
 msgid "Sweep the unscoped root AND every namespace."
 msgstr "Varre a raiz sem dono E todos os namespaces."
 
-msgid "a share carved out of volume '{parent}' — remove the parent, or use `volumes rm`"
-msgstr "é uma partilha recortada do volume '{parent}' — remove o pai, ou usa `volumes rm`"
+msgid "a share carved out of volume '{parent}' — remove the parent, or use `volume rm`"
+msgstr "é uma partilha recortada do volume '{parent}' — remove o pai, ou usa `volume rm`"
 
-msgid "provisioned on a remote NAS — use `volumes rm [--destroy-remote]` so the dataset is not left orphaned"
-msgstr "provisionado numa NAS remota — usa `volumes rm [--destroy-remote]` para o dataset não ficar órfão"
+msgid "provisioned on a remote NAS — use `volume rm [--destroy-remote]` so the dataset is not left orphaned"
+msgstr "provisionado numa NAS remota — usa `volume rm [--destroy-remote]` para o dataset não ficar órfão"
 
-msgid "network driver '{driver}' — declared infrastructure, remove it with `volumes rm`"
-msgstr "driver de rede '{driver}' — infraestrutura declarada, remove-o com `volumes rm`"
+msgid "network driver '{driver}' — declared infrastructure, remove it with `volume rm`"
+msgstr "driver de rede '{driver}' — infraestrutura declarada, remove-o com `volume rm`"
 
 msgid "volume '{name}' could not be removed: {err}"
 msgstr "não foi possível remover o volume '{name}': {err}"
