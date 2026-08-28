@@ -31,6 +31,9 @@ never rewritten — supersede them with a new one.
 | [0019](0019-stack-revision-history.md) | A stack keeps a revision history — a record, never a source of truth | **Accepted** |
 | [0020](0020-cli-restructuring.md) | The CLI splits into three surfaces, and the declarative CRUD is written once | **Proposed** — measured baseline in `docs/discovery/51_CLI_INVENTARIO.md`; flags four published promises it breaks |
 | [0021](0021-gitops-pull-reconciler.md) | A pull reconciler: `kind: GitOpsSource`, opt-in and still daemonless | **Proposed** — the timer path `AGENTS.md` already names; corrects four stale premises and one ADR-0019 interaction |
+| [0022](0022-namespaced-network-kinds.md) | Network Kinds stay node-scoped; the collision is a NAME collision | **Accepted** — measured: isolation already holds in nftables, the name space is what is shared |
+| [0023](0023-network-command-grouping.md) | `network` and `net` stay two groups, split resource vs plumbing | **Accepted** — no command moves; one alias and two `--help` sentences |
+| [0024](0024-firewall-policy-selector.md) | A `FirewallPolicy` gains a label selector, and an empty match stays open | **Accepted** — `target` unchanged; empty match warns and succeeds, not refuses |
 
 ## Roadmap (from `AGENTS.md` "Universal Runtime" — each phase needs its own accepted ADR)
 
