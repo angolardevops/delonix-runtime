@@ -527,7 +527,7 @@ pub(crate) const API_UNIMPLEMENTED: &[(&str, &str, &str)] = &[
     (
         "GET|POST|DELETE",
         "/volumes",
-        "not written yet; `delonix volumes` covers it",
+        "not written yet; `delonix volume` covers it",
     ),
 ];
 

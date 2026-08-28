@@ -73,7 +73,7 @@ pub(crate) const DELETE_ROUTES: &[&str] = &[
 pub(crate) fn cli_group(kind: &str) -> &'static str {
     match kind {
         k if k == kinds::VM => "vm",
-        k if k == kinds::VOLUME => "volumes",
+        k if k == kinds::VOLUME => "volume",
         k if k == kinds::CONTAINER => "container",
         k if k == kinds::POD => "pod",
         k if k == kinds::NETWORK => "network",

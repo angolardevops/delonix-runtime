@@ -938,7 +938,7 @@ pub(crate) fn keep_reason(k: &Keep) -> Option<String> {
     match k {
         Keep::InUse => None,
         Keep::ShareOf(parent) => Some(po::tf(
-            "a share carved out of volume '{parent}' — remove the parent, or use `volumes rm`",
+            "a share carved out of volume '{parent}' — remove the parent, or use `volume rm`",
             &[("parent", parent)],
         )),
         Keep::HoldsShares(children) => Some(po::tf(
@@ -947,13 +947,13 @@ pub(crate) fn keep_reason(k: &Keep) -> Option<String> {
         )),
         Keep::Provisioned => Some(
             po::t(
-                "provisioned on a remote NAS — use `volumes rm [--destroy-remote]` so the dataset \
+                "provisioned on a remote NAS — use `volume rm [--destroy-remote]` so the dataset \
                  is not left orphaned",
             )
             .to_string(),
         ),
         Keep::NetworkDriver(d) => Some(po::tf(
-            "network driver '{driver}' — declared infrastructure, remove it with `volumes rm`",
+            "network driver '{driver}' — declared infrastructure, remove it with `volume rm`",
             &[("driver", d)],
         )),
     }
