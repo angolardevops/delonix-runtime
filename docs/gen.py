@@ -119,7 +119,6 @@ SOURCE_FILES = {
     "schema": "schema.rs",
     "init": "init.rs",
     "backup": "rbackup.rs",
-    "restore": "rbackup.rs",
 }
 SOURCE_BASE_URL = (
     "https://github.com/angolardevops/delonix-runtime/blob/main/"
@@ -1074,39 +1073,33 @@ um sistema de ficheiros com jornal e qualquer base de dados com write-ahead log 
 que NÃO é: a memória não é guardada, logo um processo não é retomado a meio (isso é CRIU) e uma
 aplicação que só tenha estado em RAM perde-o — <code>--stop</code> e <code>--quiesce</code> são as
 duas formas de pedir mais, e cada uma diz o que custa. O destino pode ser uma pasta ou um
-<code>volume:&lt;nome&gt;</code>, que é como o arquivo vai parar a um NAS. Sendo o motor daemonless, o agendamento instala um <b>temporizador de
+<code>volume:&lt;nome&gt;</code>, que é como o arquivo vai parar a um NAS. Sendo o motor daemonless, o <code>backup schedule</code> instala um <b>temporizador de
 utilizador do systemd</b>: o <code>--max-for-day N</code> espaça N corridas pelo dia, e o
 <code>--cron</code> traduz a expressão de crontab — recusando o que não conseguir exprimir em vez de
-aproximar.""",
+aproximar. O <code>schedule</code> tira <b>também o primeiro arquivo, já</b>: um agendamento cuja
+primeira corrida é daqui a horas deixa quem o instalou sem backup e com a impressão de ter um.
+O <code>restore</code> desempacota para uma pasta de trabalho ANTES de tocar em seja o que for — um
+arquivo truncado custa então zero — e recusa-se enquanto o recurso estiver a correr
+(<code>--force</code> pára-o, repõe, e volta a arrancá-lo). O <code>&lt;kind&gt;</code> deixou de ser
+posicional: o arquivo já regista o que leva, e o <code>--kind</code> continua a existir para quem
+quiser que uma discordância seja recusada.""",
         "subs": {},
         "examples": [
-            ('O registo e os dados dos volumes, aqui mesmo', 'delonix backup container db'),
-            ('Para um NAS, através de um volume nomeado', 'delonix backup container db --to volume:nas-backups'),
-            ('Duas vezes por dia, guardando os dois mais recentes', 'delonix backup container db --max-for-day 2 --to /srv/backups'),
-            ('Ou no horário que quiseres, em sintaxe de crontab', 'delonix backup stack loja --cron "30 3 * * 1" --to /srv/backups'),
-            ('Uma stack inteira: cada membro e cada volume, o partilhado uma só vez', 'delonix backup stack loja --to /srv/backups'),
-            ('Uma VM A CORRER — o convidado não pára e o PID não muda', 'delonix backup vm dev --to /srv/backups'),
-            ('Consistência ao nível do filesystem do convidado (precisa do qemu-guest-agent lá dentro)', 'delonix backup vm dev --quiesce --to /srv/backups'),
-            ('Parar mesmo, para uma aplicação que só tem estado em RAM', 'delonix backup container cache --stop --to /srv/backups'),
-            ('Ver o que entraria, sem escrever nada', 'delonix backup pod api --dry-run'),
-        ],
-    },
-    "restore": {
-        "title": "delonix restore",
-        "tagline": "Repõe um recurso a partir de um arquivo do `delonix backup`.",
-        "intro": """Desempacota para uma pasta de trabalho ANTES de tocar em seja o que for — um arquivo
-truncado custa então zero, ao passo que desempacotar por cima dos dados vivos destruía-os sem ter
-nada para repor. Recusa-se enquanto o recurso estiver a correr (com <code>--force</code> pára-o,
-repõe, e volta a arrancá-lo). Se o recurso já não existir, é <b>recriado</b>: a imagem volta a
-descarregar-se, o rootfs é preparado como o <code>run</code> faria, e o registo volta ao sítio. Os
-volumes vêm primeiro e o recurso depois — ao contrário, um container arrancava contra um volume
-vazio.""",
-        "subs": {},
-        "examples": [
-            ('Repor os dados (recusa enquanto estiver a correr)', 'delonix restore container container-db-20260811-205312.tar.gz'),
-            ('Parar, repor e arrancar de novo', 'delonix restore container ./container-db-20260811-205312.tar.gz --force'),
-            ('Pelo nome nu, a partir da pasta onde os backups vivem', 'delonix restore stack stack-loja-20260811-210000 --from /srv/backups'),
-            ('O que tocaria, sem lhe tocar', 'delonix restore vm vm-dev-20260811-210109.tar.gz --dry-run'),
+            ('O registo e os dados dos volumes, aqui mesmo', 'delonix backup create container db'),
+            ('Para um NAS, através de um volume nomeado', 'delonix backup create container db --to volume:nas-backups'),
+            ('Uma stack inteira: cada membro e cada volume, o partilhado uma só vez', 'delonix backup create stack loja --to /srv/backups'),
+            ('Uma VM A CORRER — o convidado não pára e o PID não muda', 'delonix backup create vm dev --to /srv/backups'),
+            ('Consistência ao nível do filesystem do convidado (precisa do qemu-guest-agent lá dentro)', 'delonix backup create vm dev --quiesce --to /srv/backups'),
+            ('Parar mesmo, para uma aplicação que só tem estado em RAM', 'delonix backup create container cache --stop --to /srv/backups'),
+            ('Ver o que entraria, sem escrever nada', 'delonix backup create pod api --dry-run'),
+            ('Duas vezes por dia, guardando os dois mais recentes', 'delonix backup schedule container db --max-for-day 2 --to /srv/backups'),
+            ('Ou no horário que quiseres, em sintaxe de crontab', 'delonix backup schedule stack loja --cron "30 3 * * 1" --to /srv/backups'),
+            ('Que arquivos existem, e o que cada um leva', 'delonix backup list --from /srv/backups'),
+            ('O que está dentro de um, sem o desempacotar', 'delonix backup inspect container-db-20260811-205312.tar.gz --from /srv/backups'),
+            ('Repor os dados (recusa enquanto estiver a correr)', 'delonix backup restore container-db-20260811-205312.tar.gz'),
+            ('Parar, repor e arrancar de novo', 'delonix backup restore ./container-db-20260811-205312.tar.gz --force'),
+            ('Afirmar o kind, para que um arquivo trocado seja recusado', 'delonix backup restore vm-dev-20260811-210109.tar.gz --kind vm'),
+            ('Apagar um arquivo (recusa o que não foi este comando a escrever)', 'delonix backup remove container-db-20260811-205312.tar.gz --from /srv/backups'),
         ],
     },
     "system": {

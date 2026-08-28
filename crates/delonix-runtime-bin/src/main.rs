@@ -283,14 +283,19 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::system::SystemCmd,
     },
-    /// Back up ONE resource (container/pod/vm/stack) to a tar.gz, on demand or on a schedule.
+    /// Archives of ONE resource (container/pod/vm/stack): create, list, inspect, restore, schedule, remove.
     ///
     /// The archive carries the record and the DATA of the volumes it uses — not
-    /// the image and not the rootfs, which `restore` derives by pulling. A VM is
-    /// the exception: its overlay disk IS its state, so that one travels.
-    Backup(cmd::rbackup::BackupArgs),
-    /// Restore a resource from an archive written by `delonix backup`.
-    Restore(cmd::rbackup::RestoreArgs),
+    /// the image and not the rootfs, which `backup restore` derives by pulling.
+    /// A VM is the exception: its overlay disk IS its state, so that one travels.
+    ///
+    /// For the whole node — registries, secrets, cluster PKI, the event log —
+    /// the command is `delonix system backup`, which is a different scope and
+    /// not a second door to this one.
+    Backup {
+        #[command(subcommand)]
+        action: cmd::rbackup::BackupCmd,
+    },
     /// Kubernetes clusters: `kubeadm` bootstrap, VM provisioning, manifest generation.
     ///
     /// Idempotent `kubeadm` bootstrap over SSH (`kind: KubernetesCluster`), full VM
@@ -534,8 +539,7 @@ fn run() -> Result<()> {
             Ok(())
         }
         Cmd::System { action } => cmd::system::run(action),
-        Cmd::Backup(a) => cmd::rbackup::cmd_backup(a),
-        Cmd::Restore(a) => cmd::rbackup::cmd_restore(a),
+        Cmd::Backup { action } => cmd::rbackup::cmd_backup(action),
         Cmd::Cluster { action } => cmd::cluster::run(action),
         Cmd::Net { action } => cmd::net::run(action),
         Cmd::Serve { action } => cmd::serve::run(action),
