@@ -1,9 +1,11 @@
 //! `delonix net <x>` — low-level network/infra plumbing, grouped under one
-//! root instead of seven separate top-level commands (`netns`/`flow`/
-//! `ingress`/`egress`/`httproute`/`tunnel`/`boot`) — a flat 26-entry root
-//! command list was hard to scan; these seven are all "operate on the
-//! rootless ingress/SDN plumbing", the natural sibling of `delonix network`
-//! (user-facing SDN networks) rather than a peer of `container`/`image`/`vm`.
+//! root instead of separate top-level commands (`netns`/`flow`/`ingress`/
+//! `egress`/`httproute`/`tunnel`) — a flat root command list was hard to
+//! scan; these are all "operate on the rootless ingress/SDN plumbing", the
+//! natural sibling of `delonix network` (user-facing SDN networks) rather
+//! than a peer of `container`/`image`/`vm`. `boot` moved to `delonix system
+//! boot` (B2 of the CLI restructuring): boot persistence is about the ENGINE
+//! surviving a reboot, not about SDN plumbing, and it never belonged here.
 //! Pure routing — each subcommand delegates to the SAME per-group module/
 //! `run()` this always had; no behavior changed, only the CLI path to reach it.
 
@@ -54,11 +56,6 @@ pub enum NetCmd {
         #[command(subcommand)]
         action: super::tunnel::TunnelCmd,
     },
-    /// Boot persistence: systemd units so containers come back up after a reboot.
-    Boot {
-        #[command(subcommand)]
-        action: super::boot::BootCmd,
-    },
 }
 
 pub fn run(action: NetCmd) -> Result<()> {
@@ -70,6 +67,5 @@ pub fn run(action: NetCmd) -> Result<()> {
         NetCmd::L4guard { action } => super::firewall::run_l4guard(action),
         NetCmd::Httproute { action } => super::httproute::run(action),
         NetCmd::Tunnel { action } => super::tunnel::run(action),
-        NetCmd::Boot { action } => super::boot::run(action),
     }
 }

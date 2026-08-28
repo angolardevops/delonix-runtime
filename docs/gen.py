@@ -32,7 +32,9 @@ GROUP_PATH = {
     "egress": ("net", "egress"),
     "httproute": ("net", "httproute"),
     "tunnel": ("net", "tunnel"),
-    "boot": ("net", "boot"),
+    "boot": ("system", "boot"),
+    "namespace": ("system", "namespace"),
+    "dash": ("dashboard",),
     "cri": ("serve", "cri"),
     "api": ("serve", "api"),
     "docker-api": ("serve", "docker-api"),
@@ -115,7 +117,6 @@ SOURCE_FILES = {
     "kube": "kube.rs",
     "netns": "netns.rs",
     "completion": "complete.rs",
-    "syntax": "main.rs",
     "schema": "schema.rs",
     "init": "init.rs",
     "backup": "rbackup.rs",
@@ -330,7 +331,7 @@ falha, o pod é desfeito por inteiro (sem meio-pod).</p>"""},
     },
     "image": {
         "title": "delonix image",
-        "tagline": "Imagens OCI: pull, ls, rm, export — e, com --vm, as imagens VM douradas (build/push).",
+        "tagline": "Imagens OCI: pull, list, remove, export — e, com --vm, as imagens VM douradas (build/push).",
         "intro": """Gestão de imagens de container (registos OCI: Docker Hub, ghcr.io, …) com
 verificação de digest no pull. Com <code>--vm</code>, o MESMO grupo opera sobre as
 <strong>imagens VM douradas</strong> (um <code>.qcow2</code> + metadados por imagem): Ubuntu cloud
@@ -391,8 +392,8 @@ image + kubeadm/kubelet/kubectl + <code>delonix-cri</code> — a base do <code>d
                 ("Referência com tag e digest (formato combinado suportado)",
                  "delonix image pull kindest/node:v1.34.0@sha256:7416a6…"),
             ]},
-            "ls": {"examples": [("", "delonix image ls")]},
-            "rm": {"examples": [("", "delonix image rm alpine:3.19")]},
+            "list": {"examples": [("", "delonix image list")]},
+            "remove": {"examples": [("", "delonix image remove alpine:3.19")]},
             "export": {"examples": [
                 ("Bundle OCI runtime para correr com runc/crun",
                  "delonix image export alpine:3.19 /tmp/bundle && sudo runc run -b /tmp/bundle teste"),
@@ -583,7 +584,7 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
         },
     },
     "namespace": {
-        "title": "delonix namespace",
+        "title": "delonix system namespace",
         "tagline": "Namespaces de isolamento: ls, describe — quem está de cada lado da fronteira.",
         "intro": """Uma namespace <strong>não tem registo próprio</strong>: existe enquanto algo
 estiver nela, e por isso este grupo DERIVA — tal como o <code>cluster ls</code> (das etiquetas) e o
@@ -598,12 +599,12 @@ distingue <em>não</em> de <em>não sei</em>.""",
         "subs": {
             "ls": {"examples": [
                 ("Todas as namespaces em uso, e o que está em cada uma",
-                 "delonix namespace ls"),
+                 "delonix system namespace ls"),
                 ("Para um script — contagens por Kind",
-                 "delonix namespace ls -o json")]},
+                 "delonix system namespace ls -o json")]},
             "describe": {"examples": [
                 ("O conteúdo de uma, mais o set nft que carrega a fronteira",
-                 "delonix namespace describe inquilino-b")]},
+                 "delonix system namespace describe inquilino-b")]},
         },
     },
     "network": {
@@ -1046,15 +1047,15 @@ redesenha a cada 2s.""",
         ],
     },
     "boot": {
-        "title": "delonix net boot",
+        "title": "delonix system boot",
         "tagline": "Persistência no arranque: units systemd para os containers voltarem a subir no boot.",
         "intro": """<code>boot enable</code> gera uma unit systemd por container em execução (rootless →
 user units + <code>loginctl enable-linger</code>; root → system units), com <code>ExecStart</code>
 =<code>container start</code>. Assim os containers voltam a subir quando o host arranca, sem daemon.""",
         "subs": {
-            "enable": {"examples": [("Persistir os que correm agora", "delonix net boot enable")]},
-            "status": {"examples": [("Ver o que está instalado", "delonix net boot status")]},
-            "disable": {"examples": [("Remover as units de boot", "delonix net boot disable")]},
+            "enable": {"examples": [("Persistir os que correm agora", "delonix system boot enable")]},
+            "status": {"examples": [("Ver o que está instalado", "delonix system boot status")]},
+            "disable": {"examples": [("Remover as units de boot", "delonix system boot disable")]},
         },
     },
     "backup": {
@@ -1139,7 +1140,7 @@ fluxo de eventos.""",
         },
     },
     "dash": {
-        "title": "delonix dash",
+        "title": "delonix dashboard",
         "tagline": "Dashboard de resumo/KPIs (TUI estilo htop) — RAM/rede/disco, uptime por-container, JSON e Prometheus.",
         "intro": """Vista viva do estado do runtime — containers, VMs, imagens, redes, storage — num
 só ecrã, sem precisar de correr <code>ls</code> em 5 grupos diferentes. Cada grupo também tem o
@@ -1157,9 +1158,9 @@ Grafana. Para scrape contínuo, o <code>delonix-mgmt</code>/<code>delonix-cri</c
 recalculam em background a cada 30s, o scrape em si fica sempre rápido.""",
         "subs": {},
         "examples": [
-            ("TUI interactiva", "delonix dash"),
-            ("Snapshot único, para um script", "delonix dash --once"),
-            ("JSON, para um datasource ou pipeline", "delonix dash --json | jq '.tiles'"),
+            ("TUI interactiva", "delonix dashboard"),
+            ("Snapshot único, para um script", "delonix dashboard --once"),
+            ("JSON, para um datasource ou pipeline", "delonix dashboard --json | jq '.tiles'"),
         ],
     },
     "docker-api": {
@@ -1231,32 +1232,30 @@ depuração e integração.""",
     },
     "completion": {
         "title": "delonix completion",
-        "tagline": "Autocompletion dinâmico para bash, zsh, fish, elvish e powershell.",
-        "intro": """Imprime o script de registo do shell. A engine é dinâmica: o script pede as
-sugestões ao próprio binário em tempo real, a partir da MESMA definição usada no parsing — nunca
-fica desactualizado à mão.""",
-        "subs": {},
-        "examples": [
-            ("Bash (persistente)", 'echo \'source <(delonix completion bash)\' >> ~/.bashrc'),
-            ("Zsh", 'echo \'source <(delonix completion zsh)\' >> ~/.zshrc'),
-        ],
-    },
-    "syntax": {
-        "title": "delonix syntax",
-        "tagline": "Realce de sintaxe do VMfile para o vim/neovim e para o VS Code.",
-        "intro": """Um <code>VMfile</code> não tem extensão, como um Dockerfile, por isso nenhum
-editor o reconhece sozinho — e sem realce a instrução mal escrita que o parser recusa (ele falha
-FECHADO) parece igual a todo o resto até ao momento do build.<br><br>
-A gramática sai do BINÁRIO, não do repositório, pela mesma razão que as completions são geradas: a
-instalação documentada é <code>curl … | bash</code>, que não tem repositório de onde copiar, e uma
-gramática guardada noutro sítio afasta-se do parser que devia descrever. O
-<code>scripts/install.sh</code> instala-a sozinho onde encontrar um destes editores.""",
-        "subs": {},
-        "examples": [
-            ("vim/neovim — a sintaxe E o ftdetect que a activa", "delonix syntax vim --dir ~/.vim"),
-            ("VS Code, como directoria de extensão", "delonix syntax vscode --dir ~/.vscode/extensions/delonix.vmfile-0.1.0"),
-            ("Só a gramática, para a colocares onde quiseres", "delonix syntax vim > ~/.vim/syntax/vmfile.vim"),
-        ],
+        "tagline": "Autocompletion dinâmico para shells, e realce de sintaxe do VMfile para editores.",
+        "intro": """Dois braços que respondem à mesma pergunta — o que é preciso dizer a uma shell ou
+a um editor para reconhecerem este binário — sob um só tecto desde a B2 da reestruturação da CLI
+(<code>syntax &lt;editor&gt;</code> dobrou-se aqui). <code>completion shell</code> imprime o script
+de registo do shell: a engine é dinâmica, pede as sugestões ao próprio binário em tempo real, a
+partir da MESMA definição usada no parsing — nunca fica desactualizado à mão.<br><br>
+<code>completion editor</code> dá o realce de sintaxe do <code>VMfile</code>: sem extensão, como um
+Dockerfile, nenhum editor o reconhece sozinho — e sem realce a instrução mal escrita que o parser
+recusa (ele falha FECHADO) parece igual a todo o resto até ao momento do build. A gramática sai do
+BINÁRIO e não do repositório, pela mesma razão que as completions são geradas: a instalação
+documentada é <code>curl … | bash</code>, sem repositório de onde copiar, e uma gramática guardada
+noutro sítio afasta-se do parser que devia descrever. O <code>scripts/install.sh</code> instala-a
+sozinho onde encontrar um destes editores.""",
+        "subs": {
+            "shell": {"examples": [
+                ("Bash (persistente)", 'echo \'source <(delonix completion shell bash)\' >> ~/.bashrc'),
+                ("Zsh", 'echo \'source <(delonix completion shell zsh)\' >> ~/.zshrc'),
+            ]},
+            "editor": {"examples": [
+                ("vim/neovim — a sintaxe E o ftdetect que a activa", "delonix completion editor vim --dir ~/.vim"),
+                ("VS Code, como directoria de extensão", "delonix completion editor vscode --dir ~/.vscode/extensions/delonix.vmfile-0.1.0"),
+                ("Só a gramática, para a colocares onde quiseres", "delonix completion editor vim > ~/.vim/syntax/vmfile.vim"),
+            ]},
+        },
     },
     "schema": {
         "title": "delonix schema · explain",
@@ -1335,7 +1334,7 @@ N containers allowed). <strong>Known limitation:</strong> the <strong>PID</stron
 keeps its own process tree; that's the next slice.""",
     },
     "image": {
-        "tagline": "OCI images: pull, ls, rm, export — and, with --vm, the golden VM images (build/push).",
+        "tagline": "OCI images: pull, list, remove, export — and, with --vm, the golden VM images (build/push).",
         "intro": """Container image management (OCI registries: Docker Hub, ghcr.io, …) with
 digest verification on pull. With <code>--vm</code>, the SAME group operates on <strong>golden VM
 images</strong> (a <code>.qcow2</code> plus per-image metadata): Ubuntu cloud image +
@@ -1555,19 +1554,18 @@ per-container firewalling. Most users never need this — they use the higher-le
 it's exposed for debugging and integration.""",
     },
     "completion": {
-        "tagline": "Dynamic autocompletion for bash, zsh, fish, elvish and powershell.",
-        "intro": """Prints the shell registration script. The engine is dynamic: the script asks
-the binary itself for suggestions in real time, from the SAME definition used for parsing — it
-never goes stale by hand.""",
-    },
-    "syntax": {
-        "tagline": "VMfile syntax highlighting for vim/neovim and VS Code.",
-        "intro": """A <code>VMfile</code> has no extension, like a Dockerfile, so no editor
-recognises it on its own — and without highlighting, the misspelled instruction the parser refuses
-(it fails CLOSED) looks like every other line until build time.<br><br>
-The grammar comes out of the BINARY, not the repository, for the same reason the completions are
-generated: the documented install is <code>curl … | bash</code>, which has no repository to copy
-from, and a grammar kept anywhere else drifts from the parser it is meant to describe.
+        "tagline": "Dynamic autocompletion for shells, and VMfile syntax highlighting for editors.",
+        "intro": """Two arms answering the same question — what a shell or an editor needs to be told
+to recognise this binary — under one roof since the CLI restructuring's B2
+(<code>syntax &lt;editor&gt;</code> folded in here). <code>completion shell</code> prints the shell
+registration script: the engine is dynamic, it asks the binary itself for suggestions in real time,
+from the SAME definition used for parsing — it never goes stale by hand.<br><br>
+<code>completion editor</code> gives <code>VMfile</code> syntax highlighting: no extension, like a
+Dockerfile, so no editor recognises it on its own — and without highlighting, the misspelled
+instruction the parser refuses (it fails CLOSED) looks like every other line until build time. The
+grammar comes out of the BINARY, not the repository, for the same reason the completions are
+generated: the documented install is <code>curl … | bash</code>, with no repository to copy from,
+and a grammar kept anywhere else drifts from the parser it is meant to describe.
 <code>scripts/install.sh</code> installs it wherever it finds one of these editors.""",
     },
     "schema": {
@@ -2019,13 +2017,13 @@ the eBPF tc/clsact classifiers — in both cases nft remains the only thing that
         "lab": {"pt": """<p>Faz um container sobreviver a um reboot do host, sem daemon
 nenhum a vigiá-lo.</p>
 <pre><code>delonix container run -d --name web nginx
-delonix net boot enable web
-delonix net boot status web</code></pre>""",
+delonix system boot enable web
+delonix system boot status web</code></pre>""",
                 "en": """<p>Make a container survive a host reboot, with no daemon watching over
 it.</p>
 <pre><code>delonix container run -d --name web nginx
-delonix net boot enable web
-delonix net boot status web</code></pre>"""},
+delonix system boot enable web
+delonix system boot status web</code></pre>"""},
         "challenge": {"pt": """<p>Em rootless, confirma que a unit gerada é uma <em>user unit</em>
 (não system) e que <code>loginctl enable-linger</code> ficou activo para a tua conta — sem isso a
 unit nunca arrancaria antes do login.</p>""",
@@ -2053,20 +2051,20 @@ to the exact event it emits.</p>"""},
     },
     "dash": {
         "lab": {"pt": """<p>Um ecrã só, sem correr <code>ls</code> em 5 grupos diferentes.</p>
-<pre><code>delonix dash --once
-delonix dash</code></pre>
+<pre><code>delonix dashboard --once
+delonix dashboard</code></pre>
 <p>Na TUI, carrega em <code>m</code> para alternar o sparkline entre containers a correr e memória
 usada.</p>""",
                 "en": """<p>One screen, instead of running <code>ls</code> across 5 different
 groups.</p>
-<pre><code>delonix dash --once
-delonix dash</code></pre>
+<pre><code>delonix dashboard --once
+delonix dashboard</code></pre>
 <p>In the TUI, press <code>m</code> to toggle the sparkline between running containers and memory
 used.</p>"""},
-        "challenge": {"pt": """<p>Corre <code>delonix dash --json | jq</code> e confirma que os
+        "challenge": {"pt": """<p>Corre <code>delonix dashboard --json | jq</code> e confirma que os
 campos de rede/disco vêm marcados de forma explícita quando ainda não foram medidos — nunca
 disfarçados de zero.</p>""",
-                "en": """<p>Run <code>delonix dash --json | jq</code> and confirm the network/disk
+                "en": """<p>Run <code>delonix dashboard --json | jq</code> and confirm the network/disk
 fields are explicitly marked when they haven't been measured yet — never disguised as zero.</p>"""},
     },
     "docker-api": {
@@ -2124,18 +2122,18 @@ que <code>net netns status</code> volta a mostrar tudo saudável.</p>""",
     "completion": {
         "lab": {"pt": """<p>Autocompletion real, gerado a partir da MESMA definição da CLI —
 nunca fica desactualizado à mão.</p>
-<pre><code>echo 'source <(delonix completion bash)' >> ~/.bashrc
+<pre><code>echo 'source <(delonix completion shell bash)' >> ~/.bashrc
 source ~/.bashrc
 delonix con&lt;TAB&gt;</code></pre>""",
                 "en": """<p>Real autocompletion, generated from the SAME CLI definition — it never
 goes stale by hand.</p>
-<pre><code>echo 'source <(delonix completion bash)' >> ~/.bashrc
+<pre><code>echo 'source <(delonix completion shell bash)' >> ~/.bashrc
 source ~/.bashrc
 delonix con&lt;TAB&gt;</code></pre>"""},
-        "challenge": {"pt": """<p>Compara o output de <code>delonix completion bash</code> entre
+        "challenge": {"pt": """<p>Compara o output de <code>delonix completion shell bash</code> entre
 duas versões do binário (antes/depois de um upgrade) — confirma que um comando novo aparece
 sozinho no script, sem qualquer edição manual.</p>""",
-                "en": """<p>Compare the output of <code>delonix completion bash</code> between two
+                "en": """<p>Compare the output of <code>delonix completion shell bash</code> between two
 binary versions (before/after an upgrade) — confirm a new command shows up in the script by
 itself, with no manual editing.</p>"""},
     },
@@ -2488,7 +2486,12 @@ EXAMPLES_EN = {
     ("netns", "down"): ["Tear down the network infra (kills slirp + holder) — brings down EVERY container on the SDN"],
     ("netns", "status"): ["Ingress infra status"],
     ("netns", "up"): ["Bring up the ingress holder"],
-    ("completion", None): ["Bash (persistent)", "Zsh"],
+    ("completion", "shell"): ["Bash (persistent)", "Zsh"],
+    ("completion", "editor"): [
+        "vim/neovim — the syntax AND the ftdetect that activates it",
+        "VS Code, as an extension directory",
+        "Just the grammar, to put wherever you want",
+    ],
 }
 
 # ---------------------------------------------------------------- template
@@ -2969,7 +2972,7 @@ como root na porta 80 a encaminhar para uma porta alta. Reverter: apagar
 <pre><code>curl -fL -o ~/.local/bin/delonix \\
   https://github.com/angolardevops/delonix-runtime/releases/latest/download/delonix-x86_64-linux
 chmod +x ~/.local/bin/delonix
-echo 'source &lt;(delonix completion bash)' &gt;&gt; ~/.bashrc</code></pre>
+echo 'source &lt;(delonix completion shell bash)' &gt;&gt; ~/.bashrc</code></pre>
 
 <h2>Primeiros passos</h2>
 <pre><code>delonix version                  # a identidade do build e o que fazer a seguir
@@ -3033,7 +3036,7 @@ to a high port. To revert: delete <code>/etc/sysctl.d/99-delonix-lowports.conf</
 <pre><code>curl -fL -o ~/.local/bin/delonix \\
   https://github.com/angolardevops/delonix-runtime/releases/latest/download/delonix-x86_64-linux
 chmod +x ~/.local/bin/delonix
-echo 'source &lt;(delonix completion bash)' &gt;&gt; ~/.bashrc</code></pre>
+echo 'source &lt;(delonix completion shell bash)' &gt;&gt; ~/.bashrc</code></pre>
 
 <h2>Getting started</h2>
 <pre><code>delonix version                  # the build's identity, and what to do next
@@ -3812,7 +3815,7 @@ CHEAT_TASKS = [
     ("microVM com cloud-init", "delonix vm create node1 --disk base.qcow2 --ssh-key @~/.ssh/id_ed25519.pub"),
     ("Cluster Kubernetes do zero", "delonix cluster kubeadm --name lab --control-plane 1 --workers 2"),
     ("Aplicar um manifesto inteiro", "delonix stack apply -f delonix-manifest.yaml"),
-    ("Persistir os containers no arranque", "delonix net boot enable"),
+    ("Persistir os containers no arranque", "delonix system boot enable"),
     ("Recuperar espaço (GC)", "delonix system prune"),
 ]
 
@@ -4105,7 +4108,7 @@ delonix build -t minha-app:1.0 .
 delonix run -d --name a1 --wait --health-interval 2 minha-app:1.0
 delonix ps
 
-delonix rm -f a1; delonix image rm minha-app:1.0; cd ..; rm -rf lab-build</code></pre>
+delonix rm -f a1; delonix image remove minha-app:1.0; cd ..; rm -rf lab-build</code></pre>
 <p class="note"><strong>Verificação:</strong> o <code>ps</code> mostra
 <code>(healthy)</code> na coluna STATUS. O motor está a sondar o container
 sozinho — sem systemd, ao contrário do Podman rootless.</p>"""),
@@ -4366,7 +4369,7 @@ delonix build -t my-app:1.0 .
 delonix run -d --name a1 --wait --health-interval 2 my-app:1.0
 delonix ps
 
-delonix rm -f a1; delonix image rm my-app:1.0; cd ..; rm -rf lab-build</code></pre>
+delonix rm -f a1; delonix image remove my-app:1.0; cd ..; rm -rf lab-build</code></pre>
 <p class="note"><strong>Verification:</strong> <code>ps</code> shows
 <code>(healthy)</code> in the STATUS column. The engine is probing the
 container on its own — no systemd, unlike rootless Podman.</p>"""),
@@ -5055,10 +5058,10 @@ delonix build -t delonix-temp:1 .</code></pre>
 ...
 Successfully installed annotated-types-0.7.0 anyio-4.14.2 ... fastapi-0.115.0 ...
 ef708d73f029</code></pre></div>
-<p>O ID no fim (<code>ef708d73f029</code>) é a imagem. <code>delonix image ls</code> confirma o
+<p>O ID no fim (<code>ef708d73f029</code>) é a imagem. <code>delonix image list</code> confirma o
 tamanho — o estágio final, sem as ferramentas de build, fica bem mais pequeno que se fosse tudo
 num único <code>FROM</code>:</p>
-<pre><code>delonix image ls</code></pre>
+<pre><code>delonix image list</code></pre>
 <div class="out"><pre><code>REPOSITORY:TAG     IMAGE ID       CREATED          SIZE
 delonix-temp:1     ef708d73f029   agora mesmo      157.2 MiB
 python:3.12-slim   25c5b8011a34   agora mesmo       41.2 MiB</code></pre></div>
@@ -5178,10 +5181,10 @@ delonix build -t delonix-temp:1 .</code></pre>
 ...
 Successfully installed annotated-types-0.7.0 anyio-4.14.2 ... fastapi-0.115.0 ...
 ef708d73f029</code></pre></div>
-<p>The ID at the end (<code>ef708d73f029</code>) is the image. <code>delonix image ls</code>
+<p>The ID at the end (<code>ef708d73f029</code>) is the image. <code>delonix image list</code>
 confirms the size — the final stage, with no build tools, ends up much smaller than if everything
 were in a single <code>FROM</code>:</p>
-<pre><code>delonix image ls</code></pre>
+<pre><code>delonix image list</code></pre>
 <div class="out"><pre><code>REPOSITORY:TAG     IMAGE ID       CREATED          SIZE
 delonix-temp:1     ef708d73f029   just now         157.2 MiB
 python:3.12-slim   25c5b8011a34   just now          41.2 MiB</code></pre></div>

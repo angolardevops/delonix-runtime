@@ -4,7 +4,7 @@
 //! (another repo, another dependency tree — see `AGENTS.md`).
 //!
 //! Commands grouped semantically (instead of a flat list): `container`
-//! (run/ps/stop/rm/exec/logs), `image` (pull/ls/rm/export), `build`
+//! (run/ps/stop/rm/exec/logs), `image` (pull/list/remove/export), `build`
 //! (Dockerfile/Delonixfile → image), `vm` (declarative microVMs), `volumes`
 //! (named volumes), `network` (user networks) and `stack` (applies a whole
 //! `delonix-manifest.yaml`). Each group with `apply` also accepts a per-Kind
@@ -113,7 +113,7 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::pod::PodCmd,
     },
-    /// OCI images: pull/ls/rm/export (with `--vm`: golden VM images — ls/pull/push/build).
+    /// OCI images: pull/list/remove/export (with `--vm`: golden VM images — ls/pull/push/build).
     Image {
         /// Operate on VM images (`<root>/vm-images/`) instead of container images — enables the `push`/`build` subcommands.
         #[arg(long)]
@@ -139,17 +139,6 @@ enum Cmd {
     Volumes {
         #[command(subcommand)]
         action: cmd::volume::VolumeCmd,
-    },
-    // A namespace has no record of its own — it exists while something is in
-    // it — so there is deliberately no `create`/`rm`: an empty namespace would
-    // be a resource with a lifecycle, and that is an ADR, not a listing. Said
-    // in the `about` (one paragraph, so `about == long_about`) rather than a
-    // second paragraph: the catalog looks the rendered string up VERBATIM, and
-    // a multi-paragraph help comes out untranslated under `--l18n=pt`.
-    /// Isolation namespaces: ls/describe — a namespace exists while something is in it, so there is no create/rm.
-    Namespace {
-        #[command(subcommand)]
-        action: cmd::namespace::NamespaceCmd,
     },
     /// User networks: ls/create/rm/inspect.
     Network {
@@ -328,7 +317,7 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::cluster::ClusterCmd,
     },
-    /// Low-level network/infra plumbing, grouped: netns/flow/ingress/egress/httproute/tunnel/boot.
+    /// Low-level network/infra plumbing, grouped: netns/flow/ingress/egress/httproute/tunnel.
     Net {
         #[command(subcommand)]
         action: cmd::net::NetCmd,
@@ -440,9 +429,11 @@ fn expand_alias(argv: &mut Vec<String>) {
     let group = if CONTAINER.contains(&first.as_str()) {
         "container"
     } else if first == "images" {
-        // `docker images` is `image ls` here — the alias carries the rename,
-        // which is exactly the friction it exists to remove.
-        argv[1] = "ls".to_string();
+        // `docker images` is `image list` here — the alias carries the rename,
+        // which is exactly the friction it exists to remove. The shortcut
+        // itself is declared STABLE (`docs/cli-stability.md`); only what it
+        // expands to moved when `image ls` became `image list` (B2).
+        argv[1] = "list".to_string();
         "image"
     } else {
         return;
@@ -499,7 +490,6 @@ fn run() -> Result<()> {
         Cmd::Vm { action } => cmd::vm::run(action),
         Cmd::Workload { action } => cmd::workload::run(action),
         Cmd::Volumes { action } => cmd::volume::run(action),
-        Cmd::Namespace { action } => cmd::namespace::run(action),
         Cmd::Network { action } => cmd::network::run(action),
         Cmd::Secret { action } => cmd::secret::run(action),
         Cmd::Storage { action } => cmd::storage::run(action),
@@ -1057,7 +1047,7 @@ mod alias_tests {
         );
         // `images` carrega também o renome do verbo — é a fricção que existe
         // para remover.
-        assert_eq!(ex(&["delonix", "images"]), ["delonix", "image", "ls"]);
+        assert_eq!(ex(&["delonix", "images"]), ["delonix", "image", "list"]);
     }
 
     #[test]

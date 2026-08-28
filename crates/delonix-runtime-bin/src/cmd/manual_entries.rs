@@ -23,7 +23,7 @@ pub static ENTRIES: &[Entry] = &[
             ("a build secret, bind-mounted live for one `RUN` and structurally unable to reach a layer", "delonix build -t myapp:v1 --secret id=npmrc,src=/home/me/.npmrc ."),
             ("cross-arch: resolves the right base image and stamps the arch into the result", "delonix build -t myapp:v1 --platform linux/arm64 ."),
         ],
-        see_also: &["image ls", "image push", "container run", "init"],
+        see_also: &["image list", "image push", "container run", "init"],
     },
     Entry {
         path: "cluster",
@@ -101,7 +101,7 @@ pub static ENTRIES: &[Entry] = &[
             ("several in one go", "delonix cluster load myapp:dev sidecar:dev"),
             ("say which cluster, when more than one is up", "delonix cluster load myapp:dev --name dev"),
         ],
-        see_also: &["cluster create", "image ls", "build", "cluster ls"],
+        see_also: &["cluster create", "image list", "build", "cluster ls"],
     },
     Entry {
         path: "cluster apply",
@@ -407,7 +407,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("turn what was written inside into a new image", "delonix container commit web myapp:v1"),
         ],
-        see_also: &["image ls", "build", "container diff"],
+        see_also: &["image list", "build", "container diff"],
     },
     Entry {
         path: "container cp",
@@ -608,7 +608,7 @@ pub static ENTRIES: &[Entry] = &[
         group: "",
         examples: &[
             ("fetch an image from a registry", "delonix image pull postgres:16"),
-            ("what is on disk, and how much of it", "delonix image ls"),
+            ("what is on disk, and how much of it", "delonix image list"),
             ("golden VM images live in a store of their own, next to the container ones", "delonix image vm ls"),
         ],
         see_also: &["build", "container run", "image vm", "image scan"],
@@ -621,7 +621,7 @@ pub static ENTRIES: &[Entry] = &[
             ("a registry other than Docker Hub — write it out in the reference", "delonix image pull ghcr.io/angolardevops/kaeso-odoo:18"),
             ("refuse the image unless it carries a cosign signature made by this key", "delonix image pull --verify cosign.pub ghcr.io/angolardevops/app:1.2.0"),
         ],
-        see_also: &["image ls", "image scan", "image verify", "image vm pull"],
+        see_also: &["image list", "image scan", "image verify", "image vm pull"],
     },
     Entry {
         path: "image push",
@@ -633,13 +633,13 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["image login", "image tag", "image vm push"],
     },
     Entry {
-        path: "image rm",
+        path: "image remove",
         group: "Lifecycle",
         examples: &[
-            ("remove an image nothing is using", "delonix image rm alpine:3.19"),
-            ("remove it even though a container still references it", "delonix image rm -f odoo:16"),
+            ("remove an image nothing is using", "delonix image remove alpine:3.19"),
+            ("remove it even though a container still references it", "delonix image remove -f odoo:16"),
         ],
-        see_also: &["image ls", "container rm", "system prune"],
+        see_also: &["image list", "container rm", "system prune"],
     },
     Entry {
         path: "image prune",
@@ -648,7 +648,7 @@ pub static ENTRIES: &[Entry] = &[
             ("drop the dangling images and the blobs nobody references", "delonix image prune"),
             ("also drop tagged images no container uses", "delonix image prune -a -f"),
         ],
-        see_also: &["image rm", "image ls", "container prune", "system prune"],
+        see_also: &["image remove", "image list", "container prune", "system prune"],
     },
     Entry {
         path: "image describe",
@@ -657,7 +657,7 @@ pub static ENTRIES: &[Entry] = &[
             ("tags, digest, size, layers and the OCI config (entrypoint/cmd/env/workdir) in one screen", "delonix image describe postgres:16"),
             ("several at once, to compare what two images actually run", "delonix image describe alpine:3.19 redis:7-alpine"),
         ],
-        see_also: &["image ls", "image history", "image scan"],
+        see_also: &["image list", "image history", "image scan"],
     },
     Entry {
         path: "image history",
@@ -666,16 +666,16 @@ pub static ENTRIES: &[Entry] = &[
             ("the layers from base to top, with the digest and size of each", "delonix image history postgres:16"),
             ("where the size went, before deciding what to change in the Dockerfile", "delonix image history kaeso-odoo:18"),
         ],
-        see_also: &["image describe", "build", "image ls"],
+        see_also: &["image describe", "build", "image list"],
     },
     Entry {
-        path: "image ls",
+        path: "image list",
         group: "Inspect",
         examples: &[
-            ("what is on disk, newest first", "delonix image ls"),
-            ("as JSON, for a script to read instead of a table meant for eyes", "delonix image ls -o json"),
+            ("what is on disk, newest first", "delonix image list"),
+            ("as JSON, for a script to read instead of a table meant for eyes", "delonix image list -o json"),
         ],
-        see_also: &["image describe", "image history", "image rm"],
+        see_also: &["image describe", "image history", "image remove"],
     },
     Entry {
         path: "image scan",
@@ -721,7 +721,7 @@ pub static ENTRIES: &[Entry] = &[
             ("a second name for the same content — nothing is copied", "delonix image tag postgres:16 db:stable"),
             ("the shape a locally-built image needs before it can be pushed to your registry", "delonix image tag kaeso-odoo:18 ghcr.io/angolardevops/kaeso-odoo:18"),
         ],
-        see_also: &["image push", "image ls", "image rm"],
+        see_also: &["image push", "image list", "image remove"],
     },
     Entry {
         path: "image export",
@@ -739,7 +739,7 @@ pub static ENTRIES: &[Entry] = &[
             ("read back an archive written by `save`, `docker save` or `podman save`", "delonix image load -i postgres-16.tar"),
             ("a gzipped archive has to be gunzipped first", "gunzip -c nginx.tar.gz > nginx.tar && delonix image load -i nginx.tar"),
         ],
-        see_also: &["image save", "image ls", "image pull"],
+        see_also: &["image save", "image list", "image pull"],
     },
     Entry {
         path: "image save",
@@ -767,7 +767,7 @@ pub static ENTRIES: &[Entry] = &[
             ("one snapshot, for a log or a terminal that is not a TTY", "delonix image dash --once"),
             ("the same numbers as JSON, for a script or a Grafana datasource", "delonix image dash --json"),
         ],
-        see_also: &["image ls", "dashboard", "system df"],
+        see_also: &["image list", "dashboard", "system df"],
     },
     Entry {
         path: "image build",
@@ -1266,39 +1266,39 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["net tunnel expose", "net tunnel ls", "secret create", "stack apply"],
     },
     Entry {
-        path: "net boot",
+        path: "system boot",
         group: "Advanced",
         examples: &[
-            ("make the containers running right now come back after a reboot", "delonix net boot enable"),
-            ("what is installed, and in which mode", "delonix net boot status"),
-            ("undo it", "delonix net boot disable"),
+            ("make the containers running right now come back after a reboot", "delonix system boot enable"),
+            ("what is installed, and in which mode", "delonix system boot status"),
+            ("undo it", "delonix system boot disable"),
         ],
         see_also: &["container run", "container start", "system info"],
     },
     Entry {
-        path: "net boot disable",
+        path: "system boot disable",
         group: "",
         examples: &[
-            ("disable and delete the generated units — what is running keeps running, it just no longer comes back by itself", "delonix net boot disable"),
+            ("disable and delete the generated units — what is running keeps running, it just no longer comes back by itself", "delonix system boot disable"),
         ],
-        see_also: &["net boot enable", "net boot status"],
+        see_also: &["system boot enable", "system boot status"],
     },
     Entry {
-        path: "net boot enable",
+        path: "system boot enable",
         group: "",
         examples: &[
-            ("one unit per RUNNING container; rootless installs user units and turns linger on, so they start without a login", "delonix net boot enable"),
-            ("bake a gentler policy into the units than the `always` default", "delonix net boot enable --restart on-failure:3"),
+            ("one unit per RUNNING container; rootless installs user units and turns linger on, so they start without a login", "delonix system boot enable"),
+            ("bake a gentler policy into the units than the `always` default", "delonix system boot enable --restart on-failure:3"),
         ],
-        see_also: &["net boot status", "net boot disable", "container run"],
+        see_also: &["system boot status", "system boot disable", "container run"],
     },
     Entry {
-        path: "net boot status",
+        path: "system boot status",
         group: "",
         examples: &[
-            ("which units exist, and whether they are user units with linger or system units", "delonix net boot status"),
+            ("which units exist, and whether they are user units with linger or system units", "delonix system boot status"),
         ],
-        see_also: &["net boot enable", "net boot disable", "container ps"],
+        see_also: &["system boot enable", "system boot disable", "container ps"],
     },
     Entry {
         path: "net netns",
@@ -1390,30 +1390,30 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["net netns publish", "net ingress unpublish"],
     },
     Entry {
-        path: "namespace",
+        path: "system namespace",
         group: "",
         examples: &[
-            ("every namespace in use, and what is in each", "delonix namespace ls"),
-            ("what one tenant holds, and whether the boundary is enforced here", "delonix namespace describe inquilino-b"),
+            ("every namespace in use, and what is in each", "delonix system namespace ls"),
+            ("what one tenant holds, and whether the boundary is enforced here", "delonix system namespace describe inquilino-b"),
         ],
         see_also: &["container run", "vm create", "net ingress", "volumes prune"],
     },
     Entry {
-        path: "namespace ls",
+        path: "system namespace ls",
         group: "Inspect",
         examples: &[
-            ("counts by Kind, per namespace", "delonix namespace ls"),
-            ("for a script", "delonix namespace ls -o json"),
+            ("counts by Kind, per namespace", "delonix system namespace ls"),
+            ("for a script", "delonix system namespace ls -o json"),
         ],
-        see_also: &["namespace describe"],
+        see_also: &["system namespace describe"],
     },
     Entry {
-        path: "namespace describe",
+        path: "system namespace describe",
         group: "Inspect",
         examples: &[
-            ("the contents by Kind, plus the nft set that carries the boundary", "delonix namespace describe inquilino-b"),
+            ("the contents by Kind, plus the nft set that carries the boundary", "delonix system namespace describe inquilino-b"),
         ],
-        see_also: &["namespace ls", "net netns firewall"],
+        see_also: &["system namespace ls", "net netns firewall"],
     },
     Entry {
         path: "network",
@@ -1985,7 +1985,7 @@ pub static ENTRIES: &[Entry] = &[
             ("where the disk went", "delonix system df"),
             ("get it back, orphan container directories included", "delonix system prune -f"),
         ],
-        see_also: &["dash", "system events", "container stats", "image ls"],
+        see_also: &["dash", "system events", "container stats", "image list"],
     },
     Entry {
         path: "backup",
@@ -2087,7 +2087,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("disk usage by area: images, containers, volumes and VM images", "delonix system df"),
         ],
-        see_also: &["system prune", "image ls", "volumes ls", "system info"],
+        see_also: &["system prune", "image list", "volumes ls", "system info"],
     },
     Entry {
         path: "system events",
@@ -2156,7 +2156,7 @@ pub static ENTRIES: &[Entry] = &[
             ("see what it WOULD take, split into declared resources and debris, and take nothing — the report to read before putting `--auto` in a timer", "delonix system prune --dry-run"),
             ("what the scheduled sweep would do right now, threshold gate included", "delonix system prune --dry-run --auto"),
         ],
-        see_also: &["system df", "image rm", "container rm", "volumes ls"],
+        see_also: &["system df", "image remove", "container rm", "volumes ls"],
     },
     Entry {
         path: "system thermal",
