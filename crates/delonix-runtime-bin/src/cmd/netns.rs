@@ -34,13 +34,16 @@ pub enum NetnsCmd {
     },
     /// Detach (and destroy) a previously attached netns.
     Detach {
+        /// Netns to destroy — a container id, or `pod-<name>` for a pod's shared one.
         #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::netns))]
         name: String,
     },
     /// Run a command inside an attached netns (exercises the runtime join path).
     Exec {
+        /// Netns to enter — a container id, or `pod-<name>` for a pod's shared one.
         #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::netns))]
         name: String,
+        /// Command and arguments to run in there. Everything after the name.
         #[arg(trailing_var_arg = true, required = true)]
         command: Vec<String>,
     },
@@ -56,7 +59,10 @@ pub enum NetnsCmd {
         ip: Option<String>,
     },
     /// Unpublish a host port from the ingress.
-    Unpublish { host_port: String },
+    Unpublish {
+        /// The HOST port to stop forwarding, as it was given to `publish`.
+        host_port: String,
+    },
     /// Apply (or clear) a container's parameterizable firewall AT THE INGRESS.
     Firewall {
         /// Netns/container name.

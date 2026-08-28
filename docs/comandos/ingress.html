@@ -202,7 +202,7 @@ SEE ALSO:
 
 Arguments:
   &lt;CONTAINER&gt;
-          
+          Container to govern. Must be on the SDN (`--net &lt;network&gt;`)
 
 Options:
       --l18n &lt;en|pt&gt;
@@ -228,10 +228,10 @@ SEE ALSO:
 
 Arguments:
   &lt;CONTAINER&gt;
-          
+          Container to govern. Must be on the SDN (`--net &lt;network&gt;`)
 
   &lt;PORT&gt;
-          `tcp/5432`, `5432` (any proto), or `*` (all ports)
+          `tcp/5432`, `5432` (any proto), or `*` (all ports) — the CONTAINER&#x27;s port, the same one the rule was written with
 
 Options:
       --from &lt;FROM&gt;
@@ -262,10 +262,10 @@ SEE ALSO:
 
 Arguments:
   &lt;CONTAINER&gt;
-          
+          Container to govern. Must be on the SDN (`--net &lt;network&gt;`)
 
   &lt;HOST_PORT&gt;
-          
+          The HOST port to stop publishing — this one IS the host&#x27;s, because a publish is `hostPort:containerPort` and the host side is its identity
 
 Options:
       --l18n &lt;en|pt&gt;
@@ -290,10 +290,10 @@ SEE ALSO:
 
 Arguments:
   &lt;CONTAINER&gt;
-          
+          Container the rule belongs to. Must be on the SDN (`--net &lt;network&gt;`) — a `--net host`/`none` container has no firewall to govern
 
   &lt;PORT&gt;
-          `tcp/5432`, `udp/53`, `5432` (any proto), or `tcp/*` (all ports)
+          `tcp/5432`, `udp/53`, `5432` (any proto), or `tcp/*` (all ports) — the CONTAINER&#x27;s port and never the host&#x27;s, because the DNAT already rewrote it in `prerouting`
 
 Options:
       --from &lt;FROM&gt;
@@ -335,10 +335,10 @@ SEE ALSO:
 
 Arguments:
   &lt;CONTAINER&gt;
-          
+          Container the rule belongs to. Must be on the SDN (`--net &lt;network&gt;`) — a `--net host`/`none` container has no firewall to govern
 
   &lt;PORT&gt;
-          
+          `tcp/5432`, `udp/53`, `5432` (any proto), or `tcp/*` (all ports) — the CONTAINER&#x27;s port and never the host&#x27;s, because the DNAT already rewrote it in `prerouting`
 
 Options:
       --from &lt;FROM&gt;
@@ -376,7 +376,7 @@ SEE ALSO:
 
 Arguments:
   &lt;CONTAINER&gt;
-          
+          Container to govern. Must be on the SDN (`--net &lt;network&gt;`)
 
   &lt;POLICY&gt;
           [possible values: allow, deny]
@@ -407,7 +407,7 @@ SEE ALSO:
 
 Arguments:
   &lt;CONTAINER&gt;
-          
+          Container to govern. Must be on the SDN (`--net &lt;network&gt;`)
 
   &lt;SPEC&gt;
           `hostPort:containerPort[/tcp|udp]` or just `port`

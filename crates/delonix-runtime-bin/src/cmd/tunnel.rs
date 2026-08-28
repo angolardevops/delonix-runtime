@@ -193,11 +193,13 @@ pub enum TunnelCmd {
     },
     /// Human-readable detail of one tunnel.
     Describe {
+        /// Tunnel to inspect, as shown by `net tunnel ls`.
         #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::tunnels))]
         name: String,
     },
     /// Stop and remove a tunnel.
     Rm {
+        /// Tunnel to tear down, as shown by `net tunnel ls`.
         #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::tunnels))]
         name: String,
     },

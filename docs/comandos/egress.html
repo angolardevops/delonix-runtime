@@ -199,7 +199,7 @@ SEE ALSO:
 
 Arguments:
   &lt;CONTAINER&gt;
-          
+          Container to govern. Must be on the SDN (`--net &lt;network&gt;`)
 
 Options:
       --l18n &lt;en|pt&gt;
@@ -224,10 +224,10 @@ SEE ALSO:
 
 Arguments:
   &lt;CONTAINER&gt;
-          
+          Container to govern. Must be on the SDN (`--net &lt;network&gt;`)
 
   &lt;PORT&gt;
-          `tcp/5432`, `5432` (any proto), or `*` (all ports)
+          `tcp/5432`, `5432` (any proto), or `*` (all ports) — the CONTAINER&#x27;s port, the same one the rule was written with
 
 Options:
       --l18n &lt;en|pt&gt;
@@ -257,10 +257,10 @@ SEE ALSO:
 
 Arguments:
   &lt;CONTAINER&gt;
-          
+          Container to govern. Must be on the SDN (`--net &lt;network&gt;`)
 
   &lt;PORT&gt;
-          
+          `tcp/5432`, `udp/53`, `5432` (any proto), or `tcp/*` (all ports) — the port on the DESTINATION this container is reaching for
 
 Options:
       --l18n &lt;en|pt&gt;
@@ -293,10 +293,10 @@ SEE ALSO:
 
 Arguments:
   &lt;CONTAINER&gt;
-          
+          Container to govern. Must be on the SDN (`--net &lt;network&gt;`)
 
   &lt;PORT&gt;
-          
+          `tcp/5432`, `udp/53`, `5432` (any proto), or `tcp/*` (all ports) — the port on the DESTINATION this container is reaching for
 
 Options:
       --l18n &lt;en|pt&gt;
@@ -334,7 +334,7 @@ SEE ALSO:
 
 Arguments:
   &lt;CONTAINER&gt;
-          
+          Container to govern. Must be on the SDN (`--net &lt;network&gt;`)
 
   &lt;POLICY&gt;
           [possible values: allow, deny]
@@ -366,7 +366,7 @@ SEE ALSO:
 
 Arguments:
   &lt;NETWORK&gt;
-          
+          Network whose egress this governs — the policy applies to every workload attached to it
 
   &lt;MODE&gt;
           Possible values:
@@ -406,7 +406,7 @@ SEE ALSO:
 
 Arguments:
   &lt;NETWORK&gt;
-          
+          Network whose egress this governs — the policy applies to every workload attached to it
 
   &lt;HOSTNAME&gt;
           e.g. `github.com` (matches `github.com` and `*.github.com`)
@@ -447,7 +447,7 @@ Repeatable for several hostnames.</p></div>
 
 Arguments:
   &lt;NETWORK&gt;
-          
+          Network whose egress this governs — the policy applies to every workload attached to it
 
 Options:
       --l18n &lt;en|pt&gt;
