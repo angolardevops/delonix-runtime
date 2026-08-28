@@ -276,6 +276,24 @@ diz quais são, em vez de os omitir.
 * **`cluster`, `vm`, `pod`, `workload`, `storage`, `sharevolume`, `net`** —
   a superfície ainda está a assentar. (O *schema* de `kind: Pod` é estável, ver
   acima; o que não é estável é o grupo de comandos `delonix pod`.)
+* **`backup`** — o grupo não estava declarado de nenhum dos lados, e essa
+  omissão é ela própria um defeito: quem quisesse saber se podia depender de
+  `delonix backup vm x` não tinha resposta. Fica NÃO estável enquanto os
+  arquivos ganham verbos. O **formato do arquivo** é outra coisa e tem a sua
+  própria guarda: o `backup.json` traz um número de versão e um leitor que não o
+  conheça RECUSA em vez de adivinhar uma disposição que nunca viu.
+
+  **Mudou na v0.67.0:** `delonix backup <kind> <nome>` passou a
+  `delonix backup create <kind> <nome>`, e o `delonix restore` de raiz passou a
+  `delonix backup restore <arquivo>` — sem o `<kind>` posicional, que o arquivo
+  já regista (continua a poder afirmar-se com `--kind` para que uma discordância
+  seja recusada). O agendamento saiu de flags do backup para
+  `delonix backup schedule`, com a mesma semântica: instala o temporizador **e**
+  tira o primeiro arquivo. Corte limpo, sem aliases — a forma antiga falha com
+  «unrecognized subcommand», nunca em silêncio.
+
+  **`delonix system backup` não foi tocado.** É outro âmbito — o state root
+  inteiro de um nó — e não uma segunda porta para este grupo.
 * **Tudo o que começa por `net netns`** — plumbing interno exposto por
   conveniência de depuração.
 * **O formato dos ficheiros de estado** em `$DELONIX_ROOT`. Lê-se pelo `inspect`,

@@ -9630,3 +9630,101 @@ msgstr "um Kind em vez do documento inteiro"
 
 msgid "everything here is host-free — it reads the file, not the machine"
 msgstr "tudo aqui é livre de máquina — lê o ficheiro, não o host"
+
+# ---- help: o grupo `backup` consolidado (v0.67.0) ---------------------------
+
+msgid "Archives of ONE resource (container/pod/vm/stack): create, list, inspect, restore, schedule, remove"
+msgstr "Arquivos de UM recurso (container/pod/vm/stack): create, list, inspect, restore, schedule, remove"
+
+msgid ""
+"Archives of ONE resource (container/pod/vm/stack): create, list, inspect, restore, schedule, remove.\n"
+"\n"
+"The archive carries the record and the DATA of the volumes it uses — not the image and not the rootfs, which `backup restore` derives by pulling. A VM is the exception: its overlay disk IS its state, so that one travels.\n"
+"\n"
+"For the whole node — registries, secrets, cluster PKI, the event log — the command is `delonix system backup`, which is a different scope and not a second door to this one."
+msgstr ""
+"Arquivos de UM recurso (container/pod/vm/stack): create, list, inspect, restore, schedule, remove.\n"
+"\n"
+"O arquivo leva o registo e os DADOS dos volumes que usa — não a imagem e não o rootfs, que o `backup restore` deriva por pull. A VM é a excepção: o disco overlay dela É o seu estado, logo esse viaja.\n"
+"\n"
+"Para o nó inteiro — registos, segredos, PKI de cluster, o registo de eventos — o comando é `delonix system backup`, que é outro âmbito e não uma segunda porta para este."
+
+msgid "Write an archive of one resource, now"
+msgstr "Escreve um arquivo de um recurso, agora"
+
+msgid "Keep archiving this resource on a systemd user timer"
+msgstr "Continua a arquivar este recurso num temporizador de utilizador do systemd"
+
+msgid "The archives in a directory"
+msgstr "Os arquivos numa pasta"
+
+msgid "What an archive holds, without unpacking it"
+msgstr "O que um arquivo tem dentro, sem o desempacotar"
+
+msgid "Put a resource back from an archive"
+msgstr "Repõe um recurso a partir de um arquivo"
+
+msgid "Delete an archive"
+msgstr "Apaga um arquivo"
+
+msgid "Take this many per day, keeping the newest N"
+msgstr "Tira este número por dia, guardando os N mais recentes"
+
+msgid "Which directory to read, or `volume:<name>` (default: the current directory)"
+msgstr "Que pasta ler, ou `volume:<nome>` (por omissão: a pasta actual)"
+
+msgid "Only archives of this kind"
+msgstr "Só arquivos deste kind"
+
+msgid "Only archives of this resource"
+msgstr "Só arquivos deste recurso"
+
+msgid "Refuse unless the archive holds this kind"
+msgstr "Recusa a não ser que o arquivo tenha este kind"
+
+msgid ""
+"Refuse unless the archive holds this kind.\n"
+"\n"
+"Optional because the archive already SAYS what it holds, and the old `restore <kind> <archive>` made the caller repeat it. The guard the original argued for is kept as an opt-in assertion, and the kind is always printed — so a restore never silently does something other than what was typed."
+msgstr ""
+"Recusa a não ser que o arquivo tenha este kind.\n"
+"\n"
+"Opcional porque o arquivo já DIZ o que tem, e o antigo `restore <kind> <arquivo>` obrigava quem chama a repeti-lo. A guarda que o original defendia mantém-se como afirmação opcional, e o kind é sempre impresso — logo um restore nunca faz em silêncio algo diferente do que foi escrito."
+
+# ---- manual: exemplos do grupo `backup` ------------------------------------
+
+msgid "archive one resource, now"
+msgstr "arquiva um recurso, já"
+
+msgid "what archives exist"
+msgstr "que arquivos existem"
+
+msgid "put one back"
+msgstr "repor um deles"
+
+msgid "the whole NODE instead of one resource — a different scope"
+msgstr "o NÓ inteiro em vez de um recurso — outro âmbito"
+
+msgid "what archives are here, and what each one holds"
+msgstr "que arquivos estão aqui, e o que cada um leva"
+
+msgid "the ones on the NAS"
+msgstr "os que estão no NAS"
+
+msgid "only this resource"
+msgstr "só este recurso"
+
+msgid "what is inside one, without unpacking it"
+msgstr "o que está dentro de um, sem o desempacotar"
+
+msgid "by bare name, from the directory the backups live in"
+msgstr "pelo nome nu, a partir da pasta onde os backups vivem"
+
+msgid "refuse unless it holds a VM — the archive already says, this asserts it"
+msgstr "recusa a não ser que leve uma VM — o arquivo já o diz, isto afirma-o"
+
+msgid "delete one (refuses anything this command did not write)"
+msgstr "apagar um (recusa o que não foi este comando a escrever)"
+
+msgid "from the directory the backups live in"
+msgstr "a partir da pasta onde os backups vivem"

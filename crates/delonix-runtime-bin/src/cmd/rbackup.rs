@@ -1,6 +1,9 @@
-//! `delonix backup <kind> <name>` / `delonix restore <kind> <archive>` — a
-//! backup of ONE resource, as opposed to `system backup`, which takes the whole
-//! node.
+//! `delonix backup create|schedule|list|inspect|restore|remove` — archives of
+//! ONE resource, as opposed to `system backup`, which takes the whole node.
+//!
+//! Those are two different objects, not two doors to one. ADR-0020 first said
+//! otherwise and was corrected: this group archives a container/pod/vm/stack
+//! with its volume data; `system backup` archives a node's entire state root.
 //!
 //! # What goes in the archive, and why not everything
 //!
@@ -777,8 +780,39 @@ fn write_vm_archive(
 // Commands
 // ---------------------------------------------------------------------------
 
+/// The six verbs of `delonix backup`.
+///
+/// One group, one object. Before this, a backup was reachable as `backup` and a
+/// restore as a SEPARATE top-level `restore`, and neither could answer "what
+/// archives do I have" — the operator read the directory with `ls`.
+///
+/// `system backup` is deliberately NOT folded in here, and ADR-0020 got that
+/// wrong: it listed the two as "several doors to one object". Measured, they are
+/// two different objects — this group archives ONE resource with its volume
+/// data, `system backup` archives the whole state root of a node (registries,
+/// secrets, cluster PKI, the event log). Folding them would delete a capability,
+/// not tidy one.
+#[derive(Debug, clap::Subcommand)]
+pub enum BackupCmd {
+    /// Write an archive of one resource, now.
+    Create(CreateArgs),
+    /// Keep archiving this resource on a systemd user timer.
+    Schedule(ScheduleArgs),
+    /// The archives in a directory.
+    List(ListArgs),
+    /// What an archive holds, without unpacking it.
+    Inspect(InspectArgs),
+    /// Put a resource back from an archive.
+    Restore(RestoreArgs),
+    /// Delete an archive.
+    Remove(RemoveArgs),
+}
+
+/// What `create` and `schedule` share: they archive the same way, and only
+/// differ in whether a timer is installed afterwards. Written once so the two
+/// cannot drift into taking different archives.
 #[derive(Debug, clap::Args)]
-pub struct BackupArgs {
+pub struct SubjectArgs {
     /// What to back up.
     #[arg(value_enum)]
     pub kind: Kind,
@@ -787,12 +821,6 @@ pub struct BackupArgs {
     /// Where the archive goes: a directory, or `volume:<name>` for a named volume (default: the current directory).
     #[arg(long, default_value = ".")]
     pub to: String,
-    /// Take this many per day, on a systemd user timer, keeping the newest N.
-    #[arg(long, value_name = "N")]
-    pub max_for_day: Option<u32>,
-    /// Schedule with a crontab expression instead (`"0 3 * * *"`), translated to a systemd timer.
-    #[arg(long, value_name = "EXPR", conflicts_with = "max_for_day")]
-    pub cron: Option<String>,
     /// How many archives of this resource to keep (default: 7, or `--max-for-day` when scheduling).
     #[arg(long, value_name = "N")]
     pub keep: Option<usize>,
@@ -812,12 +840,67 @@ pub struct BackupArgs {
 }
 
 #[derive(Debug, clap::Args)]
-pub struct RestoreArgs {
-    /// What to restore.
-    #[arg(value_enum)]
-    pub kind: Kind,
+pub struct CreateArgs {
+    #[command(flatten)]
+    pub subject: SubjectArgs,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct ScheduleArgs {
+    #[command(flatten)]
+    pub subject: SubjectArgs,
+    /// Take this many per day, keeping the newest N.
+    #[arg(long, value_name = "N")]
+    pub max_for_day: Option<u32>,
+    /// Schedule with a crontab expression instead (`"0 3 * * *"`), translated to a systemd timer.
+    #[arg(long, value_name = "EXPR", conflicts_with = "max_for_day")]
+    pub cron: Option<String>,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct ListArgs {
+    /// Which directory to read, or `volume:<name>` (default: the current directory).
+    #[arg(long, default_value = ".")]
+    pub from: String,
+    /// Only archives of this kind.
+    #[arg(long, value_enum)]
+    pub kind: Option<Kind>,
+    /// Only archives of this resource.
+    #[arg(long)]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct InspectArgs {
     /// The archive: a path, or the bare name of one in `--from`.
     pub archive: String,
+    /// Where to look for the archive when it is named rather than a path.
+    #[arg(long, default_value = ".")]
+    pub from: String,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct RemoveArgs {
+    /// The archive: a path, or the bare name of one in `--from`.
+    pub archive: String,
+    /// Where to look for the archive when it is named rather than a path.
+    #[arg(long, default_value = ".")]
+    pub from: String,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct RestoreArgs {
+    /// The archive: a path, or the bare name of one in `--from`.
+    pub archive: String,
+    /// Refuse unless the archive holds this kind.
+    ///
+    /// Optional because the archive already SAYS what it holds, and the old
+    /// `restore <kind> <archive>` made the caller repeat it. The guard the
+    /// original argued for is kept as an opt-in assertion, and the kind is
+    /// always printed — so a restore never silently does something other than
+    /// what was typed.
+    #[arg(long, value_enum)]
+    pub kind: Option<Kind>,
     /// Where to look for the archive when it is named rather than a path.
     #[arg(long, default_value = ".")]
     pub from: String,
@@ -829,25 +912,46 @@ pub struct RestoreArgs {
     pub dry_run: bool,
 }
 
-/// `delonix backup <kind> <name>`.
-pub fn cmd_backup(a: BackupArgs) -> Result<()> {
+/// `delonix backup <verb>`.
+pub fn cmd_backup(c: BackupCmd) -> Result<()> {
+    match c {
+        BackupCmd::Create(a) => run_archive(a.subject, None),
+        BackupCmd::Schedule(a) => {
+            // A schedule installs the timer AND takes the first archive now — a
+            // schedule whose first run is hours away leaves the operator with no
+            // backup and the impression of having one. That was the behaviour of
+            // `backup --cron` before this split, and it is preserved.
+            let calendar = match (&a.cron, a.max_for_day) {
+                (Some(expr), _) => cron_to_on_calendar(expr)?,
+                (None, Some(n)) => on_calendar_for(n)?,
+                (None, None) => {
+                    return Err(Error::Invalid(
+                        po::t("backup schedule: give --cron or --max-for-day").to_string(),
+                    ))
+                }
+            };
+            let mut subject = a.subject;
+            if subject.keep.is_none() {
+                subject.keep = a.max_for_day.map(|n| n as usize);
+            }
+            run_archive(subject, Some(calendar))
+        }
+        BackupCmd::List(a) => cmd_list(a),
+        BackupCmd::Inspect(a) => cmd_inspect(a),
+        BackupCmd::Restore(a) => cmd_restore(a),
+        BackupCmd::Remove(a) => cmd_remove(a),
+    }
+}
+
+/// Writes one archive, and installs a timer when `calendar` is given.
+fn run_archive(a: SubjectArgs, calendar: Option<String>) -> Result<()> {
     if !valid_name(&a.name) {
         return Err(Error::Invalid(po::tf(
             "backup: '{name}' is not a usable resource name",
             &[("name", &a.name)],
         )));
     }
-    // A schedule is installed and the FIRST archive is taken now — a schedule
-    // whose first run is hours away leaves the operator with no backup and the
-    // impression of having one.
-    let calendar = match (&a.cron, a.max_for_day) {
-        (Some(expr), _) => Some(cron_to_on_calendar(expr)?),
-        (None, Some(n)) => Some(on_calendar_for(n)?),
-        (None, None) => None,
-    };
-    let keep = a
-        .keep
-        .unwrap_or_else(|| a.max_for_day.unwrap_or(7) as usize);
+    let keep = a.keep.unwrap_or(7);
 
     let root = state_root();
     let dir = Dest::parse(&a.to).resolve(&root)?;
@@ -1176,26 +1280,192 @@ fn lingering_enabled() -> bool {
         .unwrap_or(false)
 }
 
-/// `delonix restore <kind> <archive>`.
-pub fn cmd_restore(a: RestoreArgs) -> Result<()> {
+/// `delonix backup restore <archive>`.
+/// Every archive in a directory, with what each one says about itself.
+///
+/// Reads `backup.json` out of each candidate rather than parsing the FILE NAME.
+/// The name is `<kind>-<name>-<stamp>.tar.gz` and a resource name may contain
+/// `-`, so the name is ambiguous to split; the archive's own record is not.
+/// It is also cheap: `backup.json` is the first entry written, so `read_meta`
+/// stops before the payload.
+fn cmd_list(a: ListArgs) -> Result<()> {
+    let root = state_root();
+    let dir = Dest::parse(&a.from).resolve(&root)?;
+
+    let mut rows: Vec<(String, Meta, u64)> = Vec::new();
+    let mut foreign = 0usize;
+    let mut entries: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+        .map_err(|e| {
+            Error::Io(std::io::Error::new(
+                e.kind(),
+                format!("{}: {e}", dir.display()),
+            ))
+        })?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.ends_with(".tar.gz"))
+                .unwrap_or(false)
+        })
+        .collect();
+    entries.sort();
+
+    for p in entries {
+        let Ok((meta, _)) = read_meta(&p) else {
+            // A `.tar.gz` this group did not write. Counted and reported at the
+            // end rather than passed over in silence: an operator looking for an
+            // archive that is not listed deserves to know one was skipped.
+            foreign += 1;
+            continue;
+        };
+        if let Some(k) = a.kind {
+            if meta.kind != k.as_str() {
+                continue;
+            }
+        }
+        if let Some(n) = &a.name {
+            if &meta.name != n {
+                continue;
+            }
+        }
+        let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+        let file = p
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_string();
+        rows.push((file, meta, size));
+    }
+
+    // By the recorded instant, not by file name: an archive copied from another
+    // host keeps the moment it was TAKEN, which is what the column claims.
+    rows.sort_by_key(|(_, m, _)| m.created_unix);
+
+    let mut t = super::output::Table::new(&["ARCHIVE", "KIND", "NAME", "CREATED", "SIZE", "HOST"]);
+    for (file, m, size) in &rows {
+        t.row(vec![
+            file.clone(),
+            m.kind.clone(),
+            m.name.clone(),
+            super::backup::timestamp(m.created_unix),
+            super::output::fmt_size(*size),
+            m.hostname.clone(),
+        ]);
+    }
+    t.print();
+    if foreign > 0 {
+        println!(
+            "{}",
+            po::tf(
+                "  ({n} other .tar.gz not written by `delonix backup`, skipped)",
+                &[("n", &foreign.to_string())],
+            )
+        );
+    }
+    Ok(())
+}
+
+/// What an archive holds, without unpacking it.
+fn cmd_inspect(a: InspectArgs) -> Result<()> {
+    let root = state_root();
+    let path = resolve_archive(&a.archive, &a.from, &root)?;
+    let (meta, _) = read_meta(&path)?;
+    // NOT `check_format` — this is the command an operator runs to find out WHY
+    // a restore refused. Refusing to describe an archive because its format is
+    // unknown would withhold exactly the field that explains the refusal.
+    let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+
+    let mut d = super::output::Describe::new();
+    d.field("Archive", path.display().to_string());
+    d.field("Kind", &meta.kind);
+    d.field("Name", &meta.name);
+    d.field("Created", super::backup::timestamp(meta.created_unix));
+    d.field("Host", &meta.hostname);
+    d.field("Size", super::output::fmt_size(size));
+    d.field(
+        "Format",
+        &if meta.format == FORMAT {
+            meta.format.to_string()
+        } else {
+            po::tf(
+                "{got} (this build reads {want} — restore it with delonix {ver})",
+                &[
+                    ("got", &meta.format.to_string()),
+                    ("want", &FORMAT.to_string()),
+                    ("ver", &meta.delonix_version),
+                ],
+            )
+        },
+    );
+    d.field("Written by", format!("delonix {}", meta.delonix_version));
+    if !meta.volumes.is_empty() {
+        d.list("Volumes", &meta.volumes);
+    }
+    if !meta.members.is_empty() {
+        d.list("Members", &meta.members);
+    }
+    if let Some(b) = &meta.vm_base_disk {
+        d.field("Base disk", b);
+    }
+    d.print();
+    Ok(())
+}
+
+/// Deletes one archive.
+///
+/// Refuses anything this group did not write, checked by reading the archive
+/// rather than by its name: `backup remove` pointed at a stray `.tar.gz` in the
+/// same directory would otherwise delete a file that has nothing to do with
+/// this engine.
+fn cmd_remove(a: RemoveArgs) -> Result<()> {
+    let root = state_root();
+    let path = resolve_archive(&a.archive, &a.from, &root)?;
+    let (meta, _) = read_meta(&path)?;
+    std::fs::remove_file(&path).map_err(|e| {
+        Error::Io(std::io::Error::new(
+            e.kind(),
+            format!("{}: {e}", path.display()),
+        ))
+    })?;
+    println!(
+        "{}",
+        po::tf(
+            "removed {path} ({kind} {name})",
+            &[
+                ("path", &path.display().to_string()),
+                ("kind", &meta.kind),
+                ("name", &meta.name),
+            ],
+        )
+    );
+    Ok(())
+}
+
+fn cmd_restore(a: RestoreArgs) -> Result<()> {
     let root = state_root();
     let path = resolve_archive(&a.archive, &a.from, &root)?;
     let (meta, _) = read_meta(&path)?;
     check_format(&meta)?;
 
-    if meta.kind != a.kind.as_str() {
-        // The kind is in the archive AND on the command line, and when they
-        // disagree one of them is a mistake. Restoring by the archive's kind
+    if let Some(want) = a.kind {
+        // Only when the caller ASSERTED a kind. It used to be positional and
+        // mandatory, with a sound reason: restoring by the archive's kind
         // regardless would mean `restore vm <a-container-archive>` silently does
-        // something else than what was typed.
-        return Err(Error::Invalid(po::tf(
-            "restore: {path} holds a {got}, not a {want}",
-            &[
-                ("path", &path.display().to_string()),
-                ("got", &meta.kind),
-                ("want", a.kind.as_str()),
-            ],
-        )));
+        // something other than what was typed. The reason is kept — the archive's
+        // kind is printed on the line below, always — but the caller is no longer
+        // made to repeat what the archive already records.
+        if meta.kind != want.as_str() {
+            return Err(Error::Invalid(po::tf(
+                "restore: {path} holds a {got}, not a {want}",
+                &[
+                    ("path", &path.display().to_string()),
+                    ("got", &meta.kind),
+                    ("want", want.as_str()),
+                ],
+            )));
+        }
     }
 
     println!(
@@ -1259,26 +1529,31 @@ fn resolve_archive(archive: &str, from: &str, root: &Path) -> Result<PathBuf> {
 }
 
 /// Reads `backup.json` without unpacking the rest.
+///
+/// Its errors say `backup:` and not `restore:`, because three verbs reach it
+/// now — `restore`, `inspect` and `remove`. A `backup remove` pointed at a
+/// stray `.tar.gz` used to answer "restore: ... failed to read entire block",
+/// naming a command the operator did not run.
 fn read_meta(path: &Path) -> Result<(Meta, ())> {
     let f = std::fs::File::open(path)
-        .map_err(|e| Error::Invalid(format!("restore: {}: {e}", path.display())))?;
+        .map_err(|e| Error::Invalid(format!("backup: {}: {e}", path.display())))?;
     let mut a = tar::Archive::new(flate2::read::GzDecoder::new(f));
     for e in a
         .entries()
-        .map_err(|e| Error::Invalid(format!("restore: {}: {e}", path.display())))?
+        .map_err(|e| Error::Invalid(format!("backup: {}: {e}", path.display())))?
     {
-        let e = e.map_err(|e| Error::Invalid(format!("restore: {}: {e}", path.display())))?;
+        let e = e.map_err(|e| Error::Invalid(format!("backup: {}: {e}", path.display())))?;
         if e.path()
             .map(|p| p.as_ref() == Path::new("backup.json"))
             .unwrap_or(false)
         {
             let m: Meta = serde_json::from_reader(e)
-                .map_err(|e| Error::Invalid(format!("restore: unreadable backup.json: {e}")))?;
+                .map_err(|e| Error::Invalid(format!("backup: unreadable backup.json: {e}")))?;
             return Ok((m, ()));
         }
     }
     Err(Error::Invalid(po::tf(
-        "restore: {path} has no backup.json — it was not written by `delonix backup`",
+        "backup: {path} has no backup.json — it was not written by `delonix backup`",
         &[("path", &path.display().to_string())],
     )))
 }
@@ -1637,5 +1912,54 @@ mod tests {
         let e = check_format(&m).unwrap_err().to_string();
         // The answer has to be IN the message: the version that wrote it.
         assert!(e.contains("9.9.9"), "{e}");
+    }
+
+    /// The six verbs the specification asks for are all reachable, and no
+    /// seventh crept in. Written against the clap tree rather than a list of
+    /// names in a comment: a verb added without a line here is the drift this
+    /// repo has paid for in `cmd/kinds.rs` more than once.
+    #[test]
+    fn the_backup_group_has_exactly_six_verbs() {
+        use clap::CommandFactory;
+        #[derive(clap::Parser)]
+        struct Probe {
+            #[command(subcommand)]
+            _a: BackupCmd,
+        }
+        let mut got: Vec<String> = Probe::command()
+            .get_subcommands()
+            .map(|c| c.get_name().to_string())
+            .filter(|n| n != "help")
+            .collect();
+        got.sort();
+        assert_eq!(
+            got,
+            vec!["create", "inspect", "list", "remove", "restore", "schedule"],
+            "the group grew or lost a verb"
+        );
+    }
+
+    /// `schedule` without a cadence is refused, not silently turned into a
+    /// plain `create`. A scheduling command that quietly does not schedule is
+    /// the accepted-and-ignored option this repo treats as worse than an error.
+    #[test]
+    fn schedule_without_a_cadence_refuses() {
+        let e = cmd_backup(BackupCmd::Schedule(ScheduleArgs {
+            subject: SubjectArgs {
+                kind: Kind::Container,
+                name: "db".into(),
+                to: ".".into(),
+                keep: None,
+                dry_run: true,
+                quiesce: false,
+                stop: false,
+            },
+            max_for_day: None,
+            cron: None,
+        }))
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("--cron"), "{e}");
+        assert!(e.contains("--max-for-day"), "{e}");
     }
 }

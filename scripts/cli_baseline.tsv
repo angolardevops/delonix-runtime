@@ -1,6 +1,11 @@
 =	api-resources
 ~	apply
-~	backup
+~	backup create
+~	backup inspect
+~	backup list
+~	backup remove
+~	backup restore
+~	backup schedule
 !	build
 ~	cluster apply
 ~	cluster create
@@ -148,7 +153,6 @@
 =	pod logs
 ~	pod ls
 ~	pod rm
-~	restore
 ~	schema print
 ~	secret apply
 =	secret create

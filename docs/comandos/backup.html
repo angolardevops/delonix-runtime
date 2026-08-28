@@ -136,7 +136,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <h5><span class='lang-pt'>Documentação</span><span class='lang-en'>Docs</span></h5>
 <a href="../index.html"><span class='lang-pt'>Início</span><span class='lang-en'>Home</span></a><a href="../cheatsheet.html"><span class='lang-pt'>Cheatsheet</span><span class='lang-en'>Cheatsheet</span></a><a href="../estrutura.html"><span class='lang-pt'>Estrutura de recursos</span><span class='lang-en'>Resource structure</span></a><a href="../kinds.html"><span class='lang-pt'>Kinds e templates</span><span class='lang-en'>Kinds &amp; templates</span></a><a href="../gitops.html"><span class='lang-pt'>GitOps e CI</span><span class='lang-en'>GitOps &amp; CI</span></a><a href="../estabilidade.html"><span class='lang-pt'>Promessa de estabilidade</span><span class='lang-en'>Stability promise</span></a><a href="../cloud.html"><span class='lang-pt'>cloud-init, cloud-img e CH</span><span class='lang-en'>cloud-init, cloud-img &amp; CH</span></a><a href="../labs.html"><span class='lang-pt'>Laboratórios</span><span class='lang-en'>Labs</span></a><a href="../guia-vm.html"><span class='lang-pt'>Guia de VMs e lab de rede</span><span class='lang-en'>VM &amp; network lab guide</span></a><a href="../arquitectura.html"><span class='lang-pt'>Arquitectura</span><span class='lang-en'>Architecture</span></a><a href="../c4.html"><span class='lang-pt'>Modelo C4 e system design</span><span class='lang-en'>C4 model &amp; system design</span></a><a href="../cri.html"><span class='lang-pt'>CRI — kubelet sem containerd</span><span class='lang-en'>CRI — kubelet without containerd</span></a><a href="../comparacao.html"><span class='lang-pt'>Delonix vs Docker vs Podman</span><span class='lang-en'>Delonix vs Docker vs Podman</span></a><a href="../tutorial-delonix-temp.html"><span class='lang-pt'>Projecto completo: Delonix Temp</span><span class='lang-en'>Full project: Delonix Temp</span></a>
 <h5><span class='lang-pt'>Referência CLI</span><span class='lang-en'>CLI reference</span></h5>
-<a href="../comandos/init.html">delonix init</a><a href="../comandos/container.html">delonix container</a><a href="../comandos/workload.html">delonix workload</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/namespace.html">delonix namespace</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/compose.html">delonix compose</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html">delonix net egress</a><a href="../comandos/httproute.html">delonix net httproute</a><a href="../comandos/tunnel.html">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix net boot</a><a href="../comandos/backup.html" class="on">delonix backup</a><a href="../comandos/restore.html">delonix restore</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a><a href="../comandos/syntax.html">delonix syntax</a><a href="../comandos/schema.html">delonix schema · explain</a>
+<a href="../comandos/init.html">delonix init</a><a href="../comandos/container.html">delonix container</a><a href="../comandos/workload.html">delonix workload</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html">delonix volumes</a><a href="../comandos/namespace.html">delonix namespace</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/compose.html">delonix compose</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html">delonix net egress</a><a href="../comandos/httproute.html">delonix net httproute</a><a href="../comandos/tunnel.html">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix net boot</a><a href="../comandos/backup.html" class="on">delonix backup</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dash</a><a href="../comandos/docker-api.html">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a><a href="../comandos/syntax.html">delonix syntax</a><a href="../comandos/schema.html">delonix schema · explain</a>
 <h5><span class='lang-pt'>Projecto</span><span class='lang-en'>Project</span></h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
@@ -157,85 +157,58 @@ um sistema de ficheiros com jornal e qualquer base de dados com write-ahead log 
 que NÃO é: a memória não é guardada, logo um processo não é retomado a meio (isso é CRIU) e uma
 aplicação que só tenha estado em RAM perde-o — <code>--stop</code> e <code>--quiesce</code> são as
 duas formas de pedir mais, e cada uma diz o que custa. O destino pode ser uma pasta ou um
-<code>volume:&lt;nome&gt;</code>, que é como o arquivo vai parar a um NAS. Sendo o motor daemonless, o agendamento instala um <b>temporizador de
+<code>volume:&lt;nome&gt;</code>, que é como o arquivo vai parar a um NAS. Sendo o motor daemonless, o <code>backup schedule</code> instala um <b>temporizador de
 utilizador do systemd</b>: o <code>--max-for-day N</code> espaça N corridas pelo dia, e o
 <code>--cron</code> traduz a expressão de crontab — recusando o que não conseguir exprimir em vez de
-aproximar.</p>
+aproximar. O <code>schedule</code> tira <b>também o primeiro arquivo, já</b>: um agendamento cuja
+primeira corrida é daqui a horas deixa quem o instalou sem backup e com a impressão de ter um.
+O <code>restore</code> desempacota para uma pasta de trabalho ANTES de tocar em seja o que for — um
+arquivo truncado custa então zero — e recusa-se enquanto o recurso estiver a correr
+(<code>--force</code> pára-o, repõe, e volta a arrancá-lo). O <code>&lt;kind&gt;</code> deixou de ser
+posicional: o arquivo já regista o que leva, e o <code>--kind</code> continua a existir para quem
+quiser que uma discordância seja recusada.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/rbackup.rs"><code>cmd/rbackup.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix backup [OPTIONS] &lt;KIND&gt; &lt;NAME&gt;
+<div class='help'><pre><code>Usage: delonix backup [OPTIONS] &lt;COMMAND&gt;
 
-Arguments:
-  &lt;KIND&gt;
-          What to back up
-          
-          [possible values: container, pod, vm, stack]
-
-  &lt;NAME&gt;
-          Its name
+Commands:
+  inspect   What an archive holds, without unpacking it
+  list      The archives in a directory
+  create    Write an archive of one resource, now
+  remove    Delete an archive
+  restore   Put a resource back from an archive
+  schedule  Keep archiving this resource on a systemd user timer
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
       --l18n &lt;en|pt&gt;
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
-      --to &lt;TO&gt;
-          Where the archive goes: a directory, or `volume:&lt;name&gt;` for a named volume (default: the current directory)
-          
-          [default: .]
-
-      --max-for-day &lt;N&gt;
-          Take this many per day, on a systemd user timer, keeping the newest N
-
-      --cron &lt;EXPR&gt;
-          Schedule with a crontab expression instead (`&quot;0 3 * * *&quot;`), translated to a systemd timer
-
-      --keep &lt;N&gt;
-          How many archives of this resource to keep (default: 7, or `--max-for-day` when scheduling)
-
-      --dry-run
-          Print what would be archived, without writing anything
-
-      --quiesce
-          Ask the guest agent to flush and freeze the filesystems first (VMs only; needs qemu-guest-agent inside the guest)
-
-      --stop
-          Stop the workload for the duration of the backup, instead of freezing it hot.
-          
-          Only worth it for an application that keeps state in memory and never writes it down: freezing gives a crash-consistent archive, which anything with a journal or a write-ahead log recovers from.
-
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
+COMMAND MAP:
+  Inspect    list · inspect
+  Configure  create · schedule · restore · remove
+
 EXAMPLES:
-  # the record and the volumes&#x27; data — not the image, which restore pulls back
-  delonix backup container db
+  # archive one resource, now
+  delonix backup create container db
 
-  # somewhere that is not here (a directory, or a named volume on a NAS)
-  delonix backup container db --to volume:nas-backups
+  # what archives exist
+  delonix backup list --from /srv/backups
 
-  # twice a day on a systemd user timer, keeping the newest two
-  delonix backup container db --max-for-day 2 --to /srv/backups
+  # put one back
+  delonix backup restore container-db-20260811-205312.tar.gz
 
-  # or on your own schedule, in crontab syntax
-  delonix backup stack loja --cron &quot;30 3 * * 1&quot; --to /srv/backups
-
-  # a RUNNING VM — the guest does not pause and its PID does not change
-  delonix backup vm dev --to /srv/backups
-
-  # guest-filesystem consistency, if qemu-guest-agent is installed in it
-  delonix backup vm dev --quiesce --to /srv/backups
-
-  # actually stop it, for an application that keeps state only in RAM
-  delonix backup container cache --stop --to /srv/backups
-
-  # see what would go in, without writing anything
-  delonix backup pod api --dry-run
+  # the whole NODE instead of one resource — a different scope
+  delonix system backup
 
 SEE ALSO:
-  delonix restore · delonix system backup · delonix volumes snapshot · delonix
-  vm snapshot
+  delonix backup create · delonix backup list · delonix backup restore ·
+  delonix system backup
 
   delonix › backup</code></pre></div>
-<h2><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h2><div class="ex"><div class="cap">O registo e os dados dos volumes, aqui mesmo</div><pre><code>delonix backup container db</code></pre></div><div class="ex"><div class="cap">Para um NAS, através de um volume nomeado</div><pre><code>delonix backup container db --to volume:nas-backups</code></pre></div><div class="ex"><div class="cap">Duas vezes por dia, guardando os dois mais recentes</div><pre><code>delonix backup container db --max-for-day 2 --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Ou no horário que quiseres, em sintaxe de crontab</div><pre><code>delonix backup stack loja --cron &quot;30 3 * * 1&quot; --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Uma stack inteira: cada membro e cada volume, o partilhado uma só vez</div><pre><code>delonix backup stack loja --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Uma VM A CORRER — o convidado não pára e o PID não muda</div><pre><code>delonix backup vm dev --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Consistência ao nível do filesystem do convidado (precisa do qemu-guest-agent lá dentro)</div><pre><code>delonix backup vm dev --quiesce --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Parar mesmo, para uma aplicação que só tem estado em RAM</div><pre><code>delonix backup container cache --stop --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Ver o que entraria, sem escrever nada</div><pre><code>delonix backup pod api --dry-run</code></pre></div>
+<h2><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h2><div class="ex"><div class="cap">O registo e os dados dos volumes, aqui mesmo</div><pre><code>delonix backup create container db</code></pre></div><div class="ex"><div class="cap">Para um NAS, através de um volume nomeado</div><pre><code>delonix backup create container db --to volume:nas-backups</code></pre></div><div class="ex"><div class="cap">Uma stack inteira: cada membro e cada volume, o partilhado uma só vez</div><pre><code>delonix backup create stack loja --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Uma VM A CORRER — o convidado não pára e o PID não muda</div><pre><code>delonix backup create vm dev --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Consistência ao nível do filesystem do convidado (precisa do qemu-guest-agent lá dentro)</div><pre><code>delonix backup create vm dev --quiesce --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Parar mesmo, para uma aplicação que só tem estado em RAM</div><pre><code>delonix backup create container cache --stop --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Ver o que entraria, sem escrever nada</div><pre><code>delonix backup create pod api --dry-run</code></pre></div><div class="ex"><div class="cap">Duas vezes por dia, guardando os dois mais recentes</div><pre><code>delonix backup schedule container db --max-for-day 2 --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Ou no horário que quiseres, em sintaxe de crontab</div><pre><code>delonix backup schedule stack loja --cron &quot;30 3 * * 1&quot; --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Que arquivos existem, e o que cada um leva</div><pre><code>delonix backup list --from /srv/backups</code></pre></div><div class="ex"><div class="cap">O que está dentro de um, sem o desempacotar</div><pre><code>delonix backup inspect container-db-20260811-205312.tar.gz --from /srv/backups</code></pre></div><div class="ex"><div class="cap">Repor os dados (recusa enquanto estiver a correr)</div><pre><code>delonix backup restore container-db-20260811-205312.tar.gz</code></pre></div><div class="ex"><div class="cap">Parar, repor e arrancar de novo</div><pre><code>delonix backup restore ./container-db-20260811-205312.tar.gz --force</code></pre></div><div class="ex"><div class="cap">Afirmar o kind, para que um arquivo trocado seja recusado</div><pre><code>delonix backup restore vm-dev-20260811-210109.tar.gz --kind vm</code></pre></div><div class="ex"><div class="cap">Apagar um arquivo (recusa o que não foi este comando a escrever)</div><pre><code>delonix backup remove container-db-20260811-205312.tar.gz --from /srv/backups</code></pre></div>
 <footer><span class='lang-pt'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</span><span class='lang-en'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.</span></footer>
 </main>
 <aside class="toc" id="pagetoc"><div class="toc-inner"><h5><span class='lang-pt'>Nesta página</span><span class='lang-en'>On this page</span></h5><nav id="toc-nav"></nav></div></aside>

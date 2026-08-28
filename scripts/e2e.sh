@@ -1292,9 +1292,9 @@ BKC="bk-$PFX"; BKV="bkvol-$PFX"
 "$BIN" container run -d --name "$BKC" -v "$BKV":/data alpine:latest sleep 300 >/dev/null 2>&1
 "$BIN" container exec "$BKC" sh -c 'echo prova > /data/f.txt' >/dev/null 2>&1
 
-check "backup --dry-run não escreve nada" ok "$BIN" backup container "$BKC" --to "$BKDIR" --dry-run
-check "backup --dry-run mesmo não escreveu" ok bash -c "[[ -z \"\$(ls -A '$BKDIR')\" ]]"
-check "backup container" ok "$BIN" backup container "$BKC" --to "$BKDIR"
+check "backup create --dry-run não escreve nada" ok "$BIN" backup create container "$BKC" --to "$BKDIR" --dry-run
+check "backup create --dry-run mesmo não escreveu" ok bash -c "[[ -z \"\$(ls -A '$BKDIR')\" ]]"
+check "backup create container" ok "$BIN" backup create container "$BKC" --to "$BKDIR"
 check "o arquivo existe" ok bash -c "ls '$BKDIR'/container-$BKC-*.tar.gz >/dev/null"
 check "o arquivo leva os dados do volume" ok bash -c \
   "tar tzf '$BKDIR'/container-$BKC-*.tar.gz | grep -q '^volumes/$BKV.tar.gz$'"
@@ -1303,10 +1303,10 @@ check "e NÃO leva o rootfs (é derivável da imagem)" ok bash -c \
 
 # Destruir para valer, e repor.
 "$BIN" container exec "$BKC" rm -f /data/f.txt >/dev/null 2>&1
-check "restore recusa-se com o container a correr" fail bash -c \
-  "'$BIN' restore container \$(ls '$BKDIR'/container-$BKC-*.tar.gz | head -1)"
-check "restore --force pára, repõe e arranca" ok bash -c \
-  "'$BIN' restore container \$(ls '$BKDIR'/container-$BKC-*.tar.gz | head -1) --force"
+check "backup restore recusa-se com o container a correr" fail bash -c \
+  "'$BIN' backup restore \$(ls '$BKDIR'/container-$BKC-*.tar.gz | head -1)"
+check "backup restore --force pára, repõe e arranca" ok bash -c \
+  "'$BIN' backup restore \$(ls '$BKDIR'/container-$BKC-*.tar.gz | head -1) --force"
 # Espera por CONDIÇÃO e não por tempo. Era `sleep 1` a seguir a um
 # `restore --force` que PÁRA e ARRANCA o container — e um segundo só chega
 # quando a máquina está folgada. Medido a 2026-08-25: falhou numa corrida e
@@ -1317,13 +1317,52 @@ check "os dados voltaram" ok bash -c \
   "for _ in \$(seq 30); do '$BIN' container exec '$BKC' cat /data/f.txt 2>/dev/null | grep -q prova && exit 0; sleep 0.2; done; exit 1"
 
 # Classes de saída: «não existe» tem de ser distinguível de «rebentou».
-check "backup de inexistente devolve 4" 4 "$BIN" backup container "nao-existe-$PFX" --to "$BKDIR"
-check "restore de arquivo inexistente devolve 4" 4 "$BIN" restore container "nao-existe-$PFX.tar.gz"
-check "restore com o kind trocado recusa" fail bash -c \
-  "'$BIN' restore vm \$(ls '$BKDIR'/container-$BKC-*.tar.gz | head -1)"
-check "--max-for-day que não divide o dia recusa" fail "$BIN" backup container "$BKC" --to "$BKDIR" --max-for-day 5
-check "--cron @daily recusa (não se aproxima)" fail "$BIN" backup container "$BKC" --to "$BKDIR" --cron "@daily"
-check "--cron com 4 campos recusa" fail "$BIN" backup container "$BKC" --to "$BKDIR" --cron "0 2 * *"
+check "backup create de inexistente devolve 4" 4 "$BIN" backup create container "nao-existe-$PFX" --to "$BKDIR"
+check "backup restore de arquivo inexistente devolve 4" 4 "$BIN" backup restore "nao-existe-$PFX.tar.gz"
+check "backup restore --kind trocado recusa" fail bash -c \
+  "'$BIN' backup restore \$(ls '$BKDIR'/container-$BKC-*.tar.gz | head -1) --kind vm"
+check "schedule --max-for-day que não divide o dia recusa" fail "$BIN" backup schedule container "$BKC" --to "$BKDIR" --max-for-day 5
+check "schedule --cron @daily recusa (não se aproxima)" fail "$BIN" backup schedule container "$BKC" --to "$BKDIR" --cron "@daily"
+check "schedule --cron com 4 campos recusa" fail "$BIN" backup schedule container "$BKC" --to "$BKDIR" --cron "0 2 * *"
+
+# Os três verbos que a consolidação trouxe, e que antes NÃO existiam: sem eles a
+# pergunta «que arquivos tenho» respondia-se com `ls`, e apagar um era `rm`.
+check "backup list mostra o arquivo" ok bash -c \
+  "'$BIN' backup list --from '$BKDIR' | grep -q '$BKC'"
+check "backup list --kind filtra" ok bash -c \
+  "'$BIN' backup list --from '$BKDIR' --kind container | grep -q '$BKC'"
+check "backup list --kind vm não traz um container" ok bash -c \
+  "! '$BIN' backup list --from '$BKDIR' --kind vm | grep -q '$BKC'"
+check "backup inspect diz o kind e o nome" ok bash -c \
+  "'$BIN' backup inspect \$(ls '$BKDIR'/container-$BKC-*.tar.gz | head -1) | grep -q '$BKC'"
+check "backup inspect nomeia os volumes que leva" ok bash -c \
+  "'$BIN' backup inspect \$(ls '$BKDIR'/container-$BKC-*.tar.gz | head -1) | grep -q '$BKV'"
+check "backup inspect de inexistente devolve 4" 4 "$BIN" backup inspect "nao-existe-$PFX.tar.gz"
+
+# A guarda que impede o `remove` de apagar um ficheiro alheio. Verifica-se pelo
+# FICHEIRO e não pelo código de saída: um `remove` que recusa e apaga na mesma
+# devolveria não-zero e teria destruído os dados à mesma.
+echo lixo | gzip > "$BKDIR/alheio.tar.gz"
+check "backup remove recusa um .tar.gz que não escrevemos" fail \
+  "$BIN" backup remove alheio.tar.gz --from "$BKDIR"
+check "e o ficheiro alheio CONTINUA lá" ok bash -c "[[ -f '$BKDIR/alheio.tar.gz' ]]"
+check "backup list conta o alheio como saltado" ok bash -c \
+  "'$BIN' backup list --from '$BKDIR' | grep -q 'skipped\|saltado'"
+rm -f "$BKDIR/alheio.tar.gz"
+
+check "backup remove apaga o nosso" ok bash -c \
+  "'$BIN' backup remove \$(basename \$(ls '$BKDIR'/container-$BKC-*.tar.gz | head -1)) --from '$BKDIR'"
+check "e o arquivo desapareceu" ok bash -c \
+  "! ls '$BKDIR'/container-$BKC-*.tar.gz >/dev/null 2>&1"
+
+# O corte limpo: a forma antiga falha ALTO, nunca em silêncio (precedente v0.30.0).
+check "o \`restore\` de raiz deixou de existir" 2 "$BIN" restore container x
+check "o \`backup <kind>\` sem verbo deixou de existir" 2 "$BIN" backup container "$BKC"
+
+# E o `system backup` NÃO foi dobrado aqui: é outro âmbito (o state root do nó),
+# e o ADR-0020 chegou a classificá-lo como uma segunda porta para este grupo.
+check "system backup continua a existir, separado" ok "$BIN" system backup --help
+check "system restore continua a existir, separado" ok "$BIN" system restore --help
 
 "$BIN" container rm -f "$BKC" >/dev/null 2>&1
 "$BIN" volumes rm "$BKV" >/dev/null 2>&1
