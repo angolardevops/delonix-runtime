@@ -2322,6 +2322,44 @@ fn cmd_build(
             manifest.replace('\'', "'\\''")
         ))],
     );
+    // ---------------------------------------------------------------------
+    //  Reinstall GRUB — the `virt-resize` above RENUMBERS the partitions
+    // ---------------------------------------------------------------------
+    // Ubuntu cloud images number the small partitions 13/14/15 ON PURPOSE, so
+    // that the root stays at `sda1`. `virt-resize` copies them into a fresh
+    // table, in sequence, and the numbering changes:
+    //
+    //     base    sda1 (root)  sda13 (boot)  sda14 (bios)  sda15 (esp)
+    //     after   sda4 (root)  sda1  (boot)  sda2  (bios)  sda3  (esp)
+    //
+    // Stage1 in the MBR survives the copy — the `eb 63 90` is still there,
+    // verified byte by byte. But GRUB's CORE lives in the BIOS-boot partition
+    // and carries an embedded block list; that partition moved from `sda14` to
+    // `sda2`. Stage1 loads, looks for the core where it no longer is, and the
+    // guest goes SILENT — libvirt says `Running`, the serial console never
+    // writes a line, and no DHCP request is ever made.
+    //
+    // MEASURED 2026-08-27, with `virt-resize` isolated from the rest of the
+    // build (just `qemu-img create` + `virt-resize --expand`, no
+    // `virt-customize`): the renumbering happens all the same. Goldens built
+    // this way did not boot, on Ubuntu 24.04 AND 26.04, and the build exited
+    // `0` — the worst possible failure mode: an artefact published, registered
+    // and useless.
+    //
+    // `virt-resize` warns about exactly this: «carefully check that the resized
+    // disk boots and works correctly».
+    //
+    // Runs last, after everything is installed, and needs no network: Ubuntu
+    // cloud images already ship `grub-install` and the `i386-pc` modules
+    // (checked on the 26.04 base), so it works under `--offline` too.
+    let ops = {
+        let mut ops = ops;
+        ops.push(CustomizeOp::RunCommand(
+            "grub-install --target=i386-pc /dev/sda && update-grub".into(),
+        ));
+        ops
+    };
+
     let mut args = customize_args(&work_qcow2, &ops);
     if offline {
         // Without this, libguestfs starts passt and the appliance waits for a DHCP
