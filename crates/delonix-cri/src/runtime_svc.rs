@@ -40,6 +40,32 @@ fn todo<T>(what: &str) -> Result<Response<T>, Status> {
 
 /// Runs a BLOCKING operation (fs + shell-out to `delonix`) outside the async
 /// runtime — otherwise `clone`/`run` would stall the Tokio workers.
+/// What the runtime has to say when the kubelet hands it a pod CIDR.
+///
+/// PURE, and separate from the handler, so the three cases are a data test —
+/// the same reason `should_signal` and `reconcile::plan` are pure. The case
+/// that matters is [`NotHonoured`](PodCidrVerdict::NotHonoured): before this
+/// existed the method returned `Ok(())` for it, which reads as "applied".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PodCidrVerdict {
+    /// The kubelet said nothing (empty CIDR) — nothing to report.
+    Nothing,
+    /// CNI is in charge of addressing, so the plugin's own config carries the
+    /// subnet. Ignoring the CIDR here is what containerd and CRI-O do too.
+    DelegatedToCni,
+    /// Native SDN: the addresses will NOT come from this range, and whoever
+    /// deployed the node should hear it.
+    NotHonoured,
+}
+
+fn pod_cidr_verdict(cidr: &str, cni_enabled: bool) -> PodCidrVerdict {
+    match (cidr.trim().is_empty(), cni_enabled) {
+        (true, _) => PodCidrVerdict::Nothing,
+        (false, true) => PodCidrVerdict::DelegatedToCni,
+        (false, false) => PodCidrVerdict::NotHonoured,
+    }
+}
+
 async fn blocking<T, F>(f: F) -> Result<Response<T>, Status>
 where
     T: Send + 'static,
@@ -416,10 +442,49 @@ impl RuntimeService for DelonixRuntime {
         let (base, filter) = (self.base.clone(), r.into_inner().filter);
         blocking(move || lifecycle::list_pod_sandbox_stats(&base, filter)).await
     }
+    /// The kubelet hands the runtime the cluster's pod CIDR once, at startup.
+    ///
+    /// **This runtime does not allocate from it, and the answer depends on the
+    /// mode** — which is why the old bare `Ok(())` was wrong. It was
+    /// indistinguishable from "applied", and this method exists precisely to
+    /// tell the runtime something about addressing:
+    ///
+    /// * **With CNI** (`DELONIX_CNI=1` + a conflist) the addresses come from the
+    ///   plugin chain — Calico, Flannel, Cilium — whose own config already
+    ///   carries the subnet. Ignoring the CIDR here is exactly what containerd
+    ///   and CRI-O do, and it is correct.
+    /// * **On the native SDN** the addresses come from `delonix-net`'s IPAM, so
+    ///   a CIDR the kubelet believes in is NOT the one the pods get. That is a
+    ///   real divergence, and it now says so out loud instead of returning
+    ///   success over it.
+    ///
+    /// It still answers `Ok`: the kubelet calls this during startup and several
+    /// versions treat an error as fatal, so failing closed here would refuse to
+    /// serve a node over something that is correct in the CNI case. Explicit
+    /// warning rather than silence — the other half of the same rule.
     async fn update_runtime_config(
         &self,
-        _r: Request<UpdateRuntimeConfigRequest>,
+        r: Request<UpdateRuntimeConfigRequest>,
     ) -> Result<Response<UpdateRuntimeConfigResponse>, Status> {
+        let cidr = r
+            .into_inner()
+            .runtime_config
+            .and_then(|c| c.network_config)
+            .map(|n| n.pod_cidr)
+            .unwrap_or_default();
+        match pod_cidr_verdict(&cidr, delonix_net::cni::enabled_conf().is_some()) {
+            PodCidrVerdict::Nothing => {}
+            PodCidrVerdict::DelegatedToCni => tracing::info!(
+                pod_cidr = %cidr,
+                "cri: pod CIDR noted; addressing comes from the CNI plugin chain"
+            ),
+            PodCidrVerdict::NotHonoured => tracing::warn!(
+                pod_cidr = %cidr,
+                "cri: pod CIDR IGNORED — this node runs the native SDN and allocates \
+                 from delonix-net's IPAM, so pod addresses will not come from this \
+                 range; set DELONIX_CNI=1 with a conflist to use the cluster's"
+            ),
+        }
         Ok(Response::new(UpdateRuntimeConfigResponse {}))
     }
     async fn checkpoint_container(
@@ -638,5 +703,42 @@ mod tests {
         // A correr: pronta, haja workloads ou não.
         assert!(super::network_ready_rootless(true, 0));
         assert!(super::network_ready_rootless(true, 3));
+    }
+}
+
+/// The pod CIDR the kubelet hands over is answered by mode, not by silence.
+/// This module fails if `update_runtime_config` goes back to a bare `Ok(())`.
+#[cfg(test)]
+mod tests_pod_cidr_verdict {
+    use super::{pod_cidr_verdict, PodCidrVerdict};
+
+    /// The finding: on the native SDN the CIDR is not honoured, and returning
+    /// success over it was indistinguishable from applying it.
+    #[test]
+    fn native_sdn_says_it_is_not_honoured() {
+        assert_eq!(
+            pod_cidr_verdict("10.244.1.0/24", false),
+            PodCidrVerdict::NotHonoured
+        );
+    }
+
+    /// With CNI the plugin chain owns addressing — same answer containerd gives,
+    /// and not a warning, because nothing is wrong.
+    #[test]
+    fn with_cni_it_is_delegated() {
+        assert_eq!(
+            pod_cidr_verdict("10.244.1.0/24", true),
+            PodCidrVerdict::DelegatedToCni
+        );
+    }
+
+    /// An empty CIDR is the kubelet saying nothing. Warning about it would train
+    /// whoever reads the logs to ignore the warning that matters.
+    #[test]
+    fn an_empty_cidr_says_nothing() {
+        for empty in ["", "   "] {
+            assert_eq!(pod_cidr_verdict(empty, false), PodCidrVerdict::Nothing);
+            assert_eq!(pod_cidr_verdict(empty, true), PodCidrVerdict::Nothing);
+        }
     }
 }
