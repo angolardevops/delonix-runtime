@@ -9828,3 +9828,40 @@ msgstr "para um script ou um health check"
 
 msgid "only the address registry, when chasing a leak"
 msgstr "só o registo de endereços, a perseguir uma fuga"
+
+# --- dashboard e completion shell|editor (CLI-5 B2) ---
+msgid "The resource dashboard — a TUI, a snapshot, or JSON"
+msgstr "O painel de recursos — um TUI, um snapshot, ou JSON"
+
+msgid "What another program needs to understand this CLI and its files"
+msgstr "O que outro programa precisa de saber sobre esta CLI e os seus ficheiros"
+
+msgid "Print the shell autocompletion script (bash/zsh/fish/...)"
+msgstr "Imprime o script de autocompletar da shell (bash/zsh/fish/...)"
+
+msgid "VMfile syntax highlighting for an editor (vim/vscode)"
+msgstr "Realce de sintaxe do VMfile para um editor (vim/vscode)"
+
+msgid "what a shell needs to complete this CLI"
+msgstr "o que uma shell precisa para completar esta CLI"
+
+msgid "what an editor needs to colour a VMfile"
+msgstr "o que um editor precisa para colorir um VMfile"
+
+msgid "bash, into the user's own completion directory"
+msgstr "bash, para o directório de completions do próprio utilizador"
+
+msgid "zsh, into a directory already on your fpath"
+msgstr "zsh, para um directório já no teu fpath"
+
+msgid "VMfile highlighting for vim/neovim"
+msgstr "realce de VMfile para vim/neovim"
+
+msgid "the same, written into an extension directory"
+msgstr "o mesmo, escrito para um directório de extensão"
+
+msgid "Runtime summary/KPI dashboard (interactive htop-style TUI).\n\nGlobal, or per group (`container dash`, `vm dash`, ...). Renamed from `dash` (§22): the group is declared NOT stable, and an old spelling that keeps working is one nobody migrates away from — `delonix dash` now fails loudly instead of quietly staying the habit."
+msgstr "Painel de resumo/KPI do motor (TUI interactivo, estilo htop).\n\nGlobal, ou por grupo (`container dash`, `vm dash`, ...). Renomeado de `dash` (§22): o grupo está declarado NÃO estável, e uma grafia antiga que continua a funcionar é uma de que ninguém migra — o `delonix dash` passa a falhar alto em vez de ficar em silêncio como hábito."
+
+msgid "What another program needs to understand this CLI and its files.\n\n`syntax` folded in here (§21): both arms answer the same question — what a shell or an editor has to be told — and having them under two roofs meant nobody looking for one ever found the other."
+msgstr "O que outro programa precisa de saber sobre esta CLI e os seus ficheiros.\n\nO `syntax` dobrou-se aqui (§21): os dois braços respondem à mesma pergunta — o que é preciso dizer a uma shell ou a um editor — e tê-los sob dois tectos fazia com que quem procurava um nunca encontrasse o outro."
