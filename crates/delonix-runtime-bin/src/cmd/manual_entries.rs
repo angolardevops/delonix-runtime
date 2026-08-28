@@ -500,7 +500,7 @@ pub static ENTRIES: &[Entry] = &[
             ("the stable half, for automation (ADR-0005)", "delonix api-resources -o json"),
             ("what a Kind lowers to — why `kind: Egress` never shows up as `Egress`", "delonix api-resources | grep -- '->'"),
         ],
-        see_also: &["explain", "schema print", "stack plan", "stack apply"],
+        see_also: &["explain", "manifest schema", "stack plan", "stack apply"],
     },
     Entry {
         path: "apply",
@@ -601,7 +601,7 @@ pub static ENTRIES: &[Entry] = &[
             ("drill into one field instead of reading the whole Kind", "delonix explain Container.ports"),
             ("a nested field of a pod member", "delonix explain Pod.containers.image"),
         ],
-        see_also: &["schema print", "stack validate", "stack apply"],
+        see_also: &["manifest schema", "stack validate", "stack apply"],
     },
     Entry {
         path: "image",
@@ -1600,24 +1600,6 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["pod describe", "pod logs", "container ps"],
     },
     Entry {
-        path: "schema",
-        group: "",
-        examples: &[
-            ("the schema generated from the code — point an editor at it and the manifest completes as you type", "delonix schema print > delonix.schema.json"),
-            ("one Kind only", "delonix schema print --kind Container"),
-        ],
-        see_also: &["schema print", "explain", "stack validate", "stack apply"],
-    },
-    Entry {
-        path: "schema print",
-        group: "Inspect",
-        examples: &[
-            ("the whole schema, ready for `# yaml-language-server: $schema=./delonix.schema.json`", "delonix schema print > delonix.schema.json"),
-            ("just one Kind's spec, when that is all you are editing", "delonix schema print --kind Pod"),
-        ],
-        see_also: &["explain", "stack validate", "stack apply"],
-    },
-    Entry {
         path: "secret",
         group: "",
         examples: &[
@@ -1688,7 +1670,7 @@ pub static ENTRIES: &[Entry] = &[
             ("create the `kind: Secret` documents of the manifest in this directory", "delonix secret apply"),
             ("from a file of your own, so the vault is provisioned from git like everything else", "delonix secret apply -f examples/secret.yaml"),
         ],
-        see_also: &["secret create", "stack apply", "schema print"],
+        see_also: &["secret create", "stack apply", "manifest schema"],
     },
     Entry {
         path: "secret rotate-key",
@@ -1801,7 +1783,7 @@ pub static ENTRIES: &[Entry] = &[
             ("what would change, before anything changes", "delonix stack plan -f prod.yaml"),
             ("a complete project, files already filled in", "delonix stack init -t python"),
         ],
-        see_also: &["container apply", "compose up", "cluster apply", "schema print"],
+        see_also: &["container apply", "compose up", "cluster apply", "manifest schema"],
     },
     Entry {
         path: "stack apply",
@@ -1910,7 +1892,7 @@ pub static ENTRIES: &[Entry] = &[
             ("resolve every cross-reference before an apply that has no rollback", "delonix stack validate -f prod.yaml"),
             ("the manifest in this directory, as a pre-commit check", "delonix stack validate"),
         ],
-        see_also: &["stack plan", "stack apply", "schema print", "explain"],
+        see_also: &["stack plan", "stack apply", "manifest schema", "explain"],
     },
     Entry {
         path: "storage",

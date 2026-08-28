@@ -163,15 +163,6 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::sharevolume::ShareVolumeCmd,
     },
-    /// JSON Schema of the manifest, GENERATED from the code (ADR-0007).
-    ///
-    /// Point an editor at it with one comment at the top of the manifest and you
-    /// get completion, type checking and the field docs while you type:
-    /// `# yaml-language-server: $schema=./delonix.schema.json`
-    Schema {
-        #[command(subcommand)]
-        action: cmd::schema::SchemaCmd,
-    },
     /// Field reference for a Kind, `kubectl explain` style.
     ///
     /// From the SAME generated schema, so it cannot drift from the code.
@@ -494,7 +485,6 @@ fn run() -> Result<()> {
         Cmd::Secret { action } => cmd::secret::run(action),
         Cmd::Storage { action } => cmd::storage::run(action),
         Cmd::Sharevolume { action } => cmd::sharevolume::run(action),
-        Cmd::Schema { action } => cmd::schema::run(action),
         Cmd::Explain { path } => cmd::schema::explain(&path),
         Cmd::ApiResources { output } => cmd::resource::api_resources(output),
         Cmd::Apply {

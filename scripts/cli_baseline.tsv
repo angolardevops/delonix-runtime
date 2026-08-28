@@ -150,7 +150,6 @@
 =	pod logs
 ~	pod ls
 ~	pod rm
-~	schema print
 ~	secret apply
 =	secret create
 ~	secret inspect
