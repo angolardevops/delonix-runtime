@@ -35,6 +35,8 @@ pub(crate) const GET_ROUTES: &[&str] = &[
     kinds::CLUSTER,
     kinds::GATEWAY,
     kinds::HTTP_ROUTE,
+    kinds::NETWORK_ROUTE,
+    kinds::FIREWALL_POLICY,
 ];
 
 /// Kinds whose group has no `-o json` today. Listed rather than discovered,
@@ -48,6 +50,7 @@ pub(crate) const DESCRIBE_ROUTES: &[&str] = &[
     kinds::VM,
     kinds::IMAGE,
     kinds::GATEWAY,
+    kinds::SECRET,
 ];
 pub(crate) const DELETE_ROUTES: &[&str] = &[
     kinds::POD,
@@ -163,6 +166,21 @@ pub(crate) fn get(kind: &str, names: &[String], output: OutputFormat) -> Result<
         k if k == kinds::HTTP_ROUTE => {
             super::httproute::run(super::httproute::HttpRouteCmd::Ls { output })
         }
+        // The route group's own listing, which already shows both the record and
+        // the live map. A route has no name someone chose — the PAIR is its
+        // identity — so there is nothing else `get` could key on.
+        k if k == kinds::NETWORK_ROUTE => super::netroute::cmd_ls(output),
+        // Inbound state of EVERY container — `ingress ls` with no container
+        // already walks the store, so this routes rather than inventing a second
+        // listing. Only the inbound half: a `NetworkPolicy` document declares one
+        // direction, `egress ls` answers the other, and folding both into one
+        // table would print two rows per container for one Kind.
+        k if k == kinds::FIREWALL_POLICY => {
+            super::firewall::run_ingress(super::firewall::IngressCmd::Ls {
+                container: None,
+                output,
+            })
+        }
         // `ports` stays FALSE: `vm ls --ports` does real network I/O against
         // every VM, and a `get` must not probe the network unasked.
         k if k == kinds::VM => super::vm::run(super::vm::VmCmd::Ls {
@@ -212,6 +230,21 @@ pub(crate) fn describe(kind: &str, names: &[String]) -> Result<()> {
         k if k == kinds::GATEWAY => {
             for name in names {
                 super::tunnel::run(super::tunnel::TunnelCmd::Describe { name: name.clone() })?;
+            }
+            Ok(())
+        }
+        // `secret` has no `Describe` of its own — `inspect` IS the detail view
+        // (keys, never values, unless `--reveal`), same shape `kubectl describe
+        // secret` settles for. The generic verb never reveals: a caller who
+        // wants values types `secret inspect --reveal` on purpose, not by
+        // routing through a verb that does not carry the flag.
+        k if k == kinds::SECRET => {
+            for name in names {
+                super::secret::run(super::secret::SecretCmd::Inspect {
+                    name: name.clone(),
+                    reveal: false,
+                    output: OutputFormat::Table,
+                })?;
             }
             Ok(())
         }
