@@ -16,7 +16,8 @@
 =	cluster load
 ~	cluster ls
 ~	cluster prune
-=	completion
+~	completion editor
+~	completion shell
 =	compose config
 =	compose down
 =	compose logs
@@ -51,7 +52,7 @@
 =	container unpause
 =	container update
 =	container wait
-~	dash
+~	dashboard
 ~	delete
 ~	describe
 =	explain
@@ -188,7 +189,6 @@
 ~	storage inspect
 ~	storage ls
 ~	storage rm
-~	syntax
 ~	system backup
 =	system df
 =	system doctor

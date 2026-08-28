@@ -134,11 +134,29 @@ pub static ENTRIES: &[Entry] = &[
         path: "completion",
         group: "",
         examples: &[
-            ("bash, into the user's own completion directory", "delonix completion bash > ~/.local/share/bash-completion/completions/delonix"),
-            ("zsh, into a directory already on your fpath", "delonix completion zsh > ~/.zfunc/_delonix"),
-            ("fish", "delonix completion fish > ~/.config/fish/completions/delonix.fish"),
+            ("what a shell needs to complete this CLI", "delonix completion shell bash"),
+            ("what an editor needs to colour a VMfile", "delonix completion editor vim"),
         ],
-        see_also: &["version", "init", "dash"],
+        see_also: &["version", "init", "dashboard"],
+    },
+    Entry {
+        path: "completion shell",
+        group: "completion",
+        examples: &[
+            ("bash, into the user's own completion directory", "delonix completion shell bash > ~/.local/share/bash-completion/completions/delonix"),
+            ("zsh, into a directory already on your fpath", "delonix completion shell zsh > ~/.zfunc/_delonix"),
+            ("fish", "delonix completion shell fish > ~/.config/fish/completions/delonix.fish"),
+        ],
+        see_also: &["completion editor", "man"],
+    },
+    Entry {
+        path: "completion editor",
+        group: "completion",
+        examples: &[
+            ("VMfile highlighting for vim/neovim", "delonix completion editor vim"),
+            ("the same, written into an extension directory", "delonix completion editor vscode --dir ~/.vscode/extensions/delonix"),
+        ],
+        see_also: &["completion shell", "man"],
     },
     Entry {
         path: "compose",
@@ -462,15 +480,15 @@ pub static ENTRIES: &[Entry] = &[
             ("interactive dashboard of the containers", "delonix container dash"),
             ("one text snapshot, for a script or CI", "delonix container dash --once"),
         ],
-        see_also: &["dash", "container stats", "container ps"],
+        see_also: &["dashboard", "container stats", "container ps"],
     },
     Entry {
-        path: "dash",
+        path: "dashboard",
         group: "",
         examples: &[
-            ("an htop-style live view of containers, VMs, networks and volumes", "delonix dash"),
-            ("one text snapshot and exit — the default when stdout is not a terminal", "delonix dash --once"),
-            ("one JSON snapshot, for a script or a Grafana JSON datasource", "delonix dash --json"),
+            ("an htop-style live view of containers, VMs, networks and volumes", "delonix dashboard"),
+            ("one text snapshot and exit — the default when stdout is not a terminal", "delonix dashboard --once"),
+            ("one JSON snapshot, for a script or a Grafana JSON datasource", "delonix dashboard --json"),
         ],
         see_also: &["container dash", "vm dash", "system info", "serve api"],
     },
@@ -749,7 +767,7 @@ pub static ENTRIES: &[Entry] = &[
             ("one snapshot, for a log or a terminal that is not a TTY", "delonix image dash --once"),
             ("the same numbers as JSON, for a script or a Grafana datasource", "delonix image dash --json"),
         ],
-        see_also: &["image ls", "dash", "system df"],
+        see_also: &["image ls", "dashboard", "system df"],
     },
     Entry {
         path: "image build",
@@ -1958,16 +1976,6 @@ pub static ENTRIES: &[Entry] = &[
             ("JSON, to alert on a share filling up", "delonix storage dash --json"),
         ],
         see_also: &["dash", "storage ls", "system df"],
-    },
-    Entry {
-        path: "syntax",
-        group: "",
-        examples: &[
-            ("vim/neovim — the syntax AND the ftdetect that activates it", "delonix syntax vim --dir ~/.vim"),
-            ("VS Code, as an extension directory (active in the next window)", "delonix syntax vscode --dir ~/.vscode/extensions/delonix.vmfile-0.1.0"),
-            ("just the grammar, to place it yourself", "delonix syntax vim > ~/.vim/syntax/vmfile.vim"),
-        ],
-        see_also: &["vm init", "vm build", "completion"],
     },
     Entry {
         path: "system",

@@ -54,7 +54,30 @@ struct Cli {
 // flags) — same justification as the `#[allow]` in `cmd::vm::VmCmd`: a CLI enum
 // parsed once per invocation, not a hot path.
 #[allow(clippy::large_enum_variant)]
+/// The two things a program can be told about this CLI: how to complete its
+/// commands, and how to colour its files.
 #[derive(Subcommand)]
+enum CompletionCmd {
+    /// Print the shell autocompletion script (bash/zsh/fish/...).
+    Shell {
+        /// Target shell.
+        shell: CompShell,
+    },
+    /// VMfile syntax highlighting for an editor (vim/vscode).
+    Editor {
+        /// Target editor.
+        editor: SyntaxEditor,
+        /// Write the editor's files into this directory instead of printing one to stdout.
+        #[arg(value_hint = clap::ValueHint::DirPath, long)]
+        dir: Option<std::path::PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+// Subcommand structs vary wildly in size by design (Container carries the
+// biggest arg surface in the CLI) — boxing them would ripple through every
+// match arm that destructures `action` by value, for no runtime benefit.
+#[allow(clippy::large_enum_variant)]
 enum Cmd {
     /// Start the right project for THIS directory.
     ///
@@ -317,8 +340,11 @@ enum Cmd {
     },
     /// Runtime summary/KPI dashboard (interactive htop-style TUI).
     ///
-    /// Global, or per group (`container dash`, `vm dash`, ...).
-    Dash {
+    /// Global, or per group (`container dash`, `vm dash`, ...). Renamed from
+    /// `dash` (§22): the group is declared NOT stable, and an old spelling that
+    /// keeps working is one nobody migrates away from — `delonix dash` now fails
+    /// loudly instead of quietly staying the habit.
+    Dashboard {
         /// Print ONE text snapshot and exit (no TUI) — for scripts/CI; the default when stdout is not a terminal.
         #[arg(long)]
         once: bool,
@@ -326,18 +352,14 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
-    /// Print the shell autocompletion script (bash/zsh/fish/...).
+    /// What another program needs to understand this CLI and its files.
+    ///
+    /// `syntax` folded in here (§21): both arms answer the same question — what
+    /// a shell or an editor has to be told — and having them under two roofs
+    /// meant nobody looking for one ever found the other.
     Completion {
-        /// Target shell.
-        shell: CompShell,
-    },
-    /// VMfile syntax highlighting for an editor (vim/vscode).
-    Syntax {
-        /// Target editor.
-        editor: SyntaxEditor,
-        /// Write the editor's files into this directory instead of printing one to stdout.
-        #[arg(value_hint = clap::ValueHint::DirPath, long)]
-        dir: Option<std::path::PathBuf>,
+        #[command(subcommand)]
+        action: CompletionCmd,
     },
     /// Manual pages in roff, generated from this binary — one per command.
     Man(cmd::man::ManArgs),
@@ -544,9 +566,11 @@ fn run() -> Result<()> {
         Cmd::Net { action } => cmd::net::run(action),
         Cmd::Serve { action } => cmd::serve::run(action),
         Cmd::IngressProxy { config } => cmd::ingress_proxy::run(&config),
-        Cmd::Dash { once, json } => cmd::dash::run(cmd::dash::DashScope::Global, once, json),
-        Cmd::Completion { shell } => cmd_completion(shell),
-        Cmd::Syntax { editor, dir } => cmd_syntax(editor, dir.as_deref()),
+        Cmd::Dashboard { once, json } => cmd::dash::run(cmd::dash::DashScope::Global, once, json),
+        Cmd::Completion { action } => match action {
+            CompletionCmd::Shell { shell } => cmd_completion(shell),
+            CompletionCmd::Editor { editor, dir } => cmd_syntax(editor, dir.as_deref()),
+        },
         Cmd::Man(args) => cmd::man::run(args),
     }
 }
