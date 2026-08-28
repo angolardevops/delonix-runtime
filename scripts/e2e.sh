@@ -858,6 +858,24 @@ check "stack history --show devolve o manifesto aplicado" ok \
 # Uma revisão que não existe é «não existe» (classe 4), não um 1 genérico.
 check "stack history --show inexistente devolve 4" 4 \
   "$BIN" stack history -f "$HWORK/hist.yaml" --show 999
+# Um apply que NÃO PEDE NADA não gasta uma revisão. A retenção é 20 e é o
+# escritor que poda, por isso re-aplicar um manifesto inalterado empurrava para
+# fora a revisão que mudou alguma coisa — medido antes da correcção: quatro
+# applies do mesmo ficheiro davam quatro revisões, com `plan
+# --detailed-exitcode` a responder 0 o tempo todo. Um alvo GitOps a reconciliar
+# de minuto a minuto (ADR-0021) apagava o próprio histórico em vinte minutos.
+#
+# O check compara a contagem ANTES e DEPOIS de três applies. Um check pelo rc do
+# `apply` passaria com o defeito inteiro lá dentro, e um que só olhasse para o
+# fim não distinguiria «não gravou» de «gravou e podou».
+check "três applies sem alterações não gastam revisões" ok \
+  bash -c "n() { '$BIN' stack history -f '$HWORK/hist.yaml' -o json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))'; }; \
+    before=\$(n); for i in 1 2 3; do '$BIN' stack apply -f '$HWORK/hist.yaml' >/dev/null 2>&1; done; \
+    after=\$(n); test \"\$before\" = \"\$after\""
+# ...e o plano confirma que era mesmo um no-op: sem isto, o check acima também
+# passaria num motor que simplesmente parou de gravar revisões de todo.
+check "e o plano confirma que não havia nada a mudar" ok \
+  "$BIN" stack plan -f "$HWORK/hist.yaml" --detailed-exitcode
 # `stack apply --name` — o nome que se destrói tem de poder ser CRIADO.
 #
 # Medido a 2026-08-25: `plan`, `destroy`, `prune`, `history` e `rollback`

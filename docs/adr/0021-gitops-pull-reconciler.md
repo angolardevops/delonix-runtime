@@ -277,7 +277,11 @@ Two candidate fixes, and this ADR proposes the first:
   record of what was *asked for*; a no-op apply asked for nothing new, and the
   previous revision already says what the desired state is. This is a change to
   ADR-0019's implementation, not to its decision, and it makes the history
-  useful for hand-run applies too.
+  useful for hand-run applies too. **Done** — landed ahead of the rest of this
+  ADR, because it improves `stack history` today for anyone applying by hand,
+  with no GitOps involved. The predicate is `Action::is_change`, the same one
+  behind `--detailed-exitcode`, so «a revision was written» and «the plan
+  reported changes» cannot drift apart. ADR-0019 carries the amendment note.
 - Make `KEEP` configurable. Rejected for the reason ADR-0019 already gives: a
   knob invites the question of what zero means, and the underlying problem is
   that no-ops are recorded at all.
