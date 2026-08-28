@@ -535,7 +535,7 @@ pub(crate) fn honors_namespace(kind: &str) -> bool {
 pub(crate) fn namespaced_kinds() -> Vec<&'static str> {
     let mut out: Vec<&'static str> = all()
         .filter(|f| f.namespaced != Namespaced::Never)
-        .filter(|f| !matches!(f.form, Form::Deprecated(_)))
+        .filter(|f| !matches!(f.form, Form::Sunset(_)))
         .map(|f| f.kind)
         .collect();
     out.sort_unstable();
@@ -572,7 +572,7 @@ mod tests {
             );
         }
         for f in all() {
-            if f.namespaced != Namespaced::Never && !matches!(f.form, Form::Deprecated(_)) {
+            if f.namespaced != Namespaced::Never && !matches!(f.form, Form::Sunset(_)) {
                 assert!(
                     got.contains(&f.kind),
                     "{} honors the namespace and the message never names it",
