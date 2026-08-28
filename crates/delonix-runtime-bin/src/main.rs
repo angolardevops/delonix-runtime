@@ -562,9 +562,7 @@ fn run() -> Result<()> {
         Cmd::Net { action } => cmd::net::run(action),
         Cmd::Serve { action } => cmd::serve::run(action),
         Cmd::IngressProxy { config } => cmd::ingress_proxy::run(&config),
-        Cmd::Dashboard { once, json } => {
-            cmd::dash::run(cmd::dash::DashScope::Global, once, json)
-        }
+        Cmd::Dashboard { once, json } => cmd::dash::run(cmd::dash::DashScope::Global, once, json),
         Cmd::Completion { action } => match action {
             CompletionCmd::Shell { shell } => cmd_completion(shell),
             CompletionCmd::Editor { editor, dir } => cmd_syntax(editor, dir.as_deref()),
