@@ -1432,6 +1432,22 @@ fn apply_docs(
     // itself fail on a manifest the engine still accepts, and a revision is a
     // record — it never gets to stop an apply (ADR-0019).
     let rendered = manifest::render_with_defaults(docs).ok();
+    // Whether this apply asked the machine for anything. A revision is a record
+    // of what was ASKED FOR (ADR-0019), and an apply whose plan is entirely
+    // `NoOp` asked for nothing the previous revision does not already say.
+    //
+    // Recording those was destroying the history it exists to keep: retention is
+    // 20, pruned by the writer, so twenty re-applies of an unchanged manifest
+    // scroll the apply that DID change something off the end. Measured on a
+    // scratch root before this fix — four applies of one manifest wrote four
+    // revisions, with `plan --detailed-exitcode` answering 0 the whole time. A
+    // GitOps target reconciling on a 60s timer (ADR-0021) would erase its own
+    // useful history in twenty minutes.
+    //
+    // The predicate is `Action::is_change` and not a second one written here: it
+    // already decides the `--detailed-exitcode` contract, so «a revision was
+    // written» and «the plan reported changes» cannot drift apart.
+    let asked_for_something = changes.iter().any(|c| c.action.is_change());
     let counts: std::collections::BTreeMap<String, usize> = reconcile::summary(&changes)
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))
@@ -1444,6 +1460,10 @@ fn apply_docs(
         // question is what the machine was asked to do, not what it managed to
         // do — a failed apply that created half a stack is precisely the
         // revision someone needs to read.
+        // A failure is recorded whatever the plan said — including a plan with
+        // no changes at all, which can still die in a layer. After an incident
+        // the question is what the machine was asked to do; «nothing, and it
+        // broke anyway» is an answer worth keeping.
         if let Some(r) = &rendered {
             super::revision::record(
                 &super::util::state_root(),
@@ -1474,7 +1494,7 @@ fn apply_docs(
         prune(&changes)?;
     }
 
-    if let Some(r) = &rendered {
+    if let (true, Some(r)) = (asked_for_something, &rendered) {
         super::revision::record(
             &super::util::state_root(),
             &stack,

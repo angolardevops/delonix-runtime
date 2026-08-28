@@ -62,6 +62,14 @@ directory. A gate asserts this rather than the ADR asserting it.
 **A stack records one revision per apply, under
 `<root>/stacks/<stack>/revisions/`.**
 
+> **Amended by [ADR-0021](0021-gitops-pull-reconciler.md), implemented:** «per
+> apply» became «per apply that ASKED FOR SOMETHING». An apply whose plan is
+> entirely `NoOp` no longer spends a revision — it asked for nothing the previous
+> revision does not already say, and with retention at 20 those recordings were
+> destroying the history this ADR exists to keep. A FAILED apply is still
+> recorded whatever its plan said. The decision below is unchanged; only its
+> granularity is.
+
 ### What a revision holds
 
 The **rendered manifest** — the same YAML `stack apply --dry-run` prints, with
