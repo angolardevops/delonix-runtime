@@ -111,10 +111,10 @@ fn render(cmd: &clap::Command, path: &str) -> String {
         env!("DELONIX_BUILD_DATE"),
         env!("CARGO_PKG_VERSION"),
         // Through `esc` like everything else: under `--l18n=pt` this is
-        // "Manual do Delonix Runtime", and the `ã` is exactly the kind of
+        // "Manual do Delonix Engine", and the `ã` is exactly the kind of
         // character that would reach troff raw — in the page header, on every
         // single page.
-        esc(po::t("Delonix Runtime Manual")),
+        esc(po::t("Delonix Engine Manual")),
     ));
 
     o.push_str(".SH NAME\n");

@@ -4755,8 +4755,9 @@ fn shared_account_steps(
 /// `delonix` engine binary itself plus everything `scripts/install.sh`
 /// normally configures on a fresh host for rootless containers to work
 /// out of the box (rootless deps, subuid/subgid range, AppArmor profile on
-/// 23.10+-family hosts). Without this, the appliance boots but `delonix run`
-/// fails immediately on a userns error — defeating the point of a golden image.
+/// 23.10+-family hosts). Without this, the appliance boots but `delonix
+/// container run` fails immediately on a userns error — defeating the point
+/// of a golden image.
 pub(crate) fn rootless_customization_steps(
     extra_run: &[String],
     delonix_bin: &Path,

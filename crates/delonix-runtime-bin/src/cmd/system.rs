@@ -1184,7 +1184,7 @@ fn cmd_info() -> Result<()> {
         .filter(|c| matches!(c.status, delonix_runtime_core::Status::Running))
         .count();
 
-    println!("Delonix Runtime {}", env!("CARGO_PKG_VERSION"));
+    println!("Delonix Engine {}", env!("CARGO_PKG_VERSION"));
     println!(
         "  {:<19} {}",
         super::po::t("state root:"),

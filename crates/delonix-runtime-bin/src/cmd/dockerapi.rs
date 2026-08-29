@@ -1304,7 +1304,7 @@ fn docker_port_bindings_to_publish_specs(v: &serde_json::Value) -> Vec<String> {
 fn version_json() -> Vec<u8> {
     let dlx_version = env!("CARGO_PKG_VERSION");
     json!({
-        "Platform": { "Name": format!("Delonix Runtime {dlx_version}") },
+        "Platform": { "Name": format!("Delonix Engine {dlx_version}") },
         "Version": dlx_version,
         "ApiVersion": API_VERSION,
         "MinAPIVersion": MIN_API_VERSION,
@@ -1350,7 +1350,7 @@ fn info_json(state: &AppState) -> Vec<u8> {
         "Driver": "delonix",
         "SystemTime": chrono_now_rfc3339(),
         "KernelVersion": kernel_release(),
-        "OperatingSystem": "Delonix Runtime (Linux)",
+        "OperatingSystem": "Delonix Engine (Linux)",
         "OSType": "linux",
         "Architecture": std::env::consts::ARCH,
         "NCPU": std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1),

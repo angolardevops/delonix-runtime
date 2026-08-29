@@ -10,8 +10,8 @@ msgstr ""
 
 # ---- help: comandos de topo (main.rs) --------------------------------------
 
-msgid "Delonix Runtime — a daemonless, rootless-first container & microVM engine (kernel-native, Rust). The open-source engine that powers Delonix."
-msgstr "Delonix Runtime — motor de containers e microVMs daemonless, rootless-first (kernel-native, Rust). O motor open-source que alimenta o Delonix."
+msgid "Delonix Engine — a daemonless, rootless-first container & microVM engine (kernel-native, Rust). The open-source engine that powers Delonix."
+msgstr "Delonix Engine — motor de containers e microVMs daemonless, rootless-first (kernel-native, Rust). O motor open-source que alimenta o Delonix."
 
 msgid "Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand."
 msgstr "Língua do output: `en` (default) ou `pt` (português, pt_AO). Também via `$DELONIX_L18N`. Global — funciona antes de qualquer subcomando."
@@ -5325,8 +5325,8 @@ msgstr "Escreve TODAS as páginas em `<dir>/man1/delonix*.1` em vez de imprimir 
 msgid "With `--dir`, also write the gzip-friendly index (`delonix-man-pages.txt`) listing what was generated."
 msgstr "Com `--dir`, escreve também o índice (`delonix-man-pages.txt`) com o que foi gerado."
 
-msgid "Delonix Runtime Manual"
-msgstr "Manual do Delonix Runtime"
+msgid "Delonix Engine Manual"
+msgstr "Manual do Delonix Engine"
 
 msgid "{n} manual page(s) written to {dir}"
 msgstr "{n} página(s) de manual escritas em {dir}"
