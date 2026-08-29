@@ -2,7 +2,7 @@
 
 Modelo C4 (Contexto → Contentores → Componentes) e system design funcional do
 **Delonix Engine**: motor de containers e microVMs **daemonless, rootless-first,
-kernel-native**, em Rust (13 crates, workspace `crates/`). Este documento é canónico
+kernel-native**, em Rust (14 crates, workspace `crates/`). Este documento é canónico
 e mantido contra o código — cada afirmação estrutural tem a referência do
 crate/ficheiro onde foi confirmada. Onde há limites, eles aparecem nos diagramas,
 não escondidos em rodapés.
@@ -129,7 +129,7 @@ de PID) e reclassifica `Running`→`Crashed`/`Paused`. O CRI chama-o em
 
 ---
 
-## C4 — Nível 3: Componentes (os 13 crates)
+## C4 — Nível 3: Componentes (os 14 crates)
 
 Setas = dependências **reais**, confirmadas nos `Cargo.toml` de `crates/*/` e nos
 `use delonix_*` dos `src/`. Não há ciclos; `delonix-runtime-core` é a raiz comum.
@@ -146,6 +146,7 @@ graph TB
     CORE["delonix-runtime-core<br>Container, Vm, Status, Store e JsonStore, Mount,<br>typestate, virt, secret e cred_vault — Secret Manager"]
     MGMT["delonix-mgmt<br>API de gestao LOCAL (HTTP+JSON num socket unix, so o proprio uid)<br>registo Prometheus partilhado e spans OpenTelemetry"]
     SCAN["delonix-scan<br>SBOM e varredura de CVE — image scan<br>e a imposicao de scan-on-pull"]
+    SEC["delonix-security-runtime<br>decisoes de seguranca do no: politica, admissao<br>unica (container E VM), evento, score, redaccao<br>(ADR-0026) — puro, sem sensores e sem inquilino"]
     RULES["delonix-net-rules<br>regras de rede PURAS, ZERO dependencias — Cidr, nome de bridge,<br>IPAM dentro de um prefixo, leitura de taxas; partilhado com o PaaS"]
     PVE["delonix-proxmox<br>backend VmBackend REMOTO contra a API de UM no Proxmox VE<br>(ADR-0008) — fora do delonix-vm por trazer cliente HTTP"]
     NAS["delonix-truenas<br>provisiona dataset, quota, permissoes e export numa NAS<br>pela API do TrueNAS (ADR-0009) — mesma razao de crate a parte"]
@@ -159,6 +160,7 @@ graph TB
     BIN --> CRI
     BIN --> MGMT
     BIN --> SCAN
+    BIN --> SEC
     BIN --> PVE
     BIN --> NAS
 

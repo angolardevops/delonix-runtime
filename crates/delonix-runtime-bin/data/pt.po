@@ -9856,3 +9856,33 @@ msgstr "Painel de resumo/KPI do motor (TUI interactivo, estilo htop).\n\nGlobal,
 
 msgid "What another program needs to understand this CLI and its files.\n\n`syntax` folded in here (§21): both arms answer the same question — what a shell or an editor has to be told — and having them under two roofs meant nobody looking for one ever found the other."
 msgstr "O que outro programa precisa de saber sobre esta CLI e os seus ficheiros.\n\nO `syntax` dobrou-se aqui (§21): os dois braços respondem à mesma pergunta — o que é preciso dizer a uma shell ou a um editor — e tê-los sob dois tectos fazia com que quem procurava um nunca encontrasse o outro."
+
+msgid "device passthrough ({devices}) is refused by this node's runtime policy — a passed-through device gives the guest DMA to host hardware"
+msgstr "o passthrough de dispositivo ({devices}) é recusado pela política de runtime deste nó — um dispositivo passado dá ao convidado DMA ao hardware do host"
+
+msgid "VM image '{image}': this node's runtime policy refuses `:latest` and untagged references — pin a version"
+msgstr "imagem de VM '{image}': a política de runtime deste nó recusa `:latest` e referências sem etiqueta — fixa uma versão"
+
+msgid "boot image '{url}': host '{host}' is not in this node's allowed list ({allowed})"
+msgstr "imagem de arranque '{url}': o host '{host}' não está na lista permitida deste nó ({allowed})"
+
+msgid "warning: runtime policy"
+msgstr "aviso: política de runtime"
+
+msgid "warning: runtime policy would refuse:"
+msgstr "aviso: a política de runtime teria recusado:"
+
+msgid "this node refuses `--privileged` containers but allows `vm create --device` (VFIO PCI passthrough), which gives a guest DMA to host hardware — set `denyDevicePassthrough: true` unless passthrough is deliberate here"
+msgstr "este nó recusa containers `--privileged` mas permite `vm create --device` (passthrough VFIO PCI), que dá ao convidado DMA ao hardware do host — põe `denyDevicePassthrough: true`, a não ser que o passthrough aqui seja de propósito"
+
+msgid "this node refuses `:latest` container images but not `:latest` VM disk images — set `denyLatestVmImage: true` for the same reproducibility guarantee on the VM path"
+msgstr "este nó recusa imagens de container `:latest` mas não imagens de disco de VM `:latest` — põe `denyLatestVmImage: true` para teres a mesma garantia de reprodutibilidade no caminho de VM"
+
+msgid "this node restricts container registries but `vm create --url-img` may still fetch a qcow2 from any host — list the hosts you trust in `allowedImageUrlHosts`"
+msgstr "este nó restringe os registos de container mas o `vm create --url-img` ainda pode ir buscar um qcow2 a qualquer host — enumera os hosts em que confias em `allowedImageUrlHosts`"
+
+msgid "this policy file refuses nothing — every field is at its default. A file that exists and expresses no opinion is usually a mistake; delete it, or state what the node should refuse"
+msgstr "este ficheiro de política não recusa nada — todos os campos estão na omissão. Um ficheiro que existe e não exprime opinião nenhuma é quase sempre um engano; apaga-o, ou diz o que o nó deve recusar"
+
+msgid "an entry in `allowedRegistries` contains `/` — this field takes registry HOSTS (`docker.io`, `ghcr.io`), not image references, and an entry with a path can never match"
+msgstr "uma entrada de `allowedRegistries` tem `/` — este campo leva HOSTS de registo (`docker.io`, `ghcr.io`), não referências de imagem, e uma entrada com caminho nunca pode casar"
