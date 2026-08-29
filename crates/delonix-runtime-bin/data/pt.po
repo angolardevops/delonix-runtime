@@ -1723,9 +1723,6 @@ msgstr "Detalhe de um armazenamento."
 msgid "Remove (and unmount) a storage. The DATA stays on the NAS — only the local mount is torn down, like docker."
 msgstr "Remove (e desmonta) um armazenamento. Os DADOS ficam no NAS — só se desliga a montagem local, como o docker."
 
-msgid "Apply the kind: Storage documents from a manifest."
-msgstr "Aplica os documentos kind: Storage de um manifesto."
-
 msgid "Create a named volume."
 msgstr "Cria um volume nomeado."
 
@@ -4450,9 +4447,6 @@ msgstr "Valida o manifesto SEM tocar em nada (dry-run): resolve as referências 
 msgid "Storage/volumes dashboard (KPIs + table) — TUI, or `--once` snapshot."
 msgstr "Dashboard de armazenamento/volumes (KPIs + tabela) — TUI, ou snapshot com `--once`."
 
-msgid "Apply the `kind: Storage` documents from a manifest."
-msgstr "Aplica os documentos `kind: Storage` de um manifesto."
-
 msgid "Diagnose — and, with `--delegate`, fix — cgroup delegation, the prerequisite for `--memory`/`--cpus`/`--pids-limit` to mean anything."
 msgstr "Diagnostica — e, com `--delegate`, corrige — a delegação de cgroup, o pré-requisito para que `--memory`/`--cpus`/`--pids-limit` queiram dizer alguma coisa."
 
@@ -6788,12 +6782,6 @@ msgstr "servidor, export e as opções de montagem realmente derivadas para ele"
 
 msgid "unmount and unregister it — the DATA stays on the NAS, only the local mount goes"
 msgstr "desmonta e desregista — os DADOS ficam no NAS, só a montagem local desaparece"
-
-msgid "declare the shares in a manifest instead of typing credentials on the command line"
-msgstr "declara as partilhas num manifesto em vez de escrever credenciais na linha de comando"
-
-msgid "the storages of your own manifest"
-msgstr "os storages do teu próprio manifesto"
 
 msgid "carve isolated, individually-quota'd slices out of one NAS export"
 msgstr "talha fatias isoladas, cada uma com a sua quota, a partir de um só export de NAS"

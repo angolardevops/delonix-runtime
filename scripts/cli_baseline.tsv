@@ -173,7 +173,6 @@
 →	stack rollback
 ~	stack validate
 ~	stack wait
-~	storage apply
 ~	storage create
 ~	storage dash
 ~	storage inspect
