@@ -105,7 +105,6 @@
 ~	net egress show
 ~	net flow
 ~	net httproute apply
-~	net httproute ls
 ~	net httproute rm
 ~	net ingress allow
 ~	net ingress clear
@@ -128,10 +127,7 @@
 →	net netns unpublish
 →	net netns up
 ~	net tunnel apply
-~	net tunnel describe
 ~	net tunnel expose
-~	net tunnel ls
-~	net tunnel rm
 ~	network apply
 ~	network create
 ~	network dash

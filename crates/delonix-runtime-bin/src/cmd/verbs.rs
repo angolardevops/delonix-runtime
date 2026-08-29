@@ -162,10 +162,8 @@ pub(crate) fn get(kind: &str, names: &[String], output: OutputFormat) -> Result<
         k if k == kinds::SECRET => super::secret::run(super::secret::SecretCmd::Ls { output }),
         k if k == kinds::IMAGE => super::image::run(false, super::image::ImageCmd::List { output }),
         k if k == kinds::CLUSTER => super::cluster::run(super::cluster::ClusterCmd::Ls),
-        k if k == kinds::GATEWAY => super::tunnel::run(super::tunnel::TunnelCmd::Ls { output }),
-        k if k == kinds::HTTP_ROUTE => {
-            super::httproute::run(super::httproute::HttpRouteCmd::Ls { output })
-        }
+        k if k == kinds::GATEWAY => super::tunnel::cmd_ls(output),
+        k if k == kinds::HTTP_ROUTE => super::httproute::cmd_ls(output),
         // The route group's own listing, which already shows both the record and
         // the live map. A route has no name someone chose — the PAIR is its
         // identity — so there is nothing else `get` could key on.
@@ -229,7 +227,7 @@ pub(crate) fn describe(kind: &str, names: &[String]) -> Result<()> {
         }
         k if k == kinds::GATEWAY => {
             for name in names {
-                super::tunnel::run(super::tunnel::TunnelCmd::Describe { name: name.clone() })?;
+                super::tunnel::cmd_describe(name)?;
             }
             Ok(())
         }
@@ -335,7 +333,7 @@ pub(crate) fn delete(kind: &str, names: &[String], force: bool) -> Result<()> {
         }
         k if k == kinds::GATEWAY => {
             for n in names {
-                super::tunnel::run(super::tunnel::TunnelCmd::Rm { name: n.clone() })?;
+                super::tunnel::cmd_rm(n)?;
             }
             Ok(())
         }

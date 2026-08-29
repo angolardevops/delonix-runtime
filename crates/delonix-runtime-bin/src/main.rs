@@ -39,7 +39,7 @@ enum SyntaxEditor {
     version,
     long_version = long_version_text(),
     about = "Delonix Runtime — a daemonless, rootless-first container & microVM engine (kernel-native, Rust). The open-source engine that powers Delonix.",
-    after_help = "SHORTCUTS:\n  ps, run, exec, logs, rm      same as `delonix container <verb>`\n  images                       same as `delonix image ls`"
+    after_help = "SHORTCUTS:\n  ps, run, exec, logs, rm      same as `delonix container <verb>`\n  images                       same as `delonix image list`"
 )]
 struct Cli {
     /// Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable
@@ -374,7 +374,7 @@ fn long_version_text() -> &'static str {
          \x20 delonix vm create dev                       # {c2}\n\
          \x20 delonix cluster create                      # {c3}\n\
          \x20 delonix stack init && delonix stack apply   # {c4}\n\
-         \x20 delonix dash                                # {c5}\n\
+         \x20 delonix dashboard                           # {c5}\n\
          \n\
          {docs}: https://angolardevops.github.io/delonix-runtime/ · delonix <group> --help",
             v = env!("CARGO_PKG_VERSION"),

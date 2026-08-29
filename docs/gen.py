@@ -4964,10 +4964,10 @@ def cheatsheet_page():
     body.append(bi("p",
         "<code>--l18n en|pt</code> — idioma da saída (EN por omissão; "
         "<code>pt</code> para pt_AO). <code>$DELONIX_ROOT</code> — raiz do estado. "
-        "<code>delonix completion &lt;shell&gt;</code> — autocompletion.",
+        "<code>delonix completion shell &lt;shell&gt;</code> — autocompletion.",
         "<code>--l18n en|pt</code> — output language (EN by default; "
         "<code>pt</code> for pt_AO). <code>$DELONIX_ROOT</code> — the state root. "
-        "<code>delonix completion &lt;shell&gt;</code> — autocompletion."))
+        "<code>delonix completion shell &lt;shell&gt;</code> — autocompletion."))
     page("cheatsheet.html", "Cheatsheet", "\n".join(body))
 
 

@@ -183,26 +183,11 @@ pub enum TunnelCmd {
         #[arg(long = "insecure-skip-tls-verify")]
         insecure_skip_tls_verify: bool,
     },
-    /// List tunnels (state + public URL).
-    Ls {
-        /// Output format: `table` (default) or `json` (ADR-0005). `json` gives
-        /// `running` as a boolean and the uptime in SECONDS, not the humanized
-        /// `Up 3m` the table prints.
-        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
-        output: output::OutputFormat,
-    },
-    /// Human-readable detail of one tunnel.
-    Describe {
-        /// Tunnel to inspect, as shown by `net tunnel ls`.
-        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::tunnels))]
-        name: String,
-    },
-    /// Stop and remove a tunnel.
-    Rm {
-        /// Tunnel to tear down, as shown by `net tunnel ls`.
-        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::tunnels))]
-        name: String,
-    },
+    // `Ls`/`Describe`/`Rm` moved out of this enum (B4 of the CLI restructuring):
+    // all three duplicated `get`/`describe`/`delete gateways` byte-for-byte —
+    // same store, same output, no filter any of them could take that the
+    // generic verb couldn't. `cmd_ls`/`cmd_describe`/`cmd_rm` (below) are what
+    // `verbs.rs` now calls directly.
 }
 
 pub fn run(action: TunnelCmd) -> Result<()> {
@@ -232,9 +217,6 @@ pub fn run(action: TunnelCmd) -> Result<()> {
             };
             apply_one(&name, &spec)
         }
-        TunnelCmd::Ls { output } => cmd_ls(output),
-        TunnelCmd::Describe { name } => cmd_describe(&name),
-        TunnelCmd::Rm { name } => cmd_rm(&name),
     }
 }
 
@@ -521,7 +503,7 @@ fn apply_one(name: &str, spec: &TunnelSpec) -> Result<()> {
         "tunnel/{name}: {} — {}",
         super::po::t("running"),
         rec.public_url.as_deref().unwrap_or(super::po::t(
-            "(URL not confirmed yet — see `delonix net tunnel describe` / the log)"
+            "(URL not confirmed yet — see `delonix describe gateways <name>` / the log)"
         ))
     );
     Ok(())
@@ -806,7 +788,7 @@ fn spawn_ngrok(
         return Err(Error::Invalid(super::po::tf(
             "another ngrok tunnel is already running ('{name}') — ngrok v3's local agent API \
              has no per-tunnel port anymore, so only one ngrok-provider tunnel can run on this \
-             host at a time; stop it first (`delonix net tunnel rm {name}`)",
+             host at a time; stop it first (`delonix delete gateways {name}`)",
             &[("name", &other.name)],
         )));
     }
@@ -993,7 +975,7 @@ fn spawn_cloudflare_named(
     spawn_and_capture(rec, "cloudflared", &args, |_| None)
 }
 
-/// One row of `net tunnel ls`.
+/// One row of `get gateways`.
 ///
 /// `running` is a boolean and the uptime is SECONDS, not the `Up 3m` the table
 /// prints: a script that has to parse «Up 2 weeks» to decide whether a tunnel
@@ -1014,7 +996,7 @@ struct TunnelLsRow {
     uptime_seconds: Option<u64>,
 }
 
-fn cmd_ls(format: output::OutputFormat) -> Result<()> {
+pub(crate) fn cmd_ls(format: output::OutputFormat) -> Result<()> {
     let store = record_store()?;
     if format == output::OutputFormat::Json {
         let rows: Vec<TunnelLsRow> = store
@@ -1071,11 +1053,11 @@ fn cmd_ls(format: output::OutputFormat) -> Result<()> {
     Ok(())
 }
 
-fn cmd_describe(name: &str) -> Result<()> {
+pub(crate) fn cmd_describe(name: &str) -> Result<()> {
     let store = record_store()?;
     let rec = store.load(name).map_err(|e| match e {
         Error::NotFound(n) => {
-            Error::Invalid(format!("no such tunnel: {n} (see `delonix net tunnel ls`)"))
+            Error::Invalid(format!("no such tunnel: {n} (see `delonix get gateways`)"))
         }
         e => e,
     })?;
@@ -1101,11 +1083,11 @@ fn cmd_describe(name: &str) -> Result<()> {
     Ok(())
 }
 
-fn cmd_rm(name: &str) -> Result<()> {
+pub(crate) fn cmd_rm(name: &str) -> Result<()> {
     let store = record_store()?;
     let rec = store.load(name).map_err(|e| match e {
         Error::NotFound(n) => {
-            Error::Invalid(format!("no such tunnel: {n} (see `delonix net tunnel ls`)"))
+            Error::Invalid(format!("no such tunnel: {n} (see `delonix get gateways`)"))
         }
         e => e,
     })?;
