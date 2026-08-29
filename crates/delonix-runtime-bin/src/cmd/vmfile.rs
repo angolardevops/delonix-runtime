@@ -352,7 +352,7 @@ pub(crate) fn scaffold(name: &str) -> String {
     format!(
         r#"# VMfile — a bootable qcow2, built from a distro's cloud image.
 #
-#   delonix vm build -t {name}:1.0 .
+#   delonix image --vm build -t {name}:1.0 .
 #   delonix vm create dev --disk-image {name}:1.0
 #
 # Builds as written. Delete what you do not need.
@@ -362,7 +362,7 @@ pub(crate) fn scaffold(name: &str) -> String {
 #   rocky:9      | fedora:42                  distro (ghcr), or the distro's own
 #                                             cloud image when there is none
 #   https://…/whatever.qcow2                  any absolute URL
-#   my-other-image:1.0                        one already in `delonix vm ls`
+#   my-other-image:1.0                        one already in `delonix image vm ls`
 FROM ubuntu:24.04
 
 # The disk a cloud image ships with is small (a couple of GB). Grow it BEFORE
@@ -376,12 +376,12 @@ HOSTNAME {name}
 # gives a different image depending on when it ran.
 #
 # These two build as written, with no network:
-RUN echo "built by delonix vm build" > /etc/motd
+RUN echo "built by delonix image --vm build" > /etc/motd
 RUN systemctl enable ssh
 
 # To install packages the guest needs the network, and you ask for it:
 #
-#   delonix vm build --network -t {name}:1.0 .
+#   delonix image --vm build --network -t {name}:1.0 .
 #
 # with the RUN you actually want, for example:
 #

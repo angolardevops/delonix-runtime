@@ -291,8 +291,8 @@ EXAMPLES:
   delonix image vm build -f VMfile -t myimage:1
 
 SEE ALSO:
-  delonix vm create · delonix image · delonix cluster kubeadm · delonix vm
-  build
+  delonix vm create · delonix image · delonix cluster kubeadm · delonix image
+  vm build
 
   delonix › image › vm</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>O mesmo grupo de imagens VM, por outro caminho</div><div class='cap lang-en'>The same VM image group, via another path</div><pre><code>delonix image vm ls</code></pre></div><div class="ex"><div class='cap lang-pt'>Registar um disco que NÃO foi construído aqui — o único ponto de entrada para `import`, que não tem forma `delonix vm …`</div><div class='cap lang-en'>Register a disk this engine did NOT build — the only entry point for `import`, which has no `delonix vm …` spelling</div><pre><code>delonix image vm import ./OPNsense-26.1.2.qcow2 -t opnsense:26.1.2 \

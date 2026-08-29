@@ -831,7 +831,7 @@ fn cmd_init(name: &str, dir: Option<PathBuf>, force: bool) -> Result<()> {
     println!(
         "\n{}",
         super::po::tf(
-            "Next: `delonix vm build -t {name}:1.0 {dir}` then `delonix vm create dev --disk-image {name}:1.0`",
+            "Next: `delonix image --vm build -t {name}:1.0 {dir}` then `delonix vm create dev --disk-image {name}:1.0`",
             &[("name", name), ("dir", &dir.display().to_string())],
         )
     );
@@ -5137,13 +5137,13 @@ pub(crate) fn tool_failure_hint(tail: &str, f: Family) -> Option<String> {
              Most often passt's AppArmor profile forbids the runtime directory libguestfs uses. \
              Point that directory somewhere the profile allows and retry:\n  \
              mkdir -p /tmp/delonix-run && chmod 700 /tmp/delonix-run\n  \
-             XDG_RUNTIME_DIR=/tmp/delonix-run delonix vm build --network …"
+             XDG_RUNTIME_DIR=/tmp/delonix-run delonix image --vm build --network …"
         } else {
             "the appliance's network helper (passt) failed, so `--network` could not start.\n\
              Most often its AppArmor profile forbids the runtime directory libguestfs uses.\n\
              Point that directory somewhere the profile allows and retry:\n  \
              mkdir -p /tmp/delonix-run && chmod 700 /tmp/delonix-run\n  \
-             XDG_RUNTIME_DIR=/tmp/delonix-run delonix vm build --network …"
+             XDG_RUNTIME_DIR=/tmp/delonix-run delonix image --vm build --network …"
         });
         if f == Family::Debian {
             // Building it is only half the remedy, and the half that was

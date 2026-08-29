@@ -15,7 +15,7 @@ use super::manifest::{self, ManifestDoc};
 use super::output;
 use super::util::state_root;
 
-/// `spec.build` of a `kind: VirtualMachine` — the declarative face of `delonix vm build`.
+/// `spec.build` of a `kind: VirtualMachine` — the declarative face of `delonix image --vm build`.
 ///
 /// The fields are the flags of that command, one for one, so the two paths
 /// cannot describe different builds. Nothing here is a second implementation:
@@ -71,7 +71,7 @@ pub(crate) struct VmSpec {
     /// to VMs.
     ///
     /// Without it, a project whose VM image is built from a `VMfile` needed two
-    /// commands and a hand-copied tag between them: `delonix vm build -t x` and
+    /// commands and a hand-copied tag between them: `delonix image --vm build -t x` and
     /// then a manifest saying `disk: x`. The tag was written in two places and
     /// nothing kept them in step.
     #[serde(default)]
@@ -600,28 +600,6 @@ pub enum VmCmd {
         /// Seconds to wait with --wait (default 120).
         #[arg(long = "boot-timeout", default_value_t = 120)]
         boot_timeout: u64,
-    },
-    /// Build a qcow2 VM image from a `VMfile`.
-    Build {
-        #[arg(short = 't', long = "tag")]
-        tag: String,
-        /// The `VMfile` (default: `<context>/VMfile`).
-        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
-        file: Option<PathBuf>,
-        /// Build context — the directory `COPY` reads from.
-        #[arg(value_hint = clap::ValueHint::DirPath, default_value = ".")]
-        context: PathBuf,
-        /// Do not compress the final qcow2.
-        #[arg(long)]
-        no_compress: bool,
-        /// Give the guest network access during `RUN` (for `apt-get install`
-        /// and friends). Off by default: a build that reaches the internet
-        /// produces a different image depending on when it ran.
-        #[arg(long)]
-        network: bool,
-        /// Show each step's own output instead of folding it behind the step line (a failed step unfolds either way).
-        #[arg(short = 'v', long)]
-        verbose: bool,
     },
     /// Pull a golden VM image from an OCI registry.
     ///
@@ -1847,7 +1825,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                 "{}",
                 super::po::tf("Creating VM '{name}'…", &[("name", &cfg.name)])
             );
-            // Same live display as `vm build`: a spinner while a stage runs, a
+            // Same live display as `image --vm build`: a spinner while a stage runs, a
             // green tick and how long it took when it ends. The engine reports
             // only that a stage STARTED, so each report closes the previous one
             // — correct here because a stage that failed never reaches the next
@@ -1918,38 +1896,6 @@ pub fn run(action: VmCmd) -> Result<()> {
             let ssh_user = fresh.as_ref().map(|v| default_ssh_user(v));
             print_vm_next_steps(&vm.name, ip.as_deref(), injected_key, ssh_user);
             Ok(())
-        }
-        VmCmd::Build {
-            tag,
-            file,
-            context,
-            no_compress,
-            network,
-            verbose,
-        } => {
-            // The VMfile path only — this group has no golden-recipe flags, so
-            // there is nothing to disambiguate. `-f` absent means
-            // `<context>/VMfile`, and its absence is an error rather than a
-            // silent fallback to the golden recipe: `delonix vm build` in a
-            // directory with no VMfile is a mistake, not a request for
-            // Kubernetes.
-            let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
-            let path = file.unwrap_or_else(|| context.join("VMfile"));
-            if !path.exists() {
-                return Err(Error::Invalid(super::po::tf(
-                    "no VMfile at {path} — run `delonix vm init` to scaffold one",
-                    &[("path", &path.display().to_string())],
-                )));
-            }
-            super::vmfile::build(
-                &store,
-                &path,
-                &context,
-                &tag,
-                !no_compress,
-                network,
-                verbose,
-            )
         }
         VmCmd::Pull {
             source,

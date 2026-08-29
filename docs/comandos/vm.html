@@ -171,7 +171,6 @@ Commands:
   bridge           EXPERIMENTAL (root): give a libvirt VM DIRECT IP reachability to a container SDN network
   reach            Which published ports a VM can actually reach, and how to fix the rest
   unbridge         Tear down a `vm bridge` (dry-run without `--apply`)
-  build            Build a qcow2 VM image from a `VMfile`
   convert          Convert a VM disk to the format another ecosystem imports
   ls-remote        List the tags available in a remote OCI repository
   pull             Pull a golden VM image from an OCI registry
@@ -196,7 +195,7 @@ COMMAND MAP:
   Interact     console · ssh · vnc
   Configure    default-backend
   Networking   reach · bridge · unbridge
-  Storage      build · pull · ls-remote · push · convert
+  Storage      pull · ls-remote · push · convert
   Declarative  init · apply
   Maintenance  prune · snapshot
   Dashboards   dash
@@ -309,7 +308,8 @@ EXAMPLES:
   delonix vm convert lab:1.0 --to vhdx
 
 SEE ALSO:
-  delonix vm build · delonix image vm ls · delonix vm push · delonix vm create
+  delonix image vm build · delonix image vm ls · delonix vm push · delonix vm
+  create
 
   delonix › vm › convert</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class="cap">Levar uma imagem construída aqui para outro ecossistema</div><pre><code>delonix vm convert minha-base --to vmdk        # VMware
@@ -639,8 +639,8 @@ EXAMPLES:
   delonix vm push delonix-vm-k8s:1.34
 
 SEE ALSO:
-  delonix vm pull · delonix vm build · delonix vm ls-remote · delonix image vm
-  ls
+  delonix vm pull · delonix image vm build · delonix vm ls-remote · delonix
+  image vm ls
 
   delonix › vm › push</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Publicar a tua imagem como artefacto OCI</div><div class='cap lang-en'>Publish your image as an OCI artifact</div><pre><code>printf &#x27;%s&#x27; &quot;$GHCR_TOKEN&quot; | delonix image login ghcr.io --username aminhaorg
@@ -718,54 +718,6 @@ SEE ALSO:
 
   delonix › vm › pull</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>A golden oficial com Kubernetes (sem argumento)</div><div class='cap lang-en'>The official golden image with Kubernetes (no argument)</div><pre><code>delonix vm pull</code></pre></div><div class="ex"><div class='cap lang-pt'>A golden SEM Kubernetes — só o motor, pronta a rootless</div><div class='cap lang-en'>The golden image WITHOUT Kubernetes — just the engine, rootless-ready</div><pre><code>delonix vm pull --no-k8s</code></pre></div><div class="ex"><div class='cap lang-pt'>De um registo teu, com nome local próprio</div><div class='cap lang-en'>From a registry of yours, with your own local name</div><pre><code>delonix vm pull ghcr.io/aminhaorg/base:24.04 --name base:24.04</code></pre></div>
-<h2 id='build'><code>vm build</code></h2>
-<p class='intro'>Build a qcow2 VM image from a <code>VMfile</code></p>
-<div class='help'><pre><code>Usage: delonix vm build [OPTIONS] --tag &lt;TAG&gt; [CONTEXT]
-
-Arguments:
-  [CONTEXT]
-          Build context — the directory `COPY` reads from
-          
-          [default: .]
-
-Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
-  -t, --tag &lt;TAG&gt;
-          
-
-  -f, --file &lt;FILE&gt;
-          The `VMfile` (default: `&lt;context&gt;/VMfile`)
-
-      --no-compress
-          Do not compress the final qcow2
-
-      --network
-          Give the guest network access during `RUN` (for `apt-get install` and friends). Off by default: a build that reaches the internet produces a different image depending on when it ran
-
-  -v, --verbose
-          Show each step&#x27;s own output instead of folding it behind the step line (a failed step unfolds either way)
-
-  -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)
-
-EXAMPLES:
-  # build a bootable qcow2 from the `VMfile` in this directory
-  delonix vm build -t lab:1.0
-
-  # let the guest reach a package mirror during `RUN` — offline is the default
-  # so the same recipe gives the same image tomorrow
-  delonix vm build -t lab:1.0 --network
-
-  # another recipe and another build context
-  delonix vm build -t lab:1.0 -f VMfile.dev ./image
-
-SEE ALSO:
-  delonix vm init · delonix image vm ls · delonix vm create · delonix vm push
-
-  delonix › vm › build</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Construir a partir do VMfile do directório actual</div><div class='cap lang-en'>Build from the current directory&#x27;s VMfile</div><pre><code>delonix vm build -t minha-base:1.0 .</code></pre></div><div class="ex"><div class='cap lang-pt'>VMfile noutro caminho, sem compressão (build mais rápido, imagem maior)</div><div class='cap lang-en'>VMfile at another path, no compression (faster build, larger image)</div><pre><code>delonix vm build -t minha-base:dev -f receitas/VMfile --no-compress .</code></pre></div><div class="ex"><div class='cap lang-pt'>Com rede no convidado — precisa disto para `apt-get install` num RUN (o build deixa de ser reproduzível: o resultado passa a depender do dia)</div><div class='cap lang-en'>With guest networking — needed for `apt-get install` in a RUN (the build stops being reproducible: the result now depends on the day)</div><pre><code>delonix vm build --network -t minha-base:1.0 .</code></pre></div>
 <h2 id='init'><code>vm init</code></h2>
 <p class='intro'>Bootstrap a project with a VM manifest.</p>
 <p class='intro'>Files ALREADY FILLED IN (images included), ready to use without editing anything.</p>
@@ -817,7 +769,8 @@ EXAMPLES:
   delonix vm init ./lab --name lab --force
 
 SEE ALSO:
-  delonix vm apply · delonix vm build · delonix vm create · delonix stack init
+  delonix vm apply · delonix image vm build · delonix vm create · delonix
+  stack init
 
   delonix › vm › init</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Projecto com manifesto, pronto a correr</div><div class='cap lang-en'>Project with a manifest, ready to run</div><pre><code>delonix vm init --name lab</code></pre></div><div class="ex"><div class='cap lang-pt'>Scaffold de um VMfile para CONSTRUIR a tua imagem</div><div class='cap lang-en'>Scaffold a VMfile to BUILD your image</div><pre><code>delonix vm init --vmfile --name minha-base</code></pre></div>

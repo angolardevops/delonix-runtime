@@ -3693,8 +3693,8 @@ msgstr "Sobrescreve um `VMfile` existente."
 msgid "{path} already exists — use --force to overwrite"
 msgstr "{path} já existe — usa --force para sobrescrever"
 
-msgid "Next: `delonix vm build -t {name}:1.0 {dir}` then `delonix vm create dev --disk-image {name}:1.0`"
-msgstr "A seguir: `delonix vm build -t {name}:1.0 {dir}` e depois `delonix vm create dev --disk-image {name}:1.0`"
+msgid "Next: `delonix image --vm build -t {name}:1.0 {dir}` then `delonix vm create dev --disk-image {name}:1.0`"
+msgstr "A seguir: `delonix image --vm build -t {name}:1.0 {dir}` e depois `delonix vm create dev --disk-image {name}:1.0`"
 
 msgid "no VMfile at {path} — run `delonix vm init` to scaffold one"
 msgstr "não há VMfile em {path} — corre `delonix vm init` para criar um"

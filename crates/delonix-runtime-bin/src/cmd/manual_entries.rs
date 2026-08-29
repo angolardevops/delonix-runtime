@@ -818,7 +818,7 @@ pub static ENTRIES: &[Entry] = &[
             ("fetch the official Kubernetes golden — the source is known, so no argument is needed", "delonix image vm pull"),
             ("build one of your own from a `VMfile`", "delonix image vm build -f VMfile -t myimage:1"),
         ],
-        see_also: &["vm create", "image", "cluster kubeadm", "vm build"],
+        see_also: &["vm create", "image", "cluster kubeadm", "image vm build"],
     },
     Entry {
         path: "image vm pull",
@@ -869,7 +869,7 @@ pub static ENTRIES: &[Entry] = &[
             ("scaffold a `VMfile` in the current directory, ready for `image vm build`", "delonix image vm init myimage"),
             ("write it somewhere else, overwriting whatever is already there", "delonix image vm init app -d ./images --force"),
         ],
-        see_also: &["image vm build", "vm init", "vm build"],
+        see_also: &["image vm build", "vm init", "vm create"],
     },
     Entry {
         path: "image vm describe",
@@ -2288,16 +2288,6 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["vm bridge", "vm reach", "network ls"],
     },
     Entry {
-        path: "vm build",
-        group: "Storage",
-        examples: &[
-            ("build a bootable qcow2 from the `VMfile` in this directory", "delonix vm build -t lab:1.0"),
-            ("let the guest reach a package mirror during `RUN` — offline is the default so the same recipe gives the same image tomorrow", "delonix vm build -t lab:1.0 --network"),
-            ("another recipe and another build context", "delonix vm build -t lab:1.0 -f VMfile.dev ./image"),
-        ],
-        see_also: &["vm init", "image vm ls", "vm create", "vm push"],
-    },
-    Entry {
         path: "vm convert",
         group: "Storage",
         examples: &[
@@ -2306,7 +2296,7 @@ pub static ENTRIES: &[Entry] = &[
             ("back to qcow2 and compressed — only qcow2 and vmdk can, the rest are refused up front", "delonix vm convert /srv/lab.raw --to qcow2 --compress"),
             ("Hyper-V and Azure take vhdx; the older vhd is a different format, not another spelling", "delonix vm convert lab:1.0 --to vhdx"),
         ],
-        see_also: &["vm build", "image vm ls", "vm push", "vm create"],
+        see_also: &["image vm build", "image vm ls", "vm push", "vm create"],
     },
     Entry {
         path: "vm ls-remote",
@@ -2335,7 +2325,7 @@ pub static ENTRIES: &[Entry] = &[
             ("publish an image you built to a registry of your own", "delonix vm push lab:1.0 ghcr.io/acme/lab:1.0"),
             ("omit the target and it goes to the official repository the image's own metadata names", "delonix vm push delonix-vm-k8s:1.34"),
         ],
-        see_also: &["vm pull", "vm build", "vm ls-remote", "image vm ls"],
+        see_also: &["vm pull", "image vm build", "vm ls-remote", "image vm ls"],
     },
     Entry {
         path: "vm apply",
@@ -2355,7 +2345,7 @@ pub static ENTRIES: &[Entry] = &[
             ("a `VMfile` instead — the recipe for building your own qcow2, not for running an existing one", "delonix vm init --vmfile"),
             ("generate into a directory of its own, overwriting what is there", "delonix vm init ./lab --name lab --force"),
         ],
-        see_also: &["vm apply", "vm build", "vm create", "stack init"],
+        see_also: &["vm apply", "image vm build", "vm create", "stack init"],
     },
     Entry {
         path: "vm snapshot",
