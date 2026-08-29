@@ -2,7 +2,7 @@
 
 Motor de **containers e microVMs daemonless, rootless-first, kernel-native, em Rust**.
 Repositório **público** (`angolardevops/delonix-runtime`, Apache-2.0) — extraído do monorepo
-privado `delonix-paas` (ver [README.md](README.md) para a arquitectura dos 14 crates).
+privado `delonix-paas` (ver [README.md](README.md) para a arquitectura dos 15 crates).
 
 ## Comandos
 
@@ -4939,7 +4939,7 @@ Este código **não pode depender de nada privado**. Antes de qualquer commit:
    genuína (fica aqui). O broker de control-plane que decide QUANDO publicar portas
    (`Router`, multi-tenant) ficou no lado privado (`delonix-overlay`, em `delonix-paas`).
 
-## Arquitetura (14 crates)
+## Arquitetura (15 crates)
 
 | Crate | Responsabilidade |
 |---|---|
@@ -4955,6 +4955,7 @@ Este código **não pode depender de nada privado**. Antes de qualquer commit:
 | `delonix-cri` | servidor CRI (`runtime.v1`) — permite ao Delonix servir de runtime a um `kubelet` |
 | `delonix-mgmt` | API de gestão LOCAL (HTTP+JSON num socket unix, só o próprio uid) para um control-plane externo, mais o registo Prometheus partilhado e os spans OpenTelemetry. Não é remota, e o `cli-stability.md` diz que não se deve construir automação sobre ela — ver ADR-0010 |
 | `delonix-scan` | SBOM + varredura de CVE (`image scan`, e a imposição de scan-on-pull) |
+| `delonix-mcp` | servidor Model Context Protocol (ADR-0025) — superfície de controlo de IA LOCAL e sem inquilino, `stdio`-only nesta fase; as tools chamam a `Store`/os crates de domínio, nunca constroem shell arbitrário |
 | `delonix-security-runtime` | as decisões de segurança do nó: a política (`policy.json`), o **único** ponto de admissão — container **e** VM —, o `SecurityEvent`, o score explicável e a redacção de segredos. Puro: três dependências, sem sensores, sem daemon e **sem noção de inquilino** (guarda-rio #2, imposto por teste) — ver ADR-0026 |
 
 ## Histórico

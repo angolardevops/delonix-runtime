@@ -1,0 +1,35 @@
+[package]
+name = "delonix-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# The MCP (Model Context Protocol) server — a LOCAL, tenancy-free AI control
+# surface over this engine (ADR-0025). Outside the eight dependency-clean
+# engine crates on purpose, same category as `delonix-mgmt`: it carries the
+# official Rust MCP SDK (`rmcp`) and its own `tokio` runtime, and no engine
+# crate depends on it.
+[dependencies]
+delonix-runtime-core = { path = "../delonix-runtime-core" }
+delonix-vm = { path = "../delonix-vm" }
+delonix-volume = { path = "../delonix-volume" }
+delonix-net = { path = "../delonix-net" }
+# Reused for its Prometheus-shaped runtime summary (`dashstats::collect`) so
+# `runtime.info`/`metrics.query` do not re-derive the same counts a second way.
+delonix-mgmt = { path = "../delonix-mgmt" }
+
+rmcp = { version = "3", default-features = false, features = [
+    "server",
+    "transport-io",
+    "macros",
+    "schemars",
+] }
+schemars = { version = "1.2.2", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "io-util", "sync", "time"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+libc = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

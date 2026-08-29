@@ -1617,6 +1617,40 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["secret ls", "secret inspect", "secret create"],
     },
     Entry {
+        path: "mcp",
+        group: "",
+        examples: &[
+            ("start it — an AI client spawns this itself as a child process; run it by hand only to test", "delonix mcp serve"),
+            ("confirm this node is ready before pointing an AI client at it", "delonix mcp doctor"),
+            ("the risk level of every tool it exposes, and which ones need `confirm: true`", "delonix mcp capabilities"),
+        ],
+        see_also: &["mcp serve", "mcp doctor", "container ls"],
+    },
+    Entry {
+        path: "mcp serve",
+        group: "Advanced",
+        examples: &[
+            ("the stdio server — spawned by an AI client as a child process, never left running as a daemon", "delonix mcp serve"),
+        ],
+        see_also: &["mcp doctor", "mcp capabilities"],
+    },
+    Entry {
+        path: "mcp doctor",
+        group: "Advanced",
+        examples: &[
+            ("the storage/binary checks an AI client's session depends on, before it ever calls a tool", "delonix mcp doctor"),
+        ],
+        see_also: &["mcp serve", "system info"],
+    },
+    Entry {
+        path: "mcp capabilities",
+        group: "Advanced",
+        examples: &[
+            ("the full risk table as JSON, for a client or a human to read before enabling mutations", "delonix mcp capabilities"),
+        ],
+        see_also: &["mcp serve", "mcp doctor"],
+    },
+    Entry {
         path: "serve",
         group: "",
         examples: &[
