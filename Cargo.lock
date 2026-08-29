@@ -873,6 +873,7 @@ dependencies = [
  "delonix-runtime",
  "delonix-runtime-core",
  "delonix-scan",
+ "delonix-security-runtime",
  "delonix-truenas",
  "delonix-vm",
  "delonix-volume",
@@ -925,6 +926,15 @@ dependencies = [
  "serde",
  "serde_json",
  "tar",
+]
+
+[[package]]
+name = "delonix-security-runtime"
+version = "1.0.0"
+dependencies = [
+ "delonix-runtime-core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

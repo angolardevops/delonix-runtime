@@ -170,10 +170,7 @@
 ~	stack validate
 ~	stack wait
 ~	storage create
-~	storage dash
-~	storage inspect
 ~	storage ls
-~	storage rm
 ~	system backup
 ~	system boot disable
 ~	system boot enable
@@ -219,6 +216,7 @@
 ~	vm vnc
 ~	volume apply
 ~	volume create
+~	volume dash
 ~	volume describe
 ~	volume inspect
 ~	volume ls

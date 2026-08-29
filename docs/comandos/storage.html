@@ -156,12 +156,9 @@ Network→Volume→<strong>Storage</strong>→Image→Vm→Container). Mounting 
 <div class='help'><pre><code>Usage: delonix storage [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  create   Create (and mount) a network storage
-  rm       Remove (and unmount) a storage. The DATA stays on the NAS — only the local mount is torn down, like docker
-  inspect  Details of a storage
-  ls       List the network storages (volumes with a network driver)
-  dash     Storage/volumes dashboard (KPIs + table) — TUI, or `--once` snapshot
-  help     Print this message or the help of the given subcommand(s)
+  create  Create (and mount) a network storage
+  ls      List the network storages (volumes with a network driver)
+  help    Print this message or the help of the given subcommand(s)
 
 Options:
       --l18n &lt;en|pt&gt;
@@ -171,9 +168,8 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 COMMAND MAP:
-  Lifecycle   create · rm
-  Inspect     ls · inspect
-  Dashboards  dash
+  Lifecycle  create
+  Inspect    ls
 
 EXAMPLES:
   # a NAS export becomes a named volume any container can mount
@@ -182,76 +178,14 @@ EXAMPLES:
   # what is mounted, and from where
   delonix storage ls
 
-  # the server, export and mount options really in use
-  delonix storage inspect nas
+  # the derived device, as JSON
+  delonix storage ls -o json
 
 SEE ALSO:
   delonix sharevolume · delonix volume create · delonix secret create ·
   delonix container run
 
   delonix › storage</code></pre></div>
-<h2 id='inspect'><code>storage inspect</code></h2>
-<p class='intro'>Details of a storage</p>
-<div class='help'><pre><code>Usage: delonix storage inspect [OPTIONS] &lt;NAME&gt;
-
-Arguments:
-  &lt;NAME&gt;
-          
-
-Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
-  -o, --output &lt;OUTPUT&gt;
-          Output format: `table` (default, the historical text) or `json` (ADR-0005)
-          
-          [default: table]
-          [possible values: table, json]
-
-  -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)
-
-EXAMPLES:
-  # server, export and the mount options actually derived for it
-  delonix storage inspect nas
-
-SEE ALSO:
-  delonix storage ls · delonix volume inspect · delonix sharevolume describe
-
-  delonix › storage › inspect</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>JSON do storage (para scripts)</div><div class='cap lang-en'>Storage as JSON (for scripts)</div><pre><code>delonix storage inspect nas-fotos</code></pre></div>
-<h2 id='dash'><code>storage dash</code></h2>
-<p class='intro'>Storage/volumes dashboard (KPIs + table) — TUI, or <code>--once</code> snapshot</p>
-<div class='help'><pre><code>Usage: delonix storage dash [OPTIONS]
-
-Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
-      --once
-          
-
-      --json
-          
-
-  -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)
-
-EXAMPLES:
-  # a live TUI of storages and volumes, with usage per area
-  delonix storage dash
-
-  # one snapshot, for CI or a terminal without a TTY
-  delonix storage dash --once
-
-  # JSON, to alert on a share filling up
-  delonix storage dash --json
-
-SEE ALSO:
-  delonix dash · delonix storage ls · delonix system df
-
-  delonix › storage › dash</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Dashboard só do armazenamento de rede</div><div class='cap lang-en'>Network storage-only dashboard</div><pre><code>delonix storage dash</code></pre></div>
 <h2 id='create'><code>storage create</code></h2>
 <p class='intro'>Create (and mount) a network storage</p>
 <div class='help'><pre><code>Usage: delonix storage create [OPTIONS] --type &lt;TYPE&gt; --server &lt;SERVER&gt; --share &lt;SHARE&gt; &lt;NAME&gt;
@@ -339,35 +273,10 @@ EXAMPLES:
   delonix storage ls -o json
 
 SEE ALSO:
-  delonix storage inspect · delonix volume ls · delonix sharevolume ls
+  delonix volume describe · delonix volume ls · delonix sharevolume ls
 
   delonix › storage › ls</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix storage ls</code></pre></div>
-<h2 id='rm'><code>storage rm</code></h2>
-<p class='intro'>Remove (and unmount) a storage. The DATA stays on the NAS — only the local mount is torn down, like docker</p>
-<div class='help'><pre><code>Usage: delonix storage rm [OPTIONS] &lt;NAME&gt;
-
-Arguments:
-  &lt;NAME&gt;
-          
-
-Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
-  -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)
-
-EXAMPLES:
-  # unmount and unregister it — the DATA stays on the NAS, only the local
-  # mount goes
-  delonix storage rm nas
-
-SEE ALSO:
-  delonix storage ls · delonix sharevolume rm · delonix volume rm
-
-  delonix › storage › rm</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Desmonta; os dados ficam no NAS</div><div class='cap lang-en'>Unmounts; the data stays on the NAS</div><pre><code>delonix storage rm media</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Regista um export NFS como <code>storage</code> e monta-o num
 container, com a password a vir do cofre em vez do manifesto.</p>

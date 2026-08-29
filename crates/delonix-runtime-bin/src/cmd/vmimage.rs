@@ -2434,7 +2434,8 @@ fn cmd_build(
             if offline && !no_k8s && !inventory_has(&tsv, "qemu-guest-agent") {
                 return Err(Error::Invalid(
                     super::po::t(
-                        "the built image has no qemu-guest-agent: without it the platform                          cannot learn a VM's address and a backup is not quiesced",
+                        "the built image has no qemu-guest-agent: without it the \
+platform cannot learn a VM's address and a backup is not quiesced",
                     )
                     .to_string(),
                 ));

@@ -146,23 +146,6 @@ pub fn vm_images() -> Vec<CompletionCandidate> {
     cands(store.list().unwrap_or_default().into_iter().map(|i| i.name))
 }
 
-/// Network storages (NFS/CIFS/WebDAV). They ARE volumes with a network driver
-/// — the same filter `storage ls` applies, so `storage rm <TAB>` never offers
-/// a local volume that `storage rm` would refuse.
-pub fn storages() -> Vec<CompletionCandidate> {
-    let Ok(store) = delonix_volume::VolumeStore::open(state_root()) else {
-        return Vec::new();
-    };
-    cands(
-        store
-            .list()
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|v| delonix_volume::is_network_driver(&v.driver))
-            .map(|v| v.name),
-    )
-}
-
 /// Share volumes — the records live in one directory per namespace plus the
 /// pre-scoping flat ones, so the layout is read by the module that owns it.
 pub fn sharevolumes() -> Vec<CompletionCandidate> {
