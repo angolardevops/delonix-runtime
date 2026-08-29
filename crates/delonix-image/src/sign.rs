@@ -104,10 +104,28 @@ pub fn verify_signature(store: &ImageStore, reference: &str, pubkey_pem: &str) -
 
     // 2) signature artifact: tag `sha256-<hex>.sig`.
     let sig_tag = format!("sha256-{hex}.sig");
-    let sig_bytes = c.get_manifest(&sig_tag).map_err(|_| {
-        Error::Invalid(format!(
+    // The discarded cause used to make every failure read "image not signed".
+    // A registry that answers 500, a token that expired, a network that is down
+    // — all of them came out as a VERDICT about the image. That is the worst
+    // possible confusion on a signature check: the operator concludes the
+    // artifact is unsigned and goes to re-sign it, when the registry was simply
+    // unreachable. Absence of the `.sig` tag is a verdict; anything else is an
+    // "I could not tell", and the two must not wear the same sentence.
+    let sig_bytes = c.get_manifest(&sig_tag).map_err(|e| match e {
+        // A 404 on the `.sig` tag is the VERDICT: the artifact is not there.
+        Error::NotFound(_) => Error::Invalid(format!(
             "image not signed: no cosign signature for {reference} ({digest})"
-        ))
+        )),
+        // Everything else is an "I could not tell", and it used to wear the
+        // same sentence as the verdict. A registry answering 500, an expired
+        // token, a network that is down — all of them read as a statement ABOUT
+        // THE IMAGE, so the operator concludes the artifact is unsigned and
+        // goes to re-sign it. On a signature check that is the worst confusion
+        // available: absence of proof presented as proof of absence.
+        other => Error::Invalid(format!(
+            "could not determine whether {reference} ({digest}) is signed — the \
+registry did not answer for {sig_tag}: {other}"
+        )),
     })?;
     let sig_manifest: SigManifest = serde_json::from_slice(&sig_bytes)
         .map_err(|e| Error::Invalid(format!("invalid signature manifest: {e}")))?;
