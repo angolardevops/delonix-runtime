@@ -858,9 +858,6 @@ Por baixo é um volume do <code>delonix-volume</code> com driver de rede — <co
 A password vem do cofre (<code>--password-secret</code>), nunca do argv. Ligado ao <code>stack apply</code>
 (ordem Network→Volume→<strong>Storage</strong>→Image→Vm→Container). Montar precisa de CAP_SYS_ADMIN.""",
         "subs": {
-            "apply": {"examples": [
-                ('Declarar o NAS num manifesto kind: Storage',
-                 'delonix storage apply -f storage.yaml')]},
             "inspect": {"examples": [
                 ('JSON do storage (para scripts)',
                  'delonix storage inspect nas-fotos')]},
@@ -2400,7 +2397,6 @@ EXAMPLES_EN = {
     ("secret", "ls"): ["List (values redacted)"],
     ("secret", "inspect"): ["Reveal explicitly"],
     ("secret", "rotate-key"): ["Rotate the master key (re-encrypts everything)"],
-    ("storage", "apply"): ["Declare the NAS in a kind: Storage manifest"],
     ("storage", "inspect"): ["Storage as JSON (for scripts)"],
     ("storage", "dash"): ["Network storage-only dashboard"],
     ("storage", "create"): ["NFS from a TrueNAS", "SMB/CIFS with the password from the vault"],
