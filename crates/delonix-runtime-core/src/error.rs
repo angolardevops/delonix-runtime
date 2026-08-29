@@ -143,3 +143,64 @@ impl Error {
 
 /// Convenience alias.
 pub type Result<T> = std::result::Result<T, Error>;
+
+impl Error {
+    /// Maps a failed read of a record file WITHOUT lying about why.
+    ///
+    /// `std::fs::read(...).map_err(|_| Error::NotFound(...))` is right for
+    /// `ENOENT` and wrong for everything else: a permission denied, an I/O
+    /// error or a corrupt mount all came out as "no such X". The operator then
+    /// goes and `ls` a file that is sitting right there — measured shape across
+    /// nine call sites, and in one of them the code had already PROVED the file
+    /// existed one line above.
+    ///
+    /// `describe` is lazy so the common path builds no string.
+    pub fn not_found_or_io(e: std::io::Error, describe: impl FnOnce() -> String) -> Self {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            Error::NotFound(describe())
+        } else {
+            Error::Io(e)
+        }
+    }
+}
+
+#[cfg(test)]
+mod not_found_or_io_tests {
+    use super::Error;
+    use std::io::{Error as IoError, ErrorKind};
+
+    #[test]
+    fn a_missing_file_keeps_the_callers_wording() {
+        let e = Error::not_found_or_io(IoError::from(ErrorKind::NotFound), || {
+            "network blue".to_string()
+        });
+        assert!(matches!(e, Error::NotFound(ref s) if s == "network blue"));
+        assert_eq!(e.to_string(), "no such network blue");
+    }
+
+    /// The whole point: this used to say "no such network blue" for a file that
+    /// is sitting right there and cannot be read, sending the operator to look
+    /// for something they would find.
+    #[test]
+    fn a_permission_error_is_not_reported_as_absence() {
+        let e = Error::not_found_or_io(IoError::from(ErrorKind::PermissionDenied), || {
+            "network blue".to_string()
+        });
+        assert!(matches!(e, Error::Io(_)), "got {e:?}");
+        assert!(!e.to_string().contains("no such"), "{e}");
+        assert!(e.to_string().contains("permission"), "{e}");
+    }
+
+    #[test]
+    fn the_description_is_not_built_when_the_file_is_merely_unreadable() {
+        let mut built = false;
+        let _ = Error::not_found_or_io(IoError::from(ErrorKind::PermissionDenied), || {
+            built = true;
+            String::new()
+        });
+        assert!(
+            !built,
+            "the common path must not pay for a string it discards"
+        );
+    }
+}

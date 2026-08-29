@@ -1043,8 +1043,11 @@ impl VolumeStore {
 
         let source = if src.starts_with('/') || src.starts_with('.') {
             // bind mount of a host path
+            // `canonicalize` also fails with EACCES on a parent directory and
+            // with ELOOP; "does not exist" would send the operator to the wrong
+            // question in both.
             let p = fs::canonicalize(src)
-                .map_err(|_| Error::Invalid(format!("bind path does not exist: {src}")))?;
+                .map_err(|e| Error::not_found_or_io(e, || format!("bind path {src}")))?;
             p.to_string_lossy().into_owned()
         } else {
             // named volume (creates on demand, like Docker; mounts the NFS if applicable)

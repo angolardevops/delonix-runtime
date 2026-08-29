@@ -3220,7 +3220,7 @@ fn prepare_local_overlay(
     on: &dyn Fn(CreateStage),
 ) -> Result<(std::path::PathBuf, std::path::PathBuf)> {
     let disk_path = std::fs::canonicalize(&cfg.disk)
-        .map_err(|_| Error::Invalid(format!("image not found: {}", cfg.disk)))?;
+        .map_err(|e| Error::not_found_or_io(e, || format!("VM image {}", cfg.disk)))?;
     let overlay = vmdir.join(format!("{}.qcow2", cfg.name));
     if !overlay.exists() {
         on(CreateStage::Disk);
