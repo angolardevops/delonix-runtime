@@ -57,5 +57,5 @@ ingress e monta-se por `127.0.0.1`:
       # LÊ o ficheiro criado dentro da VM E ESCREVE de volta — persistido na share da VM.
 
 Fluxo: `VM(samba, SDN) --smb--> ingress:4445 --cifs--> Storage vol --bind--> container`.
-Teardown liberta tudo (unpublish + storage rm desmonta; `--disk`/dados ficam): container rm,
-storage rm, netns unpublish, vm rm.
+Teardown liberta tudo (unpublish + volume rm desmonta; `--disk`/dados ficam): container rm,
+volume rm, netns unpublish, vm rm.

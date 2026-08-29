@@ -565,6 +565,17 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
                  'delonix volume prune --namespace acme -f'),
                 ('A loja inteira: a raiz sem dono E todos os inquilinos',
                  'delonix volume prune -A -f')]},
+            # Moved here from `storage dash` in the B5 CLI collapse — the
+            # screen always covered volumes AND storages together (its own
+            # title says "STORAGE/VOLUMES"), `storage` was only one of the
+            # two paths to it until now.
+            "dash": {"examples": [
+                ('Um TUI ao vivo de volumes e storages, com uso por área',
+                 'delonix volume dash'),
+                ('Um só retrato, para CI ou um terminal sem TTY',
+                 'delonix volume dash --once'),
+                ('JSON, para alertar quando um volume se aproxima da quota',
+                 'delonix volume dash --json')]},
         },
     },
     "namespace": {
@@ -835,18 +846,11 @@ Por baixo é um volume do <code>delonix-volume</code> com driver de rede — <co
 A password vem do cofre (<code>--password-secret</code>), nunca do argv. Ligado ao <code>stack apply</code>
 (ordem Network→Volume→<strong>Storage</strong>→Image→Vm→Container). Montar precisa de CAP_SYS_ADMIN.""",
         "subs": {
-            "inspect": {"examples": [
-                ('JSON do storage (para scripts)',
-                 'delonix storage inspect nas-fotos')]},
-            "dash": {"examples": [
-                ('Dashboard só do armazenamento de rede',
-                 'delonix storage dash')]},
             "create": {"examples": [
                 ("NFS de um TrueNAS", "delonix storage create media --type nfs --server 10.0.0.5 --share /mnt/pool/media"),
                 ("SMB/CIFS com password do cofre", "delonix storage create docs --type cifs --server nas --share docs --username user --password-secret nas-pass"),
             ]},
             "ls": {"examples": [("", "delonix storage ls")]},
-            "rm": {"examples": [("Desmonta; os dados ficam no NAS", "delonix storage rm media")]},
         },
     },
     "sharevolume": {
@@ -2359,11 +2363,8 @@ EXAMPLES_EN = {
     ("secret", "ls"): ["List (values redacted)"],
     ("secret", "inspect"): ["Reveal explicitly"],
     ("secret", "rotate-key"): ["Rotate the master key (re-encrypts everything)"],
-    ("storage", "inspect"): ["Storage as JSON (for scripts)"],
-    ("storage", "dash"): ["Network storage-only dashboard"],
     ("storage", "create"): ["NFS from a TrueNAS", "SMB/CIFS with the password from the vault"],
     ("storage", "ls"): [""],
-    ("storage", "rm"): ["Unmounts; the data stays on the NAS"],
     ("sharevolume", "apply"): ["Two isolated slices of the same NAS, each with its own quota"],
     ("sharevolume", "ls"): ["List (quota + measured real usage)"],
     ("sharevolume", "describe"): ["Slice detail (points at the -v command to consume it)"],

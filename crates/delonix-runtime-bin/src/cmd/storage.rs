@@ -6,6 +6,19 @@
 //! Under the hood it is a `delonix-volume` volume with a network driver — the
 //! `Storage` is the FRIENDLY declaration (server/share/credentials) that
 //! translates into the mount `device`/`options`; `volumes ls` shows it with its driver.
+//!
+//! **B5 CLI collapse (see the CLI restructuring plan under `docs/discovery/`)**:
+//! `dash`, `rm` and `inspect` were CUT from this group — measured to be true
+//! duplicates of `volume dash`/`volume rm`/`delete volume`/`volume inspect`
+//! (the last two after `remove_credentials` moved into `volume::cmd_rm_with`
+//! and `device`/`options` were added to `VolumeInspect`'s JSON). `create` and
+//! `ls` STAY: `create` has no generic equivalent (the friendly `--type nfs
+//! --server … --share …` declaration has no imperative counterpart on
+//! `volume create`, only the declarative `kind: Volume` + `nfs:`/`cifs:`/
+//! `webdav:` block via `volume apply -f`), and `ls` filters to network-driven
+//! volumes with a `DEVICE` column `volume ls` does not have. Cutting either
+//! would need new capability built into `volume` first — see the release
+//! notes for the measurement.
 
 use std::path::{Path, PathBuf};
 
@@ -29,13 +42,6 @@ struct StorageLsRow {
 
 #[derive(Subcommand)]
 pub enum StorageCmd {
-    /// Storage/volumes dashboard (KPIs + table) — TUI, or `--once` snapshot.
-    Dash {
-        #[arg(long)]
-        once: bool,
-        #[arg(long)]
-        json: bool,
-    },
     /// Create (and mount) a network storage.
     Create {
         name: String,
@@ -70,20 +76,6 @@ pub enum StorageCmd {
         /// Output format: `table` (default) or `json` (ADR-0005).
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: output::OutputFormat,
-    },
-    /// Details of a storage.
-    Inspect {
-        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::storages))]
-        name: String,
-        /// Output format: `table` (default, the historical text) or `json` (ADR-0005)
-        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
-        output: output::OutputFormat,
-    },
-    /// Remove (and unmount) a storage. The DATA stays on the NAS — only the
-    /// local mount is torn down, like docker.
-    Rm {
-        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::storages))]
-        name: String,
     },
 }
 
@@ -337,19 +329,24 @@ fn credentials_name(name: &str) -> String {
     format!("{safe}.cifs-credentials")
 }
 
-/// Deletes a storage's credentials file.
+/// Deletes a storage's credentials file, if this name ever had one.
 ///
-/// **`storage rm` never did this.** `store.remove(name)` only touches
-/// `<root>/volumes/<name>/`, while the NAS username+password live in
+/// **`storage rm` used to be the only caller.** `store.remove(name)` only
+/// touches `<root>/volumes/<name>/`, while the NAS username+password live in
 /// `<root>/storage/<name>.cifs-credentials` — so the credential outlived the
 /// storage it belonged to, indefinitely, and was only ever overwritten if someone
 /// happened to re-create a storage with the exact same name. Removing a storage
-/// has to take its secret with it.
+/// has to take its secret with it. Since the B5 CLI collapse (`storage rm` cut in
+/// favour of the generic `volume rm`/`delete volume`), `volume::cmd_rm_with` calls
+/// this UNCONDITIONALLY for every volume removed — a plain local volume never had
+/// a file at this path, so the call is a harmless no-op for it, and a
+/// network-share volume removed through the generic verb no longer leaks its
+/// credentials the way it silently did before this call moved here.
 ///
 /// Best-effort by design: failing to unlink a credentials file must not block the
-/// removal of the storage itself (which is what the operator asked for), but it is
+/// removal of the volume itself (which is what the operator asked for), but it is
 /// reported so it never disappears in silence.
-fn remove_credentials(name: &str) {
+pub(crate) fn remove_credentials(name: &str) {
     let path = state_root().join("storage").join(credentials_name(name));
     match std::fs::remove_file(&path) {
         Ok(()) => {}
@@ -438,30 +435,9 @@ fn resolve_password(password: Option<String>, secret: Option<String>) -> Result<
     })
 }
 
-/// The machine view of a network storage (`inspect -o json`).
-///
-/// A `Storage` is a volume with a network driver, so the fields are the
-/// volume's — but the usage measurement is deliberately NOT here: it lives on
-/// the NAS, and walking a remote mount to answer an `inspect` would turn a
-/// metadata read into network I/O of unbounded cost.
-#[derive(serde::Serialize)]
-struct StorageInspect<'a> {
-    name: &'a str,
-    driver: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    device: Option<&'a str>,
-    mountpoint: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    options: Option<&'a str>,
-    created_unix: u64,
-}
-
 pub fn run(action: StorageCmd) -> Result<()> {
     let store = VolumeStore::open(state_root())?;
     match action {
-        StorageCmd::Dash { once, json } => {
-            return super::dash::run(super::dash::DashScope::Storage, once, json)
-        }
         StorageCmd::Create {
             name,
             r#type,
@@ -524,52 +500,6 @@ pub fn run(action: StorageCmd) -> Result<()> {
                 ]);
             }
             t.print();
-        }
-        StorageCmd::Inspect { name, output } => {
-            let v = store.inspect(&name)?;
-            if output == output::OutputFormat::Json {
-                return output::print_json(&[StorageInspect {
-                    name: &v.name,
-                    driver: &v.driver,
-                    device: v.device.as_deref(),
-                    mountpoint: &v.mountpoint,
-                    options: v.options.as_deref(),
-                    created_unix: v.created_unix,
-                }]);
-            }
-            let mut d = output::Describe::new();
-            d.field("Name", &v.name);
-            d.field("Type", &v.driver);
-            d.field_opt("Device", v.device.as_deref());
-            d.field("Mountpoint", &v.mountpoint);
-            d.field_opt("Options", v.options.as_deref());
-            d.field("Created", output::fmt_local(v.created_unix));
-            d.print();
-        }
-        StorageCmd::Rm { name } => {
-            // Same reference check as `volumes rm`: a Storage is a volume, and a
-            // `kind: ShareVolume` carved out of it (or a container mounting it)
-            // must not have the ground pulled out from under it. Removing a
-            // Storage unmounts the NAS export, after which a share's mountpoint
-            // silently resolves to the LOCAL directory underneath — tenants keep
-            // writing, to the wrong place, with no error.
-            super::volume::cmd_rm_storage(&store, &name)?;
-            remove_credentials(&name);
-            delonix_runtime_core::events::emit(
-                &state_root(),
-                "storage",
-                "remove",
-                &name,
-                &name,
-                None,
-            );
-            println!(
-                "{}",
-                super::po::tf(
-                    "storage '{name}' removed (unmounted; the data stays on the NAS)",
-                    &[("name", &name)],
-                )
-            );
         }
     }
     Ok(())
