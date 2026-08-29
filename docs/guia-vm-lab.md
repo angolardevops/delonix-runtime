@@ -143,7 +143,7 @@ delonix vm ls          # tabela
 delonix vm ls --ports  # + sonda TCP real a 22/6443/10250/80/443
 delonix vm ls -o json  # para script
 delonix vm status [nome]
-delonix vm describe <nome>...
+delonix image vm describe <nome>...  # detalhe de uma IMAGEM de VM
 delonix vm dash --once # KPIs + tabela
 ```
 
@@ -197,7 +197,7 @@ OPNsense do laboratório, que arranca sem endereço utilizável.
 delonix image vm ls          # o que está local
 delonix vm ls-remote         # o que há publicado, sem descarregar nada
 delonix vm pull <ref>        # trazer
-delonix vm build -t <tag> .  # construir a partir de um VMfile
+delonix image vm build -t <tag> .  # construir a partir de um VMfile
 delonix vm convert <src> --to qcow2|raw|vmdk|vdi|vhdx|vhd
 ```
 
@@ -219,11 +219,11 @@ quatro produtos Proxmox).
 Uma imagem construída aqui é importável por VMware, VirtualBox e Hyper-V — sem que
 este motor tenha um backend para nenhum deles.
 
-### `vm build` — imagem a partir de um `VMfile`
+### `image vm build` — imagem a partir de um `VMfile`
 
 ```bash
-delonix vm init --vmfile     # gera VMfile + cloud-init/user-data.yaml
-delonix vm build -t app:1.0 .
+delonix image vm init --vmfile   # gera VMfile + cloud-init/user-data.yaml
+delonix image vm build -t app:1.0 .
 ```
 
 ```
@@ -307,7 +307,7 @@ delonix stack validate -f vm.yaml            # referências resolvem?
 delonix stack apply -f vm.yaml --dry-run     # o spec com todos os defaults
 delonix stack apply -f vm.yaml               # aplicar
 delonix stack plan -f vm.yaml                # o que mudaria
-delonix explain Vm.spec                      # todos os campos, gerados do código
+delonix explain Vm                           # todos os campos, gerados do código
 ```
 
 O ciclo declarativo foi exercitado de ponta a ponta:
@@ -924,7 +924,7 @@ no mesmo motor, rede e firmware — logo a rede está boa e o que varia é a ima
 `delonix-vm-base:*` não arrancam com o `hypervisor-fw` que o instalador coloca.
 **Para VMs em Cloud Hypervisor, use a golden.**
 
-### `vm build --network` esbarra no host
+### `image vm build --network` esbarra no host
 
 ```
 virt-customize: error: libguestfs error: passt exited with status 1
@@ -934,7 +934,7 @@ O erro traz o remédio, e é meio caminho:
 
 ```bash
 mkdir -p /tmp/delonix-run && chmod 700 /tmp/delonix-run
-XDG_RUNTIME_DIR=/tmp/delonix-run delonix vm build --network -t img:1.0 .
+XDG_RUNTIME_DIR=/tmp/delonix-run delonix image vm build --network -t img:1.0 .
 ```
 
 Passa o problema de AppArmor, mas neste host o `passt` continua sem dar resolução de
@@ -1070,7 +1070,7 @@ delonix vm ssh <n> [-l user] [-- cmd] · console <n> · vnc <n>
 
 # imagens
 delonix image vm ls · vm ls-remote · vm pull <ref> · vm push <n> <alvo>
-delonix vm build -t <tag> [--network] . · vm convert <src> --to <fmt>
+delonix image vm build -t <tag> [--network] . · vm convert <src> --to <fmt>
 delonix vm init --vmfile
 
 # instantâneos (libvirt, VM a correr)
@@ -1078,7 +1078,7 @@ delonix vm snapshot create|ls|restore|rm <n> [<s>]
 
 # declarativo
 delonix stack validate|plan|apply -f <f> [--dry-run] [--replace K/n] [--detailed-exitcode]
-delonix explain Vm.spec · delonix schema print
+delonix explain Vm · delonix manifest schema
 
 # rede
 delonix network create|ls|describe|rm · vm reach
