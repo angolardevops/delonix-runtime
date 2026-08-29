@@ -1446,6 +1446,9 @@ pub fn mount_overlay_if_marked(rootfs: &str) -> nix::Result<()> {
 }
 
 /// Mounts the container rootfs and does `pivot_root` (runs INSIDE the `clone`).
+// The last one in this crate: `setup_rootfs` runs BEFORE the spec is
+// destructured, so it takes the pieces individually. Group it the way
+// `container_init` was grouped if it grows again.
 #[allow(clippy::too_many_arguments)]
 fn setup_rootfs(
     rootfs: &str,
@@ -2174,7 +2177,6 @@ fn apply_selinux(context: &str) {
 }
 
 /// The body that runs inside the new namespaces (the container's PID 1).
-#[allow(clippy::too_many_arguments)]
 /// Replaces the inherited environment with a clean, predictable one (like Docker):
 /// default `PATH`/`HOME`/`HOSTNAME`/`TERM` + the `KEY=value` from the image/stack/CLI
 /// (these override). Runs in the single-threaded child, before the `execvp`.
@@ -2200,7 +2202,6 @@ fn apply_env(hostname: &str, env: &[String]) {
     }
 }
 
-#[allow(clippy::too_many_arguments)] // container init: many namespace/security parameters
 /// Mounts the requested tmpfs (`--tmpfs /path[:opts]`). Runs after `pivot_root`
 /// and before dropping caps; `nosuid,nodev` by default (hardening).
 fn apply_tmpfs(specs: &[String]) {
@@ -2394,7 +2395,6 @@ fn apply_ulimits(specs: &[String]) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 /// (privileged / Kind node) Gives the container a DEDICATED, EMPTY CGROUP ROOT.
 ///
 /// On the rootless-with-network path the `ip netns exec` mounts a FRESH sysfs over
@@ -2539,49 +2539,172 @@ fn setup_node_cgroup_ns(cid: &str) {
     let _ = unshare(CloneFlags::CLONE_NEWCGROUP);
 }
 
-// FIXME(follow-up): 30 positional arguments — a real smell. Refactor to a typed
-// `ContainerInitSpec` (groups rootfs/hostname/argv/limits/flags) in a
-// dedicated, reviewed change; do not mix with the lint gate.
-#[allow(clippy::too_many_arguments)]
-fn container_init(
-    rootfs: &str,
-    hostname: &str,
-    argv: &[CString],
+/// What the container's `init` needs to build the container from inside the
+/// freshly cloned child.
+///
+/// This type exists because the call used to pass 37 positional arguments,
+/// nine of them adjacent `bool`s that the compiler accepts in any order:
+/// transposing `privileged` and `read_only` compiled, and silently disarmed a
+/// security barrier. Named fields make that transposition an error at the
+/// literal instead of a runtime surprise — which is the whole point, since the
+/// child has already crossed the namespace boundary by the time it reads any
+/// of this and can no longer be inspected from the parent.
+///
+/// Every field is a borrow or a `Copy` scalar: the whole spec is `Copy`, so it
+/// travels into the `clone` closure without touching the child's allocator
+/// (see the `main.rs` note on why the child must not allocate before `exec`).
+#[derive(Clone, Copy)]
+struct ContainerInitSpec<'a> {
+    /// Prepared rootfs the child pivots into.
+    rootfs: &'a str,
+    /// Container id. Names the Kind node's dedicated cgroup leaf.
+    cid: &'a str,
+    process: ProcessSpec<'a>,
+    filesystem: FilesystemSpec<'a>,
+    security: SecuritySpec<'a>,
+    namespaces: NamespaceSpec,
+    io: IoSpec,
+}
+
+/// What runs, as whom, and in what environment.
+#[derive(Clone, Copy)]
+struct ProcessSpec<'a> {
+    /// Also the hostname set inside the container's UTS namespace.
+    hostname: &'a str,
+    /// Init command and its arguments, already `CString`-encoded for `execve`.
+    argv: &'a [CString],
+    env: &'a [String],
+    /// Image `WorkingDir` (OCI); the child `chdir`s here before the exec.
+    workdir: Option<&'a str>,
+    /// `None` keeps the uid the namespace mapping produced.
+    run_uid: Option<u32>,
+    /// `None` keeps the gid the namespace mapping produced.
+    run_gid: Option<u32>,
+    group_add: &'a [u32],
+    ulimits: &'a [String],
+    sysctls: &'a [String],
+}
+
+/// What the container sees on disk.
+#[derive(Clone, Copy)]
+struct FilesystemSpec<'a> {
+    mounts: &'a [Mount],
+    /// Remounts the rootfs read-only after the pivot.
+    read_only: bool,
+    tmpfs: &'a [String],
+    devices: &'a [String],
+    /// Decrypted `--secret-files` values, written into an in-namespace tmpfs.
+    /// Held in the child's memory only — never touches the host filesystem.
+    secret_files: &'a [(String, String)],
+}
+
+/// The barriers raised around the container. Every field here can only weaken
+/// or strengthen isolation, which is why they live together and are named.
+#[derive(Clone, Copy)]
+struct SecuritySpec<'a> {
+    /// Bitmask of capabilities kept in the child's bounding set.
+    cap_keep: u64,
+    apparmor: Option<&'a str>,
+    selinux: Option<&'a str>,
+    /// Skips seccomp entirely. The container runs with the host's syscall surface.
+    seccomp_unconfined: bool,
+    seccomp_profile_json: Option<&'a str>,
+    seccomp_detect: bool,
+    no_new_privs: bool,
+    /// Grants the full capability set and skips the confinement below it.
+    privileged: bool,
+    masked_paths: &'a [String],
+    readonly_paths: &'a [String],
+}
+
+/// Which namespaces the child creates, joins or inherits.
+#[derive(Clone, Copy)]
+struct NamespaceSpec {
+    /// Infra container to `setns` into for the pod's shared IPC + UTS.
+    pod_infra_pid: Option<i32>,
+    /// The child ends up with an EXCLUSIVE netns (not the host's under
+    /// `--net host`, nor the holder's under the rootless ingress). Decides
+    /// whether `net.*` sysctls are safe to apply.
+    has_own_netns: bool,
+    host_pid: bool,
+    /// The child inherits the holder's user namespace instead of cloning one,
+    /// so there is no uid_map handshake to wait for.
+    inherit_userns: bool,
+    /// Kind node (label `io.x-k8s.kind.*`): gets a dedicated cgroup namespace.
+    /// A plain `--privileged` container keeps its cgroup hierarchy intact.
+    node_cgroup: bool,
+}
+
+/// The file descriptors tying the child back to the parent.
+#[derive(Clone, Copy)]
+struct IoSpec {
     detach: bool,
     log_fd: Option<i32>,
     log_err_fd: Option<i32>,
-    mounts: &[Mount],
+    /// `(read, write)` of the userns handshake pipe: the child waits here for
+    /// the parent to write uid_map/gid_map. `None` on the inherited-userns path.
     sync: Option<(i32, i32)>,
-    apparmor: Option<&str>,
-    selinux: Option<&str>,
-    pod_infra_pid: Option<i32>,
-    env: &[String],
-    read_only: bool,
-    cap_keep: u64,
-    seccomp_unconfined: bool,
-    seccomp_profile_json: Option<&str>,
-    seccomp_detect: bool,
-    devices: &[String],
-    tmpfs: &[String],
-    ulimits: &[String],
-    group_add: &[u32],
-    masked_paths: &[String],
-    readonly_paths: &[String],
-    no_new_privs: bool,
-    sysctls: &[String],
-    has_own_netns: bool,
-    host_pid: bool,
-    inherit_userns: bool,
-    run_uid: Option<u32>,
-    run_gid: Option<u32>,
-    privileged: bool,
+    /// `(read, write)` for handing the pty master back to the parent.
     console_sock: Option<(i32, i32)>,
-    secret_files: &[(String, String)],
-    workdir: Option<&str>,
-    cid: &str,
-    node_cgroup: bool,
+    /// The child writes one byte here once it is past the point of no return.
     ready_w: Option<i32>,
-) -> isize {
+}
+
+fn container_init(spec: ContainerInitSpec<'_>) -> isize {
+    let ContainerInitSpec {
+        rootfs,
+        cid,
+        process:
+            ProcessSpec {
+                hostname,
+                argv,
+                env,
+                workdir,
+                run_uid,
+                run_gid,
+                group_add,
+                ulimits,
+                sysctls,
+            },
+        filesystem:
+            FilesystemSpec {
+                mounts,
+                read_only,
+                tmpfs,
+                devices,
+                secret_files,
+            },
+        security:
+            SecuritySpec {
+                cap_keep,
+                apparmor,
+                selinux,
+                seccomp_unconfined,
+                seccomp_profile_json,
+                seccomp_detect,
+                no_new_privs,
+                privileged,
+                masked_paths,
+                readonly_paths,
+            },
+        namespaces:
+            NamespaceSpec {
+                pod_infra_pid,
+                has_own_netns,
+                host_pid,
+                inherit_userns,
+                node_cgroup,
+            },
+        io:
+            IoSpec {
+                detach,
+                log_fd,
+                log_err_fd,
+                sync,
+                console_sock,
+                ready_w,
+            },
+    } = spec;
     // User namespace: wait for the PARENT to write uid_map/gid_map before continuing
     // (until then, we are `nobody` without caps). The received byte is the "you may proceed".
     // In the rootless ingress we inherit the holder's userns (already as uid 0) — no clone
@@ -4826,45 +4949,55 @@ fn spawn(
             .any(|k| k.starts_with("io.x-k8s.kind"));
     let mut stack = vec![0u8; 1024 * 1024];
     let cb = Box::new(move || {
-        container_init(
-            &rootfs_owned,
-            &hostname,
-            &argv,
-            detach,
-            log_fd,
-            log_err_fd,
-            &mounts,
-            sync,
-            apparmor.as_deref(),
-            selinux.as_deref(),
-            pod_infra_pid,
-            &env,
-            read_only,
-            cap_keep,
-            seccomp_unconfined,
-            seccomp_profile_json.as_deref(),
-            seccomp_detect,
-            &devices,
-            &tmpfs,
-            &ulimits,
-            &group_add,
-            &masked_paths,
-            &readonly_paths,
-            no_new_privs,
-            &sysctls,
-            has_own_netns,
-            host_pid,
-            inherit_userns,
-            run_uid,
-            run_gid,
-            privileged,
-            console_sock,
-            &secret_files,
-            workdir.as_deref(),
-            &cid,
-            node_cgroup,
-            Some(ready_w),
-        )
+        container_init(ContainerInitSpec {
+            rootfs: &rootfs_owned,
+            cid: &cid,
+            process: ProcessSpec {
+                hostname: &hostname,
+                argv: &argv,
+                env: &env,
+                workdir: workdir.as_deref(),
+                run_uid,
+                run_gid,
+                group_add: &group_add,
+                ulimits: &ulimits,
+                sysctls: &sysctls,
+            },
+            filesystem: FilesystemSpec {
+                mounts: &mounts,
+                read_only,
+                tmpfs: &tmpfs,
+                devices: &devices,
+                secret_files: &secret_files,
+            },
+            security: SecuritySpec {
+                cap_keep,
+                apparmor: apparmor.as_deref(),
+                selinux: selinux.as_deref(),
+                seccomp_unconfined,
+                seccomp_profile_json: seccomp_profile_json.as_deref(),
+                seccomp_detect,
+                no_new_privs,
+                privileged,
+                masked_paths: &masked_paths,
+                readonly_paths: &readonly_paths,
+            },
+            namespaces: NamespaceSpec {
+                pod_infra_pid,
+                has_own_netns,
+                host_pid,
+                inherit_userns,
+                node_cgroup,
+            },
+            io: IoSpec {
+                detach,
+                log_fd,
+                log_err_fd,
+                sync,
+                console_sock,
+                ready_w: Some(ready_w),
+            },
+        })
     });
 
     // SAFETY: single-threaded; the child mounts the container and does `exec`.
