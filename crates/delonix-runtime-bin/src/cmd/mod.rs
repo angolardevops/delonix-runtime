@@ -30,6 +30,7 @@ pub mod manifest;
 pub(crate) mod manifestcmd;
 pub mod manual;
 pub mod mapped;
+pub mod mcp;
 pub mod names;
 pub mod namespace;
 pub mod net;

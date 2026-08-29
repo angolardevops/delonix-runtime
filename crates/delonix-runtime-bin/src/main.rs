@@ -317,6 +317,12 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::serve::ServeCmd,
     },
+    /// Model Context Protocol server — a LOCAL, tenancy-free AI control surface
+    /// (ADR-0025). NOT stable: see `docs/cli-stability.md`.
+    Mcp {
+        #[command(subcommand)]
+        action: cmd::mcp::McpCmd,
+    },
     /// Runtime summary/KPI dashboard (interactive htop-style TUI).
     ///
     /// Global, or per group (`container dash`, `vm dash`, ...). Renamed from
@@ -505,6 +511,7 @@ fn run() -> Result<()> {
         Cmd::Cluster { action } => cmd::cluster::run(action),
         Cmd::Net { action } => cmd::net::run(action),
         Cmd::Serve { action } => cmd::serve::run(action),
+        Cmd::Mcp { action } => cmd::mcp::run(action),
         Cmd::IngressProxy { config } => cmd::ingress_proxy::run(&config),
         Cmd::Dashboard { once, json } => cmd::dash::run(cmd::dash::DashScope::Global, once, json),
         Cmd::Completion { action } => match action {

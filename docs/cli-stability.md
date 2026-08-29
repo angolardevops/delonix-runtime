@@ -288,6 +288,11 @@ diz quais são, em vez de os omitir.
 * **`cluster`, `vm`, `pod`, `workload`, `storage`, `sharevolume`, `net`** —
   a superfície ainda está a assentar. (O *schema* de `kind: Pod` é estável, ver
   acima; o que não é estável é o grupo de comandos `delonix pod`.)
+* **`mcp`** — o servidor Model Context Protocol (ADR-0025), superfície nova. O
+  transporte `stdio` é o suportado (um processo filho do cliente de IA por
+  sessão, nunca um daemon); um transporte HTTP local, se vier a existir, seria
+  loopback-only com um token local, como o `serve api` já é local-only e sem
+  contrato publicado — não construas automação sobre ele ainda.
 * **`backup`** — o grupo não estava declarado de nenhum dos lados, e essa
   omissão é ela própria um defeito: quem quisesse saber se podia depender de
   `delonix backup vm x` não tinha resposta. Fica NÃO estável enquanto os
