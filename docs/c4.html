@@ -315,6 +315,7 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     RULES[&quot;delonix-net-rules&lt;br&gt;regras de rede PURAS, ZERO dependencias — Cidr, nome de bridge,&lt;br&gt;IPAM dentro de um prefixo, leitura de taxas; partilhado com o PaaS&quot;]
     PVE[&quot;delonix-proxmox&lt;br&gt;backend VmBackend REMOTO contra a API de UM no Proxmox VE&lt;br&gt;(ADR-0008) — fora do delonix-vm por trazer cliente HTTP&quot;]
     NAS[&quot;delonix-truenas&lt;br&gt;provisiona dataset, quota, permissoes e export numa NAS&lt;br&gt;pela API do TrueNAS (ADR-0009) — mesma razao de crate a parte&quot;]
+    MCP[&quot;delonix-mcp&lt;br&gt;servidor MCP (ADR-0025) — superficie de IA LOCAL, sem inquilino&lt;br&gt;stdio-only; tools chamam Store/dominio, nunca shell arbitrario&quot;]
 
     BIN --&gt; RT
     BIN --&gt; IMG
@@ -328,6 +329,7 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     BIN --&gt; SEC
     BIN --&gt; PVE
     BIN --&gt; NAS
+    BIN --&gt; MCP
 
     MGMT --&gt; RT
     MGMT --&gt; IMG
@@ -357,6 +359,12 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     PVE --&gt; VM2
     PVE --&gt; CORE
     NAS --&gt; CORE
+
+    MCP --&gt; CORE
+    MCP --&gt; VM2
+    MCP --&gt; VOL
+    MCP --&gt; NET
+    MCP --&gt; MGMT
 </pre>
 <p>Notas de leitura do grafo (todas verificadas):</p>
 <ul>
@@ -395,6 +403,15 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
 <li><strong>Nada depende de <code>delonix-proxmox</code> nem de <code>delonix-truenas</code> a não ser o <code>-bin</code></strong> — são
   folhas do grafo, e é o que permite que um alvo remoto mal configurado avise e siga em
   vez de parar um <code>container ls</code>.</li>
+<li><strong><code>delonix-mcp</code> fica fora dos oito crates de motor dependency-clean, pela MESMA razão
+  do <code>delonix-mgmt</code></strong> (ADR-0025): traz o SDK MCP oficial (<code>rmcp</code>) e o seu próprio
+  runtime <code>tokio</code>, e nenhum crate de motor depende dele. Depende de <code>delonix-mgmt</code>
+  para reaproveitar o <code>dashstats::collect</code> já existente (<code>runtime.info</code>/<code>metrics.query</code>
+  não derivam os mesmos números uma segunda vez) — é o único crate novo que depende de
+  outro crate "fora do motor" em vez de só dos oito. <strong>Stdio-only nesta fase</strong>: um
+  processo filho por sessão do cliente de IA, nunca um daemon nem um socket loopback
+  — a variante remota/multi-tenant do desenho original ficou recusada por ADR-0010 e
+  pertence ao <code>delonix-paas</code>, não aqui.</li>
 <li>Módulos internos que importam ao desenho:</li>
 <li><code>delonix-net::infra</code> — todo o plano rootless (holder, slirp único, publish/DNAT,
     DNS/DHCP/RA, firewall por container, egress policy, <code>attach_container</code>);</li>

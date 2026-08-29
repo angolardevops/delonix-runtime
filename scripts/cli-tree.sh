@@ -99,6 +99,9 @@ classify() {
       else if (c ~ /^(explain|init|man|completion|version|api-resources)$/) cls = "="
       else if (c ~ /^compose /)                                   cls = "="
       else if (c ~ /^serve (cri|docker-api)$/)                    cls = "="
+      # `mcp` (ADR-0025) é superfície nova, sem relação nenhuma com a
+      # reestruturação — mesma razão do `api-resources` acima.
+      else if (c ~ /^mcp /)                                       cls = "="
       else                                                        cls = "~"
       print cls "\t" c
     }'

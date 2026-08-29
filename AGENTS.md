@@ -2,7 +2,7 @@
 
 Motor de **containers e microVMs daemonless, rootless-first, kernel-native, em Rust**.
 Repositório **público** (`angolardevops/delonix-runtime`, Apache-2.0) — extraído do monorepo
-privado `delonix-paas` (ver [README.md](README.md) para a arquitectura dos 14 crates).
+privado `delonix-paas` (ver [README.md](README.md) para a arquitectura dos 15 crates).
 
 ## Comandos
 
@@ -4939,7 +4939,7 @@ Este código **não pode depender de nada privado**. Antes de qualquer commit:
    genuína (fica aqui). O broker de control-plane que decide QUANDO publicar portas
    (`Router`, multi-tenant) ficou no lado privado (`delonix-overlay`, em `delonix-paas`).
 
-## Arquitetura (14 crates)
+## Arquitetura (15 crates)
 
 | Crate | Responsabilidade |
 |---|---|
