@@ -14,7 +14,6 @@ use delonix_runtime_core::{Error, Result};
 use delonix_volume::VolumeStore;
 use serde::{Deserialize, Serialize};
 
-use super::manifest;
 use super::output;
 use super::util::state_root;
 
@@ -85,11 +84,6 @@ pub enum StorageCmd {
     Rm {
         #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::storages))]
         name: String,
-    },
-    /// Apply the `kind: Storage` documents from a manifest.
-    Apply {
-        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
-        file: Option<PathBuf>,
     },
 }
 
@@ -576,15 +570,6 @@ pub fn run(action: StorageCmd) -> Result<()> {
                     &[("name", &name)],
                 )
             );
-        }
-        StorageCmd::Apply { file } => {
-            // Delegates to the Volume apply, and has to: `load` rewrites every
-            // `kind: Storage` into a `kind: Volume` with a network-share block,
-            // so a filter for `kind: Storage` here would match NOTHING and this
-            // command would silently do nothing at all.
-            let path = manifest::resolve_path(file)?;
-            let docs = manifest::load(&path)?;
-            super::volume::apply(&docs)?;
         }
     }
     Ok(())

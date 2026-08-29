@@ -1735,7 +1735,7 @@ pub static ENTRIES: &[Entry] = &[
             ("create or converge the slices declared in a manifest, idempotent", "delonix sharevolume apply -f examples/sharevolume.yaml"),
             ("from your own manifest — this is how a share volume is created", "delonix sharevolume apply -f delonix-manifest.yaml"),
         ],
-        see_also: &["storage apply", "stack apply", "sharevolume ls", "sharevolume describe"],
+        see_also: &["volume apply", "stack apply", "sharevolume ls", "sharevolume describe"],
     },
     Entry {
         path: "sharevolume migrate",
@@ -1910,15 +1910,6 @@ pub static ENTRIES: &[Entry] = &[
             ("as JSON, for automation", "delonix storage ls -o json"),
         ],
         see_also: &["storage inspect", "volume ls", "sharevolume ls"],
-    },
-    Entry {
-        path: "storage apply",
-        group: "Declarative",
-        examples: &[
-            ("declare the shares in a manifest instead of typing credentials on the command line", "delonix storage apply -f examples/storage.yaml"),
-            ("the storages of your own manifest", "delonix storage apply -f delonix-manifest.yaml"),
-        ],
-        see_also: &["stack apply", "sharevolume apply", "secret apply", "volume apply"],
     },
     Entry {
         path: "storage dash",
@@ -2491,7 +2482,7 @@ pub static ENTRIES: &[Entry] = &[
             ("apply only the `kind: Volume` documents of a manifest, idempotent by name", "delonix volume apply -f delonix-manifest.yaml"),
             ("the volumes of a shipped example, leaving the other kinds untouched", "delonix volume apply -f examples/volume.yaml"),
         ],
-        see_also: &["stack apply", "stack plan", "volume create", "storage apply"],
+        see_also: &["stack apply", "stack plan", "volume create", "sharevolume apply"],
     },
     Entry {
         path: "volume snapshot",

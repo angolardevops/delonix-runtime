@@ -160,7 +160,6 @@ Commands:
   rm       Remove (and unmount) a storage. The DATA stays on the NAS — only the local mount is torn down, like docker
   inspect  Details of a storage
   ls       List the network storages (volumes with a network driver)
-  apply    Apply the `kind: Storage` documents from a manifest
   dash     Storage/volumes dashboard (KPIs + table) — TUI, or `--once` snapshot
   help     Print this message or the help of the given subcommand(s)
 
@@ -172,10 +171,9 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 COMMAND MAP:
-  Lifecycle    create · rm
-  Inspect      ls · inspect
-  Declarative  apply
-  Dashboards   dash
+  Lifecycle   create · rm
+  Inspect     ls · inspect
+  Dashboards  dash
 
 EXAMPLES:
   # a NAS export becomes a named volume any container can mount
@@ -192,34 +190,6 @@ SEE ALSO:
   delonix container run
 
   delonix › storage</code></pre></div>
-<h2 id='apply'><code>storage apply</code></h2>
-<p class='intro'>Apply the <code>kind: Storage</code> documents from a manifest</p>
-<div class='help'><pre><code>Usage: delonix storage apply [OPTIONS]
-
-Options:
-  -f, --file &lt;FILE&gt;
-          
-
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
-  -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)
-
-EXAMPLES:
-  # declare the shares in a manifest instead of typing credentials on the
-  # command line
-  delonix storage apply -f examples/storage.yaml
-
-  # the storages of your own manifest
-  delonix storage apply -f delonix-manifest.yaml
-
-SEE ALSO:
-  delonix stack apply · delonix sharevolume apply · delonix secret apply ·
-  delonix volume apply
-
-  delonix › storage › apply</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Declarar o NAS num manifesto kind: Storage</div><div class='cap lang-en'>Declare the NAS in a kind: Storage manifest</div><pre><code>delonix storage apply -f storage.yaml</code></pre></div>
 <h2 id='inspect'><code>storage inspect</code></h2>
 <p class='intro'>Details of a storage</p>
 <div class='help'><pre><code>Usage: delonix storage inspect [OPTIONS] &lt;NAME&gt;
