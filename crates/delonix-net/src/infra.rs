@@ -8379,9 +8379,16 @@ Inter-|   Receive                                                |  Transmit
 
     #[test]
     fn base_root_e_runtime_dir_honram_env_vars_explicitas() {
+        // This test rewrites process-global state. Until 2026-08-29 it did so
+        // holding NO lock, while `ipam`'s tests held one private to their own
+        // module — so it silently redirected their state root mid-run
+        // (reproduced 10/10). The guard is now crate-wide, and it also puts the
+        // ambient values back when it drops.
+        let mut env = crate::testenv::lock();
+
         // with DELONIX_ROOT set, ingress_dir is deterministic and does NOT depend
         // on the uid (essential for the holder with uid mapped to 0).
-        std::env::set_var("DELONIX_ROOT", "/tmp/dlx-test-root");
+        env.set("DELONIX_ROOT", "/tmp/dlx-test-root");
         assert_eq!(ingress_dir(), PathBuf::from("/tmp/dlx-test-root/ingress"));
 
         // BUG FOUND live (a genuinely long DELONIX_ROOT, e.g. a deep test/tmp
@@ -8393,11 +8400,11 @@ Inter-|   Receive                                                |  Transmit
         // `runtime_dir()` MUST stay independent of DELONIX_ROOT's length,
         // proven here with a DELONIX_ROOT deliberately deep enough that a
         // socket nested under it would exceed SUN_LEN.
-        std::env::set_var(
+        env.set(
             "DELONIX_ROOT",
             "/tmp/a/very/deeply/nested/delonix/root/that/would/exceed/SUN_LEN/if/a/socket/lived/under/it/like/before",
         );
-        std::env::set_var(RUNTIME_DIR_ENV, "/tmp/dlx-rt-test");
+        env.set(RUNTIME_DIR_ENV, "/tmp/dlx-rt-test");
         assert_eq!(runtime_dir(), PathBuf::from("/tmp/dlx-rt-test"));
         assert_eq!(
             slirp_sock_path(),
@@ -8407,7 +8414,7 @@ Inter-|   Receive                                                |  Transmit
             control_sock_path(),
             PathBuf::from("/tmp/dlx-rt-test/control.sock")
         );
-        std::env::remove_var(RUNTIME_DIR_ENV);
+        env.unset(RUNTIME_DIR_ENV);
 
         // Rootless fallback: `/tmp`, uid-scoped — NOT `/run`-based (see
         // `runtime_dir`'s doc comment for why: the holder remounts `/run` as an
@@ -8440,7 +8447,7 @@ Inter-|   Receive                                                |  Transmit
         // E o root POR OMISSÃO mantém o nome nu, byte a byte — é o que torna
         // esta mudança segura de publicar: um holder já a correr de um binário
         // anterior resolve exactamente o caminho de sempre.
-        std::env::remove_var("DELONIX_ROOT");
+        env.unset("DELONIX_ROOT");
         assert_eq!(
             runtime_dir(),
             std::env::temp_dir().join(format!("delonix-net-{uid}"))
