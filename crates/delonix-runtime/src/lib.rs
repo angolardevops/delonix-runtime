@@ -1989,6 +1989,15 @@ impl HeldChild {
 
 impl Drop for HeldChild {
     fn drop(&mut self) {
+        // DO NOT REORDER these two calls. Swapping them, or letting anything
+        // else reap first, turns this into the exact defect `delonix-cri` had
+        // to fix with a pidfd — see `delonix_cri::child_handle` and ADR-0027.
+        //
+        // SAFETY: the pid cannot name a recycled process, and the ORDER is what
+        // guarantees it: `HeldChild` is this child's only owner and never reaps
+        // it before now, so until this `waitpid` the child is running or a
+        // zombie — and a zombie pins its number against reuse. `waitpid` writes
+        // only into `st`, a local we own.
         unsafe {
             libc::kill(self.pid, libc::SIGKILL);
             let mut st = 0;
