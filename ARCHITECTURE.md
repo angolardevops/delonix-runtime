@@ -146,6 +146,7 @@ graph TB
     CORE["delonix-runtime-core<br>Container, Vm, Status, Store e JsonStore, Mount,<br>typestate, virt, secret e cred_vault — Secret Manager"]
     MGMT["delonix-mgmt<br>API de gestao LOCAL (HTTP+JSON num socket unix, so o proprio uid)<br>registo Prometheus partilhado e spans OpenTelemetry"]
     SCAN["delonix-scan<br>SBOM e varredura de CVE — image scan<br>e a imposicao de scan-on-pull"]
+    SEC["delonix-security-runtime<br>decisoes de seguranca do no: politica, admissao<br>unica (container E VM), evento, score, redaccao<br>(ADR-0026) — puro, sem sensores e sem inquilino"]
     RULES["delonix-net-rules<br>regras de rede PURAS, ZERO dependencias — Cidr, nome de bridge,<br>IPAM dentro de um prefixo, leitura de taxas; partilhado com o PaaS"]
     PVE["delonix-proxmox<br>backend VmBackend REMOTO contra a API de UM no Proxmox VE<br>(ADR-0008) — fora do delonix-vm por trazer cliente HTTP"]
     NAS["delonix-truenas<br>provisiona dataset, quota, permissoes e export numa NAS<br>pela API do TrueNAS (ADR-0009) — mesma razao de crate a parte"]
@@ -160,6 +161,7 @@ graph TB
     BIN --> CRI
     BIN --> MGMT
     BIN --> SCAN
+    BIN --> SEC
     BIN --> PVE
     BIN --> NAS
     BIN --> MCP

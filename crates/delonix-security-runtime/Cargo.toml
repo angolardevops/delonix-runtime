@@ -1,0 +1,14 @@
+[package]
+name = "delonix-security-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Deliberately three dependencies, two of them already in every engine crate.
+# This crate decides; it does not scan, load eBPF, or talk to a registry. Every
+# dependency it grows is supply-chain surface on the highest-privilege path of a
+# container runtime — see ADR-0026, "Consequences".
+[dependencies]
+delonix-runtime-core = { path = "../delonix-runtime-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }

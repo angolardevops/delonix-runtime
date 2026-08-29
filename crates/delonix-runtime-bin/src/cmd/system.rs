@@ -1043,7 +1043,8 @@ fn cmd_doctor(strict: bool) -> Result<()> {
         name: "br_netfilter (namespace isolation)",
         ok,
         detail,
-        fix: "sudo modprobe br_netfilter && sudo sysctl -w net.bridge.bridge-nf-call-iptables=1               (persist: scripts/install.sh, which writes /etc/modules-load.d and /etc/sysctl.d)"
+        fix: "sudo modprobe br_netfilter && sudo sysctl -w net.bridge.bridge-nf-call-iptables=1 \
+(persist: scripts/install.sh, which writes /etc/modules-load.d and /etc/sysctl.d)"
             .to_string(),
         silent: true,
     });
@@ -1053,7 +1054,8 @@ fn cmd_doctor(strict: bool) -> Result<()> {
         name: "cgroup2 delegation (--memory/--cpus/--pids-limit)",
         ok: Some(limits),
         detail: runtime::current_cgroup_v2().unwrap_or_else(|| "<unknown>".into()),
-        fix: "systemd-run --user --scope -p Delegate=yes -- delonix …  (or, if that still               lacks `cpu`: sudo delonix system setup --delegate)"
+        fix: "systemd-run --user --scope -p Delegate=yes -- delonix … \
+(or, if that still lacks `cpu`: sudo delonix system setup --delegate)"
             .to_string(),
         silent: true,
     });

@@ -197,14 +197,14 @@ check "sem filtro a coluna NAMESPACE esconde-se" ok bash -c \
 check "com -n default a coluna aparece" ok bash -c \
   "'$BIN' container ps -a -n default | head -1 | grep -q NAMESPACE"
 check "vm ls" ok "$BIN" vm ls
-check "cluster ls" ok "$BIN" cluster ls
+check "get clusters" ok "$BIN" get clusters
 check "system info" ok "$BIN" system info
 check "system df" ok "$BIN" system df
 check "system events" ok "$BIN" system events
-check "completion bash" ok "$BIN" completion bash
+check "completion shell bash" ok "$BIN" completion shell bash
 
 # --- os NOMES completam-se, e não só o script de registo (C-2) ------------
-# O `completion bash` acima prova que o script de registo SAI; não prova que um
+# O `completion shell bash` acima prova que o script de registo SAI; não prova que um
 # TAB sobre um argumento sugere alguma coisa. A distinção não é teórica: o
 # `image vm rm` — o comando DESTRUTIVO — não sugeria nada enquanto o `describe`
 # ao lado sugeria, e ninguém deu por isso porque o registo saía na mesma.
@@ -653,6 +653,90 @@ if "$BIN" container inspect "$C" >/dev/null 2>&1; then
   check "update: mount desapareceu de dentro" fail "$BIN" container exec "$C" /bin/sh -c "mountpoint -q /mnt/e2e"
 
   check "update: PID intacto após o hot reconfig" ok bash -c "test \"\$('$BIN' container inspect '$C' | python3 -c 'import json,sys; print(json.load(sys.stdin)[0][\"pid\"])')\" != 'None'"
+
+  # A JANELA ENTRE O `run -d` E O PRIMEIRO `exec` (medida 2026-08-28).
+  #
+  # O `run -d` devolvia assim que libertava o init; o init só DEPOIS fazia o
+  # `pivot_root` e montava os volumes. Um `exec` que apanhasse essa janela
+  # entrava no mount namespace enquanto `/` ainda era o do HOST — corria o
+  # `/bin/sh` do host e escrevia ficheiros do host, com exit 0. Silencioso
+  # sempre que o caminho existe dos dois lados, e foi assim que passou dias por
+  # flakiness: um backup tirado ali arquivava um volume vazio e a falha só
+  # aparecia dois passos à frente, no restore, a apontar para o comando errado.
+  #
+  # A prova não pode ser o rc do `exec` — foi um rc=0 que escondeu isto. É um
+  # caminho que existe SÓ no host: se o container o vê, o exec aterrou fora dele.
+  #
+  # POR QUE É QUE GERA CARGA, e o que isso admite. Isto é AMOSTRAGEM, não uma
+  # verificação determinística: o que decide a corrida é o filho ser escalonado
+  # antes de o `exec` (um processo novo) chegar ao `setns`, logo a taxa segue a
+  # contenção de CPU do host e não o número de mounts. Medido no mesmo binário
+  # defeituoso: 0/20 com a máquina folgada, 0/20 com 40 volumes, e 4–7/20 (20–35%)
+  # com `nproc` workers a queimar CPU. Daí os 12 ciclos COM carga: entre 93% e
+  # 99,8% de apanhar o defeito, contra praticamente 0% sem ela. Custa ~10s de
+  # máquina saturada, e é o preço de o check não ser um verde por sorte.
+  #
+  # O que ele NÃO prova — que a espera existe e é limitada — está provado onde é
+  # determinístico: `the_mount_wait_has_three_exits_and_none_is_unbounded`,
+  # em `crates/delonix-runtime/src/lib.rs`. Nenhum dos dois substitui o outro.
+  check "run -d devolve com os mounts de pé (sem janela para o host)" ok bash -c "
+    marca='$OUT/.so-existe-no-host'; : > \"\$marca\"
+    carga=(); trap 'kill \"\${carga[@]}\" 2>/dev/null' EXIT
+    for _ in \$(seq \$(nproc)); do ( while :; do :; done ) & carga+=(\$!); done
+    for i in \$(seq 12); do
+      n='rd-$PFX'-\$i
+      '$BIN' container run -d --name \"\$n\" '$IMG' sleep 30 >/dev/null 2>&1
+      onde=\$('$BIN' container exec \"\$n\" /bin/sh -c \"test -e '\$marca' && echo HOST || echo CONTAINER\" 2>&1)
+      '$BIN' container rm -f \"\$n\" >/dev/null 2>&1
+      case \"\$onde\" in
+        *CONTAINER*) ;;
+        *) printf 'ciclo %s: o exec aterrou fora do container (%s)\n' \"\$i\" \"\$onde\"; exit 1 ;;
+      esac
+    done
+  "
+
+  # O REGISTO NÃO PODE DIZER `Running` ANTES DE O CONTAINER ESTAR MONTADO.
+  #
+  # O check acima cobre quem passa pelo `run -d` — esse agora espera. Não cobre
+  # um TERCEIRO processo (o CRI, o `serve docker-api`, uma CLI concorrente), que
+  # não passa por lá: descobre o container no store e entra. Enquanto o
+  # `store.save` acontecia ANTES da espera, esse terceiro lia `pid` + `Running`
+  # de um processo cuja raiz ainda era a do host — medido no binário que já
+  # tinha a espera, 2 de 15.
+  #
+  # Este não amostra uma corrida: mede a PROPRIEDADE. No instante exacto em que
+  # o registo ganha `pid`, compara `/proc/<pid>/root` com `/`. Iguais = o
+  # `pivot_root` ainda não aconteceu e o registo mentiu. Barato o bastante
+  # (dois `stat`, sem arrancar processo nenhum) para chegar sempre à janela, ao
+  # contrário de um `exec`, que leva ~50ms a arrancar e por isso quase nunca a
+  # apanha — foi assim que este resíduo escapou à primeira passagem.
+  cat > "$OUT/espia-registo.py" <<'ESPIA'
+import json, glob, os, sys, time
+root, name = os.environ["DELONIX_ROOT"], sys.argv[1]
+h = os.stat("/"); hid = (h.st_dev, h.st_ino)
+deadline = time.time() + 60
+while time.time() < deadline:
+    for f in glob.glob(os.path.join(root, "containers", "*.json")):
+        try: d = json.load(open(f))
+        except Exception: continue
+        if d.get("name") == name and d.get("pid"):
+            try: st = os.stat("/proc/%d/root" % d["pid"])
+            except OSError: sys.exit(0)   # já morreu: nada a afirmar
+            sys.exit(0 if (st.st_dev, st.st_ino) != hid else 1)
+sys.exit(0)                               # nunca visto: não é este o check
+ESPIA
+  check "o registo só diz Running com o container montado" ok bash -c "
+    carga=(); trap 'kill \"\${carga[@]}\" 2>/dev/null' EXIT
+    for _ in \$(seq \$(nproc)); do ( while :; do :; done ) & carga+=(\$!); done
+    for i in \$(seq 10); do
+      n='rg-$PFX'-\$i
+      python3 '$OUT/espia-registo.py' \"\$n\" & esp=\$!
+      '$BIN' container run -d --name \"\$n\" '$IMG' sleep 20 >/dev/null 2>&1
+      wait \$esp; rc=\$?
+      '$BIN' container rm -f \"\$n\" >/dev/null 2>&1
+      [ \$rc -eq 0 ] || { printf 'ciclo %s: o registo publicou o pid antes do pivot_root\n' \"\$i\"; exit 1; }
+    done
+  "
 
   check "container stop" ok "$BIN" container stop "$C"
   check "update num container parado recusa" fail "$BIN" container update "$C" --publish-add "$P2:80"
@@ -1463,8 +1547,11 @@ section "storage — o que se consegue provar sem uma NAS"
 STGN="stg-$PFX"
 
 check "storage ls responde" ok "$BIN" storage ls
-check "storage inspect de inexistente diz 4" 4 "$BIN" storage inspect "naoexiste-$PFX"
-check "storage rm de inexistente diz 4" 4 "$BIN" storage rm "naoexiste-$PFX"
+# `storage inspect`/`storage rm` foram cortados no B5 (52_CLI_PLANO_MIGRACAO.md)
+# — uma `Storage` é só um `volume` com driver de rede, e não havia nada em
+# `volume inspect`/`volume rm` que estas duas duplicassem sem acrescentar.
+check "volume inspect de inexistente diz 4" 4 "$BIN" volume inspect "naoexiste-$PFX"
+check "volume rm de inexistente diz 4" 4 "$BIN" volume rm "naoexiste-$PFX"
 check "storage create com --type desconhecido recusa" 2 \
   "$BIN" storage create "$STGN" --type naoexiste --server 10.99.99.99 --share /x
 check "storage create sem --share recusa" 2 \
@@ -1476,9 +1563,9 @@ check "storage create sem --share recusa" 2 \
 # contabilidade antes dos dados) — e aqui está medido, não assumido.
 if "$BIN" storage create "$STGN" --type nfs --server 10.99.99.99 --share /exports/x >/dev/null 2>&1; then
   # Um host COM privilégio de montagem chega aqui; então exercita-se o resto.
-  check "storage inspect do que foi criado" ok "$BIN" storage inspect "$STGN"
+  check "volume inspect do que foi criado" ok "$BIN" volume inspect "$STGN"
   check "storage ls mostra-o" ok bash -c "'$BIN' storage ls | grep -q '$STGN'"
-  check "storage rm" ok "$BIN" storage rm "$STGN"
+  check "volume rm" ok "$BIN" volume rm "$STGN"
 else
   skip "storage create/inspect/rm com NAS real" "montar NFS/CIFS exige CAP_SYS_ADMIN — não exercitável em rootless"
   # E ISTO é o que se prova sem privilégio nenhum:

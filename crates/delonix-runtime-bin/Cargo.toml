@@ -25,6 +25,9 @@ delonix-truenas = { path = "../delonix-truenas" }
 # this is the process that registers it.
 delonix-proxmox = { path = "../delonix-proxmox" }
 delonix-scan = { path = "../delonix-scan" }
+# The node's security decisions (ADR-0026). Pure: three dependencies, no daemon,
+# no privileges — see the crate doc for what it deliberately does NOT do.
+delonix-security-runtime = { path = "../delonix-security-runtime" }
 delonix-cri = { path = "../delonix-cri" }
 delonix-mgmt = { path = "../delonix-mgmt" }
 # The MCP server (ADR-0025) — a local, tenancy-free AI control surface. Kept

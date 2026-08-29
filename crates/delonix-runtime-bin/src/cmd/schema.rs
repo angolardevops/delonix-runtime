@@ -960,7 +960,7 @@ mod tests {
     /// drifting. Regenerate with:
     ///
     /// ```text
-    /// delonix schema print > docs/schema/v1/delonix.json
+    /// delonix manifest schema > docs/schema/v1/delonix.json
     /// ```
     #[test]
     fn o_schema_publicado_esta_em_dia_com_o_codigo() {
@@ -976,7 +976,7 @@ mod tests {
         assert_eq!(
             published, generated,
             "the published schema is stale — regenerate it with \
-             `delonix schema print > docs/schema/v1/delonix.json`"
+             `delonix manifest schema > docs/schema/v1/delonix.json`"
         );
     }
 

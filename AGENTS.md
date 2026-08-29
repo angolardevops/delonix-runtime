@@ -3981,6 +3981,12 @@ checklist para quem mexer aqui do que como lista de correcções:
   único elemento do argv cujo CAMINHO nós escolhemos; um slirp nosso sem portas não tem
   api-socket e responde «não é meu», que é a resposta honesta e não custa nada — quem liberta
   uma porta presa é o `reap_slirp_for`, que conhece o alvo pelo pid;
+- **o `run -d` ter devolvido não é o container estar montado** — o `spawn` devolvia a seguir ao
+  «GO» do handshake de userns e o init só DEPOIS fazia o `pivot_root` e os binds dos volumes. Um
+  `exec` nessa janela corria o `/bin/sh` do HOST e escrevia ficheiros do host, com exit 0
+  (medido, 3 em 12). E o gémeo: **`pid` + `Running` no registo não era o container estar montado**
+  — o save acontecia antes da prova, e é o registo que um terceiro lê. Fechados na v0.66.x — ver
+  «Um `exec` logo a seguir ao `run -d` corria no HOST»;
 - **«o processo é detached» não é «já não preciso dos fds do chamador»** — o `start_pin` herdava o
   `stderr` do chamador com o comentário a garantir que «inheriting stderr costs nothing (the
   process is detached)». O pin dorme durante toda a vida da infra, logo segura esse fd aberto
@@ -4823,6 +4829,99 @@ do hash no `/etc/shadow`. **Não validado**: um build completo de ponta a ponta 
 (precisa dos contornos de host do passt já documentados), e o `--node-exporter` contra um
 Prometheus a fazer scrape a sério.
 
+## Um `exec` logo a seguir ao `run -d` corria no HOST (2026-08-28)
+
+Reportado como «o `exec` escreve para o `/data` do ROOTFS em vez de para o volume». **A medição
+diz outra coisa, e pior**: o `exec` que apanha a janela corre no **filesystem do HOST**. Não é o
+destino errado dentro do container — é fora dele.
+
+A prova, com dois caminhos que não podem coexistir (`/etc/alpine-release` só existe no container,
+`/tmp/dlx-race/` só existe no host): 3 de 12 corridas responderam `NAO-CONTAINER` e **duas
+criaram ficheiros reais em `/tmp` do host**, com **exit 0**. Ou seja o `exec` executou o
+`/bin/sh` do host — a mensagem de erro delatou-o antes da sonda: `sh: 1: cannot create
+/data/f.txt: Directory nonexistent` é o `dash` do Ubuntu, não o busybox do alpine, e o `cat`
+seguinte já respondia com a redacção do busybox.
+
+**A causa**: no caminho `detach` o `spawn` devolvia logo a seguir a libertar o init (o byte «GO»
+do handshake de userns), e é só DEPOIS disso que o init faz `setup_rootfs` — os binds dos
+volumes, o `pivot_root`, o `/dev`, os tmpfs, os secret files. O `exec` faz `setns` para o
+`mnt` do container, que existe desde o `clone`: entrar antes do `pivot_root` é entrar num mount
+namespace cuja raiz ainda é a do host.
+
+**Porque passou dias por flakiness**: é silencioso sempre que o caminho existe dos dois lados. Um
+backup tirado nessa janela arquiva um volume vazio, e a falha aparece dois passos à frente, no
+check «os dados voltaram», a apontar para o restore — que estava bom.
+
+**A saída escolhida foi fechar a janela na origem** (o `run -d` só devolve com os mounts de pé),
+e não pôr o `exec` a recusar enquanto não estivessem. Três razões, por ordem de peso: o `exec`
+não é o único a entrar por `setns`/`/proc/<pid>/root`, logo a recusa teria de ser repetida em
+cada consumidor; recusar devolve o custo a quem chama, que é exactamente o penso de
+escrever-e-reler que a bateria já tinha posto e que este trabalho existe para tirar; e o
+mecanismo já tem precedente com razão escrita no mesmo ficheiro — o `reexec_mapped_hold` já
+espera pela prova de que o mount está de pé, pela mesma «resposta-vazia-em-silêncio».
+
+- **Um pipe `O_CLOEXEC`**, escrito pelo init logo a seguir ao último mount
+  (`apply_readonly_paths`) e lido pelo `spawn` como ÚLTIMA coisa antes de devolver. O CLOEXEC é
+  que carrega o caso mau: se o init morre, ou chega ao `execvp` sem escrever, o fd fecha e o pai
+  lê EOF em vez de esperar para sempre.
+- **Deliberadamente antes do `chown_tree_once`** (que percorre o rootfs inteiro para uma imagem
+  com `USER` ≠ root) e antes das caps/seccomp/apparmor: nada disso muda o que um intruso vê, e
+  fazer o `run -d` esperar por um chown de árvore completa trocava um defeito real por uma
+  lentidão visível.
+- **Zero reordenação do que já existia** — o handshake de userns, o `recv_fd` da consola e o log
+  shim têm uma ordem que os comentários chamam CRITICAL, e esta espera não precisa de nenhuma
+  delas: só precisa de ser a última.
+- **Tecto de 60s com aviso alto**, nunca uma espera sem fim: um mount que pendura (um bind sobre
+  um NFS que não responde) não pode pendurar o `run`, porque antes disto não pendurava. E o
+  aviso é dito, porque é exactamente aí que o `exec` seguinte pode aterrar no host.
+- **O que NÃO mudou, de propósito**: um `run -d` cujo init morre a montar continua a reportar o
+  que reportava. Mudar o relato de erro é uma segunda decisão, com as suas próprias medições, e
+  misturá-la com a correcção de uma corrida é como se mete uma mudança por rever.
+
+**Medido, mesma sonda, mesma máquina**: antes 5 em 54 corridas fora do container; depois 0 em 54,
+e 0 em 36 mais com carga. Latência do `run -d`: mediana 102 → 95 ms — indistinguível do ruído,
+porque os mounts já corriam em paralelo com o trabalho que o pai fazia a seguir ao GO.
+
+**A segunda metade: o REGISTO também mentia, e essa não passa pelo `run -d`.** Registei-a
+primeiro como resíduo aceitável e a medição desmentiu-me — o `store.save(Running)` acontecia
+antes da prova, e é o `pid` + `Running` no store que um TERCEIRO lê para decidir que o container
+está lá para ser entrado (o CRI, o `serve docker-api`, uma CLI concorrente), nenhum deles a
+passar pelo `run` que espera. Medido **no binário já corrigido**: em 2 de 15 corridas, no instante
+em que o registo ganhou `pid`, o `/proc/<pid>/root` era ainda o do host. O save passou para
+depois da prova; 55/55 depois disso.
+
+- **Como se mediu, e é a parte reutilizável**: não por sorte de timing, mas como PROPRIEDADE — um
+  espião que faz polling do JSON e, mal veja o `pid`, compara `/proc/<pid>/root` com `/` (dois
+  `stat`, sem arrancar processo nenhum). Um `exec` leva ~50 ms a arrancar e por isso quase nunca
+  chega à janela: foi assim que este resíduo escapou à primeira passagem, com um espião que
+  invocava a CLI e dava 0/15 sobre um defeito que lá estava.
+- **O `setup_cgroup` NÃO foi movido com ele**: é de onde pendem os limites do container, e cada
+  milissegundo fora de um cgroup é um milissegundo a correr sem tecto. Montar não aloca nada,
+  logo esperar primeiro não compraria segurança nenhuma e custava isso.
+- **Efeito de lado, na direcção certa**: um hook de rede que falha deixa agora o registo
+  intocado, em vez de dizer `Running` para um processo que ele próprio acabou de SIGKILL.
+
+**Os gates são DOIS, e nenhum substitui o outro.** O
+`the_mount_wait_has_three_exits_and_none_is_unbounded` prova, de forma determinística, que
+a espera existe e que as três saídas (byte, EOF, tecto) são todas finitas — verificado pela regra
+do repo: com a função a devolver de imediato, chumba em «devia ter esperado ~120ms e desistido,
+esperou 721ns». O check da bateria prova a LIGAÇÃO, que o unitário não alcança.
+
+**E o gate da bateria admite o que é: amostragem.** O que decide a corrida é o filho ser
+escalonado antes de o `exec` — um processo NOVO — chegar ao `setns`, logo a taxa segue a
+contenção de CPU e **não** o número de mounts: medido no binário defeituoso, 0/20 com a máquina
+folgada, 0/20 com 40 volumes, 4–7/20 com `nproc` workers a queimar CPU. Por isso o check gera
+carga e corre 12 ciclos — 93% a 99,8% de detecção, contra praticamente 0% sem ela, e verificado
+3/3 a chumbar o binário anterior (sempre no 1.º ou 2.º ciclo) e 3/3 a passar o corrigido. Um
+check que apanhasse isto uma vez em cada três corridas seria pior que nenhum: leria como verde.
+
+**O terceiro check é o do registo, e é DETERMINÍSTICO** — mede a propriedade em vez de amostrar a
+corrida, com o mesmo espião de dois `stat` acima. Verificado no caso que separa os dois: contra um
+binário COM a espera mas com o save no sítio antigo, chumba 3/3 (sempre no ciclo 1) enquanto o
+check da janela continua verde. É isso que prova que cobrem metades diferentes, e não a mesma
+coisa duas vezes.
+
+
 ## Regra de ouro: fronteira com o PaaS
 
 Este código **não pode depender de nada privado**. Antes de qualquer commit:
@@ -4857,6 +4956,7 @@ Este código **não pode depender de nada privado**. Antes de qualquer commit:
 | `delonix-mgmt` | API de gestão LOCAL (HTTP+JSON num socket unix, só o próprio uid) para um control-plane externo, mais o registo Prometheus partilhado e os spans OpenTelemetry. Não é remota, e o `cli-stability.md` diz que não se deve construir automação sobre ela — ver ADR-0010 |
 | `delonix-scan` | SBOM + varredura de CVE (`image scan`, e a imposição de scan-on-pull) |
 | `delonix-mcp` | servidor Model Context Protocol (ADR-0025) — superfície de controlo de IA LOCAL e sem inquilino, `stdio`-only nesta fase; as tools chamam a `Store`/os crates de domínio, nunca constroem shell arbitrário |
+| `delonix-security-runtime` | as decisões de segurança do nó: a política (`policy.json`), o **único** ponto de admissão — container **e** VM —, o `SecurityEvent`, o score explicável e a redacção de segredos. Puro: três dependências, sem sensores, sem daemon e **sem noção de inquilino** (guarda-rio #2, imposto por teste) — ver ADR-0026 |
 
 ## Histórico
 

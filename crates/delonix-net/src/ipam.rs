@@ -427,10 +427,11 @@ mod tests {
     /// só-leitura que ele instala vazava para um `allocate` concorrente, que
     /// falhava com ENOENT. Flaky, e por isso passou despercebido na corrida em
     /// que foi introduzido.
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     fn with_root<T>(tag: &str, f: impl FnOnce() -> T) -> T {
-        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // The lock is now crate-wide (`crate::testenv`): `infra`'s tests write
+        // the same variable, and a mutex private to this module serialized
+        // nothing against them — see the note on `testenv`.
+        let mut env = crate::testenv::lock();
         // The PID in the path, not just the tag. `ENV_LOCK` above serializes
         // within the PROCESS; nothing serializes across processes, and this
         // workspace runs several sessions at once (one worktree per task). With
@@ -445,10 +446,10 @@ mod tests {
         // was written in the same file.
         let dir = std::env::temp_dir().join(format!("dlx-ipam-test-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        // SAFETY: single-thread test under the Mutex above.
-        unsafe { std::env::set_var("DELONIX_ROOT", &dir) };
+        env.set("DELONIX_ROOT", &dir);
         let out = f();
-        unsafe { std::env::remove_var("DELONIX_ROOT") };
+        // No explicit unset: the guard restores what it found when it drops,
+        // including «was not set».
         let _ = std::fs::remove_dir_all(&dir);
         out
     }
@@ -583,7 +584,7 @@ mod tests {
     #[test]
     fn allocate_recusa_quando_nao_consegue_trancar_o_registo() {
         use std::os::unix::fs::PermissionsExt;
-        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut env = crate::testenv::lock();
 
         let dir = std::env::temp_dir().join(format!("dlx-ipam-nolock-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -592,10 +593,8 @@ mod tests {
         // opened — the same shape as a full disk or a lost mount.
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
 
-        // SAFETY: single-threaded under the mutex above.
-        unsafe { std::env::set_var("DELONIX_ROOT", &dir) };
+        env.set("DELONIX_ROOT", &dir);
         let got = allocate("10.88", "cafe0001");
-        unsafe { std::env::remove_var("DELONIX_ROOT") };
 
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
 

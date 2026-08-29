@@ -928,7 +928,7 @@
         },
         "pathType": {
           "default": null,
-          "description": "`Prefix` (default) | `Exact` | `ImplementationSpecific`. The proxy matches\nby prefix; `Exact` is accepted but treated as prefix (documented limitation).",
+          "description": "`Prefix` (default) | `Exact` | `ImplementationSpecific`.\n\nThis engine matches by PREFIX and has no other mode. `Exact` is accepted\nfor Kubernetes fidelity and then served as a prefix — so longer paths\nunder it match too, which is traffic the author did not ask for.\nApplying a manifest that sets `Exact` prints a warning naming the paths.",
           "type": [
             "string",
             "null"
@@ -1054,6 +1054,7 @@
       "properties": {
         "hosts": {
           "default": [],
+          "description": "The SNI names this certificate should cover. **Accepted, never applied**:\nthis engine serves ONE certificate and does not select by SNI, so the\ncert from `secretName` (or the self-signed fallback) is presented to\nevery host that reaches the listener. Applying a manifest that sets this\nprints a warning naming the hosts.",
           "items": {
             "type": "string"
           },

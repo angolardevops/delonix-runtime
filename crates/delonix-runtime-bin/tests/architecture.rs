@@ -162,3 +162,93 @@ fn the_stated_crate_count_is_the_real_one() {
         }
     }
 }
+
+/// A message the operator reads must not carry the source file's indentation.
+///
+/// A long string literal wrapped across source lines WITHOUT a `\` continuation
+/// keeps every space rustfmt put there. The operator then sees
+///
+/// ```text
+/// this namespace does not expose an AppArmor transition file              (/proc/...
+/// ```
+///
+/// Measured 2026-08-29: six of these, and the two worst were on the security
+/// path — the seccomp NO_NEW_PRIVS fallback and the AppArmor "confinement is
+/// not available" message. Those two print at the exact moment a security
+/// control failed to apply, which is the worst possible moment to look broken:
+/// an operator who cannot read the sentence cannot act on it.
+///
+/// The fix is a `\` at the end of the source line. This gate exists because
+/// nothing else notices — it compiles, it runs, and only a human reading the
+/// output would catch it.
+///
+/// Two exclusions, both deliberate:
+/// - literals containing a newline are multi-line templates (the `scaffold`
+///   YAML, the VMfile) where the alignment is the point;
+/// - a run of spaces right after `:` is column alignment (`vni:      {vni}`).
+#[test]
+fn no_message_carries_the_indentation_of_its_source_line() {
+    let out = std::process::Command::new("git")
+        .arg("ls-files")
+        .arg("*.rs")
+        .current_dir(repo_root())
+        .output()
+        .expect("git ls-files should run");
+    let mut offenders = Vec::new();
+    for rel in String::from_utf8_lossy(&out.stdout).lines() {
+        let Ok(text) = std::fs::read_to_string(repo_root().join(rel)) else {
+            continue;
+        };
+        for (lineno, line) in text.lines().enumerate() {
+            // Only whole literals that open and close on this source line can
+            // be judged here; a literal still open at the end of the line is
+            // the wrapped case, and its continuation lines are what we check.
+            let Some(open) = line.find('"') else { continue };
+            let body = &line[open + 1..];
+            // A literal carrying `\n` is a multi-line template (YAML fixture,
+            // libvirt XML, a `/proc` sample): its alignment is the content.
+            if body.contains("\\n") {
+                continue;
+            }
+            if let Some(run) = find_baked_indent(body) {
+                offenders.push(format!("{rel}:{}: …{run}…", lineno + 1));
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "these messages carry their source indentation — end the previous \
+source line with `\\`:\n{}",
+        offenders.join("\n")
+    );
+}
+
+/// A run of 6+ spaces inside a sentence, i.e. not after a `:` (column
+/// alignment) and not at the start (ordinary indentation).
+fn find_baked_indent(s: &str) -> Option<String> {
+    let b: Vec<char> = s.chars().collect();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == '"' {
+            break;
+        }
+        if b[i] == ' ' {
+            let start = i;
+            while i < b.len() && b[i] == ' ' {
+                i += 1;
+            }
+            let before = start.checked_sub(1).map(|k| b[k]);
+            let after = b.get(i).copied();
+            let long = i - start >= 6;
+            let inside = matches!(before, Some(c) if c != ':' && c != ' ');
+            let followed = matches!(after, Some(c) if c != '"' && c != ' ');
+            if long && inside && followed {
+                let lo = start.saturating_sub(25);
+                return Some(b[lo..(i + 25).min(b.len())].iter().collect());
+            }
+            continue;
+        }
+        i += 1;
+    }
+    None
+}

@@ -1707,7 +1707,7 @@ pub static ENTRIES: &[Entry] = &[
             ("un-register and delete the underlying subdirectory as well", "delonix sharevolume rm app-data --purge-data"),
             ("a slice owned by a namespace other than `default`", "delonix sharevolume rm app-data -n backend"),
         ],
-        see_also: &["sharevolume ls", "storage rm", "volume rm"],
+        see_also: &["sharevolume ls", "volume rm"],
     },
     Entry {
         path: "sharevolume describe",
@@ -1716,7 +1716,7 @@ pub static ENTRIES: &[Entry] = &[
             ("quota, alert threshold and real usage of one slice", "delonix sharevolume describe app-data"),
             ("a slice owned by another namespace", "delonix sharevolume describe app-data -n backend"),
         ],
-        see_also: &["sharevolume ls", "storage inspect", "volume describe"],
+        see_also: &["sharevolume ls", "volume describe"],
     },
     Entry {
         path: "sharevolume ls",
@@ -1870,7 +1870,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("a NAS export becomes a named volume any container can mount", "delonix storage create nas --type nfs --server 10.0.0.5 --share /mnt/pool/media"),
             ("what is mounted, and from where", "delonix storage ls"),
-            ("the server, export and mount options really in use", "delonix storage inspect nas"),
+            ("the derived device, as JSON", "delonix storage ls -o json"),
         ],
         see_also: &["sharevolume", "volume create", "secret create", "container run"],
     },
@@ -1886,39 +1886,13 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["storage ls", "sharevolume apply", "secret create", "volume create"],
     },
     Entry {
-        path: "storage rm",
-        group: "Lifecycle",
-        examples: &[
-            ("unmount and unregister it — the DATA stays on the NAS, only the local mount goes", "delonix storage rm nas"),
-        ],
-        see_also: &["storage ls", "sharevolume rm", "volume rm"],
-    },
-    Entry {
-        path: "storage inspect",
-        group: "Inspect",
-        examples: &[
-            ("server, export and the mount options actually derived for it", "delonix storage inspect nas"),
-        ],
-        see_also: &["storage ls", "volume inspect", "sharevolume describe"],
-    },
-    Entry {
         path: "storage ls",
         group: "Inspect",
         examples: &[
             ("the network storages, with type and mountpoint", "delonix storage ls"),
             ("as JSON, for automation", "delonix storage ls -o json"),
         ],
-        see_also: &["storage inspect", "volume ls", "sharevolume ls"],
-    },
-    Entry {
-        path: "storage dash",
-        group: "Dashboards",
-        examples: &[
-            ("a live TUI of storages and volumes, with usage per area", "delonix storage dash"),
-            ("one snapshot, for CI or a terminal without a TTY", "delonix storage dash --once"),
-            ("JSON, to alert on a share filling up", "delonix storage dash --json"),
-        ],
-        see_also: &["dash", "storage ls", "system df"],
+        see_also: &["volume describe", "volume ls", "sharevolume ls"],
     },
     Entry {
         path: "system",
@@ -2497,6 +2471,16 @@ pub static ENTRIES: &[Entry] = &[
             ("put the data back as it was — it REPLACES the contents, so stop the consumers first", "delonix volume snapshot restore pgdata before-upgrade"),
         ],
         see_also: &["volume snapshot ls", "volume snapshot create", "container stop"],
+    },
+    Entry {
+        path: "volume dash",
+        group: "Dashboards",
+        examples: &[
+            ("a live TUI of volumes and storages, with usage per area", "delonix volume dash"),
+            ("one snapshot, for CI or a terminal without a TTY", "delonix volume dash --once"),
+            ("JSON, to alert on a share filling up", "delonix volume dash --json"),
+        ],
+        see_also: &["dash", "storage ls", "system df"],
     },
     Entry {
         path: "workload",

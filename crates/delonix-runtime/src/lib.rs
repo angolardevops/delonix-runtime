@@ -302,7 +302,8 @@ fn apply_seccomp(unconfined: bool, detect: bool, keep_privs: bool, profile: Opti
         // both safe and useful. It says so out loud.
         if let Err(e) = install_filter_privileged(&prog) {
             eprintln!(
-                "delonix: could not keep NO_NEW_PRIVS off with a seccomp filter ({e});                  applying the filter WITH NO_NEW_PRIVS instead"
+                "delonix: could not keep NO_NEW_PRIVS off with a seccomp filter ({e}); \
+applying the filter WITH NO_NEW_PRIVS instead"
             );
             if let Err(e2) = apply_filter(&prog) {
                 eprintln!("delonix: failed to apply seccomp: {e2}; aborting the container");
@@ -1446,6 +1447,9 @@ pub fn mount_overlay_if_marked(rootfs: &str) -> nix::Result<()> {
 }
 
 /// Mounts the container rootfs and does `pivot_root` (runs INSIDE the `clone`).
+// The last one in this crate: `setup_rootfs` runs BEFORE the spec is
+// destructured, so it takes the pieces individually. Group it the way
+// `container_init` was grouped if it grows again.
 #[allow(clippy::too_many_arguments)]
 fn setup_rootfs(
     rootfs: &str,
@@ -1986,6 +1990,15 @@ impl HeldChild {
 
 impl Drop for HeldChild {
     fn drop(&mut self) {
+        // DO NOT REORDER these two calls. Swapping them, or letting anything
+        // else reap first, turns this into the exact defect `delonix-cri` had
+        // to fix with a pidfd — see `delonix_cri::child_handle` and ADR-0027.
+        //
+        // SAFETY: the pid cannot name a recycled process, and the ORDER is what
+        // guarantees it: `HeldChild` is this child's only owner and never reaps
+        // it before now, so until this `waitpid` the child is running or a
+        // zombie — and a zombie pins its number against reuse. `waitpid` writes
+        // only into `st`, a local we own.
         unsafe {
             libc::kill(self.pid, libc::SIGKILL);
             let mut st = 0;
@@ -2118,7 +2131,9 @@ fn apply_apparmor(profile: &str) -> std::result::Result<(), String> {
         let no_path = !std::path::Path::new("/proc/self/attr/apparmor/exec").exists()
             && !std::path::Path::new("/proc/self/attr/exec").exists();
         return Err(if no_path {
-            "this namespace does not expose an AppArmor transition file              (/proc/self/attr/[apparmor/]exec) — AppArmor confinement is not available to an              unprivileged container on this kernel"
+            "this namespace does not expose an AppArmor transition file \
+(/proc/self/attr/[apparmor/]exec) — AppArmor confinement is not available to an \
+unprivileged container on this kernel"
                 .to_string()
         } else {
             format!("the kernel rejected the profile ({e}) — is it loaded?")
@@ -2174,7 +2189,6 @@ fn apply_selinux(context: &str) {
 }
 
 /// The body that runs inside the new namespaces (the container's PID 1).
-#[allow(clippy::too_many_arguments)]
 /// Replaces the inherited environment with a clean, predictable one (like Docker):
 /// default `PATH`/`HOME`/`HOSTNAME`/`TERM` + the `KEY=value` from the image/stack/CLI
 /// (these override). Runs in the single-threaded child, before the `execvp`.
@@ -2200,7 +2214,6 @@ fn apply_env(hostname: &str, env: &[String]) {
     }
 }
 
-#[allow(clippy::too_many_arguments)] // container init: many namespace/security parameters
 /// Mounts the requested tmpfs (`--tmpfs /path[:opts]`). Runs after `pivot_root`
 /// and before dropping caps; `nosuid,nodev` by default (hardening).
 fn apply_tmpfs(specs: &[String]) {
@@ -2394,7 +2407,6 @@ fn apply_ulimits(specs: &[String]) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 /// (privileged / Kind node) Gives the container a DEDICATED, EMPTY CGROUP ROOT.
 ///
 /// On the rootless-with-network path the `ip netns exec` mounts a FRESH sysfs over
@@ -2539,48 +2551,172 @@ fn setup_node_cgroup_ns(cid: &str) {
     let _ = unshare(CloneFlags::CLONE_NEWCGROUP);
 }
 
-// FIXME(follow-up): 29 positional arguments — a real smell. Refactor to a typed
-// `ContainerInitSpec` (groups rootfs/hostname/argv/limits/flags) in a
-// dedicated, reviewed change; do not mix with the lint gate.
-#[allow(clippy::too_many_arguments)]
-fn container_init(
-    rootfs: &str,
-    hostname: &str,
-    argv: &[CString],
+/// What the container's `init` needs to build the container from inside the
+/// freshly cloned child.
+///
+/// This type exists because the call used to pass 37 positional arguments,
+/// nine of them adjacent `bool`s that the compiler accepts in any order:
+/// transposing `privileged` and `read_only` compiled, and silently disarmed a
+/// security barrier. Named fields make that transposition an error at the
+/// literal instead of a runtime surprise — which is the whole point, since the
+/// child has already crossed the namespace boundary by the time it reads any
+/// of this and can no longer be inspected from the parent.
+///
+/// Every field is a borrow or a `Copy` scalar: the whole spec is `Copy`, so it
+/// travels into the `clone` closure without touching the child's allocator
+/// (see the `main.rs` note on why the child must not allocate before `exec`).
+#[derive(Clone, Copy)]
+struct ContainerInitSpec<'a> {
+    /// Prepared rootfs the child pivots into.
+    rootfs: &'a str,
+    /// Container id. Names the Kind node's dedicated cgroup leaf.
+    cid: &'a str,
+    process: ProcessSpec<'a>,
+    filesystem: FilesystemSpec<'a>,
+    security: SecuritySpec<'a>,
+    namespaces: NamespaceSpec,
+    io: IoSpec,
+}
+
+/// What runs, as whom, and in what environment.
+#[derive(Clone, Copy)]
+struct ProcessSpec<'a> {
+    /// Also the hostname set inside the container's UTS namespace.
+    hostname: &'a str,
+    /// Init command and its arguments, already `CString`-encoded for `execve`.
+    argv: &'a [CString],
+    env: &'a [String],
+    /// Image `WorkingDir` (OCI); the child `chdir`s here before the exec.
+    workdir: Option<&'a str>,
+    /// `None` keeps the uid the namespace mapping produced.
+    run_uid: Option<u32>,
+    /// `None` keeps the gid the namespace mapping produced.
+    run_gid: Option<u32>,
+    group_add: &'a [u32],
+    ulimits: &'a [String],
+    sysctls: &'a [String],
+}
+
+/// What the container sees on disk.
+#[derive(Clone, Copy)]
+struct FilesystemSpec<'a> {
+    mounts: &'a [Mount],
+    /// Remounts the rootfs read-only after the pivot.
+    read_only: bool,
+    tmpfs: &'a [String],
+    devices: &'a [String],
+    /// Decrypted `--secret-files` values, written into an in-namespace tmpfs.
+    /// Held in the child's memory only — never touches the host filesystem.
+    secret_files: &'a [(String, String)],
+}
+
+/// The barriers raised around the container. Every field here can only weaken
+/// or strengthen isolation, which is why they live together and are named.
+#[derive(Clone, Copy)]
+struct SecuritySpec<'a> {
+    /// Bitmask of capabilities kept in the child's bounding set.
+    cap_keep: u64,
+    apparmor: Option<&'a str>,
+    selinux: Option<&'a str>,
+    /// Skips seccomp entirely. The container runs with the host's syscall surface.
+    seccomp_unconfined: bool,
+    seccomp_profile_json: Option<&'a str>,
+    seccomp_detect: bool,
+    no_new_privs: bool,
+    /// Grants the full capability set and skips the confinement below it.
+    privileged: bool,
+    masked_paths: &'a [String],
+    readonly_paths: &'a [String],
+}
+
+/// Which namespaces the child creates, joins or inherits.
+#[derive(Clone, Copy)]
+struct NamespaceSpec {
+    /// Infra container to `setns` into for the pod's shared IPC + UTS.
+    pod_infra_pid: Option<i32>,
+    /// The child ends up with an EXCLUSIVE netns (not the host's under
+    /// `--net host`, nor the holder's under the rootless ingress). Decides
+    /// whether `net.*` sysctls are safe to apply.
+    has_own_netns: bool,
+    host_pid: bool,
+    /// The child inherits the holder's user namespace instead of cloning one,
+    /// so there is no uid_map handshake to wait for.
+    inherit_userns: bool,
+    /// Kind node (label `io.x-k8s.kind.*`): gets a dedicated cgroup namespace.
+    /// A plain `--privileged` container keeps its cgroup hierarchy intact.
+    node_cgroup: bool,
+}
+
+/// The file descriptors tying the child back to the parent.
+#[derive(Clone, Copy)]
+struct IoSpec {
     detach: bool,
     log_fd: Option<i32>,
     log_err_fd: Option<i32>,
-    mounts: &[Mount],
+    /// `(read, write)` of the userns handshake pipe: the child waits here for
+    /// the parent to write uid_map/gid_map. `None` on the inherited-userns path.
     sync: Option<(i32, i32)>,
-    apparmor: Option<&str>,
-    selinux: Option<&str>,
-    pod_infra_pid: Option<i32>,
-    env: &[String],
-    read_only: bool,
-    cap_keep: u64,
-    seccomp_unconfined: bool,
-    seccomp_profile_json: Option<&str>,
-    seccomp_detect: bool,
-    devices: &[String],
-    tmpfs: &[String],
-    ulimits: &[String],
-    group_add: &[u32],
-    masked_paths: &[String],
-    readonly_paths: &[String],
-    no_new_privs: bool,
-    sysctls: &[String],
-    has_own_netns: bool,
-    host_pid: bool,
-    inherit_userns: bool,
-    run_uid: Option<u32>,
-    run_gid: Option<u32>,
-    privileged: bool,
+    /// `(read, write)` for handing the pty master back to the parent.
     console_sock: Option<(i32, i32)>,
-    secret_files: &[(String, String)],
-    workdir: Option<&str>,
-    cid: &str,
-    node_cgroup: bool,
-) -> isize {
+    /// The child writes one byte here once it is past the point of no return.
+    ready_w: Option<i32>,
+}
+
+fn container_init(spec: ContainerInitSpec<'_>) -> isize {
+    let ContainerInitSpec {
+        rootfs,
+        cid,
+        process:
+            ProcessSpec {
+                hostname,
+                argv,
+                env,
+                workdir,
+                run_uid,
+                run_gid,
+                group_add,
+                ulimits,
+                sysctls,
+            },
+        filesystem:
+            FilesystemSpec {
+                mounts,
+                read_only,
+                tmpfs,
+                devices,
+                secret_files,
+            },
+        security:
+            SecuritySpec {
+                cap_keep,
+                apparmor,
+                selinux,
+                seccomp_unconfined,
+                seccomp_profile_json,
+                seccomp_detect,
+                no_new_privs,
+                privileged,
+                masked_paths,
+                readonly_paths,
+            },
+        namespaces:
+            NamespaceSpec {
+                pod_infra_pid,
+                has_own_netns,
+                host_pid,
+                inherit_userns,
+                node_cgroup,
+            },
+        io:
+            IoSpec {
+                detach,
+                log_fd,
+                log_err_fd,
+                sync,
+                console_sock,
+                ready_w,
+            },
+    } = spec;
     // User namespace: wait for the PARENT to write uid_map/gid_map before continuing
     // (until then, we are `nobody` without caps). The received byte is the "you may proceed".
     // In the rootless ingress we inherit the holder's userns (already as uid 0) — no clone
@@ -2714,6 +2850,39 @@ fn container_init(
                             // masks the host's path or silently fails with EPERM.
     apply_masked_paths(masked_paths);
     apply_readonly_paths(readonly_paths);
+    // READY: the last mount is in. Everything that shapes this mount namespace —
+    // pivot_root, the volumes, /dev, the tmpfs, the secret files, the read-only
+    // remount, the masked/read-only paths — has happened, so from here on an
+    // outsider that joins this namespace sees the container the caller asked
+    // for. `spawn` blocks on the other end of this pipe until it reads this
+    // byte, and THAT is what makes `run -d` mean "the container is up".
+    //
+    // The bug it closes, measured 2026-08-28 on this host, 3 of 12 runs: a
+    // `container exec` issued right after `run -d` returned joined the mount
+    // namespace BEFORE the `pivot_root` above, so `/` was still the HOST's.
+    // It ran the HOST's `/bin/sh` and wrote the HOST's files —
+    // `touch /tmp/<path-that-only-exists-on-the-host>` succeeded with exit 0.
+    // Silent whenever the path exists on both sides, which is why it read as
+    // flakiness for three days: a backup taken in that window archived an empty
+    // volume and the failure surfaced two steps later, in the restore.
+    //
+    // Deliberately BEFORE the confinement work below (caps, seccomp,
+    // `verify_confinement`, apparmor) and before `chown_tree_once`, which walks
+    // the whole rootfs for an image with a non-root `USER`: none of those change
+    // what a joiner sees, and making `run -d` wait for a full-tree chown would
+    // trade one real defect for a visible slowdown.
+    //
+    // CLOEXEC (set by the `pipe2` in `spawn`): if this init dies before getting
+    // here, or `execvp` runs without this write, the fd closes and the parent
+    // reads EOF instead of blocking forever.
+    if let Some(w) = ready_w {
+        // SAFETY: our end of the pipe created in `spawn`; write 1 byte and close.
+        unsafe {
+            let b = [1u8; 1];
+            let _ = libc::write(w, b.as_ptr() as *const libc::c_void, 1);
+            libc::close(w);
+        }
+    }
     if no_new_privs {
         set_no_new_privs(); // no execve gains privileges (anti-escalation)
         drop_capabilities(cap_keep); // drop caps (after the mounts, before the exec)
@@ -4459,6 +4628,67 @@ unsafe fn close_range_raw(first: u32, last: u32) {
     );
 }
 
+/// Blocks until the container's init says its mount namespace is final, i.e.
+/// until it writes the byte at the `ready_w` point in [`container_init`].
+///
+/// This is what `run -d` returning means. Without it the caller wins a race it
+/// does not know it is in: measured on this host, 3 of 12 runs, a `container
+/// exec` fired straight after `run -d` joined the namespace while `/` was still
+/// the HOST's, ran the host's shell and wrote host files, exit 0.
+///
+/// Three ways out, and none of them is an unbounded wait:
+///
+/// * the byte arrives — the normal case, and it is already there by the time we
+///   get here on every path with a user namespace (the child was released long
+///   before);
+/// * EOF — the init died before mounting, or reached `execvp` without writing
+///   (the fd is CLOEXEC). Nothing to wait for; the status reconciles the same
+///   way it always did. Deliberately NOT turned into an error here: changing
+///   what `run -d` reports for a container that fails to mount is a separate
+///   decision, with its own measurements, and mixing it into a race fix is how
+///   one lands unreviewed;
+/// * the ceiling — a mount that hangs (a bind onto an unresponsive NFS server is
+///   the real case) must not hang `run` forever, because before this change it
+///   did not. It is said out loud rather than swallowed: the caller has to know
+///   the guarantee did not hold, because that is exactly when an `exec` next can
+///   land on the host.
+fn wait_for_mounts(ready_r: i32, name: &str) {
+    // Generous by design: real mounts take milliseconds, so anything near this
+    // is already pathological, and a tight ceiling would reintroduce the race on
+    // a loaded machine — which is precisely when it was measured to bite.
+    const CEILING_MS: i32 = 60_000;
+    wait_for_mounts_with(ready_r, name, CEILING_MS)
+}
+
+/// [`wait_for_mounts`] with the ceiling as an argument, so a test can exercise
+/// the three exits in milliseconds instead of a minute.
+fn wait_for_mounts_with(ready_r: i32, name: &str, ceiling_ms: i32) {
+    let mut pfd = libc::pollfd {
+        fd: ready_r,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // SAFETY: single valid fd we own; poll writes only into `pfd.revents`.
+    let n = unsafe { libc::poll(&mut pfd, 1, ceiling_ms) };
+    if n == 0 {
+        eprintln!(
+            "delonix: warning: {name} did not finish mounting within {}ms — it is running, but a \
+             command that enters it right now may see the HOST's filesystem instead of the \
+             container's",
+            ceiling_ms
+        );
+    } else if n > 0 {
+        // Drain the byte (or observe the EOF) so the fd is closed in a known state.
+        // SAFETY: valid fd, buffer we own.
+        unsafe {
+            let mut b = [0u8; 1];
+            let _ = libc::read(ready_r, b.as_mut_ptr() as *mut libc::c_void, 1);
+        }
+    }
+    // SAFETY: ours, and unused from here on.
+    unsafe { libc::close(ready_r) };
+}
+
 fn spawn(
     store: &Store,
     container: &mut Container,
@@ -4661,6 +4891,31 @@ fn spawn(
         None
     };
 
+    // READINESS pipe — the child's proof that the mount namespace is finished.
+    // See the `ready_w` write in `container_init` for the defect this closes.
+    // `O_CLOEXEC` on BOTH ends is load-bearing on the write side: it is what
+    // turns "the init died, or reached `execvp` without writing" into an EOF the
+    // parent can act on instead of a wait with no end.
+    let ready = {
+        let mut fds = [0i32; 2];
+        // SAFETY: pipe2() fills the 2-fd array.
+        if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
+            if let Some((r, w)) = sync {
+                // SAFETY: our own fds, not handed to anyone yet.
+                unsafe {
+                    libc::close(r);
+                    libc::close(w);
+                }
+            }
+            return Err(Error::Runtime {
+                context: "pipe",
+                message: "failed to create the readiness pipe".into(),
+            });
+        }
+        (fds[0], fds[1])
+    };
+    let ready_w = ready.1;
+
     let host_pid = spec.host_pid;
     let inherit_userns = spec.inherit_userns;
     // Same condition that decides whether `CLONE_NEWNET` is actually added
@@ -4706,49 +4961,73 @@ fn spawn(
             .any(|k| k.starts_with("io.x-k8s.kind"));
     let mut stack = vec![0u8; 1024 * 1024];
     let cb = Box::new(move || {
-        container_init(
-            &rootfs_owned,
-            &hostname,
-            &argv,
-            detach,
-            log_fd,
-            log_err_fd,
-            &mounts,
-            sync,
-            apparmor.as_deref(),
-            selinux.as_deref(),
-            pod_infra_pid,
-            &env,
-            read_only,
-            cap_keep,
-            seccomp_unconfined,
-            seccomp_profile_json.as_deref(),
-            seccomp_detect,
-            &devices,
-            &tmpfs,
-            &ulimits,
-            &group_add,
-            &masked_paths,
-            &readonly_paths,
-            no_new_privs,
-            &sysctls,
-            has_own_netns,
-            host_pid,
-            inherit_userns,
-            run_uid,
-            run_gid,
-            privileged,
-            console_sock,
-            &secret_files,
-            workdir.as_deref(),
-            &cid,
-            node_cgroup,
-        )
+        container_init(ContainerInitSpec {
+            rootfs: &rootfs_owned,
+            cid: &cid,
+            process: ProcessSpec {
+                hostname: &hostname,
+                argv: &argv,
+                env: &env,
+                workdir: workdir.as_deref(),
+                run_uid,
+                run_gid,
+                group_add: &group_add,
+                ulimits: &ulimits,
+                sysctls: &sysctls,
+            },
+            filesystem: FilesystemSpec {
+                mounts: &mounts,
+                read_only,
+                tmpfs: &tmpfs,
+                devices: &devices,
+                secret_files: &secret_files,
+            },
+            security: SecuritySpec {
+                cap_keep,
+                apparmor: apparmor.as_deref(),
+                selinux: selinux.as_deref(),
+                seccomp_unconfined,
+                seccomp_profile_json: seccomp_profile_json.as_deref(),
+                seccomp_detect,
+                no_new_privs,
+                privileged,
+                masked_paths: &masked_paths,
+                readonly_paths: &readonly_paths,
+            },
+            namespaces: NamespaceSpec {
+                pod_infra_pid,
+                has_own_netns,
+                host_pid,
+                inherit_userns,
+                node_cgroup,
+            },
+            io: IoSpec {
+                detach,
+                log_fd,
+                log_err_fd,
+                sync,
+                console_sock,
+                ready_w: Some(ready_w),
+            },
+        })
     });
 
     // SAFETY: single-threaded; the child mounts the container and does `exec`.
-    let pid = unsafe { clone(cb, &mut stack, flags, Some(Signal::SIGCHLD as i32)) }
-        .map_err(syserr("clone"))?;
+    let cloned = unsafe { clone(cb, &mut stack, flags, Some(Signal::SIGCHLD as i32)) };
+    // The parent drops the WRITE end unconditionally: while it holds a copy, the
+    // pipe never reaches EOF, so a child that dies before signalling would leave
+    // the read below waiting forever. On a failed `clone` both ends go, or the
+    // error path would leak a pair of fds per attempt.
+    // SAFETY: our own end; the child got its copy through the `clone`.
+    unsafe { libc::close(ready_w) };
+    let pid = match cloned {
+        Ok(p) => p,
+        Err(e) => {
+            // SAFETY: nothing else refers to the read end once there is no child.
+            unsafe { libc::close(ready.0) };
+            return Err(syserr("clone")(e));
+        }
+    };
 
     // CRITICAL ORDER: the user namespace handshake (releasing the child with the byte
     // "GO") MUST come BEFORE the console recv. In console mode the init only allocates the
@@ -4927,8 +5206,11 @@ fn spawn(
     // `describe`/`ls` don't keep pointing at a cause that no longer applies.
     container.crash_reason = None;
     container.crashed_at = None;
+    // The cgroup stays HERE, ahead of the wait: it is what the container's
+    // limits hang off, and every millisecond it is not in one is a millisecond
+    // it runs uncapped. Mounting allocates nothing, so waiting first would buy
+    // no safety and cost that.
     setup_cgroup(container, pid.as_raw())?;
-    store.save(container)?;
 
     // Configures the network (or other startup) BEFORE waiting/returning. Only the
     // path WITHOUT userns reaches here (no sync point to block the child on) — with
@@ -4942,6 +5224,28 @@ fn spawn(
             }
         }
     }
+
+    // Do not return until the child has finished shaping its mount namespace.
+    // Everything above this line is unchanged on purpose: the userns handshake,
+    // the console `recv_fd` and the log shim have an order the comments above
+    // call CRITICAL, and this wait needs none of it — it only has to be the LAST
+    // thing before the caller gets control.
+    wait_for_mounts(ready.0, &container.name);
+
+    // The record is published AFTER the wait, and that ordering is the whole
+    // point. `pid` + `Running` in the store is what a THIRD process reads to
+    // decide the container is there to be entered — the CRI, `serve docker-api`,
+    // a concurrent CLI — and none of them went through the `run` that waited.
+    // Measured on the fixed binary with the save still ahead of the wait: in 2 of
+    // 15 runs, at the instant the record gained a `pid`, `/proc/<pid>/root` was
+    // still the HOST's root. Publishing later costs nothing and closes it: until
+    // this line the container has no pid in the store, so an `exec` gets the
+    // "not running" refusal (exit 3) instead of the host's filesystem.
+    //
+    // A hook that fails above now leaves the record untouched rather than saying
+    // `Running` for a process it just SIGKILLed — the honest of the two, and the
+    // same direction this engine has taken everywhere else.
+    store.save(container)?;
 
     if detach {
         return Ok(container.status.clone());
@@ -7434,5 +7738,59 @@ mod tests {
             .iter()
             .find(|m| !m.source.is_empty() && !std::path::Path::new(&m.source).exists())
             .is_none());
+    }
+
+    /// The three exits of the wait that makes `run -d` mean "the container is
+    /// up". A unit test of this function does NOT prove it is wired into
+    /// `spawn` — that is what the `run -d devolve com os mounts de pé` check in
+    /// `scripts/e2e.sh` is for. It proves the part the E2E check cannot: that
+    /// none of the three ways out is an unbounded wait.
+    #[test]
+    fn the_mount_wait_has_three_exits_and_none_is_unbounded() {
+        use std::time::Instant;
+
+        // 1) The byte arrives: returns at once, well inside the ceiling.
+        let mut fds = [0i32; 2];
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+        unsafe {
+            let b = [1u8; 1];
+            assert_eq!(libc::write(fds[1], b.as_ptr() as *const libc::c_void, 1), 1);
+            libc::close(fds[1]);
+        }
+        let t = Instant::now();
+        wait_for_mounts_with(fds[0], "byte", 5_000);
+        assert!(
+            t.elapsed().as_millis() < 1_000,
+            "com o byte escrito devia devolver de imediato, demorou {:?}",
+            t.elapsed()
+        );
+
+        // 2) EOF (the init died before mounting): also immediate, never a hang.
+        // This is the case that would deadlock a naive blocking read if the
+        // parent had kept its own copy of the write end.
+        let mut fds = [0i32; 2];
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+        unsafe { libc::close(fds[1]) };
+        let t = Instant::now();
+        wait_for_mounts_with(fds[0], "eof", 5_000);
+        assert!(
+            t.elapsed().as_millis() < 1_000,
+            "com EOF devia devolver de imediato, demorou {:?}",
+            t.elapsed()
+        );
+
+        // 3) A mount that never finishes: bounded by the ceiling, not by the
+        // container. `run` used not to wait at all, so hanging forever here
+        // would be a worse regression than the race being fixed.
+        let mut fds = [0i32; 2];
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+        let t = Instant::now();
+        wait_for_mounts_with(fds[0], "tecto", 120);
+        let waited = t.elapsed();
+        assert!(
+            waited.as_millis() >= 100 && waited.as_millis() < 5_000,
+            "devia ter esperado ~120ms e desistido, esperou {waited:?}"
+        );
+        unsafe { libc::close(fds[1]) };
     }
 }
