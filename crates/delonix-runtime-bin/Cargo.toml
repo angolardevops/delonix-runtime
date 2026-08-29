@@ -27,6 +27,10 @@ delonix-proxmox = { path = "../delonix-proxmox" }
 delonix-scan = { path = "../delonix-scan" }
 delonix-cri = { path = "../delonix-cri" }
 delonix-mgmt = { path = "../delonix-mgmt" }
+# The MCP server (ADR-0025) — a local, tenancy-free AI control surface. Kept
+# out of the workspace's dependency-clean engine crates for the same reason
+# `delonix-mgmt` already is: it carries `rmcp` + its own tokio runtime.
+delonix-mcp = { path = "../delonix-mcp" }
 # Reverse-proxy L7 embutido (`delonix ingress-proxy`, kind: HTTPRoute) — hyper puro
 # + hyper-util. JÁ estão na árvore do bin (transitivos via delonix-cri/tonic), por
 # isso não acrescentam superfície de supply-chain nova; só passam a deps directas.
