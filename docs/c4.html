@@ -145,7 +145,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <h1>Arquitectura — Delonix Engine</h1>
 <p>Modelo C4 (Contexto → Contentores → Componentes) e system design funcional do
 <strong>Delonix Engine</strong>: motor de containers e microVMs <strong>daemonless, rootless-first,
-kernel-native</strong>, em Rust (14 crates, workspace <code>crates/</code>). Este documento é canónico
+kernel-native</strong>, em Rust (15 crates, workspace <code>crates/</code>). Este documento é canónico
 e mantido contra o código — cada afirmação estrutural tem a referência do
 crate/ficheiro onde foi confirmada. Onde há limites, eles aparecem nos diagramas,
 não escondidos em rodapés.</p>
@@ -297,7 +297,7 @@ leitura — <code>reconcile_status</code> (<code>crates/delonix-runtime/src/lib.
 de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused</code>. O CRI chama-o em
 <code>load_reconciled</code> antes de responder ao kubelet.</p>
 <hr />
-<h2>C4 — Nível 3: Componentes (os 14 crates)</h2>
+<h2>C4 — Nível 3: Componentes (os 15 crates)</h2>
 <p>Setas = dependências <strong>reais</strong>, confirmadas nos <code>Cargo.toml</code> de <code>crates/*/</code> e nos
 <code>use delonix_*</code> dos <code>src/</code>. Não há ciclos; <code>delonix-runtime-core</code> é a raiz comum.</p>
 <pre class="mermaid">graph TB
