@@ -6020,7 +6020,9 @@ fn control_query(cmd: &str) -> Result<String> {
                         context: "ingress control",
                         message: if timed_out {
                             format!(
-                                "the control plane did not reply within {CONTROL_REPLY_TIMEOUT:?}                                  - it serializes every network operation, so a burst of                                  concurrent `run`s queues up behind itself. Retry, or start them                                  in smaller batches"
+                                "the control plane did not reply within \
+{CONTROL_REPLY_TIMEOUT:?} - it serializes every network operation, so a burst of \
+concurrent `run`s queues up behind itself. Retry, or start them in smaller batches"
                             )
                         } else {
                             format!("reading the reply failed: {e}")
