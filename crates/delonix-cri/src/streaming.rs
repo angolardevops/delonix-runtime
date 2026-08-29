@@ -19,6 +19,7 @@
 //! bridge moves the raw bytes. C2.
 #![allow(clippy::result_large_err)]
 
+use crate::child_handle::ChildHandle;
 use std::collections::HashMap;
 use std::io::Read;
 use std::os::fd::FromRawFd;
@@ -416,7 +417,9 @@ async fn exec_tty(
         }
     };
 
-    let pid = child.id() as i32;
+    // Opened BEFORE the wait-thread below reaps the child: after the reap the
+    // number is free for reuse and killing by pid could hit a stranger.
+    let handle = ChildHandle::open(child.id() as i32);
 
     // Resend the stdin that arrived before the spawn.
     for chunk in &pending_stdin {
@@ -488,7 +491,7 @@ async fn exec_tty(
     // `exit_code.is_none()` here means we broke because the CLIENT went
     // away, not because the process exited on its own.
     if exit_code.is_none() {
-        unsafe { libc::kill(pid, libc::SIGKILL) };
+        handle.kill();
     }
     let code = match exit_code {
         Some(c) => c,
@@ -529,7 +532,9 @@ async fn exec_pipes(
         }
     };
 
-    let pid = child.id() as i32;
+    // Opened BEFORE the wait-thread below reaps the child: after the reap the
+    // number is free for reuse and killing by pid could hit a stranger.
+    let handle = ChildHandle::open(child.id() as i32);
     let mut stdin = child.stdin.take();
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
@@ -603,7 +608,7 @@ async fn exec_pipes(
     // BUG FIXED: same leak as `exec_tty` — a broken `Close`/error meant the
     // spawned child ran to completion unattended instead of being killed.
     if exit_code.is_none() {
-        unsafe { libc::kill(pid, libc::SIGKILL) };
+        handle.kill();
     }
     let code = match exit_code {
         Some(c) => c,

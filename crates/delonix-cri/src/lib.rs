@@ -24,6 +24,7 @@ use cri::runtime_service_server::RuntimeServiceServer;
 use cri::*;
 
 pub mod cap_ceiling;
+pub mod child_handle;
 mod runtime_svc;
 pub mod spdy;
 pub mod streaming;
