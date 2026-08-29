@@ -1178,11 +1178,10 @@ pub static ENTRIES: &[Entry] = &[
         path: "net httproute",
         group: "Networking",
         examples: &[
-            ("is the proxy serving, and with which routes", "delonix net httproute ls"),
             ("apply the HTTPRoutes of a manifest — it brings the proxy up, or reloads it in place", "delonix net httproute apply -f delonix-manifest.yaml"),
             ("tear it down and give the host ports back", "delonix net httproute rm"),
         ],
-        see_also: &["net ingress publish", "net tunnel expose", "stack apply", "container run"],
+        see_also: &["get", "net ingress publish", "net tunnel expose", "stack apply"],
     },
     Entry {
         path: "net httproute apply",
@@ -1192,33 +1191,27 @@ pub static ENTRIES: &[Entry] = &[
             ("from a file of your own — a re-apply reloads by SIGHUP, same pid, no dropped connection", "delonix net httproute apply -f examples/httproute.yaml"),
             ("listeners and TLS are fixed when the proxy starts: changing a port means `httproute rm` and then this again", "delonix net httproute apply -f examples/httproute.yaml"),
         ],
-        see_also: &["net httproute ls", "net httproute rm", "stack apply", "secret create"],
+        see_also: &["get", "net httproute rm", "stack apply", "secret create"],
     },
-    Entry {
-        path: "net httproute ls",
-        group: "",
-        examples: &[
-            ("proxy state and the routes in effect, read from the config the proxy is really serving — not from the manifest you last edited", "delonix net httproute ls"),
-        ],
-        see_also: &["net httproute apply", "net httproute rm", "net ingress ls"],
-    },
+    // `net httproute ls` moved out (B4 of the CLI restructuring): it duplicated
+    // `get httproutes` byte-for-byte (same store, same output, no filter either
+    // leaf could take) — see the `get`/`describe`/`delete` entries.
     Entry {
         path: "net httproute rm",
         group: "",
         examples: &[
             ("stop the proxy and unpublish its ports — only the MANUAL routes go, the ones auto-registered by `container run --expose` survive", "delonix net httproute rm"),
         ],
-        see_also: &["net httproute apply", "net httproute ls", "container rm"],
+        see_also: &["net httproute apply", "get", "container rm"],
     },
     Entry {
         path: "net tunnel",
         group: "Networking",
         examples: &[
             ("a local port on the public internet, with no account and no public IP on this host", "delonix net tunnel expose 8080"),
-            ("the tunnels and the public URLs they got", "delonix net tunnel ls"),
-            ("stop one when the demo is over", "delonix net tunnel rm demo"),
+            ("apply the `kind: Gateway` documents of a manifest instead of a one-shot expose", "delonix net tunnel apply -f delonix-manifest.yaml"),
         ],
-        see_also: &["net httproute apply", "net ingress publish", "secret create", "stack apply"],
+        see_also: &["get", "delete", "net httproute apply", "net ingress publish"],
     },
     Entry {
         path: "net tunnel expose",
@@ -1230,32 +1223,10 @@ pub static ENTRIES: &[Entry] = &[
             ("a cloudflare quick tunnel — random trycloudflare.com URL, no account, `cloudflared` must be on PATH", "delonix net tunnel expose 8080 --provider cloudflare"),
             ("a cloudflare NAMED tunnel you already created — its public hostname is whatever you configured for it in the dashboard", "delonix net tunnel expose 8080 --provider cloudflare --token-secret cf-tunnel-token"),
         ],
-        see_also: &["net tunnel ls", "net tunnel rm", "net tunnel apply", "net httproute apply"],
+        see_also: &["get", "delete", "net tunnel apply", "net httproute apply"],
     },
-    Entry {
-        path: "net tunnel rm",
-        group: "Lifecycle",
-        examples: &[
-            ("stop the provider's agent and forget the tunnel — the URL dies with it", "delonix net tunnel rm demo"),
-        ],
-        see_also: &["net tunnel ls", "net tunnel expose", "net tunnel apply"],
-    },
-    Entry {
-        path: "net tunnel describe",
-        group: "Inspect",
-        examples: &[
-            ("one tunnel in full: provider, local port, the agent's pid and the URL in effect", "delonix net tunnel describe demo"),
-        ],
-        see_also: &["net tunnel ls", "net tunnel rm", "net tunnel expose"],
-    },
-    Entry {
-        path: "net tunnel ls",
-        group: "Inspect",
-        examples: &[
-            ("every tunnel, its state and the public URL the provider gave it", "delonix net tunnel ls"),
-        ],
-        see_also: &["net tunnel describe", "net tunnel expose", "net tunnel rm"],
-    },
+    // `net tunnel ls`/`describe`/`rm` moved out (B4): all three duplicated
+    // `get`/`describe`/`delete gateways` byte-for-byte — see those entries.
     Entry {
         path: "net tunnel apply",
         group: "Declarative",
@@ -1263,7 +1234,7 @@ pub static ENTRIES: &[Entry] = &[
             ("the `kind: Gateway` documents of the manifest here — idempotent, an unchanged tunnel is left alone", "delonix net tunnel apply"),
             ("from a file, where the token comes from a `kind: Secret` instead of the shell history", "delonix net tunnel apply -f delonix-manifest.yaml"),
         ],
-        see_also: &["net tunnel expose", "net tunnel ls", "secret create", "stack apply"],
+        see_also: &["net tunnel expose", "get", "secret create", "stack apply"],
     },
     Entry {
         path: "system boot",

@@ -23,14 +23,11 @@ use delonix_runtime_core::{Error, Result};
 
 /// `delonix httproute` — inspect/tear down the L7 reverse-proxy of the HTTPRoutes.
 /// (`apply` is done via `stack apply`/`<kind> apply` — this group is operational.)
+// `Ls` moved out of this enum (B4 of the CLI restructuring): it duplicated
+// `get httproutes` byte-for-byte (same store, same output, no filter either
+// leaf could take) — see `cmd_ls`, called directly by `verbs::get`.
 #[derive(Subcommand)]
 pub enum HttpRouteCmd {
-    /// State of the proxy + active routes (from the config in effect).
-    Ls {
-        /// Output format: `table` (default) or `json` (ADR-0005). `json` carries a `state` of stopped, serving or config-unreadable.
-        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
-        output: super::output::OutputFormat,
-    },
     /// Apply the HTTPRoutes of a manifest (brings up/reloads the proxy).
     Apply {
         /// Manifest file (default `./delonix-manifest.yaml`).
@@ -41,7 +38,7 @@ pub enum HttpRouteCmd {
     Rm,
 }
 
-/// `net httproute ls -o json`.
+/// `get httproutes -o json` (`cmd_ls`, above).
 ///
 /// THREE states, and the third is why this is not a bare list: a proxy that is
 /// running with a config that would not parse is neither «stopped» nor «serving
@@ -73,96 +70,101 @@ struct RouteRow {
     backend: String,
 }
 
+/// State of the proxy + active routes (from the config in effect).
+///
+/// Extracted so the generic `get httproutes` verb can call it directly,
+/// without building an `HttpRouteCmd` just to route through `run()` — the
+/// CLI leaf `net httproute ls` was removed as a duplicate (B4 of the CLI
+/// restructuring): same store, same output, zero divergence risk either way.
+pub(crate) fn cmd_ls(output: super::output::OutputFormat) -> Result<()> {
+    if output == super::output::OutputFormat::Json {
+        if !ingress_proxy::is_running() {
+            return super::output::print_json(&[HttpRouteLs {
+                state: "stopped",
+                listeners: Vec::new(),
+                routes: Vec::new(),
+            }]);
+        }
+        let cfg = std::fs::read(ingress_proxy::config_path())
+            .ok()
+            .and_then(|b| serde_json::from_slice::<ProxyConfig>(&b).ok());
+        let row = match cfg {
+            Some(c) => HttpRouteLs {
+                state: "serving",
+                listeners: c
+                    .listeners
+                    .iter()
+                    .map(|l| ListenerRow {
+                        port: l.port,
+                        tls: l.tls,
+                    })
+                    .collect(),
+                routes: c
+                    .routes
+                    .iter()
+                    .map(|r| RouteRow {
+                        host: (!r.host.is_empty()).then(|| r.host.clone()),
+                        path: r.path.clone(),
+                        backend: r.backend.clone(),
+                    })
+                    .collect(),
+            },
+            None => HttpRouteLs {
+                state: "config-unreadable",
+                listeners: Vec::new(),
+                routes: Vec::new(),
+            },
+        };
+        return super::output::print_json(&[row]);
+    }
+    if !ingress_proxy::is_running() {
+        println!(
+            "{}",
+            super::po::t("httproute: proxy stopped (no active HTTPRoute)")
+        );
+        return Ok(());
+    }
+    let cfg = std::fs::read(ingress_proxy::config_path())
+        .ok()
+        .and_then(|b| serde_json::from_slice::<ProxyConfig>(&b).ok());
+    match cfg {
+        Some(c) => {
+            println!(
+                "{}",
+                super::po::tf(
+                    "httproute: proxy SERVING — {listeners} listener(s), {routes} route(s)",
+                    &[
+                        ("listeners", &c.listeners.len().to_string()),
+                        ("routes", &c.routes.len().to_string()),
+                    ],
+                )
+            );
+            for l in &c.listeners {
+                println!(
+                    "  listener :{} {}",
+                    l.port,
+                    if l.tls { "(TLS)" } else { "" }
+                );
+            }
+            for r in &c.routes {
+                println!(
+                    "  {} {} → {}",
+                    if r.host.is_empty() { "*" } else { &r.host },
+                    r.path,
+                    r.backend
+                );
+            }
+        }
+        None => println!(
+            "httproute: {}",
+            super::po::t("proxy running but its config would not parse")
+        ),
+    }
+    Ok(())
+}
+
 pub fn run(action: HttpRouteCmd) -> Result<()> {
     match action {
-        HttpRouteCmd::Ls {
-            output: super::output::OutputFormat::Json,
-        } => {
-            if !ingress_proxy::is_running() {
-                return super::output::print_json(&[HttpRouteLs {
-                    state: "stopped",
-                    listeners: Vec::new(),
-                    routes: Vec::new(),
-                }]);
-            }
-            let cfg = std::fs::read(ingress_proxy::config_path())
-                .ok()
-                .and_then(|b| serde_json::from_slice::<ProxyConfig>(&b).ok());
-            let row = match cfg {
-                Some(c) => HttpRouteLs {
-                    state: "serving",
-                    listeners: c
-                        .listeners
-                        .iter()
-                        .map(|l| ListenerRow {
-                            port: l.port,
-                            tls: l.tls,
-                        })
-                        .collect(),
-                    routes: c
-                        .routes
-                        .iter()
-                        .map(|r| RouteRow {
-                            host: (!r.host.is_empty()).then(|| r.host.clone()),
-                            path: r.path.clone(),
-                            backend: r.backend.clone(),
-                        })
-                        .collect(),
-                },
-                None => HttpRouteLs {
-                    state: "config-unreadable",
-                    listeners: Vec::new(),
-                    routes: Vec::new(),
-                },
-            };
-            super::output::print_json(&[row])
-        }
-        HttpRouteCmd::Ls { .. } => {
-            if !ingress_proxy::is_running() {
-                println!(
-                    "{}",
-                    super::po::t("httproute: proxy stopped (no active HTTPRoute)")
-                );
-                return Ok(());
-            }
-            let cfg = std::fs::read(ingress_proxy::config_path())
-                .ok()
-                .and_then(|b| serde_json::from_slice::<ProxyConfig>(&b).ok());
-            match cfg {
-                Some(c) => {
-                    println!(
-                        "{}",
-                        super::po::tf(
-                            "httproute: proxy SERVING — {listeners} listener(s), {routes} route(s)",
-                            &[
-                                ("listeners", &c.listeners.len().to_string()),
-                                ("routes", &c.routes.len().to_string()),
-                            ],
-                        )
-                    );
-                    for l in &c.listeners {
-                        println!(
-                            "  listener :{} {}",
-                            l.port,
-                            if l.tls { "(TLS)" } else { "" }
-                        );
-                    }
-                    for r in &c.routes {
-                        println!(
-                            "  {} {} → {}",
-                            if r.host.is_empty() { "*" } else { &r.host },
-                            r.path,
-                            r.backend
-                        );
-                    }
-                }
-                None => println!(
-                    "httproute: {}",
-                    super::po::t("proxy running but its config would not parse")
-                ),
-            }
-            Ok(())
-        }
         HttpRouteCmd::Apply { file } => {
             let path = manifest::resolve_path(file)?;
             let docs = manifest::load(&path)?;
