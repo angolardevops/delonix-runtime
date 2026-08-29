@@ -161,10 +161,8 @@ for SSH, and runs the SAME bootstrap — one command, from zero to a cluster run
 
 Commands:
   create   Create a local Kubernetes cluster **without a manifest and without Docker**
-  delete   Remove a kind-mode cluster (stops and deletes the nodes + kubeconfig)
   kubeadm  Provision VMs (golden VM image) + `kubeadm` bootstrap
   init     Initialize a project with the cluster manifests (kind/vm/ssh)
-  ls       List the clusters and the state of their nodes [alias: list]
   load     Load local images into a kind-mode cluster&#x27;s nodes, **without a registry**
   apply    Apply the `kind: KubernetesCluster` document(s) of a manifest
   kube     Generate a Kubernetes manifest from a container/pod already running locally
@@ -179,9 +177,8 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 COMMAND MAP:
-  Lifecycle    create · delete · kubeadm
+  Lifecycle    create · kubeadm
   Create       init
-  Inspect      ls
   Interact     load
   Declarative  kube · apply
   Maintenance  prune
@@ -191,7 +188,7 @@ EXAMPLES:
   delonix cluster create --name dev
 
   # what is up, node by node
-  delonix cluster ls
+  delonix get clusters
 
   # from zero to VMs plus kubeadm — above one control-plane the load balancer
   # comes with it
@@ -226,7 +223,7 @@ EXAMPLES:
   delonix cluster kube generate web
 
 SEE ALSO:
-  delonix container describe · delonix pod describe · delonix stack apply
+  delonix container describe · delonix describe · delonix stack apply
 
   delonix › cluster › kube</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Gerar manifestos Kubernetes a partir de um recurso Delonix</div><div class='cap lang-en'>Generate Kubernetes manifests from a Delonix resource</div><pre><code>delonix cluster kube generate</code></pre></div>
@@ -260,58 +257,11 @@ EXAMPLES:
   delonix cluster load myapp:dev --name dev
 
 SEE ALSO:
-  delonix cluster create · delonix image list · delonix build · delonix
-  cluster ls
+  delonix cluster create · delonix image list · delonix build · delonix get
 
   delonix › cluster › load</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Levar uma imagem local para dentro dos nós (o kind load, sem registo)</div><div class='cap lang-en'>Get a local image into the nodes (kind load, no registry)</div><pre><code>delonix build -t app:dev .
 delonix cluster load app:dev --name lab</code></pre></div>
-<h2 id='delete'><code>cluster delete</code></h2>
-<p class='intro'>Remove a kind-mode cluster (stops and deletes the nodes + kubeconfig)</p>
-<div class='help'><pre><code>Usage: delonix cluster delete [OPTIONS]
-
-Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
-      --name &lt;NAME&gt;
-          [default: delonix]
-
-  -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)
-
-EXAMPLES:
-  # stop and remove the nodes plus the kubeconfig
-  delonix cluster delete --name dev
-
-  # the default cluster, when you never named one
-  delonix cluster delete
-
-SEE ALSO:
-  delonix cluster create · delonix cluster ls · delonix system prune
-
-  delonix › cluster › delete</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Apagar o cluster e os seus nós</div><div class='cap lang-en'>Delete the cluster and its nodes</div><pre><code>delonix cluster delete --name lab</code></pre></div>
-<h2 id='ls'><code>cluster ls</code></h2>
-<p class='intro'>List the clusters and the state of their nodes</p>
-<div class='help'><pre><code>Usage: delonix cluster ls [OPTIONS]
-
-Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
-  -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)
-
-EXAMPLES:
-  # clusters and the state of each node, derived from the container labels
-  delonix cluster ls
-
-SEE ALSO:
-  delonix cluster create · delonix cluster delete · delonix container ps
-
-  delonix › cluster › ls</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Que clusters existem neste host</div><div class='cap lang-en'>Which clusters exist on this host</div><pre><code>delonix cluster ls</code></pre></div>
 <h2 id='create'><code>cluster create</code></h2>
 <p class='intro'>Create a local Kubernetes cluster <strong>without a manifest and without Docker</strong>.</p>
 <p class='intro'>Native kind mode: starts the <code>kindest/node</code> nodes in the Delonix engine itself and bootstraps them with <code>kubeadm</code>. No flags = 1 control-plane ready to use.</p>
@@ -369,8 +319,8 @@ EXAMPLES:
   delonix cluster create --name dev --api-port 6443
 
 SEE ALSO:
-  delonix cluster ls · delonix cluster load · delonix cluster delete · delonix
-  cluster kubeadm
+  delonix get · delonix cluster load · delonix delete · delonix cluster
+  kubeadm
 
   delonix › cluster › create</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Cluster local em modo kind (containers como nós, sem Docker)</div><div class='cap lang-en'>Local cluster in kind mode (containers as nodes, no Docker)</div><pre><code>delonix cluster create --name lab</code></pre></div><div class="ex"><div class='cap lang-pt'>Com workers</div><div class='cap lang-en'>With workers</div><pre><code>delonix cluster create --name lab --workers 2</code></pre></div>
@@ -440,7 +390,7 @@ EXAMPLES:
 
 SEE ALSO:
   delonix cluster kubeadm · delonix stack apply · delonix stack validate ·
-  delonix cluster ls
+  delonix get
 
   delonix › cluster › apply</code></pre></div>
 <div class='lang-pt'><p>Todas as entradas do manifesto que chegam a comandos remotos
@@ -522,8 +472,7 @@ EXAMPLES:
   delonix cluster kubeadm --name lab --network k8s --etcd-cluster 3
 
 SEE ALSO:
-  delonix cluster apply · delonix cluster ls · delonix vm ls · delonix image
-  vm pull
+  delonix cluster apply · delonix get · delonix vm ls · delonix image vm pull
 
   delonix › cluster › kubeadm</code></pre></div>
 <div class='lang-pt'><p><code>--control-plane &gt; 1</code> provisiona automaticamente uma VM

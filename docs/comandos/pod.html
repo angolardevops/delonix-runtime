@@ -143,7 +143,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 </nav>
 <main>
 <h1>delonix pod</h1>
-<p class='tagline lang-pt'>Pods reais multi-container (create, ls, describe, rm, logs) — N containers como uma unidade.</p><p class='tagline lang-en'>Real multi-container pods (create, ls, describe, rm, logs) — N containers as one unit.</p>
+<p class='tagline lang-pt'>Pods reais multi-container (create, ls, logs) — N containers como uma unidade.</p><p class='tagline lang-en'>Real multi-container pods (create, ls, logs) — N containers as one unit.</p>
 <p class='lang-pt'>Pods de verdade, ao estilo Kubernetes: N containers que <strong>partilham as
 namespaces do pod</strong> e se gerem como uma só unidade. Hoje partilham <strong>netns</strong>
 (o mesmo IP, alcançam-se por <code>localhost</code>), <strong>IPC</strong> (System V/POSIX) e
@@ -176,12 +176,10 @@ keeps its own process tree; that's the next slice.</p>
 <div class='help'><pre><code>Usage: delonix pod [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  create    Create a pod (N containers sharing a netns) from a manifest (`kind: Pod`)
-  rm        Remove a pod: stop/remove ALL its containers + the shared netns
-  describe  Details of one or more pods (containers + the shared IP), `kubectl` style
-  logs      Logs of a pod&#x27;s container (defaults to the first member)
-  ls        List the pods (derived from container labels)
-  help      Print this message or the help of the given subcommand(s)
+  create  Create a pod (N containers sharing a netns) from a manifest (`kind: Pod`)
+  logs    Logs of a pod&#x27;s container (defaults to the first member)
+  ls      List the pods (derived from container labels)
+  help    Print this message or the help of the given subcommand(s)
 
 Options:
       --l18n &lt;en|pt&gt;
@@ -191,8 +189,8 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 COMMAND MAP:
-  Lifecycle  create · rm
-  Inspect    ls · describe · logs
+  Lifecycle  create
+  Inspect    ls · logs
 
 EXAMPLES:
   # which pods exist and which containers each one holds
@@ -233,7 +231,7 @@ EXAMPLES:
   delonix pod create
 
 SEE ALSO:
-  delonix pod ls · delonix pod describe · delonix stack apply
+  delonix pod ls · delonix describe · delonix stack apply
 
   delonix › pod › create</code></pre></div>
 <div class='lang-pt'><p>Idempotente (<em>garante-presente</em>): se o pod já tem containers, não
@@ -273,68 +271,10 @@ EXAMPLES:
   delonix pod ls -o json
 
 SEE ALSO:
-  delonix pod describe · delonix pod logs · delonix container ps
+  delonix describe · delonix pod logs · delonix container ps
 
   delonix › pod › ls</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Listar os pods (POD, CONTAINERS n/N, IP, STATUS)</div><div class='cap lang-en'>List pods (POD, CONTAINERS n/N, IP, STATUS)</div><pre><code>delonix pod ls</code></pre></div>
-<h2 id='describe'><code>pod describe</code></h2>
-<p class='intro'>Details of one or more pods (containers + the shared IP), <code>kubectl</code> style</p>
-<div class='help'><pre><code>Usage: delonix pod describe [OPTIONS] [NAMES]...
-
-Arguments:
-  [NAMES]...
-          
-
-Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
-  -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)
-
-EXAMPLES:
-  # members, the shared IP and the status, kubectl style
-  delonix pod describe web
-
-  # several pods in one pass
-  delonix pod describe web api
-
-SEE ALSO:
-  delonix pod ls · delonix pod logs · delonix container describe
-
-  delonix › pod › describe</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Detalhe estilo kubectl: containers + IP e netns partilhados</div><div class='cap lang-en'>kubectl-style detail: containers + shared IP and netns</div><pre><code>delonix pod describe web-app</code></pre></div>
-<h2 id='rm'><code>pod rm</code></h2>
-<p class='intro'>Remove a pod: stop/remove ALL its containers + the shared netns</p>
-<div class='help'><pre><code>Usage: delonix pod rm [OPTIONS] [NAMES]...
-
-Arguments:
-  [NAMES]...
-          
-
-Options:
-  -f, --force
-          Force (kill) running containers
-
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
-  -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)
-
-EXAMPLES:
-  # stop and remove every member plus the shared netns — nothing is left
-  # holding the IP
-  delonix pod rm web
-
-  # kill the members that are still running
-  delonix pod rm -f web
-
-SEE ALSO:
-  delonix pod ls · delonix pod create · delonix container rm
-
-  delonix › pod › rm</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Remover o pod: pára/remove TODOS os containers + a netns partilhada</div><div class='cap lang-en'>Remove the pod: stops/removes ALL containers + the shared netns</div><pre><code>delonix pod rm web-app</code></pre></div><div class="ex"><div class='cap lang-pt'>Forçar (mata os que estão a correr)</div><div class='cap lang-en'>Force (kills the ones still running)</div><pre><code>delonix pod rm -f web-app</code></pre></div>
 <h2 id='logs'><code>pod logs</code></h2>
 <p class='intro'>Logs of a pod&#x27;s container (defaults to the first member)</p>
 <div class='help'><pre><code>Usage: delonix pod logs [OPTIONS] &lt;POD&gt;
@@ -367,7 +307,7 @@ EXAMPLES:
   delonix pod logs -f web
 
 SEE ALSO:
-  delonix pod describe · delonix pod ls · delonix container logs
+  delonix describe · delonix pod ls · delonix container logs
 
   delonix › pod › logs</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Logs do 1.º container do pod</div><div class='cap lang-en'>Logs from the pod&#x27;s 1st container</div><pre><code>delonix pod logs web-app</code></pre></div><div class="ex"><div class='cap lang-pt'>Logs de um container específico (nome curto dentro do pod)</div><div class='cap lang-en'>Logs from a specific container (short name inside the pod)</div><pre><code>delonix pod logs web-app --container sidecar -f</code></pre></div>
@@ -387,7 +327,7 @@ spec:
     - { name: redis, image: redis:7-alpine }
 YAML
 delonix pod create -f web-pod.yaml
-delonix pod describe web-pod
+delonix describe pods web-pod
 delonix pod logs web-pod</code></pre></div><div class='callout lang-en'><p>Create a 2-container pod and confirm they share an IP — reachable via
 <code>localhost</code> from each other, just like in Kubernetes. A pod is always created
 from a manifest: its members, ports and volumes do not fit in flags without reinventing
@@ -403,13 +343,13 @@ spec:
     - { name: redis, image: redis:7-alpine }
 YAML
 delonix pod create -f web-pod.yaml
-delonix pod describe web-pod
+delonix describe pods web-pod
 delonix pod logs web-pod</code></pre></div>
 <h2><span class='lang-pt'>Desafio</span><span class='lang-en'>Challenge</span></h2>
 <div class='callout lang-pt'><p>Escreve o MESMO pod como um <code>kind: Pod</code> num
-manifesto e aplica-o com <code>stack apply</code>. Compara o <code>pod describe</code> resultante
+manifesto e aplica-o com <code>stack apply</code>. Compara o <code>describe pods</code> resultante
 com o pod criado pela CLI — devem ter a mesma forma (netns/IPC/UTS partilhados).</p></div><div class='callout lang-en'><p>Write the SAME pod as a <code>kind: Pod</code> in a manifest and apply
-it with <code>stack apply</code>. Compare the resulting <code>pod describe</code> against the
+it with <code>stack apply</code>. Compare the resulting <code>describe pods</code> against the
 CLI-created pod — they should look the same (shared netns/IPC/UTS).</p></div>
 <footer><span class='lang-pt'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</span><span class='lang-en'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.</span></footer>
 </main>
