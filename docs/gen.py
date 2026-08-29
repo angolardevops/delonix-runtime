@@ -516,14 +516,6 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
                  'delonix vm pull --no-k8s'),
                 ('De um registo teu, com nome local próprio',
                  'delonix vm pull ghcr.io/aminhaorg/base:24.04 --name base:24.04')]},
-            "build": {"examples": [
-                ('Construir a partir do VMfile do directório actual',
-                 'delonix vm build -t minha-base:1.0 .'),
-                ('VMfile noutro caminho, sem compressão (build mais rápido, imagem maior)',
-                 'delonix vm build -t minha-base:dev -f receitas/VMfile --no-compress .'),
-                ('Com rede no convidado — precisa disto para `apt-get install` num RUN '
-                 '(o build deixa de ser reproduzível: o resultado passa a depender do dia)',
-                 'delonix vm build --network -t minha-base:1.0 .')]},
             "init": {"examples": [
                 ('Projecto com manifesto, pronto a correr',
                  'delonix vm init --name lab'),
@@ -2299,12 +2291,6 @@ EXAMPLES_EN = {
         "The official golden image with Kubernetes (no argument)",
         "The golden image WITHOUT Kubernetes — just the engine, rootless-ready",
         "From a registry of yours, with your own local name",
-    ],
-    ("vm", "build"): [
-        "Build from the current directory's VMfile",
-        "VMfile at another path, no compression (faster build, larger image)",
-        "With guest networking — needed for `apt-get install` in a RUN (the build stops being "
-        "reproducible: the result now depends on the day)",
     ],
     ("vm", "init"): ["Project with a manifest, ready to run", "Scaffold a VMfile to BUILD your image"],
     ("vm", "dash"): ["VMs-only dashboard (htop-style; `q` to quit)", "Snapshot for a script or for Grafana"],
@@ -4125,11 +4111,11 @@ delonix vm init --vmfile --name minha-base
 cat VMfile
 
 # Precisa de libguestfs no host: sudo apt install libguestfs-tools
-delonix vm build -t minha-base:1.0 .
+delonix image --vm build -t minha-base:1.0 .
 delonix vm ls
 
 # Um RUN com `apt-get install` precisa de rede no convidado, e pede-se:
-#   delonix vm build --network -t minha-base:1.0 .
+#   delonix image --vm build --network -t minha-base:1.0 .
 
 # Arrancar a partir dela
 delonix vm create teste --disk minha-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
@@ -4385,11 +4371,11 @@ delonix vm init --vmfile --name my-base
 cat VMfile
 
 # Needs libguestfs on the host: sudo apt install libguestfs-tools
-delonix vm build -t my-base:1.0 .
+delonix image --vm build -t my-base:1.0 .
 delonix vm ls
 
 # A RUN with `apt-get install` needs guest networking, so ask for it:
-#   delonix vm build --network -t my-base:1.0 .
+#   delonix image --vm build --network -t my-base:1.0 .
 
 # Boot from it
 delonix vm create test --disk my-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
@@ -4655,8 +4641,8 @@ delonix vm create pesada --backend libvirt          # default quando CH não est
 <tr><td>Arranque em milissegundos, isolamento por namespace, ou alcançar containers por IP</td>
     <td><code>--backend cloud-hypervisor</code> + firmware</td></tr>
 <tr><td>Personalizar UMA VM</td><td>cloud-init por instância: <code>--hostname</code>/<code>--ssh-key</code>/<code>--user-data</code></td></tr>
-<tr><td>Personalizar TODAS as VMs de um modelo</td><td>Um <code>VMfile</code> com <code>CLOUDINIT</code>, e <code>vm build</code></td></tr>
-<tr><td>Um disco à tua medida, publicável</td><td><code>vm init --vmfile</code> → <code>vm build</code> → <code>vm push</code></td></tr>
+<tr><td>Personalizar TODAS as VMs de um modelo</td><td>Um <code>VMfile</code> com <code>CLOUDINIT</code>, e <code>image --vm build</code></td></tr>
+<tr><td>Um disco à tua medida, publicável</td><td><code>vm init --vmfile</code> → <code>image --vm build</code> → <code>vm push</code></td></tr>
 </table>
 
 <h2>Onde isto falha, e o que ver</h2>
@@ -4671,7 +4657,7 @@ delonix vm create pesada --backend libvirt          # default quando CH não est
 <tr><td>A VM não arranca em Cloud Hypervisor</td>
     <td>Falta o firmware. CH não faz boot BIOS: precisa de
     <code>--firmware</code> ou de <code>--kernel</code>+<code>--initrd</code>.</td></tr>
-<tr><td>O disco enche a meio do <code>vm build</code></td>
+<tr><td>O disco enche a meio do <code>image --vm build</code></td>
     <td><code>SIZE</code> em falta, ou depois de um <code>RUN</code>. É
     propriedade da stage, e corre antes de tudo.</td></tr>
 <tr><td>Mudaste o <code>user-data</code> e nada muda</td>
@@ -4825,8 +4811,8 @@ delonix vm create heavy --backend libvirt          # default when CH isn't insta
 <tr><td>Millisecond boot, per-namespace isolation, or to reach containers by IP</td>
     <td><code>--backend cloud-hypervisor</code> + firmware</td></tr>
 <tr><td>To customize ONE VM</td><td>Per-instance cloud-init: <code>--hostname</code>/<code>--ssh-key</code>/<code>--user-data</code></td></tr>
-<tr><td>To customize EVERY VM from one template</td><td>A <code>VMfile</code> with <code>CLOUDINIT</code>, and <code>vm build</code></td></tr>
-<tr><td>Your own publishable disk</td><td><code>vm init --vmfile</code> → <code>vm build</code> → <code>vm push</code></td></tr>
+<tr><td>To customize EVERY VM from one template</td><td>A <code>VMfile</code> with <code>CLOUDINIT</code>, and <code>image --vm build</code></td></tr>
+<tr><td>Your own publishable disk</td><td><code>vm init --vmfile</code> → <code>image --vm build</code> → <code>vm push</code></td></tr>
 </table>
 
 <h2>Where this breaks, and what to check</h2>
@@ -4841,7 +4827,7 @@ delonix vm create heavy --backend libvirt          # default when CH isn't insta
 <tr><td>The VM won't boot under Cloud Hypervisor</td>
     <td>Missing firmware. CH doesn't do BIOS boot: it needs
     <code>--firmware</code> or <code>--kernel</code>+<code>--initrd</code>.</td></tr>
-<tr><td>The disk fills up mid-<code>vm build</code></td>
+<tr><td>The disk fills up mid-<code>image --vm build</code></td>
     <td>Missing <code>SIZE</code>, or set after a <code>RUN</code>. It's a
     stage property, and runs before everything else.</td></tr>
 <tr><td>You changed <code>user-data</code> and nothing changes</td>
