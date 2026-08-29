@@ -429,6 +429,9 @@ pub fn parse_and_validate(docs: &[ManifestDoc]) -> Result<Vec<(String, HttpRoute
 /// — so the stack graph validation reuses the SAME backend/secret checks.
 pub fn ingress_spec_of(doc: &ManifestDoc) -> Result<HttpRouteSpec> {
     let ing: IngressSpec = manifest::spec_of(doc)?;
+    for msg in ingress_ignored_fields(&doc.metadata.name, &ing) {
+        super::output::warn(&msg);
+    }
     ingress_to_httproute(&doc.metadata.name, ing)
 }
 
@@ -498,10 +501,15 @@ struct IngressHttp {
 struct IngressPath {
     #[serde(default = "default_path")]
     path: String,
-    /// `Prefix` (default) | `Exact` | `ImplementationSpecific`. The proxy matches
-    /// by prefix; `Exact` is accepted but treated as prefix (documented limitation).
+    /// `Prefix` (default) | `Exact` | `ImplementationSpecific`.
+    ///
+    /// This engine matches by PREFIX and has no other mode. `Exact` is accepted
+    /// for Kubernetes fidelity and then served as a prefix — so longer paths
+    /// under it match too, which is traffic the author did not ask for.
+    /// Applying a manifest that sets `Exact` prints a warning naming the paths.
+    // `ImplementationSpecific` gets no warning: prefix IS a valid implementation
+    // of it, and warning there would be noise on every imported k8s manifest.
     #[serde(default, rename = "pathType")]
-    #[allow(dead_code)]
     path_type: Option<String>,
     backend: IngressBackend,
 }
@@ -525,6 +533,64 @@ struct IngressServicePort {
     #[serde(default)]
     #[allow(dead_code)]
     name: Option<String>,
+}
+
+/// The `kind: Ingress` fields this engine reads and then does NOT honour,
+/// as messages ready for the user.
+///
+/// A field the author writes and the system ignores is worse than a field that
+/// does not exist: the manifest looks applied and the behaviour is not the one
+/// asked for. The three cases below all route or serve something OTHER than
+/// what the document says, so each one gets a sentence naming what was written
+/// and what will actually happen.
+///
+/// Pure on purpose — it returns the messages instead of printing them, so the
+/// tests can assert on them. `ingress_spec_of` is what emits.
+///
+/// `ingressClassName` is deliberately absent: the embedded proxy is the only
+/// ingress class there is, so serving the document is the correct answer to any
+/// value, and a warning would be noise on every k8s manifest imported as-is.
+fn ingress_ignored_fields(name: &str, ing: &IngressSpec) -> Vec<String> {
+    let mut out = Vec::new();
+
+    // A `tls` LIST is how k8s expresses "one certificate per SNI group". The
+    // proxy has one certificate and no SNI, so entries beyond the first never
+    // reach a listener — the hosts they name get the FIRST entry's cert, which
+    // their browser will reject as belonging to someone else.
+    if ing.tls.len() > 1 {
+        out.push(super::po::tf(
+            "Ingress/{name}: {count} tls entries, but this engine serves a single certificate with no SNI — only the first is used and the rest are ignored",
+            &[("name", name), ("count", &ing.tls.len().to_string())],
+        ));
+    }
+    if let Some(first) = ing.tls.first() {
+        if !first.hosts.is_empty() {
+            out.push(super::po::tf(
+                "Ingress/{name}: tls.hosts ({hosts}) is not applied — the certificate from secretName is presented to every host that reaches the listener, whatever the SNI",
+                &[("name", name), ("hosts", &first.hosts.join(", "))],
+            ));
+        }
+    }
+
+    // `Exact` is the one pathType whose promise we break by serving it: a
+    // request to `/api/anything` matches an `Exact: /api` rule here and would
+    // not in k8s. Silence here sends traffic to a backend the author excluded.
+    let exact: Vec<&str> = ing
+        .rules
+        .iter()
+        .filter_map(|r| r.http.as_ref())
+        .flat_map(|h| h.paths.iter())
+        .filter(|p| p.path_type.as_deref() == Some("Exact"))
+        .map(|p| p.path.as_str())
+        .collect();
+    if !exact.is_empty() {
+        out.push(super::po::tf(
+            "Ingress/{name}: pathType 'Exact' on {paths} is served as a PREFIX — this engine has no exact matcher, so longer paths under it match too",
+            &[("name", name), ("paths", &exact.join(", "))],
+        ));
+    }
+
+    out
 }
 
 /// Converts a k8s-shaped `IngressSpec` into the internal `HttpRouteSpec`.
@@ -587,8 +653,15 @@ fn ingress_to_httproute(name: &str, ing: IngressSpec) -> Result<HttpRouteSpec> {
 
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct IngressTls {
+    /// The SNI names this certificate should cover. **Accepted, never applied**:
+    /// this engine serves ONE certificate and does not select by SNI, so the
+    /// cert from `secretName` (or the self-signed fallback) is presented to
+    /// every host that reaches the listener. Applying a manifest that sets this
+    /// prints a warning naming the hosts.
+    // Kept in the struct on purpose: dropping it would make the field "unknown"
+    // and the manifest would warn about a spelling mistake instead of about the
+    // real limitation. `ingress_ignored_fields` is what tells the user.
     #[serde(default)]
-    #[allow(dead_code)]
     hosts: Vec<String>,
     #[serde(default, rename = "secretName")]
     secret_name: Option<String>,
@@ -1081,6 +1154,111 @@ defaultBackend:
         assert!(hr.rules[0].host.is_none());
         assert_eq!(hr.rules[0].paths[0].path, "/");
         assert_eq!(hr.rules[0].paths[0].backend.service, "fallback");
+    }
+
+    #[test]
+    fn tls_hosts_are_reported_as_not_applied() {
+        let yaml = "\
+tls:
+  - hosts: [shop.example.ao, loja.example.ao]
+    secretName: shop-tls
+";
+        let ing: IngressSpec = serde_yaml::from_str(yaml).unwrap();
+        let w = ingress_ignored_fields("shop", &ing);
+        assert_eq!(w.len(), 1, "one warning, for the hosts list: {w:?}");
+        // The message has to NAME what was written, otherwise the author cannot
+        // tell which of several hosts is the one losing its certificate.
+        assert!(w[0].contains("shop.example.ao"), "{}", w[0]);
+        assert!(w[0].contains("loja.example.ao"), "{}", w[0]);
+        assert!(w[0].contains("Ingress/shop"), "{}", w[0]);
+    }
+
+    #[test]
+    fn a_second_tls_entry_is_reported_as_ignored() {
+        let yaml = "\
+tls:
+  - secretName: a-tls
+  - secretName: b-tls
+";
+        let ing: IngressSpec = serde_yaml::from_str(yaml).unwrap();
+        let w = ingress_ignored_fields("x", &ing);
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert!(w[0].contains("2 tls entries"), "{}", w[0]);
+        // And the conversion still does what it always did: first entry wins.
+        let hr = ingress_to_httproute("x", ing).unwrap();
+        assert_eq!(hr.tls.unwrap().secret_ref.as_deref(), Some("a-tls"));
+    }
+
+    #[test]
+    fn path_type_exact_is_reported_as_served_by_prefix() {
+        let yaml = "\
+rules:
+  - http:
+      paths:
+        - path: /api
+          pathType: Exact
+          backend:
+            service:
+              name: api
+              port: { number: 80 }
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: web
+              port: { number: 80 }
+";
+        let ing: IngressSpec = serde_yaml::from_str(yaml).unwrap();
+        let w = ingress_ignored_fields("x", &ing);
+        assert_eq!(w.len(), 1, "only the Exact path warns: {w:?}");
+        assert!(w[0].contains("/api"), "{}", w[0]);
+        assert!(
+            !w[0].contains(", /"),
+            "the Prefix path must not be named: {}",
+            w[0]
+        );
+    }
+
+    #[test]
+    fn implementation_specific_does_not_warn() {
+        // Prefix IS a valid implementation of `ImplementationSpecific`, so a
+        // warning here would be noise on every k8s manifest imported as-is.
+        let yaml = "\
+rules:
+  - http:
+      paths:
+        - path: /api
+          pathType: ImplementationSpecific
+          backend:
+            service:
+              name: api
+              port: { number: 80 }
+";
+        let ing: IngressSpec = serde_yaml::from_str(yaml).unwrap();
+        assert!(ingress_ignored_fields("x", &ing).is_empty());
+    }
+
+    #[test]
+    fn an_ingress_that_loses_nothing_warns_about_nothing() {
+        let yaml = "\
+tls:
+  - secretName: shop-tls
+rules:
+  - host: shop.example.ao
+    http:
+      paths:
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: web
+              port: { number: 80 }
+";
+        let ing: IngressSpec = serde_yaml::from_str(yaml).unwrap();
+        assert!(
+            ingress_ignored_fields("shop", &ing).is_empty(),
+            "a faithful Ingress must be silent, or the warnings stop being read"
+        );
     }
 
     #[test]
