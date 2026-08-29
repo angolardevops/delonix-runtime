@@ -144,20 +144,25 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <main>
 <h1 id="promessa-de-estabilidade-da-cli">Promessa de estabilidade da CLI</h1>
 <blockquote>
-<p>Aplica-se a partir da <strong>v0.42.3</strong>, e vale dentro do <code>0.x</code>.</p>
+<p>Aplica-se a partir da <strong>v0.42.3</strong>. Escrita para o <code>0.x</code> — cada quebra listada
+abaixo tinha de esperar por um major. <strong>A v1.0.0 é esse major</strong>: fechou a
+única quebra pendente (os atalhos de topo), e esta lista passa a valer como a
+promessa de semver real de resto em diante — um breaking change deixa de
+caber num <code>1.x</code>.</p>
 </blockquote>
 <p>Um motor sem contrato não se automatiza. Quem escreve um <code>Makefile</code>, um passo de
 CI ou um script de deploy precisa de saber o que pode partir num upgrade — e a
 resposta «é 0.x, tudo pode partir» é verdadeira e inútil: garante que ninguém
 depende de nada, o que é o mesmo que ninguém adoptar.</p>
-<p>Isto não é semver 1.0. É a lista do que se compromete e do que não se
-compromete, que é o que falta a maior parte dos projectos em 0.x.</p>
+<p>Isto listava o que se compromete e o que não se compromete dentro do <code>0.x</code>,
+que é o que falta a maior parte dos projectos nessa fase. Desde a v1.0.0 é
+mais do que isso: é o contrato de semver do projecto.</p>
 <h2 id="estavel-nao-quebra-sem-um-major">Estável — não quebra sem um major</h2>
 <p><strong>Os verbos de ciclo de vida de container</strong>, com os nomes e a semântica que
 Docker e Podman lhes dão:</p>
 <pre><code>container run   ps   stop   start   restart   kill   rm   exec   logs
                 wait   inspect   port   rename   pause   unpause
-image     pull  ls   rm    build (delonix build)
+image     pull  list  remove    build (delonix build)
 </code></pre>
 <p>Concretamente, garante-se:</p>
 <ul>
@@ -169,9 +174,17 @@ image     pull  ls   rm    build (delonix build)
 <li><strong>Os códigos de saída</strong> — ver a secção «Códigos de saída» abaixo.</li>
 <li><strong>A saída JSON de <code>inspect</code></strong> — campos podem ser ACRESCENTADOS, nunca removidos
   nem com o tipo mudado.</li>
-<li><strong>Os atalhos de topo</strong> (<code>ps</code>, <code>run</code>, <code>exec</code>, <code>logs</code>, <code>rm</code>, <code>images</code>), que são
-  literalmente o mesmo comando por reescrita de argv.</li>
 </ul>
+<blockquote>
+<p><strong>Quebra de contrato na v1.0.0.</strong> Até à v0.69.0 os atalhos de topo (<code>ps</code>,
+<code>run</code>, <code>exec</code>, <code>logs</code>, <code>rm</code>, <code>images</code>) estavam aqui, como reescrita de argv
+para <code>container &lt;verbo&gt;</code>/<code>image list</code>. Saíram — corte limpo, sem alias: a
+grafia antiga falha com <code>unrecognized subcommand</code>, nunca em silêncio, a
+mesma regra que a reorganização da v0.30.0 já seguia. Os grupos continuam:
+<code>delonix container ps</code>, <code>delonix container run</code>, <code>delonix container exec</code>,
+<code>delonix container logs</code>, <code>delonix container rm</code>, <code>delonix image list</code>.
+<strong>Os códigos de saída não mudam nesta versão</strong> — ver a secção abaixo.</p>
+</blockquote>
 <h2 id="codigos-de-saida">Códigos de saída</h2>
 <blockquote>
 <p><strong>Alteração de contrato na v0.49.0.</strong> Até à v0.48.0 <strong>toda</strong> a falha do motor

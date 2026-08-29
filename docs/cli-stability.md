@@ -1,14 +1,19 @@
 # Promessa de estabilidade da CLI
 
-> Aplica-se a partir da **v0.42.3**, e vale dentro do `0.x`.
+> Aplica-se a partir da **v0.42.3**. Escrita para o `0.x` — cada quebra listada
+> abaixo tinha de esperar por um major. **A v1.0.0 é esse major**: fechou a
+> única quebra pendente (os atalhos de topo), e esta lista passa a valer como a
+> promessa de semver real de resto em diante — um breaking change deixa de
+> caber num `1.x`.
 
 Um motor sem contrato não se automatiza. Quem escreve um `Makefile`, um passo de
 CI ou um script de deploy precisa de saber o que pode partir num upgrade — e a
 resposta «é 0.x, tudo pode partir» é verdadeira e inútil: garante que ninguém
 depende de nada, o que é o mesmo que ninguém adoptar.
 
-Isto não é semver 1.0. É a lista do que se compromete e do que não se
-compromete, que é o que falta a maior parte dos projectos em 0.x.
+Isto listava o que se compromete e o que não se compromete dentro do `0.x`,
+que é o que falta a maior parte dos projectos nessa fase. Desde a v1.0.0 é
+mais do que isso: é o contrato de semver do projecto.
 
 ## Estável — não quebra sem um major
 
@@ -18,7 +23,7 @@ Docker e Podman lhes dão:
 ```
 container run   ps   stop   start   restart   kill   rm   exec   logs
                 wait   inspect   port   rename   pause   unpause
-image     pull  ls   rm    build (delonix build)
+image     pull  list  remove    build (delonix build)
 ```
 
 Concretamente, garante-se:
@@ -31,8 +36,15 @@ Concretamente, garante-se:
 * **Os códigos de saída** — ver a secção «Códigos de saída» abaixo.
 * **A saída JSON de `inspect`** — campos podem ser ACRESCENTADOS, nunca removidos
   nem com o tipo mudado.
-* **Os atalhos de topo** (`ps`, `run`, `exec`, `logs`, `rm`, `images`), que são
-  literalmente o mesmo comando por reescrita de argv.
+
+> **Quebra de contrato na v1.0.0.** Até à v0.69.0 os atalhos de topo (`ps`,
+> `run`, `exec`, `logs`, `rm`, `images`) estavam aqui, como reescrita de argv
+> para `container <verbo>`/`image list`. Saíram — corte limpo, sem alias: a
+> grafia antiga falha com `unrecognized subcommand`, nunca em silêncio, a
+> mesma regra que a reorganização da v0.30.0 já seguia. Os grupos continuam:
+> `delonix container ps`, `delonix container run`, `delonix container exec`,
+> `delonix container logs`, `delonix container rm`, `delonix image list`.
+> **Os códigos de saída não mudam nesta versão** — ver a secção abaixo.
 
 ## Códigos de saída
 
