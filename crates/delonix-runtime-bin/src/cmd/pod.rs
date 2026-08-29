@@ -68,19 +68,6 @@ pub enum PodCmd {
         #[arg(short = 'n', long, add = clap_complete::engine::ArgValueCandidates::new(super::complete::namespaces))]
         namespace: Option<String>,
     },
-    /// Details of one or more pods (containers + the shared IP), `kubectl` style.
-    Describe {
-        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::pods))]
-        names: Vec<String>,
-    },
-    /// Remove a pod: stop/remove ALL its containers + the shared netns.
-    Rm {
-        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::pods))]
-        names: Vec<String>,
-        /// Force (kill) running containers.
-        #[arg(long, short)]
-        force: bool,
-    },
     /// Logs of a pod's container (defaults to the first member).
     Logs {
         #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::pods))]
@@ -101,13 +88,6 @@ pub fn run(action: PodCmd) -> Result<()> {
             apply(&docs)
         }
         PodCmd::Ls { output, namespace } => ls(output, namespace.as_deref()),
-        PodCmd::Describe { names } => describe(&names),
-        PodCmd::Rm { names, force } => {
-            for n in &names {
-                remove_pod(n, force)?;
-            }
-            Ok(())
-        }
         PodCmd::Logs {
             pod,
             container,
@@ -571,7 +551,7 @@ fn ls(format: output::OutputFormat, namespace: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn describe(names: &[String]) -> Result<()> {
+pub(crate) fn describe(names: &[String]) -> Result<()> {
     let (_images, store) = open_stores()?;
     for name in names {
         let mut members = members_of(&store, name)?;

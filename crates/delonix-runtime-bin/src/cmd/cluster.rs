@@ -495,14 +495,6 @@ pub enum ClusterCmd {
         #[arg(long, default_value = "default")]
         cni: String,
     },
-    /// List the clusters and the state of their nodes.
-    #[command(visible_alias = "list")]
-    Ls,
-    /// Remove a kind-mode cluster (stops and deletes the nodes + kubeconfig).
-    Delete {
-        #[arg(long, default_value = "delonix", add = ArgValueCandidates::new(super::complete::clusters))]
-        name: String,
-    },
     /// Reclaim the state of clusters that have no nodes left.
     ///
     /// A cluster exists as long as containers carry its label — `cluster ls`
@@ -650,14 +642,6 @@ pub fn run(action: ClusterCmd) -> Result<()> {
                 },
             );
         }
-        ClusterCmd::Ls => {
-            let (_, store) = super::util::open_stores()?;
-            return super::kindmode::list(&store);
-        }
-        ClusterCmd::Delete { ref name } => {
-            let (images, store) = super::util::open_stores()?;
-            return super::kindmode::delete(&images, &store, name);
-        }
         ClusterCmd::Prune { force } => {
             let (_, store) = super::util::open_stores()?;
             let doomed = super::kindmode::doomed_clusters(&store)?;
@@ -703,11 +687,9 @@ pub fn run(action: ClusterCmd) -> Result<()> {
     match action {
         // Already handled above (native kind mode / init) — the top of `run` does a `return`.
         ClusterCmd::Create { .. }
-        | ClusterCmd::Delete { .. }
         | ClusterCmd::Init { .. }
         | ClusterCmd::Load { .. }
-        | ClusterCmd::Prune { .. }
-        | ClusterCmd::Ls => {
+        | ClusterCmd::Prune { .. } => {
             unreachable!("tratados acima")
         }
         ClusterCmd::Kube { action } => super::kube::run(action),
@@ -754,6 +736,18 @@ pub fn run(action: ClusterCmd) -> Result<()> {
             })
         }
     }
+}
+
+/// `cluster ls`'s old body — now also the target of the generic `get clusters`.
+pub(crate) fn cmd_ls() -> Result<()> {
+    let (_, store) = super::util::open_stores()?;
+    super::kindmode::list(&store)
+}
+
+/// `cluster delete`'s old body — now also the target of the generic `delete clusters`.
+pub(crate) fn cmd_delete(name: &str) -> Result<()> {
+    let (images, store) = super::util::open_stores()?;
+    super::kindmode::delete(&images, &store, name)
 }
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {

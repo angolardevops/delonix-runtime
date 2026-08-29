@@ -764,14 +764,6 @@ pub enum VmCmd {
         #[arg(long)]
         apply: bool,
     },
-    /// Human-readable detail of one or more VMs, `kubectl describe` style.
-    ///
-    /// For humans; use `status` for the usual compact view. Includes the LIVE
-    /// state — `delonix_vm::status` reconciles liveness/IP with the backend.
-    Describe {
-        #[arg(required = true, add = ArgValueCandidates::new(super::complete::vms))]
-        names: Vec<String>,
-    },
     /// Stop the VM (preserves disk, record and snapshots).
     #[command(alias = "down")]
     Stop {
@@ -796,15 +788,6 @@ pub enum VmCmd {
     Restart {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: String,
-    },
-    /// Remove the VM (stops + deletes overlay/state).
-    #[command(alias = "delete")]
-    Rm {
-        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
-        name: String,
-        /// Remove the local state even if the libvirt cleanup fails.
-        #[arg(long, short = 'f')]
-        force: bool,
     },
     /// Reclaim the VM state directory: everything in it no VM record accounts for.
     ///
@@ -2059,7 +2042,6 @@ pub fn run(action: VmCmd) -> Result<()> {
             t.drop_uninformative().print();
             Ok(())
         }
-        VmCmd::Describe { names } => cmd_describe(&base, &names),
         VmCmd::Console { name, escape } => cmd_console(&base, &name, escape.as_deref()),
         VmCmd::Ssh {
             target,
@@ -2142,27 +2124,6 @@ pub fn run(action: VmCmd) -> Result<()> {
                 Ok(())
             }
         },
-        VmCmd::Rm { name, force } => {
-            let res = if force {
-                delonix_vm::remove_force(&base, &name)
-            } else {
-                delonix_vm::remove(&base, &name)
-            };
-            if let Err(e) = res {
-                // Backend cleanup refused: the local record was kept intact on
-                // purpose (no orphan VMs in libvirt) — tell the user how to
-                // force it, instead of leaving them in a dead end.
-                if !force && !matches!(e, Error::VmNotFound(_)) {
-                    output::warn(&super::po::tf(
-                        "the VM record was kept; `delonix vm rm --force {name}` discards it anyway",
-                        &[("name", &name)],
-                    ));
-                }
-                return Err(e);
-            }
-            println!("{name}");
-            Ok(())
-        }
         VmCmd::Prune { stopped, force } => cmd_prune(&base, stopped, force),
         VmCmd::Apply { file } => {
             let path = manifest::resolve_path(file)?;
@@ -3164,7 +3125,7 @@ fn console_bridge(sock: &std::path::Path, escape: u8) -> Result<()> {
     Ok(())
 }
 
-fn cmd_describe(base: &std::path::Path, names: &[String]) -> Result<()> {
+pub(crate) fn cmd_describe(base: &std::path::Path, names: &[String]) -> Result<()> {
     for (i, name) in names.iter().enumerate() {
         let vm = delonix_vm::status(base, name)?;
         if i > 0 {
@@ -3172,6 +3133,29 @@ fn cmd_describe(base: &std::path::Path, names: &[String]) -> Result<()> {
         }
         describe_one(&vm);
     }
+    Ok(())
+}
+
+/// `vm rm`'s old body — now also the target of the generic `delete vms`.
+pub(crate) fn cmd_rm(base: &std::path::Path, name: &str, force: bool) -> Result<()> {
+    let res = if force {
+        delonix_vm::remove_force(base, name)
+    } else {
+        delonix_vm::remove(base, name)
+    };
+    if let Err(e) = res {
+        // Backend cleanup refused: the local record was kept intact on
+        // purpose (no orphan VMs in libvirt) — tell the user how to
+        // force it, instead of leaving them in a dead end.
+        if !force && !matches!(e, Error::VmNotFound(_)) {
+            output::warn(&super::po::tf(
+                "the VM record was kept; `delonix delete vms {name} --force` discards it anyway",
+                &[("name", name)],
+            ));
+        }
+        return Err(e);
+    }
+    println!("{name}");
     Ok(())
 }
 

@@ -295,7 +295,7 @@ para o comando específico, nunca adivinha).</p>"""},
     },
     "pod": {
         "title": "delonix pod",
-        "tagline": "Pods reais multi-container (create, ls, describe, rm, logs) — N containers como uma unidade.",
+        "tagline": "Pods reais multi-container (create, ls, logs) — N containers como uma unidade.",
         "intro": """Pods de verdade, ao estilo Kubernetes: N containers que <strong>partilham as
 namespaces do pod</strong> e se gerem como uma só unidade. Hoje partilham <strong>netns</strong>
 (o mesmo IP, alcançam-se por <code>localhost</code>), <strong>IPC</strong> (System V/POSIX) e
@@ -319,11 +319,6 @@ faz nada. Também se pode aplicar pelo <code>delonix stack apply</code> (grupo <
 <code>kind: Stack</code>) e pré-visualizar com <code>--dry-run</code>. Se a criação de um membro
 falha, o pod é desfeito por inteiro (sem meio-pod).</p>"""},
             "ls": {"examples": [("Listar os pods (POD, CONTAINERS n/N, IP, STATUS)", "delonix pod ls")]},
-            "describe": {"examples": [("Detalhe estilo kubectl: containers + IP e netns partilhados", "delonix pod describe web-app")]},
-            "rm": {"examples": [
-                ("Remover o pod: pára/remove TODOS os containers + a netns partilhada", "delonix pod rm web-app"),
-                ("Forçar (mata os que estão a correr)", "delonix pod rm -f web-app"),
-            ]},
             "logs": {"examples": [
                 ("Logs do 1.º container do pod", "delonix pod logs web-app"),
                 ("Logs de um container específico (nome curto dentro do pod)", "delonix pod logs web-app --container sidecar -f"),
@@ -435,7 +430,7 @@ para saltar; modo root continua sem cache). Sem BuildKit real (sem
     },
     "vm": {
         "title": "delonix vm",
-        "tagline": "microVMs declarativas: create, ls, status, stop, rm, apply.",
+        "tagline": "microVMs declarativas: create, ls, status, stop, apply.",
         "intro": """MicroVMs geridas pelo trait <code>VmBackend</code> — Cloud Hypervisor ou libvirt.
 O <code>create</code> é idempotente (cria ou auto-recupera) e suporta cloud-init por instância:
 <code>--hostname</code>, <code>--ssh-key</code> e <code>--user-data</code> geram um ISO NoCloud
@@ -481,9 +476,6 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
             "start": {"examples": [
                 ('Voltar a arrancar uma VM parada, sem repetir as flags do create',
                  'delonix vm start dev')]},
-            "describe": {"examples": [
-                ('Tudo sobre uma VM, estilo kubectl describe',
-                 'delonix vm describe dev')]},
             "unbridge": {"examples": [
                 ('Fechar a ponte VM↔container',
                  'sudo delonix vm unbridge minha-rede')]},
@@ -535,7 +527,6 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
             "ls": {"examples": [("", "delonix vm ls")]},
             "status": {"examples": [("Reconcilia liveness/IP com o backend", "delonix vm status node1")]},
             "stop": {"examples": [("", "delonix vm stop node1")]},
-            "rm": {"examples": [("", "delonix vm rm node1")]},
             "apply": {"examples": [("", "delonix vm apply -f delonix-manifest.yaml")]},
         },
     },
@@ -782,12 +773,6 @@ comando, do zero a um cluster com o <code>delonix-cri</code> como runtime (sem c
             "load": {"examples": [
                 ('Levar uma imagem local para dentro dos nós (o kind load, sem registo)',
                  'delonix build -t app:dev .\ndelonix cluster load app:dev --name lab')]},
-            "delete": {"examples": [
-                ('Apagar o cluster e os seus nós',
-                 'delonix cluster delete --name lab')]},
-            "ls": {"examples": [
-                ('Que clusters existem neste host',
-                 'delonix cluster ls')]},
             "create": {"examples": [
                 ('Cluster local em modo kind (containers como nós, sem Docker)',
                  'delonix cluster create --name lab'),
@@ -1291,7 +1276,7 @@ lowers to the matching Kind in <code>manifest::load</code>; see
 <a href="../kinds.html">Kinds</a> and <code>examples/workload.yaml</code>.""",
     },
     "pod": {
-        "tagline": "Real multi-container pods (create, ls, describe, rm, logs) — N containers as one unit.",
+        "tagline": "Real multi-container pods (create, ls, logs) — N containers as one unit.",
         "intro": """Real Kubernetes-style pods: N containers that <strong>share the pod's
 namespaces</strong> and are managed as a single unit. Today they share <strong>netns</strong>
 (same IP, reachable via <code>localhost</code>), <strong>IPC</strong> (System V/POSIX) and
@@ -1334,7 +1319,7 @@ it; root mode still has no cache). No real BuildKit (no <code>RUN --mount=secret
 <code>--platform</code>).""",
     },
     "vm": {
-        "tagline": "Declarative microVMs: create, ls, status, stop, rm, apply.",
+        "tagline": "Declarative microVMs: create, ls, status, stop, apply.",
         "intro": """MicroVMs managed by the <code>VmBackend</code> trait — Cloud Hypervisor or
 libvirt. <code>create</code> is idempotent (creates or self-heals) and supports per-instance
 cloud-init: <code>--hostname</code>, <code>--ssh-key</code> and <code>--user-data</code> generate a
@@ -1656,7 +1641,7 @@ spec:
     - { name: redis, image: redis:7-alpine }
 YAML
 delonix pod create -f web-pod.yaml
-delonix pod describe web-pod
+delonix describe pods web-pod
 delonix pod logs web-pod</code></pre>""",
                 "en": """<p>Create a 2-container pod and confirm they share an IP — reachable via
 <code>localhost</code> from each other, just like in Kubernetes. A pod is always created
@@ -1673,13 +1658,13 @@ spec:
     - { name: redis, image: redis:7-alpine }
 YAML
 delonix pod create -f web-pod.yaml
-delonix pod describe web-pod
+delonix describe pods web-pod
 delonix pod logs web-pod</code></pre>"""},
         "challenge": {"pt": """<p>Escreve o MESMO pod como um <code>kind: Pod</code> num
-manifesto e aplica-o com <code>stack apply</code>. Compara o <code>pod describe</code> resultante
+manifesto e aplica-o com <code>stack apply</code>. Compara o <code>describe pods</code> resultante
 com o pod criado pela CLI — devem ter a mesma forma (netns/IPC/UTS partilhados).</p>""",
                 "en": """<p>Write the SAME pod as a <code>kind: Pod</code> in a manifest and apply
-it with <code>stack apply</code>. Compare the resulting <code>pod describe</code> against the
+it with <code>stack apply</code>. Compare the resulting <code>describe pods</code> against the
 CLI-created pod — they should look the same (shared netns/IPC/UTS).</p>"""},
     },
     "image": {
@@ -2229,11 +2214,6 @@ EXAMPLES_EN = {
     ("workload", "rm"): ["Remove by name"],
     ("pod", "create"): ["Create a pod (web + sidecar talking over localhost) from a manifest"],
     ("pod", "ls"): ["List pods (POD, CONTAINERS n/N, IP, STATUS)"],
-    ("pod", "describe"): ["kubectl-style detail: containers + shared IP and netns"],
-    ("pod", "rm"): [
-        "Remove the pod: stops/removes ALL containers + the shared netns",
-        "Force (kills the ones still running)",
-    ],
     ("pod", "logs"): [
         "Logs from the pod's 1st container",
         "Logs from a specific container (short name inside the pod)",
@@ -2276,7 +2256,6 @@ EXAMPLES_EN = {
     ],
     ("vm", "restart"): ["Forced restart (stops and boots again)"],
     ("vm", "start"): ["Boot a stopped VM again, without repeating the create flags"],
-    ("vm", "describe"): ["Everything about a VM, kubectl describe-style"],
     ("vm", "unbridge"): ["Close the VM↔container bridge"],
     ("vm", "bridge"): [
         "See the plan WITHOUT applying it (dry-run is the default)",
@@ -2307,7 +2286,6 @@ EXAMPLES_EN = {
     ("vm", "ls"): [""],
     ("vm", "status"): ["Reconciles liveness/IP with the backend"],
     ("vm", "stop"): [""],
-    ("vm", "rm"): [""],
     ("vm", "apply"): [""],
     ("volumes", "snapshot"): [
         "Take and list a volume's snapshots",
@@ -2365,8 +2343,6 @@ EXAMPLES_EN = {
     ("compose", "down"): ["Removes this project's containers", "Also removes NAMED volumes (never `external: true` ones)"],
     ("cluster", "kube"): ["Generate Kubernetes manifests from a Delonix resource"],
     ("cluster", "load"): ["Get a local image into the nodes (kind load, no registry)"],
-    ("cluster", "delete"): ["Delete the cluster and its nodes"],
-    ("cluster", "ls"): ["Which clusters exist on this host"],
     ("cluster", "create"): ["Local cluster in kind mode (containers as nodes, no Docker)", "With workers"],
     ("cluster", "init"): ["Scaffold a cloud.yaml for cluster apply"],
     ("cluster", "apply"): ["Bootstrap from a `kind: KubernetesCluster` manifest"],
@@ -4083,7 +4059,7 @@ delonix vm create dev
 
 # 2. Onde ficou, e com que IP
 delonix vm ls
-delonix vm describe dev
+delonix describe vms dev
 
 # 3. Entrar (voltar ao host: Ctrl+])
 delonix vm console dev
@@ -4095,7 +4071,7 @@ delonix vm snapshots dev
 # 5. Estragar alguma coisa lá dentro e voltar atrás
 delonix vm restore dev limpa
 
-delonix vm rm dev</code></pre>
+delonix delete vms dev</code></pre>
 <p class="note"><strong>Verificação:</strong> o passo 4 devolve sem erro com a
 VM A CORRER. Um snapshot de uma VM parada falha de propósito — o
 <code>vm stop</code> faz <em>undefine</em> do domínio para não deixar
@@ -4123,7 +4099,7 @@ delonix vm create teste --disk minha-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
 # …ou a partir de um qcow2 publicado por ti, sem passar pelo store
 delonix vm create outra --url-img https://o-teu-bucket/imagem.qcow2
 
-delonix vm rm teste; cd ..; rm -rf lab-vm</code></pre>
+delonix delete vms teste; cd ..; rm -rf lab-vm</code></pre>
 <p class="note"><strong>Verificação:</strong> o build imprime
 <code>[1/1] stage-1: FROM ubuntu:24.04</code> e verifica o checksum da cloud
 image. Com <code>--url-img</code>, se não houver <code>&lt;url&gt;.sha256</code>
@@ -4142,7 +4118,7 @@ delonix system setup
 delonix cluster create --name lab
 
 # 3. Falar com ele
-export KUBECONFIG=$(delonix cluster ls -o json | jq -r '.[0].kubeconfig')
+export KUBECONFIG=~/.local/share/delonix/clusters/lab-kubeconfig.yaml
 kubectl get nodes -o wide
 
 # 4. Levar uma imagem TUA para dentro dos nós, sem registo nenhum
@@ -4153,7 +4129,7 @@ kubectl run app --image=app:dev --image-pull-policy=Never
 # 5. A prova que interessa
 kubectl get pod app -w
 
-delonix cluster delete --name lab</code></pre>
+delonix delete clusters lab</code></pre>
 <p class="note"><strong>Verificação:</strong> o passo 5 chega a
 <code>Running</code>. Nem o <code>ctr images import</code> nem o
 <code>crictl images</code> provam isto — os dois já reportaram sucesso sobre
@@ -4344,7 +4320,7 @@ delonix vm create dev
 
 # 2. Where it landed, and with what IP
 delonix vm ls
-delonix vm describe dev
+delonix describe vms dev
 
 # 3. Go in (back to the host: Ctrl+])
 delonix vm console dev
@@ -4356,7 +4332,7 @@ delonix vm snapshots dev
 # 5. Break something inside and roll back
 delonix vm restore dev clean
 
-delonix vm rm dev</code></pre>
+delonix delete vms dev</code></pre>
 <p class="note"><strong>Verification:</strong> step 4 returns with no error
 and the VM STILL RUNNING. A snapshot of a stopped VM fails on purpose —
 <code>vm stop</code> <em>undefines</em> the domain to avoid leaving orphans.</p>"""),
@@ -4383,7 +4359,7 @@ delonix vm create test --disk my-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
 # …or from a qcow2 you published yourself, bypassing the store
 delonix vm create other --url-img https://your-bucket/image.qcow2
 
-delonix vm rm test; cd ..; rm -rf lab-vm</code></pre>
+delonix delete vms test; cd ..; rm -rf lab-vm</code></pre>
 <p class="note"><strong>Verification:</strong> the build prints
 <code>[1/1] stage-1: FROM ubuntu:24.04</code> and verifies the cloud image's
 checksum. With <code>--url-img</code>, if there's no published
@@ -4403,7 +4379,7 @@ delonix system setup
 delonix cluster create --name lab
 
 # 3. Talk to it
-export KUBECONFIG=$(delonix cluster ls -o json | jq -r '.[0].kubeconfig')
+export KUBECONFIG=~/.local/share/delonix/clusters/lab-kubeconfig.yaml
 kubectl get nodes -o wide
 
 # 4. Get an image of YOURS into the nodes, with no registry at all
@@ -4414,7 +4390,7 @@ kubectl run app --image=app:dev --image-pull-policy=Never
 # 5. The proof that matters
 kubectl get pod app -w
 
-delonix cluster delete --name lab</code></pre>
+delonix delete clusters lab</code></pre>
 <p class="note"><strong>Verification:</strong> step 5 reaches
 <code>Running</code>. Neither <code>ctr images import</code> nor
 <code>crictl images</code> prove this — both have reported success on an
