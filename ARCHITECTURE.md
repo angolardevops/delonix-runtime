@@ -2,7 +2,7 @@
 
 Modelo C4 (Contexto → Contentores → Componentes) e system design funcional do
 **Delonix Engine**: motor de containers e microVMs **daemonless, rootless-first,
-kernel-native**, em Rust (14 crates, workspace `crates/`). Este documento é canónico
+kernel-native**, em Rust (15 crates, workspace `crates/`). Este documento é canónico
 e mantido contra o código — cada afirmação estrutural tem a referência do
 crate/ficheiro onde foi confirmada. Onde há limites, eles aparecem nos diagramas,
 não escondidos em rodapés.
@@ -129,7 +129,7 @@ de PID) e reclassifica `Running`→`Crashed`/`Paused`. O CRI chama-o em
 
 ---
 
-## C4 — Nível 3: Componentes (os 14 crates)
+## C4 — Nível 3: Componentes (os 15 crates)
 
 Setas = dependências **reais**, confirmadas nos `Cargo.toml` de `crates/*/` e nos
 `use delonix_*` dos `src/`. Não há ciclos; `delonix-runtime-core` é a raiz comum.
@@ -150,6 +150,7 @@ graph TB
     RULES["delonix-net-rules<br>regras de rede PURAS, ZERO dependencias — Cidr, nome de bridge,<br>IPAM dentro de um prefixo, leitura de taxas; partilhado com o PaaS"]
     PVE["delonix-proxmox<br>backend VmBackend REMOTO contra a API de UM no Proxmox VE<br>(ADR-0008) — fora do delonix-vm por trazer cliente HTTP"]
     NAS["delonix-truenas<br>provisiona dataset, quota, permissoes e export numa NAS<br>pela API do TrueNAS (ADR-0009) — mesma razao de crate a parte"]
+    MCP["delonix-mcp<br>servidor MCP (ADR-0025) — superficie de IA LOCAL, sem inquilino<br>stdio-only; tools chamam Store/dominio, nunca shell arbitrario"]
 
     BIN --> RT
     BIN --> IMG
@@ -163,6 +164,7 @@ graph TB
     BIN --> SEC
     BIN --> PVE
     BIN --> NAS
+    BIN --> MCP
 
     MGMT --> RT
     MGMT --> IMG
@@ -192,6 +194,12 @@ graph TB
     PVE --> VM2
     PVE --> CORE
     NAS --> CORE
+
+    MCP --> CORE
+    MCP --> VM2
+    MCP --> VOL
+    MCP --> NET
+    MCP --> MGMT
 ```
 
 Notas de leitura do grafo (todas verificadas):
@@ -231,6 +239,15 @@ Notas de leitura do grafo (todas verificadas):
 - **Nada depende de `delonix-proxmox` nem de `delonix-truenas` a não ser o `-bin`** — são
   folhas do grafo, e é o que permite que um alvo remoto mal configurado avise e siga em
   vez de parar um `container ls`.
+- **`delonix-mcp` fica fora dos oito crates de motor dependency-clean, pela MESMA razão
+  do `delonix-mgmt`** (ADR-0025): traz o SDK MCP oficial (`rmcp`) e o seu próprio
+  runtime `tokio`, e nenhum crate de motor depende dele. Depende de `delonix-mgmt`
+  para reaproveitar o `dashstats::collect` já existente (`runtime.info`/`metrics.query`
+  não derivam os mesmos números uma segunda vez) — é o único crate novo que depende de
+  outro crate "fora do motor" em vez de só dos oito. **Stdio-only nesta fase**: um
+  processo filho por sessão do cliente de IA, nunca um daemon nem um socket loopback
+  — a variante remota/multi-tenant do desenho original ficou recusada por ADR-0010 e
+  pertence ao `delonix-paas`, não aqui.
 - Módulos internos que importam ao desenho:
   - `delonix-net::infra` — todo o plano rootless (holder, slirp único, publish/DNAT,
     DNS/DHCP/RA, firewall por container, egress policy, `attach_container`);

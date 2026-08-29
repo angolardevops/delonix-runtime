@@ -15,6 +15,7 @@ members = [
     "crates/delonix-security-runtime",
     "crates/delonix-truenas",
     "crates/delonix-proxmox",
+    "crates/delonix-mcp",
 ]
 
 [workspace.package]
