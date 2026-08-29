@@ -92,6 +92,9 @@
 ~	manifest render
 ~	manifest schema
 ~	manifest validate
+=	mcp capabilities
+=	mcp doctor
+=	mcp serve
 ~	net egress allow
 ~	net egress clear
 ~	net egress deny
