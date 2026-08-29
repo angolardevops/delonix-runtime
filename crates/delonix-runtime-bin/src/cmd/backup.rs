@@ -129,9 +129,18 @@ impl Skip {
     }
 }
 
+/// What the backup walk decided about one entry of the state root.
+///
+/// The `Skip` carries its reason and not a bare `false`, because the reason is
+/// what the operator needs: «this backup has no VM disk images» is a different
+/// fact from «this backup has no vault master key», and a boolean makes the two
+/// indistinguishable in a listing. [`Skip::reason`] is what turns it into the
+/// sentence shown.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Decision {
+    /// Goes into the archive.
     Include,
+    /// Left out, and why — see [`Skip`] for the flag that would include it.
     Skip(Skip),
 }
 
