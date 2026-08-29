@@ -318,7 +318,7 @@ impl VmImageStore {
 
     pub fn get(&self, name: &str) -> Result<VmImage> {
         let bytes = std::fs::read(self.meta_path(name))
-            .map_err(|_| Error::NotFound(format!("imagem VM '{name}'")))?;
+            .map_err(|e| Error::not_found_or_io(e, || format!("imagem VM '{name}'")))?;
         Ok(serde_json::from_slice(&bytes)?)
     }
 }

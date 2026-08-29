@@ -856,7 +856,7 @@ impl NetworkStore {
             return Ok(Network::default_bridge());
         }
         let body = std::fs::read_to_string(self.path(name))
-            .map_err(|_| Error::NotFound(format!("network {name}")))?;
+            .map_err(|e| Error::not_found_or_io(e, || format!("network {name}")))?;
         let trimmed = body.trim();
         // Old format: just the base octet → bridge network.
         if let Ok(base) = trimmed.parse::<u8>() {
@@ -1318,7 +1318,7 @@ impl NetworkStore {
             }
         }
         let raw = std::fs::read_to_string(self.path(name))
-            .map_err(|_| Error::NotFound(format!("network {name}")))?;
+            .map_err(|e| Error::not_found_or_io(e, || format!("network {name}")))?;
         // Legacy form: the whole record is the base octet.
         let mut out: Vec<String> = if let Ok(base) = raw.trim().parse::<u8>() {
             vec![format!("base={base}")]
@@ -1546,8 +1546,11 @@ impl NetworkStore {
     /// Removes a network's record (does not touch the nft/bridge infrastructure).
     pub fn remove(&self, name: &str) -> Result<Network> {
         let net = self.get(name)?;
+        // `get` one line above already proved the record is there, so a
+        // failure here is almost certainly NOT absence — saying "no such
+        // network" would send the operator to look for what they just read.
         std::fs::remove_file(self.path(name))
-            .map_err(|_| Error::NotFound(format!("network {name}")))?;
+            .map_err(|e| Error::not_found_or_io(e, || format!("network {name}")))?;
         Ok(net)
     }
 }
