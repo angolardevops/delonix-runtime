@@ -3400,11 +3400,17 @@ msgstr "delonix: backend {backend} inacessível: {err}"
 msgid "delonix: backend {backend} did not respond in {secs}s"
 msgstr "delonix: backend {backend} não respondeu em {secs}s"
 
+msgid "device"
+msgstr "dispositivo"
+
 msgid "driver"
 msgstr "driver"
 
 msgid "mountpoint"
 msgstr "mountpoint"
+
+msgid "options"
+msgstr "opções"
 
 msgid "quota"
 msgstr "quota"
@@ -4446,6 +4452,12 @@ msgstr "Valida o manifesto SEM tocar em nada (dry-run): resolve as referências 
 
 msgid "Storage/volumes dashboard (KPIs + table) — TUI, or `--once` snapshot."
 msgstr "Dashboard de armazenamento/volumes (KPIs + tabela) — TUI, ou snapshot com `--once`."
+
+msgid "Volumes/storage dashboard (KPIs + table) — TUI, or `--once` snapshot"
+msgstr "Dashboard de volumes/armazenamento (KPIs + tabela) — TUI, ou snapshot com `--once`"
+
+msgid "Volumes/storage dashboard (KPIs + table) — TUI, or `--once` snapshot.\n\nMoved here from `storage dash` (B5 CLI collapse): the scope it renders (`DashScope::Storage`) always covered BOTH network storages and plain volumes together (its own title says \"STORAGE/VOLUMES\") — `storage` was never the only Kind it described, just the only group that could reach it. `volume` is now that one entry point."
+msgstr "Dashboard de volumes/armazenamento (KPIs + tabela) — TUI, ou snapshot com `--once`.\n\nMovido para aqui a partir de `storage dash` (colapso B5 da CLI): o âmbito que renderiza (`DashScope::Storage`) sempre cobriu TANTO os armazenamentos de rede como os volumes simples juntos (o próprio título diz \"STORAGE/VOLUMES\") — `storage` nunca foi o único Kind que descrevia, só o único grupo que lá chegava. `volume` é agora esse único ponto de entrada."
 
 msgid "Diagnose — and, with `--delegate`, fix — cgroup delegation, the prerequisite for `--memory`/`--cpus`/`--pids-limit` to mean anything."
 msgstr "Diagnostica — e, com `--delegate`, corrige — a delegação de cgroup, o pré-requisito para que `--memory`/`--cpus`/`--pids-limit` queiram dizer alguma coisa."
@@ -6752,6 +6764,12 @@ msgstr "o servidor, o export e as opções de montagem mesmo em uso"
 
 msgid "a live TUI of storages and volumes, with usage per area"
 msgstr "um TUI ao vivo dos storages e volumes, com o uso por área"
+
+msgid "a live TUI of volumes and storages, with usage per area"
+msgstr "um TUI ao vivo dos volumes e storages, com o uso por área"
+
+msgid "the derived device, as JSON"
+msgstr "o dispositivo derivado, em JSON"
 
 msgid "one snapshot, for CI or a terminal without a TTY"
 msgstr "uma snapshot, para CI ou um terminal sem TTY"
