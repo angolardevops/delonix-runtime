@@ -302,7 +302,8 @@ fn apply_seccomp(unconfined: bool, detect: bool, keep_privs: bool, profile: Opti
         // both safe and useful. It says so out loud.
         if let Err(e) = install_filter_privileged(&prog) {
             eprintln!(
-                "delonix: could not keep NO_NEW_PRIVS off with a seccomp filter ({e});                  applying the filter WITH NO_NEW_PRIVS instead"
+                "delonix: could not keep NO_NEW_PRIVS off with a seccomp filter ({e}); \
+applying the filter WITH NO_NEW_PRIVS instead"
             );
             if let Err(e2) = apply_filter(&prog) {
                 eprintln!("delonix: failed to apply seccomp: {e2}; aborting the container");
@@ -2130,7 +2131,9 @@ fn apply_apparmor(profile: &str) -> std::result::Result<(), String> {
         let no_path = !std::path::Path::new("/proc/self/attr/apparmor/exec").exists()
             && !std::path::Path::new("/proc/self/attr/exec").exists();
         return Err(if no_path {
-            "this namespace does not expose an AppArmor transition file              (/proc/self/attr/[apparmor/]exec) — AppArmor confinement is not available to an              unprivileged container on this kernel"
+            "this namespace does not expose an AppArmor transition file \
+(/proc/self/attr/[apparmor/]exec) — AppArmor confinement is not available to an \
+unprivileged container on this kernel"
                 .to_string()
         } else {
             format!("the kernel rejected the profile ({e}) — is it loaded?")

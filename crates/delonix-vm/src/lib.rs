@@ -2591,7 +2591,8 @@ fn ensure_libvirt_network(uri: &str, net: &str) {
     // System connection reachable? (NAT lives in qemu:///system.)
     if capture("virsh", &["-c", uri, "net-list", "--all"]).is_none() {
         eprintln!(
-            "warning: cannot reach {uri} for NAT networking — add yourself to the 'libvirt' group              (`sudo usermod -aG libvirt $USER && newgrp libvirt`) and retry"
+            "warning: cannot reach {uri} for NAT networking — add yourself to the \
+'libvirt' group (`sudo usermod -aG libvirt $USER && newgrp libvirt`) and retry"
         );
         return;
     }
@@ -3330,7 +3331,9 @@ pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Res
                 }
                 None if cfg.kernel.is_none() => {
                     eprintln!(
-                        "warning: booting a cloud image on Cloud Hypervisor (libvirt not found) —                          if it panics on 'unable to mount root fs', install libvirt+qemu"
+                        "warning: booting a cloud image on Cloud Hypervisor \
+(libvirt not found) — if it panics on 'unable to mount root fs', install \
+libvirt+qemu"
                     );
                     None
                 }
