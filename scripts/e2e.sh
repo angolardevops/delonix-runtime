@@ -197,14 +197,14 @@ check "sem filtro a coluna NAMESPACE esconde-se" ok bash -c \
 check "com -n default a coluna aparece" ok bash -c \
   "'$BIN' container ps -a -n default | head -1 | grep -q NAMESPACE"
 check "vm ls" ok "$BIN" vm ls
-check "cluster ls" ok "$BIN" cluster ls
+check "get clusters" ok "$BIN" get clusters
 check "system info" ok "$BIN" system info
 check "system df" ok "$BIN" system df
 check "system events" ok "$BIN" system events
-check "completion bash" ok "$BIN" completion bash
+check "completion shell bash" ok "$BIN" completion shell bash
 
 # --- os NOMES completam-se, e não só o script de registo (C-2) ------------
-# O `completion bash` acima prova que o script de registo SAI; não prova que um
+# O `completion shell bash` acima prova que o script de registo SAI; não prova que um
 # TAB sobre um argumento sugere alguma coisa. A distinção não é teórica: o
 # `image vm rm` — o comando DESTRUTIVO — não sugeria nada enquanto o `describe`
 # ao lado sugeria, e ninguém deu por isso porque o registo saía na mesma.

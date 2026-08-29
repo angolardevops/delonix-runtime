@@ -467,7 +467,15 @@ const FACTS: &[KindFacts] = &[
     KindFacts {
         kind: CLUSTER,
         plural: "kubernetesclusters",
-        short: &["kc"],
+        // "clusters" is not the plural (that is "kubernetesclusters", the
+        // literal pluralization every other Kind here follows) — it is the
+        // shortname that matches the CLI group's own name (`cluster
+        // create`/`cluster apply`/...) and the one this repo's own release
+        // notes (v0.69.0) and built-in manual already promised as the
+        // replacement for `cluster ls`/`cluster delete`. Without it, `delonix
+        // get clusters` — the exact command documented — failed with "no such
+        // resource kind 'clusters'", a real regression shipped in v1.0.0.
+        short: &["kc", "clusters"],
         api_version: "infrastructure.delonix.io/v1alpha1",
         domain: Domain::Composition,
         form: Form::Primary,
