@@ -252,8 +252,10 @@ pub(crate) fn list(root: &Path, stack: &str) -> Vec<Revision> {
 /// The rendered manifest of one revision.
 pub(crate) fn manifest_of(root: &Path, stack: &str, number: u32) -> Result<String> {
     let p = dir(root, stack).join(format!("{number:04}.yaml"));
-    std::fs::read_to_string(&p).map_err(|_| {
-        delonix_runtime_core::Error::NotFound(format!("revision {number} of stack '{stack}'"))
+    std::fs::read_to_string(&p).map_err(|e| {
+        delonix_runtime_core::Error::not_found_or_io(e, || {
+            format!("revision {number} of stack '{stack}'")
+        })
     })
 }
 

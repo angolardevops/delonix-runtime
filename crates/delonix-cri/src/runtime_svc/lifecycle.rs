@@ -239,8 +239,17 @@ fn read_rec<T: for<'de> Deserialize<'de>>(dir: &Path, id: &str) -> Result<T, Sta
     if !valid_cri_id(id) {
         return Err(Status::invalid_argument(format!("invalid id: {id:?}")));
     }
-    let data = std::fs::read(dir.join(format!("{id}.json")))
-        .map_err(|_| Status::not_found(format!("{id} not found")))?;
+    // A read that fails with anything other than ENOENT is not absence, and
+    // `NOT_FOUND` tells the kubelet to stop looking. Permission or I/O problems
+    // come back as `INTERNAL`: the code that makes it retry, and that points the
+    // operator at the disk instead of at a container that "does not exist".
+    let data = std::fs::read(dir.join(format!("{id}.json"))).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            Status::not_found(format!("{id} not found"))
+        } else {
+            Status::internal(format!("reading the record of {id}: {e}"))
+        }
+    })?;
     serde_json::from_slice(&data).map_err(st)
 }
 /// Guarded `remove_file` for the raw (non-`write_rec`) deletion call sites — same
