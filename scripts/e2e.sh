@@ -654,6 +654,90 @@ if "$BIN" container inspect "$C" >/dev/null 2>&1; then
 
   check "update: PID intacto após o hot reconfig" ok bash -c "test \"\$('$BIN' container inspect '$C' | python3 -c 'import json,sys; print(json.load(sys.stdin)[0][\"pid\"])')\" != 'None'"
 
+  # A JANELA ENTRE O `run -d` E O PRIMEIRO `exec` (medida 2026-08-28).
+  #
+  # O `run -d` devolvia assim que libertava o init; o init só DEPOIS fazia o
+  # `pivot_root` e montava os volumes. Um `exec` que apanhasse essa janela
+  # entrava no mount namespace enquanto `/` ainda era o do HOST — corria o
+  # `/bin/sh` do host e escrevia ficheiros do host, com exit 0. Silencioso
+  # sempre que o caminho existe dos dois lados, e foi assim que passou dias por
+  # flakiness: um backup tirado ali arquivava um volume vazio e a falha só
+  # aparecia dois passos à frente, no restore, a apontar para o comando errado.
+  #
+  # A prova não pode ser o rc do `exec` — foi um rc=0 que escondeu isto. É um
+  # caminho que existe SÓ no host: se o container o vê, o exec aterrou fora dele.
+  #
+  # POR QUE É QUE GERA CARGA, e o que isso admite. Isto é AMOSTRAGEM, não uma
+  # verificação determinística: o que decide a corrida é o filho ser escalonado
+  # antes de o `exec` (um processo novo) chegar ao `setns`, logo a taxa segue a
+  # contenção de CPU do host e não o número de mounts. Medido no mesmo binário
+  # defeituoso: 0/20 com a máquina folgada, 0/20 com 40 volumes, e 4–7/20 (20–35%)
+  # com `nproc` workers a queimar CPU. Daí os 12 ciclos COM carga: entre 93% e
+  # 99,8% de apanhar o defeito, contra praticamente 0% sem ela. Custa ~10s de
+  # máquina saturada, e é o preço de o check não ser um verde por sorte.
+  #
+  # O que ele NÃO prova — que a espera existe e é limitada — está provado onde é
+  # determinístico: `the_mount_wait_has_three_exits_and_none_is_unbounded`,
+  # em `crates/delonix-runtime/src/lib.rs`. Nenhum dos dois substitui o outro.
+  check "run -d devolve com os mounts de pé (sem janela para o host)" ok bash -c "
+    marca='$OUT/.so-existe-no-host'; : > \"\$marca\"
+    carga=(); trap 'kill \"\${carga[@]}\" 2>/dev/null' EXIT
+    for _ in \$(seq \$(nproc)); do ( while :; do :; done ) & carga+=(\$!); done
+    for i in \$(seq 12); do
+      n='rd-$PFX'-\$i
+      '$BIN' container run -d --name \"\$n\" '$IMG' sleep 30 >/dev/null 2>&1
+      onde=\$('$BIN' container exec \"\$n\" /bin/sh -c \"test -e '\$marca' && echo HOST || echo CONTAINER\" 2>&1)
+      '$BIN' container rm -f \"\$n\" >/dev/null 2>&1
+      case \"\$onde\" in
+        *CONTAINER*) ;;
+        *) printf 'ciclo %s: o exec aterrou fora do container (%s)\n' \"\$i\" \"\$onde\"; exit 1 ;;
+      esac
+    done
+  "
+
+  # O REGISTO NÃO PODE DIZER `Running` ANTES DE O CONTAINER ESTAR MONTADO.
+  #
+  # O check acima cobre quem passa pelo `run -d` — esse agora espera. Não cobre
+  # um TERCEIRO processo (o CRI, o `serve docker-api`, uma CLI concorrente), que
+  # não passa por lá: descobre o container no store e entra. Enquanto o
+  # `store.save` acontecia ANTES da espera, esse terceiro lia `pid` + `Running`
+  # de um processo cuja raiz ainda era a do host — medido no binário que já
+  # tinha a espera, 2 de 15.
+  #
+  # Este não amostra uma corrida: mede a PROPRIEDADE. No instante exacto em que
+  # o registo ganha `pid`, compara `/proc/<pid>/root` com `/`. Iguais = o
+  # `pivot_root` ainda não aconteceu e o registo mentiu. Barato o bastante
+  # (dois `stat`, sem arrancar processo nenhum) para chegar sempre à janela, ao
+  # contrário de um `exec`, que leva ~50ms a arrancar e por isso quase nunca a
+  # apanha — foi assim que este resíduo escapou à primeira passagem.
+  cat > "$OUT/espia-registo.py" <<'ESPIA'
+import json, glob, os, sys, time
+root, name = os.environ["DELONIX_ROOT"], sys.argv[1]
+h = os.stat("/"); hid = (h.st_dev, h.st_ino)
+deadline = time.time() + 60
+while time.time() < deadline:
+    for f in glob.glob(os.path.join(root, "containers", "*.json")):
+        try: d = json.load(open(f))
+        except Exception: continue
+        if d.get("name") == name and d.get("pid"):
+            try: st = os.stat("/proc/%d/root" % d["pid"])
+            except OSError: sys.exit(0)   # já morreu: nada a afirmar
+            sys.exit(0 if (st.st_dev, st.st_ino) != hid else 1)
+sys.exit(0)                               # nunca visto: não é este o check
+ESPIA
+  check "o registo só diz Running com o container montado" ok bash -c "
+    carga=(); trap 'kill \"\${carga[@]}\" 2>/dev/null' EXIT
+    for _ in \$(seq \$(nproc)); do ( while :; do :; done ) & carga+=(\$!); done
+    for i in \$(seq 10); do
+      n='rg-$PFX'-\$i
+      python3 '$OUT/espia-registo.py' \"\$n\" & esp=\$!
+      '$BIN' container run -d --name \"\$n\" '$IMG' sleep 20 >/dev/null 2>&1
+      wait \$esp; rc=\$?
+      '$BIN' container rm -f \"\$n\" >/dev/null 2>&1
+      [ \$rc -eq 0 ] || { printf 'ciclo %s: o registo publicou o pid antes do pivot_root\n' \"\$i\"; exit 1; }
+    done
+  "
+
   check "container stop" ok "$BIN" container stop "$C"
   check "update num container parado recusa" fail "$BIN" container update "$C" --publish-add "$P2:80"
   # Parado (3) é a terceira resposta que um reconciliador precisa: existe, logo

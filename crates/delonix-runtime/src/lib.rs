@@ -2539,7 +2539,7 @@ fn setup_node_cgroup_ns(cid: &str) {
     let _ = unshare(CloneFlags::CLONE_NEWCGROUP);
 }
 
-// FIXME(follow-up): 29 positional arguments — a real smell. Refactor to a typed
+// FIXME(follow-up): 30 positional arguments — a real smell. Refactor to a typed
 // `ContainerInitSpec` (groups rootfs/hostname/argv/limits/flags) in a
 // dedicated, reviewed change; do not mix with the lint gate.
 #[allow(clippy::too_many_arguments)]
@@ -2580,6 +2580,7 @@ fn container_init(
     workdir: Option<&str>,
     cid: &str,
     node_cgroup: bool,
+    ready_w: Option<i32>,
 ) -> isize {
     // User namespace: wait for the PARENT to write uid_map/gid_map before continuing
     // (until then, we are `nobody` without caps). The received byte is the "you may proceed".
@@ -2714,6 +2715,39 @@ fn container_init(
                             // masks the host's path or silently fails with EPERM.
     apply_masked_paths(masked_paths);
     apply_readonly_paths(readonly_paths);
+    // READY: the last mount is in. Everything that shapes this mount namespace —
+    // pivot_root, the volumes, /dev, the tmpfs, the secret files, the read-only
+    // remount, the masked/read-only paths — has happened, so from here on an
+    // outsider that joins this namespace sees the container the caller asked
+    // for. `spawn` blocks on the other end of this pipe until it reads this
+    // byte, and THAT is what makes `run -d` mean "the container is up".
+    //
+    // The bug it closes, measured 2026-08-28 on this host, 3 of 12 runs: a
+    // `container exec` issued right after `run -d` returned joined the mount
+    // namespace BEFORE the `pivot_root` above, so `/` was still the HOST's.
+    // It ran the HOST's `/bin/sh` and wrote the HOST's files —
+    // `touch /tmp/<path-that-only-exists-on-the-host>` succeeded with exit 0.
+    // Silent whenever the path exists on both sides, which is why it read as
+    // flakiness for three days: a backup taken in that window archived an empty
+    // volume and the failure surfaced two steps later, in the restore.
+    //
+    // Deliberately BEFORE the confinement work below (caps, seccomp,
+    // `verify_confinement`, apparmor) and before `chown_tree_once`, which walks
+    // the whole rootfs for an image with a non-root `USER`: none of those change
+    // what a joiner sees, and making `run -d` wait for a full-tree chown would
+    // trade one real defect for a visible slowdown.
+    //
+    // CLOEXEC (set by the `pipe2` in `spawn`): if this init dies before getting
+    // here, or `execvp` runs without this write, the fd closes and the parent
+    // reads EOF instead of blocking forever.
+    if let Some(w) = ready_w {
+        // SAFETY: our end of the pipe created in `spawn`; write 1 byte and close.
+        unsafe {
+            let b = [1u8; 1];
+            let _ = libc::write(w, b.as_ptr() as *const libc::c_void, 1);
+            libc::close(w);
+        }
+    }
     if no_new_privs {
         set_no_new_privs(); // no execve gains privileges (anti-escalation)
         drop_capabilities(cap_keep); // drop caps (after the mounts, before the exec)
@@ -4459,6 +4493,67 @@ unsafe fn close_range_raw(first: u32, last: u32) {
     );
 }
 
+/// Blocks until the container's init says its mount namespace is final, i.e.
+/// until it writes the byte at the `ready_w` point in [`container_init`].
+///
+/// This is what `run -d` returning means. Without it the caller wins a race it
+/// does not know it is in: measured on this host, 3 of 12 runs, a `container
+/// exec` fired straight after `run -d` joined the namespace while `/` was still
+/// the HOST's, ran the host's shell and wrote host files, exit 0.
+///
+/// Three ways out, and none of them is an unbounded wait:
+///
+/// * the byte arrives — the normal case, and it is already there by the time we
+///   get here on every path with a user namespace (the child was released long
+///   before);
+/// * EOF — the init died before mounting, or reached `execvp` without writing
+///   (the fd is CLOEXEC). Nothing to wait for; the status reconciles the same
+///   way it always did. Deliberately NOT turned into an error here: changing
+///   what `run -d` reports for a container that fails to mount is a separate
+///   decision, with its own measurements, and mixing it into a race fix is how
+///   one lands unreviewed;
+/// * the ceiling — a mount that hangs (a bind onto an unresponsive NFS server is
+///   the real case) must not hang `run` forever, because before this change it
+///   did not. It is said out loud rather than swallowed: the caller has to know
+///   the guarantee did not hold, because that is exactly when an `exec` next can
+///   land on the host.
+fn wait_for_mounts(ready_r: i32, name: &str) {
+    // Generous by design: real mounts take milliseconds, so anything near this
+    // is already pathological, and a tight ceiling would reintroduce the race on
+    // a loaded machine — which is precisely when it was measured to bite.
+    const CEILING_MS: i32 = 60_000;
+    wait_for_mounts_with(ready_r, name, CEILING_MS)
+}
+
+/// [`wait_for_mounts`] with the ceiling as an argument, so a test can exercise
+/// the three exits in milliseconds instead of a minute.
+fn wait_for_mounts_with(ready_r: i32, name: &str, ceiling_ms: i32) {
+    let mut pfd = libc::pollfd {
+        fd: ready_r,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // SAFETY: single valid fd we own; poll writes only into `pfd.revents`.
+    let n = unsafe { libc::poll(&mut pfd, 1, ceiling_ms) };
+    if n == 0 {
+        eprintln!(
+            "delonix: warning: {name} did not finish mounting within {}ms — it is running, but a \
+             command that enters it right now may see the HOST's filesystem instead of the \
+             container's",
+            ceiling_ms
+        );
+    } else if n > 0 {
+        // Drain the byte (or observe the EOF) so the fd is closed in a known state.
+        // SAFETY: valid fd, buffer we own.
+        unsafe {
+            let mut b = [0u8; 1];
+            let _ = libc::read(ready_r, b.as_mut_ptr() as *mut libc::c_void, 1);
+        }
+    }
+    // SAFETY: ours, and unused from here on.
+    unsafe { libc::close(ready_r) };
+}
+
 fn spawn(
     store: &Store,
     container: &mut Container,
@@ -4661,6 +4756,31 @@ fn spawn(
         None
     };
 
+    // READINESS pipe — the child's proof that the mount namespace is finished.
+    // See the `ready_w` write in `container_init` for the defect this closes.
+    // `O_CLOEXEC` on BOTH ends is load-bearing on the write side: it is what
+    // turns "the init died, or reached `execvp` without writing" into an EOF the
+    // parent can act on instead of a wait with no end.
+    let ready = {
+        let mut fds = [0i32; 2];
+        // SAFETY: pipe2() fills the 2-fd array.
+        if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
+            if let Some((r, w)) = sync {
+                // SAFETY: our own fds, not handed to anyone yet.
+                unsafe {
+                    libc::close(r);
+                    libc::close(w);
+                }
+            }
+            return Err(Error::Runtime {
+                context: "pipe",
+                message: "failed to create the readiness pipe".into(),
+            });
+        }
+        (fds[0], fds[1])
+    };
+    let ready_w = ready.1;
+
     let host_pid = spec.host_pid;
     let inherit_userns = spec.inherit_userns;
     // Same condition that decides whether `CLONE_NEWNET` is actually added
@@ -4743,12 +4863,26 @@ fn spawn(
             workdir.as_deref(),
             &cid,
             node_cgroup,
+            Some(ready_w),
         )
     });
 
     // SAFETY: single-threaded; the child mounts the container and does `exec`.
-    let pid = unsafe { clone(cb, &mut stack, flags, Some(Signal::SIGCHLD as i32)) }
-        .map_err(syserr("clone"))?;
+    let cloned = unsafe { clone(cb, &mut stack, flags, Some(Signal::SIGCHLD as i32)) };
+    // The parent drops the WRITE end unconditionally: while it holds a copy, the
+    // pipe never reaches EOF, so a child that dies before signalling would leave
+    // the read below waiting forever. On a failed `clone` both ends go, or the
+    // error path would leak a pair of fds per attempt.
+    // SAFETY: our own end; the child got its copy through the `clone`.
+    unsafe { libc::close(ready_w) };
+    let pid = match cloned {
+        Ok(p) => p,
+        Err(e) => {
+            // SAFETY: nothing else refers to the read end once there is no child.
+            unsafe { libc::close(ready.0) };
+            return Err(syserr("clone")(e));
+        }
+    };
 
     // CRITICAL ORDER: the user namespace handshake (releasing the child with the byte
     // "GO") MUST come BEFORE the console recv. In console mode the init only allocates the
@@ -4927,8 +5061,11 @@ fn spawn(
     // `describe`/`ls` don't keep pointing at a cause that no longer applies.
     container.crash_reason = None;
     container.crashed_at = None;
+    // The cgroup stays HERE, ahead of the wait: it is what the container's
+    // limits hang off, and every millisecond it is not in one is a millisecond
+    // it runs uncapped. Mounting allocates nothing, so waiting first would buy
+    // no safety and cost that.
     setup_cgroup(container, pid.as_raw())?;
-    store.save(container)?;
 
     // Configures the network (or other startup) BEFORE waiting/returning. Only the
     // path WITHOUT userns reaches here (no sync point to block the child on) — with
@@ -4942,6 +5079,28 @@ fn spawn(
             }
         }
     }
+
+    // Do not return until the child has finished shaping its mount namespace.
+    // Everything above this line is unchanged on purpose: the userns handshake,
+    // the console `recv_fd` and the log shim have an order the comments above
+    // call CRITICAL, and this wait needs none of it — it only has to be the LAST
+    // thing before the caller gets control.
+    wait_for_mounts(ready.0, &container.name);
+
+    // The record is published AFTER the wait, and that ordering is the whole
+    // point. `pid` + `Running` in the store is what a THIRD process reads to
+    // decide the container is there to be entered — the CRI, `serve docker-api`,
+    // a concurrent CLI — and none of them went through the `run` that waited.
+    // Measured on the fixed binary with the save still ahead of the wait: in 2 of
+    // 15 runs, at the instant the record gained a `pid`, `/proc/<pid>/root` was
+    // still the HOST's root. Publishing later costs nothing and closes it: until
+    // this line the container has no pid in the store, so an `exec` gets the
+    // "not running" refusal (exit 3) instead of the host's filesystem.
+    //
+    // A hook that fails above now leaves the record untouched rather than saying
+    // `Running` for a process it just SIGKILLed — the honest of the two, and the
+    // same direction this engine has taken everywhere else.
+    store.save(container)?;
 
     if detach {
         return Ok(container.status.clone());
@@ -7434,5 +7593,59 @@ mod tests {
             .iter()
             .find(|m| !m.source.is_empty() && !std::path::Path::new(&m.source).exists())
             .is_none());
+    }
+
+    /// The three exits of the wait that makes `run -d` mean "the container is
+    /// up". A unit test of this function does NOT prove it is wired into
+    /// `spawn` — that is what the `run -d devolve com os mounts de pé` check in
+    /// `scripts/e2e.sh` is for. It proves the part the E2E check cannot: that
+    /// none of the three ways out is an unbounded wait.
+    #[test]
+    fn the_mount_wait_has_three_exits_and_none_is_unbounded() {
+        use std::time::Instant;
+
+        // 1) The byte arrives: returns at once, well inside the ceiling.
+        let mut fds = [0i32; 2];
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+        unsafe {
+            let b = [1u8; 1];
+            assert_eq!(libc::write(fds[1], b.as_ptr() as *const libc::c_void, 1), 1);
+            libc::close(fds[1]);
+        }
+        let t = Instant::now();
+        wait_for_mounts_with(fds[0], "byte", 5_000);
+        assert!(
+            t.elapsed().as_millis() < 1_000,
+            "com o byte escrito devia devolver de imediato, demorou {:?}",
+            t.elapsed()
+        );
+
+        // 2) EOF (the init died before mounting): also immediate, never a hang.
+        // This is the case that would deadlock a naive blocking read if the
+        // parent had kept its own copy of the write end.
+        let mut fds = [0i32; 2];
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+        unsafe { libc::close(fds[1]) };
+        let t = Instant::now();
+        wait_for_mounts_with(fds[0], "eof", 5_000);
+        assert!(
+            t.elapsed().as_millis() < 1_000,
+            "com EOF devia devolver de imediato, demorou {:?}",
+            t.elapsed()
+        );
+
+        // 3) A mount that never finishes: bounded by the ceiling, not by the
+        // container. `run` used not to wait at all, so hanging forever here
+        // would be a worse regression than the race being fixed.
+        let mut fds = [0i32; 2];
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+        let t = Instant::now();
+        wait_for_mounts_with(fds[0], "tecto", 120);
+        let waited = t.elapsed();
+        assert!(
+            waited.as_millis() >= 100 && waited.as_millis() < 5_000,
+            "devia ter esperado ~120ms e desistido, esperou {waited:?}"
+        );
+        unsafe { libc::close(fds[1]) };
     }
 }
