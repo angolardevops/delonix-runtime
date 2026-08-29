@@ -4,6 +4,103 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v1.0.0 — os atalhos de topo saem, o resto do contrato fica como estava
+
+Esta é a release que fecha o bloco "major" da reestruturação da CLI
+(`docs/discovery/52_CLI_PLANO_MIGRACAO.md`, B8+B9). É a primeira quebra de
+contrato publicado desde que `docs/cli-stability.md` existe — por isso é
+`1.0.0`, e não outro `0.x`. É também a nota de migração própria que esse
+plano exigia para este bloco.
+
+### O que sai
+
+Os seis atalhos de topo — `ps`, `run`, `exec`, `logs`, `rm`, `images` — eram
+reescrita de argv para `container <verbo>`/`image list`, e estavam
+**declarados estáveis**. Saíram. Corte limpo, sem alias: a grafia antiga
+falha com `unrecognized subcommand`, nunca em silêncio — a mesma regra que a
+reorganização da v0.30.0 já seguia.
+
+| antiga | nova |
+|---|---|
+| `delonix ps` | `delonix container ps` |
+| `delonix run` | `delonix container run` |
+| `delonix exec` | `delonix container exec` |
+| `delonix logs` | `delonix container logs` |
+| `delonix rm` | `delonix container rm` |
+| `delonix images` | `delonix image list` |
+
+Todos os outros comandos, flags e a semântica dentro de cada grupo continuam
+exactamente iguais — só a grafia de topo desaparece.
+
+### O que NÃO sai, apesar de o plano original pedir
+
+O bloco B8 do plano também pedia para colapsar `delonix workload` "por
+coerência" com os atalhos. Não saiu. `workload` (ADR-0002) é uma superfície
+deliberada — desambiguação real entre um container e uma VM que partilham
+nome (`delonix container` ou `delonix vm` directamente, se soubermos qual
+é). Não é uma duplicata: `get`/`describe`/`delete` respondem por Kind,
+`workload` é o único caminho que atravessa Container+VM pelo nome. Cortá-lo
+precisa de um ADR sucessor que nomeie a perda — uma linha de plano não
+chega, e a mesma disciplina já valia para B4–B7 ("só cortar o que é mesmo
+duplicado").
+
+### Os códigos de saída não mudam
+
+O bloco B9 do plano pedia `2→64`, `4→66`, `5→73`. Medido contra o código
+actual: `cmd/exitcode.rs` já tem um desenho fechado, exaustivamente testado
+e alinhado a LSB/`systemctl` (`3`=não corre, `4`=não existe, `5`=conflito) e
+a `sysexits.h` (`69`/`74`/`77`/`124`) — construído DEPOIS do texto do B9, e
+o próprio módulo já avalia e rejeita o pedido literal: `Error::Invalid` é
+usado em 643 sítios para duas classes que a proposta separa (flag inválida
+vs manifesto inválido), e remapear precisaria de dividir essa variante
+primeiro — engenharia nova, não uma renumeração. Um teste já existente
+(`nenhum_codigo_colide_com_uma_convencao_instalada`) já guarda exactamente
+as colisões que o B9 temia. **Nada muda nos códigos de saída nesta
+versão** — quem escreveu automação contra a tabela publicada não tem nada
+para actualizar.
+
+### O que a v1.0.0 significa a partir de agora
+
+`docs/cli-stability.md` deixa de ser "a lista do que se compromete dentro do
+0.x" — passa a ser o contrato de semver do projecto. Uma quebra como esta
+deixa de caber num `1.x`.
+
+Achado ao medir: o próprio documento prometia `image rm` como estável —
+morto desde o B2 (`image remove`, sem alias, sem ninguém ter reparado).
+Corrigido na mesma janela.
+
+### Também nesta janela
+
+"Delonix Runtime" nas superfícies que o utilizador vê a correr
+(`--help`/`--about`, `system info`, a página de manual, os campos
+`Platform`/`OperatingSystem` do `serve docker-api`) passa a dizer "Delonix
+Engine" — é a marca pública; o nome do repositório e os doc-comments
+internos continuam "Delonix Runtime" de propósito.
+
+### A conta de folhas, do princípio ao fim de B4–B9
+
+| | valor |
+|---|---|
+| folhas na v0.67.0 (antes de B4) | 247 |
+| folhas nesta tag | **235** |
+| folhas da especificação (alvo final) | 103 |
+
+Doze folhas saíram por serem duplicatas genuínas (B4–B7); os atalhos desta
+versão não contam nessa conta — nunca estiveram na árvore do `clap`, por
+serem reescrita de argv antes do parse, e por isso `scripts/cli_baseline.tsv`
+continua em 235. É um corte real e visível para quem escreveu um script
+contra `delonix ps`, mesmo sem mexer no número que a `cli-tree.sh` mede.
+
+### O que fica por fazer, e não tem data
+
+O resto do day-2 de `vm`/`pod`/`cluster` além do CRUD já medido (B7) é
+capacidade nova — `pod port-forward`, `vm migrate`, `cluster upgrade` — não
+mais varrimentos mecânicos, e cada uma precisa da sua validação ao vivo
+contra infra real. Não há estimativa de tempo para isso, nem promessa de
+quando chega.
+
+---
+
 ## v0.69.0 — B6 e B7 medidos: mais 7 duplicatas genuínas, dois blocos deixam claro o que falta é desenho
 
 Esta janela fecha o primeiro corte de B6 (`vm build`) e o primeiro de B7
