@@ -43,6 +43,138 @@ pub mod infra;
 pub mod ipam;
 pub mod wg;
 
+/// ONE process-wide lock for the environment variables the tests rewrite.
+///
+/// # Why this exists, and why it is a type rather than a convention
+///
+/// `std::env` is process-global and `cargo test` runs the crate's tests on
+/// several threads of ONE process. A test that writes `DELONIX_ROOT` changes
+/// where EVERY concurrent test resolves its state.
+///
+/// This crate has already paid for that twice. The first time, `ipam`'s tests
+/// each had a `static LOCK` of their own — and two distinct mutexes serialize
+/// nothing, so a read-only root leaked into a concurrent `allocate` (see the
+/// note in `ipam::tests`). That was fixed by sharing one mutex *inside*
+/// `ipam`. The second time, measured 2026-08-29, was the same bug one module
+/// over: `infra`'s `base_root_e_runtime_dir_honram_env_vars_explicitas` wrote
+/// `DELONIX_ROOT` while holding **no lock at all**, because `ipam`'s mutex was
+/// private to `ipam`. Reproduced 10 times out of 10 — the `ipam` test read a
+/// root full of somebody else's leases, and the workspace battery needed a
+/// second try to go green.
+///
+/// A third mutex would have been the same mistake a third time. So the lock is
+/// not something a test is asked to remember: [`EnvGuard`] is the ONLY way to
+/// write these variables, it cannot be constructed without taking the mutex,
+/// and it restores what it found when it drops. `env_writes_all_go_through_the_guard`
+/// fails the build if anyone reaches around it.
+#[cfg(test)]
+pub(crate) mod testenv {
+    use std::ffi::OsString;
+    use std::sync::{Mutex, MutexGuard};
+
+    static LOCK: Mutex<()> = Mutex::new(());
+
+    /// Holds the lock, and remembers what it overwrote.
+    pub(crate) struct EnvGuard {
+        _lock: MutexGuard<'static, ()>,
+        saved: Vec<(String, Option<OsString>)>,
+    }
+
+    /// Takes the process-wide lock. Blocks until any other test writing the
+    /// environment is done. A poisoned mutex is recovered rather than
+    /// propagated: one failing test must not cascade into every other.
+    pub(crate) fn lock() -> EnvGuard {
+        EnvGuard {
+            _lock: LOCK.lock().unwrap_or_else(|e| e.into_inner()),
+            saved: Vec::new(),
+        }
+    }
+
+    impl EnvGuard {
+        /// Remembers the ambient value the FIRST time a key is touched, so a
+        /// test that writes the same key three times still restores the value
+        /// the process started with.
+        fn remember(&mut self, key: &str) {
+            if !self.saved.iter().any(|(k, _)| k == key) {
+                self.saved.push((key.to_string(), std::env::var_os(key)));
+            }
+        }
+
+        pub(crate) fn set(&mut self, key: &str, value: impl AsRef<std::ffi::OsStr>) {
+            self.remember(key);
+            // SAFETY: single writer — the mutex in `_lock` is the only path here.
+            unsafe { std::env::set_var(key, value) };
+        }
+
+        pub(crate) fn unset(&mut self, key: &str) {
+            self.remember(key);
+            // SAFETY: as above.
+            unsafe { std::env::remove_var(key) };
+        }
+    }
+
+    /// The guard is worth nothing if the next person writes `std::env::set_var`
+    /// directly, which is exactly how this bug arrived twice. So the rule is a
+    /// test, not a comment: no file in this crate writes the process
+    /// environment except this module.
+    ///
+    /// A source scan rather than a type-level ban because `std::env` is always
+    /// in scope — there is no way to make the free function unreachable. This
+    /// is the same shape as the workspace's `architecture.rs` gates: cheap,
+    /// exact, and it fails on the line that broke the rule.
+    #[test]
+    fn env_writes_all_go_through_the_guard() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut offenders = Vec::new();
+        let mut stack = vec![dir];
+        while let Some(d) = stack.pop() {
+            for entry in std::fs::read_dir(&d).expect("src/") {
+                let path = entry.expect("entry").path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                    continue;
+                }
+                // This module IS the exception — it is the guard.
+                if path.file_name().and_then(|f| f.to_str()) == Some("lib.rs") {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path).expect("read");
+                for (n, line) in text.lines().enumerate() {
+                    if line.contains("env::set_var") || line.contains("env::remove_var") {
+                        offenders.push(format!("{}:{}", path.display(), n + 1));
+                    }
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "these write the process environment directly instead of going through \
+             `crate::testenv::lock()`, which is how one test silently redirected another \
+             test's state root: {offenders:?}",
+        );
+    }
+
+    impl Drop for EnvGuard {
+        /// Puts back exactly what was there — including «was not set».
+        /// Without this, a test that legitimately needs the variable UNSET for
+        /// its last assertion leaves it unset for whatever runs next.
+        fn drop(&mut self) {
+            for (key, old) in self.saved.drain(..) {
+                // SAFETY: still holding the mutex — it drops after this.
+                unsafe {
+                    match old {
+                        Some(v) => std::env::set_var(&key, v),
+                        None => std::env::remove_var(&key),
+                    }
+                }
+            }
+        }
+    }
+}
+
 pub use discover::{discover_ports, DiscoveredPort};
 
 const BRIDGE: &str = "delonix0";
