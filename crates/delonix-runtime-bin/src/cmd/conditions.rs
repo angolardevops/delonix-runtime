@@ -316,15 +316,23 @@ fn vm(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
         None if env.cloud_hypervisor => "cloud-hypervisor".to_string(),
         None => "libvirt".to_string(),
     };
-    if backend == "libvirt" {
+    // The predicate lives in `delonix-vm`, next to the backends, and is the SAME
+    // one the apply path uses (`restart_policy_unsupervised`). It used to be
+    // re-implemented here as `backend == "libvirt"`, which agreed by accident
+    // and disagreed in what it SAID: any backend that was not libvirt got the
+    // reason `BackendCloudHypervisor` and a sentence naming Cloud Hypervisor.
+    // `proxmox` is a registered backend on a configured host
+    // (`vmbackends::register_configured`), so a manifest asking for it was told
+    // about a backend it had not chosen.
+    if !delonix_vm::restart_policy_unsupervised(&backend, Some(policy)) {
         vec![Condition::ok("RestartSupervised")]
     } else {
         vec![Condition::bad(
             "RestartSupervised",
-            "BackendCloudHypervisor",
+            "BackendDoesNotSupervise",
             super::po::tf(
-                "restartPolicy '{policy}' is NOT supervised on Cloud Hypervisor — use `backend: libvirt` to materialize it",
-                &[("policy", policy)],
+                "restartPolicy '{policy}' is NOT supervised by the '{backend}' backend — use `backend: libvirt` to materialize it",
+                &[("policy", policy), ("backend", &backend)],
             ),
         )]
     }
@@ -589,6 +597,36 @@ mod tests {
         );
     }
 
+    /// A third backend existed and the condition spoke as if there were two.
+    ///
+    /// `proxmox` is registered on a host that configures it
+    /// (`vmbackends::register_configured`), so `backend: proxmox` is a manifest
+    /// anyone can write. It used to come back with the reason
+    /// `BackendCloudHypervisor` and a sentence about Cloud Hypervisor — naming a
+    /// backend the author had not chosen, which sends them to read the wrong
+    /// documentation.
+    #[test]
+    fn an_unsupervised_backend_is_named_by_its_own_name() {
+        let c = conditions_for(
+            &doc(
+                "VirtualMachine",
+                "disk: d\nrestartPolicy: always\nbackend: proxmox",
+            ),
+            &env(false, true, true, true),
+        );
+        assert_eq!(c[0].reason, "BackendDoesNotSupervise");
+        assert!(
+            c[0].message.contains("proxmox"),
+            "the message must name proxmox: {}",
+            c[0].message
+        );
+        assert!(
+            !c[0].message.contains("Cloud Hypervisor"),
+            "and must NOT name a backend the author did not choose: {}",
+            c[0].message
+        );
+    }
+
     #[test]
     fn vm_restart_no_cloud_hypervisor_nao_e_supervisionado() {
         // backend absent (auto → CH) + canonical restartPolicy → not supervised.
@@ -596,7 +634,12 @@ mod tests {
             &doc("VirtualMachine", "disk: d\nrestartPolicy: always"),
             &env(false, true, true, true),
         );
-        assert_eq!(c[0].reason, "BackendCloudHypervisor");
+        assert_eq!(c[0].reason, "BackendDoesNotSupervise");
+        assert!(
+            c[0].message.contains("cloud-hypervisor"),
+            "the message must name the backend that will actually boot: {}",
+            c[0].message
+        );
         // legacy alias restart_policy + libvirt backend → supervised.
         let c = conditions_for(
             &doc(
@@ -607,7 +650,7 @@ mod tests {
         );
         assert!(c[0].ok);
         // Fix #3: backend ABSENT (auto) on a host WITHOUT cloud-hypervisor → falls
-        // back to libvirt → supervised (does not warn BackendCloudHypervisor needlessly).
+        // back to libvirt → supervised (does not warn needlessly).
         let sem_ch = Env {
             cloud_hypervisor: false,
             ..env(false, true, true, true)
