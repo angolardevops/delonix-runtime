@@ -2943,11 +2943,12 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // running anyway is the silent degradation this engine refuses elsewhere.
     super::policy::enforce(
         &super::util::state_root(),
-        &super::policy::Request {
-            image: &opts.image,
-            privileged: opts.privileged,
-            host_network: opts.net.is_empty() || opts.net == "host",
-        },
+        opts.name.as_deref().unwrap_or(&opts.image),
+        &super::policy::Request::container(
+            &opts.image,
+            opts.privileged,
+            opts.net.is_empty() || opts.net == "host",
+        ),
     )?;
     // Intact copy for the re-exec (the destructuring below consumes opts).
     let opts_copy = opts.clone();

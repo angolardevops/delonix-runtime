@@ -34,6 +34,7 @@ never rewritten — supersede them with a new one.
 | [0022](0022-namespaced-network-kinds.md) | Network Kinds stay node-scoped; the collision is a NAME collision | **Accepted** — measured: isolation already holds in nftables, the name space is what is shared |
 | [0023](0023-network-command-grouping.md) | `network` and `net` stay two groups, split resource vs plumbing | **Accepted** — no command moves; one alias and two `--help` sentences |
 | [0024](0024-firewall-policy-selector.md) | A `FirewallPolicy` gains a label selector, and an empty match stays open | **Accepted** — `target` unchanged; empty match warns and succeeds, not refuses |
+| [0026](0026-security-runtime-decision-crate.md) | The security runtime is a decision crate, not a sensor platform — and it has no tenants | **Proposed** — `delonix-security-runtime`; the VM path joins the admission gate, VM rules default-off + lint |
 
 ## Roadmap (from `AGENTS.md` "Universal Runtime" — each phase needs its own accepted ADR)
 
