@@ -317,8 +317,9 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::serve::ServeCmd,
     },
-    /// Model Context Protocol server — a LOCAL, tenancy-free AI control surface
-    /// (ADR-0025). NOT stable: see `docs/cli-stability.md`.
+    /// Model Context Protocol server — a LOCAL, tenancy-free AI control surface.
+    ///
+    /// ADR-0025. NOT stable: see `docs/cli-stability.md`.
     Mcp {
         #[command(subcommand)]
         action: cmd::mcp::McpCmd,
