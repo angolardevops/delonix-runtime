@@ -12,6 +12,7 @@ members = [
     "crates/delonix-cri",
     "crates/delonix-mgmt",
     "crates/delonix-scan",
+    "crates/delonix-security-runtime",
     "crates/delonix-truenas",
     "crates/delonix-proxmox",
 ]

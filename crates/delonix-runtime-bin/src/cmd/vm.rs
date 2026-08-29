@@ -1634,6 +1634,25 @@ pub fn run(action: VmCmd) -> Result<()> {
             wait,
             boot_timeout,
         } => {
+            // The node's runtime policy, BEFORE the image is resolved, fetched
+            // or written — the same placement, and the same reason, as
+            // `cmd_run`: a policy that refuses a boot-image host has to stop
+            // the request before a single byte is downloaded from it.
+            //
+            // Until v0.69.0 this path had NO node policy at all: `policy::enforce`
+            // had exactly one caller, `cmd/container.rs`. A host that refused
+            // `--privileged` containers still accepted `--device` passthrough,
+            // which hands the guest DMA to host hardware and is the wider hole
+            // of the two. See ADR-0026.
+            super::policy::enforce(
+                &base,
+                &name,
+                &super::policy::Request::virtual_machine(
+                    disk.as_deref(),
+                    &devices,
+                    url_img.as_deref(),
+                ),
+            )?;
             // No --disk: the single golden VM image (same resolution as
             // `cluster kubeadm` — 0 or several images give a clear error, never
             // a blind choice). When `--disk` names a KNOWN local image (or
