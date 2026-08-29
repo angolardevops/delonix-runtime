@@ -34,7 +34,7 @@ significa «a dívida não subiu», **não** significa «cumpre a Regra de Ouro 
 |---|---|---|
 | Conformidade com inglês (§1–§2) | **82/100** | Zero identificadores públicos em PT; residem 54 `let` locais + 985 nomes de teste + 3 453 comentários |
 | Qualidade de nomes (§4–§11) | **90/100** | Convenções Rust respeitadas (clippy verde); desconto pelos nomes locais em PT e por `util.rs` |
-| Documentação (§18–§23, §68) | **86/100** | 13/13 crates com `//!`; structs 87,6 %, fn 85,1 %; **enums 58,8 %** é o buraco |
+| Documentação (§18–§23, §68) | **86/100** | 13/13 crates com `//!`; structs 87,6 %, fn 85,1 %; enums 58,8 % — mas ver DOC-0001, RETIRADO: 27 dos 28 são subcomandos do clap com as variantes documentadas |
 | Arquitectura (§26–§39) | **71/100** | Só **3 traits** em 138k linhas; `VmBackend` é um porto a sério, mas o resto é módulos concretos |
 | Tratamento de erro (§23–§24, §51) | **74/100** | 45 `.map_err(\|_\| …)` a perder causa; 12 `Result<_, String>`, 3 no caminho de segurança |
 | Legibilidade por agentes (§84) | **88/100** | `ARCHITECTURE.md` + `AGENTS.md` existem e são **testados** (`tests/architecture.rs`) |
