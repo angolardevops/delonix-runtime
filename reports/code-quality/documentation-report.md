@@ -16,16 +16,37 @@ acima (saltando atributos e linhas vazias).
 Crate-level `//!` (§68): **13 de 13** crates com `lib.rs` têm documentação de
 crate nas primeiras 3 linhas.
 
-## DOC-0001 — Enums a 58,8 % é o buraco real — MEDIUM (§22)
+## DOC-0001 — ~~Enums a 58,8 % é o buraco real~~ — **RETIRADO** (era MEDIUM)
 
-28 enums públicos sem documentação. É a pior cobertura das quatro categorias que
-interessam, e é a que mais custa: um enum público é, por §22, o sítio onde se
-declara o **significado semântico de um estado do domínio**. Um `enum` sem doc
-obriga quem lê — pessoa ou agente — a ir procurar todos os `match` para
-descobrir o que cada variante quer dizer.
+**Corrigido a 2026-08-29, ao executar o item.** O número estava certo e a
+leitura estava errada.
 
-Prioridade dentro do lote: primeiro os que aparecem em erro ou em estado de
-recurso, depois os de configuração.
+Dos 28 enums públicos sem doc, **27 são enums `*Cmd` do clap** — `NamespaceCmd`,
+`VmCmd`, `StackCmd`, `SchemaCmd`, … — e **um** é de domínio (`Decision`, em
+`crates/delonix-runtime-bin/src/cmd/backup.rs`). Os `*Cmd` têm **todas as
+variantes documentadas**, porque cada `///` é o texto que sai no `--help`:
+
+```rust
+#[derive(Subcommand)]
+pub enum NamespaceCmd {
+    /// List the isolation namespaces IN USE, with what is in each.
+    Ls { … },
+    /// What is inside ONE namespace, by Kind, `kubectl describe` style.
+    Describe { … },
+}
+```
+
+Um `///` no enum por cima disto não acrescenta nada a ninguém: é exactamente a
+caça à percentagem que o DOC-0002, duas secções abaixo, diz para não fazer.
+As duas secções foram escritas no mesmo passe e contradiziam-se.
+
+A frase «um enum público é o sítio onde se declara o significado semântico de um
+estado do domínio» é verdadeira em geral e **falsa para esta amostra**: a
+cobertura de 58,8 % é dominada por encanamento de CLI.
+
+**O que fica:** documentar o `Decision` — o único enum de domínio da lista.
+Fica também a lição de método: uma cobertura por categoria não diz o que a
+categoria CONTÉM, e neste repo `enum` quer dizer «subcomando» 27 vezes em 28.
 
 ## DOC-0002 — 110 `pub mod` sem doc — INFO, não corrigir por corrigir
 
