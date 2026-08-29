@@ -143,7 +143,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 </nav>
 <main>
 <h1>delonix vm</h1>
-<p class='tagline lang-pt'>microVMs declarativas: create, ls, status, stop, rm, apply.</p><p class='tagline lang-en'>Declarative microVMs: create, ls, status, stop, rm, apply.</p>
+<p class='tagline lang-pt'>microVMs declarativas: create, ls, status, stop, apply.</p><p class='tagline lang-en'>Declarative microVMs: create, ls, status, stop, apply.</p>
 <p class='lang-pt'>MicroVMs geridas pelo trait <code>VmBackend</code> — Cloud Hypervisor ou libvirt.
 O <code>create</code> é idempotente (cria ou auto-recupera) e suporta cloud-init por instância:
 <code>--hostname</code>, <code>--ssh-key</code> e <code>--user-data</code> geram um ISO NoCloud
@@ -158,10 +158,8 @@ nodes.</p>
 Commands:
   create           Create (or auto-recover) a VM
   restart          Stop (if running) then start — always a real reboot, unlike `start`. Same recovered-fields limits as `start`
-  rm               Remove the VM (stops + deletes overlay/state)
   start            Start an existing, stopped VM — idempotent (already running = no-op)
   stop             Stop the VM (preserves disk, record and snapshots)
-  describe         Human-readable detail of one or more VMs, `kubectl describe` style
   ls               List the VMs
   status           Current state (reconciles liveness/IP with the backend)
   console          Attach to the VM&#x27;s serial console (interactive terminal)
@@ -190,8 +188,8 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 COMMAND MAP:
-  Lifecycle    create · stop · start · restart · rm
-  Inspect      ls · status · describe
+  Lifecycle    create · stop · start · restart
+  Inspect      ls · status
   Interact     console · ssh · vnc
   Configure    default-backend
   Networking   reach · bridge · unbridge
@@ -437,34 +435,6 @@ SEE ALSO:
 
   delonix › vm › start</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Voltar a arrancar uma VM parada, sem repetir as flags do create</div><div class='cap lang-en'>Boot a stopped VM again, without repeating the create flags</div><pre><code>delonix vm start dev</code></pre></div>
-<h2 id='describe'><code>vm describe</code></h2>
-<p class='intro'>Human-readable detail of one or more VMs, <code>kubectl describe</code> style.</p>
-<p class='intro'>For humans; use <code>status</code> for the usual compact view. Includes the LIVE state — <code>delonix_vm::status</code> reconciles liveness/IP with the backend.</p>
-<div class='help'><pre><code>Usage: delonix vm describe [OPTIONS] &lt;NAMES&gt;...
-
-Arguments:
-  &lt;NAMES&gt;...
-          
-
-Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
-  -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)
-
-EXAMPLES:
-  # everything the record holds about a VM, plus the live state, kubectl style
-  delonix vm describe dev
-
-  # several at once, to compare how they were created
-  delonix vm describe dev k8s-cp1
-
-SEE ALSO:
-  delonix vm status · delonix vm ls · delonix vm snapshot ls
-
-  delonix › vm › describe</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Tudo sobre uma VM, estilo kubectl describe</div><div class='cap lang-en'>Everything about a VM, kubectl describe-style</div><pre><code>delonix vm describe dev</code></pre></div>
 <h2 id='unbridge'><code>vm unbridge</code></h2>
 <p class='intro'>Tear down a <code>vm bridge</code> (dry-run without <code>--apply</code>)</p>
 <div class='help'><pre><code>Usage: delonix vm unbridge [OPTIONS] &lt;NETWORK&gt;
@@ -972,8 +942,8 @@ EXAMPLES:
   delonix vm ls --namespace teamA
 
 SEE ALSO:
-  delonix vm status · delonix vm describe · delonix vm dash · delonix vm prune
-  · delonix image vm ls
+  delonix vm status · delonix describe · delonix vm dash · delonix vm prune ·
+  delonix image vm ls
 
   delonix › vm › ls</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix vm ls</code></pre></div>
@@ -1001,7 +971,7 @@ EXAMPLES:
   delonix vm status
 
 SEE ALSO:
-  delonix vm ls · delonix vm describe · delonix vm console
+  delonix vm ls · delonix describe · delonix vm console
 
   delonix › vm › status</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Reconcilia liveness/IP com o backend</div><div class='cap lang-en'>Reconciles liveness/IP with the backend</div><pre><code>delonix vm status node1</code></pre></div>
@@ -1027,42 +997,10 @@ EXAMPLES:
   delonix vm stop dev
 
 SEE ALSO:
-  delonix vm start · delonix vm snapshot · delonix vm rm · delonix vm ls
+  delonix vm start · delonix vm snapshot · delonix delete · delonix vm ls
 
   delonix › vm › stop</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix vm stop node1</code></pre></div>
-<h2 id='rm'><code>vm rm</code></h2>
-<p class='intro'>Remove the VM (stops + deletes overlay/state)</p>
-<div class='help'><pre><code>Usage: delonix vm rm [OPTIONS] &lt;NAME&gt;
-
-Arguments:
-  &lt;NAME&gt;
-          
-
-Options:
-  -f, --force
-          Remove the local state even if the libvirt cleanup fails
-
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
-  -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)
-
-EXAMPLES:
-  # stop it and delete the overlay and the record
-  delonix vm rm dev
-
-  # drop the local state even when the libvirt cleanup fails, instead of
-  # leaving a record you cannot get rid of
-  delonix vm rm dev --force
-
-SEE ALSO:
-  delonix vm stop · delonix vm ls · delonix vm create · delonix vm snapshot ls
-  · delonix vm prune
-
-  delonix › vm › rm</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix vm rm node1</code></pre></div>
 <h2 id='apply'><code>vm apply</code></h2>
 <p class='intro'>Apply the <code>kind: VirtualMachine</code> documents of a manifest.</p>
 <p class='intro'><code>delonix_vm::create</code> is already idempotent by name — creates or auto-recovers.</p>

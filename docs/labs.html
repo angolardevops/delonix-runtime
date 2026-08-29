@@ -375,7 +375,7 @@ delonix vm create dev
 
 # 2. Onde ficou, e com que IP
 delonix vm ls
-delonix vm describe dev
+delonix describe vms dev
 
 # 3. Entrar (voltar ao host: Ctrl+])
 delonix vm console dev
@@ -387,7 +387,7 @@ delonix vm snapshots dev
 # 5. Estragar alguma coisa lá dentro e voltar atrás
 delonix vm restore dev limpa
 
-delonix vm rm dev</code></pre>
+delonix delete vms dev</code></pre>
 <p class="note"><strong>Verificação:</strong> o passo 4 devolve sem erro com a
 VM A CORRER. Um snapshot de uma VM parada falha de propósito — o
 <code>vm stop</code> faz <em>undefine</em> do domínio para não deixar
@@ -398,7 +398,7 @@ delonix vm create dev
 
 # 2. Where it landed, and with what IP
 delonix vm ls
-delonix vm describe dev
+delonix describe vms dev
 
 # 3. Go in (back to the host: Ctrl+])
 delonix vm console dev
@@ -410,7 +410,7 @@ delonix vm snapshots dev
 # 5. Break something inside and roll back
 delonix vm restore dev clean
 
-delonix vm rm dev</code></pre>
+delonix delete vms dev</code></pre>
 <p class="note"><strong>Verification:</strong> step 4 returns with no error
 and the VM STILL RUNNING. A snapshot of a stopped VM fails on purpose —
 <code>vm stop</code> <em>undefines</em> the domain to avoid leaving orphans.</p></div>
@@ -437,7 +437,7 @@ delonix vm create teste --disk minha-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
 # …ou a partir de um qcow2 publicado por ti, sem passar pelo store
 delonix vm create outra --url-img https://o-teu-bucket/imagem.qcow2
 
-delonix vm rm teste; cd ..; rm -rf lab-vm</code></pre>
+delonix delete vms teste; cd ..; rm -rf lab-vm</code></pre>
 <p class="note"><strong>Verificação:</strong> o build imprime
 <code>[1/1] stage-1: FROM ubuntu:24.04</code> e verifica o checksum da cloud
 image. Com <code>--url-img</code>, se não houver <code>&lt;url&gt;.sha256</code>
@@ -466,7 +466,7 @@ delonix vm create test --disk my-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
 # …or from a qcow2 you published yourself, bypassing the store
 delonix vm create other --url-img https://your-bucket/image.qcow2
 
-delonix vm rm test; cd ..; rm -rf lab-vm</code></pre>
+delonix delete vms test; cd ..; rm -rf lab-vm</code></pre>
 <p class="note"><strong>Verification:</strong> the build prints
 <code>[1/1] stage-1: FROM ubuntu:24.04</code> and verifies the cloud image's
 checksum. With <code>--url-img</code>, if there's no published
@@ -486,7 +486,7 @@ delonix system setup
 delonix cluster create --name lab
 
 # 3. Falar com ele
-export KUBECONFIG=$(delonix cluster ls -o json | jq -r '.[0].kubeconfig')
+export KUBECONFIG=~/.local/share/delonix/clusters/lab-kubeconfig.yaml
 kubectl get nodes -o wide
 
 # 4. Levar uma imagem TUA para dentro dos nós, sem registo nenhum
@@ -497,7 +497,7 @@ kubectl run app --image=app:dev --image-pull-policy=Never
 # 5. A prova que interessa
 kubectl get pod app -w
 
-delonix cluster delete --name lab</code></pre>
+delonix delete clusters lab</code></pre>
 <p class="note"><strong>Verificação:</strong> o passo 5 chega a
 <code>Running</code>. Nem o <code>ctr images import</code> nem o
 <code>crictl images</code> provam isto — os dois já reportaram sucesso sobre
@@ -511,7 +511,7 @@ delonix system setup
 delonix cluster create --name lab
 
 # 3. Talk to it
-export KUBECONFIG=$(delonix cluster ls -o json | jq -r '.[0].kubeconfig')
+export KUBECONFIG=~/.local/share/delonix/clusters/lab-kubeconfig.yaml
 kubectl get nodes -o wide
 
 # 4. Get an image of YOURS into the nodes, with no registry at all
@@ -522,7 +522,7 @@ kubectl run app --image=app:dev --image-pull-policy=Never
 # 5. The proof that matters
 kubectl get pod app -w
 
-delonix cluster delete --name lab</code></pre>
+delonix delete clusters lab</code></pre>
 <p class="note"><strong>Verification:</strong> step 5 reaches
 <code>Running</code>. Neither <code>ctr images import</code> nor
 <code>crictl images</code> prove this — both have reported success on an

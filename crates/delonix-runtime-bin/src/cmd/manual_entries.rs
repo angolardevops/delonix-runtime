@@ -30,7 +30,7 @@ pub static ENTRIES: &[Entry] = &[
         group: "",
         examples: &[
             ("a local Kubernetes cluster with no manifest and no Docker", "delonix cluster create --name dev"),
-            ("what is up, node by node", "delonix cluster ls"),
+            ("what is up, node by node", "delonix get clusters"),
             ("from zero to VMs plus kubeadm — above one control-plane the load balancer comes with it", "delonix cluster kubeadm --name lab --network k8s --control-plane 3"),
         ],
         see_also: &["cluster kube generate", "stack apply", "vm create", "image vm pull"],
@@ -44,16 +44,7 @@ pub static ENTRIES: &[Entry] = &[
             ("your own CNI instead of kindnet — the node stays NotReady until you apply it", "delonix cluster create --name dev --cni none"),
             ("pin the apiserver to the host port your kubeconfig already expects", "delonix cluster create --name dev --api-port 6443"),
         ],
-        see_also: &["cluster ls", "cluster load", "cluster delete", "cluster kubeadm"],
-    },
-    Entry {
-        path: "cluster delete",
-        group: "Lifecycle",
-        examples: &[
-            ("stop and remove the nodes plus the kubeconfig", "delonix cluster delete --name dev"),
-            ("the default cluster, when you never named one", "delonix cluster delete"),
-        ],
-        see_also: &["cluster create", "cluster ls", "system prune"],
+        see_also: &["get", "cluster load", "delete", "cluster kubeadm"],
     },
     Entry {
         path: "cluster prune",
@@ -62,7 +53,7 @@ pub static ENTRIES: &[Entry] = &[
             ("collect what clusters with no nodes left behind: their directory, their exported kubeconfig, and the `~/.kube/config` context still pointing at a port that may now answer for something else", "delonix cluster prune"),
             ("in CI, where there is no terminal to confirm at", "delonix cluster prune -f"),
         ],
-        see_also: &["cluster delete", "cluster ls", "vm prune", "system prune"],
+        see_also: &["delete", "get", "vm prune", "system prune"],
     },
     Entry {
         path: "cluster kubeadm",
@@ -73,7 +64,7 @@ pub static ENTRIES: &[Entry] = &[
             ("merge the kubeconfig into your own only after every node reports Ready", "delonix cluster kubeadm --name lab --network k8s --copy-kubeconfig"),
             ("etcd on VMs of its own instead of stacked on the control-planes", "delonix cluster kubeadm --name lab --network k8s --etcd-cluster 3"),
         ],
-        see_also: &["cluster apply", "cluster ls", "vm ls", "image vm pull"],
+        see_also: &["cluster apply", "get", "vm ls", "image vm pull"],
     },
     Entry {
         path: "cluster init",
@@ -86,14 +77,6 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["cluster apply", "cluster create", "stack init"],
     },
     Entry {
-        path: "cluster ls",
-        group: "Inspect",
-        examples: &[
-            ("clusters and the state of each node, derived from the container labels", "delonix cluster ls"),
-        ],
-        see_also: &["cluster create", "cluster delete", "container ps"],
-    },
-    Entry {
         path: "cluster load",
         group: "Interact",
         examples: &[
@@ -101,7 +84,7 @@ pub static ENTRIES: &[Entry] = &[
             ("several in one go", "delonix cluster load myapp:dev sidecar:dev"),
             ("say which cluster, when more than one is up", "delonix cluster load myapp:dev --name dev"),
         ],
-        see_also: &["cluster create", "image list", "build", "cluster ls"],
+        see_also: &["cluster create", "image list", "build", "get"],
     },
     Entry {
         path: "cluster apply",
@@ -110,7 +93,7 @@ pub static ENTRIES: &[Entry] = &[
             ("bootstrap the hosts a manifest declares — idempotent, and with no state file to drift", "delonix cluster apply -f cloud.yaml"),
             ("the manifest in this directory", "delonix cluster apply"),
         ],
-        see_also: &["cluster kubeadm", "stack apply", "stack validate", "cluster ls"],
+        see_also: &["cluster kubeadm", "stack apply", "stack validate", "get"],
     },
     Entry {
         path: "cluster kube",
@@ -118,7 +101,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("the Kubernetes YAML for something you already have running locally", "delonix cluster kube generate web"),
         ],
-        see_also: &["container describe", "pod describe", "stack apply"],
+        see_also: &["container describe", "describe", "stack apply"],
     },
     Entry {
         path: "cluster kube generate",
@@ -128,7 +111,7 @@ pub static ENTRIES: &[Entry] = &[
             ("keep it in the repo as the starting point for a real deployment", "delonix cluster kube generate web > pod.yaml"),
             ("every member of a pod, as one manifest", "delonix cluster kube generate api-pod"),
         ],
-        see_also: &["container describe", "pod describe", "container apply", "stack apply"],
+        see_also: &["container describe", "describe", "container apply", "stack apply"],
     },
     Entry {
         path: "completion",
@@ -891,7 +874,7 @@ pub static ENTRIES: &[Entry] = &[
             ),
             ("remove it anyway, and lose those VMs", "delonix image vm rm -f proxmox-ve:9.1"),
         ],
-        see_also: &["image vm ls", "vm rm", "system df"],
+        see_also: &["image vm ls", "delete", "system df"],
     },
     Entry {
         path: "image vm ls",
@@ -1531,25 +1514,7 @@ pub static ENTRIES: &[Entry] = &[
             ("N containers sharing one netns — same IP and `localhost` between them, like a k8s Pod", "delonix pod create -f examples/pod-multi.yaml"),
             ("from the default manifest in the current directory", "delonix pod create"),
         ],
-        see_also: &["pod ls", "pod describe", "stack apply"],
-    },
-    Entry {
-        path: "pod rm",
-        group: "Lifecycle",
-        examples: &[
-            ("stop and remove every member plus the shared netns — nothing is left holding the IP", "delonix pod rm web"),
-            ("kill the members that are still running", "delonix pod rm -f web"),
-        ],
-        see_also: &["pod ls", "pod create", "container rm"],
-    },
-    Entry {
-        path: "pod describe",
-        group: "Inspect",
-        examples: &[
-            ("members, the shared IP and the status, kubectl style", "delonix pod describe web"),
-            ("several pods in one pass", "delonix pod describe web api"),
-        ],
-        see_also: &["pod ls", "pod logs", "container describe"],
+        see_also: &["pod ls", "describe", "stack apply"],
     },
     Entry {
         path: "pod logs",
@@ -1559,7 +1524,7 @@ pub static ENTRIES: &[Entry] = &[
             ("a specific container inside the pod, by its short name", "delonix pod logs web --container api"),
             ("follow it live", "delonix pod logs -f web"),
         ],
-        see_also: &["pod describe", "pod ls", "container logs"],
+        see_also: &["describe", "pod ls", "container logs"],
     },
     Entry {
         path: "pod ls",
@@ -1568,7 +1533,7 @@ pub static ENTRIES: &[Entry] = &[
             ("the pods, derived from the container labels — there is no separate store to drift", "delonix pod ls"),
             ("as JSON, for a script", "delonix pod ls -o json"),
         ],
-        see_also: &["pod describe", "pod logs", "container ps"],
+        see_also: &["describe", "pod logs", "container ps"],
     },
     Entry {
         path: "secret",
@@ -2161,15 +2126,6 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["vm start", "vm stop", "vm console", "vm status"],
     },
     Entry {
-        path: "vm rm",
-        group: "Lifecycle",
-        examples: &[
-            ("stop it and delete the overlay and the record", "delonix vm rm dev"),
-            ("drop the local state even when the libvirt cleanup fails, instead of leaving a record you cannot get rid of", "delonix vm rm dev --force"),
-        ],
-        see_also: &["vm stop", "vm ls", "vm create", "vm snapshot ls", "vm prune"],
-    },
-    Entry {
         path: "vm prune",
         group: "Maintenance",
         examples: &[
@@ -2177,7 +2133,7 @@ pub static ENTRIES: &[Entry] = &[
             ("in CI, where there is no terminal to confirm at", "delonix vm prune -f"),
             ("ALSO destroy every VM that is not running, disks included — the `container prune` behaviour, opt-in because a stopped VM is a machine at rest, not a corpse", "delonix vm prune --stopped"),
         ],
-        see_also: &["vm rm", "vm ls", "cluster prune", "system prune"],
+        see_also: &["delete", "vm ls", "cluster prune", "system prune"],
     },
     Entry {
         path: "vm start",
@@ -2193,16 +2149,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("give the host back its CPU and RAM, keeping the disk, the record and the snapshots — the libvirt domain is undefined here, so its snapshot metadata is preserved on our side and given back on the next start", "delonix vm stop dev"),
         ],
-        see_also: &["vm start", "vm snapshot", "vm rm", "vm ls"],
-    },
-    Entry {
-        path: "vm describe",
-        group: "Inspect",
-        examples: &[
-            ("everything the record holds about a VM, plus the live state, kubectl style", "delonix vm describe dev"),
-            ("several at once, to compare how they were created", "delonix vm describe dev k8s-cp1"),
-        ],
-        see_also: &["vm status", "vm ls", "vm snapshot ls"],
+        see_also: &["vm start", "vm snapshot", "delete", "vm ls"],
     },
     Entry {
         path: "vm ls",
@@ -2213,7 +2160,7 @@ pub static ENTRIES: &[Entry] = &[
             ("the same rows as JSON, for a script", "delonix vm ls -o json"),
             ("only one isolation namespace — and the NAMESPACE column stays, which it does not when every row would say `default`", "delonix vm ls --namespace teamA"),
         ],
-        see_also: &["vm status", "vm describe", "vm dash", "vm prune", "image vm ls"],
+        see_also: &["vm status", "describe", "vm dash", "vm prune", "image vm ls"],
     },
     Entry {
         path: "vm status",
@@ -2222,7 +2169,7 @@ pub static ENTRIES: &[Entry] = &[
             ("one VM, with liveness and IP reconciled against the backend rather than read off a stale record", "delonix vm status dev"),
             ("the state of all of them at once", "delonix vm status"),
         ],
-        see_also: &["vm ls", "vm describe", "vm console"],
+        see_also: &["vm ls", "describe", "vm console"],
     },
     Entry {
         path: "vm console",
@@ -2371,7 +2318,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("which checkpoints a VM has, before reverting to one — also with the VM stopped", "delonix vm snapshot ls dev"),
         ],
-        see_also: &["vm snapshot create", "vm snapshot restore", "vm describe"],
+        see_also: &["vm snapshot create", "vm snapshot restore", "describe"],
     },
     Entry {
         path: "vm snapshot rm",
@@ -2379,7 +2326,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("drop a checkpoint you no longer need — its state leaves the disk with it", "delonix vm snapshot rm dev before-upgrade"),
         ],
-        see_also: &["vm snapshot ls", "vm snapshot create", "vm rm"],
+        see_also: &["vm snapshot ls", "vm snapshot create", "delete"],
     },
     Entry {
         path: "vm snapshot restore",
@@ -2549,7 +2496,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("the details of a workload, routed to the backend that owns the name", "delonix workload describe web"),
         ],
-        see_also: &["workload ls", "container describe", "vm describe"],
+        see_also: &["workload ls", "container describe", "describe"],
     },
     Entry {
         path: "workload ls",

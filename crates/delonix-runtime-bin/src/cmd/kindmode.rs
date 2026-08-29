@@ -529,7 +529,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     let node = format!("{}-control-plane", cfg.name); // kind naming convention
     if store.list()?.iter().any(|c| c.name == node) {
         return Err(Error::Invalid(super::po::tf(
-            "node '{node}' already exists — use `delonix cluster delete --name {name}` or another name",
+            "node '{node}' already exists — use `delonix delete clusters {name}` or another name",
             &[("node", &node), ("name", &cfg.name)],
         )));
     }

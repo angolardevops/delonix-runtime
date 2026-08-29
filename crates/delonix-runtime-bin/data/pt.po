@@ -1499,8 +1499,8 @@ msgstr "--network-alias é gravado mas o DNS interno ainda não resolve aliases 
 msgid "Remove the local state even if the libvirt cleanup fails."
 msgstr "Remove o estado local mesmo que a limpeza no libvirt falhe."
 
-msgid "the VM record was kept; `delonix vm rm --force {name}` discards it anyway"
-msgstr "o registo da VM foi preservado; `delonix vm rm --force {name}` descarta-o na mesma"
+msgid "the VM record was kept; `delonix delete vms {name} --force` discards it anyway"
+msgstr "o registo da VM foi preservado; `delonix delete vms {name} --force` descarta-o na mesma"
 
 msgid "Remove inbound rule(s) matching `[proto/]port` (all protos if none given)."
 msgstr "Remove regra(s) de entrada que casem `[proto/]porta` (todos os protos se omitido)."
@@ -2653,8 +2653,8 @@ msgstr "join sem --discovery-token-ca-cert-hash: {s}"
 msgid "could not invent a free name — pass `--name`"
 msgstr "não consegui inventar um nome livre — passa `--name`"
 
-msgid "node '{node}' already exists — use `delonix cluster delete --name {name}` or another name"
-msgstr "o nó '{node}' já existe — usa `delonix cluster delete --name {name}` ou outro nome"
+msgid "node '{node}' already exists — use `delonix delete clusters {name}` or another name"
+msgstr "o nó '{node}' já existe — usa `delonix delete clusters {name}` ou outro nome"
 
 msgid "--control-planes must be >= 1"
 msgstr "--control-planes tem de ser >= 1"

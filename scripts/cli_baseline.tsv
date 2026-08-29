@@ -9,12 +9,10 @@
 !	build
 ~	cluster apply
 ~	cluster create
-~	cluster delete
 ~	cluster init
 ~	cluster kubeadm
 ~	cluster kube generate
 =	cluster load
-~	cluster ls
 ~	cluster prune
 ~	completion editor
 ~	completion shell
@@ -142,10 +140,8 @@
 ~	network vlan
 ~	plan
 ~	pod create
-~	pod describe
 =	pod logs
 ~	pod ls
-~	pod rm
 ~	secret apply
 =	secret create
 ~	secret inspect
@@ -203,7 +199,6 @@
 ~	vm create
 ~	vm dash
 ~	vm default-backend
-~	vm describe
 ~	vm init
 ~	vm ls
 ~	vm ls-remote
@@ -212,7 +207,6 @@
 ~	vm push
 ~	vm reach
 =	vm restart
-~	vm rm
 =	vm snapshot create
 =	vm snapshot ls
 =	vm snapshot restore

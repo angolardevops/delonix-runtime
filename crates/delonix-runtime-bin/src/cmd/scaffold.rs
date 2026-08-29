@@ -865,7 +865,7 @@ fn readme(o: &InitOpts) -> String {
          ```bash\n\
          delonix cluster create --name {name}    # nós em containers, sem Docker\n\
          kubectl --kubeconfig ~/.local/share/delonix/clusters/{name}-kubeconfig.yaml get nodes\n\
-         delonix cluster delete --name {name}\n\
+         delonix delete clusters {name}\n\
          ```\n\n\
          ## Ficheiros\n\n\
          | Ficheiro | O quê |\n\

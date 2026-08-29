@@ -161,7 +161,7 @@ pub(crate) fn get(kind: &str, names: &[String], output: OutputFormat) -> Result<
         }),
         k if k == kinds::SECRET => super::secret::run(super::secret::SecretCmd::Ls { output }),
         k if k == kinds::IMAGE => super::image::run(false, super::image::ImageCmd::List { output }),
-        k if k == kinds::CLUSTER => super::cluster::run(super::cluster::ClusterCmd::Ls),
+        k if k == kinds::CLUSTER => super::cluster::cmd_ls(),
         k if k == kinds::GATEWAY => super::tunnel::cmd_ls(output),
         k if k == kinds::HTTP_ROUTE => super::httproute::cmd_ls(output),
         // The route group's own listing, which already shows both the record and
@@ -214,14 +214,14 @@ pub(crate) fn describe(kind: &str, names: &[String]) -> Result<()> {
     }
     let n = names.to_vec();
     match f.kind {
-        k if k == kinds::POD => super::pod::run(super::pod::PodCmd::Describe { names: n }),
+        k if k == kinds::POD => super::pod::describe(&n),
         k if k == kinds::NETWORK => {
             super::network::run(super::network::NetworkCmd::Describe { names: n })
         }
         k if k == kinds::VOLUME => {
             super::volume::run(super::volume::VolumeCmd::Describe { names: n })
         }
-        k if k == kinds::VM => super::vm::run(super::vm::VmCmd::Describe { names: n }),
+        k if k == kinds::VM => super::vm::cmd_describe(&super::util::state_root(), &n),
         k if k == kinds::IMAGE => {
             super::image::run(false, super::image::ImageCmd::Describe { names: n })
         }
@@ -276,10 +276,12 @@ pub(crate) fn delete(kind: &str, names: &[String], force: bool) -> Result<()> {
         )));
     }
     match f.kind {
-        k if k == kinds::POD => super::pod::run(super::pod::PodCmd::Rm {
-            names: names.to_vec(),
-            force,
-        }),
+        k if k == kinds::POD => {
+            for n in names {
+                super::pod::remove_pod(n, force)?;
+            }
+            Ok(())
+        }
         k if k == kinds::NETWORK => {
             for n in names {
                 super::network::run(super::network::NetworkCmd::Rm { name: n.clone() })?;
@@ -299,11 +301,9 @@ pub(crate) fn delete(kind: &str, names: &[String], force: bool) -> Result<()> {
             Ok(())
         }
         k if k == kinds::VM => {
+            let base = super::util::state_root();
             for n in names {
-                super::vm::run(super::vm::VmCmd::Rm {
-                    name: n.clone(),
-                    force,
-                })?;
+                super::vm::cmd_rm(&base, n, force)?;
             }
             Ok(())
         }
@@ -327,7 +327,7 @@ pub(crate) fn delete(kind: &str, names: &[String], force: bool) -> Result<()> {
         }
         k if k == kinds::CLUSTER => {
             for n in names {
-                super::cluster::run(super::cluster::ClusterCmd::Delete { name: n.clone() })?;
+                super::cluster::cmd_delete(n)?;
             }
             Ok(())
         }
