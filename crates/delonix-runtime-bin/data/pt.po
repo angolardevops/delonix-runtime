@@ -9856,3 +9856,54 @@ msgstr "Painel de resumo/KPI do motor (TUI interactivo, estilo htop).\n\nGlobal,
 
 msgid "What another program needs to understand this CLI and its files.\n\n`syntax` folded in here (§21): both arms answer the same question — what a shell or an editor has to be told — and having them under two roofs meant nobody looking for one ever found the other."
 msgstr "O que outro programa precisa de saber sobre esta CLI e os seus ficheiros.\n\nO `syntax` dobrou-se aqui (§21): os dois braços respondem à mesma pergunta — o que é preciso dizer a uma shell ou a um editor — e tê-los sob dois tectos fazia com que quem procurava um nunca encontrasse o outro."
+
+msgid "Model Context Protocol server — a LOCAL, tenancy-free AI control surface."
+msgstr "Servidor Model Context Protocol — uma superfície de controlo de IA LOCAL e sem inquilino."
+
+msgid "ADR-0025. NOT stable: see `docs/cli-stability.md`."
+msgstr "ADR-0025. NÃO estável: ver `docs/cli-stability.md`."
+
+msgid "Model Context Protocol server — a LOCAL, tenancy-free AI control surface.\n\nADR-0025. NOT stable: see `docs/cli-stability.md`."
+msgstr "Servidor Model Context Protocol — uma superfície de controlo de IA LOCAL e sem inquilino.\n\nADR-0025. NÃO estável: ver `docs/cli-stability.md`."
+
+msgid "Start the MCP server."
+msgstr "Arranca o servidor MCP."
+
+msgid "`stdio` (default) is the supported transport — a child process of the AI client for one session, not a daemon."
+msgstr "`stdio` (omissão) é o transporte suportado — um processo filho do cliente de IA por uma sessão, não um daemon."
+
+msgid "Start the MCP server.\n\n`stdio` (default) is the supported transport — a child process of the AI client for one session, not a daemon."
+msgstr "Arranca o servidor MCP.\n\n`stdio` (omissão) é o transporte suportado — um processo filho do cliente de IA por uma sessão, não um daemon."
+
+msgid "Check that this node is ready to serve MCP tool calls."
+msgstr "Verifica se este nó está pronto para servir chamadas de ferramentas MCP."
+
+msgid "Stores openable, state dir writable, the `delonix` binary resolvable for mutations."
+msgstr "Stores abríveis, directório de estado escrevível, o binário `delonix` resolvível para mutações."
+
+msgid "Check that this node is ready to serve MCP tool calls.\n\nStores openable, state dir writable, the `delonix` binary resolvable for mutations."
+msgstr "Verifica se este nó está pronto para servir chamadas de ferramentas MCP.\n\nStores abríveis, directório de estado escrevível, o binário `delonix` resolvível para mutações."
+
+msgid "Print the tool risk table (name, risk level, whether `confirm` is required)."
+msgstr "Imprime a tabela de risco das ferramentas (nome, nível de risco, se exige `confirm`)."
+
+msgid "Transport: only `stdio` is implemented in this pass."
+msgstr "Transporte: só `stdio` está implementado nesta fase."
+
+msgid "start it — an AI client spawns this itself as a child process; run it by hand only to test"
+msgstr "arrancá-lo — um cliente de IA lança-o sozinho como processo filho; correr à mão é só para testar"
+
+msgid "confirm this node is ready before pointing an AI client at it"
+msgstr "confirmar que este nó está pronto antes de apontar um cliente de IA para ele"
+
+msgid "the risk level of every tool it exposes, and which ones need `confirm: true`"
+msgstr "o nível de risco de cada ferramenta que expõe, e quais exigem `confirm: true`"
+
+msgid "the stdio server — spawned by an AI client as a child process, never left running as a daemon"
+msgstr "o servidor stdio — lançado por um cliente de IA como processo filho, nunca deixado a correr como daemon"
+
+msgid "the storage/binary checks an AI client's session depends on, before it ever calls a tool"
+msgstr "as verificações de armazenamento/binário de que a sessão de um cliente de IA depende, antes de chamar qualquer ferramenta"
+
+msgid "the full risk table as JSON, for a client or a human to read before enabling mutations"
+msgstr "a tabela de risco completa em JSON, para um cliente ou um humano ler antes de activar mutações"
