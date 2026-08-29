@@ -527,6 +527,19 @@ pub enum VolumeCmd {
         #[command(subcommand)]
         action: SnapshotCmd,
     },
+    /// Volumes/storage dashboard (KPIs + table) — TUI, or `--once` snapshot.
+    ///
+    /// Moved here from `storage dash` (B5 CLI collapse): the scope it renders
+    /// (`DashScope::Storage`) always covered BOTH network storages and plain
+    /// volumes together (its own title says "STORAGE/VOLUMES") — `storage` was
+    /// never the only Kind it described, just the only group that could reach
+    /// it. `volume` is now that one entry point.
+    Dash {
+        #[arg(long)]
+        once: bool,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// `delonix volume snapshot` — crash-consistent (taken with the workload
@@ -566,8 +579,12 @@ pub enum SnapshotCmd {
 }
 
 pub fn run(action: VolumeCmd) -> Result<()> {
+    if let VolumeCmd::Dash { once, json } = action {
+        return super::dash::run(super::dash::DashScope::Storage, once, json);
+    }
     let store = VolumeStore::open(state_root())?;
     match action {
+        VolumeCmd::Dash { .. } => unreachable!("handled above"),
         VolumeCmd::Create {
             name,
             driver,
@@ -994,6 +1011,14 @@ struct VolumeInspect<'a> {
     usage_unreadable_dirs: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     quota_bytes: Option<u64>,
+    // Only ever set for a network-backed volume (the former `kind: Storage`) —
+    // `storage inspect -o json` used to be the only place these showed up in
+    // machine-readable form. Added here (never removed, per `cli-stability.md`)
+    // so cutting that command loses no JSON field a script might already read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    device: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    options: Option<&'a str>,
 }
 
 fn cmd_inspect(store: &VolumeStore, name: &str, format: output::OutputFormat) -> Result<()> {
@@ -1008,6 +1033,8 @@ fn cmd_inspect(store: &VolumeStore, name: &str, format: output::OutputFormat) ->
             usage_bytes: usage.is_complete().then_some(usage.bytes),
             usage_unreadable_dirs: usage.unreadable,
             quota_bytes: v.quota_bytes,
+            device: v.device.as_deref(),
+            options: v.options.as_deref(),
         }]);
     }
     println!("{:<13}{}", format!("{}:", super::po::t("name")), v.name);
@@ -1017,6 +1044,16 @@ fn cmd_inspect(store: &VolumeStore, name: &str, format: output::OutputFormat) ->
         format!("{}:", super::po::t("mountpoint")),
         v.mountpoint
     );
+    // Only ever set for a network-backed volume (the former `kind: Storage`) —
+    // omitted for a plain volume rather than printed empty, same as `quota`
+    // below. This is the text-mode half of what used to be `storage inspect`
+    // (B5 CLI collapse): the machine half already showed these in `-o json`.
+    if let Some(device) = v.device.as_deref() {
+        println!("{:<13}{device}", format!("{}:", super::po::t("device")));
+    }
+    if let Some(options) = v.options.as_deref() {
+        println!("{:<13}{options}", format!("{}:", super::po::t("options")));
+    }
     println!(
         "{}",
         super::po::tf(
@@ -1445,13 +1482,6 @@ fn note_unswept_owners(scope: &super::prune::Scope, owners: &[String]) {
     );
 }
 
-/// `storage rm`'s removal: the same reference check and mapped-tree removal as
-/// `volume rm`, without a `--force` escape (a `kind: Storage` is shared
-/// infrastructure — the operator should take the shares down explicitly).
-pub(crate) fn cmd_rm_storage(store: &VolumeStore, name: &str) -> Result<()> {
-    cmd_rm(store, name, false)
-}
-
 /// Removes a volume.
 ///
 /// **Two confirmed data-loss paths are closed here.** Before this, `cmd_rm` was
@@ -1528,6 +1558,13 @@ pub(crate) fn cmd_rm_with(
         );
     }
     store.remove_with(name, Some(&delonix_runtime::remove_tree_mapped))?;
+    // A network-storage volume's NAS username+password live in a sidecar file
+    // this store never touches (see `storage::remove_credentials`) — a plain
+    // volume never had one, so this is a harmless no-op for it. Unconditional
+    // so the generic `delete volume`/`volume rm` path (this function) can no
+    // longer leave a credential behind the way `store.remove(name)` alone did
+    // before the B5 CLI collapse folded `storage rm` into this one.
+    super::storage::remove_credentials(name);
     delonix_runtime_core::events::emit(
         &state_root(),
         "volume",

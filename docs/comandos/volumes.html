@@ -161,6 +161,7 @@ Commands:
   apply     Apply the `kind: Volume` documents from a manifest (idempotent by name)
   prune     DESTROY every local volume that nothing references
   snapshot  Point-in-time snapshots of a volume (tar.gz under the volume; safe in rootless)
+  dash      Volumes/storage dashboard (KPIs + table) — TUI, or `--once` snapshot
   help      Print this message or the help of the given subcommand(s)
 
 Options:
@@ -175,6 +176,7 @@ COMMAND MAP:
   Inspect      ls · inspect · describe
   Declarative  apply
   Maintenance  prune · snapshot
+  Dashboards   dash
 
 EXAMPLES:
   # a named volume, so the data outlives the container that writes to it
@@ -473,6 +475,39 @@ SEE ALSO:
   delonix › volume › prune</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class="cap">DESTRUIR todos os volumes locais que nada referencia (só a raiz sem dono)</div><pre><code>delonix volume prune</code></pre></div><div class="ex"><div class="cap">Recuperar o disco de um inquilino que já não existe — os volumes dele vivem
 # no seu próprio namespace, onde um prune sem âmbito nunca olha</div><pre><code>delonix volume prune --namespace acme -f</code></pre></div><div class="ex"><div class="cap">A loja inteira: a raiz sem dono E todos os inquilinos</div><pre><code>delonix volume prune -A -f</code></pre></div>
+<h2 id='dash'><code>volumes dash</code></h2>
+<p class='intro'>Volumes/storage dashboard (KPIs + table) — TUI, or <code>--once</code> snapshot.</p>
+<p class='intro'>Moved here from <code>storage dash</code> (B5 CLI collapse): the scope it renders (<code>DashScope::Storage</code>) always covered BOTH network storages and plain volumes together (its own title says &quot;STORAGE/VOLUMES&quot;) — <code>storage</code> was never the only Kind it described, just the only group that could reach it. <code>volume</code> is now that one entry point.</p>
+<div class='help'><pre><code>Usage: delonix volume dash [OPTIONS]
+
+Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --once
+          
+
+      --json
+          
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # a live TUI of volumes and storages, with usage per area
+  delonix volume dash
+
+  # one snapshot, for CI or a terminal without a TTY
+  delonix volume dash --once
+
+  # JSON, to alert on a share filling up
+  delonix volume dash --json
+
+SEE ALSO:
+  delonix dash · delonix storage ls · delonix system df
+
+  delonix › volume › dash</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class="cap">Um TUI ao vivo de volumes e storages, com uso por área</div><pre><code>delonix volume dash</code></pre></div><div class="ex"><div class="cap">Um só retrato, para CI ou um terminal sem TTY</div><pre><code>delonix volume dash --once</code></pre></div><div class="ex"><div class="cap">JSON, para alertar quando um volume se aproxima da quota</div><pre><code>delonix volume dash --json</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Prova que um volume nomeado sobrevive a um restart do container —
 ao contrário de escrever directamente no rootfs.</p>
