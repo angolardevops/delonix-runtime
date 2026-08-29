@@ -3944,7 +3944,7 @@ que não há daemon nenhum por baixo.</p>
 delonix container run -d --name web -p 8080:80 nginx:alpine
 
 # 2. Confirmar — o STATUS diz há quanto tempo está de pé
-delonix ps
+delonix container ps
 
 # 3. A prova de que não há daemon: NENHUM processo residente do motor
 pgrep -a delonix || echo "sem daemon — o container é filho do init do host"
@@ -3953,13 +3953,13 @@ pgrep -a delonix || echo "sem daemon — o container é filho do init do host"
 curl -s localhost:8080 | head -3
 
 # 5. Entrar lá dentro
-delonix exec -it web sh -c 'hostname; id; ls /etc/nginx'
+delonix container exec -it web sh -c 'hostname; id; ls /etc/nginx'
 
 # 6. Ver o que ele escreveu
-delonix logs web | tail -5
+delonix container logs web | tail -5
 
 # 7. Limpar
-delonix rm -f web</code></pre>
+delonix container rm -f web</code></pre>
 <p class="note"><strong>Verificação:</strong> o passo 3 não imprime processo
 nenhum do motor. Um container a correr sem supervisor residente é a diferença
 de fundo para o Docker, e vê-se aqui em duas linhas.</p>"""),
@@ -3983,7 +3983,7 @@ delonix container run -d --name limitado -m 128M alpine sleep 300
 PID=$(delonix container inspect limitado | jq -r .pid)
 cat /sys/fs/cgroup$(awk -F: '/^0::/{print $3}' /proc/$PID/cgroup)/memory.max
 
-delonix rm -f limitado</code></pre>
+delonix container rm -f limitado</code></pre>
 <p class="note"><strong>Verificação:</strong> o passo 4 imprime
 <code>134217728</code> (128 MiB), não <code>max</code>. Se imprimir
 <code>max</code>, a delegação não está feita — e o container corre <em>sem</em>
@@ -4004,7 +4004,7 @@ delonix container run -d --name db  --net loja -e POSTGRES_PASSWORD=x postgres:1
 delonix container run -d --name app --net loja -p 8080:80 nginx:alpine
 
 # 3. A app resolve a db PELO NOME, sem /etc/hosts nem variáveis
-delonix exec app sh -c 'getent hosts db; nc -z db 5432 && echo "porta aberta"'
+delonix container exec app sh -c 'getent hosts db; nc -z db 5432 && echo "porta aberta"'
 
 # 4. Fechar a db a tudo menos à app (alcançabilidade DIRIGIDA)
 cat &gt; dep.yaml &lt;&lt;'EOF'
@@ -4022,7 +4022,7 @@ delonix stack apply -f dep.yaml
 # 5. Provar: um terceiro container na MESMA rede já não alcança a db
 delonix container run --rm --net loja alpine sh -c 'nc -z -w2 db 5432 || echo BLOQUEADO'
 
-delonix rm -f db app; delonix network rm loja; rm dep.yaml</code></pre>
+delonix container rm -f db app; delonix network rm loja; rm dep.yaml</code></pre>
 <p class="note"><strong>Verificação:</strong> o passo 3 diz "porta aberta" e o
 passo 5 diz "BLOQUEADO". A mesma rede, dois resultados — é isso que
 <code>kind: Dependency</code> faz e uma rede sozinha não faz.</p>"""),
@@ -4044,10 +4044,10 @@ delonix build -t minha-app:1.0 .
 
 # `--wait` bloqueia até o HEALTHCHECK passar: sem isto escreve-se
 # `until ...; do sleep 1; done`, e escreve-se mal
-delonix run -d --name a1 --wait --health-interval 2 minha-app:1.0
-delonix ps
+delonix container run -d --name a1 --wait --health-interval 2 minha-app:1.0
+delonix container ps
 
-delonix rm -f a1; delonix image remove minha-app:1.0; cd ..; rm -rf lab-build</code></pre>
+delonix container rm -f a1; delonix image remove minha-app:1.0; cd ..; rm -rf lab-build</code></pre>
 <p class="note"><strong>Verificação:</strong> o <code>ps</code> mostra
 <code>(healthy)</code> na coluna STATUS. O motor está a sondar o container
 sozinho — sem systemd, ao contrário do Podman rootless.</p>"""),
@@ -4179,7 +4179,7 @@ delonix stack apply -f stack.yaml    # refused: does not converge live: image
 # 6. Só com a decisão explícita é que recria
 delonix stack apply -f stack.yaml --replace Container/iac-app
 
-delonix rm -f iac-app; delonix network rm iac-lab; cd ..; rm -rf lab-iac</code></pre>
+delonix container rm -f iac-app; delonix network rm iac-lab; cd ..; rm -rf lab-iac</code></pre>
 <p class="note"><strong>Verificação:</strong> no passo 4, o pid antes e depois
 (<code>delonix container inspect iac-app | grep pid</code>) é o MESMO — só o
 cgroup mudou. No passo 5 o <code>apply</code> sai com erro e <strong>nada
@@ -4205,7 +4205,7 @@ that there's no daemon underneath.</p>
 delonix container run -d --name web -p 8080:80 nginx:alpine
 
 # 2. Confirm — STATUS shows how long it's been up
-delonix ps
+delonix container ps
 
 # 3. Proof there's no daemon: NO resident engine process
 pgrep -a delonix || echo "no daemon — the container is a child of the host's init"
@@ -4214,13 +4214,13 @@ pgrep -a delonix || echo "no daemon — the container is a child of the host's i
 curl -s localhost:8080 | head -3
 
 # 5. Go inside
-delonix exec -it web sh -c 'hostname; id; ls /etc/nginx'
+delonix container exec -it web sh -c 'hostname; id; ls /etc/nginx'
 
 # 6. See what it wrote
-delonix logs web | tail -5
+delonix container logs web | tail -5
 
 # 7. Clean up
-delonix rm -f web</code></pre>
+delonix container rm -f web</code></pre>
 <p class="note"><strong>Verification:</strong> step 3 prints no engine process
 at all. A container running with no resident supervisor is the fundamental
 difference from Docker, and you can see it here in two lines.</p>"""),
@@ -4244,7 +4244,7 @@ delonix container run -d --name limited -m 128M alpine sleep 300
 PID=$(delonix container inspect limited | jq -r .pid)
 cat /sys/fs/cgroup$(awk -F: '/^0::/{print $3}' /proc/$PID/cgroup)/memory.max
 
-delonix rm -f limited</code></pre>
+delonix container rm -f limited</code></pre>
 <p class="note"><strong>Verification:</strong> step 4 prints
 <code>134217728</code> (128 MiB), not <code>max</code>. If it prints
 <code>max</code>, delegation isn't set up — and the container runs with
@@ -4265,7 +4265,7 @@ delonix container run -d --name db  --net shop -e POSTGRES_PASSWORD=x postgres:1
 delonix container run -d --name app --net shop -p 8080:80 nginx:alpine
 
 # 3. The app resolves db BY NAME, no /etc/hosts, no env vars
-delonix exec app sh -c 'getent hosts db; nc -z db 5432 && echo "port open"'
+delonix container exec app sh -c 'getent hosts db; nc -z db 5432 && echo "port open"'
 
 # 4. Lock db down to everyone except app (DIRECTED reachability)
 cat &gt; dep.yaml &lt;&lt;'EOF'
@@ -4283,7 +4283,7 @@ delonix stack apply -f dep.yaml
 # 5. Prove it: a third container on the SAME network can no longer reach db
 delonix container run --rm --net shop alpine sh -c 'nc -z -w2 db 5432 || echo BLOCKED'
 
-delonix rm -f db app; delonix network rm shop; rm dep.yaml</code></pre>
+delonix container rm -f db app; delonix network rm shop; rm dep.yaml</code></pre>
 <p class="note"><strong>Verification:</strong> step 3 says "port open" and
 step 5 says "BLOCKED". Same network, two different outcomes — that's what
 <code>kind: Dependency</code> does that a plain network alone doesn't.</p>"""),
@@ -4305,10 +4305,10 @@ delonix build -t my-app:1.0 .
 
 # `--wait` blocks until HEALTHCHECK passes: without it you'd have to
 # write `until ...; do sleep 1; done` yourself, and get it wrong
-delonix run -d --name a1 --wait --health-interval 2 my-app:1.0
-delonix ps
+delonix container run -d --name a1 --wait --health-interval 2 my-app:1.0
+delonix container ps
 
-delonix rm -f a1; delonix image remove my-app:1.0; cd ..; rm -rf lab-build</code></pre>
+delonix container rm -f a1; delonix image remove my-app:1.0; cd ..; rm -rf lab-build</code></pre>
 <p class="note"><strong>Verification:</strong> <code>ps</code> shows
 <code>(healthy)</code> in the STATUS column. The engine is probing the
 container on its own — no systemd, unlike rootless Podman.</p>"""),
@@ -4440,7 +4440,7 @@ delonix stack apply -f stack.yaml    # refused: does not converge live: image
 # 6. Only an explicit decision recreates it
 delonix stack apply -f stack.yaml --replace Container/iac-app
 
-delonix rm -f iac-app; delonix network rm iac-lab; cd ..; rm -rf lab-iac</code></pre>
+delonix container rm -f iac-app; delonix network rm iac-lab; cd ..; rm -rf lab-iac</code></pre>
 <p class="note"><strong>Verification:</strong> in step 4, the pid before and
 after (<code>delonix container inspect iac-app | grep pid</code>) is the
 SAME — only the cgroup changed. In step 5 <code>apply</code> exits with an
