@@ -2165,8 +2165,8 @@ msgstr "free.pinggy.io não devolveu URL (o nó geo-encaminhado pode estar em ba
 msgid "note: insecure-skip-tls-verify is a no-op for provider=pinggy — it forwards raw TCP and never inspects the local backend's certificate"
 msgstr "nota: insecure-skip-tls-verify é no-op no provider=pinggy — ele encaminha TCP cru e nunca inspecciona o certificado do backend local"
 
-msgid "another ngrok tunnel is already running ('{name}') — ngrok v3's local agent API has no per-tunnel port anymore, so only one ngrok-provider tunnel can run on this host at a time; stop it first (`delonix net tunnel rm {name}`)"
-msgstr "já há outro tunnel ngrok em execução ('{name}') — a API local do agente do ngrok v3 já não tem porta por-tunnel, por isso só pode correr um tunnel provider=ngrok de cada vez neste host; pára-o primeiro (`delonix net tunnel rm {name}`)"
+msgid "another ngrok tunnel is already running ('{name}') — ngrok v3's local agent API has no per-tunnel port anymore, so only one ngrok-provider tunnel can run on this host at a time; stop it first (`delonix delete gateways {name}`)"
+msgstr "já há outro tunnel ngrok em execução ('{name}') — a API local do agente do ngrok v3 já não tem porta por-tunnel, por isso só pode correr um tunnel provider=ngrok de cada vez neste host; pára-o primeiro (`delonix delete gateways {name}`)"
 
 msgid "provider=cloudflare with hostname but no token: the anonymous quick-tunnel (ephemeral *.trycloudflare.com URL) cannot pick its own hostname — pass --token (or --token-secret) for a NAMED tunnel you already created, whose public hostname is configured in the Cloudflare dashboard"
 msgstr "provider=cloudflare com hostname mas sem token: o quick-tunnel anónimo (URL efémera *.trycloudflare.com) não pode escolher o seu próprio hostname — passa --token (ou --token-secret) para um tunnel NOMEADO já criado, cujo hostname público está configurado no dashboard da Cloudflare"
@@ -3292,8 +3292,8 @@ msgstr "tunnel '{name}': provider '{provider}' desconhecido (pinggy|ngrok|cloudf
 msgid "(determining URL...)"
 msgstr "(a determinar URL...)"
 
-msgid "(URL not confirmed yet — see `delonix net tunnel describe` / the log)"
-msgstr "(URL ainda não confirmada — ver `delonix net tunnel describe` / o log)"
+msgid "(URL not confirmed yet — see `delonix describe gateways <name>` / the log)"
+msgstr "(URL ainda não confirmada — ver `delonix describe gateways <name>` / o log)"
 
 msgid "{bin}: {e} (is it installed and in PATH?)"
 msgstr "{bin}: {e} (está instalado e no PATH?)"
@@ -6290,6 +6290,9 @@ msgstr "pára um quando a demonstração acabar"
 
 msgid "the `kind: Gateway` documents of the manifest here — idempotent, an unchanged tunnel is left alone"
 msgstr "os documentos `kind: Gateway` do manifesto daqui — idempotente, um túnel inalterado fica como está"
+
+msgid "apply the `kind: Gateway` documents of a manifest instead of a one-shot expose"
+msgstr "aplica os documentos `kind: Gateway` de um manifesto em vez de um expose único"
 
 msgid "from a file, where the token comes from a `kind: Secret` instead of the shell history"
 msgstr "de um ficheiro, onde o token vem de um `kind: Secret` em vez do histórico da shell"
