@@ -13,6 +13,7 @@
 //! (`spdy3.dict`, adler32 0xe3c6a7c2). Requires the `zlib-rs` backend of `flate2`.
 #![allow(clippy::result_large_err)]
 
+use crate::child_handle::ChildHandle;
 use std::collections::{HashMap, VecDeque};
 use std::os::fd::FromRawFd;
 use std::path::{Path, PathBuf};
@@ -470,8 +471,8 @@ async fn writer_task<W: AsyncWrite + Unpin>(mut wr: W, mut rx: UnboundedReceiver
 
 enum Input {
     None,
-    Tty(i32, u32),
-    Pipe(Option<std::process::ChildStdin>, u32),
+    Tty(i32, ChildHandle),
+    Pipe(Option<std::process::ChildStdin>, ChildHandle),
 }
 
 impl Input {
@@ -503,16 +504,23 @@ impl Input {
     /// forever, leaking a process (and everything it holds: pty, netns fds,
     /// container namespace refs) per abandoned exec session. Best-effort:
     /// the wait-thread in `spawn_and_pump` already reaps whichever process
-    /// currently has this pid, so a SIGKILL here after it already exited is
-    /// a harmless ESRCH, not a misdirected signal to a reused pid.
+    /// currently has this pid.
+    ///
+    /// This used to kill by raw pid and claim that a SIGKILL after the exit was
+    /// a harmless ESRCH. It was not: reaping is exactly what frees the number
+    /// for reuse, so the signal could land on an unrelated process. It goes
+    /// through a `ChildHandle` (pidfd) now — see that module.
     fn close(self) {
         match self {
-            Input::Tty(m, pid) => unsafe {
-                libc::kill(pid as i32, libc::SIGKILL);
-                libc::close(m);
-            },
-            Input::Pipe(_, pid) => {
-                unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+            Input::Tty(m, h) => {
+                h.kill();
+                // SAFETY: the pty master this `Input` has owned since
+                // `spawn_and_pump` handed it over; `close` consumes `self`, so
+                // nothing can reach the fd after this.
+                unsafe { libc::close(m) };
+            }
+            Input::Pipe(_, h) => {
+                h.kill();
             }
             Input::None => {}
         }
@@ -556,7 +564,9 @@ fn spawn_and_pump(
                 return Input::None;
             }
         };
-        let pid = child.id();
+        // Opened HERE, before the wait-thread below can reap the child: a
+        // pidfd taken after the reap would be as unreliable as the raw number.
+        let handle = ChildHandle::open(child.id() as i32);
         let tx = out_tx.clone();
         let reader = std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
@@ -583,7 +593,7 @@ fn spawn_and_pump(
             let _ = reader.join();
             finish(&tx2, error_sid, code);
         });
-        Input::Tty(master, pid)
+        Input::Tty(master, handle)
     } else {
         let mut cmd = Command::new(delonix_bin());
         cmd.env("DELONIX_ROOT", base)
@@ -601,7 +611,9 @@ fn spawn_and_pump(
                 return Input::None;
             }
         };
-        let pid = child.id();
+        // Opened HERE, before the wait-thread below can reap the child: a
+        // pidfd taken after the reap would be as unreliable as the raw number.
+        let handle = ChildHandle::open(child.id() as i32);
         let stdin = child.stdin.take();
         let mut handles = Vec::new();
         for (sid, src) in [
@@ -648,7 +660,7 @@ fn spawn_and_pump(
             }
             finish(&tx2, error_sid, code);
         });
-        Input::Pipe(stdin, pid)
+        Input::Pipe(stdin, handle)
     }
 }
 
