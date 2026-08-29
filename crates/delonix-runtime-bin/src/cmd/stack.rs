@@ -1435,7 +1435,7 @@ fn apply_docs(
     // per-resource lines (`container/web: created`), which are the record of what
     // happened. A spinner would fight them for the same row, and folding them
     // would hide the one thing worth keeping. The animation belongs where a step
-    // is SILENT for seconds — see `Progress` in `vm build`/`vm create`.
+    // is SILENT for seconds — see `Progress` in `image --vm build`/`vm create`.
     let mut layers = super::output::Layers::new(count_of_kinds(docs));
     // Every layer is grouped so a failure has somewhere to be caught. `apply`
     // stays fail-fast without rollback — nothing below undoes anything — but
@@ -1631,7 +1631,7 @@ fn salvage_ownership(docs: &[manifest::ManifestDoc], stack: &str, changes: &[Cha
 /// per-resource lines (`container/web: created`), which are the record of what
 /// happened. A spinner would fight them for the same row, and folding them would
 /// hide the one thing worth keeping. The animation belongs where a step is
-/// SILENT for seconds — see `Progress` in `vm build`/`vm create`.
+/// SILENT for seconds — see `Progress` in `image --vm build`/`vm create`.
 fn run_layers(
     layers: &mut super::output::Layers,
     docs: &[manifest::ManifestDoc],
