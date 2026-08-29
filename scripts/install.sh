@@ -963,7 +963,7 @@ fi
 if [ "$WITH_BINARY" = 1 ] && [ -x "$BIN_DIR/delonix" ]; then
   _comp_installed=""
   if [ -d /etc/bash_completion.d ]; then
-    "$BIN_DIR/delonix" completion bash 2>/dev/null | $SUDO tee /etc/bash_completion.d/delonix >/dev/null \
+    "$BIN_DIR/delonix" completion shell bash 2>/dev/null | $SUDO tee /etc/bash_completion.d/delonix >/dev/null \
       && _comp_installed="bash"
   fi
   for _zdir in /usr/share/zsh/site-functions /usr/local/share/zsh/site-functions; do
@@ -971,20 +971,20 @@ if [ "$WITH_BINARY" = 1 ] && [ -x "$BIN_DIR/delonix" ]; then
       # O ficheiro TEM de se chamar `_delonix`: o zsh procura a função de
       # completion pelo nome do ficheiro no `fpath`, e um nome diferente é
       # carregado por ninguém — falha silenciosa clássica desta integração.
-      "$BIN_DIR/delonix" completion zsh 2>/dev/null | $SUDO tee "$_zdir/_delonix" >/dev/null \
+      "$BIN_DIR/delonix" completion shell zsh 2>/dev/null | $SUDO tee "$_zdir/_delonix" >/dev/null \
         && _comp_installed="$_comp_installed zsh"
       break
     fi
   done
   for _fdir in /usr/share/fish/vendor_completions.d /usr/local/share/fish/vendor_completions.d; do
     if [ -d "$_fdir" ]; then
-      "$BIN_DIR/delonix" completion fish 2>/dev/null | $SUDO tee "$_fdir/delonix.fish" >/dev/null \
+      "$BIN_DIR/delonix" completion shell fish 2>/dev/null | $SUDO tee "$_fdir/delonix.fish" >/dev/null \
         && _comp_installed="$_comp_installed fish"
       break
     fi
   done
   [ -n "$_comp_installed" ] && stepok binary "completion ($_comp_installed)"
-  [ -z "$_comp_installed" ] && warn "no completion directory found — register it by hand: delonix completion bash >> ~/.bashrc"
+  [ -z "$_comp_installed" ] && warn "no completion directory found — register it by hand: delonix completion shell bash >> ~/.bashrc"
 fi
 
 # --------------------------------------- realce de sintaxe do VMfile (editores)
