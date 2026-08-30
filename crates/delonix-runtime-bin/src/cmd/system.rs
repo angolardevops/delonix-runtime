@@ -75,6 +75,13 @@ pub enum SystemCmd {
         /// Output format: `table` (default) or `json` (ADR-0005).
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: super::output::OutputFormat,
+        /// Exit non-zero on a `config` or `capacity` finding, for a fleet gate.
+        ///
+        /// Never on a `load` one: pressure is what this minute looks like, and
+        /// a gate that goes red because somebody ran a build teaches everyone
+        /// to ignore it.
+        #[arg(long)]
+        strict: bool,
     },
     /// Disk usage by area (images, containers, volumes, VM images).
     Df,
@@ -288,7 +295,7 @@ pub fn run(action: SystemCmd) -> Result<()> {
             interval,
             no_stream,
         } => cmd_monitor(interval, no_stream),
-        SystemCmd::Resources { output } => cmd_resources(output),
+        SystemCmd::Resources { output, strict } => cmd_resources(output, strict),
         SystemCmd::Virt { tune } => cmd_virt(tune),
         SystemCmd::Thermal {
             high,
@@ -910,66 +917,57 @@ fn human(b: u64) -> String {
     format!("{v:.1} {}", U[i])
 }
 
-/// `system df` — where the disk is. It exists for a concrete reason: orphan
-/// rootfs dirs once piled up 45 GiB with nothing reporting them, until the kubelet marked
-/// the node with `disk-pressure`. The `RECLAIMABLE` column is the one that matters.
 /// `system resources` — capacity, what is enforceable, and current pressure.
 ///
 /// Three questions in one screen, because they are only useful together: a
 /// ceiling nobody can enforce is not a ceiling, and a controller that IS
 /// delegated tells you nothing about whether the machine is currently stalled
 /// on it.
-fn cmd_resources(output: super::output::OutputFormat) -> Result<()> {
-    let ncpu = runtime::host_ncpu();
-    let mem_total = runtime::host_mem_bytes();
-    let meminfo = std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
-    let kb = |key: &str| -> u64 {
-        meminfo
-            .lines()
-            .find(|l| l.starts_with(key))
-            .and_then(|l| l.split_whitespace().nth(1))
-            .and_then(|n| n.parse::<u64>().ok())
-            .unwrap_or(0)
-            * 1024
-    };
-    let mem_available = kb("MemAvailable:");
-    let swap_total = kb("SwapTotal:");
-    let swap_used = swap_total.saturating_sub(kb("SwapFree:"));
+///
+/// Every judgement comes from `resource_advice`, which is pure and tested; this
+/// function reads the host and prints. The split is not tidiness: the same
+/// findings, with the same stable ids, have to reach an MCP client and a fleet
+/// gate, and a rule that lives inside a `println!` reaches neither.
+fn cmd_resources(output: super::output::OutputFormat, strict: bool) -> Result<()> {
+    use delonix_runtime::resource_advice as advice;
 
     let root = state_root();
-    let disk_free = fs_avail_bytes(&root);
-    let rootless = runtime::is_rootless();
-    let (base, delegated) = runtime::enforceable_controllers();
+    let snap = advice::collect(&root);
+    let findings = advice::advise(&snap);
+    let inference = advice::local_inference(&snap);
 
-    let inert: Vec<&str> = runtime::RESOURCE_CONTROLLERS
-        .iter()
-        .filter(|c| !delegated.iter().any(|d| d == *c))
-        .flat_map(|c| runtime::flags_of_controller(c).iter().copied())
-        .collect();
-
-    let pressure: Vec<(&str, Option<runtime::Psi>)> = ["cpu", "memory", "io"]
-        .iter()
-        .map(|r| (*r, runtime::psi(r)))
-        .collect();
+    let pressure: [(&str, Option<runtime::Psi>); 3] = [
+        ("cpu", snap.psi_cpu),
+        ("memory", snap.psi_memory),
+        ("io", snap.psi_io),
+    ];
     let worst = runtime::bottleneck(&pressure);
+    let failed = strict && findings.iter().any(|f| f.class.gates());
 
     if output == super::output::OutputFormat::Json {
         let doc = serde_json::json!({
             "host": {
-                "cpus": ncpu,
-                "memory_bytes": mem_total,
-                "memory_available_bytes": mem_available,
-                "swap_bytes": swap_total,
-                "swap_used_bytes": swap_used,
+                "cpus": snap.cpus,
+                "memory_bytes": snap.mem_total,
+                "memory_available_bytes": snap.mem_available,
+                "swap_bytes": snap.swap_total,
+                "swap_used_bytes": snap.swap_used,
                 "state_root": root.to_string_lossy(),
-                "state_root_free_bytes": disk_free,
-                "cpu_temperature_c": runtime::max_cpu_temp_c(),
+                "state_root_free_bytes": snap.disk_free,
+                "cpu_temperature_c": snap.cpu_temp_c,
+                "gpu": snap.gpu.as_ref().map(|g| serde_json::json!({
+                    "name": g.name,
+                    "vram_total_mib": g.vram_total_mib,
+                    "vram_free_mib": g.vram_free_mib,
+                    "cdi_spec": g.cdi_spec,
+                    "drives_display": g.drives_display,
+                })),
             },
             "control": {
-                "rootless": rootless,
-                "cgroup_base": base,
-                "delegated": delegated,
-                "ignored_flags": inert,
+                "rootless": snap.rootless,
+                "cgroup_base": snap.cgroup_base,
+                "delegated": snap.delegated,
+                "aggregate_slice": snap.aggregate_slice,
             },
             "pressure": pressure.iter().map(|(r, p)| {
                 serde_json::json!({
@@ -980,9 +978,21 @@ fn cmd_resources(output: super::output::OutputFormat) -> Result<()> {
                 })
             }).collect::<Vec<_>>(),
             "bottleneck": worst,
+            "advice": findings.iter().map(|f| serde_json::json!({
+                "id": f.id,
+                "severity": f.severity.as_str(),
+                "class": f.class.as_str(),
+                "finding": f.finding,
+                "action": f.action,
+            })).collect::<Vec<_>>(),
+            "local_inference": {
+                "verdict": inference.verdict.as_str(),
+                "largest_model_b_q4": inference.largest_model_b,
+                "reasons": inference.reasons,
+            },
         });
         println!("{}", serde_json::to_string_pretty(&doc).unwrap_or_default());
-        return Ok(());
+        return strict_exit(failed);
     }
 
     // Whole-row templates as msgids, not one `po::t` per word. A bare "total"
@@ -993,24 +1003,27 @@ fn cmd_resources(output: super::output::OutputFormat) -> Result<()> {
     println!("{}", super::po::t("host"));
     println!(
         "  {}",
-        super::po::tf("cpus:               {n}", &[("n", &ncpu.to_string())])
+        super::po::tf("cpus:               {n}", &[("n", &snap.cpus.to_string())])
     );
     println!(
         "  {}",
         super::po::tf(
             "memory:             {total} total, {available} available",
             &[
-                ("total", &human(mem_total)),
-                ("available", &human(mem_available))
+                ("total", &human(snap.mem_total)),
+                ("available", &human(snap.mem_available))
             ]
         )
     );
-    if swap_total > 0 {
+    if snap.swap_total > 0 {
         println!(
             "  {}",
             super::po::tf(
                 "swap:               {total} total, {used} used",
-                &[("total", &human(swap_total)), ("used", &human(swap_used))]
+                &[
+                    ("total", &human(snap.swap_total)),
+                    ("used", &human(snap.swap_used))
+                ]
             )
         );
     }
@@ -1020,16 +1033,29 @@ fn cmd_resources(output: super::output::OutputFormat) -> Result<()> {
             "state root:         {path} ({free} free)",
             &[
                 ("path", &root.display().to_string()),
-                ("free", &human(disk_free))
+                ("free", &human(snap.disk_free))
             ]
         )
     );
-    if let Some(t) = runtime::max_cpu_temp_c() {
+    if let Some(t) = snap.cpu_temp_c {
         println!(
             "  {}",
             super::po::tf(
                 "cpu temperature:    {celsius} °C",
                 &[("celsius", &t.to_string())]
+            )
+        );
+    }
+    if let Some(g) = &snap.gpu {
+        println!(
+            "  {}",
+            super::po::tf(
+                "gpu:                {name} ({free} MiB of {total} MiB free)",
+                &[
+                    ("name", g.name.as_deref().unwrap_or("?")),
+                    ("free", &g.vram_free_mib.to_string()),
+                    ("total", &g.vram_total_mib.to_string())
+                ]
             )
         );
     }
@@ -1043,7 +1069,7 @@ fn cmd_resources(output: super::output::OutputFormat) -> Result<()> {
         "  {}",
         super::po::tf(
             "mode:               {mode}",
-            &[("mode", if rootless { "rootless" } else { "root" })]
+            &[("mode", if snap.rootless { "rootless" } else { "root" })]
         )
     );
     println!(
@@ -1052,13 +1078,14 @@ fn cmd_resources(output: super::output::OutputFormat) -> Result<()> {
             "cgroup base:        {path}",
             &[(
                 "path",
-                base.as_deref()
+                snap.cgroup_base
+                    .as_deref()
                     .unwrap_or(super::po::t("none — no delegation boundary found"))
             )]
         )
     );
     for c in runtime::RESOURCE_CONTROLLERS {
-        let on = delegated.iter().any(|d| d == c);
+        let on = snap.delegated.iter().any(|d| d == c);
         let flags = runtime::flags_of_controller(c).join(", ");
         let (label, ansi) = if on {
             (super::po::t("enforced"), super::output::color::GREEN)
@@ -1103,58 +1130,42 @@ fn cmd_resources(output: super::output::OutputFormat) -> Result<()> {
         }
     }
 
-    if !inert.is_empty() {
+    if !findings.is_empty() {
         println!();
-        println!(
-            "{}",
-            super::po::tf(
-                "{n} flag(s) are accepted and silently ignored on this host: {flags}",
-                &[("n", &inert.len().to_string()), ("flags", &inert.join(" "))]
-            )
-        );
-        // `io` is not a delegation this host merely forgot to grant: systemd
-        // does not delegate it to an unprivileged user at all, so no rootless
-        // engine — this one, podman, docker — can write `io.max`. Saying "run
-        // system setup" about it would send people after a fix that does not
-        // exist.
-        let io_missing = !delegated.iter().any(|d| d == "io");
-        if inert.iter().any(|f| !f.starts_with("--io")) {
-            println!(
-                "  {}",
-                super::po::t("fix: sudo delonix system setup --delegate, then log out and back in")
-            );
-        }
-        if io_missing {
-            println!(
-                "  {}",
-                super::po::t(
-                    "io is never delegated to a rootless user; run the node as root for I/O ceilings"
-                )
-            );
+        println!("{}", super::po::t("findings"));
+        for f in &findings {
+            println!("  {:<14}{}", f.id, f.finding);
+            if !f.action.is_empty() {
+                println!("  {:<14}→ {}", "", f.action);
+            }
         }
     }
-    Ok(())
+
+    println!();
+    println!(
+        "{}",
+        super::po::tf(
+            "local model inference: {verdict}",
+            &[("verdict", inference.verdict.as_str())]
+        )
+    );
+    for r in &inference.reasons {
+        println!("  {r}");
+    }
+
+    strict_exit(failed)
 }
 
-/// Free bytes on the filesystem holding `path`, via `statvfs(3)` — the same
-/// call `prune::filesystem_used_pct` makes, asking for the other half of the
-/// answer (`libc` directly rather than `nix`, which this crate does not
-/// depend on and which one number does not justify adding).
-///
-/// `0` when the call fails, and the caller shows it as `0 B free` — this is a
-/// report, not a gate, so an unreadable filesystem must not stop the other
-/// twenty numbers from being printed.
-fn fs_avail_bytes(path: &std::path::Path) -> u64 {
-    let Ok(c_path) = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()) else {
-        return 0;
-    };
-    // SAFETY: `c_path` is a valid NUL-terminated string that outlives the call,
-    // and `stat` is a fully-owned, correctly-sized destination.
-    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
-    if unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) } != 0 {
-        return 0;
+/// `--strict` turns findings into an exit code without printing a second
+/// verdict: the lines above already said what is wrong, and a gate that
+/// repeats itself is a gate people stop reading.
+fn strict_exit(failed: bool) -> Result<()> {
+    if failed {
+        return Err(Error::Invalid(
+            super::po::t("strict: a config or capacity finding is open").into(),
+        ));
     }
-    (stat.f_bavail as u64).saturating_mul(stat.f_frsize as u64)
+    Ok(())
 }
 
 fn cmd_df() -> Result<()> {
