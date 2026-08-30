@@ -108,6 +108,14 @@ def ask(args, prompt):
                 ],
                 "stream": False,
                 "format": "json",
+                # Reasoning models (the Qwen3 family, and more every month) emit
+                # a thinking block before the answer and it dominates the
+                # latency: the numbers here come from a fixed table, not from a
+                # chain of reasoning, so the block is spent on nothing. Ollama
+                # ignores the field on models that do not think, so it is safe
+                # to always send. `--think` puts it back for a fair comparison
+                # against a model whose answer genuinely needs it.
+                "think": args.think,
                 "options": {"temperature": 0, "num_ctx": args.ctx},
             },
             {},
@@ -167,6 +175,11 @@ def main():
     p.add_argument("--base-url", default="http://localhost:11434")
     p.add_argument("--api-key-env", default="OPENAI_API_KEY")
     p.add_argument("--ctx", type=int, default=8192)
+    p.add_argument(
+        "--think",
+        action="store_true",
+        help="deixar o modelo pensar antes de responder (ollama). Triplica a latência.",
+    )
     p.add_argument("--timeout", type=int, default=120)
     p.add_argument("--repeat", type=int, default=1, help="corridas por caso (temperatura 0 não garante determinismo)")
     p.add_argument("--only", nargs="*", help="correr só estes casos, pelo nome")
@@ -222,6 +235,7 @@ def main():
         "p95_seconds": round(sorted(lat)[max(0, int(len(lat) * 0.95) - 1)], 2),
         "trivial_bottleneck_pct": round(trivial_b, 1),
         "trivial_findings_pct": round(trivial_f, 1),
+        "think": args.think,
     }
 
     if args.json:
