@@ -218,7 +218,7 @@ garante-se, dentro do `0.x`:
   `delonix api-resources` diz qual é o de cada um. As duas grafias são aceites;
   a de grupo é a canónica, e o Kind só aceita **o grupo dele** ou o legado.
 
-A verdade não é este texto, é o schema: **`delonix schema print`** emite-o a
+A verdade não é este texto, é o schema: **`delonix manifest schema`** emite-o a
 partir do próprio código (ADR-0007), e o mesmo ficheiro está publicado em
 [`schema/v1/delonix.json`](schema/v1/delonix.json). Um teste do repositório
 falha se o publicado deixar de ser o gerado, precisamente para esta página não
