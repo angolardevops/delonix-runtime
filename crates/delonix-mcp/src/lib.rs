@@ -313,6 +313,80 @@ impl DelonixMcp {
     }
 
     #[tool(
+        name = "resources.get",
+        description = "Host capacity, which cgroup controllers this node can actually enforce, \
+                       current PSI pressure, and the findings that follow — each with a stable \
+                       DLX-RES-nnn id. Read-only.",
+        annotations(read_only_hint = true)
+    )]
+    fn resources_get(&self) -> String {
+        use delonix_runtime::resource_advice as advice;
+        // The rules are NOT re-implemented here. An agent that disagrees with
+        // `delonix system resources` about the same host is worse than no
+        // agent: whoever reads the two has no way to tell which one is lying.
+        let snap = advice::collect(&self.base);
+        let findings = advice::advise(&snap);
+        let inference = advice::local_inference(&snap);
+        // Built before the `json!`: the macro reads a `[` in value position as
+        // a JSON array literal and chokes on the `.iter()` that follows.
+        let pressure: Vec<_> = [
+            ("cpu", snap.psi_cpu),
+            ("memory", snap.psi_memory),
+            ("io", snap.psi_io),
+        ]
+        .iter()
+        .map(|(r, p)| {
+            json!({
+                "resource": r,
+                "avg10": p.map(|p| p.avg10),
+                "avg60": p.map(|p| p.avg60),
+                "avg300": p.map(|p| p.avg300),
+            })
+        })
+        .collect();
+        self.log("resources.get", "ok", &json!({}), None, None, None);
+        pretty(json!({
+            "host": {
+                "cpus": snap.cpus,
+                "memory_bytes": snap.mem_total,
+                "memory_available_bytes": snap.mem_available,
+                "swap_bytes": snap.swap_total,
+                "swap_used_bytes": snap.swap_used,
+                "state_root_free_bytes": snap.disk_free,
+                "cpu_temperature_c": snap.cpu_temp_c,
+                "gpu": snap.gpu.as_ref().map(|g| json!({
+                    "name": g.name,
+                    "vram_total_mib": g.vram_total_mib,
+                    "vram_free_mib": g.vram_free_mib,
+                    "cdi_spec": g.cdi_spec,
+                    "drives_display": g.drives_display,
+                })),
+            },
+            "control": {
+                "rootless": snap.rootless,
+                "cgroup_base": snap.cgroup_base,
+                "delegated": snap.delegated,
+                "aggregate_slice": snap.aggregate_slice,
+            },
+            "pressure": pressure,
+            "advice": findings.iter().map(|f| json!({
+                "id": f.id,
+                "severity": f.severity.as_str(),
+                "class": f.class.as_str(),
+                "finding": f.finding,
+                "action": f.action,
+            })).collect::<Vec<_>>(),
+            // Whether this very node should be the one running the model that
+            // is reading this. It usually should not, and the reasons say why.
+            "local_inference": {
+                "verdict": inference.verdict.as_str(),
+                "largest_model_b_q4": inference.largest_model_b,
+                "reasons": inference.reasons,
+            },
+        }))
+    }
+
+    #[tool(
         name = "resource.list",
         description = "List resources of a kind (container, vm, or volume).",
         annotations(read_only_hint = true)

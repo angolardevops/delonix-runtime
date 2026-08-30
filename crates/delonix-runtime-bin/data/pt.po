@@ -10024,3 +10024,21 @@ msgstr "nomeia as flags que esta máquina aceita e ignora em silêncio"
 
 msgid "machine-readable, for a capacity dashboard or a gate"
 msgstr "legível por máquina, para um painel de capacidade ou um portão"
+
+msgid "Exit non-zero on a `config` or `capacity` finding, for a fleet gate"
+msgstr "Sai com código diferente de zero perante um achado `config` ou `capacity`, para um portão de frota"
+
+msgid "Exit non-zero on a `config` or `capacity` finding, for a fleet gate.\n\nNever on a `load` one: pressure is what this minute looks like, and a gate that goes red because somebody ran a build teaches everyone to ignore it."
+msgstr "Sai com código diferente de zero perante um achado `config` ou `capacity`, para um portão de frota.\n\nNunca perante um `load`: a pressão é o que este minuto parece, e um portão que fica vermelho porque alguém correu uma compilação ensina toda a gente a ignorá-lo."
+
+msgid "findings"
+msgstr "achados"
+
+msgid "gpu:                {name} ({free} MiB of {total} MiB free)"
+msgstr "gpu:                {name} ({free} MiB livres de {total} MiB)"
+
+msgid "local model inference: {verdict}"
+msgstr "inferência de modelo local: {verdict}"
+
+msgid "strict: a config or capacity finding is open"
+msgstr "strict: há um achado de configuração ou de capacidade em aberto"
