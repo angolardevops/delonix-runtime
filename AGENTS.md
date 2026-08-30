@@ -167,7 +167,7 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   no pacote da própria imagem). **Por confirmar num host GPU real** (impossível neste sandbox):
   a precedência exacta `/etc/cdi` vs `/var/run/cdi`, e se o `ldconfig -r` chega como substituto
   dos hooks reais.
-- `delonix pod` — **pods reais multi-container** (create/ls/describe/rm/logs). N containers
+- `delonix pod` — **pods reais multi-container** (create/ls/describe/rm/logs/exec/cp/attach). N containers
   partilham a **netns do pod** (mesmo IP, `localhost` entre si), como um Pod do k8s. `cmd/pod.rs`:
   cria uma netns SDN NOMEADA no holder (`pod-<nome>`, via `infra::attach_container`) e corre cada
   container com `--pod pod-<nome>` (o re-exec acima) + label `delonix.io/pod=<nome>`. **Membership
@@ -183,6 +183,17 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   rootless porque o re-exec `--pod` já os põe no userns do holder, onde o `setns` tem privilégio (a
   razão pela qual o `setns` antigo — `join_netns`, agora removido — falhava deixou de valer).
   **PID** (`shareProcessNamespace`, campo já no schema) é a Fase 3.
+  **`exec`/`cp`/`attach` day-2** — um membro de pod é uma entrada normal no `Store`
+  de containers (`<pod>-<membro>`, de `pod_member_run_opts`), por isso `container
+  exec/cp/attach <pod>-<membro>` já funcionava ponta-a-ponta antes disto; o que
+  faltava era a UX relativa ao pod (`pod exec <pod> --container <curto>`, ao estilo
+  `kubectl exec <pod> -c <container>`). São wrappers finos: `cmd/pod.rs::resolve_target`
+  escolhe o membro (`--container` por nome curto, ou o primeiro por omissão) e delega
+  em `container::cmd_exec`/`cmd_cp`/`cmd_attach` (tornados `pub(crate)`), zero motor
+  novo. `pod cp` reaproveita a convenção `<nome>:/caminho` do `container cp`
+  (`split_cp_arg`), substituindo o nome do POD pelo nome REAL do membro antes de
+  delegar. `pod port-forward` fica de fora — precisa de um encaminhador
+  processo-do-host↔netns-do-pod novo, não uma delegação.
 - `delonix image` — pull/ls/rm/export (bundle OCI para `runc`/`crun`).
 - `delonix build -t <tag> [-f Dockerfile|Delonixfile] [contexto]` — único grupo com orquestração
   nova (as outras têm API pronta nas crates, isto é "ligar os fios"): sobe um container de

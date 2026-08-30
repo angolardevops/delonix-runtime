@@ -107,7 +107,10 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::container::ContainerCmd,
     },
-    /// Real multi-container pods (N containers sharing a netns): create/ls/describe/rm/logs.
+    /// Real multi-container pods (N containers sharing a netns): create/ls/logs/exec/cp/attach.
+    ///
+    /// `describe`/`rm` moved to the generic per-Kind verbs — `delonix describe
+    /// pod <name>` / `delonix delete pod <name>`.
     Pod {
         #[command(subcommand)]
         action: cmd::pod::PodCmd,
@@ -122,7 +125,10 @@ enum Cmd {
     },
     /// Build an image from a Dockerfile or Delonixfile.
     Build(cmd::build::BuildArgs),
-    /// Declarative microVMs: create/ls/stop/rm/status.
+    /// Declarative microVMs: create/ls/stop/start/status.
+    ///
+    /// `describe`/`rm` moved to the generic per-Kind verbs — `delonix
+    /// describe vm <name>` / `delonix delete vm <name>`.
     Vm {
         #[command(subcommand)]
         action: cmd::vm::VmCmd,

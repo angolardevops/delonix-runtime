@@ -295,7 +295,7 @@ para o comando específico, nunca adivinha).</p>"""},
     },
     "pod": {
         "title": "delonix pod",
-        "tagline": "Pods reais multi-container (create, ls, logs) — N containers como uma unidade.",
+        "tagline": "Pods reais multi-container (create, ls, logs, exec, cp, attach) — N containers como uma unidade.",
         "intro": """Pods de verdade, ao estilo Kubernetes: N containers que <strong>partilham as
 namespaces do pod</strong> e se gerem como uma só unidade. Hoje partilham <strong>netns</strong>
 (o mesmo IP, alcançam-se por <code>localhost</code>), <strong>IPC</strong> (System V/POSIX) e
@@ -323,6 +323,19 @@ falha, o pod é desfeito por inteiro (sem meio-pod).</p>"""},
                 ("Logs do 1.º container do pod", "delonix pod logs web-app"),
                 ("Logs de um container específico (nome curto dentro do pod)", "delonix pod logs web-app --container sidecar -f"),
             ]},
+            "exec": {"examples": [
+                ("Correr um comando no 1.º membro", "delonix pod exec web-app nginx -t"),
+                ("Uma shell interactiva num membro específico", "delonix pod exec -it web-app --container sidecar sh"),
+            ]},
+            "cp": {"examples": [
+                ("Do 1.º membro do pod para o host", "delonix pod cp web-app:/etc/nginx/nginx.conf ."),
+                ("Do host para um membro específico", "delonix pod cp ./site.conf web-app:/etc/nginx/conf.d/ --container sidecar"),
+            ], "notes": """<p>Exactamente um dos lados é <code>pod:/caminho</code> — a mesma convenção
+do <code>container cp</code>. Sem <code>--container</code>, resolve ao 1.º membro do pod.</p>"""},
+            "attach": {"examples": [
+                ("Voltar a ligar-se à saída do 1.º membro (só saída)", "delonix pod attach web-app"),
+            ], "notes": """<p>Mesmo contrato do <code>container attach</code>: sem canal de stdin vivo
+para um container já desanexado, por isso <code>-i</code> é recusado com erro claro.</p>"""},
         },
     },
     "image": {

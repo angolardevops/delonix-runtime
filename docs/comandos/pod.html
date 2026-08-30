@@ -143,7 +143,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 </nav>
 <main>
 <h1>delonix pod</h1>
-<p class='tagline lang-pt'>Pods reais multi-container (create, ls, logs) — N containers como uma unidade.</p><p class='tagline lang-en'>Real multi-container pods (create, ls, logs) — N containers as one unit.</p>
+<p class='tagline lang-pt'>Pods reais multi-container (create, ls, logs, exec, cp, attach) — N containers como uma unidade.</p><p class='tagline lang-en'>Real multi-container pods (create, ls, logs) — N containers as one unit.</p>
 <p class='lang-pt'>Pods de verdade, ao estilo Kubernetes: N containers que <strong>partilham as
 namespaces do pod</strong> e se gerem como uma só unidade. Hoje partilham <strong>netns</strong>
 (o mesmo IP, alcançam-se por <code>localhost</code>), <strong>IPC</strong> (System V/POSIX) e
@@ -179,6 +179,9 @@ Commands:
   create  Create a pod (N containers sharing a netns) from a manifest (`kind: Pod`)
   logs    Logs of a pod&#x27;s container (defaults to the first member)
   ls      List the pods (derived from container labels)
+  attach  Re-attach to a pod member&#x27;s output stream (output only)
+  cp      Copy files between the host and one member of a pod
+  exec    Execute a command inside one member of a pod (defaults to the first)
   help    Print this message or the help of the given subcommand(s)
 
 Options:
@@ -191,6 +194,7 @@ Options:
 COMMAND MAP:
   Lifecycle  create
   Inspect    ls · logs
+  Interact   exec · cp · attach
 
 EXAMPLES:
   # which pods exist and which containers each one holds
@@ -311,6 +315,123 @@ SEE ALSO:
 
   delonix › pod › logs</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Logs do 1.º container do pod</div><div class='cap lang-en'>Logs from the pod&#x27;s 1st container</div><pre><code>delonix pod logs web-app</code></pre></div><div class="ex"><div class='cap lang-pt'>Logs de um container específico (nome curto dentro do pod)</div><div class='cap lang-en'>Logs from a specific container (short name inside the pod)</div><pre><code>delonix pod logs web-app --container sidecar -f</code></pre></div>
+<h2 id='exec'><code>pod exec</code></h2>
+<p class='intro'>Execute a command inside one member of a pod (defaults to the first)</p>
+<div class='help'><pre><code>Usage: delonix pod exec [OPTIONS] &lt;POD&gt; &lt;COMMAND&gt;...
+
+Arguments:
+  &lt;POD&gt;
+          
+
+  &lt;COMMAND&gt;...
+          
+
+Options:
+  -i, --interactive
+          Interactive (attaches stdin)
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -t, --tty
+          Allocate a pseudo-terminal
+
+  -e, --env &lt;ENV&gt;
+          Extra environment variable (`KEY=VAL`) for this call only, on top of the container&#x27;s own env. Repeatable
+
+  -w, --workdir &lt;WORKDIR&gt;
+          Working directory for this call only (default: the container&#x27;s own configured `workdir`, or `/`)
+
+  -u, --user &lt;USER&gt;
+          Run as this user for this call only: `uid[:gid]` or `name[:group]` (resolved against the container&#x27;s own `/etc/passwd`/`/etc/group`). Default: the container&#x27;s own configured user
+
+      --container &lt;CONTAINER&gt;
+          Which container (its short name inside the pod). Default: the first
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # run a command in the first member
+  delonix pod exec web nginx -t
+
+  # an interactive shell in a specific member
+  delonix pod exec -it web --container sidecar sh
+
+SEE ALSO:
+  delonix pod attach · delonix pod cp · delonix container exec
+
+  delonix › pod › exec</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class="cap">Correr um comando no 1.º membro</div><pre><code>delonix pod exec web-app nginx -t</code></pre></div><div class="ex"><div class="cap">Uma shell interactiva num membro específico</div><pre><code>delonix pod exec -it web-app --container sidecar sh</code></pre></div>
+<h2 id='cp'><code>pod cp</code></h2>
+<p class='intro'>Copy files between the host and one member of a pod.</p>
+<p class='intro'>Exactly one side is <code>pod:/path</code> (e.g. <code>delonix pod cp web:/etc/hosts .</code>), same convention as <code>container cp</code>. Use <code>--container</code> when the pod has more than one member and the first isn&#x27;t the one you mean.</p>
+<div class='help'><pre><code>Usage: delonix pod cp [OPTIONS] &lt;SRC&gt; &lt;DST&gt;
+
+Arguments:
+  &lt;SRC&gt;
+          
+
+  &lt;DST&gt;
+          
+
+Options:
+      --container &lt;CONTAINER&gt;
+          Which container (its short name inside the pod). Default: the first
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # out of the pod&#x27;s first member onto the host
+  delonix pod cp web:/etc/nginx/nginx.conf .
+
+  # from the host into a specific member
+  delonix pod cp ./site.conf web:/etc/nginx/conf.d/ --container sidecar
+
+SEE ALSO:
+  delonix pod exec · delonix container cp
+
+  delonix › pod › cp</code></pre></div>
+<p>Exactamente um dos lados é <code>pod:/caminho</code> — a mesma convenção
+do <code>container cp</code>. Sem <code>--container</code>, resolve ao 1.º membro do pod.</p>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class="cap">Do 1.º membro do pod para o host</div><pre><code>delonix pod cp web-app:/etc/nginx/nginx.conf .</code></pre></div><div class="ex"><div class="cap">Do host para um membro específico</div><pre><code>delonix pod cp ./site.conf web-app:/etc/nginx/conf.d/ --container sidecar</code></pre></div>
+<h2 id='attach'><code>pod attach</code></h2>
+<p class='intro'>Re-attach to a pod member&#x27;s output stream (output only).</p>
+<p class='intro'>Same contract as <code>container attach</code>: this engine keeps no live stdin conduit to an already-started detached container, so <code>-i</code>/<code>--interactive</code> is refused with a clear error instead of silently doing nothing.</p>
+<div class='help'><pre><code>Usage: delonix pod attach [OPTIONS] &lt;POD&gt;
+
+Arguments:
+  &lt;POD&gt;
+          
+
+Options:
+      --container &lt;CONTAINER&gt;
+          Which container (its short name inside the pod). Default: the first
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -i, --interactive
+          Refused: stdin forwarding isn&#x27;t supported (see the command&#x27;s own doc above)
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # re-attach to the first member&#x27;s output (output only)
+  delonix pod attach web
+
+SEE ALSO:
+  delonix pod logs · delonix pod exec · delonix container attach
+
+  delonix › pod › attach</code></pre></div>
+<p>Mesmo contrato do <code>container attach</code>: sem canal de stdin vivo
+para um container já desanexado, por isso <code>-i</code> é recusado com erro claro.</p>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class="cap">Voltar a ligar-se à saída do 1.º membro (só saída)</div><pre><code>delonix pod attach web-app</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Cria um pod de 2 containers e confirma que partilham IP —
 alcançam-se por <code>localhost</code>, como no Kubernetes. Um pod cria-se sempre a

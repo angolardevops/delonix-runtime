@@ -5669,7 +5669,7 @@ pub(crate) fn cmd_rm(images: &ImageStore, store: &Store, id: &str, force: bool) 
 }
 
 #[allow(clippy::too_many_arguments)]
-fn cmd_exec(
+pub(crate) fn cmd_exec(
     images: &ImageStore,
     store: &Store,
     id: &str,
@@ -6034,7 +6034,7 @@ fn copy_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Resu
 ///
 /// The `:` has to come before any `/`, otherwise `./a:b/c` or an absolute path
 /// with `:` in the name would be read as a container.
-fn split_cp_arg(s: &str) -> Option<(String, String)> {
+pub(crate) fn split_cp_arg(s: &str) -> Option<(String, String)> {
     let colon = s.find(':')?;
     if s[..colon].is_empty() || s[..colon].contains('/') {
         return None;
@@ -6043,7 +6043,7 @@ fn split_cp_arg(s: &str) -> Option<(String, String)> {
 }
 
 /// `container cp` — copies host↔container. Exactly one side is `container:/path`.
-fn cmd_cp(images: &ImageStore, store: &Store, src: &str, dst: &str) -> Result<()> {
+pub(crate) fn cmd_cp(images: &ImageStore, store: &Store, src: &str, dst: &str) -> Result<()> {
     let join_root = |root: &std::path::Path, p: &str| root.join(p.trim_start_matches('/'));
     match (split_cp_arg(src), split_cp_arg(dst)) {
         (Some((name, cpath)), None) => {
@@ -6935,7 +6935,12 @@ pub(crate) fn cmd_logs(
 /// stream (this engine keeps no live stdin conduit to an already-started
 /// detached container, unlike a persistent per-container shim; see the
 /// command's own `--help`). Reuses `cmd_logs`'s exact follow mechanism.
-fn cmd_attach(images: &ImageStore, store: &Store, id: &str, interactive: bool) -> Result<()> {
+pub(crate) fn cmd_attach(
+    images: &ImageStore,
+    store: &Store,
+    id: &str,
+    interactive: bool,
+) -> Result<()> {
     if interactive {
         return Err(Error::Invalid(
             "attach -i/--interactive: stdin forwarding isn't supported — this engine keeps no \
@@ -7431,6 +7436,7 @@ mod tests {
             target: "/var/lib".into(),
             readonly: false,
             propagation: None,
+            optional: false,
         }];
 
         let desired = super::desired_container_fields(&spec);
@@ -7463,6 +7469,7 @@ mod tests {
             target: "/var/lib".into(),
             readonly: false,
             propagation: None,
+            optional: false,
         };
         assert_eq!(super::mount_to_spec(&named, root), "dados:/var/lib");
         let ro = delonix_runtime_core::Mount {
@@ -7475,6 +7482,7 @@ mod tests {
             target: "/etc/nginx".into(),
             readonly: true,
             propagation: None,
+            optional: false,
         };
         assert_eq!(
             super::mount_to_spec(&bind, root),
@@ -7487,6 +7495,7 @@ mod tests {
             target: "/x".into(),
             readonly: false,
             propagation: None,
+            optional: false,
         };
         assert_eq!(
             super::mount_to_spec(&deep, root),
