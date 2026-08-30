@@ -799,7 +799,7 @@ pub enum BackupCmd {
     /// Keep archiving this resource on a systemd user timer.
     Schedule(ScheduleArgs),
     /// The archives in a directory.
-    List(ListArgs),
+    Ls(ListArgs),
     /// What an archive holds, without unpacking it.
     Inspect(InspectArgs),
     /// Put a resource back from an archive.
@@ -936,7 +936,7 @@ pub fn cmd_backup(c: BackupCmd) -> Result<()> {
             }
             run_archive(subject, Some(calendar))
         }
-        BackupCmd::List(a) => cmd_list(a),
+        BackupCmd::Ls(a) => cmd_list(a),
         BackupCmd::Inspect(a) => cmd_inspect(a),
         BackupCmd::Restore(a) => cmd_restore(a),
         BackupCmd::Remove(a) => cmd_remove(a),
@@ -1934,7 +1934,7 @@ mod tests {
         got.sort();
         assert_eq!(
             got,
-            vec!["create", "inspect", "list", "remove", "restore", "schedule"],
+            vec!["create", "inspect", "ls", "remove", "restore", "schedule"],
             "the group grew or lost a verb"
         );
     }

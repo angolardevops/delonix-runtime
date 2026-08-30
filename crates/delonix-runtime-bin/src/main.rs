@@ -4,7 +4,7 @@
 //! (another repo, another dependency tree — see `AGENTS.md`).
 //!
 //! Commands grouped semantically (instead of a flat list): `container`
-//! (run/ps/stop/rm/exec/logs), `image` (pull/list/remove/export), `build`
+//! (run/ps/stop/rm/exec/logs), `image` (pull/ls/remove/export), `build`
 //! (Dockerfile/Delonixfile → image), `vm` (declarative microVMs), `volume`
 //! (named volumes), `network` (user networks) and `stack` (applies a whole
 //! `delonix-manifest.yaml`). Each group with `apply` also accepts a per-Kind
@@ -107,12 +107,15 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::container::ContainerCmd,
     },
-    /// Real multi-container pods (N containers sharing a netns): create/ls/describe/rm/logs.
+    /// Real multi-container pods (N containers sharing a netns): create/ls/logs/exec/cp/attach.
+    ///
+    /// `describe`/`rm` moved to the generic per-Kind verbs — `delonix describe
+    /// pod <name>` / `delonix delete pod <name>`.
     Pod {
         #[command(subcommand)]
         action: cmd::pod::PodCmd,
     },
-    /// OCI images: pull/list/remove/export (with `--vm`: golden VM images — ls/pull/push/build).
+    /// OCI images: pull/ls/remove/export (with `--vm`: golden VM images — ls/pull/push/build).
     Image {
         /// Operate on VM images (`<root>/vm-images/`) instead of container images — enables the `push`/`build` subcommands.
         #[arg(long)]

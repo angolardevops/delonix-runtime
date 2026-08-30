@@ -22,6 +22,9 @@ msgstr "Containers: run/ps/stop/rm/exec/logs/update/describe."
 msgid "OCI images: pull/list/remove/export (with `--vm`: golden VM images — ls/pull/push/build)."
 msgstr "Imagens OCI: pull/list/remove/export (com `--vm`: imagens VM douradas — ls/pull/push/build)."
 
+msgid "OCI images: pull/ls/remove/export (with `--vm`: golden VM images — ls/pull/push/build)."
+msgstr "Imagens OCI: pull/ls/remove/export (com `--vm`: imagens VM douradas — ls/pull/push/build)."
+
 msgid "Operate on VM images (`<root>/vm-images/`) instead of container images — enables the `push`/`build` subcommands."
 msgstr "Opera sobre imagens VM (`<root>/vm-images/`) em vez de imagens de container — activa os subcomandos `push`/`build`."
 
@@ -3502,6 +3505,9 @@ msgstr "Imagens a carregar (`repo:tag`, tal como aparecem em `delonix image ls`)
 msgid "Cluster name. Omit when there is only one — with several, this says which"
 msgstr "Nome do cluster. Omite quando só há um — com vários, indica qual"
 
+msgid "Cluster name. Omit when there is only one cached"
+msgstr "Nome do cluster. Omite quando só há um em cache"
+
 msgid "warning: '{spec}' is published (DNAT is in place) but the inbound firewall drops it — the port answers nothing."
 msgstr "aviso: '{spec}' está publicada (o DNAT está aplicado) mas a firewall inbound descarta-a — a porta não responde nada."
 
@@ -4301,6 +4307,12 @@ msgstr "Lista os containers."
 msgid "Real multi-container pods (N containers sharing a netns): create/ls/describe/rm/logs."
 msgstr "Pods multi-container REAIS (N containers a partilhar uma netns): create/ls/describe/rm/logs."
 
+msgid "Real multi-container pods (N containers sharing a netns): create/ls/logs/exec/cp/attach"
+msgstr "Pods multi-container REAIS (N containers a partilhar uma netns): create/ls/logs/exec/cp/attach"
+
+msgid "Real multi-container pods (N containers sharing a netns): create/ls/logs/exec/cp/attach.\n\n`describe`/`rm` moved to the generic per-Kind verbs — `delonix describe pod <name>` / `delonix delete pod <name>`."
+msgstr "Pods multi-container REAIS (N containers a partilhar uma netns): create/ls/logs/exec/cp/attach.\n\n`describe`/`rm` passaram para os verbos genéricos por-Kind — `delonix describe pod <nome>` / `delonix delete pod <nome>`."
+
 msgid "Create a pod (N containers sharing a netns) from a manifest (`kind: Pod`)."
 msgstr "Cria um pod (N containers a partilhar uma netns) a partir de um manifesto (`kind: Pod`)."
 
@@ -4315,6 +4327,21 @@ msgstr "Remove um pod: pára/remove TODOS os seus containers + a netns partilhad
 
 msgid "Logs of a pod's container (defaults to the first member)."
 msgstr "Logs de um container do pod (por omissão, o primeiro membro)."
+
+msgid "Execute a command inside one member of a pod (defaults to the first)"
+msgstr "Executa um comando num membro de um pod (por omissão, o primeiro)"
+
+msgid "Copy files between the host and one member of a pod"
+msgstr "Copia ficheiros entre o host e um membro de um pod"
+
+msgid "Copy files between the host and one member of a pod.\n\nExactly one side is `pod:/path` (e.g. `delonix pod cp web:/etc/hosts .`), same convention as `container cp`. Use `--container` when the pod has more than one member and the first isn't the one you mean."
+msgstr "Copia ficheiros entre o host e um membro de um pod.\n\nExactamente um dos lados é `pod:/caminho` (ex.: `delonix pod cp web:/etc/hosts .`), a mesma convenção do `container cp`. Usa `--container` quando o pod tem mais de um membro e o primeiro não é o que queres."
+
+msgid "Re-attach to a pod member's output stream (output only)"
+msgstr "Volta a ligar-se ao fluxo de saída de um membro do pod (só saída)"
+
+msgid "Re-attach to a pod member's output stream (output only).\n\nSame contract as `container attach`: this engine keeps no live stdin conduit to an already-started detached container, so `-i`/`--interactive` is refused with a clear error instead of silently doing nothing."
+msgstr "Volta a ligar-se ao fluxo de saída de um membro do pod (só saída).\n\nMesmo contrato do `container attach`: este motor não guarda um canal vivo de stdin para um container já desanexado, por isso `-i`/`--interactive` é recusado com um erro claro em vez de não fazer nada em silêncio."
 
 msgid "Pull an image from a registry. With `--vm`, no argument = the OFFICIAL Delonix golden VM image."
 msgstr "Puxa uma imagem de um registo. Com `--vm`, sem argumento = a imagem VM dourada OFICIAL do Delonix."
@@ -4913,6 +4940,9 @@ msgstr "Formato de saída: `table` (por omissão) ou `json` (ADR-0005)"
 
 msgid "Output format: `table` (default) or `json` (ADR-0005). Works for both `image list` and `image --vm list`"
 msgstr "Formato de saída: `table` (por omissão) ou `json` (ADR-0005). Vale para o `image list` e para o `image --vm list`"
+
+msgid "Output format: `table` (default) or `json` (ADR-0005). Works for both `image ls` and `image --vm ls`"
+msgstr "Formato de saída: `table` (por omissão) ou `json` (ADR-0005). Vale para o `image ls` e para o `image --vm ls`"
 
 msgid "Path to a `.qcow2` (or any format `qemu-img` reads — it is converted)"
 msgstr "Caminho para um `.qcow2` (ou qualquer formato que o `qemu-img` leia — é convertido)"
@@ -5937,6 +5967,21 @@ msgstr "os logs do primeiro membro, que é o que normalmente se quer"
 msgid "a specific container inside the pod, by its short name"
 msgstr "um container específico dentro do pod, pelo seu nome curto"
 
+msgid "run a command in the first member"
+msgstr "corre um comando no primeiro membro"
+
+msgid "an interactive shell in a specific member"
+msgstr "uma shell interactiva num membro específico"
+
+msgid "out of the pod's first member onto the host"
+msgstr "do primeiro membro do pod para o host"
+
+msgid "from the host into a specific member"
+msgstr "do host para um membro específico"
+
+msgid "re-attach to the first member's output (output only)"
+msgstr "volta a ligar-se à saída do primeiro membro (só saída)"
+
 msgid "containers AND VMs in one table, so you stop guessing which group owns what"
 msgstr "containers E VMs numa só tabela, para deixares de adivinhar que grupo é dono de quê"
 
@@ -6552,6 +6597,9 @@ msgstr "o que está de pé, nó a nó"
 msgid "from zero to VMs plus kubeadm — above one control-plane the load balancer comes with it"
 msgstr "do zero a VMs mais kubeadm — acima de um control-plane o load balancer vem com ele"
 
+msgid "hand the kubeconfig to a teammate, or reload it in a fresh shell"
+msgstr "entrega o kubeconfig a um colega, ou volta a carregá-lo numa shell nova"
+
 msgid "a project with the cluster manifests already filled in"
 msgstr "um projecto com os manifestos do cluster já preenchidos"
 
@@ -6590,6 +6638,15 @@ msgstr "várias de uma vez"
 
 msgid "say which cluster, when more than one is up"
 msgstr "diz qual é o cluster, quando há mais do que um de pé"
+
+msgid "the one cluster you have — no name needed"
+msgstr "o único cluster que tens — não precisa de nome"
+
+msgid "a specific one, redirected to a file"
+msgstr "um específico, redireccionado para um ficheiro"
+
+msgid "straight into KUBECONFIG for one shell"
+msgstr "directo para KUBECONFIG, para uma shell"
 
 msgid "the Kubernetes YAML for something you already have running locally"
 msgstr "o YAML de Kubernetes para algo que já tens a correr localmente"
@@ -7959,6 +8016,12 @@ msgstr "Carrega imagens locais nos nós de um cluster em modo kind, **sem regist
 
 msgid "Load local images into a kind-mode cluster's nodes, **without a registry**.\n\nThe equivalent of `kind load docker-image`: packs each image from the local store and imports it into every running node's containerd."
 msgstr "Carrega imagens locais nos nós de um cluster em modo kind, **sem registo**.\n\nO equivalente ao `kind load docker-image`: empacota cada imagem do store local e importa-a no containerd de cada nó a correr."
+
+msgid "Print a cluster's kubeconfig from the local cache (no live SSH)"
+msgstr "Imprime o kubeconfig de um cluster a partir da cache local (sem SSH ao vivo)"
+
+msgid "Print a cluster's kubeconfig from the local cache (no live SSH).\n\nThe same file `create`/`apply`/`kubeadm` already wrote and merged into `~/.kube/config` at creation time. Redirect or pipe it as needed."
+msgstr "Imprime o kubeconfig de um cluster a partir da cache local (sem SSH ao vivo).\n\nO mesmo ficheiro que `create`/`apply`/`kubeadm` já escreveram e fundiram em `~/.kube/config` na criação. Redirecciona-o ou encaminha-o como precisares."
 
 msgid "Generate a Kubernetes manifest from a container/pod already running locally."
 msgstr "Gera um manifesto Kubernetes a partir de um container/pod já a correr localmente."
