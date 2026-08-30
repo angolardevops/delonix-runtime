@@ -388,7 +388,7 @@ image + kubeadm/kubelet/kubectl + <code>delonix-cri</code> — a base do <code>d
                 ("Referência com tag e digest (formato combinado suportado)",
                  "delonix image pull kindest/node:v1.34.0@sha256:7416a6…"),
             ]},
-            "list": {"examples": [("", "delonix image list")]},
+            "ls": {"examples": [("", "delonix image ls")]},
             "remove": {"examples": [("", "delonix image remove alpine:3.19")]},
             "export": {"examples": [
                 ("Bundle OCI runtime para correr com runc/crun",
@@ -1074,7 +1074,7 @@ quiser que uma discordância seja recusada.""",
             ('Ver o que entraria, sem escrever nada', 'delonix backup create pod api --dry-run'),
             ('Duas vezes por dia, guardando os dois mais recentes', 'delonix backup schedule container db --max-for-day 2 --to /srv/backups'),
             ('Ou no horário que quiseres, em sintaxe de crontab', 'delonix backup schedule stack loja --cron "30 3 * * 1" --to /srv/backups'),
-            ('Que arquivos existem, e o que cada um leva', 'delonix backup list --from /srv/backups'),
+            ('Que arquivos existem, e o que cada um leva', 'delonix backup ls --from /srv/backups'),
             ('O que está dentro de um, sem o desempacotar', 'delonix backup inspect container-db-20260811-205312.tar.gz --from /srv/backups'),
             ('Repor os dados (recusa enquanto estiver a correr)', 'delonix backup restore container-db-20260811-205312.tar.gz'),
             ('Parar, repor e arrancar de novo', 'delonix backup restore ./container-db-20260811-205312.tar.gz --force'),
@@ -4998,10 +4998,10 @@ delonix build -t delonix-temp:1 .</code></pre>
 ...
 Successfully installed annotated-types-0.7.0 anyio-4.14.2 ... fastapi-0.115.0 ...
 ef708d73f029</code></pre></div>
-<p>O ID no fim (<code>ef708d73f029</code>) é a imagem. <code>delonix image list</code> confirma o
+<p>O ID no fim (<code>ef708d73f029</code>) é a imagem. <code>delonix image ls</code> confirma o
 tamanho — o estágio final, sem as ferramentas de build, fica bem mais pequeno que se fosse tudo
 num único <code>FROM</code>:</p>
-<pre><code>delonix image list</code></pre>
+<pre><code>delonix image ls</code></pre>
 <div class="out"><pre><code>REPOSITORY:TAG     IMAGE ID       CREATED          SIZE
 delonix-temp:1     ef708d73f029   agora mesmo      157.2 MiB
 python:3.12-slim   25c5b8011a34   agora mesmo       41.2 MiB</code></pre></div>
@@ -5121,10 +5121,10 @@ delonix build -t delonix-temp:1 .</code></pre>
 ...
 Successfully installed annotated-types-0.7.0 anyio-4.14.2 ... fastapi-0.115.0 ...
 ef708d73f029</code></pre></div>
-<p>The ID at the end (<code>ef708d73f029</code>) is the image. <code>delonix image list</code>
+<p>The ID at the end (<code>ef708d73f029</code>) is the image. <code>delonix image ls</code>
 confirms the size — the final stage, with no build tools, ends up much smaller than if everything
 were in a single <code>FROM</code>:</p>
-<pre><code>delonix image list</code></pre>
+<pre><code>delonix image ls</code></pre>
 <div class="out"><pre><code>REPOSITORY:TAG     IMAGE ID       CREATED          SIZE
 delonix-temp:1     ef708d73f029   just now         157.2 MiB
 python:3.12-slim   25c5b8011a34   just now          41.2 MiB</code></pre></div>
