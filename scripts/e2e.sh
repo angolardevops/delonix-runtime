@@ -198,6 +198,39 @@ check "com -n default a coluna aparece" ok bash -c \
   "'$BIN' container ps -a -n default | head -1 | grep -q NAMESPACE"
 check "vm ls" ok "$BIN" vm ls
 check "get clusters" ok "$BIN" get clusters
+
+# `cluster kubeconfig` só lê `<root>/clusters/<nome>-kubeconfig.yaml` — não
+# distingue modo kind de kubeadm/SSH, e não precisa de nenhum dos dois vivo
+# para se provar. Booting um cluster real aqui (cgroup delegado + download do
+# `kindest/node`) provaria o `cluster create`, não este comando; um ficheiro
+# fabricado no formato real prova exactamente o que o comando faz: ler,
+# resolver 0/1/muitos, e nunca adivinhar.
+check "cluster kubeconfig sem nenhum em cache recusa" fail "$BIN" cluster kubeconfig
+mkdir -p "$DELONIX_ROOT/clusters"
+cat >"$DELONIX_ROOT/clusters/ck1-$PFX-kubeconfig.yaml" <<YAML
+apiVersion: v1
+kind: Config
+clusters:
+  - name: ck1-$PFX
+    cluster: {server: https://127.0.0.1:6443}
+users:
+  - name: ck1-$PFX-admin
+    user: {token: fake-e2e-token}
+contexts:
+  - name: ck1-$PFX
+    context: {cluster: ck1-$PFX, user: ck1-$PFX-admin}
+current-context: ck1-$PFX
+YAML
+check "cluster kubeconfig sem nome resolve ao único em cache" ok bash -c \
+  "'$BIN' cluster kubeconfig | grep -q 'ck1-$PFX'"
+check "cluster kubeconfig <nome> imprime esse" ok bash -c \
+  "'$BIN' cluster kubeconfig 'ck1-$PFX' | grep -q 'fake-e2e-token'"
+check "cluster kubeconfig <inexistente> recusa" fail "$BIN" cluster kubeconfig "nao-existe-$PFX"
+cp "$DELONIX_ROOT/clusters/ck1-$PFX-kubeconfig.yaml" "$DELONIX_ROOT/clusters/ck2-$PFX-kubeconfig.yaml"
+check "cluster kubeconfig sem nome com vários recusa e nomeia-os" ok bash -c \
+  "out=\$('$BIN' cluster kubeconfig 2>&1); rc=\$?; [ \$rc -ne 0 ] && echo \"\$out\" | grep -q \"ck1-$PFX\" && echo \"\$out\" | grep -q \"ck2-$PFX\""
+rm -f "$DELONIX_ROOT/clusters/ck1-$PFX-kubeconfig.yaml" "$DELONIX_ROOT/clusters/ck2-$PFX-kubeconfig.yaml"
+
 check "system info" ok "$BIN" system info
 check "system df" ok "$BIN" system df
 check "system events" ok "$BIN" system events

@@ -789,6 +789,15 @@ comando, do zero a um cluster com o <code>delonix-cri</code> como runtime (sem c
                  'delonix cluster create --name lab'),
                 ('Com workers',
                  'delonix cluster create --name lab --workers 2')]},
+            "kubeconfig": {"examples": [
+                ('O único cluster que existe — não precisa de nome',
+                 'delonix cluster kubeconfig'),
+                ('Um específico, redireccionado para um ficheiro',
+                 'delonix cluster kubeconfig lab > lab.yaml')],
+                "notes": """<p>Lê da CACHE local (<code>&lt;root&gt;/clusters/&lt;nome&gt;-kubeconfig.yaml</code>)
+— sem SSH ao vivo. Funciona para os dois tipos de cluster (modo kind e
+<code>kubeadm</code>/SSH), que escrevem no mesmo caminho. Não faz merge em
+<code>~/.kube/config</code>: isso já acontece automaticamente na criação.</p>"""},
             "init": {"examples": [
                 ('Scaffold de um cloud.yaml para cluster apply',
                  'delonix cluster init ./meu-cluster')]},
