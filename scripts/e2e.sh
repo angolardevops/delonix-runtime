@@ -272,7 +272,7 @@ check "network inspect de inexistente recusa" fail "$BIN" network inspect naoexi
 check "container update sem mudanças recusa" fail "$BIN" container update naoexiste-$PFX
 check "container stop de inexistente recusa" fail "$BIN" container stop naoexiste-$PFX
 check "container rm de inexistente recusa" fail "$BIN" container rm naoexiste-$PFX
-check "vm rm de inexistente recusa" fail "$BIN" vm rm naoexiste-$PFX
+check "delete vm de inexistente recusa" fail "$BIN" delete vm naoexiste-$PFX
 check "stack apply de ficheiro inexistente recusa" fail "$BIN" stack apply -f /nao/existe.yaml
 
 ########################################
@@ -287,7 +287,7 @@ check "inexistente: container inspect diz 4" 4 "$BIN" container inspect naoexist
 check "inexistente: volumes inspect diz 4" 4 "$BIN" volumes inspect naoexiste-$PFX
 check "inexistente: network inspect diz 4" 4 "$BIN" network inspect naoexiste-$PFX
 check "inexistente: secret rm diz 4" 4 "$BIN" secret rm naoexiste-$PFX
-check "inexistente: vm rm diz 4" 4 "$BIN" vm rm naoexiste-$PFX
+check "inexistente: delete vm diz 4" 4 "$BIN" delete vm naoexiste-$PFX
 # O lote tem caminho de saída PRÓPRIO (`for_each_id` sai antes de o `main` ver o
 # erro): sem a mesma classificação lá, `rm a b` respondia 1 onde `rm a` diz 4.
 check "inexistente: lote de ids mantém a classe" 4 \
@@ -1322,8 +1322,54 @@ if "$BIN" pod create -f "$PODY" >/dev/null 2>"$OUT/pod-$PFX.err"; then
     [ \"\$n\" -le 1 ] || { echo \"o aviso saiu \$n vezes (um por membro)\"; exit 1; }
   "
   check "pod ls mostra-o" ok bash -c "'$BIN' pod ls | grep -q 'p$PFX'"
-  check "pod describe" ok "$BIN" pod describe "p$PFX"
-  check "pod rm -f" ok "$BIN" pod rm -f "p$PFX"
+
+  # `pod exec`/`pod cp`/`pod attach` — wrappers finos sobre `container exec/cp/
+  # attach`, que resolvem `--container <curto>` (ou o 1.º membro por omissão)
+  # para o nome real `<pod>-<membro>` no Store. Provados com uma escrita
+  # POR MEMBRO (não `hostname`: os membros partilham UTS, por isso um
+  # `hostname` igual não provaria que o `--container` escolheu o certo — só a
+  # mountns, que NÃO é partilhada, distingue).
+  check "pod exec vai ao 1.º membro por omissão" ok bash -c \
+    "'$BIN' pod exec p$PFX sh -c 'echo do-a > /tmp/mark-$PFX'"
+  check "pod exec --container a confirma (é o 1.º)" ok bash -c \
+    "'$BIN' pod exec p$PFX --container a cat /tmp/mark-$PFX | grep -q do-a"
+  check "'b' não vê a escrita do 1.º membro (mountns própria)" fail \
+    "$BIN" pod exec "p$PFX" --container b cat "/tmp/mark-$PFX"
+  check "pod exec --container b escreve só em b" ok bash -c \
+    "'$BIN' pod exec p$PFX --container b sh -c 'echo do-b > /tmp/mark2-$PFX'"
+  check "pod exec --container b confirma" ok bash -c \
+    "'$BIN' pod exec p$PFX --container b cat /tmp/mark2-$PFX | grep -q do-b"
+  check "pod exec --container inexistente recusa" fail \
+    "$BIN" pod exec "p$PFX" --container nope true
+
+  check "pod cp: host -> 1.º membro" ok bash -c \
+    "echo prova-podcp > '$OUT/podcp-$PFX.txt' && '$BIN' pod cp '$OUT/podcp-$PFX.txt' p$PFX:/tmp/podcp-$PFX.txt"
+  check "pod cp: chegou ao 1.º membro" ok bash -c \
+    "'$BIN' pod exec p$PFX cat /tmp/podcp-$PFX.txt | grep -q prova-podcp"
+  check "pod cp --container escolhe o membro" ok bash -c \
+    "'$BIN' pod cp '$OUT/podcp-$PFX.txt' p$PFX:/tmp/podcp2-$PFX.txt --container b && \
+     '$BIN' pod exec p$PFX --container b cat /tmp/podcp2-$PFX.txt | grep -q prova-podcp"
+  check "pod cp: membro -> host" ok bash -c \
+    "'$BIN' pod cp p$PFX:/tmp/podcp-$PFX.txt '$OUT/podcp-back-$PFX.txt' && grep -q prova-podcp '$OUT/podcp-back-$PFX.txt'"
+
+  # `pod attach` segue os logs (`follow=true`) — contra um membro vivo isso
+  # bloqueia para sempre; o `timeout` + rc=124 prova que ligou e ficou a seguir,
+  # não que falhou logo. `-i` tem de recusar de imediato (mesmo contrato do
+  # `container attach`).
+  check "pod attach bloqueia (segue o output de um membro vivo)" 124 \
+    timeout 2 "$BIN" pod attach "p$PFX"
+  check "pod attach -i recusa (sem stdin ao vivo)" fail \
+    "$BIN" pod attach "p$PFX" -i
+
+  # `pod describe`/`pod rm` NÃO existem como subcomandos próprios — o B7
+  # (#159) colapsou-os nos verbos genéricos por-Kind. Medido ao vivo antes de
+  # escrever este fix: `delonix pod describe`/`delonix pod rm` respondem
+  # `unrecognized subcommand` desde essa PR, e este script continuava a
+  # chamá-los — achado do mesmo tipo do `volumes`/`volume` da sessão anterior.
+  # `delonix vm rm` tinha a mesma quebra em vários pontos deste script — ver
+  # `delete vm`/`describe vm` — e foi corrigido numa sessão à parte.
+  check "describe pod" ok "$BIN" describe pod "p$PFX"
+  check "delete pod -f" ok "$BIN" delete pod "p$PFX" -f
 else
   skip "pod create + aviso de cgroup" "o pod create falhou (holder/SDN indisponível)"
 fi
@@ -1398,10 +1444,10 @@ if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
     # A quebra da v0.51.x tem de falhar ALTO, nunca em silêncio.
     check "a forma antiga 'vm snapshots' já não existe" fail "$BIN" vm snapshots "$SVM"
     check "a forma antiga 'vm restore' já não existe" fail "$BIN" vm restore "$SVM" s1
-    "$BIN" vm rm -f "$SVM" >/dev/null 2>&1
+    "$BIN" delete vm "$SVM" -f >/dev/null 2>&1
   else
     skip "vm: snapshot sobrevive a stop/start" "o vm create falhou neste host"
-    "$BIN" vm rm -f "$SVM" >/dev/null 2>&1
+    "$BIN" delete vm "$SVM" -f >/dev/null 2>&1
   fi
 
   rm -f "$SDISK"
@@ -1455,10 +1501,10 @@ elif command -v cloud-hypervisor >/dev/null; then
     check "CH: rm com a VM parada" ok "$BIN" vm snapshot rm "$CVM" s1
     check "CH: e saiu do disco" ok bash -c \
       "! qemu-img snapshot -l '$SROOT/vms/$CVM.qcow2' 2>/dev/null | grep -qw s1"
-    "$BIN" vm rm -f "$CVM" >/dev/null 2>&1
+    "$BIN" delete vm "$CVM" -f >/dev/null 2>&1
   else
     skip "vm: snapshots no cloud-hypervisor" "o vm create CH falhou neste host (infra de rede?)"
-    "$BIN" vm rm -f "$CVM" >/dev/null 2>&1
+    "$BIN" delete vm "$CVM" -f >/dev/null 2>&1
   fi
   rm -f "$CDISK"
 else

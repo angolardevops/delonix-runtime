@@ -143,7 +143,10 @@
 ~	network route
 ~	network vlan
 ~	plan
+~	pod attach
+~	pod cp
 ~	pod create
+~	pod exec
 =	pod logs
 ~	pod ls
 ~	secret apply
