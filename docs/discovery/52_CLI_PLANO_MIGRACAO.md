@@ -61,7 +61,7 @@ Todas em grupos declarados NÃO estáveis:
 | `namespace` | `system namespace` |
 | `net boot` | `system boot` |
 | `volumes` | `volume` |
-| `image ls` / `image rm` | `image list` / `image remove` |
+| `image ls` / `image rm` | `image list` / `image remove` (revertido em v2.0.0 — ver `docs/releases/v2.0.0.md`; `image remove` fica) |
 | `schema print` | `manifest schema` (já existe; remove-se o antigo) |
 | `restore` (raiz) | `backup restore` |
 
