@@ -22,6 +22,9 @@ msgstr "Containers: run/ps/stop/rm/exec/logs/update/describe."
 msgid "OCI images: pull/list/remove/export (with `--vm`: golden VM images — ls/pull/push/build)."
 msgstr "Imagens OCI: pull/list/remove/export (com `--vm`: imagens VM douradas — ls/pull/push/build)."
 
+msgid "OCI images: pull/ls/remove/export (with `--vm`: golden VM images — ls/pull/push/build)."
+msgstr "Imagens OCI: pull/ls/remove/export (com `--vm`: imagens VM douradas — ls/pull/push/build)."
+
 msgid "Operate on VM images (`<root>/vm-images/`) instead of container images — enables the `push`/`build` subcommands."
 msgstr "Opera sobre imagens VM (`<root>/vm-images/`) em vez de imagens de container — activa os subcomandos `push`/`build`."
 
@@ -4913,6 +4916,9 @@ msgstr "Formato de saída: `table` (por omissão) ou `json` (ADR-0005)"
 
 msgid "Output format: `table` (default) or `json` (ADR-0005). Works for both `image list` and `image --vm list`"
 msgstr "Formato de saída: `table` (por omissão) ou `json` (ADR-0005). Vale para o `image list` e para o `image --vm list`"
+
+msgid "Output format: `table` (default) or `json` (ADR-0005). Works for both `image ls` and `image --vm ls`"
+msgstr "Formato de saída: `table` (por omissão) ou `json` (ADR-0005). Vale para o `image ls` e para o `image --vm ls`"
 
 msgid "Path to a `.qcow2` (or any format `qemu-img` reads — it is converted)"
 msgstr "Caminho para um `.qcow2` (ou qualquer formato que o `qemu-img` leia — é convertido)"
