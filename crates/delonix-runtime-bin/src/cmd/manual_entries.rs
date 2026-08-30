@@ -32,6 +32,7 @@ pub static ENTRIES: &[Entry] = &[
             ("a local Kubernetes cluster with no manifest and no Docker", "delonix cluster create --name dev"),
             ("what is up, node by node", "delonix get clusters"),
             ("from zero to VMs plus kubeadm — above one control-plane the load balancer comes with it", "delonix cluster kubeadm --name lab --network k8s --control-plane 3"),
+            ("hand the kubeconfig to a teammate, or reload it in a fresh shell", "delonix cluster kubeconfig dev"),
         ],
         see_also: &["cluster kube generate", "stack apply", "vm create", "image vm pull"],
     },
@@ -85,6 +86,16 @@ pub static ENTRIES: &[Entry] = &[
             ("say which cluster, when more than one is up", "delonix cluster load myapp:dev --name dev"),
         ],
         see_also: &["cluster create", "image list", "build", "get"],
+    },
+    Entry {
+        path: "cluster kubeconfig",
+        group: "Interact",
+        examples: &[
+            ("the one cluster you have — no name needed", "delonix cluster kubeconfig"),
+            ("a specific one, redirected to a file", "delonix cluster kubeconfig lab > lab.yaml"),
+            ("straight into KUBECONFIG for one shell", "export KUBECONFIG=<(delonix cluster kubeconfig lab)"),
+        ],
+        see_also: &["cluster create", "cluster kubeadm", "cluster apply", "get"],
     },
     Entry {
         path: "cluster apply",
