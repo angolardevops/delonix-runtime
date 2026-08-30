@@ -1179,6 +1179,7 @@ fn cmd_resources(output: super::output::OutputFormat, strict: bool) -> Result<()
             "bottleneck": worst,
             "advice": findings.iter().map(|f| serde_json::json!({
                 "id": f.id,
+                "subject": f.subject,
                 "severity": f.severity.as_str(),
                 "class": f.class.as_str(),
                 "finding": f.finding,
@@ -1333,9 +1334,9 @@ fn cmd_resources(output: super::output::OutputFormat, strict: bool) -> Result<()
         println!();
         println!("{}", super::po::t("findings"));
         for f in &findings {
-            println!("  {:<14}{}", f.id, f.finding);
+            println!("  {:<14}{:<9}{}", f.id, f.subject, f.finding);
             if !f.action.is_empty() {
-                println!("  {:<14}→ {}", "", f.action);
+                println!("  {:<14}{:<9}→ {}", "", "", f.action);
             }
         }
     }
