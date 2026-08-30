@@ -4,6 +4,58 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v2.0.0 — `image list`/`backup list` voltam a `ls`
+
+Reversão de uma quebra de contrato anterior, ela própria uma quebra de contrato — por
+isso é `2.0.0` e não outro `1.x`. `docs/cli-stability.md` diz, desde a v1.0.0, que "um
+breaking change deixa de caber num `1.x`": `image list`/`image remove` estavam na
+tabela *Estável*, e reverter `list` desfaz uma promessa dessa tabela.
+
+### O que muda
+
+| antiga (v0.67.0+) | nova |
+|---|---|
+| `delonix image list` | `delonix image ls` |
+| `delonix backup list` | `delonix backup ls` |
+
+Corte limpo, sem alias — a grafia `list` falha com `unrecognized subcommand` (rc=2),
+nunca em silêncio, a mesma regra de todas as reorganizações anteriores (v0.30.0,
+v1.0.0). `image remove` **fica** — só o verbo de listagem volta atrás.
+
+### Porquê
+
+O B2 da reestruturação da CLI (v0.67.0) tinha renomeado `image ls`/`image rm` para
+`image list`/`image remove`. Isso deixou `image list` como a **única** excepção de
+nomenclatura numa CLI onde as outras 15 folhas do tipo "listar" usam `ls` — `network
+ls`, `volume ls`, `vm ls`, `pod ls`, `secret ls`, `stack ls`, e mais — seguindo o
+padrão Docker/Podman/kubectl que este mesmo projecto já cita para os verbos de
+`container`. `backup list` nunca tinha sido `ls` (o grupo `backup` nasceu depois do
+B2, já com essa grafia), mas ficou junto nesta reversão para a CLI contar uma história
+consistente ("`ls` em todo o lado, sem excepção") numa única release em vez de duas.
+
+O grupo `backup` está declarado **não estável** em `docs/cli-stability.md` — essa
+metade sozinha não obrigaria a um major. Só `image list` obriga.
+
+### O que NÃO muda
+
+Nenhum outro comando, flag, ou semântica. `image remove`, `image pull`, `image push`,
+`image build --type`, e o resto do grupo `image`/`backup` continuam exactamente como
+estavam. Os códigos de saída não mudam.
+
+### Bónus encontrado a medir, corrigido de caminho
+
+`scripts/e2e.sh` tinha ~6 verificações que já invocavam `image ls` desde antes do B2
+— mortas desde então (`unrecognized subcommand`, rc=2, nunca detectado por CI). Esta
+reversão fá-las passar de novo, sem tocar nelas. As verificações de `backup list`
+foram renomeadas para `backup ls`.
+
+### A conta de folhas
+
+`scripts/cli_baseline.tsv` continua em **236** — é uma troca de nome de duas linhas
+(`image list`→`image ls`, `backup list`→`backup ls`), não uma adição nem remoção.
+
+---
+
 ## v1.1.0 — a admissão passa a ser um ponto só, e o motor ganha uma superfície para agentes
 
 Duas superfícies novas e dois bugs que deixavam trabalho a correr fora de onde

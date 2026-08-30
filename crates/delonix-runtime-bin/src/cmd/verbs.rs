@@ -160,7 +160,7 @@ pub(crate) fn get(kind: &str, names: &[String], output: OutputFormat) -> Result<
             namespace: None,
         }),
         k if k == kinds::SECRET => super::secret::run(super::secret::SecretCmd::Ls { output }),
-        k if k == kinds::IMAGE => super::image::run(false, super::image::ImageCmd::List { output }),
+        k if k == kinds::IMAGE => super::image::run(false, super::image::ImageCmd::Ls { output }),
         k if k == kinds::CLUSTER => super::cluster::cmd_ls(),
         k if k == kinds::GATEWAY => super::tunnel::cmd_ls(output),
         k if k == kinds::HTTP_ROUTE => super::httproute::cmd_ls(output),

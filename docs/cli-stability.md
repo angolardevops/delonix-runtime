@@ -23,7 +23,7 @@ Docker e Podman lhes dão:
 ```
 container run   ps   stop   start   restart   kill   rm   exec   logs
                 wait   inspect   port   rename   pause   unpause
-image     pull  list  remove    build (delonix build)
+image     pull  ls    remove    build (delonix build)
 ```
 
 Concretamente, garante-se:
@@ -43,8 +43,18 @@ Concretamente, garante-se:
 > grafia antiga falha com `unrecognized subcommand`, nunca em silêncio, a
 > mesma regra que a reorganização da v0.30.0 já seguia. Os grupos continuam:
 > `delonix container ps`, `delonix container run`, `delonix container exec`,
-> `delonix container logs`, `delonix container rm`, `delonix image list`.
+> `delonix container logs`, `delonix container rm`, `delonix image list`
+> (ver a nota da v2.0.0 abaixo — essa grafia mudou outra vez).
 > **Os códigos de saída não mudam nesta versão** — ver a secção abaixo.
+
+> **Quebra de contrato na v2.0.0.** O B2 da reestruturação da CLI (v0.67.0)
+> tinha renomeado `image ls`/`image rm` para `image list`/`image remove` — a
+> única excepção de nomenclatura numa CLI onde as outras 15 folhas do tipo
+> "listar" usam `ls` (`network ls`, `volume ls`, `vm ls`, `pod ls`, `secret
+> ls`, `stack ls`, …), seguindo o padrão Docker/Podman que este mesmo
+> documento já cita para os verbos de container. Revertido: `image list`
+> volta a `image ls` (`image remove` fica). Corte limpo, sem alias — a
+> grafia `list` falha com `unrecognized subcommand`, nunca em silêncio.
 
 ## Códigos de saída
 

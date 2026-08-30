@@ -1497,12 +1497,12 @@ check "schedule --cron com 4 campos recusa" fail "$BIN" backup schedule containe
 
 # Os três verbos que a consolidação trouxe, e que antes NÃO existiam: sem eles a
 # pergunta «que arquivos tenho» respondia-se com `ls`, e apagar um era `rm`.
-check "backup list mostra o arquivo" ok bash -c \
-  "'$BIN' backup list --from '$BKDIR' | grep -q '$BKC'"
-check "backup list --kind filtra" ok bash -c \
-  "'$BIN' backup list --from '$BKDIR' --kind container | grep -q '$BKC'"
-check "backup list --kind vm não traz um container" ok bash -c \
-  "! '$BIN' backup list --from '$BKDIR' --kind vm | grep -q '$BKC'"
+check "backup ls mostra o arquivo" ok bash -c \
+  "'$BIN' backup ls --from '$BKDIR' | grep -q '$BKC'"
+check "backup ls --kind filtra" ok bash -c \
+  "'$BIN' backup ls --from '$BKDIR' --kind container | grep -q '$BKC'"
+check "backup ls --kind vm não traz um container" ok bash -c \
+  "! '$BIN' backup ls --from '$BKDIR' --kind vm | grep -q '$BKC'"
 check "backup inspect diz o kind e o nome" ok bash -c \
   "'$BIN' backup inspect \$(ls '$BKDIR'/container-$BKC-*.tar.gz | head -1) | grep -q '$BKC'"
 check "backup inspect nomeia os volumes que leva" ok bash -c \
@@ -1516,8 +1516,8 @@ echo lixo | gzip > "$BKDIR/alheio.tar.gz"
 check "backup remove recusa um .tar.gz que não escrevemos" fail \
   "$BIN" backup remove alheio.tar.gz --from "$BKDIR"
 check "e o ficheiro alheio CONTINUA lá" ok bash -c "[[ -f '$BKDIR/alheio.tar.gz' ]]"
-check "backup list conta o alheio como saltado" ok bash -c \
-  "'$BIN' backup list --from '$BKDIR' | grep -q 'skipped\|saltado'"
+check "backup ls conta o alheio como saltado" ok bash -c \
+  "'$BIN' backup ls --from '$BKDIR' | grep -q 'skipped\|saltado'"
 rm -f "$BKDIR/alheio.tar.gz"
 
 check "backup remove apaga o nosso" ok bash -c \

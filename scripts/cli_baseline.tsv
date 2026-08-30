@@ -2,7 +2,7 @@
 ~	apply
 ~	backup create
 ~	backup inspect
-~	backup list
+~	backup ls
 ~	backup remove
 ~	backup restore
 ~	backup schedule
@@ -64,10 +64,10 @@
 ~	image history
 =	image import
 ~	image init
-~	image list
 ~	image load
 =	image login
 =	image logout
+~	image ls
 ~	image ls-remote
 ~	image prune
 =	image pull
