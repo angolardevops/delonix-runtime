@@ -393,7 +393,7 @@ fn parse_port_spec(spec: &str) -> Result<(String, String)> {
 }
 
 /// The container's SDN IP, or an error explaining why a firewall can't attach.
-fn require_sdn_ip(c: &Container) -> Result<String> {
+pub(crate) fn require_sdn_ip(c: &Container) -> Result<String> {
     c.ip.clone().filter(|s| !s.is_empty()).ok_or_else(|| {
         Error::Invalid(format!(
             "'{}' has no firewall: it is not on a custom network (attach it with `--net <network>`; `--net host` shares the host stack)",
@@ -445,7 +445,7 @@ fn rule_spec(r: &FwRule) -> String {
 /// other's rule is live in `nft` right now but silently missing from the
 /// persisted record, so it vanishes on the next `container start` (which
 /// only re-applies what's persisted).
-fn update_locked<F>(store: &Store, id_or_name: &str, f: F) -> Result<Container>
+pub(crate) fn update_locked<F>(store: &Store, id_or_name: &str, f: F) -> Result<Container>
 where
     F: FnOnce(&mut Container) -> Result<bool>,
 {
@@ -467,7 +467,7 @@ where
 /// the useful thing for the mistake that actually happens: an IPv6 CIDR. It used to
 /// pass validation and then surface as a raw nft parse error from deep inside the
 /// dataplane, because the ruleset is a v4 `table ip` (reproduced live).
-fn check_cidr(src: &str) -> Result<()> {
+pub(crate) fn check_cidr(src: &str) -> Result<()> {
     if src.is_empty() || fw_src_ok(src) {
         return Ok(());
     }
@@ -526,6 +526,9 @@ fn add_rule(
             src: src.clone(),
             action: action.as_str().to_string(),
             note: note.clone().unwrap_or_default(),
+            // Imperative `net ingress`/`net egress` — never owned by a
+            // `NetworkAccessRule` document.
+            origin: None,
         });
         // Shadow: an EARLIER overlapping rule (e.g. `deny any/8069` vs
         // `allow tcp/8069`) with the opposite action still matches first — the new
@@ -1520,6 +1523,9 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
             src,
             action,
             note: r.note.clone().unwrap_or_default(),
+            // `kind: FirewallPolicy` — never owned by a `NetworkAccessRule`
+            // document (see `apply_fw_doc`'s origin-aware `retain`, above).
+            origin: None,
         });
     }
     let mut n = 0usize;
@@ -1529,8 +1535,16 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
         require_sdn_ip(c)?;
         let mut fw = c.firewall.clone().unwrap_or_default();
         fw.enabled = true;
-        // Declarative: this direction is fully replaced by the document.
-        fw.rules.retain(|r| r.dir != dir);
+        // Declarative: this direction is fully replaced by the document —
+        // but only the UNOWNED rules of it. A rule with `origin: Some(_)`
+        // came from an independently-lifecycled `kind: NetworkAccessRule`
+        // document, not from this one; wiping it here would be the exact
+        // "two policies, one silently erases the other while both report
+        // success" bug this module already refuses at the manifest level for
+        // two FirewallPolicy documents (see `stack.rs`'s duplicate
+        // (target,direction) check) — except this time between two
+        // DIFFERENT Kinds, which that check cannot see.
+        fw.rules.retain(|r| r.dir != dir || r.origin.is_some());
         if dir == "in" {
             fw.policy_in = policy.to_string();
         } else {
@@ -1766,6 +1780,7 @@ mod tests {
             src: src.into(),
             action: action.into(),
             note: String::new(),
+            origin: None,
         }
     }
 
@@ -1852,6 +1867,7 @@ mod tests {
             src: src.into(),
             action: action.into(),
             note: String::new(),
+            origin: None,
         };
         let fw = |policy: &str, rules: Vec<FwRule>| delonix_runtime_core::ContainerFw {
             enabled: true,

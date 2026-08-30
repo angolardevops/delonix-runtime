@@ -7600,6 +7600,7 @@ Inter-|   Receive                                                |  Transmit
                     src: "10.200.0.0/16".into(),
                     action: "allow".into(),
                     note: String::new(),
+                    origin: None,
                 },
                 delonix_runtime_core::FwRule {
                     dir: "out".into(),
@@ -7608,6 +7609,7 @@ Inter-|   Receive                                                |  Transmit
                     src: String::new(),
                     action: "deny".into(),
                     note: String::new(),
+                    origin: None,
                 },
             ],
             namespace: "default".into(),
@@ -7647,6 +7649,7 @@ Inter-|   Receive                                                |  Transmit
             src: String::new(),
             action: action.into(),
             note: String::new(),
+            origin: None,
         };
         let fw = delonix_runtime_core::ContainerFw {
             enabled: true,
@@ -7763,6 +7766,7 @@ Inter-|   Receive                                                |  Transmit
             src: "10.200.0.0/16".into(),
             action: "allow".into(),
             note: String::new(),
+            origin: None,
         };
         let tail = fw_rule_tail(&r).expect("safe rule");
         // A single-host source must NOT carry `/32`: the kernel prints it as a bare

@@ -62,6 +62,7 @@ pub(crate) const CONTAINER: &str = "Container";
 pub(crate) const POD: &str = "Pod";
 pub(crate) const INGRESS: &str = "Ingress";
 pub(crate) const FIREWALL_POLICY: &str = "NetworkPolicy";
+pub(crate) const NETWORK_ACCESS_RULE: &str = "NetworkAccessRule";
 pub(crate) const HTTP_ROUTE: &str = "HTTPRoute";
 pub(crate) const GATEWAY: &str = "Gateway";
 pub(crate) const WORKLOAD: &str = "Workload";
@@ -389,6 +390,22 @@ const FACTS: &[KindFacts] = &[
         in_stack: true,
         converges: true,
         teardown: false,
+        namespaced: Namespaced::Never,
+        presence: Presence::Declarative,
+    },
+    KindFacts {
+        kind: NETWORK_ACCESS_RULE,
+        plural: "networkaccessrules",
+        short: &["nar"],
+        api_version: "networking.delonix.io/v1alpha1",
+        domain: Domain::NetPolicy,
+        form: Form::Primary,
+        in_stack: true,
+        converges: true,
+        // Unlike `FIREWALL_POLICY`: this Kind's rule carries its own `origin`,
+        // a durable identity independent of anything else on the target
+        // container — so a stack CAN own and prune it.
+        teardown: true,
         namespaced: Namespaced::Never,
         presence: Presence::Declarative,
     },

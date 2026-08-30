@@ -58,6 +58,7 @@ const TYPED_KINDS: &[&str] = &[
     k::HTTP_ROUTE,
     k::INGRESS,
     k::FIREWALL_POLICY,
+    k::NETWORK_ACCESS_RULE,
     k::WORKLOAD,
     k::CLUSTER,
     k::STACK,
@@ -225,6 +226,11 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
                 generator.subschema_for::<super::firewall::FwDocSpec>(),
                 "FwDocSpec",
                 super::firewall::FW_SPEC_FIELDS,
+            ),
+            k::NETWORK_ACCESS_RULE => (
+                generator.subschema_for::<super::network_access_rule::NetworkAccessRuleSpec>(),
+                "NetworkAccessRuleSpec",
+                super::network_access_rule::NETWORK_ACCESS_RULE_SPEC_FIELDS,
             ),
             k::WORKLOAD => (
                 generator.subschema_for::<super::workload::WorkloadSpec>(),
