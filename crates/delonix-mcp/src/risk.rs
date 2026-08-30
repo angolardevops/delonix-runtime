@@ -41,6 +41,7 @@ pub const TOOL_RISK: &[(&str, RiskLevel)] = &[
     ("resource.get", RiskLevel::Read),
     ("resource.describe", RiskLevel::Read),
     ("metrics.query", RiskLevel::Read),
+    ("resources.get", RiskLevel::Read),
     ("logs.query", RiskLevel::Read),
     ("network.inspect", RiskLevel::Read),
     ("storage.inspect", RiskLevel::Read),

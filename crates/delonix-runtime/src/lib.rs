@@ -13,6 +13,7 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::time::Duration;
 
 pub mod capabilities;
+pub mod resource_advice;
 pub mod seccomp_profile;
 
 use capabilities::{all_caps_mask, resolve_cap_keep};

@@ -781,6 +781,7 @@ version = "2.0.0"
 dependencies = [
  "delonix-mgmt",
  "delonix-net",
+ "delonix-runtime",
  "delonix-runtime-core",
  "delonix-vm",
  "delonix-volume",
