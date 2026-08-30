@@ -2045,6 +2045,16 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["system setup", "system df", "system virt", "dash"],
     },
     Entry {
+        path: "system resources",
+        group: "Inspect",
+        examples: &[
+            ("capacity, what the engine can actually enforce, and what is stalled right now", "delonix system resources"),
+            ("name the flags this host accepts and silently ignores", "delonix system resources"),
+            ("machine-readable, for a capacity dashboard or a gate", "delonix system resources -o json"),
+        ],
+        see_also: &["system setup", "system info", "system doctor", "container run"],
+    },
+    Entry {
         path: "system setup",
         group: "Configure",
         examples: &[
