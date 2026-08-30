@@ -3277,7 +3277,7 @@ fn host_reserve_pct() -> u64 {
 }
 
 /// Total host memory (bytes), from `/proc/meminfo`.
-fn host_mem_bytes() -> u64 {
+pub fn host_mem_bytes() -> u64 {
     std::fs::read_to_string("/proc/meminfo")
         .ok()
         .and_then(|s| {
@@ -3359,7 +3359,7 @@ pub fn default_cpus() -> String {
     format!("{:.2}", share.clamp(MIN_DEFAULT_CPUS, LEGACY_DEFAULT_CPUS))
 }
 
-fn host_ncpu() -> u64 {
+pub fn host_ncpu() -> u64 {
     std::thread::available_parallelism()
         .map(|n| n.get() as u64)
         .unwrap_or(1)
@@ -3588,6 +3588,129 @@ pub fn admission_check(memory_max: &str) -> Result<()> {
     }
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Resource accounting — what this host CAN enforce, and what it is doing now
+// ---------------------------------------------------------------------------
+//
+// The engine already writes `cpu.max`, `cpu.weight`, `cpuset.cpus`, `io.weight`,
+// `io.max`, `memory.max`, `memory.swap.max` and `pids.max`. Whether any of them
+// LANDS depends on which controllers this host delegated, and that answer was
+// not reachable from the CLI: `system info` printed `cgroup2 delegated: yes`
+// without saying WHICH, so `--cpuset-cpus` on a host with only `cpu memory pids`
+// was accepted, ignored, and reported as fine. These functions exist so a
+// command can name the ignored flags instead.
+
+/// One `/proc/pressure/<res>` (PSI) reading, in PERCENT of time stalled.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Psi {
+    pub avg10: f64,
+    pub avg60: f64,
+    pub avg300: f64,
+}
+
+/// Parses the `some` line of a PSI file. `some` (any task stalled) rather than
+/// `full` (EVERY task stalled): `full` is always 0 for cpu, and on a workstation
+/// the interesting signal is contention, not total starvation.
+pub fn parse_psi_some(text: &str) -> Option<Psi> {
+    let line = text.lines().find(|l| l.starts_with("some "))?;
+    let field = |k: &str| -> Option<f64> {
+        line.split_whitespace()
+            .find_map(|f| f.strip_prefix(k))?
+            .parse()
+            .ok()
+    };
+    Some(Psi {
+        avg10: field("avg10=")?,
+        avg60: field("avg60=")?,
+        avg300: field("avg300=")?,
+    })
+}
+
+/// Reads `/proc/pressure/<resource>` (`cpu`, `memory`, `io`). `None` when the
+/// kernel was built without `CONFIG_PSI` — not an error, just no signal.
+pub fn psi(resource: &str) -> Option<Psi> {
+    parse_psi_some(&std::fs::read_to_string(format!("/proc/pressure/{resource}")).ok()?)
+}
+
+/// Splits a `cgroup.controllers`/`cgroup.subtree_control` file into names.
+pub fn parse_controller_list(text: &str) -> Vec<String> {
+    text.split_whitespace().map(str::to_string).collect()
+}
+
+/// The cgroup directory the engine will put container leaves under, and the
+/// controllers that will be available there.
+///
+/// Reading the CURRENT cgroup would be wrong, and visibly so on any desktop
+/// session: measured here, the current cgroup (an `app-*.scope`) offers
+/// `memory pids` while the delegation boundary two levels up
+/// (`user@1000.service`) offers `cpu memory pids`. The engine escapes to that
+/// boundary before creating anything (`user_service_base`), so the honest
+/// answer comes from there — reporting the scope's view would invent a missing
+/// `cpu` that the engine never actually hits.
+///
+/// The base itself may not exist yet (nothing has run), so the controllers come
+/// from the boundary's `subtree_control` in that case: that is precisely the set
+/// the base WILL inherit.
+pub fn enforceable_controllers() -> (Option<String>, Vec<String>) {
+    let base = if is_rootless() {
+        current_cgroup_v2().and_then(|cur| user_service_base(&cur))
+    } else {
+        Some(delonix_runtime_core::DELONIX_SLICE.to_string())
+    };
+    let Some(base) = base else {
+        return (None, Vec::new());
+    };
+    let read = |p: String| std::fs::read_to_string(p).ok();
+    let list = read(format!("{base}/cgroup.controllers"))
+        .or_else(|| {
+            // Not created yet — ask the parent what it hands down.
+            let parent = std::path::Path::new(&base)
+                .parent()?
+                .to_string_lossy()
+                .into_owned();
+            read(format!("{parent}/cgroup.subtree_control"))
+        })
+        .map(|t| parse_controller_list(&t))
+        .unwrap_or_default();
+    (Some(base), list)
+}
+
+/// Below this share of stalled time, ranking the resources is reading noise.
+pub const PRESSURE_FLOOR_PCT: f64 = 5.0;
+
+/// Which resource is the bottleneck RIGHT NOW, or `None` when nothing is under
+/// meaningful pressure.
+///
+/// Pure so the rule can be tested without stalling a real machine. The floor
+/// matters more than the ranking: on an idle host the three numbers are all
+/// near zero and whichever wins by 0.01 is meaningless — naming it "the
+/// bottleneck" would be a lie with a number next to it.
+pub fn bottleneck<'a>(readings: &[(&'a str, Option<Psi>)]) -> Option<&'a str> {
+    readings
+        .iter()
+        .filter_map(|(r, p)| p.map(|p| (*r, p.avg10)))
+        .filter(|(_, v)| *v >= PRESSURE_FLOOR_PCT)
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(r, _)| r)
+}
+
+/// The user-facing flags each cgroup controller makes real. Without the
+/// controller they are parsed, accepted, and silently ignored.
+pub fn flags_of_controller(controller: &str) -> &'static [&'static str] {
+    match controller {
+        "cpu" => &["--cpus", "--cpu-weight"],
+        "cpuset" => &["--cpuset-cpus", "--cpuset-mems"],
+        "io" => &["--io-weight", "--io-max"],
+        "memory" => &["--memory", "--memory-swap"],
+        "pids" => &["--pids-limit"],
+        _ => &[],
+    }
+}
+
+/// The controllers this engine has flags for, in the order a report should show
+/// them: the ones people set most often first.
+pub const RESOURCE_CONTROLLERS: &[&str] = &["cpu", "memory", "pids", "cpuset", "io"];
 
 /// Maximum temperature (°C) among the host's thermal sensors (CPU and the like).
 /// Basis of the thermal governor (#2): when Delonix heats up the machine, we lower
@@ -7047,6 +7170,94 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn psi_line_parses_the_some_row() {
+        const PSI: &str = "\
+some avg10=20.11 avg60=28.83 avg300=18.98 total=1894000689
+full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
+";
+        let p = parse_psi_some(PSI).unwrap();
+        assert_eq!(p.avg10, 20.11);
+        assert_eq!(p.avg60, 28.83);
+        assert_eq!(p.avg300, 18.98);
+
+        // `/proc/pressure/cpu` has no `full` row at all — the parser must not
+        // depend on it being there.
+        let only_some = parse_psi_some("some avg10=0.00 avg60=0.05 avg300=0.34 total=1\n").unwrap();
+        assert_eq!(only_some.avg300, 0.34);
+
+        // A kernel without CONFIG_PSI, or a truncated read, is not a panic.
+        assert!(parse_psi_some("").is_none());
+        assert!(parse_psi_some("full avg10=1.0 avg60=1.0 avg300=1.0 total=1").is_none());
+        assert!(parse_psi_some("some avg10=x avg60=1.0 avg300=1.0 total=1").is_none());
+    }
+
+    #[test]
+    fn bottleneck_needs_a_floor_not_just_a_maximum() {
+        let psi = |v: f64| {
+            Some(Psi {
+                avg10: v,
+                avg60: v,
+                avg300: v,
+            })
+        };
+        // Idle machine: three tiny numbers, no bottleneck to name.
+        assert_eq!(
+            bottleneck(&[("cpu", psi(0.00)), ("memory", psi(0.69)), ("io", psi(1.40))]),
+            None
+        );
+        // The reading this host actually gave while a build ran.
+        assert_eq!(
+            bottleneck(&[
+                ("cpu", psi(0.00)),
+                ("memory", psi(0.69)),
+                ("io", psi(20.11))
+            ]),
+            Some("io")
+        );
+        // Highest wins when several cross the floor.
+        assert_eq!(
+            bottleneck(&[("cpu", psi(30.0)), ("memory", psi(80.0)), ("io", psi(6.0))]),
+            Some("memory")
+        );
+        // Exactly at the floor counts; a kernel without PSI is skipped, not
+        // treated as zero pressure.
+        assert_eq!(bottleneck(&[("io", psi(5.0))]), Some("io"));
+        assert_eq!(bottleneck(&[("io", None), ("cpu", psi(9.0))]), Some("cpu"));
+        assert_eq!(bottleneck(&[("io", None)]), None);
+        assert_eq!(bottleneck(&[]), None);
+    }
+
+    #[test]
+    fn controller_list_and_the_flags_each_one_makes_real() {
+        assert_eq!(
+            parse_controller_list("cpu memory pids\n"),
+            vec!["cpu", "memory", "pids"]
+        );
+        assert!(parse_controller_list("\n").is_empty());
+        assert!(parse_controller_list("").is_empty());
+
+        // The point of the mapping: on a host delegated `cpu memory pids`, the
+        // flags belonging to `cpuset` and `io` are the ones silently ignored.
+        let delegated = parse_controller_list("cpu memory pids");
+        let ignored: Vec<&str> = RESOURCE_CONTROLLERS
+            .iter()
+            .filter(|c| !delegated.iter().any(|d| d == *c))
+            .flat_map(|c| flags_of_controller(c).iter().copied())
+            .collect();
+        assert_eq!(
+            ignored,
+            vec!["--cpuset-cpus", "--cpuset-mems", "--io-weight", "--io-max"]
+        );
+
+        // Every controller the report walks has at least one flag behind it,
+        // or the row would be noise.
+        for c in RESOURCE_CONTROLLERS {
+            assert!(!flags_of_controller(c).is_empty(), "{c} sem flags");
+        }
+        assert!(flags_of_controller("hugetlb").is_empty());
     }
 
     #[test]

@@ -187,6 +187,7 @@
 ~	system namespace describe
 ~	system namespace ls
 =	system prune
+=	system resources
 ~	system restore
 =	system setup
 ~	system thermal
