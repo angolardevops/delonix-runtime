@@ -125,7 +125,10 @@ enum Cmd {
     },
     /// Build an image from a Dockerfile or Delonixfile.
     Build(cmd::build::BuildArgs),
-    /// Declarative microVMs: create/ls/stop/rm/status.
+    /// Declarative microVMs: create/ls/stop/start/status.
+    ///
+    /// `describe`/`rm` moved to the generic per-Kind verbs — `delonix
+    /// describe vm <name>` / `delonix delete vm <name>`.
     Vm {
         #[command(subcommand)]
         action: cmd::vm::VmCmd,

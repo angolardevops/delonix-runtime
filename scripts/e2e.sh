@@ -272,7 +272,7 @@ check "network inspect de inexistente recusa" fail "$BIN" network inspect naoexi
 check "container update sem mudanças recusa" fail "$BIN" container update naoexiste-$PFX
 check "container stop de inexistente recusa" fail "$BIN" container stop naoexiste-$PFX
 check "container rm de inexistente recusa" fail "$BIN" container rm naoexiste-$PFX
-check "vm rm de inexistente recusa" fail "$BIN" vm rm naoexiste-$PFX
+check "delete vm de inexistente recusa" fail "$BIN" delete vm naoexiste-$PFX
 check "stack apply de ficheiro inexistente recusa" fail "$BIN" stack apply -f /nao/existe.yaml
 
 ########################################
@@ -287,7 +287,7 @@ check "inexistente: container inspect diz 4" 4 "$BIN" container inspect naoexist
 check "inexistente: volumes inspect diz 4" 4 "$BIN" volumes inspect naoexiste-$PFX
 check "inexistente: network inspect diz 4" 4 "$BIN" network inspect naoexiste-$PFX
 check "inexistente: secret rm diz 4" 4 "$BIN" secret rm naoexiste-$PFX
-check "inexistente: vm rm diz 4" 4 "$BIN" vm rm naoexiste-$PFX
+check "inexistente: delete vm diz 4" 4 "$BIN" delete vm naoexiste-$PFX
 # O lote tem caminho de saída PRÓPRIO (`for_each_id` sai antes de o `main` ver o
 # erro): sem a mesma classificação lá, `rm a b` respondia 1 onde `rm a` diz 4.
 check "inexistente: lote de ids mantém a classe" 4 \
@@ -1365,9 +1365,9 @@ if "$BIN" pod create -f "$PODY" >/dev/null 2>"$OUT/pod-$PFX.err"; then
   # (#159) colapsou-os nos verbos genéricos por-Kind. Medido ao vivo antes de
   # escrever este fix: `delonix pod describe`/`delonix pod rm` respondem
   # `unrecognized subcommand` desde essa PR, e este script continuava a
-  # chamá-los — achado do mesmo tipo do `volumes`/`volume` da sessão anterior
-  # (`delonix vm rm` tem a mesma quebra, em vários pontos deste script;
-  # fica registado, não corrigido aqui — âmbito de outra sessão).
+  # chamá-los — achado do mesmo tipo do `volumes`/`volume` da sessão anterior.
+  # `delonix vm rm` tinha a mesma quebra em vários pontos deste script — ver
+  # `delete vm`/`describe vm` — e foi corrigido numa sessão à parte.
   check "describe pod" ok "$BIN" describe pod "p$PFX"
   check "delete pod -f" ok "$BIN" delete pod "p$PFX" -f
 else
@@ -1444,10 +1444,10 @@ if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
     # A quebra da v0.51.x tem de falhar ALTO, nunca em silêncio.
     check "a forma antiga 'vm snapshots' já não existe" fail "$BIN" vm snapshots "$SVM"
     check "a forma antiga 'vm restore' já não existe" fail "$BIN" vm restore "$SVM" s1
-    "$BIN" vm rm -f "$SVM" >/dev/null 2>&1
+    "$BIN" delete vm "$SVM" -f >/dev/null 2>&1
   else
     skip "vm: snapshot sobrevive a stop/start" "o vm create falhou neste host"
-    "$BIN" vm rm -f "$SVM" >/dev/null 2>&1
+    "$BIN" delete vm "$SVM" -f >/dev/null 2>&1
   fi
 
   rm -f "$SDISK"
@@ -1501,10 +1501,10 @@ elif command -v cloud-hypervisor >/dev/null; then
     check "CH: rm com a VM parada" ok "$BIN" vm snapshot rm "$CVM" s1
     check "CH: e saiu do disco" ok bash -c \
       "! qemu-img snapshot -l '$SROOT/vms/$CVM.qcow2' 2>/dev/null | grep -qw s1"
-    "$BIN" vm rm -f "$CVM" >/dev/null 2>&1
+    "$BIN" delete vm "$CVM" -f >/dev/null 2>&1
   else
     skip "vm: snapshots no cloud-hypervisor" "o vm create CH falhou neste host (infra de rede?)"
-    "$BIN" vm rm -f "$CVM" >/dev/null 2>&1
+    "$BIN" delete vm "$CVM" -f >/dev/null 2>&1
   fi
   rm -f "$CDISK"
 else
