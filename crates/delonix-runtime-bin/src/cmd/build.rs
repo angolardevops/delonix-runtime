@@ -670,6 +670,7 @@ fn mount_run_secrets(
                 target: target.clone(),
                 readonly: true,
                 propagation: None,
+                optional: false,
             },
         ) {
             for t in &mounted {
