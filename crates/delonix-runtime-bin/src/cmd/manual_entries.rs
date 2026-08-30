@@ -2045,6 +2045,16 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["system setup", "system df", "system virt", "dash"],
     },
     Entry {
+        path: "system regulate",
+        group: "Configure",
+        examples: &[
+            ("see which workload is causing the contention, and what would be done about it", "delonix system regulate --once"),
+            ("actually do it — halve the culprit's cpu share, and give it back when it passes", "delonix system regulate --apply"),
+            ("one decision and exit, for a systemd timer", "delonix system regulate --apply --once"),
+        ],
+        see_also: &["system resources", "system thermal", "container update"],
+    },
+    Entry {
         path: "system resources",
         group: "Inspect",
         examples: &[
