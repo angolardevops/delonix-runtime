@@ -198,6 +198,39 @@ check "com -n default a coluna aparece" ok bash -c \
   "'$BIN' container ps -a -n default | head -1 | grep -q NAMESPACE"
 check "vm ls" ok "$BIN" vm ls
 check "get clusters" ok "$BIN" get clusters
+
+# `cluster kubeconfig` só lê `<root>/clusters/<nome>-kubeconfig.yaml` — não
+# distingue modo kind de kubeadm/SSH, e não precisa de nenhum dos dois vivo
+# para se provar. Booting um cluster real aqui (cgroup delegado + download do
+# `kindest/node`) provaria o `cluster create`, não este comando; um ficheiro
+# fabricado no formato real prova exactamente o que o comando faz: ler,
+# resolver 0/1/muitos, e nunca adivinhar.
+check "cluster kubeconfig sem nenhum em cache recusa" fail "$BIN" cluster kubeconfig
+mkdir -p "$DELONIX_ROOT/clusters"
+cat >"$DELONIX_ROOT/clusters/ck1-$PFX-kubeconfig.yaml" <<YAML
+apiVersion: v1
+kind: Config
+clusters:
+  - name: ck1-$PFX
+    cluster: {server: https://127.0.0.1:6443}
+users:
+  - name: ck1-$PFX-admin
+    user: {token: fake-e2e-token}
+contexts:
+  - name: ck1-$PFX
+    context: {cluster: ck1-$PFX, user: ck1-$PFX-admin}
+current-context: ck1-$PFX
+YAML
+check "cluster kubeconfig sem nome resolve ao único em cache" ok bash -c \
+  "'$BIN' cluster kubeconfig | grep -q 'ck1-$PFX'"
+check "cluster kubeconfig <nome> imprime esse" ok bash -c \
+  "'$BIN' cluster kubeconfig 'ck1-$PFX' | grep -q 'fake-e2e-token'"
+check "cluster kubeconfig <inexistente> recusa" fail "$BIN" cluster kubeconfig "nao-existe-$PFX"
+cp "$DELONIX_ROOT/clusters/ck1-$PFX-kubeconfig.yaml" "$DELONIX_ROOT/clusters/ck2-$PFX-kubeconfig.yaml"
+check "cluster kubeconfig sem nome com vários recusa e nomeia-os" ok bash -c \
+  "out=\$('$BIN' cluster kubeconfig 2>&1); rc=\$?; [ \$rc -ne 0 ] && echo \"\$out\" | grep -q \"ck1-$PFX\" && echo \"\$out\" | grep -q \"ck2-$PFX\""
+rm -f "$DELONIX_ROOT/clusters/ck1-$PFX-kubeconfig.yaml" "$DELONIX_ROOT/clusters/ck2-$PFX-kubeconfig.yaml"
+
 check "system info" ok "$BIN" system info
 check "system df" ok "$BIN" system df
 check "system events" ok "$BIN" system events
@@ -1289,8 +1322,54 @@ if "$BIN" pod create -f "$PODY" >/dev/null 2>"$OUT/pod-$PFX.err"; then
     [ \"\$n\" -le 1 ] || { echo \"o aviso saiu \$n vezes (um por membro)\"; exit 1; }
   "
   check "pod ls mostra-o" ok bash -c "'$BIN' pod ls | grep -q 'p$PFX'"
-  check "pod describe" ok "$BIN" pod describe "p$PFX"
-  check "pod rm -f" ok "$BIN" pod rm -f "p$PFX"
+
+  # `pod exec`/`pod cp`/`pod attach` — wrappers finos sobre `container exec/cp/
+  # attach`, que resolvem `--container <curto>` (ou o 1.º membro por omissão)
+  # para o nome real `<pod>-<membro>` no Store. Provados com uma escrita
+  # POR MEMBRO (não `hostname`: os membros partilham UTS, por isso um
+  # `hostname` igual não provaria que o `--container` escolheu o certo — só a
+  # mountns, que NÃO é partilhada, distingue).
+  check "pod exec vai ao 1.º membro por omissão" ok bash -c \
+    "'$BIN' pod exec p$PFX sh -c 'echo do-a > /tmp/mark-$PFX'"
+  check "pod exec --container a confirma (é o 1.º)" ok bash -c \
+    "'$BIN' pod exec p$PFX --container a cat /tmp/mark-$PFX | grep -q do-a"
+  check "'b' não vê a escrita do 1.º membro (mountns própria)" fail \
+    "$BIN" pod exec "p$PFX" --container b cat "/tmp/mark-$PFX"
+  check "pod exec --container b escreve só em b" ok bash -c \
+    "'$BIN' pod exec p$PFX --container b sh -c 'echo do-b > /tmp/mark2-$PFX'"
+  check "pod exec --container b confirma" ok bash -c \
+    "'$BIN' pod exec p$PFX --container b cat /tmp/mark2-$PFX | grep -q do-b"
+  check "pod exec --container inexistente recusa" fail \
+    "$BIN" pod exec "p$PFX" --container nope true
+
+  check "pod cp: host -> 1.º membro" ok bash -c \
+    "echo prova-podcp > '$OUT/podcp-$PFX.txt' && '$BIN' pod cp '$OUT/podcp-$PFX.txt' p$PFX:/tmp/podcp-$PFX.txt"
+  check "pod cp: chegou ao 1.º membro" ok bash -c \
+    "'$BIN' pod exec p$PFX cat /tmp/podcp-$PFX.txt | grep -q prova-podcp"
+  check "pod cp --container escolhe o membro" ok bash -c \
+    "'$BIN' pod cp '$OUT/podcp-$PFX.txt' p$PFX:/tmp/podcp2-$PFX.txt --container b && \
+     '$BIN' pod exec p$PFX --container b cat /tmp/podcp2-$PFX.txt | grep -q prova-podcp"
+  check "pod cp: membro -> host" ok bash -c \
+    "'$BIN' pod cp p$PFX:/tmp/podcp-$PFX.txt '$OUT/podcp-back-$PFX.txt' && grep -q prova-podcp '$OUT/podcp-back-$PFX.txt'"
+
+  # `pod attach` segue os logs (`follow=true`) — contra um membro vivo isso
+  # bloqueia para sempre; o `timeout` + rc=124 prova que ligou e ficou a seguir,
+  # não que falhou logo. `-i` tem de recusar de imediato (mesmo contrato do
+  # `container attach`).
+  check "pod attach bloqueia (segue o output de um membro vivo)" 124 \
+    timeout 2 "$BIN" pod attach "p$PFX"
+  check "pod attach -i recusa (sem stdin ao vivo)" fail \
+    "$BIN" pod attach "p$PFX" -i
+
+  # `pod describe`/`pod rm` NÃO existem como subcomandos próprios — o B7
+  # (#159) colapsou-os nos verbos genéricos por-Kind. Medido ao vivo antes de
+  # escrever este fix: `delonix pod describe`/`delonix pod rm` respondem
+  # `unrecognized subcommand` desde essa PR, e este script continuava a
+  # chamá-los — achado do mesmo tipo do `volumes`/`volume` da sessão anterior
+  # (`delonix vm rm` tem a mesma quebra, em vários pontos deste script;
+  # fica registado, não corrigido aqui — âmbito de outra sessão).
+  check "describe pod" ok "$BIN" describe pod "p$PFX"
+  check "delete pod -f" ok "$BIN" delete pod "p$PFX" -f
 else
   skip "pod create + aviso de cgroup" "o pod create falhou (holder/SDN indisponível)"
 fi
@@ -1497,12 +1576,12 @@ check "schedule --cron com 4 campos recusa" fail "$BIN" backup schedule containe
 
 # Os três verbos que a consolidação trouxe, e que antes NÃO existiam: sem eles a
 # pergunta «que arquivos tenho» respondia-se com `ls`, e apagar um era `rm`.
-check "backup list mostra o arquivo" ok bash -c \
-  "'$BIN' backup list --from '$BKDIR' | grep -q '$BKC'"
-check "backup list --kind filtra" ok bash -c \
-  "'$BIN' backup list --from '$BKDIR' --kind container | grep -q '$BKC'"
-check "backup list --kind vm não traz um container" ok bash -c \
-  "! '$BIN' backup list --from '$BKDIR' --kind vm | grep -q '$BKC'"
+check "backup ls mostra o arquivo" ok bash -c \
+  "'$BIN' backup ls --from '$BKDIR' | grep -q '$BKC'"
+check "backup ls --kind filtra" ok bash -c \
+  "'$BIN' backup ls --from '$BKDIR' --kind container | grep -q '$BKC'"
+check "backup ls --kind vm não traz um container" ok bash -c \
+  "! '$BIN' backup ls --from '$BKDIR' --kind vm | grep -q '$BKC'"
 check "backup inspect diz o kind e o nome" ok bash -c \
   "'$BIN' backup inspect \$(ls '$BKDIR'/container-$BKC-*.tar.gz | head -1) | grep -q '$BKC'"
 check "backup inspect nomeia os volumes que leva" ok bash -c \
@@ -1516,8 +1595,8 @@ echo lixo | gzip > "$BKDIR/alheio.tar.gz"
 check "backup remove recusa um .tar.gz que não escrevemos" fail \
   "$BIN" backup remove alheio.tar.gz --from "$BKDIR"
 check "e o ficheiro alheio CONTINUA lá" ok bash -c "[[ -f '$BKDIR/alheio.tar.gz' ]]"
-check "backup list conta o alheio como saltado" ok bash -c \
-  "'$BIN' backup list --from '$BKDIR' | grep -q 'skipped\|saltado'"
+check "backup ls conta o alheio como saltado" ok bash -c \
+  "'$BIN' backup ls --from '$BKDIR' | grep -q 'skipped\|saltado'"
 rm -f "$BKDIR/alheio.tar.gz"
 
 check "backup remove apaga o nosso" ok bash -c \

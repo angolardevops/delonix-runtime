@@ -162,7 +162,7 @@ mais do que isso: é o contrato de semver do projecto.</p>
 Docker e Podman lhes dão:</p>
 <pre><code>container run   ps   stop   start   restart   kill   rm   exec   logs
                 wait   inspect   port   rename   pause   unpause
-image     pull  list  remove    build (delonix build)
+image     pull  ls    remove    build (delonix build)
 </code></pre>
 <p>Concretamente, garante-se:</p>
 <ul>
@@ -182,8 +182,17 @@ para <code>container &lt;verbo&gt;</code>/<code>image list</code>. Saíram — c
 grafia antiga falha com <code>unrecognized subcommand</code>, nunca em silêncio, a
 mesma regra que a reorganização da v0.30.0 já seguia. Os grupos continuam:
 <code>delonix container ps</code>, <code>delonix container run</code>, <code>delonix container exec</code>,
-<code>delonix container logs</code>, <code>delonix container rm</code>, <code>delonix image list</code>.
+<code>delonix container logs</code>, <code>delonix container rm</code>, <code>delonix image list</code>
+(ver a nota da v2.0.0 abaixo — essa grafia mudou outra vez).
 <strong>Os códigos de saída não mudam nesta versão</strong> — ver a secção abaixo.</p>
+<p><strong>Quebra de contrato na v2.0.0.</strong> O B2 da reestruturação da CLI (v0.67.0)
+tinha renomeado <code>image ls</code>/<code>image rm</code> para <code>image list</code>/<code>image remove</code> — a
+única excepção de nomenclatura numa CLI onde as outras 15 folhas do tipo
+"listar" usam <code>ls</code> (<code>network ls</code>, <code>volume ls</code>, <code>vm ls</code>, <code>pod ls</code>, <code>secret
+ls</code>, <code>stack ls</code>, …), seguindo o padrão Docker/Podman que este mesmo
+documento já cita para os verbos de container. Revertido: <code>image list</code>
+volta a <code>image ls</code> (<code>image remove</code> fica). Corte limpo, sem alias — a
+grafia <code>list</code> falha com <code>unrecognized subcommand</code>, nunca em silêncio.</p>
 </blockquote>
 <h2 id="codigos-de-saida">Códigos de saída</h2>
 <blockquote>

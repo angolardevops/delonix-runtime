@@ -214,9 +214,9 @@ pub enum ImageCmd {
         no_k8s: bool,
     },
     /// List local images.
-    List {
+    Ls {
         /// Output format: `table` (default) or `json` (ADR-0005). Works for both
-        /// `image list` and `image --vm list`.
+        /// `image ls` and `image --vm ls`.
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: super::output::OutputFormat,
     },
@@ -763,7 +763,7 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
             )
             .into(),
         )),
-        ImageCmd::List { output } => cmd_ls(&images, output),
+        ImageCmd::Ls { output } => cmd_ls(&images, output),
         ImageCmd::Describe { names } => cmd_describe(&images, &names),
         ImageCmd::Tag { source, target } => cmd_tag(&images, &source, &target),
         ImageCmd::History { image } => cmd_history(&images, &image),
@@ -865,7 +865,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
     use super::vmimage::{self, VmImageCmd};
     let mapped = match action {
         ImageCmd::Dash { .. } => unreachable!("tratado no topo de run"),
-        ImageCmd::List { output } => VmImageCmd::Ls { output },
+        ImageCmd::Ls { output } => VmImageCmd::Ls { output },
         ImageCmd::Describe { names } => VmImageCmd::Describe { names },
         ImageCmd::Init { name, dir, force } => VmImageCmd::Init { name, dir, force },
         // BUG FIXED HERE, found live on a real host: `delonix image --vm
@@ -967,7 +967,7 @@ fn run_vm(action: ImageCmd) -> Result<()> {
         | ImageCmd::Load { .. }
         | ImageCmd::Apply { .. } => {
             return Err(Error::Invalid(
-                super::po::t("command not available for VM images (--vm) — use list/pull/push/build")
+                super::po::t("command not available for VM images (--vm) — use ls/pull/push/build")
                     .into(),
             ))
         }
