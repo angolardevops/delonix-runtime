@@ -17,6 +17,10 @@ delonix-net = { path = "../delonix-net" }
 # Reused for its Prometheus-shaped runtime summary (`dashstats::collect`) so
 # `runtime.info`/`metrics.query` do not re-derive the same counts a second way.
 delonix-mgmt = { path = "../delonix-mgmt" }
+# For `resources.get`: the snapshot and the advice rules, so an agent and the
+# CLI answer with the SAME finding ids. Already in this crate's dependency
+# graph through `delonix-mgmt`; named directly because it is used directly.
+delonix-runtime = { path = "../delonix-runtime" }
 
 rmcp = { version = "3", default-features = false, features = [
     "server",
