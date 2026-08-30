@@ -83,6 +83,32 @@ pub enum SystemCmd {
         #[arg(long)]
         strict: bool,
     },
+    /// Give the contended CPU back to the workloads that are waiting for it.
+    ///
+    /// Reads pressure, finds the workload CAUSING it (the biggest consumer —
+    /// not the one with the highest stall, which is the victim), halves its
+    /// `cpu.weight`, and gives it back when the contention passes. `cpu.weight`
+    /// is a SHARE, not a cap: with nothing to compete against, a throttled
+    /// workload still gets the whole machine. Nothing is ever killed or paused.
+    ///
+    /// Prints the plan and changes nothing unless `--apply` is given.
+    Regulate {
+        /// Carry the plan out. Without it this is a report.
+        #[arg(long)]
+        apply: bool,
+        /// One decision and exit, for a systemd timer or a cron.
+        #[arg(long)]
+        once: bool,
+        /// Seconds between decisions when looping.
+        #[arg(long, default_value_t = 30)]
+        interval: u64,
+        /// Never take a workload's `cpu.weight` below this.
+        #[arg(long, default_value_t = 20)]
+        floor: u64,
+        /// Output format: `table` (default) or `json` (ADR-0005).
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: super::output::OutputFormat,
+    },
     /// Disk usage by area (images, containers, volumes, VM images).
     Df,
     /// Save this node's state into one archive.
@@ -296,6 +322,13 @@ pub fn run(action: SystemCmd) -> Result<()> {
             no_stream,
         } => cmd_monitor(interval, no_stream),
         SystemCmd::Resources { output, strict } => cmd_resources(output, strict),
+        SystemCmd::Regulate {
+            apply,
+            once,
+            interval,
+            floor,
+            output,
+        } => cmd_regulate(apply, once, interval, floor, output),
         SystemCmd::Virt { tune } => cmd_virt(tune),
         SystemCmd::Thermal {
             high,
@@ -915,6 +948,172 @@ fn human(b: u64) -> String {
         i += 1;
     }
     format!("{v:.1} {}", U[i])
+}
+
+/// `system regulate` — the deterministic half of resource management.
+///
+/// The decision lives in `delonix_runtime::regulate` and is pure; this reads
+/// the host, prints, and (with `--apply`) writes. Same split as `resources`,
+/// and for the same reason: a rule inside a `println!` cannot be tested and
+/// cannot be reused by anything else.
+fn cmd_regulate(
+    apply: bool,
+    once: bool,
+    interval: u64,
+    floor: u64,
+    output: super::output::OutputFormat,
+) -> Result<()> {
+    use delonix_runtime::regulate;
+
+    let root = state_root();
+    let json = output == super::output::OutputFormat::Json;
+    // A sampling window, not an instant: `cpu.stat` is a counter since the
+    // container started, so a single read ranks workloads by how much CPU they
+    // burned since last Tuesday.
+    let window = std::time::Duration::from_secs(1);
+
+    loop {
+        let (_, store) = open_stores()?;
+        let running: Vec<_> = store
+            .list()?
+            .into_iter()
+            .filter(|c| c.pid.is_some())
+            .collect();
+        // A workload can exit while still throttled — the recovery tick that
+        // would have removed its memo never comes. Swept here, every tick.
+        let live: Vec<String> = running.iter().map(|c| c.id.clone()).collect();
+        regulate::forget_gone(&root, &live);
+
+        let mut workloads = regulate::sample(&running, window);
+        for w in &mut workloads {
+            w.original_weight = regulate::recorded_original(&root, &w.id);
+        }
+
+        let host = regulate::cpu_stall(None);
+        let (avg10, avg60) = host.map(|p| (p.avg10, p.avg60)).unwrap_or((0.0, 0.0));
+        let actions = regulate::plan(avg10, avg60, &workloads, floor);
+
+        let mut done = Vec::new();
+        for a in &actions {
+            let Some(w) = workloads.iter().find(|w| w.id == a.id()) else {
+                continue;
+            };
+            if apply {
+                match regulate::apply(&root, w, a) {
+                    Ok(()) => {
+                        // The event log is the only record a daemonless engine
+                        // leaves of a decision nobody watched happen.
+                        delonix_runtime_core::events::emit(
+                            &root,
+                            "regulate",
+                            a.verb(),
+                            &w.id,
+                            &w.name,
+                            Some(match a {
+                                regulate::Action::Throttle { reason, .. }
+                                | regulate::Action::Restore { reason, .. } => reason.as_str(),
+                            }),
+                        );
+                        done.push((a, true));
+                    }
+                    Err(e) => {
+                        eprintln!("delonix: could not {} {}: {e}", a.verb(), w.name);
+                        done.push((a, false));
+                    }
+                }
+            } else {
+                done.push((a, false));
+            }
+        }
+
+        if json {
+            let doc = serde_json::json!({
+                "applied": apply,
+                "cpu_stall": { "avg10": avg10, "avg60": avg60 },
+                "workloads": workloads.iter().map(|w| serde_json::json!({
+                    "id": w.id,
+                    "name": w.name,
+                    "cpu_weight": w.cpu_weight,
+                    "cpu_share_pct": w.cpu_share_pct,
+                    "original_weight": w.original_weight,
+                })).collect::<Vec<_>>(),
+                "actions": done.iter().map(|(a, ok)| match a {
+                    regulate::Action::Throttle { id, name, from, to, reason } => serde_json::json!({
+                        "action": "throttle", "id": id, "name": name,
+                        "from": from, "to": to, "reason": reason, "applied": ok,
+                    }),
+                    regulate::Action::Restore { id, name, to, reason } => serde_json::json!({
+                        "action": "restore", "id": id, "name": name,
+                        "to": to, "reason": reason, "applied": ok,
+                    }),
+                }).collect::<Vec<_>>(),
+            });
+            println!("{}", serde_json::to_string_pretty(&doc).unwrap_or_default());
+        } else {
+            println!(
+                "{}",
+                super::po::tf(
+                    "cpu stalled {avg10}% over 10s, {avg60}% over 60s · {n} workload(s)",
+                    &[
+                        ("avg10", &format!("{avg10:.1}")),
+                        ("avg60", &format!("{avg60:.1}")),
+                        ("n", &workloads.len().to_string())
+                    ]
+                )
+            );
+            for w in &workloads {
+                println!(
+                    "  {:<22}{:>6.1}%  cpu.weight {}{}",
+                    w.name,
+                    w.cpu_share_pct,
+                    w.cpu_weight,
+                    match w.original_weight {
+                        Some(o) if o != w.cpu_weight => format!(" (regulated, was {o})"),
+                        _ => String::new(),
+                    }
+                );
+            }
+            if done.is_empty() {
+                println!("  {}", super::po::t("nothing to do"));
+            }
+            for (a, applied) in &done {
+                let (verb, target, reason) = match a {
+                    regulate::Action::Throttle {
+                        name,
+                        from,
+                        to,
+                        reason,
+                        ..
+                    } => (
+                        super::po::t("throttle"),
+                        format!("{name}: cpu.weight {from} → {to}"),
+                        reason,
+                    ),
+                    regulate::Action::Restore {
+                        name, to, reason, ..
+                    } => (
+                        super::po::t("restore"),
+                        format!("{name}: cpu.weight → {to}"),
+                        reason,
+                    ),
+                };
+                let mark = if *applied {
+                    super::po::t("applied now")
+                } else if apply {
+                    super::po::t("FAILED")
+                } else {
+                    super::po::t("would apply (use --apply)")
+                };
+                println!("  {verb} {target}  [{mark}]");
+                println!("    {reason}");
+            }
+        }
+
+        if once {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_secs(interval.max(1)));
+    }
 }
 
 /// `system resources` — capacity, what is enforceable, and current pressure.

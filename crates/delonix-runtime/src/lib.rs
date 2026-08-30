@@ -13,6 +13,7 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::time::Duration;
 
 pub mod capabilities;
+pub mod regulate;
 pub mod resource_advice;
 pub mod seccomp_profile;
 

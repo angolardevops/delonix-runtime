@@ -162,6 +162,7 @@ Commands:
   info       Engine state: rootless?, cgroup delegation, network infra, counts
   resources  How much this host has, how much the engine can actually enforce, and what is under pressure right now
   backup     Save this node&#x27;s state into one archive
+  regulate   Give the contended CPU back to the workloads that are waiting for it
   restore    Put a node&#x27;s state back from a `system backup` archive
   setup      Diagnose — and, with `--delegate`, fix — cgroup delegation
   virt       Host virtualization: hypervisor, KVM, virtio — and what there is to tune
@@ -181,7 +182,7 @@ Options:
 
 COMMAND MAP:
   Inspect      events · info · features · doctor · resources · df
-  Configure    setup · backup · restore · virt
+  Configure    setup · regulate · backup · restore · virt
   Maintenance  prune · thermal
   Dashboards   monitor
   Advanced     boot
