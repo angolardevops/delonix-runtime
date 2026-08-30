@@ -371,6 +371,7 @@ impl DelonixMcp {
             "pressure": pressure,
             "advice": findings.iter().map(|f| json!({
                 "id": f.id,
+                "subject": f.subject,
                 "severity": f.severity.as_str(),
                 "class": f.class.as_str(),
                 "finding": f.finding,

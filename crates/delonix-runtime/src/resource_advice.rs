@@ -70,6 +70,14 @@ impl Class {
 #[derive(Debug, Clone)]
 pub struct Advice {
     pub id: &'static str,
+    /// What the finding is ABOUT — a resource (`cpu`, `io`, `disk`) or a
+    /// subsystem (`cgroup`, `slice`).
+    ///
+    /// The id alone is not enough to aggregate a fleet, and the corpus in
+    /// `tests/advisor_fixtures.rs` is what showed it: a host contended on both
+    /// CPU and I/O produced `DLX-RES-004` twice, identically. «Forty nodes have
+    /// DLX-RES-004» is not actionable; «forty nodes have DLX-RES-004 on io» is.
+    pub subject: &'static str,
     pub severity: Severity,
     pub class: Class,
     pub finding: String,
@@ -141,6 +149,7 @@ pub fn advise(s: &ResourceSnapshot) -> Vec<Advice> {
     if !ignored.is_empty() {
         out.push(Advice {
             id: "DLX-RES-001",
+            subject: "cgroup",
             severity: Severity::Blocking,
             class: Class::Config,
             finding: format!(
@@ -159,6 +168,7 @@ pub fn advise(s: &ResourceSnapshot) -> Vec<Advice> {
     if s.rootless && !has("io") {
         out.push(Advice {
             id: "DLX-RES-002",
+            subject: "io",
             severity: Severity::Info,
             class: Class::Config,
             finding: "--io-weight and --io-max cannot apply: systemd never delegates the io \
@@ -171,6 +181,7 @@ pub fn advise(s: &ResourceSnapshot) -> Vec<Advice> {
     if !s.aggregate_slice {
         out.push(Advice {
             id: "DLX-RES-003",
+            subject: "slice",
             severity: Severity::Warn,
             class: Class::Config,
             finding: "no aggregate ceiling: one workload with no --memory can take the whole \
@@ -185,6 +196,7 @@ pub fn advise(s: &ResourceSnapshot) -> Vec<Advice> {
     if s.disk_free < DISK_FLOOR {
         out.push(Advice {
             id: "DLX-RES-007",
+            subject: "disk",
             severity: Severity::Warn,
             class: Class::Capacity,
             finding: format!(
@@ -206,6 +218,7 @@ pub fn advise(s: &ResourceSnapshot) -> Vec<Advice> {
         if p.avg300 >= CHRONIC_PCT {
             out.push(Advice {
                 id: "DLX-RES-004",
+                subject: res,
                 severity: Severity::Warn,
                 class: Class::Load,
                 finding: format!(
@@ -218,6 +231,7 @@ pub fn advise(s: &ResourceSnapshot) -> Vec<Advice> {
         } else if p.avg10 >= SPIKE_PCT {
             out.push(Advice {
                 id: "DLX-RES-005",
+                subject: res,
                 severity: Severity::Info,
                 class: Class::Load,
                 finding: format!(
@@ -235,6 +249,7 @@ pub fn advise(s: &ResourceSnapshot) -> Vec<Advice> {
     if thrashing {
         out.push(Advice {
             id: "DLX-RES-006",
+            subject: "memory",
             severity: Severity::Warn,
             class: Class::Load,
             finding: format!(
@@ -248,6 +263,7 @@ pub fn advise(s: &ResourceSnapshot) -> Vec<Advice> {
     if s.cpu_temp_c.is_some_and(|t| t >= HOT_C) {
         out.push(Advice {
             id: "DLX-RES-008",
+            subject: "cpu",
             severity: Severity::Warn,
             class: Class::Load,
             finding: format!("cpu at {} °C", s.cpu_temp_c.unwrap_or(0)),
@@ -622,6 +638,10 @@ mod tests {
         // finding, and mixing them would put an impossible action on a gate.
         assert!(!a[0].finding.contains("--io-max"));
         assert_eq!(a[2].id, "DLX-RES-002");
+        assert_eq!(
+            a.iter().map(|x| x.subject).collect::<Vec<_>>(),
+            vec!["cgroup", "slice", "io"]
+        );
         assert!(
             a[2].action.is_empty(),
             "não se manda corrigir o incorrigível"
