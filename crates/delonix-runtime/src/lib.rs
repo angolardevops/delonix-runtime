@@ -1104,6 +1104,78 @@ fn safe_bind_target(rootfs: &str, target: &str) -> Option<std::path::PathBuf> {
     Some(current)
 }
 
+/// The mount flags the kernel LOCKS on a mount that a user namespace merely
+/// inherited (`ro`, `nosuid`, `nodev`, `noexec` and the atime family), read out
+/// of `mountinfo` for the mount `source` lives on.
+///
+/// A rootless `MS_REMOUNT` that would CLEAR any locked flag is refused with
+/// EPERM — the kernel will let an unprivileged remount add restrictions, never
+/// remove one. The remount below adds `nosuid`/`nodev` and deliberately does
+/// not add `noexec`; on a source under `/run` (mounted `nosuid,nodev,noexec,
+/// relatime` on every systemd host) that reads as "clear noexec and relatime"
+/// and the whole bind fails. Measured on `--gpus all`: the CDI spec mounts
+/// `/run/nvidia-persistenced/socket`, and one EPERM there aborted the run.
+///
+/// So: carry the source's locked flags forward, then add ours on top.
+fn locked_flags_from(mountinfo: &str, source: &std::path::Path) -> MsFlags {
+    let mut best: Option<(usize, &str)> = None;
+    for line in mountinfo.lines() {
+        // `id parent maj:min root MOUNTPOINT OPTIONS [optional...] - fstype ...`
+        let mut it = line.split(' ');
+        let (Some(_), Some(_), Some(_), Some(_)) = (it.next(), it.next(), it.next(), it.next())
+        else {
+            continue;
+        };
+        let (Some(mountpoint), Some(options)) = (it.next(), it.next()) else {
+            continue;
+        };
+        // `mountinfo` octal-escapes space, tab, newline and backslash in paths.
+        let mountpoint = mountpoint.replace("\\040", " ");
+        if !source.starts_with(&mountpoint) && mountpoint != "/" {
+            continue;
+        }
+        if best.is_none_or(|(len, _)| mountpoint.len() > len) {
+            best = Some((mountpoint.len(), options));
+        }
+    }
+    let Some((_, options)) = best else {
+        return MsFlags::empty();
+    };
+    let mut flags = MsFlags::empty();
+    for opt in options.split(',') {
+        flags |= match opt {
+            "ro" => MsFlags::MS_RDONLY,
+            "nosuid" => MsFlags::MS_NOSUID,
+            "nodev" => MsFlags::MS_NODEV,
+            "noexec" => MsFlags::MS_NOEXEC,
+            "noatime" => MsFlags::MS_NOATIME,
+            "nodiratime" => MsFlags::MS_NODIRATIME,
+            "relatime" => MsFlags::MS_RELATIME,
+            _ => continue,
+        };
+    }
+    flags
+}
+
+fn locked_flags_for(source: &std::path::Path) -> MsFlags {
+    let canonical = std::fs::canonicalize(source).unwrap_or_else(|_| source.to_path_buf());
+    match std::fs::read_to_string("/proc/self/mountinfo") {
+        Ok(text) => locked_flags_from(&text, &canonical),
+        Err(_) => MsFlags::empty(),
+    }
+}
+
+/// `true` if the mount point for `source` has to be created as a DIRECTORY.
+///
+/// Split out of `bind_volume` so the rule is testable without `mount(2)`: it is
+/// the rule itself that was wrong (see the comment at the call site), not the
+/// mounting around it.
+fn mount_point_should_be_dir(source: &std::path::Path) -> bool {
+    std::fs::metadata(source)
+        .map(|md| md.is_dir())
+        .unwrap_or(true)
+}
+
 fn bind_volume(rootfs: &str, m: &Mount) -> nix::Result<()> {
     if !mount_target_safe(&m.target) {
         return Err(nix::errno::Errno::EINVAL);
@@ -1112,9 +1184,23 @@ fn bind_volume(rootfs: &str, m: &Mount) -> nix::Result<()> {
         return Err(nix::errno::Errno::EINVAL);
     };
     let dst = dst_path.to_string_lossy().into_owned();
-    // File source (e.g. secret) → the target must be a FILE; directory source
-    // → a directory.
-    if std::path::Path::new(&m.source).is_file() {
+    // The mount point must have the SHAPE of the source: a directory source
+    // needs a directory, anything else needs a file-shaped placeholder.
+    //
+    // The test used to be `is_file()`, which is true only for regular files and
+    // therefore sent every socket, fifo and device node down the directory
+    // branch — bind-mounting one onto a freshly created directory fails with
+    // ENOTDIR. Not hypothetical: `--gpus all` on a host with the NVIDIA
+    // persistence daemon aborts the whole run there, because the CDI spec
+    // `nvidia-ctk` generates mounts `/run/nvidia-persistenced/socket`.
+    //
+    // A source that does not exist keeps the old behaviour (directory) on
+    // purpose: callers that pre-create a host directory elsewhere in the
+    // pipeline depend on it, and the mount fails with its own clear ENOENT
+    // either way.
+    if mount_point_should_be_dir(std::path::Path::new(&m.source)) {
+        let _ = std::fs::create_dir_all(&dst);
+    } else {
         if let Some(parent) = std::path::Path::new(&dst).parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -1123,8 +1209,6 @@ fn bind_volume(rootfs: &str, m: &Mount) -> nix::Result<()> {
             .write(true)
             .truncate(false)
             .open(&dst);
-    } else {
-        let _ = std::fs::create_dir_all(&dst);
     }
     mount(
         Some(m.source.as_str()),
@@ -1137,8 +1221,11 @@ fn bind_volume(rootfs: &str, m: &Mount) -> nix::Result<()> {
     // `mount`, so without this a volume could bring setuid binaries or device
     // nodes into the container. Additional `rdonly` if requested. (`noexec` NOT,
     // so as not to break volumes with legitimate executables, e.g. code.)
-    let mut rflags =
-        MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_NOSUID | MsFlags::MS_NODEV;
+    let mut rflags = MsFlags::MS_BIND
+        | MsFlags::MS_REMOUNT
+        | MsFlags::MS_NOSUID
+        | MsFlags::MS_NODEV
+        | locked_flags_for(std::path::Path::new(&m.source));
     if m.readonly {
         rflags |= MsFlags::MS_RDONLY;
     }
@@ -1514,7 +1601,9 @@ fn setup_rootfs(
     // here, before the loop.
     let missing: Vec<&str> = mounts
         .iter()
-        .filter(|m| !m.source.is_empty() && !std::path::Path::new(&m.source).exists())
+        .filter(|m| {
+            !m.optional && !m.source.is_empty() && !std::path::Path::new(&m.source).exists()
+        })
         .map(|m| m.source.as_str())
         .collect();
     if !missing.is_empty() {
@@ -1525,7 +1614,18 @@ fn setup_rootfs(
         return Err(nix::errno::Errno::ENOENT);
     }
     for m in mounts {
-        bind_volume(rootfs, m)?;
+        match bind_volume(rootfs, m) {
+            Ok(()) => {}
+            // An engine-injected mount that does not fit this image degrades
+            // the container; it does not break it. Named, never silent — the
+            // whole point of the `-v` diagnostics above is that a mount which
+            // did not happen must be findable without reading a JSON record.
+            Err(e) if m.optional => eprintln!(
+                "delonix: skipped injected mount {} -> {} ({e}); the container starts without it",
+                m.source, m.target
+            ),
+            Err(e) => return Err(e),
+        }
     }
     // Best-effort ld cache refresh for any driver libraries a CDI-derived
     // mount just injected (e.g. `libcuda.so.*` from `--gpus nvidia`/`--device
@@ -6836,6 +6936,72 @@ mod tests {
         }
     }
 
+    #[test]
+    fn locked_flags_come_from_the_most_specific_mount() {
+        const MI: &str = "\
+23 28 0:22 / /proc rw,nosuid,nodev,noexec,relatime shared:12 - proc proc rw
+25 28 0:6 / /dev rw,nosuid,relatime shared:2 - devtmpfs udev rw,size=15G
+28 1 259:2 / / rw,relatime shared:1 - ext4 /dev/nvme0n1p2 rw,errors=remount-ro
+31 28 0:24 / /run rw,nosuid,nodev,noexec,relatime shared:5 - tmpfs tmpfs rw,mode=755
+44 31 0:24 /user/1000 /run/user/1000 rw,nosuid,nodev,relatime shared:9 - tmpfs tmpfs rw
+";
+        // The one that broke `--gpus all`: /run is noexec+relatime, and a
+        // remount that drops either is EPERM for an unprivileged caller.
+        let run = locked_flags_from(MI, std::path::Path::new("/run/nvidia-persistenced/socket"));
+        assert!(run.contains(MsFlags::MS_NOEXEC));
+        assert!(run.contains(MsFlags::MS_RELATIME));
+        assert!(run.contains(MsFlags::MS_NOSUID) && run.contains(MsFlags::MS_NODEV));
+        assert!(!run.contains(MsFlags::MS_RDONLY));
+
+        // Longest prefix wins: /run/user/1000 is NOT noexec even though /run is.
+        let user = locked_flags_from(MI, std::path::Path::new("/run/user/1000/bus"));
+        assert!(
+            !user.contains(MsFlags::MS_NOEXEC),
+            "apanhou as flags de /run"
+        );
+        assert!(user.contains(MsFlags::MS_RELATIME));
+
+        // A plain path on / carries only what / carries.
+        let root = locked_flags_from(MI, std::path::Path::new("/usr/bin/nvidia-smi"));
+        assert_eq!(root, MsFlags::MS_RELATIME);
+
+        // No mountinfo at all is not a reason to fail a mount.
+        assert_eq!(
+            locked_flags_from("", std::path::Path::new("/x")),
+            MsFlags::empty()
+        );
+    }
+
+    #[test]
+    fn mount_point_follows_the_source_shape() {
+        let dir = std::env::temp_dir().join(format!("delonix-shape-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let plain_file = dir.join("f");
+        std::fs::write(&plain_file, b"x").unwrap();
+        let directory = dir.join("d");
+        std::fs::create_dir_all(&directory).unwrap();
+        let socket = dir.join("s");
+        let _l = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+
+        assert!(
+            mount_point_should_be_dir(&directory),
+            "a directory source wants a directory mount point"
+        );
+        assert!(!mount_point_should_be_dir(&plain_file));
+        // The one that mattered: `is_file()` said false here and the caller
+        // created a directory, so binding /run/nvidia-persistenced/socket died
+        // with ENOTDIR and took the whole `--gpus all` run with it.
+        assert!(
+            !mount_point_should_be_dir(&socket),
+            "a socket needs a file-shaped mount point"
+        );
+        // A source that is not there at all keeps the historical behaviour.
+        assert!(mount_point_should_be_dir(&dir.join("nao-existe")));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     /// Achado de auditoria (MÉDIO): `bind_devices` construía o destino por
     /// concatenação crua e criava o mountpoint com `File::create` (que TRUNCA).
     /// Um `spec.devices` de um manifesto não-confiado — `/dev/null:/../../x` —
@@ -7710,20 +7876,34 @@ mod tests {
                 target: "/a".into(),
                 readonly: false,
                 propagation: None,
+                optional: false,
             },
             Mount {
                 source: ausente.to_string_lossy().into_owned(),
                 target: "/b".into(),
                 readonly: true,
                 propagation: None,
+                optional: false,
+            },
+            // An INJECTED mount whose source is gone must not refuse the
+            // container: a CDI spec names host paths (the persistenced socket,
+            // firmware blobs) that come and go with a daemon.
+            Mount {
+                source: ausente.to_string_lossy().into_owned(),
+                target: "/d".into(),
+                readonly: true,
+                propagation: None,
+                optional: true,
             },
         ];
         let missing: Vec<&str> = mounts
             .iter()
-            .filter(|m| !m.source.is_empty() && !std::path::Path::new(&m.source).exists())
+            .filter(|m| {
+                !m.optional && !m.source.is_empty() && !std::path::Path::new(&m.source).exists()
+            })
             .map(|m| m.source.as_str())
             .collect();
-        assert_eq!(missing.len(), 1, "so o ausente conta");
+        assert_eq!(missing.len(), 1, "so o ausente NAO opcional conta");
         assert!(missing[0].contains("dlx-nao-existe"));
 
         // Uma origem VAZIA nao e um caminho em falta — ha mounts sintetizados
@@ -7733,6 +7913,7 @@ mod tests {
             target: "/c".into(),
             readonly: false,
             propagation: None,
+            optional: false,
         }];
         assert!(vazio
             .iter()

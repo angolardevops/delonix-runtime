@@ -1061,6 +1061,7 @@ impl VolumeStore {
             target: target.to_string(),
             readonly,
             propagation,
+            optional: false,
         })
     }
 }
