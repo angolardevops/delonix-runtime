@@ -34,6 +34,12 @@ msgstr "Constrói uma imagem a partir de um Dockerfile ou Delonixfile."
 msgid "Declarative microVMs: create/ls/stop/rm/status."
 msgstr "microVMs declarativas: create/ls/stop/rm/status."
 
+msgid "Declarative microVMs: create/ls/stop/start/status"
+msgstr "microVMs declarativas: create/ls/stop/start/status"
+
+msgid "Declarative microVMs: create/ls/stop/start/status.\n\n`describe`/`rm` moved to the generic per-Kind verbs — `delonix describe vm <name>` / `delonix delete vm <name>`."
+msgstr "microVMs declarativas: create/ls/stop/start/status.\n\n`describe`/`rm` passaram para os verbos genéricos por-Kind — `delonix describe vm <nome>` / `delonix delete vm <nome>`."
+
 msgid "Named volumes and bind mounts: create/ls/rm/inspect."
 msgstr "Volumes nomeados e bind mounts: create/ls/rm/inspect."
 
