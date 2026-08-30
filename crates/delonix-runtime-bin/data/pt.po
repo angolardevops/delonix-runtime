@@ -10156,3 +10156,12 @@ msgstr "fazê-lo mesmo — cortar a metade a quota de cpu do culpado, e devolvê
 
 msgid "one decision and exit, for a systemd timer"
 msgstr "uma decisão e sai, para um temporizador systemd"
+
+msgid "resources (delonix system resources)"
+msgstr "recursos (delonix system resources)"
+
+msgid "no cgroup to govern: this session has no delegation boundary (see `system setup`)"
+msgstr "não há cgroup para governar: esta sessão não tem fronteira de delegação (ver `system setup`)"
+
+msgid "{n} host prerequisite(s) not met, {r} resource finding(s) open"
+msgstr "{n} pré-requisito(s) do anfitrião por cumprir, {r} achado(s) de recursos em aberto"

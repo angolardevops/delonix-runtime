@@ -794,9 +794,18 @@ fn cmd_thermal(high: u64, low: u64, floor: u64, interval: u64, once: bool) -> Re
             super::po::t("--high must be greater than --low").into(),
         ));
     }
-    if runtime::is_rootless() {
+    // It used to refuse rootless outright, on the assumption that the ceiling
+    // it lowers is always the root `delonix.slice`. It is not: rootless now
+    // gets its ceiling on the delegated base the workloads already live in, and
+    // writing `cpu.max` there needs no privilege at all. What it still needs is
+    // a delegation BOUNDARY — an SSH session scope has none, and there the
+    // refusal is real and says so.
+    if runtime::slice_path().is_none() {
         return Err(delonix_runtime_core::Error::Invalid(
-            super::po::t("the thermal governor needs root (it writes to the host cgroup)").into(),
+            super::po::t(
+                "no cgroup to govern: this session has no delegation boundary (see `system setup`)",
+            )
+            .into(),
         ));
     }
     let mut scale = 100u64; // % of Delonix's CPU budget
@@ -1639,10 +1648,37 @@ fn cmd_doctor(strict: bool) -> Result<()> {
             )
         );
     }
-    if strict && failed > 0 {
+    // The resource findings, from the SAME rules `system resources` prints.
+    // Two lists of problems with the same host, in two commands, is how an
+    // operator ends up reading one and missing the other — and this is the one
+    // people run when something is wrong. Only the stable classes appear here:
+    // `doctor` answers «is this host able to do what the engine promises», and
+    // this minute's CPU pressure is not an answer to that.
+    let resource_findings: Vec<_> = {
+        use delonix_runtime::resource_advice as advice;
+        advice::advise(&advice::collect(&state_root()))
+            .into_iter()
+            .filter(|f| f.class.gates())
+            .collect()
+    };
+    if !resource_findings.is_empty() {
+        println!();
+        println!("{}", super::po::t("resources (delonix system resources)"));
+        for f in &resource_findings {
+            println!("  {:<14}{:<9}{}", f.id, f.subject, f.finding);
+            if !f.action.is_empty() {
+                println!("  {:<14}{:<9}→ {}", "", "", f.action);
+            }
+        }
+    }
+
+    if strict && (failed > 0 || !resource_findings.is_empty()) {
         return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
-            "{n} host prerequisite(s) not met",
-            &[("n", &failed.to_string())],
+            "{n} host prerequisite(s) not met, {r} resource finding(s) open",
+            &[
+                ("n", &failed.to_string()),
+                ("r", &resource_findings.len().to_string()),
+            ],
         )));
     }
     Ok(())
