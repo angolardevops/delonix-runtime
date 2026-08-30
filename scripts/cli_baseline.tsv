@@ -191,6 +191,7 @@
 ~	system namespace describe
 ~	system namespace ls
 =	system prune
+=	system regulate
 =	system resources
 ~	system restore
 =	system setup
