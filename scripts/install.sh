@@ -18,6 +18,8 @@
 # Flags:
 #   --no-vm        não instala as dependências de VMs (libvirt/qemu/cloud-init)
 #   --no-tune      não aplica o tuning de kernel (sysctls/módulos)
+#   --no-gpu       não configura aceleradores (CDI da NVIDIA, grupo render).
+#                  Por omissão é LIGADO, e só faz algo se houver GPU.
 #   --no-binary    só dependências/configuração (usa um binário já instalado)
 #   --no-editor-plugin  não instala a extensão nos editores VS Code encontrados
 #   --with-cri     instala também o delonix-cri (nó Kubernetes)
@@ -85,6 +87,9 @@ WITH_VM=1
 # de containers cujos limites não pegam é entregar metade do produto.
 WITH_DELEGATE=1
 WITH_TUNE=1
+# Fase de aceleradores: ligada por omissao, mas inerte num host sem GPU — ver
+# a seccao "aceleradores" mais abaixo, que tem tres estados e nao dois.
+WITH_GPU=1
 WITH_BINARY=1
 WITH_CRI=0
 WITH_EDITOR_PLUGIN=1
@@ -156,6 +161,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --no-vm)      WITH_VM=0 ;;
     --no-tune)    WITH_TUNE=0 ;;
+    --no-gpu)     WITH_GPU=0 ;;
     --no-editor-plugin) WITH_EDITOR_PLUGIN=0 ;;
     --no-binary)  WITH_BINARY=0 ;;
     --with-cri)   WITH_CRI=1 ;;
@@ -801,6 +807,157 @@ SYSCTL
   fi
 fi
 
+# ------------------------------------------------ aceleradores (GPU), opt-out
+# Ate aqui a GPU era uma ETIQUETA: o `step host gpu` la em cima corre um lspci,
+# imprime o nome da placa e nao configura NADA. O motor, esse, exige uma spec
+# CDI para `--gpus nvidia|all` e para um `--device nvidia.com/gpu=...`, e sem
+# ela recusa a corrida com uma mensagem a mandar o utilizador instalar o
+# nvidia-container-toolkit e correr `nvidia-ctk cdi generate` A MAO. Dois
+# passos manuais no caminho normal de quem so quer correr um container com
+# GPU — exactamente o que este instalador existe para nao deixar acontecer.
+#
+# A fase tem TRES estados por acelerador, e nunca dois:
+#   configurado          — ja esta, salta (SKIP)
+#   presente mas nao configurado — configura, e diz o que fez
+#   ausente              — salta EM SILENCIO. Uma maquina sem GPU nao leva um
+#                          aviso amarelo por nao ter uma GPU.
+#
+# Porque nao vem do gestor de pacotes da distro: o nvidia-container-toolkit nao
+# esta nos repositorios do Debian/Ubuntu/Fedora — vem do repositorio da propria
+# NVIDIA, e por isso este bloco acrescenta-o (chave + lista) antes de instalar.
+# Numa distro cujo repositorio nao publicamos aqui, NAO se inventa: escreve-se
+# o comando exacto e segue-se.
+#
+# AMD e Intel nao precisam de CDI nenhum: `--gpus dri` liga /dev/dri/renderD*
+# em cru e o que falta e quase sempre so a pertenca ao grupo `render`.
+NEED_GPU_PROOF=0
+if [ "$WITH_GPU" = 1 ]; then
+  # Deteccao pelo NO, nao pelo lspci: um driver instalado sem modulo carregado
+  # nao serve para nada, e /dev/nvidia0 so existe quando o modulo esta de pe.
+  HAS_NVIDIA_NODE=0
+  ls /dev/nvidia[0-9]* >/dev/null 2>&1 && HAS_NVIDIA_NODE=1
+  HAS_NVIDIA_PCI=0
+  if command -v lspci >/dev/null 2>&1; then
+    lspci -n 2>/dev/null | awk '{print $3}' | grep -qi '^10de:' && HAS_NVIDIA_PCI=1
+  fi
+  HAS_DRI=0
+  ls /dev/dri/renderD* >/dev/null 2>&1 && HAS_DRI=1
+
+  # `ls a b` sai 2 quando UM dos globos nao casa, mesmo tendo listado o outro —
+  # e com quatro caminhos a verificar isso dava sempre "nao ha spec", que fazia
+  # o instalador regerar por cima de uma spec ja gerada pelo nvidia-cdi-refresh.
+  cdi_spec_path() {
+    local d f
+    for d in /etc/cdi /var/run/cdi; do
+      for f in "$d"/*.yaml "$d"/*.yml "$d"/*.json; do
+        [ -e "$f" ] && { printf '%s\n' "$f"; return 0; }
+      done
+    done
+    return 1
+  }
+
+  if [ "$HAS_NVIDIA_NODE" = 0 ] && [ "$HAS_NVIDIA_PCI" = 1 ]; then
+    # Placa no barramento, sem no em /dev: o driver nao esta instalado ou o
+    # modulo nao carregou. Nao e este instalador que instala drivers de kernel
+    # proprietarios — mas cala-lo seria pior, porque `--gpus all` vai falhar.
+    warn "NVIDIA GPU on the bus but no /dev/nvidia* node — the driver is not installed or the module did not load; install your distro's NVIDIA driver, reboot, and re-run this installer to finish the GPU setup"
+  fi
+
+  if [ "$HAS_NVIDIA_NODE" = 1 ]; then
+    # 1. o toolkit. So ele sabe que bibliotecas o driver INSTALADO exporta —
+    #    a versao muda a cada actualizacao e nao se adivinha.
+    if command -v nvidia-ctk >/dev/null 2>&1; then
+      skip accel nvidia-ctk
+    else
+      step accel nvidia-ctk "adding the NVIDIA repository and installing nvidia-container-toolkit..."
+      _ctk_ok=0
+      case "$PKG" in
+        apt)
+          if curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey 2>/dev/null \
+               | $SUDO gpg --batch --yes --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg 2>/dev/null \
+             && curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list 2>/dev/null \
+               | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+               | $SUDO tee /etc/apt/sources.list.d/nvidia-container-toolkit.list >/dev/null; then
+            PKG_UPDATED=0   # a lista e nova: o indice tem mesmo de ser relido
+            pkg_update_once
+            pkg_install nvidia-container-toolkit >/dev/null 2>&1 && _ctk_ok=1
+          fi ;;
+        dnf)
+          if curl -fsSL https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo 2>/dev/null \
+               | $SUDO tee /etc/yum.repos.d/nvidia-container-toolkit.repo >/dev/null; then
+            pkg_install nvidia-container-toolkit >/dev/null 2>&1 && _ctk_ok=1
+          fi ;;
+        *)
+          # Nao publicamos o repositorio desta distro. O comando exacto vale
+          # mais do que uma tentativa as cegas com o nome errado do pacote.
+          warn "install nvidia-container-toolkit from your distro (Arch: pacman -S nvidia-container-toolkit; openSUSE: see https://github.com/NVIDIA/nvidia-container-toolkit), then re-run this installer" ;;
+      esac
+      if [ "$_ctk_ok" = 1 ] && command -v nvidia-ctk >/dev/null 2>&1; then
+        stepok accel nvidia-ctk
+      elif [ "$_ctk_ok" = 1 ]; then
+        warn "nvidia-container-toolkit installed but nvidia-ctk is not on PATH"
+      else
+        warn "could not install nvidia-container-toolkit — 'delonix container run --gpus all' will refuse to start until it exists"
+      fi
+    fi
+
+    # 2. a spec CDI. E ela que o motor le; o toolkit sozinho nao chega, e a
+    #    versao 1.17+ do pacote instala um nvidia-cdi-refresh.path que a
+    #    regenera em /var/run/cdi a cada boot e a cada troca de driver. Se ele
+    #    ja a escreveu, nao se escreve uma segunda em /etc/cdi: duas specs do
+    #    mesmo vendor sao lidas as DUAS, e a mais velha sobrevive a uma
+    #    actualizacao de driver a apontar para bibliotecas que ja nao existem.
+    if cdi_spec_path >/dev/null; then
+      skip accel cdi-spec
+    elif command -v nvidia-ctk >/dev/null 2>&1; then
+      step accel cdi-spec "generating /etc/cdi/nvidia.yaml..."
+      $SUDO mkdir -p /etc/cdi
+      if $SUDO nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml >/dev/null 2>&1; then
+        stepok accel cdi-spec
+      else
+        warn "nvidia-ctk could not generate the CDI spec — run 'sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml' and read its error"
+      fi
+    fi
+
+    # 3. a spec e util? Uma que nao declare os nos de CONTROLO nao serve: com
+    #    /dev/nvidia0 e sem /dev/nvidiactl + /dev/nvidia-uvm, nenhum processo
+    #    CUDA inicializa. Vale a pena olhar, porque o modo de falha e um
+    #    container que arranca bem e so estoura quando alguem chama a GPU.
+    _cdi_spec=$(cdi_spec_path || true)
+    if [ -n "$_cdi_spec" ]; then
+      if grep -q 'nvidiactl' "$_cdi_spec" 2>/dev/null && grep -q 'nvidia-uvm' "$_cdi_spec" 2>/dev/null; then
+        stepok accel gpu-ready
+        NEED_GPU_PROOF=1
+      else
+        warn "the CDI spec at $_cdi_spec does not declare /dev/nvidiactl and /dev/nvidia-uvm — containers will see the GPU node but CUDA will not initialise; regenerate it with 'sudo nvidia-ctk cdi generate'"
+      fi
+    fi
+  fi
+
+  # AMD/Intel (e a parte /dev/dri de uma NVIDIA): sem CDI, so pertenca de
+  # grupo. `--gpus dri` liga os nos em cru e e o suficiente para VA-API,
+  # Vulkan e ROCm.
+  if [ "$HAS_DRI" = 1 ]; then
+    _dri_grp=$(stat -c '%G' /dev/dri/renderD128 2>/dev/null || echo render)
+    if id -nG "$REAL_USER" 2>/dev/null | tr ' ' '\n' | grep -qx "$_dri_grp"; then
+      skip accel dri-group
+    elif getent group "$_dri_grp" >/dev/null 2>&1; then
+      step accel dri-group "adding $REAL_USER to '$_dri_grp' (for --gpus dri)..."
+      $SUDO usermod -aG "$_dri_grp" "$REAL_USER" 2>/dev/null \
+        && { stepok accel dri-group; NEED_RELOGIN=1; } \
+        || warn "could not add $REAL_USER to '$_dri_grp' — '--gpus dri' will fail with EACCES"
+    fi
+  fi
+
+  # `[ ... ] && skip ...` seria mais curto e ABORTARIA o instalador: com a
+  # condicao falsa o comando devolve 1 e o `set -e` la de cima mata o processo
+  # a meio, sem uma linha de erro. Foi assim que a etiqueta de GPU ja matou uma
+  # instalacao inteira (ver o comentario do GPU_INFO). Portanto: `if`.
+  if [ "$HAS_NVIDIA_NODE" = 0 ] && [ "$HAS_NVIDIA_PCI" = 0 ] && [ "$HAS_DRI" = 0 ]; then
+    skip accel gpu
+  fi
+fi
+
 # ------------------------------------- construir imagens VM (opt-in explicito)
 # `delonix image --vm build` corre `virt-customize`, que constroi um appliance
 # com o supermin. Duas coisas que faltam por omissao num host tipico, e cada uma
@@ -1153,6 +1310,9 @@ check "nft"                            has_cmd nft
 check "subuid range for $REAL_USER"    grep -q "^$REAL_USER:" /etc/subuid
 check "subgid range for $REAL_USER"    grep -q "^$REAL_USER:" /etc/subgid
 check "/dev/net/tun"                   test -e /dev/net/tun
+if [ "$NEED_GPU_PROOF" = 1 ]; then
+  check "CDI spec (--gpus all)"        sh -c 'ls /etc/cdi/*.yaml /etc/cdi/*.json /var/run/cdi/*.yaml /var/run/cdi/*.json >/dev/null 2>&1'
+fi
 check "user namespaces"                unshare -r -n true
 if [ "$WITH_VM" = 1 ]; then
   check "VM backend (cloud-hypervisor or virsh)" sh -c 'command -v cloud-hypervisor || command -v virsh'
@@ -1247,6 +1407,19 @@ CGHINT
 fi
 if [ "$NEED_RELOGIN" = 1 ]; then
   warn "log out and back in (or run 'newgrp kvm') for the new group memberships to take effect"
+fi
+if [ "$NEED_GPU_PROOF" = 1 ]; then
+  echo
+  msg "GPU configured — prove it end to end (this pulls a ~80MB image, which is why the installer does not do it for you):"
+  cat <<'GPUPROOF'
+    delonix container run --rm --gpus all ubuntu:24.04 nvidia-smi
+
+    It must print the driver table. If it prints `nvidia-smi: not found`, the
+    engine is older than the fix for CDI top-level containerEdits — the whole
+    driver (nvidia-smi and every library) lives there, not in the per-device
+    entries, and an engine that reads only the latter hands the container
+    /dev/nvidia0 and nothing else.
+GPUPROOF
 fi
 
 }  # fim do bloco de protecção contra download truncado (ver o topo do ficheiro)
