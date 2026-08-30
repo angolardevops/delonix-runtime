@@ -7436,6 +7436,7 @@ mod tests {
             target: "/var/lib".into(),
             readonly: false,
             propagation: None,
+            optional: false,
         }];
 
         let desired = super::desired_container_fields(&spec);
@@ -7468,6 +7469,7 @@ mod tests {
             target: "/var/lib".into(),
             readonly: false,
             propagation: None,
+            optional: false,
         };
         assert_eq!(super::mount_to_spec(&named, root), "dados:/var/lib");
         let ro = delonix_runtime_core::Mount {
@@ -7480,6 +7482,7 @@ mod tests {
             target: "/etc/nginx".into(),
             readonly: true,
             propagation: None,
+            optional: false,
         };
         assert_eq!(
             super::mount_to_spec(&bind, root),
@@ -7492,6 +7495,7 @@ mod tests {
             target: "/x".into(),
             readonly: false,
             propagation: None,
+            optional: false,
         };
         assert_eq!(
             super::mount_to_spec(&deep, root),
