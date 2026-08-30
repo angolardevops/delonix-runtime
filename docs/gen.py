@@ -295,7 +295,7 @@ para o comando específico, nunca adivinha).</p>"""},
     },
     "pod": {
         "title": "delonix pod",
-        "tagline": "Pods reais multi-container (create, ls, logs) — N containers como uma unidade.",
+        "tagline": "Pods reais multi-container (create, ls, logs, exec, cp, attach) — N containers como uma unidade.",
         "intro": """Pods de verdade, ao estilo Kubernetes: N containers que <strong>partilham as
 namespaces do pod</strong> e se gerem como uma só unidade. Hoje partilham <strong>netns</strong>
 (o mesmo IP, alcançam-se por <code>localhost</code>), <strong>IPC</strong> (System V/POSIX) e
@@ -323,6 +323,19 @@ falha, o pod é desfeito por inteiro (sem meio-pod).</p>"""},
                 ("Logs do 1.º container do pod", "delonix pod logs web-app"),
                 ("Logs de um container específico (nome curto dentro do pod)", "delonix pod logs web-app --container sidecar -f"),
             ]},
+            "exec": {"examples": [
+                ("Correr um comando no 1.º membro", "delonix pod exec web-app nginx -t"),
+                ("Uma shell interactiva num membro específico", "delonix pod exec -it web-app --container sidecar sh"),
+            ]},
+            "cp": {"examples": [
+                ("Do 1.º membro do pod para o host", "delonix pod cp web-app:/etc/nginx/nginx.conf ."),
+                ("Do host para um membro específico", "delonix pod cp ./site.conf web-app:/etc/nginx/conf.d/ --container sidecar"),
+            ], "notes": """<p>Exactamente um dos lados é <code>pod:/caminho</code> — a mesma convenção
+do <code>container cp</code>. Sem <code>--container</code>, resolve ao 1.º membro do pod.</p>"""},
+            "attach": {"examples": [
+                ("Voltar a ligar-se à saída do 1.º membro (só saída)", "delonix pod attach web-app"),
+            ], "notes": """<p>Mesmo contrato do <code>container attach</code>: sem canal de stdin vivo
+para um container já desanexado, por isso <code>-i</code> é recusado com erro claro.</p>"""},
         },
     },
     "image": {
@@ -388,7 +401,7 @@ image + kubeadm/kubelet/kubectl + <code>delonix-cri</code> — a base do <code>d
                 ("Referência com tag e digest (formato combinado suportado)",
                  "delonix image pull kindest/node:v1.34.0@sha256:7416a6…"),
             ]},
-            "list": {"examples": [("", "delonix image list")]},
+            "ls": {"examples": [("", "delonix image ls")]},
             "remove": {"examples": [("", "delonix image remove alpine:3.19")]},
             "export": {"examples": [
                 ("Bundle OCI runtime para correr com runc/crun",
@@ -789,6 +802,15 @@ comando, do zero a um cluster com o <code>delonix-cri</code> como runtime (sem c
                  'delonix cluster create --name lab'),
                 ('Com workers',
                  'delonix cluster create --name lab --workers 2')]},
+            "kubeconfig": {"examples": [
+                ('O único cluster que existe — não precisa de nome',
+                 'delonix cluster kubeconfig'),
+                ('Um específico, redireccionado para um ficheiro',
+                 'delonix cluster kubeconfig lab > lab.yaml')],
+                "notes": """<p>Lê da CACHE local (<code>&lt;root&gt;/clusters/&lt;nome&gt;-kubeconfig.yaml</code>)
+— sem SSH ao vivo. Funciona para os dois tipos de cluster (modo kind e
+<code>kubeadm</code>/SSH), que escrevem no mesmo caminho. Não faz merge em
+<code>~/.kube/config</code>: isso já acontece automaticamente na criação.</p>"""},
             "init": {"examples": [
                 ('Scaffold de um cloud.yaml para cluster apply',
                  'delonix cluster init ./meu-cluster')]},
@@ -1074,7 +1096,7 @@ quiser que uma discordância seja recusada.""",
             ('Ver o que entraria, sem escrever nada', 'delonix backup create pod api --dry-run'),
             ('Duas vezes por dia, guardando os dois mais recentes', 'delonix backup schedule container db --max-for-day 2 --to /srv/backups'),
             ('Ou no horário que quiseres, em sintaxe de crontab', 'delonix backup schedule stack loja --cron "30 3 * * 1" --to /srv/backups'),
-            ('Que arquivos existem, e o que cada um leva', 'delonix backup list --from /srv/backups'),
+            ('Que arquivos existem, e o que cada um leva', 'delonix backup ls --from /srv/backups'),
             ('O que está dentro de um, sem o desempacotar', 'delonix backup inspect container-db-20260811-205312.tar.gz --from /srv/backups'),
             ('Repor os dados (recusa enquanto estiver a correr)', 'delonix backup restore container-db-20260811-205312.tar.gz'),
             ('Parar, repor e arrancar de novo', 'delonix backup restore ./container-db-20260811-205312.tar.gz --force'),
@@ -4998,10 +5020,10 @@ delonix build -t delonix-temp:1 .</code></pre>
 ...
 Successfully installed annotated-types-0.7.0 anyio-4.14.2 ... fastapi-0.115.0 ...
 ef708d73f029</code></pre></div>
-<p>O ID no fim (<code>ef708d73f029</code>) é a imagem. <code>delonix image list</code> confirma o
+<p>O ID no fim (<code>ef708d73f029</code>) é a imagem. <code>delonix image ls</code> confirma o
 tamanho — o estágio final, sem as ferramentas de build, fica bem mais pequeno que se fosse tudo
 num único <code>FROM</code>:</p>
-<pre><code>delonix image list</code></pre>
+<pre><code>delonix image ls</code></pre>
 <div class="out"><pre><code>REPOSITORY:TAG     IMAGE ID       CREATED          SIZE
 delonix-temp:1     ef708d73f029   agora mesmo      157.2 MiB
 python:3.12-slim   25c5b8011a34   agora mesmo       41.2 MiB</code></pre></div>
@@ -5121,10 +5143,10 @@ delonix build -t delonix-temp:1 .</code></pre>
 ...
 Successfully installed annotated-types-0.7.0 anyio-4.14.2 ... fastapi-0.115.0 ...
 ef708d73f029</code></pre></div>
-<p>The ID at the end (<code>ef708d73f029</code>) is the image. <code>delonix image list</code>
+<p>The ID at the end (<code>ef708d73f029</code>) is the image. <code>delonix image ls</code>
 confirms the size — the final stage, with no build tools, ends up much smaller than if everything
 were in a single <code>FROM</code>:</p>
-<pre><code>delonix image list</code></pre>
+<pre><code>delonix image ls</code></pre>
 <div class="out"><pre><code>REPOSITORY:TAG     IMAGE ID       CREATED          SIZE
 delonix-temp:1     ef708d73f029   just now         157.2 MiB
 python:3.12-slim   25c5b8011a34   just now          41.2 MiB</code></pre></div>

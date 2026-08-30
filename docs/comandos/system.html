@@ -160,6 +160,7 @@ Commands:
   events     Engine events (create/start/die/remove/…), from oldest to most recent
   features   What each capability promises, and the EVIDENCE for it
   info       Engine state: rootless?, cgroup delegation, network infra, counts
+  resources  How much this host has, how much the engine can actually enforce, and what is under pressure right now
   backup     Save this node&#x27;s state into one archive
   restore    Put a node&#x27;s state back from a `system backup` archive
   setup      Diagnose — and, with `--delegate`, fix — cgroup delegation
@@ -179,7 +180,7 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 COMMAND MAP:
-  Inspect      events · info · features · doctor · df
+  Inspect      events · info · features · doctor · resources · df
   Configure    setup · backup · restore · virt
   Maintenance  prune · thermal
   Dashboards   monitor
@@ -198,7 +199,7 @@ EXAMPLES:
 
 SEE ALSO:
   delonix dash · delonix system events · delonix container stats · delonix
-  image list
+  image ls
 
   delonix › system</code></pre></div>
 <h2 id='thermal'><code>system thermal</code></h2>
@@ -469,8 +470,8 @@ EXAMPLES:
   delonix system df
 
 SEE ALSO:
-  delonix system prune · delonix image list · delonix volume ls · delonix
-  system info
+  delonix system prune · delonix image ls · delonix volume ls · delonix system
+  info
 
   delonix › system › df</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Uso de disco</div><div class='cap lang-en'>Disk usage</div><pre><code>delonix system df</code></pre></div>

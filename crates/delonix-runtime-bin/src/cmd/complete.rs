@@ -109,6 +109,26 @@ pub fn clusters() -> Vec<CompletionCandidate> {
     cands(nomes)
 }
 
+/// Cluster names with a cached kubeconfig (`<root>/clusters/<name>-kubeconfig.yaml`) —
+/// covers BOTH cluster types (kind-mode and kubeadm/SSH), unlike `clusters()`
+/// above, which only sees kind-mode's container labels.
+pub fn cached_kubeconfigs() -> Vec<CompletionCandidate> {
+    let dir = state_root().join("clusters");
+    let mut names: Vec<String> = std::fs::read_dir(&dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            e.file_name()
+                .to_str()
+                .and_then(|f| f.strip_suffix("-kubeconfig.yaml"))
+                .map(String::from)
+        })
+        .collect();
+    names.sort();
+    cands(names)
+}
+
 /// Names of the vault secrets.
 pub fn secrets() -> Vec<CompletionCandidate> {
     let Ok(store) = delonix_runtime_core::SecretStore::open(state_root()) else {
