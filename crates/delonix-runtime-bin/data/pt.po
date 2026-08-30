@@ -10018,3 +10018,72 @@ msgstr "este ficheiro de política não recusa nada — todos os campos estão n
 
 msgid "an entry in `allowedRegistries` contains `/` — this field takes registry HOSTS (`docker.io`, `ghcr.io`), not image references, and an entry with a path can never match"
 msgstr "uma entrada de `allowedRegistries` tem `/` — este campo leva HOSTS de registo (`docker.io`, `ghcr.io`), não referências de imagem, e uma entrada com caminho nunca pode casar"
+
+msgid "host"
+msgstr "máquina"
+
+msgid "cpus:               {n}"
+msgstr "cpus:               {n}"
+
+msgid "memory:             {total} total, {available} available"
+msgstr "memória:            {total} no total, {available} disponíveis"
+
+msgid "swap:               {total} total, {used} used"
+msgstr "swap:               {total} no total, {used} em uso"
+
+msgid "state root:         {path} ({free} free)"
+msgstr "raiz de estado:     {path} ({free} livres)"
+
+msgid "cpu temperature:    {celsius} °C"
+msgstr "temperatura do cpu: {celsius} °C"
+
+msgid "control — what the engine can actually enforce here"
+msgstr "controlo — o que o motor consegue mesmo impor aqui"
+
+msgid "mode:               {mode}"
+msgstr "modo:               {mode}"
+
+msgid "cgroup base:        {path}"
+msgstr "base de cgroup:     {path}"
+
+msgid "none — no delegation boundary found"
+msgstr "nenhuma — não há fronteira de delegação"
+
+msgid "enforced"
+msgstr "imposto"
+
+msgid "IGNORED"
+msgstr "IGNORADO"
+
+msgid "pressure — share of time some task was stalled (avg10 / avg60 / avg300)"
+msgstr "pressão — fatia do tempo com alguma tarefa parada (avg10 / avg60 / avg300)"
+
+msgid "the bottleneck right now"
+msgstr "o gargalo neste momento"
+
+msgid "unavailable (kernel without CONFIG_PSI)"
+msgstr "indisponível (kernel sem CONFIG_PSI)"
+
+msgid "{n} flag(s) are accepted and silently ignored on this host: {flags}"
+msgstr "{n} flag(s) são aceites e ignoradas em silêncio nesta máquina: {flags}"
+
+msgid "fix: sudo delonix system setup --delegate, then log out and back in"
+msgstr "correcção: sudo delonix system setup --delegate, e depois sair e voltar a entrar"
+
+msgid "io is never delegated to a rootless user; run the node as root for I/O ceilings"
+msgstr "o io nunca é delegado a um utilizador sem privilégios; para tectos de I/O corre o nó como root"
+
+msgid "How much this host has, how much the engine can actually enforce, and what is under pressure right now"
+msgstr "Quanto esta máquina tem, quanto o motor consegue mesmo impor, e o que está sob pressão neste momento"
+
+msgid "How much this host has, how much the engine can actually enforce, and what is under pressure right now.\n\n`info` says whether there IS delegation and `doctor` says whether the prerequisites are met. Neither says WHICH controllers were delegated, and that is the question behind a whole class of silent failures: a `--cpuset-cpus` or an `--io-max` on a host without those controllers is parsed, accepted, and ignored, with the container running unbounded and nothing anywhere saying so. This names the ignored flags. Read-only."
+msgstr "Quanto esta máquina tem, quanto o motor consegue mesmo impor, e o que está sob pressão neste momento.\n\nO `info` diz se HÁ delegação e o `doctor` diz se os pré-requisitos estão cumpridos. Nenhum diz QUAIS controladores foram delegados, e é essa a pergunta por trás de uma classe inteira de falhas silenciosas: um `--cpuset-cpus` ou um `--io-max` numa máquina sem esses controladores é lido, aceite e ignorado, com o container a correr sem tecto nenhum e nada em lado nenhum a dizê-lo. Este nomeia as flags ignoradas. Só leitura."
+
+msgid "capacity, what the engine can actually enforce, and what is stalled right now"
+msgstr "capacidade, o que o motor consegue mesmo impor, e o que está parado neste momento"
+
+msgid "name the flags this host accepts and silently ignores"
+msgstr "nomeia as flags que esta máquina aceita e ignora em silêncio"
+
+msgid "machine-readable, for a capacity dashboard or a gate"
+msgstr "legível por máquina, para um painel de capacidade ou um portão"

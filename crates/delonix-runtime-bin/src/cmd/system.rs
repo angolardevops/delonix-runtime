@@ -62,6 +62,20 @@ pub enum SystemCmd {
         #[arg(long)]
         delegate: bool,
     },
+    /// How much this host has, how much the engine can actually enforce, and
+    /// what is under pressure right now.
+    ///
+    /// `info` says whether there IS delegation and `doctor` says whether the
+    /// prerequisites are met. Neither says WHICH controllers were delegated,
+    /// and that is the question behind a whole class of silent failures: a
+    /// `--cpuset-cpus` or an `--io-max` on a host without those controllers is
+    /// parsed, accepted, and ignored, with the container running unbounded and
+    /// nothing anywhere saying so. This names the ignored flags. Read-only.
+    Resources {
+        /// Output format: `table` (default) or `json` (ADR-0005).
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: super::output::OutputFormat,
+    },
     /// Disk usage by area (images, containers, volumes, VM images).
     Df,
     /// Save this node's state into one archive.
@@ -274,6 +288,7 @@ pub fn run(action: SystemCmd) -> Result<()> {
             interval,
             no_stream,
         } => cmd_monitor(interval, no_stream),
+        SystemCmd::Resources { output } => cmd_resources(output),
         SystemCmd::Virt { tune } => cmd_virt(tune),
         SystemCmd::Thermal {
             high,
@@ -898,6 +913,250 @@ fn human(b: u64) -> String {
 /// `system df` — where the disk is. It exists for a concrete reason: orphan
 /// rootfs dirs once piled up 45 GiB with nothing reporting them, until the kubelet marked
 /// the node with `disk-pressure`. The `RECLAIMABLE` column is the one that matters.
+/// `system resources` — capacity, what is enforceable, and current pressure.
+///
+/// Three questions in one screen, because they are only useful together: a
+/// ceiling nobody can enforce is not a ceiling, and a controller that IS
+/// delegated tells you nothing about whether the machine is currently stalled
+/// on it.
+fn cmd_resources(output: super::output::OutputFormat) -> Result<()> {
+    let ncpu = runtime::host_ncpu();
+    let mem_total = runtime::host_mem_bytes();
+    let meminfo = std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
+    let kb = |key: &str| -> u64 {
+        meminfo
+            .lines()
+            .find(|l| l.starts_with(key))
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|n| n.parse::<u64>().ok())
+            .unwrap_or(0)
+            * 1024
+    };
+    let mem_available = kb("MemAvailable:");
+    let swap_total = kb("SwapTotal:");
+    let swap_used = swap_total.saturating_sub(kb("SwapFree:"));
+
+    let root = state_root();
+    let disk_free = fs_avail_bytes(&root);
+    let rootless = runtime::is_rootless();
+    let (base, delegated) = runtime::enforceable_controllers();
+
+    let inert: Vec<&str> = runtime::RESOURCE_CONTROLLERS
+        .iter()
+        .filter(|c| !delegated.iter().any(|d| d == *c))
+        .flat_map(|c| runtime::flags_of_controller(c).iter().copied())
+        .collect();
+
+    let pressure: Vec<(&str, Option<runtime::Psi>)> = ["cpu", "memory", "io"]
+        .iter()
+        .map(|r| (*r, runtime::psi(r)))
+        .collect();
+    let worst = runtime::bottleneck(&pressure);
+
+    if output == super::output::OutputFormat::Json {
+        let doc = serde_json::json!({
+            "host": {
+                "cpus": ncpu,
+                "memory_bytes": mem_total,
+                "memory_available_bytes": mem_available,
+                "swap_bytes": swap_total,
+                "swap_used_bytes": swap_used,
+                "state_root": root.to_string_lossy(),
+                "state_root_free_bytes": disk_free,
+                "cpu_temperature_c": runtime::max_cpu_temp_c(),
+            },
+            "control": {
+                "rootless": rootless,
+                "cgroup_base": base,
+                "delegated": delegated,
+                "ignored_flags": inert,
+            },
+            "pressure": pressure.iter().map(|(r, p)| {
+                serde_json::json!({
+                    "resource": r,
+                    "avg10": p.map(|p| p.avg10),
+                    "avg60": p.map(|p| p.avg60),
+                    "avg300": p.map(|p| p.avg300),
+                })
+            }).collect::<Vec<_>>(),
+            "bottleneck": worst,
+        });
+        println!("{}", serde_json::to_string_pretty(&doc).unwrap_or_default());
+        return Ok(());
+    }
+
+    // Whole-row templates as msgids, not one `po::t` per word. A bare "total"
+    // or "free" reused across rows is a gender collision waiting to happen in
+    // Portuguese (*livre* vs *livres*, *usada* vs *usado*), and it also lets a
+    // translator move the padding, which a fixed `{:<20}` around a translated
+    // label never allows.
+    println!("{}", super::po::t("host"));
+    println!(
+        "  {}",
+        super::po::tf("cpus:               {n}", &[("n", &ncpu.to_string())])
+    );
+    println!(
+        "  {}",
+        super::po::tf(
+            "memory:             {total} total, {available} available",
+            &[
+                ("total", &human(mem_total)),
+                ("available", &human(mem_available))
+            ]
+        )
+    );
+    if swap_total > 0 {
+        println!(
+            "  {}",
+            super::po::tf(
+                "swap:               {total} total, {used} used",
+                &[("total", &human(swap_total)), ("used", &human(swap_used))]
+            )
+        );
+    }
+    println!(
+        "  {}",
+        super::po::tf(
+            "state root:         {path} ({free} free)",
+            &[
+                ("path", &root.display().to_string()),
+                ("free", &human(disk_free))
+            ]
+        )
+    );
+    if let Some(t) = runtime::max_cpu_temp_c() {
+        println!(
+            "  {}",
+            super::po::tf(
+                "cpu temperature:    {celsius} °C",
+                &[("celsius", &t.to_string())]
+            )
+        );
+    }
+
+    println!();
+    println!(
+        "{}",
+        super::po::t("control — what the engine can actually enforce here")
+    );
+    println!(
+        "  {}",
+        super::po::tf(
+            "mode:               {mode}",
+            &[("mode", if rootless { "rootless" } else { "root" })]
+        )
+    );
+    println!(
+        "  {}",
+        super::po::tf(
+            "cgroup base:        {path}",
+            &[(
+                "path",
+                base.as_deref()
+                    .unwrap_or(super::po::t("none — no delegation boundary found"))
+            )]
+        )
+    );
+    for c in runtime::RESOURCE_CONTROLLERS {
+        let on = delegated.iter().any(|d| d == c);
+        let flags = runtime::flags_of_controller(c).join(", ");
+        let (label, ansi) = if on {
+            (super::po::t("enforced"), super::output::color::GREEN)
+        } else {
+            (super::po::t("IGNORED"), super::output::color::YELLOW)
+        };
+        // Pad BEFORE colouring: `{:<10}` counts the ANSI bytes as width and
+        // would push the flags column ten characters right on a terminal and
+        // nowhere in a pipe — the same table, two different shapes.
+        let cell = format!("{label:<10}");
+        let cell = if super::output::color_enabled() {
+            format!("{ansi}{cell}{}", super::output::color::RESET)
+        } else {
+            cell
+        };
+        println!("  {c:<10}{cell}{flags}");
+    }
+
+    println!();
+    println!(
+        "{}",
+        super::po::t("pressure — share of time some task was stalled (avg10 / avg60 / avg300)")
+    );
+    for (r, p) in &pressure {
+        match p {
+            Some(p) => {
+                let mark = if worst == Some(r) {
+                    format!("   ← {}", super::po::t("the bottleneck right now"))
+                } else {
+                    String::new()
+                };
+                println!(
+                    "  {r:<10}{:>6.2}% / {:>6.2}% / {:>6.2}%{mark}",
+                    p.avg10, p.avg60, p.avg300
+                );
+            }
+            // No PSI is a kernel build choice, not a fault of this host.
+            None => println!(
+                "  {r:<10}{}",
+                super::po::t("unavailable (kernel without CONFIG_PSI)")
+            ),
+        }
+    }
+
+    if !inert.is_empty() {
+        println!();
+        println!(
+            "{}",
+            super::po::tf(
+                "{n} flag(s) are accepted and silently ignored on this host: {flags}",
+                &[("n", &inert.len().to_string()), ("flags", &inert.join(" "))]
+            )
+        );
+        // `io` is not a delegation this host merely forgot to grant: systemd
+        // does not delegate it to an unprivileged user at all, so no rootless
+        // engine — this one, podman, docker — can write `io.max`. Saying "run
+        // system setup" about it would send people after a fix that does not
+        // exist.
+        let io_missing = !delegated.iter().any(|d| d == "io");
+        if inert.iter().any(|f| !f.starts_with("--io")) {
+            println!(
+                "  {}",
+                super::po::t("fix: sudo delonix system setup --delegate, then log out and back in")
+            );
+        }
+        if io_missing {
+            println!(
+                "  {}",
+                super::po::t(
+                    "io is never delegated to a rootless user; run the node as root for I/O ceilings"
+                )
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Free bytes on the filesystem holding `path`, via `statvfs(3)` — the same
+/// call `prune::filesystem_used_pct` makes, asking for the other half of the
+/// answer (`libc` directly rather than `nix`, which this crate does not
+/// depend on and which one number does not justify adding).
+///
+/// `0` when the call fails, and the caller shows it as `0 B free` — this is a
+/// report, not a gate, so an unreadable filesystem must not stop the other
+/// twenty numbers from being printed.
+fn fs_avail_bytes(path: &std::path::Path) -> u64 {
+    let Ok(c_path) = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()) else {
+        return 0;
+    };
+    // SAFETY: `c_path` is a valid NUL-terminated string that outlives the call,
+    // and `stat` is a fully-owned, correctly-sized destination.
+    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) } != 0 {
+        return 0;
+    }
+    (stat.f_bavail as u64).saturating_mul(stat.f_frsize as u64)
+}
+
 fn cmd_df() -> Result<()> {
     let root = state_root();
     let (_, store) = open_stores()?;
