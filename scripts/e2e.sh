@@ -198,6 +198,39 @@ check "com -n default a coluna aparece" ok bash -c \
   "'$BIN' container ps -a -n default | head -1 | grep -q NAMESPACE"
 check "vm ls" ok "$BIN" vm ls
 check "get clusters" ok "$BIN" get clusters
+
+# `cluster kubeconfig` só lê `<root>/clusters/<nome>-kubeconfig.yaml` — não
+# distingue modo kind de kubeadm/SSH, e não precisa de nenhum dos dois vivo
+# para se provar. Booting um cluster real aqui (cgroup delegado + download do
+# `kindest/node`) provaria o `cluster create`, não este comando; um ficheiro
+# fabricado no formato real prova exactamente o que o comando faz: ler,
+# resolver 0/1/muitos, e nunca adivinhar.
+check "cluster kubeconfig sem nenhum em cache recusa" fail "$BIN" cluster kubeconfig
+mkdir -p "$DELONIX_ROOT/clusters"
+cat >"$DELONIX_ROOT/clusters/ck1-$PFX-kubeconfig.yaml" <<YAML
+apiVersion: v1
+kind: Config
+clusters:
+  - name: ck1-$PFX
+    cluster: {server: https://127.0.0.1:6443}
+users:
+  - name: ck1-$PFX-admin
+    user: {token: fake-e2e-token}
+contexts:
+  - name: ck1-$PFX
+    context: {cluster: ck1-$PFX, user: ck1-$PFX-admin}
+current-context: ck1-$PFX
+YAML
+check "cluster kubeconfig sem nome resolve ao único em cache" ok bash -c \
+  "'$BIN' cluster kubeconfig | grep -q 'ck1-$PFX'"
+check "cluster kubeconfig <nome> imprime esse" ok bash -c \
+  "'$BIN' cluster kubeconfig 'ck1-$PFX' | grep -q 'fake-e2e-token'"
+check "cluster kubeconfig <inexistente> recusa" fail "$BIN" cluster kubeconfig "nao-existe-$PFX"
+cp "$DELONIX_ROOT/clusters/ck1-$PFX-kubeconfig.yaml" "$DELONIX_ROOT/clusters/ck2-$PFX-kubeconfig.yaml"
+check "cluster kubeconfig sem nome com vários recusa e nomeia-os" ok bash -c \
+  "out=\$('$BIN' cluster kubeconfig 2>&1); rc=\$?; [ \$rc -ne 0 ] && echo \"\$out\" | grep -q \"ck1-$PFX\" && echo \"\$out\" | grep -q \"ck2-$PFX\""
+rm -f "$DELONIX_ROOT/clusters/ck1-$PFX-kubeconfig.yaml" "$DELONIX_ROOT/clusters/ck2-$PFX-kubeconfig.yaml"
+
 check "system info" ok "$BIN" system info
 check "system df" ok "$BIN" system df
 check "system events" ok "$BIN" system events
@@ -1497,12 +1530,12 @@ check "schedule --cron com 4 campos recusa" fail "$BIN" backup schedule containe
 
 # Os três verbos que a consolidação trouxe, e que antes NÃO existiam: sem eles a
 # pergunta «que arquivos tenho» respondia-se com `ls`, e apagar um era `rm`.
-check "backup list mostra o arquivo" ok bash -c \
-  "'$BIN' backup list --from '$BKDIR' | grep -q '$BKC'"
-check "backup list --kind filtra" ok bash -c \
-  "'$BIN' backup list --from '$BKDIR' --kind container | grep -q '$BKC'"
-check "backup list --kind vm não traz um container" ok bash -c \
-  "! '$BIN' backup list --from '$BKDIR' --kind vm | grep -q '$BKC'"
+check "backup ls mostra o arquivo" ok bash -c \
+  "'$BIN' backup ls --from '$BKDIR' | grep -q '$BKC'"
+check "backup ls --kind filtra" ok bash -c \
+  "'$BIN' backup ls --from '$BKDIR' --kind container | grep -q '$BKC'"
+check "backup ls --kind vm não traz um container" ok bash -c \
+  "! '$BIN' backup ls --from '$BKDIR' --kind vm | grep -q '$BKC'"
 check "backup inspect diz o kind e o nome" ok bash -c \
   "'$BIN' backup inspect \$(ls '$BKDIR'/container-$BKC-*.tar.gz | head -1) | grep -q '$BKC'"
 check "backup inspect nomeia os volumes que leva" ok bash -c \
@@ -1516,8 +1549,8 @@ echo lixo | gzip > "$BKDIR/alheio.tar.gz"
 check "backup remove recusa um .tar.gz que não escrevemos" fail \
   "$BIN" backup remove alheio.tar.gz --from "$BKDIR"
 check "e o ficheiro alheio CONTINUA lá" ok bash -c "[[ -f '$BKDIR/alheio.tar.gz' ]]"
-check "backup list conta o alheio como saltado" ok bash -c \
-  "'$BIN' backup list --from '$BKDIR' | grep -q 'skipped\|saltado'"
+check "backup ls conta o alheio como saltado" ok bash -c \
+  "'$BIN' backup ls --from '$BKDIR' | grep -q 'skipped\|saltado'"
 rm -f "$BKDIR/alheio.tar.gz"
 
 check "backup remove apaga o nosso" ok bash -c \

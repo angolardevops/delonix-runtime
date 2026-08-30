@@ -3,7 +3,7 @@
 //! It is a GROUP, not standalone commands: `events`/`info`/`df` are about the
 //! engine, not about a particular container or image — just like docker
 //! (`docker system ...`). Whatever is per-object stays in the object's group
-//! (`container stats`, `image list`). `namespace` and `boot` moved in here
+//! (`container stats`, `image ls`). `namespace` and `boot` moved in here
 //! (B2 of the CLI restructuring, from top-level and from `net boot`): both
 //! are properties of the ENGINE, not of one resource group.
 

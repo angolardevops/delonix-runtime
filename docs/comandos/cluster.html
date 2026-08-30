@@ -160,14 +160,15 @@ for SSH, and runs the SAME bootstrap — one command, from zero to a cluster run
 <div class='help'><pre><code>Usage: delonix cluster [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  create   Create a local Kubernetes cluster **without a manifest and without Docker**
-  kubeadm  Provision VMs (golden VM image) + `kubeadm` bootstrap
-  init     Initialize a project with the cluster manifests (kind/vm/ssh)
-  load     Load local images into a kind-mode cluster&#x27;s nodes, **without a registry**
-  apply    Apply the `kind: KubernetesCluster` document(s) of a manifest
-  kube     Generate a Kubernetes manifest from a container/pod already running locally
-  prune    Reclaim the state of clusters that have no nodes left
-  help     Print this message or the help of the given subcommand(s)
+  create      Create a local Kubernetes cluster **without a manifest and without Docker**
+  kubeadm     Provision VMs (golden VM image) + `kubeadm` bootstrap
+  init        Initialize a project with the cluster manifests (kind/vm/ssh)
+  kubeconfig  Print a cluster&#x27;s kubeconfig from the local cache (no live SSH)
+  load        Load local images into a kind-mode cluster&#x27;s nodes, **without a registry**
+  apply       Apply the `kind: KubernetesCluster` document(s) of a manifest
+  kube        Generate a Kubernetes manifest from a container/pod already running locally
+  prune       Reclaim the state of clusters that have no nodes left
+  help        Print this message or the help of the given subcommand(s)
 
 Options:
       --l18n &lt;en|pt&gt;
@@ -179,7 +180,7 @@ Options:
 COMMAND MAP:
   Lifecycle    create · kubeadm
   Create       init
-  Interact     load
+  Interact     load · kubeconfig
   Declarative  kube · apply
   Maintenance  prune
 
@@ -193,6 +194,9 @@ EXAMPLES:
   # from zero to VMs plus kubeadm — above one control-plane the load balancer
   # comes with it
   delonix cluster kubeadm --name lab --network k8s --control-plane 3
+
+  # hand the kubeconfig to a teammate, or reload it in a fresh shell
+  delonix cluster kubeconfig dev
 
 SEE ALSO:
   delonix cluster kube generate · delonix stack apply · delonix vm create ·
@@ -257,7 +261,7 @@ EXAMPLES:
   delonix cluster load myapp:dev --name dev
 
 SEE ALSO:
-  delonix cluster create · delonix image list · delonix build · delonix get
+  delonix cluster create · delonix image ls · delonix build · delonix get
 
   delonix › cluster › load</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Levar uma imagem local para dentro dos nós (o kind load, sem registo)</div><div class='cap lang-en'>Get a local image into the nodes (kind load, no registry)</div><pre><code>delonix build -t app:dev .
@@ -324,6 +328,42 @@ SEE ALSO:
 
   delonix › cluster › create</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Cluster local em modo kind (containers como nós, sem Docker)</div><div class='cap lang-en'>Local cluster in kind mode (containers as nodes, no Docker)</div><pre><code>delonix cluster create --name lab</code></pre></div><div class="ex"><div class='cap lang-pt'>Com workers</div><div class='cap lang-en'>With workers</div><pre><code>delonix cluster create --name lab --workers 2</code></pre></div>
+<h2 id='kubeconfig'><code>cluster kubeconfig</code></h2>
+<p class='intro'>Print a cluster&#x27;s kubeconfig from the local cache (no live SSH).</p>
+<p class='intro'>The same file <code>create</code>/<code>apply</code>/<code>kubeadm</code> already wrote and merged into <code>~/.kube/config</code> at creation time. Redirect or pipe it as needed.</p>
+<div class='help'><pre><code>Usage: delonix cluster kubeconfig [OPTIONS] [NAME]
+
+Arguments:
+  [NAME]
+          Cluster name. Omit when there is only one cached
+
+Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # the one cluster you have — no name needed
+  delonix cluster kubeconfig
+
+  # a specific one, redirected to a file
+  delonix cluster kubeconfig lab &gt; lab.yaml
+
+  # straight into KUBECONFIG for one shell
+  export KUBECONFIG=&lt;(delonix cluster kubeconfig lab)
+
+SEE ALSO:
+  delonix cluster create · delonix cluster kubeadm · delonix cluster apply ·
+  delonix get
+
+  delonix › cluster › kubeconfig</code></pre></div>
+<p>Lê da CACHE local (<code>&lt;root&gt;/clusters/&lt;nome&gt;-kubeconfig.yaml</code>)
+— sem SSH ao vivo. Funciona para os dois tipos de cluster (modo kind e
+<code>kubeadm</code>/SSH), que escrevem no mesmo caminho. Não faz merge em
+<code>~/.kube/config</code>: isso já acontece automaticamente na criação.</p>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class="cap">O único cluster que existe — não precisa de nome</div><pre><code>delonix cluster kubeconfig</code></pre></div><div class="ex"><div class="cap">Um específico, redireccionado para um ficheiro</div><pre><code>delonix cluster kubeconfig lab &gt; lab.yaml</code></pre></div>
 <h2 id='init'><code>cluster init</code></h2>
 <p class='intro'>Initialize a project with the cluster manifests (kind/vm/ssh).</p>
 <p class='intro'>Files ALREADY FILLED IN (images included), ready to use without editing anything.</p>
