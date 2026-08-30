@@ -1,0 +1,55 @@
+{
+  "input": {
+    "aggregate_slice": true,
+    "cgroup_base": "/sys/fs/cgroup/delonix.slice",
+    "cpu_temperature_c": 45,
+    "cpus": 16,
+    "delegated_controllers": [
+      "cpu",
+      "cpuset",
+      "io",
+      "memory",
+      "pids"
+    ],
+    "gpu": null,
+    "memory_available_bytes": 1073741824,
+    "memory_bytes": 68719476736,
+    "pressure": [
+      {
+        "avg10": 35.0,
+        "avg300": 31.0,
+        "avg60": 33.0,
+        "resource": "cpu"
+      },
+      {
+        "avg10": 66.0,
+        "avg300": 55.0,
+        "avg60": 60.0,
+        "resource": "memory"
+      },
+      {
+        "avg10": 48.0,
+        "avg300": 40.0,
+        "avg60": 44.0,
+        "resource": "io"
+      }
+    ],
+    "rootless": false,
+    "state_root_free_bytes": 858993459200,
+    "swap_bytes": 8589934592,
+    "swap_used_bytes": 5368709120
+  },
+  "name": "everything-contended",
+  "truth": {
+    "bottleneck": "memory",
+    "findings": [
+      "DLX-RES-004:cpu",
+      "DLX-RES-004:memory",
+      "DLX-RES-004:io",
+      "DLX-RES-006:memory"
+    ],
+    "gating_findings": [],
+    "largest_model_b_q4": null,
+    "local_inference_verdict": "not-recommended"
+  }
+}

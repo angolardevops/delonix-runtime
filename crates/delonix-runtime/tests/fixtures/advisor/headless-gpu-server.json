@@ -1,0 +1,56 @@
+{
+  "input": {
+    "aggregate_slice": true,
+    "cgroup_base": "/sys/fs/cgroup/delonix.slice",
+    "cpu_temperature_c": 45,
+    "cpus": 16,
+    "delegated_controllers": [
+      "cpu",
+      "cpuset",
+      "io",
+      "memory",
+      "pids"
+    ],
+    "gpu": {
+      "cdi_spec": true,
+      "drives_display": false,
+      "name": "NVIDIA L4",
+      "vram_free_mib": 24000,
+      "vram_total_mib": 24564
+    },
+    "memory_available_bytes": 51539607552,
+    "memory_bytes": 68719476736,
+    "pressure": [
+      {
+        "avg10": 0.1,
+        "avg300": 0.3,
+        "avg60": 0.2,
+        "resource": "cpu"
+      },
+      {
+        "avg10": 0.0,
+        "avg300": 0.0,
+        "avg60": 0.0,
+        "resource": "memory"
+      },
+      {
+        "avg10": 0.4,
+        "avg300": 0.6,
+        "avg60": 0.5,
+        "resource": "io"
+      }
+    ],
+    "rootless": false,
+    "state_root_free_bytes": 858993459200,
+    "swap_bytes": 8589934592,
+    "swap_used_bytes": 0
+  },
+  "name": "headless-gpu-server",
+  "truth": {
+    "bottleneck": null,
+    "findings": [],
+    "gating_findings": [],
+    "largest_model_b_q4": 37,
+    "local_inference_verdict": "recommended"
+  }
+}
