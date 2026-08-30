@@ -34,6 +34,12 @@ msgstr "Constrói uma imagem a partir de um Dockerfile ou Delonixfile."
 msgid "Declarative microVMs: create/ls/stop/rm/status."
 msgstr "microVMs declarativas: create/ls/stop/rm/status."
 
+msgid "Declarative microVMs: create/ls/stop/start/status"
+msgstr "microVMs declarativas: create/ls/stop/start/status"
+
+msgid "Declarative microVMs: create/ls/stop/start/status.\n\n`describe`/`rm` moved to the generic per-Kind verbs — `delonix describe vm <name>` / `delonix delete vm <name>`."
+msgstr "microVMs declarativas: create/ls/stop/start/status.\n\n`describe`/`rm` passaram para os verbos genéricos por-Kind — `delonix describe vm <nome>` / `delonix delete vm <nome>`."
+
 msgid "Named volumes and bind mounts: create/ls/rm/inspect."
 msgstr "Volumes nomeados e bind mounts: create/ls/rm/inspect."
 
@@ -4307,6 +4313,12 @@ msgstr "Lista os containers."
 msgid "Real multi-container pods (N containers sharing a netns): create/ls/describe/rm/logs."
 msgstr "Pods multi-container REAIS (N containers a partilhar uma netns): create/ls/describe/rm/logs."
 
+msgid "Real multi-container pods (N containers sharing a netns): create/ls/logs/exec/cp/attach"
+msgstr "Pods multi-container REAIS (N containers a partilhar uma netns): create/ls/logs/exec/cp/attach"
+
+msgid "Real multi-container pods (N containers sharing a netns): create/ls/logs/exec/cp/attach.\n\n`describe`/`rm` moved to the generic per-Kind verbs — `delonix describe pod <name>` / `delonix delete pod <name>`."
+msgstr "Pods multi-container REAIS (N containers a partilhar uma netns): create/ls/logs/exec/cp/attach.\n\n`describe`/`rm` passaram para os verbos genéricos por-Kind — `delonix describe pod <nome>` / `delonix delete pod <nome>`."
+
 msgid "Create a pod (N containers sharing a netns) from a manifest (`kind: Pod`)."
 msgstr "Cria um pod (N containers a partilhar uma netns) a partir de um manifesto (`kind: Pod`)."
 
@@ -4321,6 +4333,21 @@ msgstr "Remove um pod: pára/remove TODOS os seus containers + a netns partilhad
 
 msgid "Logs of a pod's container (defaults to the first member)."
 msgstr "Logs de um container do pod (por omissão, o primeiro membro)."
+
+msgid "Execute a command inside one member of a pod (defaults to the first)"
+msgstr "Executa um comando num membro de um pod (por omissão, o primeiro)"
+
+msgid "Copy files between the host and one member of a pod"
+msgstr "Copia ficheiros entre o host e um membro de um pod"
+
+msgid "Copy files between the host and one member of a pod.\n\nExactly one side is `pod:/path` (e.g. `delonix pod cp web:/etc/hosts .`), same convention as `container cp`. Use `--container` when the pod has more than one member and the first isn't the one you mean."
+msgstr "Copia ficheiros entre o host e um membro de um pod.\n\nExactamente um dos lados é `pod:/caminho` (ex.: `delonix pod cp web:/etc/hosts .`), a mesma convenção do `container cp`. Usa `--container` quando o pod tem mais de um membro e o primeiro não é o que queres."
+
+msgid "Re-attach to a pod member's output stream (output only)"
+msgstr "Volta a ligar-se ao fluxo de saída de um membro do pod (só saída)"
+
+msgid "Re-attach to a pod member's output stream (output only).\n\nSame contract as `container attach`: this engine keeps no live stdin conduit to an already-started detached container, so `-i`/`--interactive` is refused with a clear error instead of silently doing nothing."
+msgstr "Volta a ligar-se ao fluxo de saída de um membro do pod (só saída).\n\nMesmo contrato do `container attach`: este motor não guarda um canal vivo de stdin para um container já desanexado, por isso `-i`/`--interactive` é recusado com um erro claro em vez de não fazer nada em silêncio."
 
 msgid "Pull an image from a registry. With `--vm`, no argument = the OFFICIAL Delonix golden VM image."
 msgstr "Puxa uma imagem de um registo. Com `--vm`, sem argumento = a imagem VM dourada OFICIAL do Delonix."
@@ -5945,6 +5972,21 @@ msgstr "os logs do primeiro membro, que é o que normalmente se quer"
 
 msgid "a specific container inside the pod, by its short name"
 msgstr "um container específico dentro do pod, pelo seu nome curto"
+
+msgid "run a command in the first member"
+msgstr "corre um comando no primeiro membro"
+
+msgid "an interactive shell in a specific member"
+msgstr "uma shell interactiva num membro específico"
+
+msgid "out of the pod's first member onto the host"
+msgstr "do primeiro membro do pod para o host"
+
+msgid "from the host into a specific member"
+msgstr "do host para um membro específico"
+
+msgid "re-attach to the first member's output (output only)"
+msgstr "volta a ligar-se à saída do primeiro membro (só saída)"
 
 msgid "containers AND VMs in one table, so you stop guessing which group owns what"
 msgstr "containers E VMs numa só tabela, para deixares de adivinhar que grupo é dono de quê"

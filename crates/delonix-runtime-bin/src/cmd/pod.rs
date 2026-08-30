@@ -78,6 +78,62 @@ pub enum PodCmd {
         #[arg(long, short)]
         follow: bool,
     },
+    /// Execute a command inside one member of a pod (defaults to the first).
+    Exec {
+        /// Interactive (attaches stdin).
+        #[arg(short = 'i', long)]
+        interactive: bool,
+        /// Allocate a pseudo-terminal.
+        #[arg(short = 't', long)]
+        tty: bool,
+        /// Extra environment variable (`KEY=VAL`) for this call only, on top of
+        /// the container's own env. Repeatable.
+        #[arg(short = 'e', long = "env")]
+        env: Vec<String>,
+        /// Working directory for this call only (default: the container's own
+        /// configured `workdir`, or `/`).
+        #[arg(short = 'w', long = "workdir")]
+        workdir: Option<String>,
+        /// Run as this user for this call only: `uid[:gid]` or `name[:group]`
+        /// (resolved against the container's own `/etc/passwd`/`/etc/group`).
+        /// Default: the container's own configured user.
+        #[arg(short = 'u', long = "user")]
+        user: Option<String>,
+        /// Which container (its short name inside the pod). Default: the first.
+        #[arg(long)]
+        container: Option<String>,
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::pods))]
+        pod: String,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
+        command: Vec<String>,
+    },
+    /// Copy files between the host and one member of a pod.
+    ///
+    /// Exactly one side is `pod:/path` (e.g. `delonix pod cp web:/etc/hosts .`),
+    /// same convention as `container cp`. Use `--container` when the pod has
+    /// more than one member and the first isn't the one you mean.
+    Cp {
+        /// Which container (its short name inside the pod). Default: the first.
+        #[arg(long)]
+        container: Option<String>,
+        src: String,
+        dst: String,
+    },
+    /// Re-attach to a pod member's output stream (output only).
+    ///
+    /// Same contract as `container attach`: this engine keeps no live stdin
+    /// conduit to an already-started detached container, so `-i`/`--interactive`
+    /// is refused with a clear error instead of silently doing nothing.
+    Attach {
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::pods))]
+        pod: String,
+        /// Which container (its short name inside the pod). Default: the first.
+        #[arg(long)]
+        container: Option<String>,
+        /// Refused: stdin forwarding isn't supported (see the command's own doc above).
+        #[arg(short, long)]
+        interactive: bool,
+    },
 }
 
 pub fn run(action: PodCmd) -> Result<()> {
@@ -93,6 +149,35 @@ pub fn run(action: PodCmd) -> Result<()> {
             container,
             follow,
         } => logs(&pod, container.as_deref(), follow),
+        PodCmd::Exec {
+            interactive,
+            tty,
+            env,
+            workdir,
+            user,
+            container,
+            pod,
+            command,
+        } => exec(
+            &pod,
+            container.as_deref(),
+            interactive,
+            tty,
+            &env,
+            workdir.as_deref(),
+            user.as_deref(),
+            &command,
+        ),
+        PodCmd::Cp {
+            container,
+            src,
+            dst,
+        } => cp(container.as_deref(), &src, &dst),
+        PodCmd::Attach {
+            pod,
+            container,
+            interactive,
+        } => attach(&pod, container.as_deref(), interactive),
     }
 }
 
@@ -582,22 +667,90 @@ pub(crate) fn describe(names: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn logs(pod: &str, container_short: Option<&str>, follow: bool) -> Result<()> {
-    let (images, store) = open_stores()?;
-    let members = members_of(&store, pod)?;
+/// The pod's containers, and the ONE the caller means: `--container <short>` by
+/// exact `<pod>-<short>` name, or the pod's first member when omitted. Shared by
+/// `logs`/`exec`/`cp`/`attach` so the "no such pod"/"pod has no container" pair
+/// exists in one place instead of a fourth copy.
+fn resolve_target(
+    store: &delonix_runtime_core::Store,
+    pod: &str,
+    container_short: Option<&str>,
+) -> Result<Container> {
+    let members = members_of(store, pod)?;
     if members.is_empty() {
         return Err(Error::NotFound(format!(
             "no such pod: {pod} (see `delonix pod ls`)"
         )));
     }
-    let target = match container_short {
+    match container_short {
         Some(short) => members
-            .iter()
+            .into_iter()
             .find(|c| c.name == format!("{pod}-{short}"))
-            .ok_or_else(|| Error::Invalid(format!("pod '{pod}' has no container '{short}'")))?,
-        None => &members[0],
-    };
+            .ok_or_else(|| {
+                Error::Invalid(format!(
+                    "pod '{pod}' has no container '{short}' (see `delonix pod describe {pod}`)"
+                ))
+            }),
+        None => Ok(members.into_iter().next().unwrap()),
+    }
+}
+
+fn logs(pod: &str, container_short: Option<&str>, follow: bool) -> Result<()> {
+    let (images, store) = open_stores()?;
+    let target = resolve_target(&store, pod, container_short)?;
     container::cmd_logs(&images, &store, &target.name, follow, None, None, false)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn exec(
+    pod: &str,
+    container_short: Option<&str>,
+    interactive: bool,
+    tty: bool,
+    env: &[String],
+    workdir: Option<&str>,
+    user: Option<&str>,
+    command: &[String],
+) -> Result<()> {
+    let (images, store) = open_stores()?;
+    let target = resolve_target(&store, pod, container_short)?;
+    container::cmd_exec(
+        &images,
+        &store,
+        &target.name,
+        interactive,
+        tty,
+        env,
+        workdir,
+        user,
+        command,
+    )
+}
+
+fn attach(pod: &str, container_short: Option<&str>, interactive: bool) -> Result<()> {
+    let (images, store) = open_stores()?;
+    let target = resolve_target(&store, pod, container_short)?;
+    container::cmd_attach(&images, &store, &target.name, interactive)
+}
+
+/// Copies host↔pod-member. Exactly one of `src`/`dst` is `<pod>:/path`: that side
+/// is rewritten to `<member-name>:/path` (the pod's real container in the store),
+/// then delegated to `container::cmd_cp` unmodified — its own "exactly one side"
+/// validation applies to the rewritten strings, so nothing new is validated here.
+fn cp(container_short: Option<&str>, src: &str, dst: &str) -> Result<()> {
+    let (images, store) = open_stores()?;
+    let rewrite = |arg: &str| -> Result<String> {
+        match container::split_cp_arg(arg) {
+            Some((pod, path)) => {
+                let target = resolve_target(&store, &pod, container_short)?;
+                Ok(format!("{}:{path}", target.name))
+            }
+            None => Ok(arg.to_string()),
+        }
+    };
+    let new_src = rewrite(src)?;
+    let new_dst = rewrite(dst)?;
+    container::cmd_cp(&images, &store, &new_src, &new_dst)
 }
 
 #[cfg(test)]
