@@ -92,7 +92,7 @@ classify() {
       else if (c ~ /^image (pull|push|build|scan|verify|convert|import|export|tag|login|logout)$/) cls = "="
       else if (c == "pod logs" || c == "cluster load")            cls = "="
       else if (c == "secret create" || c == "stack init")         cls = "="
-      else if (c ~ /^system (info|events|df|prune|doctor|features|setup|resources)$/) cls = "="
+      else if (c ~ /^system (info|events|df|prune|doctor|features|setup|resources|regulate)$/) cls = "="
       # `api-resources` é da árvore-alvo, não da antiga: nasce no destino, logo
       # `=` e não `~`. Sem este braço caía no `else` final e a linha de base
       # dizia «muda de grafia» sobre um comando que nunca teve outra.

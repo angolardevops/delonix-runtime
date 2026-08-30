@@ -10042,3 +10042,48 @@ msgstr "inferência de modelo local: {verdict}"
 
 msgid "strict: a config or capacity finding is open"
 msgstr "strict: há um achado de configuração ou de capacidade em aberto"
+
+msgid "Give the contended CPU back to the workloads that are waiting for it"
+msgstr "Devolve o CPU disputado às cargas que estão à espera dele"
+
+msgid "Give the contended CPU back to the workloads that are waiting for it.\n\nReads pressure, finds the workload CAUSING it (the biggest consumer — not the one with the highest stall, which is the victim), halves its `cpu.weight`, and gives it back when the contention passes. `cpu.weight` is a SHARE, not a cap: with nothing to compete against, a throttled workload still gets the whole machine. Nothing is ever killed or paused.\n\nPrints the plan and changes nothing unless `--apply` is given."
+msgstr "Devolve o CPU disputado às cargas que estão à espera dele.\n\nLê a pressão, encontra a carga que a CAUSA (a que mais consome — não a que mais espera, que é a vítima), corta-lhe o `cpu.weight` a metade, e devolve-o quando a disputa passa. O `cpu.weight` é uma QUOTA-PARTE, não um tecto: sem nada com que competir, uma carga estrangulada continua a ter a máquina inteira. Nada é morto nem suspenso.\n\nMostra o plano e não muda nada sem `--apply`."
+
+msgid "Carry the plan out. Without it this is a report."
+msgstr "Executa o plano. Sem isto, é um relatório."
+
+msgid "One decision and exit, for a systemd timer or a cron."
+msgstr "Uma decisão e sai, para um temporizador systemd ou um cron."
+
+msgid "Seconds between decisions when looping."
+msgstr "Segundos entre decisões quando fica em ciclo."
+
+msgid "Never take a workload's `cpu.weight` below this."
+msgstr "Nunca baixar o `cpu.weight` de uma carga abaixo deste valor."
+
+msgid "cpu stalled {avg10}% over 10s, {avg60}% over 60s · {n} workload(s)"
+msgstr "cpu parado {avg10}% em 10s, {avg60}% em 60s · {n} carga(s)"
+
+msgid "nothing to do"
+msgstr "nada a fazer"
+
+msgid "throttle"
+msgstr "estrangular"
+
+msgid "restore"
+msgstr "repor"
+
+msgid "applied now"
+msgstr "aplicado agora"
+
+msgid "would apply (use --apply)"
+msgstr "aplicaria (usa --apply)"
+
+msgid "see which workload is causing the contention, and what would be done about it"
+msgstr "ver que carga está a causar a disputa, e o que se lhe faria"
+
+msgid "actually do it — halve the culprit's cpu share, and give it back when it passes"
+msgstr "fazê-lo mesmo — cortar a metade a quota de cpu do culpado, e devolvê-la quando passar"
+
+msgid "one decision and exit, for a systemd timer"
+msgstr "uma decisão e sai, para um temporizador systemd"
