@@ -1322,8 +1322,54 @@ if "$BIN" pod create -f "$PODY" >/dev/null 2>"$OUT/pod-$PFX.err"; then
     [ \"\$n\" -le 1 ] || { echo \"o aviso saiu \$n vezes (um por membro)\"; exit 1; }
   "
   check "pod ls mostra-o" ok bash -c "'$BIN' pod ls | grep -q 'p$PFX'"
-  check "pod describe" ok "$BIN" pod describe "p$PFX"
-  check "pod rm -f" ok "$BIN" pod rm -f "p$PFX"
+
+  # `pod exec`/`pod cp`/`pod attach` — wrappers finos sobre `container exec/cp/
+  # attach`, que resolvem `--container <curto>` (ou o 1.º membro por omissão)
+  # para o nome real `<pod>-<membro>` no Store. Provados com uma escrita
+  # POR MEMBRO (não `hostname`: os membros partilham UTS, por isso um
+  # `hostname` igual não provaria que o `--container` escolheu o certo — só a
+  # mountns, que NÃO é partilhada, distingue).
+  check "pod exec vai ao 1.º membro por omissão" ok bash -c \
+    "'$BIN' pod exec p$PFX sh -c 'echo do-a > /tmp/mark-$PFX'"
+  check "pod exec --container a confirma (é o 1.º)" ok bash -c \
+    "'$BIN' pod exec p$PFX --container a cat /tmp/mark-$PFX | grep -q do-a"
+  check "'b' não vê a escrita do 1.º membro (mountns própria)" fail \
+    "$BIN" pod exec "p$PFX" --container b cat "/tmp/mark-$PFX"
+  check "pod exec --container b escreve só em b" ok bash -c \
+    "'$BIN' pod exec p$PFX --container b sh -c 'echo do-b > /tmp/mark2-$PFX'"
+  check "pod exec --container b confirma" ok bash -c \
+    "'$BIN' pod exec p$PFX --container b cat /tmp/mark2-$PFX | grep -q do-b"
+  check "pod exec --container inexistente recusa" fail \
+    "$BIN" pod exec "p$PFX" --container nope true
+
+  check "pod cp: host -> 1.º membro" ok bash -c \
+    "echo prova-podcp > '$OUT/podcp-$PFX.txt' && '$BIN' pod cp '$OUT/podcp-$PFX.txt' p$PFX:/tmp/podcp-$PFX.txt"
+  check "pod cp: chegou ao 1.º membro" ok bash -c \
+    "'$BIN' pod exec p$PFX cat /tmp/podcp-$PFX.txt | grep -q prova-podcp"
+  check "pod cp --container escolhe o membro" ok bash -c \
+    "'$BIN' pod cp '$OUT/podcp-$PFX.txt' p$PFX:/tmp/podcp2-$PFX.txt --container b && \
+     '$BIN' pod exec p$PFX --container b cat /tmp/podcp2-$PFX.txt | grep -q prova-podcp"
+  check "pod cp: membro -> host" ok bash -c \
+    "'$BIN' pod cp p$PFX:/tmp/podcp-$PFX.txt '$OUT/podcp-back-$PFX.txt' && grep -q prova-podcp '$OUT/podcp-back-$PFX.txt'"
+
+  # `pod attach` segue os logs (`follow=true`) — contra um membro vivo isso
+  # bloqueia para sempre; o `timeout` + rc=124 prova que ligou e ficou a seguir,
+  # não que falhou logo. `-i` tem de recusar de imediato (mesmo contrato do
+  # `container attach`).
+  check "pod attach bloqueia (segue o output de um membro vivo)" 124 \
+    timeout 2 "$BIN" pod attach "p$PFX"
+  check "pod attach -i recusa (sem stdin ao vivo)" fail \
+    "$BIN" pod attach "p$PFX" -i
+
+  # `pod describe`/`pod rm` NÃO existem como subcomandos próprios — o B7
+  # (#159) colapsou-os nos verbos genéricos por-Kind. Medido ao vivo antes de
+  # escrever este fix: `delonix pod describe`/`delonix pod rm` respondem
+  # `unrecognized subcommand` desde essa PR, e este script continuava a
+  # chamá-los — achado do mesmo tipo do `volumes`/`volume` da sessão anterior
+  # (`delonix vm rm` tem a mesma quebra, em vários pontos deste script;
+  # fica registado, não corrigido aqui — âmbito de outra sessão).
+  check "describe pod" ok "$BIN" describe pod "p$PFX"
+  check "delete pod -f" ok "$BIN" delete pod "p$PFX" -f
 else
   skip "pod create + aviso de cgroup" "o pod create falhou (holder/SDN indisponível)"
 fi

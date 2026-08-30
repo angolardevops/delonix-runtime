@@ -107,7 +107,10 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::container::ContainerCmd,
     },
-    /// Real multi-container pods (N containers sharing a netns): create/ls/describe/rm/logs.
+    /// Real multi-container pods (N containers sharing a netns): create/ls/logs/exec/cp/attach.
+    ///
+    /// `describe`/`rm` moved to the generic per-Kind verbs — `delonix describe
+    /// pod <name>` / `delonix delete pod <name>`.
     Pod {
         #[command(subcommand)]
         action: cmd::pod::PodCmd,
