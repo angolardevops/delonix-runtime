@@ -1577,6 +1577,20 @@ dourada e um host preparado por `cluster apply` ficarem exactamente iguais), `cm
 restantes control-planes → `kubeadm join` dos workers → traz o kubeconfig para
 `<root>/clusters/<nome>-kubeconfig.yaml`, e copia para `~/.kube/config` se ainda não existir).
 
+**`delonix cluster kubeconfig [<nome>]`** — imprime esse ficheiro em cache para
+stdout, **sem SSH ao vivo**. Não existe registo do alvo SSH depois de o `apply`/
+`kubeadm` terminar (mesma filosofia "sem ficheiro de estado" de baixo), por isso
+um comando standalone não o consegue reconstruir sem o manifesto outra vez — o
+que já está em cache é o que há para reobter. Funciona também para clusters em
+modo kind (`kindmode::kubeconfig_path` grava no MESMO caminho, apesar de os
+dois modos não partilharem mais nada em comum — `complete::clusters()` só vê o
+modo kind, pelas labels do container). Sem nome, resolve para o único cluster
+em cache; com vários, recusa e nomeia-os (mesma regra do `resolve_vm_image`
+para imagens VM). Não faz merge em `~/.kube/config` — isso já aconteceu
+automaticamente na criação, por dois caminhos distintos e ainda não unificados
+(`merge_into_local_kubeconfig` aqui, `kindmode::install_kubecontext` no modo
+kind) — unificá-los é um refactor à parte, não tocado por este comando.
+
 **Idempotência sem-estado** (pedido explícito, "parecido ao Terraform mas sem ficheiro de
 estado"): cada passo de `k8s_recipes` tem um `check` (comando shell, êxito = já satisfeito) e um
 `apply`; `kubeadm init`/`join` verificam `/etc/kubernetes/admin.conf`/`kubelet.conf` no host antes

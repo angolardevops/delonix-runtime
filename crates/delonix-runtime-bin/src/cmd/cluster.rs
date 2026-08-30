@@ -593,6 +593,15 @@ pub enum ClusterCmd {
         #[arg(long = "etcd-cluster")]
         etcd_cluster: Option<u32>,
     },
+    /// Print a cluster's kubeconfig from the local cache (no live SSH).
+    ///
+    /// The same file `create`/`apply`/`kubeadm` already wrote and merged into
+    /// `~/.kube/config` at creation time. Redirect or pipe it as needed.
+    Kubeconfig {
+        /// Cluster name. Omit when there is only one cached.
+        #[arg(add = ArgValueCandidates::new(super::complete::cached_kubeconfigs))]
+        name: Option<String>,
+    },
 }
 
 pub fn run(action: ClusterCmd) -> Result<()> {
@@ -735,7 +744,73 @@ pub fn run(action: ClusterCmd) -> Result<()> {
                 etcd_cluster,
             })
         }
+        ClusterCmd::Kubeconfig { name } => cmd_kubeconfig(name),
     }
+}
+
+/// Cluster names with a cached kubeconfig, sorted. Covers BOTH cluster types —
+/// kind-mode (`kindmode::kubeconfig_path`) and kubeadm/SSH
+/// (`fetch_kubeconfig`'s `dest`) write to the identical
+/// `<root>/clusters/<name>-kubeconfig.yaml`, unlike `complete::clusters()`,
+/// which only sees kind-mode's container labels. Best-effort: a missing or
+/// unreadable directory is "none cached", not an error.
+fn cached_kubeconfig_names() -> Vec<String> {
+    let dir = state_root().join("clusters");
+    let mut names: Vec<String> = std::fs::read_dir(&dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            e.file_name()
+                .to_str()
+                .and_then(|f| f.strip_suffix("-kubeconfig.yaml"))
+                .map(String::from)
+        })
+        .collect();
+    names.sort();
+    names
+}
+
+/// An explicit name passes through as-is (existence is checked when the file
+/// is actually read); omitted, this is the same "0/1/many, list the names,
+/// never guess" rule `resolve_vm_image` already uses for VM images.
+fn resolve_kubeconfig_name(explicit: Option<String>) -> Result<String> {
+    if let Some(n) = explicit {
+        return Ok(n);
+    }
+    let mut names = cached_kubeconfig_names();
+    match names.len() {
+        0 => Err(Error::Invalid(
+            super::po::t(
+                "no cluster kubeconfig cached — run `cluster create`/`cluster apply`/`cluster kubeadm` first",
+            )
+            .into(),
+        )),
+        1 => Ok(names.remove(0)),
+        n => Err(Error::Invalid(super::po::tf(
+            "{n} cluster kubeconfigs cached — say which one. Available: {names}",
+            &[("n", &n.to_string()), ("names", &names.join(", "))],
+        ))),
+    }
+}
+
+fn cmd_kubeconfig(name: Option<String>) -> Result<()> {
+    let name = resolve_kubeconfig_name(name)?;
+    let path = state_root()
+        .join("clusters")
+        .join(format!("{name}-kubeconfig.yaml"));
+    let content = std::fs::read(&path).map_err(|_| {
+        let names = cached_kubeconfig_names();
+        let hint = if names.is_empty() {
+            super::po::t("run `cluster create`/`cluster apply`/`cluster kubeadm` first").into()
+        } else {
+            super::po::tf("available: {names}", &[("names", &names.join(", "))])
+        };
+        Error::NotFound(format!("cluster kubeconfig: {name} ({hint})"))
+    })?;
+    use std::io::Write;
+    std::io::stdout().write_all(&content)?;
+    Ok(())
 }
 
 /// `cluster ls`'s old body — now also the target of the generic `get clusters`.
@@ -1285,10 +1360,9 @@ fn pull_official(store: &VmImageStore, tag: &str) -> Result<()> {
         Ok(()) => Ok(()),
         Err(e) => {
             let repo = source.rsplit_once(':').map(|(r, _)| r).unwrap_or(&source);
-            let choices =
-                delonix_image::registry::list_remote_tags(&super::util::state_root(), repo)
-                    .map(|t| t.join(", "))
-                    .unwrap_or_default();
+            let choices = delonix_image::registry::list_remote_tags(&state_root(), repo)
+                .map(|t| t.join(", "))
+                .unwrap_or_default();
             if choices.is_empty() {
                 return Err(e);
             }

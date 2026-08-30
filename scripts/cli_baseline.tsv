@@ -11,6 +11,7 @@
 ~	cluster create
 ~	cluster init
 ~	cluster kubeadm
+~	cluster kubeconfig
 ~	cluster kube generate
 =	cluster load
 ~	cluster prune
