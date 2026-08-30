@@ -1547,6 +1547,32 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["describe", "pod logs", "container ps"],
     },
     Entry {
+        path: "pod exec",
+        group: "Interact",
+        examples: &[
+            ("run a command in the first member", "delonix pod exec web nginx -t"),
+            ("an interactive shell in a specific member", "delonix pod exec -it web --container sidecar sh"),
+        ],
+        see_also: &["pod attach", "pod cp", "container exec"],
+    },
+    Entry {
+        path: "pod cp",
+        group: "Interact",
+        examples: &[
+            ("out of the pod's first member onto the host", "delonix pod cp web:/etc/nginx/nginx.conf ."),
+            ("from the host into a specific member", "delonix pod cp ./site.conf web:/etc/nginx/conf.d/ --container sidecar"),
+        ],
+        see_also: &["pod exec", "container cp"],
+    },
+    Entry {
+        path: "pod attach",
+        group: "Interact",
+        examples: &[
+            ("re-attach to the first member's output (output only)", "delonix pod attach web"),
+        ],
+        see_also: &["pod logs", "pod exec", "container attach"],
+    },
+    Entry {
         path: "secret",
         group: "",
         examples: &[
