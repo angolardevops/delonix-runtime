@@ -94,6 +94,7 @@ fn filled_spec(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
         k::HTTP_ROUTE => cmd::httproute::spec_with_defaults(doc),
         k::INGRESS => cmd::httproute::ingress_spec_with_defaults(doc),
         k::FIREWALL_POLICY => cmd::firewall::spec_with_defaults(doc),
+        k::NETWORK_ACCESS_RULE => cmd::network_access_rule::spec_with_defaults(doc),
         k::CONTAINER if doc.spec.get("containers").is_some() => {
             cmd::container::pod_spec_with_defaults(doc)
         }
@@ -421,6 +422,9 @@ pub(crate) fn spec_fields_for(kind: &str) -> Option<&'static [&'static str]> {
         // keeps `Egress`/`FirewallPolicy`.
         k::INGRESS => Some(crate::cmd::httproute::INGRESS_SPEC_FIELDS),
         k::EGRESS | k::FIREWALL_POLICY => Some(crate::cmd::firewall::FW_SPEC_FIELDS),
+        k::NETWORK_ACCESS_RULE => {
+            Some(crate::cmd::network_access_rule::NETWORK_ACCESS_RULE_SPEC_FIELDS)
+        }
         k::HTTP_ROUTE => Some(crate::cmd::httproute::HTTP_ROUTE_SPEC_FIELDS),
         k::DEPENDENCY => Some(crate::cmd::dependency::DEPENDENCY_SPEC_FIELDS),
         k::NETWORK_ROUTE => Some(crate::cmd::netroute::NETWORK_ROUTE_SPEC_FIELDS),
