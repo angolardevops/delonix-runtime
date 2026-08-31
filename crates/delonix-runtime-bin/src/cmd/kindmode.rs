@@ -1584,6 +1584,88 @@ pub(crate) fn list(store: &Store) -> Result<()> {
     Ok(())
 }
 
+/// `delonix describe kubernetesclusters <name>` — the per-cluster detail
+/// `list()` never had (only the one-row-per-cluster summary). Reuses the same
+/// derivation `list()` already does (membership by the
+/// `io.x-k8s.kind.cluster` label, role by `io.x-k8s.kind.role`, uptime/last
+/// restart the same way) rather than inventing a second way to compute them.
+pub(crate) fn describe(store: &Store, name: &str) -> Result<()> {
+    // `cluster_nodes` itself errors `NotFound` for an unknown name — it can
+    // only return a name it found at least one container under.
+    let (_, nodes) = cluster_nodes(store, Some(name))?;
+    let cp: Vec<&Container> = nodes
+        .iter()
+        .filter(|c| {
+            c.labels
+                .get("io.x-k8s.kind.role")
+                .map(|r| r == "control-plane")
+                .unwrap_or(false)
+        })
+        .collect();
+    let running = nodes
+        .iter()
+        .filter(|c| matches!(c.status, delonix_runtime_core::Status::Running))
+        .count();
+    let api = cp
+        .first()
+        .and_then(|c| c.ports.first())
+        .and_then(|p| delonix_net::parse_publish(p).ok())
+        .map(|(hp, _, _)| hp)
+        .unwrap_or_else(|| "-".into());
+    let uptime = cp
+        .first()
+        .and_then(|c| c.pid)
+        .and_then(node_uptime_secs)
+        .map(fmt_dur)
+        .unwrap_or_else(|| "-".into());
+    let evs = delonix_runtime_core::events::read(&super::util::state_root());
+    let ids: Vec<&str> = nodes.iter().map(|c| c.id.as_str()).collect();
+    let last = evs
+        .iter()
+        .filter(|e| ids.contains(&e.id.as_str()) && (e.action == "start" || e.action == "die"))
+        .map(|e| e.ts)
+        .max()
+        .map(delonix_runtime_core::fmt_local_ts)
+        .unwrap_or_else(|| "—".into());
+    let kubeconfig = kubeconfig_path(name);
+
+    let mut d = super::output::Describe::new();
+    d.field("Name", name);
+    d.field(
+        "State",
+        if running == nodes.len() {
+            "up".to_string()
+        } else {
+            format!("{running}/{} up", nodes.len())
+        },
+    );
+    d.field("API port", api);
+    d.field("Uptime", uptime);
+    d.field("Last restart", last);
+    d.field(
+        "Kubeconfig",
+        if kubeconfig.exists() {
+            kubeconfig.display().to_string()
+        } else {
+            "-".to_string()
+        },
+    );
+    let node_lines: Vec<String> = nodes
+        .iter()
+        .map(|c| {
+            let role = c
+                .labels
+                .get("io.x-k8s.kind.role")
+                .cloned()
+                .unwrap_or_else(|| "worker".into());
+            format!("{} ({role}, {:?})", c.name, c.status)
+        })
+        .collect();
+    d.list("Nodes", &node_lines);
+    d.print();
+    Ok(())
+}
+
 /// Removes this cluster's entries from the user's kubeconfig. Best-effort and
 /// idempotent: a cluster that never got to install a context is not an error.
 fn remove_kubecontext(cluster: &str) -> Result<()> {

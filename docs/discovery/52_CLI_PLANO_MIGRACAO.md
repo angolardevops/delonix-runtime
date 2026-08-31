@@ -37,17 +37,29 @@ nenhuma, e `0 checks` lê-se como `0 falhas`. Cada bloco vai a PR contra a `main
 
 ## 3. Os blocos, por ordem
 
-### B1 — Verbos genéricos, o resto dos Kinds  ·  ADITIVO  ·  ~7 folhas
+### B1 — Verbos genéricos, o resto dos Kinds  ·  ADITIVO  ·  FECHADO
 
 Levar o `get`/`describe`/`delete` de 9 para os 12 Kinds que têm estado próprio.
-Falta `NetworkRoute`, `NetworkPolicy` e o `describe` de `Secret`/`Image`/
-`KubernetesCluster`.
+**Medido de novo antes de tocar em código (2026-08-31)**: o texto original
+estava desactualizado em dois pontos — `describe` de `Secret` e `Image` já
+estavam wired (`SecretCmd::Inspect`/`ImageCmd::Describe`). Os gaps reais eram
+três: `NetworkRoute` (describe+delete), `NetworkPolicy` (get/describe/delete,
+o desenho por decidir) e o `describe` de `KubernetesCluster` (não existia
+NENHUMA função de describe por-cluster).
 
-O `NetworkPolicy` é o único com desenho por decidir: o `net ingress ls` é **por
-container**, não uma lista global, por isso `get networkpolicies` não tem hoje
-pergunta equivalente.
+**`NetworkPolicy` resolvido**: `get networkpolicies` passou a combinar as duas
+direcções por container numa só tabela (`firewall::list_all_policies`) — o
+`net ingress ls`/`net egress ls` continuam intocados, uma direcção de cada
+vez. Sem registo próprio (`FirewallPolicy` não persiste identidade de
+documento — mesma razão que levou o `NetworkAccessRule` a precisar de
+`origin`), a identidade endereçável por `describe`/`delete networkpolicies` é
+`<target>/<direction>` (ex.: `web/ingress`), não um nome de documento.
+`NetworkRoute` usa a mesma lógica já existente, `<from>-><to>`
+(`netroute::route_name`, a identidade que `stack plan` já imprimia).
 
-**Fecha o critério de saída da CLI-2.** Nada quebra.
+**Fechou o critério de saída da CLI-2. Nada quebrou** — sem subcomando nativo
+novo em nenhum dos três Kinds, só parametrização dos verbos genéricos
+já existentes.
 
 ### B2 — Renomeações que não tocam em contrato  ·  QUEBRA MENOR  ·  ~20 folhas
 
