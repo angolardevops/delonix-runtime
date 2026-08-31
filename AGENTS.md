@@ -3053,6 +3053,63 @@ pela simplificação anterior — só nunca tinham sido alcançados por um teste
 + `docs/gen.py`/`docs/comandos/tunnel.html` (regenerados) + `docs/schema/v1/delonix.json`
 (regenerado — `insecureSkipTlsVerify` é campo novo do schema publicado) + `examples/tunnel.yaml`.
 
+## `kind: NetworkAccessRule` — o primitivo incremental que faltava ao B4 (ADR-0028)
+
+O B4 do plano de reestruturação da CLI prometia colapsar `net ingress`/`net
+egress` (17 folhas) numa Kind declarativa. Medido duas vezes
+(`docs/releases/v0.68.0.md`) e confirmado outra vez nesta sessão: só chegou a
+4 folhas, porque `net ingress allow`/`net egress allow` são **incrementais**
+(acrescentam uma regra, mantendo as outras) e a única Kind declarativa que
+existia para o firewall — `kind: FirewallPolicy`, também alcançável como
+`NetworkPolicy` (ambas as grafias apontam para `cmd::kinds::FIREWALL_POLICY`)
+— **substitui o estado inteiro de uma direcção** a cada apply
+(`apply_fw_doc`). Duas `FirewallPolicy` para o mesmo (alvo, direcção) são
+recusadas de propósito — ver a secção acima — porque um replace não consegue
+exprimir «estas duas juntas» sem uma apagar a outra em silêncio.
+
+`kind: NetworkAccessRule` entra AO LADO de `FirewallPolicy`, não a substitui:
+uma regra de firewall INCREMENTAL por documento. Medido antes de escrever
+código: o motor JÁ resolve o mecanismo todo — `add_rule` (a semântica «o
+último comando ganha» do `net ingress`/`net egress`) é uma mutação Rust pura
+sobre `Vec<FwRule>`, seguida de um `nft -f` que reconstrói a chain inteira do
+zero (`delonix-net/src/infra.rs::do_firewall`). Não há primitivo nft por
+regra a construir — a única coisa que faltava era CONTABILIDADE: nada deixava
+um documento aplicado e removido de forma independente retirar só a SUA
+contribuição de uma lista partilhada. A única Kind que já acumulava,
+`kind: Dependency`, contorna isto fundindo todos os documentos irmãos num só
+`FirewallPolicy` no `load` (`dependency.rs::lower_dependencies`) — só
+funciona dentro de UMA passagem de `stack apply`, e o próprio módulo admite
+que remover UMA Dependency sozinha não retira o seu efeito.
+
+**O mecanismo**: `FwRule` ganhou `origin: Option<String>` — o nome do
+documento `NetworkAccessRule` que escreveu aquela regra. O apply de um
+documento encontra-e-substitui só a regra com a SUA origem no container alvo,
+deixando todas as outras (de outros documentos, do `net ingress`/`net
+egress` imperativo, ou de uma `FirewallPolicy`) intocadas. Remover o
+documento retira só essa regra.
+
+**Correcção necessária no MESMO commit**: `apply_fw_doc`'s
+`fw.rules.retain(|r| r.dir != dir)` apagava TUDO da direcção, incluindo
+regras com `origin` — uma `FirewallPolicy` aplicada sobre um alvo que também
+tivesse regras de `NetworkAccessRule` apagava-as em silêncio enquanto
+reportava sucesso, a MESMA classe de bug que a recusa de duas
+`FirewallPolicy` já existe para prevenir, só que entre Kinds diferentes onde
+essa recusa não a vê. Ficou `retain(|r| r.dir != dir || r.origin.is_some())`
+— `FirewallPolicy` continua a substituir só as regras SEM dono.
+
+**Sem verbo de CLI novo.** Alcança-se como `kind: Dependency` já se alcança —
+por `delonix apply -f`/`delonix stack apply`, que despacham por Kind. Colapsar
+a superfície de `net ingress`/`net egress` para esta Kind é uma decisão
+**separada e futura** (o próprio §5 do plano já pedia «remedir o B4 quando
+existir uma NetworkPolicy incremental» — é este o primitivo que faltava para
+essa remedição, não a remedição em si).
+
+**Limitação aceite, partilhada com `container`/`pod`/`FirewallPolicy`**: o
+`stamp` de posse (`STACK_LABEL`) é por CONTAINER, não por regra — duas
+`NetworkAccessRule` de STACKS diferentes no mesmo alvo pisam-se no dono
+registado (o `LAST_APPLIED` já é por-origem, isso não colide). Mesmo
+compromisso que já existia noutro lado, não uma regressão nova.
+
 ## Cluster modo Kind sem Docker — investigação (GO/NO-GO)
 
 Pedido: `delonix cluster` em modo `kind` (sem `kubeadm`) a funcionar **sem Docker instalado** —

@@ -1,0 +1,50 @@
+# kind: NetworkAccessRule — UMA regra de firewall INCREMENTAL por documento.
+#
+# Ao contrário de `kind: FirewallPolicy`/`NetworkPolicy`, que SUBSTITUI o
+# estado inteiro de uma direcção a cada apply (e por isso recusa dois
+# documentos para o mesmo alvo+direcção), várias NetworkAccessRule para o
+# MESMO container acumulam — é o que este exemplo mostra: duas regras
+# independentes no mesmo alvo, cada uma retirável sozinha (remove-a do
+# manifesto e reaplica; a outra fica intacta).
+#
+# É o primitivo que faltava para o B4 do plano de reestruturação da CLI
+# (ver `docs/adr/0028-network-access-rule-incremental.md`) — `net ingress
+# allow`/`net egress allow` já eram incrementais, mas nada declarativo
+# conseguia exprimir isso até agora. NÃO substitui `net ingress`/`net
+# egress` (essa decisão é trabalho futuro, separado); aplica-se por
+# `delonix stack apply -f network-access-rule.yaml`, como qualquer outro
+# Kind — não tem verbo de CLI próprio.
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: appnet }
+spec:
+  driver: bridge
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata: { name: web }
+spec:
+  image: "nginx:alpine"
+  network: appnet
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkAccessRule
+metadata: { name: allow-web-from-lan }
+spec:
+  target: web
+  direction: ingress   # ou egress
+  action: allow        # ou deny (default: allow)
+  proto: tcp           # tcp | udp | any (default: any)
+  port: "8080"
+  from: "10.0.0.0/24"  # CIDR; vazio/omitido = qualquer origem
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkAccessRule
+metadata: { name: allow-web-metrics-from-monitoring }
+spec:
+  target: web          # o MESMO alvo — acumula com a regra acima, não a substitui
+  direction: ingress
+  proto: tcp
+  port: "9090"
+  from: "10.1.0.0/24"

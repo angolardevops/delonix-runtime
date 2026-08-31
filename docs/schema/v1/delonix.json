@@ -1138,6 +1138,54 @@
       ],
       "type": "object"
     },
+    "NetworkAccessRuleSpec": {
+      "additionalProperties": false,
+      "description": "`spec` of `kind: NetworkAccessRule`.",
+      "properties": {
+        "action": {
+          "default": null,
+          "description": "`allow` (accept) or `deny` (drop). Default `allow`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "direction": {
+          "description": "`ingress` (traffic TO the container) or `egress` (FROM it).",
+          "type": "string"
+        },
+        "from": {
+          "default": null,
+          "description": "CIDR of the other end (source on ingress, destination on egress).\nEmpty/omitted = anywhere.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "port": {
+          "description": "Port, a range `n-m`, or `*` (any).",
+          "type": "string"
+        },
+        "proto": {
+          "default": null,
+          "description": "`tcp`/`udp`/`any`. Default `any`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "description": "Container this rule applies to. Must be on the SDN — a `--net\nhost`/`none` container has no firewall to govern.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target",
+        "direction",
+        "port"
+      ],
+      "type": "object"
+    },
     "NetworkRouteSpec": {
       "additionalProperties": false,
       "description": "`spec` of `kind: NetworkRoute`.",
@@ -3020,6 +3068,31 @@
       "if": {
         "properties": {
           "kind": {
+            "const": "NetworkAccessRule"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "networking.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/NetworkAccessRuleSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
             "const": "Workload"
           }
         },
@@ -3118,6 +3191,7 @@
         "KnowDepends",
         "KubernetesCluster",
         "Network",
+        "NetworkAccessRule",
         "NetworkPolicy",
         "NetworkRoute",
         "Pod",

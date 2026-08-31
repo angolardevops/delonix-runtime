@@ -83,6 +83,11 @@ pub(crate) fn cli_group(kind: &str) -> &'static str {
         k if k == kinds::HTTP_ROUTE => "net httproute",
         k if k == kinds::GATEWAY => "net tunnel",
         k if k == kinds::FIREWALL_POLICY => "net ingress",
+        // A rule's identity is real (`origin`), but the rule itself lives
+        // inside the target's own fw.rules table — the same one `net ingress
+        // ls`/`net egress ls` already print. There is no separate list to
+        // build here yet; that table already shows it.
+        k if k == kinds::NETWORK_ACCESS_RULE => "net ingress",
         k if k == kinds::CLUSTER => "cluster",
         k if k == kinds::STACK => "stack",
         k if k == kinds::WORKLOAD => "workload",
