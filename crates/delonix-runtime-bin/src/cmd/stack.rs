@@ -366,7 +366,7 @@ pub fn run(action: StackCmd) -> Result<()> {
 // symptoms.
 
 /// Everything the manifest asks for, in the reconciler's comparable form.
-fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Desired>> {
+pub(crate) fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Desired>> {
     let mut out = Vec::new();
     for kind in super::kinds::stack_kinds() {
         for doc in manifest::of_kind(docs, kind) {
@@ -402,7 +402,7 @@ fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Desired>>
 /// there is no way to enumerate, say, every HTTPRoute with an owner, so they can
 /// never be prune candidates, and pretending otherwise would risk deleting
 /// something nobody claimed.
-fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Actual>> {
+pub(crate) fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Actual>> {
     let mut out = super::container::actual()?;
     out.extend(super::volume::actual()?);
     out.extend(super::network::actual()?);

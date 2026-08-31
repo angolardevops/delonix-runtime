@@ -276,6 +276,23 @@ enum Cmd {
         #[arg(short, long)]
         force: bool,
     },
+    /// The manifest, last-applied, and observed values for one resource — side by side.
+    ///
+    /// `stack plan` already computes this internally for every resource — it
+    /// only ever prints the VERDICT (Create/Update/Replace/NoOp). This prints
+    /// the three underlying VALUES, for one named resource, side by side.
+    Diff {
+        /// Kind, plural or short name: `containers`, `container`, `c`.
+        kind: String,
+        name: String,
+        /// Manifest to read (default: `./delonix-manifest.yaml`).
+        #[arg(short = 'f', long = "file")]
+        file: Option<std::path::PathBuf>,
+        /// Exit 2 if DESIRED and OBSERVED differ on any field, 0 otherwise —
+        /// same contract as `stack plan --detailed-exitcode`.
+        #[arg(long)]
+        detailed_exitcode: bool,
+    },
     /// Apply a whole manifest (`delonix-manifest.yaml`) — every Kind, in dependency order.
     Stack {
         #[command(subcommand)]
@@ -497,6 +514,12 @@ fn run() -> Result<()> {
         } => cmd::verbs::get(&kind, &names, output),
         Cmd::Describe { kind, names } => cmd::verbs::describe(&kind, &names),
         Cmd::Delete { kind, names, force } => cmd::verbs::delete(&kind, &names, force),
+        Cmd::Diff {
+            kind,
+            name,
+            file,
+            detailed_exitcode,
+        } => cmd::diff::cmd_diff(&kind, &name, file, detailed_exitcode),
         Cmd::Stack { action } => cmd::stack::run(action),
         Cmd::Compose { action } => cmd::compose::run(action),
         // clap prints "<name> <long_version>"; reproduced here so `delonix version` and
