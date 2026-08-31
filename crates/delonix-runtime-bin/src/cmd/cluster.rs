@@ -602,6 +602,17 @@ pub enum ClusterCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::cached_kubeconfigs))]
         name: Option<String>,
     },
+    /// Is the control-plane answering, and is every node `Ready`?
+    ///
+    /// Only kind-mode clusters (the same boundary `kubeconfig`/`describe`
+    /// already have) — an SSH-provisioned `cluster apply` target has no
+    /// container to exec into. Exits non-zero on anything short of fully
+    /// healthy: a `health` that returns 0 over a `NotReady` node is the
+    /// dishonest reporting this repo's own audits exist to remove.
+    Health {
+        /// Cluster name. Omit when there is only one.
+        name: Option<String>,
+    },
 }
 
 pub fn run(action: ClusterCmd) -> Result<()> {
@@ -745,6 +756,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
             })
         }
         ClusterCmd::Kubeconfig { name } => cmd_kubeconfig(name),
+        ClusterCmd::Health { name } => cmd_health(name.as_deref()),
     }
 }
 
@@ -830,6 +842,11 @@ pub(crate) fn cmd_delete(name: &str) -> Result<()> {
 pub(crate) fn cmd_describe(name: &str) -> Result<()> {
     let (_, store) = super::util::open_stores()?;
     super::kindmode::describe(&store, name)
+}
+
+fn cmd_health(name: Option<&str>) -> Result<()> {
+    let (_, store) = super::util::open_stores()?;
+    super::kindmode::health(&store, name)
 }
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {

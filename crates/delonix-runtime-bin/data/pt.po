@@ -6647,6 +6647,9 @@ msgstr "diz qual é o cluster, quando há mais do que um de pé"
 msgid "the one cluster you have — no name needed"
 msgstr "o único cluster que tens — não precisa de nome"
 
+msgid "non-zero the moment a node stops answering `Ready`"
+msgstr "não-zero no instante em que um nó deixa de responder `Ready`"
+
 msgid "a specific one, redirected to a file"
 msgstr "um específico, redireccionado para um ficheiro"
 
@@ -8026,6 +8029,15 @@ msgstr "Imprime o kubeconfig de um cluster a partir da cache local (sem SSH ao v
 
 msgid "Print a cluster's kubeconfig from the local cache (no live SSH).\n\nThe same file `create`/`apply`/`kubeadm` already wrote and merged into `~/.kube/config` at creation time. Redirect or pipe it as needed."
 msgstr "Imprime o kubeconfig de um cluster a partir da cache local (sem SSH ao vivo).\n\nO mesmo ficheiro que `create`/`apply`/`kubeadm` já escreveram e fundiram em `~/.kube/config` na criação. Redirecciona-o ou encaminha-o como precisares."
+
+msgid "Is the control-plane answering, and is every node `Ready`?"
+msgstr "O control-plane está a responder, e todos os nós estão `Ready`?"
+
+msgid "Is the control-plane answering, and is every node `Ready`?\n\nOnly kind-mode clusters (the same boundary `kubeconfig`/`describe` already have) — an SSH-provisioned `cluster apply` target has no container to exec into. Exits non-zero on anything short of fully healthy: a `health` that returns 0 over a `NotReady` node is the dishonest reporting this repo's own audits exist to remove."
+msgstr "O control-plane está a responder, e todos os nós estão `Ready`?\n\nSó clusters modo-kind (a mesma fronteira que `kubeconfig`/`describe` já têm) — um alvo provisionado por SSH (`cluster apply`) não tem container para onde fazer exec. Sai não-zero perante qualquer coisa que não seja totalmente saudável: um `health` que devolve 0 sobre um nó `NotReady` é o relato desonesto que as próprias auditorias deste repo existem para remover."
+
+msgid "Cluster name. Omit when there is only one"
+msgstr "Nome do cluster. Omite-o se só houver um"
 
 msgid "Generate a Kubernetes manifest from a container/pod already running locally."
 msgstr "Gera um manifesto Kubernetes a partir de um container/pod já a correr localmente."
