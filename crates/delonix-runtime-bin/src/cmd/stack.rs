@@ -379,6 +379,7 @@ fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Desired>>
                 k::IMAGE => super::image::desired(doc)?,
                 k::VM => super::vm::desired(doc)?,
                 k::FIREWALL_POLICY => super::firewall::desired(doc)?,
+                k::NETWORK_ACCESS_RULE => super::network_access_rule::desired(doc)?,
                 k::HTTP_ROUTE | k::INGRESS => super::httproute::desired(doc)?,
                 k::GATEWAY => super::tunnel::desired(doc)?,
                 _ => reconcile::Desired {
@@ -410,6 +411,7 @@ fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Actual>> {
     out.extend(super::image::actual(docs)?);
     out.extend(super::vm::actual()?);
     out.extend(super::firewall::actual(docs)?);
+    out.extend(super::network_access_rule::actual(docs)?);
     out.extend(super::httproute::actual(docs)?);
     out.extend(super::tunnel::actual(docs)?);
     let (_, cstore) = super::util::open_stores()?;
@@ -643,6 +645,10 @@ pub(crate) fn compared_fields_table() -> Vec<(&'static str, &'static [&'static s
         (k::IMAGE, super::image::RECONCILED_IMAGE_FIELDS),
         (k::VM, super::vm::RECONCILED_VM_FIELDS),
         (k::FIREWALL_POLICY, super::firewall::RECONCILED_FW_FIELDS),
+        (
+            k::NETWORK_ACCESS_RULE,
+            super::network_access_rule::RECONCILED_NETWORK_ACCESS_RULE_FIELDS,
+        ),
         (k::HTTP_ROUTE, super::httproute::RECONCILED_HTTPROUTE_FIELDS),
         (k::INGRESS, super::httproute::RECONCILED_HTTPROUTE_FIELDS),
         (k::GATEWAY, super::tunnel::RECONCILED_TUNNEL_FIELDS),
@@ -1220,9 +1226,11 @@ fn presence(
         // it in this arm made the one below unreachable, which `clippy` caught
         // and the tests did not: a route would report `-` (ready, nothing to
         // observe) whether or not it existed.
-        k::INGRESS | k::FIREWALL_POLICY | k::HTTP_ROUTE | k::DEPENDENCY => {
-            ("-".into(), super::po::t("declarative").into())
-        }
+        k::INGRESS
+        | k::FIREWALL_POLICY
+        | k::HTTP_ROUTE
+        | k::DEPENDENCY
+        | k::NETWORK_ACCESS_RULE => ("-".into(), super::po::t("declarative").into()),
         // Declared vs. live are different questions for a route, and the answer
         // names which. Before any of this it fell through to `?`/`unsupported
         // kind` — `stack ls` could not say anything about a path it had opened.
@@ -1650,6 +1658,9 @@ fn run_layers(
     layers.run(k::CONTAINER, "📦", || super::container::apply(docs))?;
     layers.run(k::POD, "🧩", || super::pod::apply(docs))?;
     layers.run(k::FIREWALL_POLICY, "🧱", || super::firewall::apply(docs))?;
+    layers.run(k::NETWORK_ACCESS_RULE, "🎯", || {
+        super::network_access_rule::apply(docs)
+    })?;
     // HTTPRoute LAST: it needs the backend containers already created (with IP) to
     // resolve the routes; brings up/reloads the L7 reverse-proxy.
     layers.run(k::HTTP_ROUTE, "🔀", || super::httproute::apply(docs))?;
@@ -1742,6 +1753,7 @@ fn destroy_one(kind: &str, name: &str) -> Result<()> {
         k::NETWORK_ROUTE => super::netroute::remove_for_replace(name),
         k::POD => super::pod::remove_pod(name, true),
         k::VM => super::vm::remove_for_replace(name),
+        k::NETWORK_ACCESS_RULE => super::network_access_rule::remove_for_replace(name),
         // Unreachable: the guard above already refused everything outside
         // the `teardown` column. Kept so flipping that column without an arm
         // here fails instead of silently doing nothing.
@@ -1935,6 +1947,20 @@ fn converge_and_stamp(
                         })?;
                     super::firewall::converge_doc(doc)?
                 }
+                // Same rationale as `FIREWALL_POLICY` just above: applying is
+                // already convergence (find-and-replace by `origin`).
+                k::NETWORK_ACCESS_RULE => {
+                    let doc = docs
+                        .iter()
+                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .ok_or_else(|| {
+                            delonix_runtime_core::Error::Invalid(format!(
+                                "NetworkAccessRule/{}: not in the manifest",
+                                c.name
+                            ))
+                        })?;
+                    super::network_access_rule::converge_doc(doc)?
+                }
                 // Same shape as a firewall policy: `apply_one` is already
                 // idempotent and updates the record in place, so converging IS
                 // applying — a per-field path would be a second way to write the
@@ -2001,6 +2027,7 @@ fn stamp_all(
             k::NETWORK_ROUTE => super::netroute::stamp(&d.name, stack, &d.fields),
             k::POD => super::pod::stamp(&d.name, stack, &d.fields),
             k::VM => super::vm::stamp(&d.name, stack, &d.fields),
+            k::NETWORK_ACCESS_RULE => super::network_access_rule::stamp(&d.name, stack, &d.fields),
             // `Image` is shared content and deliberately not ownable — stamping
             // it for one stack would hand another stack's cache an owner.
             k::IMAGE => Ok(()),
@@ -2612,6 +2639,27 @@ fn validate_graph_with(
                             ));
                         }
                     } else if !containers.contains(target) {
+                        issues.push(super::po::tf(
+                            "{kind} '{name}' → target '{target}' is not a declared or existing Container",
+                            &[("kind", &doc.kind), ("name", name), ("target", target)],
+                        ));
+                    }
+                }
+            }
+            k::NETWORK_ACCESS_RULE => {
+                // `direction` ∈ {ingress, egress} — same check as
+                // `FirewallPolicy`'s, caught here before `apply` creates anything.
+                let dir = doc.spec.get("direction").and_then(|v| v.as_str());
+                if !matches!(dir, Some("ingress" | "egress")) {
+                    issues.push(super::po::tf(
+                        "NetworkAccessRule '{name}' → direction is required and ∈ {{ingress, egress}}",
+                        &[("name", name)],
+                    ));
+                }
+                // No `scope: network` for this Kind — a rule always targets a
+                // container, never a network's egress policy.
+                if let Some(target) = doc.spec.get("target").and_then(|v| v.as_str()) {
+                    if !containers.contains(target) {
                         issues.push(super::po::tf(
                             "{kind} '{name}' → target '{target}' is not a declared or existing Container",
                             &[("kind", &doc.kind), ("name", name), ("target", target)],
@@ -3430,7 +3478,7 @@ spec: {}
     fn um_kind_declarativo_nao_fica_pendente_para_sempre() {
         assert_eq!(
             declarativos().len(),
-            3,
+            4,
             "a lista mudou — confirma o `presence`"
         );
         for k in declarativos() {
