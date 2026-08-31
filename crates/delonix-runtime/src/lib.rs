@@ -3610,10 +3610,42 @@ fn delegated_base_usable(base: &std::path::Path) -> bool {
 /// controllers active for children. It is what prevents the SUM of all
 /// containers from killing the host: the slice has total `memory.max`/`cpu.max`/`pids.max`,
 /// and the kernel OOM-kills INSIDE the slice (a container), never the host. Idempotent.
+/// Where the aggregate ceiling lives on THIS host, given whether we are
+/// rootless and what the current cgroup is.
+///
+/// Pure so the decision can be tested on a machine that is neither.
+///
+/// `DELONIX_SLICE` is `/sys/fs/cgroup/delonix.slice`, a ROOT path — and rootless
+/// is the default mode of this engine, so until now the aggregate budget simply
+/// did not exist where most installations run. Two consequences, both measured:
+/// one workload with no `--memory` could take the whole host, and the thermal
+/// governor lowered `cpu.max` on a cgroup that was not there.
+///
+/// In rootless the answer already existed and was being ignored: the delegated
+/// base the engine creates leaves under (`<user@uid.service>/dlx-containers`) IS
+/// the common parent of every workload. Putting the ceiling on it needs no new
+/// privilege and no new path — it is the same directory the leaves already live
+/// in.
+fn slice_path_from(rootless: bool, current_cgroup: Option<&str>) -> Option<String> {
+    if !rootless {
+        return Some(delonix_runtime_core::DELONIX_SLICE.to_string());
+    }
+    user_service_base(current_cgroup?)
+}
+
+/// The aggregate ceiling's cgroup on this host, or `None` when there is no
+/// delegation boundary to hang it on (an SSH session scope, say).
+pub fn slice_path() -> Option<String> {
+    slice_path_from(is_rootless(), current_cgroup_v2().as_deref())
+}
+
 pub fn ensure_delonix_slice() {
-    let slice = delonix_runtime_core::DELONIX_SLICE;
+    let Some(slice) = slice_path() else {
+        return; // no delegation boundary → nothing to hang a ceiling on
+    };
+    let slice = slice.as_str();
     if std::fs::create_dir_all(slice).is_err() {
-        return; // no permission (rootless) → best-effort
+        return; // no permission → best-effort
     }
     let pct = host_reserve_pct();
     let mem = host_mem_bytes();
@@ -3651,11 +3683,12 @@ pub fn ensure_delonix_slice() {
 /// under excessive load — instead of letting the host drown. (The slice is already the
 /// hard ceiling; this is the soft, informative refusal.)
 pub fn admission_check(memory_max: &str) -> Result<()> {
-    if is_rootless() {
-        return Ok(()); // no delegated cgroup → no budget to check
-    }
     ensure_delonix_slice();
-    let slice = delonix_runtime_core::DELONIX_SLICE;
+    // No boundary at all (an SSH session scope) means no budget to check —
+    // which is different from "rootless", the case this used to give up on.
+    let Some(slice) = slice_path() else {
+        return Ok(());
+    };
     let read = |f: &str| -> Option<u64> {
         std::fs::read_to_string(format!("{slice}/{f}"))
             .ok()
@@ -3846,10 +3879,9 @@ pub fn set_slice_cpu_pct(pct: u64) {
     // Safety floor: never write quota 0 (`cpu.max "0 100000"` would freeze
     // ALL of the slice's containers). Guarantees at least ~1% of a core.
     let quota = (slice_full_cpu_quota() * pct.min(100) / 100).max(1_000);
-    let _ = std::fs::write(
-        format!("{}/cpu.max", delonix_runtime_core::DELONIX_SLICE),
-        format!("{quota} 100000"),
-    );
+    if let Some(slice) = slice_path() {
+        let _ = std::fs::write(format!("{slice}/cpu.max"), format!("{quota} 100000"));
+    }
 }
 
 /// Best-effort: tries to set the controllable fans to max (if writable
@@ -3876,7 +3908,7 @@ pub fn boost_fans() -> bool {
 /// State of Delonix's aggregate budget (for `system info`).
 pub fn slice_budget() -> (u64, u64, u64, f64, u64) {
     ensure_delonix_slice();
-    let slice = delonix_runtime_core::DELONIX_SLICE;
+    let slice = slice_path().unwrap_or_default();
     let read = |f: &str| -> u64 {
         std::fs::read_to_string(format!("{slice}/{f}"))
             .ok()
@@ -3900,7 +3932,7 @@ pub fn slice_budget() -> (u64, u64, u64, f64, u64) {
 /// [`ContainerUsage::cpu_usage_usec`].
 pub fn slice_cpu_usage_usec() -> Option<u64> {
     ensure_delonix_slice();
-    let slice = delonix_runtime_core::DELONIX_SLICE;
+    let slice = slice_path()?;
     std::fs::read_to_string(format!("{slice}/cpu.stat"))
         .ok()
         .and_then(|s| parse_cpu_stat_usage_usec(&s))
@@ -7426,6 +7458,40 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
             assert!(!flags_of_controller(c).is_empty(), "{c} sem flags");
         }
         assert!(flags_of_controller("hugetlb").is_empty());
+    }
+
+    #[test]
+    fn the_aggregate_ceiling_lands_where_the_workloads_already_are() {
+        // Root: the static slice, as it always was.
+        assert_eq!(
+            slice_path_from(false, Some("/sys/fs/cgroup/whatever")).as_deref(),
+            Some("/sys/fs/cgroup/delonix.slice")
+        );
+        // Rootless: the delegated base the leaves are already created under.
+        // Not a new path and not a new privilege — the same directory.
+        assert_eq!(
+            slice_path_from(
+                true,
+                Some(
+                    "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/x.scope"
+                )
+            )
+            .as_deref(),
+            Some("/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/dlx-containers")
+        );
+        // An SSH session scope is a SIBLING of `user@<uid>.service`: no
+        // boundary, so no ceiling. `None` and not a guessed path — writing a
+        // ceiling the engine can never move a container into would be worse
+        // than having none.
+        assert_eq!(
+            slice_path_from(
+                true,
+                Some("/sys/fs/cgroup/user.slice/user-1000.slice/session-3.scope")
+            ),
+            None
+        );
+        // `/proc/self/cgroup` unreadable is the same answer.
+        assert_eq!(slice_path_from(true, None), None);
     }
 
     #[test]
