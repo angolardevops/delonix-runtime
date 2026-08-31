@@ -3104,11 +3104,50 @@ a superfície de `net ingress`/`net egress` para esta Kind é uma decisão
 existir uma NetworkPolicy incremental» — é este o primitivo que faltava para
 essa remedição, não a remedição em si).
 
-**Limitação aceite, partilhada com `container`/`pod`/`FirewallPolicy`**: o
-`stamp` de posse (`STACK_LABEL`) é por CONTAINER, não por regra — duas
-`NetworkAccessRule` de STACKS diferentes no mesmo alvo pisam-se no dono
-registado (o `LAST_APPLIED` já é por-origem, isso não colide). Mesmo
-compromisso que já existia noutro lado, não uma regressão nova.
+**Correcção a esta secção, encontrada na validação AO VIVO antes do merge, não
+depois**: a 1.ª versão do `stamp` escrevia `STACK_LABEL`/`MANAGED_BY` nas
+labels do PRÓPRIO container-alvo — e isso fazia um `stack apply --prune` da
+stack dona só da REGRA apagar um container completamente alheio (criado à
+mão, ou por outra stack). Medido ao vivo, não deduzido: duas
+`NetworkAccessRule` no mesmo container, `--prune` a tirar uma delas, e o
+container inteiro desaparecia. **Corrigido antes do merge** com anotações
+próprias por-origem (`delonix.io/networkaccessrule-owner/<nome>`,
+`network_access_rule.rs`'s `owner_key`/`last_applied_key`) que NUNCA tocam nas
+labels do container — a posse de uma regra e a posse do container que a
+recebe são coisas distintas, e só o carimbo da regra vive aí. O `actual()`
+passou também a varrer o store INTEIRO (não só os docs do manifesto actual),
+senão um documento removido do manifesto nunca aparecia como candidato a
+`Delete` para o `--prune` — a própria razão de existir deste Kind.
+
+## Identidade endereçável de Kinds sem registo próprio (B1, 2026-08-31)
+
+`NetworkRoute` e `NetworkPolicy`/`FirewallPolicy` não têm um nome de documento
+persistido em lado nenhum — o registo (quando existe) só sabe o PAR ou o
+(alvo, direcção), nunca o `metadata.name` que alguém escreveu no manifesto
+(mesma razão do `origin` que o `NetworkAccessRule` precisou de inventar, ver
+acima). Isto importava pouco enquanto só o reconciliador (`stack plan`/
+`apply`) precisava de os endereçar — mas o B1 do plano de restruturação da CLI
+(`docs/discovery/52_CLI_PLANO_MIGRACAO.md`) exigiu ligar `get`/`describe`/
+`delete` genéricos a estes dois Kinds, e um verbo genérico recebe um NOME.
+
+- **`NetworkRoute`**: `<from>-><to>` (`netroute::route_name`/
+  `split_route_name`) — já era a identidade que `stack plan`/`stack ls`
+  imprimiam, só passou a ser também o que `describe`/`delete networkroutes`
+  aceitam.
+- **`NetworkPolicy`**: `<target>/<direction>` (ex.: `web/ingress`,
+  `firewall::split_policy_name`) — novo, porque `FirewallPolicy` nunca tinha
+  precisado de imprimir a sua própria identidade em lado nenhum antes.
+  `get networkpolicies` (`firewall::list_all_policies`) também ganhou, de
+  caminho, a listagem que faltava: hoje `net ingress ls`/`net egress ls`
+  respondem só à SUA direcção, uma de cada vez — nada combinava as duas por
+  container numa tabela só. `describe`/`delete networkpolicies` reaproveitam
+  o `list_rules`/`clear_dir` que `net ingress ls <container>`/`net ingress
+  clear <container>` já usavam — zero rendering novo, zero mecanismo novo.
+
+Nos dois casos: **sem subcomando de CLI nativo novo**. `network route
+describe`/`net ingress describe` continuam a não existir — só o verbo
+genérico foi ligado, mesmo padrão que `kind: Dependency`/
+`kind: NetworkAccessRule` já seguiam.
 
 ## Cluster modo Kind sem Docker — investigação (GO/NO-GO)
 
