@@ -63,8 +63,42 @@ impl Class {
     }
 }
 
+/// A sentence the engine has to say, kept as a TEMPLATE plus its data rather
+/// than as finished text.
+///
+/// Finished text cannot be translated: the CLI's catalogue is keyed on the
+/// exact English string, and `format!("{n} flag(s)…")` produces a different
+/// key for every host. Splitting them is what lets the same finding come out in
+/// Portuguese without the engine crate growing an i18n layer it has no business
+/// having — the engine says WHAT, the CLI decides in which language.
+#[derive(Debug, Clone)]
+pub struct Message {
+    /// The English sentence, with `{name}` holes. `&'static str` on purpose:
+    /// this is the catalogue key, so it has to be a literal in the source.
+    pub template: &'static str,
+    pub args: Vec<(&'static str, String)>,
+}
+
+impl Message {
+    fn new(template: &'static str, args: &[(&'static str, String)]) -> Self {
+        Self {
+            template,
+            args: args.to_vec(),
+        }
+    }
+    /// The sentence in English. What a JSON consumer and an MCP client get:
+    /// they carry the stable `id` for machines and this for humans.
+    pub fn render(&self) -> String {
+        let mut out = self.template.to_string();
+        for (k, v) in &self.args {
+            out = out.replace(&format!("{{{k}}}"), v);
+        }
+        out
+    }
+}
+
 /// One finding. `finding` says what is true; `action` says what to do about it,
-/// and is empty when there is nothing the operator can do — saying "run
+/// and is `None` when there is nothing the operator can do — saying "run
 /// something" about an unfixable fact is how a report teaches people to ignore
 /// it.
 #[derive(Debug, Clone)]
@@ -80,8 +114,8 @@ pub struct Advice {
     pub subject: &'static str,
     pub severity: Severity,
     pub class: Class,
-    pub finding: String,
-    pub action: String,
+    pub finding: Message,
+    pub action: Option<Message>,
 }
 
 /// What a GPU offers, when there is one. `None` everywhere is a host without a
@@ -152,12 +186,17 @@ pub fn advise(s: &ResourceSnapshot) -> Vec<Advice> {
             subject: "cgroup",
             severity: Severity::Blocking,
             class: Class::Config,
-            finding: format!(
-                "{} flag(s) are accepted and silently ignored: {}",
-                ignored.len(),
-                ignored.join(" ")
+            finding: Message::new(
+                "{n} flag(s) are accepted and silently ignored: {flags}",
+                &[
+                    ("n", ignored.len().to_string()),
+                    ("flags", ignored.join(" ")),
+                ],
             ),
-            action: "sudo delonix system setup --delegate, then log out and back in".into(),
+            action: Some(Message::new(
+                "sudo delonix system setup --delegate, then log out and back in",
+                &[],
+            )),
         });
     }
 
@@ -171,10 +210,12 @@ pub fn advise(s: &ResourceSnapshot) -> Vec<Advice> {
             subject: "io",
             severity: Severity::Info,
             class: Class::Config,
-            finding: "--io-weight and --io-max cannot apply: systemd never delegates the io \
-                      controller to a rootless user"
-                .into(),
-            action: String::new(),
+            finding: Message::new(
+                "--io-weight and the --device-*-bps flags cannot apply: systemd never \
+                 delegates the io controller to a rootless user",
+                &[],
+            ),
+            action: None,
         });
     }
 
@@ -184,11 +225,15 @@ pub fn advise(s: &ResourceSnapshot) -> Vec<Advice> {
             subject: "slice",
             severity: Severity::Warn,
             class: Class::Config,
-            finding: "no aggregate ceiling: one workload with no --memory can take the whole \
-                      host, and the thermal governor has no slice to lower"
-                .into(),
-            action: "run the node as root for delonix.slice, or set a per-container --memory"
-                .into(),
+            finding: Message::new(
+                "no aggregate ceiling: one workload with no --memory can take the whole host, \
+                 and the thermal governor has no slice to lower",
+                &[],
+            ),
+            action: Some(Message::new(
+                "run the node as root for delonix.slice, or set a per-container --memory",
+                &[],
+            )),
         });
     }
 
@@ -199,12 +244,12 @@ pub fn advise(s: &ResourceSnapshot) -> Vec<Advice> {
             subject: "disk",
             severity: Severity::Warn,
             class: Class::Capacity,
-            finding: format!(
-                "{} GiB free under the state root — image pulls fail and a kubelet evicts \
+            finding: Message::new(
+                "{gib} GiB free under the state root — image pulls fail and a kubelet evicts \
                  below this",
-                s.disk_free / GIB
+                &[("gib", (s.disk_free / GIB).to_string())],
             ),
-            action: "delonix system prune".into(),
+            action: Some(Message::new("delonix system prune", &[])),
         });
     }
 
@@ -221,12 +266,15 @@ pub fn advise(s: &ResourceSnapshot) -> Vec<Advice> {
                 subject: res,
                 severity: Severity::Warn,
                 class: Class::Load,
-                finding: format!(
-                    "{res} has been stalled {:.0}% of the last 5 minutes — this is chronic, \
-                     not a spike",
-                    p.avg300
+                finding: Message::new(
+                    "{res} has been stalled {avg300}% of the last 5 minutes — this is \
+                     chronic, not a spike",
+                    &[
+                        ("res", res.to_string()),
+                        ("avg300", format!("{:.0}", p.avg300)),
+                    ],
                 ),
-                action: chronic_action(res).into(),
+                action: Some(Message::new(chronic_action(res), &[])),
             });
         } else if p.avg10 >= SPIKE_PCT {
             out.push(Advice {
@@ -234,11 +282,16 @@ pub fn advise(s: &ResourceSnapshot) -> Vec<Advice> {
                 subject: res,
                 severity: Severity::Info,
                 class: Class::Load,
-                finding: format!(
-                    "{res} is stalled {:.0}% right now but only {:.0}% over 5 minutes — a spike",
-                    p.avg10, p.avg300
+                finding: Message::new(
+                    "{res} is stalled {avg10}% right now but only {avg300}% over 5 minutes \
+                     — a spike",
+                    &[
+                        ("res", res.to_string()),
+                        ("avg10", format!("{:.0}", p.avg10)),
+                        ("avg300", format!("{:.0}", p.avg300)),
+                    ],
                 ),
-                action: String::new(),
+                action: None,
             });
         }
     }
@@ -252,11 +305,14 @@ pub fn advise(s: &ResourceSnapshot) -> Vec<Advice> {
             subject: "memory",
             severity: Severity::Warn,
             class: Class::Load,
-            finding: format!(
-                "{} GiB swapped out while memory is under pressure — the host is thrashing",
-                s.swap_used / GIB
+            finding: Message::new(
+                "{gib} GiB swapped out while memory is under pressure — the host is thrashing",
+                &[("gib", (s.swap_used / GIB).to_string())],
             ),
-            action: "lower vm.swappiness, or cap the workloads with --memory".into(),
+            action: Some(Message::new(
+                "lower vm.swappiness, or cap the workloads with --memory",
+                &[],
+            )),
         });
     }
 
@@ -266,9 +322,14 @@ pub fn advise(s: &ResourceSnapshot) -> Vec<Advice> {
             subject: "cpu",
             severity: Severity::Warn,
             class: Class::Load,
-            finding: format!("cpu at {} °C", s.cpu_temp_c.unwrap_or(0)),
-            action: "delonix system thermal (lowers the engine's CPU ceiling until it cools)"
-                .into(),
+            finding: Message::new(
+                "cpu at {celsius} °C",
+                &[("celsius", s.cpu_temp_c.unwrap_or(0).to_string())],
+            ),
+            action: Some(Message::new(
+                "delonix system thermal (lowers the engine's CPU ceiling until it cools)",
+                &[],
+            )),
         });
     }
 
@@ -633,17 +694,17 @@ mod tests {
         assert_eq!(ids(&a), vec!["DLX-RES-001", "DLX-RES-003", "DLX-RES-002"]);
         // Most severe first, so a truncated report still shows what matters.
         assert_eq!(a[0].severity, Severity::Blocking);
-        assert!(a[0].finding.contains("--cpuset"));
+        assert!(a[0].finding.render().contains("--cpuset"));
         // `io` is NOT in the blocking flag list: it is a separate, unfixable
         // finding, and mixing them would put an impossible action on a gate.
-        assert!(!a[0].finding.contains("--io-weight"));
+        assert!(!a[0].finding.render().contains("--io-weight"));
         assert_eq!(a[2].id, "DLX-RES-002");
         assert_eq!(
             a.iter().map(|x| x.subject).collect::<Vec<_>>(),
             vec!["cgroup", "slice", "io"]
         );
         assert!(
-            a[2].action.is_empty(),
+            a[2].action.is_none(),
             "não se manda corrigir o incorrigível"
         );
     }
@@ -689,7 +750,12 @@ mod tests {
         };
         let a = advise(&chronic);
         assert_eq!(ids(&a), vec!["DLX-RES-004"]);
-        assert!(a[0].action.contains("--io-weight"));
+        assert!(a[0]
+            .action
+            .as_ref()
+            .unwrap()
+            .render()
+            .contains("--io-weight"));
 
         // Same instant, five quiet minutes behind it: a spike, and it must not
         // be able to fail a gate.

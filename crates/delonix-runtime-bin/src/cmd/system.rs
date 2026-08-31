@@ -1291,6 +1291,16 @@ fn cmd_regulate(
     }
 }
 
+/// Renders one advisory sentence THROUGH the catalogue.
+///
+/// The engine hands over a template and its holes precisely so this can come out
+/// in Portuguese without the engine crate knowing that Portuguese exists. Shared
+/// by `resources` and `doctor`, which print the same findings.
+fn say(m: &delonix_runtime::resource_advice::Message) -> String {
+    let args: Vec<(&str, &str)> = m.args.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    super::po::tf(m.template, &args)
+}
+
 /// `system resources` — capacity, what is enforceable, and current pressure.
 ///
 /// Three questions in one screen, because they are only useful together: a
@@ -1372,8 +1382,11 @@ fn cmd_resources(output: super::output::OutputFormat, strict: bool) -> Result<()
                 "subject": f.subject,
                 "severity": f.severity.as_str(),
                 "class": f.class.as_str(),
-                "finding": f.finding,
-                "action": f.action,
+                // English in the JSON, always: a machine consumer that has to
+                // guess the locale of a field breaks when somebody's shell
+                // changes. The stable `id` is the key, this is for humans.
+                "finding": f.finding.render(),
+                "action": f.action.as_ref().map(|a| a.render()).unwrap_or_default(),
             })).collect::<Vec<_>>(),
             "local_inference": {
                 "verdict": inference.verdict.as_str(),
@@ -1585,9 +1598,9 @@ fn cmd_resources(output: super::output::OutputFormat, strict: bool) -> Result<()
         println!();
         println!("{}", super::po::t("findings"));
         for f in &findings {
-            println!("  {:<14}{:<9}{}", f.id, f.subject, f.finding);
-            if !f.action.is_empty() {
-                println!("  {:<14}{:<9}→ {}", "", "", f.action);
+            println!("  {:<14}{:<9}{}", f.id, f.subject, say(&f.finding));
+            if let Some(a) = &f.action {
+                println!("  {:<14}{:<9}→ {}", "", "", say(a));
             }
         }
     }
@@ -1907,9 +1920,9 @@ fn cmd_doctor(strict: bool) -> Result<()> {
         println!();
         println!("{}", super::po::t("resources (delonix system resources)"));
         for f in &resource_findings {
-            println!("  {:<14}{:<9}{}", f.id, f.subject, f.finding);
-            if !f.action.is_empty() {
-                println!("  {:<14}{:<9}→ {}", "", "", f.action);
+            println!("  {:<14}{:<9}{}", f.id, f.subject, say(&f.finding));
+            if let Some(a) = &f.action {
+                println!("  {:<14}{:<9}→ {}", "", "", say(a));
             }
         }
     }
