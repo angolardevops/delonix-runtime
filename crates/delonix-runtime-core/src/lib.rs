@@ -164,6 +164,18 @@ pub struct FwRule {
     /// Free-form UI note (cosmetic; preserved in the persistence round-trip).
     #[serde(default)]
     pub note: String,
+    /// Name of the `kind: NetworkAccessRule` document that contributed this
+    /// rule, if any. `None` for everything else — an imperative `net ingress
+    /// allow` rule, a `kind: FirewallPolicy` rule, or a record written before
+    /// this field existed. This is the contribution ledger that lets an
+    /// independently-applied-and-removed `NetworkAccessRule` document retract
+    /// only its own rule from a container's shared list, instead of the
+    /// direction-wide replace `FirewallPolicy` does. `apply_fw_doc`'s replace
+    /// is origin-aware for exactly this reason: it only replaces rules with
+    /// `origin: None`, so it never silently erases a `NetworkAccessRule`'s
+    /// contribution while reporting success.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
 }
 
 /// A container's continuous health check — the `--health-*` family.
@@ -1565,6 +1577,7 @@ mod tests {
             dir: "in".into(),
             action: "allow".into(),
             note: String::new(),
+            origin: None,
         };
         assert!(good.nft_safe());
     }

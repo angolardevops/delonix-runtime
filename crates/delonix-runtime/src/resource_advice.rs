@@ -560,7 +560,7 @@ pub fn collect(state_root: &std::path::Path) -> ResourceSnapshot {
         psi_cpu: crate::psi("cpu"),
         psi_memory: crate::psi("memory"),
         psi_io: crate::psi("io"),
-        aggregate_slice: std::path::Path::new(delonix_runtime_core::DELONIX_SLICE).is_dir(),
+        aggregate_slice: crate::slice_path().is_some_and(|p| std::path::Path::new(&p).is_dir()),
         gpu: gpu_facts(),
     }
 }
