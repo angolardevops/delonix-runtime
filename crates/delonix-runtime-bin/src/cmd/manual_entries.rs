@@ -2111,6 +2111,15 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["system setup", "system info", "system doctor", "container run"],
     },
     Entry {
+        path: "system metrics",
+        group: "Inspect",
+        examples: &[
+            ("the raw counters, no dashboard formatting", "delonix system metrics"),
+            ("machine-readable, the same collector dash --json and Prometheus use", "delonix system metrics -o json"),
+        ],
+        see_also: &["dash", "system resources", "serve api"],
+    },
+    Entry {
         path: "system setup",
         group: "Configure",
         examples: &[

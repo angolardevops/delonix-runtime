@@ -10106,6 +10106,18 @@ msgstr "Quanto esta máquina tem, quanto o motor consegue mesmo impor, e o que e
 msgid "capacity, what the engine can actually enforce, and what is stalled right now"
 msgstr "capacidade, o que o motor consegue mesmo impor, e o que está parado neste momento"
 
+msgid "The raw counters: containers/VMs/networks/volumes/images, memory, network, disk"
+msgstr "Os contadores crus: containers/VMs/redes/volumes/imagens, memória, rede, disco"
+
+msgid "The raw counters: containers/VMs/networks/volumes/images, memory, network, disk.\n\nNot an alias of `dash --json`: that one returns `DashData` (tiles, rows, problems — shaped for the TUI). This returns the `DashSummary` the dashboard and the Prometheus `/metrics` endpoint are already BOTH built from (`delonix-mgmt::dashstats::collect`) — the numbers, with no dashboard formatting, for a script that wants a snapshot without spinning up `serve api` and scraping it."
+msgstr "Os contadores crus: containers/VMs/redes/volumes/imagens, memória, rede, disco.\n\nNão é um alias do `dash --json`: aquele devolve `DashData` (tiles, linhas, problemas — moldado para o TUI). Isto devolve o `DashSummary` de que o dashboard e o endpoint Prometheus `/metrics` já são AMBOS construídos (`delonix-mgmt::dashstats::collect`) — os números, sem formatação de dashboard, para um script que quer um retrato sem levantar o `serve api` e fazer scrape."
+
+msgid "the raw counters, no dashboard formatting"
+msgstr "os contadores crus, sem formatação de dashboard"
+
+msgid "machine-readable, the same collector dash --json and Prometheus use"
+msgstr "legível por máquina, o mesmo colector que o dash --json e o Prometheus usam"
+
 msgid "name the flags this host accepts and silently ignores"
 msgstr "nomeia as flags que esta máquina aceita e ignora em silêncio"
 

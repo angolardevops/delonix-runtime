@@ -83,6 +83,19 @@ pub enum SystemCmd {
         #[arg(long)]
         strict: bool,
     },
+    /// The raw counters: containers/VMs/networks/volumes/images, memory, network, disk.
+    ///
+    /// Not an alias of `dash --json`: that one returns `DashData` (tiles,
+    /// rows, problems — shaped for the TUI). This returns the `DashSummary`
+    /// the dashboard and the Prometheus `/metrics` endpoint are already
+    /// BOTH built from (`delonix-mgmt::dashstats::collect`) — the numbers,
+    /// with no dashboard formatting, for a script that wants a snapshot
+    /// without spinning up `serve api` and scraping it.
+    Metrics {
+        /// Output format: `table` (default) or `json` (ADR-0005).
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: super::output::OutputFormat,
+    },
     /// Give the contended CPU back to the workloads that are waiting for it.
     ///
     /// Reads pressure, finds the workload CAUSING it (the biggest consumer —
@@ -334,6 +347,7 @@ pub fn run(action: SystemCmd) -> Result<()> {
             no_stream,
         } => cmd_monitor(interval, no_stream),
         SystemCmd::Resources { output, strict } => cmd_resources(output, strict),
+        SystemCmd::Metrics { output } => cmd_metrics(output),
         SystemCmd::Regulate {
             apply,
             once,
@@ -1618,6 +1632,91 @@ fn cmd_resources(output: super::output::OutputFormat, strict: bool) -> Result<()
     }
 
     strict_exit(failed)
+}
+
+/// `system metrics` — the same `DashSummary` `dash --json` and the
+/// Prometheus `/metrics` endpoint already collect, printed directly. One
+/// collector, three consumers (`cmd/dash.rs`, `delonix-mgmt`'s HTTP server,
+/// this) — never a second aggregation that could disagree with the other two.
+fn cmd_metrics(output: super::output::OutputFormat) -> Result<()> {
+    let summary = delonix_mgmt::dashstats::collect(&state_root(), true, true);
+    if output == super::output::OutputFormat::Json {
+        let out = serde_json::to_string_pretty(&summary)
+            .map_err(|e| Error::Invalid(format!("system metrics: {e}")))?;
+        println!("{out}");
+        return Ok(());
+    }
+    let mut d = super::output::Describe::new();
+    d.field(
+        "Containers",
+        format!(
+            "{}/{} running",
+            summary.containers_running, summary.containers_total
+        ),
+    );
+    d.field(
+        "VMs",
+        format!("{}/{} running", summary.vms_running, summary.vms_total),
+    );
+    d.field("Networks", summary.networks_total.to_string());
+    d.field("Volumes", summary.volumes_total.to_string());
+    d.field("Images", summary.images_total.to_string());
+    d.field("Secrets", summary.secrets_total.to_string());
+    d.field(
+        "Memory",
+        format!(
+            "{} / {}",
+            super::output::fmt_size(summary.memory_bytes_used),
+            if summary.memory_bytes_limit == 0 {
+                "unlimited".to_string()
+            } else {
+                super::output::fmt_size(summary.memory_bytes_limit)
+            }
+        ),
+    );
+    match (summary.network_rx_bytes, summary.network_tx_bytes) {
+        (Some(rx), Some(tx)) => d.field(
+            "Network",
+            format!(
+                "rx {} / tx {}",
+                super::output::fmt_size(rx),
+                super::output::fmt_size(tx)
+            ),
+        ),
+        _ => d.field("Network", "not measured"),
+    };
+    if summary.network_unmeasured_containers > 0 {
+        d.field(
+            "Unmeasured",
+            format!(
+                "{} container(s) (host/none networking)",
+                summary.network_unmeasured_containers
+            ),
+        );
+    }
+    if summary.storage_bytes_images.is_some() {
+        d.section("Disk");
+        d.sub_opt(
+            "images",
+            summary.storage_bytes_images.map(super::output::fmt_size),
+        );
+        d.sub_opt(
+            "volumes",
+            summary.storage_bytes_volumes.map(super::output::fmt_size),
+        );
+        d.sub_opt(
+            "vm images",
+            summary.storage_bytes_vm_images.map(super::output::fmt_size),
+        );
+        d.sub_opt(
+            "containers",
+            summary
+                .storage_bytes_containers
+                .map(super::output::fmt_size),
+        );
+    }
+    d.print();
+    Ok(())
 }
 
 /// `--strict` turns findings into an exit code without printing a second
