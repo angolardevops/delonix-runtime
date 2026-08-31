@@ -294,6 +294,35 @@ pub(crate) fn cmd_ls(format: super::output::OutputFormat) -> Result<()> {
     Ok(())
 }
 
+/// `delonix describe networkroutes <from>-><to>` — the generic verb's target.
+///
+/// A route has no name of its own, so the identity it is addressed by here is
+/// the same `route_name` the reconciler already prints in `stack plan`/`stack
+/// ls` — never a second spelling that could drift from it.
+pub(crate) fn cmd_describe(names: &[String]) -> Result<()> {
+    for name in names {
+        let (from, to) = split_route_name(name)?;
+        let Some(def) = delonix_net::infra::route_get(from, to) else {
+            return Err(delonix_runtime_core::Error::NotFound(format!(
+                "no such route: {name}"
+            )));
+        };
+        let state = live_state(&live_snapshot(), from, to);
+        let mut d = super::output::Describe::new();
+        d.field("From", from);
+        d.field("To", to);
+        d.field("State", live_label(&state));
+        if let LiveState::Open { packets, bytes } = state {
+            d.field("Packets", packets.to_string());
+            d.field("Bytes", super::output::fmt_size(bytes));
+        }
+        d.field_opt("Stack", def.labels.get(super::reconcile::STACK_LABEL));
+        d.field_opt("Managed by", def.labels.get(super::reconcile::MANAGED_BY));
+        d.print();
+    }
+    Ok(())
+}
+
 /// For `stack ls`: whether the route is declared, and what the dataplane is
 /// actually doing about it.
 ///
