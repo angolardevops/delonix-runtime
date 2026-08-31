@@ -9,6 +9,7 @@
 !	build
 ~	cluster apply
 ~	cluster create
+~	cluster health
 ~	cluster init
 ~	cluster kubeadm
 ~	cluster kubeconfig

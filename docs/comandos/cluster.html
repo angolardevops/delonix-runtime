@@ -163,6 +163,7 @@ Commands:
   create      Create a local Kubernetes cluster **without a manifest and without Docker**
   kubeadm     Provision VMs (golden VM image) + `kubeadm` bootstrap
   init        Initialize a project with the cluster manifests (kind/vm/ssh)
+  health      Is the control-plane answering, and is every node `Ready`?
   kubeconfig  Print a cluster&#x27;s kubeconfig from the local cache (no live SSH)
   load        Load local images into a kind-mode cluster&#x27;s nodes, **without a registry**
   apply       Apply the `kind: KubernetesCluster` document(s) of a manifest
@@ -180,7 +181,7 @@ Options:
 COMMAND MAP:
   Lifecycle    create · kubeadm
   Create       init
-  Interact     load · kubeconfig
+  Interact     load · kubeconfig · health
   Declarative  kube · apply
   Maintenance  prune
 
