@@ -795,7 +795,114 @@ fn list_all(store: &Store, dir: &str, format: output::OutputFormat) -> Result<()
     Ok(())
 }
 
-fn list_rules(store: &Store, name: &str, dir: &str) -> Result<()> {
+/// One row of `get networkpolicies` — a container's policy in ONE direction.
+#[derive(serde::Serialize)]
+struct PolicyLsRow {
+    target: String,
+    direction: String,
+    policy: String,
+    rules: usize,
+}
+
+/// `delonix get networkpolicies` — the listing `FirewallPolicy`/`NetworkPolicy`
+/// never had: `net ingress ls`/`net egress ls` each answer ONE direction, and
+/// neither folds the two into a single global table. A `FirewallPolicy`
+/// document has no registry of its own (see `network_access_rule.rs`'s doc
+/// comment for the same fact about `NetworkAccessRule`) — its identity here is
+/// `<target>/<direction>`, the same pair `describe`/`delete networkpolicies`
+/// parse back out (`split_policy_name`), not a document name nothing persists.
+///
+/// Only GOVERNED containers get a row (an `--net host`/`none` container has no
+/// firewall to have a policy in — same rule `list_all`'s POLICY column already
+/// applies). A container with neither direction governed prints nothing,
+/// exactly like it does not appear in `net ingress ls`/`net egress ls` today.
+pub(crate) fn list_all_policies(output: output::OutputFormat) -> Result<()> {
+    let (_images, store) = open_stores()?;
+    let mut rows = Vec::new();
+    for c in store.list()? {
+        let governed = c.ip.as_deref().map(|s| !s.is_empty()).unwrap_or(false);
+        if !governed {
+            continue;
+        }
+        let fw = c.firewall.clone().unwrap_or_default();
+        for (dir, label, policy) in [
+            ("in", "ingress", &fw.policy_in),
+            ("out", "egress", &fw.policy_out),
+        ] {
+            rows.push(PolicyLsRow {
+                target: c.name.clone(),
+                direction: label.into(),
+                policy: if policy.is_empty() {
+                    "allow (default)".to_string()
+                } else {
+                    policy.clone()
+                },
+                rules: fw.rules.iter().filter(|r| r.dir == dir).count(),
+            });
+        }
+    }
+    if output == output::OutputFormat::Json {
+        return output::print_json(&rows);
+    }
+    let mut t = output::Table::new(&["TARGET", "DIRECTION", "POLICY", "RULES"]);
+    for r in &rows {
+        t.row(vec![
+            r.target.clone(),
+            r.direction.clone(),
+            r.policy.clone(),
+            r.rules.to_string(),
+        ]);
+    }
+    t.print();
+    Ok(())
+}
+
+/// Splits `<target>/<direction>` — the identity `get networkpolicies` prints
+/// and `describe`/`delete networkpolicies` parse back. Mirrors
+/// `netroute::split_route_name`'s reasoning: a `FirewallPolicy` is not
+/// addressable by a document name (nothing persists one), so the generic
+/// verbs key by what the resource actually IS — here, the (target, direction)
+/// pair `validate_graph` already treats as this Kind's true identity.
+pub(crate) fn split_policy_name(name: &str) -> Result<(&str, &str)> {
+    let (target, dir) = name.split_once('/').ok_or_else(|| {
+        Error::Invalid(format!(
+            "'{name}' is not a policy name (expected `<target>/ingress` or `<target>/egress`)"
+        ))
+    })?;
+    match dir {
+        "ingress" => Ok((target, "in")),
+        "egress" => Ok((target, "out")),
+        other => Err(Error::Invalid(format!(
+            "'{other}' is not ingress|egress (in '{name}')"
+        ))),
+    }
+}
+
+/// `delonix describe networkpolicies <target>/<direction>` — reuses the exact
+/// per-container detail `net ingress ls <target>`/`net egress ls <target>`
+/// already print, rather than inventing a second rendering of the same rules.
+pub(crate) fn cmd_describe_policy(names: &[String]) -> Result<()> {
+    let (_images, store) = open_stores()?;
+    for name in names {
+        let (target, dir) = split_policy_name(name)?;
+        list_rules(&store, target, dir)?;
+    }
+    Ok(())
+}
+
+/// `delonix delete networkpolicies <target>/<direction>` — same semantics as
+/// `net ingress clear <target>`/`net egress clear <target>`: the policy for
+/// that ONE direction resets to allow-all, the other direction is untouched.
+pub(crate) fn cmd_delete_policy(names: &[String]) -> Result<()> {
+    let (_images, store) = open_stores()?;
+    for name in names {
+        let (target, dir) = split_policy_name(name)?;
+        clear_dir(&store, target, dir)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn list_rules(store: &Store, name: &str, dir: &str) -> Result<()> {
     let c = store.load(name)?;
     let fw = c.firewall.clone().unwrap_or_default();
     let policy = if dir == "in" {
@@ -1002,7 +1109,7 @@ fn or_any(s: &str) -> String {
     }
 }
 
-fn clear_dir(store: &Store, name: &str, dir: &str) -> Result<()> {
+pub(crate) fn clear_dir(store: &Store, name: &str, dir: &str) -> Result<()> {
     let mut removed = 0usize;
     let mut nothing_to_clear = false;
     let c = update_locked(store, name, |c| {
@@ -1719,6 +1826,17 @@ fn egress_host(network: &str, hostname: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The identity `get networkpolicies` prints and `describe`/`delete
+    /// networkpolicies` have to parse back — the round-trip `list_all_policies`
+    /// and its two consumers depend on.
+    #[test]
+    fn split_policy_name_reads_target_and_direction_back() {
+        assert_eq!(split_policy_name("web/ingress").unwrap(), ("web", "in"));
+        assert_eq!(split_policy_name("web/egress").unwrap(), ("web", "out"));
+        assert!(split_policy_name("web").is_err());
+        assert!(split_policy_name("web/sideways").is_err());
+    }
 
     /// Writes a container record straight into a temp store. Only the fields
     /// the resolver reads are set; everything else comes from `Default`, which
