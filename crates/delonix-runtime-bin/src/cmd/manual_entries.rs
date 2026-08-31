@@ -98,6 +98,15 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["cluster create", "cluster kubeadm", "cluster apply", "get"],
     },
     Entry {
+        path: "cluster health",
+        group: "Interact",
+        examples: &[
+            ("the one cluster you have — no name needed", "delonix cluster health"),
+            ("non-zero the moment a node stops answering `Ready`", "delonix cluster health lab"),
+        ],
+        see_also: &["describe", "cluster kubeconfig", "get"],
+    },
+    Entry {
         path: "cluster apply",
         group: "Declarative",
         examples: &[

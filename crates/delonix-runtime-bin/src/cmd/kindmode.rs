@@ -1666,6 +1666,91 @@ pub(crate) fn describe(store: &Store, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Parses `kubectl get --raw=/readyz?verbose` — a fixed text format
+/// (`[+]check ok` / `[-]check failed: reason`, one final `readyz check
+/// passed`/`readyz check failed` line), pure so the two failure shapes below
+/// are testable without a cluster.
+fn parse_readyz(raw: &str) -> (bool, Vec<(String, bool)>) {
+    let mut checks = Vec::new();
+    let mut ok = false;
+    for line in raw.lines() {
+        if let Some(name) = line.strip_prefix("[+]") {
+            checks.push((name.to_string(), true));
+        } else if let Some(name) = line.strip_prefix("[-]") {
+            checks.push((name.to_string(), false));
+        } else if line.contains("readyz check passed") {
+            ok = true;
+        }
+    }
+    (ok, checks)
+}
+
+/// `delonix cluster health <name>` — only kind-mode clusters (same boundary
+/// `describe`/`kubeconfig` already have: an SSH-provisioned `cluster apply`
+/// target has no container registry to exec into). Never needs `kubectl` on
+/// THIS host — it runs where the golden image already installed it, inside
+/// the control-plane node, the same way the kubeadm preflight already does
+/// (`node_exec_capture`, used by `wait_in_node`).
+pub(crate) fn health(store: &Store, name: Option<&str>) -> Result<()> {
+    let (name, nodes) = cluster_nodes(store, name)?;
+    let cp = nodes
+        .iter()
+        .find(|c| {
+            c.labels
+                .get("io.x-k8s.kind.role")
+                .map(|r| r == "control-plane")
+                .unwrap_or(false)
+        })
+        .ok_or_else(|| Error::Invalid(format!("cluster '{name}' has no control-plane node")))?;
+
+    let (rc, raw) = node_exec_capture(
+        cp,
+        "KUBECONFIG=/etc/kubernetes/admin.conf kubectl get --raw='/readyz?verbose'",
+    )?;
+    if rc != 0 {
+        return Err(Error::Invalid(format!(
+            "cluster '{name}': control-plane did not answer /readyz (exit {rc}): {}",
+            raw.trim()
+        )));
+    }
+    let (ready, checks) = parse_readyz(&raw);
+
+    let (_, nodes_raw) = node_exec_capture(
+        cp,
+        "KUBECONFIG=/etc/kubernetes/admin.conf kubectl get nodes --no-headers -o wide",
+    )?;
+    let mut all_ready = true;
+    let node_lines: Vec<String> = nodes_raw
+        .lines()
+        .map(|l| {
+            let cols: Vec<&str> = l.split_whitespace().collect();
+            let (node_name, status) = (
+                cols.first().copied().unwrap_or("?"),
+                cols.get(1).copied().unwrap_or("?"),
+            );
+            if status != "Ready" {
+                all_ready = false;
+            }
+            format!("{node_name} ({status})")
+        })
+        .collect();
+
+    let mut d = super::output::Describe::new();
+    d.field("Cluster", name);
+    d.field("Control-plane", if ready { "ready" } else { "NOT ready" });
+    d.section("Checks");
+    for (check, ok) in &checks {
+        d.item(format!("{} {check}", if *ok { "✓" } else { "✗" }));
+    }
+    d.list("Nodes", &node_lines);
+    d.print();
+
+    if !ready || !all_ready {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
 /// Removes this cluster's entries from the user's kubeconfig. Best-effort and
 /// idempotent: a cluster that never got to install a context is not an error.
 fn remove_kubecontext(cluster: &str) -> Result<()> {
@@ -1716,6 +1801,31 @@ fn remove_kubecontext(cluster: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Real shape of `kubectl get --raw=/readyz?verbose` on a healthy node —
+    /// captured, not guessed, since a wrong shape here would make `cluster
+    /// health` always agree with itself.
+    #[test]
+    fn parse_readyz_reads_a_healthy_control_plane() {
+        let raw = "[+]ping ok\n[+]log ok\n[+]etcd ok\n[+]poststarthook/start-kube-apiserver-admission-initializer ok\nreadyz check passed\n";
+        let (ok, checks) = parse_readyz(raw);
+        assert!(ok);
+        assert_eq!(checks.len(), 4);
+        assert!(checks.iter().all(|(_, ok)| *ok));
+    }
+
+    /// One failed check is enough to flip the verdict, even with every other
+    /// check passing — a `health` command that averages checks instead of
+    /// requiring all of them would report "mostly fine" on a broken cluster.
+    #[test]
+    fn parse_readyz_a_single_failed_check_fails_the_whole_thing() {
+        let raw = "[+]ping ok\n[-]etcd failed: reason withheld\n[+]log ok\nreadyz check failed\n";
+        let (ok, checks) = parse_readyz(raw);
+        assert!(!ok);
+        assert_eq!(checks.len(), 3);
+        assert!(!checks[1].1);
+        assert_eq!(checks[1].0, "etcd failed: reason withheld");
+    }
 
     #[test]
     fn containerd_ref_normaliza_como_o_docker_faz() {
