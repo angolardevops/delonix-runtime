@@ -1698,6 +1698,15 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["secret create", "stack apply", "manifest schema"],
     },
     Entry {
+        path: "secret rotate",
+        group: "Maintenance",
+        examples: &[
+            ("mint a fresh random value for one key, keeping the rest of the secret untouched", "delonix secret rotate db-pass PASSWORD"),
+            ("a longer generated value — the stored string is twice this many hex characters", "delonix secret rotate db-pass PASSWORD --length 48"),
+        ],
+        see_also: &["secret rotate-key", "secret set", "secret inspect"],
+    },
+    Entry {
         path: "secret rotate-key",
         group: "Maintenance",
         examples: &[

@@ -1830,6 +1830,15 @@ msgstr "Remove uma chave de um segredo (ou o segredo todo com --all)."
 msgid "Remove a secret."
 msgstr "Remove um segredo."
 
+msgid "Rotate one key's VALUE to a fresh random one"
+msgstr "Roda o VALOR de uma chave para um novo, aleatório"
+
+msgid "Rotate one key's VALUE to a fresh random one.\n\nDistinct from `rotate-key`: this replaces a single key's value with new random bytes, and touches nothing else in the secret. Meant for values this engine or the operator mints themselves (a database password, an HMAC signing key) — an externally-issued credential (a third-party API key) still has to be rotated at the issuer and landed here with `secret set`."
+msgstr "Roda o VALOR de uma chave para um novo, aleatório.\n\nDistinto do `rotate-key`: substitui o valor de UMA chave por bytes aleatórios novos, e não toca em mais nada do segredo. Pensado para valores que este motor ou o operador geram (uma password de base de dados, uma chave de assinatura HMAC) — uma credencial emitida por terceiros (uma chave de API externa) continua a ter de ser rodada no emissor e chegar aqui por `secret set`."
+
+msgid "Random bytes to generate (hex-encoded, so the stored value is twice this many characters)"
+msgstr "Bytes aleatórios a gerar (em hex, por isso o valor guardado tem o dobro deste número de caracteres)"
+
 msgid "Rotate the host master key: re-encrypt ALL secrets with a new key. The values are preserved."
 msgstr "Roda a chave-mestra do host: re-cifra TODOS os segredos com uma chave nova. Os valores são preservados."
 
@@ -2813,6 +2822,15 @@ msgstr "chave '{k}' não existe em '{name}'"
 
 msgid "key '{k}' removed from '{name}'"
 msgstr "chave '{k}' removida de '{name}'"
+
+msgid "length must be greater than zero"
+msgstr "o comprimento tem de ser maior que zero"
+
+msgid "key '{k}' does not exist in '{name}' — rotate only replaces a key that is already there (use `secret set` to add one)"
+msgstr "a chave '{k}' não existe em '{name}' — rotar só substitui uma chave que já lá está (usa `secret set` para acrescentar uma)"
+
+msgid "key '{k}' in '{name}' rotated to a fresh random value"
+msgstr "chave '{k}' em '{name}' rodada para um valor aleatório novo"
 
 msgid "master key rotated — all secrets re-encrypted with the new key"
 msgstr "chave-mestra rodada — todos os segredos re-cifrados com a nova chave"
@@ -5941,6 +5959,12 @@ msgstr "esvaziar o segredo inteiro de uma só vez"
 
 msgid "remove a secret for good — a container that names it fails loudly on the next start"
 msgstr "remover um segredo de vez — um container que o nomeie falha alto no arranque seguinte"
+
+msgid "mint a fresh random value for one key, keeping the rest of the secret untouched"
+msgstr "gerar um valor aleatório novo para uma chave, mantendo o resto do segredo intocado"
+
+msgid "a longer generated value — the stored string is twice this many hex characters"
+msgstr "um valor gerado mais comprido — a string guardada tem o dobro deste número de caracteres em hex"
 
 msgid "re-encrypt every secret under a new host master key; the values are preserved"
 msgstr "voltar a cifrar todos os segredos com uma chave-mestra nova do host; os valores são preservados"

@@ -159,6 +159,7 @@
 ~	secret inspect
 ~	secret ls
 ~	secret rm
+~	secret rotate
 ~	secret rotate-key
 ~	secret set
 ~	secret unset
