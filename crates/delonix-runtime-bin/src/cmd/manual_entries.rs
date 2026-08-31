@@ -597,6 +597,40 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["stack plan", "describe", "get"],
     },
     Entry {
+        path: "config",
+        group: "",
+        examples: &[
+            ("every key, or none set", "delonix config get"),
+            ("make -o json the default everywhere", "delonix config set output json"),
+            ("back to the plain table default", "delonix config unset output"),
+        ],
+        see_also: &["config get", "config set", "config unset"],
+    },
+    Entry {
+        path: "config get",
+        group: "",
+        examples: &[
+            ("one key, or every key with none named", "delonix config get output"),
+        ],
+        see_also: &["config set", "config unset"],
+    },
+    Entry {
+        path: "config set",
+        group: "",
+        examples: &[
+            ("make -o json the default everywhere", "delonix config set output json"),
+        ],
+        see_also: &["config get", "config unset"],
+    },
+    Entry {
+        path: "config unset",
+        group: "",
+        examples: &[
+            ("back to the plain table default", "delonix config unset output"),
+        ],
+        see_also: &["config get", "config set"],
+    },
+    Entry {
         path: "explain",
         group: "",
         examples: &[

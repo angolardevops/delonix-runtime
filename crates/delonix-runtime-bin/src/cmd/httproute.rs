@@ -77,6 +77,7 @@ struct RouteRow {
 /// CLI leaf `net httproute ls` was removed as a duplicate (B4 of the CLI
 /// restructuring): same store, same output, zero divergence risk either way.
 pub(crate) fn cmd_ls(output: super::output::OutputFormat) -> Result<()> {
+    let output = super::config::resolve_output(&super::util::state_root(), output);
     if output == super::output::OutputFormat::Json {
         if !ingress_proxy::is_running() {
             return super::output::print_json(&[HttpRouteLs {

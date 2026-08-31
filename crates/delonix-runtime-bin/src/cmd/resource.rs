@@ -111,6 +111,7 @@ struct ApiResourceRow {
 /// start disagreeing about which Kinds exist — the defect that module was
 /// written to remove.
 pub(crate) fn api_resources(output: super::output::OutputFormat) -> Result<(), Error> {
+    let output = super::config::resolve_output(&super::util::state_root(), output);
     use super::kinds::{Form, Namespaced};
 
     let rows: Vec<ApiResourceRow> = kinds::all()

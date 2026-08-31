@@ -55,6 +55,21 @@ msgstr "Armazenamento de REDE (NFS/CIFS/WebDAV) montável como volume — estilo
 msgid "Apply a whole manifest (`delonix-manifest.yaml`) — every Kind, in dependency order."
 msgstr "Aplica um manifesto (`delonix-manifest.yaml`) inteiro — todos os Kinds, por ordem de dependência."
 
+msgid "A small, local preference — never a remote context"
+msgstr "Uma preferência pequena e local — nunca um contexto remoto"
+
+msgid "A small, local preference — never a remote context.\n\nOnly `output` (`table`|`json`) today. The specification's `endpoint`/ `identity`/`tls` context stays out on purpose: ADR-0010 recused the remote management API, and nobody has named a concrete consumer for reopening it."
+msgstr "Uma preferência pequena e local — nunca um contexto remoto.\n\nSó `output` (`table`|`json`) por agora. O contexto `endpoint`/`identity`/`tls` da especificação fica de fora de propósito: o ADR-0010 recusou a API de gestão remota, e ninguém nomeou ainda um consumidor concreto para a reabrir."
+
+msgid "Read one key, or every key set (with no argument)"
+msgstr "Lê uma chave, ou todas as que estão definidas (sem argumento)"
+
+msgid "Set a key. Refuses an unknown key or an invalid value by name — never accepted-and-ignored"
+msgstr "Define uma chave. Recusa uma chave desconhecida ou um valor inválido pelo nome — nunca aceite-e-ignorado"
+
+msgid "Remove a key — the command that reads it falls back to its built-in default again"
+msgstr "Remove uma chave — o comando que a lê volta a cair no seu default embutido"
+
 msgid "The engine itself: events, state and disk usage."
 msgstr "O motor em si: eventos, estado e uso de disco."
 
@@ -9699,6 +9714,18 @@ msgstr "desired, last-applied e observed, lado a lado"
 
 msgid "a drift gate: exit 2 means desired and observed disagree"
 msgstr "um portão de deriva: sair 2 quer dizer desired e observed em desacordo"
+
+msgid "every key, or none set"
+msgstr "todas as chaves, ou nenhuma definida"
+
+msgid "make -o json the default everywhere"
+msgstr "torna -o json o default em todo o lado"
+
+msgid "back to the plain table default"
+msgstr "de volta ao default simples de tabela"
+
+msgid "one key, or every key with none named"
+msgstr "uma chave, ou todas as chaves sem nenhuma nomeada"
 
 # --- verbos de manifesto no topo: apply / plan / wait / manifest (CLI-2) ---
 msgid "Converge a manifest — the canonical spelling of `stack apply`"

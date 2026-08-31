@@ -22,6 +22,9 @@
 =	compose logs
 =	compose ps
 =	compose up
+~	config get
+~	config set
+~	config unset
 !	container apply
 =	container attach
 =	container commit

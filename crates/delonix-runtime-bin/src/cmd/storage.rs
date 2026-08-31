@@ -473,6 +473,7 @@ pub fn run(action: StorageCmd) -> Result<()> {
             );
         }
         StorageCmd::Ls { output } => {
+            let output = super::config::resolve_output(&super::util::state_root(), output);
             let nets: Vec<_> = store
                 .list()?
                 .into_iter()

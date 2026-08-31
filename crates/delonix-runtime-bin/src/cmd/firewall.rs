@@ -719,6 +719,7 @@ struct FwLsRow {
 /// Overview of every container's firewall state in one table — `ls` without an
 /// argument, like `docker ps`. Per-container detail stays in `ls <container>`.
 fn list_all(store: &Store, dir: &str, format: output::OutputFormat) -> Result<()> {
+    let format = super::config::resolve_output(&super::util::state_root(), format);
     if format == output::OutputFormat::Json {
         let rows: Vec<FwLsRow> = store
             .list()?
@@ -817,6 +818,7 @@ struct PolicyLsRow {
 /// applies). A container with neither direction governed prints nothing,
 /// exactly like it does not appear in `net ingress ls`/`net egress ls` today.
 pub(crate) fn list_all_policies(output: output::OutputFormat) -> Result<()> {
+    let output = super::config::resolve_output(&super::util::state_root(), output);
     let (_images, store) = open_stores()?;
     let mut rows = Vec::new();
     for c in store.list()? {

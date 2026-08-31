@@ -4349,6 +4349,7 @@ fn cmd_ps(
     format: super::output::OutputFormat,
     namespace: Option<&str>,
 ) -> Result<()> {
+    let format = super::config::resolve_output(&super::util::state_root(), format);
     let mut cs = store.list()?;
     // The filter runs BEFORE anything else reads the list — `--namespace` that
     // narrowed the table and left the JSON, the `--quiet` ids or the counts

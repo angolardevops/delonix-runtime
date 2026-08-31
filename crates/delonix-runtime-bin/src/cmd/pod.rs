@@ -571,6 +571,7 @@ struct PodLsRow {
 }
 
 fn ls(format: output::OutputFormat, namespace: Option<&str>) -> Result<()> {
+    let format = super::config::resolve_output(&super::util::state_root(), format);
     let (_images, store) = open_stores()?;
     let mut pods: BTreeMap<String, Vec<Container>> = BTreeMap::new();
     for c in store.list()? {

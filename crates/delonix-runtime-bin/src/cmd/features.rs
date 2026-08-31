@@ -175,7 +175,8 @@ pub(crate) struct FeaturesArgs {
     pub output: super::output::OutputFormat,
 }
 
-pub(crate) fn run(args: FeaturesArgs) -> delonix_runtime_core::Result<()> {
+pub(crate) fn run(mut args: FeaturesArgs) -> delonix_runtime_core::Result<()> {
+    args.output = super::config::resolve_output(&super::util::state_root(), args.output);
     let min = match &args.min {
         Some(s) => match Level::parse(s) {
             Some(l) => Some(l),

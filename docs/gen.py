@@ -615,6 +615,32 @@ distingue <em>não</em> de <em>não sei</em>.""",
                  "delonix system namespace describe inquilino-b")]},
         },
     },
+    "config": {
+        "title": "delonix config",
+        "tagline": "Uma preferência local, nunca um contexto: get, set, unset.",
+        "intro": """Só uma chave hoje, <code>output</code> (<code>table</code>|<code>json</code>),
+persistida em <code>config.json</code> no <code>DELONIX_ROOT</code> deste anfitrião. Nunca um
+contexto remoto: a especificação queria <code>endpoint</code>/<code>identity</code>/<code>tls</code>,
+e é exactamente isso que o ADR-0010 recusou — a API de gestão remota fica local até alguém nomear um
+consumidor concreto para a reabrir.
+<br><br>
+<code>namespace</code> ficou de fora de propósito: ao contrário de <code>output</code>, que tem UM
+ponto de leitura (<code>resolve_output</code>, chamado em cada sítio com <code>-o/--output</code>
+desta CLI), um default de namespace seria lido por uma dúzia de comandos sem nenhum ponto comum —
+construí-lo só porque a especificação pedia mais chaves seria o campo que o sistema ignora que este
+repositório já pagou mais do que uma vez.""",
+        "subs": {
+            "get": {"examples": [
+                ("Todas as chaves definidas, ou uma só",
+                 "delonix config get\ndelonix config get output")]},
+            "set": {"examples": [
+                ("-o json passa a ser o default em toda a CLI",
+                 "delonix config set output json")]},
+            "unset": {"examples": [
+                ("De volta ao default simples de tabela",
+                 "delonix config unset output")]},
+        },
+    },
     "network": {
         "title": "delonix network",
         "tagline": "Redes de utilizador: create, ls, route, inspect, rm, apply — bridge e overlay realizados fisicamente.",
