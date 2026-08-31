@@ -882,6 +882,7 @@ fn cmd_ls(
     format: output::OutputFormat,
     namespace: Option<&str>,
 ) -> Result<()> {
+    let format = super::config::resolve_output(&super::util::state_root(), format);
     // Without the flag this is EXACTLY what it always was: `VolumeStore::list`
     // deliberately does not see the scoped sub-tree, and widening the default
     // would silently add rows to everyone's `volume ls`.
@@ -1022,6 +1023,7 @@ struct VolumeInspect<'a> {
 }
 
 fn cmd_inspect(store: &VolumeStore, name: &str, format: output::OutputFormat) -> Result<()> {
+    let format = super::config::resolve_output(&super::util::state_root(), format);
     let v = store.inspect(name)?;
     let usage = measured_usage(std::path::Path::new(&v.mountpoint));
     if format == output::OutputFormat::Json {

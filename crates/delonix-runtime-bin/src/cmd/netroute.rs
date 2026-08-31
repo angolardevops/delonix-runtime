@@ -239,6 +239,7 @@ struct RouteLsRow {
 /// map (what the kernel is doing). They disagree routinely and legitimately,
 /// and a listing that showed only one of them would be the dishonest half.
 pub(crate) fn cmd_ls(format: super::output::OutputFormat) -> Result<()> {
+    let format = super::config::resolve_output(&super::util::state_root(), format);
     let mut routes = delonix_net::infra::route_list();
     // The pair IS the identity of a route (there is no name someone chose), so
     // it is also the only stable sort key.

@@ -1968,6 +1968,7 @@ pub fn run(action: VmCmd) -> Result<()> {
             output,
             namespace,
         } => {
+            let output = super::config::resolve_output(&base, output);
             // One filter, applied once, before either renderer sees a row —
             // table and JSON cannot disagree about what `--namespace` means.
             let filter = |vms: Vec<delonix_runtime_core::Vm>| -> Vec<delonix_runtime_core::Vm> {

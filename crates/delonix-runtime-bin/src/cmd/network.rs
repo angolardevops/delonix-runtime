@@ -745,6 +745,7 @@ struct Finding {
 /// is the control plane answering, is every declared network realized, and does
 /// the address registry still match the workloads.
 fn cmd_diagnose(store: &NetworkStore, format: output::OutputFormat) -> Result<()> {
+    let format = super::config::resolve_output(&super::util::state_root(), format);
     let mut f: Vec<Finding> = Vec::new();
     let st = infra::status();
 
@@ -922,6 +923,7 @@ fn cmd_diagnose(store: &NetworkStore, format: output::OutputFormat) -> Result<()
 }
 
 fn cmd_ls(store: &NetworkStore, format: output::OutputFormat) -> Result<()> {
+    let format = super::config::resolve_output(&super::util::state_root(), format);
     let nets = store.list()?;
     if format == output::OutputFormat::Json {
         let rows: Vec<NetworkLsRow> = nets
@@ -1228,6 +1230,7 @@ fn cmd_inspect(
     name: &str,
     format: super::output::OutputFormat,
 ) -> Result<()> {
+    let format = super::config::resolve_output(&super::util::state_root(), format);
     let n = store.get(name)?;
     let gw = effective_default_route(&n.name).unwrap_or_else(|| n.gateway.clone());
     if format == super::output::OutputFormat::Json {

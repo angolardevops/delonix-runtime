@@ -218,6 +218,7 @@ fn warn_if_inert(ns_count: usize) {
 pub fn run(cmd: NamespaceCmd) -> Result<()> {
     match cmd {
         NamespaceCmd::Ls { output: fmt } => {
+            let fmt = super::config::resolve_output(&super::util::state_root(), fmt);
             let all = collect();
             if fmt == output::OutputFormat::Json {
                 let rows: Vec<NsRow> = all
@@ -247,6 +248,7 @@ pub fn run(cmd: NamespaceCmd) -> Result<()> {
             Ok(())
         }
         NamespaceCmd::Describe { name, output: fmt } => {
+            let fmt = super::config::resolve_output(&super::util::state_root(), fmt);
             let all = collect();
             let c = all.get(&name).ok_or_else(|| {
                 delonix_runtime_core::Error::NotFound(super::po::tf(

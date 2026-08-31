@@ -997,6 +997,7 @@ struct TunnelLsRow {
 }
 
 pub(crate) fn cmd_ls(format: output::OutputFormat) -> Result<()> {
+    let format = super::config::resolve_output(&super::util::state_root(), format);
     let store = record_store()?;
     if format == output::OutputFormat::Json {
         let rows: Vec<TunnelLsRow> = store

@@ -372,6 +372,7 @@ pub fn run(action: WorkloadCmd) -> Result<()> {
 }
 
 fn ls(format: super::output::OutputFormat, namespace: Option<&str>) -> Result<()> {
+    let format = super::config::resolve_output(&super::util::state_root(), format);
     // Collect first: `-o json` needs the whole array; the table path is unchanged.
     let mut rows = Vec::new();
     for d in drivers() {
