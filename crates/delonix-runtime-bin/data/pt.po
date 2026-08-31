@@ -10166,3 +10166,9 @@ msgstr "{n} pré-requisito(s) do anfitrião por cumprir, {r} achado(s) de recurs
 
 msgid "stalled: cpu {avg10}%/{avg60}%, memory {mem10}%/{mem60}% (10s/60s) · {n} workload(s)"
 msgstr "parado: cpu {avg10}%/{avg60}%, memória {mem10}%/{mem60}% (10s/60s) · {n} carga(s)"
+
+msgid "workloads — what each asked for, and its own stall (10s cpu/mem/io)"
+msgstr "cargas — o que cada uma pediu, e a sua própria paragem (10s cpu/mem/io)"
+
+msgid "in force"
+msgstr "em vigor"

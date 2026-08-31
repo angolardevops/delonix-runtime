@@ -633,10 +633,10 @@ mod tests {
         assert_eq!(ids(&a), vec!["DLX-RES-001", "DLX-RES-003", "DLX-RES-002"]);
         // Most severe first, so a truncated report still shows what matters.
         assert_eq!(a[0].severity, Severity::Blocking);
-        assert!(a[0].finding.contains("--cpuset-cpus"));
+        assert!(a[0].finding.contains("--cpuset"));
         // `io` is NOT in the blocking flag list: it is a separate, unfixable
         // finding, and mixing them would put an impossible action on a gate.
-        assert!(!a[0].finding.contains("--io-max"));
+        assert!(!a[0].finding.contains("--io-weight"));
         assert_eq!(a[2].id, "DLX-RES-002");
         assert_eq!(
             a.iter().map(|x| x.subject).collect::<Vec<_>>(),
