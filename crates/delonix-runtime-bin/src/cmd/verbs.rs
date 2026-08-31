@@ -51,6 +51,9 @@ pub(crate) const DESCRIBE_ROUTES: &[&str] = &[
     kinds::IMAGE,
     kinds::GATEWAY,
     kinds::SECRET,
+    kinds::NETWORK_ROUTE,
+    kinds::FIREWALL_POLICY,
+    kinds::CLUSTER,
 ];
 pub(crate) const DELETE_ROUTES: &[&str] = &[
     kinds::POD,
@@ -61,6 +64,8 @@ pub(crate) const DELETE_ROUTES: &[&str] = &[
     kinds::IMAGE,
     kinds::CLUSTER,
     kinds::GATEWAY,
+    kinds::NETWORK_ROUTE,
+    kinds::FIREWALL_POLICY,
 ];
 
 /// The CLI group that still owns a Kind's imperative verbs.
@@ -173,17 +178,11 @@ pub(crate) fn get(kind: &str, names: &[String], output: OutputFormat) -> Result<
         // the live map. A route has no name someone chose — the PAIR is its
         // identity — so there is nothing else `get` could key on.
         k if k == kinds::NETWORK_ROUTE => super::netroute::cmd_ls(output),
-        // Inbound state of EVERY container — `ingress ls` with no container
-        // already walks the store, so this routes rather than inventing a second
-        // listing. Only the inbound half: a `NetworkPolicy` document declares one
-        // direction, `egress ls` answers the other, and folding both into one
-        // table would print two rows per container for one Kind.
-        k if k == kinds::FIREWALL_POLICY => {
-            super::firewall::run_ingress(super::firewall::IngressCmd::Ls {
-                container: None,
-                output,
-            })
-        }
+        // Both directions of every governed container, one row each — the
+        // listing `net ingress ls`/`net egress ls` never had between them
+        // (each answers only its own direction). Identity is `<target>/
+        // <direction>`, matched by `describe`/`delete networkpolicies` below.
+        k if k == kinds::FIREWALL_POLICY => super::firewall::list_all_policies(output),
         // `ports` stays FALSE: `vm ls --ports` does real network I/O against
         // every VM, and a `get` must not probe the network unasked.
         k if k == kinds::VM => super::vm::run(super::vm::VmCmd::Ls {
@@ -248,6 +247,14 @@ pub(crate) fn describe(kind: &str, names: &[String]) -> Result<()> {
                     reveal: false,
                     output: OutputFormat::Table,
                 })?;
+            }
+            Ok(())
+        }
+        k if k == kinds::NETWORK_ROUTE => super::netroute::cmd_describe(&n),
+        k if k == kinds::FIREWALL_POLICY => super::firewall::cmd_describe_policy(&n),
+        k if k == kinds::CLUSTER => {
+            for name in names {
+                super::cluster::cmd_describe(name)?;
             }
             Ok(())
         }
@@ -342,6 +349,14 @@ pub(crate) fn delete(kind: &str, names: &[String], force: bool) -> Result<()> {
             }
             Ok(())
         }
+        k if k == kinds::NETWORK_ROUTE => {
+            for n in names {
+                super::netroute::remove_for_replace(n)?;
+                println!("{}", super::po::tf("route {name}: closed", &[("name", n)]));
+            }
+            Ok(())
+        }
+        k if k == kinds::FIREWALL_POLICY => super::firewall::cmd_delete_policy(names),
         // The list above already decided this Kind routes; reaching here means the
         // two halves disagree, which is our defect and not the caller's.
         _ => Err(Error::Invalid(format!(

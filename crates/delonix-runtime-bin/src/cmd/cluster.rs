@@ -825,6 +825,13 @@ pub(crate) fn cmd_delete(name: &str) -> Result<()> {
     super::kindmode::delete(&images, &store, name)
 }
 
+/// The target of the generic `describe kubernetesclusters` — no native
+/// `cluster describe` subcommand exists, and this Kind does not need one yet.
+pub(crate) fn cmd_describe(name: &str) -> Result<()> {
+    let (_, store) = super::util::open_stores()?;
+    super::kindmode::describe(&store, name)
+}
+
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     for doc in manifest::of_kind(docs, k::CLUSTER) {
         let name = &doc.metadata.name;
