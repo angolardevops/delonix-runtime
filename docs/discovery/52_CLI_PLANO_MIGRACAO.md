@@ -61,25 +61,33 @@ documento — mesma razão que levou o `NetworkAccessRule` a precisar de
 novo em nenhum dos três Kinds, só parametrização dos verbos genéricos
 já existentes.
 
-### B2 — Renomeações que não tocam em contrato  ·  QUEBRA MENOR  ·  ~20 folhas
+### B2 — Renomeações que não tocam em contrato  ·  QUEBRA MENOR  ·  FECHADO
 
-Todas em grupos declarados NÃO estáveis:
+**Medido de novo antes de tocar em código (2026-08-31, agente `Explore` +
+leitura directa de `main.rs`/`scripts/cli_baseline.tsv`): as 9 renomeações já
+estavam TODAS feitas** — sessões anteriores já as tinham executado (dois
+comentários no código citam "B2 da reestruturação da CLI" explicitamente,
+`system.rs:258-263` e `system.rs:271-277`) e o documento nunca foi
+actualizado para o reflectir.
 
-| de | para |
-|---|---|
-| `dash` | `dashboard` (§22) |
-| `syntax <editor>` | `completion editor <editor>` (§21) |
-| `completion <shell>` | `completion shell <shell>` |
-| `namespace` | `system namespace` |
-| `net boot` | `system boot` |
-| `volumes` | `volume` |
-| `image ls` / `image rm` | `image list` / `image remove` (revertido em v2.0.0 — ver `docs/releases/v2.0.0.md`; `image remove` fica) |
-| `schema print` | `manifest schema` (já existe; remove-se o antigo) |
-| `restore` (raiz) | `backup restore` |
+| de | para | estado |
+|---|---|---|
+| `dash` | `dashboard` (§22) | feito — `main.rs:339` |
+| `syntax <editor>` | `completion editor <editor>` (§21) | feito — `main.rs:59-73` |
+| `completion <shell>` | `completion shell <shell>` | feito, mesmo braço |
+| `namespace` | `system namespace` | feito — `system.rs:265` |
+| `net boot` | `system boot` | feito — `system.rs:271`, cita B2 no comentário |
+| `volumes` | `volume` | feito — `main.rs:144` |
+| `image ls` / `image rm` | `image list` / `image remove` | **revertido** em v2.0.0 (`docs/releases/v2.0.0.md`) — `image ls`/`image remove` são a forma canónica |
+| `schema print` | `manifest schema` | feito — `schema.rs`'s `SchemaCmd` já não está ligado a nenhum comando de topo |
+| `restore` (raiz) | `backup restore` | feito — `rbackup.rs:806`, documentado no AGENTS.md |
 
-Corte limpo, sem alias — o precedente é a v0.30.0, e uma grafia antiga que
-continua a funcionar é uma grafia de que ninguém migra. Falha com
-`unrecognized subcommand`, nunca em silêncio.
+Corrigidas de caminho duas secções do `AGENTS.md` que ainda usavam as grafias
+antigas como título (`## delonix net boot` e `` `delonix volumes` `` na lista
+de comandos) — história preservada no corpo do texto, só o título/rótulo
+corrigido para a grafia actual.
+
+**Nenhum código tocado neste bloco — era só actualizar o registo.**
 
 ### B3 — Capacidade nova: os grupos que não existem  ·  ADITIVO  ·  ~20 folhas
 
