@@ -374,8 +374,12 @@ impl DelonixMcp {
                 "subject": f.subject,
                 "severity": f.severity.as_str(),
                 "class": f.class.as_str(),
-                "finding": f.finding,
-                "action": f.action,
+                // Rendered in English here: an MCP client gets the stable `id`
+                // for machines and a finished sentence for humans. The template
+                // and its holes are the CLI's business, because only the CLI
+                // knows which language to render them in.
+                "finding": f.finding.render(),
+                "action": f.action.as_ref().map(|a| a.render()).unwrap_or_default(),
             })).collect::<Vec<_>>(),
             // Whether this very node should be the one running the model that
             // is reading this. It usually should not, and the reasons say why.

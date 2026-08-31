@@ -10189,3 +10189,51 @@ msgstr "temporizador instalado em {path} (a cada {interval}s)"
 
 msgid "units written but `systemctl enable --now` failed — enable it by hand"
 msgstr "unidades escritas mas o `systemctl enable --now` falhou — activa-o à mão"
+
+msgid "{n} flag(s) are accepted and silently ignored: {flags}"
+msgstr "{n} flag(s) são aceites e ignoradas em silêncio: {flags}"
+
+msgid "sudo delonix system setup --delegate, then log out and back in"
+msgstr "sudo delonix system setup --delegate, e depois sair e voltar a entrar"
+
+msgid "--io-weight and the --device-*-bps flags cannot apply: systemd never delegates the io controller to a rootless user"
+msgstr "o --io-weight e as flags --device-*-bps não se aplicam: o systemd nunca delega o controlador io a um utilizador sem privilégios"
+
+msgid "no aggregate ceiling: one workload with no --memory can take the whole host, and the thermal governor has no slice to lower"
+msgstr "sem tecto agregado: uma carga sem --memory pode levar o anfitrião inteiro, e o governador térmico não tem slice para baixar"
+
+msgid "run the node as root for delonix.slice, or set a per-container --memory"
+msgstr "corre o nó como root para teres o delonix.slice, ou põe um --memory por container"
+
+msgid "{gib} GiB free under the state root — image pulls fail and a kubelet evicts below this"
+msgstr "{gib} GiB livres na raiz de estado — abaixo disto as descargas de imagem falham e um kubelet começa a despejar"
+
+msgid "delonix system prune"
+msgstr "delonix system prune"
+
+msgid "{res} has been stalled {avg300}% of the last 5 minutes — this is chronic, not a spike"
+msgstr "o {res} esteve parado {avg300}% dos últimos 5 minutos — isto é crónico, não é um pico"
+
+msgid "{res} is stalled {avg10}% right now but only {avg300}% over 5 minutes — a spike"
+msgstr "o {res} está parado {avg10}% agora mas só {avg300}% em 5 minutos — é um pico"
+
+msgid "give the heavy workload a lower --io-weight, or move its volume to another disk"
+msgstr "baixa o --io-weight da carga pesada, ou muda o volume dela para outro disco"
+
+msgid "cap the workloads with --memory, or add RAM"
+msgstr "põe tecto às cargas com --memory, ou acrescenta RAM"
+
+msgid "give the heavy workload a lower --cpu-weight"
+msgstr "baixa o --cpu-weight da carga pesada"
+
+msgid "{gib} GiB swapped out while memory is under pressure — the host is thrashing"
+msgstr "{gib} GiB despejados para swap com a memória sob pressão — o anfitrião está a bater"
+
+msgid "lower vm.swappiness, or cap the workloads with --memory"
+msgstr "baixa o vm.swappiness, ou põe tecto às cargas com --memory"
+
+msgid "cpu at {celsius} °C"
+msgstr "cpu a {celsius} °C"
+
+msgid "delonix system thermal (lowers the engine's CPU ceiling until it cools)"
+msgstr "delonix system thermal (baixa o tecto de CPU do motor até arrefecer)"
