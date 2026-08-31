@@ -188,6 +188,7 @@
 =	system events
 =	system features
 =	system info
+~	system metrics
 ~	system monitor
 ~	system namespace describe
 ~	system namespace ls
