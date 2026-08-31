@@ -996,11 +996,20 @@ fn cmd_regulate(
         let mut workloads = regulate::sample(&running, window);
         for w in &mut workloads {
             w.original_weight = regulate::recorded_original(&root, &w.id);
+            w.memory_regulated = regulate::memory_is_regulated(&root, &w.id);
         }
 
-        let host = regulate::cpu_stall(None);
-        let (avg10, avg60) = host.map(|p| (p.avg10, p.avg60)).unwrap_or((0.0, 0.0));
-        let actions = regulate::plan(avg10, avg60, &workloads, floor);
+        let (avg10, avg60) = regulate::stall("cpu")
+            .map(|p| (p.avg10, p.avg60))
+            .unwrap_or((0.0, 0.0));
+        let (mem10, mem60) = regulate::stall("memory")
+            .map(|p| (p.avg10, p.avg60))
+            .unwrap_or((0.0, 0.0));
+        // Two resources, two decisions, and never the same workload blamed for
+        // both by accident: the biggest CPU consumer is rarely the biggest
+        // memory holder.
+        let mut actions = regulate::plan_cpu(avg10, avg60, &workloads, floor);
+        actions.extend(regulate::plan_memory(mem10, mem60, &workloads));
 
         let mut done = Vec::new();
         for a in &actions {
@@ -1015,13 +1024,10 @@ fn cmd_regulate(
                         delonix_runtime_core::events::emit(
                             &root,
                             "regulate",
-                            a.verb(),
+                            &format!("{} {}", a.verb(), a.knob().as_str()),
                             &w.id,
                             &w.name,
-                            Some(match a {
-                                regulate::Action::Throttle { reason, .. }
-                                | regulate::Action::Restore { reason, .. } => reason.as_str(),
-                            }),
+                            Some(a.reason()),
                         );
                         done.push((a, true));
                     }
@@ -1039,20 +1045,24 @@ fn cmd_regulate(
             let doc = serde_json::json!({
                 "applied": apply,
                 "cpu_stall": { "avg10": avg10, "avg60": avg60 },
+                "memory_stall": { "avg10": mem10, "avg60": mem60 },
                 "workloads": workloads.iter().map(|w| serde_json::json!({
                     "id": w.id,
                     "name": w.name,
                     "cpu_weight": w.cpu_weight,
                     "cpu_share_pct": w.cpu_share_pct,
                     "original_weight": w.original_weight,
+                    "memory_current": w.memory_current,
+                    "memory_high": w.memory_high,
+                    "memory_regulated": w.memory_regulated,
                 })).collect::<Vec<_>>(),
                 "actions": done.iter().map(|(a, ok)| match a {
-                    regulate::Action::Throttle { id, name, from, to, reason } => serde_json::json!({
-                        "action": "throttle", "id": id, "name": name,
+                    regulate::Action::Throttle { id, name, knob, from, to, reason } => serde_json::json!({
+                        "action": "throttle", "id": id, "name": name, "knob": knob.as_str(),
                         "from": from, "to": to, "reason": reason, "applied": ok,
                     }),
-                    regulate::Action::Restore { id, name, to, reason } => serde_json::json!({
-                        "action": "restore", "id": id, "name": name,
+                    regulate::Action::Restore { id, name, knob, to, reason } => serde_json::json!({
+                        "action": "restore", "id": id, "name": name, "knob": knob.as_str(),
                         "to": to, "reason": reason, "applied": ok,
                     }),
                 }).collect::<Vec<_>>(),
@@ -1062,23 +1072,30 @@ fn cmd_regulate(
             println!(
                 "{}",
                 super::po::tf(
-                    "cpu stalled {avg10}% over 10s, {avg60}% over 60s · {n} workload(s)",
+                    "stalled: cpu {avg10}%/{avg60}%, memory {mem10}%/{mem60}% (10s/60s) · {n} workload(s)",
                     &[
                         ("avg10", &format!("{avg10:.1}")),
                         ("avg60", &format!("{avg60:.1}")),
+                        ("mem10", &format!("{mem10:.1}")),
+                        ("mem60", &format!("{mem60:.1}")),
                         ("n", &workloads.len().to_string())
                     ]
                 )
             );
             for w in &workloads {
                 println!(
-                    "  {:<22}{:>6.1}%  cpu.weight {}{}",
+                    "  {:<22}{:>6.1}% cpu  {:>9} mem  cpu.weight {}{}{}",
                     w.name,
                     w.cpu_share_pct,
+                    human(w.memory_current),
                     w.cpu_weight,
                     match w.original_weight {
-                        Some(o) if o != w.cpu_weight => format!(" (regulated, was {o})"),
+                        Some(o) if o != w.cpu_weight => format!(" (was {o})"),
                         _ => String::new(),
+                    },
+                    match w.memory_high {
+                        Some(h) => format!("  memory.high {}", human(h)),
+                        None => String::new(),
                     }
                 );
             }
@@ -1086,6 +1103,16 @@ fn cmd_regulate(
                 println!("  {}", super::po::t("nothing to do"));
             }
             for (a, applied) in &done {
+                let knob = a.knob();
+                // A byte count and a weight are not the same kind of number,
+                // and `memory.high` has a value that is not a number at all.
+                let show = |v: u64| match knob {
+                    regulate::Knob::MemoryHigh if v == regulate::MEMORY_NO_LIMIT => {
+                        "max".to_string()
+                    }
+                    regulate::Knob::MemoryHigh => human(v),
+                    regulate::Knob::CpuWeight => v.to_string(),
+                };
                 let (verb, target, reason) = match a {
                     regulate::Action::Throttle {
                         name,
@@ -1095,14 +1122,14 @@ fn cmd_regulate(
                         ..
                     } => (
                         super::po::t("throttle"),
-                        format!("{name}: cpu.weight {from} → {to}"),
+                        format!("{name}: {} {} → {}", knob.as_str(), show(*from), show(*to)),
                         reason,
                     ),
                     regulate::Action::Restore {
                         name, to, reason, ..
                     } => (
                         super::po::t("restore"),
-                        format!("{name}: cpu.weight → {to}"),
+                        format!("{name}: {} → {}", knob.as_str(), show(*to)),
                         reason,
                     ),
                 };
