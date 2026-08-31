@@ -252,7 +252,7 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   alerta do thin pool (80). Se a ocupação não puder ser lida, **recusa** em vez de
   adivinhar. É o comando que o role `store_gc` do `delonix-deploy` agenda — e que até aqui
   não existia: `delonix prune --auto` devolvia exit 2, `unrecognized subcommand`.
-- `delonix volumes` — create/ls/rm/inspect, wrapper fino sobre `VolumeStore`.
+- `delonix volume` (renomeado de `volumes` no B2) — create/ls/rm/inspect, wrapper fino sobre `VolumeStore`.
   **`prune` tem ÂMBITO POR DONO** (`prune::Scope`): sem flags varre só a raiz sem dono — o que
   sempre varreu — e ao fim DIZ quais os namespaces que não olhou; `--namespace <ns>` varre um
   inquilino (é o primitivo do teardown de tenant), `-A/--all-namespaces` varre tudo. Um volume
@@ -435,7 +435,12 @@ como se fosse um comando principal por engano. Pedido explícito: agrupamento **
   em nada. Confirmado ao vivo: `container run --net <rede-existente>` neste host continua a
   ganhar IP real na SDN depois da reorganização.
 
-## Sobreviver a um reboot (`delonix net boot`, `cmd/boot.rs`)
+## Sobreviver a um reboot (`cmd/boot.rs`)
+
+**Renomeado para `delonix system boot` no B2 do plano de restruturação da CLI**
+(`docs/discovery/52_CLI_PLANO_MIGRACAO.md`) — o resto desta secção fala de
+`net boot`, a grafia de quando cada achado foi medido, e fica como está por
+ser história, não a superfície actual.
 
 Não há daemon a repor estado — a persistência é do systemd, como no Podman. `net boot enable`
 escreve um unit por container (`ExecStart=<exe> container start <nome>`), rootless em
