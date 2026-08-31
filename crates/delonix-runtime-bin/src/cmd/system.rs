@@ -1171,6 +1171,21 @@ fn cmd_resources(output: super::output::OutputFormat, strict: bool) -> Result<()
     let findings = advice::advise(&snap);
     let inference = advice::local_inference(&snap);
 
+    // Per workload: what it asked for, and what its own cgroup says now. The
+    // host-level findings answer «can this host enforce anything»; this answers
+    // the question after it, which on a mixed host has a different answer — a
+    // container started before a delegation was fixed keeps running without the
+    // ceiling it asked for, and nothing said so.
+    let views: Vec<_> = open_stores()
+        .and_then(|(_, store)| store.list())
+        .map(|cs| {
+            cs.into_iter()
+                .filter(|c| c.pid.is_some())
+                .map(|c| delonix_runtime::workload_view::view(&c))
+                .collect()
+        })
+        .unwrap_or_default();
+
     let pressure: [(&str, Option<runtime::Psi>); 3] = [
         ("cpu", snap.psi_cpu),
         ("memory", snap.psi_memory),
@@ -1226,6 +1241,24 @@ fn cmd_resources(output: super::output::OutputFormat, strict: bool) -> Result<()
                 "largest_model_b_q4": inference.largest_model_b,
                 "reasons": inference.reasons,
             },
+            "workloads": views.iter().map(|v| serde_json::json!({
+                "id": v.id,
+                "name": v.name,
+                "cgroup": v.cgroup,
+                "limits": v.limits.iter().map(|l| serde_json::json!({
+                    "flag": l.flag,
+                    "requested": l.requested,
+                    "expected": l.expected,
+                    "actual": l.actual,
+                    "applied": l.applied(),
+                    "diagnosis": l.diagnosis(),
+                })).collect::<Vec<_>>(),
+                "pressure": v.psi.iter().map(|(r, p)| serde_json::json!({
+                    "resource": r,
+                    "avg10": p.map(|p| p.avg10),
+                    "avg60": p.map(|p| p.avg60),
+                })).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
         });
         println!("{}", serde_json::to_string_pretty(&doc).unwrap_or_default());
         return strict_exit(failed);
@@ -1363,6 +1396,49 @@ fn cmd_resources(output: super::output::OutputFormat, strict: bool) -> Result<()
                 "  {r:<10}{}",
                 super::po::t("unavailable (kernel without CONFIG_PSI)")
             ),
+        }
+    }
+
+    if !views.is_empty() {
+        println!();
+        println!(
+            "{}",
+            super::po::t("workloads — what each asked for, and its own stall (10s cpu/mem/io)")
+        );
+        for v in &views {
+            let stall = |r: &str| {
+                v.psi
+                    .iter()
+                    .find(|(n, _)| *n == r)
+                    .and_then(|(_, p)| *p)
+                    .map(|p| format!("{:.0}%", p.avg10))
+                    .unwrap_or_else(|| "-".into())
+            };
+            println!(
+                "  {:<22}{:>5} {:>5} {:>5}",
+                v.name,
+                stall("cpu"),
+                stall("memory"),
+                // Present even where the io CONTROLLER is not delegated: the
+                // kernel accounts the stall whether or not anybody can cap it,
+                // so this is the only honest answer to «who waits for the disk»
+                // on a rootless host.
+                stall("io")
+            );
+            for l in &v.limits {
+                let mark = if l.applied() {
+                    super::po::t("in force")
+                } else {
+                    super::po::t("IGNORED")
+                };
+                println!(
+                    "      {:<16}{:<10}{:<10}{}",
+                    l.flag,
+                    l.requested,
+                    mark,
+                    l.diagnosis()
+                );
+            }
         }
     }
 

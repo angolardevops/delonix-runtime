@@ -16,6 +16,7 @@ pub mod capabilities;
 pub mod regulate;
 pub mod resource_advice;
 pub mod seccomp_profile;
+pub mod workload_view;
 
 use capabilities::{all_caps_mask, resolve_cap_keep};
 use delonix_runtime_core::{Container, Error, Mount, Result, Status, Store};
@@ -3351,6 +3352,10 @@ fn attach_device_filter(cgroup: &str) -> bool {
 
 /// Converts `cpus` (e.g. "0.5", "2") into the cgroup v2 `cpu.max` syntax
 /// (`<quota> <period>`); `period` = 100000 µs. Minimum 0.01 of a core.
+pub fn cpu_max_for(cpus: &str) -> String {
+    cpu_max_value(cpus)
+}
+
 fn cpu_max_value(cpus: &str) -> String {
     let c: f64 = cpus.parse().unwrap_or(1.0);
     let quota = ((c * 100_000.0).round() as i64).max(1000);
@@ -3512,6 +3517,10 @@ fn host_load1() -> Option<f64> {
 }
 
 /// Converts `64M`/`1G`/`512K`/bytes into bytes.
+pub fn mem_bytes(s: &str) -> u64 {
+    parse_mem_bytes(s)
+}
+
 fn parse_mem_bytes(s: &str) -> u64 {
     let s = s.trim();
     let (num, mult) = match s.chars().last() {
@@ -3833,12 +3842,27 @@ pub fn bottleneck<'a>(readings: &[(&'a str, Option<Psi>)]) -> Option<&'a str> {
 /// The user-facing flags each cgroup controller makes real. Without the
 /// controller they are parsed, accepted, and silently ignored.
 pub fn flags_of_controller(controller: &str) -> &'static [&'static str] {
+    // Every name here MUST exist on `container run`. Four did not: measured
+    // 2026-08-31, `--memory-swap`, `--pids-limit`, `--cpuset-mems` and
+    // `--io-max` are Docker's spellings, and this engine has `--cpuset` and the
+    // `--device-*-bps/iops` family instead. Telling an operator to stop using a
+    // flag they cannot type is a small lie that costs a real minute, so
+    // `named_flags_all_exist` walks the clap tree and refuses any name that is
+    // not really there.
     match controller {
         "cpu" => &["--cpus", "--cpu-weight"],
-        "cpuset" => &["--cpuset-cpus", "--cpuset-mems"],
-        "io" => &["--io-weight", "--io-max"],
-        "memory" => &["--memory", "--memory-swap"],
-        "pids" => &["--pids-limit"],
+        "cpuset" => &["--cpuset"],
+        "io" => &[
+            "--io-weight",
+            "--device-read-bps",
+            "--device-write-bps",
+            "--device-read-iops",
+            "--device-write-iops",
+        ],
+        "memory" => &["--memory"],
+        // No user-facing flag: the pids ceiling is a cgroup-GROUP property, not
+        // a `container run` option. Naming one would invent a flag.
+        "pids" => &[],
         _ => &[],
     }
 }
@@ -7449,12 +7473,22 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
             .collect();
         assert_eq!(
             ignored,
-            vec!["--cpuset-cpus", "--cpuset-mems", "--io-weight", "--io-max"]
+            vec![
+                "--cpuset",
+                "--io-weight",
+                "--device-read-bps",
+                "--device-write-bps",
+                "--device-read-iops",
+                "--device-write-iops"
+            ]
         );
 
-        // Every controller the report walks has at least one flag behind it,
-        // or the row would be noise.
-        for c in RESOURCE_CONTROLLERS {
+        // `pids` is delegated on every host that delegates anything and has NO
+        // `container run` flag behind it — the ceiling is a cgroup-group
+        // property. An empty row is correct here; inventing a flag to fill it
+        // is the defect this replaced.
+        assert!(flags_of_controller("pids").is_empty());
+        for c in ["cpu", "memory", "cpuset", "io"] {
             assert!(!flags_of_controller(c).is_empty(), "{c} sem flags");
         }
         assert!(flags_of_controller("hugetlb").is_empty());

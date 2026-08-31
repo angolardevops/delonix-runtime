@@ -872,6 +872,67 @@ mod comandos_citados_tests {
     }
 }
 
+/// The advisory names flags. They have to be flags that exist.
+///
+/// Written after shipping four that did not: `--memory-swap`, `--pids-limit`,
+/// `--cpuset-mems` and `--io-max` are Docker's spellings, and `system resources`
+/// was printing them at operators as things to stop using on an engine whose
+/// flag is `--cpuset` and whose I/O ceilings are the `--device-*-bps` family.
+/// Nothing could tell: they are string literals in another crate, and the
+/// compiler has no opinion about the inside of a string.
+#[cfg(test)]
+mod advisory_flag_tests {
+    use clap::CommandFactory;
+
+    /// Every long flag `container run` accepts.
+    fn container_run_flags() -> std::collections::BTreeSet<String> {
+        let cmd = <super::Cli as CommandFactory>::command();
+        let container = cmd
+            .get_subcommands()
+            .find(|c| c.get_name() == "container")
+            .expect("the `container` group exists");
+        let run = container
+            .get_subcommands()
+            .find(|c| c.get_name() == "run")
+            .expect("`container run` exists");
+        run.get_arguments()
+            .filter_map(|a| a.get_long().map(|l| format!("--{l}")))
+            .collect()
+    }
+
+    #[test]
+    fn named_flags_all_exist() {
+        let real = container_run_flags();
+        let mut missing = Vec::new();
+        for c in delonix_runtime::RESOURCE_CONTROLLERS {
+            for f in delonix_runtime::flags_of_controller(c) {
+                if !real.contains(*f) {
+                    missing.push(format!("{c}: {f}"));
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "`flags_of_controller` nomeia flags que `container run` não tem: {missing:?}\n\
+             As reais são: {real:?}"
+        );
+    }
+
+    /// The four that were wrong, named, so nobody reintroduces them by copying
+    /// from Docker's documentation.
+    #[test]
+    fn the_docker_spellings_are_not_ours() {
+        let real = container_run_flags();
+        for f in ["--memory-swap", "--pids-limit", "--cpuset-mems", "--io-max"] {
+            assert!(
+                !real.contains(f),
+                "{f} passou a existir — se é mesmo nossa, acrescenta-a ao \
+                 `flags_of_controller` no mesmo commit"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod help_i18n_tests {
     use clap::CommandFactory;
