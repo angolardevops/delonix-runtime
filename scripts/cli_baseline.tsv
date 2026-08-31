@@ -54,6 +54,7 @@
 ~	dashboard
 ~	delete
 ~	describe
+~	diff
 =	explain
 ~	get
 ~	image apply

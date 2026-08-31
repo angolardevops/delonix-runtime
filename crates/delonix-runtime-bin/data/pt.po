@@ -9652,6 +9652,21 @@ msgstr "Remove recursos por Kind e nome"
 msgid "Remove resources by Kind and name.\n\nWith no name it REFUSES rather than removing every resource of the Kind: a missing argument is a typo far more often than an intention, and this verb does not get a second chance to ask."
 msgstr "Remove recursos por Kind e nome.\n\nSem nome RECUSA, em vez de remover todos os recursos do Kind: um argumento em falta é um erro de escrita muito mais vezes do que uma intenção, e este verbo não tem uma segunda oportunidade de perguntar."
 
+msgid "The manifest, last-applied, and observed values for one resource — side by side"
+msgstr "O manifesto, o último aplicado e o observado de um recurso — lado a lado"
+
+msgid "The manifest, last-applied, and observed values for one resource — side by side.\n\n`stack plan` already computes this internally for every resource — it only ever prints the VERDICT (Create/Update/Replace/NoOp). This prints the three underlying VALUES, for one named resource, side by side."
+msgstr "O manifesto, o último aplicado e o observado de um recurso — lado a lado.\n\nO `stack plan` já calcula isto internamente para cada recurso — só imprime o VEREDICTO (Create/Update/Replace/NoOp). Isto imprime os três VALORES subjacentes, para um recurso nomeado, lado a lado."
+
+msgid "Kind, plural or short name: `containers`, `container`, `c`"
+msgstr "Kind, plural ou abreviatura: `containers`, `container`, `c`"
+
+msgid "Manifest to read (default: `./delonix-manifest.yaml`)"
+msgstr "Manifesto a ler (por omissão: `./delonix-manifest.yaml`)"
+
+msgid "Exit 2 if DESIRED and OBSERVED differ on any field, 0 otherwise — same contract as `stack plan --detailed-exitcode`"
+msgstr "Sai com 2 se DESIRED e OBSERVED diferirem nalgum campo, 0 caso contrário — mesmo contrato do `stack plan --detailed-exitcode`"
+
 msgid "Kind, plural or short name: `pods`, `pod`, `po`"
 msgstr "Kind, plural ou abreviatura: `pods`, `pod`, `po`"
 
@@ -9678,6 +9693,12 @@ msgstr "remove por Kind e nome"
 
 msgid "with no name it REFUSES — it will not take every one of them"
 msgstr "sem nome RECUSA — não leva todos"
+
+msgid "desired, last-applied and observed, side by side"
+msgstr "desired, last-applied e observed, lado a lado"
+
+msgid "a drift gate: exit 2 means desired and observed disagree"
+msgstr "um portão de deriva: sair 2 quer dizer desired e observed em desacordo"
 
 # --- verbos de manifesto no topo: apply / plan / wait / manifest (CLI-2) ---
 msgid "Converge a manifest — the canonical spelling of `stack apply`"

@@ -588,6 +588,15 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["get", "describe", "stack destroy"],
     },
     Entry {
+        path: "diff",
+        group: "",
+        examples: &[
+            ("desired, last-applied and observed, side by side", "delonix diff container web -f prod.yaml"),
+            ("a drift gate: exit 2 means desired and observed disagree", "delonix diff container web -f prod.yaml --detailed-exitcode"),
+        ],
+        see_also: &["stack plan", "describe", "get"],
+    },
+    Entry {
         path: "explain",
         group: "",
         examples: &[

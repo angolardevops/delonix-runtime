@@ -9,6 +9,7 @@ pub mod conditions;
 pub mod container;
 pub mod dash;
 pub mod dependency;
+pub mod diff;
 pub mod dockerapi;
 pub mod etcd;
 pub mod exitcode;
