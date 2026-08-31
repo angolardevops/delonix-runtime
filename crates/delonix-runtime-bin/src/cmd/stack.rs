@@ -697,6 +697,7 @@ fn plan_cmd(
         print_compared_fields();
         return Ok(());
     }
+    let output = super::config::resolve_output(&super::util::state_root(), output);
     let path = manifest::resolve_path(file)?;
     let docs = manifest::load(&path)?;
     let stack = stack_name(&path, name.as_deref());
@@ -2183,6 +2184,7 @@ fn history(
     show: Option<u32>,
     output: super::output::OutputFormat,
 ) -> Result<()> {
+    let output = super::config::resolve_output(&super::util::state_root(), output);
     // The manifest is read for its NAME, not its contents — a stack whose file
     // has since been deleted still has a history, so a missing file is only an
     // error when no `--name` was given to stand in for it.

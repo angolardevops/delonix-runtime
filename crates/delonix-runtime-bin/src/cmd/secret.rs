@@ -514,6 +514,8 @@ pub fn run(action: SecretCmd) -> Result<()> {
             );
         }
         SecretCmd::Ls { output } => {
+            let output =
+                crate::cmd::config::resolve_output(&crate::cmd::util::state_root(), output);
             if output == crate::cmd::output::OutputFormat::Json {
                 // Key NAMES + count only — never the values (those stay redacted,
                 // revealed only by `secret inspect --reveal`).
@@ -544,6 +546,7 @@ pub fn run(action: SecretCmd) -> Result<()> {
             reveal,
             output,
         } => {
+            let output = super::config::resolve_output(&super::util::state_root(), output);
             let s = store.load(&name)?;
             if output == output::OutputFormat::Json {
                 return output::print_json(&[inspect_view(&s, reveal)]);

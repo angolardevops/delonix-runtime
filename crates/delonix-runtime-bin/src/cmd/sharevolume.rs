@@ -524,6 +524,7 @@ struct ShareVolumeLsRow {
 }
 
 fn cmd_ls(root: &Path, vstore: &VolumeStore, format: output::OutputFormat) -> Result<()> {
+    let format = super::config::resolve_output(root, format);
     if format == output::OutputFormat::Json {
         let mut rows = Vec::new();
         for rec in list_all(root)? {

@@ -1233,6 +1233,7 @@ struct ImageLsRow {
 }
 
 fn cmd_ls(images: &ImageStore, format: super::output::OutputFormat) -> Result<()> {
+    let format = super::config::resolve_output(&super::util::state_root(), format);
     let mut imgs = images.list()?;
     // Newest first, as in `docker images`.
     imgs.sort_by_key(|i| std::cmp::Reverse(i.created_unix));

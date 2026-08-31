@@ -6,6 +6,7 @@ pub mod cluster;
 pub mod complete;
 pub mod compose;
 pub mod conditions;
+pub mod config;
 pub mod container;
 pub mod dash;
 pub mod dependency;

@@ -907,6 +907,7 @@ fn cmd_events(
 ) -> Result<()> {
     use super::output::OutputFormat;
     let root = state_root();
+    let output = super::config::resolve_output(&root, output);
     let evs = events::read(&root);
     let start = tail.map(|n| evs.len().saturating_sub(n)).unwrap_or(0);
     let shown = &evs[start..];
@@ -1125,6 +1126,7 @@ fn cmd_regulate(
     floor: u64,
     output: super::output::OutputFormat,
 ) -> Result<()> {
+    let output = super::config::resolve_output(&state_root(), output);
     use delonix_runtime::regulate;
 
     let root = state_root();
@@ -1330,6 +1332,7 @@ fn cmd_resources(output: super::output::OutputFormat, strict: bool) -> Result<()
     use delonix_runtime::resource_advice as advice;
 
     let root = state_root();
+    let output = super::config::resolve_output(&root, output);
     let snap = advice::collect(&root);
     let findings = advice::advise(&snap);
     let inference = advice::local_inference(&snap);
@@ -1639,7 +1642,9 @@ fn cmd_resources(output: super::output::OutputFormat, strict: bool) -> Result<()
 /// collector, three consumers (`cmd/dash.rs`, `delonix-mgmt`'s HTTP server,
 /// this) — never a second aggregation that could disagree with the other two.
 fn cmd_metrics(output: super::output::OutputFormat) -> Result<()> {
-    let summary = delonix_mgmt::dashstats::collect(&state_root(), true, true);
+    let root = state_root();
+    let output = super::config::resolve_output(&root, output);
+    let summary = delonix_mgmt::dashstats::collect(&root, true, true);
     if output == super::output::OutputFormat::Json {
         let out = serde_json::to_string_pretty(&summary)
             .map_err(|e| Error::Invalid(format!("system metrics: {e}")))?;

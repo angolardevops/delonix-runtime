@@ -293,6 +293,16 @@ enum Cmd {
         #[arg(long)]
         detailed_exitcode: bool,
     },
+    /// A small, local preference — never a remote context.
+    ///
+    /// Only `output` (`table`|`json`) today. The specification's `endpoint`/
+    /// `identity`/`tls` context stays out on purpose: ADR-0010 recused the
+    /// remote management API, and nobody has named a concrete consumer for
+    /// reopening it.
+    Config {
+        #[command(subcommand)]
+        action: cmd::config::ConfigCmd,
+    },
     /// Apply a whole manifest (`delonix-manifest.yaml`) — every Kind, in dependency order.
     Stack {
         #[command(subcommand)]
@@ -520,6 +530,7 @@ fn run() -> Result<()> {
             file,
             detailed_exitcode,
         } => cmd::diff::cmd_diff(&kind, &name, file, detailed_exitcode),
+        Cmd::Config { action } => cmd::config::run(action),
         Cmd::Stack { action } => cmd::stack::run(action),
         Cmd::Compose { action } => cmd::compose::run(action),
         // clap prints "<name> <long_version>"; reproduced here so `delonix version` and
