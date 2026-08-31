@@ -105,6 +105,18 @@ pub enum SystemCmd {
         /// Never take a workload's `cpu.weight` below this.
         #[arg(long, default_value_t = 20)]
         floor: u64,
+        /// Install a systemd timer that runs one decision every `--interval`
+        /// seconds, and exit.
+        ///
+        /// A timer and not a daemon, on purpose: this engine is daemonless by
+        /// design, and a resident process would need its own ADR. What the
+        /// timer fixes is the other half of the problem — a regulator nobody
+        /// starts regulates nothing.
+        #[arg(long = "install-timer")]
+        install_timer: bool,
+        /// Remove the timer this command installed, and exit.
+        #[arg(long = "uninstall-timer")]
+        uninstall_timer: bool,
         /// Output format: `table` (default) or `json` (ADR-0005).
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: super::output::OutputFormat,
@@ -327,8 +339,16 @@ pub fn run(action: SystemCmd) -> Result<()> {
             once,
             interval,
             floor,
+            install_timer,
+            uninstall_timer,
             output,
-        } => cmd_regulate(apply, once, interval, floor, output),
+        } => {
+            if install_timer || uninstall_timer {
+                cmd_regulate_timer(install_timer, interval, floor)
+            } else {
+                cmd_regulate(apply, once, interval, floor, output)
+            }
+        }
         SystemCmd::Virt { tune } => cmd_virt(tune),
         SystemCmd::Thermal {
             high,
@@ -957,6 +977,125 @@ fn human(b: u64) -> String {
         i += 1;
     }
     format!("{v:.1} {}", U[i])
+}
+
+/// `system regulate --install-timer` / `--uninstall-timer`.
+///
+/// A `systemd` timer running `--apply --once`, which is what the daemonless
+/// design leaves available and what closes the gap between «there is a
+/// regulator» and «something runs it». Rootless installs a USER unit (no
+/// privilege at all); as root it goes system-wide.
+///
+/// `Persistent=false` on purpose: a decision missed while the machine was off
+/// is not a decision worth catching up on — pressure from last week is not
+/// pressure.
+fn cmd_regulate_timer(install: bool, interval: u64, floor: u64) -> Result<()> {
+    let rootless = runtime::is_rootless();
+    let (dir, user_mode) = if rootless {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        (
+            std::path::PathBuf::from(home).join(".config/systemd/user"),
+            true,
+        )
+    } else {
+        (std::path::PathBuf::from("/etc/systemd/system"), false)
+    };
+    let service = dir.join("delonix-regulate.service");
+    let timer = dir.join("delonix-regulate.timer");
+    let systemctl = |args: &[&str]| -> bool {
+        let mut c = std::process::Command::new("systemctl");
+        if user_mode {
+            c.arg("--user");
+        }
+        c.args(args)
+            .status()
+            .map(|st| st.success())
+            .unwrap_or(false)
+    };
+
+    if !install {
+        systemctl(&["disable", "--now", "delonix-regulate.timer"]);
+        let gone = std::fs::remove_file(&timer).is_ok() | std::fs::remove_file(&service).is_ok();
+        systemctl(&["daemon-reload"]);
+        println!(
+            "{}",
+            if gone {
+                super::po::t("timer removed")
+            } else {
+                super::po::t("no timer was installed")
+            }
+        );
+        return Ok(());
+    }
+
+    let exe = std::env::current_exe()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| "delonix".into());
+    std::fs::create_dir_all(&dir).map_err(|e| delonix_runtime_core::Error::Runtime {
+        context: "regulate timer",
+        message: format!("{}: {e}", dir.display()),
+    })?;
+    let interval = interval.max(1);
+    std::fs::write(
+        &service,
+        format!(
+            "# Written by `delonix system regulate --install-timer`.\n\
+             # Revert: delonix system regulate --uninstall-timer\n\
+             [Unit]\n\
+             Description=Delonix resource regulator (one decision)\n\
+             \n\
+             [Service]\n\
+             Type=oneshot\n\
+             ExecStart={exe} system regulate --apply --once --floor {floor}\n"
+        ),
+    )
+    .map_err(|e| delonix_runtime_core::Error::Runtime {
+        context: "regulate timer",
+        message: format!("{}: {e}", service.display()),
+    })?;
+    std::fs::write(
+        &timer,
+        format!(
+            "# Written by `delonix system regulate --install-timer`.\n\
+             [Unit]\n\
+             Description=Delonix resource regulator every {interval}s\n\
+             \n\
+             [Timer]\n\
+             OnBootSec={interval}s\n\
+             OnUnitActiveSec={interval}s\n\
+             AccuracySec=1s\n\
+             # A decision missed while the machine was off is not worth catching\n\
+             # up on: pressure from last week is not pressure.\n\
+             Persistent=false\n\
+             \n\
+             [Install]\n\
+             WantedBy=timers.target\n"
+        ),
+    )
+    .map_err(|e| delonix_runtime_core::Error::Runtime {
+        context: "regulate timer",
+        message: format!("{}: {e}", timer.display()),
+    })?;
+
+    systemctl(&["daemon-reload"]);
+    let started = systemctl(&["enable", "--now", "delonix-regulate.timer"]);
+    println!(
+        "{}",
+        super::po::tf(
+            "timer installed at {path} (every {interval}s)",
+            &[
+                ("path", &timer.display().to_string()),
+                ("interval", &interval.to_string())
+            ]
+        )
+    );
+    if !started {
+        eprintln!(
+            "delonix: {}",
+            super::po::t("units written but `systemctl enable --now` failed — enable it by hand")
+        );
+    }
+    Ok(())
 }
 
 /// `system regulate` — the deterministic half of resource management.

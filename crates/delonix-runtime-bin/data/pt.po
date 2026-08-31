@@ -650,7 +650,6 @@ msgstr "porta {default} ocupada — o cluster '{cluster}' usa a {p}"
 msgid "no free port found for the apiserver (6443 and 36443-36542 all taken)"
 msgstr "não encontrei nenhuma porta livre para o apiserver (6443 e 36443-36542 ocupadas)"
 
-
 msgid "container '{name}' exited immediately — see `delonix container logs {name}`"
 msgstr "o container '{name}' saiu imediatamente — vê `delonix container logs {name}`"
 
@@ -7089,7 +7088,6 @@ msgstr "um comando e sai, em vez de uma shell interactiva"
 msgid "straight to an address, as another user"
 msgstr "directo para um endereço, como outro utilizador"
 
-
 msgid "volume '{name}': the dataset {ds} already existed and was adopted — its quota now follows this manifest"
 msgstr "volume '{name}': o dataset {ds} já existia e foi adoptado — a quota dele passa a seguir este manifesto"
 
@@ -8046,7 +8044,6 @@ msgstr "Serve uma fatia da Docker Engine API num socket unix."
 
 msgid "Serve a slice of the Docker Engine API on a unix socket.\n\n`docker version`/`ps`/`images`/`info`/lifecycle mutations via `DOCKER_HOST=unix://<path>`."
 msgstr "Serve uma fatia da Docker Engine API num socket unix.\n\n`docker version`/`ps`/`images`/`info`/mutações de ciclo de vida via `DOCKER_HOST=unix://<caminho>`."
-
 
 # --- image vm rm ---
 msgid "no such VM image: {name} (see `delonix image vm ls`)"
@@ -10130,7 +10127,6 @@ msgstr "Segundos entre decisões quando fica em ciclo."
 msgid "Never take a workload's `cpu.weight` below this."
 msgstr "Nunca baixar o `cpu.weight` de uma carga abaixo deste valor."
 
-
 msgid "nothing to do"
 msgstr "nada a fazer"
 
@@ -10172,3 +10168,24 @@ msgstr "cargas — o que cada uma pediu, e a sua própria paragem (10s cpu/mem/i
 
 msgid "in force"
 msgstr "em vigor"
+
+msgid "Install a systemd timer that runs one decision every `--interval` seconds, and exit"
+msgstr "Instala um temporizador systemd que corre uma decisão a cada `--interval` segundos, e sai"
+
+msgid "Install a systemd timer that runs one decision every `--interval` seconds, and exit.\n\nA timer and not a daemon, on purpose: this engine is daemonless by design, and a resident process would need its own ADR. What the timer fixes is the other half of the problem — a regulator nobody starts regulates nothing."
+msgstr "Instala um temporizador systemd que corre uma decisão a cada `--interval` segundos, e sai.\n\nUm temporizador e não um daemon, de propósito: este motor é daemonless por desenho, e um processo residente precisaria do seu próprio ADR. O que o temporizador resolve é a outra metade do problema — um regulador que ninguém arranca não regula nada."
+
+msgid "Remove the timer this command installed, and exit."
+msgstr "Remove o temporizador que este comando instalou, e sai."
+
+msgid "timer removed"
+msgstr "temporizador removido"
+
+msgid "no timer was installed"
+msgstr "não havia temporizador instalado"
+
+msgid "timer installed at {path} (every {interval}s)"
+msgstr "temporizador instalado em {path} (a cada {interval}s)"
+
+msgid "units written but `systemctl enable --now` failed — enable it by hand"
+msgstr "unidades escritas mas o `systemctl enable --now` falhou — activa-o à mão"
