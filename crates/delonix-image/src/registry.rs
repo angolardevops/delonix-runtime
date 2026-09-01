@@ -1406,6 +1406,75 @@ pub fn push_oci_artifact_with_annotations(
     Ok(digest)
 }
 
+/// Like [`push_oci_artifact_with_annotations`], but the annotations land on
+/// the LAYER descriptor rather than the manifest — what `image sign` needs
+/// for a cosign-compatible signature artifact: `verify_signature` (`sign.rs`)
+/// reads the signature from `sig_manifest.layers[].annotations`, the OCI
+/// place a descriptor's own metadata lives, never the manifest's top-level
+/// `annotations`. A dedicated function rather than overloading the existing
+/// one: [`push_oci_artifact_with_annotations`] already has real callers (VM
+/// image metadata) that expect manifest-level annotations, and changing what
+/// its one parameter means for a second, unrelated caller is how two
+/// call sites end up disagreeing about the same field.
+pub fn push_oci_artifact_with_layer_annotations(
+    root: &std::path::Path,
+    target: &str,
+    layer_media_type: &str,
+    data: &[u8],
+    layer_annotations: &BTreeMap<String, String>,
+) -> Result<String> {
+    let (host, repo, refr) = parse_reference(target);
+    let http = transfer_client()?;
+    let creds = crate::auth::lookup(root, &host);
+    let mut c = Client {
+        http,
+        host: host.clone(),
+        repo: repo.clone(),
+        token: None,
+        creds,
+    };
+
+    tracing::info!(repo = %repo, reference = %refr, host = %host, "pushing signature artifact {repo}:{refr} to {host}");
+
+    let config_digest = with_prefix(&sha256_hex(EMPTY_CONFIG_BYTES));
+    c.push_blob(&config_digest, EMPTY_CONFIG_BYTES)?;
+
+    let layer_digest = with_prefix(&sha256_hex(data));
+    c.push_blob(&layer_digest, data)?;
+
+    let layer_descriptor = DescriptorBuilder::default()
+        .media_type(MediaType::from(layer_media_type))
+        .size(data.len() as u64)
+        .digest(Digest::from_str(&layer_digest).map_err(oci_err)?)
+        .annotations(
+            layer_annotations
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect::<std::collections::HashMap<String, String>>(),
+        )
+        .build()
+        .map_err(oci_err)?;
+
+    let manifest = ImageManifestBuilder::default()
+        .schema_version(2u32)
+        .media_type(MediaType::ImageManifest)
+        .artifact_type(MediaType::from(layer_media_type))
+        .config(descriptor(
+            EMPTY_CONFIG_MEDIA_TYPE,
+            EMPTY_CONFIG_BYTES.len(),
+            &config_digest,
+        )?)
+        .layers(vec![layer_descriptor])
+        .build()
+        .map_err(oci_err)?;
+    let manifest_bytes = serde_json::to_vec(&manifest)?;
+    c.push_manifest(&refr, &manifest_bytes, MediaType::ImageManifest.as_ref())?;
+
+    let digest = format!("sha256:{}", sha256_hex(&manifest_bytes));
+    tracing::info!(host = %host, repo = %repo, reference = %refr, digest = %digest, "pushed: {host}/{repo}:{refr}");
+    Ok(digest)
+}
+
 /// Tags of `source`'s repository (host/repo part; any tag on `source` itself
 /// is ignored). Same lightweight shape as [`push_oci_artifact`]/
 /// [`pull_oci_artifact`] — no [`crate::image::ImageStore`] needed, `root` is
@@ -1559,12 +1628,154 @@ pub fn pull_oci_artifact_with_meta(
     Ok((data, annotations))
 }
 
+/// Minimal mock of an ANONYMOUS OCI registry (no 401 challenge — like a
+/// public `ghcr.io` or a local registry without auth): stores blobs/manifests
+/// in memory and serves them back. Enough for a real round-trip of
+/// `push_oci_artifact`→`pull_oci_artifact` without depending on the network.
+/// Also returns a counter of `GET .../blobs/...` requests served — used by
+/// `pull_from_registry_with_creds_salta_blobs_ja_no_cas` to prove a 2nd
+/// pull of the same reference does not touch the network for content
+/// already in the local CAS.
+///
+/// `pub(crate)` and OUTSIDE `mod tests`: `sign.rs`'s own tests need the exact
+/// same mock for a sign→verify round trip, and a second copy of an 80-line
+/// fake registry would be exactly the kind of divergence this repo's own
+/// "generator and reader share one formula" rule exists to prevent — the two
+/// mocks would drift on whatever detail the day one of them gets fixed.
+#[cfg(test)]
+pub(crate) fn serve_anon_registry() -> (
+    u16,
+    std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    std::thread::JoinHandle<()>,
+) {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let blobs: Arc<Mutex<std::collections::HashMap<String, Vec<u8>>>> =
+        Arc::new(Mutex::new(Default::default()));
+    let manifests: Arc<Mutex<std::collections::HashMap<String, Vec<u8>>>> =
+        Arc::new(Mutex::new(Default::default()));
+    let blob_gets = Arc::new(AtomicUsize::new(0));
+    let blob_gets_thread = blob_gets.clone();
+    let handle = std::thread::spawn(move || {
+        listener.set_nonblocking(false).unwrap();
+        loop {
+            let (mut s, _) = match listener.accept() {
+                Ok(x) => x,
+                Err(_) => return,
+            };
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 8192];
+            // read headers (up to \r\n\r\n), then the body by Content-Length.
+            let header_end = loop {
+                let n = s.read(&mut chunk).unwrap_or(0);
+                if n == 0 {
+                    break None;
+                }
+                buf.extend_from_slice(&chunk[..n]);
+                if let Some(i) = find_subslice(&buf, b"\r\n\r\n") {
+                    break Some(i);
+                }
+                if buf.len() > 1_000_000 {
+                    break None;
+                }
+            };
+            let Some(hend) = header_end else { continue };
+            let head = String::from_utf8_lossy(&buf[..hend]).to_string();
+            let mut lines = head.lines();
+            let first = lines.next().unwrap_or_default();
+            let mut parts = first.split_whitespace();
+            let method = parts.next().unwrap_or_default().to_string();
+            let path = parts.next().unwrap_or_default().to_string();
+            let content_length: usize = head
+                .lines()
+                .find(|l| l.to_ascii_lowercase().starts_with("content-length:"))
+                .and_then(|l| l.split(':').nth(1))
+                .and_then(|v| v.trim().parse().ok())
+                .unwrap_or(0);
+            let mut body = buf[hend + 4..].to_vec();
+            while body.len() < content_length {
+                let n = s.read(&mut chunk).unwrap_or(0);
+                if n == 0 {
+                    break;
+                }
+                body.extend_from_slice(&chunk[..n]);
+            }
+
+            let write_resp = |s: &mut std::net::TcpStream,
+                              status: &str,
+                              headers: &str,
+                              body: &[u8]| {
+                let head = format!(
+                    "HTTP/1.1 {status}\r\n{headers}content-length: {}\r\nconnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = s.write_all(head.as_bytes());
+                let _ = s.write_all(body);
+            };
+
+            if method == "POST" && path.contains("/blobs/uploads/") {
+                write_resp(
+                    &mut s,
+                    "202 Accepted",
+                    &format!("location: {path}upload-1\r\n"),
+                    b"",
+                );
+            } else if method == "PUT" && path.contains("/blobs/uploads/") {
+                let digest = path.split("digest=").nth(1).unwrap_or("").to_string();
+                blobs.lock().unwrap().insert(digest, body);
+                write_resp(&mut s, "201 Created", "", b"");
+            } else if method == "HEAD" && path.contains("/blobs/") {
+                let digest = path.rsplit('/').next().unwrap_or("").to_string();
+                if blobs.lock().unwrap().contains_key(&digest) {
+                    write_resp(&mut s, "200 OK", "", b"");
+                } else {
+                    write_resp(&mut s, "404 Not Found", "", b"");
+                }
+            } else if method == "GET" && path.contains("/blobs/") {
+                blob_gets_thread.fetch_add(1, Ordering::SeqCst);
+                let digest = path.rsplit('/').next().unwrap_or("").to_string();
+                match blobs.lock().unwrap().get(&digest) {
+                    Some(data) => write_resp(&mut s, "200 OK", "", data),
+                    None => write_resp(&mut s, "404 Not Found", "", b""),
+                }
+            } else if method == "PUT" && path.contains("/manifests/") {
+                let refr = path.rsplit('/').next().unwrap_or("").to_string();
+                manifests.lock().unwrap().insert(refr, body);
+                write_resp(&mut s, "201 Created", "", b"");
+            } else if method == "GET" && path.contains("/manifests/") {
+                let refr = path.rsplit('/').next().unwrap_or("").to_string();
+                match manifests.lock().unwrap().get(&refr) {
+                    Some(data) => write_resp(
+                        &mut s,
+                        "200 OK",
+                        "content-type: application/vnd.oci.image.manifest.v1+json\r\n",
+                        data,
+                    ),
+                    None => write_resp(&mut s, "404 Not Found", "", b""),
+                }
+            } else {
+                write_resp(&mut s, "404 Not Found", "", b"");
+            }
+        }
+    });
+    (port, blob_gets, handle)
+}
+
+#[cfg(test)]
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         layer_media_type, matches_insecure, parse_content_range, parse_reference,
         pull_from_registry_with_creds, pull_oci_artifact, push_oci_artifact, scheme_for_with,
-        sha256_hex, with_prefix, Client,
+        serve_anon_registry, sha256_hex, with_prefix, Client,
     };
 
     fn insecure(entries: &[&str]) -> Vec<String> {
@@ -1854,140 +2065,6 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    /// Minimal mock of an ANONYMOUS OCI registry (no 401 challenge — like a
-    /// public `ghcr.io` or a local registry without auth): stores blobs/manifests
-    /// in memory and serves them back. Enough for a real round-trip of
-    /// `push_oci_artifact`→`pull_oci_artifact` without depending on the network.
-    /// Also returns a counter of `GET .../blobs/...` requests served — used by
-    /// `pull_from_registry_with_creds_salta_blobs_ja_no_cas` to prove a 2nd
-    /// pull of the same reference does not touch the network for content
-    /// already in the local CAS.
-    fn serve_anon_registry() -> (
-        u16,
-        std::sync::Arc<std::sync::atomic::AtomicUsize>,
-        std::thread::JoinHandle<()>,
-    ) {
-        use std::io::{Read, Write};
-        use std::net::TcpListener;
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::sync::{Arc, Mutex};
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let blobs: Arc<Mutex<std::collections::HashMap<String, Vec<u8>>>> =
-            Arc::new(Mutex::new(Default::default()));
-        let manifests: Arc<Mutex<std::collections::HashMap<String, Vec<u8>>>> =
-            Arc::new(Mutex::new(Default::default()));
-        let blob_gets = Arc::new(AtomicUsize::new(0));
-        let blob_gets_thread = blob_gets.clone();
-        let handle = std::thread::spawn(move || {
-            listener.set_nonblocking(false).unwrap();
-            loop {
-                let (mut s, _) = match listener.accept() {
-                    Ok(x) => x,
-                    Err(_) => return,
-                };
-                let mut buf = Vec::new();
-                let mut chunk = [0u8; 8192];
-                // read headers (up to \r\n\r\n), then the body by Content-Length.
-                let header_end = loop {
-                    let n = s.read(&mut chunk).unwrap_or(0);
-                    if n == 0 {
-                        break None;
-                    }
-                    buf.extend_from_slice(&chunk[..n]);
-                    if let Some(i) = find_subslice(&buf, b"\r\n\r\n") {
-                        break Some(i);
-                    }
-                    if buf.len() > 1_000_000 {
-                        break None;
-                    }
-                };
-                let Some(hend) = header_end else { continue };
-                let head = String::from_utf8_lossy(&buf[..hend]).to_string();
-                let mut lines = head.lines();
-                let first = lines.next().unwrap_or_default();
-                let mut parts = first.split_whitespace();
-                let method = parts.next().unwrap_or_default().to_string();
-                let path = parts.next().unwrap_or_default().to_string();
-                let content_length: usize = head
-                    .lines()
-                    .find(|l| l.to_ascii_lowercase().starts_with("content-length:"))
-                    .and_then(|l| l.split(':').nth(1))
-                    .and_then(|v| v.trim().parse().ok())
-                    .unwrap_or(0);
-                let mut body = buf[hend + 4..].to_vec();
-                while body.len() < content_length {
-                    let n = s.read(&mut chunk).unwrap_or(0);
-                    if n == 0 {
-                        break;
-                    }
-                    body.extend_from_slice(&chunk[..n]);
-                }
-
-                let write_resp = |s: &mut std::net::TcpStream,
-                                  status: &str,
-                                  headers: &str,
-                                  body: &[u8]| {
-                    let head = format!(
-                        "HTTP/1.1 {status}\r\n{headers}content-length: {}\r\nconnection: close\r\n\r\n",
-                        body.len()
-                    );
-                    let _ = s.write_all(head.as_bytes());
-                    let _ = s.write_all(body);
-                };
-
-                if method == "POST" && path.contains("/blobs/uploads/") {
-                    write_resp(
-                        &mut s,
-                        "202 Accepted",
-                        &format!("location: {path}upload-1\r\n"),
-                        b"",
-                    );
-                } else if method == "PUT" && path.contains("/blobs/uploads/") {
-                    let digest = path.split("digest=").nth(1).unwrap_or("").to_string();
-                    blobs.lock().unwrap().insert(digest, body);
-                    write_resp(&mut s, "201 Created", "", b"");
-                } else if method == "HEAD" && path.contains("/blobs/") {
-                    let digest = path.rsplit('/').next().unwrap_or("").to_string();
-                    if blobs.lock().unwrap().contains_key(&digest) {
-                        write_resp(&mut s, "200 OK", "", b"");
-                    } else {
-                        write_resp(&mut s, "404 Not Found", "", b"");
-                    }
-                } else if method == "GET" && path.contains("/blobs/") {
-                    blob_gets_thread.fetch_add(1, Ordering::SeqCst);
-                    let digest = path.rsplit('/').next().unwrap_or("").to_string();
-                    match blobs.lock().unwrap().get(&digest) {
-                        Some(data) => write_resp(&mut s, "200 OK", "", data),
-                        None => write_resp(&mut s, "404 Not Found", "", b""),
-                    }
-                } else if method == "PUT" && path.contains("/manifests/") {
-                    let refr = path.rsplit('/').next().unwrap_or("").to_string();
-                    manifests.lock().unwrap().insert(refr, body);
-                    write_resp(&mut s, "201 Created", "", b"");
-                } else if method == "GET" && path.contains("/manifests/") {
-                    let refr = path.rsplit('/').next().unwrap_or("").to_string();
-                    match manifests.lock().unwrap().get(&refr) {
-                        Some(data) => write_resp(
-                            &mut s,
-                            "200 OK",
-                            "content-type: application/vnd.oci.image.manifest.v1+json\r\n",
-                            data,
-                        ),
-                        None => write_resp(&mut s, "404 Not Found", "", b""),
-                    }
-                } else {
-                    write_resp(&mut s, "404 Not Found", "", b"");
-                }
-            }
-        });
-        (port, blob_gets, handle)
-    }
-
-    fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-        haystack.windows(needle.len()).position(|w| w == needle)
     }
 
     #[test]
