@@ -89,22 +89,37 @@ corrigido para a grafia actual.
 
 **Nenhum código tocado neste bloco — era só actualizar o registo.**
 
-### B3 — Capacidade nova: os grupos que não existem  ·  ADITIVO  ·  ~20 folhas
+### B3 — Capacidade nova: os grupos que não existem  ·  ADITIVO  ·  EM CURSO
 
-| grupo | folhas | natureza |
-|---|---|---|
-| `backup` | 6 | consolida o `backup`/`restore` de raiz + `list`/`inspect`/`schedule`/`remove` |
-| `config` | 5 | contextos — **precisa de ADR**, ver §5 |
-| `cluster` day-2 | 5 | `kubeconfig`/`health`/`upgrade`/`drain`/`uncordon` |
-| `pod` day-2 | 4 | `exec`/`attach`/`cp`/`port-forward` |
-| `vm` day-2 | 3 | `pause`/`resume`/`migrate` |
-| `system` | 3 | `metrics`/`state` (o `boot`/`namespace` vêm do B2) |
-| `network` | 2 | `diagnose`/`capture` (o `flow` existe em `net flow`) |
-| `image sign` · `secret rotate` · `diff` | 3 | |
+| grupo | folhas | natureza | estado |
+|---|---|---|---|
+| `backup` | 6 | consolida o `backup`/`restore` de raiz + `list`/`inspect`/`schedule`/`remove` | já feito antes deste plano (ver AGENTS.md) |
+| `diff` | 1 | as três faces (desired/last-applied/observed) de UM recurso nomeado | **FECHADO** — PR #200 |
+| `system metrics` | 1 | `DashSummary` cru, `-o json`/tabela | **FECHADO** — PR #201 |
+| `cluster` day-2 | 5 | `kubeconfig`/`health`/`upgrade`/`drain`/`uncordon` | `kubeconfig` já existia; **`health` FECHADO** — PR #202; `upgrade`/`drain`/`uncordon` por fazer (`drain`/`uncordon` bloqueados no ADR-0010, sem consumidor) |
+| `config` | 5 | contextos — **precisa de ADR**, ver §5 | **`output` FECHADO** (local-only, sem ADR reaberto) — PR #203; `namespace` fica de fora de propósito, sem ponto de leitura único |
+| `system state` | — | — | **não se constrói** — já respondido por `system info` (ver plano da fatia 1) |
+| `pod` day-2 | 4 | `exec`/`attach`/`cp`/`port-forward` | `exec`/`attach`/`cp` já existiam antes deste plano; só `port-forward` por fazer |
+| `vm` day-2 | 3 | `pause`/`resume`/`migrate` | por fazer |
+| `network` | 2 | `diagnose`/`capture` (o `flow` existe em `net flow`) | `diagnose` já existia; `capture` por fazer |
+| `image sign` · `secret rotate` | 2 | | por fazer |
 
-O `diff` é o único verbo canónico em falta com desenho por fazer: quer as três
-faces (desired / last-applied / observed), que é output novo e não
-encaminhamento.
+**Fatia 1 fechada (2026-08-31, PRs #200/#201/#202/#203)**: `diff`, `system
+metrics`, `cluster health` e `config` (só `output`) — a decisão de âmbito de
+cada um está no plano de execução dessa fatia, não repetida aqui. O `config`
+nasceu **local-only**, sem reabrir o ADR-0010: não havia um consumidor
+concreto para um contexto remoto, e `cluster drain`/`uncordon` ficam pela
+mesma razão. O `diff` reaproveita o motor de diff de 3 vias que `stack plan`
+já tinha (`cmd/reconcile.rs::diff_fields`) — zero motor novo.
+
+**Por fazer nesta fatia**: as quatro peças grandes — `pod port-forward`
+(precisa de um encaminhador processo-do-host↔netns-do-pod novo), `vm
+pause`/`resume`/`migrate` (`migrate` pode não ser viável sem mecanismo de
+live-migration/storage partilhado — por confirmar antes de desenhar),
+`network capture` (privilégio/ferramenta a confirmar), `image sign`
+(manuseio de chave privada — zero código de assinatura hoje, só `image
+verify`), `secret rotate` (rotação de VALOR, distinta do `rotate-key` de
+master-key já existente).
 
 ### B4 — O colapso do `net`  ·  QUEBRA  ·  −41 folhas
 
@@ -145,6 +160,12 @@ Só sobrevive o que não cabe num CRUD.
 
 ## 4. O que pode sair no próximo bump
 
+**Esta secção ficou parcialmente ultrapassada pela execução (2026-08-31)**: o
+`config` e o `diff` — que aqui apareciam como "NÃO cabe" — já foram fechados na
+fatia 1 do B3, com âmbito reduzido (`config` só `output`, local-only, sem
+reabrir o ADR-0010). O texto original fica abaixo por registo do raciocínio,
+não como lista actual de pendências — essa está na tabela do B3, acima.
+
 **B1 + B2 + parte do B3.** É o que não exige decisão nova nem quebra contrato
 publicado:
 
@@ -156,9 +177,10 @@ publicado:
 Levaria a conformidade de **57% para ~80%**, e é uma **minor** (`0.67.0`) com
 nota de migração para as nove grafias renomeadas.
 
-**O que NÃO cabe:** o `config` (precisa de ADR), o `diff` (output novo), o day-2
-de `pod`/`vm`/`cluster` (capacidade a sério), e todos os blocos de colapso — que
-dependem do B1/B3 estarem completos e, no caso do B8, de um major.
+**O que NÃO cabia nesta leitura original:** o `config` (precisa de ADR), o
+`diff` (output novo), o day-2 de `pod`/`vm`/`cluster` (capacidade a sério), e
+todos os blocos de colapso — que dependem do B1/B3 estarem completos e, no
+caso do B8, de um major.
 
 ## 5. As três decisões que faltam
 
