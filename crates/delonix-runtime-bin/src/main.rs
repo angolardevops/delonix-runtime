@@ -757,6 +757,17 @@ fn main() {
     if raw.len() == 3 && raw[1] == "__apirun" {
         cmd::dockerapi::run_from_spec_file(std::path::Path::new(&raw[2]));
     }
+    // Hidden verb for `pod port-forward` (see `cmd::pod::port_forward`): run
+    // INSIDE the pod's netns via `join_argv`, with the accepted host-side
+    // socket wired as our stdin+stdout. Not a public subcommand, same idiom as
+    // `netns run`/`__rmtree` above.
+    if raw.len() == 3 && raw[1] == "__netnsconnect" {
+        if let Err(e) = cmd::pod::netnsconnect(&raw[2]) {
+            eprintln!("delonix: {}", cmd::po::t_dyn(&e.to_string()));
+            std::process::exit(cmd::exitcode::for_error(&e));
+        }
+        std::process::exit(0);
+    }
 
     // Dynamic autocompletion: if the shell asked for suggestions (env
     // COMPLETE), handle that and exit; otherwise, follow the normal flow.

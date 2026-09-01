@@ -176,12 +176,13 @@ keeps its own process tree; that's the next slice.</p>
 <div class='help'><pre><code>Usage: delonix pod [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  create  Create a pod (N containers sharing a netns) from a manifest (`kind: Pod`)
-  logs    Logs of a pod&#x27;s container (defaults to the first member)
-  attach  Re-attach to a pod member&#x27;s output stream (output only)
-  cp      Copy files between the host and one member of a pod
-  exec    Execute a command inside one member of a pod (defaults to the first)
-  help    Print this message or the help of the given subcommand(s)
+  create        Create a pod (N containers sharing a netns) from a manifest (`kind: Pod`)
+  logs          Logs of a pod&#x27;s container (defaults to the first member)
+  attach        Re-attach to a pod member&#x27;s output stream (output only)
+  cp            Copy files between the host and one member of a pod
+  exec          Execute a command inside one member of a pod (defaults to the first)
+  port-forward  Forward one or more host ports to ports inside the pod&#x27;s netns
+  help          Print this message or the help of the given subcommand(s)
 
 Options:
       --l18n &lt;en|pt&gt;
@@ -193,7 +194,7 @@ Options:
 COMMAND MAP:
   Lifecycle  create
   Inspect    logs
-  Interact   exec · cp · attach
+  Interact   exec · cp · attach · port-forward
 
 EXAMPLES:
   # which pods exist and which containers each one holds
