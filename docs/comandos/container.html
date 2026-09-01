@@ -538,6 +538,9 @@ Options:
   -n, --namespace &lt;NAMESPACE&gt;
           Show only the containers of this isolation namespace. Omit to list every one
 
+  -s, --size
+          Show the SIZE column — each container&#x27;s own writable-layer usage (never the shared read-only image layers). Off by default: it walks a directory tree per container, the same cost `volumes inspect` already opts into rather than pays on every listing
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
