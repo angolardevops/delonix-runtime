@@ -3144,8 +3144,8 @@ msgstr "password vazia no stdin"
 msgid "login to {registry} saved (auth.json)"
 msgstr "login em {registry} guardado (auth.json)"
 
-msgid "tag/history/verify are for container images — they do not apply to VM images (--vm)"
-msgstr "tag/history/verify são de imagens de container — não se aplicam a imagens VM (--vm)"
+msgid "tag/history/verify/sign are for container images — they do not apply to VM images (--vm)"
+msgstr "tag/history/verify/sign são de imagens de container — não se aplicam a imagens VM (--vm)"
 
 msgid "command not available for VM images (--vm) — use ls/pull/push/build"
 msgstr "comando não disponível para imagens VM (--vm) — usa ls/pull/push/build"
@@ -5731,6 +5731,24 @@ msgstr "verificar a assinatura cosign de uma imagem que já tens contra a chave 
 
 msgid "the gate to run before promoting a local build to production"
 msgstr "o gate a correr antes de promover um build local a produção"
+
+msgid "sign a build before pushing it, key generated on first use"
+msgstr "assina um build antes de o publicar, chave gerada na primeira utilização"
+
+msgid "re-sign after rotating the key"
+msgstr "assina de novo depois de rodar a chave"
+
+msgid "Sign an image with cosign-compatible ECDSA-P256, publishing the signature next to it in the registry"
+msgstr "Assina uma imagem com ECDSA-P256 compatível com o cosign, publicando a assinatura ao lado dela no registo"
+
+msgid "Sign an image with cosign-compatible ECDSA-P256, publishing the signature next to it in the registry.\n\nThe private key is generated on first use, at `<DELONIX_ROOT>/keys/image-signing.key` (or `--key`) — never printed. Prints the path of the PUBLIC key instead, for distributing to whoever will run `image verify`."
+msgstr "Assina uma imagem com ECDSA-P256 compatível com o cosign, publicando a assinatura ao lado dela no registo.\n\nA chave privada é gerada na primeira utilização, em `<DELONIX_ROOT>/keys/image-signing.key` (ou `--key`) — nunca impressa. Imprime antes o caminho da chave PÚBLICA, para distribuir a quem for correr `image verify`."
+
+msgid "Private signing key (PEM). Generated there on first use if omitted"
+msgstr "Chave de assinatura privada (PEM). Gerada aí na primeira utilização se omitida"
+
+msgid "Sign again even if this image already has a signature"
+msgstr "Assina de novo mesmo que esta imagem já tenha uma assinatura"
 
 msgid "a second name for the same content — nothing is copied"
 msgstr "um segundo nome para o mesmo conteúdo — nada é copiado"

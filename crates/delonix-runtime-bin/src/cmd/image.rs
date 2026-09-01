@@ -233,6 +233,23 @@ pub enum ImageCmd {
         #[arg(value_hint = clap::ValueHint::FilePath, value_name = "PEM")]
         key: PathBuf,
     },
+    /// Sign an image with cosign-compatible ECDSA-P256, publishing the
+    /// signature next to it in the registry.
+    ///
+    /// The private key is generated on first use, at
+    /// `<DELONIX_ROOT>/keys/image-signing.key` (or `--key`) — never printed.
+    /// Prints the path of the PUBLIC key instead, for distributing to
+    /// whoever will run `image verify`.
+    Sign {
+        #[arg(add = ArgValueCandidates::new(super::complete::images))]
+        image: String,
+        /// Private signing key (PEM). Generated there on first use if omitted.
+        #[arg(long, value_hint = clap::ValueHint::FilePath, value_name = "PEM")]
+        key: Option<PathBuf>,
+        /// Sign again even if this image already has a signature.
+        #[arg(long)]
+        force: bool,
+    },
     /// SBOM + CVE scan of an image.
     ///
     /// Reads the layers from the CAS, without running anything. Pulls the
@@ -612,6 +629,7 @@ pub fn run(action: ImageCmd) -> Result<()> {
         ImageCmd::Tag { source, target } => cmd_tag(&images, &source, &target),
         ImageCmd::History { image } => cmd_history(&images, &image),
         ImageCmd::Verify { image, key } => cmd_verify(&images, &image, &key),
+        ImageCmd::Sign { image, key, force } => cmd_sign(&images, &image, key.as_deref(), force),
         ImageCmd::Scan {
             image,
             sbom,
@@ -889,6 +907,37 @@ fn cmd_verify(images: &ImageStore, image: &str, key: &std::path::Path) -> Result
         super::po::tf(
             "OK: valid signature for {image} ({digest})",
             &[("image", image), ("digest", &digest)],
+        )
+    );
+    Ok(())
+}
+
+/// `image sign` — the counterpart of [`cmd_verify`]. The private key never
+/// touches stdout; only the path of the public key is printed, since that is
+/// the half a caller actually needs to hand to someone else.
+fn cmd_sign(
+    images: &ImageStore,
+    image: &str,
+    key: Option<&std::path::Path>,
+    force: bool,
+) -> Result<()> {
+    let key_path = match key {
+        Some(k) => k.to_path_buf(),
+        None => delonix_image::sign::default_signing_key_path(images.root()),
+    };
+    let (digest, pubkey_path) = delonix_image::sign::sign_image(images, image, &key_path, force)?;
+    println!(
+        "{}",
+        super::po::tf(
+            "signed {image} ({digest})",
+            &[("image", image), ("digest", &digest)],
+        )
+    );
+    println!(
+        "{}",
+        super::po::tf(
+            "public key: {path} — share this with anyone who needs to `image verify`",
+            &[("path", &pubkey_path.display().to_string())],
         )
     );
     Ok(())
