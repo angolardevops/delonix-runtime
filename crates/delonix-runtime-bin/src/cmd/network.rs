@@ -724,6 +724,13 @@ struct NetworkLsRow {
     driver: String,
     bridge: String,
     subnet: String,
+    /// Names of containers attached to this network (primary or extra) —
+    /// `None` only when the container store itself could not be read, never
+    /// a lying empty list in that case (see `containers_on_network`'s
+    /// doc-comment: "no attached containers" and "could not tell" are not
+    /// the same fact in a view an operator reads before an `network rm`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    used_by: Option<Vec<String>>,
 }
 
 /// One line of the report: a fact, its verdict, and what to do when it is bad.
@@ -928,18 +935,31 @@ fn cmd_ls(store: &NetworkStore, format: output::OutputFormat) -> Result<()> {
     if format == output::OutputFormat::Json {
         let rows: Vec<NetworkLsRow> = nets
             .into_iter()
-            .map(|n| NetworkLsRow {
-                name: n.name,
-                driver: n.driver,
-                bridge: n.bridge,
-                subnet: n.subnet,
+            .map(|n| {
+                let used_by = network_user_names(&n.name);
+                NetworkLsRow {
+                    name: n.name,
+                    driver: n.driver,
+                    bridge: n.bridge,
+                    subnet: n.subnet,
+                    used_by,
+                }
             })
             .collect();
         return output::print_json(&rows);
     }
-    let mut t = output::Table::new(&["NAME", "DRIVER", "BRIDGE", "SUBNET"]);
+    let mut t = output::Table::new(&["NAME", "DRIVER", "BRIDGE", "SUBNET", "USED BY"]);
     for n in nets {
-        t.row(vec![n.name, n.driver, n.bridge, n.subnet]);
+        let used_by = match network_user_names(&n.name) {
+            // The store could not be read — this is "I could not tell", never
+            // the same cell as "-" (genuinely nobody uses it): the two answer
+            // different questions, and collapsing them is exactly the
+            // relato-desonesto class this repo's own doctrine rejects.
+            None => "?".to_string(),
+            Some(names) if names.is_empty() => "-".to_string(),
+            Some(names) => names.join(", "),
+        };
+        t.row(vec![n.name, n.driver, n.bridge, n.subnet, used_by]);
     }
     t.print();
     Ok(())
@@ -1278,19 +1298,34 @@ fn cmd_describe(store: &NetworkStore, names: &[String]) -> Result<()> {
 /// Containers attached to this network, read from the `Store` — `network` (the
 /// primary network of `run --net`) or `extra_networks` (those attached later).
 ///
-/// Best-effort on purpose: an error opening/reading the store yields `None`, and
-/// `describe` omits the section instead of asserting "<none>". The distinction
-/// matters — "there are no attached containers" and "I couldn't tell" are not the
-/// same thing in a view used to decide whether a network can be removed.
-fn attached_containers(net: &str) -> Option<Vec<String>> {
+/// Best-effort on purpose: an error opening/reading the store yields `None` —
+/// the ONE filter both [`attached_containers`] (the detailed `describe` form)
+/// and [`network_user_names`] (the bare-names `ls` form) share, so the two
+/// views can never disagree about who counts as "attached".
+fn containers_on_network(net: &str) -> Option<Vec<delonix_runtime_core::Container>> {
     let store = delonix_runtime_core::Store::open(state_root().join("containers")).ok()?;
     let cs = store.list().ok()?;
     Some(
-        cs.iter()
+        cs.into_iter()
             .filter(|c| {
                 c.network.as_deref() == Some(net)
                     || c.extra_networks.iter().any(|e| e.network == net)
             })
+            .collect(),
+    )
+}
+
+/// Containers attached to this network, formatted for `describe`
+/// (`name (short-id) ip`).
+///
+/// Best-effort on purpose: `describe` omits the section instead of asserting
+/// "<none>". The distinction matters — "there are no attached containers" and
+/// "I couldn't tell" are not the same thing in a view used to decide whether a
+/// network can be removed.
+fn attached_containers(net: &str) -> Option<Vec<String>> {
+    Some(
+        containers_on_network(net)?
+            .iter()
             .map(|c| {
                 // The IP on the network in question, be it the primary or an extra.
                 let ip = if c.network.as_deref() == Some(net) {
@@ -1308,6 +1343,19 @@ fn attached_containers(net: &str) -> Option<Vec<String>> {
                     ip.unwrap_or_else(|| "<no ip>".into())
                 )
             })
+            .collect(),
+    )
+}
+
+/// Bare container names attached to this network — the compact form `ls`'s
+/// `USED BY` column needs (the detailed `name (id) ip` form of
+/// [`attached_containers`] would not fit a table cell alongside four other
+/// columns).
+fn network_user_names(net: &str) -> Option<Vec<String>> {
+    Some(
+        containers_on_network(net)?
+            .iter()
+            .map(|c| c.name.clone())
             .collect(),
     )
 }

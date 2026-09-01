@@ -870,11 +870,55 @@ struct VolumeLsRow {
     name: String,
     driver: String,
     mountpoint: String,
+    /// On-disk usage in bytes — `null`, never a lying `0`, when the walk could
+    /// not read everything (the normal rootless case: a mapped-subuid `_data`
+    /// dir a managed database `chmod 700`'d) and `measured_usage`'s mapped
+    /// re-exec fallback was unavailable either. See `Usage::is_complete`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    size_bytes: Option<u64>,
+    /// Names of containers whose `mounts` resolve to this volume's
+    /// mountpoint — `None` only when the container store itself could not be
+    /// read, never a lying empty list (see `volume_user_names`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    used_by: Option<Vec<String>>,
     /// Absent unless a namespace was asked for — an unscoped volume belongs to
     /// no tenant, and emitting `null` on every row of the common case is a
     /// field that says nothing.
     #[serde(skip_serializing_if = "Option::is_none")]
     namespace: Option<String>,
+}
+
+/// Bare container names whose `mounts` resolve to `mountpoint` — the reverse
+/// of `VolumeStore::resolve_spec`, which sets `Mount.source` to EXACTLY the
+/// volume's `mountpoint` for a named-volume `-v` (never for a bind mount,
+/// which keeps the caller's own host path). `None` only when the container
+/// store could not be read, matching the same "no users" vs "could not tell"
+/// distinction `network.rs`'s `attached_containers`/`network_user_names`
+/// already draw for the same reason: a view read before a destructive `rm`
+/// must not let the two collapse into the same cell.
+fn volume_user_names(mountpoint: &str) -> Option<Vec<String>> {
+    let store = delonix_runtime_core::Store::open(state_root().join("containers")).ok()?;
+    let cs = store.list().ok()?;
+    Some(
+        cs.into_iter()
+            .filter(|c| c.mounts.iter().any(|m| m.source == mountpoint))
+            .map(|c| c.name)
+            .collect(),
+    )
+}
+
+/// Compact, table-cell form of a measured usage: a plain size when complete,
+/// `">= <size>"` when the walk was incomplete. `fmt_measured`'s full sentence
+/// ("unknown (>= X, N dir(s) unreadable — run as the data's owner)") is right
+/// for `describe`'s one-field-per-line layout; it would blow out a `ls` row
+/// next to four other columns, so this is a second, narrower rendering of the
+/// SAME `Usage` value — not a second measurement.
+fn fmt_size_cell(u: &delonix_volume::Usage) -> String {
+    if u.is_complete() {
+        output::fmt_size(u.bytes)
+    } else {
+        format!(">= {}", output::fmt_size(u.bytes))
+    }
 }
 
 fn cmd_ls(
@@ -906,21 +950,42 @@ fn cmd_ls(
     if format == output::OutputFormat::Json {
         let rows: Vec<VolumeLsRow> = vols
             .into_iter()
-            .map(|(ns, v)| VolumeLsRow {
-                name: v.name,
-                driver: v.driver,
-                mountpoint: v.mountpoint,
-                namespace: (!ns.is_empty()).then_some(ns),
+            .map(|(ns, v)| {
+                let usage = measured_usage(std::path::Path::new(&v.mountpoint));
+                let used_by = volume_user_names(&v.mountpoint);
+                VolumeLsRow {
+                    name: v.name,
+                    driver: v.driver,
+                    mountpoint: v.mountpoint,
+                    size_bytes: usage.is_complete().then_some(usage.bytes),
+                    used_by,
+                    namespace: (!ns.is_empty()).then_some(ns),
+                }
             })
             .collect();
         return output::print_json(&rows);
     }
-    let mut t = output::Table::new(&["NAME", "DRIVER", "MOUNTPOINT", "NAMESPACE"]);
+    let mut t = output::Table::new(&[
+        "NAME",
+        "DRIVER",
+        "MOUNTPOINT",
+        "SIZE",
+        "USED BY",
+        "NAMESPACE",
+    ]);
     for (ns, v) in vols {
+        let usage = measured_usage(std::path::Path::new(&v.mountpoint));
+        let used_by = match volume_user_names(&v.mountpoint) {
+            None => "?".to_string(),
+            Some(names) if names.is_empty() => "-".to_string(),
+            Some(names) => names.join(", "),
+        };
         t.row(vec![
             v.name,
             v.driver,
             v.mountpoint,
+            fmt_size_cell(&usage),
+            used_by,
             output::namespace_cell(&ns, namespace.is_some()),
         ]);
     }
@@ -1581,7 +1646,7 @@ pub(crate) fn cmd_rm_with(
 
 #[cfg(test)]
 mod tests {
-    use super::{fmt_usage, parse_duusage, VolumeSpec};
+    use super::{fmt_size_cell, fmt_usage, parse_duusage, VolumeSpec};
 
     /// The mapped walk sees far more than the direct one — root in the userns
     /// even reads a `chmod 000` directory owned by a mapped uid — but it does not
@@ -1709,5 +1774,28 @@ mod tests {
         let plain: super::VolumeSpec =
             serde_yaml::from_str("nfs:\n  server: 10.0.0.1\n  share: /export\n").unwrap();
         assert!(plain.check_share_exclusivity().is_ok());
+    }
+
+    /// The `ls`-row rendering of a measured `Usage`: plain size when complete,
+    /// `">= "`-prefixed when not — distinct from `fmt_measured`'s full prose
+    /// sentence, which would not fit a table cell alongside four other columns.
+    #[test]
+    fn fmt_size_cell_marks_an_incomplete_measurement_as_a_lower_bound() {
+        let complete = delonix_volume::Usage {
+            bytes: 2048,
+            unreadable: 0,
+        };
+        assert_eq!(fmt_size_cell(&complete), super::output::fmt_size(2048));
+
+        let incomplete = delonix_volume::Usage {
+            bytes: 2048,
+            unreadable: 3,
+        };
+        let rendered = fmt_size_cell(&incomplete);
+        assert!(rendered.starts_with(">= "), "{rendered}");
+        assert!(
+            rendered.contains(&super::output::fmt_size(2048)),
+            "{rendered}"
+        );
     }
 }
