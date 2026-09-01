@@ -79,6 +79,22 @@ pub enum SecretCmd {
         #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::secrets))]
         name: String,
     },
+    /// Rotate one key's VALUE to a fresh random one.
+    ///
+    /// Distinct from `rotate-key`: this replaces a single key's value with
+    /// new random bytes, and touches nothing else in the secret. Meant for
+    /// values this engine or the operator mints themselves (a database
+    /// password, an HMAC signing key) — an externally-issued credential
+    /// (a third-party API key) still has to be rotated at the issuer and
+    /// landed here with `secret set`.
+    Rotate {
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::secrets))]
+        name: String,
+        key: String,
+        /// Random bytes to generate (hex-encoded, so the stored value is twice this many characters).
+        #[arg(long, default_value_t = 32)]
+        length: usize,
+    },
     /// Rotate the host master key: re-encrypt ALL secrets with a new key.
     /// The values are preserved.
     RotateKey,
@@ -422,6 +438,13 @@ pub fn apply(docs: &[ManifestDoc], base: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Lowercase hex, no dependency — the value only needs to be valid UTF-8 to
+/// live in a `BTreeMap<String,String>`, and hex is the smallest encoding that
+/// guarantees that without pulling in a base64 crate for one call site.
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 fn now_unix() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -666,6 +689,40 @@ pub fn run(action: SecretCmd) -> Result<()> {
                 super::po::tf("secret '{name}' removed", &[("name", &name)])
             );
         }
+        SecretCmd::Rotate { name, key, length } => {
+            if length == 0 {
+                return Err(Error::Invalid(
+                    super::po::t("length must be greater than zero").into(),
+                ));
+            }
+            // Distinct "no such secret" vs. "no such key" — same pattern as `Unset`.
+            store.load(&name)?;
+            let mut buf = vec![0u8; length];
+            delonix_runtime_core::cred_vault::random_bytes(&mut buf)?;
+            let value = hex_encode(&buf);
+            let mut rotated = false;
+            store.update(&name, |s| {
+                rotated = s.data.contains_key(&key);
+                if rotated {
+                    s.data.insert(key.clone(), value.clone());
+                    s.updated_unix = now_unix();
+                }
+                rotated
+            })?;
+            if !rotated {
+                return Err(Error::Invalid(super::po::tf(
+                    "key '{k}' does not exist in '{name}' — rotate only replaces a key that is already there (use `secret set` to add one)",
+                    &[("k", &key), ("name", &name)],
+                )));
+            }
+            println!(
+                "{}",
+                super::po::tf(
+                    "key '{k}' in '{name}' rotated to a fresh random value",
+                    &[("k", &key), ("name", &name)],
+                )
+            );
+        }
         SecretCmd::RotateKey => {
             store.rotate_key()?;
             println!(
@@ -679,8 +736,98 @@ pub fn run(action: SecretCmd) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{inspect_view, parse_kv, read_env_keys, valid_env_name, FromEnv, Secret};
+    use super::{
+        hex_encode, inspect_view, parse_kv, read_env_keys, valid_env_name, FromEnv, Secret,
+    };
+    use delonix_runtime_core::SecretStore;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn hex_encode_produz_minusculas_e_o_tamanho_certo() {
+        assert_eq!(hex_encode(&[0x00, 0xab, 0xff]), "00abff");
+        assert_eq!(hex_encode(&[]), "");
+    }
+
+    /// Rotating replaces ONLY the requested key, generates a value DIFFERENT
+    /// from the old one, and never touches any other key of the same secret.
+    #[test]
+    fn rotate_gera_valor_diferente_preserva_as_outras_chaves() {
+        let dir =
+            std::env::temp_dir().join(format!("dlx-sec-rotate-preserve-{}", std::process::id()));
+        let store = SecretStore::open(&dir).unwrap();
+        let mut data = BTreeMap::new();
+        data.insert("PASSWORD".to_string(), "old-value".to_string());
+        data.insert("OTHER".to_string(), "untouched".to_string());
+        store
+            .save(&Secret {
+                name: "s".into(),
+                data,
+                updated_unix: 0,
+            })
+            .unwrap();
+
+        let mut buf = [0u8; 16];
+        delonix_runtime_core::cred_vault::random_bytes(&mut buf).unwrap();
+        let new_value = hex_encode(&buf);
+        let mut rotated = false;
+        store
+            .update("s", |s| {
+                rotated = s.data.contains_key("PASSWORD");
+                if rotated {
+                    s.data.insert("PASSWORD".to_string(), new_value.clone());
+                }
+                rotated
+            })
+            .unwrap();
+        assert!(rotated);
+
+        let s = store.load("s").unwrap();
+        assert_eq!(
+            s.data.get("PASSWORD").map(String::as_str),
+            Some(new_value.as_str())
+        );
+        assert_ne!(
+            s.data.get("PASSWORD").map(String::as_str),
+            Some("old-value")
+        );
+        assert_eq!(s.data.get("OTHER").map(String::as_str), Some("untouched"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A key that does not exist is REFUSED, never created pretending to be
+    /// a rotation — the same discipline as `secret unset`.
+    #[test]
+    fn rotate_recusa_chave_desconhecida() {
+        let dir =
+            std::env::temp_dir().join(format!("dlx-sec-rotate-unknown-{}", std::process::id()));
+        let store = SecretStore::open(&dir).unwrap();
+        let mut data = BTreeMap::new();
+        data.insert("PASSWORD".to_string(), "v".to_string());
+        store
+            .save(&Secret {
+                name: "s".into(),
+                data,
+                updated_unix: 0,
+            })
+            .unwrap();
+
+        let mut rotated = false;
+        store
+            .update("s", |s| {
+                rotated = s.data.contains_key("MISSING");
+                rotated
+            })
+            .unwrap();
+        assert!(!rotated, "an unknown key must not report a rotation");
+
+        // The secret is untouched.
+        let s = store.load("s").unwrap();
+        assert_eq!(s.data.get("PASSWORD").map(String::as_str), Some("v"));
+        assert!(!s.data.contains_key("MISSING"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn parse_kv_corta_no_primeiro_igual() {
