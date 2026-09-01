@@ -1705,17 +1705,15 @@ pub(crate) fn serve_anon_registry() -> (
                 body.extend_from_slice(&chunk[..n]);
             }
 
-            let write_resp = |s: &mut std::net::TcpStream,
-                              status: &str,
-                              headers: &str,
-                              body: &[u8]| {
-                let head = format!(
+            let write_resp =
+                |s: &mut std::net::TcpStream, status: &str, headers: &str, body: &[u8]| {
+                    let head = format!(
                     "HTTP/1.1 {status}\r\n{headers}content-length: {}\r\nconnection: close\r\n\r\n",
                     body.len()
                 );
-                let _ = s.write_all(head.as_bytes());
-                let _ = s.write_all(body);
-            };
+                    let _ = s.write_all(head.as_bytes());
+                    let _ = s.write_all(body);
+                };
 
             if method == "POST" && path.contains("/blobs/uploads/") {
                 write_resp(
