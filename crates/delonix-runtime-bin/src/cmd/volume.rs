@@ -913,7 +913,7 @@ fn volume_user_names(mountpoint: &str) -> Option<Vec<String>> {
 /// for `describe`'s one-field-per-line layout; it would blow out a `ls` row
 /// next to four other columns, so this is a second, narrower rendering of the
 /// SAME `Usage` value — not a second measurement.
-fn fmt_size_cell(u: &delonix_volume::Usage) -> String {
+pub(crate) fn fmt_size_cell(u: &delonix_volume::Usage) -> String {
     if u.is_complete() {
         output::fmt_size(u.bytes)
     } else {

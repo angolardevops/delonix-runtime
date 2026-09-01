@@ -10333,3 +10333,8 @@ msgstr "cpu a {celsius} °C"
 
 msgid "delonix system thermal (lowers the engine's CPU ceiling until it cools)"
 msgstr "delonix system thermal (baixa o tecto de CPU do motor até arrefecer)"
+
+# ---- help: cli-ls-improvements-2 (container ls -s/--size) ------------------
+
+msgid "Show the SIZE column — each container's own writable-layer usage (never the shared read-only image layers). Off by default: it walks a directory tree per container, the same cost `volumes inspect` already opts into rather than pays on every listing"
+msgstr "Mostra a coluna SIZE — o espaço da própria camada de escrita de cada container (nunca as layers de imagem partilhadas e só de leitura). Desligado por omissão: percorre uma árvore de directórios por container, o mesmo custo que o `volumes inspect` já assume em vez de pagar em toda a listagem"
