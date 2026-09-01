@@ -568,6 +568,10 @@ struct PodLsRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     ip: Option<String>,
     status: String,
+    /// The earliest member's creation instant — a pod has no `created_unix`
+    /// of its own, and the oldest member is the one that first stood up the
+    /// shared netns.
+    created_unix: u64,
 }
 
 fn ls(format: output::OutputFormat, namespace: Option<&str>) -> Result<()> {
@@ -596,6 +600,7 @@ fn ls(format: output::OutputFormat, namespace: Option<&str>) -> Result<()> {
         } else {
             "Degraded"
         };
+        let created_unix = members.iter().map(|c| c.created_unix).min().unwrap_or(0);
         rows.push(PodLsRow {
             namespace: members
                 .first()
@@ -606,6 +611,7 @@ fn ls(format: output::OutputFormat, namespace: Option<&str>) -> Result<()> {
             total: members.len(),
             ip: (!ip.is_empty()).then_some(ip),
             status: status.to_string(),
+            created_unix,
         });
     }
     // BEFORE the format branch — a `--namespace` that narrows the table and
@@ -623,13 +629,14 @@ fn ls(format: output::OutputFormat, namespace: Option<&str>) -> Result<()> {
     if format == output::OutputFormat::Json {
         return output::print_json(&rows);
     }
-    let mut t = output::Table::new(&["POD", "CONTAINERS", "IP", "STATUS", "NAMESPACE"]);
+    let mut t = output::Table::new(&["POD", "CONTAINERS", "IP", "STATUS", "AGE", "NAMESPACE"]);
     for r in rows {
         t.row(vec![
             r.name,
             format!("{}/{}", r.running, r.total),
             r.ip.unwrap_or_else(|| "-".to_string()),
             r.status,
+            output::fmt_age(r.created_unix),
             output::namespace_cell(&r.namespace, namespace.is_some()),
         ]);
     }

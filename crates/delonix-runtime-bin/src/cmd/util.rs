@@ -287,6 +287,24 @@ pub(crate) fn existing_rootfs_path(images: &ImageStore, id: &str) -> Option<Path
     None
 }
 
+/// Where a container's OWN writes live on disk — never the shared read-only
+/// lower layers a `container ls -s` SIZE column must not double-count across
+/// every container built from the same image. Same three-layout precedence as
+/// [`existing_rootfs_path`], but pointed at the writable layer instead of the
+/// (empty-on-host) mountpoint:
+/// 1. `overlay-lowers` present → `upper/` (the writable layer; `merged/` is
+///    only the mountpoint, shared/empty on the host).
+/// 2. `rootfs/` present → the legacy flat copy IS the container's own full
+///    footprint (nothing shared to exclude).
+pub(crate) fn container_writable_dir(images: &ImageStore, id: &str) -> Option<PathBuf> {
+    let base = images.root().join("containers").join(id);
+    if base.join(ImageStore::LOWERS_FILE).exists() {
+        return Some(base.join("upper"));
+    }
+    let p = base.join("rootfs");
+    p.exists().then_some(p)
+}
+
 /// Converts a container's legacy FLAT rootfs into a shared overlay, if it has
 /// one. Best-effort: any failure leaves the container exactly as it was.
 ///

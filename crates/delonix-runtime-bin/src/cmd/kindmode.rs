@@ -1473,6 +1473,18 @@ fn fmt_dur(mut s: u64) -> String {
 /// `cluster ls` — the kind-mode clusters, grouped by the nodes'
 /// `io.x-k8s.kind.cluster` label (it is the source of truth: there is no separate
 /// "cluster" registry, and inventing one would create state that desyncs).
+/// The Kubernetes version a cluster's control-plane actually runs, parsed
+/// from the node image tag (`kindest/node:v1.34.0@sha256:...`). This is what
+/// really pins the binaries; `KindCluster.k8s_version` only affects what
+/// `kubeadm init` is TOLD to expect, is `None` on the `create` path today,
+/// and is never persisted per-node — the tag is the one source that also
+/// answers this for a cluster already running.
+fn k8s_version_from_image(image: &str) -> Option<String> {
+    let tag = image.split('@').next().unwrap_or(image);
+    let (_repo, version) = tag.rsplit_once(':')?;
+    version.starts_with('v').then(|| version.to_string())
+}
+
 pub(crate) fn list(store: &Store) -> Result<()> {
     use std::collections::BTreeMap;
     let mut clusters: BTreeMap<String, Vec<Container>> = BTreeMap::new();
@@ -1511,6 +1523,7 @@ pub(crate) fn list(store: &Store) -> Result<()> {
         "UPTIME",
         "LAST RESTART",
         "CRI SOCKET",
+        "K8S VERSION",
     ]);
     for (name, nodes) in clusters {
         let cp: Vec<&Container> = nodes
@@ -1569,6 +1582,11 @@ pub(crate) fn list(store: &Store) -> Result<()> {
             })
             .unwrap_or_else(|| "-".into());
 
+        let k8s_version = cp
+            .first()
+            .and_then(|c| k8s_version_from_image(&c.image))
+            .unwrap_or_else(|| "-".into());
+
         t.row(vec![
             name.clone(),
             estado,
@@ -1578,6 +1596,7 @@ pub(crate) fn list(store: &Store) -> Result<()> {
             uptime,
             last,
             cri,
+            k8s_version,
         ]);
     }
     t.print();
@@ -1915,5 +1934,28 @@ mod tests {
     #[test]
     fn contexto_tem_prefixo_do_produto() {
         assert_eq!(context_name("njinga-huila-65"), "delonix-njinga-huila-65");
+    }
+
+    #[test]
+    fn k8s_version_from_image_le_a_tag_kindest() {
+        assert_eq!(
+            k8s_version_from_image(
+                "kindest/node:v1.34.0@sha256:7416a61b42b1662ca6ca89f02028ac133a309a2a30ba309614e8ec94d976dc5a"
+            ),
+            Some("v1.34.0".to_string())
+        );
+        assert_eq!(
+            k8s_version_from_image("kindest/node:v1.31.0"),
+            Some("v1.31.0".to_string())
+        );
+    }
+
+    #[test]
+    fn k8s_version_from_image_recusa_o_que_nao_e_uma_tag_v() {
+        // A imagem base referida por id/digest, sem tag legível, ou uma
+        // referência que alguém trocou por um `--image` custom sem `v` na
+        // frente — nunca fingir uma versão que não foi lida.
+        assert_eq!(k8s_version_from_image("sha256:abcdef"), None);
+        assert_eq!(k8s_version_from_image("myregistry.local/node:custom"), None);
     }
 }

@@ -17,7 +17,9 @@ use serde::{Deserialize, Serialize};
 use super::cdi;
 use super::manifest::{self, ManifestDoc};
 use super::output;
-use super::util::{effective_command, find, open_stores, prepare_rootfs, resolve_or_pull};
+use super::util::{
+    container_writable_dir, effective_command, find, open_stores, prepare_rootfs, resolve_or_pull,
+};
 
 /// `spec` for `kind: Container` — mirrors `ContainerCmd::Run` (minus `name`,
 /// which comes from `metadata.name`). **`detach` defaults to `true`** (unlike the
@@ -1813,6 +1815,12 @@ pub enum ContainerCmd {
         /// Show only the containers of this isolation namespace. Omit to list every one.
         #[arg(short = 'n', long, add = ArgValueCandidates::new(super::complete::namespaces))]
         namespace: Option<String>,
+        /// Show the SIZE column — each container's own writable-layer usage
+        /// (never the shared read-only image layers). Off by default: it
+        /// walks a directory tree per container, the same cost `volumes
+        /// inspect` already opts into rather than pays on every listing.
+        #[arg(short = 's', long)]
+        size: bool,
     },
     /// (Re)start stopped/crashed containers. Always detached.
     ///
@@ -2278,7 +2286,16 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             quiet,
             output,
             namespace,
-        } => cmd_ps(&store, all, quiet, output, namespace.as_deref()),
+            size,
+        } => cmd_ps(
+            &images,
+            &store,
+            all,
+            quiet,
+            output,
+            namespace.as_deref(),
+            size,
+        ),
         ContainerCmd::Start { ids } => for_each_id(&ids, |id| cmd_start(&images, &store, id)),
         ContainerCmd::Stop { ids, time } => for_each_id(&ids, |id| cmd_stop(&store, id, time)),
         ContainerCmd::Kill { ids, signal } => for_each_id(&ids, |id| cmd_kill(&store, id, &signal)),
@@ -4340,14 +4357,48 @@ struct ContainerLsRow {
     status: String,
     ports: String,
     name: String,
+    restarts: u32,
+    /// Only populated when `-s/--size` is passed — a directory walk per
+    /// container is not something a plain `ls` should pay for by default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    size_bytes: Option<u64>,
+}
+
+/// How many times a container has been explicitly (re)started, counted from
+/// the event log. Same source `cluster ls`'s LAST RESTART column already
+/// reads, read once for every container instead of once per row.
+///
+/// **Scope, stated plainly rather than left to be discovered wrong**: `cmd_run`'s
+/// initial launch emits `"create"`, never `"start"` — only `cmd_start` (a
+/// `container start`/`restart` on an EXISTING container) emits `"start"`, and
+/// it does so exactly once per invocation (there is no separate `"restart"`
+/// verb — `restart` is just `stop`+`start`). So this counts manual restarts
+/// correctly, with no off-by-one to subtract. What it does **not** count is a
+/// `--restart always`/`on-failure` policy's own internal crash-loop: those
+/// iterations live entirely inside `run_supervised`'s forked loop, which
+/// records only `"die"` for each crash and never re-emits `"start"` (the
+/// mirror of Docker's own `RestartCount`, which likewise counts only
+/// policy-triggered restarts — but reads it from a live daemon that watched
+/// each one happen, which this engine's forked supervisor does not persist
+/// anywhere a listing command could read it back from).
+fn restart_counts(root: &std::path::Path) -> std::collections::HashMap<String, u32> {
+    let mut counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    for e in delonix_runtime_core::events::read(root) {
+        if e.kind == "container" && e.action == "start" {
+            *counts.entry(e.id).or_insert(0) += 1;
+        }
+    }
+    counts
 }
 
 fn cmd_ps(
+    images: &ImageStore,
     store: &Store,
     all: bool,
     quiet: bool,
     format: super::output::OutputFormat,
     namespace: Option<&str>,
+    size: bool,
 ) -> Result<()> {
     let format = super::config::resolve_output(&super::util::state_root(), format);
     let mut cs = store.list()?;
@@ -4383,6 +4434,7 @@ fn cmd_ps(
         Status::Running | Status::Paused => c.pid_starttime.and_then(output::uptime_from_starttime),
         _ => None,
     };
+    let restarts = restart_counts(&super::util::state_root());
     if format == super::output::OutputFormat::Json {
         let rows: Vec<ContainerLsRow> = included
             .iter()
@@ -4394,6 +4446,12 @@ fn cmd_ps(
                 status: fmt_status_of(c, uptime_of(c)),
                 ports: fmt_ports(&c.ports),
                 name: c.name.clone(),
+                restarts: restarts.get(&c.id).copied().unwrap_or(0),
+                size_bytes: size
+                    .then(|| container_writable_dir(images, &c.id))
+                    .flatten()
+                    .map(|dir| super::volume::measured_usage(&dir))
+                    .and_then(|u| u.is_complete().then_some(u.bytes)),
             })
             .collect();
         return output::print_json(&rows);
@@ -4404,22 +4462,27 @@ fn cmd_ps(
         }
         return Ok(());
     }
-    let mut t = output::Table::new(&[
+    let mut headers: Vec<&str> = vec![
         "CONTAINER ID",
         "IMAGE",
         "COMMAND",
         "CREATED",
         "STATUS",
         "PORTS",
+        "RESTARTS",
         "NAMES",
-        // Last, and it hides itself on a host that uses no namespaces — see
-        // `output::namespace_cell`. Until it existed, the boundary the engine
-        // enforces in nftables was invisible in the listing an operator reads
-        // most.
-        "NAMESPACE",
-    ]);
+    ];
+    if size {
+        headers.push("SIZE");
+    }
+    // Last, and it hides itself on a host that uses no namespaces — see
+    // `output::namespace_cell`. Until it existed, the boundary the engine
+    // enforces in nftables was invisible in the listing an operator reads
+    // most.
+    headers.push("NAMESPACE");
+    let mut t = output::Table::new(&headers);
     for c in &included {
-        t.row(vec![
+        let mut row = vec![
             short_id(&c.id).to_string(),
             // `display_ref` strips the `@sha256:…` when there's a tag: a
             // `kindest/node:v1.34.0@sha256:7416a61b…` (84 chars) pushed all the
@@ -4429,9 +4492,18 @@ fn cmd_ps(
             output::fmt_age(c.created_unix),
             fmt_status_of(c, uptime_of(c)),
             output::truncate(&fmt_ports(&c.ports), 28),
+            restarts.get(&c.id).copied().unwrap_or(0).to_string(),
             c.name.clone(),
-            output::namespace_cell(&c.namespace, namespace.is_some()),
-        ]);
+        ];
+        if size {
+            let cell = container_writable_dir(images, &c.id)
+                .map(|dir| super::volume::measured_usage(&dir))
+                .map(|u| super::volume::fmt_size_cell(&u))
+                .unwrap_or_else(|| "-".to_string());
+            row.push(cell);
+        }
+        row.push(output::namespace_cell(&c.namespace, namespace.is_some()));
+        t.row(row);
     }
     // Drops NAMESPACE on a host where every row would say `default` — the
     // column exists to show a boundary, and a column of dashes shows none.
@@ -8381,5 +8453,61 @@ containers:
              (encontradas {chamadas} chamadas) — um caminho sem ele perde o \
              `--dns` no primeiro restart"
         );
+    }
+
+    fn scratch_root(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "dlx-restartcounts-test-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// The off-by-one this column shipped with, found live: `cmd_run`'s
+    /// initial launch emits `"create"`, never `"start"` — a naive
+    /// `count("start") - 1` therefore undercounted every container by
+    /// exactly one restart the moment it was ACTUALLY restarted once.
+    #[test]
+    fn restart_counts_nao_subtrai_um_porque_o_run_nunca_emite_start() {
+        let root = scratch_root("basic");
+        delonix_runtime_core::events::emit(&root, "container", "create", "c1", "c1", None);
+        let counts = super::restart_counts(&root);
+        assert_eq!(
+            counts.get("c1").copied().unwrap_or(0),
+            0,
+            "create sozinho não é um restart"
+        );
+
+        delonix_runtime_core::events::emit(&root, "container", "stop", "c1", "c1", None);
+        delonix_runtime_core::events::emit(&root, "container", "die", "c1", "c1", Some("exit=137"));
+        delonix_runtime_core::events::emit(&root, "container", "start", "c1", "c1", None);
+        let counts = super::restart_counts(&root);
+        assert_eq!(counts.get("c1").copied().unwrap_or(0), 1);
+
+        delonix_runtime_core::events::emit(&root, "container", "stop", "c1", "c1", None);
+        delonix_runtime_core::events::emit(&root, "container", "start", "c1", "c1", None);
+        let counts = super::restart_counts(&root);
+        assert_eq!(counts.get("c1").copied().unwrap_or(0), 2);
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// Each container's count is independent — a `start` on `c2` must not
+    /// bleed into `c1`'s row.
+    #[test]
+    fn restart_counts_e_por_container() {
+        let root = scratch_root("perid");
+        delonix_runtime_core::events::emit(&root, "container", "create", "c1", "c1", None);
+        delonix_runtime_core::events::emit(&root, "container", "create", "c2", "c2", None);
+        delonix_runtime_core::events::emit(&root, "container", "start", "c2", "c2", None);
+        let counts = super::restart_counts(&root);
+        assert_eq!(counts.get("c1").copied().unwrap_or(0), 0);
+        assert_eq!(counts.get("c2").copied().unwrap_or(0), 1);
+        std::fs::remove_dir_all(&root).ok();
     }
 }

@@ -1230,6 +1230,41 @@ struct ImageLsRow {
     created_unix: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     size_bytes: Option<u64>,
+    /// `None` when the container store could not be read (unknown, not "in
+    /// use") — same "no users" vs "could not tell" distinction as
+    /// `volume.rs`'s `volume_user_names`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    orphan: Option<bool>,
+}
+
+/// Whether a container's persisted image reference (`Container.image` —
+/// whatever the user typed: bare name, `name:tag`, id, or digest) points at
+/// this image.
+///
+/// **Bare names are normalised before the tag comparison.** Without this, a
+/// container created as `container run alpine ...` (no explicit tag) stores
+/// `image: "alpine"`, which never matches a `repo_tags` entry like
+/// `"alpine:latest"` — found live while validating the orphan flag below:
+/// `image remove alpine:latest` happily untagged the image while `c1` still
+/// depended on it, exactly the silent breakage `cmd_rm`'s own doc-comment
+/// says this check exists to prevent.
+fn container_references_image(c_image: &str, img: &delonix_image::Image) -> bool {
+    c_image == img.id
+        || delonix_image::cas::strip(c_image) == delonix_image::cas::strip(&img.id)
+        || img
+            .repo_tags
+            .contains(&delonix_image::image::normalise_tag(c_image))
+}
+
+/// Whether zero containers reference this image — same match
+/// `cmd_rm` already uses to decide if a removal is safe, reused here
+/// instead of a fresh lookup.
+fn image_is_orphan(
+    store: &delonix_runtime_core::Store,
+    img: &delonix_image::Image,
+) -> Option<bool> {
+    let cs = store.list().ok()?;
+    Some(!cs.iter().any(|c| container_references_image(&c.image, img)))
 }
 
 fn cmd_ls(images: &ImageStore, format: super::output::OutputFormat) -> Result<()> {
@@ -1237,6 +1272,8 @@ fn cmd_ls(images: &ImageStore, format: super::output::OutputFormat) -> Result<()
     let mut imgs = images.list()?;
     // Newest first, as in `docker images`.
     imgs.sort_by_key(|i| std::cmp::Reverse(i.created_unix));
+    let cstore =
+        delonix_runtime_core::Store::open(super::util::state_root().join("containers")).ok();
     if format == super::output::OutputFormat::Json {
         let rows: Vec<ImageLsRow> = imgs
             .iter()
@@ -1245,29 +1282,42 @@ fn cmd_ls(images: &ImageStore, format: super::output::OutputFormat) -> Result<()
                 id: img.id.clone(),
                 created_unix: img.created_unix,
                 size_bytes: image_size(images, img),
+                orphan: cstore.as_ref().and_then(|s| image_is_orphan(s, img)),
             })
             .collect();
         return super::output::print_json(&rows);
     }
-    let mut t = super::output::Table::new(&["REPOSITORY:TAG", "IMAGE ID", "CREATED", "SIZE"])
-        .right_align(3);
+    let mut t =
+        super::output::Table::new(&["REPOSITORY:TAG", "IMAGE ID", "CREATED", "SIZE", "ORPHAN"])
+            .right_align(3);
     for img in imgs {
-        let tag = img
-            .repo_tags
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "<none>".into());
-        t.row(vec![
-            // `display_ref` strips the redundant `@sha256:…` (the tag already identifies it);
-            // `truncate` is the safety net for huge repo names.
-            super::output::truncate(&super::output::display_ref(&tag), 44),
-            img.short_id(),
-            // It used to be the raw epoch (`CRIADA(unix)`) — unreadable in a table.
-            super::output::fmt_age(img.created_unix),
-            image_size(images, &img)
-                .map(super::output::fmt_size)
-                .unwrap_or_else(|| "-".into()),
-        ]);
+        let size = image_size(images, &img)
+            .map(super::output::fmt_size)
+            .unwrap_or_else(|| "-".into());
+        let orphan = match cstore.as_ref().and_then(|s| image_is_orphan(s, &img)) {
+            Some(true) => "yes",
+            Some(false) => "-",
+            None => "?",
+        };
+        // One row per tag — a multi-tag image used to show only the first,
+        // hiding the other names it can also be pulled/referenced by.
+        let tags: Vec<String> = if img.repo_tags.is_empty() {
+            vec!["<none>".into()]
+        } else {
+            img.repo_tags.clone()
+        };
+        for tag in tags {
+            t.row(vec![
+                // `display_ref` strips the redundant `@sha256:…` (the tag already identifies it);
+                // `truncate` is the safety net for huge repo names.
+                super::output::truncate(&super::output::display_ref(&tag), 44),
+                img.short_id(),
+                // It used to be the raw epoch (`CRIADA(unix)`) — unreadable in a table.
+                super::output::fmt_age(img.created_unix),
+                size.clone(),
+                orphan.to_string(),
+            ]);
+        }
     }
     t.print();
     Ok(())
@@ -1419,12 +1469,10 @@ fn cmd_rm(
         let img = images.resolve(reference)?;
         let mut users: Vec<String> = Vec::new();
         for c in store.list()? {
-            // A record points at the image either by id or by any of its tags —
-            // `run` stores whatever reference the user typed.
-            if c.image == img.id
-                || delonix_image::cas::strip(&c.image) == delonix_image::cas::strip(&img.id)
-                || img.repo_tags.contains(&c.image)
-            {
+            // A record points at the image either by id or by any of its
+            // (normalised) tags — `run` stores whatever reference the user
+            // typed, bare name included.
+            if container_references_image(&c.image, &img) {
                 let alive = c.pid.map(delonix_runtime::is_alive).unwrap_or(false);
                 let state = if alive {
                     super::po::t("running")
@@ -1674,5 +1722,37 @@ mod tests {
         let linux = parsed.linux().as_ref().expect("linux");
         assert!(!linux.masked_paths().as_ref().expect("masked").is_empty());
         assert!(!linux.namespaces().as_ref().expect("namespaces").is_empty());
+    }
+
+    fn tagged_image(id: &str, tags: &[&str]) -> delonix_image::Image {
+        delonix_image::Image {
+            id: id.to_string(),
+            repo_tags: tags.iter().map(|t| t.to_string()).collect(),
+            layers: vec![],
+            config: delonix_image::ImageConfig::default(),
+            created_unix: 0,
+        }
+    }
+
+    /// The bug found while validating the `image ls` ORPHAN column: a
+    /// container created as `container run alpine ...` (no explicit tag)
+    /// stores `image: "alpine"`, which used to never match a `repo_tags`
+    /// entry like `"alpine:latest"` — before this fix, `image remove
+    /// alpine:latest` silently untagged an image a live container still
+    /// depended on.
+    #[test]
+    fn container_references_image_normaliza_o_nome_nu() {
+        let img = tagged_image("sha256:abc", &["alpine:latest"]);
+        assert!(container_references_image("alpine", &img));
+        assert!(container_references_image("alpine:latest", &img));
+        assert!(!container_references_image("alpine:3.19", &img));
+    }
+
+    #[test]
+    fn container_references_image_por_id_ou_digest_despido() {
+        let img = tagged_image("sha256:abc", &[]);
+        assert!(container_references_image("sha256:abc", &img));
+        assert!(container_references_image("abc", &img));
+        assert!(!container_references_image("sha256:def", &img));
     }
 }

@@ -25,6 +25,25 @@ struct SecretLsRow {
     name: String,
     keys: usize,
     names: Vec<String>,
+    updated_unix: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    used_by: Option<Vec<String>>,
+}
+
+/// Containers that reference a secret by NAME (`Container.secrets`, the names
+/// `--secret <name>` resolves at spawn — never the values). `None` means the
+/// container store could not be read (unknown, not "nobody"), matching the
+/// same distinction `volume.rs`'s `volume_user_names`/`network.rs`'s
+/// `network_user_names` already draw.
+fn secret_user_names(name: &str) -> Option<Vec<String>> {
+    let store = delonix_runtime_core::Store::open(state_root().join("containers")).ok()?;
+    let cs = store.list().ok()?;
+    Some(
+        cs.into_iter()
+            .filter(|c| c.secrets.iter().any(|s| s == name))
+            .map(|c| c.name)
+            .collect(),
+    )
 }
 
 #[derive(Subcommand)]
@@ -546,20 +565,30 @@ pub fn run(action: SecretCmd) -> Result<()> {
                     .list()
                     .into_iter()
                     .map(|s| SecretLsRow {
+                        used_by: secret_user_names(&s.name),
                         name: s.name.clone(),
                         keys: s.data.len(),
                         names: s.data.keys().cloned().collect(),
+                        updated_unix: s.updated_unix,
                     })
                     .collect();
                 return crate::cmd::output::print_json(&rows);
             }
-            let mut t = output::Table::new(&["NAME", "KEYS", "NAMES"]).right_align(1);
+            let mut t =
+                output::Table::new(&["NAME", "KEYS", "NAMES", "AGE", "USED BY"]).right_align(1);
             for s in store.list() {
                 let keys: Vec<&str> = s.data.keys().map(String::as_str).collect();
+                let used_by = match secret_user_names(&s.name) {
+                    Some(names) if names.is_empty() => "-".to_string(),
+                    Some(names) => names.join(", "),
+                    None => "?".to_string(),
+                };
                 t.row(vec![
                     s.name.clone(),
                     s.data.len().to_string(),
                     keys.join(", "),
+                    output::fmt_age(s.updated_unix),
+                    used_by,
                 ]);
             }
             t.print();
