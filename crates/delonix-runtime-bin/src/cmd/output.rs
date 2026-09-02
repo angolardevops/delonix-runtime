@@ -610,7 +610,7 @@ pub fn uptime_from_starttime(starttime_jiffies: u64) -> Option<u64> {
 /// lines (`container/web: created`), which are the record of what happened. A
 /// spinner rewriting its row would fight them for the same terminal line, and
 /// folding them away would hide the one part worth keeping. The spinner belongs
-/// where a step is silent for seconds (`image --vm build`, `vm create`); a layer that
+/// where a step is silent for seconds (`image vm build`, `vm create`); a layer that
 /// narrates itself needs grouping and timing, not animation.
 ///
 /// A layer with nothing to do says so instead of claiming a tick it did not

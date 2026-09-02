@@ -115,11 +115,8 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::pod::PodCmd,
     },
-    /// OCI images: pull/ls/remove/export (with `--vm`: golden VM images — ls/pull/push/build).
+    /// OCI images: pull/ls/remove/export. `image vm <cmd>` for golden VM images.
     Image {
-        /// Operate on VM images (`<root>/vm-images/`) instead of container images — enables the `push`/`build` subcommands.
-        #[arg(long)]
-        vm: bool,
         #[command(subcommand)]
         action: cmd::image::ImageCmd,
     },
@@ -476,7 +473,7 @@ fn run() -> Result<()> {
     match cli.cmd {
         Cmd::Container { action } => cmd::container::run(action),
         Cmd::Pod { action } => cmd::pod::run(action),
-        Cmd::Image { vm, action } => cmd::image::run(vm, action),
+        Cmd::Image { action } => cmd::image::run(action),
         Cmd::Build(args) => cmd::build::run(args),
         Cmd::Vm { action } => cmd::vm::run(action),
         Cmd::Workload { action } => cmd::workload::run(action),

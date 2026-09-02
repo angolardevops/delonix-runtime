@@ -816,47 +816,6 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["image ls", "dashboard", "system df"],
     },
     Entry {
-        path: "image build",
-        group: "Advanced",
-        examples: &[
-            ("the same as `image vm build` — this spelling needs the group's `--vm` flag", "delonix image --vm build --offline --k8s-version 1.34 -t delonix-vm-k8s:1.34"),
-        ],
-        see_also: &["image vm build", "image vm init", "build"],
-    },
-    Entry {
-        path: "image convert",
-        group: "Advanced",
-        examples: &[
-            ("the same as `image vm convert` — this spelling needs the group's `--vm` flag", "delonix image --vm convert --to vmdk delonix-vm-base:ubuntu-24.04 -o ubuntu-24.04.vmdk"),
-        ],
-        see_also: &["image vm convert", "image vm import", "image vm ls"],
-    },
-    Entry {
-        path: "image import",
-        group: "Advanced",
-        examples: &[
-            ("the same as `image vm import` — this spelling needs the group's `--vm` flag", "delonix image --vm import -t rocky-9 rocky-9.qcow2"),
-        ],
-        see_also: &["image vm import", "image vm ls", "vm create"],
-    },
-    Entry {
-        path: "image init",
-        group: "Advanced",
-        examples: &[
-            ("the same as `image vm init` — this spelling needs the group's `--vm` flag", "delonix image --vm init myimage"),
-        ],
-        see_also: &["image vm init", "vm init", "image vm build"],
-    },
-    Entry {
-        path: "image ls-remote",
-        group: "Advanced",
-        examples: &[
-            ("the same as `image vm ls-remote` — this spelling needs the group's `--vm` flag", "delonix image --vm ls-remote"),
-            ("the same for the Kubernetes-free golden repo", "delonix image --vm ls-remote --no-k8s"),
-        ],
-        see_also: &["image vm ls-remote", "image vm pull", "image vm ls"],
-    },
-    Entry {
         path: "image vm",
         group: "Advanced",
         examples: &[

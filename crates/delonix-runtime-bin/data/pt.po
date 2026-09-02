@@ -10338,3 +10338,23 @@ msgstr "delonix system thermal (baixa o tecto de CPU do motor até arrefecer)"
 
 msgid "Show the SIZE column — each container's own writable-layer usage (never the shared read-only image layers). Off by default: it walks a directory tree per container, the same cost `volumes inspect` already opts into rather than pays on every listing"
 msgstr "Mostra a coluna SIZE — o espaço da própria camada de escrita de cada container (nunca as layers de imagem partilhadas e só de leitura). Desligado por omissão: percorre uma árvore de directórios por container, o mesmo custo que o `volumes inspect` já assume em vez de pagar em toda a listagem"
+
+# ---- help: cli-b6-drop-vm-flag (--vm flag removed, image vm <cmd> is the sole form) ----
+
+msgid "Base disk (qcow2/raw) — becomes a per-VM overlay. Omit to use the local golden VM image (if there is exactly one; `image vm ls`)"
+msgstr "Disco base (qcow2/raw) — vira overlay por-VM. Omite para usar a imagem VM dourada local (se houver exactamente uma; `image vm ls`)"
+
+msgid "Tag of the golden VM image (`delonix image vm ls`). Omit = uses the only local image that exists"
+msgstr "Tag da imagem VM dourada (`delonix image vm ls`). Omitir = usa a única imagem local existente"
+
+msgid "OCI images: pull/ls/remove/export. `image vm <cmd>` for golden VM images"
+msgstr "Imagens OCI: pull/ls/remove/export. `image vm <cmd>` para as imagens VM douradas"
+
+msgid "Human-readable detail of one or more images, `kubectl describe`-style.\n\nTags/digest/size/layers + the OCI config: entrypoint/cmd/env/workdir."
+msgstr "Detalhe legível de uma ou mais imagens, ao estilo `kubectl describe`.\n\nTags/digest/tamanho/layers + a config OCI: entrypoint/cmd/env/workdir."
+
+msgid "Golden VM images (`<root>/vm-images/`): ls/pull/push/build/rm/etc"
+msgstr "Imagens VM douradas (`<root>/vm-images/`): ls/pull/push/build/rm/etc"
+
+msgid "Publish a local image to an OCI registry.\n\nWithout `target`, publishes under the image's own reference."
+msgstr "Publica uma imagem local num registo OCI.\n\nSem `target`, publica sob a própria referência da imagem."

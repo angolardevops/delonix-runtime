@@ -1,6 +1,6 @@
 # Vm — a declarative microVM (Cloud Hypervisor or libvirt). Apply with:
 #   delonix vm apply -f examples/vm.yaml
-# The golden VM image is built once with:  delonix image --vm build --name k8s-golden --k8s-version 1.34
+# The golden VM image is built once with:  delonix image vm build --name k8s-golden --k8s-version 1.34
 #
 # Fields are grouped by concern (resources/network/boot/cloudInit/libvirt) so
 # a spec this size stays readable. The OLD flat form (every field at the top
