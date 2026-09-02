@@ -425,11 +425,11 @@ delonix vm init --vmfile --name minha-base
 cat VMfile
 
 # Precisa de libguestfs no host: sudo apt install libguestfs-tools
-delonix image --vm build -t minha-base:1.0 .
+delonix image vm build -t minha-base:1.0 .
 delonix vm ls
 
 # Um RUN com `apt-get install` precisa de rede no convidado, e pede-se:
-#   delonix image --vm build --network -t minha-base:1.0 .
+#   delonix image vm build --network -t minha-base:1.0 .
 
 # Arrancar a partir dela
 delonix vm create teste --disk minha-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub
@@ -454,11 +454,11 @@ delonix vm init --vmfile --name my-base
 cat VMfile
 
 # Needs libguestfs on the host: sudo apt install libguestfs-tools
-delonix image --vm build -t my-base:1.0 .
+delonix image vm build -t my-base:1.0 .
 delonix vm ls
 
 # A RUN with `apt-get install` needs guest networking, so ask for it:
-#   delonix image --vm build --network -t my-base:1.0 .
+#   delonix image vm build --network -t my-base:1.0 .
 
 # Boot from it
 delonix vm create test --disk my-base:1.0 --ssh-key @~/.ssh/id_ed25519.pub

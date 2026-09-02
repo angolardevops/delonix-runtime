@@ -1,4 +1,4 @@
-//! `delonix image --vm` — golden VM images (Ubuntu + kubeadm/kubelet/
+//! `delonix image vm` — golden VM images (Ubuntu + kubeadm/kubelet/
 //! kubectl + `delonix-cri`), managed separately from container images (those
 //! live in `cmd::image`/`ImageStore`). One standalone `.qcow2` per image (no
 //! CAS/layers — there is only one blob per image, nothing to deduplicate) + a
@@ -679,8 +679,8 @@ pub fn run(action: VmImageCmd) -> Result<()> {
             no_k8s,
         } => {
             // BUG FIXED HERE, found live: this is the shared engine command
-            // behind BOTH `image --vm pull` AND `image vm pull` — it never
-            // got the "no argument = official image" default that `delonix
+            // behind `image vm pull` — it never got the "no argument =
+            // official image" default that `delonix
             // vm pull` (a separate, sibling CLI definition in `cmd/vm.rs`)
             // already has, despite this exact struct's own doc comment
             // claiming it. A user on a real host hit this: `delonix image vm
@@ -831,14 +831,14 @@ fn cmd_init(name: &str, dir: Option<PathBuf>, force: bool) -> Result<()> {
     println!(
         "\n{}",
         super::po::tf(
-            "Next: `delonix image --vm build -t {name}:1.0 {dir}` then `delonix vm create dev --disk-image {name}:1.0`",
+            "Next: `delonix image vm build -t {name}:1.0 {dir}` then `delonix vm create dev --disk-image {name}:1.0`",
             &[("name", name), ("dir", &dir.display().to_string())],
         )
     );
     Ok(())
 }
 
-/// `image --vm ls -o json` / `image vm ls -o json` row (ADR-0005): machine-friendly
+/// `image vm ls -o json` / `image vm ls -o json` row (ADR-0005): machine-friendly
 /// values (`created_unix`/`size_bytes` as numbers; nullable kernel/k8s).
 #[derive(serde::Serialize)]
 struct VmImageLsRow {
@@ -907,7 +907,7 @@ fn cmd_ls(store: &VmImageStore, format: output::OutputFormat) -> Result<()> {
     Ok(())
 }
 
-/// `image --vm describe` — human-readable detail, `kubectl describe` style.
+/// `image vm describe` — human-readable detail, `kubectl describe` style.
 fn cmd_describe(store: &VmImageStore, names: &[String]) -> Result<()> {
     for (i, name) in names.iter().enumerate() {
         let img = store.get(name)?;
@@ -1323,7 +1323,7 @@ pub(crate) fn image_of_disk(disk: &str) -> Option<VmImage> {
 /// (`official_tag_for`), which is exactly what a `FROM ubuntu:24.04` becomes.
 ///
 /// The LOCAL copy is checked first, and it is not an optimization: a base
-/// already in `image --vm ls` makes the build cost nothing and reach nothing,
+/// already in `image vm ls` makes the build cost nothing and reach nothing,
 /// which is the same reason `RUN` is offline by default — a build that touches
 /// the network gives a different image depending on when it ran.
 ///
@@ -1397,7 +1397,7 @@ pub(crate) fn official_distro_base(
     };
     // Same metadata path a plain `vm pull` takes, so the base lands in the
     // store indistinguishable from one pulled by hand — including showing up
-    // in `image --vm ls` with its distro and kernel.
+    // in `image vm ls` with its distro and kernel.
     let img = apply_pulled_annotations(img, &annotations);
     store.save(&img).ok()?;
     Some(path)
@@ -1501,10 +1501,10 @@ pub(crate) fn cmd_push(store: &VmImageStore, name: &str, target: Option<&str>) -
     Ok(())
 }
 
-/// Arguments of `image vm import`, defined ONCE and `flatten`ed into all
-/// three entry points (`vm import`, `image vm import`, `image --vm import`).
-/// Spelling them out per entry point is how those three drift apart — a flag
-/// that works in one place and not another is worse than no flag.
+/// Arguments of `image vm import`, defined ONCE and `flatten`ed into it —
+/// `image --vm import` (a second, older entry point into this same struct)
+/// is gone (B6 of the CLI restructuring). Kept as a named struct rather than
+/// inlined so a future second entry point cannot drift from this one.
 #[derive(clap::Args, Clone, Debug)]
 pub struct ImportArgs {
     /// Path to a `.qcow2` (or any format `qemu-img` reads — it is converted).
@@ -4649,7 +4649,7 @@ fn shared_account_steps(
         )),
     ]);
     ops.extend(extra_run.iter().cloned().map(CustomizeOp::RunCommand));
-    // Records the installed kernel's `uname -r` string for `image --vm ls`'s
+    // Records the installed kernel's `uname -r` string for `image vm ls`'s
     // KERNEL column — `virt-customize` never boots the image's own kernel (it
     // chroots via its OWN appliance kernel), so there is no `uname -r` to run
     // here; `/boot/vmlinuz-<release>` is named by the exact release string
@@ -5140,13 +5140,13 @@ pub(crate) fn tool_failure_hint(tail: &str, f: Family) -> Option<String> {
              Most often passt's AppArmor profile forbids the runtime directory libguestfs uses. \
              Point that directory somewhere the profile allows and retry:\n  \
              mkdir -p /tmp/delonix-run && chmod 700 /tmp/delonix-run\n  \
-             XDG_RUNTIME_DIR=/tmp/delonix-run delonix image --vm build --network …"
+             XDG_RUNTIME_DIR=/tmp/delonix-run delonix image vm build --network …"
         } else {
             "the appliance's network helper (passt) failed, so `--network` could not start.\n\
              Most often its AppArmor profile forbids the runtime directory libguestfs uses.\n\
              Point that directory somewhere the profile allows and retry:\n  \
              mkdir -p /tmp/delonix-run && chmod 700 /tmp/delonix-run\n  \
-             XDG_RUNTIME_DIR=/tmp/delonix-run delonix image --vm build --network …"
+             XDG_RUNTIME_DIR=/tmp/delonix-run delonix image vm build --network …"
         });
         if f == Family::Debian {
             // Building it is only half the remedy, and the half that was

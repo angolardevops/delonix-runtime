@@ -794,7 +794,7 @@ Options:
           Downloaded once and cached, so a second `create` from the same URL costs nothing. Verified against a sibling `&lt;url&gt;.sha256` when the publisher offers one; without it, the download is trusted on TLS alone and SAYS SO — someone pointing this at their own bucket deserves to know which of the two they got.
 
       --disk &lt;DISK&gt;
-          Base disk (qcow2/raw) — becomes a per-VM overlay. Omit to use the local golden VM image (if there is exactly one; `image --vm ls`)
+          Base disk (qcow2/raw) — becomes a per-VM overlay. Omit to use the local golden VM image (if there is exactly one; `image vm ls`)
 
       --vcpus &lt;VCPUS&gt;
           vCPUs (default: 1, or the image&#x27;s `VCPUS` — see `HYPERVISOR`/`VCPUS` in `delonix vm init --vmfile` — when `--disk` names a local image)

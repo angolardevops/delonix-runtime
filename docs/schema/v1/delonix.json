@@ -2204,7 +2204,7 @@
       "type": "object"
     },
     "VmBuildSpec": {
-      "description": "`spec.build` of a `kind: VirtualMachine` — the declarative face of `delonix image --vm build`.\n\nThe fields are the flags of that command, one for one, so the two paths\ncannot describe different builds. Nothing here is a second implementation:\n`apply` calls the SAME `vmfile::build`.",
+      "description": "`spec.build` of a `kind: VirtualMachine` — the declarative face of `delonix image vm build`.\n\nThe fields are the flags of that command, one for one, so the two paths\ncannot describe different builds. Nothing here is a second implementation:\n`apply` calls the SAME `vmfile::build`.",
       "properties": {
         "compress": {
           "default": true,
@@ -2324,7 +2324,7 @@
             }
           ],
           "default": null,
-          "description": "Build the base disk from a `VMfile`, instead of naming one that already\nexists — the same shape `kind: Image` has (`pull:` or `build:`), applied\nto VMs.\n\nWithout it, a project whose VM image is built from a `VMfile` needed two\ncommands and a hand-copied tag between them: `delonix image --vm build -t x` and\nthen a manifest saying `disk: x`. The tag was written in two places and\nnothing kept them in step."
+          "description": "Build the base disk from a `VMfile`, instead of naming one that already\nexists — the same shape `kind: Image` has (`pull:` or `build:`), applied\nto VMs.\n\nWithout it, a project whose VM image is built from a `VMfile` needed two\ncommands and a hand-copied tag between them: `delonix image vm build -t x` and\nthen a manifest saying `disk: x`. The tag was written in two places and\nnothing kept them in step."
         },
         "cloudInit": {},
         "cmdline": {

@@ -177,6 +177,11 @@ fn default_context() -> PathBuf {
     PathBuf::from(".")
 }
 
+// A CLI enum parsed once per invocation, not a hot path — the same
+// justification `VmSub` already carries. `Vm { action: VmSub }` became the
+// outlier once the VM-only variants (build/convert/import/init) moved OUT of
+// this enum and into `VmSub` alone.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum ImageCmd {
     /// Dashboard (KPIs + table) of images — interactive TUI, or `--once` snapshot.
@@ -186,44 +191,24 @@ pub enum ImageCmd {
         #[arg(long)]
         json: bool,
     },
-    /// Pull an image from a registry. With `--vm`, no argument = the
-    /// OFFICIAL Delonix golden VM image.
+    /// Pull an image from a registry.
     Pull {
-        image: Option<String>,
+        image: String,
         /// Verify the cosign signature with this public key (PEM) AFTER the
         /// pull, and fail if it does not match. Without this, a pull is not
         /// authenticated beyond the registry's own digest.
         #[arg(value_hint = clap::ValueHint::FilePath, long, value_name = "PEM")]
         verify: Option<PathBuf>,
-        /// (only with `--vm`) Local name (default: derived from the reference).
-        #[arg(long)]
-        name: Option<String>,
-        /// (only with `--vm`) With no argument, pull the official
-        /// NO-Kubernetes golden instead of the Kubernetes one.
-        #[arg(long)]
-        no_k8s: bool,
-    },
-    /// List the tags available in a remote OCI repository (only with `--vm`).
-    ///
-    /// With no argument, the OFFICIAL Delonix golden image repo.
-    LsRemote {
-        source: Option<String>,
-        /// With no argument, list the official NO-Kubernetes golden's repo
-        /// instead of the Kubernetes one.
-        #[arg(long)]
-        no_k8s: bool,
     },
     /// List local images.
     Ls {
-        /// Output format: `table` (default) or `json` (ADR-0005). Works for both
-        /// `image ls` and `image --vm ls`.
+        /// Output format: `table` (default) or `json` (ADR-0005).
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: super::output::OutputFormat,
     },
     /// Human-readable detail of one or more images, `kubectl describe`-style.
     ///
-    /// Tags/digest/size/layers + the OCI config:
-    /// entrypoint/cmd/env/workdir. With `--vm`, describes golden VM images.
+    /// Tags/digest/size/layers + the OCI config: entrypoint/cmd/env/workdir.
     Describe {
         #[arg(required = true, add = ArgValueCandidates::new(super::complete::images))]
         names: Vec<String>,
@@ -347,112 +332,18 @@ pub enum ImageCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::registries))]
         registry: String,
     },
-    /// Golden VM images (`<root>/vm-images/`): ls/pull/push/build.
-    /// Equivalent to `image --vm <cmd>` (old form, kept).
+    /// Golden VM images (`<root>/vm-images/`): ls/pull/push/build/rm/etc.
     Vm {
         #[command(subcommand)]
         action: VmSub,
     },
     /// Publish a local image to an OCI registry.
     ///
-    /// Without `target`, publishes under the image's own reference. With
-    /// `--vm`, `target` is required.
+    /// Without `target`, publishes under the image's own reference.
     Push {
         #[arg(add = ArgValueCandidates::new(super::complete::images))]
         name: String,
         target: Option<String>,
-    },
-    /// (only with `--vm`) Register an existing disk image under a name.
-    Import(super::vmimage::ImportArgs),
-    /// Convert a VM disk to the format another ecosystem imports (only with
-    /// `--vm`).
-    ///
-    /// `qcow2`, `raw`, `vmdk`, `vdi`, `vhdx`, `vhd`.
-    Convert {
-        #[arg(add = ArgValueCandidates::new(super::complete::vm_images))]
-        source: String,
-        #[arg(long = "to", value_enum)]
-        to: super::vmimage::ConvertFormat,
-        #[arg(value_hint = clap::ValueHint::FilePath, short = 'o', long = "output")]
-        output: Option<PathBuf>,
-        /// Compress the output. Only `qcow2` and `vmdk` can — refused for the
-        /// others rather than handed to `qemu-img` to fail on.
-        #[arg(long)]
-        compress: bool,
-    },
-    /// (only with `--vm`) Scaffold a `VMfile` for building your own VM image.
-    ///
-    /// Writes a `VMfile` (and a cloud-init) for building your own image. The
-    /// built-in alternative is the golden VM image (Ubuntu +
-    /// kubeadm/kubelet/kubectl + `delonix-cri`), built by `image --vm build`
-    /// with no `-f`.
-    Init {
-        /// Name to use in the scaffold (image tag, hostname, account).
-        #[arg(default_value = "myimage")]
-        name: String,
-        /// Where to write it (default: the current directory).
-        #[arg(value_hint = clap::ValueHint::DirPath, short = 'd', long)]
-        dir: Option<PathBuf>,
-        /// Overwrite an existing `VMfile`.
-        #[arg(long)]
-        force: bool,
-    },
-    /// (only with `--vm`) Build a VM image.
-    ///
-    /// The built-in golden recipe (Ubuntu + kubeadm/kubelet/kubectl +
-    /// `delonix-cri`), or a `VMfile` of your own with `-f`.
-    Build {
-        #[arg(short = 't', long = "tag")]
-        tag: String,
-        /// Build from a `VMfile` instead of the built-in golden recipe.
-        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
-        file: Option<PathBuf>,
-        /// Build context — the directory `COPY` reads from.
-        #[arg(value_hint = clap::ValueHint::DirPath, default_value = ".")]
-        context: PathBuf,
-        #[arg(long, value_enum, default_value = "ubuntu")]
-        distro: Distro,
-        #[arg(long, default_value = "26.04")]
-        ubuntu_release: String,
-        #[arg(long, default_value = "bookworm")]
-        debian_release: String,
-        #[arg(long, default_value = "9")]
-        rocky_release: String,
-        /// Fedora release AND build (e.g. `42-1.1`) — only with `--distro fedora`.
-        #[arg(long, default_value = "42-1.1")]
-        fedora_release: String,
-        #[arg(long)]
-        k8s_version: Option<String>,
-        #[arg(long = "extra-package")]
-        extra_packages: Vec<String>,
-        #[arg(long = "extra-run")]
-        extra_run: Vec<String>,
-        #[arg(value_hint = clap::ValueHint::FilePath, long)]
-        cri_bin: Option<PathBuf>,
-        /// Do not compress the final qcow2 (larger, but with no decompression
-        /// cost on backing-file reads at runtime).
-        #[arg(long)]
-        no_compress: bool,
-        /// Give the guest network access during `RUN` — VMfile builds only.
-        /// The golden recipe already decides this with `--offline`.
-        #[arg(long)]
-        network: bool,
-        /// Fetch the k8s .deb packages on the HOST (verified) and install them with `dpkg` —
-        /// the appliance runs without network. No DHCP/DNS needed in the guest.
-        #[arg(long)]
-        offline: bool,
-        /// Build a golden image with NO Kubernetes — just `delonix` itself.
-        #[arg(long)]
-        no_k8s: bool,
-        #[arg(value_hint = clap::ValueHint::FilePath, long)]
-        delonix_bin: Option<PathBuf>,
-        /// Set a root password in the image (without it, no account has one).
-        #[arg(long)]
-        root_password: Option<String>,
-        /// Install the Prometheus node_exporter and enable it on this address
-        /// (bare flag: `0.0.0.0:9100`). Without it the image ships no listener.
-        #[arg(long, require_equals = true, num_args = 0..=1, default_missing_value = "0.0.0.0:9100")]
-        node_exporter: Option<String>,
     },
 }
 
@@ -613,11 +504,7 @@ pub enum VmSub {
     },
 }
 
-/// `vm`: enables `--vm` in the `image` group — dispatches `ls`/`pull`/`push`/`build`
-/// to `cmd::vmimage` (golden VM images) instead of `ImageStore` (container
-/// images). `rm`/`export`/`apply` make no sense for VM images at this
-/// stage — clear error instead of silently wrong behavior.
-pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
+pub fn run(action: ImageCmd) -> Result<()> {
     // login/logout are agnostic to container-vs-VM (same auth.json).
     match &action {
         ImageCmd::Dash { once, json } => {
@@ -716,59 +603,22 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
             },
         });
     }
-    if vm {
-        return run_vm(action);
-    }
     let (images, store) = open_stores()?;
     match action {
         ImageCmd::Dash { .. } => unreachable!("tratado no topo de run"),
-        ImageCmd::Pull {
-            image,
-            verify,
-            name,
-            no_k8s,
-        } => {
-            // Unlike `--vm pull` (defaults to the official golden image), a
-            // plain container-image pull has no sensible default — `image`
-            // only became `Option<String>` so the SAME struct could serve
-            // both paths at the clap level (see `run_vm`'s mapping).
-            //
-            // `--name`/`--no-k8s` belong to the `--vm` half of that shared
-            // struct. They used to be silently discarded here, which is the
-            // failure this engine refuses to ship: the caller believes the
-            // image was stored under the name they asked for. Name the flag
-            // and the alternative instead.
-            if name.is_some() {
-                return Err(Error::Invalid(
-                    super::po::t(
-                        "`--name` only applies to VM images (`image --vm pull`) — to give a \
-                         container image another reference, pull it and then `image tag`",
-                    )
-                    .into(),
-                ));
-            }
-            if no_k8s {
-                return Err(Error::Invalid(
-                    super::po::t("`--no-k8s` only applies to VM images (`image --vm pull`)").into(),
-                ));
-            }
-            let image = image.ok_or_else(|| {
-                Error::Invalid(super::po::t("`image pull <reference>`: the reference is required").into())
-            })?;
-            cmd_pull(&images, &image, verify.as_deref())
-        }
-        ImageCmd::LsRemote { .. } => Err(Error::Invalid(
-            super::po::t(
-                "`ls-remote` of container images is not supported yet — use `delonix image --vm ls-remote` for VM images",
-            )
-            .into(),
-        )),
+        ImageCmd::Pull { image, verify } => cmd_pull(&images, &image, verify.as_deref()),
         ImageCmd::Ls { output } => cmd_ls(&images, output),
         ImageCmd::Describe { names } => cmd_describe(&images, &names),
         ImageCmd::Tag { source, target } => cmd_tag(&images, &source, &target),
         ImageCmd::History { image } => cmd_history(&images, &image),
         ImageCmd::Verify { image, key } => cmd_verify(&images, &image, &key),
-        ImageCmd::Scan { image, sbom, fail_on, update, feed } => {
+        ImageCmd::Scan {
+            image,
+            sbom,
+            fail_on,
+            update,
+            feed,
+        } => {
             if update {
                 super::scan::cmd_scan_update(feed)
             } else {
@@ -794,35 +644,9 @@ pub fn run(vm: bool, action: ImageCmd) -> Result<()> {
             apply(&docs)
         }
         ImageCmd::Push { name, target } => cmd_push(&images, &name, target.as_deref()),
-        ImageCmd::Convert { .. } => Err(Error::Invalid(
-            super::po::t(
-                "`convert` is only for VM images — use `delonix image --vm convert`",
-            )
-            .into(),
-        )),
-        // Container images come from `delonix image pull`/`build`/`load`; a
-        // disk image is a different kind of thing entirely.
-        ImageCmd::Import(_) => Err(Error::Invalid(
-            super::po::t(
-                "`import` is only for VM images — use `delonix image --vm import` (for a container image tarball, use `delonix image load`)",
-            )
-            .into(),
-        )),
-        // `init` scaffolds a VMfile, which only describes a VM image — the
-        // container equivalent is `delonix build`'s Dockerfile/Delonixfile.
-        ImageCmd::Init { .. } => Err(Error::Invalid(
-            super::po::t(
-                "`init` in this group is only for VM images — use `delonix vm init` (or `delonix image --vm init`)",
-            )
-            .into(),
-        )),
-        ImageCmd::Build { .. } => Err(Error::Invalid(
-            super::po::t(
-                "`build` in this group is only for VM images — use `delonix image --vm build`, or `delonix build` for container images",
-            )
-            .into(),
-        )),
-        ImageCmd::Login { .. } | ImageCmd::Logout { .. } | ImageCmd::Vm { .. } => unreachable!("tratados acima"),
+        ImageCmd::Login { .. } | ImageCmd::Logout { .. } | ImageCmd::Vm { .. } => {
+            unreachable!("tratados acima")
+        }
     }
 }
 
@@ -859,123 +683,6 @@ fn cmd_login(registry: &str, username: &str, password_stdin: bool) -> Result<()>
         )
     );
     Ok(())
-}
-
-fn run_vm(action: ImageCmd) -> Result<()> {
-    use super::vmimage::{self, VmImageCmd};
-    let mapped = match action {
-        ImageCmd::Dash { .. } => unreachable!("tratado no topo de run"),
-        ImageCmd::Ls { output } => VmImageCmd::Ls { output },
-        ImageCmd::Describe { names } => VmImageCmd::Describe { names },
-        ImageCmd::Init { name, dir, force } => VmImageCmd::Init { name, dir, force },
-        // BUG FIXED HERE, found live on a real host: `delonix image --vm
-        // pull` (no argument) should default to the official golden image,
-        // same as `delonix vm pull` — this mapping used to pass `image`
-        // through even when `None`, and `VmImageCmd::Pull` used to require a
-        // `source`, so clap itself rejected the no-arg invocation before this
-        // code ever ran. Both are now `Option<String>`; `vmimage::run`
-        // applies the actual default.
-        // `--name` used to be dropped on the floor here: `vm pull` and `image
-        // vm pull` both took it, and only this legacy third spelling answered
-        // `unexpected argument '--name'`. Three entry points to one command
-        // that disagree on their flags is how a documented example stops
-        // working depending on which of them the reader happened to copy.
-        ImageCmd::Pull {
-            image,
-            verify: _,
-            name,
-            no_k8s,
-        } => VmImageCmd::Pull {
-            source: image,
-            name,
-            no_k8s,
-        },
-        ImageCmd::LsRemote { source, no_k8s } => VmImageCmd::LsRemote { source, no_k8s },
-        ImageCmd::Push { name, target } => VmImageCmd::Push {
-            name,
-            // A VM image has no repo_tags from which to infer the destination.
-            // No longer required: without it the official repository is
-            // chosen from the image's own metadata (`official_repo_for`).
-            target,
-        },
-        ImageCmd::Import(args) => VmImageCmd::Import(args),
-        ImageCmd::Convert {
-            source,
-            to,
-            output,
-            compress,
-        } => VmImageCmd::Convert {
-            source,
-            to,
-            output,
-            compress,
-        },
-        ImageCmd::Build {
-            tag,
-            file,
-            context,
-            distro,
-            ubuntu_release,
-            debian_release,
-            rocky_release,
-            fedora_release,
-            k8s_version,
-            extra_packages,
-            extra_run,
-            cri_bin,
-            no_compress,
-            network,
-            offline,
-            no_k8s,
-            delonix_bin,
-            root_password,
-            node_exporter,
-        } => VmImageCmd::Build {
-            tag,
-            file,
-            context,
-            distro,
-            ubuntu_release,
-            debian_release,
-            rocky_release,
-            fedora_release,
-            k8s_version,
-            extra_packages,
-            extra_run,
-            cri_bin,
-            no_compress,
-            network,
-            offline,
-            no_k8s,
-            delonix_bin,
-            root_password,
-            node_exporter,
-        },
-        ImageCmd::Tag { .. }
-        | ImageCmd::History { .. }
-        | ImageCmd::Verify { .. }
-        | ImageCmd::Scan { .. } => return Err(Error::Invalid(
-            super::po::t(
-                "tag/history/verify are for container images — they do not apply to VM images (--vm)",
-            )
-            .into(),
-        )),
-        ImageCmd::Remove { .. }
-        | ImageCmd::Prune { .. }
-        | ImageCmd::Export { .. }
-        | ImageCmd::Save { .. }
-        | ImageCmd::Load { .. }
-        | ImageCmd::Apply { .. } => {
-            return Err(Error::Invalid(
-                super::po::t("command not available for VM images (--vm) — use ls/pull/push/build")
-                    .into(),
-            ))
-        }
-        ImageCmd::Login { .. } | ImageCmd::Logout { .. } | ImageCmd::Vm { .. } => {
-            unreachable!("tratados em run()")
-        }
-    };
-    vmimage::run(mapped)
 }
 
 /// `(username, password)` out of a `kind: Secret`, for a registry pull.

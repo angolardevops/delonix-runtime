@@ -959,7 +959,7 @@ if [ "$WITH_GPU" = 1 ]; then
 fi
 
 # ------------------------------------- construir imagens VM (opt-in explicito)
-# `delonix image --vm build` corre `virt-customize`, que constroi um appliance
+# `delonix image vm build` corre `virt-customize`, que constroi um appliance
 # com o supermin. Duas coisas que faltam por omissao num host tipico, e cada uma
 # falha de forma que ninguem adivinha:
 #
@@ -991,7 +991,7 @@ if [ "$WITH_IMAGE_BUILD" = 1 ]; then
       stepok imgbuild kernel-readable
       warn "the host kernel is now world-READABLE (revert: sudo chmod 0600 /boot/vmlinuz-*)"
     else
-      warn "could not chmod /boot/vmlinuz-* — `image --vm build` will fail in supermin"
+      warn "could not chmod /boot/vmlinuz-* — `image vm build` will fail in supermin"
     fi
   else
     skip imgbuild kernel-readable

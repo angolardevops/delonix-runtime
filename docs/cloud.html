@@ -269,8 +269,8 @@ delonix vm create pesada --backend libvirt          # default quando CH não est
 <tr><td>Arranque em milissegundos, isolamento por namespace, ou alcançar containers por IP</td>
     <td><code>--backend cloud-hypervisor</code> + firmware</td></tr>
 <tr><td>Personalizar UMA VM</td><td>cloud-init por instância: <code>--hostname</code>/<code>--ssh-key</code>/<code>--user-data</code></td></tr>
-<tr><td>Personalizar TODAS as VMs de um modelo</td><td>Um <code>VMfile</code> com <code>CLOUDINIT</code>, e <code>image --vm build</code></td></tr>
-<tr><td>Um disco à tua medida, publicável</td><td><code>vm init --vmfile</code> → <code>image --vm build</code> → <code>vm push</code></td></tr>
+<tr><td>Personalizar TODAS as VMs de um modelo</td><td>Um <code>VMfile</code> com <code>CLOUDINIT</code>, e <code>image vm build</code></td></tr>
+<tr><td>Um disco à tua medida, publicável</td><td><code>vm init --vmfile</code> → <code>image vm build</code> → <code>vm push</code></td></tr>
 </table>
 
 <h2>Onde isto falha, e o que ver</h2>
@@ -285,7 +285,7 @@ delonix vm create pesada --backend libvirt          # default quando CH não est
 <tr><td>A VM não arranca em Cloud Hypervisor</td>
     <td>Falta o firmware. CH não faz boot BIOS: precisa de
     <code>--firmware</code> ou de <code>--kernel</code>+<code>--initrd</code>.</td></tr>
-<tr><td>O disco enche a meio do <code>image --vm build</code></td>
+<tr><td>O disco enche a meio do <code>image vm build</code></td>
     <td><code>SIZE</code> em falta, ou depois de um <code>RUN</code>. É
     propriedade da stage, e corre antes de tudo.</td></tr>
 <tr><td>Mudaste o <code>user-data</code> e nada muda</td>
@@ -437,8 +437,8 @@ delonix vm create heavy --backend libvirt          # default when CH isn't insta
 <tr><td>Millisecond boot, per-namespace isolation, or to reach containers by IP</td>
     <td><code>--backend cloud-hypervisor</code> + firmware</td></tr>
 <tr><td>To customize ONE VM</td><td>Per-instance cloud-init: <code>--hostname</code>/<code>--ssh-key</code>/<code>--user-data</code></td></tr>
-<tr><td>To customize EVERY VM from one template</td><td>A <code>VMfile</code> with <code>CLOUDINIT</code>, and <code>image --vm build</code></td></tr>
-<tr><td>Your own publishable disk</td><td><code>vm init --vmfile</code> → <code>image --vm build</code> → <code>vm push</code></td></tr>
+<tr><td>To customize EVERY VM from one template</td><td>A <code>VMfile</code> with <code>CLOUDINIT</code>, and <code>image vm build</code></td></tr>
+<tr><td>Your own publishable disk</td><td><code>vm init --vmfile</code> → <code>image vm build</code> → <code>vm push</code></td></tr>
 </table>
 
 <h2>Where this breaks, and what to check</h2>
@@ -453,7 +453,7 @@ delonix vm create heavy --backend libvirt          # default when CH isn't insta
 <tr><td>The VM won't boot under Cloud Hypervisor</td>
     <td>Missing firmware. CH doesn't do BIOS boot: it needs
     <code>--firmware</code> or <code>--kernel</code>+<code>--initrd</code>.</td></tr>
-<tr><td>The disk fills up mid-<code>image --vm build</code></td>
+<tr><td>The disk fills up mid-<code>image vm build</code></td>
     <td>Missing <code>SIZE</code>, or set after a <code>RUN</code>. It's a
     stage property, and runs before everything else.</td></tr>
 <tr><td>You changed <code>user-data</code> and nothing changes</td>

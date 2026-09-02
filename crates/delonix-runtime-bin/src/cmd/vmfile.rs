@@ -352,7 +352,7 @@ pub(crate) fn scaffold(name: &str) -> String {
     format!(
         r#"# VMfile — a bootable qcow2, built from a distro's cloud image.
 #
-#   delonix image --vm build -t {name}:1.0 .
+#   delonix image vm build -t {name}:1.0 .
 #   delonix vm create dev --disk-image {name}:1.0
 #
 # Builds as written. Delete what you do not need.
@@ -376,12 +376,12 @@ HOSTNAME {name}
 # gives a different image depending on when it ran.
 #
 # These two build as written, with no network:
-RUN echo "built by delonix image --vm build" > /etc/motd
+RUN echo "built by delonix image vm build" > /etc/motd
 RUN systemctl enable ssh
 
 # To install packages the guest needs the network, and you ask for it:
 #
-#   delonix image --vm build --network -t {name}:1.0 .
+#   delonix image vm build --network -t {name}:1.0 .
 #
 # with the RUN you actually want, for example:
 #

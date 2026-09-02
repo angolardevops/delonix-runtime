@@ -62,19 +62,14 @@
 =	explain
 ~	get
 ~	image apply
-=	image build
-=	image convert
 ~	image dash
 ~	image describe
 =	image export
 ~	image history
-=	image import
-~	image init
 ~	image load
 =	image login
 =	image logout
 ~	image ls
-~	image ls-remote
 ~	image prune
 =	image pull
 =	image push

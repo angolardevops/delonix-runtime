@@ -170,7 +170,7 @@ check "container ls" ok "$BIN" container ls
 check "container ls -a" ok "$BIN" container ls -a
 check "container ls -q" ok "$BIN" container ls -q
 check "image ls" ok "$BIN" image ls
-check "image --vm ls" ok "$BIN" image --vm ls
+check "image vm ls" ok "$BIN" image vm ls
 check "volumes ls" ok "$BIN" volumes ls
 check "network ls" ok "$BIN" network ls
 
