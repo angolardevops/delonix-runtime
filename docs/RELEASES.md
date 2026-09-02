@@ -54,6 +54,572 @@ foram renomeadas para `backup ls`.
 `scripts/cli_baseline.tsv` continua em **236** — é uma troca de nome de duas linhas
 (`image list`→`image ls`, `backup list`→`backup ls`), não uma adição nem remoção.
 
+### `delonix system resources` — as flags que este anfitrião aceita e ignora
+
+`system info` dizia `cgroup2 delegated: yes`. **Quais** controladores, não dizia
+— e é aí que mora uma classe inteira de falhas silenciosas: um `--cpuset-cpus`
+ou um `--io-max` num anfitrião sem esses controladores é lido, aceite e
+ignorado, o container corre sem tecto nenhum e nada em lado nenhum o diz.
+
+O comando novo responde a três perguntas de uma vez, porque separadas não valem:
+quanto há, quanto se consegue mesmo impor, e o que está parado agora.
+
+```
+$ delonix system resources
+control — what the engine can actually enforce here
+  mode                rootless
+  cgroup base         /sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/dlx-containers
+  cpu       enforced  --cpus, --cpu-weight
+  memory    enforced  --memory, --memory-swap
+  pids      enforced  --pids-limit
+  cpuset    IGNORED   --cpuset-cpus, --cpuset-mems
+  io        IGNORED   --io-weight, --io-max
+
+pressure — share of time some task was stalled (avg10 / avg60 / avg300)
+  cpu         0.00% /   0.01% /   0.03%
+  memory      0.00% /   0.00% /   0.13%
+  io         19.04% /   5.01% /   2.68%   ← the bottleneck right now
+
+4 flag(s) are accepted and silently ignored on this host: --cpuset-cpus --cpuset-mems --io-weight --io-max
+```
+
+Três coisas que ele faz e que a leitura ingénua não faria:
+
+- **Lê os controladores na fronteira de delegação, não no cgroup actual.** Numa
+  sessão gráfica o cgroup actual é um `app-*.scope` que oferece `memory pids`,
+  enquanto o `user@<uid>.service` duas camadas acima oferece `cpu memory pids`.
+  O motor escapa para essa fronteira antes de criar seja o que for, por isso
+  reportar a vista do scope inventaria um `cpu` em falta que nunca se atinge.
+- **Só nomeia um gargalo acima de 5% de tempo parado.** Numa máquina em repouso
+  os três números andam perto de zero e o que ganhar por 0,01 não significa
+  nada — dar-lhe o nome de gargalo seria uma mentira com um número ao lado.
+- **Não manda ninguém atrás de uma correcção que não existe.** O `io` não é uma
+  delegação que este anfitrião se esqueceu de dar: o systemd não a dá a um
+  utilizador sem privilégios, ponto — nenhum motor rootless, este, o podman ou o
+  docker, escreve `io.max`. Para tectos de I/O o caminho é correr o nó como root.
+
+`-o json` para um painel de capacidade ou um portão. É só leitura: não escreve
+nada, em lado nenhum.
+
+#### O conselho é código, com identificadores estáveis
+
+O `system resources` não se limita a mostrar números: cada achado tem um id
+`DLX-RES-nnn` que sobrevive à reescrita do texto, uma severidade e uma **classe**.
+
+```
+findings
+  DLX-RES-001   2 flag(s) are accepted and silently ignored: --cpuset-cpus --cpuset-mems
+                → sudo delonix system setup --delegate, then log out and back in
+  DLX-RES-003   no aggregate ceiling: one workload with no --memory can take the whole host
+                → run the node as root for delonix.slice, or set a per-container --memory
+  DLX-RES-002   --io-weight and --io-max cannot apply: systemd never delegates the io
+                controller to a rootless user
+```
+
+As três classes existem para o portão, não para decoração: `config` e `capacity`
+descrevem algo estável sobre o qual se pode agir, e `--strict` sai com código
+diferente de zero perante um deles; `load` descreve **este minuto** e nunca
+reprova nada — um portão que fica vermelho porque alguém correu uma compilação
+ensina toda a gente a ignorá-lo. É por isso que a pressão crónica (avg300) e um
+pico (avg10 alto, avg300 baixo) são achados diferentes, com ids diferentes.
+
+Repare no `DLX-RES-002`: é o único sem acção. O `io` não é uma delegação que
+alguém se esqueceu de dar — o systemd não a dá a um utilizador sem privilégios,
+e nenhum motor rootless escreve `io.max`. Mandar correr o `system setup` sobre
+isso seria mandar o operador atrás de uma correcção que não existe.
+
+#### `resources.get` no MCP, e o veredicto sobre correr o modelo aqui
+
+A mesma função pura serve o MCP. Um agente e a CLI dão exactamente os mesmos ids
+sobre a mesma máquina — se divergissem, quem lesse os dois não teria como saber
+qual mentia.
+
+E o servidor responde a uma pergunta que um agente sobre esta máquina devia
+fazer primeiro: **esta máquina devia estar a correr o modelo que está a ler
+isto?** O veredicto é aritmética medida, não opinião:
+
+```json
+"local_inference": {
+  "verdict": "marginal",
+  "largest_model_b_q4": 10,
+  "reasons": [
+    "this GPU also drives a display: a model that fills its VRAM makes the desktop stutter…",
+    "10 GiB already swapped out — CPU offload would swap, and swapped inference is unusable"
+  ]
+}
+```
+
+O dimensionamento está ancorado num número que qualquer pessoa confirma — um 8B
+a `Q4_K_M` ocupa ~4,7 GiB — e conta o que quase toda a gente esquece: **o
+contexto não é grátis**. Nos 7581 MiB livres desta placa cabe um modelo de 10B
+com 8k de contexto e só de 8B com 32k. Um modelo que "cabe" sem contar a cache
+KV é um modelo que morre a meio da resposta.
+
+Recusa com razão escrita quando não há GPU utilizável, quando não há spec CDI
+(o container nunca chegaria à placa), ou quando nem um modelo de 7B cabe —
+abaixo disso o modelo preenche um template mas não pesa um compromisso.
+
+#### `delonix system regulate` — devolver o CPU a quem está à espera
+
+A metade determinista. Lê a pressão, encontra a carga que a **causa**, corta-lhe
+o `cpu.weight` a metade, e devolve-o quando a disputa passa.
+
+**Causa, não vítima.** Pressão alta *dentro* de um container quer dizer que esse
+container está a ser esfomeado — é a vítima. A causa é quem mais consome.
+Estrangular «quem mais espera» castigaria exactamente a carga errada, por isso o
+alvo escolhe-se por quota de consumo, medida em duas amostras (o `usage_usec` é
+um contador desde que o container arrancou; uma leitura só diz quem gastou mais
+CPU desde terça-feira passada).
+
+**Só o `cpu.weight`, de propósito.** É uma quota-parte, não um tecto: sem nada
+com que competir, uma carga estrangulada continua a ter a máquina inteira. Nada
+é morto, suspenso nem limitado. O `memory.high` seria o segundo botão óbvio e
+fica de fora por decisão: mal posto, prende uma base de dados em reclamação
+permanente, e isso merece desenho próprio.
+
+Duas marcas de água em duas janelas (25% em 10s para agir, 5% em 60s para
+devolver) porque com uma só o regulador estrangula e repõe a mesma carga a cada
+tique. E a recuperação **ganha** a um pico novo: sem isso, uma compilação custa a
+uma carga metade da sua quota até o nó reiniciar.
+
+Provado sob contenção a sério — 48 processos a queimar CPU num container, com o
+anfitrião a 95% de tempo parado:
+
+```
+cpu stalled 95.0% over 10s, 46.4% over 60s · 3 workload(s)
+  reg-burn               100.0%  cpu.weight 100
+  oqsi-e2e-server          0.0%  cpu.weight 100
+  kaeso-db                 0.0%  cpu.weight 100
+  throttle reg-burn: cpu.weight 100 → 50  [applied]
+    cpu stalled 95.0% over 10s and this workload is taking 100% of the engine's cpu time
+```
+
+Escolheu a causa, deixou as duas vítimas em paz, desceu 100 → 50 → 25 → 20 e
+parou no piso. A reposição foi provada no sentido inverso, com o evento no log.
+
+Foi essa corrida que encontrou um defeito que nenhum teste apanhava: o container
+morreu estrangulado antes de o minuto acalmar, e o **memo sobreviveu-lhe**. Agora
+os memos de cargas que já não existem são varridos a cada tique.
+
+Não muda nada sem `--apply`.
+
+#### `scripts/advisor_eval.py` — escolher o modelo com números
+
+A escolha de um modelo para ler o estado de um anfitrião estava a ser feita por
+opinião. Este é um dos raros casos em que a resposta certa é **calculável**: o
+`bottleneck()` e os achados `DLX-RES-nnn` são deterministas, portanto há
+gabarito, e um modelo que não o bate não serve — valham-lhe os benchmarks que
+valerem.
+
+Dezassete anfitriões sintéticos cobrem o espaço de decisão, e a verdade de cada
+um é **computada pelas regras reais, nunca escrita à mão**: uma expectativa
+escrita à mão é uma segunda implementação das regras, e no dia em que as regras
+mudam passa a ser uma mentira que um teste verde defende. Mudar um limiar sem
+regenerar os goldens falha o teste, no mesmo commit.
+
+```
+DELONIX_UPDATE_FIXTURES=1 cargo test -p delonix-runtime --test advisor_fixtures
+scripts/advisor_eval.py --backend ollama --model qwen3:8b
+scripts/advisor_eval.py --backend stub      # prova o arnês sem modelo nenhum
+```
+
+Mede, por ordem de importância: **JSON válido** (um conselheiro que devolve
+prosa não se liga a nada — abaixo de 100% está fora), **gargalo certo**,
+**achados certos** (Jaccard sobre o par `id:subject`), **achados inventados** e
+latência p50/p95. Os inventados contam tanto como os certos: um modelo que
+encontra problemas num anfitrião saudável ensina o operador a ignorá-lo.
+
+Dois pares no corpus existem só para separar quem entendeu de quem decorou:
+
+| par | o que separa |
+|---|---|
+| `io-bound-chronic` vs `io-spike-transient` | o mesmo instante mau, cinco minutos diferentes |
+| `memory-thrashing` vs `swap-used-but-calm` | 10 GiB em swap num anfitrião calmo é **saúde**, não problema |
+
+E o corpus tem um portão contra si próprio. A primeira versão dava **69%** a
+quem respondesse sempre «nada» — nove de treze anfitriões estavam calmos, e um
+ranking onde o silêncio tira 69% não separa um bom modelo de um mudo. Um teste
+mede agora a resposta trivial e recusa um corpus onde ela passe dos 60%; hoje
+tira 53%, e é essa a linha que o relatório imprime ao lado de qualquer
+pontuação.
+
+O `--backend openai` fala o dialecto `/v1/chat/completions`, que qualquer
+fornecedor serve. O utilizador final escolhe o seu modelo e o seu fornecedor;
+isto só diz quanto custa a escolha.
+
+#### O tecto agregado passa a existir em rootless
+
+O `delonix.slice` é `/sys/fs/cgroup/delonix.slice` — um caminho de **raiz**. E
+rootless é o modo por omissão deste motor, portanto até aqui o orçamento
+agregado simplesmente **não existia onde a maior parte das instalações corre**.
+Duas consequências, ambas medidas: uma carga sem `--memory` podia levar o
+anfitrião inteiro, e o governador térmico baixava o `cpu.max` de um cgroup que
+não estava lá.
+
+A resposta já existia e estava a ser ignorada: em rootless, a base delegada onde
+o motor cria as folhas (`<user@uid.service>/dlx-containers`) **é** o pai comum de
+todas as cargas. Pôr o tecto nela não precisa de privilégio novo nem de caminho
+novo — é o mesmo directório onde as folhas já vivem.
+
+Medido nesta máquina, depois da mudança:
+
+```
+memory.max   27878420480     (85% de 30,5 GiB)
+cpu.max      2720000 100000  (27,2 dos 32 cores)
+pids.max     131072
+```
+
+Três coisas destrancam com isto:
+
+- o **`DLX-RES-003`** («sem tecto agregado») deixa de aparecer, porque deixou de
+  ser verdade;
+- a **admissão** (`admission_check`) deixa de desistir por ser rootless — passa a
+  desistir só quando não há fronteira de delegação nenhuma, que é outra coisa;
+- o **`system thermal`** deixa de exigir root. Provado ao vivo: a 85 °C baixou o
+  tecto do motor de 27,2 para 21,8 cores, sem sudo.
+
+Onde não há fronteira — uma sessão SSH, que é um *scope* **irmão** do
+`user@<uid>.service` e não um descendente — a resposta é `None` e o comando
+recusa dizendo isso. Escrever um tecto para onde o motor nunca conseguiria mover
+um container seria pior do que não ter tecto.
+
+#### O `doctor` deixa de ter uma segunda lista escondida
+
+O `system doctor` dizia «every prerequisite holds» num anfitrião onde duas flags
+estavam a ser aceites e ignoradas — porque essa lista vivia noutro comando. Duas
+listas de problemas do mesmo anfitrião, em dois sítios, é como um operador lê uma
+e perde a outra, e o `doctor` é o que se corre quando algo está mal.
+
+Passa a mostrar os achados de recursos, das **mesmas** regras, e só as classes
+estáveis: `doctor` responde «este anfitrião consegue fazer o que o motor
+promete», e a pressão deste minuto não é resposta a essa pergunta. O `--strict`
+passa a reprovar também por elas.
+
+#### O regulador ganha a memória — e nunca o `memory.max`
+
+A segunda metade do `system regulate`. Só o `memory.high`, e a distinção não é
+de estilo: `high` põe uma carga acima da linha em reclamação agressiva e
+abranda-a; `max` mata-a. Um regulador que pode matar uma base de dados porque
+uma média de cinco minutos passou um limiar não é um regulador, é um incidente.
+
+**Duas decisões, dois culpados.** O maior consumidor de CPU raramente é o maior
+detentor de memória, por isso os planeadores são separados e cada observação
+credita **uma** decisão por recurso. Provado sob pressão real nesta máquina —
+39,2% de tempo parado em memória, com o CPU a 0,1%:
+
+```
+stalled: cpu 0.1%/0.3%, memory 39.2%/35.4% (10s/60s) · 2 workload(s)
+  oqsi-e2e-server          0.2% cpu  648.7 MiB mem  cpu.weight 100
+  kaeso-db                99.8% cpu    2.7 GiB mem  cpu.weight 100
+  throttle kaeso-db: memory.high 2.7 GiB → 2.4 GiB  [would apply (use --apply)]
+    memory stalled 39.2% over 10s and this workload holds 81% of the engine's memory
+```
+
+Repare que o `kaeso-db` tem 99,8% do CPU e **não** foi estrangulado no CPU: a
+0,1% de tempo parado não há disputa nenhuma para resolver. É o mesmo princípio
+que já estava lá — 90% do CPU numa máquina que ninguém está à espera não é
+problema.
+
+O aperto é para **90% do que a carga usa agora**: um empurrão para a reclamação,
+não um precipício. A carga fica com o que tem e paga só por crescer, que é
+exactamente para o que o `memory.high` serve. Nunca abaixo de 128 MiB, e nunca
+duas vezes na mesma carga — quem já está apertado é excluído, ou um só evento
+sustentado levá-la-ia ao piso em quatro tiques.
+
+Um memo por **par (carga, botão)**, e não um por carga: uma carga pode estar
+estrangulada no CPU e na memória ao mesmo tempo, e um só ficheiro faria a segunda
+reivindicação apagar a primeira — uma delas nunca mais voltaria. Repor a memória
+escreve o literal `max`, e não um número, porque um número continuaria a ser um
+tecto. Um `memory.high` que um humano pôs à mão não tem memo e **nunca** é
+tocado.
+
+#### Primeira medição de um modelo: o `qwen3:8b` perde para o silêncio
+
+O arnês existia e nunca tinha visto um modelo. Viu.
+
+```
+modelo qwen3:8b · ollama · 17 casos
+  json válido       100%
+  gargalo certo      47%     (a resposta trivial tira 53%)
+  achados (jaccard) 0.32     (a resposta trivial tira 0.35)
+  inventados           5
+  latência p50/p95  7.0s / 9.7s
+```
+
+Passa o portão duro — **100% de JSON válido**, e um conselheiro que devolve prosa
+não se liga a nada — e depois **perde para quem responde sempre «nada»** nas duas
+métricas que interessam.
+
+O porquê está nos casos, e é um modo de falha único:
+
+| onde | resultado |
+|---|---|
+| anfitriões **em disputa** (cpu/io/memória crónicos, pico, sem PSI) | 8 em 9 certos |
+| anfitriões **calmos** (saudável, swap-mas-calmo, as três variantes de GPU, disco cheio) | 0 em 6, e inventou achados em 5 |
+
+**O modelo não consegue dizer «não se passa nada».** É a pior propriedade
+possível num conselheiro, porque é exactamente o que ensina um operador a
+ignorá-lo — e é a razão pela qual os anfitriões calmos estão no corpus. Sem eles,
+este modelo teria tirado ~89% e parecido excelente.
+
+Três coisas que este número **não** é: não é um veredicto sobre o Qwen3 (o prompt
+não foi afinado, e o arnês ainda não distingue culpa do modelo de culpa do
+prompt); não é uma medição de velocidade de GPU (correu em **CPU** — o servidor
+Ollama desta máquina não tinha bibliotecas CUDA, e a placa esteve o tempo todo
+livre); e não é uma comparação (um modelo, um prompt, temperatura 0, uma corrida
+por caso).
+
+O arnês ganha `--think`, desligado por omissão. Os modelos de raciocínio emitem
+um bloco de pensamento antes da resposta e ele domina a latência — e aqui os
+números vêm de uma tabela fixa, não de uma cadeia de raciocínio, portanto o bloco
+gasta-se em nada. Com ele ligado a mesma pergunta demorava três vezes mais.
+
+#### `system resources` passa a olhar para dentro de cada carga
+
+Os achados do anfitrião respondem «este anfitrião consegue impor alguma coisa».
+A pergunta a seguir é outra, e num anfitrião misto tem outra resposta: **«e o
+tecto que EU pedi, ficou de pé?»** Uma carga arrancada antes de uma delegação ser
+corrigida continua a correr sem o limite que pediu, e nada o dizia.
+
+Provado ao vivo — uma carga que pede um `--cpuset` que esta máquina não consegue
+impor:
+
+```
+workloads — what each asked for, and its own stall (10s cpu/mem/io)
+  wl-probe                 0%    0%    0%
+      --memory        256M      in force
+      --cpus          0.5       in force
+      --cpuset        0-1       IGNORED   controller not delegated — the flag was accepted and ignored
+```
+
+A comparação é contra **o que o motor teria escrito**, calculado pelos
+conversores que o caminho de arranque usa — não por um segundo entendimento de
+«o que quer dizer `--memory 512M` em termos de cgroup». Uma segunda
+implementação derivaria, e o primeiro sinal da deriva seria este relatório a
+chamar partido a um anfitrião correcto.
+
+E cada carga traz a **sua própria** pressão. A do `io` aparece mesmo onde o
+controlador `io` não está delegado: o kernel contabiliza a paragem quer alguém
+a possa limitar quer não. Em rootless, é a única resposta honesta a «quem está à
+espera do disco».
+
+#### Quatro flags que o conselho nomeava não existem
+
+Medido a 2026-08-31: `--memory-swap`, `--pids-limit`, `--cpuset-mems` e
+`--io-max` são a grafia do Docker. Este motor tem `--cpuset` e a família
+`--device-*-bps/iops`, e o `pids` **não tem flag nenhuma** — o tecto é
+propriedade do grupo de cgroup, não do `container run`.
+
+Portanto o `system resources` andou a dizer a operadores para deixarem de usar
+flags que não conseguem escrever. Nada podia dar por isso: são literais de
+string noutro crate, e o compilador não tem opinião sobre o interior de uma
+string. Agora um teste percorre a árvore do `clap` e recusa qualquer nome que
+não exista mesmo — mais um que falha se alguma das quatro grafias do Docker
+voltar a aparecer sem ser acrescentada ao mapa no mesmo commit.
+
+#### O regulador passa a ter quem o arranque
+
+Não é um daemon — este motor é daemonless por desenho, e um processo residente
+precisaria do seu próprio ADR. É a outra metade do problema: **um regulador que
+ninguém arranca não regula nada.**
+
+```
+delonix system regulate --install-timer --interval 60
+delonix system regulate --uninstall-timer
+```
+
+Um temporizador `systemd` a correr `--apply --once`. Em rootless instala uma
+unidade de **utilizador** — nenhum privilégio — e como root vai para o sistema.
+Provado ao vivo: disparou, correu o regulador, registou a decisão no journal, e
+agendou a seguinte.
+
+```
+Aug 31 08:11:11 delonix[…]:   kaeso-db  52.0% cpu  1.7 GiB mem  cpu.weight 100
+Aug 31 08:11:11 delonix[…]:   nothing to do
+Aug 31 08:11:11 systemd[1775]: Finished delonix-regulate.service
+```
+
+`Persistent=false` de propósito: uma decisão perdida enquanto a máquina esteve
+desligada não vale a pena recuperar — a pressão da semana passada não é pressão.
+
+### Limitações conhecidas
+
+- **O I/O continua sem regulação**, e não é uma escolha nossa: o `io` não é
+  delegável a um utilizador sem privilégios, portanto não há botão para rodar. O
+  que existe é a visibilidade, e agora está exposta — a pressão de `io` de cada
+  carga aparece no `system resources`.
+
+#### Os achados passam a falar português
+
+Não davam, e a razão era estrutural: o catálogo da CLI indexa pela string
+inglesa EXACTA, e um `format!("{n} flag(s)…")` produz uma chave diferente para
+cada anfitrião. Traduzir texto já formatado é impossível por construção.
+
+Agora o motor emite **template mais dados** em vez de texto acabado:
+
+```rust
+finding: Message::new(
+    "{n} flag(s) are accepted and silently ignored: {flags}",
+    &[("n", …), ("flags", …)],
+)
+```
+
+O template é um literal `&'static str` — portanto é uma chave de catálogo — e a
+CLI renderiza-o na língua do utilizador. **O motor diz o quê, a CLI decide em que
+língua**, e o crate do motor continua sem saber que o português existe.
+
+```
+achados
+  DLX-RES-001   cgroup   2 flag(s) são aceites e ignoradas em silêncio: --cpuset
+                         → sudo delonix system setup --delegate, e depois sair e voltar a entrar
+  DLX-RES-002   io       o --io-weight e as flags --device-*-bps não se aplicam: o
+                         systemd nunca delega o controlador io a um utilizador sem privilégios
+```
+
+O JSON e o MCP continuam a receber **inglês**, sempre: um consumidor de máquina
+que tenha de adivinhar a locale de um campo é um consumidor que se parte quando
+alguém muda a shell. Para máquinas, a chave é o `id`.
+
+E a `action` passou de `String` vazia a `Option<Message>` — «não há nada a
+fazer» deixou de se escrever como «a acção é a string vazia», que é a mesma
+coisa dita de uma forma em que ninguém repara.
+
+### Limitações conhecidas
+- **O `--apply` da memória não foi exercido contra um container vivo.** A decisão
+  foi provada sob pressão real, e a mecânica de escrita e reposição por testes com
+  ficheiros a sério; espremer a base de dados de alguém para fazer uma
+  demonstração não era proporcionado.
+- **Um modelo medido, e em CPU.** O `qwen3:8b` correu inteiro na CPU porque o
+  servidor Ollama desta máquina não tem bibliotecas CUDA; isso afecta a latência,
+  não a exactidão. Nenhum segundo modelo, e nenhuma corrida com GPU.
+- **O prompt não foi afinado.** Uma pontuação baixa pode ser do modelo ou do
+  prompt, e o arnês ainda não distingue as duas coisas — o passo seguinte é
+  variar o prompt com o modelo fixo.
+- **Os anfitriões do corpus são sintéticos.** Capturas reais de uma máquina só
+  ocupam um canto do espaço (esta só produziria «rootless, cpu memory pids, em
+  repouso»), mas o arnês lê qualquer ficheiro da mesma forma — a saída de
+  `delonix system resources -o json` entra ao lado destes.
+
+## Restruturação da CLI, blocos B1 e B3 (fatia 1) — identidade, diagnóstico, e uma preferência local
+
+Continuação directa do plano em `docs/discovery/52_CLI_PLANO_MIGRACAO.md`. O B1 fecha
+a identidade endereçável dos dois Kinds que nunca tinham um nome de documento
+persistido; o B3 (fatia 1) acrescenta quatro peças baratas — mecanismo já existente,
+só faltava a superfície.
+
+### B1 — `get`/`describe`/`delete` alcançam `NetworkRoute` e `NetworkPolicy`
+
+`NetworkRoute` (`<from>-><to>`) e `NetworkPolicy`/`FirewallPolicy` (`<target>/<direction>`)
+não tinham identidade própria em lado nenhum — o registo, quando existe, só conhecia o
+par ou o (alvo, direcção). Os verbos genéricos exigem um NOME, e agora respondem por
+essa identidade. `get networkpolicies` ganhou, de caminho, a listagem combinada que
+faltava: `net ingress ls`/`net egress ls` só respondiam à sua direcção, uma de cada
+vez. `cluster describe` (modo kind) também passou a existir.
+
+Sem verbo de CLI novo — os dois Kinds continuam sem `network route describe`/
+`net ingress describe` nativos, só o verbo genérico foi ligado, o mesmo padrão que
+`kind: Dependency`/`kind: NetworkAccessRule` já seguiam.
+
+### `delonix diff <kind> <name>` — as três faces de um recurso, lado a lado
+
+O motor de diff de 3 vias já existia dentro de `stack plan` (`desired`/`last-applied`/
+`observed`) — faltava a superfície que mostra as três faces de UM recurso nomeado, em
+vez da lista de mudanças do plano inteiro. `delonix diff <kind> <name> [-f <manifesto>]`
+imprime uma tabela `FIELD | DESIRED | LAST-APPLIED | OBSERVED`; `--detailed-exitcode`
+segue o mesmo idioma do `stack plan` (0 sem diferenças, 2 com elas). Zero mudança a
+qualquer Kind — reaproveita os `desired()`/`actual()` que cada um já expõe.
+
+### `delonix cluster health <name>` — o control-plane responde, os nós estão `Ready`
+
+Só cobre clusters modo-kind (mesma fronteira que `cluster kubeconfig`/`get
+kubernetesclusters` já têm). Corre `kubectl get --raw=/readyz?verbose` e `kubectl get
+nodes` **dentro do container do control-plane** — sem exigir `kubectl` no host. Exit
+não-zero se o control-plane não responder ou um nó não estiver `Ready`: um `health`
+que devolvesse 0 sobre um nó `NotReady` seria o relato desonesto que este repo
+persegue.
+
+### `delonix system metrics [-o json]`
+
+Mais um consumidor do `delonix-mgmt::dashstats::collect` que já alimenta `dash --json`
+e o `/metrics` Prometheus — zero lógica nova. Devolve o `DashSummary` cru (os
+contadores, para scripts), e não o `DashData` moldado para o TUI que `dash --json` já
+dá. `system state` não se construiu de propósito: `system info` já responde à mesma
+pergunta, e um segundo comando para a mesma resposta seria a duplicação que este
+projecto já evita noutros sítios.
+
+### `delonix config get|set|unset` — uma preferência, um ponto de leitura
+
+Âmbito reduzido de propósito: só a preferência de `output` (`table`/`json`) fica
+coberta — não `namespace`, que teria uma dúzia de pontos de aplicação em vez de um
+só, e vira decoração se ninguém a lê de verdade em todos eles. Persistida em
+`<DELONIX_ROOT>/config.json`, mesmo padrão do `delonix_vm::{get,set,clear}_default_
+backend`. O único ponto de leitura é `output::OutputFormat`'s default — todos os
+comandos com `-o/--output` ganham o novo comportamento de graça, sem tocar em mais
+nenhum ficheiro. `config set output json` muda o default de QUALQUER comando sem
+`-o` explícito; `config unset output` volta à tabela.
+
+### `delonix secret rotate <nome> <chave> [--length N]`
+
+Gera um valor novo para UMA chave já existente de um segredo, sem tocar nas outras
+chaves nem na chave-mestra (isso continua a ser o `rotate-key`, comando distinto).
+Reaproveita por inteiro o `SecretStore::update` já provado (flock, read-modify-write)
+e a resolução por nome que já faz um valor rodado aplicar-se só no `start` seguinte.
+Recusa uma chave que não existe — nunca cria uma nova a fingir que é rotação — e
+nunca ecoa o valor gerado, mesma disciplina do `secret create`/`set`. Risco: nenhum
+(zero privilégio/mecanismo novo).
+
+### `volume ls` ganha SIZE/USED BY, `network ls` ganha USED BY
+
+Pedido directo do utilizador, lido pelas lentes de DevOps/SRE/platform engineering: um
+`volume ls` sem tamanho nem consumidor obriga a um `inspect` por volume só para
+responder "que espaço ocupa isto, e quem o usa"; o mesmo para redes. Duas colunas
+novas em cada:
+
+- **`volume ls`**: `SIZE` (o mesmo `measured_usage` do `volumes inspect` — nunca um
+  `0` mentiroso quando um directório de subuid mapeado não é legível daqui: mostra
+  o valor com sufixo `+` quando a medição está incompleta) e `USED BY` (os nomes dos
+  containers cujo `Mount.source` aponta para o `mountpoint` do volume).
+- **`network ls`**: `USED BY` (os containers cujo `network`/`extra_networks` inclui
+  a rede).
+
+Nos dois casos, `None` (não foi possível saber) e `Some(vazio)` (ninguém usa mesmo)
+são distintos — `?` contra `-` na tabela, e em `-o json` o campo só desaparece no
+primeiro caso (`skip_serializing_if` só para `None`, nunca para uma lista vazia
+genuína). Colunas sem informação nenhuma em toda a tabela escondem-se sozinhas
+(`Table::drop_uninformative`).
+
+### `pod`/`secret`/`image`/`container`/`cluster ls` ganham mais seis colunas
+
+Continuação do mesmo pedido — a lente DevOps/SRE/platform engineering aplicada
+ao resto dos `ls`:
+
+- **`pod ls`**: `AGE`, do `created_unix` do membro mais antigo (um pod não tem
+  criação própria — deriva-se dos containers que o compõem).
+- **`secret ls`**: `AGE` (`updated_unix`) e `USED BY` — mesma distinção
+  `None`/`Some(vazio)` do volume/network, contra `Container.secrets`.
+- **`image ls`**: uma linha por TAG em vez de só a primeira (uma imagem
+  multi-tag escondia as outras), e `ORPHAN` (zero containers referenciam-na).
+- **`container ls`**: `RESTARTS` (do registo de eventos) e uma coluna `SIZE`
+  opt-in (`-s/--size`) — o espaço da própria camada de escrita do container,
+  nunca as layers de imagem partilhadas; fica fora por omissão porque é uma
+  travessia de directório por container, o mesmo custo que o `volumes inspect`
+  já assume em vez de pagar em toda a listagem.
+- **`cluster ls`** (modo kind): `K8S VERSION`, lida da tag da imagem do nó
+  control-plane (`kindest/node:v1.34.0…`) — a versão real que corre, não a que
+  o `kubeadm init` foi mandado esperar. Filtro por namespace ficou de fora: o
+  `cluster create` não tem `--namespace` nenhum hoje, e adicioná-lo é âmbito
+  maior, separado.
+
+**Um bug de segurança real, encontrado a validar o `ORPHAN`**: `image remove`
+nunca correspondia um container criado com o nome NU da imagem
+(`container run alpine ...` grava `image: "alpine"`, que nunca batia com uma
+entrada de `repo_tags` como `"alpine:latest"`) — `image remove alpine:latest`
+desmarcava em silêncio uma imagem de que um container vivo ainda dependia.
+Corrigido normalizando pelo mesmo `normalise_tag` que o `ImageStore::resolve`
+já usa, partilhado entre o `cmd_rm` e o novo `ORPHAN`. Confirmado ao vivo: antes
+da correcção o `remove` tinha sucesso com o container ainda a apontar para a
+imagem; depois, recusa correctamente.
+
 ---
 
 ## v1.1.0 — a admissão passa a ser um ponto só, e o motor ganha uma superfície para agentes
