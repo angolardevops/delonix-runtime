@@ -1447,11 +1447,11 @@ msgstr "imagem vazia"
 msgid "app templates scaffold containerized apps — use `delonix stack init --template <t>`; this command scaffolds a VM/cluster project"
 msgstr "os templates de app criam apps em containers — usa `delonix stack init --template <t>`; este comando cria um projecto de VM/cluster"
 
-msgid "no local VM images — run `delonix image --vm build` (or `pull`) first, or pass the image/disk explicitly"
-msgstr "sem imagens VM locais — corre `delonix image --vm build` (ou `pull`) primeiro, ou passa a imagem/disco explicitamente"
+msgid "no local VM images — run `delonix image vm build` (or `pull`) first, or pass the image/disk explicitly"
+msgstr "sem imagens VM locais — corre `delonix image vm build` (ou `pull`) primeiro, ou passa a imagem/disco explicitamente"
 
-msgid "{n} local VM images — say which one: `--vm-image <tag>` (cluster) or `--disk <path>` (vm create); see `delonix image --vm ls`"
-msgstr "há {n} imagens VM locais — especifica qual: `--vm-image <tag>` (cluster) ou `--disk <caminho>` (vm create); vê `delonix image --vm ls`"
+msgid "{n} local VM images — say which one: `--vm-image <tag>` (cluster) or `--disk <path>` (vm create), or `--k8s-version <v>` if `delonix-vm-k8s:<v>` is one of them. Available: {names}"
+msgstr "há {n} imagens VM locais — especifica qual: `--vm-image <tag>` (cluster) ou `--disk <caminho>` (vm create), ou `--k8s-version <v>` se `delonix-vm-k8s:<v>` for uma delas. Disponíveis: {names}"
 
 msgid "Pull a golden VM image from an OCI registry — with no argument, the OFFICIAL Delonix image (ready for `vm create`/`cluster kubeadm`)."
 msgstr "Descarrega uma imagem VM dourada de um registo OCI — sem argumento, a imagem OFICIAL do Delonix (pronta para `vm create`/`cluster kubeadm`)."
@@ -3743,8 +3743,8 @@ msgstr "Sobrescreve um `VMfile` existente."
 msgid "{path} already exists — use --force to overwrite"
 msgstr "{path} já existe — usa --force para sobrescrever"
 
-msgid "Next: `delonix image --vm build -t {name}:1.0 {dir}` then `delonix vm create dev --disk-image {name}:1.0`"
-msgstr "A seguir: `delonix image --vm build -t {name}:1.0 {dir}` e depois `delonix vm create dev --disk-image {name}:1.0`"
+msgid "Next: `delonix image vm build -t {name}:1.0 {dir}` then `delonix vm create dev --disk-image {name}:1.0`"
+msgstr "A seguir: `delonix image vm build -t {name}:1.0 {dir}` e depois `delonix vm create dev --disk-image {name}:1.0`"
 
 msgid "no VMfile at {path} — run `delonix vm init` to scaffold one"
 msgstr "não há VMfile em {path} — corre `delonix vm init` para criar um"
