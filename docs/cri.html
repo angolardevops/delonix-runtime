@@ -192,7 +192,7 @@ apertado do que a especificação pede.</p>
 
 <h2>Do zero a um cluster</h2>
 <p>É esta peça que fecha o ciclo do <code>delonix cluster</code>: a imagem VM dourada
-(<code>delonix image --vm build</code>) já traz kubeadm/kubelet/kubectl e o
+(<code>delonix image vm build</code>) já traz kubeadm/kubelet/kubectl e o
 <code>delonix-cri</code> activo; <code>delonix cluster kubeadm</code> provisiona as VMs e faz o
 bootstrap — o cluster resultante corre Kubernetes com o Delonix como runtime de ponta a ponta.</p>
 </div><div class='lang-en'>
@@ -244,7 +244,7 @@ container with no declared seccomp profile runs under the engine's built-in allo
 
 <h2>From zero to a cluster</h2>
 <p>This is the piece that closes the <code>delonix cluster</code> loop: the golden VM image
-(<code>delonix image --vm build</code>) already ships kubeadm/kubelet/kubectl and
+(<code>delonix image vm build</code>) already ships kubeadm/kubelet/kubectl and
 <code>delonix-cri</code> running; <code>delonix cluster kubeadm</code> provisions the VMs and does
 the bootstrap — the resulting cluster runs Kubernetes with Delonix as the runtime end to end.</p>
 </div>

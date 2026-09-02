@@ -435,18 +435,6 @@ mod tests {
         );
     }
 
-    /// `image build` só se invoca como `image --vm build`.
-    ///
-    /// Os cinco aliases de topo do grupo `image` (build/init/convert/import/
-    /// ls-remote) exigem o `--vm`, que **não** é global no clap: `delonix image
-    /// build` sozinho não corre. A alternativa era escrever o exemplo sem a
-    /// flag para satisfazer a regra e publicar uma linha que falha ao ser
-    /// colada — que é o defeito que esta bateria existe para apanhar.
-    fn invoca_por_alias(path: &str, line: &str) -> bool {
-        let segs: Vec<&str> = path.split(' ').collect();
-        segs.len() == 2 && segs[0] == "image" && line.contains(&format!("image --vm {}", segs[1]))
-    }
-
     /// Um exemplo tem de começar pelo comando que documenta — senão documenta
     /// outro. Apanha o erro de copiar-colar entre entradas vizinhas, que é
     /// invisível a olho numa tabela de 234 linhas.
@@ -461,7 +449,7 @@ mod tests {
                 // Um exemplo pode legitimamente ser um pipeline ou trazer um
                 // prefixo de ambiente (`DELONIX_ROOT=… delonix …`); o que se
                 // exige é que o caminho do comando APAREÇA nele.
-                if !line.contains(e.path) && !invoca_por_alias(e.path, line) {
+                if !line.contains(e.path) {
                     mal.push(format!("{}: {line}", e.path));
                 }
             }

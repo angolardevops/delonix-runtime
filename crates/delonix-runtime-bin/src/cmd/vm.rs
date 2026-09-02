@@ -15,7 +15,7 @@ use super::manifest::{self, ManifestDoc};
 use super::output;
 use super::util::state_root;
 
-/// `spec.build` of a `kind: VirtualMachine` — the declarative face of `delonix image --vm build`.
+/// `spec.build` of a `kind: VirtualMachine` — the declarative face of `delonix image vm build`.
 ///
 /// The fields are the flags of that command, one for one, so the two paths
 /// cannot describe different builds. Nothing here is a second implementation:
@@ -71,7 +71,7 @@ pub(crate) struct VmSpec {
     /// to VMs.
     ///
     /// Without it, a project whose VM image is built from a `VMfile` needed two
-    /// commands and a hand-copied tag between them: `delonix image --vm build -t x` and
+    /// commands and a hand-copied tag between them: `delonix image vm build -t x` and
     /// then a manifest saying `disk: x`. The tag was written in two places and
     /// nothing kept them in step.
     #[serde(default)]
@@ -503,7 +503,7 @@ pub enum VmCmd {
         #[arg(long = "url-img", conflicts_with_all = ["disk"])]
         url_img: Option<String>,
         /// Base disk (qcow2/raw) — becomes a per-VM overlay. Omit to use the
-        /// local golden VM image (if there is exactly one; `image --vm ls`).
+        /// local golden VM image (if there is exactly one; `image vm ls`).
         #[arg(long, add = ArgValueCandidates::new(super::complete::vm_images))]
         disk: Option<String>,
         /// vCPUs (default: 1, or the image's `VCPUS` — see `HYPERVISOR`/`VCPUS`
@@ -1827,7 +1827,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                 "{}",
                 super::po::tf("Creating VM '{name}'…", &[("name", &cfg.name)])
             );
-            // Same live display as `image --vm build`: a spinner while a stage runs, a
+            // Same live display as `image vm build`: a spinner while a stage runs, a
             // green tick and how long it took when it ends. The engine reports
             // only that a stage STARTED, so each report closes the previous one
             // — correct here because a stage that failed never reaches the next
