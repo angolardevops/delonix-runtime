@@ -332,17 +332,43 @@ check "sucesso continua a ser 0" 0 "$BIN" container ps
 ########################################
 section "volumes: ciclo de vida"
 ########################################
+# `volumes` (plural) já não existe — renomeado para `volume` sem alias no B2.
+# Corrigido aqui de caminho: `set -e` faria QUALQUER destas linhas abortar o
+# script inteiro, e é por isso que nada da secção seguinte (share volumes,
+# fundida em `volume` no B5) alguma vez chegava a correr.
 VOL="vol-$PFX"
-check "volumes create" ok "$BIN" volumes create "$VOL"
-check "volumes create idempotente" ok "$BIN" volumes create "$VOL"
-check "volumes ls mostra-o" ok bash -c "'$BIN' volumes ls | grep -q '$VOL'"
-check "volumes inspect" ok "$BIN" volumes inspect "$VOL"
-check "volumes describe" ok "$BIN" volumes describe "$VOL"
+check "volume create" ok "$BIN" volume create "$VOL"
+check "volume create idempotente" ok "$BIN" volume create "$VOL"
+check "volume ls mostra-o" ok bash -c "'$BIN' volume ls | grep -q '$VOL'"
+check "volume inspect" ok "$BIN" volume inspect "$VOL"
+check "volume describe" ok "$BIN" volume describe "$VOL"
 # Conflito (5): «o nome já está tomado» é uma resposta diferente de «o argumento
 # está errado» — quem reconcilia adopta/salta no primeiro caso e pára no segundo.
-check "snapshot create" ok "$BIN" volumes snapshot create "$VOL" --name s1
-check "snapshot já existente diz 5 (conflito)" 5 "$BIN" volumes snapshot create "$VOL" --name s1
-check "snapshot rm" ok "$BIN" volumes snapshot rm "$VOL" s1
+check "snapshot create" ok "$BIN" volume snapshot create "$VOL" --name s1
+check "snapshot já existente diz 5 (conflito)" 5 "$BIN" volume snapshot create "$VOL" --name s1
+check "snapshot rm" ok "$BIN" volume snapshot rm "$VOL" s1
+
+########################################
+section "volume create: --type (fusão B5 — antigo storage create)"
+########################################
+# `storage`/`sharevolume` tinham ZERO checks executados — o balde dos
+# «comandos nunca executados» — e o próprio grupo `storage` já não existe:
+# fundido em `volume create --type` (B5 CLI collapse).
+STGN="stg-$PFX"
+check "volume create --type desconhecido recusa" 2 \
+  "$BIN" volume create "$STGN" --type naoexiste --server 10.99.99.99 --share /x
+check "volume create --type sem --share recusa" 2 \
+  "$BIN" volume create "$STGN" --type nfs --server 10.99.99.99
+check "--type e --driver são exclusivos" 2 \
+  "$BIN" volume create "$STGN" --type nfs --server 10.99.99.99 --share /x --driver nfs
+if "$BIN" volume create "$STGN" --type nfs --server 10.99.99.99 --share /exports/x >/dev/null 2>&1; then
+  check "volume ls mostra-o" ok bash -c "'$BIN' volume ls | grep -q '$STGN'"
+  "$BIN" volume rm -f "$STGN" >/dev/null 2>&1
+else
+  skip "volume create --type com NAS real" "montar NFS/CIFS exige CAP_SYS_ADMIN — não exercitável em rootless"
+  check "um create falhado não deixa registo em volume ls" ok bash -c \
+    "! '$BIN' volume ls 2>/dev/null | grep -q '$STGN'"
+fi
 
 ########################################
 section "share volumes (kind: Volume com bloco share:)"
@@ -361,7 +387,7 @@ section "share volumes (kind: Volume com bloco share:)"
 # inquilino continuarem no disco depois disso.
 SHWORK="$OUT/share-$PFX"; mkdir -p "$SHWORK"
 SHPAI="shpai-$PFX"
-check "volume pai para os shares" ok "$BIN" volumes create "$SHPAI"
+check "volume pai para os shares" ok "$BIN" volume create "$SHPAI"
 cat >"$SHWORK/shares.yaml" <<YAML
 apiVersion: delonix.io/v1
 kind: Volume
@@ -396,7 +422,7 @@ YAML
 # exactamente nesse buraco, que é a razão de a escrita antiga ser exercitada
 # aqui em vez de se assumir que ainda funciona.
 check "apply das duas escritas do pai (storageRef + share.from)" ok \
-  "$BIN" volumes apply -f "$SHWORK/shares.yaml"
+  "$BIN" volume apply -f "$SHWORK/shares.yaml"
 # A v0.65.0 REMOVEU `kind: ShareVolume`. O que aqui se prova não é que recusa —
 # um «unknown kind» genérico também recusaria — é que a recusa NOMEIA o que
 # escrever em vez dele: sem isso, quem apanha um manifesto correcto-até-ontem
@@ -412,13 +438,15 @@ spec:
   quota: 5G
 YAML
 check "kind: ShareVolume é recusado" fail \
-  "$BIN" volumes apply -f "$SHWORK/velho.yaml"
+  "$BIN" volume apply -f "$SHWORK/velho.yaml"
 # Sem backticks no padrão de propósito: o texto do erro tem-nos, e dentro das
 # aspas duplas deste `bash -c` seriam substituição de comandos. Os `.` cobrem-nos.
 check "a recusa nomeia a forma nova" ok \
-  bash -c "'$BIN' volumes apply -f '$SHWORK/velho.yaml' 2>&1 | grep -q 'kind: Volume. with a .share:. block'"
-check "sharevolume ls mostra os dois" ok \
-  bash -c "test \$('$BIN' sharevolume ls | grep -c 'sh-$PFX') -eq 2"
+  bash -c "'$BIN' volume apply -f '$SHWORK/velho.yaml' 2>&1 | grep -q 'kind: Volume. with a .share:. block'"
+# `sharevolume ls` fundiu-se em `volume ls -A` (B5 CLI collapse — todas as
+# namespaces de uma vez, o que `sharevolume ls` sempre fazia por omissão).
+check "volume ls -A mostra os dois" ok \
+  bash -c "test \$('$BIN' volume ls -A | grep -c 'sh-$PFX') -eq 2"
 # Dois inquilinos com o MESMO nome de share: o reconciliador identifica por
 # (kind, nome), por isso sem qualificar a namespace os dois seriam UM recurso —
 # um apareceria como deriva do outro em todos os planos, e um `--replace` levava
@@ -432,14 +460,14 @@ check "stack apply adopta e carimba a posse" ok \
 check "manifesto inalterado propõe ZERO alterações" ok \
   "$BIN" stack plan -f "$SHWORK/shares.yaml" --detailed-exitcode
 # Um ficheiro do inquilino, para o destroy ter alguma coisa que possa destruir
-# por engano.
-SHDATA="$("$BIN" sharevolume describe "sh-$PFX" -n shteam-a | awk '/Mountpoint/{print $2}')"
+# por engano. `sharevolume describe -n <ns>` fundiu-se em `volume describe -n <ns>`.
+SHDATA="$("$BIN" volume describe "sh-$PFX" -n shteam-a | awk '/Mountpoint/{print $2}')"
 [[ -n "$SHDATA" ]] && echo "dados-do-inquilino" >"$SHDATA/ficheiro.txt"
 check "o describe do share resolveu um mountpoint" ok test -n "$SHDATA"
 check "stack destroy alcança os dois shares" ok \
   "$BIN" stack destroy -f "$SHWORK/shares.yaml"
 check "o destroy tirou-os do registo" ok \
-  bash -c "test \$('$BIN' sharevolume ls | grep -c 'sh-$PFX') -eq 0"
+  bash -c "test \$('$BIN' volume ls -A | grep -c 'sh-$PFX') -eq 0"
 # A garantia que o `remove_with` sempre deu (nunca toca num mountpoint externo)
 # e que ninguém tinha exercitado pelo caminho declarativo.
 check "os DADOS do inquilino sobreviveram ao destroy" ok test -f "$SHDATA/ficheiro.txt"
@@ -458,8 +486,32 @@ spec:
     share: /export
 YAML
 check "share + nfs no mesmo volume é recusado" fail \
-  "$BIN" volumes apply -f "$SHWORK/mau.yaml"
-"$BIN" volumes rm "$SHPAI" --force >/dev/null 2>&1
+  "$BIN" volume apply -f "$SHWORK/mau.yaml"
+"$BIN" volume rm -f "$SHPAI" >/dev/null 2>&1
+
+########################################
+section "volume create --parent (fusão B5 — antigo sharevolume) imperativo"
+########################################
+# O caminho MANIFESTO acima já prova a fusão de ponta a ponta; isto prova só
+# o caminho IMPERATIVO novo, que não existia antes desta fatia — criar uma
+# share sem escrever um manifesto.
+SHPARENT="shparent-$PFX"
+check "volume pai" ok "$BIN" volume create "$SHPARENT"
+check "volume create --parent" ok "$BIN" volume create "shchild-$PFX" --parent "$SHPARENT" --quota 1M
+check "a share aparece em volume ls com PARENT" ok \
+  bash -c "'$BIN' volume ls | awk '{print \$1\" \"\$3}' | grep -q 'shchild-$PFX $SHPARENT'"
+check "--purge-data é recusado num volume sem --parent" 1 \
+  "$BIN" volume rm "$SHPARENT" --purge-data
+SHCDATA="$("$BIN" volume describe "shchild-$PFX" | awk '/Mountpoint/{print $2}')"
+[[ -n "$SHCDATA" ]] && echo "dados" >"$SHCDATA/f.txt"
+check "rm sem --purge-data preserva os dados" ok "$BIN" volume rm "shchild-$PFX"
+check "…e os dados sobreviveram" ok test -f "$SHCDATA/f.txt"
+# Recriar para provar o --purge-data em separado (o rm anterior já desregistou).
+check "volume create --parent outra vez" ok "$BIN" volume create "shchild-$PFX" --parent "$SHPARENT"
+SHCDATA2="$("$BIN" volume describe "shchild-$PFX" | awk '/Mountpoint/{print $2}')"
+check "rm --purge-data apaga os dados" ok "$BIN" volume rm "shchild-$PFX" --purge-data
+check "…e o subdirectório já não existe" fail test -d "$SHCDATA2"
+"$BIN" volume rm -f "$SHPARENT" >/dev/null 2>&1
 
 ########################################
 section "network: ciclo de vida"
@@ -1614,47 +1666,7 @@ check "system backup continua a existir, separado" ok "$BIN" system backup --hel
 check "system restore continua a existir, separado" ok "$BIN" system restore --help
 
 "$BIN" container rm -f "$BKC" >/dev/null 2>&1
-"$BIN" volumes rm "$BKV" >/dev/null 2>&1
-
-########################################
-section "storage — o que se consegue provar sem uma NAS"
-
-# O `storage` tinha ZERO execuções. E é o grupo onde o SKIP honesto é a maior
-# parte do valor: `storage create` MONTA de imediato (`mount -t nfs|cifs|davfs`),
-# o que exige CAP_SYS_ADMIN — num host rootless não é exercitável, ponto.
-# Fingir com um servidor NFS falso provaria o parser, não o caminho.
-STGN="stg-$PFX"
-
-check "storage ls responde" ok "$BIN" storage ls
-# `storage inspect`/`storage rm` foram cortados no B5 (52_CLI_PLANO_MIGRACAO.md)
-# — uma `Storage` é só um `volume` com driver de rede, e não havia nada em
-# `volume inspect`/`volume rm` que estas duas duplicassem sem acrescentar.
-check "volume inspect de inexistente diz 4" 4 "$BIN" volume inspect "naoexiste-$PFX"
-check "volume rm de inexistente diz 4" 4 "$BIN" volume rm "naoexiste-$PFX"
-check "storage create com --type desconhecido recusa" 2 \
-  "$BIN" storage create "$STGN" --type naoexiste --server 10.99.99.99 --share /x
-check "storage create sem --share recusa" 2 \
-  "$BIN" storage create "$STGN" --type nfs --server 10.99.99.99
-
-# O que É exercitável do `create`: que ele falha ALTO por falta de privilégio e
-# NÃO deixa estado atrás. Um create meio-feito é a classe que este repo já pagou
-# várias vezes (o `create_network` sem rollback, o `volumes rm` a apagar a
-# contabilidade antes dos dados) — e aqui está medido, não assumido.
-if "$BIN" storage create "$STGN" --type nfs --server 10.99.99.99 --share /exports/x >/dev/null 2>&1; then
-  # Um host COM privilégio de montagem chega aqui; então exercita-se o resto.
-  check "volume inspect do que foi criado" ok "$BIN" volume inspect "$STGN"
-  check "storage ls mostra-o" ok bash -c "'$BIN' storage ls | grep -q '$STGN'"
-  check "volume rm" ok "$BIN" volume rm "$STGN"
-else
-  skip "storage create/inspect/rm com NAS real" "montar NFS/CIFS exige CAP_SYS_ADMIN — não exercitável em rootless"
-  # E ISTO é o que se prova sem privilégio nenhum:
-  check "um create falhado não deixa o directório do volume" ok bash -c \
-    "[ ! -d \"\${DELONIX_ROOT:-\$HOME/.local/share/delonix}/volumes/$STGN\" ]"
-  check "um create falhado não deixa registo em volumes ls" ok bash -c \
-    "! '$BIN' volumes ls 2>/dev/null | grep -q '$STGN'"
-  check "um create falhado não deixa registo em storage ls" ok bash -c \
-    "! '$BIN' storage ls 2>/dev/null | grep -q '$STGN'"
-fi
+"$BIN" volume rm -f "$BKV" >/dev/null 2>&1
 
 section "serve — arrancar, sondar, matar, e não deixar restos"
 

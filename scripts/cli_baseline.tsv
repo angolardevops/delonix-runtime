@@ -161,11 +161,6 @@
 ~	serve api
 =	serve cri
 =	serve docker-api
-~	sharevolume apply
-~	sharevolume describe
-~	sharevolume ls
-~	sharevolume migrate
-~	sharevolume rm
 ~	stack apply
 ~	stack describe
 ~	stack destroy
@@ -177,8 +172,6 @@
 →	stack rollback
 ~	stack validate
 ~	stack wait
-~	storage create
-~	storage ls
 ~	system backup
 ~	system boot disable
 ~	system boot enable

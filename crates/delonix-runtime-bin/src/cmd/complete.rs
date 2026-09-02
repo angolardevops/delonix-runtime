@@ -166,12 +166,6 @@ pub fn vm_images() -> Vec<CompletionCandidate> {
     cands(store.list().unwrap_or_default().into_iter().map(|i| i.name))
 }
 
-/// Share volumes — the records live in one directory per namespace plus the
-/// pre-scoping flat ones, so the layout is read by the module that owns it.
-pub fn sharevolumes() -> Vec<CompletionCandidate> {
-    cands(super::sharevolume::completion_names())
-}
-
 /// Public tunnels (`<root>/tunnels/`), live or not: `rm` wants the dead ones
 /// too — the same reason `containers` does not filter by state.
 pub fn tunnels() -> Vec<CompletionCandidate> {

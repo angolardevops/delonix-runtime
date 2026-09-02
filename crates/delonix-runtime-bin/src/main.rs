@@ -152,19 +152,6 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::secret::SecretCmd,
     },
-    /// NETWORK storage (NFS/CIFS/WebDAV) mountable as a volume — k8s PersistentVolume style.
-    Storage {
-        #[command(subcommand)]
-        action: cmd::storage::StorageCmd,
-    },
-    /// An isolated, individually-quota'd slice of a `Storage`.
-    ///
-    /// Multiple container/vm/pod share ONE NAS export without seeing each
-    /// other's data.
-    Sharevolume {
-        #[command(subcommand)]
-        action: cmd::sharevolume::ShareVolumeCmd,
-    },
     /// Field reference for a Kind, `kubectl explain` style.
     ///
     /// From the SAME generated schema, so it cannot drift from the code.
@@ -480,8 +467,6 @@ fn run() -> Result<()> {
         Cmd::Volume { action } => cmd::volume::run(action),
         Cmd::Network { action } => cmd::network::run(action),
         Cmd::Secret { action } => cmd::secret::run(action),
-        Cmd::Storage { action } => cmd::storage::run(action),
-        Cmd::Sharevolume { action } => cmd::sharevolume::run(action),
         Cmd::Explain { path } => cmd::schema::explain(&path),
         Cmd::ApiResources { output } => cmd::resource::api_resources(output),
         Cmd::Apply {

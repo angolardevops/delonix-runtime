@@ -168,6 +168,7 @@ pub(crate) fn get(kind: &str, names: &[String], output: OutputFormat) -> Result<
         k if k == kinds::VOLUME => super::volume::run(super::volume::VolumeCmd::Ls {
             output,
             namespace: None,
+            all_namespaces: false,
         }),
         k if k == kinds::SECRET => super::secret::run(super::secret::SecretCmd::Ls { output }),
         k if k == kinds::IMAGE => super::image::run(super::image::ImageCmd::Ls { output }),
@@ -222,9 +223,10 @@ pub(crate) fn describe(kind: &str, names: &[String]) -> Result<()> {
         k if k == kinds::NETWORK => {
             super::network::run(super::network::NetworkCmd::Describe { names: n })
         }
-        k if k == kinds::VOLUME => {
-            super::volume::run(super::volume::VolumeCmd::Describe { names: n })
-        }
+        k if k == kinds::VOLUME => super::volume::run(super::volume::VolumeCmd::Describe {
+            names: n,
+            namespace: None,
+        }),
         k if k == kinds::VM => super::vm::cmd_describe(&super::util::state_root(), &n),
         k if k == kinds::IMAGE => super::image::run(super::image::ImageCmd::Describe { names: n }),
         k if k == kinds::GATEWAY => {
@@ -306,6 +308,8 @@ pub(crate) fn delete(kind: &str, names: &[String], force: bool) -> Result<()> {
                     name: n.clone(),
                     force,
                     destroy_remote: false,
+                    purge_data: false,
+                    namespace: None,
                 })?;
             }
             Ok(())
