@@ -18,6 +18,13 @@ capacidade escrita várias vezes.** Quatro grupos (`net` 41, `image` 32,
 `container` 29, `vm` 28) são 130 folhas, mais de metade da árvore, e é aí que
 está quase toda a redução.
 
+**A contagem de "folhas hoje" já não é 243.** `scripts/cli_baseline.tsv`
+tem, a 2026-09-01, **249** — subiu com capacidade nova do B3/dia-2 (e o MCP),
+desceu com os cortes do B4-B9 abaixo; os dois movimentos não se cancelaram. A
+proporção "243→103" e o `57%`/`~80%` da secção 4 ficam por remedir — não se
+recalcularam aqui para não inventar um número sem contar folha a folha de
+novo.
+
 ## 2. O que decide a ordem
 
 Três restrições, e nenhuma é preferência:
@@ -121,42 +128,125 @@ live-migration/storage partilhado — por confirmar antes de desenhar),
 verify`), `secret rotate` (rotação de VALOR, distinta do `rotate-key` de
 master-key já existente).
 
-### B4 — O colapso do `net`  ·  QUEBRA  ·  −41 folhas
+### B4–B9 — remedidos a 2026-09-01 (agente `Explore`, `origin/main` fresco)
 
-O maior ganho isolado. `ingress`/`egress` → `NetworkPolicy`; `httproute` →
-`HTTPRoute`; `tunnel` → `Gateway`; `boot` → `system boot` (feito no B2); `netns`
-passa a oculto.
+**Esta secção descrevia B4–B9 como blocos por começar, e estava errada.**
+Todos os seis já foram medidos e parcialmente executados — v0.68.0/v0.69.0
+(29-30/08) cortaram B4/B5/B6/B7, e a v1.0.0 (29/08) executou o B8 e **rejeitou**
+o B9 — tudo isto ANTES de o B1/B3 desta ronda sequer começarem (31/08 em
+diante). Quem leu esta secção por cima re-derivava conclusões já assentes, ou
+podia reabrir uma decisão já tomada (o B9). Números confirmados por leitura
+directa do código e dos commits, não pelo `docs/releases/*` sozinho.
 
-**Bloqueado pelo B1 e pelo B3**: sem `get networkpolicies` e sem
-`network diagnose`, cortar o `net` tira capacidade.
+### B4 — O colapso do `net`  ·  QUEBRA  ·  prometidas −41, entregues **−4**
 
-### B5 — O colapso do armazenamento  ·  QUEBRA  ·  −22 folhas
+Os dois bloqueios que esta secção citava (`get networkpolicies`, `network
+diagnose`) estão fechados e confirmados reais — mas não eram o bloqueio a
+sério. **O bloqueio real, medido no v0.68.0**: `net ingress`/`net egress` são
+**incrementais** (`allow`/`deny` acrescentam uma regra, "o último comando
+ganha"), enquanto a única Kind declarativa que existia — `FirewallPolicy` —
+**substitui o estado inteiro de uma direcção** a cada apply, e recusa dois
+documentos para o mesmo (alvo, direcção). Duas chamadas incrementais não se
+tornam duas aplicações de `FirewallPolicy` sem a segunda apagar a primeira.
 
-`storage` e `sharevolume` desaparecem em `kind: Volume`; `volumes` já é `volume`
-no B2. Os três grupos passam a `apply`/`get`/`delete` mais o day-2 de snapshot e
-backup.
+Só **4 das 41** eram genuinamente duplicadas: `net tunnel ls/describe/rm` →
+`get/describe/delete gateways`, `net httproute ls` → `get httproutes`
+(`cmd/tunnel.rs`/`cmd/httproute.rs`, os `Ls`/`Describe`/`Rm` saíram dos enums
+com comentário a citar o B4). O `kind: NetworkAccessRule` (ADR-0028,
+31/08) nasceu justamente para reabrir este bloco — uma regra INCREMENTAL,
+por-documento, com `origin` para se poder remover sem apagar as dos outros —
+mas a colapsagem do `net ingress`/`net egress` sobre ela **não foi feita**; a
+própria ADR-0028 di-lo: "se vale a pena trocar 17 leaves imperativos por
+manifestos precisa da sua própria medição, não de uma suposição."
 
-### B6 — `image --vm` e o `build`  ·  QUEBRA  ·  −11 folhas
+**Falta no próprio número do plano**: `l4guard` (3 leaves — `set`/`clear`/
+`status`) nunca entrou na conta dos 41, e a ADR-0028 diz textualmente que é
+"um mecanismo diferente" — fora do alcance do `NetworkAccessRule`.
 
-`image build --type container|virtual-machine` substitui o `build` de raiz, o
-`image --vm build` e o `vm build`. A flag `--vm` que troca o store inteiro
-desaparece.
+**Restam por decidir antes de cortar mais**: (1) `net ingress/egress
+allow/deny` passam a escrever um `NetworkAccessRule` em vez de mutar o
+registo de firewall directamente — muda o modelo de persistência; (2)
+`net ingress publish/unpublish` (DNAT) e `net egress net/host` não têm
+equivalente nenhum no `NetworkAccessRule` (que só cobre containers); (3)
+`netns` "passar a oculto" é plumbing que outros subsistemas chamam
+internamente — decidir se é ocultado ou mantido, não é um corte trivial.
 
-### B7 — Day-2 puro: `vm`, `cluster`, `pod`  ·  QUEBRA  ·  −25 folhas
+### B5 — O colapso do armazenamento  ·  QUEBRA  ·  prometidas −22, entregues **−7**
 
-`vm create|ls|rm|status` → `apply`/`get`/`delete`; idem para `pod` e `cluster`.
-Só sobrevive o que não cabe num CRUD.
+`storage apply` saiu no v0.68.0 (idêntico byte-a-byte a `volume::apply`);
+`storage dash/inspect/rm` saíram no v1.1.0 ("colapsam no `volume` — duplicados
+genuínos, medidos campo a campo", `docs/releases/v1.1.0.md`; `volume inspect`
+ganhou `device`/`options` para não perder o que só o `storage inspect` tinha).
 
-### B8 — Os atalhos de raiz e o `workload`  ·  QUEBRA DE CONTRATO  ·  −10 folhas
+**O que resta (`storage create`/`ls` — 2 leaves; `sharevolume apply/ls/
+describe/rm/migrate` — 5 leaves) foi medido e não é duplicado**: `storage
+create` tem onboarding de credenciais NFS/CIFS/SMB/WebDAV que `volume create`
+não tem; `sharevolume` tem semântica de namespace/quota/storage-pai e um
+`migrate` sem equivalente nenhum nos verbos genéricos. Colapsar mais exige
+DESENHO novo (credenciais de rede dentro de `volume apply -f`, filtro
+`--network-only`/coluna `DEVICE` em `volume ls`, um lar para `migrate`), não
+apagar código.
 
-`ps`, `run`, `exec`, `logs`, `rm`, `images` estão **declarados estáveis**. O
-`workload` não está, mas colapsa aqui por coerência.
+### B6 — `image --vm` e o `build`  ·  QUEBRA  ·  prometidas −11, entregues **−1**
 
-**Este bloco é o major.** Precisa de nota de migração própria.
+`vm build` (grupo de raiz) saiu no v0.69.0 — idêntico a `image --vm build`
+(a única diferença aparente, `-v/--verbose`, já era no-op nos dois: os dois
+leem `$DELONIX_VERBOSE` via `Progress::new()`).
 
-### B9 — Exit codes colidentes  ·  QUEBRA DE CONTRATO
+**Achado novo nesta remedição, ainda por cortar**: `image --vm build` (a
+flag antiga) e `image vm build` (o subcomando aninhado mais recente) são hoje
+**duas grafias da MESMA operação** — `ImageCmd::Vm` espelha `VmSub` 1:1
+(`image.rs`). Nenhuma release cortou uma das duas; é o duplicado barato que
+falta medir e fechar antes da parte cara deste bloco.
 
-`2`→64, `4`→66, `5`→73, e o `3` precisa de destino. Vai com o B8, no mesmo major.
+`image build --type container|virtual-machine` **não existe e é desenho
+novo, não corte**: os flag-sets divergem a sério (`BuildArgs` é forma
+Dockerfile/Delonixfile; a variante VM tem ~18 flags próprias — distro,
+cloud-init, receita dourada — sem equivalente do lado container). O v0.69.0
+já mediu isto e concluiu que unificar sob um `--type` é engenharia nova, fora
+do âmbito de "só cortar duplicados".
+
+### B7 — Day-2 puro: `vm`, `cluster`, `pod`  ·  QUEBRA  ·  prometidas −25, entregues **−6**
+
+`vm rm`/`vm describe`, `pod rm`/`pod describe`, `cluster ls`/`cluster delete`
+saíram no v0.69.0 — confirmados idênticos aos genéricos `get`/`describe`/
+`delete`, corpo extraído para uma função `pub(crate)` que o verbo genérico
+chama directamente.
+
+**O resto (~37 leaves entre os três grupos) é dia-2 genuíno, medido, não por
+cortar**: `vm` mantém `console`/`ssh`/`vnc`/`snapshot`/`bridge`/`unbridge`/
+`reach`/`stop`/`start`/`restart`/`prune` (e `vm ls`/`vm create` de propósito
+— `get vms` fixa `ports: false`/sem namespace, um `get` não pode fazer I/O de
+rede não pedido); `pod` mantém `exec`/`attach`/`cp`/`logs` (sem equivalente
+CRUD nenhum); `cluster` mantém `kubeadm`/`kube`/`kubeconfig`/`health` (e
+`upgrade`/`drain`/`uncordon` continuam por fazer, bloqueados no ADR-0010,
+tal como já estava registado). Mais colapso aqui é a mesma disciplina do B7
+original — medir cada leaf, um a um — não um bloco novo.
+
+### B8 — Os atalhos de raiz e o `workload`  ·  QUEBRA DE CONTRATO  ·  **FECHADO na v1.0.0**
+
+**Já não está bloqueado nem pendente — já aconteceu.** `ps`, `run`, `exec`,
+`logs`, `rm`, `images` saíram da raiz na v1.0.0 (29/08), corte limpo sem
+alias: a grafia antiga falha com `unrecognized subcommand`, nunca em
+silêncio. `docs/cli-stability.md` já não os lista como atalhos — regista a
+própria quebra e a tabela de migração (`ps`→`container ps`, etc.).
+
+**`workload` foi avaliado e mantido de propósito**, não esquecido: é o único
+caminho que desambigua um Container e uma VM com o MESMO nome — `get`/
+`describe`/`delete` respondem por Kind, `workload` responde por nome através
+dos dois. Cortá-lo precisa de uma ADR sucessora que nomeie a perda; uma linha
+de plano não chega (`docs/releases/v1.0.0.md`).
+
+### B9 — Exit codes colidentes  ·  **REJEITADO na v1.0.0, decisão fechada**
+
+`exitcode.rs` já tinha, à data desta proposta, um esquema fechado e
+exaustivamente testado (LSB: `3` não-corre, `4` não-existe, `5` conflito;
+`sysexits.h`: `69`/`74`/`77`/`124`) — construído DEPOIS do texto do B9, e o
+próprio módulo avalia e recusa o pedido literal: remapear `2/4/5` exigiria
+primeiro separar o `Error::Invalid` (643 sítios, duas classes distintas
+fundidas) em vez de um simples remap. Os exit codes já estavam na tabela
+*Estável* do `cli-stability.md` desde a v0.49.0. **Nada muda aqui** —
+decisão fechada, não uma pendência.
 
 ## 4. O que pode sair no próximo bump
 
@@ -184,24 +274,35 @@ caso do B8, de um major.
 
 ## 5. As três decisões que faltam
 
-**O `Service`.** A especificação lista-o no §5.1 com `svc` e
-`networking.delonix.io/v1alpha1`; o registo tem 16 Kinds e nenhum é `Service`. É
-um Kind a desenhar — spec própria, semântica de balanceamento — não a
-encaminhar. Sem isto, a contagem dos «12 Kinds operáveis» não fecha.
+**O `Service`.** Ainda por desenhar — remedido a 2026-09-01, o registo
+(`cmd/kinds.rs`) tem hoje 18 Kinds (cresceu de 16 com o `NetworkAccessRule` e
+o `Gateway`) e continua sem nenhum `Service`. É um Kind a desenhar — spec
+própria, semântica de balanceamento — não a encaminhar. Sem isto, a contagem
+dos «12 Kinds operáveis» não fecha. Nada mudou aqui desde a leitura original.
 
-**O `config` e os contextos.** O §16 quer `endpoint`, `identity` e `tls` num
-contexto. O ADR-0010 **recusou** a API de gestão remota, e um contexto com
-endpoint remoto pressupõe-na. Ou o `config` nasce local-only (namespace e
-preferência de output, sem endpoint), ou reabre-se o ADR-0010 com um consumidor
-concreto.
+**O `config` e os contextos — FECHADO, confirmado no código.** O `config.rs`
+diz, no seu próprio comentário de módulo: uma preferência local pequena,
+nunca um contexto — o §16 quer `endpoint`/`identity`/`tls` num contexto, e é
+exactamente o que o ADR-0010 já recusou. `namespace` (o outro candidato do
+plano) fica de fora de propósito: ao contrário do `output`, não há um ponto
+de leitura único a que um default de namespace se prenda. `KNOWN_KEYS` tem
+uma chave só: `"output"`. O ADR-0010 continua `Status: Rejected
+(2026-08-10)` — "a API fica local, e essa é a resposta, não um adiamento."
 
-**Quando é o major.** O B8 e o B9 quebram contratos publicados com exemplo em
-bash. É `1.0.0` ou é um `0.x` com nota de migração? A resposta muda o
-sequenciamento dos blocos B4–B7, que podem ir antes ou serem agrupados com ele.
+**Quando é o major — já respondido pela EXECUÇÃO, não por um documento.** A
+v1.0.0 aconteceu a 29/08, ANTES de o B1 sequer ter sido fundido (31/08) — a
+pergunta desta secção («B4–B7 vão antes ou juntam-se ao major?») ficou sem
+objecto: o major já saiu, estreito e desacoplado, levando só a parte menos
+controversa do B8 (atalhos de raiz) e **rejeitando** o B9 (remap de exit
+codes). B4–B7 continuam a forma `0.x`, aditiva-e-medida, como se a decisão
+tivesse sido «sair o major cedo e estreito, continuar a colapsar o resto a
+seguir, aos poucos». Registado aqui como facto, não como pergunta em aberto.
 
 ## 6. O que este plano não promete
 
-Não há estimativa de tempo. Os blocos B3 e B7 são capacidade nova — `pod
-port-forward`, `vm migrate`, `cluster upgrade` e `network capture` são
-funcionalidades, não renomeações, e cada uma precisa da sua validação ao vivo
-contra infra real. Dar-lhes um prazo aqui seria inventar.
+Não há estimativa de tempo. `pod port-forward` (PR #207) e `network capture`
+(PR #208) já têm código a aguardar revisão manual; `vm migrate` e `cluster
+upgrade` continuam genuinamente por construir — nenhum PR aberto os cobre, e
+`vm migrate` mantém a ressalva original: pode não ser viável sem mecanismo de
+live-migration/storage partilhado entre hosts `delonix`, por confirmar antes
+de desenhar. Dar-lhes um prazo aqui seria inventar.
