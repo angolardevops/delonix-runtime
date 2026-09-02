@@ -1,7 +1,7 @@
 //! `delonix cluster apply -f cloud.yaml` — idempotent `kubeadm` bootstrap
 //! over SSH, on already-live hosts (`kind: KubernetesCluster`). Does not create VMs — that is
 //! `delonix vm create` (optionally with the golden image from `delonix image
-//! --vm build`). Idempotency WITHOUT a state file: each step checks the
+//! vm build`). Idempotency WITHOUT a state file: each step checks the
 //! real condition on the host (`remote::ssh_check`) before acting.
 //!
 //! **Simplifications of this v1** (see `AGENTS.md`): only `stacked` etcd
