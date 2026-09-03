@@ -730,12 +730,6 @@ pub enum VmCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: String,
     },
-    /// Current state (reconciles liveness/IP with the backend).
-    Status {
-        /// VM to query (omit for the state of ALL).
-        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
-        name: Option<String>,
-    },
     /// Which published ports a VM can actually reach, and how to fix the rest.
     ///
     /// A port published to the default `127.0.0.1` is invisible to a VM —
@@ -2076,29 +2070,6 @@ pub fn run(action: VmCmd) -> Result<()> {
             &command,
         ),
         VmCmd::Vnc { name } => cmd_vnc(&base, &name),
-        VmCmd::Status { name } => {
-            // No argument: the reconciled state of ALL (consistent with
-            // `ingress ls`/`egress ls` with no argument).
-            let names: Vec<String> = match name {
-                Some(n) => vec![n],
-                None => delonix_vm::list(&base)?
-                    .into_iter()
-                    .map(|v| v.name)
-                    .collect(),
-            };
-            let mut t = output::Table::new(&["NAME", "STATUS", "BACKEND", "IP"]);
-            for n in names {
-                let vm = delonix_vm::status(&base, &n)?;
-                t.row(vec![
-                    vm.name,
-                    format!("{:?}", vm.status),
-                    vm.backend,
-                    vm.ip.unwrap_or_default(),
-                ]);
-            }
-            t.print();
-            Ok(())
-        }
         VmCmd::Reach => cmd_reach(&base),
         VmCmd::Bridge {
             network,

@@ -240,6 +240,9 @@ enum Cmd {
         /// Output format: `table` (default) or `json` (ADR-0005).
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: cmd::output::OutputFormat,
+        /// Show only this isolation namespace — only Kinds that HAVE one accept it (refused otherwise, never silently ignored).
+        #[arg(short = 'n', long)]
+        namespace: Option<String>,
     },
     /// Detail of one resource, in blocks — the generic form of ten `describe`s.
     Describe {
@@ -503,7 +506,8 @@ fn run() -> Result<()> {
             kind,
             names,
             output,
-        } => cmd::verbs::get(&kind, &names, output),
+            namespace,
+        } => cmd::verbs::get(&kind, &names, output, namespace),
         Cmd::Describe { kind, names } => cmd::verbs::describe(&kind, &names),
         Cmd::Delete { kind, names, force } => cmd::verbs::delete(&kind, &names, force),
         Cmd::Diff {

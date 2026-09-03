@@ -210,23 +210,43 @@ cloud-init, receita dourada — sem equivalente do lado container). O v0.69.0
 já mediu isto e concluiu que unificar sob um `--type` é engenharia nova, fora
 do âmbito de "só cortar duplicados".
 
-### B7 — Day-2 puro: `vm`, `cluster`, `pod`  ·  QUEBRA  ·  prometidas −25, entregues **−6**
+### B7 — Day-2 puro: `vm`, `cluster`, `pod`  ·  QUEBRA  ·  **FECHADO** — prometidas −25, entregues **−8**
 
 `vm rm`/`vm describe`, `pod rm`/`pod describe`, `cluster ls`/`cluster delete`
 saíram no v0.69.0 — confirmados idênticos aos genéricos `get`/`describe`/
 `delete`, corpo extraído para uma função `pub(crate)` que o verbo genérico
 chama directamente.
 
-**O resto (~37 leaves entre os três grupos) é dia-2 genuíno, medido, não por
-cortar**: `vm` mantém `console`/`ssh`/`vnc`/`snapshot`/`bridge`/`unbridge`/
-`reach`/`stop`/`start`/`restart`/`prune` (e `vm ls`/`vm create` de propósito
-— `get vms` fixa `ports: false`/sem namespace, um `get` não pode fazer I/O de
-rede não pedido); `pod` mantém `exec`/`attach`/`cp`/`logs` (sem equivalente
-CRUD nenhum); `cluster` mantém `kubeadm`/`kube`/`kubeconfig`/`health` (e
-`upgrade`/`drain`/`uncordon` continuam por fazer — **não bloqueados**, ver a
-correcção na tabela do B3 acima: a citação do ADR-0010 era má atribuição).
-Mais colapso aqui é a mesma disciplina do B7 original — medir cada leaf, um a
-um — não um bloco novo.
+**Fechado a 2026-09-03 com a disciplina que faltava: as 40 leaves reais dos
+três grupos (não as ~37 estimadas — a própria contagem nunca tinha sido
+recontada a partir dos `enum`s) medidas UMA A UMA contra o que `get`/
+`describe`/`delete` já cobrem**, não por julgamento de bloco. Achado: **38
+são IRREDUTÍVEIS** (a maioria já suspeitada, mas nunca confirmada leaf a
+leaf) e **2 eram cortáveis e tinham escapado à passagem anterior**:
+
+- **`vm status` — CORTADO, sem alias.** Duplicava `get vms` (mesma chamada,
+  `delonix_vm::list` → `status()` por VM) sem nome, e `describe vms <nome>`
+  com o nome — zero flag própria, zero diferença de dados.
+- **`pod ls` — CORTADO, sem alias, com um passo de "construir antes de
+  cortar" primeiro.** Só diferia de `get pods` por aceitar `--namespace`, que
+  o `get` genérico não tinha para NENHUMA Kind. Corrigido na origem: `delonix
+  get <kind> -n <namespace>` passou a existir (recusado, nunca ignorado em
+  silêncio, nas Kinds sem namespace — `Secret`, por exemplo), e só depois
+  `pod ls` foi removido, coerente com a regra §2 deste documento ("um corte
+  só é honesto quando o destino já faz o que a origem fazia").
+
+**Os 38 restantes ficam, e agora com a razão escrita ao lado de cada um** (a
+tabela completa da auditoria fica fora deste documento — o resumo por
+categoria): sessões interactivas reais (`console`/`ssh`/`vnc`/`exec`/
+`attach`), efeitos colaterais que um verbo de leitura não pode ter
+(`stop`/`start`/`restart`/`bridge`/`unbridge`/`snapshot create`/`rm`/
+`restore`), I/O de rede ao vivo que um `get` recusa de propósito
+(`vm ls --ports`, `cluster health`), ou objectos sem Kind nenhuma
+(imagens de VM, snapshots, ficheiro de kubeconfig, `kube generate`,
+`vm default-backend`). `cluster kubeadm`/`kube`/`kubeconfig`/`health` ficam
+por esta última razão. `upgrade`/`drain`/`uncordon` não são candidatos de B7
+— são capacidade nova do B3 (ver a correcção na tabela do B3 acima: a
+citação do ADR-0010 era má atribuição).
 
 ### B8 — Os atalhos de raiz e o `workload`  ·  QUEBRA DE CONTRATO  ·  **FECHADO na v1.0.0**
 

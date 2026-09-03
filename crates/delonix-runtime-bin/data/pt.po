@@ -10424,3 +10424,9 @@ msgstr "desregista uma partilha — os dados no pai são PRESERVADOS"
 
 msgid "every namespace at once, so a share hanging off a parent is never invisible"
 msgstr "todas as namespaces de uma vez, para uma partilha dependente de um pai nunca ficar invisível"
+
+msgid "Show only this isolation namespace — only Kinds that HAVE one accept it (refused otherwise, never silently ignored)"
+msgstr "Mostra só esta namespace de isolamento — só as Kinds que TÊM uma a aceitam (recusado nas outras, nunca ignorado em silêncio)"
+
+msgid "only one isolation namespace — refused on a Kind that has none, never silently ignored"
+msgstr "só uma namespace de isolamento — recusado numa Kind que não tem nenhuma, nunca ignorado em silêncio"
