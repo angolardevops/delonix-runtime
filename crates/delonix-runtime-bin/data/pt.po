@@ -10430,3 +10430,103 @@ msgstr "Mostra só esta namespace de isolamento — só as Kinds que TÊM uma a 
 
 msgid "only one isolation namespace — refused on a Kind that has none, never silently ignored"
 msgstr "só uma namespace de isolamento — recusado numa Kind que não tem nenhuma, nunca ignorado em silêncio"
+
+msgid "Cordon a node and evict its pods."
+msgstr "Isola um nó e evacua os seus pods."
+
+msgid ""
+"Cordon a node and evict its pods.\n"
+"\n"
+"The manual step before touching a control-plane/worker host (upgrade, "
+"maintenance, decommission). A pure Kubernetes API operation: talks to the "
+"apiserver through the CACHED kubeconfig (the same file `cluster kubeconfig` "
+"prints), needs no SSH and no container to exec into — unlike `health`, this "
+"works identically for every cluster family (`resolve_kubeconfig_name` "
+"already treats kind-mode and SSH/kubeadm clusters the same). Shells out to "
+"the system `kubectl`, the same \"never reinvent an existing client\" rule "
+"`remote::ssh_run` already follows for `ssh`."
+msgstr ""
+"Isola um nó e evacua os seus pods.\n"
+"\n"
+"O passo manual antes de mexer num host control-plane/worker (upgrade, "
+"manutenção, desactivação). Operação pura de API Kubernetes: fala com o "
+"apiserver através do kubeconfig CACHEADO (o mesmo ficheiro que `cluster "
+"kubeconfig` imprime), não precisa de SSH nem de container para executar — "
+"ao contrário de `health`, funciona de forma idêntica para qualquer família "
+"de cluster (`resolve_kubeconfig_name` já trata clusters kind-mode e "
+"SSH/kubeadm da mesma forma). Delega no `kubectl` do sistema, a mesma regra "
+"de \"nunca reinventar um cliente já existente\" que `remote::ssh_run` já "
+"segue para o `ssh`."
+
+msgid "Mark a drained node schedulable again"
+msgstr "Marca um nó drenado como voltando a ser escalonável"
+
+msgid "mark a drained node schedulable again"
+msgstr "marca um nó drenado como voltando a ser escalonável"
+
+msgid "Upgrade a `mode: ssh` cluster to a newer Kubernetes version, kubeadm-style"
+msgstr "Actualiza um cluster `mode: ssh` para uma versão mais recente do Kubernetes, à maneira do kubeadm"
+
+msgid ""
+"Upgrade a `mode: ssh` cluster to a newer Kubernetes version, kubeadm-"
+"style.\n"
+"\n"
+"Mirrors kubeadm's own manual, one-node-at-a-time procedure — deliberately "
+"NOT an unattended whole-cluster cascade. Without `--node`, upgrades the "
+"control-plane LEADER only (`spec.controlPlane.hosts[0]`, the one host "
+"`kubeadm upgrade apply` runs on); with `--node <name>`, upgrades that other "
+"control-plane or worker host (`kubeadm upgrade node`). Drains before and "
+"uncordons after each node automatically, unless `--no-drain`."
+msgstr ""
+"Actualiza um cluster `mode: ssh` para uma versão mais recente do "
+"Kubernetes, à maneira do kubeadm.\n"
+"\n"
+"Espelha o próprio procedimento manual do kubeadm, nó a nó — deliberadamente "
+"NÃO é uma cascata sobre o cluster inteiro sem supervisão. Sem `--node`, "
+"actualiza só o control-plane LÍDER (`spec.controlPlane.hosts[0]`, o único "
+"host onde `kubeadm upgrade apply` corre); com `--node <nome>`, actualiza "
+"esse outro control-plane ou worker (`kubeadm upgrade node`). Drena antes e "
+"retira o isolamento depois de cada nó automaticamente, a não ser que "
+"`--no-drain`."
+
+msgid "Kubernetes node name, as `kubectl get nodes` shows it"
+msgstr "Nome do nó Kubernetes, tal como `kubectl get nodes` o mostra"
+
+msgid "Also evict DaemonSet-managed pods (they would otherwise block the drain)"
+msgstr "Evacua também pods geridos por DaemonSet (senão bloqueariam a drenagem)"
+
+msgid "Also evict pods using an `emptyDir` volume (their data is lost)"
+msgstr "Evacua também pods a usar um volume `emptyDir` (os seus dados perdem-se)"
+
+msgid "Evict pods not managed by a controller too (bare Pods)"
+msgstr "Evacua também pods sem controlador nenhum a geri-los (Pods nus)"
+
+msgid "Give up waiting for eviction after this long (a `kubectl` duration, e.g. `5m`)"
+msgstr "Desiste de esperar pela evacuação passado este tempo (uma duração `kubectl`, ex.: `5m`)"
+
+msgid "Manifest with the `kind: KubernetesCluster` document (default: `./delonix-manifest.yaml`)"
+msgstr "Manifesto com o documento `kind: KubernetesCluster` (por omissão: `./delonix-manifest.yaml`)"
+
+msgid "Target Kubernetes version, e.g. `1.32.1`"
+msgstr "Versão Kubernetes alvo, ex.: `1.32.1`"
+
+msgid "Upgrade this control-plane/worker host instead of the control-plane leader"
+msgstr "Actualiza este host control-plane/worker em vez do control-plane líder"
+
+msgid "Skip the automatic drain/uncordon around the node's own upgrade"
+msgstr "Salta a drenagem/reintegração automática à volta da actualização do próprio nó"
+
+msgid "cordon a node and evict its pods before touching it — needs no SSH, just the cached kubeconfig"
+msgstr "isola um nó e evacua os seus pods antes de lhe mexer — não precisa de SSH, só do kubeconfig cacheado"
+
+msgid "also evict pods on an emptyDir volume, and bare Pods with no controller"
+msgstr "evacua também pods num volume emptyDir, e Pods nus sem controlador"
+
+msgid "the control-plane leader first — kubeadm's own procedure runs `upgrade apply` there"
+msgstr "primeiro o control-plane líder — é lá que o próprio procedimento do kubeadm corre `upgrade apply`"
+
+msgid "then every other control-plane/worker, one at a time — `kubeadm upgrade node`"
+msgstr "depois cada outro control-plane/worker, um de cada vez — `kubeadm upgrade node`"
+
+msgid "a control-plane that schedules nothing anyway: skip the automatic drain/uncordon"
+msgstr "um control-plane que de qualquer forma não escalona nada: salta a drenagem/reintegração automática"
