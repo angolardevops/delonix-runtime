@@ -575,6 +575,7 @@ pub static ENTRIES: &[Entry] = &[
             ("list a Kind — plural, singular and shortname are the same question", "delonix get pods"),
             ("the stable half, for automation (ADR-0005)", "delonix get pods -o json"),
             ("a renamed Kind still answers to the name it had", "delonix get virtualmachines"),
+            ("only one isolation namespace — refused on a Kind that has none, never silently ignored", "delonix get pods -n teamA"),
         ],
         see_also: &["describe", "delete", "api-resources", "stack ls"],
     },
@@ -1536,7 +1537,7 @@ pub static ENTRIES: &[Entry] = &[
             ("N containers sharing one netns — same IP and `localhost` between them, like a k8s Pod", "delonix pod create -f examples/pod-multi.yaml"),
             ("from the default manifest in the current directory", "delonix pod create"),
         ],
-        see_also: &["pod ls", "describe", "stack apply"],
+        see_also: &["get", "describe", "stack apply"],
     },
     Entry {
         path: "pod logs",
@@ -1546,16 +1547,7 @@ pub static ENTRIES: &[Entry] = &[
             ("a specific container inside the pod, by its short name", "delonix pod logs web --container api"),
             ("follow it live", "delonix pod logs -f web"),
         ],
-        see_also: &["describe", "pod ls", "container logs"],
-    },
-    Entry {
-        path: "pod ls",
-        group: "Inspect",
-        examples: &[
-            ("the pods, derived from the container labels — there is no separate store to drift", "delonix pod ls"),
-            ("as JSON, for a script", "delonix pod ls -o json"),
-        ],
-        see_also: &["describe", "pod logs", "container ps"],
+        see_also: &["describe", "get", "container logs"],
     },
     Entry {
         path: "pod exec",
@@ -2060,7 +2052,7 @@ pub static ENTRIES: &[Entry] = &[
             ("what the host offers a VM: hypervisor, KVM, virtio — and what is left to tune", "delonix system virt"),
             ("apply the recommended tuning (needs root)", "delonix system virt --tune"),
         ],
-        see_also: &["vm create", "vm status", "system info"],
+        see_also: &["vm create", "get", "system info"],
     },
     Entry {
         path: "system prune",
@@ -2131,7 +2123,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("a real reboot — `start` on an already-running VM does nothing, this one always cycles it", "delonix vm restart dev"),
         ],
-        see_also: &["vm start", "vm stop", "vm console", "vm status"],
+        see_also: &["vm start", "vm stop", "vm console", "get"],
     },
     Entry {
         path: "vm prune",
@@ -2149,7 +2141,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("boot a stopped VM again with the disk, vcpus, memory and backend of its last create — the overlay is reused, so its disk state survives", "delonix vm start dev"),
         ],
-        see_also: &["vm stop", "vm restart", "vm create", "vm status"],
+        see_also: &["vm stop", "vm restart", "vm create", "get"],
     },
     Entry {
         path: "vm stop",
@@ -2168,16 +2160,7 @@ pub static ENTRIES: &[Entry] = &[
             ("the same rows as JSON, for a script", "delonix vm ls -o json"),
             ("only one isolation namespace — and the NAMESPACE column stays, which it does not when every row would say `default`", "delonix vm ls --namespace teamA"),
         ],
-        see_also: &["vm status", "describe", "vm dash", "vm prune", "image vm ls"],
-    },
-    Entry {
-        path: "vm status",
-        group: "Inspect",
-        examples: &[
-            ("one VM, with liveness and IP reconciled against the backend rather than read off a stale record", "delonix vm status dev"),
-            ("the state of all of them at once", "delonix vm status"),
-        ],
-        see_also: &["vm ls", "describe", "vm console"],
+        see_also: &["get", "describe", "vm dash", "vm prune", "image vm ls"],
     },
     Entry {
         path: "vm console",
@@ -2185,7 +2168,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("watch the boot and log in before there is any IP or SSH — Ctrl-] brings you back to the host", "delonix vm console dev"),
         ],
-        see_also: &["vm vnc", "vm status", "vm create", "vm restart"],
+        see_also: &["vm vnc", "get", "vm create", "vm restart"],
     },
     Entry {
         path: "vm ssh",
@@ -2203,7 +2186,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("the address to point a VNC client at, for a VM created with `--vnc` on libvirt", "delonix vm vnc dev"),
         ],
-        see_also: &["vm console", "vm create", "vm status"],
+        see_also: &["vm console", "vm create", "get"],
     },
     Entry {
         path: "vm default-backend",
@@ -2231,7 +2214,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("which published container ports a VM can actually get to, and the exact republish command for each one that is stuck on loopback", "delonix vm reach"),
         ],
-        see_also: &["vm bridge", "container port", "net ingress publish", "vm status"],
+        see_also: &["vm bridge", "container port", "net ingress publish", "get"],
     },
     Entry {
         path: "vm unbridge",
@@ -2309,7 +2292,7 @@ pub static ENTRIES: &[Entry] = &[
             ("a checkpoint before an upgrade — of a RUNNING VM it takes the memory too", "delonix vm snapshot create dev before-upgrade"),
             ("which checkpoints a VM has, before reverting to one", "delonix vm snapshot ls dev"),
         ],
-        see_also: &["vm stop", "vm status", "volume snapshot", "vm default-backend"],
+        see_also: &["vm stop", "get", "volume snapshot", "vm default-backend"],
     },
     Entry {
         path: "vm snapshot create",
@@ -2342,7 +2325,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("put the VM back exactly as it was when the checkpoint was taken", "delonix vm snapshot restore dev before-upgrade"),
         ],
-        see_also: &["vm snapshot ls", "vm snapshot create", "vm status"],
+        see_also: &["vm snapshot ls", "vm snapshot create", "get"],
     },
     Entry {
         path: "vm dash",
@@ -2352,7 +2335,7 @@ pub static ENTRIES: &[Entry] = &[
             ("one snapshot of text, for a terminal that is not interactive", "delonix vm dash --once"),
             ("the same numbers as JSON, for a script or a dashboard datasource", "delonix vm dash --json"),
         ],
-        see_also: &["vm ls", "vm status", "dash", "container dash"],
+        see_also: &["vm ls", "get", "dash", "container dash"],
     },
     Entry {
         path: "volume",

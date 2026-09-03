@@ -59,15 +59,6 @@ pub enum PodCmd {
         #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
     },
-    /// List the pods (derived from container labels).
-    Ls {
-        /// Output format: `table` (default) or `json` (ADR-0005).
-        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
-        output: output::OutputFormat,
-        /// Show only the pods of this isolation namespace. Omit to list every one.
-        #[arg(short = 'n', long, add = clap_complete::engine::ArgValueCandidates::new(super::complete::namespaces))]
-        namespace: Option<String>,
-    },
     /// Logs of a pod's container (defaults to the first member).
     Logs {
         #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::pods))]
@@ -143,7 +134,6 @@ pub fn run(action: PodCmd) -> Result<()> {
             let docs = manifest::load(&path)?;
             apply(&docs)
         }
-        PodCmd::Ls { output, namespace } => ls(output, namespace.as_deref()),
         PodCmd::Logs {
             pod,
             container,
@@ -574,7 +564,11 @@ struct PodLsRow {
     created_unix: u64,
 }
 
-fn ls(format: output::OutputFormat, namespace: Option<&str>) -> Result<()> {
+/// The generic `get pods`'s only implementation of "list" — `pod ls` as a
+/// dedicated CLI leaf was cut (B7): identical to `get pods [-n <ns>]` in
+/// every respect, once `get` gained the `--namespace` filter this needed to
+/// stop being the ONLY way to filter a pod listing by namespace.
+pub(crate) fn ls(format: output::OutputFormat, namespace: Option<&str>) -> Result<()> {
     let format = super::config::resolve_output(&super::util::state_root(), format);
     let (_images, store) = open_stores()?;
     let mut pods: BTreeMap<String, Vec<Container>> = BTreeMap::new();
