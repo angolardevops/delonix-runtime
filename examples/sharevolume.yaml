@@ -15,8 +15,9 @@
 # The parent is a `kind: Volume` with a network-share block (`nfs:`/`cifs:`/
 # `webdav:`) — see examples/storage.yaml.
 #
-# Apply with:  delonix volumes apply -f sharevolume.yaml
-# (or `delonix sharevolume apply -f ...`, which applies only the shares)
+# Apply with:  delonix volume apply -f sharevolume.yaml
+# Or create a share imperatively, without a manifest at all:
+#   delonix volume create app-data --parent nas --quota 5G
 apiVersion: storage.delonix.io/v1alpha1
 kind: Volume
 metadata:

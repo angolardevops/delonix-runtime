@@ -104,8 +104,6 @@ SOURCE_FILES = {
     "compose": "compose.rs",
     "cluster": "cluster.rs",
     "secret": "secret.rs",
-    "storage": "storage.rs",
-    "sharevolume": "sharevolume.rs",
     "ingress": "firewall.rs",
     "egress": "firewall.rs",
     "httproute": "httproute.rs",
@@ -546,7 +544,12 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
         "tagline": "Volumes nomeados e bind mounts: create, ls, inspect, rm, apply.",
         "intro": """Wrapper fino sobre o <code>VolumeStore</code>. No <code>container run</code>,
 <code>-v nome:/destino[:ro]</code> resolve para um volume nomeado (criado on-demand) e
-<code>-v /host:/destino[:ro]</code> para um bind mount — a distinção é automática.""",
+<code>-v /host:/destino[:ro]</code> para um bind mount — a distinção é automática.
+<br><br>
+Três formas de <code>create</code> (fusão B5 da CLI — <code>storage create</code>/<code>sharevolume</code>
+eram a única via imperativa até aqui): local/dispositivo <code>nfs</code> cru (<code>--driver</code>),
+uma partilha de rede amigável — NFS/CIFS/WebDAV, com credenciais do cofre (<code>--type</code>), ou uma
+fatia isolada e com quota talhada de um volume já existente (<code>--parent</code>).""",
         "subs": {
             "snapshot": {"examples": [
                 ('Tirar e listar snapshots de um volume',
@@ -558,10 +561,26 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
             "describe": {"examples": [
                 ('Detalhe de um volume (uso, quota, montagens)',
                  'delonix volume describe dados')]},
-            "create": {"examples": [("Com quota e driver nfs disponíveis", "delonix volume create dados --quota 10G")]},
-            "ls": {"examples": [("", "delonix volume ls")]},
+            "create": {"examples": [
+                ("Com quota e driver nfs disponíveis", "delonix volume create dados --quota 10G"),
+                ("NFS de um TrueNAS, montado directamente como volume",
+                 "delonix volume create media --type nfs --server 10.0.0.5 --share /mnt/pool/media"),
+                ("SMB/CIFS com a password do cofre, nunca do argv",
+                 "delonix volume create docs --type cifs --server nas --share docs --username user --password-secret nas-pass"),
+                ("Uma fatia isolada e com quota própria de um volume já existente",
+                 "delonix volume create tenant-a --parent media --quota 1G"),
+            ]},
+            "ls": {"examples": [
+                ("", "delonix volume ls"),
+                ("Todas as namespaces de uma vez — uma partilha nunca fica invisível",
+                 "delonix volume ls -A"),
+            ]},
             "inspect": {"examples": [("", "delonix volume inspect dados")]},
-            "rm": {"examples": [("", "delonix volume rm dados")]},
+            "rm": {"examples": [
+                ("", "delonix volume rm dados"),
+                ("Remove o registo de uma partilha; os DADOS ficam (a não ser que peças --purge-data)",
+                 "delonix volume rm tenant-a"),
+            ]},
             "apply": {"examples": [("", "delonix volume apply -f delonix-manifest.yaml")]},
             # `prune` faltava aqui, e a consequência não era estética: a página
             # listava o subcomando na tabela do grupo e nunca documentava uma
@@ -864,7 +883,7 @@ linha por etapa sem TTY (pipes/CI).</p>"""},
         "intro": """Um cofre local (<code>SecretStore</code>) cifrado com XChaCha20-Poly1305. Os valores
 NUNCA são impressos por omissão (redigidos; <code>--reveal</code> é opt-in). É a fonte dos
 <code>container run --secret</code>/<code>--secret-files</code> e do <code>--password-secret</code> do
-<code>storage</code> — o segredo entra uma vez, nunca fica no histórico do shell nem no manifesto.""",
+<code>volume create</code> — o segredo entra uma vez, nunca fica no histórico do shell nem no manifesto.""",
         "subs": {
             "apply": {"examples": [
                 ('Criar segredos a partir de um manifesto kind: Secret',
@@ -882,62 +901,6 @@ NUNCA são impressos por omissão (redigidos; <code>--reveal</code> é opt-in). 
             "ls": {"examples": [("Listar (valores redigidos)", "delonix secret ls")]},
             "inspect": {"examples": [("Revelar explicitamente", "delonix secret inspect db-pass --reveal")]},
             "rotate-key": {"examples": [("Rodar a chave-mestra (re-cifra tudo)", "delonix secret rotate-key")]},
-        },
-    },
-    "storage": {
-        "title": "delonix storage",
-        "tagline": "Volumes de REDE (NFS/CIFS/WebDAV) montáveis, estilo PersistentVolume do k8s.",
-        "intro": """Monta pastas de um NAS (TrueNAS/Synology/Samba/Nextcloud) como volumes nomeados.
-Por baixo é um volume do <code>delonix-volume</code> com driver de rede — <code>mount -t nfs|cifs|davfs</code>.
-A password vem do cofre (<code>--password-secret</code>), nunca do argv. Ligado ao <code>stack apply</code>
-(ordem Network→Volume→<strong>Storage</strong>→Image→Vm→Container). Montar precisa de CAP_SYS_ADMIN.""",
-        "subs": {
-            "create": {"examples": [
-                ("NFS de um TrueNAS", "delonix storage create media --type nfs --server 10.0.0.5 --share /mnt/pool/media"),
-                ("SMB/CIFS com password do cofre", "delonix storage create docs --type cifs --server nas --share docs --username user --password-secret nas-pass"),
-            ]},
-            "ls": {"examples": [("", "delonix storage ls")]},
-        },
-    },
-    "sharevolume": {
-        "title": "delonix sharevolume",
-        "tagline": "Uma fatia ISOLADA e com QUOTA própria de uma partilha de rede — vários container/vm/pod partilham um NAS.",
-        "intro": """Resolve um problema concreto de multi-tenant: várias cargas a partilhar UM export
-NFS/CIFS/WebDAV, cada uma com o SEU ponto de montagem isolado e a SUA quota, sem se verem. Por baixo
-não há mecanismo de montagem novo nenhum: cada <code>ShareVolume</code> é um SUBDIRECTÓRIO real da
-árvore já montada pelo <code>kind: Storage</code> pai (<code>&lt;storage&gt;/_data/shares/&lt;nome&gt;</code>),
-registado como o seu próprio volume — a isolação é confinamento de caminho puro e o consumo usa o
-<code>-v &lt;nome&gt;:/destino</code> de sempre, sem código novo nenhum do lado do container/vm/pod. A
-quota é SOFT (uso medido + alerta) — o caminho HARD (imagem ext4 loopback) precisa de armazenamento de
-bloco local e não compõe com um subdirectório de um mount de rede.""",
-        "subs": {
-            "migrate": {"examples": [
-                ('Trazer registos anteriores ao scoping por namespace para a `default` '
-                 '— move só o REGISTO, nunca os bytes de um inquilino',
-                 'delonix sharevolume migrate')]},
-            "apply": {"examples": [
-                ("Duas fatias isoladas do mesmo NAS, cada uma com a sua quota",
-                 "delonix sharevolume apply -f sharevolume.yaml",
-                 "sharevolume/tenant-a: ready (nas-shared -> /var/lib/delonix/volumes/nas-shared/_data/shares/tenant-a)\n"
-                 "sharevolume/tenant-b: ready (nas-shared -> /var/lib/delonix/volumes/nas-shared/_data/shares/tenant-b)"),
-            ]},
-            "ls": {"examples": [
-                ("Listar (quota + uso real medido)", "delonix sharevolume ls",
-                 "NAME       STORAGE      QUOTA     USED   ALERT   MOUNTPOINT\n"
-                 "tenant-b   nas-shared   2.0 MiB   0 B    -       .../shares/tenant-b\n"
-                 "tenant-a   nas-shared   1.0 MiB   1.0 MiB   OVER    .../shares/tenant-a"),
-            ]},
-            "describe": {"examples": [
-                ("Detalhe de uma fatia (aponta o comando -v para a consumir)",
-                 "delonix sharevolume describe tenant-a",
-                 "Name:           tenant-a\nStorage:        nas-shared\nMountpoint:     .../shares/tenant-a\n"
-                 "Used:           1.0 MiB\nQuota:          1.0 MiB\nAlert:          OVER QUOTA\n"
-                 "Consume with:   -v tenant-a:/path/in/container"),
-            ]},
-            "rm": {"examples": [
-                ("Remove o registo; os DADOS ficam (a não ser que peças --purge-data)",
-                 "delonix sharevolume rm tenant-a"),
-            ]},
         },
     },
     "ingress": {
@@ -1380,7 +1343,12 @@ nodes.""",
         "tagline": "Named volumes and bind mounts: create, ls, inspect, rm, apply.",
         "intro": """A thin wrapper over <code>VolumeStore</code>. In <code>container run</code>,
 <code>-v name:/dest[:ro]</code> resolves to a named volume (created on demand) and
-<code>-v /host:/dest[:ro]</code> to a bind mount — the distinction is automatic.""",
+<code>-v /host:/dest[:ro]</code> to a bind mount — the distinction is automatic.
+<br><br>
+Three shapes of <code>create</code> (B5 CLI collapse — <code>storage create</code>/<code>sharevolume</code>
+were the only imperative path before this): a plain/raw <code>nfs</code> device (<code>--driver</code>),
+a friendly network share — NFS/CIFS/WebDAV, with vault credentials (<code>--type</code>), or an
+isolated, quota'd slice carved out of an already-existing volume (<code>--parent</code>).""",
     },
     "network": {
         "tagline": "User networks: create, ls, inspect, rm, apply — bridge and overlay are physically realized.",
@@ -1432,29 +1400,9 @@ for SSH, and runs the SAME bootstrap — one command, from zero to a cluster run
         "tagline": "Encrypted-at-rest secret vault — the source behind `run --secret`.",
         "intro": """A local vault (<code>SecretStore</code>) encrypted with XChaCha20-Poly1305.
 Values are NEVER printed by default (redacted; <code>--reveal</code> is opt-in). It's the source
-for <code>container run --secret</code>/<code>--secret-files</code> and <code>storage</code>'s
+for <code>container run --secret</code>/<code>--secret-files</code> and <code>volume create</code>'s
 <code>--password-secret</code> — the secret goes in once, and never ends up in shell history or in
 the manifest.""",
-    },
-    "storage": {
-        "tagline": "NETWORK volumes (NFS/CIFS/WebDAV) you can mount, k8s PersistentVolume-style.",
-        "intro": """Mounts a folder from a NAS (TrueNAS/Synology/Samba/Nextcloud) as a named
-volume. Under the hood it's a <code>delonix-volume</code> volume with a network driver —
-<code>mount -t nfs|cifs|davfs</code>. The password comes from the vault
-(<code>--password-secret</code>), never from argv. Wired into <code>stack apply</code> (order
-Network→Volume→<strong>Storage</strong>→Image→Vm→Container). Mounting needs CAP_SYS_ADMIN.""",
-    },
-    "sharevolume": {
-        "tagline": "An ISOLATED, individually-QUOTA'd slice of a network share — several container/vm/pod share one NAS.",
-        "intro": """Solves a concrete multi-tenant problem: several workloads sharing ONE
-NFS/CIFS/WebDAV export, each with ITS OWN isolated mount point and ITS OWN quota, without seeing
-each other. Under the hood there's no new mount mechanism at all: each <code>ShareVolume</code> is
-a real SUBDIRECTORY of the tree already mounted by the parent <code>kind: Storage</code>
-(<code>&lt;storage&gt;/_data/shares/&lt;name&gt;</code>), registered as its own volume — the
-isolation is pure path confinement, and consumption uses the usual
-<code>-v &lt;name&gt;:/dest</code>, no new code at all on the container/vm/pod side. The quota is
-SOFT (measured usage + alert) — the HARD path (a loopback ext4 image) needs local block storage
-and doesn't compose with a subdirectory of a network mount.""",
     },
     "ingress": {
         "tagline": "INBOUND firewall (L4 rules + DNAT publishes) for a container on the SDN.",
@@ -1892,42 +1840,6 @@ pode obrigar a recriar segredos.</p>""",
 the <code>db-pass</code> secret created earlier is still readable afterwards — rotation must never
 force you to recreate secrets.</p>"""},
     },
-    "storage": {
-        "lab": {"pt": """<p>Regista um export NFS como <code>storage</code> e monta-o num
-container, com a password a vir do cofre em vez do manifesto.</p>
-<pre><code>printf 'password-do-nas' | delonix secret create nas-pass
-delonix storage create nas1 --server 192.168.1.50 --share /export/dados --password-secret nas-pass
-delonix container run --rm -v nas1:/mnt alpine sh -c 'echo ok > /mnt/teste'</code></pre>""",
-                "en": """<p>Register an NFS export as <code>storage</code> and mount it into a
-container, with the password coming from the vault instead of the manifest.</p>
-<pre><code>printf 'nas-password' | delonix secret create nas-pass
-delonix storage create nas1 --server 192.168.1.50 --share /export/data --password-secret nas-pass
-delonix container run --rm -v nas1:/mnt alpine sh -c 'echo ok > /mnt/test'</code></pre>"""},
-        "challenge": {"pt": """<p>Confirma no próprio NAS (por outra via — outro host, ou o
-painel do NAS) que o ficheiro <code>teste</code> chegou mesmo lá — a prova de que o
-<code>storage</code> não é um volume local disfarçado.</p>""",
-                "en": """<p>Confirm on the NAS itself (through another path — another host, or the
-NAS's own panel) that the <code>test</code> file really landed there — the proof that
-<code>storage</code> isn't a local volume in disguise.</p>"""},
-    },
-    "sharevolume": {
-        "lab": {"pt": """<p>Duas fatias isoladas do MESMO <code>Storage</code>, cada uma com a
-sua quota, para dois containers que não se devem ver.</p>
-<pre><code>delonix sharevolume apply -f sharevolume-a.yaml
-delonix sharevolume apply -f sharevolume-b.yaml
-delonix sharevolume ls</code></pre>""",
-                "en": """<p>Two isolated slices of the SAME <code>Storage</code>, each with its
-own quota, for two containers that shouldn't see each other.</p>
-<pre><code>delonix sharevolume apply -f sharevolume-a.yaml
-delonix sharevolume apply -f sharevolume-b.yaml
-delonix sharevolume ls</code></pre>"""},
-        "challenge": {"pt": """<p>Monta o ShareVolume A num container e o B noutro. Confirma que
-listar o ponto de montagem de um NUNCA mostra ficheiros do outro — a isolação é só confinamento de
-caminho, sem mecanismo de montagem novo.</p>""",
-                "en": """<p>Mount ShareVolume A into one container and B into another. Confirm
-that listing one's mount point never shows the other's files — the isolation is pure path
-confinement, no new mount mechanism involved.</p>"""},
-    },
     "ingress": {
         "lab": {"pt": """<p>Fecha tudo por omissão e abre só uma porta — o modelo
 default-deny.</p>
@@ -2346,10 +2258,15 @@ EXAMPLES_EN = {
         "Delete a snapshot that is no longer useful",
     ],
     ("volumes", "describe"): ["Volume detail (usage, quota, mounts)"],
-    ("volumes", "create"): ["With quota and the nfs driver available"],
-    ("volumes", "ls"): [""],
+    ("volumes", "create"): [
+        "With quota and the nfs driver available",
+        "NFS from a TrueNAS, mounted straight as a volume",
+        "SMB/CIFS with the password from the vault, never from argv",
+        "An isolated, individually-quota'd slice of an already-existing volume",
+    ],
+    ("volumes", "ls"): ["", "Every namespace at once — a share is never invisible"],
     ("volumes", "inspect"): [""],
-    ("volumes", "rm"): [""],
+    ("volumes", "rm"): ["", "Un-register a share's record; the DATA stays unless you ask for --purge-data"],
     ("volumes", "apply"): [""],
     ("network", "describe"): ["Network detail, kubectl-style"],
     ("network", "node"): [
@@ -2412,12 +2329,6 @@ EXAMPLES_EN = {
     ("secret", "ls"): ["List (values redacted)"],
     ("secret", "inspect"): ["Reveal explicitly"],
     ("secret", "rotate-key"): ["Rotate the master key (re-encrypts everything)"],
-    ("storage", "create"): ["NFS from a TrueNAS", "SMB/CIFS with the password from the vault"],
-    ("storage", "ls"): [""],
-    ("sharevolume", "apply"): ["Two isolated slices of the same NAS, each with its own quota"],
-    ("sharevolume", "ls"): ["List (quota + measured real usage)"],
-    ("sharevolume", "describe"): ["Slice detail (points at the -v command to consume it)"],
-    ("sharevolume", "rm"): ["Removes the record; the DATA stays (unless you ask for --purge-data)"],
     ("ingress", "clear"): ["Clear that container's whole firewall"],
     ("ingress", "rm"): ["Remove ONE rule, without clearing the others"],
     ("ingress", "unpublish"): ["Stop publishing a port"],
@@ -3793,14 +3704,14 @@ CHEAT_TASKS = [
     ("Firewall: só deixar entrar Postgres da SDN", "delonix net ingress allow db tcp/5432 --from 10.219.0.0/16\ndelonix net ingress policy db deny"),
     ("Firewall: egress da rede só p/ DNS + CIDRs", "delonix net egress net backend allowlist --to 10.0.0.0/8"),
     ("Tráfego por container ao vivo (eBPF)", "sudo delonix net flow --watch"),
-    ("Volume de rede de um NAS (NFS)", "delonix storage create media --type nfs --server 10.0.0.5 --share /mnt/pool/media"),
+    ("Volume de rede de um NAS (NFS)", "delonix volume create media --type nfs --server 10.0.0.5 --share /mnt/pool/media"),
     ("Segredo no cofre (não no argv)", "printf 'password=s3nha' | delonix secret create db-pass --from-env-file -"),
     ("Expor um container à internet pública (sem conta, sem router)",
      "delonix container run -d --name web --expose 80 nginx\ndelonix net tunnel expose 8080",
      "tunnel/tunnel-8080: running — https://oxipg-197-148-40-67.free.pinggy.net"),
     ("NAS partilhado por vários tenants, cada um com a sua quota",
-     "delonix storage create nas --type nfs --server 10.0.0.5 --share /pool/data\n"
-     "delonix sharevolume apply -f sharevolume.yaml"),
+     "delonix volume create nas --type nfs --server 10.0.0.5 --share /pool/data\n"
+     "delonix volume create tenant-a --parent nas --quota 5G"),
     ("microVM com cloud-init", "delonix vm create node1 --disk base.qcow2 --ssh-key @~/.ssh/id_ed25519.pub"),
     ("Cluster Kubernetes do zero", "delonix cluster kubeadm --name lab --control-plane 1 --workers 2"),
     ("Aplicar um manifesto inteiro", "delonix stack apply -f delonix-manifest.yaml"),
@@ -3897,10 +3808,12 @@ KINDS_DOC = [
     ("Gateway", "tunnel.yaml", "Expõe UMA porta local à internet pública via pinggy/ngrok/cloudflare — sem conta, "
      "sem IP público. Junta-se ao <code>HTTPRoute</code> apontando <code>localPort</code> para onde o proxy L7 "
      "escuta: uma URL pública, routing por Host do lado de lá para vários backends."),
-    ("ShareVolume", "sharevolume.yaml", "Uma fatia ISOLADA e com quota própria de uma partilha de rede — vários "
-     "container/vm/pod partilham UM export NFS/CIFS/WebDAV sem se verem. Cada fatia é um subdirectório real do "
-     "mount pai, registado como o seu próprio volume; consome-se com <code>-v &lt;nome&gt;:/destino</code>, sem "
-     "nada de novo do lado do consumidor."),
+    ("Volume com bloco share", "sharevolume.yaml", "Uma fatia ISOLADA e com quota própria de outro volume "
+     "(tipicamente um com bloco de rede) — vários container/vm/pod partilham UM export NFS/CIFS/WebDAV sem se "
+     "verem. Cada fatia é um subdirectório real do mount pai, registado como o seu próprio volume; consome-se "
+     "com <code>-v &lt;nome&gt;:/destino</code>, sem nada de novo do lado do consumidor. <strong>O "
+     "<code>kind: ShareVolume</code> deixou de existir</strong>: é o MESMO <code>kind: Volume</code> com um "
+     "bloco <code>share:</code>."),
 ]
 
 # Tradução EN das intros do `KINDS_DOC` (mesma ordem/tamanho — o YAML em si
@@ -3972,10 +3885,12 @@ KINDS_DOC_EN = [
     "Exposes ONE local port to the public internet via pinggy/ngrok/cloudflare — no "
     "account, no public IP. Pairs with <code>HTTPRoute</code> by pointing <code>localPort</code> at where the "
     "L7 proxy listens: one public URL, Host-based routing on the other end to several backends.",
-    "An ISOLATED, individually-quota'd slice of a network share — several "
-    "container/vm/pod share ONE NFS/CIFS/WebDAV export without seeing each other. Each slice is a real "
-    "subdirectory of the parent mount, registered as its own volume; consumed with "
-    "<code>-v &lt;name&gt;:/dest</code>, nothing new on the consumer side.",
+    "An ISOLATED, individually-quota'd slice of another volume (typically one with a "
+    "network block) — several container/vm/pod share ONE NFS/CIFS/WebDAV export without seeing each other. "
+    "Each slice is a real subdirectory of the parent mount, registered as its own volume; consumed with "
+    "<code>-v &lt;name&gt;:/dest</code>, nothing new on the consumer side. <strong>"
+    "<code>kind: ShareVolume</code> no longer exists</strong>: it's the SAME <code>kind: Volume</code> with a "
+    "<code>share:</code> block.",
 ]
 
 
@@ -4921,7 +4836,11 @@ def kinds_page():
         "a loop. The templates below are the real files in "
         "<a href='https://github.com/angolardevops/delonix-runtime/tree/main/examples'><code>examples/</code></a>."))
     for (kind, fname, intro), intro_en in zip(KINDS_DOC, KINDS_DOC_EN):
-        anchor = kind.split()[0].lower()
+        # The first word used to be the whole anchor, so any two labels that
+        # start the same way (the two Volume-family variants beside the plain
+        # Volume entry) collided on ID and the later ones were unreachable,
+        # silently. The full slug is unique for every distinct label here.
+        anchor = "-".join(kind.lower().split())
         body.append(f"<h2 id='{anchor}'>{html.escape(kind)}</h2>")
         body.append(bi('p', intro, intro_en))
         path = os.path.join(ROOT, "..", "examples", fname)

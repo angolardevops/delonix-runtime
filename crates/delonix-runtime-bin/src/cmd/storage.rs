@@ -1,83 +1,24 @@
-//! `delonix storage` — NETWORK storage mountable as a volume, inspired by
-//! Kubernetes PersistentVolumes. A shared folder (NFS, SMB/CIFS, WebDAV)
-//! from a NAS (TrueNAS, Synology, Nextcloud, …) becomes available as a named
-//! volume that any container mounts with `-v <name>:/path`.
+//! Network-share mounting primitives (NFS/SMB-CIFS/WebDAV) — the friendly
+//! declaration (server/share/credentials) that a `kind: Volume`'s
+//! `nfs:`/`cifs:`/`webdav:` block, and `volume create --type <t>`, both
+//! translate into a mount `device`/`options`.
 //!
-//! Under the hood it is a `delonix-volume` volume with a network driver — the
-//! `Storage` is the FRIENDLY declaration (server/share/credentials) that
-//! translates into the mount `device`/`options`; `volumes ls` shows it with its driver.
-//!
-//! **B5 CLI collapse (see the CLI restructuring plan under `docs/discovery/`)**:
-//! `dash`, `rm` and `inspect` were CUT from this group — measured to be true
-//! duplicates of `volume dash`/`volume rm`/`delete volume`/`volume inspect`
-//! (the last two after `remove_credentials` moved into `volume::cmd_rm_with`
-//! and `device`/`options` were added to `VolumeInspect`'s JSON). `create` and
-//! `ls` STAY: `create` has no generic equivalent (the friendly `--type nfs
-//! --server … --share …` declaration has no imperative counterpart on
-//! `volume create`, only the declarative `kind: Volume` + `nfs:`/`cifs:`/
-//! `webdav:` block via `volume apply -f`), and `ls` filters to network-driven
-//! volumes with a `DEVICE` column `volume ls` does not have. Cutting either
-//! would need new capability built into `volume` first — see the release
-//! notes for the measurement.
+//! **B5 CLI collapse**: `delonix storage` used to be a whole command group
+//! of its own (`create`/`ls`/`dash`/`rm`/`inspect`). `dash`/`rm`/`inspect`
+//! were the first to fold into `volume dash`/`volume rm`/`delete volume`/
+//! `volume inspect`; `create` and `ls` — the two pieces that had no
+//! imperative equivalent on `volume create`/`volume ls` — are now covered by
+//! `volume create --type <nfs|cifs|smb|webdav> --server … --share …` and
+//! `volume ls`'s `PARENT`/`QUOTA` columns. `delonix storage` no longer
+//! exists as a group; this module is now purely the shared mount-building
+//! logic both `volume create` and the `kind: Volume` apply path call into.
 
 use std::path::{Path, PathBuf};
 
-use clap::Subcommand;
 use delonix_runtime_core::{Error, Result};
-use delonix_volume::VolumeStore;
 use serde::{Deserialize, Serialize};
 
-use super::output;
 use super::util::state_root;
-
-/// `storage ls -o json` row (ADR-0005). `r#type` serializes as the JSON key `type`.
-#[derive(serde::Serialize)]
-struct StorageLsRow {
-    name: String,
-    r#type: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    device: Option<String>,
-    mountpoint: String,
-}
-
-#[derive(Subcommand)]
-pub enum StorageCmd {
-    /// Create (and mount) a network storage.
-    Create {
-        name: String,
-        /// Type: `nfs` | `cifs`/`smb` (Samba/Windows) | `webdav` (Nextcloud/ownCloud).
-        #[arg(long, value_parser = ["nfs", "cifs", "smb", "webdav"])]
-        r#type: String,
-        /// Server (host/IP), or the base URL in the `webdav` case.
-        #[arg(long)]
-        server: String,
-        /// Export/share: NFS path (`/mnt/pool/media`), CIFS share name
-        /// (`media`), or the path in the WebDAV URL (`/remote.php/dav/...`).
-        #[arg(long)]
-        share: String,
-        /// User (cifs/webdav).
-        #[arg(long)]
-        username: Option<String>,
-        /// Password (cifs/webdav) — prefer `--password-secret` to avoid exposing it.
-        #[arg(long)]
-        password: Option<String>,
-        /// Vault secret with the `password` key (cifs/webdav) — does not leak in shell history.
-        #[arg(long = "password-secret", add = clap_complete::engine::ArgValueCandidates::new(super::complete::secrets))]
-        password_secret: Option<String>,
-        /// Mount read-only.
-        #[arg(long = "read-only")]
-        read_only: bool,
-        /// Extra mount options (`vers=4.1,soft`), appended to the derived ones.
-        #[arg(long)]
-        options: Option<String>,
-    },
-    /// List the network storages (volumes with a network driver).
-    Ls {
-        /// Output format: `table` (default) or `json` (ADR-0005).
-        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
-        output: output::OutputFormat,
-    },
-}
 
 /// Names accepted in the `kind: Storage` `spec`, for the unknown-field warning.
 pub(crate) const STORAGE_SPEC_FIELDS: &[&str] = &[
@@ -433,77 +374,6 @@ fn resolve_password(password: Option<String>, secret: Option<String>) -> Result<
             &[("name", &name)],
         ))
     })
-}
-
-pub fn run(action: StorageCmd) -> Result<()> {
-    let store = VolumeStore::open(state_root())?;
-    match action {
-        StorageCmd::Create {
-            name,
-            r#type,
-            server,
-            share,
-            username,
-            password,
-            password_secret,
-            read_only,
-            options,
-        } => {
-            let pw = resolve_password(password, password_secret)?;
-            let creds = write_cifs_credentials(&name, username.as_deref(), pw.as_deref())?;
-            let m = build_mount(
-                &r#type,
-                &server,
-                &share,
-                creds.as_deref(),
-                read_only,
-                options.as_deref(),
-            )?;
-            let v = store.create_with(&name, &m.driver, Some(m.device.clone()), m.options)?;
-            println!(
-                "{}",
-                super::po::tf(
-                    "storage '{name}' created and mounted ({driver} · {device})",
-                    &[
-                        ("name", &v.name),
-                        ("driver", &m.driver),
-                        ("device", &m.device)
-                    ],
-                )
-            );
-        }
-        StorageCmd::Ls { output } => {
-            let output = super::config::resolve_output(&super::util::state_root(), output);
-            let nets: Vec<_> = store
-                .list()?
-                .into_iter()
-                .filter(|v| delonix_volume::is_network_driver(&v.driver))
-                .collect();
-            if output == crate::cmd::output::OutputFormat::Json {
-                let rows: Vec<StorageLsRow> = nets
-                    .into_iter()
-                    .map(|v| StorageLsRow {
-                        name: v.name,
-                        r#type: v.driver,
-                        device: v.device,
-                        mountpoint: v.mountpoint,
-                    })
-                    .collect();
-                return crate::cmd::output::print_json(&rows);
-            }
-            let mut t = output::Table::new(&["NAME", "TYPE", "DEVICE", "MOUNTPOINT"]);
-            for v in nets {
-                t.row(vec![
-                    v.name,
-                    v.driver,
-                    v.device.unwrap_or_default(),
-                    v.mountpoint,
-                ]);
-            }
-            t.print();
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]
