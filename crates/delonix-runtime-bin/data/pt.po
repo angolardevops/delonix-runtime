@@ -10430,3 +10430,81 @@ msgstr "Mostra só esta namespace de isolamento — só as Kinds que TÊM uma a 
 
 msgid "only one isolation namespace — refused on a Kind that has none, never silently ignored"
 msgstr "só uma namespace de isolamento — recusado numa Kind que não tem nenhuma, nunca ignorado em silêncio"
+
+msgid "Move a VM to another `delonix` host — real downtime, no shared storage"
+msgstr "Move uma VM para outro host `delonix` — downtime real, sem storage partilhado"
+
+msgid ""
+"Move a VM to another `delonix` host — real downtime, no shared storage.\n"
+"\n"
+"Stops the VM (if running), flattens its overlay to a standalone qcow2, "
+"transfers it over SSH, registers it as a VM image on the target (`image vm "
+"import --appliance` — the disk already carries its own configured state, a "
+"fresh cloud-init pass would be wrong there), and creates the VM from it. "
+"True live migration (near-zero downtime) is out of scope: Cloud Hypervisor "
+"has no disk-migration primitive, and even libvirt/QEMU's NBD-based path "
+"would need network reachability and convergence handling this engine does "
+"not have."
+msgstr ""
+"Move uma VM para outro host `delonix` — downtime real, sem storage "
+"partilhado.\n"
+"\n"
+"Pára a VM (se estiver a correr), achata o seu overlay num qcow2 "
+"autónomo, transfere-o por SSH, regista-o como imagem VM no alvo (`image vm "
+"import --appliance` — o disco já traz o seu próprio estado configurado, uma "
+"passagem de cloud-init nova seria errada aí), e cria a VM a partir dele. "
+"Live migration a sério (downtime quase nulo) fica fora de âmbito: o Cloud "
+"Hypervisor não tem primitivo nenhum de migração de disco, e mesmo o "
+"caminho NBD do libvirt/QEMU precisaria de alcançabilidade de rede e gestão "
+"de convergência que este motor não tem."
+
+msgid "Target host (address or hostname the SSH client resolves)"
+msgstr "Host alvo (endereço ou hostname que o cliente SSH resolve)"
+
+msgid "SSH user on the target (default: `delonix`, the account the golden image creates)"
+msgstr "Utilizador SSH no alvo (por omissão: `delonix`, a conta que a imagem dourada cria)"
+
+msgid "SSH private key for the target"
+msgstr "Chave SSH privada para o alvo"
+
+msgid "SSH port on the target (default: 22)"
+msgstr "Porta SSH no alvo (por omissão: 22)"
+
+msgid "Network on the TARGET host for the recreated VM — a network name is local to a host, never inherited from the source"
+msgstr "Rede no host ALVO para a VM recriada — o nome de uma rede é local a um host, nunca herdado da origem"
+
+msgid "Backend on the target (default: its own auto-detection/preference)"
+msgstr "Backend no alvo (por omissão: a sua própria auto-detecção/preferência)"
+
+msgid "vCPUs on the target (default: the source VM's current value)"
+msgstr "vCPUs no alvo (por omissão: o valor actual da VM de origem)"
+
+msgid "Memory on the target (default: the source VM's current value)"
+msgstr "Memória no alvo (por omissão: o valor actual da VM de origem)"
+
+msgid "Remove the source VM once the target confirms it was created"
+msgstr "Remove a VM de origem assim que o alvo confirmar que foi criada"
+
+msgid "'{name}' is running — stopping it first (migration needs a disk no VMM has open)"
+msgstr "'{name}' está a correr — a pará-la primeiro (a migração precisa de um disco que nenhum VMM tenha aberto)"
+
+msgid "flattening {name}'s disk (no backing-file dependency to carry across hosts)..."
+msgstr "a achatar o disco de {name} (sem dependência de backing-file para levar entre hosts)..."
+
+msgid "source VM '{name}' removed — it now lives on {host}"
+msgstr "VM de origem '{name}' removida — agora vive em {host}"
+
+msgid "'{name}' migrated to {user}@{host} (network: {network})"
+msgstr "'{name}' migrada para {user}@{host} (rede: {network})"
+
+msgid "transferring to {user}@{host}:{path}..."
+msgstr "a transferir para {user}@{host}:{path}..."
+
+msgid "move a stopped VM to another delonix host — real downtime, no shared storage needed"
+msgstr "move uma VM parada para outro host delonix — downtime real, sem storage partilhado"
+
+msgid "pin the SSH identity and a non-default port"
+msgstr "fixa a identidade SSH e uma porta não-omissa"
+
+msgid "remove the source once the target confirms the VM was created there"
+msgstr "remove a origem assim que o alvo confirmar que a VM foi lá criada"
