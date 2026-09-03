@@ -484,6 +484,42 @@ pub(crate) fn check_cidr(src: &str) -> Result<()> {
     }))
 }
 
+/// The `origin` an imperative `net ingress`/`net egress allow`/`deny` writes
+/// on its rule — deterministic from the exact match tuple a repeat
+/// invocation is judged against (`dir`/`proto`/`port`/normalized `src`), so
+/// this is a rename of the KEY `add_rule`'s replace logic already matched
+/// on, not new behavior: the same `(dir, proto, port, src)` still replaces
+/// itself one-for-one, byte-identical UX (ADR-0029, decision 1). What
+/// changes is that the key now lives in `FwRule.origin` — the SAME field
+/// `kind: NetworkAccessRule` uses — instead of a bespoke 4-field comparison,
+/// so `add_rule` and `network_access_rule::set_rule_by_origin` are one
+/// mechanism with two writers, and a CLI-added rule becomes addressable via
+/// `get networkaccessrules`/`describe`/`delete networkaccessrules` for free.
+/// The `cli:` prefix keeps this namespace apart from manifest document names
+/// (a `NetworkAccessRule`'s `metadata.name` can never collide with it and
+/// still express the same match — the two mechanisms stay independent, per
+/// the ADR: a `NetworkAccessRule` document with the identical tuple gets its
+/// OWN origin and neither one silently erases the other's rule).
+fn cli_rule_origin(dir: &str, proto: &str, port: &str, src: &str) -> String {
+    format!("cli:{dir}:{proto}:{port}:{}", norm_any(src))
+}
+
+/// A rule's `origin` names a `kind: NetworkAccessRule` MANIFEST document, as
+/// opposed to [`cli_rule_origin`]'s synthetic key for an imperative `net
+/// ingress`/`net egress allow`/`deny`. The distinction matters in exactly one
+/// place — `apply_fw_doc`'s `FirewallPolicy` replace, below — because now
+/// that both writers put something in `origin`, "has an origin" alone no
+/// longer means "independently-lifecycled document ADR-0028 protects";
+/// giving `FirewallPolicy` the OLD "wipe every rule of this direction"
+/// behavior for CLI-added rules (and only the NEW protection for genuine
+/// `NetworkAccessRule` documents) keeps `FirewallPolicy`'s own "declares the
+/// WHOLE state of a direction" contract exactly as it was before this
+/// refactor — a `net ingress allow` is not a promise that a document
+/// replacing the whole direction won't override it.
+fn is_manifest_origin(origin: &str) -> bool {
+    !origin.starts_with("cli:")
+}
+
 fn add_rule(
     store: &Store,
     name: &str,
@@ -496,6 +532,7 @@ fn add_rule(
     let (proto, port) = parse_port_spec(port_spec)?;
     let src = cidr.unwrap_or_default();
     check_cidr(&src)?;
+    let origin = cli_rule_origin(dir, &proto, &port, &src);
     let mut replaced: Vec<String> = Vec::new();
     let mut shadow: Option<(String, String)> = None;
     let c = update_locked(store, name, |c| {
@@ -508,10 +545,9 @@ fn add_rule(
         // (dir/proto/port/source) REPLACES the existing one. Without this, `deny 8069`
         // followed by `allow 8069` left the service blocked forever — the rules
         // accumulated and the nft chain is first-match terminal: the old deny,
-        // above, always won (real bug report).
-        let same_match = |r: &FwRule| {
-            r.dir == dir && r.proto == proto && r.port == port && norm_any(&r.src) == norm_any(&src)
-        };
+        // above, always won (real bug report). Matched by `origin` now, not by
+        // re-deriving the 4-field tuple — see `cli_rule_origin`.
+        let same_match = |r: &FwRule| r.origin.as_deref() == Some(origin.as_str());
         replaced = fw
             .rules
             .iter()
@@ -526,9 +562,7 @@ fn add_rule(
             src: src.clone(),
             action: action.as_str().to_string(),
             note: note.clone().unwrap_or_default(),
-            // Imperative `net ingress`/`net egress` — never owned by a
-            // `NetworkAccessRule` document.
-            origin: None,
+            origin: Some(origin.clone()),
         });
         // Shadow: an EARLIER overlapping rule (e.g. `deny any/8069` vs
         // `allow tcp/8069`) with the opposite action still matches first — the new
@@ -1645,15 +1679,19 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
         let mut fw = c.firewall.clone().unwrap_or_default();
         fw.enabled = true;
         // Declarative: this direction is fully replaced by the document —
-        // but only the UNOWNED rules of it. A rule with `origin: Some(_)`
-        // came from an independently-lifecycled `kind: NetworkAccessRule`
-        // document, not from this one; wiping it here would be the exact
-        // "two policies, one silently erases the other while both report
-        // success" bug this module already refuses at the manifest level for
-        // two FirewallPolicy documents (see `stack.rs`'s duplicate
-        // (target,direction) check) — except this time between two
-        // DIFFERENT Kinds, which that check cannot see.
-        fw.rules.retain(|r| r.dir != dir || r.origin.is_some());
+        // but only the UNOWNED rules of it, and rules an imperative `net
+        // ingress`/`net egress allow`/`deny` added are NOT exempt (see
+        // `is_manifest_origin`: they carry an `origin` now too, since
+        // ADR-0029, but not one naming an independently-lifecycled document).
+        // A rule whose origin DOES name a `kind: NetworkAccessRule` document
+        // survives — wiping it here would be the exact "two policies, one
+        // silently erases the other while both report success" bug this
+        // module already refuses at the manifest level for two FirewallPolicy
+        // documents (see `stack.rs`'s duplicate (target,direction) check) —
+        // except this time between two DIFFERENT Kinds, which that check
+        // cannot see.
+        fw.rules
+            .retain(|r| r.dir != dir || r.origin.as_deref().is_some_and(is_manifest_origin));
         if dir == "in" {
             fw.policy_in = policy.to_string();
         } else {
@@ -1913,6 +1951,56 @@ mod tests {
         assert_eq!(norm_any(""), norm_any("*"));
         assert_eq!(norm_any("10.0.0.0/8"), "10.0.0.0/8");
     }
+
+    /// The origin key `add_rule` writes must be deterministic (the whole
+    /// point — a repeat `net ingress allow` for the same match has to find
+    /// and replace its own earlier rule, byte-identical UX to the pre-origin
+    /// 4-field comparison) and must normalize `src` the same way `norm_any`
+    /// already does for the match itself (ADR-0029, decision 1).
+    #[test]
+    fn cli_rule_origin_e_deterministico_e_normaliza_o_src() {
+        assert_eq!(
+            cli_rule_origin("in", "tcp", "8069", ""),
+            cli_rule_origin("in", "tcp", "8069", "")
+        );
+        assert_eq!(
+            cli_rule_origin("in", "tcp", "8069", ""),
+            cli_rule_origin("in", "tcp", "8069", "0.0.0.0/0")
+        );
+        assert_ne!(
+            cli_rule_origin("in", "tcp", "8069", ""),
+            cli_rule_origin("out", "tcp", "8069", "")
+        );
+        assert_ne!(
+            cli_rule_origin("in", "tcp", "8069", ""),
+            cli_rule_origin("in", "tcp", "5432", "")
+        );
+    }
+
+    /// The distinction `apply_fw_doc`'s `FirewallPolicy` replace relies on:
+    /// a CLI-synthesized origin must NOT read as a manifest document's name,
+    /// or a `FirewallPolicy` apply would stop wiping imperative rules it is
+    /// supposed to fully replace (see `is_manifest_origin`'s doc comment).
+    #[test]
+    fn is_manifest_origin_distingue_documento_de_origem_cli() {
+        assert!(!is_manifest_origin(&cli_rule_origin(
+            "in", "tcp", "8069", ""
+        )));
+        assert!(is_manifest_origin("allow-web-from-lan"));
+    }
+
+    // A full `apply_fw_doc` integration test would need a live ingress
+    // holder (`apply_firewall_everywhere` talks to the real control socket
+    // regardless of `c.ip`, confirmed by running one against this store —
+    // it fails with "ingress holder is down") — not available in a plain
+    // `cargo test`, the same limitation this codebase already accepts for
+    // other holder-touching code paths, proven by unit test and code review
+    // rather than a live run; `apply_fw_doc` itself has no existing test
+    // either, for the same reason. The fix — `is_manifest_origin` — is
+    // exercised directly above; the one-line wiring at the retain call site
+    // (`fw.rules.retain(|r| r.dir != dir ||
+    // r.origin.as_deref().is_some_and(is_manifest_origin))`) was verified
+    // by hand instead.
 
     #[test]
     fn field_overlaps_apanha_coringas_e_iguais() {
