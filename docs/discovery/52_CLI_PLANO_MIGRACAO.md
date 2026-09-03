@@ -103,7 +103,7 @@ corrigido para a grafia actual.
 | `backup` | 6 | consolida o `backup`/`restore` de raiz + `list`/`inspect`/`schedule`/`remove` | já feito antes deste plano (ver AGENTS.md) |
 | `diff` | 1 | as três faces (desired/last-applied/observed) de UM recurso nomeado | **FECHADO** — PR #200 |
 | `system metrics` | 1 | `DashSummary` cru, `-o json`/tabela | **FECHADO** — PR #201 |
-| `cluster` day-2 | 5 | `kubeconfig`/`health`/`upgrade`/`drain`/`uncordon` | `kubeconfig` já existia; **`health` FECHADO** — PR #202; `upgrade`/`drain`/`uncordon` por fazer (`drain`/`uncordon` bloqueados no ADR-0010, sem consumidor) |
+| `cluster` day-2 | 5 | `kubeconfig`/`health`/`upgrade`/`drain`/`uncordon` | `kubeconfig` já existia; **`health` FECHADO** — PR #202; `upgrade`/`drain`/`uncordon` por fazer — **a citação do ADR-0010 aqui era MÁ ATRIBUIÇÃO** (medido 2026-09-03): esse ADR recusa a API de gestão REMOTA (`delonix-mgmt` alcançável de fora do host); `drain`/`uncordon` não precisam sequer de SSH (`cluster kubeconfig` já cacheia localmente — são `kubectl --kubeconfig=<cache> drain/uncordon` directos) e `upgrade` reusa o MESMO `cmd/remote.rs::SshTarget` que `kubeadm_init`/`join` já usam. Nada bloqueado; por construir |
 | `config` | 5 | contextos — **precisa de ADR**, ver §5 | **`output` FECHADO** (local-only, sem ADR reaberto) — PR #203; `namespace` fica de fora de propósito, sem ponto de leitura único |
 | `system state` | — | — | **não se constrói** — já respondido por `system info` (ver plano da fatia 1) |
 | `pod` day-2 | 4 | `exec`/`attach`/`cp`/`port-forward` | `exec`/`attach`/`cp` já existiam antes deste plano; só `port-forward` por fazer |
@@ -163,13 +163,17 @@ manifestos precisa da sua própria medição, não de uma suposição."
 `status`) nunca entrou na conta dos 41, e a ADR-0028 diz textualmente que é
 "um mecanismo diferente" — fora do alcance do `NetworkAccessRule`.
 
-**Restam por decidir antes de cortar mais**: (1) `net ingress/egress
-allow/deny` passam a escrever um `NetworkAccessRule` em vez de mutar o
-registo de firewall directamente — muda o modelo de persistência; (2)
-`net ingress publish/unpublish` (DNAT) e `net egress net/host` não têm
-equivalente nenhum no `NetworkAccessRule` (que só cobre containers); (3)
-`netns` "passar a oculto" é plumbing que outros subsistemas chamam
-internamente — decidir se é ocultado ou mantido, não é um corte trivial.
+**As três decisões em aberto — RESOLVIDAS (`docs/adr/0029-net-ingress-egress-collapse.md`)**:
+(1) `net ingress/egress allow/deny` passam a escrever pela MESMA
+contabilidade do `NetworkAccessRule` (`origin` sintético derivado do
+`(dir, proto, port, src)`) — unifica os dois caminhos de mutação sem tirar
+nem uma folha da CLI nem mudar UX nenhuma; (2) `publish`/`unpublish` (DNAT)
+ficam FORA do `NetworkAccessRule` PERMANENTEMENTE — são outra grão (mapeamento
+de porta, não decisão allow/deny) e nunca deviam ter contado nas "−41"
+prometidas; (3) `net netns` fica VISÍVEL — é ferramenta de diagnóstico
+documentada como tal, não plumbing interna (essa já está oculta antes do
+clap). Nenhuma das três abre trabalho de corte de folhas novo — a única
+mudança de código é a fusão dos dois caminhos de mutação do ponto (1).
 
 ### B5 — O colapso do armazenamento  ·  QUEBRA  ·  prometidas −22, entregues **−7**
 
@@ -219,9 +223,10 @@ cortar**: `vm` mantém `console`/`ssh`/`vnc`/`snapshot`/`bridge`/`unbridge`/
 — `get vms` fixa `ports: false`/sem namespace, um `get` não pode fazer I/O de
 rede não pedido); `pod` mantém `exec`/`attach`/`cp`/`logs` (sem equivalente
 CRUD nenhum); `cluster` mantém `kubeadm`/`kube`/`kubeconfig`/`health` (e
-`upgrade`/`drain`/`uncordon` continuam por fazer, bloqueados no ADR-0010,
-tal como já estava registado). Mais colapso aqui é a mesma disciplina do B7
-original — medir cada leaf, um a um — não um bloco novo.
+`upgrade`/`drain`/`uncordon` continuam por fazer — **não bloqueados**, ver a
+correcção na tabela do B3 acima: a citação do ADR-0010 era má atribuição).
+Mais colapso aqui é a mesma disciplina do B7 original — medir cada leaf, um a
+um — não um bloco novo.
 
 ### B8 — Os atalhos de raiz e o `workload`  ·  QUEBRA DE CONTRATO  ·  **FECHADO na v1.0.0**
 
@@ -300,9 +305,24 @@ seguir, aos poucos». Registado aqui como facto, não como pergunta em aberto.
 
 ## 6. O que este plano não promete
 
-Não há estimativa de tempo. `pod port-forward` (PR #207) e `network capture`
-(PR #208) já têm código a aguardar revisão manual; `vm migrate` e `cluster
-upgrade` continuam genuinamente por construir — nenhum PR aberto os cobre, e
-`vm migrate` mantém a ressalva original: pode não ser viável sem mecanismo de
-live-migration/storage partilhado entre hosts `delonix`, por confirmar antes
-de desenhar. Dar-lhes um prazo aqui seria inventar.
+Não há estimativa de tempo. `pod port-forward` (PR #207), `net capture`
+(PR #208), `vm pause/unpause` (PR #206) e `image sign` (PR #209) já têm
+código a aguardar revisão manual.
+
+**`vm migrate` — investigado 2026-09-03, já não é "por confirmar".** Medido
+contra o `VmBackend` real e a documentação upstream do Cloud Hypervisor e do
+libvirt/QEMU: um MVP **stop-copy-start** (`vm stop` → scp do overlay qcow2 +
+a golden para o host alvo → `vm create`/registo lá, com downtime real) é
+directamente construível sobre primitivos já existentes, sem storage
+partilhado nenhum. **Live migration a sério continua fora de alcance** — o
+Cloud Hypervisor não tem mecanismo de migração de DISCO (só memória/estado),
+e mesmo o caminho NBD do libvirt/QEMU (que existe e é maduro) exigiria
+`VmBackend::migrate` + alcançabilidade de rede entre hosts + gestão de
+convergência que este código não tem — isso fica como ADR próprio, não como
+extensão incremental. O que se constrói agora é o MVP com downtime,
+documentado como tal.
+
+**`cluster upgrade`/`drain`/`uncordon` — já não estão bloqueados** (ver a
+correcção na secção do B3/B7 acima). `drain`/`uncordon` não precisam de SSH
+(kubeconfig já cacheado localmente); `upgrade` reusa o `SshTarget` que
+`kubeadm_init`/`join` já usam. Por construir, sem PR aberto ainda.

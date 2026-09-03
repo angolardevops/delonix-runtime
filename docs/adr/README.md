@@ -37,6 +37,8 @@ never rewritten — supersede them with a new one.
 | [0024](0024-firewall-policy-selector.md) | A `FirewallPolicy` gains a label selector, and an empty match stays open | **Accepted** — `target` unchanged; empty match warns and succeeds, not refuses |
 | [0027](0027-rootless-sensor-spike.md) | Rootless changes the answer — seccomp user-notification, not eBPF, is this engine's sensor | **Proposed** — GO/NO-GO closed with measurements: `bpf()` EPERM, unotify observes+attributes+refuses with zero capabilities |
 | [0026](0026-security-runtime-decision-crate.md) | The security runtime is a decision crate, not a sensor platform — and it has no tenants | **Proposed** — `delonix-security-runtime`; the VM path joins the admission gate, VM rules default-off + lint |
+| [0028](0028-network-access-rule-incremental.md) | `kind: NetworkAccessRule` — an incremental firewall primitive alongside `FirewallPolicy` | **Accepted** — `FwRule.origin` bookkeeping, no new dataplane primitive, no new CLI leaf |
+| [0029](0029-net-ingress-egress-collapse.md) | The three open questions of B4's `net` collapse, resolved | **Accepted** — CLI allow/deny route through the same origin bookkeeping; publish/unpublish and `netns` stay imperative/visible, permanently |
 
 ## Roadmap (from `AGENTS.md` "Universal Runtime" — each phase needs its own accepted ADR)
 
