@@ -429,23 +429,71 @@ fn actual_of(name: String, v: &delonix_volume::Volume) -> super::reconcile::Actu
     }
 }
 
+// A CLI enum parsed once per invocation, not a hot path — the same
+// justification `ImageCmd`/`VmSub` already carry. `Create` became the
+// outlier once it absorbed `storage create`'s network-share flags and the
+// `--parent` share flags (B5 CLI collapse).
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum VolumeCmd {
     /// Create a named volume.
+    ///
+    /// Three shapes, and a document may use only one: a plain/`nfs`-device
+    /// volume (`--driver`), a friendly network share (`--type`), or a
+    /// quota'd slice of an already-existing volume (`--parent`) — the same
+    /// three the `kind: Volume` manifest accepts as `nfs:`/`cifs:`/`webdav:`
+    /// and `share:` blocks (B5 CLI collapse: `storage create`/`sharevolume`
+    /// were the only imperative way to reach the last two before this).
     Create {
         name: String,
-        /// `local` (default) or `nfs`.
-        #[arg(long, default_value = "local")]
+        /// `local` (default) or `nfs` — the RAW device form. For a friendlier
+        /// network declaration (with credentials), use `--type` instead.
+        #[arg(long, default_value = "local", conflicts_with_all = ["type", "parent"])]
         driver: String,
         /// Device/export (`nfs` driver).
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["type", "parent"])]
         device: Option<String>,
-        /// Additional mount options (`nfs` driver).
-        #[arg(long)]
+        /// Additional mount options (`nfs` driver, or the friendly `--type` form).
+        #[arg(long, conflicts_with = "parent")]
         options: Option<String>,
         /// Quota (e.g. `2g`) — only applied if `--quota` is given.
         #[arg(long)]
         quota: Option<String>,
+        /// Usage percentage above which `ls`/`describe` flag a WARN (default 90).
+        #[arg(long = "alert-pct")]
+        alert_pct: Option<u8>,
+        /// Network storage type — `nfs` | `cifs`/`smb` (Samba/Windows) |
+        /// `webdav` (Nextcloud/ownCloud). Requires `--server`/`--share`.
+        #[arg(long = "type", value_parser = ["nfs", "cifs", "smb", "webdav"], requires_all = ["server", "share"], conflicts_with = "parent")]
+        r#type: Option<String>,
+        /// Server (host/IP), or the base URL in the `webdav` case — with `--type`.
+        #[arg(long, requires = "type")]
+        server: Option<String>,
+        /// Export/share: NFS path (`/mnt/pool/media`), CIFS share name
+        /// (`media`), or the path in the WebDAV URL — with `--type`.
+        #[arg(long, requires = "type")]
+        share: Option<String>,
+        /// User (cifs/webdav) — with `--type`.
+        #[arg(long, requires = "type")]
+        username: Option<String>,
+        /// Password (cifs/webdav) — prefer `--password-secret`. With `--type`.
+        #[arg(long, requires = "type")]
+        password: Option<String>,
+        /// Vault secret with the `password` key (cifs/webdav) — with `--type`.
+        #[arg(long = "password-secret", requires = "type", add = clap_complete::engine::ArgValueCandidates::new(super::complete::secrets))]
+        password_secret: Option<String>,
+        /// Mount read-only — with `--type`.
+        #[arg(long = "read-only", requires = "type")]
+        read_only: bool,
+        /// Carve this volume out of an ALREADY-EXISTING one (a quota'd,
+        /// isolated subdirectory — what `kind: ShareVolume` used to be a Kind
+        /// of its own for). Mounts nothing of its own: exclusive with
+        /// `--driver`/`--device`/`--options`/`--type`.
+        #[arg(long, add = ArgValueCandidates::new(super::complete::volumes))]
+        parent: Option<String>,
+        /// Namespace that will own the share (default `default`) — only with `--parent`.
+        #[arg(short = 'n', long, requires = "parent", add = clap_complete::engine::ArgValueCandidates::new(super::complete::namespaces))]
+        namespace: Option<String>,
     },
     /// List the volumes.
     Ls {
@@ -459,8 +507,14 @@ pub enum VolumeCmd {
         // rendered help up VERBATIM, so a multi-paragraph `long_help` comes out
         // untranslated under `--l18n=pt`.
         /// Show this namespace's volumes instead of the unscoped ones.
-        #[arg(short = 'n', long, add = clap_complete::engine::ArgValueCandidates::new(super::complete::namespaces))]
+        #[arg(short = 'n', long, conflicts_with = "all_namespaces", add = clap_complete::engine::ArgValueCandidates::new(super::complete::namespaces))]
         namespace: Option<String>,
+        /// Every namespace at once, plus the unscoped root — a share that
+        /// exists and is invisible is how an operator removes its parent
+        /// believing nothing hangs off it (B5 CLI collapse: `sharevolume ls`
+        /// always listed this way; `volume ls` now can too).
+        #[arg(short = 'A', long = "all-namespaces")]
+        all_namespaces: bool,
     },
     /// Details of a volume (includes real on-disk usage).
     Inspect {
@@ -476,11 +530,14 @@ pub enum VolumeCmd {
     Describe {
         #[arg(required = true, add = ArgValueCandidates::new(super::complete::volumes))]
         names: Vec<String>,
+        /// Namespace that owns them (default: the unscoped root).
+        #[arg(short = 'n', long, add = clap_complete::engine::ArgValueCandidates::new(super::complete::namespaces))]
+        namespace: Option<String>,
     },
     /// Remove a volume.
     ///
-    /// Refuses while a container or a `kind: ShareVolume` still references it
-    /// (use `--force` to remove it anyway).
+    /// Refuses while a container or a share carved out of it still references
+    /// it (use `--force` to remove it anyway).
     Rm {
         #[arg(add = ArgValueCandidates::new(super::complete::volumes))]
         name: String,
@@ -493,6 +550,15 @@ pub enum VolumeCmd {
         /// Refused for a volume that only mounts a share someone else made.
         #[arg(long = "destroy-remote")]
         destroy_remote: bool,
+        /// Also delete the data of a SHARE (a volume with a `--parent`) — the
+        /// subdirectory it points at survives by default (the parent's data
+        /// is not this command's to destroy). Refused on a volume that is not
+        /// a share: its own removal already takes its data with it.
+        #[arg(long = "purge-data")]
+        purge_data: bool,
+        /// Namespace that owns it (default: the unscoped root).
+        #[arg(short = 'n', long, add = clap_complete::engine::ArgValueCandidates::new(super::complete::namespaces))]
+        namespace: Option<String>,
     },
     /// DESTROY every local volume that nothing references.
     ///
@@ -591,19 +657,59 @@ pub fn run(action: VolumeCmd) -> Result<()> {
             device,
             options,
             quota,
-        } => {
-            let vol = create_volume(&store, &name, &driver, device, options, quota)?;
-            println!("{}", vol.name);
-            Ok(())
-        }
-        VolumeCmd::Ls { output, namespace } => cmd_ls(&store, output, namespace.as_deref()),
+            alert_pct,
+            r#type,
+            server,
+            share,
+            username,
+            password,
+            password_secret,
+            read_only,
+            parent,
+            namespace,
+        } => cmd_create(
+            &store,
+            &name,
+            CreateArgs {
+                driver,
+                device,
+                options,
+                quota,
+                alert_pct,
+                r#type,
+                server,
+                share,
+                username,
+                password,
+                password_secret,
+                read_only,
+                parent,
+                namespace,
+            },
+        ),
+        VolumeCmd::Ls {
+            output,
+            namespace,
+            all_namespaces,
+        } => cmd_ls(&store, output, namespace.as_deref(), all_namespaces),
         VolumeCmd::Inspect { name, output } => cmd_inspect(&store, &name, output),
-        VolumeCmd::Describe { names } => cmd_describe(&store, &names),
+        VolumeCmd::Describe { names, namespace } => {
+            cmd_describe(&store, &names, namespace.as_deref())
+        }
         VolumeCmd::Rm {
             name,
             force,
             destroy_remote,
-        } => cmd_rm_with(&store, &name, force, destroy_remote),
+            purge_data,
+            namespace,
+        } => cmd_rm_with(
+            &store,
+            &name,
+            force,
+            destroy_remote,
+            purge_data,
+            namespace.as_deref(),
+        ),
         VolumeCmd::Prune {
             force,
             namespace,
@@ -798,7 +904,15 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                 spec.options.clone(),
             ),
         };
-        create_volume(&store, name, &driver, device, options, spec.quota.clone())?;
+        create_volume(
+            &store,
+            name,
+            &driver,
+            device,
+            options,
+            spec.quota.clone(),
+            spec.alert_pct,
+        )?;
         // Stamp WHO provisioned this and where. It is the ownership mark that
         // `--destroy-remote` needs: without it there is no claim, and a volume
         // that merely mounts a share made by someone else can never take that
@@ -830,6 +944,7 @@ fn create_volume(
     device: Option<String>,
     options: Option<String>,
     quota: Option<String>,
+    alert_pct: Option<u8>,
 ) -> Result<delonix_volume::Volume> {
     // VALIDATE BEFORE CREATING. This used to create the volume first and parse
     // `--quota` after, so `volume create v --quota abc` exited 1 with "invalid
@@ -848,8 +963,8 @@ fn create_volume(
     } else {
         store.create_with(name, driver, device, options)?
     };
-    if let Some(bytes) = quota_bytes {
-        store.set_quota(name, Some(bytes), None, false)?;
+    if quota_bytes.is_some() || alert_pct.is_some() {
+        store.set_quota(name, quota_bytes, alert_pct, false)?;
     }
     if !existed {
         delonix_runtime_core::events::emit(
@@ -862,6 +977,90 @@ fn create_volume(
         );
     }
     Ok(vol)
+}
+
+/// Everything `VolumeCmd::Create` can carry — one struct so `cmd_create`
+/// takes one argument instead of fourteen, and so the three creation shapes
+/// (plain/`nfs`-device, friendly `--type` network share, `--parent` share)
+/// stay readable as one function instead of an unwieldy call site.
+struct CreateArgs {
+    driver: String,
+    device: Option<String>,
+    options: Option<String>,
+    quota: Option<String>,
+    alert_pct: Option<u8>,
+    r#type: Option<String>,
+    server: Option<String>,
+    share: Option<String>,
+    username: Option<String>,
+    password: Option<String>,
+    password_secret: Option<String>,
+    read_only: bool,
+    parent: Option<String>,
+    namespace: Option<String>,
+}
+
+/// `volume create` — dispatches on which of the three shapes was given.
+/// `clap`'s `conflicts_with`/`requires` on the flags themselves already rule
+/// out a mix; this just picks the one that is left.
+fn cmd_create(store: &VolumeStore, name: &str, a: CreateArgs) -> Result<()> {
+    if let Some(from) = a.parent {
+        // The parent has to exist and be reachable from the UNSCOPED store —
+        // same rule `apply_share` already enforces for the manifest path.
+        super::sharevolume::apply_share(
+            name,
+            &from,
+            a.quota.as_deref(),
+            a.alert_pct,
+            a.namespace.as_deref().unwrap_or("default"),
+        )?;
+        return Ok(());
+    }
+    if let Some(kind) = a.r#type {
+        let spec = super::storage::NetShareSpec {
+            server: a.server.unwrap_or_default(),
+            share: a.share.unwrap_or_default(),
+            username: a.username,
+            password: a.password,
+            password_secret: a.password_secret,
+            read_only: a.read_only,
+            mount_options: a.options,
+        };
+        super::storage::ensure_share_credentials(name, &kind, &spec)?;
+        let m = super::storage::share_mount(name, &kind, &spec)?;
+        let vol = create_volume(
+            store,
+            name,
+            &m.driver,
+            Some(m.device.clone()),
+            m.options,
+            a.quota,
+            a.alert_pct,
+        )?;
+        println!(
+            "{}",
+            super::po::tf(
+                "volume '{name}' created and mounted ({driver} · {device})",
+                &[
+                    ("name", &vol.name),
+                    ("driver", &m.driver),
+                    ("device", &m.device)
+                ],
+            )
+        );
+        return Ok(());
+    }
+    let vol = create_volume(
+        store,
+        name,
+        &a.driver,
+        a.device,
+        a.options,
+        a.quota,
+        a.alert_pct,
+    )?;
+    println!("{}", vol.name);
+    Ok(())
 }
 
 /// `volume ls -o json` row (ADR-0005): stable keys mirroring the table columns.
@@ -886,6 +1085,13 @@ struct VolumeLsRow {
     /// field that says nothing.
     #[serde(skip_serializing_if = "Option::is_none")]
     namespace: Option<String>,
+    /// The volume this one is a share of, if any (B5 CLI collapse — folds in
+    /// what `sharevolume ls -o json`'s `storage` field used to be the only
+    /// place to read).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quota_bytes: Option<u64>,
 }
 
 /// Bare container names whose `mounts` resolve to `mountpoint` — the reverse
@@ -925,27 +1131,40 @@ fn cmd_ls(
     store: &VolumeStore,
     format: output::OutputFormat,
     namespace: Option<&str>,
+    all_namespaces: bool,
 ) -> Result<()> {
     let format = super::config::resolve_output(&super::util::state_root(), format);
-    // Without the flag this is EXACTLY what it always was: `VolumeStore::list`
+    // Without a flag this is EXACTLY what it always was: `VolumeStore::list`
     // deliberately does not see the scoped sub-tree, and widening the default
     // would silently add rows to everyone's `volume ls`.
     //
-    // With it, the question is a different one — «what does this tenant have» —
-    // and `list_all` is the call that answers it, because it returns the owner
-    // attached to each record.
-    let vols: Vec<(String, delonix_volume::Volume)> = match namespace {
-        None => store
-            .list()?
-            .into_iter()
-            .map(|v| (String::new(), v))
-            .collect(),
-        Some(ns) => store
+    // With `-n`/`-A`, the question is a different one — «what does this
+    // tenant have» / «what exists on this node, everywhere» — and `list_all`
+    // is the call that answers it, because it returns the owner attached to
+    // each record. `-A` is what makes a share invisible to no listing: a
+    // share that exists and cannot be seen is how an operator removes its
+    // parent believing nothing hangs off it (B5 CLI collapse — `sharevolume
+    // ls` always listed every namespace this way).
+    let vols: Vec<(String, delonix_volume::Volume)> = if all_namespaces {
+        store
             .list_all()?
             .into_iter()
-            .filter(|ov| ov.namespace.as_deref() == Some(ns))
-            .map(|ov| (ns.to_string(), ov.volume))
-            .collect(),
+            .map(|ov| (ov.namespace.unwrap_or_default(), ov.volume))
+            .collect()
+    } else {
+        match namespace {
+            None => store
+                .list()?
+                .into_iter()
+                .map(|v| (String::new(), v))
+                .collect(),
+            Some(ns) => store
+                .list_all()?
+                .into_iter()
+                .filter(|ov| ov.namespace.as_deref() == Some(ns))
+                .map(|ov| (ns.to_string(), ov.volume))
+                .collect(),
+        }
     };
     if format == output::OutputFormat::Json {
         let rows: Vec<VolumeLsRow> = vols
@@ -960,6 +1179,8 @@ fn cmd_ls(
                     size_bytes: usage.is_complete().then_some(usage.bytes),
                     used_by,
                     namespace: (!ns.is_empty()).then_some(ns),
+                    parent: v.parent,
+                    quota_bytes: v.quota_bytes,
                 }
             })
             .collect();
@@ -968,11 +1189,15 @@ fn cmd_ls(
     let mut t = output::Table::new(&[
         "NAME",
         "DRIVER",
+        "PARENT",
         "MOUNTPOINT",
         "SIZE",
+        "QUOTA",
+        "ALERT",
         "USED BY",
         "NAMESPACE",
     ]);
+    let filtered = namespace.is_some() || all_namespaces;
     for (ns, v) in vols {
         let usage = measured_usage(std::path::Path::new(&v.mountpoint));
         let used_by = match volume_user_names(&v.mountpoint) {
@@ -980,17 +1205,43 @@ fn cmd_ls(
             Some(names) if names.is_empty() => "-".to_string(),
             Some(names) => names.join(", "),
         };
+        let qs = store.quota_state_at_checked(
+            std::path::Path::new(&v.mountpoint),
+            v.quota_bytes,
+            v.alert_pct,
+        );
         t.row(vec![
             v.name,
             v.driver,
+            v.parent.unwrap_or_else(|| "-".to_string()),
             v.mountpoint,
             fmt_size_cell(&usage),
+            v.quota_bytes
+                .map(output::fmt_size)
+                .unwrap_or_else(|| "-".to_string()),
+            alert_cell(&usage, &qs),
             used_by,
-            output::namespace_cell(&ns, namespace.is_some()),
+            output::namespace_cell(&ns, filtered),
         ]);
     }
     t.drop_uninformative().print();
     Ok(())
+}
+
+/// The `ALERT` cell: `?` when the measurement is incomplete AND the quota
+/// engine could not decide either (the honest "cannot tell" — never a `-`
+/// that reads as "fine"), `OVER`/`WARN`/`-` otherwise. Mirrors the
+/// `sharevolume ls` rendering this folds in (B5 CLI collapse).
+fn alert_cell(usage: &delonix_volume::Usage, qs: &delonix_volume::QuotaState) -> String {
+    if !usage.is_complete() && !qs.measured {
+        "?".to_string()
+    } else if qs.above_quota {
+        "OVER".to_string()
+    } else if qs.in_alert {
+        "WARN".to_string()
+    } else {
+        "-".to_string()
+    }
 }
 
 /// On-disk usage, with the quota denominator when present: `"1.5 KiB"` or
@@ -1015,7 +1266,15 @@ fn fmt_usage(used: u64, quota: Option<u64>) -> String {
 
 /// `volume describe` — readable detail in `kubectl describe` style.
 /// Complements `inspect` (the usual compact view, stable for scripts).
-fn cmd_describe(store: &VolumeStore, names: &[String]) -> Result<()> {
+fn cmd_describe(store: &VolumeStore, names: &[String], namespace: Option<&str>) -> Result<()> {
+    let scoped;
+    let store = match namespace {
+        Some(ns) => {
+            scoped = VolumeStore::open_scoped(state_root(), ns)?;
+            &scoped
+        }
+        None => store,
+    };
     for (i, name) in names.iter().enumerate() {
         let v = store.inspect(name)?;
         if i > 0 {
@@ -1026,30 +1285,54 @@ fn cmd_describe(store: &VolumeStore, names: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn describe_one(_store: &VolumeStore, v: &delonix_volume::Volume) {
+fn describe_one(store: &VolumeStore, v: &delonix_volume::Volume) {
     let mut d = output::Describe::new();
     d.field("Name", &v.name);
-    d.field("Driver", &v.driver);
+    // A share (`--parent`) mounts nothing of its own — driver/device/options
+    // describe a MOUNT, and there is none to describe here (B5 CLI collapse:
+    // this is the "Storage"/parent field `sharevolume describe` used to be
+    // the only place to see).
+    d.field_opt("Parent", v.parent.as_deref());
+    if v.parent.is_none() {
+        d.field("Driver", &v.driver);
+    }
     d.field("Mountpoint", &v.mountpoint);
     d.field("Created", output::fmt_local(v.created_unix));
     d.field("Age", output::fmt_age(v.created_unix));
-    d.field(
-        "Usage",
-        fmt_measured(
-            measured_usage(std::path::Path::new(&v.mountpoint)),
-            v.quota_bytes,
-        ),
-    );
+    let usage = measured_usage(std::path::Path::new(&v.mountpoint));
+    d.field("Usage", fmt_measured(usage, v.quota_bytes));
     d.field(
         "Quota",
         v.quota_bytes
             .map(output::fmt_size)
             .unwrap_or_else(|| "<none>".into()),
     );
+    if v.quota_bytes.is_some() || v.alert_pct.is_some() {
+        let qs = store.quota_state_at_checked(
+            std::path::Path::new(&v.mountpoint),
+            v.quota_bytes,
+            v.alert_pct,
+        );
+        d.field(
+            "Alert",
+            if qs.above_quota {
+                "OVER QUOTA".to_string()
+            } else if qs.in_alert {
+                "near quota".to_string()
+            } else if !usage.is_complete() && !qs.measured {
+                "? (measurement incomplete)".to_string()
+            } else {
+                "ok".to_string()
+            },
+        );
+    }
     d.field_opt("Alert at", v.alert_pct.map(|p| format!("{p}%")));
     // Only exist in the `nfs` driver — omitted entirely for `local`.
     d.field_opt("Device", v.device.as_deref());
     d.field_opt("Options", v.options.as_deref());
+    if v.parent.is_some() {
+        d.field("Consume with", format!("-v {}:/path/in/container", v.name));
+    }
     d.print();
 }
 
@@ -1569,25 +1852,47 @@ fn note_unswept_owners(scope: &super::prune::Scope, owners: &[String]) {
 /// data belongs to a SUBUID, and without the hook the removal failed with a bare
 /// `Permission denied` and the volume could not be deleted by ANY command.
 pub(crate) fn cmd_rm(store: &VolumeStore, name: &str, force: bool) -> Result<()> {
-    cmd_rm_with(store, name, force, false)
+    cmd_rm_with(store, name, force, false, false, None)
 }
 
 /// `cmd_rm`, plus the option to destroy the storage this volume was
-/// PROVISIONED with on a remote NAS.
+/// PROVISIONED with on a remote NAS, the option to purge a SHARE's own data,
+/// and an optional namespace to scope the lookup to.
 ///
 /// `destroy_remote` defaults to false everywhere and always will: removing a
 /// volume is a local operation, and taking someone's dataset down with it is
 /// not something to infer. ADR-0009 puts it behind its own flag for the same
-/// reason `--purge-data` exists on a share volume.
+/// reason `--purge-data` exists for a share.
 pub(crate) fn cmd_rm_with(
     store: &VolumeStore,
     name: &str,
     force: bool,
     destroy_remote: bool,
+    purge_data: bool,
+    namespace: Option<&str>,
 ) -> Result<()> {
+    let scoped;
+    let store = match namespace {
+        Some(ns) => {
+            scoped = VolumeStore::open_scoped(state_root(), ns)?;
+            &scoped
+        }
+        None => store,
+    };
     // `inspect` first: a volume with no record at all is a plain NotFound, and
     // must stay one (`rm` of something absent is an error, docker parity).
     let vol = store.inspect(name)?;
+    // A share does not own a mount of its own — `--purge-data` is the only
+    // way its data goes, and asking for it on a volume that is NOT a share is
+    // a no-op dressed as a real flag: that volume's own removal below already
+    // takes its data with it. Refuse rather than silently ignore.
+    if purge_data && vol.parent.is_none() {
+        return Err(Error::Invalid(super::po::tf(
+            "'{name}' is not a share (no --parent) — its own removal already deletes its data; \
+             --purge-data has nothing to do here",
+            &[("name", name)],
+        )));
+    }
     if !force {
         let refs = volume_refs(store, name);
         if !refs.is_empty() {
@@ -1632,6 +1937,32 @@ pub(crate) fn cmd_rm_with(
     // longer leave a credential behind the way `store.remove(name)` alone did
     // before the B5 CLI collapse folded `storage rm` into this one.
     super::storage::remove_credentials(name);
+    // `remove_with` never touches `vol.mountpoint` for a share (it lives
+    // outside this store's own `dir(name)` — see its doc comment), so the
+    // purge is a SEPARATE step here, after the record is already gone. That
+    // ordering is safe (unlike a plain volume's data-then-bookkeeping rule)
+    // precisely because the two paths never overlap: the record removed
+    // above is this store's own bookkeeping directory, never the shared data.
+    if purge_data {
+        // NEVER claim a deletion that did not happen (B5 CLI collapse: the
+        // `sharevolume rm --purge-data` invariant this folds in). In
+        // rootless a tenant's share is written by a container in a mapped
+        // userns, so a plain `remove_dir_all` may hit EACCES — the mapped
+        // fallback is what `volumes rm` already uses for the same reason.
+        if std::fs::remove_dir_all(&vol.mountpoint).is_err() {
+            delonix_runtime::remove_tree_mapped(std::path::Path::new(&vol.mountpoint));
+        }
+        if std::path::Path::new(&vol.mountpoint).exists() {
+            return Err(Error::Runtime {
+                context: "volume purge",
+                message: super::po::tf(
+                    "the data of '{name}' at {path} could NOT be deleted — the volume record was \
+                     already removed, so it is not lost track of; delete it as the data's owner",
+                    &[("name", name), ("path", &vol.mountpoint)],
+                ),
+            });
+        }
+    }
     delonix_runtime_core::events::emit(
         &state_root(),
         "volume",
@@ -1640,7 +1971,14 @@ pub(crate) fn cmd_rm_with(
         &vol.name,
         if force { Some("force") } else { None },
     );
-    println!("{name}");
+    println!(
+        "{name}{}",
+        if purge_data {
+            format!(" ({})", super::po::t("data deleted"))
+        } else {
+            String::new()
+        }
+    );
     Ok(())
 }
 

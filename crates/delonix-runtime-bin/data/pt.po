@@ -10358,3 +10358,69 @@ msgstr "Imagens VM douradas (`<root>/vm-images/`): ls/pull/push/build/rm/etc"
 
 msgid "Publish a local image to an OCI registry.\n\nWithout `target`, publishes under the image's own reference."
 msgstr "Publica uma imagem local num registo OCI.\n\nSem `target`, publica sob a própria referência da imagem."
+
+msgid "Create a named volume.\n\nThree shapes, and a document may use only one: a plain/`nfs`-device volume (`--driver`), a friendly network share (`--type`), or a quota'd slice of an already-existing volume (`--parent`) — the same three the `kind: Volume` manifest accepts as `nfs:`/`cifs:`/`webdav:` and `share:` blocks (B5 CLI collapse: `storage create`/`sharevolume` were the only imperative way to reach the last two before this)."
+msgstr "Cria um volume nomeado.\n\nTrês formas, e um documento só pode usar uma: um volume simples/de dispositivo `nfs` (`--driver`), uma partilha de rede amigável (`--type`), ou uma fatia com quota de um volume já existente (`--parent`) — as mesmas três que o manifesto `kind: Volume` aceita como blocos `nfs:`/`cifs:`/`webdav:` e `share:` (fusão B5 da CLI: `storage create`/`sharevolume` eram a única forma imperativa de alcançar as duas últimas antes disto)."
+
+msgid "Remove a volume.\n\nRefuses while a container or a share carved out of it still references it (use `--force` to remove it anyway)."
+msgstr "Remove um volume.\n\nRecusa enquanto um container ou uma partilha talhada dele ainda o referencia (usa `--force` para o remover na mesma)."
+
+msgid "`local` (default) or `nfs` — the RAW device form. For a friendlier network declaration (with credentials), use `--type` instead"
+msgstr "`local` (por omissão) ou `nfs` — a forma de dispositivo CRUA. Para uma declaração de rede mais amigável (com credenciais), usa `--type`"
+
+msgid "Additional mount options (`nfs` driver, or the friendly `--type` form)"
+msgstr "Opções de montagem adicionais (driver `nfs`, ou a forma amigável `--type`)"
+
+msgid "Usage percentage above which `ls`/`describe` flag a WARN (default 90)"
+msgstr "Percentagem de uso acima da qual `ls`/`describe` assinalam um WARN (por omissão 90)"
+
+msgid "Network storage type — `nfs` | `cifs`/`smb` (Samba/Windows) | `webdav` (Nextcloud/ownCloud). Requires `--server`/`--share`"
+msgstr "Tipo de armazenamento de rede — `nfs` | `cifs`/`smb` (Samba/Windows) | `webdav` (Nextcloud/ownCloud). Exige `--server`/`--share`"
+
+msgid "Server (host/IP), or the base URL in the `webdav` case — with `--type`"
+msgstr "Servidor (host/IP), ou o URL base no caso `webdav` — com `--type`"
+
+msgid "Export/share: NFS path (`/mnt/pool/media`), CIFS share name (`media`), or the path in the WebDAV URL — with `--type`"
+msgstr "Export/partilha: caminho NFS (`/mnt/pool/media`), nome da partilha CIFS (`media`), ou o caminho no URL WebDAV — com `--type`"
+
+msgid "User (cifs/webdav) — with `--type`"
+msgstr "Utilizador (cifs/webdav) — com `--type`"
+
+msgid "Password (cifs/webdav) — prefer `--password-secret`. With `--type`"
+msgstr "Password (cifs/webdav) — prefere `--password-secret`. Com `--type`"
+
+msgid "Vault secret with the `password` key (cifs/webdav) — with `--type`"
+msgstr "Segredo do cofre com a chave `password` (cifs/webdav) — com `--type`"
+
+msgid "Mount read-only — with `--type`"
+msgstr "Monta em leitura-apenas — com `--type`"
+
+msgid "Carve this volume out of an ALREADY-EXISTING one (a quota'd, isolated subdirectory — what `kind: ShareVolume` used to be a Kind of its own for). Mounts nothing of its own: exclusive with `--driver`/`--device`/`--options`/`--type`"
+msgstr "Talha este volume a partir de um JÁ EXISTENTE (um subdirectório isolado e com quota — o que `kind: ShareVolume` costumava ser uma Kind própria para). Não monta nada de seu: exclusivo com `--driver`/`--device`/`--options`/`--type`"
+
+msgid "Namespace that will own the share (default `default`) — only with `--parent`"
+msgstr "Namespace que vai possuir a partilha (por omissão `default`) — só com `--parent`"
+
+msgid "Every namespace at once, plus the unscoped root — a share that exists and is invisible is how an operator removes its parent believing nothing hangs off it (B5 CLI collapse: `sharevolume ls` always listed this way; `volume ls` now can too)"
+msgstr "Todas as namespaces de uma vez, mais a raiz sem âmbito — uma partilha que existe e é invisível é como um operador remove o seu pai a acreditar que nada depende dele (fusão B5 da CLI: `sharevolume ls` sempre listou assim; `volume ls` agora também pode)"
+
+msgid "Namespace that owns them (default: the unscoped root)"
+msgstr "Namespace que os possui (por omissão: a raiz sem âmbito)"
+
+msgid "Also delete the data of a SHARE (a volume with a `--parent`) — the subdirectory it points at survives by default (the parent's data is not this command's to destroy). Refused on a volume that is not a share: its own removal already takes its data with it"
+msgstr "Também apaga os dados de uma PARTILHA (um volume com `--parent`) — o subdirectório para onde aponta sobrevive por omissão (os dados do pai não são deste comando para destruir). Recusado num volume que não é uma partilha: a sua própria remoção já leva os dados consigo"
+
+msgid "Namespace that owns it (default: the unscoped root)"
+msgstr "Namespace que o possui (por omissão: a raiz sem âmbito)"
+
+msgid "an NFS export straight as a volume, without the friendlier `--type` declaration"
+msgstr "um export NFS directamente como volume, sem a declaração mais amigável `--type`"
+
+msgid "an isolated, individually-quota'd slice carved out of an already-mounted volume"
+msgstr "uma fatia isolada e com quota própria, talhada a partir de um volume já montado"
+
+msgid "un-register a share — the data on the parent is PRESERVED"
+msgstr "desregista uma partilha — os dados no pai são PRESERVADOS"
+
+msgid "every namespace at once, so a share hanging off a parent is never invisible"
+msgstr "todas as namespaces de uma vez, para uma partilha dependente de um pai nunca ficar invisível"

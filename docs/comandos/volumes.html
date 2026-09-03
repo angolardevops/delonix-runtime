@@ -136,7 +136,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <h5><span class='lang-pt'>Documentação</span><span class='lang-en'>Docs</span></h5>
 <a href="../index.html"><span class='lang-pt'>Início</span><span class='lang-en'>Home</span></a><a href="../cheatsheet.html"><span class='lang-pt'>Cheatsheet</span><span class='lang-en'>Cheatsheet</span></a><a href="../estrutura.html"><span class='lang-pt'>Estrutura de recursos</span><span class='lang-en'>Resource structure</span></a><a href="../kinds.html"><span class='lang-pt'>Kinds e templates</span><span class='lang-en'>Kinds &amp; templates</span></a><a href="../gitops.html"><span class='lang-pt'>GitOps e CI</span><span class='lang-en'>GitOps &amp; CI</span></a><a href="../estabilidade.html"><span class='lang-pt'>Promessa de estabilidade</span><span class='lang-en'>Stability promise</span></a><a href="../cloud.html"><span class='lang-pt'>cloud-init, cloud-img e CH</span><span class='lang-en'>cloud-init, cloud-img &amp; CH</span></a><a href="../labs.html"><span class='lang-pt'>Laboratórios</span><span class='lang-en'>Labs</span></a><a href="../guia-vm.html"><span class='lang-pt'>Guia de VMs e lab de rede</span><span class='lang-en'>VM &amp; network lab guide</span></a><a href="../arquitectura.html"><span class='lang-pt'>Arquitectura</span><span class='lang-en'>Architecture</span></a><a href="../c4.html"><span class='lang-pt'>Modelo C4 e system design</span><span class='lang-en'>C4 model &amp; system design</span></a><a href="../cri.html"><span class='lang-pt'>CRI — kubelet sem containerd</span><span class='lang-en'>CRI — kubelet without containerd</span></a><a href="../comparacao.html"><span class='lang-pt'>Delonix vs Docker vs Podman</span><span class='lang-en'>Delonix vs Docker vs Podman</span></a><a href="../tutorial-delonix-temp.html"><span class='lang-pt'>Projecto completo: Delonix Temp</span><span class='lang-en'>Full project: Delonix Temp</span></a>
 <h5><span class='lang-pt'>Referência CLI</span><span class='lang-en'>CLI reference</span></h5>
-<a href="../comandos/init.html">delonix init</a><a href="../comandos/container.html">delonix container</a><a href="../comandos/workload.html">delonix workload</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html" class="on">delonix volume</a><a href="../comandos/namespace.html">delonix system namespace</a><a href="../comandos/config.html">delonix config</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/compose.html">delonix compose</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/storage.html">delonix storage</a><a href="../comandos/sharevolume.html">delonix sharevolume</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html">delonix net egress</a><a href="../comandos/httproute.html">delonix net httproute</a><a href="../comandos/tunnel.html">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix system boot</a><a href="../comandos/backup.html">delonix backup</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dashboard</a><a href="../comandos/docker-api.html">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a><a href="../comandos/explain.html">delonix explain</a>
+<a href="../comandos/init.html">delonix init</a><a href="../comandos/container.html">delonix container</a><a href="../comandos/workload.html">delonix workload</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/volumes.html" class="on">delonix volume</a><a href="../comandos/namespace.html">delonix system namespace</a><a href="../comandos/config.html">delonix config</a><a href="../comandos/network.html">delonix network</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/compose.html">delonix compose</a><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/secret.html">delonix secret</a><a href="../comandos/ingress.html">delonix net ingress</a><a href="../comandos/egress.html">delonix net egress</a><a href="../comandos/httproute.html">delonix net httproute</a><a href="../comandos/tunnel.html">delonix net tunnel</a><a href="../comandos/flow.html">delonix net flow</a><a href="../comandos/boot.html">delonix system boot</a><a href="../comandos/backup.html">delonix backup</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/dash.html">delonix dashboard</a><a href="../comandos/docker-api.html">delonix serve docker-api</a><a href="../comandos/kube.html">delonix cluster kube</a><a href="../comandos/netns.html">delonix net netns</a><a href="../comandos/completion.html">delonix completion</a><a href="../comandos/explain.html">delonix explain</a>
 <h5><span class='lang-pt'>Projecto</span><span class='lang-en'>Project</span></h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
@@ -146,9 +146,19 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <p class='tagline lang-pt'>Volumes nomeados e bind mounts: create, ls, inspect, rm, apply.</p><p class='tagline lang-en'>Named volumes and bind mounts: create, ls, inspect, rm, apply.</p>
 <p class='lang-pt'>Wrapper fino sobre o <code>VolumeStore</code>. No <code>container run</code>,
 <code>-v nome:/destino[:ro]</code> resolve para um volume nomeado (criado on-demand) e
-<code>-v /host:/destino[:ro]</code> para um bind mount — a distinção é automática.</p><p class='lang-en'>A thin wrapper over <code>VolumeStore</code>. In <code>container run</code>,
+<code>-v /host:/destino[:ro]</code> para um bind mount — a distinção é automática.
+<br><br>
+Três formas de <code>create</code> (fusão B5 da CLI — <code>storage create</code>/<code>sharevolume</code>
+eram a única via imperativa até aqui): local/dispositivo <code>nfs</code> cru (<code>--driver</code>),
+uma partilha de rede amigável — NFS/CIFS/WebDAV, com credenciais do cofre (<code>--type</code>), ou uma
+fatia isolada e com quota talhada de um volume já existente (<code>--parent</code>).</p><p class='lang-en'>A thin wrapper over <code>VolumeStore</code>. In <code>container run</code>,
 <code>-v name:/dest[:ro]</code> resolves to a named volume (created on demand) and
-<code>-v /host:/dest[:ro]</code> to a bind mount — the distinction is automatic.</p>
+<code>-v /host:/dest[:ro]</code> to a bind mount — the distinction is automatic.
+<br><br>
+Three shapes of <code>create</code> (B5 CLI collapse — <code>storage create</code>/<code>sharevolume</code>
+were the only imperative path before this): a plain/raw <code>nfs</code> device (<code>--driver</code>),
+a friendly network share — NFS/CIFS/WebDAV, with vault credentials (<code>--type</code>), or an
+isolated, quota'd slice carved out of an already-existing volume (<code>--parent</code>).</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/volume.rs"><code>cmd/volume.rs</code></a></p>
 <div class='help'><pre><code>Usage: delonix volume [OPTIONS] &lt;COMMAND&gt;
 
@@ -189,8 +199,8 @@ EXAMPLES:
   delonix volume inspect pgdata
 
 SEE ALSO:
-  delonix container run · delonix storage · delonix sharevolume · delonix
-  volume snapshot
+  delonix container run · delonix volume create · delonix volume snapshot ·
+  delonix volume dash
 
   delonix › volume</code></pre></div>
 <h2 id='snapshot'><code>volumes snapshot</code></h2>
@@ -242,6 +252,9 @@ Options:
       --l18n &lt;en|pt&gt;
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
+  -n, --namespace &lt;NAMESPACE&gt;
+          Namespace that owns them (default: the unscoped root)
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -253,12 +266,13 @@ EXAMPLES:
   delonix volume describe pgdata backups
 
 SEE ALSO:
-  delonix volume inspect · delonix volume ls · delonix sharevolume describe
+  delonix volume inspect · delonix volume ls · delonix volume rm
 
   delonix › volume › describe</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Detalhe de um volume (uso, quota, montagens)</div><div class='cap lang-en'>Volume detail (usage, quota, mounts)</div><pre><code>delonix volume describe dados</code></pre></div>
 <h2 id='create'><code>volumes create</code></h2>
-<p class='intro'>Create a named volume</p>
+<p class='intro'>Create a named volume.</p>
+<p class='intro'>Three shapes, and a document may use only one: a plain/<code>nfs</code>-device volume (<code>--driver</code>), a friendly network share (<code>--type</code>), or a quota&#x27;d slice of an already-existing volume (<code>--parent</code>) — the same three the <code>kind: Volume</code> manifest accepts as <code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code> and <code>share:</code> blocks (B5 CLI collapse: <code>storage create</code>/<code>sharevolume</code> were the only imperative way to reach the last two before this).</p>
 <div class='help'><pre><code>Usage: delonix volume create [OPTIONS] &lt;NAME&gt;
 
 Arguments:
@@ -267,7 +281,7 @@ Arguments:
 
 Options:
       --driver &lt;DRIVER&gt;
-          `local` (default) or `nfs`
+          `local` (default) or `nfs` — the RAW device form. For a friendlier network declaration (with credentials), use `--type` instead
           
           [default: local]
 
@@ -278,10 +292,42 @@ Options:
           Device/export (`nfs` driver)
 
       --options &lt;OPTIONS&gt;
-          Additional mount options (`nfs` driver)
+          Additional mount options (`nfs` driver, or the friendly `--type` form)
 
       --quota &lt;QUOTA&gt;
           Quota (e.g. `2g`) — only applied if `--quota` is given
+
+      --alert-pct &lt;ALERT_PCT&gt;
+          Usage percentage above which `ls`/`describe` flag a WARN (default 90)
+
+      --type &lt;TYPE&gt;
+          Network storage type — `nfs` | `cifs`/`smb` (Samba/Windows) | `webdav` (Nextcloud/ownCloud). Requires `--server`/`--share`
+          
+          [possible values: nfs, cifs, smb, webdav]
+
+      --server &lt;SERVER&gt;
+          Server (host/IP), or the base URL in the `webdav` case — with `--type`
+
+      --share &lt;SHARE&gt;
+          Export/share: NFS path (`/mnt/pool/media`), CIFS share name (`media`), or the path in the WebDAV URL — with `--type`
+
+      --username &lt;USERNAME&gt;
+          User (cifs/webdav) — with `--type`
+
+      --password &lt;PASSWORD&gt;
+          Password (cifs/webdav) — prefer `--password-secret`. With `--type`
+
+      --password-secret &lt;PASSWORD_SECRET&gt;
+          Vault secret with the `password` key (cifs/webdav) — with `--type`
+
+      --read-only
+          Mount read-only — with `--type`
+
+      --parent &lt;PARENT&gt;
+          Carve this volume out of an ALREADY-EXISTING one (a quota&#x27;d, isolated subdirectory — what `kind: ShareVolume` used to be a Kind of its own for). Mounts nothing of its own: exclusive with `--driver`/`--device`/`--options`/`--type`
+
+  -n, --namespace &lt;NAMESPACE&gt;
+          Namespace that will own the share (default `default`) — only with `--parent`
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
@@ -293,16 +339,27 @@ EXAMPLES:
   # with a size cap, so one workload cannot fill the whole disk
   delonix volume create pgdata --quota 20g
 
-  # an NFS export straight as a volume, without the friendlier `storage`
+  # an NFS export straight as a volume, without the friendlier `--type`
   # declaration
   delonix volume create backups --driver nfs --device 10.0.0.5:/mnt/pool/backups --options vers=4.1,soft
 
+  # a NAS export becomes a named volume any container can mount
+  delonix volume create nas --type nfs --server 10.0.0.5 --share /mnt/pool/media
+
+  # an SMB share with the password read from the vault, never from the shell
+  # history
+  delonix volume create backups --type smb --server nas.local --share backups --username delonix --password-secret nas-creds
+
+  # an isolated, individually-quota&#x27;d slice carved out of an already-mounted
+  # volume
+  delonix volume create app-data --parent nas --quota 5g
+
 SEE ALSO:
-  delonix volume ls · delonix volume inspect · delonix storage create ·
-  delonix container run
+  delonix volume ls · delonix volume inspect · delonix secret create · delonix
+  container run
 
   delonix › volume › create</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Com quota e driver nfs disponíveis</div><div class='cap lang-en'>With quota and the nfs driver available</div><pre><code>delonix volume create dados --quota 10G</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Com quota e driver nfs disponíveis</div><div class='cap lang-en'>With quota and the nfs driver available</div><pre><code>delonix volume create dados --quota 10G</code></pre></div><div class="ex"><div class='cap lang-pt'>NFS de um TrueNAS, montado directamente como volume</div><div class='cap lang-en'>NFS from a TrueNAS, mounted straight as a volume</div><pre><code>delonix volume create media --type nfs --server 10.0.0.5 --share /mnt/pool/media</code></pre></div><div class="ex"><div class='cap lang-pt'>SMB/CIFS com a password do cofre, nunca do argv</div><div class='cap lang-en'>SMB/CIFS with the password from the vault, never from argv</div><pre><code>delonix volume create docs --type cifs --server nas --share docs --username user --password-secret nas-pass</code></pre></div><div class="ex"><div class='cap lang-pt'>Uma fatia isolada e com quota própria de um volume já existente</div><div class='cap lang-en'>An isolated, individually-quota&#x27;d slice of an already-existing volume</div><pre><code>delonix volume create tenant-a --parent media --quota 1G</code></pre></div>
 <h2 id='ls'><code>volumes ls</code></h2>
 <p class='intro'>List the volumes</p>
 <div class='help'><pre><code>Usage: delonix volume ls [OPTIONS]
@@ -320,6 +377,9 @@ Options:
   -n, --namespace &lt;NAMESPACE&gt;
           Show this namespace&#x27;s volumes instead of the unscoped ones
 
+  -A, --all-namespaces
+          Every namespace at once, plus the unscoped root — a share that exists and is invisible is how an operator removes its parent believing nothing hangs off it (B5 CLI collapse: `sharevolume ls` always listed this way; `volume ls` now can too)
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -330,12 +390,16 @@ EXAMPLES:
   # as JSON, for a backup job or a monitoring script
   delonix volume ls -o json
 
+  # every namespace at once, so a share hanging off a parent is never
+  # invisible
+  delonix volume ls -A
+
 SEE ALSO:
-  delonix volume inspect · delonix volume describe · delonix storage ls ·
+  delonix volume inspect · delonix volume describe · delonix volume create ·
   delonix system df
 
   delonix › volume › ls</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix volume ls</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix volume ls</code></pre></div><div class="ex"><div class='cap lang-pt'>Todas as namespaces de uma vez — uma partilha nunca fica invisível</div><div class='cap lang-en'>Every namespace at once — a share is never invisible</div><pre><code>delonix volume ls -A</code></pre></div>
 <h2 id='inspect'><code>volumes inspect</code></h2>
 <p class='intro'>Details of a volume (includes real on-disk usage)</p>
 <div class='help'><pre><code>Usage: delonix volume inspect [OPTIONS] &lt;NAME&gt;
@@ -363,13 +427,13 @@ EXAMPLES:
   delonix volume inspect pgdata
 
 SEE ALSO:
-  delonix volume describe · delonix volume ls · delonix sharevolume describe
+  delonix volume describe · delonix volume ls · delonix volume create
 
   delonix › volume › inspect</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix volume inspect dados</code></pre></div>
 <h2 id='rm'><code>volumes rm</code></h2>
 <p class='intro'>Remove a volume.</p>
-<p class='intro'>Refuses while a container or a <code>kind: ShareVolume</code> still references it (use <code>--force</code> to remove it anyway).</p>
+<p class='intro'>Refuses while a container or a share carved out of it still references it (use <code>--force</code> to remove it anyway).</p>
 <div class='help'><pre><code>Usage: delonix volume rm [OPTIONS] &lt;NAME&gt;
 
 Arguments:
@@ -386,6 +450,12 @@ Options:
       --destroy-remote
           ALSO destroy the storage this volume was provisioned with on a remote NAS (`spec.provision`). Irreversible, and on another machine. Refused for a volume that only mounts a share someone else made
 
+      --purge-data
+          Also delete the data of a SHARE (a volume with a `--parent`) — the subdirectory it points at survives by default (the parent&#x27;s data is not this command&#x27;s to destroy). Refused on a volume that is not a share: its own removal already takes its data with it
+
+  -n, --namespace &lt;NAMESPACE&gt;
+          Namespace that owns it (default: the unscoped root)
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -397,12 +467,18 @@ EXAMPLES:
   # uses it
   delonix volume rm -f pgdata
 
+  # un-register a share — the data on the parent is PRESERVED
+  delonix volume rm app-data
+
+  # un-register and delete the underlying subdirectory as well
+  delonix volume rm app-data --purge-data
+
 SEE ALSO:
   delonix volume ls · delonix volume snapshot create · delonix container rm ·
-  delonix sharevolume rm
+  delonix volume prune
 
   delonix › volume › rm</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix volume rm dados</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix volume rm dados</code></pre></div><div class="ex"><div class='cap lang-pt'>Remove o registo de uma partilha; os DADOS ficam (a não ser que peças --purge-data)</div><div class='cap lang-en'>Un-register a share&#x27;s record; the DATA stays unless you ask for --purge-data</div><pre><code>delonix volume rm tenant-a</code></pre></div>
 <h2 id='apply'><code>volumes apply</code></h2>
 <p class='intro'>Apply the <code>kind: Volume</code> documents from a manifest (idempotent by name)</p>
 <div class='help'><pre><code>Usage: delonix volume apply [OPTIONS]
@@ -426,7 +502,7 @@ EXAMPLES:
 
 SEE ALSO:
   delonix stack apply · delonix stack plan · delonix volume create · delonix
-  sharevolume apply
+  volume ls
 
   delonix › volume › apply</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix volume apply -f delonix-manifest.yaml</code></pre></div>
@@ -504,7 +580,7 @@ EXAMPLES:
   delonix volume dash --json
 
 SEE ALSO:
-  delonix dash · delonix storage ls · delonix system df
+  delonix dash · delonix volume ls · delonix system df
 
   delonix › volume › dash</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class="cap">Um TUI ao vivo de volumes e storages, com uso por área</div><pre><code>delonix volume dash</code></pre></div><div class="ex"><div class="cap">Um só retrato, para CI ou um terminal sem TTY</div><pre><code>delonix volume dash --once</code></pre></div><div class="ex"><div class="cap">JSON, para alertar quando um volume se aproxima da quota</div><pre><code>delonix volume dash --json</code></pre></div>

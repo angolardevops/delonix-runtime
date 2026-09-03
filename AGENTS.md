@@ -258,10 +258,42 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   inquilino (é o primitivo do teardown de tenant), `-A/--all-namespaces` varre tudo. Um volume
   de inquilino vive em `volumes/.ns/<ns>/<nome>` e o `VolumeStore::list` NÃO o vê por desenho —
   quem tem de contabilizar a loja inteira usa `list_all`, que devolve o dono agarrado a cada
-  registo. **O âmbito limita o que se LEVA, nunca o que se OLHA**: um `kind: ShareVolume` é
-  registado na sub-árvore do inquilino mas o `Storage` pai fica na raiz, com os dados da share
-  DENTRO da árvore do pai — filtrar antes da derivação pai/filho faria `--namespace <t>` apagar
-  dados na NAS.
+  registo. **O âmbito limita o que se LEVA, nunca o que se OLHA**: um share é registado na
+  sub-árvore do inquilino mas o volume pai fica na raiz, com os dados da share DENTRO da árvore do
+  pai — filtrar antes da derivação pai/filho faria `--namespace <t>` apagar dados na NAS.
+  - **`delonix storage`/`delonix sharevolume` já não existem como grupos de topo (fusão B5 da
+    CLI, completa).** Já vinham a encolher por várias sessões — `storage` chegou a esta fusão só
+    com `create`/`ls` (o resto já tinha caído em `volume dash`/`rm`/`inspect`), e o próprio
+    módulo dizia por escrito o que faltava: "Cutting either would need new capability built into
+    `volume` first". Esta sessão construiu essa capacidade: `volume create` ganhou `--type
+    <nfs|cifs|smb|webdav> --server … --share … [--username --password --password-secret
+    --read-only]` (a mesma declaração amigável que `storage create` tinha, chamando directamente
+    para os helpers `pub(crate)` de `storage.rs` — `share_mount`/`ensure_share_credentials` —, que
+    ficam como a lógica de montagem partilhada com o caminho de manifesto) e `--parent <volume>
+    [--namespace <ns>]` (uma share — o que `sharevolume` cobria — delegando em
+    `sharevolume::apply_share`, a MESMA função que o manifesto `share:` já chamava, para os dois
+    caminhos nunca poderem discordar). `volume rm` ganhou `--purge-data` (recusado num volume sem
+    `--parent` — a sua própria remoção já leva os dados) e `volume ls`/`describe` ganharam
+    `PARENT`/`QUOTA`/`ALERT` (com `-A/--all-namespaces` em `ls`, para uma share nunca ficar
+    invisível — a mesma garantia que `sharevolume ls` sempre deu).
+  - **A leitura de uma share deixou de precisar de um tipo `ShareRecord` à parte.** O antigo
+    `sharevolume.rs` tinha `load_record`/`list_all` a verificar QUATRO sítios (volume com
+    namespace, registo JSON com namespace, volume global, registo JSON legado) para uma share
+    poder ter sido criada antes OU depois da fusão v0.53.x que já a tornou um `Volume` com
+    `.parent`. Essa leitura dupla só existia para ler registos `ShareRecord` pré-fusão nunca
+    migrados — o comando `sharevolume migrate` que resolvia isso foi removido a par (decisão do
+    utilizador: instalações reais já tiveram tempo de correr `migrate` num binário anterior).
+    Sem esse fallback, uma share É só um `Volume` com `.parent` — `volume ls`/`describe`/`rm`
+    leem-na directamente do `VolumeStore`, sem tipo intermédio nenhum. **BREAKING**: um registo
+    `ShareRecord` nunca migrado (anterior à v0.53.x) deixa de ser lido — quem estiver nesse
+    estado tem de correr `sharevolume migrate` num binário anterior a esta versão antes de
+    actualizar.
+  - **`--purge-data` de uma share não precisou de mecanismo novo**, só de um flag: `VolumeStore::
+    remove_with` já documentava (e a auditoria confirmou lendo o código) que nunca toca no
+    `mountpoint` de um volume registado por `register_external` — vive fora do `dir(name)` que a
+    função apaga — logo "preservar por omissão" já era o comportamento; o `--purge-data` só
+    adiciona o `remove_dir_all`+fallback `remove_tree_mapped` que `sharevolume rm --purge-data`
+    já tinha, agora em `cmd_rm_with`.
 - `delonix network` — ls/create/rm/inspect. **Dois stores em paralelo, deliberado**:
   `NetworkStore` (registo declarativo rico — drivers bridge/macvlan/ipvlan/overlay) e
   `infra::{network_create_with,network_remove}` (plano físico do holder netns rootless).
@@ -326,10 +358,11 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   A com os containers a receber endereços da subnet B. Passa a RECUSAR — pode haver workloads já
   ligados com leases do prefixo registado, e mudar a bridge debaixo deles não é decisão de um
   `create`.
-- `delonix storage` — armazenamento de REDE (NFS/CIFS-SMB/WebDAV) montável como volume, estilo
-  PersistentVolume do k8s. `create/ls/inspect/rm/apply` + `kind: Storage`. Uma pasta de um NAS
-  (TrueNAS/Synology/Nextcloud) vira um volume nomeado que qualquer container monta com `-v <nome>:/x`.
-  Por baixo é um volume do `delonix-volume` com driver de rede (o `ensure_mounted` monta via
+- **Armazenamento de REDE (NFS/CIFS-SMB/WebDAV)**, montável como volume, estilo PersistentVolume
+  do k8s — `delonix volume create --type <nfs|cifs|smb|webdav>` (ver o bullet do `delonix volume`
+  acima) + `kind: Volume` com bloco `nfs:`/`cifs:`/`webdav:`. Uma pasta de um NAS (TrueNAS/
+  Synology/Nextcloud) vira um volume nomeado que qualquer container monta com `-v <nome>:/x`. Por
+  baixo é um volume do `delonix-volume` com driver de rede (o `ensure_mounted` monta via
   `mount -t nfs|cifs|davfs`); a declaração amigável (server/share/credenciais) é traduzida no
   device/options por `storage::build_mount`. Password via cofre (`--password-secret` → chave
   `password` do segredo). Validado end-to-end com NFS real: um container LEU e ESCREVEU num volume de
