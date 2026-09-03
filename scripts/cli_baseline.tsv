@@ -148,7 +148,6 @@
 ~	pod create
 ~	pod exec
 =	pod logs
-~	pod ls
 ~	secret apply
 =	secret create
 ~	secret inspect
@@ -214,7 +213,6 @@
 =	vm snapshot rm
 =	vm ssh
 =	vm start
-~	vm status
 =	vm stop
 →	vm unbridge
 ~	vm vnc

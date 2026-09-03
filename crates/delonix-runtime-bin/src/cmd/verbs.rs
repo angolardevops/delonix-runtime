@@ -133,14 +133,40 @@ pub(crate) fn no_verb_reason(kind: &str) -> &'static str {
 }
 
 /// `delonix get <kind> [name…]`
-pub(crate) fn get(kind: &str, names: &[String], output: OutputFormat) -> Result<()> {
+pub(crate) fn get(
+    kind: &str,
+    names: &[String],
+    output: OutputFormat,
+    namespace: Option<String>,
+) -> Result<()> {
     let f = resolve_kind(kind)?;
     refuse_if_unreachable(f)?;
     if !names.is_empty() {
         // Naming a resource is asking about THAT one, which is `describe` with
         // a table's worth of detail. Routing it here instead of inventing a
-        // filtered list keeps one implementation per question.
+        // filtered list keeps one implementation per question. `--namespace`
+        // alongside an explicit name has nothing to filter — refused rather
+        // than silently ignored, same rule as `-o json` on a Kind with none.
+        if namespace.is_some() {
+            return Err(Error::Invalid(
+                "--namespace filters a LIST — naming a resource already picks exactly one, \
+                 drop one of the two"
+                    .into(),
+            ));
+        }
         return describe(kind, names);
+    }
+    // Only Kinds whose own `ls` already accepts a namespace do anything with
+    // one here — every other arm below ignores the parameter outright, which
+    // would be the accepted-and-ignored trap this codebase refuses elsewhere
+    // (`--security-opt seccomp=`, `-v :z`, `--network-alias`) if `--namespace`
+    // reached them un-checked. Refuse it up front instead.
+    const NAMESPACED_GET_KINDS: &[&str] = &[kinds::POD, kinds::VM, kinds::VOLUME];
+    if namespace.is_some() && !NAMESPACED_GET_KINDS.contains(&f.kind) {
+        return Err(Error::Invalid(format!(
+            "`get {}` has no namespace to filter by",
+            f.plural
+        )));
     }
     // A format accepted and ignored is worse than one refused: whoever asks for
     // `-o json` in a pipeline gets a table and only finds out downstream.
@@ -160,14 +186,11 @@ pub(crate) fn get(kind: &str, names: &[String], output: OutputFormat) -> Result<
         )));
     }
     match f.kind {
-        k if k == kinds::POD => super::pod::run(super::pod::PodCmd::Ls {
-            output,
-            namespace: None,
-        }),
+        k if k == kinds::POD => super::pod::ls(output, namespace.as_deref()),
         k if k == kinds::NETWORK => super::network::run(super::network::NetworkCmd::Ls { output }),
         k if k == kinds::VOLUME => super::volume::run(super::volume::VolumeCmd::Ls {
             output,
-            namespace: None,
+            namespace,
             all_namespaces: false,
         }),
         k if k == kinds::SECRET => super::secret::run(super::secret::SecretCmd::Ls { output }),
@@ -189,7 +212,7 @@ pub(crate) fn get(kind: &str, names: &[String], output: OutputFormat) -> Result<
         k if k == kinds::VM => super::vm::run(super::vm::VmCmd::Ls {
             ports: false,
             output,
-            namespace: None,
+            namespace,
         }),
         // The list above already decided this Kind routes; reaching here means the
         // two halves disagree, which is our defect and not the caller's.
@@ -487,5 +510,37 @@ mod tests {
     fn delete_without_a_name_refuses_instead_of_taking_all() {
         let e = delete(kinds::POD, &[], false).unwrap_err();
         assert!(e.to_string().contains("will not delete every one"), "{e}");
+    }
+
+    /// `--namespace` alongside an explicit name has nothing to filter — a
+    /// name already picks exactly one resource. Refused before either guard
+    /// clause reaches real store I/O (same shape as `delete_without_a_name_*`
+    /// above), so this is a pure logic test.
+    #[test]
+    fn get_com_nome_e_namespace_e_recusado() {
+        let e = get(
+            kinds::POD,
+            &["web".to_string()],
+            OutputFormat::Table,
+            Some("teamA".to_string()),
+        )
+        .unwrap_err();
+        assert!(e.to_string().contains("drop one of the two"), "{e}");
+    }
+
+    /// A Kind with no namespace concept (`Secret`) must refuse `--namespace`
+    /// outright, not silently ignore it — the exact "accepted and ignored"
+    /// trap this codebase already refuses for `--security-opt seccomp=`/
+    /// `-v :z`/`--network-alias`.
+    #[test]
+    fn get_namespace_e_recusado_numa_kind_sem_namespace() {
+        let e = get(
+            kinds::SECRET,
+            &[],
+            OutputFormat::Table,
+            Some("teamA".to_string()),
+        )
+        .unwrap_err();
+        assert!(e.to_string().contains("no namespace to filter by"), "{e}");
     }
 }

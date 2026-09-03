@@ -161,7 +161,6 @@ Commands:
   start            Start an existing, stopped VM — idempotent (already running = no-op)
   stop             Stop the VM (preserves disk, record and snapshots)
   ls               List the VMs
-  status           Current state (reconciles liveness/IP with the backend)
   console          Attach to the VM&#x27;s serial console (interactive terminal)
   ssh              SSH into a VM by NAME, or straight to an address
   vnc              Print the VNC address of a graphical VM (created with `--vnc`, libvirt)
@@ -189,7 +188,7 @@ Options:
 
 COMMAND MAP:
   Lifecycle    create · stop · start · restart
-  Inspect      ls · status
+  Inspect      ls
   Interact     console · ssh · vnc
   Configure    default-backend
   Networking   reach · bridge · unbridge
@@ -379,7 +378,7 @@ EXAMPLES:
   delonix vm snapshot ls dev
 
 SEE ALSO:
-  delonix vm stop · delonix vm status · delonix volume snapshot · delonix vm
+  delonix vm stop · delonix get · delonix volume snapshot · delonix vm
   default-backend
 
   delonix › vm › snapshot</code></pre></div>
@@ -405,7 +404,7 @@ EXAMPLES:
   delonix vm restart dev
 
 SEE ALSO:
-  delonix vm start · delonix vm stop · delonix vm console · delonix vm status
+  delonix vm start · delonix vm stop · delonix vm console · delonix get
 
   delonix › vm › restart</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Reinício forçado (pára e volta a arrancar)</div><div class='cap lang-en'>Forced restart (stops and boots again)</div><pre><code>delonix vm restart dev</code></pre></div>
@@ -431,7 +430,7 @@ EXAMPLES:
   delonix vm start dev
 
 SEE ALSO:
-  delonix vm stop · delonix vm restart · delonix vm create · delonix vm status
+  delonix vm stop · delonix vm restart · delonix vm create · delonix get
 
   delonix › vm › start</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Voltar a arrancar uma VM parada, sem repetir as flags do create</div><div class='cap lang-en'>Boot a stopped VM again, without repeating the create flags</div><pre><code>delonix vm start dev</code></pre></div>
@@ -524,7 +523,7 @@ EXAMPLES:
 
 SEE ALSO:
   delonix vm bridge · delonix container port · delonix net ingress publish ·
-  delonix vm status
+  delonix get
 
   delonix › vm › reach</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Que portas de container é que as VMs conseguem alcançar</div><div class='cap lang-en'>Which container ports VMs can reach</div><pre><code>delonix vm reach</code></pre></div>
@@ -549,7 +548,7 @@ EXAMPLES:
   delonix vm vnc dev
 
 SEE ALSO:
-  delonix vm console · delonix vm create · delonix vm status
+  delonix vm console · delonix vm create · delonix get
 
   delonix › vm › vnc</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Abrir o ecrã gráfico da VM</div><div class='cap lang-en'>Open the VM&#x27;s graphical screen</div><pre><code>delonix vm vnc dev</code></pre></div>
@@ -578,7 +577,7 @@ EXAMPLES:
   delonix vm console dev
 
 SEE ALSO:
-  delonix vm vnc · delonix vm status · delonix vm create · delonix vm restart
+  delonix vm vnc · delonix get · delonix vm create · delonix vm restart
 
   delonix › vm › console</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Consola série (voltar ao host: Ctrl+])</div><div class='cap lang-en'>Serial console (back to the host: Ctrl+])</div><pre><code>delonix vm console dev</code></pre></div>
@@ -772,7 +771,7 @@ EXAMPLES:
   delonix vm dash --json
 
 SEE ALSO:
-  delonix vm ls · delonix vm status · delonix dash · delonix container dash
+  delonix vm ls · delonix get · delonix dash · delonix container dash
 
   delonix › vm › dash</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Dashboard só das VMs (htop-style; `q` sai)</div><div class='cap lang-en'>VMs-only dashboard (htop-style; `q` to quit)</div><pre><code>delonix vm dash</code></pre></div><div class="ex"><div class='cap lang-pt'>Snapshot para um script ou para o Grafana</div><div class='cap lang-en'>Snapshot for a script or for Grafana</div><pre><code>delonix vm dash --json | jq &#x27;.tiles&#x27;</code></pre></div>
@@ -942,38 +941,17 @@ EXAMPLES:
   delonix vm ls --namespace teamA
 
 SEE ALSO:
-  delonix vm status · delonix describe · delonix vm dash · delonix vm prune ·
+  delonix get · delonix describe · delonix vm dash · delonix vm prune ·
   delonix image vm ls
 
   delonix › vm › ls</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix vm ls</code></pre></div>
 <h2 id='status'><code>vm status</code></h2>
-<p class='intro'>Current state (reconciles liveness/IP with the backend)</p>
-<div class='help'><pre><code>Usage: delonix vm status [OPTIONS] [NAME]
+<p class='intro'>error: unrecognized subcommand &#x27;status&#x27;</p>
+<p class='intro'>tip: a similar subcommand exists: &#x27;start&#x27;</p>
+<div class='help'><pre><code>Usage: delonix vm [OPTIONS] &lt;COMMAND&gt;
 
-Arguments:
-  [NAME]
-          VM to query (omit for the state of ALL)
-
-Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
-  -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)
-
-EXAMPLES:
-  # one VM, with liveness and IP reconciled against the backend rather than
-  # read off a stale record
-  delonix vm status dev
-
-  # the state of all of them at once
-  delonix vm status
-
-SEE ALSO:
-  delonix vm ls · delonix describe · delonix vm console
-
-  delonix › vm › status</code></pre></div>
+For more information, try &#x27;--help&#x27;.</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Reconcilia liveness/IP com o backend</div><div class='cap lang-en'>Reconciles liveness/IP with the backend</div><pre><code>delonix vm status node1</code></pre></div>
 <h2 id='stop'><code>vm stop</code></h2>
 <p class='intro'>Stop the VM (preserves disk, record and snapshots)</p>
