@@ -2433,6 +2433,9 @@ msgstr "__volsnap: modo desconhecido '{other}' (create|restore)"
 msgid "warning: --build-arg '{kv}' ignored — expected KEY=VALUE"
 msgstr "aviso: --build-arg '{kv}' ignorado — esperava KEY=VALUE"
 
+msgid "Forwarding from 127.0.0.1:{host_port} -> {pod_port}"
+msgstr "A encaminhar de 127.0.0.1:{host_port} -> {pod_port}"
+
 msgid "--secret '{entry}': expects 'id=<name>,src=<path>'"
 msgstr "--secret '{entry}': espera 'id=<nome>,src=<caminho>'"
 
@@ -6025,6 +6028,18 @@ msgstr "do host para um membro específico"
 
 msgid "re-attach to the first member's output (output only)"
 msgstr "volta a ligar-se à saída do primeiro membro (só saída)"
+
+msgid "reach the pod's port 80 at localhost:8080 until Ctrl-C"
+msgstr "alcança a porta 80 do pod em localhost:8080 até Ctrl-C"
+
+msgid "Forward one or more host ports to ports inside the pod's netns"
+msgstr "Encaminha uma ou mais portas do host para portas dentro da netns do pod"
+
+msgid "Forward one or more host ports to ports inside the pod's netns.\n\nEach `hostPort[:podPort]` binds `127.0.0.1:hostPort` on this host (loopback only, same default-safe posture as the rest of this engine's port publishing) and relays every accepted connection into the pod's shared network namespace, where `podPort` (defaulting to the same number as `hostPort`) is reached over the pod's own loopback — the same semantics a real Kubernetes Pod gives `kubectl port-forward`.\n\nRuns in the FOREGROUND, blocking until Ctrl-C, like `kubectl port-forward` — it is not a background service."
+msgstr "Encaminha uma ou mais portas do host para portas dentro da netns do pod.\n\nCada `hostPort[:podPort]` liga `127.0.0.1:hostPort` neste host (só loopback, a mesma postura segura por omissão do resto da publicação de portas deste motor) e encaminha cada ligação aceite para a rede partilhada do pod, onde `podPort` (por omissão, o mesmo número de `hostPort`) é alcançada pelo próprio loopback do pod — a mesma semântica que um Pod Kubernetes real dá ao `kubectl port-forward`.\n\nCorre em PRIMEIRO PLANO, bloqueando até Ctrl-C, como o `kubectl port-forward` — não é um serviço em segundo plano."
+
+msgid "`hostPort[:podPort]`, repeatable"
+msgstr "`hostPort[:podPort]`, repetível"
 
 msgid "containers AND VMs in one table, so you stop guessing which group owns what"
 msgstr "containers E VMs numa só tabela, para deixares de adivinhar que grupo é dono de quê"
