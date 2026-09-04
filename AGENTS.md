@@ -3608,78 +3608,95 @@ sem noção de tenant) — não o "Proxmox Driver" com inventário/scheduler do 
 - Event bus: só decidir o transporte (in-process callback vs. daemon) depois da Fase 3 acima, não
   antes — evita desenhar para um daemon que pode nunca ser aprovado.
 
-## Estado para a próxima sessão (2026-08-10)
+## Estado para a próxima sessão (2026-09-04)
 
-> A versão anterior desta secção estava parada em **2026-07-27 / v0.35.1** — onze versões atrás,
-> e era a primeira coisa que uma sessão lia para saber onde as coisas estavam. Uma secção de
-> «estado» desactualizada mente nos dois sentidos: dá por fazer o que já está feito, e por
-> pendente o que já foi fechado. É o mesmo defeito que o `AUDITORIA-E2E.md` teve durante semanas.
+> A versão anterior desta secção estava parada em **2026-08-10** — quase um mês, e todo o
+> ciclo de restruturação da CLI (abaixo) aconteceu nesse intervalo sem que esta secção alguma
+> vez fosse tocada. Chegou a listar como "pendente" dois ADRs (0008 fase 1, 0009) que já
+> estavam **implementados e documentados noutras secções deste mesmo ficheiro** — o defeito
+> exacto que a nota anterior (2026-07-27) já tinha avisado contra repetir. Reescrita do zero a
+> partir do que se mediu HOJE, não do que a secção antiga afirmava.
 
-Última tag publicada: **v0.46.0**; o `Cargo.toml` ainda diz `0.46.0` e o branch de trabalho é
-`ciclo-v046-bloco-a`, com **82 commits por publicar**. As notas da **v0.47.0** já estão escritas
-(`docs/releases/v0.47.0.md`) e cobrem os três blocos: o ciclo declarativo (`stack plan`/`apply`
-convergente/`destroy`, schema gerado e estável, 18→15 Kinds), o tecto de capabilities do CRI, e o
-bloco pequeno (`delonix init`/`version`, o `scan` a recusar imagens VM, a extracção a dobrar).
-**Publicar é decisão do dono** — bump + tag `vX.Y.Z`, o CI faz o resto.
+Última tag publicada: **v2.0.0** (`image list`/`backup list` voltam a `ls`). O `Cargo.toml` já
+diz `2.0.0`. Desde essa tag, **6 PRs fundidos em `main` e por publicar**: o ciclo de
+restruturação da CLI (`docs/discovery/52_CLI_PLANO_MIGRACAO.md`) — B6 (`image --vm` removido,
+PR #214), B5 (`storage`/`sharevolume` fundidos em `volume`, PR #216), o desenho do B4
+(ADR-0029, PR #217), o código do B4 (`net ingress/egress` a escrever pela mesma contabilidade
+de origem do `NetworkAccessRule`, PR #219), e o B7 fechado por auditoria leaf-a-leaf (`vm
+status`/`pod ls` cortados, `get` ganha `--namespace`, PR #221).
 
-**Estado verificável hoje** (medido, não afirmado): `cargo build --workspace`, `clippy
---all-targets` e `fmt` limpos; **792 testes** em 21 suites; arnês de caos **20/20**; bateria E2E
-da CLI **198/198**; a documentação sem um único comando ou flag que não exista no binário; i18n a
-**232/232** comandos e **0** descrições de flag por traduzir, com dois testes a travar a regressão.
+**A restruturação da CLI (B1–B9) está FECHADA.** B1/B2/B5/B6/B7/B8 fundidos; B9 rejeitado
+(decisão fechada, v1.0.0); B4 com o desenho totalmente resolvido (ADR-0029) e o único código
+real já fundido (#219 — os outros dois pontos da ADR nunca precisaram de código). **B3 está
+100% codificado, mas NÃO fundido** — 6 PRs abertos, todos a tocar infra-estrutura sensível
+(chave privada, captura de pacotes, execução remota por SSH, controlo de VM) e por isso à
+espera de revisão manual do dono, não de um agente:
 
-**Três gates novos, e cada um nasceu de uma falha real desta série:**
-1. **`ci.yml` → `docs`** — regenera o site e falha se o commitado deixar de ser o gerado, mais o
-   `--dry-run`/`validate` de todos os `examples/`. Pagou-se no mesmo dia: apanhou sete páginas
-   fora de dia com o `--help` real. **O que NÃO verifica está escrito no job** — um campo
-   desconhecido escapa, porque o `warn_unknown_fields` só corre no apply REAL.
-2. **`chaos.yml` → bateria E2E** (`scripts/e2e.sh`, 198 verificações sobre a CLI a sério). Fica ao
-   lado do caos e não no `ci.yml` porque precisa do MESMO ambiente rootless que aquele job já
-   monta. Não corria desde a v0.3.0 — 44 versões — e tinha nove falhas, **oito porque o teste
-   codificava um bug entretanto corrigido** (usava `--subnet …/24`, aceite-e-ignorado até o
-   `--subnet` passar a valer). Regra: quando uma correcção faz um teste antigo falhar, a primeira
-   hipótese é que o teste fixava o comportamento errado.
-3. **Cenário de caos `stack_converge`** — ver a secção do IaC.
+- **#206** `vm pause`/`unpause` — suspende vCPUs de uma VM a correr.
+- **#207** `pod port-forward` — encaminhador host↔netns-do-pod, estilo kubectl.
+- **#208** `net capture` — captura de pacotes crua na interface SDN de um container.
+- **#209** `image sign` — assinatura ECDSA-P256 compatível com cosign.
+- **#218** `cluster drain`/`uncordon`/`upgrade` — dia-2 de um cluster `mode: ssh`.
+- **#220** `vm migrate` — MVP stop-copy-start para outro host `delonix` (ver nota abaixo:
+  live migration a sério fica de fora, por razão medida).
 
-**Pendente, por ordem de valor:**
+**Aviso prático para quem fundir #218 e #220**: os dois editam a MESMA secção de
+`docs/discovery/52_CLI_PLANO_MIGRACAO.md` (a tabela de estado do B3) — o segundo a fundir
+recebe um conflito trivial nesse ficheiro, e a resolução certa é manter as DUAS actualizações,
+nunca escolher uma.
 
-1. **Os três ADRs já estão DECIDIDOS** (2026-08-10), e cada um tem skill própria:
-   - **0008 (backend Proxmox) — aceite em DUAS fases.** A fase 1, o **registo de backends**, entra
-     já: o `backend_for` acaba hoje em `_ => CloudHypervisorBackend`, ou seja um nome desconhecido
-     cai num default em vez de falhar — o guarda-rio #6 partido onde é mais provável haver um typo.
-     É pequeno, puro e testável sem hypervisor. A fase 2, o backend em si, fica **bloqueada num
-     alvo real**, como o spike do kind: não se escreve um backend que nunca se viu arrancar uma VM,
-     e o próprio ADR admite que não é testável aqui. Skill: `skills/delonix-vm-backend/`.
-   - **0009 (provisionar no TrueNAS) — aceite**, e é o de melhor rácio dos três pela razão que o
-     próprio ADR dá: **o appliance TrueNAS arranca e serve a API neste host**, logo o CRUD, a quota
-     e as permissões exercitam-se contra um alvo REAL. Duas condições não-opcionais: passagem
-     `delonix-runtime-sec` antes do merge (passamos a segurar uma credencial que destrói dados
-     noutra máquina) e o caminho destrutivo provado por cenário de caos, não por leitura — o
-     precedente é o `volumes rm` da v0.37.0. Skill: `skills/delonix-truenas/`.
-   - **0010 (API de gestão remota) — RECUSADO.** Dos três consumidores que o ADR enumera, a
-     evidência aponta para o control-plane de frota, e isso é o `delonix-paas`: remoteness sem
-     identidade, autorização e auditoria não é remoteness que valha a pena. **Fecha também o F4**
-     (a cobertura estreita da API): alargar uma superfície cuja audiência estava indecisa só valia
-     depois de a audiência ser conhecida — e é um processo no mesmo host. Reabre-se com um
-     consumidor concreto que não seja nem o PaaS nem um agente local.
-2. **Volumes anónimos do `compose`** — precisa de decisão de DESENHO antes de código: um `down`
-   simples remove um volume anónimo, ou só `down -v`? Nomeação determinística por posição na
-   lista (risco de colisão se a ordem mudar) vs. um registo próprio (mais peso). Não avances sem
-   responder a isto primeiro.
-3. **5 itens de namespace/privilégio/protocolo**, cada um candidato a sessão própria — nenhum é
-   dívida rápida, todos tocam fronteiras que este projecto trata com auditoria dedicada (skill
-   `delonix-runtime-sec`): `macvlan`/`ipvlan` realizados fisicamente (mesmo em root o código
-   nunca foi escrito — distinto do caso rootless, que é limite de CAP_NET_ADMIN e não de código
-   em falta); partilha de PID em pods (`shareProcessNamespace`, toca no `spawn()`, já sinalizado
-   como função de risco de ~405 linhas); recuperar VMs num respawn do holder (pods e containers já
-   recuperam desde a v0.41.0); WebSocket/upgrade tunelado no proxy L7 (`httproute`); `exec`/attach
-   interactivo + `--restart` na API `serve docker-api` (a primeira precisa de HTTP hijacking real,
-   a segunda de repensar o modelo de supervisor `fork()` para um servidor multi-thread).
-4. **Um workflow de CI que reconstrua as imagens de appliance**, como o `vm-image.yml` já faz para
-   a golden. As imagens em si já estão publicadas em
-   `ghcr.io/angolardevops/delonix-vm-appliances` (2026-08-13) — o `write:packages` que faltava
-   já está na conta `angolardevops`; ver a secção «Imagens de appliance».
-5. **Gravar os vídeos** — o guião (`docs/ROTEIRO-VIDEOS.md`, 6 episódios, comandos já testados)
-   está pronto; a gravação é trabalho do utilizador, não de agente.
+**Estado verificável a 2026-09-03** (medido no gate `ngola-ci`, não afirmado): `cargo fmt
+--check`, `clippy -D warnings` e `cargo deny` limpos; **739 testes** na suite principal
+(`delonix-runtime-bin`), 0 falhas; **235 folhas** na CLI (`scripts/cli_baseline.tsv`, desceu de
+237 com o corte do B7); i18n com os testes de regressão (`help_i18n_tests`,
+`todo_o_comando_tem_entrada_no_manual`) todos verdes. **Não remedido nesta passagem**: a
+bateria E2E (`scripts/e2e.sh`) e o arnês de caos — os últimos números conhecidos (198/198 e
+20/20) são de antes de todo este ciclo e não foram corridos de novo; não assumir que continuam
+válidos sem os correr.
+
+**Três ADRs novos nascidos DESTA pergunta** (o utilizador pediu para fechar o que a ADR-0029
+tinha deixado deliberadamente em aberto, mais uma capacidade nova adjacente):
+
+- **Colapsar `net ingress`/`net egress` para `NetworkAccessRule` — FECHADO, ADR-0030.**
+  Medido leaf a leaf (17 imperativos: só 4 — `allow`/`deny` — eram sequer candidatos a
+  `NetworkAccessRule`; `policy`/`net`/`host` já colapsam em `FirewallPolicy` desde antes;
+  `publish`/`unpublish` são doutro grão por desenho, ADR-0029; `rm`/`clear` não têm
+  equivalente declarativo nenhum). Veredicto: sem mais corte — o `scripts/e2e.sh` desta
+  base usa `net ingress`/`net egress` 8 vezes e `NetworkAccessRule` zero, e todo o resto do
+  motor já mantém as duas formas (imperativa e `kind:`) lado a lado para sempre.
+- **`vm migrate` — live migration a sério — NO-GO, ADR-0031.** Medido contra a documentação
+  real do Cloud Hypervisor e do libvirt/QEMU: o CH não transfere disco nenhum na migração (só
+  memória/estado — as próprias demonstrações oficiais arrancam a VM destino sem `--disk`); o
+  caminho NBD do libvirt existe e é maduro, mas exige `virtproxyd-tcp` a escutar em rede nos
+  dois hosts — o mesmo tipo de excepção privilegiada já aceite para o `vm bridge`, não um
+  default rootless. Um híbrido (sincronizar o disco em incremental e só depois migrar a
+  memória) não fecha sem uma API de dirty-bitmap que o CH não expõe. Fica bloqueado em UMA de
+  duas pré-condições que este motor não tem hoje: storage de imagens de VM partilhado, ou uma
+  excepção privilegiada aceite para o daemon do libvirt — nenhuma das duas nomeada como
+  necessidade concreta ainda.
+- **Kind `Service` — DESENHADA, ADR-0032, por implementar.** Selecciona um CONJUNTO de
+  containers por `matchLabels` (o mesmo primitivo que a ADR-0024 já desenhou para
+  `FirewallPolicy` e nunca chegou a construir) e publica-o como VÁRIOS registos DNS `A` sob
+  `<nome>.<namespace>.delonix.internal` — round-robin por rotação na resposta, sem VIP, sem
+  dataplane novo, sem daemon: reaproveita o `build_dns_index`/TTL que a resolução de nomes já
+  tem. Um VIP com DNAT real (`ClusterIP` à k8s) fica deliberadamente fora do v1 — sem
+  consumidor concreto nomeado para justificar um verdict map novo.
+
+**Pendente de sessões anteriores, NÃO reverificado nesta passagem** (herdado de 2026-08-10;
+tratar como desactualizado até se confirmar, não como facto — dois dos três ADRs que esta
+secção listava como "pendentes" nessa data **já estavam implementados** quando esta reescrita
+os foi confirmar, ver as secções «O registo de backends de VM, e o backend Proxmox (ADR-0008,
+fechado 2026-08-11)» e «Provisionar armazenamento numa NAS (ADR-0009)» acima neste ficheiro —
+por isso a lista abaixo fica sinalizada como precisando de nova verificação, não repetida como
+se ainda fosse verdade):
+
+1. Volumes anónimos do `compose` — decisão de desenho por tomar (nomeação determinística vs.
+   registo próprio).
+2. 5 itens de namespace/privilégio/protocolo (macvlan/ipvlan físico, PID em pods, recuperação
+   de VM num respawn do holder, WebSocket/upgrade no proxy L7, exec/attach+`--restart` na API
+   docker) — estado real por confirmar, não assumir que continuam por fazer.
+3. Workflow de CI para reconstruir as imagens de appliance.
+4. Gravar os vídeos do guião (`docs/ROTEIRO-VIDEOS.md`) — trabalho do utilizador.
 
 **Meia-isolação é pior que nenhuma (incidente real, 2026-08-12).** Correr uma bateria com
 `DELONIX_ROOT` isolado e **sem** `DELONIX_NET_RUNTIME_DIR` põe dois roots a disputar

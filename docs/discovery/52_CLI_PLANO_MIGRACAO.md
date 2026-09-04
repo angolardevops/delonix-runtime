@@ -299,11 +299,12 @@ caso do B8, de um major.
 
 ## 5. As três decisões que faltam
 
-**O `Service`.** Ainda por desenhar — remedido a 2026-09-01, o registo
-(`cmd/kinds.rs`) tem hoje 18 Kinds (cresceu de 16 com o `NetworkAccessRule` e
-o `Gateway`) e continua sem nenhum `Service`. É um Kind a desenhar — spec
-própria, semântica de balanceamento — não a encaminhar. Sem isto, a contagem
-dos «12 Kinds operáveis» não fecha. Nada mudou aqui desde a leitura original.
+**O `Service` — DESENHADO a 2026-09-04, `docs/adr/0032-service-kind-dns-round-robin.md`,
+por implementar.** Selecciona um conjunto de containers por `matchLabels` (o mesmo
+primitivo que a ADR-0024 já desenhou para `FirewallPolicy`, também ainda por
+construir) e publica-o como vários registos DNS `A`, round-robin, sob o nome
+interno já existente — sem VIP, sem dataplane novo, sem daemon. Fecha a
+contagem das «12 Kinds operáveis» no desenho; falta só o código.
 
 **O `config` e os contextos — FECHADO, confirmado no código.** O `config.rs`
 diz, no seu próprio comentário de módulo: uma preferência local pequena,
