@@ -39,6 +39,9 @@ never rewritten — supersede them with a new one.
 | [0026](0026-security-runtime-decision-crate.md) | The security runtime is a decision crate, not a sensor platform — and it has no tenants | **Proposed** — `delonix-security-runtime`; the VM path joins the admission gate, VM rules default-off + lint |
 | [0028](0028-network-access-rule-incremental.md) | `kind: NetworkAccessRule` — an incremental firewall primitive alongside `FirewallPolicy` | **Accepted** — `FwRule.origin` bookkeeping, no new dataplane primitive, no new CLI leaf |
 | [0029](0029-net-ingress-egress-collapse.md) | The three open questions of B4's `net` collapse, resolved | **Accepted** — CLI allow/deny route through the same origin bookkeeping; publish/unpublish and `netns` stay imperative/visible, permanently |
+| [0030](0030-net-ingress-egress-no-further-collapse.md) | No further collapse of `net ingress`/`net egress` — measured, not assumed | **Accepted** — of 17 leaves, only 4 (`allow`/`deny`) were ever candidates; the rest already collapse elsewhere, are a different grain, or have no declarative shape |
+| [0031](0031-live-vm-migration-no-go.md) | Live VM migration is a NO-GO for both backends, as this engine is built today | **Accepted** — Cloud Hypervisor transfers no disk state; libvirt's NBD path needs a persistently-listening daemon this engine's rootless identity rejects |
+| [0032](0032-service-kind-dns-round-robin.md) | `kind: Service` — a selector-matched workload SET, load-balanced by DNS, not a new dataplane | **Proposed** — design only; round-robin `A` records via the existing DNS index, no VIP/dataplane/daemon in v1 |
 
 ## Roadmap (from `AGENTS.md` "Universal Runtime" — each phase needs its own accepted ADR)
 
