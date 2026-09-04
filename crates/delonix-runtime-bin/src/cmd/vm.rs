@@ -783,6 +783,22 @@ pub enum VmCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: String,
     },
+    /// Suspend a running VM's vCPUs — guest memory stays intact, unlike `stop`.
+    ///
+    /// The same notion as `container pause` (cgroup freezer), not `vm
+    /// snapshot` (which persists a checkpoint to disk and survives a reboot
+    /// of the host; this does not — the VMM process keeps the memory in
+    /// RAM). Resume with `unpause`. Refuses a VM that is not currently
+    /// running.
+    Pause {
+        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
+        name: String,
+    },
+    /// Resume a VM suspended with `pause`. Refuses a VM that is not paused.
+    Unpause {
+        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
+        name: String,
+    },
     /// Reclaim the VM state directory: everything in it no VM record accounts for.
     ///
     /// Stale create locks, sockets, pidfiles and console logs of VMs that are
@@ -2089,6 +2105,16 @@ pub fn run(action: VmCmd) -> Result<()> {
         }
         VmCmd::Restart { name } => {
             delonix_vm::restart(&base, &name)?;
+            println!("{name}");
+            Ok(())
+        }
+        VmCmd::Pause { name } => {
+            delonix_vm::pause(&base, &name)?;
+            println!("{name}");
+            Ok(())
+        }
+        VmCmd::Unpause { name } => {
+            delonix_vm::unpause(&base, &name)?;
             println!("{name}");
             Ok(())
         }
