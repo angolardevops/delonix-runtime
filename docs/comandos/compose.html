@@ -231,6 +231,9 @@ Options:
   -d, --detach
           Accepted for `docker compose` compatibility. Services already start detached here (this engine has no daemon holding them), so this is a no-op rather than an error — every existing script and CI job writes `up -d`, and rejecting it broke all of them for no behavioural gain
 
+      --profile &lt;PROFILE&gt;
+          Activate a service declaring this profile (repeatable). A service with no `profiles:` always runs; one that names some only runs if requested here, or if an activated service `depends_on` it
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -335,6 +338,9 @@ Options:
 
   -p, --project-name &lt;PROJECT&gt;
           
+
+      --profile &lt;PROFILE&gt;
+          Same meaning as `up --profile` — resolve and print as if these profiles were requested
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
