@@ -2126,6 +2126,16 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["vm start", "vm stop", "vm console", "get"],
     },
     Entry {
+        path: "vm migrate",
+        group: "Lifecycle",
+        examples: &[
+            ("move a stopped VM to another delonix host — real downtime, no shared storage needed", "delonix vm migrate dev --host 10.0.0.20 --network ingress"),
+            ("pin the SSH identity and a non-default port", "delonix vm migrate dev --host 10.0.0.20 --network ingress --ssh-key ~/.ssh/id_ed25519 --ssh-port 2222"),
+            ("remove the source once the target confirms the VM was created there", "delonix vm migrate dev --host 10.0.0.20 --network ingress --remove-source"),
+        ],
+        see_also: &["vm stop", "vm create", "image vm import", "vm ssh"],
+    },
+    Entry {
         path: "vm prune",
         group: "Maintenance",
         examples: &[

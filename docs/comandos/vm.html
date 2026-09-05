@@ -157,6 +157,7 @@ nodes.</p>
 
 Commands:
   create           Create (or auto-recover) a VM
+  migrate          Move a VM to another `delonix` host — real downtime, no shared storage
   restart          Stop (if running) then start — always a real reboot, unlike `start`. Same recovered-fields limits as `start`
   start            Start an existing, stopped VM — idempotent (already running = no-op)
   stop             Stop the VM (preserves disk, record and snapshots)
@@ -187,7 +188,7 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 COMMAND MAP:
-  Lifecycle    create · stop · start · restart
+  Lifecycle    create · stop · start · restart · migrate
   Inspect      ls
   Interact     console · ssh · vnc
   Configure    default-backend

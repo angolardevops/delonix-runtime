@@ -106,27 +106,49 @@ corrigido para a grafia actual.
 | `cluster` day-2 | 5 | `kubeconfig`/`health`/`upgrade`/`drain`/`uncordon` | `kubeconfig` já existia; **`health` FECHADO** — PR #202; `upgrade`/`drain`/`uncordon` por fazer — **a citação do ADR-0010 aqui era MÁ ATRIBUIÇÃO** (medido 2026-09-03): esse ADR recusa a API de gestão REMOTA (`delonix-mgmt` alcançável de fora do host); `drain`/`uncordon` não precisam sequer de SSH (`cluster kubeconfig` já cacheia localmente — são `kubectl --kubeconfig=<cache> drain/uncordon` directos) e `upgrade` reusa o MESMO `cmd/remote.rs::SshTarget` que `kubeadm_init`/`join` já usam. Nada bloqueado; por construir |
 | `config` | 5 | contextos — **precisa de ADR**, ver §5 | **`output` FECHADO** (local-only, sem ADR reaberto) — PR #203; `namespace` fica de fora de propósito, sem ponto de leitura único |
 | `system state` | — | — | **não se constrói** — já respondido por `system info` (ver plano da fatia 1) |
-| `pod` day-2 | 4 | `exec`/`attach`/`cp`/`port-forward` | `exec`/`attach`/`cp` já existiam antes deste plano; só `port-forward` por fazer |
-| `vm` day-2 | 3 | `pause`/`resume`/`migrate` | por fazer |
-| `network` | 2 | `diagnose`/`capture` (o `flow` existe em `net flow`) | `diagnose` já existia; `capture` por fazer |
-| `image sign` · `secret rotate` | 2 | | por fazer |
+| `pod` day-2 | 4 | `exec`/`attach`/`cp`/`port-forward` | `exec`/`attach`/`cp` já existiam antes deste plano; **`port-forward` FEITO** — PR #207 (por fundir) |
+| `vm` day-2 | 3 | `pause`/`resume`/`migrate` | **`pause`/`unpause` FEITO** — PR #206 (por fundir); **`migrate` FEITO** — stop-copy-start MVP (2026-09-03; ver nota abaixo), PR por fundir |
+| `network` | 2 | `diagnose`/`capture` (o `flow` existe em `net flow`) | `diagnose` já existia; **`capture` FEITO** — PR #208 (por fundir) |
+| `image sign` · `secret rotate` | 2 | | **`secret rotate` já estava FEITO** (PR #205, 2026-08-xx) — a citação aqui como "por fazer" era desactualizada, o mesmo padrão de má atribuição do B2/B4-B9; **`image sign` FEITO** — PR #209 (por fundir) |
+
+**B3 fica ASSIM 100% coberto por código já escrito** (2026-09-03) — o que resta
+não é implementação, é revisão manual: `pod port-forward`/`vm pause`/`net
+capture`/`image sign`/`cluster upgrade+drain+uncordon`/`vm migrate` tocam
+todos infra-estrutura sensível (chave privada, captura de pacotes, execução
+remota, suspensão de VM) e ficam marcados para revisão antes do merge, mesmo
+padrão já usado nesta sessão.
 
 **Fatia 1 fechada (2026-08-31, PRs #200/#201/#202/#203)**: `diff`, `system
 metrics`, `cluster health` e `config` (só `output`) — a decisão de âmbito de
 cada um está no plano de execução dessa fatia, não repetida aqui. O `config`
-nasceu **local-only**, sem reabrir o ADR-0010: não havia um consumidor
-concreto para um contexto remoto, e `cluster drain`/`uncordon` ficam pela
-mesma razão. O `diff` reaproveita o motor de diff de 3 vias que `stack plan`
+nasceu **local-only**, sem reabrir o ADR-0010. `cluster drain`/`uncordon` NÃO
+ficam pela mesma razão — ver a correcção na linha do `cluster` day-2 acima: a
+citação do ADR-0010 aí também era má atribuição, medida e corrigida a
+2026-09-03. O `diff` reaproveita o motor de diff de 3 vias que `stack plan`
 já tinha (`cmd/reconcile.rs::diff_fields`) — zero motor novo.
 
-**Por fazer nesta fatia**: as quatro peças grandes — `pod port-forward`
-(precisa de um encaminhador processo-do-host↔netns-do-pod novo), `vm
-pause`/`resume`/`migrate` (`migrate` pode não ser viável sem mecanismo de
-live-migration/storage partilhado — por confirmar antes de desenhar),
-`network capture` (privilégio/ferramenta a confirmar), `image sign`
-(manuseio de chave privada — zero código de assinatura hoje, só `image
-verify`), `secret rotate` (rotação de VALOR, distinta do `rotate-key` de
-master-key já existente).
+**`vm migrate` — o que foi medido antes de desenhar (2026-09-03).** Um
+spike confirmou: Cloud Hypervisor não tem NENHUM mecanismo de migração de
+disco (só memória/estado), e mesmo o caminho NBD do libvirt/QEMU (que existe
+e é maduro) exigiria `VmBackend::migrate` + alcançabilidade de rede entre
+hosts + gestão de convergência que este motor não tem — fica como ADR
+próprio, fora de âmbito. O que É viável e ficou construído: um MVP
+**stop-copy-start** (downtime real) — `vm stop` → achata o overlay num qcow2
+autónomo → `scp` para o alvo → `image vm import --appliance` (regista-o sem
+lhe atribuir um cloud-init novo, o disco já traz o seu próprio estado) →
+`vm create --disk <imagem-importada>` no alvo. **Bug real apanhado a
+desenhar, não a validar ao vivo**: `remote::ssh_run` embrulha SEMPRE o
+comando em `sudo -n bash -c` — correcto para `cluster apply` (instala
+pacotes de sistema), mas executar o PRÓPRIO `delonix` CLI assim corrê-lo-ia
+como ROOT no alvo, contra a raiz de estado ERRADA (`Store::default_root`
+bifurca por `geteuid()`) — invisível a um `vm ls` normal nesse host.
+Corrigido com `remote::ssh_run_as_user` (sem `sudo`), novo, ao lado do
+`ssh_run` existente.
+
+**Nada por fazer nesta fatia — só por fundir.** O texto anterior aqui listava
+as quatro peças grandes como pendentes de desenho/implementação; todas têm
+código escrito e testado hoje (ver a tabela e as duas notas acima), à espera
+só de revisão manual antes do merge por tocarem infra-estrutura sensível.
 
 ### B4–B9 — remedidos a 2026-09-01 (agente `Explore`, `origin/main` fresco)
 
@@ -326,24 +348,35 @@ seguir, aos poucos». Registado aqui como facto, não como pergunta em aberto.
 
 ## 6. O que este plano não promete
 
-Não há estimativa de tempo. `pod port-forward` (PR #207), `net capture`
-(PR #208), `vm pause/unpause` (PR #206) e `image sign` (PR #209) já têm
-código a aguardar revisão manual.
+Não há estimativa de tempo. **B3 está agora 100% codificado** — o que falta
+é revisão, não implementação. `pod port-forward` (PR #207), `net capture`
+(PR #208), `vm pause/unpause` (PR #206), `image sign` (PR #209),
+`cluster upgrade`/`drain`/`uncordon` e `vm migrate` (PRs por abrir/já abertos
+a 2026-09-03) têm código a aguardar revisão manual — todos tocam
+infra-estrutura sensível (chave privada, captura de pacotes, execução
+remota, suspensão de VM).
 
-**`vm migrate` — investigado 2026-09-03, já não é "por confirmar".** Medido
-contra o `VmBackend` real e a documentação upstream do Cloud Hypervisor e do
-libvirt/QEMU: um MVP **stop-copy-start** (`vm stop` → scp do overlay qcow2 +
-a golden para o host alvo → `vm create`/registo lá, com downtime real) é
-directamente construível sobre primitivos já existentes, sem storage
-partilhado nenhum. **Live migration a sério continua fora de alcance** — o
-Cloud Hypervisor não tem mecanismo de migração de DISCO (só memória/estado),
-e mesmo o caminho NBD do libvirt/QEMU (que existe e é maduro) exigiria
+**`vm migrate` — investigado E construído a 2026-09-03.** Medido contra o
+`VmBackend` real e a documentação upstream do Cloud Hypervisor e do
+libvirt/QEMU: **live migration a sério fica fora de alcance** — o Cloud
+Hypervisor não tem mecanismo de migração de DISCO (só memória/estado), e
+mesmo o caminho NBD do libvirt/QEMU (que existe e é maduro) exigiria
 `VmBackend::migrate` + alcançabilidade de rede entre hosts + gestão de
 convergência que este código não tem — isso fica como ADR próprio, não como
-extensão incremental. O que se constrói agora é o MVP com downtime,
-documentado como tal.
+extensão incremental. O que ficou construído é o MVP **stop-copy-start**
+(downtime real, documentado como tal): `vm stop` → achata o overlay num
+qcow2 autónomo → `scp` para o alvo → `image vm import --appliance` (o disco
+já traz o seu próprio estado — uma passagem de cloud-init nova seria errada)
+→ `vm create --disk <imagem-importada>` no alvo. **Bug real fechado no
+desenho, não só na validação**: `remote::ssh_run` embrulha sempre o comando
+em `sudo -n bash -c` (correcto para `cluster apply`); corrê-lo assim contra
+o PRÓPRIO `delonix` CLI do alvo operaria a raiz de estado ERRADA
+(`Store::default_root` bifurca por `geteuid()`) — invisível a um `vm ls`
+normal aí. `remote::ssh_run_as_user` (sem sudo) fecha-o, novo ao lado do
+`ssh_run` existente.
 
-**`cluster upgrade`/`drain`/`uncordon` — já não estão bloqueados** (ver a
-correcção na secção do B3/B7 acima). `drain`/`uncordon` não precisam de SSH
-(kubeconfig já cacheado localmente); `upgrade` reusa o `SshTarget` que
-`kubeadm_init`/`join` já usam. Por construir, sem PR aberto ainda.
+**`cluster upgrade`/`drain`/`uncordon` — já não estavam bloqueados, e estão
+construídos.** A citação do ADR-0010 era má atribuição (ver a correcção na
+secção do B3/B7 acima): `drain`/`uncordon` não precisam de SSH (kubeconfig
+já cacheado localmente); `upgrade` reusa o `SshTarget` que `kubeadm_init`/
+`join` já usam.

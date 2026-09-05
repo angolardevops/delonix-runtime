@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use super::manifest::{self, ManifestDoc};
 use super::output;
+use super::remote::{self, SshTarget};
 use super::util::state_root;
 
 /// `spec.build` of a `kind: VirtualMachine` — the declarative face of `delonix image vm build`.
@@ -782,6 +783,47 @@ pub enum VmCmd {
     Restart {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: String,
+    },
+    /// Move a VM to another `delonix` host — real downtime, no shared storage.
+    ///
+    /// Stops the VM (if running), flattens its overlay to a standalone qcow2,
+    /// transfers it over SSH, registers it as a VM image on the target
+    /// (`image vm import --appliance` — the disk already carries its own
+    /// configured state, a fresh cloud-init pass would be wrong there), and
+    /// creates the VM from it. True live migration (near-zero downtime) is
+    /// out of scope: Cloud Hypervisor has no disk-migration primitive, and
+    /// even libvirt/QEMU's NBD-based path would need network reachability and
+    /// convergence handling this engine does not have.
+    Migrate {
+        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
+        name: String,
+        /// Target host (address or hostname the SSH client resolves).
+        #[arg(long)]
+        host: String,
+        /// SSH user on the target (default: `delonix`, the account the golden image creates).
+        #[arg(long, default_value = "delonix")]
+        user: String,
+        /// SSH private key for the target.
+        #[arg(long = "ssh-key", value_hint = clap::ValueHint::FilePath)]
+        ssh_key: Option<PathBuf>,
+        /// SSH port on the target (default: 22).
+        #[arg(long = "ssh-port")]
+        ssh_port: Option<u16>,
+        /// Network on the TARGET host for the recreated VM — a network name is local to a host, never inherited from the source.
+        #[arg(long)]
+        network: String,
+        /// Backend on the target (default: its own auto-detection/preference).
+        #[arg(long)]
+        backend: Option<String>,
+        /// vCPUs on the target (default: the source VM's current value).
+        #[arg(long)]
+        vcpus: Option<u32>,
+        /// Memory on the target (default: the source VM's current value).
+        #[arg(long)]
+        memory: Option<String>,
+        /// Remove the source VM once the target confirms it was created.
+        #[arg(long = "remove-source")]
+        remove_source: bool,
     },
     /// Reclaim the VM state directory: everything in it no VM record accounts for.
     ///
@@ -2092,6 +2134,30 @@ pub fn run(action: VmCmd) -> Result<()> {
             println!("{name}");
             Ok(())
         }
+        VmCmd::Migrate {
+            name,
+            host,
+            user,
+            ssh_key,
+            ssh_port,
+            network,
+            backend,
+            vcpus,
+            memory,
+            remove_source,
+        } => cmd_migrate(
+            &base,
+            &name,
+            &host,
+            &user,
+            ssh_key.as_deref(),
+            ssh_port,
+            &network,
+            backend.as_deref(),
+            vcpus,
+            memory.as_deref(),
+            remove_source,
+        ),
         VmCmd::Snapshot { action } => match action {
             VmSnapshotCmd::Create { vm, snapshot } => {
                 delonix_vm::snapshot(&base, &vm, &snapshot)?;
@@ -2700,6 +2766,203 @@ fn cmd_ssh(
         context: "ssh",
         message: format!("could not run ssh: {err}"),
     })
+}
+
+/// A short random suffix for the intermediate filename `cmd_migrate` transfers
+/// to the target — under the SSH user's own home, not a shared world-writable
+/// directory, but random anyway rather than derived from a pid: this base has
+/// already found a pid-derived temp name to be guessable enough to matter
+/// (`delonix-net::bpf::stage_object`'s CVE-class fix), and there is no reason
+/// to reintroduce that shape for a new writer.
+fn random_suffix() -> String {
+    let mut buf = [0u8; 4];
+    let _ = delonix_runtime_core::cred_vault::random_bytes(&mut buf);
+    buf.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// `vm migrate` — see the `VmCmd::Migrate` doc comment for the shape of the
+/// operation. Every step after the local flatten runs on the TARGET over SSH
+/// (`remote::scp_to`/`ssh_run_as_user` — NOT `ssh_run`, whose `sudo -n`
+/// wrapping would run the target's `delonix` CLI as root instead of the SSH
+/// user, against the wrong rootless state root entirely), so a failure at
+/// any point leaves the source VM's own state untouched — `--remove-source`
+/// only runs after the target confirms the new VM was created.
+#[allow(clippy::too_many_arguments)]
+fn cmd_migrate(
+    base: &std::path::Path,
+    name: &str,
+    host: &str,
+    user: &str,
+    ssh_key: Option<&std::path::Path>,
+    ssh_port: Option<u16>,
+    network: &str,
+    backend: Option<&str>,
+    vcpus: Option<u32>,
+    memory: Option<&str>,
+    remove_source: bool,
+) -> Result<()> {
+    let vm = delonix_vm::status(base, name)?;
+    if vm.status == delonix_runtime_core::Status::Running {
+        eprintln!(
+            "{}",
+            super::po::tf(
+                "'{name}' is running — stopping it first (migration needs a disk no VMM has open)",
+                &[("name", name)],
+            )
+        );
+        delonix_vm::stop(base, name)?;
+    }
+
+    let overlay = std::path::PathBuf::from(&vm.overlay);
+    let tmp_dir = std::env::temp_dir();
+    let flat = tmp_dir.join(format!("delonix-migrate-{name}-{}.qcow2", random_suffix()));
+    eprintln!(
+        "{}",
+        super::po::tf(
+            "flattening {name}'s disk (no backing-file dependency to carry across hosts)...",
+            &[("name", name)],
+        )
+    );
+    let flatten = std::process::Command::new("qemu-img")
+        .args(["convert", "-O", "qcow2", "--"])
+        .arg(&overlay)
+        .arg(&flat)
+        .status();
+    match flatten {
+        Ok(s) if s.success() => {}
+        Ok(s) => {
+            return Err(Error::Runtime {
+                context: "qemu-img convert",
+                message: format!("exit {}", s.code().map_or(-1, |c| c)),
+            });
+        }
+        Err(e) => {
+            return Err(Error::Runtime {
+                context: "qemu-img convert",
+                message: e.to_string(),
+            });
+        }
+    }
+    // From here on, a failure must not leave `flat` behind on THIS host —
+    // it is a full copy of the VM's disk, not a small marker file.
+    let result = migrate_transfer_and_create(
+        &flat, host, user, ssh_key, ssh_port, name, network, backend, vcpus, memory, &vm,
+    );
+    let _ = std::fs::remove_file(&flat);
+    result?;
+
+    if remove_source {
+        delonix_vm::remove_force(base, name)?;
+        eprintln!(
+            "{}",
+            super::po::tf(
+                "source VM '{name}' removed — it now lives on {host}",
+                &[("name", name), ("host", host)],
+            )
+        );
+    }
+    println!(
+        "{}",
+        super::po::tf(
+            "'{name}' migrated to {user}@{host} (network: {network})",
+            &[
+                ("name", name),
+                ("user", user),
+                ("host", host),
+                ("network", network)
+            ],
+        )
+    );
+    Ok(())
+}
+
+/// The over-SSH half of `cmd_migrate` — kept separate so the caller can clean
+/// up the local flattened copy on every exit path (`?` inside this function
+/// would skip that cleanup).
+#[allow(clippy::too_many_arguments)]
+fn migrate_transfer_and_create(
+    flat: &std::path::Path,
+    host: &str,
+    user: &str,
+    ssh_key: Option<&std::path::Path>,
+    ssh_port: Option<u16>,
+    name: &str,
+    network: &str,
+    backend: Option<&str>,
+    vcpus: Option<u32>,
+    memory: Option<&str>,
+    vm: &delonix_runtime_core::Vm,
+) -> Result<()> {
+    let target = SshTarget {
+        host: host.to_string(),
+        user: user.to_string(),
+        key: ssh_key.map(std::path::Path::to_path_buf),
+        port: ssh_port,
+    };
+    // Asked instead of assumed (`/home/<user>` is not universal — a system
+    // account, a non-Linux target, or a custom `HOME` would all silently
+    // break a guessed path) — the SAME lesson `k8s_repo_version`/`family_of`
+    // already paid for in this codebase: derive from the real host, never
+    // from a naming convention.
+    let home = remote::ssh_run_as_user(&target, "echo -n \"$HOME\"").map_err(|e| {
+        Error::Invalid(format!(
+            "[{host}] resolving the target's home directory: {e}"
+        ))
+    })?;
+    let home = home.trim();
+    if home.is_empty() {
+        return Err(Error::Invalid(format!(
+            "[{host}] the target reported an empty $HOME — cannot place the transferred disk"
+        )));
+    }
+    let remote_tmp = format!("{home}/delonix-migrate-{name}-{}.qcow2", random_suffix());
+    eprintln!(
+        "{}",
+        super::po::tf(
+            "transferring to {user}@{host}:{path}...",
+            &[("user", user), ("host", host), ("path", &remote_tmp)],
+        )
+    );
+    remote::scp_to(&target, flat, &remote_tmp)?;
+
+    let image_tag = format!("migrated-{name}");
+    // `--appliance`: the disk already carries whatever cloud-init or manual
+    // configuration it had when stopped — attaching a FRESH NoCloud seed on
+    // `vm create` would hand it a new `instance-id` and could make cloud-init
+    // treat it as a first boot again (regenerated host keys, reset network),
+    // exactly the surprise this flag exists to prevent for an appliance's own
+    // baked-in state.
+    let import_cmd =
+        format!("delonix image vm import {remote_tmp} --tag {image_tag} --appliance --force");
+    let import_result = remote::ssh_run_as_user(&target, &import_cmd);
+    if let Err(e) = &import_result {
+        let _ = remote::ssh_run_as_user(&target, &format!("rm -f -- {remote_tmp}"));
+        return Err(Error::Invalid(format!(
+            "[{host}] registering the transferred disk: {e}"
+        )));
+    }
+
+    let vcpus = vcpus.unwrap_or(vm.vcpus);
+    let memory = memory.unwrap_or(&vm.memory);
+    let mut create_cmd = format!(
+        "delonix vm create {name} --disk {image_tag} --vcpus {vcpus} --memory {memory} --network {network}"
+    );
+    if let Some(b) = backend {
+        create_cmd.push_str(&format!(" --backend {b}"));
+    }
+    let create_result = remote::ssh_run_as_user(&target, &create_cmd);
+    // Best-effort either way: the transferred file is now safely inside the
+    // target's own VmImageStore (or the import itself failed and it never
+    // will be) — the loose copy at `remote_tmp` is disposable in both cases.
+    let _ = remote::ssh_run_as_user(&target, &format!("rm -f -- {remote_tmp}"));
+    create_result.map_err(|e| {
+        Error::Invalid(format!(
+            "[{host}] creating the VM from the imported disk: {e} (the image was imported as \
+             '{image_tag}' — `delonix image vm rm {image_tag}` to clean it up, or retry `vm create` \
+             by hand against it)"
+        ))
+    })?;
+    Ok(())
 }
 
 fn cmd_vnc(base: &std::path::Path, name: &str) -> Result<()> {
@@ -3889,5 +4152,21 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
         for bad in ["/mnt/a,b", "/mnt/a]b", "/mnt/a\"b", "/mnt/a#b", "/mnt/a\nb"] {
             assert!(!super::valid_mount_path(bad), "{bad:?} devia ser rejeitado");
         }
+    }
+
+    /// The intermediate filename `vm migrate` writes on the target must not
+    /// be guessable — a predictable name under a real home directory is a
+    /// smaller version of the same class this codebase already found and
+    /// fixed once (`delonix-net::bpf::stage_object`'s pid-derived path).
+    /// Fixed length (hex of 4 random bytes) and non-empty are the two
+    /// properties worth locking down; true randomness needs a live RNG this
+    /// test does not try to second-guess.
+    #[test]
+    fn random_suffix_tem_forma_hex_fixa_e_varia() {
+        let a = super::random_suffix();
+        let b = super::random_suffix();
+        assert_eq!(a.len(), 8, "4 random bytes hex-encoded is 8 chars: {a:?}");
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()), "{a:?}");
+        assert_ne!(a, b, "two calls must not collide in a quick smoke test");
     }
 }
