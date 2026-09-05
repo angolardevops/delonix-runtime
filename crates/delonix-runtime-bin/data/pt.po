@@ -6224,6 +6224,33 @@ msgstr "manter no ecrã, redesenhado a cada 2s"
 msgid "one veth only, when you already know which container you are chasing"
 msgstr "só um veth, quando já sabes qual é o container que persegues"
 
+msgid "write a pcap file, stop after 100 packets"
+msgstr "escreve um ficheiro pcap, pára ao fim de 100 pacotes"
+
+msgid "stream straight into Wireshark for 30s"
+msgstr "transmite direto para o Wireshark durante 30s"
+
+msgid "Raw packet capture on a container's SDN interface, via the host's own `tcpdump`"
+msgstr "Captura de pacotes crua na interface SDN de um container, via o `tcpdump` do próprio host"
+
+msgid "Raw packet capture on a container's SDN interface, via the host's own `tcpdump`.\n\nRuns `tcpdump` INSIDE the container's netns (the same `join_argv` prefix `--net <network>` uses to enter one), never a second capture engine. Containers only in this version — a pod member shares its pod's netns and is refused, pointing at the pod's name."
+msgstr "Captura de pacotes crua na interface SDN de um container, via o `tcpdump` do próprio host.\n\nCorre o `tcpdump` DENTRO da netns do container (o mesmo prefixo `join_argv` que `--net <rede>` usa para lá entrar), nunca um segundo motor de captura. Só containers nesta versão — um membro de pod partilha a netns do pod e é recusado, apontando para o nome do pod."
+
+msgid "Container to capture (must be attached to a custom network — `--net host`/`none` have no netns of their own to enter)"
+msgstr "Container a capturar (tem de estar ligado a uma rede custom — `--net host`/`none` não têm netns própria para entrar)"
+
+msgid "Interface inside the container's netns"
+msgstr "Interface dentro da netns do container"
+
+msgid "Where to write the capture: a file path, or `-` for stdout"
+msgstr "Onde escrever a captura: um caminho de ficheiro, ou `-` para stdout"
+
+msgid "Stop after this many packets"
+msgstr "Pára ao fim deste número de pacotes"
+
+msgid "Stop after this many seconds (a real `SIGINT`, same as Ctrl-C — ignored if `--count` is reached first)"
+msgstr "Pára ao fim destes segundos (um `SIGINT` a sério, como Ctrl-C — ignorado se `--count` for atingido primeiro)"
+
 msgid "what is open on a container, and from where"
 msgstr "o que está aberto num container, e de onde"
 

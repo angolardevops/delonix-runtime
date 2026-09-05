@@ -28,6 +28,30 @@ pub enum NetCmd {
         #[arg(long, short)]
         watch: bool,
     },
+    /// Raw packet capture on a container's SDN interface, via the host's own `tcpdump`.
+    ///
+    /// Runs `tcpdump` INSIDE the container's netns (the same `join_argv`
+    /// prefix `--net <network>` uses to enter one), never a second capture
+    /// engine. Containers only in this version — a pod member shares its
+    /// pod's netns and is refused, pointing at the pod's name.
+    Capture {
+        /// Container to capture (must be attached to a custom network —
+        /// `--net host`/`none` have no netns of their own to enter).
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::containers))]
+        container: String,
+        /// Interface inside the container's netns.
+        #[arg(short = 'i', long, default_value = "eth0")]
+        iface: String,
+        /// Where to write the capture: a file path, or `-` for stdout.
+        #[arg(short = 'w', long)]
+        write: String,
+        /// Stop after this many packets.
+        #[arg(short = 'c', long)]
+        count: Option<u32>,
+        /// Stop after this many seconds (a real `SIGINT`, same as Ctrl-C — ignored if `--count` is reached first).
+        #[arg(long)]
+        duration: Option<u64>,
+    },
     /// INBOUND firewall (L4 rules + DNAT publishes) for a container on the SDN.
     Ingress {
         #[command(subcommand)]
@@ -62,6 +86,13 @@ pub fn run(action: NetCmd) -> Result<()> {
     match action {
         NetCmd::Netns { action } => super::netns::run(action),
         NetCmd::Flow { iface, watch } => super::flow::run(iface, watch),
+        NetCmd::Capture {
+            container,
+            iface,
+            write,
+            count,
+            duration,
+        } => super::capture::run(&container, &iface, &write, count, duration),
         NetCmd::Ingress { action } => super::firewall::run_ingress(action),
         NetCmd::Egress { action } => super::firewall::run_egress(action),
         NetCmd::L4guard { action } => super::firewall::run_l4guard(action),
