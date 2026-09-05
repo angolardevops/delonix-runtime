@@ -4607,6 +4607,147 @@ fn routes_forget_network(name: &str) {
     }
 }
 
+// ---- `kind: Service` registry (ADR-0032) — a selector + port, nothing else ----
+//
+// A `Service` is its own resource (name, namespace, selector, port) with no
+// single container to attach its record to — unlike `kind: NetworkAccessRule`,
+// whose "record" lives as an `origin`-tagged rule ON the target container. It
+// needs the same small on-disk registry shape `RouteDef` already has: `get`/
+// `list`/`set_metadata` for the generic verbs and `--prune` to work, and a
+// `write_atomic` write so a reader never sees a half-written record.
+
+/// One `kind: Service` document: name/namespace/selector/port, plus the
+/// ownership fields every ownable Kind in this registry carries.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct ServiceDef {
+    pub name: String,
+    pub namespace: String,
+    /// `spec.selector.matchLabels` — matched against `Container.labels` via
+    /// `matches_labels` (this crate, shared with `FirewallPolicy`'s own
+    /// planned selector per ADR-0032's Consequences section).
+    #[serde(default)]
+    pub match_labels: std::collections::BTreeMap<String, String>,
+    /// The CONTAINER port every matched workload is expected to listen on —
+    /// never a host-side or VIP-side port, because there is no VIP (v1 is
+    /// DNS-only, ADR-0032).
+    pub port: u16,
+    #[serde(default)]
+    pub labels: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    pub annotations: std::collections::BTreeMap<String, String>,
+}
+
+fn services_dir() -> PathBuf {
+    ingress_dir().join("services")
+}
+
+/// One file per (namespace, name) — a `Service` is always namespaced (ADR-0032:
+/// the DNS name itself is `<service>.<namespace>.delonix.internal`), so unlike
+/// `RouteDef`'s pair-keyed path there is no bare-name ambiguity to resolve.
+fn servicedef_path(namespace: &str, name: &str) -> PathBuf {
+    services_dir().join(format!("{}--{}.json", sanitize(namespace), sanitize(name)))
+}
+
+/// Every declared `Service` on this node — what `--prune`/`get services` need
+/// to enumerate, same reasoning as `route_list`.
+pub fn service_list() -> Vec<ServiceDef> {
+    let mut v = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(services_dir()) {
+        for e in rd.flatten() {
+            if let Ok(def) =
+                serde_json::from_slice::<ServiceDef>(&std::fs::read(e.path()).unwrap_or_default())
+            {
+                v.push(def);
+            }
+        }
+    }
+    v
+}
+
+pub fn service_get(namespace: &str, name: &str) -> Option<ServiceDef> {
+    serde_json::from_slice(&std::fs::read(servicedef_path(namespace, name)).ok()?).ok()
+}
+
+fn write_servicedef(def: &ServiceDef) -> Result<()> {
+    let _ = std::fs::create_dir_all(services_dir());
+    let json = serde_json::to_vec_pretty(def).map_err(|e| Error::Runtime {
+        context: "service",
+        message: e.to_string(),
+    })?;
+    delonix_runtime_core::write_atomic(&servicedef_path(&def.namespace, &def.name), &json).map_err(
+        |e| Error::Runtime {
+            context: "service",
+            message: e.to_string(),
+        },
+    )
+}
+
+/// Applies a document's selector/port, PRESERVING whatever labels/annotations
+/// already exist (the reconciler's `stamp` writes those separately, same
+/// two-step apply-then-stamp order every other Kind in this file follows).
+pub fn service_set(
+    namespace: &str,
+    name: &str,
+    match_labels: &std::collections::BTreeMap<String, String>,
+    port: u16,
+) -> Result<()> {
+    let mut def = service_get(namespace, name).unwrap_or_default();
+    def.name = name.to_string();
+    def.namespace = namespace.to_string();
+    def.match_labels = match_labels.clone();
+    def.port = port;
+    write_servicedef(&def)
+}
+
+/// Records ownership on a `Service` — mirrors `route_set_metadata`.
+pub fn service_set_metadata(
+    namespace: &str,
+    name: &str,
+    labels: &[(String, Option<String>)],
+    annotations: &[(String, Option<String>)],
+) -> Result<()> {
+    let mut def = service_get(namespace, name)
+        .ok_or_else(|| Error::NotFound(format!("no such service: {namespace}/{name}")))?;
+    for (k, v) in labels {
+        match v {
+            Some(v) => {
+                def.labels.insert(k.clone(), v.clone());
+            }
+            None => {
+                def.labels.remove(k);
+            }
+        }
+    }
+    for (k, v) in annotations {
+        match v {
+            Some(v) => {
+                def.annotations.insert(k.clone(), v.clone());
+            }
+            None => {
+                def.annotations.remove(k);
+            }
+        }
+    }
+    write_servicedef(&def)
+}
+
+/// Retracts a `Service` document — what `--prune`/`destroy` call.
+pub fn service_remove(namespace: &str, name: &str) -> Result<()> {
+    let _ = std::fs::remove_file(servicedef_path(namespace, name));
+    Ok(())
+}
+
+/// One resolvable `Service`: every matched, live backend IP plus the namespace
+/// it lives in (for the SAME cross-namespace scoping every other DNS entry
+/// gets — see `dns_scope_allows`; a `Service` is not an exemption from
+/// ADR-0011's isolation model, and v1 has no `kind: Dependency`-equivalent to
+/// widen it, so cross-namespace resolution of a `Service` is simply refused).
+#[derive(Clone, Debug, Default)]
+struct ServiceDnsEntry {
+    ips: Vec<[u8; 4]>,
+    ns: String,
+}
+
 /// O comprimento do prefixo da rede a que uma bridge pertence.
 ///
 /// **Quarto sítio onde o `/16` estava assado**, e o mais discreto: o endereço do
@@ -6407,6 +6548,31 @@ fn handle_dns(q: &[u8], client: Option<[u8; 4]>) -> Option<Vec<u8>> {
                       // Only the address types (and our own zone) need the index consulted; an
                       // `MX` for an external domain must not pay for a lookup that cannot match.
     let ours = dns_owns_name(&name);
+    // `kind: Service` answers are a SEPARATE path, tried first and only for
+    // `A` queries: a Service name is always fully-qualified
+    // (`<name>.<namespace>.delonix.internal`), so it can never collide with a
+    // container/VM name, and building the multi-record answer here keeps
+    // `dns_action_owned`/the single-IP `Answer` branch below completely
+    // unchanged for every other caller (ADR-0032's explicit design goal).
+    if qtype == QTYPE_A {
+        if let Some(ips) = dns_resolve_multi_for(&name, client) {
+            let mut r = Vec::with_capacity(qend + 16 * ips.len());
+            r.extend_from_slice(&q[0..2]); // original ID
+            r.extend_from_slice(&[0x81, 0x80]); // flags: response + RA
+            r.extend_from_slice(&[0x00, 0x01]); // QDCOUNT=1
+            r.extend_from_slice(&(ips.len() as u16).to_be_bytes()); // ANCOUNT
+            r.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // NSCOUNT=0, ARCOUNT=0
+            r.extend_from_slice(&q[12..qend]); // original question
+            for ip in &ips {
+                r.extend_from_slice(&[0xc0, 0x0c]); // pointer to the name (offset 12)
+                r.extend_from_slice(&[0x00, 0x01, 0x00, 0x01]); // TYPE A, CLASS IN
+                r.extend_from_slice(&[0x00, 0x00, 0x00, 0x1e]); // TTL 30s
+                r.extend_from_slice(&[0x00, 0x04]); // RDLENGTH 4
+                r.extend_from_slice(ip);
+            }
+            return Some(r);
+        }
+    }
     let resolved = if qtype == QTYPE_A || qtype == QTYPE_AAAA || ours {
         dns_resolve_for(&name, client)
     } else {
@@ -6573,6 +6739,11 @@ struct DnsIndex {
     /// carrying the tenant's namespace out of the node. Same reasoning as
     /// `.delonix.internal` never leaving.
     known_ns: std::collections::HashSet<String>,
+    /// `kind: Service` entries, keyed the SAME way as a container's namespaced
+    /// key (`dns_index_ns_key`) — a `Service` only ever resolves fully
+    /// qualified (`<name>.<namespace>.delonix.internal`), so there is no bare
+    /// form to also index.
+    services: std::collections::HashMap<String, ServiceDnsEntry>,
 }
 
 /// Parses `a.b.c.d/len` into `(network, mask)`. A bare address is `/32`.
@@ -6655,6 +6826,14 @@ fn neigh_table_lookup(table: &[(String, String)], mac: &str) -> Option<String> {
 /// [`dns_index`], never directly from a query.
 fn build_dns_index() -> DnsIndex {
     let mut idx = DnsIndex::default();
+    // Collected alongside the container loop below, for the `kind: Service`
+    // pass at the end — a SECOND directory read would just re-parse the same
+    // files this loop already opened.
+    let mut container_summaries: Vec<(
+        std::collections::BTreeMap<String, String>,
+        String,
+        [u8; 4],
+    )> = Vec::new();
     // containers: <base>/containers/*.json (name + ip [+ namespace + firewall])
     if let Ok(rd) = std::fs::read_dir(base_root().join("containers")) {
         for e in rd.flatten() {
@@ -6697,6 +6876,20 @@ fn build_dns_index() -> DnsIndex {
             if !dns_state_serves(v["status"].as_str()) {
                 continue;
             }
+            // A `Service` selects live containers only — same "must actually
+            // be serving" rule as everything else in this index. Read from
+            // the persisted labels, not from the `kind: Service` document:
+            // the document names a SELECTOR, and what it selects lives on
+            // the container's own record.
+            let container_labels: std::collections::BTreeMap<String, String> = v["labels"]
+                .as_object()
+                .map(|m| {
+                    m.iter()
+                        .filter_map(|(k, val)| val.as_str().map(|s| (k.clone(), s.to_string())))
+                        .collect()
+                })
+                .unwrap_or_default();
+            container_summaries.push((container_labels, ns.clone(), ip));
             let entry = DnsEntry {
                 ip,
                 ns: ns.clone(),
@@ -6790,6 +6983,32 @@ fn build_dns_index() -> DnsIndex {
                 idx.ns_of_ip.entry(ip).or_insert(ns);
             }
         }
+    }
+    // `kind: Service` (ADR-0032): each declared Service's selector is
+    // evaluated against the live container set collected above — the SAME
+    // freshness the rest of this index has (re-evaluated on every rebuild,
+    // at most once per `DNS_INDEX_TTL`), which is MORE live than
+    // `FirewallPolicy`'s own selector will be (apply-triggered only).
+    for def in service_list() {
+        let ips: Vec<[u8; 4]> = container_summaries
+            .iter()
+            .filter(|(labels, ns, _)| {
+                ns.eq_ignore_ascii_case(&def.namespace)
+                    && crate::matches_labels(labels, &def.match_labels)
+            })
+            .map(|(_, _, ip)| *ip)
+            .collect();
+        // An empty match is not an error here (ADR-0032: "applies to nothing,
+        // warns loudly, succeeds") — the warning is the CALLER's job (the
+        // Kind's `apply`, which runs once and can log); the index just
+        // reflects reality, which is an entry with zero backends.
+        idx.services.insert(
+            dns_index_ns_key(&def.name, &def.namespace),
+            ServiceDnsEntry {
+                ips,
+                ns: def.namespace,
+            },
+        );
     }
     idx
 }
@@ -6923,6 +7142,41 @@ fn dns_resolve_for(name: &str, client: Option<[u8; 4]>) -> Option<[u8; 4]> {
         .get(&dns_index_vm_key(&cname))
         .filter(|e| visible(e))
         .map(|e| e.ip)
+}
+
+/// Resolves a `kind: Service` name to its FULL backend set (ADR-0032) —
+/// kept as a sibling to `dns_resolve_for` rather than folded into it, so the
+/// container/VM path above (one IP, one shape of caller) never has to change
+/// to accommodate a multi-IP answer it does not need. Only the fully-qualified
+/// `<service>.<namespace>.delonix.internal` form resolves a Service — there is
+/// no bare or short-qualified form, unlike a container/VM name.
+///
+/// Cross-namespace resolution is refused, same as any other DNS entry
+/// (ADR-0011): a `Service` is not an exemption from the isolation model, and
+/// v1 has nothing equivalent to `kind: Dependency` to widen it explicitly.
+fn dns_resolve_multi_for(name: &str, client: Option<[u8; 4]>) -> Option<Vec<[u8; 4]>> {
+    let (cname, Some(ns)) = parse_internal_name(name)? else {
+        return None;
+    };
+    let idx = dns_index();
+    let entry = idx.services.get(&dns_index_ns_key(&cname, &ns))?;
+    let client_ns = dns_client_ns(client);
+    if !entry.ns.eq_ignore_ascii_case(&client_ns) && !entry.ns.eq_ignore_ascii_case(NS_DEFAULT) {
+        return None;
+    }
+    if entry.ips.is_empty() {
+        return None;
+    }
+    // Rotated by a counter so consecutive queries do not always favor the
+    // same backend (ADR-0032) — a client that resolves once and holds a
+    // long-lived connection does not get rebalanced mid-connection, the same
+    // limitation any DNS-based load balancing has (k8s headless Service
+    // included), and an explicit trade-off rather than a silent one.
+    static ROTATE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let start = ROTATE.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % entry.ips.len();
+    let mut rotated = entry.ips[start..].to_vec();
+    rotated.extend_from_slice(&entry.ips[..start]);
+    Some(rotated)
 }
 
 fn parse_v4(s: &str) -> Option<[u8; 4]> {

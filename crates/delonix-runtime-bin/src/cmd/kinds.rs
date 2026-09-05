@@ -65,6 +65,7 @@ pub(crate) const FIREWALL_POLICY: &str = "NetworkPolicy";
 pub(crate) const NETWORK_ACCESS_RULE: &str = "NetworkAccessRule";
 pub(crate) const HTTP_ROUTE: &str = "HTTPRoute";
 pub(crate) const GATEWAY: &str = "Gateway";
+pub(crate) const SERVICE: &str = "Service";
 pub(crate) const WORKLOAD: &str = "Workload";
 pub(crate) const DEPENDENCY: &str = "Dependency";
 pub(crate) const SHARE_VOLUME: &str = "ShareVolume";
@@ -366,6 +367,24 @@ const FACTS: &[KindFacts] = &[
         teardown: true,
         namespaced: Namespaced::Always,
         presence: Presence::Derived,
+    },
+    KindFacts {
+        // ADR-0032: a selector-matched set, DNS round-robin, no VIP. Placed
+        // right after the compute Kinds it selects — a Service's own registry
+        // entry is independent of them, but the match count printed on
+        // `apply` is only meaningful once the workloads it names already
+        // exist.
+        kind: SERVICE,
+        plural: "services",
+        short: &["svc"],
+        api_version: "networking.delonix.io/v1alpha1",
+        domain: Domain::NetConnectivity,
+        form: Form::Primary,
+        in_stack: true,
+        converges: true,
+        teardown: true,
+        namespaced: Namespaced::Always,
+        presence: Presence::Registry,
     },
     KindFacts {
         kind: INGRESS,
