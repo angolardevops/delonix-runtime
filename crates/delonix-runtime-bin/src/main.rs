@@ -1063,3 +1063,228 @@ mod help_i18n_tests {
         );
     }
 }
+
+/// `docs/cli-stability.md` classifies every root command group as either
+/// "Estável" or "NÃO estável" — but nothing checked that classification was
+/// EXHAUSTIVE. Measured before this test existed: of 33 real root groups,
+/// only `container`/`image` (+ `build`, folded into the same promise) and the
+/// 9 named in "NÃO estável" had any status at all — 21 groups (`apply`,
+/// `compose`, `volume`, `network`, `secret`, `stack`, … ) were simply never
+/// mentioned by either list. A group with no status is a group nobody has to
+/// think about before breaking, which is worse than one explicitly marked
+/// unstable.
+///
+/// This mirrors the doc's own two lists in Rust and checks them against the
+/// REAL `clap` tree, not a hand-copied module count (that count — 58 of 71
+/// `pub mod` — was itself wrong: most of those modules are internal
+/// implementation files, not CLI groups a user ever types).
+#[cfg(test)]
+mod cli_stability_classification_tests {
+    use clap::CommandFactory;
+
+    /// Groups `docs/cli-stability.md`'s "Estável" section covers: the name,
+    /// positional order, listed flags and exit codes don't change without a
+    /// major. `build` is included here even though it is its own root
+    /// command — the doc's fenced block names it in the same breath as
+    /// `image`, as the promise for `delonix build`.
+    const STABLE_GROUPS: &[&str] = &["container", "image", "build"];
+
+    /// Every other real top-level group, mirroring "NÃO estável" 1:1. A group
+    /// added to `Cmd` has to land in ONE of these two lists (and in
+    /// `docs/cli-stability.md`) in the same commit — that's what
+    /// `every_root_group_is_classified_exactly_once` enforces.
+    const NOT_STABLE_GROUPS: &[&str] = &[
+        "api-resources",
+        "apply",
+        "backup",
+        "cluster",
+        "compose",
+        "completion",
+        "config",
+        "dashboard",
+        "delete",
+        "describe",
+        "diff",
+        "explain",
+        "get",
+        "init",
+        "man",
+        "manifest",
+        "mcp",
+        "net",
+        "network",
+        "plan",
+        "pod",
+        "secret",
+        "serve",
+        "stack",
+        "system",
+        "version",
+        "vm",
+        "volume",
+        "wait",
+        "workload",
+    ];
+
+    /// `help` is `clap`-synthesized; no version has ever promised anything
+    /// about it. `ingress-proxy` is `#[command(hide = true)]` — real in the
+    /// tree (so `get_subcommands()` sees it) but not a public surface a user
+    /// ever types; `stack apply` launches it by argv, inside the holder's
+    /// netns. Neither belongs in either stability list.
+    const NOT_A_GROUP: &[&str] = &["help", "ingress-proxy"];
+
+    #[test]
+    fn every_root_group_is_classified_exactly_once() {
+        let cmd = super::Cli::command();
+        let mut unclassified = Vec::new();
+        let mut double_classified = Vec::new();
+        for sub in cmd.get_subcommands() {
+            let name = sub.get_name();
+            if NOT_A_GROUP.contains(&name) {
+                continue;
+            }
+            let stable = STABLE_GROUPS.contains(&name);
+            let not_stable = NOT_STABLE_GROUPS.contains(&name);
+            if stable && not_stable {
+                double_classified.push(name.to_string());
+            } else if !stable && !not_stable {
+                unclassified.push(name.to_string());
+            }
+        }
+        assert!(
+            unclassified.is_empty(),
+            "grupo(s) de topo sem classificação de estabilidade — acrescenta a \
+             STABLE_GROUPS ou NOT_STABLE_GROUPS (e a docs/cli-stability.md) no \
+             MESMO commit que os introduziu: {unclassified:?}"
+        );
+        assert!(
+            double_classified.is_empty(),
+            "grupo(s) na promessa de estabilidade E na lista de não-estáveis \
+             ao mesmo tempo — só pode estar numa: {double_classified:?}"
+        );
+    }
+
+    /// The inverse of the guard above: a name in either list that is no
+    /// longer a real group is a promise (or a disclaimer) about something
+    /// that stopped existing. That's exactly what happened to
+    /// `storage`/`sharevolume` after #216 — they stayed in "NÃO estável" long
+    /// after `delonix storage`/`delonix sharevolume` already answered
+    /// "unrecognized subcommand".
+    #[test]
+    fn no_classified_name_outlives_its_group() {
+        let cmd = super::Cli::command();
+        let real: Vec<&str> = cmd.get_subcommands().map(|s| s.get_name()).collect();
+        let stale: Vec<&str> = STABLE_GROUPS
+            .iter()
+            .chain(NOT_STABLE_GROUPS.iter())
+            .filter(|name| !real.contains(name))
+            .copied()
+            .collect();
+        assert!(
+            stale.is_empty(),
+            "nome(s) classificado(s) que já não são um grupo de comandos real \
+             — actualiza STABLE_GROUPS/NOT_STABLE_GROUPS e docs/cli-stability.md \
+             no mesmo commit que os removeu: {stale:?}",
+        );
+    }
+}
+
+/// The actual promise for `container`/`image`, checked against the real
+/// `clap` tree instead of trusted on the page. There was no such check
+/// before this — the doc could drift from the code (as it already had:
+/// `-i`/`-t` were listed as if they belonged to `run`, when they have only
+/// ever existed on `exec`) and nothing would notice until an operator's
+/// script broke on an upgrade.
+#[cfg(test)]
+mod container_image_contract_tests {
+    use clap::CommandFactory;
+    use std::collections::BTreeSet;
+
+    fn verb<'a>(cmd: &'a clap::Command, group: &str, verb: &str) -> &'a clap::Command {
+        cmd.get_subcommands()
+            .find(|c| c.get_name() == group)
+            .unwrap_or_else(|| panic!("`delonix {group}` desapareceu"))
+            .get_subcommands()
+            .find(|c| c.get_name() == verb)
+            .unwrap_or_else(|| panic!("`delonix {group} {verb}` desapareceu"))
+    }
+
+    fn subcommand_names(cmd: &clap::Command, group: &str) -> BTreeSet<String> {
+        cmd.get_subcommands()
+            .find(|c| c.get_name() == group)
+            .unwrap_or_else(|| panic!("`delonix {group}` desapareceu"))
+            .get_subcommands()
+            .map(|s| s.get_name().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn container_keeps_every_promised_verb() {
+        let cmd = super::Cli::command();
+        let real = subcommand_names(&cmd, "container");
+        for name in [
+            "run", "ps", "stop", "start", "restart", "kill", "rm", "exec", "logs", "wait",
+            "inspect", "port", "rename", "pause", "unpause",
+        ] {
+            assert!(
+                real.contains(name),
+                "`container {name}` desapareceu — docs/cli-stability.md promete \
+                 que não quebra sem um major"
+            );
+        }
+    }
+
+    #[test]
+    fn image_keeps_every_promised_verb() {
+        let cmd = super::Cli::command();
+        let real = subcommand_names(&cmd, "image");
+        for name in ["pull", "ls", "remove"] {
+            assert!(
+                real.contains(name),
+                "`image {name}` desapareceu — docs/cli-stability.md promete \
+                 que não quebra sem um major"
+            );
+        }
+    }
+
+    #[test]
+    fn container_run_keeps_every_promised_flag() {
+        let cmd = super::Cli::command();
+        let run = verb(&cmd, "container", "run");
+        let long: BTreeSet<String> = run
+            .get_arguments()
+            .filter_map(|a| a.get_long().map(|l| format!("--{l}")))
+            .collect();
+        for f in [
+            "--name",
+            "--rm",
+            "--net",
+            "--restart",
+            "--memory",
+            "--cpus",
+            "--entrypoint",
+            "--add-host",
+            "--wait",
+        ] {
+            assert!(long.contains(f), "`container run {f}` desapareceu");
+        }
+        assert!(
+            long.iter().any(|f| f.starts_with("--health-")),
+            "`container run --health-*` desapareceu"
+        );
+        let short: BTreeSet<char> = run.get_arguments().filter_map(|a| a.get_short()).collect();
+        for f in ['d', 'p', 'v', 'e', 'w', 'u'] {
+            assert!(short.contains(&f), "`container run -{f}` desapareceu");
+        }
+    }
+
+    #[test]
+    fn container_exec_keeps_every_promised_flag() {
+        let cmd = super::Cli::command();
+        let exec = verb(&cmd, "container", "exec");
+        let short: BTreeSet<char> = exec.get_arguments().filter_map(|a| a.get_short()).collect();
+        for f in ['i', 't', 'e', 'w', 'u'] {
+            assert!(short.contains(&f), "`container exec -{f}` desapareceu");
+        }
+    }
+}
