@@ -1385,11 +1385,23 @@ fn u64v(value: u64) -> Option<UInt64Value> {
     Some(UInt64Value { value })
 }
 
-/// Builds a container's real metrics from its cgroup v2.
-fn container_stats_for(base: &Path, r: &ContainerRec) -> ContainerStats {
-    let ts = now_ns();
-    let cg = container_cgroup(base, &r.id);
-    let (cpu_ns, mem_cur, working_set, rss, pgfault, pgmajfault) = match &cg {
+/// The cgroup v2 numbers behind BOTH the (older) Stats API and the (newer)
+/// generic Metrics API — one read, two shapes. Extracted so
+/// `list_pod_sandbox_metrics` does not grow a second, drifting copy of the
+/// same cgroup-field math `container_stats_for` already has.
+struct ContainerCgroupMetrics {
+    cpu_ns: u64,
+    usage_bytes: u64,
+    working_set_bytes: u64,
+    rss_bytes: u64,
+    pgfault: u64,
+    pgmajfault: u64,
+    swap_bytes: u64,
+}
+
+fn container_cgroup_metrics(base: &Path, id: &str) -> ContainerCgroupMetrics {
+    let cg = container_cgroup(base, id);
+    match &cg {
         Some(cg) => {
             let cpu_us = cg_field(cg, "cpu.stat", "usage_usec");
             let cur = cg_u64(cg, "memory.current");
@@ -1403,17 +1415,40 @@ fn container_stats_for(base: &Path, r: &ContainerRec) -> ContainerStats {
                 let rss = cgroup_rss_bytes(cg);
                 (rss, rss, rss)
             };
-            (
-                cpu_us.saturating_mul(1000), // µs → ns
-                usage,
-                working,
-                rss,
-                cg_field(cg, "memory.stat", "pgfault"),
-                cg_field(cg, "memory.stat", "pgmajfault"),
-            )
+            ContainerCgroupMetrics {
+                cpu_ns: cpu_us.saturating_mul(1000), // µs → ns
+                usage_bytes: usage,
+                working_set_bytes: working,
+                rss_bytes: rss,
+                pgfault: cg_field(cg, "memory.stat", "pgfault"),
+                pgmajfault: cg_field(cg, "memory.stat", "pgmajfault"),
+                swap_bytes: cg_u64(cg, "memory.swap.current"),
+            }
         }
-        None => (0, 0, 0, 0, 0, 0),
-    };
+        None => ContainerCgroupMetrics {
+            cpu_ns: 0,
+            usage_bytes: 0,
+            working_set_bytes: 0,
+            rss_bytes: 0,
+            pgfault: 0,
+            pgmajfault: 0,
+            swap_bytes: 0,
+        },
+    }
+}
+
+/// Builds a container's real metrics from its cgroup v2.
+fn container_stats_for(base: &Path, r: &ContainerRec) -> ContainerStats {
+    let ts = now_ns();
+    let ContainerCgroupMetrics {
+        cpu_ns,
+        usage_bytes: mem_cur,
+        working_set_bytes: working_set,
+        rss_bytes: rss,
+        pgfault,
+        pgmajfault,
+        swap_bytes,
+    } = container_cgroup_metrics(base, &r.id);
     ContainerStats {
         attributes: Some(ContainerAttributes {
             id: r.id.clone(),
@@ -1453,11 +1488,7 @@ fn container_stats_for(base: &Path, r: &ContainerRec) -> ContainerStats {
         swap: Some(SwapUsage {
             timestamp: ts,
             swap_available_bytes: u64v(0),
-            swap_usage_bytes: u64v(
-                cg.as_deref()
-                    .map(|c| cg_u64(c, "memory.swap.current"))
-                    .unwrap_or(0),
-            ),
+            swap_usage_bytes: u64v(swap_bytes),
         }),
     }
 }
@@ -1588,6 +1619,156 @@ pub fn list_pod_sandbox_stats(
         .map(|s| pod_sandbox_stats_for(base, &s))
         .collect();
     Ok(Response::new(ListPodSandboxStatsResponse { stats }))
+}
+
+/// The generic Metrics API (`ListPodSandboxMetrics`/`ListMetricDescriptors`)
+/// is a DIFFERENT shape from the Stats API above — Prometheus-like `{name,
+/// value, metric_type, labels}` tuples instead of a fixed struct — but it is
+/// NOT a different measurement: it reads the exact same
+/// `container_cgroup_metrics` this file already computes for `ContainerStats`.
+/// Two shapes, one source of truth.
+///
+/// **A metric whose name never appeared in `ListMetricDescriptors` is
+/// spec-defined to be IGNORED by the caller** ("Name must match a name
+/// previously returned in a MetricDescriptors call, otherwise, it will be
+/// ignored" — `api.proto`'s own doc-comment on `Metric.name`). Emitting
+/// metrics without matching descriptors would be the same "accepted and
+/// ignored" failure this codebase refuses elsewhere — the two lists below are
+/// the single source both `list_metric_descriptors` and
+/// `list_pod_sandbox_metrics` read, so they cannot drift apart.
+struct MetricSpec {
+    name: &'static str,
+    help: &'static str,
+    metric_type: MetricType,
+}
+
+const POD_METRICS: &[MetricSpec] = &[
+    MetricSpec {
+        name: "pod_cpu_usage_core_nanoseconds",
+        help: "Cumulative CPU time consumed by the pod's containers, in nanoseconds.",
+        metric_type: MetricType::Counter,
+    },
+    MetricSpec {
+        name: "pod_memory_working_set_bytes",
+        help: "Current working set memory of the pod's containers, in bytes.",
+        metric_type: MetricType::Gauge,
+    },
+    MetricSpec {
+        name: "pod_memory_usage_bytes",
+        help: "Current memory usage of the pod's containers, in bytes.",
+        metric_type: MetricType::Gauge,
+    },
+];
+
+const CONTAINER_METRICS: &[MetricSpec] = &[
+    MetricSpec {
+        name: "container_cpu_usage_core_nanoseconds",
+        help: "Cumulative CPU time consumed by the container, in nanoseconds.",
+        metric_type: MetricType::Counter,
+    },
+    MetricSpec {
+        name: "container_memory_working_set_bytes",
+        help: "Current working set memory of the container, in bytes.",
+        metric_type: MetricType::Gauge,
+    },
+    MetricSpec {
+        name: "container_memory_usage_bytes",
+        help: "Current memory usage of the container, in bytes.",
+        metric_type: MetricType::Gauge,
+    },
+    MetricSpec {
+        name: "container_memory_rss_bytes",
+        help: "Current anonymous-memory (RSS) usage of the container, in bytes.",
+        metric_type: MetricType::Gauge,
+    },
+];
+
+pub fn list_metric_descriptors() -> Result<Response<ListMetricDescriptorsResponse>, Status> {
+    let descriptors = POD_METRICS
+        .iter()
+        .chain(CONTAINER_METRICS.iter())
+        .map(|m| MetricDescriptor {
+            name: m.name.to_string(),
+            help: m.help.to_string(),
+            // No per-metric dimension beyond the pod/container id already
+            // carried by `PodSandboxMetrics.pod_sandbox_id`/
+            // `ContainerMetrics.container_id` — nothing to declare here.
+            label_keys: vec![],
+        })
+        .collect();
+    Ok(Response::new(ListMetricDescriptorsResponse { descriptors }))
+}
+
+fn container_metrics_for(base: &Path, r: &ContainerRec) -> ContainerMetrics {
+    let m = container_cgroup_metrics(base, &r.id);
+    let values = [m.cpu_ns, m.working_set_bytes, m.usage_bytes, m.rss_bytes];
+    let metrics = CONTAINER_METRICS
+        .iter()
+        .zip(values)
+        .map(|(spec, value)| Metric {
+            name: spec.name.to_string(),
+            // Live-gathered, not cached — the spec's own convention for this
+            // field ("should be 0 if the metric was gathered live").
+            timestamp: 0,
+            metric_type: spec.metric_type as i32,
+            label_values: vec![],
+            value: u64v(value),
+        })
+        .collect();
+    ContainerMetrics {
+        container_id: r.id.clone(),
+        metrics,
+    }
+}
+
+pub fn list_pod_sandbox_metrics(
+    base: &Path,
+) -> Result<Response<ListPodSandboxMetricsResponse>, Status> {
+    let pod_metrics = list_recs::<SandboxRec>(&sb_dir(base))
+        .into_iter()
+        .map(|sb| {
+            let container_metrics: Vec<ContainerMetrics> = list_recs::<ContainerRec>(&ct_dir(base))
+                .into_iter()
+                .filter(|r| r.sandbox_id == sb.id)
+                .map(|r| container_metrics_for(base, &r))
+                .collect();
+            // The pod-level totals are the same sum-of-containers
+            // `pod_sandbox_stats_for` computes — just re-derived from
+            // `ContainerMetrics` instead of `ContainerStats`, so the two APIs
+            // can never report different pod totals for the same underlying
+            // cgroups.
+            let sum_of = |name: &str| -> u64 {
+                container_metrics
+                    .iter()
+                    .flat_map(|cm| &cm.metrics)
+                    .filter(|m| m.name == name)
+                    .filter_map(|m| m.value.as_ref().map(|v| v.value))
+                    .sum()
+            };
+            let pod_values = [
+                sum_of("container_cpu_usage_core_nanoseconds"),
+                sum_of("container_memory_working_set_bytes"),
+                sum_of("container_memory_usage_bytes"),
+            ];
+            let metrics = POD_METRICS
+                .iter()
+                .zip(pod_values)
+                .map(|(spec, value)| Metric {
+                    name: spec.name.to_string(),
+                    timestamp: 0,
+                    metric_type: spec.metric_type as i32,
+                    label_values: vec![],
+                    value: u64v(value),
+                })
+                .collect();
+            PodSandboxMetrics {
+                pod_sandbox_id: sb.id.clone(),
+                metrics,
+                container_metrics,
+            }
+        })
+        .collect();
+    Ok(Response::new(ListPodSandboxMetricsResponse { pod_metrics }))
 }
 
 /// `ReopenContainerLog` — recreates the container's log file at its configured
@@ -2267,6 +2448,125 @@ mod tests {
         .containers;
         assert_eq!(got.len(), 1, "esperava só o container 'etcd'");
         assert_eq!(got[0].id, "ctaaa1");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// The CRI spec's own rule for `Metric.name`: a name that never appeared
+    /// in a `ListMetricDescriptors` call is defined to be IGNORED by the
+    /// caller. Every name this runtime ever emits from
+    /// `list_pod_sandbox_metrics` has to come from the same table
+    /// `list_metric_descriptors` reads — this proves the two cannot drift,
+    /// rather than trusting the two literal name lists to stay in sync by hand.
+    #[test]
+    fn every_emitted_metric_name_has_a_descriptor() {
+        let tmp = tmp_base("metrics-names");
+        write_rec(
+            &sb_dir(&tmp),
+            "sb1",
+            &SandboxRec {
+                id: "sb1".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        write_rec(
+            &ct_dir(&tmp),
+            "ct1",
+            &ContainerRec {
+                id: "ct1".into(),
+                sandbox_id: "sb1".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let descriptor_names: std::collections::HashSet<String> = list_metric_descriptors()
+            .unwrap()
+            .into_inner()
+            .descriptors
+            .into_iter()
+            .map(|d| d.name)
+            .collect();
+        assert_eq!(
+            descriptor_names.len(),
+            POD_METRICS.len() + CONTAINER_METRICS.len(),
+            "descriptor names must be unique and cover both tables"
+        );
+
+        let pods = list_pod_sandbox_metrics(&tmp)
+            .unwrap()
+            .into_inner()
+            .pod_metrics;
+        assert_eq!(pods.len(), 1);
+        let pod = &pods[0];
+        assert_eq!(pod.pod_sandbox_id, "sb1");
+        for m in &pod.metrics {
+            assert!(
+                descriptor_names.contains(&m.name),
+                "pod metric '{}' has no matching descriptor — the caller must ignore it",
+                m.name
+            );
+        }
+        assert_eq!(pod.container_metrics.len(), 1);
+        let cm = &pod.container_metrics[0];
+        assert_eq!(cm.container_id, "ct1");
+        for m in &cm.metrics {
+            assert!(
+                descriptor_names.contains(&m.name),
+                "container metric '{}' has no matching descriptor — the caller must ignore it",
+                m.name
+            );
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// A container belonging to a DIFFERENT sandbox must never show up under
+    /// this one's `container_metrics` — the same isolation
+    /// `pod_sandbox_stats_for` already gives the older Stats API.
+    #[test]
+    fn container_metrics_are_scoped_to_their_own_sandbox() {
+        let tmp = tmp_base("metrics-scope");
+        for (sb_id, ct_id) in [("sbA", "ctA"), ("sbB", "ctB")] {
+            write_rec(
+                &sb_dir(&tmp),
+                sb_id,
+                &SandboxRec {
+                    id: sb_id.into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            write_rec(
+                &ct_dir(&tmp),
+                ct_id,
+                &ContainerRec {
+                    id: ct_id.into(),
+                    sandbox_id: sb_id.into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+
+        let pods = list_pod_sandbox_metrics(&tmp)
+            .unwrap()
+            .into_inner()
+            .pod_metrics;
+        assert_eq!(pods.len(), 2);
+        for pod in &pods {
+            assert_eq!(
+                pod.container_metrics.len(),
+                1,
+                "sandbox {} must see only its own container",
+                pod.pod_sandbox_id
+            );
+            let expected_ct = if pod.pod_sandbox_id == "sbA" {
+                "ctA"
+            } else {
+                "ctB"
+            };
+            assert_eq!(pod.container_metrics[0].container_id, expected_ct);
+        }
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }
