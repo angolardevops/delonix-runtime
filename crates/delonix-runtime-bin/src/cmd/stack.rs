@@ -375,6 +375,7 @@ pub(crate) fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile
                 k::VOLUME => super::volume::desired(doc)?,
                 k::NETWORK => super::network::desired(doc)?,
                 k::NETWORK_ROUTE => super::netroute::desired(doc)?,
+                k::SERVICE => super::service::desired(doc)?,
                 k::POD => super::pod::desired(doc)?,
                 k::IMAGE => super::image::desired(doc)?,
                 k::VM => super::vm::desired(doc)?,
@@ -407,6 +408,7 @@ pub(crate) fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile:
     out.extend(super::volume::actual()?);
     out.extend(super::network::actual()?);
     out.extend(super::netroute::actual()?);
+    out.extend(super::service::actual()?);
     out.extend(super::pod::actual()?);
     out.extend(super::image::actual(docs)?);
     out.extend(super::vm::actual()?);
@@ -642,6 +644,7 @@ pub(crate) fn compared_fields_table() -> Vec<(&'static str, &'static [&'static s
         (k::VOLUME, super::volume::RECONCILED_VOLUME_FIELDS),
         (k::NETWORK, super::network::RECONCILED_NETWORK_FIELDS),
         (k::NETWORK_ROUTE, super::netroute::RECONCILED_ROUTE_FIELDS),
+        (k::SERVICE, super::service::RECONCILED_SERVICE_FIELDS),
         (k::IMAGE, super::image::RECONCILED_IMAGE_FIELDS),
         (k::VM, super::vm::RECONCILED_VM_FIELDS),
         (k::FIREWALL_POLICY, super::firewall::RECONCILED_FW_FIELDS),
@@ -1236,6 +1239,7 @@ fn presence(
         // names which. Before any of this it fell through to `?`/`unsupported
         // kind` — `stack ls` could not say anything about a path it had opened.
         k::NETWORK_ROUTE => super::netroute::presence_of(doc),
+        k::SERVICE => super::service::presence_of(doc),
         // A share has a record of its own, keyed by (namespace, name) — the
         // namespace comes from the document, which is why `load_record` takes
         // both and why guessing it is not an option.
@@ -1658,6 +1662,9 @@ fn run_layers(
     layers.run(k::VM, "🖥", || super::vm::apply(docs, base))?;
     layers.run(k::CONTAINER, "📦", || super::container::apply(docs))?;
     layers.run(k::POD, "🧩", || super::pod::apply(docs))?;
+    // After the compute Kinds it selects, so the match-count warning it
+    // prints reflects workloads that already exist in this same apply.
+    layers.run(k::SERVICE, "🧭", || super::service::apply(docs))?;
     layers.run(k::FIREWALL_POLICY, "🧱", || super::firewall::apply(docs))?;
     layers.run(k::NETWORK_ACCESS_RULE, "🎯", || {
         super::network_access_rule::apply(docs)
@@ -1752,6 +1759,7 @@ fn destroy_one(kind: &str, name: &str) -> Result<()> {
         k::VOLUME => super::volume::remove_for_replace(name),
         k::NETWORK => super::network::remove_for_replace(name),
         k::NETWORK_ROUTE => super::netroute::remove_for_replace(name),
+        k::SERVICE => super::service::remove_for_replace(name),
         k::POD => super::pod::remove_pod(name, true),
         k::VM => super::vm::remove_for_replace(name),
         k::NETWORK_ACCESS_RULE => super::network_access_rule::remove_for_replace(name),
@@ -1962,6 +1970,20 @@ fn converge_and_stamp(
                         })?;
                     super::network_access_rule::converge_doc(doc)?
                 }
+                // Same shape again: `service::apply_one` already fully
+                // overwrites the registry entry, so converging is applying.
+                k::SERVICE => {
+                    let doc = docs
+                        .iter()
+                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .ok_or_else(|| {
+                            delonix_runtime_core::Error::Invalid(format!(
+                                "Service/{}: not in the manifest",
+                                c.name
+                            ))
+                        })?;
+                    super::service::converge_doc(doc)?
+                }
                 // Same shape as a firewall policy: `apply_one` is already
                 // idempotent and updates the record in place, so converging IS
                 // applying — a per-field path would be a second way to write the
@@ -2026,6 +2048,7 @@ fn stamp_all(
             k::VOLUME => super::volume::stamp(&d.name, stack, &d.fields),
             k::NETWORK => super::network::stamp(&d.name, stack, &d.fields),
             k::NETWORK_ROUTE => super::netroute::stamp(&d.name, stack, &d.fields),
+            k::SERVICE => super::service::stamp(&d.name, stack, &d.fields),
             k::POD => super::pod::stamp(&d.name, stack, &d.fields),
             k::VM => super::vm::stamp(&d.name, stack, &d.fields),
             k::NETWORK_ACCESS_RULE => super::network_access_rule::stamp(&d.name, stack, &d.fields),
