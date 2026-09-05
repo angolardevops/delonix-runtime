@@ -1,0 +1,53 @@
+# kind: Service (ADR-0032) — um CONJUNTO de containers seleccionado por label,
+# publicado como MÚLTIPLOS registos DNS `A` sob
+# <nome>.<namespace>.delonix.internal, com ordem rotativa a cada consulta
+# (round-robin). Sem VIP, sem dataplane L4 novo, sem daemon.
+#
+# A membership é recomputada a cada consulta que ultrapassa o TTL do índice DNS
+# já existente (`build_dns_index`, ~2s) — um container acrescentado, removido ou
+# relabelado aparece dentro de uma janela de TTL, sem precisar de `stack apply`
+# outra vez. Um selector vazio (ou que não corresponda a nada) resolve para uma
+# lista vazia — nunca é erro, mas o `apply` avisa em voz alta.
+#
+# `spec.port` é a porta do CONTAINER (o lado que os workloads escutam), nunca
+# uma porta de host ou de VIP — o cliente resolve o nome, recebe um IP, e liga
+# directamente a essa porta na máquina que calhou.
+#
+# Aplicar com `delonix stack apply -f service.yaml`.
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: appnet }
+spec:
+  driver: bridge
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: web-1
+  labels: { app: web }
+spec:
+  image: "nginx:alpine"
+  network: appnet
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: web-2
+  labels: { app: web }
+spec:
+  image: "nginx:alpine"
+  network: appnet
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Service
+metadata:
+  name: web
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: web
+  port: 80
+# Um cliente na mesma rede resolve `web.default.delonix.internal` e recebe os
+# dois IPs de web-1/web-2, em ordem alternada a cada consulta.

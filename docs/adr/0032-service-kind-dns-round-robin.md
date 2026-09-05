@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed. Design only — nothing here is implemented.
+Accepted. Implemented 2026-09-05.
 
 ## Context
 
@@ -127,7 +127,6 @@ set aside for v1, not ruled out forever:
 
 ## Not done here, and why
 
-- **Implementation** — this ADR is the design only, per the scope the user asked for.
 - **A real L4 VIP/ClusterIP** — deliberately deferred above, not part of v1.
 - **`FirewallPolicy`'s own selector (`ADR-0024`)** — still unimplemented; this ADR assumes
   it will exist and share code with `Service`'s, but does not build it.
