@@ -3091,6 +3091,100 @@ pela simplificação anterior — só nunca tinham sido alcançados por um teste
 + `docs/gen.py`/`docs/comandos/tunnel.html` (regenerados) + `docs/schema/v1/delonix.json`
 (regenerado — `insecureSkipTlsVerify` é campo novo do schema publicado) + `examples/tunnel.yaml`.
 
+## `kind: App` — Cloud Native Buildpacks ligadas a um caminho de build real (ADR-0035)
+
+`crates/delonix-image` já trazia três módulos puros e testados para CNB
+(`buildpack.rs`, `detect.rs`, `internal_registry.rs`) — **sem UM único
+chamador fora dos seus próprios testes**, confirmado por `git grep`
+exaustivo antes de escrever qualquer código. O único problema real que os
+impedia de se ligarem: o `creator` do lifecycle CNB exporta para um REGISTO
+OCI, e o `internal_registry.rs` era loopback-only (`127.0.0.1`) — um
+container builder vive na sua própria netns e não alcança o loopback do
+host. Não era falta de esforço, era uma incompatibilidade estrutural que
+nada tinha ainda alcançado, porque nada chamava nenhum dos dois lados.
+
+**A correcção**: o registo descartável passa a viver numa `kind: Network`
+própria de cada build, alcançado pelo container builder pelo seu **IP da
+SDN** — não pelo DNS interno do motor, que foi a primeira tentativa e falhou
+ao vivo: o cliente de registo do lifecycle CNB (go-containerregistry) só
+escolhe HTTP sozinho para um endereço RFC1918 ou `localhost:<porta>` literal;
+qualquer outro nome, DNS interno incluído, leva HTTPS e o `creator` recusa-se
+(`server gave HTTP response to HTTPS client`), sem flag nenhuma no
+`/cnb/lifecycle/creator -h` desta versão (0.21.18) para o contornar. Como as
+sub-redes da SDN deste motor são sempre RFC1918, apontar para o IP do próprio
+registo satisfaz essa heurística de borla — sem ficheiro de config, sem
+`--insecure-registry`, sem autenticação nova. Publica-se também ao HOST
+(`-p <porta-livre>:5000`) para o processo `delonix` conseguir puxar a imagem
+construída de volta para o `ImageStore` LOCAL depois do build — dois
+alcances diferentes, um só container.
+
+**O build corre por `exec`, não como processo principal do container.** Um
+container `-d` sem `--restart` não tem o código de saída capturado de forma
+fiável (o motor não é o pai real do processo) — o container builder nasce
+com `sleep infinity` como placeholder, e o `creator_args()` do `CnbPlan`
+corre via `runtime::exec`, que devolve um código real (o mesmo mecanismo que
+`container exec` já usa). Build falhado deixa os containers/rede de pé para
+inspecção (`container logs <builder>`), o mesmo idioma do `compose up` ao
+falhar um `depends_on`.
+
+```yaml
+apiVersion: artifact.delonix.io/v1alpha1
+kind: App
+metadata: { name: shop }
+spec:
+  source: .          # relativo ao CWD, mesma convenção do build.context de kind: Image
+  builder: auto      # "auto" | "heroku" | uma imagem builder própria (exige runImage)
+  image: shop:latest
+```
+
+**`desired().converges = false`, sempre** — a mesma honestidade que
+`kind: Image` já usa para uma imagem CONSTRUÍDA (nunca PUXADA): não há cache
+de build, o `apply` reconstrói sempre, e reportar deriva faria o
+`--detailed-exitcode` devolver 2 para sempre em qualquer repo que declare um
+`App`. `ownable: false` pela mesma razão de `Image` — o resultado é cache
+partilhado e endereçado por conteúdo, sem dono de stack.
+
+**`get`/`describe`/`delete apps` não existem, de propósito.** Ao contrário
+de `Image` (cujo CAS é uma lista real e independente de qualquer
+manifesto), um `App` não tem registo próprio — o seu build produz
+EXACTAMENTE uma imagem, e nada mais persiste o facto de um `App` a ter
+nomeado. Depois de construída, é indistinguível de qualquer outra imagem
+com tag: `image ls`/`image describe <tag>` é que veem o estado real. Dar-lhe
+um verbo genérico exigiria um registo novo que esta fatia não acrescenta.
+
+**Por fazer, documentado no ADR-0035**: composição de buildpacks própria
+além da detecção automática, cache partilhado ENTRE apps diferentes
+(`cache_volume` já é por-app e sobrevive a reaplicações da MESMA app),
+autenticação do registo descartável (não é alcançável fora da rede da sua
+própria build), e publicação directa para um registo remoto (v1 fica sempre
+no `ImageStore` local, como qualquer outro Kind).
+
+**Validado ao vivo de ponta a ponta, e três bugs reais só a validação
+encontrou** — nenhum visível a ler o código, os três com teste de regressão
+ou razão escrita, ver o ADR-0035 para o detalhe: (1) `source_dir` nunca era
+canonicalizado — o `.` por omissão sobrevivia ao re-exec `--net <rede-custom>`
+(um processo diferente, CWD diferente) e o `/workspace` do builder acabava a
+montar `/`; corrigido logo a seguir à verificação de directório. (2)
+`CNB_PLATFORM_API` é OBRIGATÓRIO — o `/cnb/lifecycle/creator` recusa-se a
+correr sem ele; fixado em `"0.7"`, o default que as DUAS famílias conhecidas
+(Paketo jammy-base e heroku:24) declaram para o MESMO lifecycle (0.21.18).
+(3) o `output_ref` por DNS interno (a forma original deste ADR) não
+funciona — ver a secção acima; corrigido para o IP da SDN do registo.
+**Achado à parte, real, e DELIBERADAMENTE não corrigido aqui**: a
+`paketobuildpacks/builder-jammy-base` tem 91 layers, e a string
+`lowerdir=` do overlay deste motor para essa imagem chega a ~8,8 KB — mais
+do dobro do que um `mount(2)` clássico aceita no argumento `data` (a
+`glibc`/kernel truncam em silêncio em vez de recusar, e o caminho cortado a
+meio dá exactamente o `ENOENT` observado). Reproduzido com um `container
+run` simples da mesma imagem, sem código de `App` nenhum envolvido — é
+limitação do `mount_overlay_if_marked` (`delonix-runtime`, partilhado por
+TODOS os containers), não de `App`, e a correcção própria (`fsopen`/
+`fsconfig`/`fsmount`, sem tecto de tamanho) merece o seu próprio ADR.
+`builder: heroku` (23 layers, ~2 KB) não bate nesta lacuna e foi o caminho
+provado ponta a ponta: detectou node+Procfile, instalou Node 24.20.0,
+exportou, publicou por IP em HTTP simples, puxou de volta, e a imagem final
+**correu a sério e respondeu no porto declarado** — não só `rc=0`.
+
 ## `kind: NetworkAccessRule` — o primitivo incremental que faltava ao B4 (ADR-0028)
 
 O B4 do plano de reestruturação da CLI prometia colapsar `net ingress`/`net

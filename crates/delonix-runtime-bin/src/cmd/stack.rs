@@ -378,6 +378,7 @@ pub(crate) fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile
                 k::SERVICE => super::service::desired(doc)?,
                 k::POD => super::pod::desired(doc)?,
                 k::IMAGE => super::image::desired(doc)?,
+                k::APP => super::app::desired(doc)?,
                 k::VM => super::vm::desired(doc)?,
                 k::FIREWALL_POLICY => super::firewall::desired(doc)?,
                 k::NETWORK_ACCESS_RULE => super::network_access_rule::desired(doc)?,
@@ -411,6 +412,7 @@ pub(crate) fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile:
     out.extend(super::service::actual()?);
     out.extend(super::pod::actual()?);
     out.extend(super::image::actual(docs)?);
+    out.extend(super::app::actual(docs)?);
     out.extend(super::vm::actual()?);
     out.extend(super::firewall::actual(docs)?);
     out.extend(super::network_access_rule::actual(docs)?);
@@ -646,6 +648,7 @@ pub(crate) fn compared_fields_table() -> Vec<(&'static str, &'static [&'static s
         (k::NETWORK_ROUTE, super::netroute::RECONCILED_ROUTE_FIELDS),
         (k::SERVICE, super::service::RECONCILED_SERVICE_FIELDS),
         (k::IMAGE, super::image::RECONCILED_IMAGE_FIELDS),
+        (k::APP, super::app::RECONCILED_APP_FIELDS),
         (k::VM, super::vm::RECONCILED_VM_FIELDS),
         (k::FIREWALL_POLICY, super::firewall::RECONCILED_FW_FIELDS),
         (
@@ -1210,6 +1213,14 @@ fn presence(
             ),
             Err(e) => ("?".into(), e.to_string()),
         },
+        // An App's identity is its OUTPUT image's ref, same reasoning as Image.
+        k::APP => match delonix_image::ImageStore::open(&root) {
+            Ok(s) => yes_no(
+                s.resolve(super::app::image_ref(doc).as_deref().unwrap_or(name))
+                    .is_ok(),
+            ),
+            Err(e) => ("?".into(), e.to_string()),
+        },
         k::SECRET => match delonix_runtime_core::SecretStore::open(&root) {
             Ok(s) => yes_no(s.list().iter().any(|sec| sec.name == name)),
             Err(e) => ("?".into(), e.to_string()),
@@ -1659,6 +1670,7 @@ fn run_layers(
     layers.run(k::NETWORK_ROUTE, "🔗", || super::netroute::apply(docs))?;
     layers.run(k::VOLUME, "💽", || super::volume::apply(docs))?;
     layers.run(k::IMAGE, "📦", || super::image::apply(docs))?;
+    layers.run(k::APP, "🏗", || super::app::apply(docs))?;
     layers.run(k::VM, "🖥", || super::vm::apply(docs, base))?;
     layers.run(k::CONTAINER, "📦", || super::container::apply(docs))?;
     layers.run(k::POD, "🧩", || super::pod::apply(docs))?;
@@ -1724,6 +1736,7 @@ pub(crate) fn no_teardown_reason(kind: &str) -> Option<&'static str> {
         // Shared content-addressed cache: not ownable, so it never reaches a
         // prune or a destroy, and a `Replace` is just a pull.
         k::IMAGE => "an image is shared content-addressed cache, owned by no stack",
+        k::APP => "an App's output is an image — shared content-addressed cache, owned by no stack",
         // Routes live in the shared proxy config with no per-document
         // provenance; a tunnel's record is keyed by a live agent.
         k::HTTP_ROUTE | k::INGRESS => {
@@ -2055,6 +2068,10 @@ fn stamp_all(
             // `Image` is shared content and deliberately not ownable — stamping
             // it for one stack would hand another stack's cache an owner.
             k::IMAGE => Ok(()),
+            // Same reasoning as `Image` — an App's output is shared content,
+            // stamping it for one stack would hand another stack's cache an
+            // owner.
+            k::APP => Ok(()),
             _ => Ok(()),
         };
         // A stamp that fails must not fail the apply — the resource IS created

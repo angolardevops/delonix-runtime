@@ -90,6 +90,7 @@ fn filled_spec(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
         // was read before applying was the one place you could not.
         k::SECRET => cmd::secret::spec_with_defaults(doc),
         k::IMAGE => cmd::image::spec_with_defaults(doc),
+        k::APP => cmd::app::spec_with_defaults(doc),
         k::VM => cmd::vm::spec_with_defaults(doc),
         k::POD => cmd::pod::spec_with_defaults(doc),
         k::HTTP_ROUTE => cmd::httproute::spec_with_defaults(doc),
@@ -419,6 +420,7 @@ pub(crate) fn spec_fields_for(kind: &str) -> Option<&'static [&'static str]> {
         k::NETWORK => Some(crate::cmd::network::NETWORK_SPEC_FIELDS),
         k::IMAGE => Some(crate::cmd::image::IMAGE_SPEC_FIELDS),
         k::SECRET => Some(crate::cmd::secret::SECRET_SPEC_FIELDS),
+        k::APP => Some(crate::cmd::app::APP_SPEC_FIELDS),
         // `Ingress` is the k8s-shaped L7 Ingress (→ HTTPRoute); the L4 firewall
         // keeps `Egress`/`FirewallPolicy`.
         k::INGRESS => Some(crate::cmd::httproute::INGRESS_SPEC_FIELDS),
