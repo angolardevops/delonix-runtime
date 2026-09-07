@@ -40,10 +40,12 @@
 //! (multi-stage stage selection — forwarded to `kind: Image`'s own
 //! `build.target`, itself `delonix build --target`), a fixed
 //! `networks.*.ipv4_address` (wired straight into `container run --ip`, see
-//! `service_to_run_opts`), and `extends:` (`resolve_extends` — same file only,
-//! `depends_on` never inherited, per the Specification). Defers top-level
+//! `service_to_run_opts`), `extends:` (`resolve_extends` — same file only,
+//! `depends_on` never inherited, per the Specification), and `deploy.replicas`
+//! (N containers, `<project>-<service>`/`-2`/`-3`/…, with no load-balancing
+//! across them — see `Translated.containers`). Defers top-level
 //! `configs:`/`secrets:` (use `kind: Secret` instead), multi-file compose
-//! (`-f a -f b` merge/`include:`), `deploy.replicas != 1`, and anonymous
+//! (`-f a -f b` merge/`include:`), and anonymous
 //! volumes (no explicit source). `working_dir:` IS applied (via `RunOpts.
 //! workdir`, itself now also exposed as `container run -w/--workdir`), and a
 //! bare container port with no host port DOES get a random free host port
@@ -1139,9 +1141,29 @@ struct Translated {
     image_docs: Vec<ManifestDoc>,
     network_docs: Vec<ManifestDoc>,
     volume_docs: Vec<ManifestDoc>,
-    containers: BTreeMap<String, (super::container::RunOpts, String)>,
+    /// One entry per REPLICA, in replica order — `[0]` is the "canonical"
+    /// container (`<project>-<service>`, or `container_name:` if given,
+    /// which `deploy.replicas>1` refuses precisely so this stays unambiguous)
+    /// that `depends_on`/healthcheck waits target; `[1..]` are the extra
+    /// copies (`<project>-<service>-<n>`), reachable only by their own name —
+    /// this engine does no load balancing across them (same "no VIP, no
+    /// daemon" posture as `kind: Service`'s DNS round-robin, which this v1
+    /// does not wire replicas into).
+    containers: BTreeMap<String, Vec<(super::container::RunOpts, String)>>,
     order: Vec<String>,
     waits: BTreeMap<String, Vec<DependsOnWait>>,
+}
+
+/// `true` for a `ports:` entry that pins a specific host port — the short
+/// form's 2/3-part forms, or the long form's `published:`. A bare container
+/// port (`"80"`, no `published:`) resolves to a fresh `free_host_port()` per
+/// call, so replicas never collide on that form; a pinned one names the SAME
+/// host port for every replica and always would.
+fn port_has_explicit_host(p: &ComposePort) -> bool {
+    match p {
+        ComposePort::Short(s) => s.contains(':'),
+        ComposePort::Long { published, .. } => published.is_some(),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1163,10 +1185,26 @@ fn translate(
                 "compose: service '{name}' has neither `image` nor `build`"
             )));
         }
-        if let Some(r) = svc.deploy.as_ref().and_then(|d| d.replicas) {
-            if r != 1 {
+        let replicas = svc.deploy.as_ref().and_then(|d| d.replicas).unwrap_or(1);
+        if replicas == 0 {
+            return Err(Error::Invalid(format!(
+                "compose: service '{name}': deploy.replicas=0 is not supported — this v1 has \
+                 no scale-to-zero/profile toggle for a running service; remove the service \
+                 instead"
+            )));
+        }
+        if replicas > 1 {
+            if svc.container_name.is_some() {
                 return Err(Error::Invalid(format!(
-                    "compose: service '{name}': deploy.replicas={r} is not supported in v1 (only 1)"
+                    "compose: service '{name}': container_name is incompatible with \
+                     deploy.replicas={replicas} — every replica would collide on that one name"
+                )));
+            }
+            if svc.ports.iter().any(port_has_explicit_host) {
+                return Err(Error::Invalid(format!(
+                    "compose: service '{name}': deploy.replicas={replicas} with an explicit \
+                     host port would collide across replicas — use a bare container port \
+                     (e.g. \"80\") so each replica binds its own random free host port instead"
                 )));
             }
         }
@@ -1210,16 +1248,21 @@ fn translate(
         } else {
             svc.image.clone().unwrap()
         };
-        let (opts, final_name) = service_to_run_opts(
-            project,
-            name,
-            svc,
-            base_dir,
-            &network_names,
-            &volume_names,
-            &image_ref,
-        )?;
-        containers.insert(name.clone(), (opts, final_name));
+        let replicas = svc.deploy.as_ref().and_then(|d| d.replicas).unwrap_or(1);
+        let mut instances = Vec::with_capacity(replicas as usize);
+        for idx in 1..=replicas {
+            instances.push(service_to_run_opts(
+                project,
+                name,
+                svc,
+                base_dir,
+                &network_names,
+                &volume_names,
+                &image_ref,
+                idx,
+            )?);
+        }
+        containers.insert(name.clone(), instances);
 
         let mut w = Vec::new();
         for (dep, condition) in svc.depends_on.entries()? {
@@ -1454,6 +1497,7 @@ fn resolve_volume_mounts(
     Ok((volumes, tmpfs))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn service_to_run_opts(
     project: &str,
     service: &str,
@@ -1462,6 +1506,7 @@ fn service_to_run_opts(
     network_names: &BTreeMap<String, String>,
     volume_names: &BTreeMap<String, String>,
     image_ref: &str,
+    replica_index: u32,
 ) -> Result<(super::container::RunOpts, String)> {
     let net_keys = svc.networks.keys();
     let net_key = if net_keys.is_empty() {
@@ -1533,10 +1578,18 @@ fn service_to_run_opts(
         .map(|l| (l.memory.clone(), l.cpus.clone()))
         .unwrap_or((None, None));
 
-    let final_name = svc
-        .container_name
-        .clone()
-        .unwrap_or_else(|| format!("{project}-{service}"));
+    // `container_name:` is refused alongside `deploy.replicas>1` (in
+    // `translate`, before this ever runs) precisely so `replica_index == 1`
+    // is the only case that can reach it here — every other replica gets the
+    // `-<n>` suffix, never the bare service name a 2nd/3rd container would
+    // collide on.
+    let final_name = svc.container_name.clone().unwrap_or_else(|| {
+        if replica_index == 1 {
+            format!("{project}-{service}")
+        } else {
+            format!("{project}-{service}-{replica_index}")
+        }
+    });
 
     let opts = super::container::RunOpts {
         detach: true,
@@ -1981,11 +2034,12 @@ fn cmd_up(
             );
         }
         for name in &translated.order {
-            let (opts, final_name) = &translated.containers[name];
-            println!(
-                "service {name} -> container {final_name} (image={}, net={})",
-                opts.image, opts.net
-            );
+            for (opts, final_name) in &translated.containers[name] {
+                println!(
+                    "service {name} -> container {final_name} (image={}, net={})",
+                    opts.image, opts.net
+                );
+            }
         }
         return Ok(());
     }
@@ -1998,22 +2052,29 @@ fn cmd_up(
     for name in &translated.order {
         if let Some(waits) = translated.waits.get(name) {
             for w in waits {
-                let (_, dep_final_name) = translated.containers.get(&w.on).ok_or_else(|| {
-                    Error::Invalid(format!(
-                        "compose: internal error: dependency '{}' not found",
-                        w.on
-                    ))
-                })?;
+                // The canonical (1st) replica is the one `depends_on`/healthcheck
+                // waits target — see `Translated.containers`'s doc-comment for why.
+                let (_, dep_final_name) = translated
+                    .containers
+                    .get(&w.on)
+                    .and_then(|v| v.first())
+                    .ok_or_else(|| {
+                        Error::Invalid(format!(
+                            "compose: internal error: dependency '{}' not found",
+                            w.on
+                        ))
+                    })?;
                 wait_for_condition(&store, &images, dep_final_name, w)?;
             }
         }
-        let (opts, final_name) = translated.containers[name].clone();
-        if store.list()?.iter().any(|c| c.name == final_name) {
-            println!("compose: {name} ({final_name}): already exists, nothing to do");
-            continue;
+        for (opts, final_name) in translated.containers[name].clone() {
+            if store.list()?.iter().any(|c| c.name == final_name) {
+                println!("compose: {name} ({final_name}): already exists, nothing to do");
+                continue;
+            }
+            super::container::cmd_run(&images, &store, opts)?;
+            println!("compose: {name} ({final_name}): created");
         }
-        super::container::cmd_run(&images, &store, opts)?;
-        println!("compose: {name} ({final_name}): created");
     }
     Ok(())
 }
@@ -2175,11 +2236,12 @@ fn cmd_config(file: Option<PathBuf>, project: Option<String>, profile: Vec<Strin
     let translated = translate(&compose, &project, &base_dir, &profile)?;
     println!("# compose project: {project}");
     for name in &translated.order {
-        let (opts, final_name) = &translated.containers[name];
-        println!(
-            "service {name}:\n  container: {final_name}\n  image: {}\n  network: {}\n  ports: {:?}\n  volumes: {:?}",
-            opts.image, opts.net, opts.ports, opts.volumes
-        );
+        for (opts, final_name) in &translated.containers[name] {
+            println!(
+                "service {name}:\n  container: {final_name}\n  image: {}\n  network: {}\n  ports: {:?}\n  volumes: {:?}",
+                opts.image, opts.net, opts.ports, opts.volumes
+            );
+        }
     }
     Ok(())
 }
@@ -2407,7 +2469,10 @@ services:
         let yaml = "services:\n  web:\n    image: x\n    networks:\n      default:\n        ipv4_address: 10.210.5.5\n";
         let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
         let t = translate(&compose, "p", Path::new("/tmp"), &[]).unwrap();
-        let (opts, _) = &t.containers["web"];
+        // `containers` became a Vec when `deploy.replicas` landed — one entry
+        // per replica. These two tests are about the SINGLE-replica case, so
+        // the first (and only) entry is the one they mean.
+        let (opts, _) = &t.containers["web"][0];
         assert_eq!(opts.ip.as_deref(), Some("10.210.5.5"));
     }
 
@@ -2419,15 +2484,24 @@ services:
         let yaml = "services:\n  web:\n    image: x\n";
         let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
         let t = translate(&compose, "p", Path::new("/tmp"), &[]).unwrap();
-        let (opts, _) = &t.containers["web"];
+        // `containers` became a Vec when `deploy.replicas` landed — one entry
+        // per replica. These two tests are about the SINGLE-replica case, so
+        // the first (and only) entry is the one they mean.
+        let (opts, _) = &t.containers["web"][0];
         assert_eq!(opts.ip, None);
     }
 
     #[test]
-    fn deploy_replicas_diferente_de_1_e_erro() {
+    fn deploy_replicas_cria_um_container_por_replica() {
         let yaml = "services:\n  svc:\n    image: x\n    deploy:\n      replicas: 3\n";
         let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
-        assert!(translate(&compose, "p", Path::new("/tmp"), &[]).is_err());
+        let t = translate(&compose, "p", Path::new("/tmp"), &[]).unwrap();
+        let names: Vec<&String> = t.containers["svc"].iter().map(|(_, n)| n).collect();
+        assert_eq!(
+            names,
+            vec!["p-svc", "p-svc-2", "p-svc-3"],
+            "a 1ª réplica mantém o nome de sempre (depends_on/DNS não mudam), as outras levam sufixo"
+        );
     }
 
     #[test]
