@@ -1,0 +1,25 @@
+# kind: App — build por Cloud Native Buildpacks (Paketo/Heroku), sem Dockerfile.
+#
+# `source` (por omissão ".", relativo ao directório onde correste o comando —
+# a mesma convenção do `build.context` de `kind: Image`, não a pasta deste
+# manifesto) é detectado automaticamente (`go.mod`, `package.json`,
+# `requirements.txt`, ...) para escolher o builder Paketo certo. `builder:
+# heroku` troca de família; um builder próprio exige `runImage` explícito —
+# este motor não lê o `builder.toml` de um builder alheio para o adivinhar.
+#
+# Por baixo: um registo OCI descartável (não o loopback, que um container
+# builder não alcança) vive numa rede própria desta build, alcançado pelo
+# `creator` do lifecycle CNB pelo DNS interno do motor — a mesma rede/DNS que
+# qualquer outro container usa para se encontrar, sem dataplane novo. A imagem
+# resultante volta para o `ImageStore` local sob o nome de `spec.image`.
+#
+# Sem cache de build (cada apply reconstrói), a mesma promessa que `kind:
+# Image`'s `build:` já faz. Aplicar com `delonix stack apply -f app.yaml`.
+---
+apiVersion: artifact.delonix.io/v1alpha1
+kind: App
+metadata: { name: shop }
+spec:
+  source: .
+  builder: auto
+  image: shop:latest

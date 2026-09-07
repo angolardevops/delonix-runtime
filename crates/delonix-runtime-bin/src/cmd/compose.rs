@@ -1217,7 +1217,7 @@ fn service_build_to_image_doc(
 /// accepted limitation of "find a free port" — not something userspace can
 /// close without a kernel-level reservation API neither Docker nor this
 /// engine has.
-fn free_host_port() -> Result<u16> {
+pub(crate) fn free_host_port() -> Result<u16> {
     std::net::TcpListener::bind(("0.0.0.0", 0))
         .and_then(|l| l.local_addr())
         .map(|a| a.port())

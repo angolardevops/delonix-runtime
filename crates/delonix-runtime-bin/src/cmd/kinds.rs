@@ -57,6 +57,7 @@ pub(crate) const NETWORK: &str = "Network";
 pub(crate) const NETWORK_ROUTE: &str = "NetworkRoute";
 pub(crate) const VOLUME: &str = "Volume";
 pub(crate) const IMAGE: &str = "Image";
+pub(crate) const APP: &str = "App";
 pub(crate) const VM: &str = "VirtualMachine";
 pub(crate) const CONTAINER: &str = "Container";
 pub(crate) const POD: &str = "Pod";
@@ -325,6 +326,21 @@ const FACTS: &[KindFacts] = &[
         converges: true,
         // Shared content-addressed cache: removing it because one stack stopped
         // declaring it would pull it from under the others.
+        teardown: false,
+        namespaced: Namespaced::Never,
+        presence: Presence::Registry,
+    },
+    KindFacts {
+        kind: APP,
+        plural: "apps",
+        short: &[],
+        api_version: "artifact.delonix.io/v1alpha1",
+        domain: Domain::Artifact,
+        form: Form::Primary,
+        in_stack: true,
+        converges: true,
+        // An App's output is an image — shared content-addressed cache, owned
+        // by no stack. Same reasoning, same wording, as Image's row above.
         teardown: false,
         namespaced: Namespaced::Never,
         presence: Presence::Registry,

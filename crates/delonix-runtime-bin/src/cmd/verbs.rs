@@ -122,6 +122,12 @@ pub(crate) fn no_verb_reason(kind: &str) -> &'static str {
             "`Workload` lowers to Pod/VirtualMachine/Container at load — ask for those"
         }
         k if k == kinds::DEPENDENCY => "`Dependency` lowers to NetworkPolicy — ask for that",
+        // Unlike `Image`, an App has no registry entry of its own — its build
+        // produces exactly one Image and nothing else persists the fact that
+        // an App named it. Once built, it is indistinguishable from any other
+        // tagged image: `image ls`/`image describe <tag>` see the real state;
+        // `get apps` would need a new persisted record this pass does not add.
+        k if k == kinds::APP => "an App's state IS its output image — use `image ls`/`image describe <tag>`",
         k if k == kinds::INGRESS => "`Ingress` is the k8s spelling of HTTPRoute — ask for that",
         // The CLI restructuring separates the two surfaces on purpose: a
         // container made by `container run` is an IMPERATIVE resource, and
