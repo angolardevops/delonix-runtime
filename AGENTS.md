@@ -436,10 +436,28 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   sucesso — reproduzido também SEM `--target`, num rebuild simples do mesmo Dockerfile
   inalterado. É cosmético (o `img.short_id()` final está correcto) mas engana visualmente;
   fica registado para quem mexer a seguir no `Progress`/cache dos passos.
-  **Por fazer, documentado (nunca silencioso)**: `profiles`/`extends`/`configs`/`secrets`
-  **Por fazer, documentado (nunca silencioso)**: `extends`/`configs`/`secrets`  top-level (usa `kind: Secret` em vez disso)/multi-ficheiro (`-f a -f b`/`include:`),
-  `deploy.replicas≠1`, `networks.*.ipv4_address` fixo,
-  volumes anónimos (sem `source` explícito) — este último deliberadamente NÃO tentado ainda:
+  **FEITO: `networks.*.ipv4_address` fixo** — em vez de recusar, alimenta o
+  MESMO caminho `container run --ip`: `infra::attach_container_on_ip`
+  reserva o endereço escolhido no MESMO registo IPAM por-prefixo que o
+  `allocate` do `attach_container` lê (a linha de controlo enviada ao holder
+  é idêntica — `attach <netns> <ip> <bridge> <gateway> [<ns>]`, só com um
+  endereço ESCOLHIDO em vez de ALOCADO) — já existia, tinha ZERO chamadores,
+  o mesmo padrão "pública, morta, com bug latente" já catalogado várias
+  vezes neste ficheiro. `container run --ip` deixou de recusar; recusa só
+  `--ip` sem `--net <rede>` (não há endereço SDN nenhum para fixar). Um bug
+  de LANG-01 (mensagem de erro em português dentro do motor) foi corrigido
+  de caminho, ao dar à função a sua primeira chamada real. **Validado só por
+  teste unitário, deliberadamente não ao vivo**: a linha de controlo do
+  holder não mudou (confirmado a ler o código, não suposto), por isso não
+  precisa de um respawn — mas provar o attach contra um holder vivo foi
+  adiado de propósito para não mexer na rede de produção deste host, decisão
+  já tomada para este item. Cobertura: o guard puro `fixed_ip_needs_custom_net`
+  (CLI), a fusão `ipv4_address` → `RunOpts.ip` (compose), e o teste
+  pré-existente de recusa por-subnet em `delonix-net` (continua verde).
+  **Por fazer, documentado (nunca silencioso)**: `extends`/`configs`/`secrets`
+  top-level (usa `kind: Secret` em vez disso), multi-ficheiro (`-f a -f b`/`include:`),
+  `deploy.replicas≠1`, volumes anónimos (sem `source` explícito) — este último
+  deliberadamente NÃO tentado ainda:
   precisa de semântica própria de nomeação/limpeza (quando é que um volume anónimo se apaga?
   `down` simples ou só `down -v`?) que merece ser pensada com calma, não decidida às pressas.
 - `delonix serve docker-api [--addr unix://<socket>]` — fatia da **Docker Engine API** (`cmd/dockerapi.rs`)

@@ -5235,7 +5235,7 @@ pub fn attach_container_on_ip(
     } = resolve_net(net)?;
     if !delonix_net_rules::valid_ip_in_subnet(&prefix, ip) {
         return Err(Error::Invalid(format!(
-            "o IP {ip} não pertence à rede {net} ({prefix}.0.0/16)"
+            "IP {ip} does not belong to network {net} ({prefix}.0.0/16)"
         )));
     }
     crate::ipam::reserve(&prefix, id, ip);
