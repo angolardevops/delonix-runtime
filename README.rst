@@ -2,6 +2,16 @@
 Delonix Engine
 ==============
 
+.. image:: https://img.shields.io/github/v/release/angolardevops/delonix-runtime?label=release
+   :target: https://github.com/angolardevops/delonix-runtime/releases/latest
+   :alt: Latest release
+.. image:: https://img.shields.io/github/actions/workflow/status/angolardevops/delonix-runtime/ci.yml?branch=main&label=CI
+   :target: https://github.com/angolardevops/delonix-runtime/actions/workflows/ci.yml
+   :alt: CI status
+.. image:: https://img.shields.io/github/license/angolardevops/delonix-runtime
+   :target: https://github.com/angolardevops/delonix-runtime/blob/main/LICENSE
+   :alt: License
+
 A **daemonless, rootless-first, kernel-native** container and microVM **engine**,
 written in Rust — *the open-source engine at the foundation of the Delonix
 platform.* It creates and manages Linux containers directly through namespaces,
@@ -15,8 +25,6 @@ Not a low-level OCI *runtime* (that's ``runc``/``crun``): Delonix is a full
 container **and** VM engine — build, run, network, firewall, store, and
 bootstrap Kubernetes clusters, from one binary.
 
-:Version: 0.48.0
-:License: Apache-2.0
 :Docs: https://angolardevops.github.io/delonix-runtime/
 :Repo: https://github.com/angolardevops/delonix-runtime
 
@@ -530,6 +538,16 @@ The complete, always-current changelog lives in
 first, **regenerated automatically by the release pipeline** on every
 published tag (source of truth: ``docs/releases/<tag>.md``, the same notes
 published on GitHub Releases).
+
+Community
+=========
+
+`CONTRIBUTING.md <CONTRIBUTING.md>`_ for how to send a change,
+`GOVERNANCE.md <GOVERNANCE.md>`_ for how decisions get made and by whom,
+`MAINTAINERS.md <MAINTAINERS.md>`_ for who that is today,
+`CODE_OF_CONDUCT.md <CODE_OF_CONDUCT.md>`_ for how we expect people to treat
+each other, and `SECURITY.md <SECURITY.md>`_ for reporting a vulnerability
+privately instead of in a public issue.
 
 License
 =======

@@ -1,0 +1,8 @@
+# See GOVERNANCE.md and MAINTAINERS.md.
+#
+# One maintainer today, so one line: everything requires review from the same
+# person. This file exists so that changes when a second maintainer takes an
+# area, not before — a CODEOWNERS split with one real owner behind every line
+# would just be decoration.
+
+* @angolardevops
