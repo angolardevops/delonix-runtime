@@ -854,6 +854,7 @@ dependencies = [
  "delonix-runtime-core",
  "libc",
  "nix",
+ "rustix 1.1.4",
  "seccompiler",
  "serde_json",
 ]

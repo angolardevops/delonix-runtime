@@ -5560,3 +5560,50 @@ pergunta do filesystem que deu origem a tudo.
 **Armadilha de método que vale por si**: os containers só passam a partilhar quando o binário EM
 USO é o novo. Durante esta série o host criou containers flat com o `--version` a dizer o número
 certo — ver «duas builds com a mesma versão não são a mesma build».
+
+## O overlay de muitas layers dava ENOENT — o `mount(2)` clássico corta o `lowerdir=` em silêncio (ADR-0037)
+
+Achado a validar `kind: App` ao vivo (não tocado nesta base ainda, mas o bug é do
+motor): um `container run` de uma imagem com 91 layers reais
+(`paketobuildpacks/builder-jammy-base`) falhava sempre com `failed to prepare
+the rootfs: ENOENT`, sem `kind: App` nem manifesto nenhum envolvido — reproduzido
+com um `container run` liso da mesma imagem.
+
+**Medido no sandbox rootless real** (`unshare --user --map-root-user --mount`, o
+mesmo em que `mount_overlay_if_marked` já corre): a string `lowerdir=a:b:c:...`
+que o `mount(2)` clássico recebe como argumento `data` é copiada pelo kernel via
+`strndup_user(data, PAGE_SIZE)` — **um tecto de 4096 bytes nesta arquitectura,
+cortado em SILÊNCIO, nunca com erro**. Um `lowerdir=` cortado a meio de um
+caminho falha a abrir esse caminho truncado — exactamente o `ENOENT` observado.
+Medido a fronteira exacta: 20 layers reais (4084 bytes) montam bem, 30 (5994
+bytes) falham sempre. A imagem real que revelou isto precisa de **9107 bytes**.
+
+**Corrigido movendo o mount para a API nova** (`fsopen`/`fsconfig`/`fsmount`/
+`move_mount`, Linux 5.2+, com o `lowerdir+` incremental do overlayfs desde a
+6.5): uma chamada `fsconfig(fd, FSCONFIG_SET_STRING, "lowerdir+", <path>, 0)`
+POR layer, nunca uma string só — não há tecto nenhum a que uma chamada por
+layer possa esbarrar. Via `rustix` (`mount`+`fs`), não syscalls crus: o `nix`
+já usado neste ficheiro não tem wrapper para estas quatro chamadas, e o
+`rustix` **já está na árvore nesta versão exacta** (puxado por `tempfile`) —
+activar as suas features não acrescenta dependência nova nenhuma ao supply
+chain, só compila código já vendido de um crate já confiado.
+
+**Sem fallback por comprimento para a chamada clássica, de propósito**: a API
+nova está em todos os kernels que este motor já exige (cgroup v2, `clone3`,
+pidfd); manter dois caminhos para a mesma operação é o custo de manutenção que
+a disciplina deste repo evita, e um fallback disparado por comprimento
+reintroduziria o bug em silêncio em qualquer kernel sem a via nova, disfarçado
+de falha intermitente em vez de um erro claro.
+
+**Validado ao vivo em três camadas**: (1) um harness C isolado no MESMO
+sandbox, 100 layers sintéticas / 19 KB de dados de caminho — quase 5x o tecto
+clássico — montado correctamente, conteúdo íntegro, escrita a ir só para
+`upper/`; (2) a implementação em Rust, sem regressão num container normal
+(`alpine`, poucas layers) e — a prova que interessa — a MESMA imagem real de
+91 layers que falhava 100% das vezes agora arranca (`run_exit=0`), com
+`overlay-lowers` confirmado em 91 linhas/9107 bytes, `/etc/os-release` a
+devolver o Ubuntu 22.04 real (não um rootfs corrompido) e escrita-e-releitura
+dentro do container a confirmar copy-up intacto; (3) o gate completo do
+workspace (fmt/lang_ratchet/clippy/test/deny).
+
+Ver ADR-0037 para o detalhe completo, incluindo a tabela de medição.
