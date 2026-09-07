@@ -400,7 +400,13 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   porta 0 + liberta de imediato; TOCTOU inerente e aceite, mesma técnica que qualquer atribuição
   aleatória de porta usa). Validado ao vivo: `compose up` com `ports: ["80"]` publicou de facto
   numa porta livre real, confirmado por `container port`.
-  **Por fazer, documentado (nunca silencioso)**: `profiles`/`extends`/`configs`/`secrets`
+  **FEITO — `profiles:`** (`up --profile <nome>`, repetível) — um serviço sem `profiles:`
+  corre sempre; um que declare algum só arranca se o perfil for pedido, **ou** se um serviço
+  ACTIVO o alcançar por `depends_on` — a mesma regra do `docker compose` real (senão um
+  serviço activo ficaria sem o que `depends_on` promete). `active_services` calcula o fecho
+  transitivo; `down`/`ps`/`logs` não precisam de o saber, porque já derivam dos containers
+  REALMENTE criados (por label), nunca do ficheiro compose outra vez.
+  **Por fazer, documentado (nunca silencioso)**: `extends`/`configs`/`secrets`
   top-level (usa `kind: Secret` em vez disso)/multi-ficheiro (`-f a -f b`/`include:`),
   `build.target` (selecção de estágio), `deploy.replicas≠1`, `networks.*.ipv4_address` fixo,
   volumes anónimos (sem `source` explícito) — este último deliberadamente NÃO tentado ainda:

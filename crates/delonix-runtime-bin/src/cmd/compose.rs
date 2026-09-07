@@ -34,8 +34,9 @@
 //! `env_file`/`ports`/`volumes`/`command`/`entrypoint`/`depends_on`
 //! (all 3 conditions)/`healthcheck`/`restart`/`networks`/`labels`/`user`/
 //! `cap_add`/`cap_drop`/`privileged`/`tmpfs`/`deploy.resources.limits`/
-//! `container_name`/`hostname`/`read_only`, top-level `networks:`/`volumes:`
-//! (incl. `external: true`). Defers `profiles:`, `extends:`, top-level
+//! `container_name`/`hostname`/`read_only`/`profiles` (`up --profile`,
+//! transitively closed over `depends_on` — see `active_services`), top-level
+//! `networks:`/`volumes:` (incl. `external: true`). Defers `extends:`, top-level
 //! `configs:`/`secrets:` (use `kind: Secret` instead), multi-file compose
 //! (`-f a -f b` merge/`include:`), `build.target` (stage selection),
 //! `deploy.replicas != 1`, a fixed `networks.*.ipv4_address`, and anonymous
@@ -45,7 +46,7 @@
 //! (resolved once, before the container is created — see `free_host_port`).
 
 use super::kinds as k;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -69,21 +70,14 @@ pub(crate) const COMPOSE_SERVICE_LABEL: &str = "delonix.io/compose-service";
 /// an unrecognized key silently), so the user gets an ACTIONABLE message
 /// ("not supported in v1, here's why") instead of nothing at all.
 const KNOWN_UNSUPPORTED_TOP: &[(&str, &str)] = &[
-    ("profiles", "top-level `profiles` activation is not supported in v1 — every service always runs"),
     ("configs", "top-level `configs:` is not supported in v1 — use `kind: Secret` + `Container.secret` instead"),
     ("secrets", "top-level `secrets:` is not supported in v1 — use `kind: Secret` + `Container.secret` instead"),
     ("include", "multi-file compose (`include:`/`-f a -f b` merge) is not supported — pass exactly one -f"),
 ];
-const KNOWN_UNSUPPORTED_SERVICE: &[(&str, &str)] = &[
-    (
-        "extends",
-        "`extends:` is not supported in v1 — inline the service or use YAML anchors",
-    ),
-    (
-        "profiles",
-        "per-service `profiles:` is not supported in v1 — every service always runs",
-    ),
-];
+const KNOWN_UNSUPPORTED_SERVICE: &[(&str, &str)] = &[(
+    "extends",
+    "`extends:` is not supported in v1 — inline the service or use YAML anchors",
+)];
 
 /// Every top-level key of the Compose Specification this implementation reads.
 ///
@@ -130,6 +124,7 @@ const SUPPORTED_SERVICE: &[&str] = &[
     "container_name",
     "hostname",
     "read_only",
+    "profiles",
 ];
 
 /// Keys of a top-level `networks:`/`volumes:` entry that are read.
@@ -177,6 +172,11 @@ pub enum ComposeCmd {
         /// `up -d`, and rejecting it broke all of them for no behavioural gain.
         #[arg(short = 'd', long = "detach")]
         detach: bool,
+        /// Activate a service declaring this profile (repeatable). A service
+        /// with no `profiles:` always runs; one that names some only runs if
+        /// requested here, or if an activated service `depends_on` it.
+        #[arg(long = "profile")]
+        profile: Vec<String>,
     },
     /// Removes every container this project's `up` created.
     ///
@@ -217,6 +217,10 @@ pub enum ComposeCmd {
         file: Option<PathBuf>,
         #[arg(short = 'p', long = "project-name")]
         project: Option<String>,
+        /// Same meaning as `up --profile` — resolve and print as if these
+        /// profiles were requested.
+        #[arg(long = "profile")]
+        profile: Vec<String>,
     },
 }
 
@@ -227,7 +231,8 @@ pub fn run(cmd: ComposeCmd) -> Result<()> {
             project,
             dry_run,
             detach: _,
-        } => cmd_up(file, project, dry_run),
+            profile,
+        } => cmd_up(file, project, dry_run, profile),
         ComposeCmd::Down {
             file,
             project,
@@ -240,7 +245,11 @@ pub fn run(cmd: ComposeCmd) -> Result<()> {
             project,
             follow,
         } => cmd_logs(service, file, project, follow),
-        ComposeCmd::Config { file, project } => cmd_config(file, project),
+        ComposeCmd::Config {
+            file,
+            project,
+            profile,
+        } => cmd_config(file, project, profile),
     }
 }
 
@@ -303,6 +312,14 @@ struct ComposeService {
     hostname: Option<String>,
     #[serde(default)]
     read_only: bool,
+    /// A service with no `profiles:` is always active. One that declares them
+    /// only starts when one of them is requested via `--profile` — or when
+    /// another ACTIVE service `depends_on` it (see `active_services`, which
+    /// mirrors real `docker compose`: a dependency is pulled in even outside
+    /// the requested profile, because the service that needs it cannot start
+    /// without it).
+    #[serde(default)]
+    profiles: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -803,9 +820,21 @@ fn parse_go_duration(s: &str) -> Result<Duration> {
 /// Kahn's-algorithm topological sort over `depends_on` edges. A `depends_on`
 /// naming an undeclared service, or a cycle, is a HARD error (never an
 /// arbitrary order) — ties broken alphabetically for determinism.
-fn topo_sort(services: &BTreeMap<String, ComposeService>) -> Result<Vec<String>> {
+///
+/// `active` scopes the sort to the services `active_services` resolved for
+/// this run — everything outside it (an inactive profile, never requested and
+/// not needed by anything that IS active) is left out of the graph entirely,
+/// not just out of the final order. `active` is trusted to already be closed
+/// under `depends_on` (see `active_services`'s doc-comment); this function
+/// still checks that every name a service names is DECLARED, because that
+/// error has nothing to do with profiles.
+fn topo_sort(
+    services: &BTreeMap<String, ComposeService>,
+    active: &BTreeSet<String>,
+) -> Result<Vec<String>> {
     let mut deps: BTreeMap<&str, Vec<String>> = BTreeMap::new();
-    for (name, svc) in services {
+    for name in active {
+        let svc = &services[name];
         for dep in svc.depends_on.names() {
             if !services.contains_key(&dep) {
                 return Err(Error::Invalid(format!(
@@ -817,7 +846,7 @@ fn topo_sort(services: &BTreeMap<String, ComposeService>) -> Result<Vec<String>>
     }
     let mut remaining: BTreeMap<&str, usize> = deps.iter().map(|(&n, d)| (n, d.len())).collect();
     let mut dependents: BTreeMap<&str, Vec<&str>> =
-        services.keys().map(|k| (k.as_str(), Vec::new())).collect();
+        active.iter().map(|k| (k.as_str(), Vec::new())).collect();
     for (&name, d) in &deps {
         for dep in d {
             dependents.get_mut(dep.as_str()).unwrap().push(name);
@@ -842,7 +871,7 @@ fn topo_sort(services: &BTreeMap<String, ComposeService>) -> Result<Vec<String>>
             }
         }
     }
-    if order.len() != services.len() {
+    if order.len() != active.len() {
         let cyclic: Vec<&str> = remaining
             .iter()
             .filter(|(_, &c)| c > 0)
@@ -854,6 +883,36 @@ fn topo_sort(services: &BTreeMap<String, ComposeService>) -> Result<Vec<String>>
         )));
     }
     Ok(order)
+}
+
+/// The services that actually run for this `up`/`config`: every service with
+/// no `profiles:` (always on), every service naming a REQUESTED profile, and
+/// — the same rule real `docker compose` uses — anything an active service
+/// reaches through `depends_on`, even outside the requested profiles. Without
+/// this transitive step, an active service could `depends_on` one this
+/// function silently dropped, and `translate` would have nothing to wait on.
+fn active_services(compose: &ComposeFile, requested: &[String]) -> BTreeSet<String> {
+    let mut active: BTreeSet<String> = compose
+        .services
+        .iter()
+        .filter(|(_, svc)| {
+            svc.profiles.is_empty() || svc.profiles.iter().any(|p| requested.contains(p))
+        })
+        .map(|(name, _)| name.clone())
+        .collect();
+    loop {
+        let additions: Vec<String> = active
+            .iter()
+            .filter_map(|name| compose.services.get(name))
+            .flat_map(|svc| svc.depends_on.names())
+            .filter(|dep| !active.contains(dep))
+            .collect();
+        if additions.is_empty() {
+            break;
+        }
+        active.extend(additions);
+    }
+    active
 }
 
 /// Deterministic `<project>_<key>` name for a network/volume that has no
@@ -1052,13 +1111,19 @@ struct Translated {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn translate(compose: &ComposeFile, project: &str, base_dir: &Path) -> Result<Translated> {
+fn translate(
+    compose: &ComposeFile,
+    project: &str,
+    base_dir: &Path,
+    requested_profiles: &[String],
+) -> Result<Translated> {
     if !valid_compose_project_name(project) {
         return Err(Error::Invalid(format!(
             "compose: invalid project name '{project}' (only lowercase letters, digits, '_'/'-', must start with a letter or digit)"
         )));
     }
-    for (name, svc) in &compose.services {
+    let active = active_services(compose, requested_profiles);
+    for (name, svc) in compose.services.iter().filter(|(n, _)| active.contains(*n)) {
         if svc.image.is_none() && svc.build.is_none() {
             return Err(Error::Invalid(format!(
                 "compose: service '{name}' has neither `image` nor `build`"
@@ -1072,7 +1137,7 @@ fn translate(compose: &ComposeFile, project: &str, base_dir: &Path) -> Result<Tr
             }
         }
     }
-    let order = topo_sort(&compose.services)?;
+    let order = topo_sort(&compose.services, &active)?;
     let network_names = resolve_network_names(project, compose);
     let volume_names = resolve_volume_names(project, compose);
 
@@ -1100,7 +1165,7 @@ fn translate(compose: &ComposeFile, project: &str, base_dir: &Path) -> Result<Tr
     let mut containers = BTreeMap::new();
     let mut waits: BTreeMap<String, Vec<DependsOnWait>> = BTreeMap::new();
 
-    for (name, svc) in &compose.services {
+    for (name, svc) in compose.services.iter().filter(|(n, _)| active.contains(*n)) {
         let image_ref = if let Some(build) = &svc.build {
             let tag = svc
                 .image
@@ -1665,10 +1730,15 @@ fn load_compose(file: Option<PathBuf>) -> Result<(ComposeFile, String, PathBuf, 
     ))
 }
 
-fn cmd_up(file: Option<PathBuf>, project: Option<String>, dry_run: bool) -> Result<()> {
+fn cmd_up(
+    file: Option<PathBuf>,
+    project: Option<String>,
+    dry_run: bool,
+    profile: Vec<String>,
+) -> Result<()> {
     let (compose, default_project, base_dir, _path) = load_compose(file)?;
     let project = project.unwrap_or(default_project);
-    let translated = translate(&compose, &project, &base_dir)?;
+    let translated = translate(&compose, &project, &base_dir, &profile)?;
 
     if dry_run {
         println!("# compose project: {project}");
@@ -1872,10 +1942,10 @@ fn cmd_logs(
     Ok(())
 }
 
-fn cmd_config(file: Option<PathBuf>, project: Option<String>) -> Result<()> {
+fn cmd_config(file: Option<PathBuf>, project: Option<String>, profile: Vec<String>) -> Result<()> {
     let (compose, default_project, base_dir, _path) = load_compose(file)?;
     let project = project.unwrap_or(default_project);
-    let translated = translate(&compose, &project, &base_dir)?;
+    let translated = translate(&compose, &project, &base_dir, &profile)?;
     println!("# compose project: {project}");
     for name in &translated.order {
         let (opts, final_name) = &translated.containers[name];
@@ -1949,16 +2019,85 @@ mod tests {
     fn topo_sort_ordena_por_dependencia_e_detecta_ciclo() {
         let yaml = "web:\n  image: a\n  depends_on: [api]\napi:\n  image: b\n  depends_on: [db]\ndb:\n  image: c\n";
         let services: BTreeMap<String, ComposeService> = serde_yaml::from_str(yaml).unwrap();
-        let order = topo_sort(&services).unwrap();
+        let all: BTreeSet<String> = services.keys().cloned().collect();
+        let order = topo_sort(&services, &all).unwrap();
         assert_eq!(order, vec!["db", "api", "web"]);
 
         let cyclic = "a:\n  image: x\n  depends_on: [b]\nb:\n  image: y\n  depends_on: [a]\n";
         let services: BTreeMap<String, ComposeService> = serde_yaml::from_str(cyclic).unwrap();
-        assert!(topo_sort(&services).is_err());
+        let all: BTreeSet<String> = services.keys().cloned().collect();
+        assert!(topo_sort(&services, &all).is_err());
 
         let missing = "a:\n  image: x\n  depends_on: [ghost]\n";
         let services: BTreeMap<String, ComposeService> = serde_yaml::from_str(missing).unwrap();
-        assert!(topo_sort(&services).is_err());
+        let all: BTreeSet<String> = services.keys().cloned().collect();
+        assert!(topo_sort(&services, &all).is_err());
+    }
+
+    #[test]
+    fn active_services_skips_an_unrequested_profile() {
+        let yaml = "\
+services:
+  web:
+    image: a
+  debugger:
+    image: b
+    profiles: [debug]
+";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let active = active_services(&compose, &[]);
+        assert_eq!(active, BTreeSet::from(["web".to_string()]));
+        let active = active_services(&compose, &["debug".to_string()]);
+        assert_eq!(
+            active,
+            BTreeSet::from(["web".to_string(), "debugger".to_string()])
+        );
+    }
+
+    /// The rule real `docker compose` uses: a dependency is pulled in even
+    /// outside the requested profile, because the service that needs it
+    /// cannot start without it.
+    #[test]
+    fn active_services_pulls_in_a_dependency_outside_the_requested_profile() {
+        let yaml = "\
+services:
+  app:
+    image: a
+    profiles: [tools]
+    depends_on: [cache]
+  cache:
+    image: b
+    profiles: [infra]
+  unrelated:
+    image: c
+    profiles: [infra]
+";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let active = active_services(&compose, &["tools".to_string()]);
+        assert_eq!(
+            active,
+            BTreeSet::from(["app".to_string(), "cache".to_string()]),
+            "`cache` must be pulled in transitively; `unrelated` must not"
+        );
+    }
+
+    #[test]
+    fn translate_only_creates_active_services() {
+        let yaml = "\
+services:
+  web:
+    image: a
+  debugger:
+    image: b
+    profiles: [debug]
+";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let t = translate(&compose, "p", Path::new("/tmp"), &[]).unwrap();
+        assert_eq!(t.order, vec!["web".to_string()]);
+        assert!(!t.containers.contains_key("debugger"));
+
+        let t = translate(&compose, "p", Path::new("/tmp"), &["debug".to_string()]).unwrap();
+        assert_eq!(t.containers.len(), 2);
     }
 
     #[test]
@@ -2022,7 +2161,7 @@ services:
         condition: service_healthy
 "#;
         let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
-        let t = translate(&compose, "myproj", Path::new("/tmp")).unwrap();
+        let t = translate(&compose, "myproj", Path::new("/tmp"), &[]).unwrap();
         assert_eq!(t.order, vec!["db".to_string(), "app".to_string()]);
         let app_waits = &t.waits["app"];
         assert_eq!(app_waits.len(), 1);
@@ -2035,14 +2174,14 @@ services:
     fn deploy_replicas_diferente_de_1_e_erro() {
         let yaml = "services:\n  svc:\n    image: x\n    deploy:\n      replicas: 3\n";
         let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
-        assert!(translate(&compose, "p", Path::new("/tmp")).is_err());
+        assert!(translate(&compose, "p", Path::new("/tmp"), &[]).is_err());
     }
 
     #[test]
     fn service_sem_image_nem_build_e_erro() {
         let yaml = "services:\n  svc:\n    ports: []\n";
         let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
-        assert!(translate(&compose, "p", Path::new("/tmp")).is_err());
+        assert!(translate(&compose, "p", Path::new("/tmp"), &[]).is_err());
     }
 
     #[test]
