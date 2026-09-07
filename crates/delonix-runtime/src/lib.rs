@@ -3395,10 +3395,38 @@ pub fn cpu_max_for(cpus: &str) -> String {
     cpu_max_value(cpus)
 }
 
-fn cpu_max_value(cpus: &str) -> String {
-    let c: f64 = cpus.parse().unwrap_or(1.0);
+/// The string to write into a cgroup's `cpu.max` for `cpus` cores, or `None`
+/// when `cpus` is not a number of cores this engine understands.
+///
+/// Measured 2026-09-07, before this returned `Option`: `--cpus abc` and
+/// `--cpus 500m` (the Kubernetes millicore spelling) both landed on
+/// `unwrap_or(1.0)` and produced `100000 100000` — one whole CPU, rc=0, no
+/// warning. For `500m` that is DOUBLE what was asked for, which is worse than
+/// refusing: the operator reads the flag as honoured.
+///
+/// Millicores are NOT accepted here. `0.5` and `500m` would mean the same thing,
+/// but this flag is `docker run --cpus`, whose value is a decimal number of
+/// cores, and inventing a second spelling on the imperative side would leave the
+/// two grammars to drift. A `kind: Pod` that wants millicores is a separate
+/// decision, with its own place to make it.
+fn try_cpu_max_value(cpus: &str) -> Option<String> {
+    let c: f64 = cpus.trim().parse().ok()?;
+    if !c.is_finite() || c < 0.0 {
+        return None;
+    }
+    // `0` keeps the floor it always had (0.01 of a core). Note for whoever picks
+    // this up: the record uses `cpus: "0"` to mean NO limit — `workload_view`
+    // skips the row for exactly that value — and this turns it into the
+    // TIGHTEST limit the engine can express. Deciding what `0` means is a
+    // separate change; this one only refuses what it cannot read.
     let quota = ((c * 100_000.0).round() as i64).max(1000);
-    format!("{quota} 100000")
+    Some(format!("{quota} 100000"))
+}
+
+/// [`try_cpu_max_value`] for the paths that already validated, falling back to
+/// one core. Every caller that APPLIES a limit uses the fallible form.
+fn cpu_max_value(cpus: &str) -> String {
+    try_cpu_max_value(cpus).unwrap_or_else(|| "100000 100000".to_string())
 }
 
 /// Writes a limit into the cgroup; failing is an ERROR (limits are MANDATORY — a
@@ -3555,26 +3583,87 @@ fn host_load1() -> Option<f64> {
         .and_then(|s| s.split_whitespace().next().and_then(|f| f.parse().ok()))
 }
 
-/// Converts `64M`/`1G`/`512K`/bytes into bytes.
+/// Converts `64M`/`64Mi`/`1G`/`512K`/bytes into bytes, or `None` when `s` is not
+/// a size this engine understands.
+///
+/// **Accepts both spellings on purpose.** `M` is what the kernel's own
+/// `memparse` takes (and what `docker -m` uses); `Mi` is what Kubernetes writes
+/// and what a `kind: Pod` manifest invites. Every multiplier here is 1024-based,
+/// so the two mean exactly the same thing — accepting one and dropping the other
+/// was a trap, not a distinction.
+///
+/// **Returns `Option` on purpose too.** The previous version returned `u64` and
+/// mapped garbage to `u64::MAX`, on the reasoning that admission control would
+/// refuse it. Measured 2026-09-07: `admission_check` has no caller on the
+/// container path, so nothing refused anything — and the value was never the
+/// problem anyway, because the write path handed the operator's raw string to
+/// the kernel. A parser that cannot say "I don't know" forces its callers to
+/// guess, which is how `--cpus abc` became one whole CPU. The sibling
+/// `delonix_volume::parse_size_bytes` has returned `Option` all along.
+pub fn try_mem_bytes(s: &str) -> Option<u64> {
+    let t = s.trim();
+    if t.is_empty() {
+        return None;
+    }
+    let lower = t.to_ascii_lowercase();
+    // Two-character IEC suffixes first: `mi` also ends in `i`, so testing the
+    // single-character forms first would strip the `i` and leave `64m`.
+    let (digits, mult) = if let Some(d) = lower.strip_suffix("ki") {
+        (d, 1024u64)
+    } else if let Some(d) = lower.strip_suffix("mi") {
+        (d, 1024 * 1024)
+    } else if let Some(d) = lower.strip_suffix("gi") {
+        (d, 1024 * 1024 * 1024)
+    } else if let Some(d) = lower.strip_suffix("ti") {
+        (d, 1024u64 * 1024 * 1024 * 1024)
+    } else if let Some(d) = lower.strip_suffix('k') {
+        (d, 1024)
+    } else if let Some(d) = lower.strip_suffix('m') {
+        (d, 1024 * 1024)
+    } else if let Some(d) = lower.strip_suffix('g') {
+        (d, 1024 * 1024 * 1024)
+    } else if let Some(d) = lower.strip_suffix('t') {
+        (d, 1024u64 * 1024 * 1024 * 1024)
+    } else {
+        (lower.as_str(), 1)
+    };
+    // Overflow REFUSES rather than saturating: `99999999999t` is not a ceiling
+    // anybody meant, and `u64::MAX` in `memory.max` is indistinguishable from no
+    // ceiling at all. Same call the volume store already makes.
+    // No inner `trim()`: `64 M` is a typo, and reading it is guessing. The
+    // kernel's own parser refuses it too.
+    digits.parse::<u64>().ok()?.checked_mul(mult)
+}
+
+/// The exact string to write into a cgroup's `memory.max`, or `None` when `s` is
+/// not a size this engine understands. `max` (no ceiling) passes through — it is
+/// what [`default_memory_max`] returns on a host whose total is unreadable.
+///
+/// **Normalising to plain bytes is the whole point.** The kernel's parser takes
+/// `64M` but not `64Mi`, and the rootless-delegated path used to hand it the
+/// operator's string verbatim with the error discarded (`let _ = fs::write`):
+/// an unaccepted spelling failed the write and the container ran with NO
+/// ceiling while the record, `inspect` and `describe` all said it had one.
+/// Writing a decimal takes the kernel's parser out of the question entirely.
+pub fn mem_limit_write_value(s: &str) -> Option<String> {
+    let t = s.trim();
+    if t.eq_ignore_ascii_case("max") {
+        return Some("max".to_string());
+    }
+    try_mem_bytes(t).map(|b| b.to_string())
+}
+
+/// Converts `64M`/`64Mi`/`1G`/bytes into bytes, saturating to `u64::MAX` on
+/// anything it cannot read.
+///
+/// Kept ONLY for display and for comparisons where "unreadable" must not read as
+/// "zero". Anything that APPLIES a limit uses [`try_mem_bytes`] and refuses.
 pub fn mem_bytes(s: &str) -> u64 {
-    parse_mem_bytes(s)
+    try_mem_bytes(s).unwrap_or(u64::MAX)
 }
 
 fn parse_mem_bytes(s: &str) -> u64 {
-    let s = s.trim();
-    let (num, mult) = match s.chars().last() {
-        Some('K') | Some('k') => (&s[..s.len() - 1], 1024u64),
-        Some('M') | Some('m') => (&s[..s.len() - 1], 1024 * 1024),
-        Some('G') | Some('g') => (&s[..s.len() - 1], 1024 * 1024 * 1024),
-        _ => (s, 1),
-    };
-    // `saturating_mul` avoids overflow (e.g. "99999999999G"); an unparseable value
-    // saturates to u64::MAX (and not 0), so admission control refuses it — never
-    // treat garbage as "0 bytes" and let it through.
-    match num.trim().parse::<u64>() {
-        Ok(n) => n.saturating_mul(mult),
-        Err(_) => u64::MAX,
-    }
+    mem_bytes(s)
 }
 
 /// Will the cgroup limits (cpu/memory/pids) actually apply to a
@@ -4183,7 +4272,28 @@ fn try_delegated_base(base: &str, c: &Container, pid: i32, move_self: bool) -> b
     }
     // 2) Limits on the leaf (controllers already active) — BEFORE the process enters,
     //    so the ceiling holds from the first allocation.
-    let _ = std::fs::write(format!("{leaf}/memory.max"), &c.memory_max);
+    // BUG FIXED HERE (measured 2026-09-07): this wrote the operator's RAW string
+    // and discarded the error. The kernel's parser takes `64M` but not `64Mi`,
+    // so `-m 64Mi` failed the write in silence and the container ran with NO
+    // ceiling — while the record, `inspect` and `describe` all said 64 MiB.
+    // Two halves to the fix, and both are needed: normalise to plain bytes so
+    // the kernel's parser is out of the question, and use `write_limit`, whose
+    // own doc-comment says failing here is an ERROR. The ROOT path (line ~4590)
+    // has used `write_limit` all along; it was the rootless-delegated path — the
+    // NORMAL one — that did not. Same shape as the `container.cgroup()` vs
+    // `live_cgroup()` bug this file already carries a note about.
+    // The value reaching here was already validated by `setup_cgroup`, which is
+    // the one entry every caller passes through (CLI, CRI, manifest, docker-api).
+    // Normalising again is not belt-and-braces: it is what keeps the kernel's own
+    // parser out of the question, and a failed write now FAILS the delegation
+    // instead of being discarded.
+    let Some(mem_value) = mem_limit_write_value(&c.memory_max) else {
+        return false;
+    };
+    if std::fs::write(format!("{leaf}/memory.max"), &mem_value).is_err() {
+        abandon_leaf(&leaf);
+        return false;
+    }
     // BUG FIXED HERE (1/2): `memory.max` alone does NOT bound a container's
     // memory pressure on a host that has swap — the container simply swaps at
     // the limit instead of being reclaimed/killed, so the ceiling the operator
@@ -4200,7 +4310,13 @@ fn try_delegated_base(base: &str, c: &Container, pid: i32, move_self: bool) -> b
     // is what runc/systemd do for exactly this reason.
     let _ = std::fs::write(format!("{leaf}/memory.oom.group"), "1");
     let _ = std::fs::write(format!("{leaf}/pids.max"), DEFAULT_PIDS_MAX);
-    let _ = std::fs::write(format!("{leaf}/cpu.max"), cpu_max_value(&c.cpus));
+    let Some(cpu_value) = try_cpu_max_value(&c.cpus) else {
+        return false;
+    };
+    if std::fs::write(format!("{leaf}/cpu.max"), &cpu_value).is_err() {
+        abandon_leaf(&leaf);
+        return false;
+    }
     // BUG FOUND (docs/COMPARACAO-DOCKER-PODMAN.md 2b): `+cpuset`/`+io` were
     // already being activated in `subtree_control` above (the delegated base
     // grants the controller), but nothing ever WROTE `cpuset.cpus`/`cpu.weight`/
@@ -4464,6 +4580,32 @@ fn aggregate_io_max_value() -> Option<String> {
 }
 
 fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
+    // A limit this engine cannot read is REFUSED here, before a single cgroup
+    // file is touched — and here, because `setup_cgroup` is the one entry every
+    // caller passes through (CLI, CRI, `kind: Pod`, the Docker API).
+    //
+    // Measured 2026-09-07: `-m 64Mi` (the spelling Kubernetes uses, and the one a
+    // `kind: Pod` manifest invites) was accepted, persisted, and reported by
+    // `inspect` — while the container ran with `memory.max = max`, no ceiling at
+    // all. The raw string went to the kernel, whose parser takes `64M` and not
+    // `64Mi`; the write failed and the error was discarded. `--cpus 500m` was
+    // worse than useless: it landed on a fallback of 1.0, DOUBLE the request.
+    //
+    // Refusing beats guessing. A ceiling the operator wrote and the kernel never
+    // got is the failure this repo names as its worst — the record, `inspect` and
+    // `describe` all agree, and the kernel is the only one telling the truth.
+    if mem_limit_write_value(&c.memory_max).is_none() {
+        return Err(Error::Invalid(format!(
+            "--memory {}: not a size — use bytes (67108864) or a suffix (64M, 64Mi, 1G, 1Gi)",
+            c.memory_max
+        )));
+    }
+    if !c.cpus.is_empty() && try_cpu_max_value(&c.cpus).is_none() {
+        return Err(Error::Invalid(format!(
+            "--cpus {}: not a number of cores — use a decimal (0.5, 2). Millicores (500m) are a Kubernetes spelling this flag does not take",
+            c.cpus
+        )));
+    }
     // Rootless: ALWAYS tries cgroup delegation (cpu/memory/pids) in the user's
     // delegated cgroup (systemd --user with `Delegate=yes`) — it is Podman's model
     // and the way to get REAL limits without root. Before, it was only tried with
@@ -7938,9 +8080,12 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
             "300"
         );
         // The pre-existing limits stay correct too — this isn't a regression on those.
+        // The value is the NORMALISED byte count, not the operator's string: this
+        // assertion used to read `"64M"`, which is what the kernel was being
+        // handed and is exactly why `64Mi` produced a container with no ceiling.
         assert_eq!(
             std::fs::read_to_string(leaf.join("memory.max")).unwrap(),
-            "64M"
+            (64 * 1024 * 1024).to_string()
         );
 
         let _ = std::fs::remove_dir_all(&base);
@@ -8139,16 +8284,76 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
         }
     }
 
+    /// The old version of this test asserted that garbage parsed to `u64::MAX`
+    /// "refused at admission" — and `admission_check` had no caller on the
+    /// container path, so nothing refused anything. A test can fix the bug in
+    /// place as surely as the code does.
     #[test]
-    fn parse_mem_satura_e_nao_zera_em_lixo() {
-        assert_eq!(parse_mem_bytes("64M"), 64 * 1024 * 1024);
-        assert_eq!(parse_mem_bytes("1G"), 1024 * 1024 * 1024);
-        assert_eq!(parse_mem_bytes("512"), 512);
-        // overflow → saturates (does not panic/wrap).
-        assert_eq!(parse_mem_bytes("99999999999G"), u64::MAX);
-        // garbage → u64::MAX (refused at admission), NEVER 0 (which would let everything through).
-        assert_eq!(parse_mem_bytes("64MB"), u64::MAX);
-        assert_eq!(parse_mem_bytes("abc"), u64::MAX);
+    fn a_size_is_read_or_refused_never_guessed() {
+        // The kernel's own spellings.
+        assert_eq!(try_mem_bytes("64M"), Some(64 * 1024 * 1024));
+        assert_eq!(try_mem_bytes("64m"), Some(64 * 1024 * 1024));
+        assert_eq!(try_mem_bytes("1G"), Some(1024 * 1024 * 1024));
+        assert_eq!(try_mem_bytes("512K"), Some(512 * 1024));
+        assert_eq!(try_mem_bytes("512"), Some(512));
+        // The Kubernetes spellings, which a `kind: Pod` manifest invites and the
+        // kernel's parser REFUSES. Same 1024-based value as the forms above —
+        // that is why accepting them is a fix and not a new grammar.
+        assert_eq!(try_mem_bytes("64Mi"), Some(64 * 1024 * 1024));
+        assert_eq!(try_mem_bytes("64mi"), Some(64 * 1024 * 1024));
+        assert_eq!(try_mem_bytes("1Gi"), Some(1024 * 1024 * 1024));
+        assert_eq!(try_mem_bytes("8Ki"), Some(8 * 1024));
+        assert_eq!(try_mem_bytes("1Ti"), Some(1024u64 * 1024 * 1024 * 1024));
+        // `mi` ends in `i` AND contains `m`: stripping the single-character
+        // suffixes first would leave `64m` and silently divide by 1024.
+        assert_ne!(try_mem_bytes("64Mi"), try_mem_bytes("64Ki"));
+        // Refused, every one — this is the half that was missing.
+        for bad in ["abc", "64MB", "", "  ", "-1", "64 M", "M", "64Q", "0x40"] {
+            assert_eq!(try_mem_bytes(bad), None, "{bad} should be refused");
+        }
+        // Overflow REFUSES instead of saturating: `u64::MAX` written into
+        // `memory.max` is indistinguishable from no ceiling at all.
+        assert_eq!(try_mem_bytes("99999999999T"), None);
+    }
+
+    #[test]
+    fn the_cgroup_value_is_always_decimal_or_max() {
+        // Normalising is what takes the kernel's parser out of the question.
+        assert_eq!(mem_limit_write_value("64M").as_deref(), Some("67108864"));
+        assert_eq!(mem_limit_write_value("64Mi").as_deref(), Some("67108864"));
+        assert_eq!(
+            mem_limit_write_value("67108864").as_deref(),
+            Some("67108864")
+        );
+        // `max` is what `default_memory_max()` returns when the host total is
+        // unreadable, and the kernel takes it verbatim.
+        assert_eq!(mem_limit_write_value("max").as_deref(), Some("max"));
+        assert_eq!(mem_limit_write_value("MAX").as_deref(), Some("max"));
+        assert_eq!(mem_limit_write_value("abc"), None);
+        // Whatever `default_memory_max()` produces must survive its own round trip.
+        assert!(mem_limit_write_value(&default_memory_max()).is_some());
+    }
+
+    #[test]
+    fn cpus_is_a_core_count_or_it_is_refused() {
+        assert_eq!(try_cpu_max_value("0.5").as_deref(), Some("50000 100000"));
+        assert_eq!(try_cpu_max_value("2").as_deref(), Some("200000 100000"));
+        assert_eq!(try_cpu_max_value("1").as_deref(), Some("100000 100000"));
+        // `500m` is the Kubernetes millicore spelling. It used to land on a
+        // fallback of 1.0 — DOUBLE the request, with rc=0 and no warning.
+        assert_eq!(try_cpu_max_value("500m"), None);
+        // Surrounding whitespace IS trimmed, here and in `try_mem_bytes` — that
+        // is a boundary, not a guess. What neither accepts is whitespace INSIDE
+        // the value (`64 M`, and see the sibling test).
+        assert_eq!(try_cpu_max_value(" 0.5 ").as_deref(), Some("50000 100000"));
+        for bad in ["abc", "", "-1", "nan", "inf", "1,5", "0.5x"] {
+            assert_eq!(try_cpu_max_value(bad), None, "{bad} should be refused");
+        }
+        // `0` is NOT refused, and that is deliberate: it keeps the 0.01-core floor
+        // it always had. See the note in `try_cpu_max_value` — the record uses
+        // `cpus: "0"` to mean NO limit and this turns it into the tightest one,
+        // which is a real defect and a separate decision from this fix.
+        assert_eq!(try_cpu_max_value("0").as_deref(), Some("1000 100000"));
     }
 
     #[test]
