@@ -3900,6 +3900,15 @@ volta a contar**.
   **auto-dimensionamento** no pico. Nenhuma peça disto existe hoje (zero eBPF/autoscaling/daemon
   no repo, confirmado por grep). É uma mudança de filosofia (o produto é daemonless por desenho)
   e um dataplane novo de raiz — meses de trabalho de um crate dedicado, não uma sessão.
+- **Suporte macOS/Windows (ADR-0036, Proposed)** — decidido de propósito como um LANÇADOR de VM
+  (`delonix machine`), não um port: nenhum primitivo do motor (namespaces, cgroups v2, nftables,
+  `pivot_root`) existe fora do kernel Linux, por isso portar seria um SEGUNDO motor, não um `#[cfg]`.
+  O guest é a mesma imagem `delonix-vm-base` já publicada, zero mudança do lado Linux. As duas
+  plataformas NÃO são igualmente difíceis: **Windows** anda sobre o WSL2 já instalado (shell-out a
+  `wsl.exe`, sem hypervisor novo); **macOS** precisa de uma ligação real ao Virtualization.framework
+  — bloqueado até haver um Mac verdadeiro para o spike GO/NO-GO, mesma disciplina do backend Proxmox
+  (ADR-0008). Zero código de hypervisor nesta sessão — este sandbox é Linux e não compila nenhum dos
+  dois lados.
 
 ## i18n (fonte EN + catálogo pt.po embutido) — `cmd/po.rs`
 
