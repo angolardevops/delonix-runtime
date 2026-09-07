@@ -1038,13 +1038,34 @@ fn start_argv(
         args.push("--group-add".into());
         args.push(g.to_string());
     }
-    for p in &rec.masked_paths {
-        args.push("--masked-path".into());
-        args.push(p.clone());
-    }
-    for p in &rec.readonly_paths {
-        args.push("--readonly-path".into());
-        args.push(p.clone());
+    // A `privileged: true` container gets NEITHER of these, and that is not a
+    // relaxation invented here — it is what `--privileged` means, and what
+    // `cap_ceiling`'s own note already states this runtime does: "a
+    // `privileged: true` container still gets `seccomp=unconfined`, a writable
+    // `/sys`, and its own cgroup namespace".
+    //
+    // The kubelet sends `readonly_paths` (with `/proc/sys` in it) and
+    // `masked_paths` for EVERY container, privileged or not; deciding which of
+    // them to honour is the runtime's job, and containerd and CRI-O both drop
+    // them for privileged. Applying them regardless is what broke `kube-proxy`
+    // on every kubeadm cluster this runtime serves:
+    //
+    //     E server.go:136 "Error running ProxyServer" err="could not set
+    //     conntrack parameters from kube-proxy configuration: open
+    //     /proc/sys/net/netfilter/nf_conntrack_max: read-only file system"
+    //
+    // Without `kube-proxy` there is no ClusterIP, and CoreDNS never leaves
+    // `ContainerCreating` — so the whole service plane of the cluster went down
+    // over two `--readonly-path` arguments (issue #237).
+    if !rec.privileged {
+        for p in &rec.masked_paths {
+            args.push("--masked-path".into());
+            args.push(p.clone());
+        }
+        for p in &rec.readonly_paths {
+            args.push("--readonly-path".into());
+            args.push(p.clone());
+        }
     }
     args.push("--security-opt".into());
     args.push(format!("no-new-privileges={}", rec.no_new_privs));
@@ -2014,6 +2035,50 @@ mod tests {
     /// kubelet matava-os e o `kubeadm init` ficava preso em
     /// `wait-control-plane`. Nada disto falha a compilar nem falha um teste
     /// unitário — só falha um cluster.
+    /// O `kube-proxy` é privilegiado e escreve em `/proc/sys/net/netfilter`. O
+    /// kubelet manda `readonly_paths` com `/proc/sys` lá dentro para TODOS os
+    /// contentores; decidir quais honrar é do runtime, e para um privilegiado a
+    /// resposta é nenhum — como no containerd e no CRI-O.
+    ///
+    /// Sem isto: `open /proc/sys/net/netfilter/nf_conntrack_max: read-only file
+    /// system`, o `kube-proxy` em CrashLoopBackOff, e sem ele não há ClusterIP
+    /// nem CoreDNS. Todo o plano de serviço do cluster por dois argumentos.
+    #[test]
+    fn privilegiado_nao_leva_masked_nem_readonly_paths() {
+        let caminhos = || vec!["/proc/sys".to_string(), "/proc/sysrq-trigger".to_string()];
+
+        let sem_privilegio = ContainerRec {
+            image: "registry.k8s.io/kube-proxy:v1.36.4".into(),
+            masked_paths: caminhos(),
+            readonly_paths: caminhos(),
+            privileged: false,
+            ..Default::default()
+        };
+        let argv = start_argv(&sem_privilegio, None, crate::CapCeiling::default(), "a");
+        assert!(
+            argv.iter().any(|a| a == "--readonly-path"),
+            "sem privilégio os caminhos TÊM de ser aplicados: {argv:?}"
+        );
+        assert!(
+            argv.iter().any(|a| a == "--masked-path"),
+            "sem privilégio os caminhos TÊM de ser aplicados: {argv:?}"
+        );
+
+        let com_privilegio = ContainerRec {
+            privileged: true,
+            ..sem_privilegio
+        };
+        let argv = start_argv(&com_privilegio, None, crate::CapCeiling::default(), "a");
+        assert!(
+            !argv.iter().any(|a| a == "--readonly-path"),
+            "um privilegiado não leva `--readonly-path`: {argv:?}"
+        );
+        assert!(
+            !argv.iter().any(|a| a == "--masked-path"),
+            "um privilegiado não leva `--masked-path`: {argv:?}"
+        );
+    }
+
     #[test]
     fn host_network_vira_rede_do_host_e_nao_publica_portas() {
         let rec = ContainerRec {
