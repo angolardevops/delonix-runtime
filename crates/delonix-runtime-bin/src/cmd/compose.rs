@@ -38,12 +38,13 @@
 //! transitively closed over `depends_on` — see `active_services`), top-level
 //! `networks:`/`volumes:` (incl. `external: true`), `build.target`
 //! (multi-stage stage selection — forwarded to `kind: Image`'s own
-//! `build.target`, itself `delonix build --target`), and a fixed
+//! `build.target`, itself `delonix build --target`), a fixed
 //! `networks.*.ipv4_address` (wired straight into `container run --ip`, see
-//! `service_to_run_opts`). Defers `extends:`, top-level `configs:`/`secrets:`
-//! (use `kind: Secret` instead), multi-file compose (`-f a -f b` merge/
-//! `include:`), `deploy.replicas != 1`, and anonymous volumes (no explicit
-//! source). `working_dir:` IS applied (via `RunOpts.
+//! `service_to_run_opts`), and `extends:` (`resolve_extends` — same file only,
+//! `depends_on` never inherited, per the Specification). Defers top-level
+//! `configs:`/`secrets:` (use `kind: Secret` instead), multi-file compose
+//! (`-f a -f b` merge/`include:`), `deploy.replicas != 1`, and anonymous
+//! volumes (no explicit source). `working_dir:` IS applied (via `RunOpts.
 //! workdir`, itself now also exposed as `container run -w/--workdir`), and a
 //! bare container port with no host port DOES get a random free host port
 //! (resolved once, before the container is created — see `free_host_port`).
@@ -77,10 +78,11 @@ const KNOWN_UNSUPPORTED_TOP: &[(&str, &str)] = &[
     ("secrets", "top-level `secrets:` is not supported in v1 — use `kind: Secret` + `Container.secret` instead"),
     ("include", "multi-file compose (`include:`/`-f a -f b` merge) is not supported — pass exactly one -f"),
 ];
-const KNOWN_UNSUPPORTED_SERVICE: &[(&str, &str)] = &[(
-    "extends",
-    "`extends:` is not supported in v1 — inline the service or use YAML anchors",
-)];
+/// Empty today: `profiles:` and `extends:` were the only two entries, and both
+/// are now implemented. Kept as the place a future refusal goes, WITH its
+/// reason — the allowlist below is what stops an unknown key from being read
+/// as accepted.
+const KNOWN_UNSUPPORTED_SERVICE: &[(&str, &str)] = &[];
 
 /// Every top-level key of the Compose Specification this implementation reads.
 ///
@@ -105,6 +107,7 @@ const SUPPORTED_TOP: &[&str] = &["version", "name", "services", "networks", "vol
 const SUPPORTED_SERVICE: &[&str] = &[
     "image",
     "build",
+    "extends",
     "environment",
     "env_file",
     "ports",
@@ -270,10 +273,19 @@ struct ComposeFile {
     volumes: BTreeMap<String, ComposeVolume>,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize, Default, Clone)]
 struct ComposeService {
     image: Option<String>,
     build: Option<ComposeBuild>,
+    /// `extends: { service: <name> }` — resolved by `resolve_extends` before
+    /// this service is used anywhere else, so nothing downstream needs to
+    /// know it existed (it's always `None` by the time `translate` runs).
+    /// `extends.file` is refused earlier, at the raw-YAML check
+    /// (`check_unsupported_fields`) — this repo doesn't do multi-file
+    /// compose at all, so `file:` naming anything is refused outright rather
+    /// than silently pointed at the wrong file.
+    #[serde(default)]
+    extends: Option<ComposeExtends>,
     #[serde(default)]
     environment: ComposeEnv,
     #[serde(default, rename = "env_file")]
@@ -426,7 +438,7 @@ impl StringOrNum {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(untagged)]
 enum ComposePort {
     Short(String),
@@ -437,7 +449,7 @@ enum ComposePort {
     },
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(untagged)]
 enum ComposeVolumeMount {
     Short(String),
@@ -451,6 +463,13 @@ enum ComposeVolumeMount {
     },
 }
 
+/// `extends: { service: <name> }` on a service — resolved (and consumed) by
+/// `resolve_extends` before anything else touches `ComposeService`.
+#[derive(Debug, Deserialize, Clone)]
+struct ComposeExtends {
+    service: String,
+}
+
 #[derive(Debug, Deserialize, Clone)]
 #[serde(untagged)]
 enum ComposeCmdShape {
@@ -458,7 +477,7 @@ enum ComposeCmdShape {
     Exec(Vec<String>),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(untagged)]
 enum ComposeDependsOn {
     Short(Vec<String>),
@@ -490,7 +509,7 @@ impl ComposeDependsOn {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct ComposeDependsOnEntry {
     condition: String,
 }
@@ -530,7 +549,7 @@ enum ComposeHealthTest {
     List(Vec<String>),
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize, Default, Clone)]
 #[serde(untagged)]
 enum ComposeServiceNetworks {
     #[default]
@@ -554,29 +573,29 @@ impl ComposeServiceNetworks {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct ComposeServiceNetworkEntry {
     ipv4_address: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct ComposeDeploy {
     resources: Option<ComposeResources>,
     replicas: Option<u32>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct ComposeResources {
     limits: Option<ComposeResourceLimits>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct ComposeResourceLimits {
     cpus: Option<String>,
     memory: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(untagged)]
 enum ComposeBuild {
     Context(String),
@@ -1040,6 +1059,18 @@ fn check_unsupported_fields(text: &str) -> Result<()> {
                 continue;
             };
             let svc = svc_name.as_str().unwrap_or("?");
+            if let Some(serde_yaml::Value::Mapping(ext_map)) =
+                svc_map.get(serde_yaml::Value::String("extends".to_string()))
+            {
+                if ext_map.contains_key(serde_yaml::Value::String("file".to_string())) {
+                    return Err(Error::Invalid(format!(
+                        "compose: service '{svc}': extends.file is not supported — this \
+                         implementation doesn't do multi-file compose at all, so `file:` \
+                         naming anything is refused rather than silently resolved against \
+                         the wrong file (omit `file:` to extend a service in this same file)"
+                    )));
+                }
+            }
             for (key, reason) in KNOWN_UNSUPPORTED_SERVICE {
                 if svc_map.contains_key(serde_yaml::Value::String((*key).to_string())) {
                     return Err(Error::Invalid(format!(
@@ -1710,6 +1741,198 @@ fn wait_for_condition(
 }
 
 // ============================================================================
+// `extends:` resolution
+// ============================================================================
+
+/// Merges two `KEY<sep>VALUE` pair lists (as `ComposeEnv::to_kv_pairs`/
+/// `to_host_pairs` already produce), the child's value winning on a shared
+/// key, at that key's ORIGINAL position (`base`'s if it had the key, else
+/// wherever `child` first introduces it) — same "first position, latest
+/// value" rule `docker compose`'s own `extends` uses for `environment:`.
+fn merge_pairs(base: &[String], child: &[String], sep: char) -> Vec<String> {
+    let mut merged: Vec<(String, String)> = Vec::new();
+    let mut upsert = |pair: &str| {
+        let (k, v) = match pair.split_once(sep) {
+            Some((k, v)) => (k.to_string(), v.to_string()),
+            None => (pair.to_string(), String::new()),
+        };
+        match merged.iter_mut().find(|(ek, _)| *ek == k) {
+            Some(existing) => existing.1 = v,
+            None => merged.push((k, v)),
+        }
+    };
+    for p in base {
+        upsert(p);
+    }
+    for p in child {
+        upsert(p);
+    }
+    merged
+        .into_iter()
+        .map(|(k, v)| format!("{k}{sep}{v}"))
+        .collect()
+}
+
+fn merge_env(base: &ComposeEnv, child: &ComposeEnv) -> ComposeEnv {
+    ComposeEnv::List(merge_pairs(&base.to_kv_pairs(), &child.to_kv_pairs(), '='))
+}
+
+fn merge_extra_hosts(base: &ComposeEnv, child: &ComposeEnv) -> ComposeEnv {
+    ComposeEnv::List(merge_pairs(
+        &base.to_host_pairs(),
+        &child.to_host_pairs(),
+        ':',
+    ))
+}
+
+/// Appends `child` to `base`, skipping a `child` entry already present in
+/// `base` — used for `cap_add`/`cap_drop`, where "declared twice" and
+/// "declared once" mean the same thing.
+fn dedup_concat(base: Vec<String>, child: Vec<String>) -> Vec<String> {
+    let mut out = base;
+    for c in child {
+        if !out.contains(&c) {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// `networks:` isn't merged field-by-field — this engine attaches only ONE
+/// network per container anyway (`service_to_run_opts` already warns and
+/// picks the first when a service names more than one), so "the child's own
+/// declaration wins outright, else inherit the base's" is the whole rule,
+/// with none of the real Compose Specification's deeper per-network-entry
+/// merge that would matter for nothing here.
+fn merge_networks(
+    base: ComposeServiceNetworks,
+    child: ComposeServiceNetworks,
+) -> ComposeServiceNetworks {
+    match child {
+        ComposeServiceNetworks::Empty => base,
+        declared => declared,
+    }
+}
+
+/// Merges `base`'s fields into `child`, wherever `child` didn't declare its
+/// own — the Compose Specification's `extends:` semantics. `depends_on` is
+/// the one field NEVER inherited: the Specification excludes it on purpose
+/// (a service's dependency graph is its own, not something it borrows along
+/// with the rest of the configuration it reuses).
+///
+/// `ports`/`volumes` are plain concatenation (base's entries, then child's) —
+/// a real docker-compose dedups list entries by target, which matters when a
+/// base and a child both republish the same container port; this v1 doesn't,
+/// documented simplification rather than silent, and a duplicate publish is
+/// harmless (the second one loses the free-port race and refuses "already in
+/// use", which is at least loud). `privileged`/`read_only` are ORed rather
+/// than overridden — a plain `bool` field (not `Option<bool>`) has no way to
+/// tell "the child said `false`" from "the child didn't say anything", so
+/// there is no way to un-inherit a base's `true` from a child; documented
+/// here rather than silently assumed away.
+fn merge_service(base: ComposeService, child: ComposeService) -> ComposeService {
+    ComposeService {
+        image: child.image.or(base.image),
+        extends: None, // consumed
+        build: child.build.or(base.build),
+        environment: merge_env(&base.environment, &child.environment),
+        env_file: OneOrMany::Many({
+            let mut v = base.env_file.into_vec();
+            v.extend(child.env_file.into_vec());
+            v
+        }),
+        ports: {
+            let mut v = base.ports;
+            v.extend(child.ports);
+            v
+        },
+        volumes: {
+            let mut v = base.volumes;
+            v.extend(child.volumes);
+            v
+        },
+        command: child.command.or(base.command),
+        entrypoint: child.entrypoint.or(base.entrypoint),
+        depends_on: child.depends_on,
+        // NOT inherited, same rule and same reason as `depends_on` above:
+        // `profiles` decides WHETHER a service runs, not how it is built.
+        // Inheriting it would silently enrol a child in its base's profile
+        // and change which services `up` starts — a `extends:` is supposed
+        // to reuse configuration, not membership.
+        profiles: child.profiles,
+        healthcheck: child.healthcheck.or(base.healthcheck),
+        restart: child.restart.or(base.restart),
+        networks: merge_networks(base.networks, child.networks),
+        labels: merge_env(&base.labels, &child.labels),
+        working_dir: child.working_dir.or(base.working_dir),
+        user: child.user.or(base.user),
+        cap_add: dedup_concat(base.cap_add, child.cap_add),
+        cap_drop: dedup_concat(base.cap_drop, child.cap_drop),
+        privileged: base.privileged || child.privileged,
+        tmpfs: OneOrMany::Many({
+            let mut v = base.tmpfs.into_vec();
+            v.extend(child.tmpfs.into_vec());
+            v
+        }),
+        extra_hosts: merge_extra_hosts(&base.extra_hosts, &child.extra_hosts),
+        deploy: child.deploy.or(base.deploy),
+        container_name: child.container_name.or(base.container_name),
+        hostname: child.hostname.or(base.hostname),
+        read_only: base.read_only || child.read_only,
+    }
+}
+
+/// Resolves every service's `extends:` in place, before anything else looks
+/// at `services` — by the time this returns, no `ComposeService.extends` is
+/// `Some` any more, so `translate`/`service_to_run_opts`/the `depends_on`
+/// graph builder need zero changes to know `extends` ever existed.
+///
+/// A base is resolved (recursively, in case IT also extends something)
+/// before being merged into whoever extends it — `chain` is the path taken
+/// to get here, and a base already on it is a cycle, reported with the full
+/// path rather than just the two names that finally collided.
+fn resolve_extends(services: &mut BTreeMap<String, ComposeService>) -> Result<()> {
+    let names: Vec<String> = services.keys().cloned().collect();
+    for name in names {
+        resolve_one(services, &name, &mut vec![name.clone()])?;
+    }
+    Ok(())
+}
+
+fn resolve_one(
+    services: &mut BTreeMap<String, ComposeService>,
+    name: &str,
+    chain: &mut Vec<String>,
+) -> Result<()> {
+    let Some(base_name) = services
+        .get(name)
+        .and_then(|s| s.extends.as_ref().map(|e| e.service.clone()))
+    else {
+        return Ok(()); // already resolved, or never had one
+    };
+    if !services.contains_key(&base_name) {
+        return Err(Error::Invalid(format!(
+            "compose: service '{name}' extends undefined service '{base_name}'"
+        )));
+    }
+    if chain.contains(&base_name) {
+        chain.push(base_name);
+        return Err(Error::Invalid(format!(
+            "compose: extends cycle: {}",
+            chain.join(" -> ")
+        )));
+    }
+    chain.push(base_name.clone());
+    resolve_one(services, &base_name, chain)?;
+    chain.pop();
+
+    let base = services.get(&base_name).cloned().expect("checked above");
+    let child = services.get(name).cloned().expect("iterating its own key");
+    services.insert(name.to_string(), merge_service(base, child));
+    Ok(())
+}
+
+// ============================================================================
 // Commands
 // ============================================================================
 
@@ -1718,8 +1941,9 @@ fn load_compose(file: Option<PathBuf>) -> Result<(ComposeFile, String, PathBuf, 
     let text = std::fs::read_to_string(&path)
         .map_err(|e| Error::Invalid(format!("reading {}: {e}", path.display())))?;
     check_unsupported_fields(&text)?;
-    let compose: ComposeFile = serde_yaml::from_str(&text)
+    let mut compose: ComposeFile = serde_yaml::from_str(&text)
         .map_err(|e| Error::Invalid(format!("parsing {}: {e}", path.display())))?;
+    resolve_extends(&mut compose.services)?;
     let base_dir = path
         .parent()
         .map(Path::to_path_buf)
@@ -2310,6 +2534,140 @@ services:
             "colisão real entre dois pares projecto/chave distintos"
         );
     }
+
+    fn services_of(yaml: &str) -> BTreeMap<String, ComposeService> {
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        compose.services
+    }
+
+    /// The base case: a child inherits everything it doesn't declare itself,
+    /// and its own values win where it does.
+    #[test]
+    fn extends_inherits_what_the_child_omits_and_overrides_what_it_declares() {
+        let mut services = services_of(
+            "services:\n  \
+             base:\n    image: alpine\n    working_dir: /base\n    environment: [A=1, B=1]\n  \
+             web:\n    extends: {service: base}\n    working_dir: /web\n",
+        );
+        resolve_extends(&mut services).unwrap();
+        let web = &services["web"];
+        assert_eq!(web.image.as_deref(), Some("alpine"), "inherited from base");
+        assert_eq!(web.working_dir.as_deref(), Some("/web"), "child overrides");
+        assert!(web.extends.is_none(), "consumed after resolution");
+        let mut env = web.environment.to_kv_pairs();
+        env.sort();
+        assert_eq!(env, vec!["A=1".to_string(), "B=1".to_string()]);
+    }
+
+    /// `environment:`/`labels:` MERGE key by key, child winning on a shared
+    /// key — not a full override of the base's map.
+    #[test]
+    fn extends_merges_environment_child_wins_on_shared_keys() {
+        let mut services = services_of(
+            "services:\n  \
+             base:\n    image: x\n    environment: [SHARED=base, ONLY_BASE=b]\n  \
+             web:\n    extends: {service: base}\n    environment: [SHARED=child, ONLY_CHILD=c]\n",
+        );
+        resolve_extends(&mut services).unwrap();
+        let mut env = services["web"].environment.to_kv_pairs();
+        env.sort();
+        assert_eq!(
+            env,
+            vec![
+                "ONLY_BASE=b".to_string(),
+                "ONLY_CHILD=c".to_string(),
+                "SHARED=child".to_string(),
+            ],
+            "child's value wins, base's untouched keys survive"
+        );
+    }
+
+    /// `depends_on:` is the one field the Compose Specification never
+    /// inherits through `extends` — a service's dependency graph is its own.
+    #[test]
+    fn extends_never_inherits_depends_on() {
+        let mut services = services_of(
+            "services:\n  \
+             db:\n    image: postgres\n  \
+             base:\n    image: x\n    depends_on: [db]\n  \
+             web:\n    extends: {service: base}\n    image: y\n",
+        );
+        resolve_extends(&mut services).unwrap();
+        assert!(
+            services["web"].depends_on.names().is_empty(),
+            "web never named `db` itself, and extends must not have given it to it"
+        );
+    }
+
+    /// A chain (`web` extends `mid` extends `base`) resolves transitively —
+    /// `web` ends up with `base`'s fields too, not just `mid`'s own.
+    #[test]
+    fn extends_chain_is_transitive() {
+        let mut services = services_of(
+            "services:\n  \
+             base:\n    image: x\n    working_dir: /base\n  \
+             mid:\n    extends: {service: base}\n  \
+             web:\n    extends: {service: mid}\n    image: y\n",
+        );
+        resolve_extends(&mut services).unwrap();
+        let web = &services["web"];
+        assert_eq!(web.image.as_deref(), Some("y"), "web's own override");
+        assert_eq!(
+            web.working_dir.as_deref(),
+            Some("/base"),
+            "inherited through the chain, not just from the direct base"
+        );
+    }
+
+    #[test]
+    fn extends_of_an_undefined_service_is_a_clear_error() {
+        let mut services =
+            services_of("services:\n  web:\n    extends: {service: ghost}\n    image: y\n");
+        let e = resolve_extends(&mut services).unwrap_err().to_string();
+        assert!(e.contains("ghost"), "{e}");
+        assert!(e.contains("undefined"), "{e}");
+    }
+
+    #[test]
+    fn extends_cycle_is_refused_naming_the_path() {
+        let mut services = services_of(
+            "services:\n  \
+             a:\n    extends: {service: b}\n    image: x\n  \
+             b:\n    extends: {service: a}\n    image: y\n",
+        );
+        let e = resolve_extends(&mut services).unwrap_err().to_string();
+        assert!(e.contains("cycle"), "{e}");
+    }
+
+    /// `cap_add`/`cap_drop` concatenate without duplicating an entry both
+    /// base and child declare.
+    #[test]
+    fn extends_dedups_cap_add() {
+        let mut services = services_of(
+            "services:\n  \
+             base:\n    image: x\n    cap_add: [NET_ADMIN, SYS_TIME]\n  \
+             web:\n    extends: {service: base}\n    cap_add: [NET_ADMIN, SYS_PTRACE]\n",
+        );
+        resolve_extends(&mut services).unwrap();
+        assert_eq!(
+            services["web"].cap_add,
+            vec!["NET_ADMIN", "SYS_TIME", "SYS_PTRACE"]
+        );
+    }
+
+    /// `extends.file` is refused at the raw-YAML check, before typed
+    /// parsing ever runs — this implementation doesn't do multi-file
+    /// compose at all.
+    #[test]
+    fn extends_file_is_refused() {
+        let e = check_unsupported_fields(
+            "services:\n  web:\n    extends: {service: base, file: other.yml}\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("extends.file"), "{e}");
+        assert!(e.contains("multi-file"), "{e}");
+    }
 }
 
 /// The allowlist behind the denylist. This module is what fails if
@@ -2365,12 +2723,19 @@ mod tests_unknown_keys {
 
     /// The specific reasons still win over the generic message — a denied key
     /// must not regress into "not understood".
+    ///
+    /// The `profiles:` half of this test was REMOVED when `profiles` shipped:
+    /// it asserted the key is refused ("every service always runs"), and that
+    /// stopped being true. A test that keeps a retired refusal alive is the
+    /// «a test can encode the bug» trap this repo has already paid for — it
+    /// would have blocked the very feature it outlived. `KNOWN_UNSUPPORTED_TOP`
+    /// still has entries, so the property this test exists for is still covered.
     #[test]
     fn the_specific_reason_wins_over_the_generic() {
-        let e = err_of("services:\n  web:\n    image: nginx\n    extends: {}\n");
-        assert!(e.contains("inline the service"), "specific reason: {e}");
         let e = err_of("configs:\n  a: {}\nservices:\n  web:\n    image: nginx\n");
         assert!(e.contains("kind: Secret"), "specific reason: {e}");
+        let e = err_of("include:\n  - other.yml\nservices:\n  web:\n    image: nginx\n");
+        assert!(e.contains("exactly one -f"), "specific reason: {e}");
     }
 
     #[test]
