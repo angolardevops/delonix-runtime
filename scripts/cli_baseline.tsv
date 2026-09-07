@@ -96,6 +96,7 @@
 =	mcp capabilities
 =	mcp doctor
 =	mcp serve
+~	net capture
 ~	net egress allow
 ~	net egress clear
 ~	net egress deny
