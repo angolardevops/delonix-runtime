@@ -2126,6 +2126,22 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["vm start", "vm stop", "vm console", "get"],
     },
     Entry {
+        path: "vm pause",
+        group: "Lifecycle",
+        examples: &[
+            ("free the host's CPU while the guest keeps its memory in RAM — a lighter suspend than `vm stop`, resumed exactly where it was", "delonix vm pause dev"),
+        ],
+        see_also: &["vm unpause", "vm stop", "vm snapshot"],
+    },
+    Entry {
+        path: "vm unpause",
+        group: "Lifecycle",
+        examples: &[
+            ("resume a VM suspended with `pause`, exactly where it left off", "delonix vm unpause dev"),
+        ],
+        see_also: &["vm pause", "vm status"],
+    },
+    Entry {
         path: "vm prune",
         group: "Maintenance",
         examples: &[

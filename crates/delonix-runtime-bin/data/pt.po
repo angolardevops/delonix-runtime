@@ -2085,6 +2085,21 @@ msgstr "Arranca uma VM existente e parada — idempotente (já a correr = sem ef
 msgid "Stop (if running) then start — always a real reboot, unlike `start`. Same recovered-fields limits as `start`"
 msgstr "Pára (se a correr) e depois arranca — reinício real sempre, ao contrário do `start`. Mesmos limites de campos recuperados que o `start`"
 
+msgid "Suspend a running VM's vCPUs — guest memory stays intact, unlike `stop`"
+msgstr "Suspende os vCPUs de uma VM a correr — a memória do convidado fica intacta, ao contrário do `stop`"
+
+msgid "Suspend a running VM's vCPUs — guest memory stays intact, unlike `stop`.\n\nThe same notion as `container pause` (cgroup freezer), not `vm snapshot` (which persists a checkpoint to disk and survives a reboot of the host; this does not — the VMM process keeps the memory in RAM). Resume with `unpause`. Refuses a VM that is not currently running."
+msgstr "Suspende os vCPUs de uma VM a correr — a memória do convidado fica intacta, ao contrário do `stop`.\n\nA mesma noção do `container pause` (freezer do cgroup), não do `vm snapshot` (que persiste um checkpoint em disco e sobrevive a um reboot do host; isto não — o processo VMM mantém a memória em RAM). Retoma-se com `unpause`. Recusa uma VM que não esteja a correr no momento."
+
+msgid "Resume a VM suspended with `pause`. Refuses a VM that is not paused"
+msgstr "Retoma uma VM suspensa com `pause`. Recusa uma VM que não esteja pausada"
+
+msgid "free the host's CPU while the guest keeps its memory in RAM — a lighter suspend than `vm stop`, resumed exactly where it was"
+msgstr "libertar o CPU do host mantendo a memória do convidado em RAM — uma suspensão mais leve que o `vm stop`, retomada exactamente onde estava"
+
+msgid "resume a VM suspended with `pause`, exactly where it left off"
+msgstr "retomar uma VM suspensa com `pause`, exactamente onde ficou"
+
 msgid "Remove the VM (stops + deletes overlay/state)."
 msgstr "Remove a VM (pára + apaga overlay/estado)."
 

@@ -202,6 +202,7 @@
 ~	vm init
 ~	vm ls
 ~	vm ls-remote
+~	vm pause
 ~	vm prune
 ~	vm pull
 ~	vm push
@@ -215,6 +216,7 @@
 =	vm start
 =	vm stop
 →	vm unbridge
+~	vm unpause
 ~	vm vnc
 ~	volume apply
 ~	volume create
