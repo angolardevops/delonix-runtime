@@ -400,8 +400,32 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   porta 0 + liberta de imediato; TOCTOU inerente e aceite, mesma técnica que qualquer atribuição
   aleatória de porta usa). Validado ao vivo: `compose up` com `ports: ["80"]` publicou de facto
   numa porta livre real, confirmado por `container port`.
+  **FEITO: multi-ficheiro (`-f a.yml -f b.yml`), repetível nos 5 subcomandos.** Cada ficheiro é
+  parseado e passa por `check_unsupported_fields` (o denylist/allowlist contra o YAML CRU)
+  **separadamente** — a verificação corre sobre texto bruto, antes de qualquer fusão, por isso
+  uma chave recusada não escapa por estar no SEGUNDO ficheiro. Os `ComposeFile` tipados
+  resultantes fundem-se esquerda-para-direita (`merge_compose_files`) pelas regras do próprio
+  Compose Spec: escalares → o ficheiro mais tardio ganha só se DECLARADO (`Option::or`, nunca
+  substituindo por um default silencioso); `environment:`/`labels:`/`extra_hosts:` → fundidos
+  CHAVE A CHAVE (`merge_env`, convertendo os dois lados para `KEY=VALUE` antes de fundir — um
+  ficheiro nunca apaga as variáveis do outro só por declarar mais uma); `cap_add`/`cap_drop` →
+  concatenados sem duplicar; `ports`/`volumes`/`env_file`/`tmpfs` → concatenados. **`depends_on`
+  ACUMULA** (`merge_depends_on`) — ao contrário de `extends:` (que o exclui de propósito, por
+  ambiguidade com um TEMPLATE estranho), um multi-ficheiro comum do MESMO serviço não tem essa
+  ambiguidade, por isso uma dependência declarada em qualquer um dos ficheiros sobrevive à
+  fusão. `networks:`/`volumes:` de topo são pequenos (`external`/`name`) — uma chave partilhada
+  é um REPLACE inteiro, não uma fusão campo-a-campo, simplificação documentada e não uma queda
+  silenciosa. Os caminhos relativos (contexto do `build`, `env_file`) resolvem-se contra o
+  directório do PRIMEIRO ficheiro, a convenção do próprio `docker compose` real. **Validado ao
+  vivo**: uma chave recusada só no 2.º ficheiro continua a chumbar; sem `-f` nenhum o
+  comportamento de sempre (procura `compose.yaml`/`.yml`) fica byte-a-byte intacto; e um
+  `depends_on:` acrescentado só no ficheiro de OVERRIDE muda de facto a ordem topológica de
+  criação (dois serviços cuja ordem alfabética seria a inversa da dependência) — prova de que a
+  fusão compõe os dois ficheiros a sério, não escolhe um. `include:` continua **deliberadamente
+  fora de escopo** (path-relativity e propagação de nome de projecto próprias, que expandiriam o
+  âmbito) — a mensagem de recusa aponta para `-f a -f b` em vez disso.
   **Por fazer, documentado (nunca silencioso)**: `profiles`/`extends`/`configs`/`secrets`
-  top-level (usa `kind: Secret` em vez disso)/multi-ficheiro (`-f a -f b`/`include:`),
+  top-level (usa `kind: Secret` em vez disso), o directivo YAML `include:`,
   `build.target` (selecção de estágio), `deploy.replicas≠1`, `networks.*.ipv4_address` fixo,
   volumes anónimos (sem `source` explícito) — este último deliberadamente NÃO tentado ainda:
   precisa de semântica própria de nomeação/limpeza (quando é que um volume anónimo se apaga?

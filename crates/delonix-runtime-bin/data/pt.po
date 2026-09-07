@@ -5234,6 +5234,12 @@ msgstr "Quota (ex.: `2g`) — só aplicada se vier `--quota`"
 msgid "Remove it even with live references — DESTROYS the data of whatever is still using it"
 msgstr "Remove-o mesmo com referências vivas — DESTRÓI os dados de quem ainda o estiver a usar"
 
+msgid "Repeatable — `-f a.yml -f b.yml` merges left-to-right (see the module doc-comment, \"Multi-file compose\"). No `-f` at all falls back to the usual single-file search"
+msgstr "Repetível — `-f a.yml -f b.yml` funde-se esquerda-para-direita (ver o doc-comment do módulo, \"Multi-file compose\"). Sem `-f` nenhum, cai na pesquisa de ficheiro único habitual"
+
+msgid "Repeatable — must name the SAME file(s) `up` was given, so the project/network/volume names re-derive identically"
+msgstr "Repetível — tem de nomear o(s) MESMO(S) ficheiro(s) que o `up` recebeu, para os nomes de projecto/rede/volume se re-derivarem de forma idêntica"
+
 msgid "Server (host/IP), or the base URL in the `webdav` case"
 msgstr "Servidor (host/IP), ou o URL base no caso do `webdav`"
 
