@@ -95,6 +95,12 @@ pub struct BuildArgs {
     /// names the missing interpreter instead of a confusing mid-build failure).
     #[arg(long = "platform")]
     platform: Option<String>,
+    /// Name or index of a `FROM ... AS <name>` stage to stop the build at and
+    /// package as the result, instead of the Dockerfile's own final stage.
+    /// Only the stages the target itself needs (everything at or before it,
+    /// in file order) are built — later stages are skipped entirely.
+    #[arg(long = "target")]
+    target: Option<String>,
 }
 
 /// Parses `KEY=VALUE` build-arg flags into pairs, dropping anything malformed
@@ -236,6 +242,7 @@ pub fn run(args: BuildArgs) -> Result<()> {
         !args.no_cache,
         &secrets,
         platform.as_deref(),
+        args.target.as_deref(),
     )?;
     println!("{}", img.short_id());
     Ok(())
@@ -747,6 +754,7 @@ pub fn build_from_spec(
     use_cache: bool,
     secrets: &HashMap<String, PathBuf>,
     platform: Option<&str>,
+    target: Option<&str>,
 ) -> Result<Image> {
     let (images, store) = open_stores()?;
     let text = std::fs::read_to_string(dockerfile_path).map_err(|e| {
@@ -759,6 +767,14 @@ pub fn build_from_spec(
         ))
     })?;
     let df = parse_dockerfile_with_args(&text, build_args)?;
+    // `Some(idx)`: stop at `df.stages[idx]` and package IT, skipping the
+    // Dockerfile's own final stage and any stage after `idx` entirely (same
+    // as `docker build --target`). `None`: the default final stage (either
+    // no `--target` was given, or it named the final stage explicitly).
+    let target_idx: Option<usize> = match target {
+        Some(t) => delonix_image::build::resolve_target_stage(&df, t)?,
+        None => None,
+    };
     let rootless = runtime::is_rootless();
     let arch = platform.unwrap_or_else(|| delonix_image::build::oci_arch());
 
@@ -787,19 +803,30 @@ pub fn build_from_spec(
         }
     }
 
+    // The stage actually being packaged — `df.stages[idx]` when `--target`
+    // stops short of the Dockerfile's own final stage, else that final stage
+    // itself (`df.from`/`df.steps`, unchanged from before `--target` existed).
+    let (final_from, final_steps): (&str, &[delonix_image::build::Step]) = match target_idx {
+        Some(idx) => (df.stages[idx].from.as_str(), &df.stages[idx].steps),
+        None => (df.from.as_str(), &df.steps),
+    };
+
     // Fail fast (before building anything) in the one root-mode gap: the FINAL
     // stage's `FROM` naming an earlier stage rather than a real image — see the
     // module doc comment for why. Determined purely from `df`, no I/O needed.
+    // Only stages BEFORE the one being packaged count as "earlier" — with
+    // `--target`, a later stage's name/index is simply unbuilt, not a stage
+    // this one could reference at all.
     if !rootless {
-        let final_from_is_stage = df
-            .stages
+        let earlier = target_idx.unwrap_or(df.stages.len());
+        let final_from_is_stage = df.stages[..earlier]
             .iter()
-            .any(|s| s.name.as_deref() == Some(df.from.as_str()))
-            || df.from.parse::<usize>().is_ok_and(|i| i < df.stages.len());
+            .any(|s| s.name.as_deref() == Some(final_from))
+            || final_from.parse::<usize>().is_ok_and(|i| i < earlier);
         if final_from_is_stage {
             return Err(Error::Invalid(super::po::tf(
                 "multi-stage build in root mode (overlay): the final stage (`FROM {from}`) must be a real image — `FROM <earlier-stage>` in the final stage is only supported in rootless (no OCI lineage to preserve)",
-                &[("from", &df.from)],
+                &[("from", final_from)],
             )));
         }
     }
@@ -825,11 +852,16 @@ pub fn build_from_spec(
     // O plano: um `○` por instrução que toca no rootfs, estágio a estágio, mais o
     // empacotamento final. Os `ENV`/`WORKDIR` ficam de fora aqui pela mesma razão
     // que não abrem passo — ver `step_title`.
-    let plano: Vec<String> = df
-        .stages
+    // Stages after the target are never built — their instructions don't
+    // belong in the plan (a progress bar promising steps that never run is
+    // its own kind of dishonest reporting).
+    let stages_built = target_idx.map_or(df.stages.len(), |idx| idx + 1);
+    let final_stage_steps: &[delonix_image::build::Step] =
+        if target_idx.is_none() { &df.steps } else { &[] };
+    let plano: Vec<String> = df.stages[..stages_built]
         .iter()
         .flat_map(|st| st.steps.iter())
-        .chain(df.steps.iter())
+        .chain(final_stage_steps.iter())
         .filter_map(step_title)
         .chain(std::iter::once(
             super::po::t("Packaging the image").to_string(),
@@ -838,7 +870,7 @@ pub fn build_from_spec(
     p.plan(&plano);
 
     let build_result: Result<Image> = (|| {
-        for (idx, stage) in df.stages.iter().enumerate() {
+        for (idx, stage) in df.stages[..stages_built].iter().enumerate() {
             let (ids, result) = build_one_stage(
                 &store,
                 &images,
@@ -863,38 +895,93 @@ pub fn build_from_spec(
             stages.insert(idx.to_string(), result);
         }
 
-        let (ids, final_state) = build_one_stage(
-            &store, &images, context, &df.from, &df.steps, &stages, use_cache, secrets, platform,
-            &mut p,
-        );
-        all_ids.extend(ids);
-        let final_state = final_state?;
+        // With `--target` naming an intermediate stage, that stage was just
+        // built inside the loop above — reuse its result instead of a second,
+        // redundant `build_one_stage` call (which would also be wrong: its
+        // `from`/`steps` already served as `final_from`/`final_steps`, but a
+        // second build would allocate a SECOND container for the same stage).
+        let final_state = match target_idx {
+            Some(idx) => stages
+                .get(&idx.to_string())
+                .cloned()
+                .expect("stage just inserted by the loop above"),
+            None => {
+                let (ids, final_state) = build_one_stage(
+                    &store,
+                    &images,
+                    context,
+                    final_from,
+                    final_steps,
+                    &stages,
+                    use_cache,
+                    secrets,
+                    platform,
+                    &mut p,
+                );
+                all_ids.extend(ids);
+                final_state?
+            }
+        };
         let id = final_state.id.clone();
         // O último `○` do plano: empacotar é o passo mais demorado de um build
         // com um rootfs grande, e era o único trecho sem sinal nenhum.
         p.step(super::po::t("Packaging the image"), "📦");
 
         if rootless {
-            let cmd = if df.cmd.is_empty() {
+            // `CMD`/`ENTRYPOINT`/`USER`/`ENV`/`WORKDIR`/`HEALTHCHECK` land on
+            // `df` unconditionally wherever they're written in the file
+            // (this parser doesn't scope them per stage — see the module's
+            // own `Dockerfile` doc comment) — they may belong to a stage
+            // AFTER the one `--target` stops at, one that is never built.
+            // Applying them there would leak instructions from code that
+            // never ran into the packaged image. `final_state`'s own fields
+            // are already fully correct on their own (base image config +
+            // every step the TARGET stage itself executed — see
+            // `build_one_stage`), so a targeted intermediate build skips the
+            // document-level overrides entirely and trusts them as-is.
+            let targeting_intermediate = target_idx.is_some();
+            let cmd = if targeting_intermediate || df.cmd.is_empty() {
                 final_state.cmd.clone()
             } else {
                 df.cmd.clone()
             };
-            let entrypoint = if df.entrypoint.is_empty() {
+            let entrypoint = if targeting_intermediate || df.entrypoint.is_empty() {
                 final_state.entrypoint.clone()
             } else {
                 df.entrypoint.clone()
             };
             let mut env = final_state.env.clone();
-            env.extend(df.env.iter().cloned());
-            let workdir = df
-                .workdir
-                .clone()
-                .unwrap_or_else(|| final_state.workdir.clone());
-            let user = if df.user.is_empty() {
+            if !targeting_intermediate {
+                env.extend(df.env.iter().cloned());
+            }
+            let workdir = if targeting_intermediate {
+                final_state.workdir.clone()
+            } else {
+                df.workdir
+                    .clone()
+                    .unwrap_or_else(|| final_state.workdir.clone())
+            };
+            let user = if targeting_intermediate || df.user.is_empty() {
                 final_state.user.clone()
             } else {
                 df.user.clone()
+            };
+            let healthcheck = if targeting_intermediate {
+                final_state
+                    .image
+                    .as_ref()
+                    .and_then(|i| i.config.healthcheck.clone())
+            } else {
+                // O `HEALTHCHECK` do ficheiro, com a base como fallback — a
+                // mesma precedência que o caminho overlay (root) já usava em
+                // `build_image`. Sem isto, o mesmo Dockerfile dava imagens
+                // diferentes conforme o modo do motor.
+                df.healthcheck.clone().or_else(|| {
+                    final_state
+                        .image
+                        .as_ref()
+                        .and_then(|i| i.config.healthcheck.clone())
+                })
             };
             commit_flat_rootless(
                 &images,
@@ -907,18 +994,27 @@ pub fn build_from_spec(
                 user,
                 tag,
                 arch,
-                // O `HEALTHCHECK` do ficheiro, com a base como fallback — a
-                // mesma precedência que o caminho overlay (root) já usava em
-                // `build_image`. Sem isto, o mesmo Dockerfile dava imagens
-                // diferentes conforme o modo do motor.
-                df.healthcheck.clone().or_else(|| {
-                    final_state
-                        .image
-                        .as_ref()
-                        .and_then(|i| i.config.healthcheck.clone())
-                }),
+                healthcheck,
             )
         } else {
+            // `build_image` reads CMD/ENTRYPOINT/USER/ENV/WORKDIR/HEALTHCHECK
+            // straight off `&df` — the document-global fields the comment
+            // above explains are NOT necessarily the target stage's own.
+            // Fixing that needs `build_image` itself to take the resolved
+            // values `commit_flat_rootless` above already computes
+            // correctly, which is `delonix-image` surgery beyond this
+            // feature's scope — refuse rather than risk silently packaging
+            // an intermediate stage with instructions from a later, unbuilt
+            // one baked in.
+            if target_idx.is_some() {
+                return Err(Error::Invalid(
+                    "--target naming an intermediate stage is not supported in root mode \
+                     (overlay) — only rootless resolves the target's own CMD/ENTRYPOINT/USER/\
+                     ENV/WORKDIR/HEALTHCHECK correctly; targeting the Dockerfile's own final \
+                     stage works in both modes"
+                        .to_string(),
+                ));
+            }
             let Some(base_image) = &final_state.image else {
                 return Err(Error::Invalid(super::po::tf(
                     "multi-stage build in root mode (overlay): the final stage (`FROM {from}`) must be a real image — `FROM <earlier-stage>` in the final stage is only supported in rootless (no OCI lineage to preserve)",

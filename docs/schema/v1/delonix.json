@@ -94,6 +94,14 @@
         },
         "tag": {
           "type": "string"
+        },
+        "target": {
+          "default": null,
+          "description": "Name or index of a multi-stage `FROM ... AS <name>` stage to stop the\nbuild at — same as the CLI's `--target`.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

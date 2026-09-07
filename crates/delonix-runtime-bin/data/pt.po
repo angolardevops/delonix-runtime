@@ -5222,6 +5222,9 @@ msgstr "`linux/<arch>` (ex.: `linux/arm64`) — build cross-arch. Resolve a imag
 msgid "Load `KEY=value` lines from a file (e.g. `.env`), or `-` to read them from stdin (the value never touches argv/process list)"
 msgstr "Carrega linhas `CHAVE=valor` de um ficheiro (ex.: `.env`), ou `-` para as ler do stdin (o valor nunca passa pelo argv/lista de processos)"
 
+msgid "Name or index of a `FROM ... AS <name>` stage to stop the build at and package as the result, instead of the Dockerfile's own final stage. Only the stages the target itself needs (everything at or before it, in file order) are built — later stages are skipped entirely"
+msgstr "Nome ou índice de um estágio `FROM ... AS <nome>` onde parar o build e empacotar como resultado, em vez do estágio final do próprio Dockerfile. Só se constroem os estágios de que o alvo precisa (todos até ele, pela ordem do ficheiro) — os estágios seguintes são inteiramente saltados"
+
 msgid "`local` (default) or `nfs`"
 msgstr "`local` (por omissão) ou `nfs`"
 

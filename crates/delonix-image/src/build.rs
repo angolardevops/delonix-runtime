@@ -65,6 +65,11 @@ pub struct Stage {
 pub struct Dockerfile {
     /// Intermediate stages (all but the last), in order.
     pub stages: Vec<Stage>,
+    /// The last stage's own `AS <name>`, if it had one — kept separately from
+    /// `stages` (which holds only the intermediate ones) so `--target
+    /// <name>` can recognize a name that refers to the DEFAULT final stage
+    /// (a no-op) rather than reporting it as unknown.
+    pub last_name: Option<String>,
     /// The base image of the final stage (`FROM`).
     pub from: String,
     /// The steps of the final stage, in order.
@@ -328,6 +333,7 @@ pub fn parse_dockerfile_with_args(text: &str, cli_args: &[(String, String)]) -> 
     let last = stages
         .pop()
         .ok_or_else(|| Error::Invalid("Dockerfile has no FROM instruction".into()))?;
+    df.last_name = last.name;
     df.from = last.from;
     df.steps = last.steps;
     df.stages = stages;
@@ -340,6 +346,48 @@ pub fn parse_dockerfile_with_args(text: &str, cli_args: &[(String, String)]) -> 
         }
     }
     Ok(df)
+}
+
+/// Resolves `--target <name-or-index>` (Docker's multi-stage stage
+/// selection) against an already-parsed `Dockerfile`. `Ok(None)` means the
+/// target IS the default final stage (matched by name or by index —
+/// `df.stages.len()`, one past the last intermediate stage) and nothing
+/// changes; `Ok(Some(idx))` names an intermediate stage in `df.stages` to
+/// stop the build at, INSTEAD of the final one.
+///
+/// Pure — no I/O — so the exhaustive-match/error-message cases are testable
+/// without a real Dockerfile parse or filesystem.
+pub fn resolve_target_stage(df: &Dockerfile, target: &str) -> Result<Option<usize>> {
+    if df.last_name.as_deref() == Some(target) || target.parse::<usize>() == Ok(df.stages.len()) {
+        return Ok(None);
+    }
+    if let Some(idx) = df
+        .stages
+        .iter()
+        .position(|s| s.name.as_deref() == Some(target))
+    {
+        return Ok(Some(idx));
+    }
+    if let Ok(idx) = target.parse::<usize>() {
+        if idx < df.stages.len() {
+            return Ok(Some(idx));
+        }
+    }
+    let mut known: Vec<String> = df
+        .stages
+        .iter()
+        .filter_map(|s| s.name.clone())
+        .chain(df.last_name.clone())
+        .collect();
+    known.sort_unstable();
+    Err(Error::Invalid(format!(
+        "no stage named '{target}' in this Dockerfile — known stages: {}",
+        if known.is_empty() {
+            "none (this Dockerfile names no stages with `AS`)".to_string()
+        } else {
+            known.join(", ")
+        }
+    )))
 }
 
 /// `ENV K=V` or `ENV K V` → (key, value).
@@ -825,9 +873,54 @@ impl ImageStore {
 mod tests {
     use super::{
         join_continuations, parse_dockerfile_with_args, parse_env_pairs, parse_run_flags,
-        substitute_args, Step,
+        resolve_target_stage, substitute_args, Step,
     };
     use std::collections::HashMap;
+
+    fn multistage() -> super::Dockerfile {
+        parse_dockerfile_with_args(
+            "FROM golang:1.22 AS builder\nRUN go build -o /app\nFROM alpine:3.19 AS runtime\nCOPY --from=builder /app /app\n",
+            &[],
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn target_names_an_intermediate_stage() {
+        let df = multistage();
+        assert_eq!(resolve_target_stage(&df, "builder").unwrap(), Some(0));
+    }
+
+    #[test]
+    fn target_names_the_default_final_stage_is_a_no_op() {
+        let df = multistage();
+        assert_eq!(resolve_target_stage(&df, "runtime").unwrap(), None);
+    }
+
+    #[test]
+    fn target_by_numeric_index() {
+        let df = multistage();
+        assert_eq!(resolve_target_stage(&df, "0").unwrap(), Some(0));
+        // index == stages.len() is the final stage, same as its name.
+        assert_eq!(resolve_target_stage(&df, "1").unwrap(), None);
+    }
+
+    #[test]
+    fn unknown_target_names_the_real_stages() {
+        let df = multistage();
+        let e = resolve_target_stage(&df, "typo").unwrap_err().to_string();
+        assert!(e.contains("builder"), "{e}");
+        assert!(e.contains("runtime"), "{e}");
+    }
+
+    #[test]
+    fn unknown_target_on_a_single_stage_build_says_so() {
+        let df = parse_dockerfile_with_args("FROM alpine:3.19\nRUN true\n", &[]).unwrap();
+        let e = resolve_target_stage(&df, "anything")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("none"), "{e}");
+    }
 
     #[test]
     fn substitute_args_replaces_braced_and_bare_names() {

@@ -406,9 +406,39 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   serviço activo ficaria sem o que `depends_on` promete). `active_services` calcula o fecho
   transitivo; `down`/`ps`/`logs` não precisam de o saber, porque já derivam dos containers
   REALMENTE criados (por label), nunca do ficheiro compose outra vez.
-  **Por fazer, documentado (nunca silencioso)**: `extends`/`configs`/`secrets`
-  top-level (usa `kind: Secret` em vez disso)/multi-ficheiro (`-f a -f b`/`include:`),
-  `build.target` (selecção de estágio), `deploy.replicas≠1`, `networks.*.ipv4_address` fixo,
+  **FEITO**: `build.target` (selecção de estágio multi-stage) — `ComposeBuild::Full`'s campo
+  `target` já era parseado desde sempre e ficava explicitamente RECUSADO
+  («not supported in v1»); passou a ser encaminhado para o `build.target` do `kind: Image`
+  gerado (o mesmo caminho que `delonix build --target` usa). O ganho real não é só o campo —
+  é que `delonix build` em si **nunca teve** selecção de estágio nenhuma: só constrói TODOS os
+  estágios e empacota o último. `resolve_target_stage` (`delonix-image::build`, puro/testado)
+  resolve o nome/índice pedido contra `df.stages` ou o próprio estágio final (que não vive em
+  `df.stages` — só `df.from`/`df.steps` — daí o novo `Dockerfile.last_name` para o reconhecer
+  pelo nome sem o tratar como desconhecido); um nome/índice que não bate com nenhum dos dois
+  recusa nomeando os estágios reais. Só os estágios até ao alvo (inclusive) são construídos —
+  os posteriores nem chegam a ganhar container. **Corrigido de caminho, para o `--target`
+  produzir a imagem CERTA e não uma contaminada**: `CMD`/`ENTRYPOINT`/`USER`/`ENV`/`WORKDIR`/
+  `HEALTHCHECK` só aterram em `df.*` — não são geridos por estágio neste parser — por isso um
+  `--target` a um estágio intermédio já não os herda do estágio final (por vezes NÃO SEQUER
+  construído); usa antes os valores já correctos que `final_state` traz do PRÓPRIO estágio-alvo
+  (imagem base + os seus próprios passos). **Modo root (overlay) recusa `--target` a um estágio
+  intermédio** — corrigir isso exigiria mexer no `build_image` do `delonix-image` para aceitar
+  os valores já resolvidos em vez de ler `&df` cru, fora do âmbito desta fatia; visar o estágio
+  final continua a funcionar nos dois modos. **Validado ao vivo**: Dockerfile de 2 estágios
+  (`builder`/`runtime`, com um `COPY --from=builder`) — build sem `--target` produz a imagem do
+  `runtime` (tem `runtime-only.txt`+`shared.txt`, NÃO `builder-only.txt` — a semântica normal do
+  multi-stage); `--target builder` produz só o `builder` (tem `builder-only.txt`+`shared.txt`,
+  NÃO `runtime-only.txt` — prova que o estágio `runtime` nem chegou a correr); `--target runtime`
+  (o nome do estágio final, explícito) dá byte-a-byte o mesmo que sem a flag; um nome
+  inexistente recusa nomeando `builder, runtime`.
+  **Achado à parte, pré-existente, NÃO corrigido aqui**: um `RUN`/`COPY` que acerta a cache
+  (rebuild idêntico) fecha o seu passo com `✗` no `Progress`, apesar do build no fim ter
+  sucesso — reproduzido também SEM `--target`, num rebuild simples do mesmo Dockerfile
+  inalterado. É cosmético (o `img.short_id()` final está correcto) mas engana visualmente;
+  fica registado para quem mexer a seguir no `Progress`/cache dos passos.
+  **Por fazer, documentado (nunca silencioso)**: `profiles`/`extends`/`configs`/`secrets`
+  **Por fazer, documentado (nunca silencioso)**: `extends`/`configs`/`secrets`  top-level (usa `kind: Secret` em vez disso)/multi-ficheiro (`-f a -f b`/`include:`),
+  `deploy.replicas≠1`, `networks.*.ipv4_address` fixo,
   volumes anónimos (sem `source` explícito) — este último deliberadamente NÃO tentado ainda:
   precisa de semântica própria de nomeação/limpeza (quando é que um volume anónimo se apaga?
   `down` simples ou só `down -v`?) que merece ser pensada com calma, não decidida às pressas.
