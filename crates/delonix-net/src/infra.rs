@@ -3949,8 +3949,13 @@ fn hex_decode(s: &str) -> Option<Vec<u8>> {
 }
 
 /// Sanitizes a netns/interface name (only `[a-z0-9_-]`, <= 12 chars) — defense
-/// against injection in `ip netns` and the IFNAMSIZ.
-fn sanitize(s: &str) -> String {
+/// against injection in `ip netns` and the IFNAMSIZ. `pub`: it is also the
+/// ONLY correct way to recompute a container's netns name from its id (a
+/// 16-char id truncates to 12) — a second copy of this truncation in a
+/// consumer crate would silently diverge from this one on the day either
+/// changes, the same class of bug `fw_rule_tail`/`mac_for` already guard
+/// against by being the single shared formula.
+pub fn sanitize(s: &str) -> String {
     let cleaned: String = s
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')

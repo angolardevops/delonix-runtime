@@ -1033,6 +1033,16 @@ if [ "$WITH_IMAGE_BUILD" = 1 ]; then
   fi
 fi
 
+# ------------------------------------------------- `net capture` (opt-in leve)
+# `delonix net capture` corre o `tcpdump` do PRÓPRIO HOST dentro da netns de um
+# container — sem ele o comando recusa antes de qualquer nsenter, com o mesmo
+# erro accionável que este passo evita. Ao contrário de `--with-image-build`
+# (que troca permissões do kernel e compila software), `tcpdump` é um pacote
+# pequeno e comum, sem nada a reverter — corre sempre, sem flag própria, e
+# falha ABERTO (aviso, nunca aborta o instalador) se o gestor de pacotes deste
+# host não o tiver.
+optional_dep netcapture tcpdump tcpdump "delonix net capture"
+
 # --------------------------------------- tuning de ESCALA (--production, opt-in)
 # O bloco `99-delonix.conf` acima da correccao do que FALHA num host normal.
 # Este da os limites que so se atingem em CARGA, e cada um foi escolhido por um

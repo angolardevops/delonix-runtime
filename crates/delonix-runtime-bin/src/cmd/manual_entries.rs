@@ -1006,6 +1006,15 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["container stats", "net ingress ls", "net netns status"],
     },
     Entry {
+        path: "net capture",
+        group: "Inspect",
+        examples: &[
+            ("write a pcap file, stop after 100 packets", "delonix net capture web -w out.pcap -c 100"),
+            ("stream straight into Wireshark for 30s", "delonix net capture web -w - --duration 30 | wireshark -k -i -"),
+        ],
+        see_also: &["net flow", "container exec"],
+    },
+    Entry {
         path: "net egress",
         group: "Configure",
         examples: &[
