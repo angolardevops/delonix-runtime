@@ -41,12 +41,14 @@
 //! `build.target`, itself `delonix build --target`), a fixed
 //! `networks.*.ipv4_address` (wired straight into `container run --ip`, see
 //! `service_to_run_opts`), `extends:` (`resolve_extends` — same file only,
-//! `depends_on` never inherited, per the Specification), and `deploy.replicas`
+//! `depends_on` never inherited, per the Specification), `deploy.replicas`
 //! (N containers, `<project>-<service>`/`-2`/`-3`/…, with no load-balancing
-//! across them — see `Translated.containers`). Defers top-level
-//! `configs:`/`secrets:` (use `kind: Secret` instead), multi-file compose
-//! (`-f a -f b` merge/`include:`), and anonymous
-//! volumes (no explicit source). `working_dir:` IS applied (via `RunOpts.
+//! across them — see `Translated.containers`), and anonymous volumes
+//! (`- /container/path`, no explicit source — see `anonymous_volume_names`;
+//! **only `down -v` removes them**, a plain `down` never does, matching real
+//! `docker compose`). Defers top-level `configs:`/`secrets:` (use
+//! `kind: Secret` instead) and multi-file compose
+//! (`-f a -f b` merge/`include:`). `working_dir:` IS applied (via `RunOpts.
 //! workdir`, itself now also exposed as `container run -w/--workdir`), and a
 //! bare container port with no host port DOES get a random free host port
 //! (resolved once, before the container is created — see `free_host_port`).
@@ -997,6 +999,39 @@ fn resolve_volume_names(project: &str, compose: &ComposeFile) -> BTreeMap<String
         .collect()
 }
 
+/// One scoped name PER ANONYMOUS MOUNT of a service, in order — the Compose
+/// Spec shorthand `- /container/path` (no `:`, so no explicit source), which
+/// real `docker compose` auto-names and tracks via labels on the volume. This
+/// engine has no separate volume registry to track membership in (same
+/// philosophy as named volume/network naming above: `down`/`down -v`
+/// RE-DERIVE names by re-parsing the compose file, never look anything up) —
+/// so an anonymous volume gets a name that is itself re-derivable: the
+/// service name plus its 1-based position among that service's OWN anonymous
+/// mounts (a named/bind mount does not consume a slot), joined through the
+/// same collision-free `compose_scoped_name` used for named volumes/networks.
+///
+/// `--anon<n>` is deliberately NOT a value a real top-level `volumes:` key is
+/// likely to collide with — this is a naming convention, not a security
+/// boundary (the whole "no registry, re-derive by convention" philosophy
+/// already accepts this class of risk for named volumes/networks too).
+fn anonymous_volume_names(
+    project: &str,
+    service: &str,
+    mounts: &[ComposeVolumeMount],
+) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut n = 0usize;
+    for m in mounts {
+        if let ComposeVolumeMount::Short(s) = m {
+            if !s.contains(':') {
+                n += 1;
+                names.push(compose_scoped_name(project, &format!("{service}--anon{n}")));
+            }
+        }
+    }
+    names
+}
+
 /// Refuses every key this implementation does not read — against the RAW parsed
 /// YAML, because the typed structs drop an unrecognized key without a word.
 ///
@@ -1238,6 +1273,16 @@ fn translate(
     let mut waits: BTreeMap<String, Vec<DependsOnWait>> = BTreeMap::new();
 
     for (name, svc) in compose.services.iter().filter(|(n, _)| active.contains(*n)) {
+        // Anonymous volumes get their `kind: Volume` docs HERE, alongside the
+        // named ones above — same creation path (`volume::apply`), so there
+        // is no second way a volume comes into existence. Computed once and
+        // handed to `service_to_run_opts` unchanged: it and this loop MUST
+        // agree on the names, or the container would mount a volume that was
+        // never created.
+        let anon_names = anonymous_volume_names(project, name, &svc.volumes);
+        for n in &anon_names {
+            volume_docs.push(simple_doc(k::VOLUME, n));
+        }
         let image_ref = if let Some(build) = &svc.build {
             let tag = svc
                 .image
@@ -1258,6 +1303,7 @@ fn translate(
                 base_dir,
                 &network_names,
                 &volume_names,
+                &anon_names,
                 &image_ref,
                 idx,
             )?);
@@ -1456,19 +1502,34 @@ fn resolve_volume_mounts(
     base_dir: &Path,
     mounts: &[ComposeVolumeMount],
     volume_names: &BTreeMap<String, String>,
+    anon_names: &[String],
     service: &str,
 ) -> Result<(Vec<String>, Vec<String>)> {
     let mut volumes = Vec::new();
     let mut tmpfs = Vec::new();
+    let mut anon_idx = 0usize;
     for m in mounts {
         match m {
-            ComposeVolumeMount::Short(s) => {
-                let parts: Vec<&str> = s.splitn(3, ':').collect();
-                if parts.len() < 2 {
+            // Anonymous: `- /container/path`, no `:` at all — no host path, no
+            // named volume, nothing to resolve against `volume_names`. The
+            // name was already computed (by `anonymous_volume_names`, in the
+            // SAME order this loop walks) so a `kind: Volume` doc for it could
+            // be created up front alongside the named ones — see `translate`.
+            ComposeVolumeMount::Short(s) if !s.contains(':') => {
+                if !s.starts_with('/') {
                     return Err(Error::Invalid(format!(
-                        "compose: service '{service}' volume '{s}': anonymous volumes (no explicit source) are not supported in v1 — declare a named volume"
+                        "compose: service '{service}' volume '{s}': target must be absolute"
                     )));
                 }
+                let name = anon_names.get(anon_idx).ok_or_else(|| Error::Invalid(format!(
+                    "compose: service '{service}': internal error: no scoped name reserved for anonymous volume #{}",
+                    anon_idx + 1
+                )))?;
+                anon_idx += 1;
+                volumes.push(format!("{name}:{s}"));
+            }
+            ComposeVolumeMount::Short(s) => {
+                let parts: Vec<&str> = s.splitn(3, ':').collect();
                 let (source, target) = (parts[0], parts[1]);
                 let ro = if parts.get(2).map(|o| o.contains("ro")).unwrap_or(false) { ":ro" } else { "" };
                 let resolved = resolve_volume_source(base_dir, source, volume_names, service)?;
@@ -1505,6 +1566,7 @@ fn service_to_run_opts(
     base_dir: &Path,
     network_names: &BTreeMap<String, String>,
     volume_names: &BTreeMap<String, String>,
+    anon_names: &[String],
     image_ref: &str,
     replica_index: u32,
 ) -> Result<(super::container::RunOpts, String)> {
@@ -1537,7 +1599,7 @@ fn service_to_run_opts(
     })?;
 
     let (volumes, tmpfs_from_mounts) =
-        resolve_volume_mounts(base_dir, &svc.volumes, volume_names, service)?;
+        resolve_volume_mounts(base_dir, &svc.volumes, volume_names, anon_names, service)?;
     let mut tmpfs = tmpfs_from_mounts;
     tmpfs.extend(svc.tmpfs.clone().into_vec());
 
@@ -2142,6 +2204,23 @@ fn cmd_down(file: Option<PathBuf>, project: Option<String>, remove_volumes: bool
                     ));
                 }
             }
+            // Anonymous volumes (`- /container/path`, no explicit source):
+            // ONLY `down -v` removes them, matching real `docker compose`
+            // (a plain `down` never touches them, above). The names are
+            // RE-DERIVED from the same re-parsed compose file `up` used to
+            // create them — same "no registry" philosophy as the named ones
+            // right above, and as `network_names`/`volume_names` at the top
+            // of this function.
+            for (name, svc) in &compose.services {
+                for anon in anonymous_volume_names(&project, name, &svc.volumes) {
+                    if let Err(e) = super::volume::cmd_rm(&vol_store, &anon, false) {
+                        super::output::warn(&super::po::tf(
+                            "volume '{name}' not removed: {err}",
+                            &[("name", &anon), ("err", &e.to_string())],
+                        ));
+                    }
+                }
+            }
         }
     }
     println!(
@@ -2491,6 +2570,68 @@ services:
         assert_eq!(opts.ip, None);
     }
 
+    #[test]
+    fn fn anonymous_volume_names_indexa_so_os_montes_anonimos() {
+        let mounts = vec![
+            ComposeVolumeMount::Short("/data".to_string()), // anon #1
+            ComposeVolumeMount::Short("named:/x".to_string()), // not anon, no slot
+            ComposeVolumeMount::Short("/cache".to_string()), // anon #2
+        ];
+        let names = anonymous_volume_names("proj", "web", &mounts);
+        assert_eq!(names.len(), 2, "{names:?}");
+        assert_ne!(names[0], names[1]);
+        // Re-derivable: calling it again with the SAME inputs gives the SAME
+        // names — the property `down`/`down -v` rely on.
+        assert_eq!(names, anonymous_volume_names("proj", "web", &mounts));
+        // Different service, different project: no collision.
+        assert!(!anonymous_volume_names("proj", "db", &mounts).contains(&names[0]));
+        assert!(!anonymous_volume_names("other", "web", &mounts).contains(&names[0]));
+    }
+
+    /// An anonymous mount gets a real volume created for it (a `kind: Volume`
+    /// doc alongside the named ones) AND a `name:target` entry in
+    /// `RunOpts.volumes` — the same shape a named volume mount produces, so
+    /// nothing downstream needs to special-case it.
+    #[test]
+    fn montagem_anonima_ganha_um_doc_de_volume_e_uma_entrada_run_opts() {
+        let yaml = "services:\n  web:\n    image: x\n    volumes:\n      - /var/lib/data\n";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let t = translate(&compose, "myproj", Path::new("/tmp"), &[]).unwrap();
+        let (opts, _) = &t.containers["web"];
+        assert_eq!(opts.volumes.len(), 1, "{:?}", opts.volumes);
+        let (name, target) = opts.volumes[0].split_once(':').unwrap();
+        assert_eq!(target, "/var/lib/data");
+        assert!(
+            t.volume_docs.iter().any(|d| d.metadata.name == name),
+            "no kind: Volume doc for the anonymous volume {name:?}: {:?}",
+            t.volume_docs
+                .iter()
+                .map(|d| &d.metadata.name)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// A named/bind mount is untouched by the anonymous-volume machinery —
+    /// no extra doc, no consumed slot.
+    #[test]
+    fn montagem_com_dois_pontos_nao_e_tratada_como_anonima() {
+        let yaml = "volumes:\n  data: {}\nservices:\n  web:\n    image: x\n    volumes:\n      - data:/var/lib/data\n";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let t = translate(&compose, "myproj", Path::new("/tmp"), &[]).unwrap();
+        // Only the ONE named volume doc — no anonymous one snuck in.
+        assert_eq!(
+            t.volume_docs.len(),
+            1,
+            "{:?}",
+            t.volume_docs
+                .iter()
+                .map(|d| &d.metadata.name)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn deploy_replicas_diferente_de_1_e_erro() {
     #[test]
     fn deploy_replicas_cria_um_container_por_replica() {
         let yaml = "services:\n  svc:\n    image: x\n    deploy:\n      replicas: 3\n";
