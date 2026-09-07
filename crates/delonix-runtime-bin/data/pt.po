@@ -10445,3 +10445,10 @@ msgstr "service/{name}: {namespace}.{count} carga(s) correspondente(s), porta {p
 
 msgid "service {name}: removed"
 msgstr "service {name}: removido"
+
+# compose --profile (up/config)
+msgid "Activate a service declaring this profile (repeatable). A service with no `profiles:` always runs; one that names some only runs if requested here, or if an activated service `depends_on` it"
+msgstr "Activa um serviço que declare este perfil (repetível). Um serviço sem `profiles:` corre sempre; um que nomeie alguns só arranca se for pedido aqui, ou se um serviço activo o alcançar por `depends_on`"
+
+msgid "Same meaning as `up --profile` — resolve and print as if these profiles were requested"
+msgstr "O mesmo significado de `up --profile` — resolve e imprime como se estes perfis tivessem sido pedidos"
