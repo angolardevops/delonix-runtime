@@ -29,10 +29,13 @@ image     pull  ls    remove    build (delonix build)
 Concretamente, garante-se:
 
 * **O nome do comando e a ordem dos argumentos posicionais.**
-* **As flags curtas e longas listadas acima e os seus significados** — `-d`,
-  `-p`, `-v`, `-e`, `--name`, `--rm`, `-i`, `-t`, `--net`, `--restart`,
+* **As flags curtas e longas listadas acima e os seus significados** — em
+  `run`: `-d`, `-p`, `-v`, `-e`, `--name`, `--rm`, `--net`, `--restart`,
   `--memory`, `--cpus`, `--entrypoint`, `-w`, `-u`, `--add-host`, `--wait`,
-  `--health-*`.
+  `--health-*`; em `exec`: `-i`, `-t`, `-e`, `-w`, `-u`. (Esta lista andou
+  achatada, sem dizer a qual verbo cada flag pertence — `-i`/`-t` nunca
+  existiram em `run`, só em `exec`; um teste em `main.rs` verifica agora as
+  duas listas contra a árvore `clap` real, em vez de confiar na leitura.)
 * **Os códigos de saída** — ver a secção «Códigos de saída» abaixo.
 * **A saída JSON de `inspect`** — campos podem ser ACRESCENTADOS, nunca removidos
   nem com o tipo mudado.
@@ -295,9 +298,32 @@ diz quais são, em vez de os omitir.
   hoje, não esta promessa. A **API de gestão** (`serve api`) é local (socket
   unix, só o próprio uid) e não tem contrato publicado: não construas automação
   sobre ela — para isso existe a CLI, com `-o json`.
-* **`cluster`, `vm`, `pod`, `workload`, `storage`, `sharevolume`, `net`** —
+* **`cluster`, `vm`, `pod`, `workload`, `net`** —
   a superfície ainda está a assentar. (O *schema* de `kind: Pod` é estável, ver
   acima; o que não é estável é o grupo de comandos `delonix pod`.)
+  > **`storage`/`sharevolume` deixaram de ser grupos** (#216, «fold
+  > storage/sharevolume into volume») — esta secção continuou a nomeá-los
+  > durante um tempo depois de já não existirem, o que é exactamente o erro
+  > que a lista mais abaixo existe para impedir (um nome classificado que já
+  > não é um grupo real). A superfície deles vive hoje em `delonix volume`.
+* **`volume`, `network`, `secret`** — só a saída `-o json` e (para `Volume`/
+  `Network`) o schema do manifesto têm promessa (ver as duas secções
+  acima); o resto da superfície imperativa (`create`/`rm`/`inspect` e as suas
+  flags) nunca foi revisto para uma promessa própria. `volume` em particular
+  acabou de absorver `storage`/`sharevolume` (#216) — está literalmente a
+  meio de assentar, o pior momento possível para prometer nada sobre ele.
+* **`apply`, `plan`, `wait`, `stack`, `manifest`, `get`, `describe`,
+  `delete`, `diff`** — o ciclo de reconciliação nativo (IaC, v0.47.0+). O
+  SCHEMA dos manifestos que estes comandos consomem já é estável (secção
+  acima); os VERBOS e flags destes comandos em si (`--detailed-exitcode`,
+  `--prune`, `--replace`, …) nunca tiveram revisão própria, e a Kind mais
+  recente (`Service`) ainda está a ganhar wiring nalguns destes caminhos.
+* **`compose`** — suporte nativo a `docker-compose.yml`, ainda a ganhar
+  chaves do Compose Spec (`profiles`, `configs`/`secrets`, multi-ficheiro —
+  ver o `AGENTS.md` para a lista completa do que falta).
+* **`system`, `dashboard`, `completion`, `init`, `man`, `config`,
+  `explain`, `api-resources`, `version`** — utilitários/introspecção, sem
+  promessa declarada em nenhuma versão.
 * **`mcp`** — o servidor Model Context Protocol (ADR-0025), superfície nova. O
   transporte `stdio` é o suportado (um processo filho do cliente de IA por
   sessão, nunca um daemon); um transporte HTTP local, se vier a existir, seria

@@ -167,10 +167,13 @@ image     pull  ls    remove    build (delonix build)
 <p>Concretamente, garante-se:</p>
 <ul>
 <li><strong>O nome do comando e a ordem dos argumentos posicionais.</strong></li>
-<li><strong>As flags curtas e longas listadas acima e os seus significados</strong> — <code>-d</code>,
-  <code>-p</code>, <code>-v</code>, <code>-e</code>, <code>--name</code>, <code>--rm</code>, <code>-i</code>, <code>-t</code>, <code>--net</code>, <code>--restart</code>,
+<li><strong>As flags curtas e longas listadas acima e os seus significados</strong> — em
+  <code>run</code>: <code>-d</code>, <code>-p</code>, <code>-v</code>, <code>-e</code>, <code>--name</code>, <code>--rm</code>, <code>--net</code>, <code>--restart</code>,
   <code>--memory</code>, <code>--cpus</code>, <code>--entrypoint</code>, <code>-w</code>, <code>-u</code>, <code>--add-host</code>, <code>--wait</code>,
-  <code>--health-*</code>.</li>
+  <code>--health-*</code>; em <code>exec</code>: <code>-i</code>, <code>-t</code>, <code>-e</code>, <code>-w</code>, <code>-u</code>. (Esta lista andou
+  achatada, sem dizer a qual verbo cada flag pertence — <code>-i</code>/<code>-t</code> nunca
+  existiram em <code>run</code>, só em <code>exec</code>; um teste em <code>main.rs</code> verifica agora as
+  duas listas contra a árvore <code>clap</code> real, em vez de confiar na leitura.)</li>
 <li><strong>Os códigos de saída</strong> — ver a secção «Códigos de saída» abaixo.</li>
 <li><strong>A saída JSON de <code>inspect</code></strong> — campos podem ser ACRESCENTADOS, nunca removidos
   nem com o tipo mudado.</li>
@@ -474,9 +477,34 @@ manifesto em git merece um degrau em vez de um erro.</p>
   hoje, não esta promessa. A <strong>API de gestão</strong> (<code>serve api</code>) é local (socket
   unix, só o próprio uid) e não tem contrato publicado: não construas automação
   sobre ela — para isso existe a CLI, com <code>-o json</code>.</li>
-<li><strong><code>cluster</code>, <code>vm</code>, <code>pod</code>, <code>workload</code>, <code>storage</code>, <code>sharevolume</code>, <code>net</code></strong> —
+<li><strong><code>cluster</code>, <code>vm</code>, <code>pod</code>, <code>workload</code>, <code>net</code></strong> —
   a superfície ainda está a assentar. (O <em>schema</em> de <code>kind: Pod</code> é estável, ver
-  acima; o que não é estável é o grupo de comandos <code>delonix pod</code>.)</li>
+  acima; o que não é estável é o grupo de comandos <code>delonix pod</code>.)<blockquote>
+<p><strong><code>storage</code>/<code>sharevolume</code> deixaram de ser grupos</strong> (#216, «fold
+storage/sharevolume into volume») — esta secção continuou a nomeá-los
+durante um tempo depois de já não existirem, o que é exactamente o erro
+que a lista mais abaixo existe para impedir (um nome classificado que já
+não é um grupo real). A superfície deles vive hoje em <code>delonix volume</code>.</p>
+</blockquote>
+</li>
+<li><strong><code>volume</code>, <code>network</code>, <code>secret</code></strong> — só a saída <code>-o json</code> e (para <code>Volume</code>/
+  <code>Network</code>) o schema do manifesto têm promessa (ver as duas secções
+  acima); o resto da superfície imperativa (<code>create</code>/<code>rm</code>/<code>inspect</code> e as suas
+  flags) nunca foi revisto para uma promessa própria. <code>volume</code> em particular
+  acabou de absorver <code>storage</code>/<code>sharevolume</code> (#216) — está literalmente a
+  meio de assentar, o pior momento possível para prometer nada sobre ele.</li>
+<li><strong><code>apply</code>, <code>plan</code>, <code>wait</code>, <code>stack</code>, <code>manifest</code>, <code>get</code>, <code>describe</code>,
+  <code>delete</code>, <code>diff</code></strong> — o ciclo de reconciliação nativo (IaC, v0.47.0+). O
+  SCHEMA dos manifestos que estes comandos consomem já é estável (secção
+  acima); os VERBOS e flags destes comandos em si (<code>--detailed-exitcode</code>,
+  <code>--prune</code>, <code>--replace</code>, …) nunca tiveram revisão própria, e a Kind mais
+  recente (<code>Service</code>) ainda está a ganhar wiring nalguns destes caminhos.</li>
+<li><strong><code>compose</code></strong> — suporte nativo a <code>docker-compose.yml</code>, ainda a ganhar
+  chaves do Compose Spec (<code>profiles</code>, <code>configs</code>/<code>secrets</code>, multi-ficheiro —
+  ver o <code>AGENTS.md</code> para a lista completa do que falta).</li>
+<li><strong><code>system</code>, <code>dashboard</code>, <code>completion</code>, <code>init</code>, <code>man</code>, <code>config</code>,
+  <code>explain</code>, <code>api-resources</code>, <code>version</code></strong> — utilitários/introspecção, sem
+  promessa declarada em nenhuma versão.</li>
 <li><strong><code>mcp</code></strong> — o servidor Model Context Protocol (ADR-0025), superfície nova. O
   transporte <code>stdio</code> é o suportado (um processo filho do cliente de IA por
   sessão, nunca um daemon); um transporte HTTP local, se vier a existir, seria
