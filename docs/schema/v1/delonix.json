@@ -1,5 +1,35 @@
 {
   "$defs": {
+    "AppSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "builder": {
+          "default": "auto",
+          "description": "`\"auto\"` (detect the stack, use the Paketo builder), `\"heroku\"`, or an\nexplicit builder image reference — the last one REQUIRES `runImage`\n(this engine does not introspect a custom builder's own `builder.toml`\nto discover its run image; refusing is the honest answer, not a guess).",
+          "type": "string"
+        },
+        "image": {
+          "description": "Tag the built image gets in the LOCAL `ImageStore` once the build\nsucceeds.",
+          "type": "string"
+        },
+        "runImage": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "default": ".",
+          "description": "Directory to build (Compose-style relative-to-CWD default, same\nconvention `kind: Image`'s `build.context` already uses — not the\nmanifest file's own directory).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "image"
+      ],
+      "type": "object"
+    },
     "Backend": {
       "description": "The destination of a path: a container (by name) and the port it listens on.",
       "properties": {
@@ -2951,6 +2981,31 @@
       "if": {
         "properties": {
           "kind": {
+            "const": "App"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "artifact.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/AppSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
             "const": "Gateway"
           }
         },
@@ -3238,6 +3293,7 @@
     },
     "kind": {
       "enum": [
+        "App",
         "Cluster",
         "Container",
         "Dependency",
