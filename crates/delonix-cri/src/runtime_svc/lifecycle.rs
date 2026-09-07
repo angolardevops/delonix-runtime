@@ -61,6 +61,16 @@ struct SandboxRec {
     cni_ip: String,
 }
 
+/// `NODE` when the sandbox shares the host's namespace, `POD` otherwise — the
+/// same two values `run_pod_sandbox` decodes on the way in (`is_node`).
+fn ns_mode(host: bool) -> i32 {
+    if host {
+        NamespaceMode::Node as i32
+    } else {
+        NamespaceMode::Pod as i32
+    }
+}
+
 fn sandbox_state(r: &SandboxRec) -> i32 {
     if r.stopped {
         PodSandboxState::SandboxNotready as i32
@@ -623,7 +633,35 @@ pub fn pod_sandbox_status(
             ip,
             additional_ips: vec![],
         }),
-        linux: None,
+        // The namespace modes the sandbox was CREATED with, given back verbatim.
+        //
+        // This used to be `None`, and that single word cost a control plane. The
+        // kubelet compares `linux.namespaces.options.network` against what the pod
+        // asks for, on every sync, and starts a NEW sandbox whenever they differ.
+        // With `linux: None` prost hands it the zero value — `POD` — so every
+        // `hostNetwork: true` pod (which is EVERY kubeadm control-plane static pod:
+        // etcd, apiserver, controller-manager, scheduler) compared `POD != NODE`
+        // and was torn down and rebuilt about once per second, for ever.
+        //
+        // MEASURED 2026-09-07, v0.66.0, k8s 1.36.4: `kubeadm init` never got past
+        // `wait-control-plane`, the four containers showed `Exited (0)` with no
+        // probe having run, and `crictl pods` reached ATTEMPT 401 on the etcd pod
+        // in under four minutes — 128 live sandboxes and climbing. The same
+        // container started by hand stayed `Up`, because there is no kubelet to
+        // compare anything.
+        //
+        // `run_pod_sandbox` already reads all three modes and stores them; only
+        // the way back was missing.
+        linux: Some(LinuxPodSandboxStatus {
+            namespaces: Some(Namespace {
+                options: Some(NamespaceOption {
+                    network: ns_mode(r.host_network),
+                    pid: ns_mode(r.host_pid),
+                    ipc: ns_mode(r.host_ipc),
+                    ..Default::default()
+                }),
+            }),
+        }),
         labels: r.labels.clone(),
         annotations: r.annotations.clone(),
         runtime_handler: String::new(),
@@ -2244,6 +2282,54 @@ mod tests {
         .into_inner()
         .items;
         assert!(none.is_empty(), "o filtro de estado não foi aplicado");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// The kubelet compares `linux.namespaces.options.network` against what the pod asks
+    /// for, on EVERY sync, and starts a new sandbox whenever they differ. Reporting `None`
+    /// hands it the zero value (`POD`), so every `hostNetwork: true` pod — which is every
+    /// kubeadm control-plane static pod — never matched and was rebuilt about once per
+    /// second, for ever. MEASURED 2026-09-07: `crictl pods` reached ATTEMPT 401 on the etcd
+    /// pod in under four minutes, and no control plane could ever finish `kubeadm init`.
+    #[test]
+    fn pod_sandbox_status_reports_the_namespace_modes() {
+        let tmp = std::env::temp_dir().join(format!("dlx-cri-ns-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        write_rec(
+            &sb_dir(&tmp),
+            "sbhost",
+            &SandboxRec {
+                id: "sbhost".into(),
+                name: "etcd".into(),
+                namespace: "kube-system".into(),
+                host_network: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let st = pod_sandbox_status(&tmp, "sbhost".into())
+            .unwrap()
+            .into_inner()
+            .status
+            .expect("status");
+        let opts = st
+            .linux
+            .expect("the kubelet reads `linux` — `None` is what broke the control plane")
+            .namespaces
+            .expect("namespaces")
+            .options
+            .expect("options");
+
+        assert_eq!(
+            opts.network,
+            NamespaceMode::Node as i32,
+            "a host-network sandbox must report NODE, or the kubelet rebuilds it every sync"
+        );
+        // The other two are POD here, and asserting them keeps a future edit from wiring
+        // `network` alone and leaving the neighbours reporting whatever the zero value is.
+        assert_eq!(opts.pid, NamespaceMode::Pod as i32);
+        assert_eq!(opts.ipc, NamespaceMode::Pod as i32);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
