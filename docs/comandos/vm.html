@@ -157,9 +157,11 @@ nodes.</p>
 
 Commands:
   create           Create (or auto-recover) a VM
+  pause            Suspend a running VM&#x27;s vCPUs — guest memory stays intact, unlike `stop`
   restart          Stop (if running) then start — always a real reboot, unlike `start`. Same recovered-fields limits as `start`
   start            Start an existing, stopped VM — idempotent (already running = no-op)
   stop             Stop the VM (preserves disk, record and snapshots)
+  unpause          Resume a VM suspended with `pause`. Refuses a VM that is not paused
   ls               List the VMs
   console          Attach to the VM&#x27;s serial console (interactive terminal)
   ssh              SSH into a VM by NAME, or straight to an address
@@ -187,7 +189,7 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 COMMAND MAP:
-  Lifecycle    create · stop · start · restart
+  Lifecycle    create · stop · start · restart · pause · unpause
   Inspect      ls
   Interact     console · ssh · vnc
   Configure    default-backend
@@ -948,7 +950,7 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><pre><code>delonix vm ls</code></pre></div>
 <h2 id='status'><code>vm status</code></h2>
 <p class='intro'>error: unrecognized subcommand &#x27;status&#x27;</p>
-<p class='intro'>tip: a similar subcommand exists: &#x27;start&#x27;</p>
+<p class='intro'>tip: some similar subcommands exist: &#x27;pause&#x27;, &#x27;start&#x27;</p>
 <div class='help'><pre><code>Usage: delonix vm [OPTIONS] &lt;COMMAND&gt;
 
 For more information, try &#x27;--help&#x27;.</code></pre></div>
