@@ -125,6 +125,24 @@ pub enum PodCmd {
         #[arg(short, long)]
         interactive: bool,
     },
+    /// Forward one or more host ports to ports inside the pod's netns.
+    ///
+    /// Each `hostPort[:podPort]` binds `127.0.0.1:hostPort` on this host (loopback
+    /// only, same default-safe posture as the rest of this engine's port
+    /// publishing) and relays every accepted connection into the pod's shared
+    /// network namespace, where `podPort` (defaulting to the same number as
+    /// `hostPort`) is reached over the pod's own loopback — the same semantics a
+    /// real Kubernetes Pod gives `kubectl port-forward`.
+    ///
+    /// Runs in the FOREGROUND, blocking until Ctrl-C, like `kubectl
+    /// port-forward` — it is not a background service.
+    PortForward {
+        #[arg(add = clap_complete::engine::ArgValueCandidates::new(super::complete::pods))]
+        pod: String,
+        /// `hostPort[:podPort]`, repeatable.
+        #[arg(required = true)]
+        ports: Vec<String>,
+    },
 }
 
 pub fn run(action: PodCmd) -> Result<()> {
@@ -168,6 +186,7 @@ pub fn run(action: PodCmd) -> Result<()> {
             container,
             interactive,
         } => attach(&pod, container.as_deref(), interactive),
+        PodCmd::PortForward { pod, ports } => port_forward(&pod, &ports),
     }
 }
 
@@ -755,9 +774,192 @@ fn cp(container_short: Option<&str>, src: &str, dst: &str) -> Result<()> {
     container::cmd_cp(&images, &store, &new_src, &new_dst)
 }
 
+/// Parses `hostPort[:podPort]` — the same convention `kubectl port-forward`
+/// uses: no remote host (this always binds `127.0.0.1`), and `podPort` defaults
+/// to the same number as `hostPort` when omitted. Pure, no I/O.
+fn parse_port_forward_spec(spec: &str) -> Result<(u16, u16)> {
+    let (host, target) = spec.split_once(':').unwrap_or((spec, spec));
+    let parse_one = |s: &str| -> Result<u16> {
+        s.parse::<u16>().map_err(|_| {
+            Error::Invalid(format!(
+                "invalid port forward spec '{spec}': '{s}' is not a valid port"
+            ))
+        })
+    };
+    Ok((parse_one(host)?, parse_one(target)?))
+}
+
+/// `pod port-forward <pod> <hostPort>[:<podPort>]...` — a host↔pod-netns relay,
+/// the imperative sibling of `container run --net <network>`/`--pod`: it reuses
+/// the exact same [`infra::join_argv`] prefix those already use to enter a
+/// netns without new privilege, it just runs a byte-relay instead of the
+/// container's own command.
+///
+/// Foreground, like `kubectl port-forward`: blocks until Ctrl-C (closing the
+/// listeners frees the ports; there is no graceful-shutdown state to save).
+/// Each accepted connection spawns its own hidden `__netnsconnect <podPort>`
+/// process INSIDE the pod's netns, with the accepted socket wired as BOTH its
+/// stdin and stdout (one TCP socket serves both directions) — so N concurrent
+/// connections to the same `hostPort` are independent processes, never sharing
+/// state, and one being slow never blocks another.
+fn port_forward(pod: &str, ports: &[String]) -> Result<()> {
+    let (_, store) = open_stores()?;
+    if members_of(&store, pod)?.is_empty() {
+        return Err(Error::NotFound(format!(
+            "no such pod: {pod} (see `delonix pod ls`)"
+        )));
+    }
+    let netns = pod_netns_name(pod);
+    let specs: Vec<(u16, u16)> = ports
+        .iter()
+        .map(|s| parse_port_forward_spec(s))
+        .collect::<Result<_>>()?;
+
+    let exe = std::env::current_exe().map_err(|e| Error::Runtime {
+        context: "current_exe",
+        message: e.to_string(),
+    })?;
+
+    // Bind every listener BEFORE printing anything or spawning a single
+    // thread — a port already in use has to fail the whole command up front,
+    // not leave earlier ports silently forwarding while a later one errors.
+    let mut listeners = Vec::with_capacity(specs.len());
+    for &(host_port, pod_port) in &specs {
+        let listener =
+            std::net::TcpListener::bind(("127.0.0.1", host_port)).map_err(|e| Error::Runtime {
+                context: "port-forward bind",
+                message: format!("127.0.0.1:{host_port}: {e}"),
+            })?;
+        listeners.push((listener, host_port, pod_port));
+    }
+
+    for (_, host_port, pod_port) in &listeners {
+        println!(
+            "{}",
+            super::po::tf(
+                "Forwarding from 127.0.0.1:{host_port} -> {pod_port}",
+                &[
+                    ("host_port", &host_port.to_string()),
+                    ("pod_port", &pod_port.to_string()),
+                ],
+            )
+        );
+    }
+
+    let handles: Vec<_> = listeners
+        .into_iter()
+        .map(|(listener, _host_port, pod_port)| {
+            let netns = netns.clone();
+            let exe = exe.clone();
+            std::thread::spawn(move || {
+                for conn in listener.incoming() {
+                    let Ok(stream) = conn else { continue };
+                    let netns = netns.clone();
+                    let exe = exe.clone();
+                    std::thread::spawn(move || {
+                        let _ = relay_one(&exe, &netns, pod_port, stream);
+                    });
+                }
+            })
+        })
+        .collect();
+    for h in handles {
+        let _ = h.join();
+    }
+    Ok(())
+}
+
+/// One forwarded connection: enters the pod's netns via [`infra::join_argv`]
+/// and runs the hidden `__netnsconnect <podPort>` verb with the accepted
+/// socket as its stdin AND stdout. Blocks until that process exits (i.e. until
+/// the connection closes on either side) — called from its own thread, so it
+/// never blocks the accept loop or another connection.
+fn relay_one(
+    exe: &std::path::Path,
+    netns: &str,
+    pod_port: u16,
+    stream: std::net::TcpStream,
+) -> Result<()> {
+    let prefix = infra::join_argv(netns).ok_or_else(|| Error::Runtime {
+        context: "join_argv",
+        message: super::po::t("ingress infra is down — no holder to enter").into(),
+    })?;
+    let stdin_side = stream.try_clone().map_err(|e| Error::Runtime {
+        context: "port-forward",
+        message: e.to_string(),
+    })?;
+    let mut child = std::process::Command::new(&prefix[0])
+        .args(&prefix[1..])
+        .arg(exe)
+        .args(["__netnsconnect", &pod_port.to_string()])
+        .stdin(std::process::Stdio::from(std::os::fd::OwnedFd::from(
+            stdin_side,
+        )))
+        .stdout(std::process::Stdio::from(std::os::fd::OwnedFd::from(
+            stream,
+        )))
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| Error::Runtime {
+            context: "port-forward spawn",
+            message: e.to_string(),
+        })?;
+    let _ = child.wait();
+    Ok(())
+}
+
+/// `__netnsconnect <port>` — hidden verb, intercepted before clap in `main`
+/// (same idiom as `netns run`/`__rmtree`) and run INSIDE a pod's netns via
+/// [`relay_one`] above. Connects to `127.0.0.1:<port>` (any pod member
+/// listening there is reachable over the pod's own loopback, the same
+/// semantics a real Kubernetes Pod gives its containers) and relays bytes
+/// between that connection and its own stdin/stdout. A short-lived process,
+/// one per forwarded connection — not a persistent server, no `tokio`.
+pub fn netnsconnect(port_str: &str) -> Result<()> {
+    let port: u16 = port_str
+        .parse()
+        .map_err(|_| Error::Invalid(format!("__netnsconnect: invalid port '{port_str}'")))?;
+    let stream = std::net::TcpStream::connect(("127.0.0.1", port)).map_err(|e| Error::Runtime {
+        context: "__netnsconnect connect",
+        message: format!("127.0.0.1:{port}: {e}"),
+    })?;
+    let mut reader = stream.try_clone().map_err(|e| Error::Runtime {
+        context: "__netnsconnect",
+        message: e.to_string(),
+    })?;
+    let mut writer = stream;
+    let to_local = std::thread::spawn(move || {
+        let mut stdin = std::io::stdin();
+        let _ = std::io::copy(&mut stdin, &mut writer);
+        let _ = writer.shutdown(std::net::Shutdown::Write);
+    });
+    let mut stdout = std::io::stdout();
+    let _ = std::io::copy(&mut reader, &mut stdout);
+    let _ = to_local.join();
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_port_forward_spec_defaults_pod_port_to_host_port() {
+        assert_eq!(parse_port_forward_spec("8080").unwrap(), (8080, 8080));
+    }
+
+    #[test]
+    fn parse_port_forward_spec_reads_hostport_colon_podport() {
+        assert_eq!(parse_port_forward_spec("18080:80").unwrap(), (18080, 80));
+    }
+
+    #[test]
+    fn parse_port_forward_spec_rejects_non_numeric_or_out_of_range() {
+        assert!(parse_port_forward_spec("abc").is_err());
+        assert!(parse_port_forward_spec("8080:abc").is_err());
+        assert!(parse_port_forward_spec("70000").is_err());
+        assert!(parse_port_forward_spec("8080:70000").is_err());
+    }
 
     /// Regression: `spec.network` was parsed and ignored — `create_pod` passed a hardcoded
     /// `ingress`, so a pod asking for a custom network came up on the default bridge in

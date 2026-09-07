@@ -1576,6 +1576,14 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["pod logs", "pod exec", "container attach"],
     },
     Entry {
+        path: "pod port-forward",
+        group: "Interact",
+        examples: &[
+            ("reach the pod's port 80 at localhost:8080 until Ctrl-C", "delonix pod port-forward web 8080:80"),
+        ],
+        see_also: &["pod exec", "container port"],
+    },
+    Entry {
         path: "secret",
         group: "",
         examples: &[
