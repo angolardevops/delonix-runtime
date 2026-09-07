@@ -171,6 +171,10 @@ pub(crate) struct BuildSpec {
     /// `linux/<arch>` — same as the CLI's `--platform`.
     #[serde(default)]
     platform: Option<String>,
+    /// Name or index of a multi-stage `FROM ... AS <name>` stage to stop the
+    /// build at — same as the CLI's `--target`.
+    #[serde(default)]
+    target: Option<String>,
 }
 
 fn default_context() -> PathBuf {
@@ -769,6 +773,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                     !b.no_cache,
                     &secrets,
                     platform.as_deref(),
+                    b.target.as_deref(),
                 )?;
                 println!(
                     "image/{name}: {} ({})",

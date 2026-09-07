@@ -36,10 +36,12 @@
 //! `cap_add`/`cap_drop`/`privileged`/`tmpfs`/`deploy.resources.limits`/
 //! `container_name`/`hostname`/`read_only`/`profiles` (`up --profile`,
 //! transitively closed over `depends_on` — see `active_services`), top-level
-//! `networks:`/`volumes:` (incl. `external: true`). Defers `extends:`, top-level
+//! `networks:`/`volumes:` (incl. `external: true`), and `build.target`
+//! (multi-stage stage selection — forwarded to `kind: Image`'s own
+//! `build.target`, itself `delonix build --target`). Defers `extends:`, top-level
 //! `configs:`/`secrets:` (use `kind: Secret` instead), multi-file compose
-//! (`-f a -f b` merge/`include:`), `build.target` (stage selection),
-//! `deploy.replicas != 1`, a fixed `networks.*.ipv4_address`, and anonymous
+//! (`-f a -f b` merge/`include:`), `deploy.replicas != 1`, a fixed
+//! `networks.*.ipv4_address`, and anonymous
 //! volumes (no explicit source). `working_dir:` IS applied (via `RunOpts.
 //! workdir`, itself now also exposed as `container run -w/--workdir`), and a
 //! bare container port with no host port DOES get a random free host port
@@ -1217,6 +1219,8 @@ struct BuildDocSpec {
     tag: String,
     #[serde(rename = "buildArgs", skip_serializing_if = "Vec::is_empty")]
     build_args: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target: Option<String>,
 }
 #[derive(Serialize)]
 struct ImageDocSpec {
@@ -1229,25 +1233,19 @@ fn service_build_to_image_doc(
     base_dir: &Path,
     tag: &str,
 ) -> Result<ManifestDoc> {
-    let (context_rel, dockerfile, args) = match build {
-        ComposeBuild::Context(c) => (c.clone(), None, Vec::new()),
+    let (context_rel, dockerfile, args, target) = match build {
+        ComposeBuild::Context(c) => (c.clone(), None, Vec::new(), None),
         ComposeBuild::Full {
             context,
             dockerfile,
             args,
             target,
-        } => {
-            if target.is_some() {
-                return Err(Error::Invalid(format!(
-                    "compose: service '{service}': build.target (multi-stage stage selection) is not supported in v1"
-                )));
-            }
-            (
-                context.to_string_lossy().into_owned(),
-                dockerfile.clone(),
-                args.to_kv_pairs(),
-            )
-        }
+        } => (
+            context.to_string_lossy().into_owned(),
+            dockerfile.clone(),
+            args.to_kv_pairs(),
+            target.clone(),
+        ),
     };
     let context_path = base_dir.join(&context_rel);
     let file = dockerfile.map(|f| context_path.join(f).to_string_lossy().into_owned());
@@ -1257,6 +1255,7 @@ fn service_build_to_image_doc(
             file,
             tag: tag.to_string(),
             build_args: args,
+            target,
         },
     };
     Ok(ManifestDoc {

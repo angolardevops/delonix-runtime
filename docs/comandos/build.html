@@ -202,6 +202,9 @@ Options:
       --platform &lt;PLATFORM&gt;
           `linux/&lt;arch&gt;` (e.g. `linux/arm64`) — cross-arch build. Resolves the correct-arch base image and stamps it into the result; actually running a foreign-arch `RUN` needs the host&#x27;s own binfmt_misc/qemu-user-static already registered (not managed by delonix — a clear preflight error names the missing interpreter instead of a confusing mid-build failure)
 
+      --target &lt;TARGET&gt;
+          Name or index of a `FROM ... AS &lt;name&gt;` stage to stop the build at and package as the result, instead of the Dockerfile&#x27;s own final stage. Only the stages the target itself needs (everything at or before it, in file order) are built — later stages are skipped entirely
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
