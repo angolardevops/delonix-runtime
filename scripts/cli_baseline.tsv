@@ -148,6 +148,7 @@
 ~	pod create
 ~	pod exec
 =	pod logs
+~	pod port-forward
 ~	secret apply
 =	secret create
 ~	secret inspect
