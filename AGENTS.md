@@ -3157,6 +3157,75 @@ passou também a varrer o store INTEIRO (não só os docs do manifesto actual),
 senão um documento removido do manifesto nunca aparecia como candidato a
 `Delete` para o `--prune` — a própria razão de existir deste Kind.
 
+## `kind: Service` — descoberta por selector, round-robin por DNS, sem VIP (ADR-0032, 2026-09-05)
+
+Fecha a Kind que faltava para as «12 Kinds operáveis» do plano de
+restruturação da CLI. Desenho completo em
+`docs/adr/0032-service-kind-dns-round-robin.md`; esta secção regista o que
+mudou a implementar e o que a validação ao vivo confirmou.
+
+- **Selecção por label, sem novo mecanismo de matching**: `matches_labels`
+  (`delonix-net-rules`, puro, fail-closed — um selector vazio não selecciona
+  NADA) compara `spec.selector.matchLabels` contra `Container.labels`. É o
+  mesmo primitivo que a `ADR-0024` desenhou para `FirewallPolicy` e que
+  continua por construir — pensado para os dois Kinds acabarem a partilhar a
+  mesma função, não duas cópias a divergir.
+- **DNS multi-registo, não VIP**: `build_dns_index` ganhou uma passagem sobre
+  `service_list()` (novo registo em `infra.rs`, mesmo padrão do `RouteDef`)
+  que resolve o `matchLabels` contra os containers vivos da MESMA passagem de
+  scan (sem 2.ª leitura de disco) e guarda o conjunto de IPs sob a chave DNS
+  do serviço. `dns_resolve_multi_for` (novo, ao lado do `dns_resolve_for` de
+  sempre — os consumidores de 1 IP não mudam de forma) só resolve o nome
+  totalmente qualificado (`<svc>.<ns>.delonix.internal`, sem forma curta) e
+  roda o conjunto por um contador atómico a cada consulta. `handle_dns` tenta
+  este caminho primeiro para `QTYPE_A` e responde com um registo `A` por
+  backend; falha (zero backends) cai para o caminho de sempre, que continua
+  bit-a-bit inalterado.
+- **Isolamento por namespace, herdado do modelo já existente**: mesma
+  namespace ou o serviço estar em `default` (a namespace "pública" — ver
+  «Isolamento de namespace» acima); resto é NXDOMAIN. Não há equivalente de
+  `Dependency` para alargar isto a um Service noutra namespace — se vier a ser
+  preciso, é follow-up.
+- **`ownable: true`, mas sem tocar nas labels do alvo** — o mesmo cuidado que
+  o `NetworkAccessRule` precisou (ver secção acima), só que aqui mais simples:
+  ao contrário de uma regra de firewall, um `Service` NUNCA se liga a um
+  container que não é dele — a posse fica inteira no registo próprio do
+  Service, sem carimbo nenhum no container seleccionado.
+- **`spec.port` é sempre o porto do CONTAINER**, a mesma convenção que
+  `net ingress allow` já usa (pós-DNAT) — não há porto de host nem de VIP,
+  porque não há VIP.
+
+**Wiring que o `KindFacts` sozinho NÃO cobre — descoberto pela bateria de
+testes, não por leitura de código.** Adicionar uma Kind nova toca em VÁRIAS
+tabelas que ninguém deriva de `cmd/kinds.rs`, cada uma com o seu próprio gate:
+`reconcile.rs::hot_fields` (sem isto, mudar `port` planeava sempre `Replace`
+em vez de `Update`); `stack.rs::converge_and_stamp`'s braço central (sem ele,
+o `hot_fields` fix sozinho continuava a cair no `other => Err("no live update
+path")`); `complete.rs::NAMESPACE_SOURCES` (o teste
+`every_namespaced_kind_declares_a_source` chumbou até `Service` ganhar
+`Store(ns_from_services)`); `schema.rs::TYPED_KINDS` (uma lista SEPARADA do
+`match` de geração do schema — `todo_kind_conhecido_tem_schema_ou_dica`
+chumbou até `Service` entrar nela); e o próprio schema publicado
+(`docs/schema/v1/delonix.json`, regenerado e verificado a mudar SÓ o que
+`ServiceSpec`/`ServiceSelector` acrescentam). É a mesma lição que a tabela
+`KindFacts` já documenta no seu próprio doc-comment — um classificador só vale
+o que algo consulta — só que aqui são cinco tabelas diferentes, cada uma
+descoberta por um teste a falhar, não por grep.
+
+**Validado ao vivo** (`DELONIX_ROOT` isolado, binário de release deste
+commit): selector a corresponder a 2 de 3 containers (o terceiro, com outro
+label, fica de fora); `nslookup` real dentro de um container `other` a
+devolver os DOIS registos `A` do serviço; isolamento de namespace nos dois
+sentidos (`teamA` alcança o seu próprio Service, uma namespace terceira não —
+mas alcança um Service em `default`, que é a excepção desenhada); selector
+vazio a avisar e aplicar com sucesso (`rc=0`, `NXDOMAIN` ao resolver);
+actualização de porta a quente (`stack apply` reporta "updating 1 field(s)
+live", não um `Replace`); `stack plan --detailed-exitcode` sem diferenças
+depois de um apply inalterado; `delete services` a remover o registo e o DNS
+a responder `NXDOMAIN` de imediato a seguir. **Não validado**: um cliente que
+resolve uma vez e mantém ligação longa não é rebalanceado a meio — é a
+limitação nomeada no próprio ADR, comum a qualquer balanceamento por DNS.
+
 ## Identidade endereçável de Kinds sem registo próprio (B1, 2026-08-31)
 
 `NetworkRoute` e `NetworkPolicy`/`FirewallPolicy` não têm um nome de documento

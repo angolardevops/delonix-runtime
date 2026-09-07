@@ -10430,3 +10430,18 @@ msgstr "Mostra só esta namespace de isolamento — só as Kinds que TÊM uma a 
 
 msgid "only one isolation namespace — refused on a Kind that has none, never silently ignored"
 msgstr "só uma namespace de isolamento — recusado numa Kind que não tem nenhuma, nunca ignorado em silêncio"
+
+msgid "selector matches no workloads"
+msgstr "o selector não corresponde a nenhuma carga"
+
+msgid "{count} backend(s)"
+msgstr "{count} backend(s)"
+
+msgid "Service/{name}: selector matched no workloads — this service resolves to nothing"
+msgstr "Service/{name}: o selector não correspondeu a nenhuma carga — este serviço resolve para nada"
+
+msgid "service/{name}: {namespace}.{count} matching workload(s), port {port}"
+msgstr "service/{name}: {namespace}.{count} carga(s) correspondente(s), porta {port}"
+
+msgid "service {name}: removed"
+msgstr "service {name}: removido"

@@ -57,6 +57,7 @@ pub mod scan;
 pub mod schema;
 pub mod secret;
 pub mod serve;
+pub mod service;
 pub mod sharevolume;
 pub mod stack;
 pub mod storage;
