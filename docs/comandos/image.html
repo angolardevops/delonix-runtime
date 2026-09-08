@@ -166,6 +166,7 @@ Commands:
   verify    Verify the cosign signature of a local image against a public key
   login     Authenticate to an OCI registry
   logout    Remove the stored credentials of a registry
+  sign      Sign an image with cosign-compatible ECDSA-P256, publishing the signature next to it in the registry
   tag       Give another name/tag to a local image (copies nothing — it&#x27;s just a new name for the same content)
   export    Export an OCI runtime bundle (rootfs + config.json) for `runc`/`crun`
   load      Load an image from an archive (the counterpart of `save`)
@@ -186,7 +187,7 @@ Options:
 COMMAND MAP:
   Lifecycle    pull · remove · push
   Inspect      ls · describe · history · verify · scan
-  Configure    tag · login · logout
+  Configure    tag · sign · login · logout
   Storage      export · save · load
   Declarative  apply
   Maintenance  prune
