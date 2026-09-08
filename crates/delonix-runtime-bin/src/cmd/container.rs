@@ -1609,7 +1609,7 @@ pub enum ContainerCmd {
         /// `always`, `unless-stopped`. A detached supervisor (one per container,
         /// ephemeral — there's no daemon) becomes the container's parent, captures
         /// the real exit code, and restarts it according to the policy.
-        #[arg(long, default_value = "no")]
+        #[arg(long, default_value = "no", value_parser = parse_restart_policy)]
         restart: String,
         /// Attach a host device, `/dev/x[:/dev/y]`. Repeatable. The container's
         /// `/dev` is a tmpfs with a curated list (null/zero/tty/...); this
@@ -1633,13 +1633,13 @@ pub enum ContainerCmd {
         #[arg(short = 'c', long)]
         cpus: Option<String>,
         /// Relative CPU weight (`cpu.weight`, 1–10000) under contention.
-        #[arg(long = "cpu-weight")]
+        #[arg(long = "cpu-weight", value_parser = parse_cgroup_weight)]
         cpu_weight: Option<String>,
         /// CPUs the container is pinned to (`cpuset.cpus`, e.g. `0-3`, `0,2`).
         #[arg(long)]
         cpuset: Option<String>,
         /// Relative I/O weight (`io.weight`, 1–10000).
-        #[arg(long = "io-weight")]
+        #[arg(long = "io-weight", value_parser = parse_cgroup_weight)]
         io_weight: Option<String>,
         /// Absolute read limit from the store's disk (`10mb`, `1g`). Docker's `--device-read-bps`.
         #[arg(long = "device-read-bps")]
@@ -4751,6 +4751,59 @@ fn should_restart(policy: &str, status: &delonix_runtime_core::Status, restarts:
 }
 
 /// Does the policy require supervision? (`no` needs no supervisor at all.)
+/// Validates `--cpu-weight`/`--io-weight` against the range their own `--help`
+/// promises (1–10000, which is also the kernel's).
+///
+/// Measured 2026-09-07: `0`, `99999` and `abc` were all accepted with rc=0 and
+/// all produced `cpu.weight = 100` — the kernel default. The flag documented a
+/// range it did not enforce, and out-of-range meant "ignored", which reads as
+/// "applied" from the outside.
+pub(crate) fn parse_cgroup_weight(s: &str) -> std::result::Result<String, String> {
+    match s.parse::<u32>() {
+        Ok(n) if (1..=10_000).contains(&n) => Ok(s.to_string()),
+        _ => Err(format!("'{s}': weight must be a number from 1 to 10000")),
+    }
+}
+
+/// Validates `--restart` at the CLI boundary, so a typo is refused instead of
+/// producing a container that never comes back.
+///
+/// Measured 2026-09-07: `--restart talvez` was ACCEPTED (rc=0) and left
+/// `restart_policy: null` in the record — `policy_supervised` does not recognise
+/// it, so no policy was stored and nothing ever restarted the container. A
+/// misspelling (`alwyas`, `on-failre`) produced a service that never comes back
+/// up, silently, while the operator believed a supervisor was configured. Of
+/// everything in that class this is the one with the sharpest edge: the others
+/// waste resources, this one loses availability.
+///
+/// A plain `ValueEnum` cannot express it — `on-failure` takes an optional
+/// `:max` — so the grammar is checked here, in one place, and the message lists
+/// what is valid rather than only saying what was not.
+pub(crate) fn parse_restart_policy(s: &str) -> std::result::Result<String, String> {
+    let (name, max) = match s.split_once(':') {
+        Some((n, m)) => (n, Some(m)),
+        None => (s, None),
+    };
+    match (name, max) {
+        ("no" | "always" | "unless-stopped", None) => Ok(s.to_string()),
+        ("on-failure", None) => Ok(s.to_string()),
+        // `on-failure:0` would mean "retry zero times", which is `no` written the
+        // long way; refusing it keeps one spelling per meaning.
+        ("on-failure", Some(m)) => match m.parse::<u32>() {
+            Ok(n) if n > 0 => Ok(s.to_string()),
+            _ => Err(format!(
+                "'{s}': the retry count after `on-failure:` must be a positive number (e.g. on-failure:3)"
+            )),
+        },
+        ("no" | "always" | "unless-stopped", Some(_)) => Err(format!(
+            "'{s}': only `on-failure` takes a `:max` (e.g. on-failure:3)"
+        )),
+        _ => Err(format!(
+            "'{s}': not a restart policy — use no, always, unless-stopped, on-failure or on-failure:<max>"
+        )),
+    }
+}
+
 pub(crate) fn policy_supervised(policy: &str) -> bool {
     matches!(
         policy.split(':').next().unwrap_or(""),
@@ -8281,6 +8334,73 @@ restartPolicy: OnFailure
         assert_eq!(opts.cap_drop, vec!["ALL"]);
         assert_eq!(opts.net, "mynet");
         assert_eq!(opts.restart, "on-failure");
+    }
+
+    /// `--restart talvez` used to be ACCEPTED (rc=0) and leave
+    /// `restart_policy: null`: nothing recognised the value, so nothing ever
+    /// restarted the container while the operator believed a supervisor was
+    /// configured. A misspelling that costs availability, in silence.
+    #[test]
+    fn a_restart_policy_is_valid_or_it_is_refused() {
+        for good in [
+            "no",
+            "always",
+            "unless-stopped",
+            "on-failure",
+            "on-failure:3",
+            "on-failure:99",
+        ] {
+            assert_eq!(
+                super::parse_restart_policy(good).as_deref(),
+                Ok(good),
+                "{good}"
+            );
+            // Whatever passes here must be a value the supervisor understands —
+            // otherwise the check is decorative. `no` is the one that
+            // deliberately does not supervise.
+            if good != "no" {
+                assert!(
+                    super::policy_supervised(good),
+                    "{good} passed and the supervisor does not know it"
+                );
+            }
+        }
+        for bad in [
+            "talvez",
+            "alwyas",
+            "on-failre",
+            "",
+            "ALWAYS",
+            "always:2",
+            "on-failure:0",
+            "on-failure:abc",
+            "on-failure:-1",
+        ] {
+            assert!(
+                super::parse_restart_policy(bad).is_err(),
+                "{bad} should be refused"
+            );
+        }
+    }
+
+    /// The flag documented `1–10000` and enforced nothing: `0`, `99999` and
+    /// `abc` all landed on the kernel's default of 100, with rc=0. A range in
+    /// the `--help` that the code does not check is a promise, not a fact.
+    #[test]
+    fn a_cgroup_weight_honours_the_range_its_help_promises() {
+        for good in ["1", "100", "500", "10000"] {
+            assert_eq!(
+                super::parse_cgroup_weight(good).as_deref(),
+                Ok(good),
+                "{good}"
+            );
+        }
+        for bad in ["0", "10001", "99999", "abc", "", "-1", "1.5", " 100"] {
+            assert!(
+                super::parse_cgroup_weight(bad).is_err(),
+                "{bad} should be refused"
+            );
+        }
     }
 
     #[test]
