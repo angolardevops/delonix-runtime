@@ -162,10 +162,13 @@ for SSH, and runs the SAME bootstrap — one command, from zero to a cluster run
 Commands:
   create      Create a local Kubernetes cluster **without a manifest and without Docker**
   kubeadm     Provision VMs (golden VM image) + `kubeadm` bootstrap
+  upgrade     Upgrade a `mode: ssh` cluster to a newer Kubernetes version, kubeadm-style
   init        Initialize a project with the cluster manifests (kind/vm/ssh)
+  drain       Cordon a node and evict its pods
   health      Is the control-plane answering, and is every node `Ready`?
   kubeconfig  Print a cluster&#x27;s kubeconfig from the local cache (no live SSH)
   load        Load local images into a kind-mode cluster&#x27;s nodes, **without a registry**
+  uncordon    Mark a drained node schedulable again
   apply       Apply the `kind: KubernetesCluster` document(s) of a manifest
   kube        Generate a Kubernetes manifest from a container/pod already running locally
   prune       Reclaim the state of clusters that have no nodes left
@@ -179,9 +182,9 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 COMMAND MAP:
-  Lifecycle    create · kubeadm
+  Lifecycle    create · kubeadm · upgrade
   Create       init
-  Interact     load · kubeconfig · health
+  Interact     load · kubeconfig · health · drain · uncordon
   Declarative  kube · apply
   Maintenance  prune
 
