@@ -81,6 +81,7 @@ fn filled_spec(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
     match doc.kind.as_str() {
         k::NETWORK => cmd::network::spec_with_defaults(doc),
         k::NETWORK_ROUTE => cmd::netroute::spec_with_defaults(doc),
+        k::SERVICE => cmd::service::spec_with_defaults(doc),
         k::VOLUME => cmd::volume::spec_with_defaults(doc),
         // Secret DOES get a round-trip, and its values are redacted on the way
         // (`secret::spec_with_defaults`). It used to be the one Kind skipped
@@ -89,6 +90,7 @@ fn filled_spec(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
         // was read before applying was the one place you could not.
         k::SECRET => cmd::secret::spec_with_defaults(doc),
         k::IMAGE => cmd::image::spec_with_defaults(doc),
+        k::APP => cmd::app::spec_with_defaults(doc),
         k::VM => cmd::vm::spec_with_defaults(doc),
         k::POD => cmd::pod::spec_with_defaults(doc),
         k::HTTP_ROUTE => cmd::httproute::spec_with_defaults(doc),
@@ -418,6 +420,7 @@ pub(crate) fn spec_fields_for(kind: &str) -> Option<&'static [&'static str]> {
         k::NETWORK => Some(crate::cmd::network::NETWORK_SPEC_FIELDS),
         k::IMAGE => Some(crate::cmd::image::IMAGE_SPEC_FIELDS),
         k::SECRET => Some(crate::cmd::secret::SECRET_SPEC_FIELDS),
+        k::APP => Some(crate::cmd::app::APP_SPEC_FIELDS),
         // `Ingress` is the k8s-shaped L7 Ingress (→ HTTPRoute); the L4 firewall
         // keeps `Egress`/`FirewallPolicy`.
         k::INGRESS => Some(crate::cmd::httproute::INGRESS_SPEC_FIELDS),
@@ -428,6 +431,7 @@ pub(crate) fn spec_fields_for(kind: &str) -> Option<&'static [&'static str]> {
         k::HTTP_ROUTE => Some(crate::cmd::httproute::HTTP_ROUTE_SPEC_FIELDS),
         k::DEPENDENCY => Some(crate::cmd::dependency::DEPENDENCY_SPEC_FIELDS),
         k::NETWORK_ROUTE => Some(crate::cmd::netroute::NETWORK_ROUTE_SPEC_FIELDS),
+        k::SERVICE => Some(crate::cmd::service::SERVICE_SPEC_FIELDS),
         k::GATEWAY => Some(crate::cmd::tunnel::TUNNEL_SPEC_FIELDS),
         k::SHARE_VOLUME => Some(crate::cmd::sharevolume::SHAREVOLUME_SPEC_FIELDS),
         k::WORKLOAD => Some(crate::cmd::workload::WORKLOAD_SPEC_FIELDS),

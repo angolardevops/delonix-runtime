@@ -14,7 +14,9 @@
 //! crate. É o preço de deixar de deduzir a camada de transporte.
 
 use delonix_cri::cri::runtime_service_client::RuntimeServiceClient;
-use delonix_cri::cri::{StatusRequest, VersionRequest};
+use delonix_cri::cri::{
+    ListMetricDescriptorsRequest, ListPodSandboxMetricsRequest, StatusRequest, VersionRequest,
+};
 
 /// Um caminho de socket CURTO — o `sun_path` do `AF_UNIX` são 108 bytes, e o
 /// `$TMPDIR` de uma sessão de agente já passa dos 90.
@@ -105,6 +107,39 @@ async fn o_status_chega_pelo_transporte_grpc_a_serio() {
     assert!(
         rr.status,
         "chegámos aqui pelo gRPC, logo o runtime respondeu — RuntimeReady tem de ser true"
+    );
+
+    // `ListMetricDescriptors`/`ListPodSandboxMetrics` — real gRPC round-trip,
+    // not just the internal function called directly. Empty base directory
+    // here, so no sandboxes exist; what matters is that the descriptor names
+    // arrive over the wire and match this runtime's own metric names (the
+    // spec-mandated pairing `every_emitted_metric_name_has_a_descriptor`
+    // checks internally, now also proven through the transport).
+    let descriptors = cli
+        .list_metric_descriptors(ListMetricDescriptorsRequest {})
+        .await
+        .expect("ListMetricDescriptors over the real gRPC transport")
+        .into_inner()
+        .descriptors;
+    assert!(
+        !descriptors.is_empty(),
+        "o runtime tem de declarar pelo menos um descritor de métrica"
+    );
+    let names: Vec<&str> = descriptors.iter().map(|d| d.name.as_str()).collect();
+    assert!(
+        names.contains(&"container_cpu_usage_core_nanoseconds"),
+        "faltou o descritor de CPU por container: {names:?}"
+    );
+
+    let pod_metrics = cli
+        .list_pod_sandbox_metrics(ListPodSandboxMetricsRequest {})
+        .await
+        .expect("ListPodSandboxMetrics over the real gRPC transport")
+        .into_inner()
+        .pod_metrics;
+    assert!(
+        pod_metrics.is_empty(),
+        "no sandboxes exist, the list has to come back empty — never fabricated"
     );
 
     drop(cli);

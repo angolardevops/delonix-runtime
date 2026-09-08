@@ -28,6 +28,7 @@ BIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "..", "target", "
 GROUP_PATH = {
     "netns": ("net", "netns"),
     "flow": ("net", "flow"),
+    "capture": ("net", "capture"),
     "ingress": ("net", "ingress"),
     "egress": ("net", "egress"),
     "httproute": ("net", "httproute"),
@@ -109,6 +110,7 @@ SOURCE_FILES = {
     "httproute": "httproute.rs",
     "tunnel": "tunnel.rs",
     "flow": "flow.rs",
+    "capture": "capture.rs",
     "boot": "boot.rs",
     "system": "system.rs",
     "dash": "dash.rs",
@@ -1034,6 +1036,21 @@ redesenha a cada 2s.""",
             ("Monitorização contínua", "sudo delonix net flow --watch"),
         ],
     },
+    "capture": {
+        "title": "delonix net capture",
+        "tagline": "Captura de pacotes crua na interface SDN de um container — o tcpdump do próprio host.",
+        "intro": """Sem motor de captura próprio: corre o <code>tcpdump</code> do PRÓPRIO HOST dentro
+da netns do container — o mesmo prefixo <code>join_argv</code> que <code>--net &lt;rede&gt;</code> já usa
+para lá entrar, sem privilégio novo. Só containers nesta versão: um membro de pod partilha a netns do
+pod e é recusado, a apontar para o nome do pod. Preflight claro antes de qualquer <code>nsenter</code>
+se o <code>tcpdump</code> não estiver instalado neste host (<code>install.sh</code> já o traz como
+dependência opcional).""",
+        "subs": {},
+        "examples": [
+            ("Escrever um ficheiro pcap, parar ao fim de 100 pacotes", "delonix net capture web -w out.pcap -c 100"),
+            ("Transmitir direto para o Wireshark durante 30s", "delonix net capture web -w - --duration 30 | wireshark -k -i -"),
+        ],
+    },
     "boot": {
         "title": "delonix system boot",
         "tagline": "Persistência no arranque: units systemd para os containers voltarem a subir no boot.",
@@ -1451,6 +1468,15 @@ attaches two eBPF tc/clsact classifiers to the SDN veths, which count bytes/pack
 shared BPF map — <strong>never dropping anything</strong> (nft remains the only enforcer). Without
 privilege (the common rootless case) it says so and falls back to veth counters, which always
 work. <code>--watch</code> redraws every 2s.""",
+    },
+    "capture": {
+        "tagline": "Raw packet capture on a container's SDN interface — the host's own tcpdump.",
+        "intro": """No capture engine of its own: runs the HOST's own <code>tcpdump</code> inside the
+container's netns — the same <code>join_argv</code> prefix <code>--net &lt;network&gt;</code> already
+uses to enter one, no new privilege. Containers only in this version: a pod member shares its pod's
+netns and is refused, pointing at the pod's name. A clear preflight runs before any
+<code>nsenter</code> if <code>tcpdump</code> isn't installed on this host (<code>install.sh</code>
+already brings it as an optional dependency).""",
     },
     "boot": {
         "tagline": "Boot persistence: systemd units so containers come back up after a reboot.",
@@ -2355,6 +2381,10 @@ EXAMPLES_EN = {
     ("tunnel", "describe"): ["Tunnel detail"],
     ("tunnel", "rm"): ["Stop and remove (really kills the agent process)"],
     ("flow", None): ["One sample", "Continuous monitoring"],
+    ("capture", None): [
+        "Write a pcap file, stop after 100 packets",
+        "Stream straight into Wireshark for 30s",
+    ],
     ("boot", "enable"): ["Persist the ones running now"],
     ("boot", "status"): ["See what's installed"],
     ("boot", "disable"): ["Remove the boot units"],

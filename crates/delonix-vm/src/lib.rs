@@ -658,6 +658,19 @@ pub trait VmBackend {
         self.stop(vmdir, vm)
     }
 
+    /// Suspends a RUNNING VM's vCPUs, guest memory intact — the same notion
+    /// as `container pause`'s cgroup freezer, not [`VmBackend::snapshot`]
+    /// (which persists a checkpoint to disk; this never touches storage).
+    /// Default: unsupported (fail closed) — a backend overrides this only
+    /// once it actually has a mechanism, never as a silent no-op.
+    fn pause(&self, _vmdir: &Path, _vm: &Vm) -> Result<()> {
+        Err(unsupported_pause(self.id(), "pause"))
+    }
+    /// Resumes a VM suspended with [`VmBackend::pause`]. Default: unsupported.
+    fn unpause(&self, _vmdir: &Path, _vm: &Vm) -> Result<()> {
+        Err(unsupported_pause(self.id(), "unpause"))
+    }
+
     /// Brings an already-created VM back up, instead of creating one.
     ///
     /// `Ok(None)` — the default — means "I have no way to resume; create it the
@@ -751,6 +764,11 @@ pub trait VmBackend {
     fn auto_selectable(&self) -> bool {
         true
     }
+}
+
+/// Fail-closed error for a backend that does not implement pause/unpause.
+fn unsupported_pause(backend: &str, op: &str) -> Error {
+    Error::Invalid(format!("{op} is not supported on the '{backend}' backend"))
 }
 
 /// Fail-closed error for a backend that does not implement snapshot/restore
@@ -1263,6 +1281,23 @@ impl VmBackend for CloudHypervisorBackend {
         Ok(())
     }
 
+    // ---- pause/unpause -----------------------------------------------------
+    //
+    // Cloud Hypervisor's own `PUT /api/v1/vm.pause`/`vm.resume`, over the
+    // per-VM api-socket `boot` already opens (`vm.api_socket`). Unlike
+    // `vm.snapshot` (see the comment above the snapshot methods below), this
+    // never touches the disk — it only suspends/resumes vCPUs — so it has
+    // none of the "who holds the qcow2 lock" conflict that keeps snapshot
+    // offline instead.
+
+    fn pause(&self, _vmdir: &Path, vm: &Vm) -> Result<()> {
+        ch_api_put(&vm.api_socket, "/api/v1/vm.pause")
+    }
+
+    fn unpause(&self, _vmdir: &Path, vm: &Vm) -> Result<()> {
+        ch_api_put(&vm.api_socket, "/api/v1/vm.resume")
+    }
+
     // ---- snapshots -------------------------------------------------------
     //
     // OFFLINE, in the VM's own qcow2 (`qemu-img snapshot`) — the same kind of
@@ -1451,6 +1486,79 @@ const DEFAULT_CH_FIRMWARES: [&str; 4] = [
 /// (`<base>/vms/<name>.console`). `delonix vm console` connects here.
 pub fn console_socket(base: &Path, name: &str) -> std::path::PathBuf {
     base.join("vms").join(format!("{name}.console"))
+}
+
+/// A minimal HTTP/1.1 `PUT` with no request body, used only for Cloud
+/// Hypervisor's `vm.pause`/`vm.resume` (which have no response body either —
+/// both answer `204 No Content`). There is no HTTP client anywhere in this
+/// crate — ADR-0008 keeps `delonix-vm` free of network dependencies, and a
+/// REMOTE backend gets its own crate instead (`delonix-proxmox`) — so this is
+/// the smallest thing that talks the one endpoint these two verbs need, over
+/// `UnixStream`, the same primitive `delonix-net`'s `slirp_api` already uses
+/// for a different (line-delimited JSON) protocol.
+fn ch_api_put(sock: &str, path: &str) -> Result<()> {
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+    let mut s = UnixStream::connect(sock).map_err(|e| Error::Runtime {
+        context: "vm",
+        message: format!("cloud-hypervisor api socket: {e}"),
+    })?;
+    let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(10)));
+    let req = format!("PUT {path} HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n");
+    s.write_all(req.as_bytes()).map_err(|e| Error::Runtime {
+        context: "vm",
+        message: format!("cloud-hypervisor api write: {e}"),
+    })?;
+    // Read only up to the end of the response HEADERS. Waiting for EOF
+    // instead would hang on a keep-alive connection the server never
+    // closes — and both verbs this calls answer with no body to wait for
+    // beyond that point.
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 512];
+    loop {
+        let n = s.read(&mut chunk).map_err(|e| Error::Runtime {
+            context: "vm",
+            message: format!("cloud-hypervisor api read: {e}"),
+        })?;
+        if n == 0 || buf.len() > 8192 {
+            break;
+        }
+        buf.extend_from_slice(&chunk[..n]);
+        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+            break;
+        }
+    }
+    let status_line = String::from_utf8_lossy(&buf)
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if http_status_is_2xx(&status_line) {
+        Ok(())
+    } else {
+        Err(Error::Runtime {
+            context: "vm",
+            message: format!(
+                "cloud-hypervisor api {path}: {}",
+                if status_line.is_empty() {
+                    "no response"
+                } else {
+                    &status_line
+                }
+            ),
+        })
+    }
+}
+
+/// Pure: `true` for any HTTP status line in the 2xx range. Tested against the
+/// exact shape Cloud Hypervisor returns (`HTTP/1.1 204 No Content`).
+fn http_status_is_2xx(status_line: &str) -> bool {
+    status_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse::<u16>().ok())
+        .is_some_and(|code| (200..300).contains(&code))
 }
 
 fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) -> Result<i32> {
@@ -2762,6 +2870,26 @@ impl VmBackend for LibvirtBackend {
         Ok(())
     }
 
+    fn pause(&self, _vmdir: &Path, vm: &Vm) -> Result<()> {
+        let uri = libvirt_domain_uri(&vm.name).ok_or_else(|| Error::VmNotFound(vm.name.clone()))?;
+        quiet("virsh", &["-c", uri, "suspend", "--", &vm.name])
+            .map(|_| ())
+            .map_err(|e| Error::Runtime {
+                context: "virsh suspend",
+                message: e,
+            })
+    }
+
+    fn unpause(&self, _vmdir: &Path, vm: &Vm) -> Result<()> {
+        let uri = libvirt_domain_uri(&vm.name).ok_or_else(|| Error::VmNotFound(vm.name.clone()))?;
+        quiet("virsh", &["-c", uri, "resume", "--", &vm.name])
+            .map(|_| ())
+            .map_err(|e| Error::Runtime {
+                context: "virsh resume",
+                message: e,
+            })
+    }
+
     fn snapshot(&self, vmdir: &Path, vm: &Vm, name: &str) -> Result<()> {
         let take = |uri: &str| -> Result<()> {
             let argv = libvirt_snapshot_argv(uri, &vm.name, name);
@@ -3620,6 +3748,41 @@ fn load_vm(base: &Path, name: &str) -> Result<Vm> {
     })
 }
 
+/// Suspends a RUNNING VM's vCPUs (see [`VmBackend::pause`]). Refuses a VM
+/// that is not currently `Running`, rather than a silent no-op — the caller
+/// would otherwise have no way to tell "already paused" from "just paused".
+pub fn pause(base: &Path, name: &str) -> Result<()> {
+    let vmdir = vms_dir(base);
+    let st = store(base)?;
+    let mut vm = load_vm(base, name)?;
+    if vm.status != Status::Running {
+        return Err(Error::Invalid(format!(
+            "VM '{name}' is not running (status: {:?}) — nothing to pause",
+            vm.status
+        )));
+    }
+    backend_for(&vm)?.pause(&vmdir, &vm)?;
+    vm.status = Status::Paused;
+    st.save(name, &vm)
+}
+
+/// Resumes a VM suspended with [`pause`]. Refuses a VM that is not currently
+/// `Paused`.
+pub fn unpause(base: &Path, name: &str) -> Result<()> {
+    let vmdir = vms_dir(base);
+    let st = store(base)?;
+    let mut vm = load_vm(base, name)?;
+    if vm.status != Status::Paused {
+        return Err(Error::Invalid(format!(
+            "VM '{name}' is not paused (status: {:?}) — nothing to resume",
+            vm.status
+        )));
+    }
+    backend_for(&vm)?.unpause(&vmdir, &vm)?;
+    vm.status = Status::Running;
+    st.save(name, &vm)
+}
+
 /// Takes a named snapshot of VM `name` (see [`VmBackend::snapshot`]). On libvirt a
 /// running VM's snapshot is a system checkpoint (memory + disk).
 pub fn snapshot(base: &Path, name: &str, snap: &str) -> Result<()> {
@@ -4081,7 +4244,16 @@ pub fn status(base: &Path, name: &str) -> Result<Vm> {
         // where we are already reading the process, and only on proof.
         let adopted = adopt_pid_starttime(vm);
         if backend.is_running(vm) {
-            vm.status = Status::Running;
+            // A PAUSED VMM is still "alive" to `is_running` (the process is
+            // there, only its vCPUs are frozen) — a routine `vm ls`/`status()`
+            // must not silently thaw the record back to `Running` just
+            // because the process answers. Only `unpause`/`stop` move it out
+            // of `Paused`; measured live: without this guard, `vm ls` right
+            // after `vm pause` reported `Running` again, and a second `vm
+            // pause` failed against a VMM that was never actually paused.
+            if vm.status != Status::Paused {
+                vm.status = Status::Running;
+            }
             vm.ip = backend.ip(vm).or_else(|| vm.ip.clone());
         } else {
             // A powered-off VM = Stopped (the guest may have done a clean shutdown;
@@ -4385,6 +4557,26 @@ Format specific information:
         assert!(e.contains("restore"), "{e}");
         assert!(e.contains("cloud-hypervisor"), "{e}");
         assert!(e.contains("libvirt"), "{e}");
+    }
+
+    #[test]
+    fn unsupported_pause_names_the_backend_and_op() {
+        let e = super::unsupported_pause("proxmox", "pause").to_string();
+        assert!(e.contains("pause"), "{e}");
+        assert!(e.contains("proxmox"), "{e}");
+    }
+
+    #[test]
+    fn http_status_is_2xx_reads_the_real_shapes_cloud_hypervisor_sends() {
+        assert!(super::http_status_is_2xx("HTTP/1.1 204 No Content"));
+        assert!(super::http_status_is_2xx("HTTP/1.1 200 OK"));
+        assert!(!super::http_status_is_2xx(
+            "HTTP/1.1 500 Internal Server Error"
+        ));
+        assert!(!super::http_status_is_2xx("HTTP/1.1 400 Bad Request"));
+        // No response at all (connection reset before a full status line).
+        assert!(!super::http_status_is_2xx(""));
+        assert!(!super::http_status_is_2xx("garbage"));
     }
 
     /// REGRESSION: toda a ferramenta cujo OUTPUT este crate parseia tem de
