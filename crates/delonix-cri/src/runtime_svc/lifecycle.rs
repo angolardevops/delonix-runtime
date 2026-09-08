@@ -2053,26 +2053,27 @@ mod tests {
     /// kubelet matava-os e o `kubeadm init` ficava preso em
     /// `wait-control-plane`. Nada disto falha a compilar nem falha um teste
     /// unitário — só falha um cluster.
-    /// O `kube-proxy` é privilegiado e escreve em `/proc/sys/net/netfilter`. O
-    /// kubelet manda `readonly_paths` com `/proc/sys` lá dentro para TODOS os
-    /// contentores; decidir quais honrar é do runtime, e para um privilegiado a
-    /// resposta é nenhum — como no containerd e no CRI-O.
+    /// `kube-proxy` is privileged and writes to `/proc/sys/net/netfilter`. The
+    /// kubelet sends `readonly_paths` with `/proc/sys` in it for EVERY
+    /// container; deciding which to honour is the runtime's job, and for a
+    /// privileged one the answer is none — as in containerd and CRI-O.
     ///
-    /// Sem isto: `open /proc/sys/net/netfilter/nf_conntrack_max: read-only file
-    /// system`, o `kube-proxy` em CrashLoopBackOff, e sem ele não há ClusterIP
-    /// nem CoreDNS. Todo o plano de serviço do cluster por dois argumentos.
+    /// Without this: `open /proc/sys/net/netfilter/nf_conntrack_max: read-only
+    /// file system`, `kube-proxy` in CrashLoopBackOff, and without it there is
+    /// no ClusterIP and no CoreDNS. The cluster's whole service plane, over two
+    /// arguments.
     #[test]
-    fn privilegiado_nao_leva_masked_nem_readonly_paths() {
-        let caminhos = || vec!["/proc/sys".to_string(), "/proc/sysrq-trigger".to_string()];
+    fn privileged_gets_neither_masked_nor_readonly_paths() {
+        let paths = || vec!["/proc/sys".to_string(), "/proc/sysrq-trigger".to_string()];
 
-        let sem_privilegio = ContainerRec {
+        let unprivileged = ContainerRec {
             image: "registry.k8s.io/kube-proxy:v1.36.4".into(),
-            masked_paths: caminhos(),
-            readonly_paths: caminhos(),
+            masked_paths: paths(),
+            readonly_paths: paths(),
             privileged: false,
             ..Default::default()
         };
-        let argv = start_argv(&sem_privilegio, None, crate::CapCeiling::default(), "a");
+        let argv = start_argv(&unprivileged, None, crate::CapCeiling::default(), "a");
         assert!(
             argv.iter().any(|a| a == "--readonly-path"),
             "sem privilégio os caminhos TÊM de ser aplicados: {argv:?}"
@@ -2084,7 +2085,7 @@ mod tests {
 
         let com_privilegio = ContainerRec {
             privileged: true,
-            ..sem_privilegio
+            ..unprivileged
         };
         let argv = start_argv(&com_privilegio, None, crate::CapCeiling::default(), "a");
         assert!(
@@ -2095,9 +2096,9 @@ mod tests {
             !argv.iter().any(|a| a == "--masked-path"),
             "um privilegiado não leva `--masked-path`: {argv:?}"
         );
-        // A metade sem a qual a outra não serve de nada: retirar os caminhos
-        // explícitos faz o motor cair nas omissões do runc, que incluem
-        // `/proc/sys`. Só o `--privileged` as desliga.
+        // The half without which the other is worthless: dropping the explicit
+        // paths makes the engine fall back on runc's defaults, which include
+        // `/proc/sys`. Only `--privileged` turns those off.
         assert!(
             argv.iter().any(|a| a == "--privileged"),
             "`privileged: true` tem de CHEGAR ao motor: {argv:?}"
