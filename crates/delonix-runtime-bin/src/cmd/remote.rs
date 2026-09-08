@@ -66,8 +66,10 @@ fn shell_quote(s: &str) -> String {
 
 /// Corre `cmd` no host, como root (`sudo -n` — o utilizador SSH tem de já
 /// estar em sudoers sem password; `BatchMode=yes` recusa qualquer prompt
-/// interactivo, incluindo de password). Devolve `(sucesso, stdout+stderr)`.
-fn ssh_run_raw(t: &SshTarget, cmd: &str) -> Result<(bool, String)> {
+/// interactivo, incluindo de password) OR, when `as_root` is false, as the
+/// SSH-connecting user with no `sudo` at all — see [`ssh_run_as_user`] for
+/// why that variant exists. Devolve `(sucesso, stdout+stderr)`.
+fn ssh_run_raw(t: &SshTarget, cmd: &str, as_root: bool) -> Result<(bool, String)> {
     let mut args = t.conn_args("-p");
     // `--` separa opções de argumentos posicionais — defesa em profundidade
     // contra um `host` que comece por `-` ser interpretado como flag do
@@ -76,7 +78,12 @@ fn ssh_run_raw(t: &SshTarget, cmd: &str) -> Result<(bool, String)> {
     // auditoria de segurança, ver AGENTS.md.
     args.push("--".to_string());
     args.push(t.user_host());
-    args.push(format!("sudo -n bash -c {}", shell_quote(cmd)));
+    let remote_cmd = if as_root {
+        format!("sudo -n bash -c {}", shell_quote(cmd))
+    } else {
+        format!("bash -c {}", shell_quote(cmd))
+    };
+    args.push(remote_cmd);
     let out = Command::new("ssh")
         .args(&args)
         .output()
@@ -88,17 +95,40 @@ fn ssh_run_raw(t: &SshTarget, cmd: &str) -> Result<(bool, String)> {
 
 /// `true` se `check_cmd` terminar com sucesso no host (condição já satisfeita).
 pub fn ssh_check(t: &SshTarget, check_cmd: &str) -> bool {
-    ssh_run_raw(t, check_cmd).map(|(ok, _)| ok).unwrap_or(false)
+    ssh_run_raw(t, check_cmd, true)
+        .map(|(ok, _)| ok)
+        .unwrap_or(false)
 }
 
 /// Corre `cmd`; erro claro (com o host e o output capturado) se falhar.
 pub fn ssh_run(t: &SshTarget, cmd: &str) -> Result<String> {
-    let (ok, out) = ssh_run_raw(t, cmd)?;
+    let (ok, out) = ssh_run_raw(t, cmd, true)?;
     if ok {
         Ok(out)
     } else {
         Err(Error::Invalid(format!(
             "[{}] comando falhou: {cmd}\n{out}",
+            t.host
+        )))
+    }
+}
+
+/// Like [`ssh_run`], but WITHOUT the `sudo -n` wrapping — runs `cmd` as the
+/// SSH-connecting user, in their own context. `ssh_run`'s `sudo` is right for
+/// `cluster apply`'s job (installing system packages, writing `/etc` as
+/// root); it is wrong for invoking a ROOTLESS tool on the target — the
+/// `delonix` CLI itself resolves its state root from `geteuid()`/`$HOME`
+/// (`Store::default_root`), so running it via `sudo` would silently operate
+/// against ROOT's state root instead of the SSH user's own rootless one — a
+/// different, invisible VM/volume/store than the one `vm ls` on that host
+/// would ever show. `vm migrate` is the first caller.
+pub fn ssh_run_as_user(t: &SshTarget, cmd: &str) -> Result<String> {
+    let (ok, out) = ssh_run_raw(t, cmd, false)?;
+    if ok {
+        Ok(out)
+    } else {
+        Err(Error::Invalid(format!(
+            "[{}] command failed: {cmd}\n{out}",
             t.host
         )))
     }
