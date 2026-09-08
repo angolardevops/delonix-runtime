@@ -2875,7 +2875,7 @@ users:
     }
 
     #[test]
-    fn merge_kubeconfig_substitui_current_context_pendurado_ou_ausente() {
+    fn merge_kubeconfig_replaces_a_dangling_or_absent_current_context() {
         // A context that is set but DANGLING is not a preference to protect.
         // Reported live: `current-context` absent while three contexts sat in
         // the file, so a bare `kubectl` went to localhost:8080 and failed with
