@@ -524,11 +524,25 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   `DELONIX_NET_RUNTIME_DIR` isolados): `db_password`/`nginx_conf` de dois
   ficheiros locais chegaram intactos a `/run/secrets/db_password` e
   `/run/secrets/nginx_conf` dentro do container, com o modo 0600 esperado.
-  **Por fazer, documentado (nunca silencioso)**: multi-ficheiro (`-f a -f b`/
-  `include:`) e volumes anónimos (sem `source` explícito) — este último
-  deliberadamente NÃO tentado ainda: precisa de semântica própria de
-  nomeação/limpeza (quando é que um volume anónimo se apaga?
-  `down` simples ou só `down -v`?) que merece ser pensada com calma, não decidida às pressas.
+  **FEITO: volumes anónimos** (`- /container/path`, sem `source` explícito)
+  — a decisão de nomeação/limpeza que este parágrafo pedia para não se
+  decidir às pressas: `anonymous_volume_names` dá-lhes um nome ESCOPADO
+  re-derivável (posição entre as montagens anónimas DA MESMA service, pela
+  mesma `compose_scoped_name` sem colisão que os volumes/redes nomeados já
+  usam) — sem registo próprio, mesma filosofia "reconstrói do ficheiro
+  compose" do resto do módulo. **Só `down -v` os remove; um `down` simples
+  NUNCA toca neles** — o comportamento real do `docker compose`. Validado
+  AO VIVO (`DELONIX_ROOT`+`DELONIX_NET_RUNTIME_DIR` isolados, sem tocar na
+  rede de produção): `up` cria o volume e monta-o (escrita de dentro do
+  container aparece em `_data/` do lado do host); `down` simples deixa o
+  ficheiro escrito intacto no disco; `down -v` a seguir apaga-o.
+  **Por fazer, documentado (nunca silencioso)**: multi-ficheiro
+  (`-f a -f b`/`include:`). Esta lista já esteve escrita TRÊS vezes em paralelo,
+  cada cópia truncada a meio por um merge feito pela interface sem ninguém compilar
+  a junção — `profiles`, `extends`, `build.target`, `deploy.replicas`,
+  `networks.*.ipv4_address`, `configs:`/`secrets:` e os volumes anónimos apareciam
+  como por fazer muito depois de estarem feitos. Uma lista de dívida desactualizada
+  mente nos dois sentidos.
 - `delonix serve docker-api [--addr unix://<socket>]` — fatia da **Docker Engine API** (`cmd/dockerapi.rs`)
   que basta para `docker version/ps/images/info` **e**, desde a v0.26.0, o ciclo de vida completo de
   um container via `DOCKER_HOST=unix://<socket>`: `POST /containers/create|start|stop|kill|wait|
