@@ -208,6 +208,7 @@
 ~	vm init
 ~	vm ls
 ~	vm ls-remote
+~	vm migrate
 ~	vm pause
 ~	vm prune
 ~	vm pull
