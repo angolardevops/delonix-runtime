@@ -204,7 +204,7 @@ pub(crate) fn doomed_containers(store: &Store) -> Result<Vec<String>> {
     Ok(store
         .list()?
         .into_iter()
-        .filter(|c| !c.pid.map(delonix_runtime::is_alive).unwrap_or(false))
+        .filter(|c| !c.is_live())
         .map(|c| c.name)
         .collect())
 }
@@ -259,7 +259,7 @@ pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<Con
     // leaves behind is picked up (and counted) by the orphan pass below.
     // Counting it in both places would report twice the space that was freed.
     for c in store.list()? {
-        if c.pid.map(delonix_runtime::is_alive).unwrap_or(false) {
+        if c.is_live() {
             continue;
         }
         let size = measure(&images.container_path(&c.id));
@@ -287,10 +287,7 @@ pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<Con
                 Err(_) => return true,
             };
         match st.load(name) {
-            Ok(vm) => {
-                matches!(vm.status, delonix_runtime_core::Status::Running)
-                    && vm.pid.map(delonix_runtime::is_alive).unwrap_or(false)
-            }
+            Ok(vm) => matches!(vm.status, delonix_runtime_core::Status::Running) && vm.is_live(),
             Err(_) => false,
         }
     }
@@ -307,7 +304,7 @@ pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<Con
     let mut live_refs: HashSet<String> = store
         .list()?
         .iter()
-        .filter(|c| c.pid.map(delonix_runtime::is_alive).unwrap_or(false))
+        .filter(|c| c.is_live())
         .map(|c| c.id.clone())
         .collect();
     for id in delonix_net::infra::attached_refs() {
@@ -385,7 +382,7 @@ pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<Con
         let live_ports: HashSet<u32> = store
             .list()?
             .iter()
-            .filter(|c| c.pid.map(delonix_runtime::is_alive).unwrap_or(false))
+            .filter(|c| c.is_live())
             .flat_map(|c| c.ports.iter())
             .filter_map(|p| {
                 delonix_net::parse_publish(p)
@@ -542,7 +539,7 @@ pub(crate) fn plan(images: &ImageStore, store: &Store, all: bool) -> Result<Prun
     let live_ids: HashSet<String> = store
         .list()?
         .iter()
-        .filter(|c| c.pid.map(delonix_runtime::is_alive).unwrap_or(false))
+        .filter(|c| c.is_live())
         .map(|c| c.id.clone())
         .collect();
     for c in store.list()? {

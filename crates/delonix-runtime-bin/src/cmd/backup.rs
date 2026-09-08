@@ -455,7 +455,7 @@ fn live_workloads(root: &Path) -> Vec<String> {
     let mut out = Vec::new();
     if let Ok(store) = Store::open(root.join("containers")) {
         for c in store.list().unwrap_or_default() {
-            if c.pid.map(delonix_runtime::is_alive).unwrap_or(false) {
+            if c.is_live() {
                 out.push(format!("container {}", c.name));
             }
         }

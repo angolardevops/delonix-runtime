@@ -32,21 +32,51 @@ static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 struct FileLock(fs::File);
 
 impl FileLock {
-    /// Acquires the lock (blocks until it gets it). `None` if the lock file
-    /// cannot even be opened — in that case the caller proceeds without a lock
-    /// (graceful degradation: better than refusing the operation).
-    fn acquire(path: &Path) -> Option<FileLock> {
+    /// Acquires the lock (blocks until it gets it), or **fails**.
+    ///
+    /// It used to return `Option` and the callers proceeded without a lock when
+    /// it was `None` — commented as "graceful degradation: better than refusing
+    /// the operation". It is neither graceful nor a degradation: the callers are
+    /// the two `update` methods, whose ENTIRE reason to exist is to make a
+    /// read-modify-write safe between processes. Running one without the lock
+    /// silently gives the caller the opposite of what the signature promises,
+    /// and the failure it reintroduces is the lost update — which is invisible,
+    /// unlike an error.
+    ///
+    /// And the degradation bought nothing. The lock file lives in the store
+    /// directory, which is the same directory `write_atomic` creates its
+    /// temporary in: if we cannot create a file there, the `save` two lines
+    /// later cannot happen either. So the old path did not rescue an operation
+    /// that would otherwise fail — it turned a clear error into a silent
+    /// half-write.
+    fn acquire(path: &Path) -> Result<FileLock> {
         let f = fs::OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(false)
             .open(path)
-            .ok()?;
+            .map_err(|e| Error::Runtime {
+                context: "state lock",
+                message: format!(
+                    "cannot open the lock file {}: {e} — refusing the \
+                         read-modify-write rather than doing it unlocked, which \
+                         would silently lose a concurrent write",
+                    path.display()
+                ),
+            })?;
         // SAFETY: valid, open fd; LOCK_EX blocks until the lock is ours.
         if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) } != 0 {
-            return None;
+            return Err(Error::Runtime {
+                context: "state lock",
+                message: format!(
+                    "flock on {} failed: {} — refusing the read-modify-write \
+                     rather than doing it unlocked",
+                    path.display(),
+                    std::io::Error::last_os_error()
+                ),
+            });
         }
-        Some(FileLock(f))
+        Ok(FileLock(f))
     }
 }
 
@@ -317,7 +347,7 @@ impl Store {
         // Resolve the REAL id first (accepts prefix/name), to always lock
         // the same lock file regardless of how it was referenced.
         let id = self.load(id_or_name)?.id;
-        let _lock = FileLock::acquire(&self.lock_path(&id));
+        let _lock = FileLock::acquire(&self.lock_path(&id))?;
         // Re-read UNDER the lock: between the resolve and the `flock` another process may have
         // written; using the value read before would reintroduce the lost update.
         let mut c = self.load(&id)?;
@@ -489,7 +519,7 @@ impl<T: Serialize + DeserializeOwned> JsonStore<T> {
     where
         F: FnOnce(&mut T) -> bool,
     {
-        let _lock = FileLock::acquire(&self.lock_path(key));
+        let _lock = FileLock::acquire(&self.lock_path(key))?;
         // Re-read UNDER the lock: between any earlier read and the `flock`
         // another process may have written; using a stale value would
         // reintroduce the lost update this exists to prevent.
@@ -560,6 +590,47 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ))
+    }
+
+    /// REGRESSION: `update` must REFUSE when it cannot take the lock, never do
+    /// the read-modify-write unlocked.
+    ///
+    /// `acquire` used to return `Option` and both `update` methods carried on
+    /// when it was `None`, commented as graceful degradation. What it actually
+    /// produced was a lost update — invisible, unlike an error.
+    ///
+    /// The lock is made un-takeable by putting a DIRECTORY where the lock file
+    /// goes: opening it for writing gives `EISDIR`. It is the one way to
+    /// reproduce the failure without root and without a full filesystem.
+    #[test]
+    fn update_refuses_when_the_lock_cannot_be_taken() {
+        let root = tmp_dir("lock-eisdir");
+        fs::create_dir_all(&root).unwrap();
+        let store = Store::open(&root).unwrap();
+        let c = Container::new(
+            "abc123".into(),
+            "web".into(),
+            "img".into(),
+            vec!["sh".into()],
+            "64m".into(),
+        );
+        store.save(&c).unwrap();
+        // The lock file's own path, occupied by a directory.
+        fs::create_dir_all(root.join(".abc123.lock")).unwrap();
+
+        let err = store
+            .update("abc123", |c| {
+                c.name = "changed".into();
+                true
+            })
+            .expect_err("update must refuse without the lock");
+        assert!(
+            err.to_string().contains("lock"),
+            "the error must name the lock: {err}"
+        );
+        // And the refusal is total: nothing was written.
+        assert_eq!(store.load("abc123").unwrap().name, "web");
+        fs::remove_dir_all(&root).ok();
     }
 
     /// REGRESSION: a reader must NEVER observe a partially-written file.

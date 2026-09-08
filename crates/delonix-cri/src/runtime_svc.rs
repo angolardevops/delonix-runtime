@@ -556,7 +556,7 @@ fn live_attached_refs(base: &std::path::Path) -> Option<i64> {
         .list()
         .ok()?
         .into_iter()
-        .filter(|c| c.pid.is_some_and(delonix_runtime::is_alive))
+        .filter(|c| c.is_live())
         .map(|c| c.id)
         .collect();
     let orfaos = delonix_net::infra::orphan_refs(&attached, &live).len();

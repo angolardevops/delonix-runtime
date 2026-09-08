@@ -264,7 +264,7 @@ fn enable(
     // One unit per container that SHOULD be up — not merely per container that
     // happens to be up right now.
     for c in &all {
-        let alive = c.pid.map(runtime::is_alive).unwrap_or(false);
+        let alive = c.is_live();
         if !alive && !wants_to_be_up(c.restart_policy.as_deref()) {
             continue;
         }

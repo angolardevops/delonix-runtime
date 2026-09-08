@@ -246,7 +246,7 @@ fn wait_in_node(c: &Container, what: &str, check: &str, timeout: Duration) -> Re
     // was the only trace of a node whose entrypoint had exited 1 seconds after
     // start. The two things that actually diagnose it are the node's own last
     // lines and whether it is still alive at all — both cheap, both here.
-    let alive = c.pid.map(delonix_runtime::is_alive).unwrap_or(false);
+    let alive = c.is_live();
     let tail = node_log_tail(c, 8);
     Err(Error::Invalid(super::po::tf(
         "timeout waiting for {what} on node '{name}' ({secs}s){state}{detail}",

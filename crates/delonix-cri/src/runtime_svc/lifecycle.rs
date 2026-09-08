@@ -368,9 +368,7 @@ fn delonix_state(base: &Path, cri_id: &str) -> i32 {
     use delonix_runtime_core::Status as S;
     match load_reconciled(base, cri_id) {
         Some(c) => match c.status {
-            S::Running if c.pid.map(delonix_runtime::is_alive).unwrap_or(false) => {
-                ContainerState::ContainerRunning as i32
-            }
+            S::Running if c.is_live() => ContainerState::ContainerRunning as i32,
             S::Running => ContainerState::ContainerExited as i32, // defensive (post-reconcile)
             S::Paused => ContainerState::ContainerRunning as i32, // frozen, but exists
             S::Stopped | S::Failed(_) | S::Crashed => ContainerState::ContainerExited as i32,
@@ -1195,8 +1193,7 @@ pub fn stop_container(
     // of assuming it stopped and moving on to RemoveContainer on a still-running
     // process).
     if let Some(c) = load_reconciled(base, &id) {
-        let alive = matches!(c.status, delonix_runtime_core::Status::Running)
-            && c.pid.map(delonix_runtime::is_alive).unwrap_or(false);
+        let alive = matches!(c.status, delonix_runtime_core::Status::Running) && c.is_live();
         if alive {
             tracing::warn!(container = %format!("cri-{id}"), "ainda a correr depois do stop — o kubelet vai repetir");
             return Err(Status::internal(format!(
