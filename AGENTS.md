@@ -481,9 +481,29 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   ficou com `cap_add: NET_ADMIN, SYS_PTRACE` (um de cada lado, sem duplicar); o `base` ficou
   intocado. As três recusas (base inexistente, ciclo, `extends.file`) confirmadas com a mensagem
   exacta contra o binário real.
-  **Por fazer, documentado (nunca silencioso)**: `profiles`/`configs`/`secrets`
-  top-level (usa `kind: Secret` em vez disso)/multi-ficheiro (`-f a -f b`/`include:`),
-  `build.target` (selecção de estágio), `deploy.replicas≠1`, `networks.*.ipv4_address` fixo,
+  **FEITO**: `deploy.replicas` — N containers reais por serviço
+  (`<projecto>-<serviço>` para a 1ª réplica, `-2`/`-3`/… para as seguintes), **sem load
+  balancing nenhum entre elas** — mesma postura "sem VIP, sem daemon" que o `kind: Service`
+  já declara para o seu round-robin de DNS, que esta v1 não liga às réplicas do compose.
+  A 1ª réplica mantém o nome de sempre de propósito: é o que `depends_on`/o healthcheck já
+  visavam, e é a única forma de as outras duas capacidades continuarem a funcionar sem
+  tocar-lhes. **Duas recusas, as duas por colisão real**: `container_name:` explícito com
+  `replicas>1` (as réplicas colidiriam todas nesse UM nome) e uma porta de host FIXA
+  (`ports: ["8080:80"]`, ou a forma longa com `published:`) com `replicas>1` (colidiriam
+  todas na mesma porta) — uma porta SEM host explícito continua aceite e até é o caminho
+  recomendado, porque cada réplica chama `free_host_port` a sua própria vez e não há nada
+  para colidir. `deploy.replicas: 0` também é recusado — esta v1 não tem semântica de
+  escala-a-zero/perfil para um serviço que já está a correr. `cmd_down`/`cmd_ps`/`cmd_logs`
+  não precisaram de UMA linha de código: já derivam a lista de containers de um projecto
+  pelas labels (`compose-project`/`compose-service`) em vez de recalcular nomes a partir do
+  ficheiro, por isso já viam N containers da mesma forma que viam 1. Validado ao vivo: `deploy:
+  replicas: 3` com `ports: ["80"]` criou de facto 3 containers (`web`/`web-2`/`web-3`), cada
+  um com a SUA porta aleatória (`container port` confirmou as três diferentes), `compose ps`
+  listou os três sob o mesmo serviço, e `compose down` removeu os três sem tratamento
+  especial nenhum; as três recusas confirmadas com a mensagem exacta.
+  **Por fazer, documentado (nunca silencioso)**: `profiles`/`extends`/`configs`/`secrets`
+  **Por fazer, documentado (nunca silencioso)**: `profiles`/`configs`/`secrets`  top-level (usa `kind: Secret` em vez disso)/multi-ficheiro (`-f a -f b`/`include:`),
+  `build.target` (selecção de estágio), `networks.*.ipv4_address` fixo,
   volumes anónimos (sem `source` explícito) — este último deliberadamente NÃO tentado ainda:
   **Por fazer, documentado (nunca silencioso)**: `extends`/`configs`/`secrets`
   top-level (usa `kind: Secret` em vez disso), multi-ficheiro (`-f a -f b`/`include:`),
