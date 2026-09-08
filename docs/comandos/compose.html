@@ -217,7 +217,7 @@ precisa de semântica própria de limpeza, ainda por desenhar). <code>working_di
 
 Options:
   -f, --file &lt;FILE&gt;
-          
+          Repeatable — `-f a.yml -f b.yml` merges left-to-right (see the module doc-comment, &quot;Multi-file compose&quot;). No `-f` at all falls back to the usual single-file search
 
       --l18n &lt;en|pt&gt;
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -364,7 +364,7 @@ SEE ALSO:
 
 Options:
   -f, --file &lt;FILE&gt;
-          
+          Repeatable — must name the SAME file(s) `up` was given, so the project/network/volume names re-derive identically
 
       --l18n &lt;en|pt&gt;
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
