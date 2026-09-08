@@ -107,6 +107,33 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["describe", "cluster kubeconfig", "get"],
     },
     Entry {
+        path: "cluster drain",
+        group: "Interact",
+        examples: &[
+            ("cordon a node and evict its pods before touching it — needs no SSH, just the cached kubeconfig", "delonix cluster drain lab lab-w1"),
+            ("also evict pods on an emptyDir volume, and bare Pods with no controller", "delonix cluster drain lab lab-w1 --delete-emptydir-data --force"),
+        ],
+        see_also: &["cluster uncordon", "cluster upgrade", "cluster kubeconfig"],
+    },
+    Entry {
+        path: "cluster uncordon",
+        group: "Interact",
+        examples: &[
+            ("mark a drained node schedulable again", "delonix cluster uncordon lab lab-w1"),
+        ],
+        see_also: &["cluster drain", "cluster upgrade", "cluster kubeconfig"],
+    },
+    Entry {
+        path: "cluster upgrade",
+        group: "Lifecycle",
+        examples: &[
+            ("the control-plane leader first — kubeadm's own procedure runs `upgrade apply` there", "delonix cluster upgrade -f cloud.yaml --to 1.32.1"),
+            ("then every other control-plane/worker, one at a time — `kubeadm upgrade node`", "delonix cluster upgrade -f cloud.yaml --to 1.32.1 --node lab-w1"),
+            ("a control-plane that schedules nothing anyway: skip the automatic drain/uncordon", "delonix cluster upgrade -f cloud.yaml --to 1.32.1 --no-drain"),
+        ],
+        see_also: &["cluster drain", "cluster uncordon", "cluster apply", "cluster health"],
+    },
+    Entry {
         path: "cluster apply",
         group: "Declarative",
         examples: &[

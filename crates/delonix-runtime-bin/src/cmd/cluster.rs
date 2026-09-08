@@ -613,6 +613,65 @@ pub enum ClusterCmd {
         /// Cluster name. Omit when there is only one.
         name: Option<String>,
     },
+    /// Cordon a node and evict its pods.
+    ///
+    /// The manual step before touching a control-plane/worker host (upgrade,
+    /// maintenance, decommission). A pure Kubernetes API operation: talks to
+    /// the apiserver through the CACHED kubeconfig (the same file `cluster
+    /// kubeconfig` prints), needs no SSH and no container to exec into —
+    /// unlike `health`, this works identically for every cluster family
+    /// (`resolve_kubeconfig_name` already treats kind-mode and SSH/kubeadm
+    /// clusters the same). Shells out to the system `kubectl`, the same
+    /// "never reinvent an existing client" rule `remote::ssh_run` already
+    /// follows for `ssh`.
+    Drain {
+        /// Cluster name. Omit when there is only one cached.
+        #[arg(long, add = ArgValueCandidates::new(super::complete::cached_kubeconfigs))]
+        name: Option<String>,
+        /// Kubernetes node name, as `kubectl get nodes` shows it.
+        node: String,
+        /// Also evict DaemonSet-managed pods (they would otherwise block the drain).
+        #[arg(long, default_value_t = true)]
+        ignore_daemonsets: bool,
+        /// Also evict pods using an `emptyDir` volume (their data is lost).
+        #[arg(long)]
+        delete_emptydir_data: bool,
+        /// Evict pods not managed by a controller too (bare Pods).
+        #[arg(long)]
+        force: bool,
+        /// Give up waiting for eviction after this long (a `kubectl` duration, e.g. `5m`).
+        #[arg(long)]
+        timeout: Option<String>,
+    },
+    /// Mark a drained node schedulable again.
+    Uncordon {
+        /// Cluster name. Omit when there is only one cached.
+        #[arg(long, add = ArgValueCandidates::new(super::complete::cached_kubeconfigs))]
+        name: Option<String>,
+        /// Kubernetes node name, as `kubectl get nodes` shows it.
+        node: String,
+    },
+    /// Upgrade a `mode: ssh` cluster to a newer Kubernetes version, kubeadm-style.
+    ///
+    /// Mirrors kubeadm's own manual, one-node-at-a-time procedure — deliberately
+    /// NOT an unattended whole-cluster cascade. Without `--node`, upgrades the
+    /// control-plane LEADER only (`spec.controlPlane.hosts[0]`, the one host
+    /// `kubeadm upgrade apply` runs on); with `--node <name>`, upgrades that
+    /// other control-plane or worker host (`kubeadm upgrade node`). Drains
+    /// before and uncordons after each node automatically, unless `--no-drain`.
+    Upgrade {
+        /// Manifest with the `kind: KubernetesCluster` document (default: `./delonix-manifest.yaml`).
+        #[arg(short = 'f', long, value_hint = clap::ValueHint::FilePath)]
+        file: Option<PathBuf>,
+        /// Target Kubernetes version, e.g. `1.32.1`.
+        #[arg(long)]
+        to: String,
+        /// Upgrade this control-plane/worker host instead of the control-plane leader.
+        node: Option<String>,
+        /// Skip the automatic drain/uncordon around the node's own upgrade.
+        #[arg(long)]
+        no_drain: bool,
+    },
 }
 
 pub fn run(action: ClusterCmd) -> Result<()> {
@@ -757,6 +816,34 @@ pub fn run(action: ClusterCmd) -> Result<()> {
         }
         ClusterCmd::Kubeconfig { name } => cmd_kubeconfig(name),
         ClusterCmd::Health { name } => cmd_health(name.as_deref()),
+        ClusterCmd::Drain {
+            name,
+            node,
+            ignore_daemonsets,
+            delete_emptydir_data,
+            force,
+            timeout,
+        } => {
+            let name = resolve_kubeconfig_name(name)?;
+            drain_node(
+                &name,
+                &node,
+                ignore_daemonsets,
+                delete_emptydir_data,
+                force,
+                timeout.as_deref(),
+            )
+        }
+        ClusterCmd::Uncordon { name, node } => {
+            let name = resolve_kubeconfig_name(name)?;
+            uncordon_node(&name, &node)
+        }
+        ClusterCmd::Upgrade {
+            file,
+            to,
+            node,
+            no_drain,
+        } => cmd_upgrade(file, &to, node.as_deref(), no_drain),
     }
 }
 
@@ -847,6 +934,325 @@ pub(crate) fn cmd_describe(name: &str) -> Result<()> {
 fn cmd_health(name: Option<&str>) -> Result<()> {
     let (_, store) = super::util::open_stores()?;
     super::kindmode::health(&store, name)
+}
+
+/// The cached kubeconfig path for `name`, or a clear error naming what
+/// IS cached — same "0/1/many, list the names, never guess" shape
+/// `resolve_kubeconfig_name` already uses, but this one runs after the name
+/// is already resolved (or given explicitly by `cluster upgrade`, which
+/// reads it straight off the manifest and never goes through
+/// `resolve_kubeconfig_name` at all).
+fn kubeconfig_path_or_hint(name: &str) -> Result<PathBuf> {
+    let path = state_root()
+        .join("clusters")
+        .join(format!("{name}-kubeconfig.yaml"));
+    if !path.exists() {
+        let names = cached_kubeconfig_names();
+        let hint = if names.is_empty() {
+            super::po::t("run `cluster create`/`cluster apply`/`cluster kubeadm` first").into()
+        } else {
+            super::po::tf("available: {names}", &[("names", &names.join(", "))])
+        };
+        return Err(Error::Invalid(super::po::tf(
+            "no cached kubeconfig for cluster '{name}' — {hint}",
+            &[("name", name), ("hint", &hint)],
+        )));
+    }
+    Ok(path)
+}
+
+/// `kubectl` on the OPERATOR's own machine — never reimplemented here, same
+/// "shell out to the host's real client" rule `remote::ssh_run` already
+/// follows for `ssh`. `ENOENT` renders as "No such file or directory", which
+/// sends the reader looking for a missing FILE rather than a missing TOOL —
+/// the exact trap `vmimage::tool_failure_hint`'s own doc comment names for
+/// `virt-customize`; named directly here instead, since `kubectl` has no
+/// image-build package table to look up.
+fn run_kubectl(kubeconfig: &Path, args: &[String]) -> Result<()> {
+    let status = Command::new("kubectl")
+        .arg(format!("--kubeconfig={}", kubeconfig.display()))
+        .args(args)
+        .status();
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => Err(Error::Invalid(super::po::tf(
+            "kubectl {args}: failed (exit {code})",
+            &[
+                ("args", &args.join(" ")),
+                (
+                    "code",
+                    &s.code()
+                        .map(|c| c.to_string())
+                        .unwrap_or_else(|| "?".into()),
+                ),
+            ],
+        ))),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(Error::Invalid(
+            super::po::t(
+                "kubectl not found on PATH — install it to use `cluster drain`/`cluster \
+                 uncordon`/`cluster upgrade` (https://kubernetes.io/docs/tasks/tools/)",
+            )
+            .into(),
+        )),
+        Err(e) => Err(Error::Invalid(super::po::tf(
+            "running kubectl: {e}",
+            &[("e", &e.to_string())],
+        ))),
+    }
+}
+
+/// Shared by the `cluster drain` CLI verb and `cluster upgrade`'s own
+/// automatic drain-before-touching-a-node step — one implementation, so the
+/// two never drift on which flags a drain actually passes.
+pub(crate) fn drain_node(
+    name: &str,
+    node: &str,
+    ignore_daemonsets: bool,
+    delete_emptydir_data: bool,
+    force: bool,
+    timeout: Option<&str>,
+) -> Result<()> {
+    let kubeconfig = kubeconfig_path_or_hint(name)?;
+    let mut args: Vec<String> = vec!["drain".into(), node.into()];
+    if ignore_daemonsets {
+        args.push("--ignore-daemonsets".into());
+    }
+    if delete_emptydir_data {
+        args.push("--delete-emptydir-data".into());
+    }
+    if force {
+        args.push("--force".into());
+    }
+    if let Some(t) = timeout {
+        args.push(format!("--timeout={t}"));
+    }
+    run_kubectl(&kubeconfig, &args)?;
+    println!(
+        "{}",
+        super::po::tf(
+            "cluster '{name}': node {node} drained",
+            &[("name", name), ("node", node)],
+        )
+    );
+    Ok(())
+}
+
+/// See [`drain_node`] — same sharing rationale, the other half of the pair.
+pub(crate) fn uncordon_node(name: &str, node: &str) -> Result<()> {
+    let kubeconfig = kubeconfig_path_or_hint(name)?;
+    run_kubectl(&kubeconfig, &["uncordon".to_string(), node.to_string()])?;
+    println!(
+        "{}",
+        super::po::tf(
+            "cluster '{name}': node {node} uncordoned",
+            &[("name", name), ("node", node)],
+        )
+    );
+    Ok(())
+}
+
+/// The one `kind: KubernetesCluster` document a manifest must declare for
+/// `cluster upgrade` to act on — deliberately refuses more than one, unlike
+/// `apply()` (which applies every Cluster doc it finds): an upgrade touches
+/// live, already-bootstrapped hosts one at a time, and guessing which of
+/// several clusters in one manifest the operator meant would be exactly the
+/// silent-wrong-target class of bug `valid_endpoint`'s own history already
+/// warns about.
+fn single_cluster_doc(docs: &[ManifestDoc]) -> Result<(&ManifestDoc, ClusterSpec)> {
+    let clusters = manifest::of_kind(docs, k::CLUSTER);
+    match clusters.as_slice() {
+        [doc] => {
+            let spec: ClusterSpec = manifest::spec_of(doc)?;
+            Ok((doc, spec))
+        }
+        [] => Err(Error::Invalid(
+            super::po::t("no `kind: KubernetesCluster` document in the manifest").into(),
+        )),
+        _ => Err(Error::Invalid(
+            super::po::t(
+                "more than one `kind: KubernetesCluster` document — `cluster upgrade` upgrades \
+                 one cluster at a time, say which with a manifest that declares only it",
+            )
+            .into(),
+        )),
+    }
+}
+
+/// Finds a control-plane-join or worker host by its label (hostname, or IP
+/// when no hostname is set — same identity `HostSpec::label()` already
+/// defines) among every host EXCEPT the control-plane leader
+/// (`hosts[0]`), which `cluster upgrade` without `--node` already owns —
+/// `kubeadm upgrade node` is the wrong verb there (kubeadm's own upgrade
+/// procedure runs `upgrade apply` on the leader and `upgrade node`
+/// everywhere else), so matching it here would silently run the wrong
+/// command against the right host.
+fn find_upgrade_target<'a>(spec: &'a ClusterSpec, label: &str) -> Result<&'a HostSpec> {
+    let leader = spec.control_plane.hosts.first();
+    if leader.is_some_and(|h| h.label() == label) {
+        return Err(Error::Invalid(super::po::tf(
+            "'{label}' is the control-plane leader — omit --node to upgrade it \
+             (that host runs `kubeadm upgrade apply`, not `kubeadm upgrade node`)",
+            &[("label", label)],
+        )));
+    }
+    spec.control_plane
+        .hosts
+        .iter()
+        .skip(1)
+        .chain(spec.workers.hosts.iter())
+        .find(|h| h.label() == label)
+        .ok_or_else(|| {
+            let names: Vec<String> = spec
+                .control_plane
+                .hosts
+                .iter()
+                .skip(1)
+                .chain(spec.workers.hosts.iter())
+                .map(|h| h.label())
+                .collect();
+            Error::Invalid(super::po::tf(
+                "no host named '{label}' in the manifest — available: {names}",
+                &[("label", label), ("names", &names.join(", "))],
+            ))
+        })
+}
+
+/// Bumps `pkg`(s) to `version` via the SAME `pkgs.k8s.io` repository
+/// `k8s_recipes::k8s_host_recipes` already configured on this host, and
+/// re-holds them afterward. The `=<version>-*` apt version glob sidesteps
+/// needing the exact Debian revision suffix (`1.32.1-1.1`) that only the
+/// repository itself knows — `apt-get install pkg=1.32.1` alone would 404 on
+/// the FULL package version string, not the Kubernetes version.
+fn bump_k8s_packages(target: &SshTarget, label: &str, version: &str, pkgs: &[&str]) -> Result<()> {
+    let pkg_specs: Vec<String> = pkgs.iter().map(|p| format!("{p}={version}-*")).collect();
+    let unhold = pkgs.join(" ");
+    let cmd = format!(
+        "apt-mark unhold {unhold} >/dev/null 2>&1; apt-get update -qq && apt-get install -y \
+         --allow-change-held-packages {} && apt-mark hold {unhold}",
+        pkg_specs.join(" "),
+    );
+    remote::ssh_run(target, &cmd)
+        .map_err(|e| Error::Invalid(format!("[{label}] upgrading {unhold}: {e}")))?;
+    Ok(())
+}
+
+/// `--to <version>`, no `--node`: the control-plane LEADER step of kubeadm's
+/// own upgrade procedure — bump kubeadm, `kubeadm upgrade apply`, then bump
+/// kubelet/kubectl and restart, draining/uncordoning around that last part
+/// (the leader still runs workloads unless tainted, so it is drained like
+/// any other node touched here).
+fn upgrade_control_plane_leader(
+    cluster_name: &str,
+    spec: &ClusterSpec,
+    version: &str,
+    no_drain: bool,
+) -> Result<()> {
+    let leader =
+        spec.control_plane.hosts.first().ok_or_else(|| {
+            Error::Invalid(super::po::t("manifest has no control-plane host").into())
+        })?;
+    let target = target_for(leader, &spec.ssh);
+    let label = leader.label();
+
+    bump_k8s_packages(&target, &label, version, &["kubeadm"])?;
+    remote::ssh_run(
+        &target,
+        &format!("kubeadm upgrade apply v{version} -y --cri-socket={DELONIX_CRI_SOCKET}"),
+    )
+    .map_err(|e| Error::Invalid(format!("[{label}] kubeadm upgrade apply: {e}")))?;
+
+    if !no_drain {
+        drain_node(cluster_name, &label, true, true, true, None)?;
+    }
+    bump_k8s_packages(&target, &label, version, &["kubelet", "kubectl"])?;
+    remote::ssh_run(
+        &target,
+        "systemctl daemon-reload && systemctl restart kubelet",
+    )
+    .map_err(|e| Error::Invalid(format!("[{label}] restarting kubelet: {e}")))?;
+    if !no_drain {
+        uncordon_node(cluster_name, &label)?;
+    }
+    println!(
+        "{}",
+        super::po::tf(
+            "cluster '{name}': control-plane leader {label} upgraded to {version}",
+            &[
+                ("name", cluster_name),
+                ("label", &label),
+                ("version", version)
+            ],
+        )
+    );
+    Ok(())
+}
+
+/// `--to <version> --node <name>`: kubeadm's own `upgrade node` step, for
+/// every host EXCEPT the leader (other control-planes, and workers).
+fn upgrade_one_node(
+    cluster_name: &str,
+    spec: &ClusterSpec,
+    node_label: &str,
+    version: &str,
+    no_drain: bool,
+) -> Result<()> {
+    let host = find_upgrade_target(spec, node_label)?;
+    let target = target_for(host, &spec.ssh);
+    let label = host.label();
+
+    bump_k8s_packages(&target, &label, version, &["kubeadm"])?;
+    remote::ssh_run(&target, "kubeadm upgrade node")
+        .map_err(|e| Error::Invalid(format!("[{label}] kubeadm upgrade node: {e}")))?;
+
+    if !no_drain {
+        drain_node(cluster_name, &label, true, true, true, None)?;
+    }
+    bump_k8s_packages(&target, &label, version, &["kubelet", "kubectl"])?;
+    remote::ssh_run(
+        &target,
+        "systemctl daemon-reload && systemctl restart kubelet",
+    )
+    .map_err(|e| Error::Invalid(format!("[{label}] restarting kubelet: {e}")))?;
+    if !no_drain {
+        uncordon_node(cluster_name, &label)?;
+    }
+    println!(
+        "{}",
+        super::po::tf(
+            "cluster '{name}': node {label} upgraded to {version}",
+            &[
+                ("name", cluster_name),
+                ("label", &label),
+                ("version", version)
+            ],
+        )
+    );
+    Ok(())
+}
+
+fn cmd_upgrade(file: Option<PathBuf>, to: &str, node: Option<&str>, no_drain: bool) -> Result<()> {
+    if !valid_version(to) {
+        return Err(Error::Invalid(super::po::tf(
+            "--to '{v}': invalid Kubernetes version (digits and dots only, e.g. 1.32.1)",
+            &[("v", to)],
+        )));
+    }
+    let path = manifest::resolve_path(file)?;
+    let docs = manifest::load(&path)?;
+    let (doc, spec) = single_cluster_doc(&docs)?;
+    let name = &doc.metadata.name;
+    validate(&spec)?;
+    if spec.mode != "ssh" {
+        return Err(Error::Invalid(super::po::tf(
+            "cluster '{name}': `cluster upgrade` only supports `mode: ssh` (already-live hosts) \
+             — `mode: kind`/`mode: vm` clusters are recreated, not upgraded in place",
+            &[("name", name)],
+        )));
+    }
+    match node {
+        None => upgrade_control_plane_leader(name, &spec, to, no_drain),
+        Some(n) => upgrade_one_node(name, &spec, n, to, no_drain),
+    }
 }
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
@@ -2952,5 +3358,73 @@ k8sVersion: \"1.31\"
     fn ssh_user_cai_no_default_quando_o_bloco_ssh_e_omitido() {
         let spec: ClusterSpec = serde_yaml::from_str("mode: ssh").unwrap();
         assert_eq!(spec.ssh.user, "delonix");
+    }
+
+    fn upgrade_test_spec() -> ClusterSpec {
+        serde_yaml::from_str(
+            "\
+mode: ssh
+controlPlaneEndpoint: lb.example.com
+controlPlane:
+  hosts:
+    - { ip: 10.0.0.10, hostname: cp1 }
+    - { ip: 10.0.0.11, hostname: cp2 }
+workers:
+  hosts:
+    - { ip: 10.0.0.20, hostname: w1 }
+",
+        )
+        .unwrap()
+    }
+
+    /// `--node <leader>` is refused — the leader runs `kubeadm upgrade apply`
+    /// (no `--node` at all), never `kubeadm upgrade node`. Silently accepting
+    /// it would run the wrong verb against the right host.
+    #[test]
+    fn find_upgrade_target_recusa_o_lider() {
+        let spec = upgrade_test_spec();
+        let err = find_upgrade_target(&spec, "cp1").unwrap_err().to_string();
+        assert!(err.contains("cp1"), "{err}");
+        assert!(err.contains("omit --node"), "{err}");
+    }
+
+    /// The other control-plane and every worker ARE valid `--node` targets.
+    #[test]
+    fn find_upgrade_target_encontra_outro_control_plane_e_workers() {
+        let spec = upgrade_test_spec();
+        assert_eq!(find_upgrade_target(&spec, "cp2").unwrap().ip, "10.0.0.11");
+        assert_eq!(find_upgrade_target(&spec, "w1").unwrap().ip, "10.0.0.20");
+    }
+
+    /// A name that matches nothing gets a clear error naming what DOES exist
+    /// — never a bare "not found" that sends the reader guessing.
+    #[test]
+    fn find_upgrade_target_lista_os_nomes_disponiveis_quando_falha() {
+        let spec = upgrade_test_spec();
+        let err = find_upgrade_target(&spec, "ghost").unwrap_err().to_string();
+        assert!(err.contains("cp2"), "{err}");
+        assert!(err.contains("w1"), "{err}");
+    }
+
+    fn cluster_doc(name: &str) -> ManifestDoc {
+        serde_yaml::from_str(&format!(
+            "apiVersion: delonix.io/v1\nkind: KubernetesCluster\nmetadata: {{ name: {name} }}\nspec: {{ mode: ssh }}\n"
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn single_cluster_doc_recusa_zero_ou_varios() {
+        assert!(single_cluster_doc(&[]).is_err());
+        let docs = vec![cluster_doc("a"), cluster_doc("b")];
+        let err = single_cluster_doc(&docs).unwrap_err().to_string();
+        assert!(err.contains("one cluster at a time"), "{err}");
+    }
+
+    #[test]
+    fn single_cluster_doc_aceita_exactamente_um() {
+        let docs = vec![cluster_doc("only")];
+        let (doc, _spec) = single_cluster_doc(&docs).unwrap();
+        assert_eq!(doc.metadata.name, "only");
     }
 }
