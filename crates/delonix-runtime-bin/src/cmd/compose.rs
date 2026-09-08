@@ -43,15 +43,30 @@
 //! `service_to_run_opts`), `extends:` (`resolve_extends` — same file only,
 //! `depends_on` never inherited, per the Specification), `deploy.replicas`
 //! (N containers, `<project>-<service>`/`-2`/`-3`/…, with no load-balancing
-//! across them — see `Translated.containers`), and anonymous volumes
-//! (`- /container/path`, no explicit source — see `anonymous_volume_names`;
-//! **only `down -v` removes them**, a plain `down` never does, matching real
-//! `docker compose`). Defers top-level `configs:`/`secrets:` (use
-//! `kind: Secret` instead) and multi-file compose
+//! across them — see `Translated.containers`), top-level `configs:`/`secrets:`
+//! (each referenced entry becomes a `kind: Secret` under the hood, applied
+//! before the containers that use it — see `resolve_compose_secrets`), and
+//! anonymous volumes (`- /container/path`, no explicit source — see
+//! `anonymous_volume_names`; **only `down -v` removes them**, a plain `down`
+//! never does, matching real `docker compose`). Defers multi-file compose
 //! (`-f a -f b` merge/`include:`). `working_dir:` IS applied (via `RunOpts.
 //! workdir`, itself now also exposed as `container run -w/--workdir`), and a
 //! bare container port with no host port DOES get a random free host port
 //! (resolved once, before the container is created — see `free_host_port`).
+//!
+//! **`configs:`/`secrets:` — a simplification documented, never silent.**
+//! Compose gives every secret/config its own mount TARGET; the engine's own
+//! `Container.secret` mechanism (`--secret`) mounts a secret's DATA KEYS
+//! verbatim at `/run/secrets/<key>`, with no per-secret retarget. So a
+//! `source:`/`target:` pair where the two differ is REFUSED with the exact
+//! reason (use the source name, or drop `target:`), instead of silently
+//! mounting under the wrong filename. `external: true` is refused the same
+//! way — this module can only create a secret from a `file:`/`environment:`
+//! it can read, never reference one that already exists elsewhere. Both
+//! `secrets:` and `configs:` land in the SAME `SecretStore` (a config has no
+//! separate concept here, exactly what the pre-existing refusal message —
+//! "use `kind: Secret` instead" — already pointed at); only `secrets:` reads
+//! `environment:` (real Compose Spec configs never have that source).
 
 use super::kinds as k;
 use std::collections::{BTreeMap, BTreeSet};
@@ -77,15 +92,14 @@ pub(crate) const COMPOSE_SERVICE_LABEL: &str = "delonix.io/compose-service";
 /// against the RAW parsed YAML (not the typed struct, which would just drop
 /// an unrecognized key silently), so the user gets an ACTIONABLE message
 /// ("not supported in v1, here's why") instead of nothing at all.
-const KNOWN_UNSUPPORTED_TOP: &[(&str, &str)] = &[
-    ("configs", "top-level `configs:` is not supported in v1 — use `kind: Secret` + `Container.secret` instead"),
-    ("secrets", "top-level `secrets:` is not supported in v1 — use `kind: Secret` + `Container.secret` instead"),
-    ("include", "multi-file compose (`include:`/`-f a -f b` merge) is not supported — pass exactly one -f"),
-];
-/// Empty today: `profiles:` and `extends:` were the only two entries, and both
-/// are now implemented. Kept as the place a future refusal goes, WITH its
-/// reason — the allowlist below is what stops an unknown key from being read
-/// as accepted.
+const KNOWN_UNSUPPORTED_TOP: &[(&str, &str)] = &[(
+    "include",
+    "multi-file compose (`include:`/`-f a -f b` merge) is not supported — pass exactly one -f",
+)];
+/// Empty today: `profiles:`, `extends:` and top-level `configs:`/`secrets:`
+/// were the entries here, and all are now implemented. Kept as the place a
+/// future refusal goes, WITH its reason — the allowlist below is what stops
+/// an unknown key from being read as accepted.
 const KNOWN_UNSUPPORTED_SERVICE: &[(&str, &str)] = &[];
 
 /// Every top-level key of the Compose Specification this implementation reads.
@@ -102,7 +116,9 @@ const KNOWN_UNSUPPORTED_SERVICE: &[(&str, &str)] = &[];
 /// `version:` is here although nothing reads it: the Compose Specification
 /// dropped it, real files still carry it, and erroring on it would refuse most
 /// of the compose files in the world for a key whose absence changes nothing.
-const SUPPORTED_TOP: &[&str] = &["version", "name", "services", "networks", "volumes"];
+const SUPPORTED_TOP: &[&str] = &[
+    "version", "name", "services", "networks", "volumes", "secrets", "configs",
+];
 
 /// Every per-service key this implementation reads — the field list of
 /// [`ComposeService`], and `struct_fields_are_all_in_the_allowlist` reads
@@ -135,11 +151,17 @@ const SUPPORTED_SERVICE: &[&str] = &[
     "hostname",
     "read_only",
     "profiles",
+    "secrets",
+    "configs",
 ];
 
 /// Keys of a top-level `networks:`/`volumes:` entry that are read.
 const SUPPORTED_NETWORK: &[&str] = &["external", "name"];
 const SUPPORTED_VOLUME: &[&str] = &["external", "name"];
+/// Keys of a top-level `secrets:`/`configs:` entry that are read — `configs:`
+/// has no `environment` (real Compose Spec never gives it that source).
+const SUPPORTED_SECRET: &[&str] = &["file", "environment", "external", "name"];
+const SUPPORTED_CONFIG: &[&str] = &["file", "external", "name"];
 
 /// (service key, the flag that already does it) — the engine HAS the capability
 /// and `compose` simply does not wire it through yet.
@@ -275,6 +297,63 @@ struct ComposeFile {
     networks: BTreeMap<String, ComposeNetwork>,
     #[serde(default)]
     volumes: BTreeMap<String, ComposeVolume>,
+    #[serde(default)]
+    secrets: BTreeMap<String, ComposeSecretDef>,
+    #[serde(default)]
+    configs: BTreeMap<String, ComposeConfigDef>,
+}
+
+/// A top-level `secrets:` entry. `file`/`environment` are the two sources
+/// this module can resolve without talking to anything outside the compose
+/// file/process env; `external`/`name` are read only to give `external: true`
+/// a specific refusal instead of a silent "field ignored".
+#[derive(Debug, Deserialize, Default)]
+struct ComposeSecretDef {
+    file: Option<PathBuf>,
+    environment: Option<String>,
+    #[serde(default)]
+    external: bool,
+    name: Option<String>,
+}
+
+/// A top-level `configs:` entry. No `environment:` here — the Compose
+/// Specification never gives configs that source, only `secrets:` has it.
+#[derive(Debug, Deserialize, Default)]
+struct ComposeConfigDef {
+    file: Option<PathBuf>,
+    #[serde(default)]
+    external: bool,
+    name: Option<String>,
+}
+
+/// A service's `secrets:`/`configs:` entry — the short form (just the name)
+/// or the long form (`source`/`target`). `uid`/`gid`/`mode` are accepted by
+/// the Compose Specification's long form but not read here — the same
+/// documented simplification `ComposeVolumeMount`'s long form already makes
+/// for options this module has no dataplane for.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+enum ComposeSecretRef {
+    Short(String),
+    Long {
+        source: String,
+        #[serde(default)]
+        target: Option<String>,
+    },
+}
+impl ComposeSecretRef {
+    fn source(&self) -> &str {
+        match self {
+            ComposeSecretRef::Short(s) => s,
+            ComposeSecretRef::Long { source, .. } => source,
+        }
+    }
+    fn target(&self) -> Option<&str> {
+        match self {
+            ComposeSecretRef::Short(_) => None,
+            ComposeSecretRef::Long { target, .. } => target.as_deref(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Default, Clone)]
@@ -331,6 +410,10 @@ struct ComposeService {
     hostname: Option<String>,
     #[serde(default)]
     read_only: bool,
+    #[serde(default)]
+    secrets: Vec<ComposeSecretRef>,
+    #[serde(default)]
+    configs: Vec<ComposeSecretRef>,
     /// A service with no `profiles:` is always active. One that declares them
     /// only starts when one of them is requested via `--profile` — or when
     /// another ACTIVE service `depends_on` it (see `active_services`, which
@@ -1048,6 +1131,180 @@ fn anonymous_volume_names(
         .collect()
 }
 
+/// Reads a top-level `secrets:`/`configs:` entry's content. `what` is
+/// "secret"/"config", used only in the error text.
+fn resolve_secret_content(
+    what: &str,
+    name: &str,
+    file: Option<&Path>,
+    environment: Option<&str>,
+    external: bool,
+    base_dir: &Path,
+) -> Result<String> {
+    if external {
+        return Err(Error::Invalid(format!(
+            "compose: {what} '{name}': `external: true` is not supported in v1 — this \
+             implementation cannot reference a pre-existing {what}, only create one from \
+             `file:`{}",
+            if what == "secret" {
+                " or `environment:`"
+            } else {
+                ""
+            }
+        )));
+    }
+    if let Some(f) = file {
+        let path = base_dir.join(f);
+        return std::fs::read_to_string(&path).map_err(|e| {
+            Error::Invalid(format!(
+                "compose: {what} '{name}': reading {}: {e}",
+                path.display()
+            ))
+        });
+    }
+    if let Some(var) = environment {
+        return std::env::var(var).map_err(|_| {
+            Error::Invalid(format!(
+                "compose: secret '{name}': `environment: {var}` is not set in this shell"
+            ))
+        });
+    }
+    Err(Error::Invalid(format!(
+        "compose: {what} '{name}' needs `file:`{} — neither was given",
+        if what == "secret" {
+            " or `environment:`"
+        } else {
+            ""
+        }
+    )))
+}
+
+#[derive(Serialize)]
+struct SecretDocSpec {
+    #[serde(rename = "stringData")]
+    string_data: BTreeMap<String, String>,
+}
+
+/// A `kind: Secret` document holding exactly one key: the compose secret's
+/// own name, mapped to its resolved content. One key (not the whole map of
+/// every compose secret) because `Container.secret`'s file delivery mounts
+/// EVERY key of every attached secret under `/run/secrets/<key>` — merging
+/// unrelated secrets into one document would let one service's `secrets:`
+/// list pull in a key it never declared.
+fn secret_doc(real_name: &str, data_key: &str, content: &str) -> ManifestDoc {
+    let mut string_data = BTreeMap::new();
+    string_data.insert(data_key.to_string(), content.to_string());
+    ManifestDoc {
+        api_version: "delonix.io/v1".to_string(),
+        kind: k::SECRET.to_string(),
+        metadata: Metadata {
+            name: real_name.to_string(),
+            namespace: None,
+            labels: BTreeMap::new(),
+            annotations: BTreeMap::new(),
+        },
+        spec: serde_yaml::to_value(SecretDocSpec { string_data })
+            .unwrap_or(serde_yaml::Value::Mapping(serde_yaml::Mapping::new())),
+    }
+}
+
+/// Resolves every `secrets:`/`configs:` reference of the ACTIVE services into
+/// `kind: Secret` documents, plus the (compose key -> delonix secret name)
+/// maps `service_to_run_opts` needs to fill `RunOpts.secret`.
+///
+/// Only entries actually REFERENCED by a service are resolved — a `secrets:`
+/// block nobody attaches costs nothing and reads nothing, same as an unused
+/// top-level `networks:`/`volumes:` entry would (well, those still get
+/// created; but here there is no dataplane-free "declare it anyway" step,
+/// and a `file:` that does not exist would otherwise fail an `up` for a
+/// secret no container even wants).
+/// `(kind: Secret` documents, compose secret name -> delonix name, compose
+/// config name -> delonix name)`.
+type ComposeSecrets = (
+    Vec<ManifestDoc>,
+    BTreeMap<String, String>,
+    BTreeMap<String, String>,
+);
+
+fn resolve_compose_secrets(
+    project: &str,
+    compose: &ComposeFile,
+    active: &BTreeSet<String>,
+    base_dir: &Path,
+) -> Result<ComposeSecrets> {
+    let mut used_secrets: BTreeSet<String> = BTreeSet::new();
+    let mut used_configs: BTreeSet<String> = BTreeSet::new();
+    for (svc_name, svc) in compose.services.iter().filter(|(n, _)| active.contains(*n)) {
+        for (what, refs, used) in [
+            ("secret", &svc.secrets, &mut used_secrets),
+            ("config", &svc.configs, &mut used_configs),
+        ] {
+            for r in refs {
+                if let Some(t) = r.target() {
+                    if t != r.source() {
+                        return Err(Error::Invalid(format!(
+                            "compose: service '{svc_name}' {what} '{}': `target: {t}` \
+                             (renaming the mounted filename) is not supported in v1 — use \
+                             the source name, or drop `target:`",
+                            r.source()
+                        )));
+                    }
+                }
+                used.insert(r.source().to_string());
+            }
+        }
+    }
+
+    let mut docs = Vec::new();
+    let mut secret_names = BTreeMap::new();
+    for key in &used_secrets {
+        let def = compose.secrets.get(key).ok_or_else(|| {
+            Error::Invalid(format!(
+                "compose: service references undeclared secret '{key}' (declare it under \
+                 top-level `secrets:`)"
+            ))
+        })?;
+        let content = resolve_secret_content(
+            "secret",
+            key,
+            def.file.as_deref(),
+            def.environment.as_deref(),
+            def.external,
+            base_dir,
+        )?;
+        let real = def
+            .name
+            .clone()
+            .unwrap_or_else(|| compose_scoped_name(project, &format!("secret-{key}")));
+        docs.push(secret_doc(&real, key, &content));
+        secret_names.insert(key.clone(), real);
+    }
+    let mut config_names = BTreeMap::new();
+    for key in &used_configs {
+        let def = compose.configs.get(key).ok_or_else(|| {
+            Error::Invalid(format!(
+                "compose: service references undeclared config '{key}' (declare it under \
+                 top-level `configs:`)"
+            ))
+        })?;
+        let content = resolve_secret_content(
+            "config",
+            key,
+            def.file.as_deref(),
+            None,
+            def.external,
+            base_dir,
+        )?;
+        let real = def
+            .name
+            .clone()
+            .unwrap_or_else(|| compose_scoped_name(project, &format!("config-{key}")));
+        docs.push(secret_doc(&real, key, &content));
+        config_names.insert(key.clone(), real);
+    }
+    Ok((docs, secret_names, config_names))
+}
+
 /// Refuses every key this implementation does not read — against the RAW parsed
 /// YAML, because the typed structs drop an unrecognized key without a word.
 ///
@@ -1086,6 +1343,8 @@ fn check_unsupported_fields(text: &str) -> Result<()> {
     for (section, allowed) in [
         ("networks", SUPPORTED_NETWORK),
         ("volumes", SUPPORTED_VOLUME),
+        ("secrets", SUPPORTED_SECRET),
+        ("configs", SUPPORTED_CONFIG),
     ] {
         let Some(serde_yaml::Value::Mapping(entries)) = top.get(section) else {
             continue;
@@ -1192,6 +1451,7 @@ struct Translated {
     image_docs: Vec<ManifestDoc>,
     network_docs: Vec<ManifestDoc>,
     volume_docs: Vec<ManifestDoc>,
+    secret_docs: Vec<ManifestDoc>,
     /// One entry per REPLICA, in replica order — `[0]` is the "canonical"
     /// container (`<project>-<service>`, or `container_name:` if given,
     /// which `deploy.replicas>1` refuses precisely so this stays unambiguous)
@@ -1284,6 +1544,9 @@ fn translate(
         volume_docs.push(simple_doc(k::VOLUME, &volume_names[key]));
     }
 
+    let (secret_docs, secret_names, config_names) =
+        resolve_compose_secrets(project, compose, &active, base_dir)?;
+
     let mut image_docs = Vec::new();
     let mut containers = BTreeMap::new();
     let mut waits: BTreeMap<String, Vec<DependsOnWait>> = BTreeMap::new();
@@ -1320,6 +1583,8 @@ fn translate(
                 &network_names,
                 &volume_names,
                 &anon_names,
+                &secret_names,
+                &config_names,
                 &image_ref,
                 idx,
             )?);
@@ -1342,6 +1607,7 @@ fn translate(
         image_docs,
         network_docs,
         volume_docs,
+        secret_docs,
         containers,
         order,
         waits,
@@ -1583,6 +1849,8 @@ fn service_to_run_opts(
     network_names: &BTreeMap<String, String>,
     volume_names: &BTreeMap<String, String>,
     anon_names: &[String],
+    secret_names: &BTreeMap<String, String>,
+    config_names: &BTreeMap<String, String>,
     image_ref: &str,
     replica_index: u32,
 ) -> Result<(super::container::RunOpts, String)> {
@@ -1669,7 +1937,24 @@ fn service_to_run_opts(
         }
     });
 
+    // `target:` mismatches were already refused in `resolve_compose_secrets`
+    // (it sees every service, so it is the one place that can name the
+    // service in the error) — by the time we get here every reference maps
+    // straight onto a resolved delonix secret name. `secret_files: true`
+    // whenever there is at least one, because Compose secrets/configs are
+    // ALWAYS file-mounted (`/run/secrets/<name>`), never injected as env vars.
+    let mut secret_refs: Vec<String> = Vec::new();
+    for r in &svc.secrets {
+        secret_refs.push(secret_names[r.source()].clone());
+    }
+    for r in &svc.configs {
+        secret_refs.push(config_names[r.source()].clone());
+    }
+    let secret_files = !secret_refs.is_empty();
+
     let opts = super::container::RunOpts {
+        secret: secret_refs,
+        secret_files,
         detach: true,
         name: Some(final_name.clone()),
         hostname: svc.hostname.clone(),
@@ -2010,6 +2295,16 @@ fn merge_service(base: ComposeService, child: ComposeService) -> ComposeService 
         container_name: child.container_name.or(base.container_name),
         hostname: child.hostname.or(base.hostname),
         read_only: base.read_only || child.read_only,
+        secrets: {
+            let mut v = base.secrets;
+            v.extend(child.secrets);
+            v
+        },
+        configs: {
+            let mut v = base.configs;
+            v.extend(child.configs);
+            v
+        },
     }
 }
 
@@ -2105,6 +2400,7 @@ fn cmd_up(
             .iter()
             .chain(&translated.volume_docs)
             .chain(&translated.image_docs)
+            .chain(&translated.secret_docs)
         {
             println!(
                 "---\n{}",
@@ -2125,6 +2421,7 @@ fn cmd_up(
     super::image::apply(&translated.image_docs)?;
     super::network::apply(&translated.network_docs)?;
     super::volume::apply(&translated.volume_docs)?;
+    super::secret::apply(&translated.secret_docs, &base_dir)?;
 
     let (images, store) = open_stores()?;
     for name in &translated.order {
@@ -2586,6 +2883,156 @@ services:
         assert_eq!(opts.ip, None);
     }
 
+    /// The success path end-to-end: a `file:` source becomes a `kind: Secret`
+    /// document holding exactly the secret's own name as key, and the
+    /// referencing service's `RunOpts` picks it up with `secret_files: true`
+    /// (Compose secrets are always file-mounted, never env vars).
+    #[test]
+    fn secret_file_source_becomes_a_secret_doc_and_flows_into_run_opts() {
+        let path = std::env::temp_dir().join(format!(
+            "dlx-compose-secret-test-{}-{}.txt",
+            std::process::id(),
+            "a"
+        ));
+        std::fs::write(&path, "s3cr3t\n").unwrap();
+        let yaml = format!(
+            "secrets:\n  db_password:\n    file: {}\nservices:\n  web:\n    image: x\n    secrets:\n      - db_password\n",
+            path.display()
+        );
+        let compose: ComposeFile = serde_yaml::from_str(&yaml).unwrap();
+        let t = translate(&compose, "p", Path::new("/"), &[]).unwrap();
+        std::fs::remove_file(&path).ok();
+
+        let (opts, _) = &t.containers["web"][0];
+        assert!(opts.secret_files, "compose secrets must be file-delivered");
+        assert_eq!(opts.secret.len(), 1);
+        let secret_name = &opts.secret[0];
+
+        let doc = t
+            .secret_docs
+            .iter()
+            .find(|d| &d.metadata.name == secret_name)
+            .expect("a secret doc must exist for the referenced secret");
+        let spec = doc.spec.as_mapping().unwrap();
+        let string_data = spec.get("stringData").unwrap().as_mapping().unwrap();
+        let value = string_data.get("db_password").unwrap().as_str().unwrap();
+        assert_eq!(value, "s3cr3t\n");
+    }
+
+    /// `configs:` goes through the same mechanism as `secrets:` — same
+    /// SecretStore, same file delivery — the "use `kind: Secret` instead"
+    /// message this module always gave for both keys.
+    #[test]
+    fn config_file_source_also_becomes_a_secret_doc() {
+        let path = std::env::temp_dir().join(format!(
+            "dlx-compose-config-test-{}-{}.txt",
+            std::process::id(),
+            "a"
+        ));
+        std::fs::write(&path, "server { }\n").unwrap();
+        let yaml = format!(
+            "configs:\n  nginx_conf:\n    file: {}\nservices:\n  web:\n    image: x\n    configs:\n      - nginx_conf\n",
+            path.display()
+        );
+        let compose: ComposeFile = serde_yaml::from_str(&yaml).unwrap();
+        let t = translate(&compose, "p", Path::new("/"), &[]).unwrap();
+        std::fs::remove_file(&path).ok();
+
+        let (opts, _) = &t.containers["web"][0];
+        assert!(opts.secret_files);
+        assert_eq!(opts.secret.len(), 1);
+    }
+
+    /// A service with neither `secrets:` nor `configs:` never turns on
+    /// `secret_files` — a container with no secrets attached should not
+    /// silently get a tmpfs it never asked for (harmless here, but this is
+    /// the flag `write_secret_files` reads to decide delivery mode).
+    #[test]
+    fn no_secrets_leaves_run_opts_secret_files_false() {
+        let yaml = "services:\n  web:\n    image: x\n";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let t = translate(&compose, "p", Path::new("/tmp"), &[]).unwrap();
+        let (opts, _) = &t.containers["web"][0];
+        assert!(!opts.secret_files);
+        assert!(opts.secret.is_empty());
+    }
+
+    /// `environment:` reads the PROCESS environment at translate time —
+    /// `PATH` is used here specifically to avoid `std::env::set_var` (unsafe
+    /// in this toolchain, and shared mutable state across parallel tests);
+    /// it is a variable every test process already has, for free.
+    #[test]
+    fn secret_environment_source_reads_the_process_env() {
+        let content =
+            resolve_secret_content("secret", "s", None, Some("PATH"), false, Path::new("/tmp"))
+                .unwrap();
+        assert_eq!(content, std::env::var("PATH").unwrap());
+    }
+
+    #[test]
+    fn secret_environment_source_missing_var_is_a_clear_error() {
+        let e = resolve_secret_content(
+            "secret",
+            "s",
+            None,
+            Some("DLX_COMPOSE_TEST_VAR_THAT_DOES_NOT_EXIST_XYZ"),
+            false,
+            Path::new("/tmp"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("is not set"), "{e}");
+    }
+
+    /// `translate()`'s `Result<Translated, _>` cannot use `.unwrap_err()`
+    /// directly (`Translated` has no `Debug`, on purpose — it holds live
+    /// `RunOpts`), so the error-path tests below go through this instead.
+    fn translate_err(compose: &ComposeFile) -> String {
+        match translate(compose, "p", Path::new("/tmp"), &[]) {
+            Ok(_) => panic!("this compose file must be refused"),
+            Err(e) => e.to_string(),
+        }
+    }
+
+    /// A `source:`/`target:` pair that renames the mounted filename cannot be
+    /// honoured — `Container.secret`'s file delivery names every mount after
+    /// the secret's OWN data key, with no per-secret retarget. Refused with
+    /// the specific reason, never silently mounted under the wrong name.
+    #[test]
+    fn secret_target_rename_is_refused() {
+        let yaml = "secrets:\n  db_password:\n    environment: PATH\nservices:\n  web:\n    image: x\n    secrets:\n      - source: db_password\n        target: renamed\n";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let e = translate_err(&compose);
+        assert!(e.contains("target: renamed"), "{e}");
+    }
+
+    /// `external: true` cannot be honoured either — this module can only
+    /// create a secret from a `file:`/`environment:` it can read, never
+    /// reference one that already exists outside the compose file.
+    #[test]
+    fn external_secret_is_refused() {
+        let yaml = "secrets:\n  db_password:\n    external: true\nservices:\n  web:\n    image: x\n    secrets:\n      - db_password\n";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let e = translate_err(&compose);
+        assert!(e.contains("external"), "{e}");
+    }
+
+    #[test]
+    fn config_without_file_is_refused() {
+        let yaml = "configs:\n  app_conf: {}\nservices:\n  web:\n    image: x\n    configs:\n      - app_conf\n";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let e = translate_err(&compose);
+        assert!(e.contains("needs `file:`"), "{e}");
+    }
+
+    #[test]
+    fn undeclared_secret_reference_is_refused() {
+        let yaml = "services:\n  web:\n    image: x\n    secrets:\n      - missing\n";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let e = translate_err(&compose);
+        assert!(e.contains("undeclared secret"), "{e}");
+    }
+
     #[test]
     fn anonymous_volume_names_indexes_only_the_anonymous_mounts() {
         let mounts = vec![
@@ -2975,18 +3422,17 @@ mod tests_unknown_keys {
     /// The specific reasons still win over the generic message — a denied key
     /// must not regress into "not understood".
     ///
-    /// The `profiles:` half of this test was REMOVED when `profiles` shipped:
-    /// it asserted the key is refused ("every service always runs"), and that
-    /// stopped being true. A test that keeps a retired refusal alive is the
-    /// «a test can encode the bug» trap this repo has already paid for — it
-    /// would have blocked the very feature it outlived. `KNOWN_UNSUPPORTED_TOP`
-    /// still has entries, so the property this test exists for is still covered.
+    /// The `profiles:`/`extends:`/`configs:`/`secrets:` assertions this test
+    /// once had were REMOVED as each shipped: they asserted the key is
+    /// refused, and that stopped being true. A test that keeps a retired
+    /// refusal alive is the «a test can encode the bug» trap this repo has
+    /// already paid for — it would have blocked the very feature it outlived.
+    /// `KNOWN_UNSUPPORTED_TOP` still has `include`, so the property this test
+    /// exists for is still covered.
     #[test]
     fn the_specific_reason_wins_over_the_generic() {
-        let e = err_of("configs:\n  a: {}\nservices:\n  web:\n    image: nginx\n");
-        assert!(e.contains("kind: Secret"), "specific reason: {e}");
         let e = err_of("include:\n  - other.yml\nservices:\n  web:\n    image: nginx\n");
-        assert!(e.contains("exactly one -f"), "specific reason: {e}");
+        assert!(e.contains("pass exactly one -f"), "specific reason: {e}");
     }
 
     #[test]
@@ -3064,6 +3510,22 @@ volumes:
         let e = err_of("services:\n  w:\n    image: n\nnetworks:\n  front:\n    driver: bridge\n");
         assert!(e.contains("driver"), "{e}");
         assert!(e.contains("front"), "{e}");
+    }
+
+    #[test]
+    fn a_secret_entry_key_outside_the_list_is_refused() {
+        let e = err_of("services:\n  w:\n    image: n\nsecrets:\n  a:\n    bogus: true\n");
+        assert!(e.contains("bogus"), "{e}");
+        assert!(e.contains("secrets 'a'"), "{e}");
+    }
+
+    #[test]
+    fn a_config_entry_cannot_use_environment_source() {
+        // `environment:` is a `secrets:`-only source in the real Compose
+        // Specification — allowing it under `configs:` too would be a second,
+        // undocumented opinion, so it is refused like any other unknown key.
+        let e = err_of("services:\n  w:\n    image: n\nconfigs:\n  a:\n    environment: X\n");
+        assert!(e.contains("environment"), "{e}");
     }
 
     /// The guard that stops the allowlist from drifting away from the struct it
