@@ -40,16 +40,18 @@
 //! (multi-stage stage selection — forwarded to `kind: Image`'s own
 //! `build.target`, itself `delonix build --target`), a fixed
 //! `networks.*.ipv4_address` (wired straight into `container run --ip`, see
-//! `service_to_run_opts`), `extends:` (`resolve_extends` — same file only,
-//! `depends_on` never inherited, per the Specification), `deploy.replicas`
+//! `service_to_run_opts`), `extends:` (`resolve_extends`, resolved AFTER the
+//! multi-file merge — see "Multi-file compose" below), `deploy.replicas`
 //! (N containers, `<project>-<service>`/`-2`/`-3`/…, with no load-balancing
 //! across them — see `Translated.containers`), top-level `configs:`/`secrets:`
 //! (each referenced entry becomes a `kind: Secret` under the hood, applied
-//! before the containers that use it — see `resolve_compose_secrets`), and
+//! before the containers that use it — see `resolve_compose_secrets`),
 //! anonymous volumes (`- /container/path`, no explicit source — see
 //! `anonymous_volume_names`; **only `down -v` removes them**, a plain `down`
-//! never does, matching real `docker compose`). Defers multi-file compose
-//! (`-f a -f b` merge/`include:`). `working_dir:` IS applied (via `RunOpts.
+//! never does, matching real `docker compose`), and multi-file compose via
+//! **repeated `-f`** (`-f a.yml -f b.yml`, see "Multi-file compose" below).
+//! Defers the YAML `include:` directive (use `-f a -f b` instead).
+//! `working_dir:` IS applied (via `RunOpts.
 //! workdir`, itself now also exposed as `container run -w/--workdir`), and a
 //! bare container port with no host port DOES get a random free host port
 //! (resolved once, before the container is created — see `free_host_port`).
@@ -67,6 +69,27 @@
 //! separate concept here, exactly what the pre-existing refusal message —
 //! "use `kind: Secret` instead" — already pointed at); only `secrets:` reads
 //! `environment:` (real Compose Spec configs never have that source).
+//!
+//! **Multi-file compose (`-f a.yml -f b.yml`).** Each file is parsed and
+//! `check_unsupported_fields`-checked SEPARATELY (that check runs on raw YAML
+//! text, before any merge, so an unknown/refused key is caught no matter
+//! which file it came from) and the resulting typed `ComposeFile`s are merged
+//! left-to-right (`merge_compose_files`) following the Compose Spec's own
+//! rules — scalars: later file wins if declared; `environment:`/`labels:`/
+//! `extra_hosts:`: merged key-by-key (later wins only on a shared key);
+//! `cap_add`/`cap_drop`: concatenated; `ports`/`volumes`/`env_file`/`tmpfs`:
+//! concatenated; `depends_on`: **accumulated** (a dependency named in either
+//! file is kept, later file's condition wins on a shared name) — unlike
+//! `extends:`, an ordinary multi-file merge of the SAME service name has no
+//! foreign-template ambiguity to protect against, so there is no reason to
+//! exclude it. Top-level `networks:`/`volumes:` entries are small enough
+//! (`external`/`name`) that a shared key is a full REPLACE rather than a
+//! field merge — documented simplification, not a silent drop. All relative
+//! paths (build context, `env_file`) resolve against the FIRST file's
+//! directory, matching real `docker compose`'s own convention. The YAML
+//! `include:` directive is a SEPARATE, deferred feature (different
+//! path-relativity and project-name-propagation rules) — only the CLI
+//! `-f a -f b` form is implemented here.
 
 use super::kinds as k;
 use std::collections::{BTreeMap, BTreeSet};
@@ -94,7 +117,7 @@ pub(crate) const COMPOSE_SERVICE_LABEL: &str = "delonix.io/compose-service";
 /// ("not supported in v1, here's why") instead of nothing at all.
 const KNOWN_UNSUPPORTED_TOP: &[(&str, &str)] = &[(
     "include",
-    "multi-file compose (`include:`/`-f a -f b` merge) is not supported — pass exactly one -f",
+    "the `include:` directive is not supported — use repeated `-f a -f b` on the command line instead",
 )];
 /// Empty today: `profiles:`, `extends:` and top-level `configs:`/`secrets:`
 /// were the entries here, and all are now implemented. Kept as the place a
@@ -190,8 +213,11 @@ pub enum ComposeCmd {
     /// Build, then network, then volume, then containers in `depends_on` order
     /// (gated on the declared condition).
     Up {
+        /// Repeatable — `-f a.yml -f b.yml` merges left-to-right (see the
+        /// module doc-comment, "Multi-file compose"). No `-f` at all falls
+        /// back to the usual single-file search.
         #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
-        file: Option<PathBuf>,
+        file: Vec<PathBuf>,
         #[arg(short = 'p', long = "project-name")]
         project: Option<String>,
         /// Prints the resolved project (containers/networks/volumes) and exits
@@ -215,8 +241,10 @@ pub enum ComposeCmd {
     /// And, with `-v`, its named volumes. Networks/volumes marked
     /// `external: true` are NEVER removed.
     Down {
+        /// Repeatable — must name the SAME file(s) `up` was given, so the
+        /// project/network/volume names re-derive identically.
         #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
-        file: Option<PathBuf>,
+        file: Vec<PathBuf>,
         #[arg(short = 'p', long = "project-name")]
         project: Option<String>,
         #[arg(short = 'v', long)]
@@ -225,7 +253,7 @@ pub enum ComposeCmd {
     /// Containers of this project (derived from labels).
     Ps {
         #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
-        file: Option<PathBuf>,
+        file: Vec<PathBuf>,
         #[arg(short = 'p', long = "project-name")]
         project: Option<String>,
     },
@@ -233,7 +261,7 @@ pub enum ComposeCmd {
     Logs {
         service: Option<String>,
         #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
-        file: Option<PathBuf>,
+        file: Vec<PathBuf>,
         #[arg(short = 'p', long = "project-name")]
         project: Option<String>,
         /// No short flag (unlike real `docker compose logs -f`) — `-f` is
@@ -246,7 +274,7 @@ pub enum ComposeCmd {
     /// (`docker compose config` equivalent).
     Config {
         #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
-        file: Option<PathBuf>,
+        file: Vec<PathBuf>,
         #[arg(short = 'p', long = "project-name")]
         project: Option<String>,
         /// Same meaning as `up --profile` — resolve and print as if these
@@ -710,6 +738,219 @@ struct ComposeVolume {
 }
 
 // ============================================================================
+// Multi-file merge — pure, PURE (typed struct in, typed struct out), no I/O.
+//
+// Left-to-right: the first file is the base, each following one is an
+// overlay merged ON TOP of what came before. See the module doc-comment
+// ("Multi-file compose") for the exact per-field rules; this section is the
+// implementation of that paragraph, one function per shape.
+// ============================================================================
+
+fn merge_compose_files(files: Vec<ComposeFile>) -> ComposeFile {
+    let mut iter = files.into_iter();
+    let mut merged = iter.next().unwrap_or_default();
+    for next in iter {
+        merged.services = merge_services(merged.services, next.services);
+        // `external`/`name` are the whole struct — a shared key is a full
+        // REPLACE, not a field merge (documented simplification: too small a
+        // struct for a field-by-field merge to earn its complexity).
+        merged.networks.extend(next.networks);
+        merged.volumes.extend(next.volumes);
+    }
+    merged
+}
+
+fn merge_services(
+    mut base: BTreeMap<String, ComposeService>,
+    overlay: BTreeMap<String, ComposeService>,
+) -> BTreeMap<String, ComposeService> {
+    for (name, overlay_svc) in overlay {
+        match base.remove(&name) {
+            Some(base_svc) => {
+                base.insert(name, merge_service_overlay(base_svc, overlay_svc));
+            }
+            None => {
+                base.insert(name, overlay_svc);
+            }
+        }
+    }
+    base
+}
+
+/// One service declared in more than one file — the per-field rules from the
+/// module doc-comment. `ComposeService` derives `Default`, so a field this
+/// function doesn't mention explicitly can't silently vanish: every field is
+/// listed here, and a new field added to the struct without a matching arm
+/// would fail to compile (no `..Default::default()` in the constructor).
+fn merge_service_overlay(base: ComposeService, overlay: ComposeService) -> ComposeService {
+    ComposeService {
+        image: overlay.image.or(base.image),
+        build: overlay.build.or(base.build),
+        environment: merge_env_overlay(base.environment, overlay.environment),
+        env_file: OneOrMany::Many(concat(
+            base.env_file.into_vec(),
+            overlay.env_file.into_vec(),
+        )),
+        ports: concat(base.ports, overlay.ports),
+        volumes: concat(base.volumes, overlay.volumes),
+        command: overlay.command.or(base.command),
+        entrypoint: overlay.entrypoint.or(base.entrypoint),
+        depends_on: merge_depends_on(base.depends_on, overlay.depends_on),
+        healthcheck: overlay.healthcheck.or(base.healthcheck),
+        restart: overlay.restart.or(base.restart),
+        networks: merge_service_networks(base.networks, overlay.networks),
+        labels: merge_env_overlay(base.labels, overlay.labels),
+        working_dir: overlay.working_dir.or(base.working_dir),
+        user: overlay.user.or(base.user),
+        cap_add: concat_dedup(base.cap_add, overlay.cap_add),
+        cap_drop: concat_dedup(base.cap_drop, overlay.cap_drop),
+        // `bool` fields have no "unset" state (`#[serde(default)]` makes an
+        // absent key indistinguishable from an explicit `false`), so a
+        // declared `false` in a later file can never silently turn OFF a
+        // `true` from an earlier one — OR is the fail-safe direction for a
+        // security-relevant flag like `privileged`, and kept the same for
+        // `read_only` for consistency. Documented simplification, not a bug:
+        // a real per-field "was this key present" tracker would need a
+        // second parse pass over the raw YAML per file.
+        privileged: base.privileged || overlay.privileged,
+        tmpfs: OneOrMany::Many(concat(base.tmpfs.into_vec(), overlay.tmpfs.into_vec())),
+        extra_hosts: merge_env_overlay(base.extra_hosts, overlay.extra_hosts),
+        deploy: overlay.deploy.or(base.deploy),
+        container_name: overlay.container_name.or(base.container_name),
+        hostname: overlay.hostname.or(base.hostname),
+        read_only: base.read_only || overlay.read_only,
+        // `extends:` has NOT been resolved yet when the multi-file merge
+        // runs (`resolve_extends` runs AFTER it — see `load_compose`), so it
+        // has to survive the merge instead of being consumed here the way
+        // the extends-side `merge_service` does. A later file that declares
+        // `extends:` again wins; otherwise the first file's survives.
+        extends: overlay.extends.or(base.extends),
+        // Lists of secret/config REFERENCES and of profiles accumulate
+        // without duplicating, like `cap_add`/`cap_drop` above — a later
+        // file adds to what an earlier one declared instead of replacing it,
+        // which is the useful reading of an overlay.
+        secrets: concat_secret_refs(base.secrets, overlay.secrets),
+        configs: concat_secret_refs(base.configs, overlay.configs),
+        profiles: concat_dedup(base.profiles, overlay.profiles),
+    }
+}
+
+/// A service's `secrets:`/`configs:` in a multi-file merge: they accumulate
+/// without repeating the SAME source. `ComposeSecretRef` is not `PartialEq`,
+/// so the comparison goes through its own `source()` — the key that names
+/// the top-level entry a reference points at.
+fn concat_secret_refs(
+    base: Vec<ComposeSecretRef>,
+    overlay: Vec<ComposeSecretRef>,
+) -> Vec<ComposeSecretRef> {
+    let mut out = base;
+    for r in overlay {
+        if !out.iter().any(|e| e.source() == r.source()) {
+            out.push(r);
+        }
+    }
+    out
+}
+
+fn concat<T>(mut base: Vec<T>, overlay: Vec<T>) -> Vec<T> {
+    base.extend(overlay);
+    base
+}
+
+fn concat_dedup(base: Vec<String>, overlay: Vec<String>) -> Vec<String> {
+    let mut out = base;
+    for v in overlay {
+        if !out.contains(&v) {
+            out.push(v);
+        }
+    }
+    out
+}
+
+/// `environment:`/`labels:`/`extra_hosts:` merge KEY-BY-KEY (later file wins
+/// only on a shared key) — never a full replace, which would silently drop
+/// every variable the base file declared just because the overlay declared
+/// one more. Both sides go through the same `KEY=VALUE`/`{KEY: VALUE}`
+/// normalization `to_kv_pairs`'s callers already rely on, so a `List` and a
+/// `Map` merge correctly no matter which form each file used.
+fn merge_env_overlay(base: ComposeEnv, overlay: ComposeEnv) -> ComposeEnv {
+    let mut merged = env_as_map(&base);
+    merged.extend(env_as_map(&overlay));
+    ComposeEnv::Map(merged)
+}
+
+fn env_as_map(env: &ComposeEnv) -> BTreeMap<String, Option<serde_yaml::Value>> {
+    match env {
+        ComposeEnv::Map(m) => m.clone(),
+        ComposeEnv::List(v) => v
+            .iter()
+            .map(|s| match s.split_once('=') {
+                Some((k, val)) => (
+                    k.to_string(),
+                    Some(serde_yaml::Value::String(val.to_string())),
+                ),
+                None => (s.clone(), None),
+            })
+            .collect(),
+    }
+}
+
+/// `depends_on:` **accumulates** across files (a name declared in either is
+/// kept; a name declared in both keeps the LATER file's condition) — the
+/// opposite of `extends:`'s exclusion of `depends_on`, and deliberately so:
+/// that exclusion exists to dodge ambiguity with a FOREIGN template, which
+/// does not apply here (same project, same service, split across files for
+/// convenience).
+fn merge_depends_on(base: ComposeDependsOn, overlay: ComposeDependsOn) -> ComposeDependsOn {
+    let mut merged = depends_on_as_map(base);
+    merged.extend(depends_on_as_map(overlay));
+    ComposeDependsOn::Long(
+        merged
+            .into_iter()
+            .map(|(name, condition)| (name, ComposeDependsOnEntry { condition }))
+            .collect(),
+    )
+}
+
+fn depends_on_as_map(d: ComposeDependsOn) -> BTreeMap<String, String> {
+    match d {
+        ComposeDependsOn::Short(v) => v
+            .into_iter()
+            .map(|name| (name, "service_started".to_string()))
+            .collect(),
+        ComposeDependsOn::Long(m) => m.into_iter().map(|(k, e)| (k, e.condition)).collect(),
+    }
+}
+
+/// A service's `networks:` merges key-by-key like `environment:` above — a
+/// service attached to `net-a` in the base file and `net-b` in an overlay
+/// ends up on BOTH, not just the overlay's.
+fn merge_service_networks(
+    base: ComposeServiceNetworks,
+    overlay: ComposeServiceNetworks,
+) -> ComposeServiceNetworks {
+    let mut merged = service_networks_as_map(base);
+    merged.extend(service_networks_as_map(overlay));
+    if merged.is_empty() {
+        return ComposeServiceNetworks::Empty;
+    }
+    ComposeServiceNetworks::Map(
+        merged
+            .into_iter()
+            .map(|(k, ipv4_address)| (k, ComposeServiceNetworkEntry { ipv4_address }))
+            .collect(),
+    )
+}
+
+fn service_networks_as_map(n: ComposeServiceNetworks) -> BTreeMap<String, Option<String>> {
+    match n {
+        ComposeServiceNetworks::Empty => BTreeMap::new(),
+        ComposeServiceNetworks::List(v) => v.into_iter().map(|k| (k, None)).collect(),
+        ComposeServiceNetworks::Map(m) => m.into_iter().map(|(k, e)| (k, e.ipv4_address)).collect(),
+    }
+}
+
+// ============================================================================
 // Pure helpers (parsing/naming/ordering) — no I/O, all unit-tested below
 // ============================================================================
 
@@ -738,6 +979,20 @@ fn resolve_compose_path(file: Option<PathBuf>) -> Result<PathBuf> {
     Err(Error::Invalid(
         "no compose file found (tried compose.yaml, compose.yml, docker-compose.yaml, docker-compose.yml) — use -f <file>".into(),
     ))
+}
+
+/// Resolves every `-f`/`--file` occurrence to a real path, in the order given
+/// on the command line — the first is the BASE, later ones override/extend it
+/// (real `docker compose`'s own convention for `-f a.yml -f b.yml`). No `-f`
+/// at all falls back to the single-file default search.
+fn resolve_compose_paths(files: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    if files.is_empty() {
+        return Ok(vec![resolve_compose_path(None)?]);
+    }
+    files
+        .iter()
+        .map(|f| resolve_compose_path(Some(f.clone())))
+        .collect()
 }
 
 /// Default project name: the lowercased basename of the compose file's
@@ -1376,10 +1631,14 @@ fn check_unsupported_fields(text: &str) -> Result<()> {
             {
                 if ext_map.contains_key(serde_yaml::Value::String("file".to_string())) {
                     return Err(Error::Invalid(format!(
-                        "compose: service '{svc}': extends.file is not supported — this \
-                         implementation doesn't do multi-file compose at all, so `file:` \
-                         naming anything is refused rather than silently resolved against \
-                         the wrong file (omit `file:` to extend a service in this same file)"
+                        "compose: service '{svc}': extends.file is not supported — it \
+                         inherits from a service in ANOTHER file, with that file's own \
+                         path relativity, which is a different thing from the `-f a -f b` \
+                         merge this implementation does do (that merges whole documents \
+                         and resolves relative paths against the FIRST file). Refused \
+                         rather than silently resolved against the wrong file: omit \
+                         `file:` to extend a service in the merged document, or pass the \
+                         other file with its own `-f`"
                     )));
                 }
             }
@@ -2362,29 +2621,48 @@ fn resolve_one(
 // Commands
 // ============================================================================
 
-fn load_compose(file: Option<PathBuf>) -> Result<(ComposeFile, String, PathBuf, String)> {
-    let path = resolve_compose_path(file)?;
-    let text = std::fs::read_to_string(&path)
-        .map_err(|e| Error::Invalid(format!("reading {}: {e}", path.display())))?;
-    check_unsupported_fields(&text)?;
-    let mut compose: ComposeFile = serde_yaml::from_str(&text)
-        .map_err(|e| Error::Invalid(format!("parsing {}: {e}", path.display())))?;
+/// Loads and merges every `-f` file (or the single default one), and returns
+/// the same 4-tuple shape single-file `load_compose` always has — so the 5
+/// call sites below need no rework beyond accepting `Vec<PathBuf>` instead of
+/// `Option<PathBuf>`. `base_dir`/the returned path string are always the
+/// FIRST file's — see the module doc-comment ("Multi-file compose").
+fn load_compose(files: Vec<PathBuf>) -> Result<(ComposeFile, String, PathBuf, String)> {
+    let paths = resolve_compose_paths(&files)?;
+    let mut parsed = Vec::with_capacity(paths.len());
+    for path in &paths {
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| Error::Invalid(format!("reading {}: {e}", path.display())))?;
+        // Runs on the RAW text of EACH file, before any merge — the typed
+        // `ComposeFile` a merge produces has already dropped unrecognized
+        // keys, so this is the only point that can still catch them.
+        check_unsupported_fields(&text)?;
+        let compose: ComposeFile = serde_yaml::from_str(&text)
+            .map_err(|e| Error::Invalid(format!("parsing {}: {e}", path.display())))?;
+        parsed.push(compose);
+    }
+    let mut compose = merge_compose_files(parsed);
+    // AFTER the merge, deliberately. `extends:` names a service in the same
+    // document, and with several `-f` files the document IS the merge — real
+    // `docker compose` merges first and resolves after, so a service can
+    // extend a base declared in another `-f`. Resolving per-file would refuse
+    // that with "undefined service", which reads as a typo and is not one.
     resolve_extends(&mut compose.services)?;
-    let base_dir = path
+    let first = &paths[0];
+    let base_dir = first
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    let default_project = default_project_name(&path);
+    let default_project = default_project_name(first);
     Ok((
         compose,
         default_project,
         base_dir,
-        path.to_string_lossy().into_owned(),
+        first.to_string_lossy().into_owned(),
     ))
 }
 
 fn cmd_up(
-    file: Option<PathBuf>,
+    file: Vec<PathBuf>,
     project: Option<String>,
     dry_run: bool,
     profile: Vec<String>,
@@ -2454,7 +2732,7 @@ fn cmd_up(
     Ok(())
 }
 
-fn cmd_down(file: Option<PathBuf>, project: Option<String>, remove_volumes: bool) -> Result<()> {
+fn cmd_down(file: Vec<PathBuf>, project: Option<String>, remove_volumes: bool) -> Result<()> {
     let (compose, default_project, _base_dir, _path) = load_compose(file)?;
     let project = project.unwrap_or(default_project);
     let (images, store) = open_stores()?;
@@ -2543,7 +2821,7 @@ fn cmd_down(file: Option<PathBuf>, project: Option<String>, remove_volumes: bool
     Ok(())
 }
 
-fn cmd_ps(file: Option<PathBuf>, project: Option<String>) -> Result<()> {
+fn cmd_ps(file: Vec<PathBuf>, project: Option<String>) -> Result<()> {
     let (_compose, default_project, _base_dir, _path) = load_compose(file)?;
     let project = project.unwrap_or(default_project);
     let (_images, store) = open_stores()?;
@@ -2577,7 +2855,7 @@ fn cmd_ps(file: Option<PathBuf>, project: Option<String>) -> Result<()> {
 
 fn cmd_logs(
     service: Option<String>,
-    file: Option<PathBuf>,
+    file: Vec<PathBuf>,
     project: Option<String>,
     follow: bool,
 ) -> Result<()> {
@@ -2622,7 +2900,7 @@ fn cmd_logs(
     Ok(())
 }
 
-fn cmd_config(file: Option<PathBuf>, project: Option<String>, profile: Vec<String>) -> Result<()> {
+fn cmd_config(file: Vec<PathBuf>, project: Option<String>, profile: Vec<String>) -> Result<()> {
     let (compose, default_project, base_dir, _path) = load_compose(file)?;
     let project = project.unwrap_or(default_project);
     let translated = translate(&compose, &project, &base_dir, &profile)?;
@@ -3317,6 +3595,46 @@ services:
         );
     }
 
+    fn compose_file(yaml: &str) -> ComposeFile {
+        serde_yaml::from_str(yaml).unwrap()
+    }
+
+    #[test]
+    fn merge_scalars_later_file_wins_only_when_declared() {
+        let base = compose_file("services:\n  web:\n    image: base\n    user: root\n");
+        let overlay = compose_file("services:\n  web:\n    image: override\n");
+        let merged = merge_compose_files(vec![base, overlay]);
+        let web = &merged.services["web"];
+        assert_eq!(web.image.as_deref(), Some("override"));
+        // `user` was not redeclared in the overlay — the base value survives.
+        assert_eq!(web.user.as_deref(), Some("root"));
+    }
+
+    #[test]
+    fn merge_environment_is_key_by_key_not_a_replace() {
+        let base = compose_file(
+            "services:\n  web:\n    image: x\n    environment:\n      A: base\n      B: base\n",
+        );
+        let overlay =
+            compose_file("services:\n  web:\n    image: x\n    environment:\n      B: over\n");
+        let merged = merge_compose_files(vec![base, overlay]);
+        let mut pairs = merged.services["web"].environment.to_kv_pairs();
+        pairs.sort();
+        assert_eq!(pairs, vec!["A=base".to_string(), "B=over".to_string()]);
+    }
+
+    #[test]
+    fn merge_cap_add_concatenates_without_duplicating() {
+        let base = compose_file("services:\n  web:\n    image: x\n    cap_add: [NET_ADMIN]\n");
+        let overlay =
+            compose_file("services:\n  web:\n    image: x\n    cap_add: [NET_ADMIN, SYS_TIME]\n");
+        let merged = merge_compose_files(vec![base, overlay]);
+        assert_eq!(
+            merged.services["web"].cap_add,
+            vec!["NET_ADMIN", "SYS_TIME"]
+        );
+    }
+
     #[test]
     fn extends_of_an_undefined_service_is_a_clear_error() {
         let mut services =
@@ -3353,9 +3671,14 @@ services:
         );
     }
 
-    /// `extends.file` is refused at the raw-YAML check, before typed
-    /// parsing ever runs — this implementation doesn't do multi-file
-    /// compose at all.
+    /// `extends.file` is refused at the raw-YAML check, before typed parsing
+    /// ever runs. It stays refused AFTER multi-file compose landed, and the
+    /// two are not the same thing: `-f a -f b` merges whole documents and
+    /// resolves relative paths against the FIRST file, while `extends.file`
+    /// inherits one service from another file with THAT file's relativity.
+    /// The assertion is on the pointer to `-f`, not on the old wording —
+    /// which claimed this implementation "doesn't do multi-file compose at
+    /// all" and stopped being true in this very merge.
     #[test]
     fn extends_file_is_refused() {
         let e = check_unsupported_fields(
@@ -3364,7 +3687,60 @@ services:
         .unwrap_err()
         .to_string();
         assert!(e.contains("extends.file"), "{e}");
-        assert!(e.contains("multi-file"), "{e}");
+        assert!(
+            e.contains("-f"),
+            "must point at the form that IS supported: {e}"
+        );
+    }
+
+    #[test]
+    fn merge_ports_and_volumes_concatenate() {
+        let base = compose_file("services:\n  web:\n    image: x\n    ports: [\"80:80\"]\n");
+        let overlay = compose_file("services:\n  web:\n    image: x\n    ports: [\"443:443\"]\n");
+        let merged = merge_compose_files(vec![base, overlay]);
+        assert_eq!(merged.services["web"].ports.len(), 2);
+    }
+
+    /// `depends_on` ACCUMULATES across files — the opposite of `extends:`'s
+    /// exclusion, and deliberately so: an ordinary multi-file merge of the
+    /// same service has no foreign-template ambiguity to protect against.
+    #[test]
+    fn merge_depends_on_accumulates_and_later_condition_wins() {
+        let base = compose_file(
+            "services:\n  web:\n    image: x\n    depends_on:\n      db:\n        condition: service_started\n",
+        );
+        let overlay = compose_file(
+            "services:\n  web:\n    image: x\n    depends_on:\n      cache:\n        condition: service_started\n      db:\n        condition: service_healthy\n",
+        );
+        let merged = merge_compose_files(vec![base, overlay]);
+        let entries: BTreeMap<String, DependsCondition> = merged.services["web"]
+            .depends_on
+            .entries()
+            .unwrap()
+            .into_iter()
+            .collect();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries["db"], DependsCondition::Healthy);
+        assert_eq!(entries["cache"], DependsCondition::Started);
+    }
+
+    #[test]
+    fn merge_a_service_only_in_one_file_survives_untouched() {
+        let base = compose_file("services:\n  db:\n    image: postgres\n");
+        let overlay = compose_file("services:\n  web:\n    image: nginx\n");
+        let merged = merge_compose_files(vec![base, overlay]);
+        assert!(merged.services.contains_key("db"));
+        assert!(merged.services.contains_key("web"));
+    }
+
+    #[test]
+    fn merge_networks_and_volumes_replace_on_shared_key() {
+        let base = compose_file("services:\n  a:\n    image: x\nnetworks:\n  net1:\n    external: false\nvolumes:\n  vol1: {}\n");
+        let overlay =
+            compose_file("services:\n  a:\n    image: x\nnetworks:\n  net1:\n    name: real-net\n");
+        let merged = merge_compose_files(vec![base, overlay]);
+        assert_eq!(merged.networks["net1"].name.as_deref(), Some("real-net"));
+        assert!(merged.volumes.contains_key("vol1"));
     }
 }
 
@@ -3429,10 +3805,20 @@ mod tests_unknown_keys {
     /// already paid for — it would have blocked the very feature it outlived.
     /// `KNOWN_UNSUPPORTED_TOP` still has `include`, so the property this test
     /// exists for is still covered.
+    ///
+    /// The assertion moved off "pass exactly one -f" for the same reason: that
+    /// wording was right while multi-file did not exist, and became the exact
+    /// opposite of the truth when repeated `-f` shipped. What is asserted now
+    /// is what stays true — the refusal names `include` and points at the form
+    /// that DOES work.
     #[test]
     fn the_specific_reason_wins_over_the_generic() {
         let e = err_of("include:\n  - other.yml\nservices:\n  web:\n    image: nginx\n");
-        assert!(e.contains("pass exactly one -f"), "specific reason: {e}");
+        assert!(e.contains("include"), "specific reason: {e}");
+        assert!(
+            e.contains("-f a -f b"),
+            "must point at the form that IS supported: {e}"
+        );
     }
 
     #[test]

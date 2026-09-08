@@ -536,13 +536,36 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   rede de produção): `up` cria o volume e monta-o (escrita de dentro do
   container aparece em `_data/` do lado do host); `down` simples deixa o
   ficheiro escrito intacto no disco; `down -v` a seguir apaga-o.
-  **Por fazer, documentado (nunca silencioso)**: multi-ficheiro
-  (`-f a -f b`/`include:`). Esta lista já esteve escrita TRÊS vezes em paralelo,
-  cada cópia truncada a meio por um merge feito pela interface sem ninguém compilar
-  a junção — `profiles`, `extends`, `build.target`, `deploy.replicas`,
-  `networks.*.ipv4_address`, `configs:`/`secrets:` e os volumes anónimos apareciam
-  como por fazer muito depois de estarem feitos. Uma lista de dívida desactualizada
-  mente nos dois sentidos.
+  **FEITO: multi-ficheiro (`-f a.yml -f b.yml`), repetível nos 5 subcomandos.** Cada ficheiro é
+  parseado e passa por `check_unsupported_fields` (o denylist/allowlist contra o YAML CRU)
+  **separadamente** — a verificação corre sobre texto bruto, antes de qualquer fusão, por isso
+  uma chave recusada não escapa por estar no SEGUNDO ficheiro. Os `ComposeFile` tipados
+  resultantes fundem-se esquerda-para-direita (`merge_compose_files`) pelas regras do próprio
+  Compose Spec: escalares → o ficheiro mais tardio ganha só se DECLARADO (`Option::or`, nunca
+  substituindo por um default silencioso); `environment:`/`labels:`/`extra_hosts:` → fundidos
+  CHAVE A CHAVE (`merge_env`, convertendo os dois lados para `KEY=VALUE` antes de fundir — um
+  ficheiro nunca apaga as variáveis do outro só por declarar mais uma); `cap_add`/`cap_drop` →
+  concatenados sem duplicar; `ports`/`volumes`/`env_file`/`tmpfs` → concatenados. **`depends_on`
+  ACUMULA** (`merge_depends_on`) — ao contrário de `extends:` (que o exclui de propósito, por
+  ambiguidade com um TEMPLATE estranho), um multi-ficheiro comum do MESMO serviço não tem essa
+  ambiguidade, por isso uma dependência declarada em qualquer um dos ficheiros sobrevive à
+  fusão. `networks:`/`volumes:` de topo são pequenos (`external`/`name`) — uma chave partilhada
+  é um REPLACE inteiro, não uma fusão campo-a-campo, simplificação documentada e não uma queda
+  silenciosa. Os caminhos relativos (contexto do `build`, `env_file`) resolvem-se contra o
+  directório do PRIMEIRO ficheiro, a convenção do próprio `docker compose` real. **Validado ao
+  vivo**: uma chave recusada só no 2.º ficheiro continua a chumbar; sem `-f` nenhum o
+  comportamento de sempre (procura `compose.yaml`/`.yml`) fica byte-a-byte intacto; e um
+  `depends_on:` acrescentado só no ficheiro de OVERRIDE muda de facto a ordem topológica de
+  criação (dois serviços cuja ordem alfabética seria a inversa da dependência) — prova de que a
+  fusão compõe os dois ficheiros a sério, não escolhe um. `include:` continua **deliberadamente
+  fora de escopo** (path-relativity e propagação de nome de projecto próprias, que expandiriam o
+  âmbito) — a mensagem de recusa aponta para `-f a -f b` em vez disso.
+  **Por fazer, documentado (nunca silencioso)**: só a directiva `include:` do
+  YAML (regras próprias de relatividade de caminhos e de propagação do nome do
+  projecto — a forma `-f a -f b` da linha de comandos está feita). Esta lista já
+  esteve escrita TRÊS vezes em paralelo, cada cópia truncada a meio por um merge
+  feito pela interface sem ninguém compilar a junção. Uma lista de dívida
+  desactualizada mente nos dois sentidos.
 - `delonix serve docker-api [--addr unix://<socket>]` — fatia da **Docker Engine API** (`cmd/dockerapi.rs`)
   que basta para `docker version/ps/images/info` **e**, desde a v0.26.0, o ciclo de vida completo de
   um container via `DOCKER_HOST=unix://<socket>`: `POST /containers/create|start|stop|kill|wait|
