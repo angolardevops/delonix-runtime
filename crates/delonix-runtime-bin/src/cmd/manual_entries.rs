@@ -745,6 +745,15 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["image pull", "image scan", "image describe"],
     },
     Entry {
+        path: "image sign",
+        group: "Configure",
+        examples: &[
+            ("sign a build before pushing it, key generated on first use", "delonix image sign kaeso-odoo:18"),
+            ("re-sign after rotating the key", "delonix image sign kaeso-odoo:18 --force"),
+        ],
+        see_also: &["image verify", "image push"],
+    },
+    Entry {
         path: "image login",
         group: "Configure",
         examples: &[

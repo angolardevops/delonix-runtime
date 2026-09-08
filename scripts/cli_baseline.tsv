@@ -76,6 +76,7 @@
 ~	image remove
 ~	image save
 =	image scan
+~	image sign
 =	image tag
 =	image verify
 ~	image vm build
