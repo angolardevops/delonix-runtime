@@ -1,0 +1,206 @@
+#cloud-config
+# ===========================================================================
+#  The build seed for the OpenStack host image. Consumed ONLY by
+#  build-openstack.sh, inside QEMU, and never by a deployed VM.
+# ===========================================================================
+# `@RELEASE@` and `@BASE_DISTRO@` are substituted by the script. They are not
+# cloud-init syntax -- keep them out of anything cloud-init parses as a value.
+#
+# Everything runs from ONE script and not from a list of `runcmd` entries,
+# because cloud-init runs each `runcmd` element independently and keeps going
+# after a failure. A twenty-gigabyte pull that dies halfway would otherwise
+# produce an image that boots, looks finished, and is missing half of
+# OpenStack -- the exact shape of failure the Proxmox builds already learned to
+# refuse (`installation finished` is a different claim from `it works`).
+write_files:
+  - path: /root/build.sh
+    permissions: "0700"
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      exec > >(tee -a /var/log/delonix-openstack-build.log) 2>&1
+      echo "=== delonix openstack build: @RELEASE@ on @BASE_DISTRO@ ==="
+
+      export DEBIAN_FRONTEND=noninteractive
+
+      # Every network step in this build is retried, and the reason is
+      # measured rather than defensive: on the second build attempt
+      # (2026-08-26) pip reported
+      #   `ansible-core!=2.19.0,<2.21,>=2.19 (from versions: none)`
+      # -- an index that returned nothing. The same index, queried from the
+      # host minutes later, listed 2.11.0 through 2.21.3. Nothing was wrong
+      # with the requirement or with pip; the guest's slirp NAT dropped one
+      # metadata fetch on a 3.3 MB/s link with a 240 ms round trip to Europe.
+      #
+      # A build that spends an hour pulling twenty gigabytes and then throws it
+      # away because one HTTPS request failed is a build nobody runs twice.
+      retry() {
+        local n=0 max=${2:-4}
+        until eval "$1"; do
+          n=$((n+1))
+          [ "$n" -ge "$max" ] && { echo "!! gave up after $max attempts: $1"; return 1; }
+          echo "==> attempt $n failed, retrying in $((n*15))s: $1"
+          sleep $((n*15))
+        done
+      }
+
+      # apt has its own retry knob; it covers the download, not the whole
+      # transaction, which is why the retry() wrapper is still there.
+      echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/99delonix-retries
+      retry "timeout 600 apt-get update"
+
+      # Verbatim from the kolla-ansible @RELEASE@ quickstart, "Install Python
+      # build dependencies" + "Install dependencies for the virtual
+      # environment". Not a guessed superset: a package this list does not name
+      # is a package upstream does not ask for.
+      retry "timeout 900 apt-get install -y git python3-dev libffi-dev gcc libssl-dev libdbus-glib-1-dev python3-venv"
+
+      python3 -m venv /opt/kolla-venv
+      # The venv on PATH, and not just called by absolute path. `kolla-ansible`
+      # is a shell wrapper that execs `ansible-playbook` and `ansible-galaxy`
+      # BY NAME, so an absolute call reaches kolla-ansible and then dies inside
+      # it with `[Errno 2] No such file or directory: 'ansible-galaxy'` --
+      # measured here on the first build, 2026-08-26. Upstream says "activate
+      # the venv" for exactly this reason; this is that, without a login shell.
+      export PATH=/opt/kolla-venv/bin:$PATH
+      retry "timeout 300 pip install -U pip"
+
+      # The PUBLISHED release from PyPI, and not `git+...@stable/@RELEASE@`
+      # which upstream's quickstart shows. Two measured reasons, and the first
+      # is the one that matters:
+      #
+      #   * a `git clone` that STALLS never returns, so `retry` never fires.
+      #     Measured 2026-08-26: this build hung 31 minutes on
+      #     `git clone https://opendev.org/openstack/kolla-ansible` with the
+      #     console silent and the disk not growing. It is the same lesson the
+      #     `curl` of SHA256SUMS taught on the host side -- a stalled
+      #     connection is not a failure, and nothing that only handles failure
+      #     will save you from it. Hence `timeout` around it as well: a hang
+      #     now becomes a non-zero exit, which `retry` does know what to do
+      #     with.
+      #   * the branch head is a DEV SNAPSHOT. Those earlier builds installed
+      #     `22.1.1.dev5`, whose content changes daily -- the opposite of a
+      #     pinned version, in a file whose whole point is that two builds a
+      #     month apart produce the same image.
+      #
+      # The wheel carries the data files this build needs -- verified, not
+      # assumed: `etc_examples/kolla/globals.yml`, `ansible/inventory/all-in-one`
+      # and `ansible/site.yml` are all in `kolla_ansible-22.1.0.data/data/share/`,
+      # which pip lays down under the venv root.
+      retry "timeout 900 pip install --retries 10 --timeout 60 \
+          'kolla-ansible==@KOLLA_VERSION@'"
+
+      mkdir -p /etc/kolla
+      cp -r /opt/kolla-venv/share/kolla-ansible/etc_examples/kolla/* /etc/kolla/
+      cp /opt/kolla-venv/share/kolla-ansible/ansible/inventory/all-in-one \
+         /etc/kolla/all-in-one
+
+      # The pristine example, kept. The last step of this build copies it back
+      # over passwords.yml -- see the note there, it is a security property and
+      # not tidiness.
+      cp /etc/kolla/passwords.yml /etc/kolla/passwords.yml.example
+
+      retry "timeout 900 kolla-ansible install-deps"
+
+      # ------------------------------------------------------------------
+      #  Build-time globals.yml
+      # ------------------------------------------------------------------
+      # This file exists so that `pull` knows WHICH images to fetch. It is NOT
+      # the deployment's configuration: `openstack_aio` in delonix-deploy
+      # writes the real one, with the real VIP and the real interfaces, on the
+      # target. The values here that look like configuration (`ens3`, the
+      # 127.x VIP) are deliberately unusable addresses -- an image that shipped
+      # a plausible-looking VIP is an image somebody deploys without noticing
+      # it points at the build machine. Proxmox VE taught this repository that
+      # lesson by publishing an appliance that announced the QEMU slirp
+      # address as its own.
+      cat > /etc/kolla/globals.yml <<'GLOBALS'
+      ---
+      kolla_base_distro: "@BASE_DISTRO@"
+      openstack_release: "@RELEASE@"
+      network_interface: "ens3"
+      neutron_external_interface: "ens4"
+      kolla_internal_vip_address: "127.0.0.2"
+      enable_cinder: "yes"
+      enable_cinder_backend_lvm: "yes"
+      enable_horizon: "yes"
+      GLOBALS
+
+      # `pull` reads passwords.yml as variables. Blank values abort the play,
+      # so they are generated here and DESTROYED at the end of the build.
+      kolla-genpwd
+
+      # ------------------------------------------------------------------
+      #  Host-level dependencies, then the images themselves
+      # ------------------------------------------------------------------
+      # `bootstrap-servers` is what installs docker and configures the host the
+      # way kolla expects it. Baking it means a deploy on the target starts
+      # from a host that is already bootstrapped; running it again there is
+      # idempotent and stays in the deploy path anyway, because the target's
+      # own identity (hostname, /etc/hosts, docker storage) is not this
+      # machine's.
+      retry "timeout 2400 kolla-ansible bootstrap-servers -i /etc/kolla/all-in-one"
+
+      # THE reason this image exists. Pulling ~20 GiB of container images over
+      # a 3.3 MB/s link (measured from this workspace, 2026-08-26) takes over
+      # an hour; paying it once at build time instead of once per deploy is the
+      # whole difference between an image and a set of instructions.
+      # Idempotent: a retry re-pulls only what is missing, so a drop an hour
+      # in costs the failed layer and not the hour.
+      retry "timeout 5400 kolla-ansible pull -i /etc/kolla/all-in-one" 5
+
+      # ------------------------------------------------------------------
+      #  Strip everything that belongs to THIS machine
+      # ------------------------------------------------------------------
+      # A generated passwords.yml inside a published image means every cloud
+      # ever deployed from it shares one set of secrets -- including the
+      # Keystone admin password and the database root password. The deploy
+      # role runs `kolla-genpwd` on the target, where the file belongs.
+      cp /etc/kolla/passwords.yml.example /etc/kolla/passwords.yml
+      chmod 0600 /etc/kolla/passwords.yml
+
+      # Keep the build's globals visible for forensics, but not where
+      # kolla-ansible would read it as configuration.
+      mv /etc/kolla/globals.yml /etc/kolla/globals.yml.build
+
+      # What a clone actually GOT, readable from inside any VM cloned from this
+      # image. Same two-carrier idea as the golden template: the filename says
+      # what was asked for, this file says what is there.
+      mkdir -p /etc/delonix
+      kolla-ansible version > /etc/delonix/kolla-version.txt 2>&1 || true
+      {
+        echo "{"
+        echo "  \"openstack_release\": \"@RELEASE@\","
+        echo "  \"kolla_base_distro\": \"@BASE_DISTRO@\","
+        echo "  \"kolla_ansible\": \"$(pip show kolla-ansible | awk '/^Version:/{print $2}')\","
+        echo "  \"images\": $(docker images -q | sort -u | wc -l),"
+        echo "  \"venv\": \"/opt/kolla-venv\""
+        echo "}"
+      } > /etc/delonix/openstack-image.json
+      cat /etc/delonix/openstack-image.json
+
+      apt-get clean
+      rm -rf /var/lib/apt/lists/*
+
+      # The image must not carry this boot's identity. Without this every VM
+      # cloned from it comes up with the same machine-id, and systemd-networkd
+      # hands them all the same DHCP lease.
+      cloud-init clean --logs --seed
+      truncate -s 0 /etc/machine-id
+      rm -f /var/lib/dbus/machine-id
+      rm -f /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub
+
+runcmd:
+  # The marker, and only the marker, is what the build script believes. QEMU
+  # exits 0 whether the guest finished or panicked, and cloud-init reports
+  # success for a `runcmd` whose script failed -- both lessons already paid for
+  # by build-proxmox.sh.
+  - |
+    if /root/build.sh; then
+      echo "DELONIX-OPENSTACK-BUILD-OK" > /dev/console
+    else
+      echo "DELONIX-OPENSTACK-BUILD-FAIL rc=$?" > /dev/console
+      tail -40 /var/log/delonix-openstack-build.log > /dev/console
+    fi
+    sync
+    poweroff
