@@ -2551,7 +2551,27 @@ fn merge_into_local_kubeconfig(source: &Path, cluster_name: &str, dest: &Path) -
         existing.extend(fresh.iter().cloned());
         merged[key] = Value::Sequence(existing);
     }
-    if first_write {
+    // Point `kubectl` at this cluster when — and ONLY when — it is not already
+    // pointed somewhere usable. Creating a second cluster must not yank the
+    // context out from under someone working in the first (the invariant the
+    // multi-cluster test pins); but leaving `current-context` unset, or aimed at
+    // a context that is no longer in the file, is not a preference to protect —
+    // it is a `kubectl` that answers `localhost:8080: connection refused`.
+    //
+    // Reported live: three contexts merged fine and `kubectl config
+    // current-context` still said `current-context is not set`, so a bare
+    // `kubectl get nodes` went to the default endpoint and failed with an error
+    // that reads like a broken cluster and is a missing selection.
+    let current_is_usable = merged
+        .get("current-context")
+        .and_then(Value::as_str)
+        .filter(|c| !c.is_empty())
+        .is_some_and(|current| {
+            as_seq(&merged, "contexts")
+                .iter()
+                .any(|e| entry_name(e).as_deref() == Some(current))
+        });
+    if first_write || !current_is_usable {
         merged["current-context"] = Value::String(cluster_name.to_string());
     }
 
@@ -2567,11 +2587,33 @@ fn merge_into_local_kubeconfig(source: &Path, cluster_name: &str, dest: &Path) -
     // `fetch_kubeconfig` already carries a few functions up; this path had been
     // left on the old shape.
     delonix_runtime_core::write_atomic_mode(dest, out.as_bytes(), Some(0o600))?;
+    let selected = merged
+        .get("current-context")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        == cluster_name;
     println!(
         "{}",
         super::po::tf(
-            "merged into {path} as context '{ctx}' (kubectl config use-context {ctx})",
-            &[("path", &dest.display().to_string()), ("ctx", cluster_name)]
+            if selected {
+                "merged into {path} as context '{ctx}' — kubectl now points here"
+            } else {
+                // Say where kubectl still points, not just how to move it: the
+                // useful fact is that this cluster is NOT the current one.
+                "merged into {path} as context '{ctx}' (kubectl stays on '{cur}'; \
+                 kubectl config use-context {ctx})"
+            },
+            &[
+                ("path", &dest.display().to_string()),
+                ("ctx", cluster_name),
+                (
+                    "cur",
+                    merged
+                        .get("current-context")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                ),
+            ]
         )
     );
     Ok(())
@@ -2821,6 +2863,37 @@ users:
         assert_eq!(names("users"), vec!["lab-admin", "prod-admin"]);
         // The 2nd write must NOT silently switch what `kubectl` already points to.
         assert_eq!(merged["current-context"], "lab");
+
+        // A context that is set but DANGLING is not a preference to protect.
+        // Reported live: `current-context` absent while three contexts sat in
+        // the file, so a bare `kubectl` went to localhost:8080 and failed with
+        // an error that reads like a broken cluster.
+        let mut m: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
+        m["current-context"] = serde_yaml::Value::String("gone-with-the-vm".into());
+        std::fs::write(&dest, serde_yaml::to_string(&m).unwrap()).unwrap();
+        std::fs::write(&source, fake_admin_conf()).unwrap();
+        merge_into_local_kubeconfig(&source, "novo", &dest).unwrap();
+        let merged: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
+        assert_eq!(
+            merged["current-context"], "novo",
+            "a dangling current-context must be replaced by the cluster just created"
+        );
+
+        // Same for no selection at all.
+        let mut m: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
+        m.as_mapping_mut().unwrap().remove("current-context");
+        std::fs::write(&dest, serde_yaml::to_string(&m).unwrap()).unwrap();
+        std::fs::write(&source, fake_admin_conf()).unwrap();
+        merge_into_local_kubeconfig(&source, "outro", &dest).unwrap();
+        let merged: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
+        assert_eq!(
+            merged["current-context"], "outro",
+            "an absent current-context must be filled by the cluster just created"
+        );
 
         // Re-running for `lab` REPLACES its 3 entries, never duplicates them.
         std::fs::write(&source, fake_admin_conf()).unwrap();
