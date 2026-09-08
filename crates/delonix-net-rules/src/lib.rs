@@ -578,13 +578,13 @@ COMMIT
     }
 
     #[test]
-    fn um_selector_vazio_nao_seleciona_nada() {
+    fn an_empty_selector_selects_nothing() {
         let container = labels(&[("app", "web")]);
         assert!(!matches_labels(&container, &labels(&[])));
     }
 
     #[test]
-    fn todas_as_chaves_do_selector_tem_de_bater() {
+    fn every_selector_key_has_to_match() {
         let container = labels(&[("app", "web"), ("tier", "frontend")]);
         assert!(matches_labels(&container, &labels(&[("app", "web")])));
         assert!(matches_labels(
@@ -601,7 +601,7 @@ COMMIT
     }
 
     #[test]
-    fn um_container_sem_labels_nao_bate_com_selector_nenhum() {
+    fn a_container_with_no_labels_matches_no_selector() {
         assert!(!matches_labels(&labels(&[]), &labels(&[("app", "web")])));
     }
 }
