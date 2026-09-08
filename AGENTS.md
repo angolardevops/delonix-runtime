@@ -454,11 +454,41 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   já tomada para este item. Cobertura: o guard puro `fixed_ip_needs_custom_net`
   (CLI), a fusão `ipv4_address` → `RunOpts.ip` (compose), e o teste
   pré-existente de recusa por-subnet em `delonix-net` (continua verde).
+  **FEITO**: `extends:` — `service:` de um serviço IRMÃO no MESMO ficheiro herda os campos que
+  o próprio serviço não declara (`resolve_extends`/`merge_service`, puros e testados), pela ordem
+  do Compose Spec: `image`/`build`/`command`/`entrypoint`/`working_dir`/`user`/`restart`/
+  `container_name`/`hostname`/`healthcheck`/`deploy` são "o filho ganha se declarar, senão herda";
+  `environment:`/`labels:` FUNDEM chave-a-chave (o filho ganha só na chave partilhada, as do pai
+  sobrevivem — não é um `override` do mapa inteiro); `cap_add`/`cap_drop` concatenam sem duplicar
+  uma entrada que os dois declarem; `ports:`/`volumes:`/`env_file:`/`tmpfs:` concatenam pai+filho
+  sem deduplicar (simplificação documentada: uma porta publicada duas vezes perde a corrida do
+  `free_host_port` e falha alto, nunca em silêncio); `privileged`/`read_only` são OR (um `bool`
+  simples não distingue "o filho disse false" de "o filho não disse nada", por isso não há como
+  desherdar um `true` do pai — documentado, não escondido). **`depends_on:` NUNCA é herdado** —
+  a mesma exclusão deliberada que a própria Especificação Compose faz: o grafo de dependências de
+  um serviço é seu, não algo que vem a reboque da configuração que ele reaproveita. Cadeias
+  (`web` extends `mid` extends `base`) resolvem-se transitivamente antes de qualquer outra coisa
+  tocar em `services` (`load_compose` chama `resolve_extends` logo a seguir ao parse, e por isso
+  `translate`/o grafo de `depends_on`/`service_to_run_opts` não precisam de saber que `extends`
+  alguma vez existiu — quando os alcançam já está `None`), com detecção de ciclo a nomear o
+  caminho inteiro e não só as duas pontas que colidiram. `extends.file` é **recusado sempre**,
+  na verificação do YAML cru e antes de qualquer parse tipado — este motor não faz compose
+  multi-ficheiro de todo, e apontar para outro ficheiro sem avisar seria resolver contra o
+  ficheiro errado em silêncio; extends dentro do mesmo ficheiro não precisa de `file:` nenhum.
+  Validado ao vivo: um `web` que estende `base` herdou `image`/`ONLY_BASE` do pai, manteve o seu
+  próprio `ONLY_WEB`, sobrescreveu `SHARED` e `working_dir` (confirmado por `PWD=/web-dir` e pela
+  variável de ambiente lidas de DENTRO do container a correr, não só pelo `compose config`), e
+  ficou com `cap_add: NET_ADMIN, SYS_PTRACE` (um de cada lado, sem duplicar); o `base` ficou
+  intocado. As três recusas (base inexistente, ciclo, `extends.file`) confirmadas com a mensagem
+  exacta contra o binário real.
+  **Por fazer, documentado (nunca silencioso)**: `profiles`/`configs`/`secrets`
+  top-level (usa `kind: Secret` em vez disso)/multi-ficheiro (`-f a -f b`/`include:`),
+  `build.target` (selecção de estágio), `deploy.replicas≠1`, `networks.*.ipv4_address` fixo,
+  volumes anónimos (sem `source` explícito) — este último deliberadamente NÃO tentado ainda:
   **Por fazer, documentado (nunca silencioso)**: `extends`/`configs`/`secrets`
   top-level (usa `kind: Secret` em vez disso), multi-ficheiro (`-f a -f b`/`include:`),
   `deploy.replicas≠1`, volumes anónimos (sem `source` explícito) — este último
-  deliberadamente NÃO tentado ainda:
-  precisa de semântica própria de nomeação/limpeza (quando é que um volume anónimo se apaga?
+  deliberadamente NÃO tentado ainda:  precisa de semântica própria de nomeação/limpeza (quando é que um volume anónimo se apaga?
   `down` simples ou só `down -v`?) que merece ser pensada com calma, não decidida às pressas.
 - `delonix serve docker-api [--addr unix://<socket>]` — fatia da **Docker Engine API** (`cmd/dockerapi.rs`)
   que basta para `docker version/ps/images/info` **e**, desde a v0.26.0, o ciclo de vida completo de
