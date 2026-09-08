@@ -1001,6 +1001,89 @@ check "bench.sh recusa uma bancada acima do limiar (3)" 3 \
   bash scripts/bench.sh --bin "$BIN" --max-load 0
 
 # ---------------------------------------------------------------------------
+# Um limite ou chega ao KERNEL ou é RECUSADO — nunca aceite e ignorado.
+#
+# Medido 2026-09-07, e é a razão desta secção existir: `-m 64Mi` — a grafia que
+# o Kubernetes usa e que um `kind: Pod` convida — era aceite (rc=0), guardada no
+# registo, mostrada pelo `inspect`, e o container corria com `memory.max = max`,
+# SEM CEILING NENHUM. O caminho rootless-delegado (o normal) escrevia a string
+# CRUA no ficheiro do cgroup e descartava o erro; o parser do kernel toma `64M`
+# e recusa `64Mi`. O caminho ROOT, ao lado, sempre usou `write_limit`, que
+# propaga. `--cpus 500m` era pior que inútil: caía num fallback de 1.0, o DOBRO
+# do pedido.
+#
+# O teste unitário prova o parser. SÓ um check aqui prova que o binário o
+# aplica — que é a metade que faltava quando o bug entrou.
+section "limites: o que se declara chega ao cgroup, ou é recusado"
+_cg_of() { # imprime o valor de um ficheiro do cgroup do container $1
+  local p; p=$("$BIN" container inspect "$1" -o json 2>/dev/null \
+    | python3 -c 'import json,sys;print(json.load(sys.stdin)[0]["pid"])' 2>/dev/null) || return 1
+  [ -n "$p" ] && [ "$p" != None ] || return 1
+  cat "/sys/fs/cgroup$(cut -d: -f3 /proc/$p/cgroup)/$2" 2>/dev/null
+}
+if [ -n "${IMG:-}" ] && "$BIN" image ls 2>/dev/null | grep -q .; then
+  for spec in "64M:67108864" "64Mi:67108864" "1Gi:1073741824"; do
+    _v=${spec%%:*}; _want=${spec##*:}; _n="${PFX}lim$(echo "$_v" | tr -d '.')"
+    "$BIN" container rm -f "$_n" >/dev/null 2>&1 || true
+    if "$BIN" container run -d --name "$_n" --net none -m "$_v" "$IMG" sleep 60 >/dev/null 2>&1; then
+      # A prova é o CGROUP, não o registo: era exactamente aí que os dois
+      # discordavam, com o registo a dizer 64Mi e o kernel a dizer `max`.
+      check "-m $_v chega ao kernel como $_want" ok \
+        bash -c "[ \"\$(_cg_of $_n memory.max)\" = $_want ]" || true
+    else
+      skip "-m $_v: o container não arrancou neste host"
+    fi
+    "$BIN" container rm -f "$_n" >/dev/null 2>&1 || true
+  done
+  # A outra metade: o que não se consegue ler é RECUSADO antes de criar seja o
+  # que for. `64MB` e `99999999999T` estão aqui de propósito — o primeiro é a
+  # grafia que toda a gente tenta, o segundo saturava para u64::MAX, que escrito
+  # em `memory.max` é indistinguível de não haver limite.
+  for bad in abc 64MB "99999999999T"; do
+    check "-m $bad é recusado, não ignorado" fail \
+      "$BIN" container run -d --name "${PFX}limbad" --net none -m "$bad" "$IMG" true
+    "$BIN" container rm -f "${PFX}limbad" >/dev/null 2>&1 || true
+  done
+  # `500m` é millicores do Kubernetes. Recusar é o ponto: convertê-lo seria o
+  # motor a adivinhar, e adivinhar dava 1 CPU inteiro.
+  for bad in abc 500m; do
+    check "--cpus $bad é recusado, não ignorado" fail \
+      "$BIN" container run -d --name "${PFX}limcpu" --net none --cpus "$bad" "$IMG" true
+    "$BIN" container rm -f "${PFX}limcpu" >/dev/null 2>&1 || true
+  done
+  # `--restart` é o de aresta mais afiada da classe: uma gralha (`alwyas`,
+  # `on-failre`) era aceite com rc=0 e deixava `restart_policy: null` — um
+  # serviço que nunca volta a subir, em silêncio, com o operador convencido de
+  # que configurou um supervisor. Os outros desperdiçam recursos; este perde
+  # disponibilidade.
+  for bad in talvez alwyas on-failure:0 always:2; do
+    check "--restart $bad é recusado, não ignorado" fail \
+      "$BIN" container run -d --name "${PFX}limrs" --net none --restart "$bad" "$IMG" true
+    "$BIN" container rm -f "${PFX}limrs" >/dev/null 2>&1 || true
+  done
+  # Os pesos documentavam `1–10000` e não verificavam nada: `0`, `99999` e `abc`
+  # caíam todos no default do kernel (100), com rc=0. Uma gama no `--help` que o
+  # código não impõe é uma promessa, não um facto.
+  for bad in 0 10001 abc; do
+    check "--cpu-weight $bad é recusado, não ignorado" fail \
+      "$BIN" container run -d --name "${PFX}limw" --net none --cpu-weight "$bad" "$IMG" true
+    "$BIN" container rm -f "${PFX}limw" >/dev/null 2>&1 || true
+  done
+  # E o que passa tem de CHEGAR ao registo: aceitar a política e não a guardar é
+  # o mesmo defeito com outra roupa.
+  "$BIN" container rm -f "${PFX}limrs" >/dev/null 2>&1 || true
+  if "$BIN" container run -d --name "${PFX}limrs" --net none --restart on-failure:3 "$IMG" sleep 30 >/dev/null 2>&1; then
+    check "--restart on-failure:3 fica no registo" ok \
+      bash -c "'$BIN' container inspect ${PFX}limrs -o json | grep -q 'on-failure:3'" || true
+  else
+    skip "--restart on-failure:3: o container não arrancou neste host"
+  fi
+  "$BIN" container rm -f "${PFX}limrs" >/dev/null 2>&1 || true
+else
+  skip "limites: sem imagem no store (precisa de rede para o pull)"
+fi
+
+# ---------------------------------------------------------------------------
 # `system doctor` — o host mente em silêncio, e alguém tem de perguntar.
 #
 # Vários pré-requisitos falham SEM DIZER: sem `br_netfilter` o isolamento de
