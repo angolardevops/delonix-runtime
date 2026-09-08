@@ -2160,6 +2160,8 @@ pub static ENTRIES: &[Entry] = &[
             ("remove the source once the target confirms the VM was created there", "delonix vm migrate dev --host 10.0.0.20 --network ingress --remove-source"),
         ],
         see_also: &["vm stop", "vm create", "image vm import", "vm ssh"],
+    },
+    Entry {
         path: "vm pause",
         group: "Lifecycle",
         examples: &[
