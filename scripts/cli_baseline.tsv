@@ -9,6 +9,7 @@
 !	build
 ~	cluster apply
 ~	cluster create
+~	cluster drain
 ~	cluster health
 ~	cluster init
 ~	cluster kubeadm
@@ -16,6 +17,8 @@
 ~	cluster kube generate
 =	cluster load
 ~	cluster prune
+~	cluster uncordon
+~	cluster upgrade
 ~	completion editor
 ~	completion shell
 =	compose config
