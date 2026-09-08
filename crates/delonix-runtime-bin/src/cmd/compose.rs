@@ -36,13 +36,14 @@
 //! `cap_add`/`cap_drop`/`privileged`/`tmpfs`/`deploy.resources.limits`/
 //! `container_name`/`hostname`/`read_only`/`profiles` (`up --profile`,
 //! transitively closed over `depends_on` — see `active_services`), top-level
-//! `networks:`/`volumes:` (incl. `external: true`), and `build.target`
+//! `networks:`/`volumes:` (incl. `external: true`), `build.target`
 //! (multi-stage stage selection — forwarded to `kind: Image`'s own
-//! `build.target`, itself `delonix build --target`). Defers `extends:`, top-level
-//! `configs:`/`secrets:` (use `kind: Secret` instead), multi-file compose
-//! (`-f a -f b` merge/`include:`), `deploy.replicas != 1`, a fixed
-//! `networks.*.ipv4_address`, and anonymous
-//! volumes (no explicit source). `working_dir:` IS applied (via `RunOpts.
+//! `build.target`, itself `delonix build --target`), and a fixed
+//! `networks.*.ipv4_address` (wired straight into `container run --ip`, see
+//! `service_to_run_opts`). Defers `extends:`, top-level `configs:`/`secrets:`
+//! (use `kind: Secret` instead), multi-file compose (`-f a -f b` merge/
+//! `include:`), `deploy.replicas != 1`, and anonymous volumes (no explicit
+//! source). `working_dir:` IS applied (via `RunOpts.
 //! workdir`, itself now also exposed as `container run -w/--workdir`), and a
 //! bare container port with no host port DOES get a random free host port
 //! (resolved once, before the container is created — see `free_host_port`).
@@ -1444,13 +1445,15 @@ fn service_to_run_opts(
         }
         net_keys[0].clone()
     };
-    if let Some(entry) = svc.networks.entry(&net_key) {
-        if entry.ipv4_address.is_some() {
-            return Err(Error::Invalid(format!(
-                "compose: service '{service}': a fixed networks.*.ipv4_address is not supported (delonix assigns IPs by IPAM) — remove it"
-            )));
-        }
-    }
+    // `networks.*.ipv4_address` wires straight into the same `--ip` path
+    // `container run` now has: `infra::attach_container_on_ip` reserves the
+    // address in the IPAM registry before the attach, so nothing here
+    // re-validates the subnet — that check already lives at the one place
+    // that knows the network's actual prefix.
+    let fixed_ip = svc
+        .networks
+        .entry(&net_key)
+        .and_then(|entry| entry.ipv4_address.clone());
     let net = network_names.get(&net_key).cloned().ok_or_else(|| {
         Error::Invalid(format!(
             "compose: service '{service}' references undefined network '{net_key}' (declare it under top-level `networks:`)"
@@ -1510,6 +1513,7 @@ fn service_to_run_opts(
         hostname: svc.hostname.clone(),
         user: svc.user.clone(),
         net,
+        ip: fixed_ip,
         volumes,
         ports,
         privileged: svc.privileged,
@@ -2167,6 +2171,32 @@ services:
         assert_eq!(app_waits[0].on, "db");
         assert_eq!(app_waits[0].condition, DependsCondition::Healthy);
         assert!(app_waits[0].healthcheck.is_some());
+    }
+
+    /// `networks.*.ipv4_address` wires straight into `RunOpts.ip` — the same
+    /// `container run --ip` path, no separate mechanism. The engine-level
+    /// half (IPAM reservation, subnet validation) is `infra::
+    /// attach_container_on_ip`'s own responsibility and test, not this one's
+    /// — this only proves the compose YAML is not silently dropped.
+    #[test]
+    fn networks_ipv4_address_flui_para_run_opts_ip() {
+        let yaml = "services:\n  web:\n    image: x\n    networks:\n      default:\n        ipv4_address: 10.210.5.5\n";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let t = translate(&compose, "p", Path::new("/tmp"), &[]).unwrap();
+        let (opts, _) = &t.containers["web"];
+        assert_eq!(opts.ip.as_deref(), Some("10.210.5.5"));
+    }
+
+    /// A service with no `ipv4_address` at all keeps letting the engine pick
+    /// (IPAM-derived) — the common case must not regress into always fixing
+    /// an address that was never asked for.
+    #[test]
+    fn sem_ipv4_address_o_ip_fica_none() {
+        let yaml = "services:\n  web:\n    image: x\n";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let t = translate(&compose, "p", Path::new("/tmp"), &[]).unwrap();
+        let (opts, _) = &t.containers["web"];
+        assert_eq!(opts.ip, None);
     }
 
     #[test]
