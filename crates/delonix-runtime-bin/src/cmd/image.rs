@@ -1234,7 +1234,7 @@ fn cmd_rm(
             // (normalised) tags — `run` stores whatever reference the user
             // typed, bare name included.
             if container_references_image(&c.image, &img) {
-                let alive = c.pid.map(delonix_runtime::is_alive).unwrap_or(false);
+                let alive = c.is_live();
                 let state = if alive {
                     super::po::t("running")
                 } else {

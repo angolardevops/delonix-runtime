@@ -923,6 +923,26 @@ fn default_cpus() -> String {
 }
 
 impl Container {
+    /// `true` if the recorded init is still alive **and is still the process we
+    /// recorded**.
+    ///
+    /// The question twenty call sites were asking as
+    /// `c.pid.map(is_alive).unwrap_or(false)` — which answers "is there *a*
+    /// process with this number", a different question. The kernel recycles
+    /// pids; this host routinely runs past 300k of them with heavy container
+    /// churn, and a stale record plus one wrap-around is all it takes for a dead
+    /// container to read as running.
+    ///
+    /// It lives on the type because the type is what holds both halves of the
+    /// answer — `pid` and `pid_starttime`. Twenty copies of the same expression
+    /// is how the guard came to be applied to sixteen of them and not to the
+    /// rest (see the port-forward `setns` closed in #103): the fix that lasts is
+    /// making the right question the easy one to ask.
+    pub fn is_live(&self) -> bool {
+        self.pid
+            .is_some_and(|p| safe_to_signal(p, self.pid_starttime))
+    }
+
     /// Builds a container in the [`Status::Created`] state.
     pub fn new(
         id: String,
@@ -1331,6 +1351,13 @@ fn default_vm_backend() -> String {
 }
 
 impl Vm {
+    /// `true` if the recorded VMM process is still alive and still ours — the
+    /// [`Container::is_live`] of the VM side, and for the same reason.
+    pub fn is_live(&self) -> bool {
+        self.pid
+            .is_some_and(|p| safe_to_signal(p, self.pid_starttime))
+    }
+
     /// Builds a VM in the [`Status::Created`] state.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -1647,5 +1674,66 @@ mod tests {
         assert!(store.load("web").is_err());
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+/// `is_live` is the question twenty call sites were getting wrong. This module
+/// fails if it ever goes back to answering "is there *a* process with this
+/// number".
+#[cfg(test)]
+mod tests_record_is_live {
+    use super::*;
+
+    fn rec(pid: Option<i32>, starttime: Option<u64>) -> Container {
+        let mut c = Container::new(
+            "id1".into(),
+            "n1".into(),
+            "img".into(),
+            vec!["sh".into()],
+            "64m".into(),
+        );
+        c.pid = pid;
+        c.pid_starttime = starttime;
+        c
+    }
+
+    /// The recycled pid: alive, and not ours. This test process is running, so
+    /// the old `pid.map(is_alive)` answered `true` here.
+    #[test]
+    fn a_live_pid_with_the_wrong_starttime_is_not_live() {
+        let mine = std::process::id() as i32;
+        let real = proc_starttime(mine).expect("own starttime is readable");
+        assert!(is_alive(mine), "the test process must be alive");
+        assert!(!rec(Some(mine), Some(real.wrapping_add(1))).is_live());
+    }
+
+    /// The positive path is a real one — same pid, same starttime. Without it
+    /// the test above would also pass with `is_live` hardcoded to `false`.
+    #[test]
+    fn the_same_process_is_live() {
+        let mine = std::process::id() as i32;
+        let real = proc_starttime(mine).expect("own starttime is readable");
+        assert!(rec(Some(mine), Some(real)).is_live());
+    }
+
+    /// A record written before `pid_starttime` existed carries `None`, and
+    /// `safe_to_signal` documents that as legacy behaviour: allow. Asserted so
+    /// the compatibility choice stays visible instead of implied.
+    #[test]
+    fn a_legacy_record_without_starttime_is_live() {
+        let mine = std::process::id() as i32;
+        assert!(rec(Some(mine), None).is_live());
+    }
+
+    #[test]
+    fn no_pid_is_not_live() {
+        assert!(!rec(None, None).is_live());
+        assert!(!rec(None, Some(1)).is_live());
+    }
+
+    /// A number nothing is using — `i32::MAX` is above every kernel's `pid_max`.
+    #[test]
+    fn a_dead_pid_is_not_live() {
+        assert!(!rec(Some(i32::MAX), None).is_live());
     }
 }

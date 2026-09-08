@@ -383,13 +383,12 @@ pub fn run(action: SystemCmd) -> Result<()> {
 /// outside into a container (someone accessing), from a container to the outside (egress), or
 /// between containers. Refreshes continuously unless `--no-stream`.
 fn cmd_monitor(interval: u64, no_stream: bool) -> Result<()> {
-    use delonix_runtime::is_alive;
     let (_images, store) = open_stores()?;
     loop {
         let conts = store.list().unwrap_or_default();
         let ip2name: std::collections::HashMap<String, String> = conts
             .iter()
-            .filter(|c| c.pid.map(is_alive).unwrap_or(false))
+            .filter(|c| c.is_live())
             .filter_map(|c| c.ip.clone().map(|ip| (ip, c.name.clone())))
             .collect();
         let conns = delonix_net::list_connections(&ip2name);
