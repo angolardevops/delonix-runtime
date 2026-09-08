@@ -1006,9 +1006,11 @@ fn resolve_volume_names(project: &str, compose: &ComposeFile) -> BTreeMap<String
 /// philosophy as named volume/network naming above: `down`/`down -v`
 /// RE-DERIVE names by re-parsing the compose file, never look anything up) —
 /// so an anonymous volume gets a name that is itself re-derivable: the
-/// service name plus its 1-based position among that service's OWN anonymous
-/// mounts (a named/bind mount does not consume a slot), joined through the
-/// same collision-free `compose_scoped_name` used for named volumes/networks.
+/// service name plus the 1-based RANK OF ITS TARGET PATH among that service's
+/// OWN anonymous mounts (a named/bind mount does not consume a slot), joined
+/// through the same collision-free `compose_scoped_name` used for named
+/// volumes/networks. Rank over the sorted set and NOT position in the file —
+/// see the comment in the body for the reordering hazard that buys.
 ///
 /// `--anon<n>` is deliberately NOT a value a real top-level `volumes:` key is
 /// likely to collide with — this is a naming convention, not a security
@@ -1019,17 +1021,31 @@ fn anonymous_volume_names(
     service: &str,
     mounts: &[ComposeVolumeMount],
 ) -> Vec<String> {
-    let mut names = Vec::new();
-    let mut n = 0usize;
-    for m in mounts {
-        if let ComposeVolumeMount::Short(s) = m {
-            if !s.contains(':') {
-                n += 1;
-                names.push(compose_scoped_name(project, &format!("{service}--anon{n}")));
-            }
-        }
-    }
-    names
+    let anon: Vec<&str> = mounts
+        .iter()
+        .filter_map(|m| match m {
+            ComposeVolumeMount::Short(s) if !s.contains(':') => Some(s.as_str()),
+            _ => None,
+        })
+        .collect();
+
+    // The index is the rank of the mount's TARGET PATH among this service's
+    // anonymous mounts, not its position in the file. Writing order would make
+    // the name depend on how the YAML happens to be laid out: swapping two
+    // `- /path` lines — an entirely ordinary edit — would swap which volume
+    // backs which path, so a database would come up on the volume that held
+    // the logs, silently and with the data still there at the wrong target.
+    // A rank over the sorted set is stable under reordering; the returned Vec
+    // stays in appearance order, which is what the caller zips against.
+    let mut sorted: Vec<&str> = anon.clone();
+    sorted.sort_unstable();
+
+    anon.iter()
+        .map(|path| {
+            let n = sorted.iter().position(|p| p == path).unwrap() + 1;
+            compose_scoped_name(project, &format!("{service}--anon{n}"))
+        })
+        .collect()
 }
 
 /// Refuses every key this implementation does not read — against the RAW parsed
@@ -2571,7 +2587,7 @@ services:
     }
 
     #[test]
-    fn fn anonymous_volume_names_indexa_so_os_montes_anonimos() {
+    fn anonymous_volume_names_indexes_only_the_anonymous_mounts() {
         let mounts = vec![
             ComposeVolumeMount::Short("/data".to_string()), // anon #1
             ComposeVolumeMount::Short("named:/x".to_string()), // not anon, no slot
@@ -2593,11 +2609,11 @@ services:
     /// `RunOpts.volumes` — the same shape a named volume mount produces, so
     /// nothing downstream needs to special-case it.
     #[test]
-    fn montagem_anonima_ganha_um_doc_de_volume_e_uma_entrada_run_opts() {
+    fn an_anonymous_mount_gets_a_volume_doc_and_a_run_opts_entry() {
         let yaml = "services:\n  web:\n    image: x\n    volumes:\n      - /var/lib/data\n";
         let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
         let t = translate(&compose, "myproj", Path::new("/tmp"), &[]).unwrap();
-        let (opts, _) = &t.containers["web"];
+        let (opts, _) = &t.containers["web"][0];
         assert_eq!(opts.volumes.len(), 1, "{:?}", opts.volumes);
         let (name, target) = opts.volumes[0].split_once(':').unwrap();
         assert_eq!(target, "/var/lib/data");
@@ -2611,10 +2627,32 @@ services:
         );
     }
 
+    /// Reordering two `- /path` lines must not move the data. The name is
+    /// derived from the SET of target paths, so the same path keeps the same
+    /// volume however the YAML is laid out — with a positional index, the two
+    /// volumes here would swap and each service would come up on the other's
+    /// data, silently.
+    #[test]
+    fn reordering_the_mounts_does_not_move_the_volumes() {
+        let a = vec![
+            ComposeVolumeMount::Short("/var/lib/data".to_string()),
+            ComposeVolumeMount::Short("/var/log".to_string()),
+        ];
+        let b = vec![
+            ComposeVolumeMount::Short("/var/log".to_string()),
+            ComposeVolumeMount::Short("/var/lib/data".to_string()),
+        ];
+        let na = anonymous_volume_names("p", "db", &a);
+        let nb = anonymous_volume_names("p", "db", &b);
+        // Same path, same volume — whichever line it is written on.
+        assert_eq!(na[0], nb[1], "/var/lib/data changed volume: {na:?} {nb:?}");
+        assert_eq!(na[1], nb[0], "/var/log changed volume: {na:?} {nb:?}");
+    }
+
     /// A named/bind mount is untouched by the anonymous-volume machinery —
     /// no extra doc, no consumed slot.
     #[test]
-    fn montagem_com_dois_pontos_nao_e_tratada_como_anonima() {
+    fn a_mount_with_a_colon_is_not_treated_as_anonymous() {
         let yaml = "volumes:\n  data: {}\nservices:\n  web:\n    image: x\n    volumes:\n      - data:/var/lib/data\n";
         let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
         let t = translate(&compose, "myproj", Path::new("/tmp"), &[]).unwrap();
@@ -2630,8 +2668,6 @@ services:
         );
     }
 
-    #[test]
-    fn deploy_replicas_diferente_de_1_e_erro() {
     #[test]
     fn deploy_replicas_cria_um_container_por_replica() {
         let yaml = "services:\n  svc:\n    image: x\n    deploy:\n      replicas: 3\n";
