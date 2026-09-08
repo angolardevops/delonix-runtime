@@ -2,7 +2,8 @@
 
 Turns vendor installation media into bootable Delonix VM images: **OPNsense**,
 **Proxmox** (VE / Backup Server / Mail Gateway / Datacenter Manager) and
-**TrueNAS SCALE**.
+**TrueNAS SCALE**. Plus one image that is deliberately not an appliance:
+**OpenStack**, whose story is at the end.
 
 Nothing here hand-builds a guest. Each product installs itself exactly as it
 would on metal — the scripts only drive its own unattended path and capture the
@@ -39,6 +40,9 @@ have.
 # TrueNAS SCALE — the installer's own JSON-RPC API
 ./build-truenas.sh                   # 25.10.5
 
+# OpenStack — NOT an appliance; see the section at the end
+./build-openstack.sh                 # 2026.1 "Gazpacho" on Ubuntu 24.04
+
 # Another version, or media you already have
 ./build-proxmox.sh pve 9.1-1
 ./build-proxmox.sh pve /path/to/proxmox-ve_9.1-1.iso
@@ -63,6 +67,7 @@ builds — the checksum is what makes that safe.
 | `build-proxmox.sh pmg` | Proxmox Mail Gateway | 9.1-1 | `pmg-9.1-1.qcow2` |
 | `build-proxmox.sh pdm` | Proxmox Datacenter Manager | 1.1-1 | `pdm-1.1-1.qcow2` |
 | `build-truenas.sh` | TrueNAS SCALE | 25.10.5 | `truenas-25.10.5.qcow2` |
+| `build-openstack.sh` | OpenStack via kolla-ansible 22.1.0 | 2026.1 Gazpacho | `openstack-2026.1-ubuntu-24.04.qcow2` |
 
 The version is in the output name on purpose: without it, building 9.2 quietly
 overwrites the 9.1 image sitting in the same directory, and both tags are meant
@@ -86,6 +91,7 @@ assumed:
 | Proxmox Datacenter Manager | <https://proxmox.com/en/downloads/proxmox-datacenter-manager> |
 | OPNsense | the `MIRROR` in `build-opnsense.sh` (dotsrc by default) |
 | TrueNAS SCALE | `download.sys.truenas.net/TrueNAS-SCALE-<train>/<version>/` |
+| OpenStack | `cloud-images.ubuntu.com` for the host OS; `opendev.org` for kolla-ansible; quay.io for the service images |
 
 `download.proxmox.com` is **not** where these ISOs live — it serves the apt
 repositories, and none of the four pages links to it. An earlier note in the CI
@@ -172,3 +178,65 @@ changing them for your own builds is an edit to `answer-*.toml` or the
 - **`modprobe: ERROR:` in a Proxmox install log is not a failure.** It is the
   kernel shrugging at absent hardware. Only `ERROR: Installation failed`,
   `Auto-installation failed` and `unable to continue` are the installer's own.
+
+## OpenStack — the one that is not an appliance
+
+`build-openstack.sh` sits in this directory because it is the same discipline —
+pinned upstream version, vendor checksum, a guest that reports its own verdict,
+a read-back before publishing — but it breaks the rule the other four keep, and
+the break is the interesting part.
+
+The other four install themselves from vendor media and configure themselves
+through a web UI. **OpenStack has no such media.** It is not one program: it is
+a dozen services that only become a cloud once something deploys them against
+a specific host, with that host's addresses. The upstream way to do that is
+[kolla-ansible](https://docs.openstack.org/kolla-ansible/), which runs the
+services as containers.
+
+So the image is split at the seam where machine-independence actually ends:
+
+| Inside the image (this script) | Outside it (`delonix-deploy`) |
+|---|---|
+| Ubuntu 24.04, checksum-verified | the VM, its two NICs, its LVM volume group |
+| kolla-ansible pinned to one release's stable branch | `kolla_internal_vip_address` |
+| `bootstrap-servers` already run (docker, host prep) | `network_interface` / `neutron_external_interface` |
+| ~20 GiB of service container images, pre-pulled | `kolla-genpwd`, on the target |
+| `/etc/delonix/openstack-image.json` | `deploy`, `prechecks`, `post-deploy` |
+
+Three consequences worth knowing before reading the script:
+
+- **It is imported WITHOUT `--appliance`.** It is a cloud image and it wants the
+  NoCloud seed `vm create` generates; that seed is how the target's hostname and
+  SSH key get in. Marking it an appliance makes `vm create` refuse `--ssh-key`
+  and hand over a VM nobody can log into.
+- **`verify-boot.sh` deliberately has no `openstack` case.** That script's whole
+  claim is that an image *serves* a port. A freshly built image here serves
+  nothing — OpenStack is pulled, not deployed. Adding a case for it would mean
+  either a probe that always fails or a probe weakened until it passes, and the
+  second is worse. Keystone on `:5000` is proved by the deploy role, on a host
+  that has a VIP. What this script proves instead, and does prove, is read back
+  out of the finished disk with `virt-cat` before it will publish.
+- **kolla-ansible comes from PyPI, not from `stable/<release>`.** Upstream's
+  quickstart installs `git+https://opendev.org/openstack/kolla-ansible@stable/…`,
+  and two measured things argue against it here. A `git clone` that STALLS never
+  returns, so a retry wrapper never gets its turn — this build hung 31 silent
+  minutes on exactly that, console quiet and disk not growing. And the branch
+  head is a dev snapshot (`22.1.1.dev5` on the day), whose content changes
+  daily; that is not a pin, in a script whose whole point is that two builds a
+  month apart make the same image. The published wheel carries the data files
+  the build needs — checked, not assumed: `etc_examples/kolla/globals.yml`,
+  `ansible/inventory/all-in-one` and `ansible/site.yml` are all in it. Every
+  network step is additionally wrapped in `timeout`, because the general lesson
+  is that **a stalled connection is not a failure**, and nothing that only
+  handles failure will save you from one.
+- **The build's `globals.yml` is moved aside, not kept.** It ships as
+  `/etc/kolla/globals.yml.build` with an unroutable VIP and the build VM's
+  interface names. Leaving a plausible one in place is exactly how Proxmox VE
+  once published an appliance that announced the QEMU slirp address as its own.
+  A generated `passwords.yml` is destroyed for the same class of reason: baked
+  secrets would be shared by every cloud ever deployed from the image.
+
+Budget: the pull is ~20 GiB, and this workspace measures 3.3 MB/s to the
+mirrors. Over an hour, on a link that never gets faster by being asked twice —
+which is the entire argument for paying it once, here, instead of once per
+deployment.
