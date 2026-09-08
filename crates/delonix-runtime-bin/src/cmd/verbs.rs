@@ -538,7 +538,7 @@ mod tests {
     /// clause reaches real store I/O (same shape as `delete_without_a_name_*`
     /// above), so this is a pure logic test.
     #[test]
-    fn get_com_nome_e_namespace_e_recusado() {
+    fn get_with_both_name_and_namespace_is_refused() {
         let e = get(
             kinds::POD,
             &["web".to_string()],
@@ -554,7 +554,7 @@ mod tests {
     /// trap this codebase already refuses for `--security-opt seccomp=`/
     /// `-v :z`/`--network-alias`.
     #[test]
-    fn get_namespace_e_recusado_numa_kind_sem_namespace() {
+    fn get_namespace_is_refused_on_a_kind_without_namespaces() {
         let e = get(
             kinds::SECRET,
             &[],
