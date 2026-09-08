@@ -501,14 +501,33 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   um com a SUA porta aleatória (`container port` confirmou as três diferentes), `compose ps`
   listou os três sob o mesmo serviço, e `compose down` removeu os três sem tratamento
   especial nenhum; as três recusas confirmadas com a mensagem exacta.
-  **Por fazer, documentado (nunca silencioso)**: `profiles`/`extends`/`configs`/`secrets`
-  **Por fazer, documentado (nunca silencioso)**: `profiles`/`configs`/`secrets`  top-level (usa `kind: Secret` em vez disso)/multi-ficheiro (`-f a -f b`/`include:`),
-  `build.target` (selecção de estágio), `networks.*.ipv4_address` fixo,
-  volumes anónimos (sem `source` explícito) — este último deliberadamente NÃO tentado ainda:
-  **Por fazer, documentado (nunca silencioso)**: `extends`/`configs`/`secrets`
-  top-level (usa `kind: Secret` em vez disso), multi-ficheiro (`-f a -f b`/`include:`),
-  `deploy.replicas≠1`, volumes anónimos (sem `source` explícito) — este último
-  deliberadamente NÃO tentado ainda:  precisa de semântica própria de nomeação/limpeza (quando é que um volume anónimo se apaga?
+  **FEITO: top-level `configs:`/`secrets:`.** Cada entrada REFERENCIADA por
+  pelo menos um serviço (as não usadas nem são lidas — mesma poupança que um
+  `networks:`/`volumes:` nunca ligado) vira um `kind: Secret` sintético
+  (`resolve_compose_secrets`), aplicado por `secret::apply` verbatim antes dos
+  containers — zero mecanismo novo, o mesmo `stringData` que o manifesto já
+  aceitava. `secrets:` lê `file:` (conteúdo cru do ficheiro, relativo ao
+  directório do compose) e `environment:` (lido do processo no `up`);
+  `configs:` só lê `file:` (a Compose Specification nunca lhe dá a fonte
+  `environment:`, e dar-lha aqui seria uma segunda opinião não documentada).
+  Cada serviço com `secrets:`/`configs:` ganha `RunOpts.secret`+
+  `secret_files: true` — a entrega em ficheiro é a única forma que a Compose
+  Specification promete para os dois, nunca variável de ambiente.
+  **Simplificação documentada, nunca silenciosa**: `Container.secret`'s
+  entrega em ficheiro nomeia cada montagem pela CHAVE de dados do segredo, sem
+  retarget por-secret — por isso um `source:`/`target:` cujo `target` DIFIRA
+  do `source` é RECUSADO com a razão exacta (usar o nome de origem, ou tirar
+  `target:`), nunca montado em silêncio com o nome errado. `external: true`
+  também é recusado (este módulo só sabe CRIAR um segredo a partir de um
+  `file:`/`environment:` que consegue ler, nunca referenciar um que já exista
+  fora do ficheiro compose). Validado ao vivo (`DELONIX_ROOT`/
+  `DELONIX_NET_RUNTIME_DIR` isolados): `db_password`/`nginx_conf` de dois
+  ficheiros locais chegaram intactos a `/run/secrets/db_password` e
+  `/run/secrets/nginx_conf` dentro do container, com o modo 0600 esperado.
+  **Por fazer, documentado (nunca silencioso)**: multi-ficheiro (`-f a -f b`/
+  `include:`) e volumes anónimos (sem `source` explícito) — este último
+  deliberadamente NÃO tentado ainda: precisa de semântica própria de
+  nomeação/limpeza (quando é que um volume anónimo se apaga?
   `down` simples ou só `down -v`?) que merece ser pensada com calma, não decidida às pressas.
 - `delonix serve docker-api [--addr unix://<socket>]` — fatia da **Docker Engine API** (`cmd/dockerapi.rs`)
   que basta para `docker version/ps/images/info` **e**, desde a v0.26.0, o ciclo de vida completo de
