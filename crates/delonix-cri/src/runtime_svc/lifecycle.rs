@@ -1038,13 +1038,52 @@ fn start_argv(
         args.push("--group-add".into());
         args.push(g.to_string());
     }
-    for p in &rec.masked_paths {
-        args.push("--masked-path".into());
-        args.push(p.clone());
+    // A `privileged: true` container gets NEITHER of these, and that is not a
+    // relaxation invented here — it is what `--privileged` means, and what
+    // `cap_ceiling`'s own note already states this runtime does: "a
+    // `privileged: true` container still gets `seccomp=unconfined`, a writable
+    // `/sys`, and its own cgroup namespace".
+    //
+    // The kubelet sends `readonly_paths` (with `/proc/sys` in it) and
+    // `masked_paths` for EVERY container, privileged or not; deciding which of
+    // them to honour is the runtime's job, and containerd and CRI-O both drop
+    // them for privileged. Applying them regardless is what broke `kube-proxy`
+    // on every kubeadm cluster this runtime serves:
+    //
+    //     E server.go:136 "Error running ProxyServer" err="could not set
+    //     conntrack parameters from kube-proxy configuration: open
+    //     /proc/sys/net/netfilter/nf_conntrack_max: read-only file system"
+    //
+    // Without `kube-proxy` there is no ClusterIP, and CoreDNS never leaves
+    // `ContainerCreating` — so the whole service plane of the cluster went down
+    // over two `--readonly-path` arguments (issue #237).
+    if !rec.privileged {
+        for p in &rec.masked_paths {
+            args.push("--masked-path".into());
+            args.push(p.clone());
+        }
+        for p in &rec.readonly_paths {
+            args.push("--readonly-path".into());
+            args.push(p.clone());
+        }
     }
-    for p in &rec.readonly_paths {
-        args.push("--readonly-path".into());
-        args.push(p.clone());
+    // `--privileged` has to REACH the engine, not merely be translated into
+    // capabilities. The engine documents it: "without an explicit list, apply
+    // runc's default masked/readonly paths […] `--privileged` opts out
+    // wholesale, matching Docker/runc semantics" — and runc's default list
+    // contains `/proc/sys`.
+    //
+    // Without this, dropping the explicit `--readonly-path` flags below only
+    // swaps one list for the other: the engine falls back to its defaults and
+    // `/proc/sys` stays read-only. MEASURED — the first version of this fix did
+    // exactly that, and `kube-proxy` failed on the same line with the corrected
+    // binary installed on the node.
+    //
+    // Capabilities and mounts are separate axes of `--privileged`, as
+    // `cap_ceiling`'s note already said. The CRI translated the first and
+    // forgot the second.
+    if rec.privileged {
+        args.push("--privileged".into());
     }
     args.push("--security-opt".into());
     args.push(format!("no-new-privileges={}", rec.no_new_privs));
@@ -2014,6 +2053,58 @@ mod tests {
     /// kubelet matava-os e o `kubeadm init` ficava preso em
     /// `wait-control-plane`. Nada disto falha a compilar nem falha um teste
     /// unitário — só falha um cluster.
+    /// `kube-proxy` is privileged and writes to `/proc/sys/net/netfilter`. The
+    /// kubelet sends `readonly_paths` with `/proc/sys` in it for EVERY
+    /// container; deciding which to honour is the runtime's job, and for a
+    /// privileged one the answer is none — as in containerd and CRI-O.
+    ///
+    /// Without this: `open /proc/sys/net/netfilter/nf_conntrack_max: read-only
+    /// file system`, `kube-proxy` in CrashLoopBackOff, and without it there is
+    /// no ClusterIP and no CoreDNS. The cluster's whole service plane, over two
+    /// arguments.
+    #[test]
+    fn privileged_gets_neither_masked_nor_readonly_paths() {
+        let paths = || vec!["/proc/sys".to_string(), "/proc/sysrq-trigger".to_string()];
+
+        let unprivileged = ContainerRec {
+            image: "registry.k8s.io/kube-proxy:v1.36.4".into(),
+            masked_paths: paths(),
+            readonly_paths: paths(),
+            privileged: false,
+            ..Default::default()
+        };
+        let argv = start_argv(&unprivileged, None, crate::CapCeiling::default(), "a");
+        assert!(
+            argv.iter().any(|a| a == "--readonly-path"),
+            "sem privilégio os caminhos TÊM de ser aplicados: {argv:?}"
+        );
+        assert!(
+            argv.iter().any(|a| a == "--masked-path"),
+            "sem privilégio os caminhos TÊM de ser aplicados: {argv:?}"
+        );
+
+        let com_privilegio = ContainerRec {
+            privileged: true,
+            ..unprivileged
+        };
+        let argv = start_argv(&com_privilegio, None, crate::CapCeiling::default(), "a");
+        assert!(
+            !argv.iter().any(|a| a == "--readonly-path"),
+            "um privilegiado não leva `--readonly-path`: {argv:?}"
+        );
+        assert!(
+            !argv.iter().any(|a| a == "--masked-path"),
+            "um privilegiado não leva `--masked-path`: {argv:?}"
+        );
+        // The half without which the other is worthless: dropping the explicit
+        // paths makes the engine fall back on runc's defaults, which include
+        // `/proc/sys`. Only `--privileged` turns those off.
+        assert!(
+            argv.iter().any(|a| a == "--privileged"),
+            "`privileged: true` tem de CHEGAR ao motor: {argv:?}"
+        );
+    }
+
     #[test]
     fn host_network_vira_rede_do_host_e_nao_publica_portas() {
         let rec = ContainerRec {
