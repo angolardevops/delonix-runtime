@@ -252,3 +252,12 @@ risco.
   REAL A CORRER»), e é uma prova diferente — mais estreita e mais funda.
 * 19 specs foram **skipped** pela própria suite (features que ela deteta como
   não anunciadas). Não contam como passe nem como falha.
+* `ListPodSandboxMetrics`/`ListMetricDescriptors` (a API genérica de métricas,
+  distinta da API de Stats acima) passaram de stub-vazio a implementação real
+  DEPOIS desta medição — reaproveitam a mesma leitura de cgroup v2 que
+  `ContainerStats`/`PodSandboxStats` já usavam, com o par nome-de-métrica ↔
+  descritor verificado por teste (o spec define que um nome sem descritor
+  correspondente é ignorado pelo chamador). **`critest` v1.36.0 não exercita
+  nenhuma das duas** (confirmado por grep neste documento) — a validação que
+  existe é um round-trip gRPC real (`grpc_status.rs`), não uma re-corrida da
+  suite. O número acima (79/103) **não muda** por causa disto.

@@ -299,12 +299,16 @@ caso do B8, de um major.
 
 ## 5. As três decisões que faltam
 
-**O `Service` — DESENHADO a 2026-09-04, `docs/adr/0032-service-kind-dns-round-robin.md`,
-por implementar.** Selecciona um conjunto de containers por `matchLabels` (o mesmo
-primitivo que a ADR-0024 já desenhou para `FirewallPolicy`, também ainda por
-construir) e publica-o como vários registos DNS `A`, round-robin, sob o nome
-interno já existente — sem VIP, sem dataplane novo, sem daemon. Fecha a
-contagem das «12 Kinds operáveis» no desenho; falta só o código.
+**O `Service` — IMPLEMENTADO a 2026-09-05, `docs/adr/0032-service-kind-dns-round-robin.md`.**
+Selecciona um conjunto de containers por `matchLabels` (o mesmo primitivo que a
+ADR-0024 ainda desenha para `FirewallPolicy`, esse continua por construir) e
+publica-o como vários registos DNS `A`, round-robin, sob o nome interno já
+existente — sem VIP, sem dataplane novo, sem daemon. `delonix get/describe/
+delete services`, converge (`hot_fields`), `stack plan`/`apply`, e schema
+gerado. Validado ao vivo: selecção por labels, DNS multi-registo real
+(`nslookup` a devolver as duas IPs), isolamento por namespace (incluindo a
+excepção `default` = pública), selector vazio a avisar e não a falhar, e
+actualização a quente da porta. Fecha a contagem das «12 Kinds operáveis».
 
 **O `config` e os contextos — FECHADO, confirmado no código.** O `config.rs`
 diz, no seu próprio comentário de módulo: uma preferência local pequena,

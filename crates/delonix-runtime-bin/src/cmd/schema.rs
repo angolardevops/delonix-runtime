@@ -52,6 +52,7 @@ const TYPED_KINDS: &[&str] = &[
     k::VM,
     k::SECRET,
     k::IMAGE,
+    k::APP,
     k::GATEWAY,
     k::DEPENDENCY,
     k::NETWORK_ROUTE,
@@ -59,6 +60,7 @@ const TYPED_KINDS: &[&str] = &[
     k::INGRESS,
     k::FIREWALL_POLICY,
     k::NETWORK_ACCESS_RULE,
+    k::SERVICE,
     k::WORKLOAD,
     k::CLUSTER,
     k::STACK,
@@ -193,6 +195,11 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
                 "ImageSpec",
                 super::image::IMAGE_SPEC_FIELDS,
             ),
+            k::APP => (
+                generator.subschema_for::<super::app::AppSpec>(),
+                "AppSpec",
+                super::app::APP_SPEC_FIELDS,
+            ),
             k::GATEWAY => (
                 generator.subschema_for::<super::tunnel::TunnelSpec>(),
                 "TunnelSpec",
@@ -207,6 +214,11 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
                 generator.subschema_for::<super::netroute::NetworkRouteSpec>(),
                 "NetworkRouteSpec",
                 super::netroute::NETWORK_ROUTE_SPEC_FIELDS,
+            ),
+            k::SERVICE => (
+                generator.subschema_for::<super::service::ServiceSpec>(),
+                "ServiceSpec",
+                super::service::SERVICE_SPEC_FIELDS,
             ),
             k::HTTP_ROUTE => (
                 generator.subschema_for::<super::httproute::HttpRouteSpec>(),

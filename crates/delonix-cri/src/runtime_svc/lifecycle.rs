@@ -61,6 +61,16 @@ struct SandboxRec {
     cni_ip: String,
 }
 
+/// `NODE` when the sandbox shares the host's namespace, `POD` otherwise — the
+/// same two values `run_pod_sandbox` decodes on the way in (`is_node`).
+fn ns_mode(host: bool) -> i32 {
+    if host {
+        NamespaceMode::Node as i32
+    } else {
+        NamespaceMode::Pod as i32
+    }
+}
+
 fn sandbox_state(r: &SandboxRec) -> i32 {
     if r.stopped {
         PodSandboxState::SandboxNotready as i32
@@ -623,7 +633,35 @@ pub fn pod_sandbox_status(
             ip,
             additional_ips: vec![],
         }),
-        linux: None,
+        // The namespace modes the sandbox was CREATED with, given back verbatim.
+        //
+        // This used to be `None`, and that single word cost a control plane. The
+        // kubelet compares `linux.namespaces.options.network` against what the pod
+        // asks for, on every sync, and starts a NEW sandbox whenever they differ.
+        // With `linux: None` prost hands it the zero value — `POD` — so every
+        // `hostNetwork: true` pod (which is EVERY kubeadm control-plane static pod:
+        // etcd, apiserver, controller-manager, scheduler) compared `POD != NODE`
+        // and was torn down and rebuilt about once per second, for ever.
+        //
+        // MEASURED 2026-09-07, v0.66.0, k8s 1.36.4: `kubeadm init` never got past
+        // `wait-control-plane`, the four containers showed `Exited (0)` with no
+        // probe having run, and `crictl pods` reached ATTEMPT 401 on the etcd pod
+        // in under four minutes — 128 live sandboxes and climbing. The same
+        // container started by hand stayed `Up`, because there is no kubelet to
+        // compare anything.
+        //
+        // `run_pod_sandbox` already reads all three modes and stores them; only
+        // the way back was missing.
+        linux: Some(LinuxPodSandboxStatus {
+            namespaces: Some(Namespace {
+                options: Some(NamespaceOption {
+                    network: ns_mode(r.host_network),
+                    pid: ns_mode(r.host_pid),
+                    ipc: ns_mode(r.host_ipc),
+                    ..Default::default()
+                }),
+            }),
+        }),
         labels: r.labels.clone(),
         annotations: r.annotations.clone(),
         runtime_handler: String::new(),
@@ -1000,13 +1038,52 @@ fn start_argv(
         args.push("--group-add".into());
         args.push(g.to_string());
     }
-    for p in &rec.masked_paths {
-        args.push("--masked-path".into());
-        args.push(p.clone());
+    // A `privileged: true` container gets NEITHER of these, and that is not a
+    // relaxation invented here — it is what `--privileged` means, and what
+    // `cap_ceiling`'s own note already states this runtime does: "a
+    // `privileged: true` container still gets `seccomp=unconfined`, a writable
+    // `/sys`, and its own cgroup namespace".
+    //
+    // The kubelet sends `readonly_paths` (with `/proc/sys` in it) and
+    // `masked_paths` for EVERY container, privileged or not; deciding which of
+    // them to honour is the runtime's job, and containerd and CRI-O both drop
+    // them for privileged. Applying them regardless is what broke `kube-proxy`
+    // on every kubeadm cluster this runtime serves:
+    //
+    //     E server.go:136 "Error running ProxyServer" err="could not set
+    //     conntrack parameters from kube-proxy configuration: open
+    //     /proc/sys/net/netfilter/nf_conntrack_max: read-only file system"
+    //
+    // Without `kube-proxy` there is no ClusterIP, and CoreDNS never leaves
+    // `ContainerCreating` — so the whole service plane of the cluster went down
+    // over two `--readonly-path` arguments (issue #237).
+    if !rec.privileged {
+        for p in &rec.masked_paths {
+            args.push("--masked-path".into());
+            args.push(p.clone());
+        }
+        for p in &rec.readonly_paths {
+            args.push("--readonly-path".into());
+            args.push(p.clone());
+        }
     }
-    for p in &rec.readonly_paths {
-        args.push("--readonly-path".into());
-        args.push(p.clone());
+    // `--privileged` has to REACH the engine, not merely be translated into
+    // capabilities. The engine documents it: "without an explicit list, apply
+    // runc's default masked/readonly paths […] `--privileged` opts out
+    // wholesale, matching Docker/runc semantics" — and runc's default list
+    // contains `/proc/sys`.
+    //
+    // Without this, dropping the explicit `--readonly-path` flags below only
+    // swaps one list for the other: the engine falls back to its defaults and
+    // `/proc/sys` stays read-only. MEASURED — the first version of this fix did
+    // exactly that, and `kube-proxy` failed on the same line with the corrected
+    // binary installed on the node.
+    //
+    // Capabilities and mounts are separate axes of `--privileged`, as
+    // `cap_ceiling`'s note already said. The CRI translated the first and
+    // forgot the second.
+    if rec.privileged {
+        args.push("--privileged".into());
     }
     args.push("--security-opt".into());
     args.push(format!("no-new-privileges={}", rec.no_new_privs));
@@ -1385,11 +1462,23 @@ fn u64v(value: u64) -> Option<UInt64Value> {
     Some(UInt64Value { value })
 }
 
-/// Builds a container's real metrics from its cgroup v2.
-fn container_stats_for(base: &Path, r: &ContainerRec) -> ContainerStats {
-    let ts = now_ns();
-    let cg = container_cgroup(base, &r.id);
-    let (cpu_ns, mem_cur, working_set, rss, pgfault, pgmajfault) = match &cg {
+/// The cgroup v2 numbers behind BOTH the (older) Stats API and the (newer)
+/// generic Metrics API — one read, two shapes. Extracted so
+/// `list_pod_sandbox_metrics` does not grow a second, drifting copy of the
+/// same cgroup-field math `container_stats_for` already has.
+struct ContainerCgroupMetrics {
+    cpu_ns: u64,
+    usage_bytes: u64,
+    working_set_bytes: u64,
+    rss_bytes: u64,
+    pgfault: u64,
+    pgmajfault: u64,
+    swap_bytes: u64,
+}
+
+fn container_cgroup_metrics(base: &Path, id: &str) -> ContainerCgroupMetrics {
+    let cg = container_cgroup(base, id);
+    match &cg {
         Some(cg) => {
             let cpu_us = cg_field(cg, "cpu.stat", "usage_usec");
             let cur = cg_u64(cg, "memory.current");
@@ -1403,17 +1492,40 @@ fn container_stats_for(base: &Path, r: &ContainerRec) -> ContainerStats {
                 let rss = cgroup_rss_bytes(cg);
                 (rss, rss, rss)
             };
-            (
-                cpu_us.saturating_mul(1000), // µs → ns
-                usage,
-                working,
-                rss,
-                cg_field(cg, "memory.stat", "pgfault"),
-                cg_field(cg, "memory.stat", "pgmajfault"),
-            )
+            ContainerCgroupMetrics {
+                cpu_ns: cpu_us.saturating_mul(1000), // µs → ns
+                usage_bytes: usage,
+                working_set_bytes: working,
+                rss_bytes: rss,
+                pgfault: cg_field(cg, "memory.stat", "pgfault"),
+                pgmajfault: cg_field(cg, "memory.stat", "pgmajfault"),
+                swap_bytes: cg_u64(cg, "memory.swap.current"),
+            }
         }
-        None => (0, 0, 0, 0, 0, 0),
-    };
+        None => ContainerCgroupMetrics {
+            cpu_ns: 0,
+            usage_bytes: 0,
+            working_set_bytes: 0,
+            rss_bytes: 0,
+            pgfault: 0,
+            pgmajfault: 0,
+            swap_bytes: 0,
+        },
+    }
+}
+
+/// Builds a container's real metrics from its cgroup v2.
+fn container_stats_for(base: &Path, r: &ContainerRec) -> ContainerStats {
+    let ts = now_ns();
+    let ContainerCgroupMetrics {
+        cpu_ns,
+        usage_bytes: mem_cur,
+        working_set_bytes: working_set,
+        rss_bytes: rss,
+        pgfault,
+        pgmajfault,
+        swap_bytes,
+    } = container_cgroup_metrics(base, &r.id);
     ContainerStats {
         attributes: Some(ContainerAttributes {
             id: r.id.clone(),
@@ -1453,11 +1565,7 @@ fn container_stats_for(base: &Path, r: &ContainerRec) -> ContainerStats {
         swap: Some(SwapUsage {
             timestamp: ts,
             swap_available_bytes: u64v(0),
-            swap_usage_bytes: u64v(
-                cg.as_deref()
-                    .map(|c| cg_u64(c, "memory.swap.current"))
-                    .unwrap_or(0),
-            ),
+            swap_usage_bytes: u64v(swap_bytes),
         }),
     }
 }
@@ -1588,6 +1696,156 @@ pub fn list_pod_sandbox_stats(
         .map(|s| pod_sandbox_stats_for(base, &s))
         .collect();
     Ok(Response::new(ListPodSandboxStatsResponse { stats }))
+}
+
+/// The generic Metrics API (`ListPodSandboxMetrics`/`ListMetricDescriptors`)
+/// is a DIFFERENT shape from the Stats API above — Prometheus-like `{name,
+/// value, metric_type, labels}` tuples instead of a fixed struct — but it is
+/// NOT a different measurement: it reads the exact same
+/// `container_cgroup_metrics` this file already computes for `ContainerStats`.
+/// Two shapes, one source of truth.
+///
+/// **A metric whose name never appeared in `ListMetricDescriptors` is
+/// spec-defined to be IGNORED by the caller** ("Name must match a name
+/// previously returned in a MetricDescriptors call, otherwise, it will be
+/// ignored" — `api.proto`'s own doc-comment on `Metric.name`). Emitting
+/// metrics without matching descriptors would be the same "accepted and
+/// ignored" failure this codebase refuses elsewhere — the two lists below are
+/// the single source both `list_metric_descriptors` and
+/// `list_pod_sandbox_metrics` read, so they cannot drift apart.
+struct MetricSpec {
+    name: &'static str,
+    help: &'static str,
+    metric_type: MetricType,
+}
+
+const POD_METRICS: &[MetricSpec] = &[
+    MetricSpec {
+        name: "pod_cpu_usage_core_nanoseconds",
+        help: "Cumulative CPU time consumed by the pod's containers, in nanoseconds.",
+        metric_type: MetricType::Counter,
+    },
+    MetricSpec {
+        name: "pod_memory_working_set_bytes",
+        help: "Current working set memory of the pod's containers, in bytes.",
+        metric_type: MetricType::Gauge,
+    },
+    MetricSpec {
+        name: "pod_memory_usage_bytes",
+        help: "Current memory usage of the pod's containers, in bytes.",
+        metric_type: MetricType::Gauge,
+    },
+];
+
+const CONTAINER_METRICS: &[MetricSpec] = &[
+    MetricSpec {
+        name: "container_cpu_usage_core_nanoseconds",
+        help: "Cumulative CPU time consumed by the container, in nanoseconds.",
+        metric_type: MetricType::Counter,
+    },
+    MetricSpec {
+        name: "container_memory_working_set_bytes",
+        help: "Current working set memory of the container, in bytes.",
+        metric_type: MetricType::Gauge,
+    },
+    MetricSpec {
+        name: "container_memory_usage_bytes",
+        help: "Current memory usage of the container, in bytes.",
+        metric_type: MetricType::Gauge,
+    },
+    MetricSpec {
+        name: "container_memory_rss_bytes",
+        help: "Current anonymous-memory (RSS) usage of the container, in bytes.",
+        metric_type: MetricType::Gauge,
+    },
+];
+
+pub fn list_metric_descriptors() -> Result<Response<ListMetricDescriptorsResponse>, Status> {
+    let descriptors = POD_METRICS
+        .iter()
+        .chain(CONTAINER_METRICS.iter())
+        .map(|m| MetricDescriptor {
+            name: m.name.to_string(),
+            help: m.help.to_string(),
+            // No per-metric dimension beyond the pod/container id already
+            // carried by `PodSandboxMetrics.pod_sandbox_id`/
+            // `ContainerMetrics.container_id` — nothing to declare here.
+            label_keys: vec![],
+        })
+        .collect();
+    Ok(Response::new(ListMetricDescriptorsResponse { descriptors }))
+}
+
+fn container_metrics_for(base: &Path, r: &ContainerRec) -> ContainerMetrics {
+    let m = container_cgroup_metrics(base, &r.id);
+    let values = [m.cpu_ns, m.working_set_bytes, m.usage_bytes, m.rss_bytes];
+    let metrics = CONTAINER_METRICS
+        .iter()
+        .zip(values)
+        .map(|(spec, value)| Metric {
+            name: spec.name.to_string(),
+            // Live-gathered, not cached — the spec's own convention for this
+            // field ("should be 0 if the metric was gathered live").
+            timestamp: 0,
+            metric_type: spec.metric_type as i32,
+            label_values: vec![],
+            value: u64v(value),
+        })
+        .collect();
+    ContainerMetrics {
+        container_id: r.id.clone(),
+        metrics,
+    }
+}
+
+pub fn list_pod_sandbox_metrics(
+    base: &Path,
+) -> Result<Response<ListPodSandboxMetricsResponse>, Status> {
+    let pod_metrics = list_recs::<SandboxRec>(&sb_dir(base))
+        .into_iter()
+        .map(|sb| {
+            let container_metrics: Vec<ContainerMetrics> = list_recs::<ContainerRec>(&ct_dir(base))
+                .into_iter()
+                .filter(|r| r.sandbox_id == sb.id)
+                .map(|r| container_metrics_for(base, &r))
+                .collect();
+            // The pod-level totals are the same sum-of-containers
+            // `pod_sandbox_stats_for` computes — just re-derived from
+            // `ContainerMetrics` instead of `ContainerStats`, so the two APIs
+            // can never report different pod totals for the same underlying
+            // cgroups.
+            let sum_of = |name: &str| -> u64 {
+                container_metrics
+                    .iter()
+                    .flat_map(|cm| &cm.metrics)
+                    .filter(|m| m.name == name)
+                    .filter_map(|m| m.value.as_ref().map(|v| v.value))
+                    .sum()
+            };
+            let pod_values = [
+                sum_of("container_cpu_usage_core_nanoseconds"),
+                sum_of("container_memory_working_set_bytes"),
+                sum_of("container_memory_usage_bytes"),
+            ];
+            let metrics = POD_METRICS
+                .iter()
+                .zip(pod_values)
+                .map(|(spec, value)| Metric {
+                    name: spec.name.to_string(),
+                    timestamp: 0,
+                    metric_type: spec.metric_type as i32,
+                    label_values: vec![],
+                    value: u64v(value),
+                })
+                .collect();
+            PodSandboxMetrics {
+                pod_sandbox_id: sb.id.clone(),
+                metrics,
+                container_metrics,
+            }
+        })
+        .collect();
+    Ok(Response::new(ListPodSandboxMetricsResponse { pod_metrics }))
 }
 
 /// `ReopenContainerLog` — recreates the container's log file at its configured
@@ -1795,6 +2053,58 @@ mod tests {
     /// kubelet matava-os e o `kubeadm init` ficava preso em
     /// `wait-control-plane`. Nada disto falha a compilar nem falha um teste
     /// unitário — só falha um cluster.
+    /// `kube-proxy` is privileged and writes to `/proc/sys/net/netfilter`. The
+    /// kubelet sends `readonly_paths` with `/proc/sys` in it for EVERY
+    /// container; deciding which to honour is the runtime's job, and for a
+    /// privileged one the answer is none — as in containerd and CRI-O.
+    ///
+    /// Without this: `open /proc/sys/net/netfilter/nf_conntrack_max: read-only
+    /// file system`, `kube-proxy` in CrashLoopBackOff, and without it there is
+    /// no ClusterIP and no CoreDNS. The cluster's whole service plane, over two
+    /// arguments.
+    #[test]
+    fn privileged_gets_neither_masked_nor_readonly_paths() {
+        let paths = || vec!["/proc/sys".to_string(), "/proc/sysrq-trigger".to_string()];
+
+        let unprivileged = ContainerRec {
+            image: "registry.k8s.io/kube-proxy:v1.36.4".into(),
+            masked_paths: paths(),
+            readonly_paths: paths(),
+            privileged: false,
+            ..Default::default()
+        };
+        let argv = start_argv(&unprivileged, None, crate::CapCeiling::default(), "a");
+        assert!(
+            argv.iter().any(|a| a == "--readonly-path"),
+            "sem privilégio os caminhos TÊM de ser aplicados: {argv:?}"
+        );
+        assert!(
+            argv.iter().any(|a| a == "--masked-path"),
+            "sem privilégio os caminhos TÊM de ser aplicados: {argv:?}"
+        );
+
+        let com_privilegio = ContainerRec {
+            privileged: true,
+            ..unprivileged
+        };
+        let argv = start_argv(&com_privilegio, None, crate::CapCeiling::default(), "a");
+        assert!(
+            !argv.iter().any(|a| a == "--readonly-path"),
+            "um privilegiado não leva `--readonly-path`: {argv:?}"
+        );
+        assert!(
+            !argv.iter().any(|a| a == "--masked-path"),
+            "um privilegiado não leva `--masked-path`: {argv:?}"
+        );
+        // The half without which the other is worthless: dropping the explicit
+        // paths makes the engine fall back on runc's defaults, which include
+        // `/proc/sys`. Only `--privileged` turns those off.
+        assert!(
+            argv.iter().any(|a| a == "--privileged"),
+            "`privileged: true` tem de CHEGAR ao motor: {argv:?}"
+        );
+    }
+
     #[test]
     fn host_network_vira_rede_do_host_e_nao_publica_portas() {
         let rec = ContainerRec {
@@ -2247,6 +2557,54 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
+    /// The kubelet compares `linux.namespaces.options.network` against what the pod asks
+    /// for, on EVERY sync, and starts a new sandbox whenever they differ. Reporting `None`
+    /// hands it the zero value (`POD`), so every `hostNetwork: true` pod — which is every
+    /// kubeadm control-plane static pod — never matched and was rebuilt about once per
+    /// second, for ever. MEASURED 2026-09-07: `crictl pods` reached ATTEMPT 401 on the etcd
+    /// pod in under four minutes, and no control plane could ever finish `kubeadm init`.
+    #[test]
+    fn pod_sandbox_status_reports_the_namespace_modes() {
+        let tmp = std::env::temp_dir().join(format!("dlx-cri-ns-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        write_rec(
+            &sb_dir(&tmp),
+            "sbhost",
+            &SandboxRec {
+                id: "sbhost".into(),
+                name: "etcd".into(),
+                namespace: "kube-system".into(),
+                host_network: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let st = pod_sandbox_status(&tmp, "sbhost".into())
+            .unwrap()
+            .into_inner()
+            .status
+            .expect("status");
+        let opts = st
+            .linux
+            .expect("the kubelet reads `linux` — `None` is what broke the control plane")
+            .namespaces
+            .expect("namespaces")
+            .options
+            .expect("options");
+
+        assert_eq!(
+            opts.network,
+            NamespaceMode::Node as i32,
+            "a host-network sandbox must report NODE, or the kubelet rebuilds it every sync"
+        );
+        // The other two are POD here, and asserting them keeps a future edit from wiring
+        // `network` alone and leaving the neighbours reporting whatever the zero value is.
+        assert_eq!(opts.pid, NamespaceMode::Pod as i32);
+        assert_eq!(opts.ipc, NamespaceMode::Pod as i32);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
     /// `label_selector` is a SUBSET match. Comparing whole maps would match nothing in
     /// practice, because a real container carries every label the kubelet set on it.
     #[test]
@@ -2267,6 +2625,125 @@ mod tests {
         .containers;
         assert_eq!(got.len(), 1, "esperava só o container 'etcd'");
         assert_eq!(got[0].id, "ctaaa1");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// The CRI spec's own rule for `Metric.name`: a name that never appeared
+    /// in a `ListMetricDescriptors` call is defined to be IGNORED by the
+    /// caller. Every name this runtime ever emits from
+    /// `list_pod_sandbox_metrics` has to come from the same table
+    /// `list_metric_descriptors` reads — this proves the two cannot drift,
+    /// rather than trusting the two literal name lists to stay in sync by hand.
+    #[test]
+    fn every_emitted_metric_name_has_a_descriptor() {
+        let tmp = tmp_base("metrics-names");
+        write_rec(
+            &sb_dir(&tmp),
+            "sb1",
+            &SandboxRec {
+                id: "sb1".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        write_rec(
+            &ct_dir(&tmp),
+            "ct1",
+            &ContainerRec {
+                id: "ct1".into(),
+                sandbox_id: "sb1".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let descriptor_names: std::collections::HashSet<String> = list_metric_descriptors()
+            .unwrap()
+            .into_inner()
+            .descriptors
+            .into_iter()
+            .map(|d| d.name)
+            .collect();
+        assert_eq!(
+            descriptor_names.len(),
+            POD_METRICS.len() + CONTAINER_METRICS.len(),
+            "descriptor names must be unique and cover both tables"
+        );
+
+        let pods = list_pod_sandbox_metrics(&tmp)
+            .unwrap()
+            .into_inner()
+            .pod_metrics;
+        assert_eq!(pods.len(), 1);
+        let pod = &pods[0];
+        assert_eq!(pod.pod_sandbox_id, "sb1");
+        for m in &pod.metrics {
+            assert!(
+                descriptor_names.contains(&m.name),
+                "pod metric '{}' has no matching descriptor — the caller must ignore it",
+                m.name
+            );
+        }
+        assert_eq!(pod.container_metrics.len(), 1);
+        let cm = &pod.container_metrics[0];
+        assert_eq!(cm.container_id, "ct1");
+        for m in &cm.metrics {
+            assert!(
+                descriptor_names.contains(&m.name),
+                "container metric '{}' has no matching descriptor — the caller must ignore it",
+                m.name
+            );
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// A container belonging to a DIFFERENT sandbox must never show up under
+    /// this one's `container_metrics` — the same isolation
+    /// `pod_sandbox_stats_for` already gives the older Stats API.
+    #[test]
+    fn container_metrics_are_scoped_to_their_own_sandbox() {
+        let tmp = tmp_base("metrics-scope");
+        for (sb_id, ct_id) in [("sbA", "ctA"), ("sbB", "ctB")] {
+            write_rec(
+                &sb_dir(&tmp),
+                sb_id,
+                &SandboxRec {
+                    id: sb_id.into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            write_rec(
+                &ct_dir(&tmp),
+                ct_id,
+                &ContainerRec {
+                    id: ct_id.into(),
+                    sandbox_id: sb_id.into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+
+        let pods = list_pod_sandbox_metrics(&tmp)
+            .unwrap()
+            .into_inner()
+            .pod_metrics;
+        assert_eq!(pods.len(), 2);
+        for pod in &pods {
+            assert_eq!(
+                pod.container_metrics.len(),
+                1,
+                "sandbox {} must see only its own container",
+                pod.pod_sandbox_id
+            );
+            let expected_ct = if pod.pod_sandbox_id == "sbA" {
+                "ctA"
+            } else {
+                "ctB"
+            };
+            assert_eq!(pod.container_metrics[0].container_id, expected_ct);
+        }
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

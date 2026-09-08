@@ -232,6 +232,7 @@ const NAMESPACE_SOURCES: &[(&str, NsSource)] = &[
     // scoped, and `list_all` is the call that returns the owner alongside the
     // record (`VolumeStore::list` deliberately does NOT see the scoped ones).
     (k::VOLUME, NsSource::Store(ns_from_volumes)),
+    (k::SERVICE, NsSource::Store(ns_from_services)),
     (
         k::POD,
         NsSource::Via(
@@ -267,6 +268,20 @@ fn ns_from_vms(root: &std::path::Path) -> Vec<String> {
         .unwrap_or_default()
         .into_iter()
         .map(|v| v.namespace)
+        .collect()
+}
+
+/// A tenant whose only declared resource is a `kind: Service` was otherwise
+/// invisible to the TAB, same as the share-volume-only tenant `ns_from_volumes`
+/// exists for. `service_list` reads `DELONIX_ROOT`/the default root directly
+/// (`delonix_net::infra::base_root`) rather than the `root` argument this
+/// function ignores — in every real caller the two already agree, since both
+/// come from the same process environment; only a test that deliberately
+/// diverges them would notice, and none here does.
+fn ns_from_services(_root: &std::path::Path) -> Vec<String> {
+    delonix_net::infra::service_list()
+        .into_iter()
+        .map(|d| d.namespace)
         .collect()
 }
 
