@@ -2864,10 +2864,34 @@ users:
         // The 2nd write must NOT silently switch what `kubectl` already points to.
         assert_eq!(merged["current-context"], "lab");
 
+        // Re-running for `lab` REPLACES its 3 entries, never duplicates them.
+        std::fs::write(&source, fake_admin_conf()).unwrap();
+        merge_into_local_kubeconfig(&source, "lab", &dest).unwrap();
+        let merged: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
+        assert_eq!(merged["clusters"].as_sequence().unwrap().len(), 2);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn merge_kubeconfig_substitui_current_context_pendurado_ou_ausente() {
         // A context that is set but DANGLING is not a preference to protect.
         // Reported live: `current-context` absent while three contexts sat in
         // the file, so a bare `kubectl` went to localhost:8080 and failed with
         // an error that reads like a broken cluster.
+        let tmp = std::env::temp_dir().join(format!(
+            "delonix-cluster-merge-kubeconfig-current-context-test-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let source = tmp.join("admin.conf");
+        let dest = tmp.join("config");
+
+        std::fs::write(&source, fake_admin_conf()).unwrap();
+        merge_into_local_kubeconfig(&source, "lab", &dest).unwrap();
+
         let mut m: serde_yaml::Value =
             serde_yaml::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
         m["current-context"] = serde_yaml::Value::String("gone-with-the-vm".into());
@@ -2894,13 +2918,6 @@ users:
             merged["current-context"], "outro",
             "an absent current-context must be filled by the cluster just created"
         );
-
-        // Re-running for `lab` REPLACES its 3 entries, never duplicates them.
-        std::fs::write(&source, fake_admin_conf()).unwrap();
-        merge_into_local_kubeconfig(&source, "lab", &dest).unwrap();
-        let merged: serde_yaml::Value =
-            serde_yaml::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
-        assert_eq!(merged["clusters"].as_sequence().unwrap().len(), 2);
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
