@@ -1,6 +1,8 @@
+pub mod app;
 pub mod backup;
 pub mod boot;
 pub mod build;
+pub mod capture;
 pub mod cdi;
 pub mod cluster;
 pub mod complete;
@@ -57,6 +59,7 @@ pub mod scan;
 pub mod schema;
 pub mod secret;
 pub mod serve;
+pub mod service;
 pub mod sharevolume;
 pub mod stack;
 pub mod storage;

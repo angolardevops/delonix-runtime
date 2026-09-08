@@ -37,6 +37,7 @@ pub(crate) const GET_ROUTES: &[&str] = &[
     kinds::HTTP_ROUTE,
     kinds::NETWORK_ROUTE,
     kinds::FIREWALL_POLICY,
+    kinds::SERVICE,
 ];
 
 /// Kinds whose group has no `-o json` today. Listed rather than discovered,
@@ -53,6 +54,7 @@ pub(crate) const DESCRIBE_ROUTES: &[&str] = &[
     kinds::SECRET,
     kinds::NETWORK_ROUTE,
     kinds::FIREWALL_POLICY,
+    kinds::SERVICE,
     kinds::CLUSTER,
 ];
 pub(crate) const DELETE_ROUTES: &[&str] = &[
@@ -66,6 +68,7 @@ pub(crate) const DELETE_ROUTES: &[&str] = &[
     kinds::GATEWAY,
     kinds::NETWORK_ROUTE,
     kinds::FIREWALL_POLICY,
+    kinds::SERVICE,
 ];
 
 /// The CLI group that still owns a Kind's imperative verbs.
@@ -119,6 +122,12 @@ pub(crate) fn no_verb_reason(kind: &str) -> &'static str {
             "`Workload` lowers to Pod/VirtualMachine/Container at load — ask for those"
         }
         k if k == kinds::DEPENDENCY => "`Dependency` lowers to NetworkPolicy — ask for that",
+        // Unlike `Image`, an App has no registry entry of its own — its build
+        // produces exactly one Image and nothing else persists the fact that
+        // an App named it. Once built, it is indistinguishable from any other
+        // tagged image: `image ls`/`image describe <tag>` see the real state;
+        // `get apps` would need a new persisted record this pass does not add.
+        k if k == kinds::APP => "an App's state IS its output image — use `image ls`/`image describe <tag>`",
         k if k == kinds::INGRESS => "`Ingress` is the k8s spelling of HTTPRoute — ask for that",
         // The CLI restructuring separates the two surfaces on purpose: a
         // container made by `container run` is an IMPERATIVE resource, and
@@ -202,6 +211,7 @@ pub(crate) fn get(
         // the live map. A route has no name someone chose — the PAIR is its
         // identity — so there is nothing else `get` could key on.
         k if k == kinds::NETWORK_ROUTE => super::netroute::cmd_ls(output),
+        k if k == kinds::SERVICE => super::service::cmd_ls(output),
         // Both directions of every governed container, one row each — the
         // listing `net ingress ls`/`net egress ls` never had between them
         // (each answers only its own direction). Identity is `<target>/
@@ -274,6 +284,7 @@ pub(crate) fn describe(kind: &str, names: &[String]) -> Result<()> {
             Ok(())
         }
         k if k == kinds::NETWORK_ROUTE => super::netroute::cmd_describe(&n),
+        k if k == kinds::SERVICE => super::service::cmd_describe(&n),
         k if k == kinds::FIREWALL_POLICY => super::firewall::cmd_describe_policy(&n),
         k if k == kinds::CLUSTER => {
             for name in names {
@@ -379,6 +390,16 @@ pub(crate) fn delete(kind: &str, names: &[String], force: bool) -> Result<()> {
             Ok(())
         }
         k if k == kinds::FIREWALL_POLICY => super::firewall::cmd_delete_policy(names),
+        k if k == kinds::SERVICE => {
+            for n in names {
+                super::service::remove_for_replace(n)?;
+                println!(
+                    "{}",
+                    super::po::tf("service {name}: removed", &[("name", n)])
+                );
+            }
+            Ok(())
+        }
         // The list above already decided this Kind routes; reaching here means the
         // two halves disagree, which is our defect and not the caller's.
         _ => Err(Error::Invalid(format!(

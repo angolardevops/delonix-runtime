@@ -391,6 +391,30 @@ pub fn service_vip(key: &str) -> String {
     format!("10.90.{a}.{b}")
 }
 
+/// Whether a `matchLabels` selector selects a workload carrying `labels`.
+///
+/// PURE, shared by design (ADR-0032): `kind: Service` needs this to compute its
+/// backend set for the DNS index, and `kind: FirewallPolicy`'s own planned
+/// selector (ADR-0024, still unimplemented) is meant to reuse the exact same
+/// function rather than grow a second, divergence-prone `matchLabels` reader.
+/// Lives here — not in `delonix-runtime-bin`, where both Kinds' CLI code lives
+/// — because `delonix-net::infra::build_dns_index` (which computes a
+/// `Service`'s live membership) cannot depend on the bin crate.
+///
+/// An EMPTY `match_labels` selects NOTHING, deliberately fail-closed: a
+/// `spec.selector.matchLabels: {}` that silently meant "every workload on the
+/// node" would be exactly the accept-and-widen footgun this codebase's own
+/// audits keep finding and removing elsewhere (`ingress ls`'s `0.0.0.0/0`
+/// default, `--net-connect` bypassing the firewall, ...). A caller that wants
+/// "no selection" states so by omitting the `Service` document, not by writing
+/// an empty selector.
+pub fn matches_labels(
+    labels: &std::collections::BTreeMap<String, String>,
+    match_labels: &std::collections::BTreeMap<String, String>,
+) -> bool {
+    !match_labels.is_empty() && match_labels.iter().all(|(k, v)| labels.get(k) == Some(v))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -544,5 +568,40 @@ COMMIT
             // `.255` é broadcast.
             assert!((2..=254).contains(&ultimo), "{nome} -> {vip}");
         }
+    }
+
+    fn labels(pairs: &[(&str, &str)]) -> std::collections::BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn um_selector_vazio_nao_seleciona_nada() {
+        let container = labels(&[("app", "web")]);
+        assert!(!matches_labels(&container, &labels(&[])));
+    }
+
+    #[test]
+    fn todas_as_chaves_do_selector_tem_de_bater() {
+        let container = labels(&[("app", "web"), ("tier", "frontend")]);
+        assert!(matches_labels(&container, &labels(&[("app", "web")])));
+        assert!(matches_labels(
+            &container,
+            &labels(&[("app", "web"), ("tier", "frontend")])
+        ));
+        // Uma chave a mais no selector que o container não tem: falha.
+        assert!(!matches_labels(
+            &container,
+            &labels(&[("app", "web"), ("env", "prod")])
+        ));
+        // Mesma chave, valor diferente: falha.
+        assert!(!matches_labels(&container, &labels(&[("app", "worker")])));
+    }
+
+    #[test]
+    fn um_container_sem_labels_nao_bate_com_selector_nenhum() {
+        assert!(!matches_labels(&labels(&[]), &labels(&[("app", "web")])));
     }
 }

@@ -76,6 +76,7 @@
 ~	image remove
 ~	image save
 =	image scan
+~	image sign
 =	image tag
 =	image verify
 ~	image vm build
@@ -96,6 +97,7 @@
 =	mcp capabilities
 =	mcp doctor
 =	mcp serve
+~	net capture
 ~	net egress allow
 ~	net egress clear
 ~	net egress deny
@@ -148,6 +150,7 @@
 ~	pod create
 ~	pod exec
 =	pod logs
+~	pod port-forward
 ~	secret apply
 =	secret create
 ~	secret inspect
@@ -203,6 +206,7 @@
 ~	vm ls
 ~	vm ls-remote
 ~	vm migrate
+~	vm pause
 ~	vm prune
 ~	vm pull
 ~	vm push
@@ -216,6 +220,7 @@
 =	vm start
 =	vm stop
 →	vm unbridge
+~	vm unpause
 ~	vm vnc
 ~	volume apply
 ~	volume create

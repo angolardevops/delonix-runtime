@@ -1489,6 +1489,21 @@ fn is_forbidden_device(host: &str) -> bool {
 /// `commit` can read it. Two copies of the option string would diverge the day the
 /// layout changes, and the divergence would only show as a container reading a
 /// tree that is not the one it runs against.
+///
+/// **Mounted through the NEW mount API** (`fsopen`/`fsconfig`/`fsmount`/
+/// `move_mount`, Linux 5.2+; overlayfs's incremental `lowerdir+` append since
+/// 6.5) — one `fsconfig()` call per lower directory, never one joined
+/// `"lowerdir=a:b:c"` string. The classic single-call `mount(2)` this replaced
+/// packs every option into ONE `data` argument capped at `PAGE_SIZE` (4096
+/// bytes on this architecture): past that the kernel truncates it in silence
+/// instead of erroring, and the truncated last path then fails to resolve —
+/// measured live, in this exact rootless `unshare --user --map-root-user
+/// --mount` sandbox, with a synthetic 100-layer overlay (ADR-0037): a classic
+/// mount with 20 real layer paths (4084 bytes) succeeds, 30 (5994 bytes)
+/// fails with a bare `ENOENT` — the exact symptom a real build against
+/// `paketobuildpacks/builder-jammy-base` (91 layers, ~8.8 KB) hit. The new API
+/// mounted that same 100-layer case (19 KB of raw path data) correctly in the
+/// same sandbox, whiteout/copy-up semantics included.
 pub fn mount_overlay_if_marked(rootfs: &str) -> nix::Result<()> {
     let merged = std::path::Path::new(rootfs);
     let Some(base) = merged.parent() else {
@@ -1502,12 +1517,8 @@ pub fn mount_overlay_if_marked(rootfs: &str) -> nix::Result<()> {
     // overlay is up. Falling through would `pivot_root` into an empty `merged/`
     // and the container would start against a rootfs with no image in it.
     let lowers = std::fs::read_to_string(&marker).map_err(|_| nix::errno::Errno::EIO)?;
-    let lowerdir = lowers
-        .lines()
-        .filter(|l| !l.is_empty())
-        .collect::<Vec<_>>()
-        .join(":");
-    if lowerdir.is_empty() {
+    let lower_paths: Vec<&str> = lowers.lines().filter(|l| !l.is_empty()).collect();
+    if lower_paths.is_empty() {
         return Err(nix::errno::Errno::EINVAL);
     }
     // Recreate the scratch directories rather than assuming they survived. On
@@ -1522,17 +1533,45 @@ pub fn mount_overlay_if_marked(rootfs: &str) -> nix::Result<()> {
     for d in ["merged", "work"] {
         let _ = std::fs::create_dir_all(base.join(d));
     }
-    let opts = format!(
-        "lowerdir={lowerdir},upperdir={},workdir={}",
-        base.join("upper").display(),
-        base.join("work").display()
-    );
-    mount(
-        Some("overlay"),
-        merged,
-        Some("overlay"),
-        MsFlags::empty(),
-        Some(opts.as_str()),
+    let upperdir = base.join("upper");
+    let workdir = base.join("work");
+    fsopen_overlay(&lower_paths, &upperdir, &workdir, merged)
+        .map_err(|e| nix::errno::Errno::from_i32(e.raw_os_error()))
+}
+
+/// The new-mount-API half of [`mount_overlay_if_marked`] — split out so the
+/// per-layer loop is the only thing that differs from the classic call it
+/// replaced, and so `rustix::io::Errno` never leaks past this function (the
+/// two callers of `mount_overlay_if_marked` and the rest of this file all
+/// speak `nix::errno::Errno`; converting once at the boundary above keeps it
+/// that way instead of spreading two error types through the caller side).
+fn fsopen_overlay(
+    lowers: &[&str],
+    upperdir: &std::path::Path,
+    workdir: &std::path::Path,
+    target: &std::path::Path,
+) -> rustix::io::Result<()> {
+    use rustix::mount::{
+        fsconfig_create, fsconfig_set_string, fsmount, fsopen, move_mount, FsMountFlags,
+        FsOpenFlags, MountAttrFlags, MoveMountFlags,
+    };
+    let fs = fsopen("overlay", FsOpenFlags::FSOPEN_CLOEXEC)?;
+    // Highest layer first, same order `lower_dirs`/the old joined string
+    // always used — overlayfs reads `lowerdir+` appends in the order given,
+    // identically to the old colon-joined list.
+    for lower in lowers {
+        fsconfig_set_string(&fs, "lowerdir+", *lower)?;
+    }
+    fsconfig_set_string(&fs, "upperdir", upperdir.to_string_lossy().as_ref())?;
+    fsconfig_set_string(&fs, "workdir", workdir.to_string_lossy().as_ref())?;
+    fsconfig_create(&fs)?;
+    let mount_fd = fsmount(&fs, FsMountFlags::FSMOUNT_CLOEXEC, MountAttrFlags::empty())?;
+    move_mount(
+        &mount_fd,
+        "",
+        rustix::fs::CWD,
+        target.to_string_lossy().as_ref(),
+        MoveMountFlags::MOVE_MOUNT_F_EMPTY_PATH,
     )
 }
 

@@ -375,8 +375,10 @@ pub(crate) fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile
                 k::VOLUME => super::volume::desired(doc)?,
                 k::NETWORK => super::network::desired(doc)?,
                 k::NETWORK_ROUTE => super::netroute::desired(doc)?,
+                k::SERVICE => super::service::desired(doc)?,
                 k::POD => super::pod::desired(doc)?,
                 k::IMAGE => super::image::desired(doc)?,
+                k::APP => super::app::desired(doc)?,
                 k::VM => super::vm::desired(doc)?,
                 k::FIREWALL_POLICY => super::firewall::desired(doc)?,
                 k::NETWORK_ACCESS_RULE => super::network_access_rule::desired(doc)?,
@@ -407,8 +409,10 @@ pub(crate) fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile:
     out.extend(super::volume::actual()?);
     out.extend(super::network::actual()?);
     out.extend(super::netroute::actual()?);
+    out.extend(super::service::actual()?);
     out.extend(super::pod::actual()?);
     out.extend(super::image::actual(docs)?);
+    out.extend(super::app::actual(docs)?);
     out.extend(super::vm::actual()?);
     out.extend(super::firewall::actual(docs)?);
     out.extend(super::network_access_rule::actual(docs)?);
@@ -642,7 +646,9 @@ pub(crate) fn compared_fields_table() -> Vec<(&'static str, &'static [&'static s
         (k::VOLUME, super::volume::RECONCILED_VOLUME_FIELDS),
         (k::NETWORK, super::network::RECONCILED_NETWORK_FIELDS),
         (k::NETWORK_ROUTE, super::netroute::RECONCILED_ROUTE_FIELDS),
+        (k::SERVICE, super::service::RECONCILED_SERVICE_FIELDS),
         (k::IMAGE, super::image::RECONCILED_IMAGE_FIELDS),
+        (k::APP, super::app::RECONCILED_APP_FIELDS),
         (k::VM, super::vm::RECONCILED_VM_FIELDS),
         (k::FIREWALL_POLICY, super::firewall::RECONCILED_FW_FIELDS),
         (
@@ -1207,6 +1213,14 @@ fn presence(
             ),
             Err(e) => ("?".into(), e.to_string()),
         },
+        // An App's identity is its OUTPUT image's ref, same reasoning as Image.
+        k::APP => match delonix_image::ImageStore::open(&root) {
+            Ok(s) => yes_no(
+                s.resolve(super::app::image_ref(doc).as_deref().unwrap_or(name))
+                    .is_ok(),
+            ),
+            Err(e) => ("?".into(), e.to_string()),
+        },
         k::SECRET => match delonix_runtime_core::SecretStore::open(&root) {
             Ok(s) => yes_no(s.list().iter().any(|sec| sec.name == name)),
             Err(e) => ("?".into(), e.to_string()),
@@ -1236,6 +1250,7 @@ fn presence(
         // names which. Before any of this it fell through to `?`/`unsupported
         // kind` — `stack ls` could not say anything about a path it had opened.
         k::NETWORK_ROUTE => super::netroute::presence_of(doc),
+        k::SERVICE => super::service::presence_of(doc),
         // A share has a record of its own, keyed by (namespace, name) — the
         // namespace comes from the document, which is why `load_record` takes
         // both and why guessing it is not an option.
@@ -1655,9 +1670,13 @@ fn run_layers(
     layers.run(k::NETWORK_ROUTE, "🔗", || super::netroute::apply(docs))?;
     layers.run(k::VOLUME, "💽", || super::volume::apply(docs))?;
     layers.run(k::IMAGE, "📦", || super::image::apply(docs))?;
+    layers.run(k::APP, "🏗", || super::app::apply(docs))?;
     layers.run(k::VM, "🖥", || super::vm::apply(docs, base))?;
     layers.run(k::CONTAINER, "📦", || super::container::apply(docs))?;
     layers.run(k::POD, "🧩", || super::pod::apply(docs))?;
+    // After the compute Kinds it selects, so the match-count warning it
+    // prints reflects workloads that already exist in this same apply.
+    layers.run(k::SERVICE, "🧭", || super::service::apply(docs))?;
     layers.run(k::FIREWALL_POLICY, "🧱", || super::firewall::apply(docs))?;
     layers.run(k::NETWORK_ACCESS_RULE, "🎯", || {
         super::network_access_rule::apply(docs)
@@ -1717,6 +1736,7 @@ pub(crate) fn no_teardown_reason(kind: &str) -> Option<&'static str> {
         // Shared content-addressed cache: not ownable, so it never reaches a
         // prune or a destroy, and a `Replace` is just a pull.
         k::IMAGE => "an image is shared content-addressed cache, owned by no stack",
+        k::APP => "an App's output is an image — shared content-addressed cache, owned by no stack",
         // Routes live in the shared proxy config with no per-document
         // provenance; a tunnel's record is keyed by a live agent.
         k::HTTP_ROUTE | k::INGRESS => {
@@ -1752,6 +1772,7 @@ fn destroy_one(kind: &str, name: &str) -> Result<()> {
         k::VOLUME => super::volume::remove_for_replace(name),
         k::NETWORK => super::network::remove_for_replace(name),
         k::NETWORK_ROUTE => super::netroute::remove_for_replace(name),
+        k::SERVICE => super::service::remove_for_replace(name),
         k::POD => super::pod::remove_pod(name, true),
         k::VM => super::vm::remove_for_replace(name),
         k::NETWORK_ACCESS_RULE => super::network_access_rule::remove_for_replace(name),
@@ -1962,6 +1983,20 @@ fn converge_and_stamp(
                         })?;
                     super::network_access_rule::converge_doc(doc)?
                 }
+                // Same shape again: `service::apply_one` already fully
+                // overwrites the registry entry, so converging is applying.
+                k::SERVICE => {
+                    let doc = docs
+                        .iter()
+                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .ok_or_else(|| {
+                            delonix_runtime_core::Error::Invalid(format!(
+                                "Service/{}: not in the manifest",
+                                c.name
+                            ))
+                        })?;
+                    super::service::converge_doc(doc)?
+                }
                 // Same shape as a firewall policy: `apply_one` is already
                 // idempotent and updates the record in place, so converging IS
                 // applying — a per-field path would be a second way to write the
@@ -2026,12 +2061,17 @@ fn stamp_all(
             k::VOLUME => super::volume::stamp(&d.name, stack, &d.fields),
             k::NETWORK => super::network::stamp(&d.name, stack, &d.fields),
             k::NETWORK_ROUTE => super::netroute::stamp(&d.name, stack, &d.fields),
+            k::SERVICE => super::service::stamp(&d.name, stack, &d.fields),
             k::POD => super::pod::stamp(&d.name, stack, &d.fields),
             k::VM => super::vm::stamp(&d.name, stack, &d.fields),
             k::NETWORK_ACCESS_RULE => super::network_access_rule::stamp(&d.name, stack, &d.fields),
             // `Image` is shared content and deliberately not ownable — stamping
             // it for one stack would hand another stack's cache an owner.
             k::IMAGE => Ok(()),
+            // Same reasoning as `Image` — an App's output is shared content,
+            // stamping it for one stack would hand another stack's cache an
+            // owner.
+            k::APP => Ok(()),
             _ => Ok(()),
         };
         // A stamp that fails must not fail the apply — the resource IS created

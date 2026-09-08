@@ -976,6 +976,25 @@ fn custom_net_name(net: &str) -> Option<String> {
     (net != "host" && net != "none").then(|| net.to_string())
 }
 
+/// `--ip` only makes sense with `--net <network>` — with `--net host/none`
+/// there is no SDN address to fix in the first place, and accepting the flag
+/// there would silently do nothing (the exact failure this engine refuses by
+/// policy elsewhere). Pure, so the combination is unit-testable without a
+/// live holder — the holder-side half (reserving the address, rejecting one
+/// outside the network's subnet) is `infra::attach_container_on_ip`, already
+/// covered by its own test in `delonix-net`.
+fn fixed_ip_needs_custom_net(has_ip: bool, custom_net: &Option<String>) -> Result<()> {
+    if has_ip && custom_net.is_none() {
+        return Err(Error::Invalid(
+            super::po::t(
+                "--ip requires --net <network> — a fixed address only makes sense on the SDN, not with --net host/none",
+            )
+            .into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Whitelist for a container's name: alnum + `-`/`_`, non-empty, doesn't
 /// start with `-`. Deliberately excludes `.` (unlike `delonix_vm::
 /// valid_vm_name`, which allows it) — see the call site for why: a dotted
@@ -3559,21 +3578,11 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     }
     c.net_bps = net_bps.clone();
     c.net_burst = net_burst.clone();
-    // `--ip` and `--pod`: accepted for flag parity, but the runtime's network
-    // model (holder + slirp) doesn't honor them YET — `attach_container` derives
-    // the IP from the container's id (it doesn't accept a fixed one), and the pod's
-    // `join_netns` isn't wired into the `run` path. We reject rather than
-    // accept-and-ignore (which would silently give an IP different from the one
-    // requested). These are engine work.
-    if ip.is_some() {
-        return Err(Error::Invalid(
-            super::po::t(
-                "--ip is not supported yet: the holder assigns the container's IP (it does not \
-                 accept a fixed one). Known engine gap.",
-            )
-            .into(),
-        ));
-    }
+    // `--pod`: accepted for flag parity, but its `join_netns` isn't wired into
+    // the `run` path yet (unrelated engine gap, tracked separately). `--ip`
+    // used to be refused here too ("the holder assigns the IP, it does not
+    // accept a fixed one") — that's fixed below, once `custom_net` is known
+    // (a fixed address only makes sense on the SDN).
 
     // ---- logs ----
     c.log_driver = log_driver;
@@ -3603,6 +3612,14 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // to JOIN it via `RunSpec.join_netns`, not create its own with `new_netns` —
     // that was the wrong approach, tried and corrected here).
     let custom_net = custom_net_name(&net);
+    // `--ip`: `infra::attach_container_on_ip` reserves the address in the SAME
+    // per-prefix IPAM registry that `attach_container`'s `allocate` reads
+    // (`ipam::reserve`, restored after `Net::attach_on_ip` left the engine) —
+    // it had ZERO callers before this, the same "public, dead, latent bug"
+    // pattern this repo has paid for several times over (see AGENTS.md). The
+    // combination check is a pure helper (`fixed_ip_needs_custom_net`) purely
+    // so it is unit-testable without a live holder.
+    fixed_ip_needs_custom_net(ip.is_some(), &custom_net)?;
     // `--expose` needs an IP on the SDN (custom network) — the proxy reaches the backend
     // via that IP. With `--net host/none` there's no IP → warn instead of silently ignoring.
     if expose.is_some() && custom_net.is_none() {
@@ -3621,7 +3638,10 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         } else {
             // 1st pass: creates the netns on the holder's side and RE-EXECUTES itself inside it.
             delonix_net::NetworkStore::open(super::util::state_root())?.get(n)?;
-            let (netns, ip) = infra::attach_container(&id, n, &namespace)?;
+            let (netns, ip) = match &ip {
+                Some(fixed) => infra::attach_container_on_ip(&id, n, fixed, &namespace)?,
+                None => infra::attach_container(&id, n, &namespace)?,
+            };
             warn_if_namespace_isolation_inert(&namespace);
             // `--expose`: auto-register in the L7 proxy HERE, on the HOST side — the
             // proxy spawn is via `nsenter` into the holder, which fails from the
@@ -8091,6 +8111,17 @@ mod tests {
         assert_eq!(super::custom_net_name("host"), None);
         assert_eq!(super::custom_net_name("none"), None);
         assert_eq!(super::custom_net_name("pnet"), Some("pnet".to_string()));
+    }
+
+    /// `--ip` is refused only when it would silently do nothing (no SDN
+    /// network to fix an address on); with one, or without `--ip` at all, it
+    /// is a no-op check.
+    #[test]
+    fn fixed_ip_only_needs_a_custom_net_when_an_ip_was_asked_for() {
+        assert!(super::fixed_ip_needs_custom_net(true, &None).is_err());
+        assert!(super::fixed_ip_needs_custom_net(true, &Some("pnet".to_string())).is_ok());
+        assert!(super::fixed_ip_needs_custom_net(false, &None).is_ok());
+        assert!(super::fixed_ip_needs_custom_net(false, &Some("pnet".to_string())).is_ok());
     }
 
     #[test]

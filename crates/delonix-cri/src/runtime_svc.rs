@@ -503,17 +503,14 @@ impl RuntimeService for DelonixRuntime {
         &self,
         _r: Request<ListMetricDescriptorsRequest>,
     ) -> Result<Response<ListMetricDescriptorsResponse>, Status> {
-        Ok(Response::new(ListMetricDescriptorsResponse {
-            descriptors: vec![],
-        }))
+        lifecycle::list_metric_descriptors()
     }
     async fn list_pod_sandbox_metrics(
         &self,
         _r: Request<ListPodSandboxMetricsRequest>,
     ) -> Result<Response<ListPodSandboxMetricsResponse>, Status> {
-        Ok(Response::new(ListPodSandboxMetricsResponse {
-            pod_metrics: vec![],
-        }))
+        let base = self.base.clone();
+        blocking(move || lifecycle::list_pod_sandbox_metrics(&base)).await
     }
     async fn runtime_config(
         &self,

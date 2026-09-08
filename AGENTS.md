@@ -400,11 +400,134 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   porta 0 + liberta de imediato; TOCTOU inerente e aceite, mesma técnica que qualquer atribuição
   aleatória de porta usa). Validado ao vivo: `compose up` com `ports: ["80"]` publicou de facto
   numa porta livre real, confirmado por `container port`.
-  **Por fazer, documentado (nunca silencioso)**: `profiles`/`extends`/`configs`/`secrets`
-  top-level (usa `kind: Secret` em vez disso)/multi-ficheiro (`-f a -f b`/`include:`),
-  `build.target` (selecção de estágio), `deploy.replicas≠1`, `networks.*.ipv4_address` fixo,
-  volumes anónimos (sem `source` explícito) — este último deliberadamente NÃO tentado ainda:
-  precisa de semântica própria de nomeação/limpeza (quando é que um volume anónimo se apaga?
+  **FEITO — `profiles:`** (`up --profile <nome>`, repetível) — um serviço sem `profiles:`
+  corre sempre; um que declare algum só arranca se o perfil for pedido, **ou** se um serviço
+  ACTIVO o alcançar por `depends_on` — a mesma regra do `docker compose` real (senão um
+  serviço activo ficaria sem o que `depends_on` promete). `active_services` calcula o fecho
+  transitivo; `down`/`ps`/`logs` não precisam de o saber, porque já derivam dos containers
+  REALMENTE criados (por label), nunca do ficheiro compose outra vez.
+  **FEITO**: `build.target` (selecção de estágio multi-stage) — `ComposeBuild::Full`'s campo
+  `target` já era parseado desde sempre e ficava explicitamente RECUSADO
+  («not supported in v1»); passou a ser encaminhado para o `build.target` do `kind: Image`
+  gerado (o mesmo caminho que `delonix build --target` usa). O ganho real não é só o campo —
+  é que `delonix build` em si **nunca teve** selecção de estágio nenhuma: só constrói TODOS os
+  estágios e empacota o último. `resolve_target_stage` (`delonix-image::build`, puro/testado)
+  resolve o nome/índice pedido contra `df.stages` ou o próprio estágio final (que não vive em
+  `df.stages` — só `df.from`/`df.steps` — daí o novo `Dockerfile.last_name` para o reconhecer
+  pelo nome sem o tratar como desconhecido); um nome/índice que não bate com nenhum dos dois
+  recusa nomeando os estágios reais. Só os estágios até ao alvo (inclusive) são construídos —
+  os posteriores nem chegam a ganhar container. **Corrigido de caminho, para o `--target`
+  produzir a imagem CERTA e não uma contaminada**: `CMD`/`ENTRYPOINT`/`USER`/`ENV`/`WORKDIR`/
+  `HEALTHCHECK` só aterram em `df.*` — não são geridos por estágio neste parser — por isso um
+  `--target` a um estágio intermédio já não os herda do estágio final (por vezes NÃO SEQUER
+  construído); usa antes os valores já correctos que `final_state` traz do PRÓPRIO estágio-alvo
+  (imagem base + os seus próprios passos). **Modo root (overlay) recusa `--target` a um estágio
+  intermédio** — corrigir isso exigiria mexer no `build_image` do `delonix-image` para aceitar
+  os valores já resolvidos em vez de ler `&df` cru, fora do âmbito desta fatia; visar o estágio
+  final continua a funcionar nos dois modos. **Validado ao vivo**: Dockerfile de 2 estágios
+  (`builder`/`runtime`, com um `COPY --from=builder`) — build sem `--target` produz a imagem do
+  `runtime` (tem `runtime-only.txt`+`shared.txt`, NÃO `builder-only.txt` — a semântica normal do
+  multi-stage); `--target builder` produz só o `builder` (tem `builder-only.txt`+`shared.txt`,
+  NÃO `runtime-only.txt` — prova que o estágio `runtime` nem chegou a correr); `--target runtime`
+  (o nome do estágio final, explícito) dá byte-a-byte o mesmo que sem a flag; um nome
+  inexistente recusa nomeando `builder, runtime`.
+  **Achado à parte, pré-existente, NÃO corrigido aqui**: um `RUN`/`COPY` que acerta a cache
+  (rebuild idêntico) fecha o seu passo com `✗` no `Progress`, apesar do build no fim ter
+  sucesso — reproduzido também SEM `--target`, num rebuild simples do mesmo Dockerfile
+  inalterado. É cosmético (o `img.short_id()` final está correcto) mas engana visualmente;
+  fica registado para quem mexer a seguir no `Progress`/cache dos passos.
+  **FEITO: `networks.*.ipv4_address` fixo** — em vez de recusar, alimenta o
+  MESMO caminho `container run --ip`: `infra::attach_container_on_ip`
+  reserva o endereço escolhido no MESMO registo IPAM por-prefixo que o
+  `allocate` do `attach_container` lê (a linha de controlo enviada ao holder
+  é idêntica — `attach <netns> <ip> <bridge> <gateway> [<ns>]`, só com um
+  endereço ESCOLHIDO em vez de ALOCADO) — já existia, tinha ZERO chamadores,
+  o mesmo padrão "pública, morta, com bug latente" já catalogado várias
+  vezes neste ficheiro. `container run --ip` deixou de recusar; recusa só
+  `--ip` sem `--net <rede>` (não há endereço SDN nenhum para fixar). Um bug
+  de LANG-01 (mensagem de erro em português dentro do motor) foi corrigido
+  de caminho, ao dar à função a sua primeira chamada real. **Validado só por
+  teste unitário, deliberadamente não ao vivo**: a linha de controlo do
+  holder não mudou (confirmado a ler o código, não suposto), por isso não
+  precisa de um respawn — mas provar o attach contra um holder vivo foi
+  adiado de propósito para não mexer na rede de produção deste host, decisão
+  já tomada para este item. Cobertura: o guard puro `fixed_ip_needs_custom_net`
+  (CLI), a fusão `ipv4_address` → `RunOpts.ip` (compose), e o teste
+  pré-existente de recusa por-subnet em `delonix-net` (continua verde).
+  **FEITO**: `extends:` — `service:` de um serviço IRMÃO no MESMO ficheiro herda os campos que
+  o próprio serviço não declara (`resolve_extends`/`merge_service`, puros e testados), pela ordem
+  do Compose Spec: `image`/`build`/`command`/`entrypoint`/`working_dir`/`user`/`restart`/
+  `container_name`/`hostname`/`healthcheck`/`deploy` são "o filho ganha se declarar, senão herda";
+  `environment:`/`labels:` FUNDEM chave-a-chave (o filho ganha só na chave partilhada, as do pai
+  sobrevivem — não é um `override` do mapa inteiro); `cap_add`/`cap_drop` concatenam sem duplicar
+  uma entrada que os dois declarem; `ports:`/`volumes:`/`env_file:`/`tmpfs:` concatenam pai+filho
+  sem deduplicar (simplificação documentada: uma porta publicada duas vezes perde a corrida do
+  `free_host_port` e falha alto, nunca em silêncio); `privileged`/`read_only` são OR (um `bool`
+  simples não distingue "o filho disse false" de "o filho não disse nada", por isso não há como
+  desherdar um `true` do pai — documentado, não escondido). **`depends_on:` NUNCA é herdado** —
+  a mesma exclusão deliberada que a própria Especificação Compose faz: o grafo de dependências de
+  um serviço é seu, não algo que vem a reboque da configuração que ele reaproveita. Cadeias
+  (`web` extends `mid` extends `base`) resolvem-se transitivamente antes de qualquer outra coisa
+  tocar em `services` (`load_compose` chama `resolve_extends` logo a seguir ao parse, e por isso
+  `translate`/o grafo de `depends_on`/`service_to_run_opts` não precisam de saber que `extends`
+  alguma vez existiu — quando os alcançam já está `None`), com detecção de ciclo a nomear o
+  caminho inteiro e não só as duas pontas que colidiram. `extends.file` é **recusado sempre**,
+  na verificação do YAML cru e antes de qualquer parse tipado — este motor não faz compose
+  multi-ficheiro de todo, e apontar para outro ficheiro sem avisar seria resolver contra o
+  ficheiro errado em silêncio; extends dentro do mesmo ficheiro não precisa de `file:` nenhum.
+  Validado ao vivo: um `web` que estende `base` herdou `image`/`ONLY_BASE` do pai, manteve o seu
+  próprio `ONLY_WEB`, sobrescreveu `SHARED` e `working_dir` (confirmado por `PWD=/web-dir` e pela
+  variável de ambiente lidas de DENTRO do container a correr, não só pelo `compose config`), e
+  ficou com `cap_add: NET_ADMIN, SYS_PTRACE` (um de cada lado, sem duplicar); o `base` ficou
+  intocado. As três recusas (base inexistente, ciclo, `extends.file`) confirmadas com a mensagem
+  exacta contra o binário real.
+  **FEITO**: `deploy.replicas` — N containers reais por serviço
+  (`<projecto>-<serviço>` para a 1ª réplica, `-2`/`-3`/… para as seguintes), **sem load
+  balancing nenhum entre elas** — mesma postura "sem VIP, sem daemon" que o `kind: Service`
+  já declara para o seu round-robin de DNS, que esta v1 não liga às réplicas do compose.
+  A 1ª réplica mantém o nome de sempre de propósito: é o que `depends_on`/o healthcheck já
+  visavam, e é a única forma de as outras duas capacidades continuarem a funcionar sem
+  tocar-lhes. **Duas recusas, as duas por colisão real**: `container_name:` explícito com
+  `replicas>1` (as réplicas colidiriam todas nesse UM nome) e uma porta de host FIXA
+  (`ports: ["8080:80"]`, ou a forma longa com `published:`) com `replicas>1` (colidiriam
+  todas na mesma porta) — uma porta SEM host explícito continua aceite e até é o caminho
+  recomendado, porque cada réplica chama `free_host_port` a sua própria vez e não há nada
+  para colidir. `deploy.replicas: 0` também é recusado — esta v1 não tem semântica de
+  escala-a-zero/perfil para um serviço que já está a correr. `cmd_down`/`cmd_ps`/`cmd_logs`
+  não precisaram de UMA linha de código: já derivam a lista de containers de um projecto
+  pelas labels (`compose-project`/`compose-service`) em vez de recalcular nomes a partir do
+  ficheiro, por isso já viam N containers da mesma forma que viam 1. Validado ao vivo: `deploy:
+  replicas: 3` com `ports: ["80"]` criou de facto 3 containers (`web`/`web-2`/`web-3`), cada
+  um com a SUA porta aleatória (`container port` confirmou as três diferentes), `compose ps`
+  listou os três sob o mesmo serviço, e `compose down` removeu os três sem tratamento
+  especial nenhum; as três recusas confirmadas com a mensagem exacta.
+  **FEITO: top-level `configs:`/`secrets:`.** Cada entrada REFERENCIADA por
+  pelo menos um serviço (as não usadas nem são lidas — mesma poupança que um
+  `networks:`/`volumes:` nunca ligado) vira um `kind: Secret` sintético
+  (`resolve_compose_secrets`), aplicado por `secret::apply` verbatim antes dos
+  containers — zero mecanismo novo, o mesmo `stringData` que o manifesto já
+  aceitava. `secrets:` lê `file:` (conteúdo cru do ficheiro, relativo ao
+  directório do compose) e `environment:` (lido do processo no `up`);
+  `configs:` só lê `file:` (a Compose Specification nunca lhe dá a fonte
+  `environment:`, e dar-lha aqui seria uma segunda opinião não documentada).
+  Cada serviço com `secrets:`/`configs:` ganha `RunOpts.secret`+
+  `secret_files: true` — a entrega em ficheiro é a única forma que a Compose
+  Specification promete para os dois, nunca variável de ambiente.
+  **Simplificação documentada, nunca silenciosa**: `Container.secret`'s
+  entrega em ficheiro nomeia cada montagem pela CHAVE de dados do segredo, sem
+  retarget por-secret — por isso um `source:`/`target:` cujo `target` DIFIRA
+  do `source` é RECUSADO com a razão exacta (usar o nome de origem, ou tirar
+  `target:`), nunca montado em silêncio com o nome errado. `external: true`
+  também é recusado (este módulo só sabe CRIAR um segredo a partir de um
+  `file:`/`environment:` que consegue ler, nunca referenciar um que já exista
+  fora do ficheiro compose). Validado ao vivo (`DELONIX_ROOT`/
+  `DELONIX_NET_RUNTIME_DIR` isolados): `db_password`/`nginx_conf` de dois
+  ficheiros locais chegaram intactos a `/run/secrets/db_password` e
+  `/run/secrets/nginx_conf` dentro do container, com o modo 0600 esperado.
+  **Por fazer, documentado (nunca silencioso)**: multi-ficheiro (`-f a -f b`/
+  `include:`) e volumes anónimos (sem `source` explícito) — este último
+  deliberadamente NÃO tentado ainda: precisa de semântica própria de
+  nomeação/limpeza (quando é que um volume anónimo se apaga?
   `down` simples ou só `down -v`?) que merece ser pensada com calma, não decidida às pressas.
 - `delonix serve docker-api [--addr unix://<socket>]` — fatia da **Docker Engine API** (`cmd/dockerapi.rs`)
   que basta para `docker version/ps/images/info` **e**, desde a v0.26.0, o ciclo de vida completo de
@@ -3091,6 +3214,100 @@ pela simplificação anterior — só nunca tinham sido alcançados por um teste
 + `docs/gen.py`/`docs/comandos/tunnel.html` (regenerados) + `docs/schema/v1/delonix.json`
 (regenerado — `insecureSkipTlsVerify` é campo novo do schema publicado) + `examples/tunnel.yaml`.
 
+## `kind: App` — Cloud Native Buildpacks ligadas a um caminho de build real (ADR-0035)
+
+`crates/delonix-image` já trazia três módulos puros e testados para CNB
+(`buildpack.rs`, `detect.rs`, `internal_registry.rs`) — **sem UM único
+chamador fora dos seus próprios testes**, confirmado por `git grep`
+exaustivo antes de escrever qualquer código. O único problema real que os
+impedia de se ligarem: o `creator` do lifecycle CNB exporta para um REGISTO
+OCI, e o `internal_registry.rs` era loopback-only (`127.0.0.1`) — um
+container builder vive na sua própria netns e não alcança o loopback do
+host. Não era falta de esforço, era uma incompatibilidade estrutural que
+nada tinha ainda alcançado, porque nada chamava nenhum dos dois lados.
+
+**A correcção**: o registo descartável passa a viver numa `kind: Network`
+própria de cada build, alcançado pelo container builder pelo seu **IP da
+SDN** — não pelo DNS interno do motor, que foi a primeira tentativa e falhou
+ao vivo: o cliente de registo do lifecycle CNB (go-containerregistry) só
+escolhe HTTP sozinho para um endereço RFC1918 ou `localhost:<porta>` literal;
+qualquer outro nome, DNS interno incluído, leva HTTPS e o `creator` recusa-se
+(`server gave HTTP response to HTTPS client`), sem flag nenhuma no
+`/cnb/lifecycle/creator -h` desta versão (0.21.18) para o contornar. Como as
+sub-redes da SDN deste motor são sempre RFC1918, apontar para o IP do próprio
+registo satisfaz essa heurística de borla — sem ficheiro de config, sem
+`--insecure-registry`, sem autenticação nova. Publica-se também ao HOST
+(`-p <porta-livre>:5000`) para o processo `delonix` conseguir puxar a imagem
+construída de volta para o `ImageStore` LOCAL depois do build — dois
+alcances diferentes, um só container.
+
+**O build corre por `exec`, não como processo principal do container.** Um
+container `-d` sem `--restart` não tem o código de saída capturado de forma
+fiável (o motor não é o pai real do processo) — o container builder nasce
+com `sleep infinity` como placeholder, e o `creator_args()` do `CnbPlan`
+corre via `runtime::exec`, que devolve um código real (o mesmo mecanismo que
+`container exec` já usa). Build falhado deixa os containers/rede de pé para
+inspecção (`container logs <builder>`), o mesmo idioma do `compose up` ao
+falhar um `depends_on`.
+
+```yaml
+apiVersion: artifact.delonix.io/v1alpha1
+kind: App
+metadata: { name: shop }
+spec:
+  source: .          # relativo ao CWD, mesma convenção do build.context de kind: Image
+  builder: auto      # "auto" | "heroku" | uma imagem builder própria (exige runImage)
+  image: shop:latest
+```
+
+**`desired().converges = false`, sempre** — a mesma honestidade que
+`kind: Image` já usa para uma imagem CONSTRUÍDA (nunca PUXADA): não há cache
+de build, o `apply` reconstrói sempre, e reportar deriva faria o
+`--detailed-exitcode` devolver 2 para sempre em qualquer repo que declare um
+`App`. `ownable: false` pela mesma razão de `Image` — o resultado é cache
+partilhado e endereçado por conteúdo, sem dono de stack.
+
+**`get`/`describe`/`delete apps` não existem, de propósito.** Ao contrário
+de `Image` (cujo CAS é uma lista real e independente de qualquer
+manifesto), um `App` não tem registo próprio — o seu build produz
+EXACTAMENTE uma imagem, e nada mais persiste o facto de um `App` a ter
+nomeado. Depois de construída, é indistinguível de qualquer outra imagem
+com tag: `image ls`/`image describe <tag>` é que veem o estado real. Dar-lhe
+um verbo genérico exigiria um registo novo que esta fatia não acrescenta.
+
+**Por fazer, documentado no ADR-0035**: composição de buildpacks própria
+além da detecção automática, cache partilhado ENTRE apps diferentes
+(`cache_volume` já é por-app e sobrevive a reaplicações da MESMA app),
+autenticação do registo descartável (não é alcançável fora da rede da sua
+própria build), e publicação directa para um registo remoto (v1 fica sempre
+no `ImageStore` local, como qualquer outro Kind).
+
+**Validado ao vivo de ponta a ponta, e três bugs reais só a validação
+encontrou** — nenhum visível a ler o código, os três com teste de regressão
+ou razão escrita, ver o ADR-0035 para o detalhe: (1) `source_dir` nunca era
+canonicalizado — o `.` por omissão sobrevivia ao re-exec `--net <rede-custom>`
+(um processo diferente, CWD diferente) e o `/workspace` do builder acabava a
+montar `/`; corrigido logo a seguir à verificação de directório. (2)
+`CNB_PLATFORM_API` é OBRIGATÓRIO — o `/cnb/lifecycle/creator` recusa-se a
+correr sem ele; fixado em `"0.7"`, o default que as DUAS famílias conhecidas
+(Paketo jammy-base e heroku:24) declaram para o MESMO lifecycle (0.21.18).
+(3) o `output_ref` por DNS interno (a forma original deste ADR) não
+funciona — ver a secção acima; corrigido para o IP da SDN do registo.
+**Achado à parte, real, e DELIBERADAMENTE não corrigido aqui**: a
+`paketobuildpacks/builder-jammy-base` tem 91 layers, e a string
+`lowerdir=` do overlay deste motor para essa imagem chega a ~8,8 KB — mais
+do dobro do que um `mount(2)` clássico aceita no argumento `data` (a
+`glibc`/kernel truncam em silêncio em vez de recusar, e o caminho cortado a
+meio dá exactamente o `ENOENT` observado). Reproduzido com um `container
+run` simples da mesma imagem, sem código de `App` nenhum envolvido — é
+limitação do `mount_overlay_if_marked` (`delonix-runtime`, partilhado por
+TODOS os containers), não de `App`, e a correcção própria (`fsopen`/
+`fsconfig`/`fsmount`, sem tecto de tamanho) merece o seu próprio ADR.
+`builder: heroku` (23 layers, ~2 KB) não bate nesta lacuna e foi o caminho
+provado ponta a ponta: detectou node+Procfile, instalou Node 24.20.0,
+exportou, publicou por IP em HTTP simples, puxou de volta, e a imagem final
+**correu a sério e respondeu no porto declarado** — não só `rc=0`.
+
 ## `kind: NetworkAccessRule` — o primitivo incremental que faltava ao B4 (ADR-0028)
 
 O B4 do plano de reestruturação da CLI prometia colapsar `net ingress`/`net
@@ -3156,6 +3373,75 @@ recebe são coisas distintas, e só o carimbo da regra vive aí. O `actual()`
 passou também a varrer o store INTEIRO (não só os docs do manifesto actual),
 senão um documento removido do manifesto nunca aparecia como candidato a
 `Delete` para o `--prune` — a própria razão de existir deste Kind.
+
+## `kind: Service` — descoberta por selector, round-robin por DNS, sem VIP (ADR-0032, 2026-09-05)
+
+Fecha a Kind que faltava para as «12 Kinds operáveis» do plano de
+restruturação da CLI. Desenho completo em
+`docs/adr/0032-service-kind-dns-round-robin.md`; esta secção regista o que
+mudou a implementar e o que a validação ao vivo confirmou.
+
+- **Selecção por label, sem novo mecanismo de matching**: `matches_labels`
+  (`delonix-net-rules`, puro, fail-closed — um selector vazio não selecciona
+  NADA) compara `spec.selector.matchLabels` contra `Container.labels`. É o
+  mesmo primitivo que a `ADR-0024` desenhou para `FirewallPolicy` e que
+  continua por construir — pensado para os dois Kinds acabarem a partilhar a
+  mesma função, não duas cópias a divergir.
+- **DNS multi-registo, não VIP**: `build_dns_index` ganhou uma passagem sobre
+  `service_list()` (novo registo em `infra.rs`, mesmo padrão do `RouteDef`)
+  que resolve o `matchLabels` contra os containers vivos da MESMA passagem de
+  scan (sem 2.ª leitura de disco) e guarda o conjunto de IPs sob a chave DNS
+  do serviço. `dns_resolve_multi_for` (novo, ao lado do `dns_resolve_for` de
+  sempre — os consumidores de 1 IP não mudam de forma) só resolve o nome
+  totalmente qualificado (`<svc>.<ns>.delonix.internal`, sem forma curta) e
+  roda o conjunto por um contador atómico a cada consulta. `handle_dns` tenta
+  este caminho primeiro para `QTYPE_A` e responde com um registo `A` por
+  backend; falha (zero backends) cai para o caminho de sempre, que continua
+  bit-a-bit inalterado.
+- **Isolamento por namespace, herdado do modelo já existente**: mesma
+  namespace ou o serviço estar em `default` (a namespace "pública" — ver
+  «Isolamento de namespace» acima); resto é NXDOMAIN. Não há equivalente de
+  `Dependency` para alargar isto a um Service noutra namespace — se vier a ser
+  preciso, é follow-up.
+- **`ownable: true`, mas sem tocar nas labels do alvo** — o mesmo cuidado que
+  o `NetworkAccessRule` precisou (ver secção acima), só que aqui mais simples:
+  ao contrário de uma regra de firewall, um `Service` NUNCA se liga a um
+  container que não é dele — a posse fica inteira no registo próprio do
+  Service, sem carimbo nenhum no container seleccionado.
+- **`spec.port` é sempre o porto do CONTAINER**, a mesma convenção que
+  `net ingress allow` já usa (pós-DNAT) — não há porto de host nem de VIP,
+  porque não há VIP.
+
+**Wiring que o `KindFacts` sozinho NÃO cobre — descoberto pela bateria de
+testes, não por leitura de código.** Adicionar uma Kind nova toca em VÁRIAS
+tabelas que ninguém deriva de `cmd/kinds.rs`, cada uma com o seu próprio gate:
+`reconcile.rs::hot_fields` (sem isto, mudar `port` planeava sempre `Replace`
+em vez de `Update`); `stack.rs::converge_and_stamp`'s braço central (sem ele,
+o `hot_fields` fix sozinho continuava a cair no `other => Err("no live update
+path")`); `complete.rs::NAMESPACE_SOURCES` (o teste
+`every_namespaced_kind_declares_a_source` chumbou até `Service` ganhar
+`Store(ns_from_services)`); `schema.rs::TYPED_KINDS` (uma lista SEPARADA do
+`match` de geração do schema — `todo_kind_conhecido_tem_schema_ou_dica`
+chumbou até `Service` entrar nela); e o próprio schema publicado
+(`docs/schema/v1/delonix.json`, regenerado e verificado a mudar SÓ o que
+`ServiceSpec`/`ServiceSelector` acrescentam). É a mesma lição que a tabela
+`KindFacts` já documenta no seu próprio doc-comment — um classificador só vale
+o que algo consulta — só que aqui são cinco tabelas diferentes, cada uma
+descoberta por um teste a falhar, não por grep.
+
+**Validado ao vivo** (`DELONIX_ROOT` isolado, binário de release deste
+commit): selector a corresponder a 2 de 3 containers (o terceiro, com outro
+label, fica de fora); `nslookup` real dentro de um container `other` a
+devolver os DOIS registos `A` do serviço; isolamento de namespace nos dois
+sentidos (`teamA` alcança o seu próprio Service, uma namespace terceira não —
+mas alcança um Service em `default`, que é a excepção desenhada); selector
+vazio a avisar e aplicar com sucesso (`rc=0`, `NXDOMAIN` ao resolver);
+actualização de porta a quente (`stack apply` reporta "updating 1 field(s)
+live", não um `Replace`); `stack plan --detailed-exitcode` sem diferenças
+depois de um apply inalterado; `delete services` a remover o registo e o DNS
+a responder `NXDOMAIN` de imediato a seguir. **Não validado**: um cliente que
+resolve uma vez e mantém ligação longa não é rebalanceado a meio — é a
+limitação nomeada no próprio ADR, comum a qualquer balanceamento por DNS.
 
 ## Identidade endereçável de Kinds sem registo próprio (B1, 2026-08-31)
 
@@ -3737,6 +4023,15 @@ volta a contar**.
   **auto-dimensionamento** no pico. Nenhuma peça disto existe hoje (zero eBPF/autoscaling/daemon
   no repo, confirmado por grep). É uma mudança de filosofia (o produto é daemonless por desenho)
   e um dataplane novo de raiz — meses de trabalho de um crate dedicado, não uma sessão.
+- **Suporte macOS/Windows (ADR-0036, Proposed)** — decidido de propósito como um LANÇADOR de VM
+  (`delonix machine`), não um port: nenhum primitivo do motor (namespaces, cgroups v2, nftables,
+  `pivot_root`) existe fora do kernel Linux, por isso portar seria um SEGUNDO motor, não um `#[cfg]`.
+  O guest é a mesma imagem `delonix-vm-base` já publicada, zero mudança do lado Linux. As duas
+  plataformas NÃO são igualmente difíceis: **Windows** anda sobre o WSL2 já instalado (shell-out a
+  `wsl.exe`, sem hypervisor novo); **macOS** precisa de uma ligação real ao Virtualization.framework
+  — bloqueado até haver um Mac verdadeiro para o spike GO/NO-GO, mesma disciplina do backend Proxmox
+  (ADR-0008). Zero código de hypervisor nesta sessão — este sandbox é Linux e não compila nenhum dos
+  dois lados.
 
 ## i18n (fonte EN + catálogo pt.po embutido) — `cmd/po.rs`
 
@@ -5560,3 +5855,50 @@ pergunta do filesystem que deu origem a tudo.
 **Armadilha de método que vale por si**: os containers só passam a partilhar quando o binário EM
 USO é o novo. Durante esta série o host criou containers flat com o `--version` a dizer o número
 certo — ver «duas builds com a mesma versão não são a mesma build».
+
+## O overlay de muitas layers dava ENOENT — o `mount(2)` clássico corta o `lowerdir=` em silêncio (ADR-0037)
+
+Achado a validar `kind: App` ao vivo (não tocado nesta base ainda, mas o bug é do
+motor): um `container run` de uma imagem com 91 layers reais
+(`paketobuildpacks/builder-jammy-base`) falhava sempre com `failed to prepare
+the rootfs: ENOENT`, sem `kind: App` nem manifesto nenhum envolvido — reproduzido
+com um `container run` liso da mesma imagem.
+
+**Medido no sandbox rootless real** (`unshare --user --map-root-user --mount`, o
+mesmo em que `mount_overlay_if_marked` já corre): a string `lowerdir=a:b:c:...`
+que o `mount(2)` clássico recebe como argumento `data` é copiada pelo kernel via
+`strndup_user(data, PAGE_SIZE)` — **um tecto de 4096 bytes nesta arquitectura,
+cortado em SILÊNCIO, nunca com erro**. Um `lowerdir=` cortado a meio de um
+caminho falha a abrir esse caminho truncado — exactamente o `ENOENT` observado.
+Medido a fronteira exacta: 20 layers reais (4084 bytes) montam bem, 30 (5994
+bytes) falham sempre. A imagem real que revelou isto precisa de **9107 bytes**.
+
+**Corrigido movendo o mount para a API nova** (`fsopen`/`fsconfig`/`fsmount`/
+`move_mount`, Linux 5.2+, com o `lowerdir+` incremental do overlayfs desde a
+6.5): uma chamada `fsconfig(fd, FSCONFIG_SET_STRING, "lowerdir+", <path>, 0)`
+POR layer, nunca uma string só — não há tecto nenhum a que uma chamada por
+layer possa esbarrar. Via `rustix` (`mount`+`fs`), não syscalls crus: o `nix`
+já usado neste ficheiro não tem wrapper para estas quatro chamadas, e o
+`rustix` **já está na árvore nesta versão exacta** (puxado por `tempfile`) —
+activar as suas features não acrescenta dependência nova nenhuma ao supply
+chain, só compila código já vendido de um crate já confiado.
+
+**Sem fallback por comprimento para a chamada clássica, de propósito**: a API
+nova está em todos os kernels que este motor já exige (cgroup v2, `clone3`,
+pidfd); manter dois caminhos para a mesma operação é o custo de manutenção que
+a disciplina deste repo evita, e um fallback disparado por comprimento
+reintroduziria o bug em silêncio em qualquer kernel sem a via nova, disfarçado
+de falha intermitente em vez de um erro claro.
+
+**Validado ao vivo em três camadas**: (1) um harness C isolado no MESMO
+sandbox, 100 layers sintéticas / 19 KB de dados de caminho — quase 5x o tecto
+clássico — montado correctamente, conteúdo íntegro, escrita a ir só para
+`upper/`; (2) a implementação em Rust, sem regressão num container normal
+(`alpine`, poucas layers) e — a prova que interessa — a MESMA imagem real de
+91 layers que falhava 100% das vezes agora arranca (`run_exit=0`), com
+`overlay-lowers` confirmado em 91 linhas/9107 bytes, `/etc/os-release` a
+devolver o Ubuntu 22.04 real (não um rootfs corrompido) e escrita-e-releitura
+dentro do container a confirmar copy-up intacto; (3) o gate completo do
+workspace (fmt/lang_ratchet/clippy/test/deny).
+
+Ver ADR-0037 para o detalhe completo, incluindo a tabela de medição.

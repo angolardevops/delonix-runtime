@@ -745,6 +745,15 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["image pull", "image scan", "image describe"],
     },
     Entry {
+        path: "image sign",
+        group: "Configure",
+        examples: &[
+            ("sign a build before pushing it, key generated on first use", "delonix image sign kaeso-odoo:18"),
+            ("re-sign after rotating the key", "delonix image sign kaeso-odoo:18 --force"),
+        ],
+        see_also: &["image verify", "image push"],
+    },
+    Entry {
         path: "image login",
         group: "Configure",
         examples: &[
@@ -1004,6 +1013,15 @@ pub static ENTRIES: &[Entry] = &[
             ("one veth only, when you already know which container you are chasing", "delonix net flow --iface vh3f2a91c4"),
         ],
         see_also: &["container stats", "net ingress ls", "net netns status"],
+    },
+    Entry {
+        path: "net capture",
+        group: "Inspect",
+        examples: &[
+            ("write a pcap file, stop after 100 packets", "delonix net capture web -w out.pcap -c 100"),
+            ("stream straight into Wireshark for 30s", "delonix net capture web -w - --duration 30 | wireshark -k -i -"),
+        ],
+        see_also: &["net flow", "container exec"],
     },
     Entry {
         path: "net egress",
@@ -1576,6 +1594,14 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["pod logs", "pod exec", "container attach"],
     },
     Entry {
+        path: "pod port-forward",
+        group: "Interact",
+        examples: &[
+            ("reach the pod's port 80 at localhost:8080 until Ctrl-C", "delonix pod port-forward web 8080:80"),
+        ],
+        see_also: &["pod exec", "container port"],
+    },
+    Entry {
         path: "secret",
         group: "",
         examples: &[
@@ -2134,6 +2160,20 @@ pub static ENTRIES: &[Entry] = &[
             ("remove the source once the target confirms the VM was created there", "delonix vm migrate dev --host 10.0.0.20 --network ingress --remove-source"),
         ],
         see_also: &["vm stop", "vm create", "image vm import", "vm ssh"],
+        path: "vm pause",
+        group: "Lifecycle",
+        examples: &[
+            ("free the host's CPU while the guest keeps its memory in RAM — a lighter suspend than `vm stop`, resumed exactly where it was", "delonix vm pause dev"),
+        ],
+        see_also: &["vm unpause", "vm stop", "vm snapshot"],
+    },
+    Entry {
+        path: "vm unpause",
+        group: "Lifecycle",
+        examples: &[
+            ("resume a VM suspended with `pause`, exactly where it left off", "delonix vm unpause dev"),
+        ],
+        see_also: &["vm pause", "vm status"],
     },
     Entry {
         path: "vm prune",

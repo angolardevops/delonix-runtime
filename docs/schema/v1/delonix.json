@@ -1,5 +1,35 @@
 {
   "$defs": {
+    "AppSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "builder": {
+          "default": "auto",
+          "description": "`\"auto\"` (detect the stack, use the Paketo builder), `\"heroku\"`, or an\nexplicit builder image reference — the last one REQUIRES `runImage`\n(this engine does not introspect a custom builder's own `builder.toml`\nto discover its run image; refusing is the honest answer, not a guess).",
+          "type": "string"
+        },
+        "image": {
+          "description": "Tag the built image gets in the LOCAL `ImageStore` once the build\nsucceeds.",
+          "type": "string"
+        },
+        "runImage": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "default": ".",
+          "description": "Directory to build (Compose-style relative-to-CWD default, same\nconvention `kind: Image`'s `build.context` already uses — not the\nmanifest file's own directory).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "image"
+      ],
+      "type": "object"
+    },
     "Backend": {
       "description": "The destination of a path: a container (by name) and the port it listens on.",
       "properties": {
@@ -64,6 +94,14 @@
         },
         "tag": {
           "type": "string"
+        },
+        "target": {
+          "default": null,
+          "description": "Name or index of a multi-stage `FROM ... AS <name>` stage to stop the\nbuild at — same as the CLI's `--target`.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -1825,6 +1863,39 @@
       },
       "type": "object"
     },
+    "ServiceSelector": {
+      "properties": {
+        "matchLabels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "ServiceSpec": {
+      "additionalProperties": false,
+      "description": "`spec` of `kind: Service`.",
+      "properties": {
+        "port": {
+          "description": "The CONTAINER port every matched workload is expected to listen on —\nmirrors the \"always container-side, post-DNAT\" convention `net ingress\nallow`'s port already uses. There is no host-side or VIP-side port,\nbecause v1 has no VIP.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "selector": {
+          "$ref": "#/$defs/ServiceSelector"
+        }
+      },
+      "required": [
+        "selector",
+        "port"
+      ],
+      "type": "object"
+    },
     "ShareBlock": {
       "description": "`spec.share` — the volume this one is carved out of.\n\nOne field, because the rest was already on the volume: `quota`/`alertPct` are\nthe spec's own, so a share sets them exactly where every other volume does\ninstead of in a second place that would have to be kept in agreement.",
       "properties": {
@@ -2918,6 +2989,31 @@
       "if": {
         "properties": {
           "kind": {
+            "const": "App"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "artifact.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/AppSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
             "const": "Gateway"
           }
         },
@@ -3093,6 +3189,31 @@
       "if": {
         "properties": {
           "kind": {
+            "const": "Service"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "networking.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/ServiceSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
             "const": "Workload"
           }
         },
@@ -3180,6 +3301,7 @@
     },
     "kind": {
       "enum": [
+        "App",
         "Cluster",
         "Container",
         "Dependency",
@@ -3196,6 +3318,7 @@
         "NetworkRoute",
         "Pod",
         "Secret",
+        "Service",
         "Stack",
         "Tunnel",
         "VirtualMachine",

@@ -34,18 +34,41 @@
 //! `env_file`/`ports`/`volumes`/`command`/`entrypoint`/`depends_on`
 //! (all 3 conditions)/`healthcheck`/`restart`/`networks`/`labels`/`user`/
 //! `cap_add`/`cap_drop`/`privileged`/`tmpfs`/`deploy.resources.limits`/
-//! `container_name`/`hostname`/`read_only`, top-level `networks:`/`volumes:`
-//! (incl. `external: true`). Defers `profiles:`, `extends:`, top-level
-//! `configs:`/`secrets:` (use `kind: Secret` instead), multi-file compose
-//! (`-f a -f b` merge/`include:`), `build.target` (stage selection),
-//! `deploy.replicas != 1`, a fixed `networks.*.ipv4_address`, and anonymous
-//! volumes (no explicit source). `working_dir:` IS applied (via `RunOpts.
+//! `container_name`/`hostname`/`read_only`/`profiles` (`up --profile`,
+//! transitively closed over `depends_on` — see `active_services`), top-level
+//! `networks:`/`volumes:` (incl. `external: true`), `build.target`
+//! (multi-stage stage selection — forwarded to `kind: Image`'s own
+//! `build.target`, itself `delonix build --target`), a fixed
+//! `networks.*.ipv4_address` (wired straight into `container run --ip`, see
+//! `service_to_run_opts`), `extends:` (`resolve_extends` — same file only,
+//! `depends_on` never inherited, per the Specification), `deploy.replicas`
+//! (N containers, `<project>-<service>`/`-2`/`-3`/…, with no load-balancing
+//! across them — see `Translated.containers`), and top-level
+//! `configs:`/`secrets:` (each referenced entry becomes a `kind: Secret`
+//! under the hood, applied before the containers that use it — see
+//! `resolve_compose_secrets`). Defers multi-file compose (`-f a -f b`
+//! merge/`include:`), and anonymous volumes (no explicit source).
+//! `working_dir:` IS applied (via `RunOpts.
 //! workdir`, itself now also exposed as `container run -w/--workdir`), and a
 //! bare container port with no host port DOES get a random free host port
 //! (resolved once, before the container is created — see `free_host_port`).
+//!
+//! **`configs:`/`secrets:` — a simplification documented, never silent.**
+//! Compose gives every secret/config its own mount TARGET; the engine's own
+//! `Container.secret` mechanism (`--secret`) mounts a secret's DATA KEYS
+//! verbatim at `/run/secrets/<key>`, with no per-secret retarget. So a
+//! `source:`/`target:` pair where the two differ is REFUSED with the exact
+//! reason (use the source name, or drop `target:`), instead of silently
+//! mounting under the wrong filename. `external: true` is refused the same
+//! way — this module can only create a secret from a `file:`/`environment:`
+//! it can read, never reference one that already exists elsewhere. Both
+//! `secrets:` and `configs:` land in the SAME `SecretStore` (a config has no
+//! separate concept here, exactly what the pre-existing refusal message —
+//! "use `kind: Secret` instead" — already pointed at); only `secrets:` reads
+//! `environment:` (real Compose Spec configs never have that source).
 
 use super::kinds as k;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -68,22 +91,15 @@ pub(crate) const COMPOSE_SERVICE_LABEL: &str = "delonix.io/compose-service";
 /// against the RAW parsed YAML (not the typed struct, which would just drop
 /// an unrecognized key silently), so the user gets an ACTIONABLE message
 /// ("not supported in v1, here's why") instead of nothing at all.
-const KNOWN_UNSUPPORTED_TOP: &[(&str, &str)] = &[
-    ("profiles", "top-level `profiles` activation is not supported in v1 — every service always runs"),
-    ("configs", "top-level `configs:` is not supported in v1 — use `kind: Secret` + `Container.secret` instead"),
-    ("secrets", "top-level `secrets:` is not supported in v1 — use `kind: Secret` + `Container.secret` instead"),
-    ("include", "multi-file compose (`include:`/`-f a -f b` merge) is not supported — pass exactly one -f"),
-];
-const KNOWN_UNSUPPORTED_SERVICE: &[(&str, &str)] = &[
-    (
-        "extends",
-        "`extends:` is not supported in v1 — inline the service or use YAML anchors",
-    ),
-    (
-        "profiles",
-        "per-service `profiles:` is not supported in v1 — every service always runs",
-    ),
-];
+const KNOWN_UNSUPPORTED_TOP: &[(&str, &str)] = &[(
+    "include",
+    "multi-file compose (`include:`/`-f a -f b` merge) is not supported — pass exactly one -f",
+)];
+/// Empty today: `profiles:`, `extends:` and top-level `configs:`/`secrets:`
+/// were the entries here, and all are now implemented. Kept as the place a
+/// future refusal goes, WITH its reason — the allowlist below is what stops
+/// an unknown key from being read as accepted.
+const KNOWN_UNSUPPORTED_SERVICE: &[(&str, &str)] = &[];
 
 /// Every top-level key of the Compose Specification this implementation reads.
 ///
@@ -99,7 +115,9 @@ const KNOWN_UNSUPPORTED_SERVICE: &[(&str, &str)] = &[
 /// `version:` is here although nothing reads it: the Compose Specification
 /// dropped it, real files still carry it, and erroring on it would refuse most
 /// of the compose files in the world for a key whose absence changes nothing.
-const SUPPORTED_TOP: &[&str] = &["version", "name", "services", "networks", "volumes"];
+const SUPPORTED_TOP: &[&str] = &[
+    "version", "name", "services", "networks", "volumes", "secrets", "configs",
+];
 
 /// Every per-service key this implementation reads — the field list of
 /// [`ComposeService`], and `struct_fields_are_all_in_the_allowlist` reads
@@ -108,6 +126,7 @@ const SUPPORTED_TOP: &[&str] = &["version", "name", "services", "networks", "vol
 const SUPPORTED_SERVICE: &[&str] = &[
     "image",
     "build",
+    "extends",
     "environment",
     "env_file",
     "ports",
@@ -130,11 +149,18 @@ const SUPPORTED_SERVICE: &[&str] = &[
     "container_name",
     "hostname",
     "read_only",
+    "profiles",
+    "secrets",
+    "configs",
 ];
 
 /// Keys of a top-level `networks:`/`volumes:` entry that are read.
 const SUPPORTED_NETWORK: &[&str] = &["external", "name"];
 const SUPPORTED_VOLUME: &[&str] = &["external", "name"];
+/// Keys of a top-level `secrets:`/`configs:` entry that are read — `configs:`
+/// has no `environment` (real Compose Spec never gives it that source).
+const SUPPORTED_SECRET: &[&str] = &["file", "environment", "external", "name"];
+const SUPPORTED_CONFIG: &[&str] = &["file", "external", "name"];
 
 /// (service key, the flag that already does it) — the engine HAS the capability
 /// and `compose` simply does not wire it through yet.
@@ -177,6 +203,11 @@ pub enum ComposeCmd {
         /// `up -d`, and rejecting it broke all of them for no behavioural gain.
         #[arg(short = 'd', long = "detach")]
         detach: bool,
+        /// Activate a service declaring this profile (repeatable). A service
+        /// with no `profiles:` always runs; one that names some only runs if
+        /// requested here, or if an activated service `depends_on` it.
+        #[arg(long = "profile")]
+        profile: Vec<String>,
     },
     /// Removes every container this project's `up` created.
     ///
@@ -217,6 +248,10 @@ pub enum ComposeCmd {
         file: Option<PathBuf>,
         #[arg(short = 'p', long = "project-name")]
         project: Option<String>,
+        /// Same meaning as `up --profile` — resolve and print as if these
+        /// profiles were requested.
+        #[arg(long = "profile")]
+        profile: Vec<String>,
     },
 }
 
@@ -227,7 +262,8 @@ pub fn run(cmd: ComposeCmd) -> Result<()> {
             project,
             dry_run,
             detach: _,
-        } => cmd_up(file, project, dry_run),
+            profile,
+        } => cmd_up(file, project, dry_run, profile),
         ComposeCmd::Down {
             file,
             project,
@@ -240,7 +276,11 @@ pub fn run(cmd: ComposeCmd) -> Result<()> {
             project,
             follow,
         } => cmd_logs(service, file, project, follow),
-        ComposeCmd::Config { file, project } => cmd_config(file, project),
+        ComposeCmd::Config {
+            file,
+            project,
+            profile,
+        } => cmd_config(file, project, profile),
     }
 }
 
@@ -256,12 +296,78 @@ struct ComposeFile {
     networks: BTreeMap<String, ComposeNetwork>,
     #[serde(default)]
     volumes: BTreeMap<String, ComposeVolume>,
+    #[serde(default)]
+    secrets: BTreeMap<String, ComposeSecretDef>,
+    #[serde(default)]
+    configs: BTreeMap<String, ComposeConfigDef>,
 }
 
+/// A top-level `secrets:` entry. `file`/`environment` are the two sources
+/// this module can resolve without talking to anything outside the compose
+/// file/process env; `external`/`name` are read only to give `external: true`
+/// a specific refusal instead of a silent "field ignored".
 #[derive(Debug, Deserialize, Default)]
+struct ComposeSecretDef {
+    file: Option<PathBuf>,
+    environment: Option<String>,
+    #[serde(default)]
+    external: bool,
+    name: Option<String>,
+}
+
+/// A top-level `configs:` entry. No `environment:` here — the Compose
+/// Specification never gives configs that source, only `secrets:` has it.
+#[derive(Debug, Deserialize, Default)]
+struct ComposeConfigDef {
+    file: Option<PathBuf>,
+    #[serde(default)]
+    external: bool,
+    name: Option<String>,
+}
+
+/// A service's `secrets:`/`configs:` entry — the short form (just the name)
+/// or the long form (`source`/`target`). `uid`/`gid`/`mode` are accepted by
+/// the Compose Specification's long form but not read here — the same
+/// documented simplification `ComposeVolumeMount`'s long form already makes
+/// for options this module has no dataplane for.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+enum ComposeSecretRef {
+    Short(String),
+    Long {
+        source: String,
+        #[serde(default)]
+        target: Option<String>,
+    },
+}
+impl ComposeSecretRef {
+    fn source(&self) -> &str {
+        match self {
+            ComposeSecretRef::Short(s) => s,
+            ComposeSecretRef::Long { source, .. } => source,
+        }
+    }
+    fn target(&self) -> Option<&str> {
+        match self {
+            ComposeSecretRef::Short(_) => None,
+            ComposeSecretRef::Long { target, .. } => target.as_deref(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
 struct ComposeService {
     image: Option<String>,
     build: Option<ComposeBuild>,
+    /// `extends: { service: <name> }` — resolved by `resolve_extends` before
+    /// this service is used anywhere else, so nothing downstream needs to
+    /// know it existed (it's always `None` by the time `translate` runs).
+    /// `extends.file` is refused earlier, at the raw-YAML check
+    /// (`check_unsupported_fields`) — this repo doesn't do multi-file
+    /// compose at all, so `file:` naming anything is refused outright rather
+    /// than silently pointed at the wrong file.
+    #[serde(default)]
+    extends: Option<ComposeExtends>,
     #[serde(default)]
     environment: ComposeEnv,
     #[serde(default, rename = "env_file")]
@@ -303,6 +409,18 @@ struct ComposeService {
     hostname: Option<String>,
     #[serde(default)]
     read_only: bool,
+    #[serde(default)]
+    secrets: Vec<ComposeSecretRef>,
+    #[serde(default)]
+    configs: Vec<ComposeSecretRef>,
+    /// A service with no `profiles:` is always active. One that declares them
+    /// only starts when one of them is requested via `--profile` — or when
+    /// another ACTIVE service `depends_on` it (see `active_services`, which
+    /// mirrors real `docker compose`: a dependency is pulled in even outside
+    /// the requested profile, because the service that needs it cannot start
+    /// without it).
+    #[serde(default)]
+    profiles: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -406,7 +524,7 @@ impl StringOrNum {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(untagged)]
 enum ComposePort {
     Short(String),
@@ -417,7 +535,7 @@ enum ComposePort {
     },
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(untagged)]
 enum ComposeVolumeMount {
     Short(String),
@@ -431,6 +549,13 @@ enum ComposeVolumeMount {
     },
 }
 
+/// `extends: { service: <name> }` on a service — resolved (and consumed) by
+/// `resolve_extends` before anything else touches `ComposeService`.
+#[derive(Debug, Deserialize, Clone)]
+struct ComposeExtends {
+    service: String,
+}
+
 #[derive(Debug, Deserialize, Clone)]
 #[serde(untagged)]
 enum ComposeCmdShape {
@@ -438,7 +563,7 @@ enum ComposeCmdShape {
     Exec(Vec<String>),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(untagged)]
 enum ComposeDependsOn {
     Short(Vec<String>),
@@ -470,7 +595,7 @@ impl ComposeDependsOn {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct ComposeDependsOnEntry {
     condition: String,
 }
@@ -510,7 +635,7 @@ enum ComposeHealthTest {
     List(Vec<String>),
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize, Default, Clone)]
 #[serde(untagged)]
 enum ComposeServiceNetworks {
     #[default]
@@ -534,29 +659,29 @@ impl ComposeServiceNetworks {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct ComposeServiceNetworkEntry {
     ipv4_address: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct ComposeDeploy {
     resources: Option<ComposeResources>,
     replicas: Option<u32>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct ComposeResources {
     limits: Option<ComposeResourceLimits>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct ComposeResourceLimits {
     cpus: Option<String>,
     memory: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(untagged)]
 enum ComposeBuild {
     Context(String),
@@ -803,9 +928,21 @@ fn parse_go_duration(s: &str) -> Result<Duration> {
 /// Kahn's-algorithm topological sort over `depends_on` edges. A `depends_on`
 /// naming an undeclared service, or a cycle, is a HARD error (never an
 /// arbitrary order) — ties broken alphabetically for determinism.
-fn topo_sort(services: &BTreeMap<String, ComposeService>) -> Result<Vec<String>> {
+///
+/// `active` scopes the sort to the services `active_services` resolved for
+/// this run — everything outside it (an inactive profile, never requested and
+/// not needed by anything that IS active) is left out of the graph entirely,
+/// not just out of the final order. `active` is trusted to already be closed
+/// under `depends_on` (see `active_services`'s doc-comment); this function
+/// still checks that every name a service names is DECLARED, because that
+/// error has nothing to do with profiles.
+fn topo_sort(
+    services: &BTreeMap<String, ComposeService>,
+    active: &BTreeSet<String>,
+) -> Result<Vec<String>> {
     let mut deps: BTreeMap<&str, Vec<String>> = BTreeMap::new();
-    for (name, svc) in services {
+    for name in active {
+        let svc = &services[name];
         for dep in svc.depends_on.names() {
             if !services.contains_key(&dep) {
                 return Err(Error::Invalid(format!(
@@ -817,7 +954,7 @@ fn topo_sort(services: &BTreeMap<String, ComposeService>) -> Result<Vec<String>>
     }
     let mut remaining: BTreeMap<&str, usize> = deps.iter().map(|(&n, d)| (n, d.len())).collect();
     let mut dependents: BTreeMap<&str, Vec<&str>> =
-        services.keys().map(|k| (k.as_str(), Vec::new())).collect();
+        active.iter().map(|k| (k.as_str(), Vec::new())).collect();
     for (&name, d) in &deps {
         for dep in d {
             dependents.get_mut(dep.as_str()).unwrap().push(name);
@@ -842,7 +979,7 @@ fn topo_sort(services: &BTreeMap<String, ComposeService>) -> Result<Vec<String>>
             }
         }
     }
-    if order.len() != services.len() {
+    if order.len() != active.len() {
         let cyclic: Vec<&str> = remaining
             .iter()
             .filter(|(_, &c)| c > 0)
@@ -854,6 +991,36 @@ fn topo_sort(services: &BTreeMap<String, ComposeService>) -> Result<Vec<String>>
         )));
     }
     Ok(order)
+}
+
+/// The services that actually run for this `up`/`config`: every service with
+/// no `profiles:` (always on), every service naming a REQUESTED profile, and
+/// — the same rule real `docker compose` uses — anything an active service
+/// reaches through `depends_on`, even outside the requested profiles. Without
+/// this transitive step, an active service could `depends_on` one this
+/// function silently dropped, and `translate` would have nothing to wait on.
+fn active_services(compose: &ComposeFile, requested: &[String]) -> BTreeSet<String> {
+    let mut active: BTreeSet<String> = compose
+        .services
+        .iter()
+        .filter(|(_, svc)| {
+            svc.profiles.is_empty() || svc.profiles.iter().any(|p| requested.contains(p))
+        })
+        .map(|(name, _)| name.clone())
+        .collect();
+    loop {
+        let additions: Vec<String> = active
+            .iter()
+            .filter_map(|name| compose.services.get(name))
+            .flat_map(|svc| svc.depends_on.names())
+            .filter(|dep| !active.contains(dep))
+            .collect();
+        if additions.is_empty() {
+            break;
+        }
+        active.extend(additions);
+    }
+    active
 }
 
 /// Deterministic `<project>_<key>` name for a network/volume that has no
@@ -914,6 +1081,180 @@ fn resolve_volume_names(project: &str, compose: &ComposeFile) -> BTreeMap<String
         .collect()
 }
 
+/// Reads a top-level `secrets:`/`configs:` entry's content. `what` is
+/// "secret"/"config", used only in the error text.
+fn resolve_secret_content(
+    what: &str,
+    name: &str,
+    file: Option<&Path>,
+    environment: Option<&str>,
+    external: bool,
+    base_dir: &Path,
+) -> Result<String> {
+    if external {
+        return Err(Error::Invalid(format!(
+            "compose: {what} '{name}': `external: true` is not supported in v1 — this \
+             implementation cannot reference a pre-existing {what}, only create one from \
+             `file:`{}",
+            if what == "secret" {
+                " or `environment:`"
+            } else {
+                ""
+            }
+        )));
+    }
+    if let Some(f) = file {
+        let path = base_dir.join(f);
+        return std::fs::read_to_string(&path).map_err(|e| {
+            Error::Invalid(format!(
+                "compose: {what} '{name}': reading {}: {e}",
+                path.display()
+            ))
+        });
+    }
+    if let Some(var) = environment {
+        return std::env::var(var).map_err(|_| {
+            Error::Invalid(format!(
+                "compose: secret '{name}': `environment: {var}` is not set in this shell"
+            ))
+        });
+    }
+    Err(Error::Invalid(format!(
+        "compose: {what} '{name}' needs `file:`{} — neither was given",
+        if what == "secret" {
+            " or `environment:`"
+        } else {
+            ""
+        }
+    )))
+}
+
+#[derive(Serialize)]
+struct SecretDocSpec {
+    #[serde(rename = "stringData")]
+    string_data: BTreeMap<String, String>,
+}
+
+/// A `kind: Secret` document holding exactly one key: the compose secret's
+/// own name, mapped to its resolved content. One key (not the whole map of
+/// every compose secret) because `Container.secret`'s file delivery mounts
+/// EVERY key of every attached secret under `/run/secrets/<key>` — merging
+/// unrelated secrets into one document would let one service's `secrets:`
+/// list pull in a key it never declared.
+fn secret_doc(real_name: &str, data_key: &str, content: &str) -> ManifestDoc {
+    let mut string_data = BTreeMap::new();
+    string_data.insert(data_key.to_string(), content.to_string());
+    ManifestDoc {
+        api_version: "delonix.io/v1".to_string(),
+        kind: k::SECRET.to_string(),
+        metadata: Metadata {
+            name: real_name.to_string(),
+            namespace: None,
+            labels: BTreeMap::new(),
+            annotations: BTreeMap::new(),
+        },
+        spec: serde_yaml::to_value(SecretDocSpec { string_data })
+            .unwrap_or(serde_yaml::Value::Mapping(serde_yaml::Mapping::new())),
+    }
+}
+
+/// Resolves every `secrets:`/`configs:` reference of the ACTIVE services into
+/// `kind: Secret` documents, plus the (compose key -> delonix secret name)
+/// maps `service_to_run_opts` needs to fill `RunOpts.secret`.
+///
+/// Only entries actually REFERENCED by a service are resolved — a `secrets:`
+/// block nobody attaches costs nothing and reads nothing, same as an unused
+/// top-level `networks:`/`volumes:` entry would (well, those still get
+/// created; but here there is no dataplane-free "declare it anyway" step,
+/// and a `file:` that does not exist would otherwise fail an `up` for a
+/// secret no container even wants).
+/// `(kind: Secret` documents, compose secret name -> delonix name, compose
+/// config name -> delonix name)`.
+type ComposeSecrets = (
+    Vec<ManifestDoc>,
+    BTreeMap<String, String>,
+    BTreeMap<String, String>,
+);
+
+fn resolve_compose_secrets(
+    project: &str,
+    compose: &ComposeFile,
+    active: &BTreeSet<String>,
+    base_dir: &Path,
+) -> Result<ComposeSecrets> {
+    let mut used_secrets: BTreeSet<String> = BTreeSet::new();
+    let mut used_configs: BTreeSet<String> = BTreeSet::new();
+    for (svc_name, svc) in compose.services.iter().filter(|(n, _)| active.contains(*n)) {
+        for (what, refs, used) in [
+            ("secret", &svc.secrets, &mut used_secrets),
+            ("config", &svc.configs, &mut used_configs),
+        ] {
+            for r in refs {
+                if let Some(t) = r.target() {
+                    if t != r.source() {
+                        return Err(Error::Invalid(format!(
+                            "compose: service '{svc_name}' {what} '{}': `target: {t}` \
+                             (renaming the mounted filename) is not supported in v1 — use \
+                             the source name, or drop `target:`",
+                            r.source()
+                        )));
+                    }
+                }
+                used.insert(r.source().to_string());
+            }
+        }
+    }
+
+    let mut docs = Vec::new();
+    let mut secret_names = BTreeMap::new();
+    for key in &used_secrets {
+        let def = compose.secrets.get(key).ok_or_else(|| {
+            Error::Invalid(format!(
+                "compose: service references undeclared secret '{key}' (declare it under \
+                 top-level `secrets:`)"
+            ))
+        })?;
+        let content = resolve_secret_content(
+            "secret",
+            key,
+            def.file.as_deref(),
+            def.environment.as_deref(),
+            def.external,
+            base_dir,
+        )?;
+        let real = def
+            .name
+            .clone()
+            .unwrap_or_else(|| compose_scoped_name(project, &format!("secret-{key}")));
+        docs.push(secret_doc(&real, key, &content));
+        secret_names.insert(key.clone(), real);
+    }
+    let mut config_names = BTreeMap::new();
+    for key in &used_configs {
+        let def = compose.configs.get(key).ok_or_else(|| {
+            Error::Invalid(format!(
+                "compose: service references undeclared config '{key}' (declare it under \
+                 top-level `configs:`)"
+            ))
+        })?;
+        let content = resolve_secret_content(
+            "config",
+            key,
+            def.file.as_deref(),
+            None,
+            def.external,
+            base_dir,
+        )?;
+        let real = def
+            .name
+            .clone()
+            .unwrap_or_else(|| compose_scoped_name(project, &format!("config-{key}")));
+        docs.push(secret_doc(&real, key, &content));
+        config_names.insert(key.clone(), real);
+    }
+    Ok((docs, secret_names, config_names))
+}
+
 /// Refuses every key this implementation does not read — against the RAW parsed
 /// YAML, because the typed structs drop an unrecognized key without a word.
 ///
@@ -952,6 +1293,8 @@ fn check_unsupported_fields(text: &str) -> Result<()> {
     for (section, allowed) in [
         ("networks", SUPPORTED_NETWORK),
         ("volumes", SUPPORTED_VOLUME),
+        ("secrets", SUPPORTED_SECRET),
+        ("configs", SUPPORTED_CONFIG),
     ] {
         let Some(serde_yaml::Value::Mapping(entries)) = top.get(section) else {
             continue;
@@ -978,6 +1321,18 @@ fn check_unsupported_fields(text: &str) -> Result<()> {
                 continue;
             };
             let svc = svc_name.as_str().unwrap_or("?");
+            if let Some(serde_yaml::Value::Mapping(ext_map)) =
+                svc_map.get(serde_yaml::Value::String("extends".to_string()))
+            {
+                if ext_map.contains_key(serde_yaml::Value::String("file".to_string())) {
+                    return Err(Error::Invalid(format!(
+                        "compose: service '{svc}': extends.file is not supported — this \
+                         implementation doesn't do multi-file compose at all, so `file:` \
+                         naming anything is refused rather than silently resolved against \
+                         the wrong file (omit `file:` to extend a service in this same file)"
+                    )));
+                }
+            }
             for (key, reason) in KNOWN_UNSUPPORTED_SERVICE {
                 if svc_map.contains_key(serde_yaml::Value::String((*key).to_string())) {
                     return Err(Error::Invalid(format!(
@@ -1046,33 +1401,76 @@ struct Translated {
     image_docs: Vec<ManifestDoc>,
     network_docs: Vec<ManifestDoc>,
     volume_docs: Vec<ManifestDoc>,
-    containers: BTreeMap<String, (super::container::RunOpts, String)>,
+    secret_docs: Vec<ManifestDoc>,
+    /// One entry per REPLICA, in replica order — `[0]` is the "canonical"
+    /// container (`<project>-<service>`, or `container_name:` if given,
+    /// which `deploy.replicas>1` refuses precisely so this stays unambiguous)
+    /// that `depends_on`/healthcheck waits target; `[1..]` are the extra
+    /// copies (`<project>-<service>-<n>`), reachable only by their own name —
+    /// this engine does no load balancing across them (same "no VIP, no
+    /// daemon" posture as `kind: Service`'s DNS round-robin, which this v1
+    /// does not wire replicas into).
+    containers: BTreeMap<String, Vec<(super::container::RunOpts, String)>>,
     order: Vec<String>,
     waits: BTreeMap<String, Vec<DependsOnWait>>,
 }
 
+/// `true` for a `ports:` entry that pins a specific host port — the short
+/// form's 2/3-part forms, or the long form's `published:`. A bare container
+/// port (`"80"`, no `published:`) resolves to a fresh `free_host_port()` per
+/// call, so replicas never collide on that form; a pinned one names the SAME
+/// host port for every replica and always would.
+fn port_has_explicit_host(p: &ComposePort) -> bool {
+    match p {
+        ComposePort::Short(s) => s.contains(':'),
+        ComposePort::Long { published, .. } => published.is_some(),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
-fn translate(compose: &ComposeFile, project: &str, base_dir: &Path) -> Result<Translated> {
+fn translate(
+    compose: &ComposeFile,
+    project: &str,
+    base_dir: &Path,
+    requested_profiles: &[String],
+) -> Result<Translated> {
     if !valid_compose_project_name(project) {
         return Err(Error::Invalid(format!(
             "compose: invalid project name '{project}' (only lowercase letters, digits, '_'/'-', must start with a letter or digit)"
         )));
     }
-    for (name, svc) in &compose.services {
+    let active = active_services(compose, requested_profiles);
+    for (name, svc) in compose.services.iter().filter(|(n, _)| active.contains(*n)) {
         if svc.image.is_none() && svc.build.is_none() {
             return Err(Error::Invalid(format!(
                 "compose: service '{name}' has neither `image` nor `build`"
             )));
         }
-        if let Some(r) = svc.deploy.as_ref().and_then(|d| d.replicas) {
-            if r != 1 {
+        let replicas = svc.deploy.as_ref().and_then(|d| d.replicas).unwrap_or(1);
+        if replicas == 0 {
+            return Err(Error::Invalid(format!(
+                "compose: service '{name}': deploy.replicas=0 is not supported — this v1 has \
+                 no scale-to-zero/profile toggle for a running service; remove the service \
+                 instead"
+            )));
+        }
+        if replicas > 1 {
+            if svc.container_name.is_some() {
                 return Err(Error::Invalid(format!(
-                    "compose: service '{name}': deploy.replicas={r} is not supported in v1 (only 1)"
+                    "compose: service '{name}': container_name is incompatible with \
+                     deploy.replicas={replicas} — every replica would collide on that one name"
+                )));
+            }
+            if svc.ports.iter().any(port_has_explicit_host) {
+                return Err(Error::Invalid(format!(
+                    "compose: service '{name}': deploy.replicas={replicas} with an explicit \
+                     host port would collide across replicas — use a bare container port \
+                     (e.g. \"80\") so each replica binds its own random free host port instead"
                 )));
             }
         }
     }
-    let order = topo_sort(&compose.services)?;
+    let order = topo_sort(&compose.services, &active)?;
     let network_names = resolve_network_names(project, compose);
     let volume_names = resolve_volume_names(project, compose);
 
@@ -1096,11 +1494,14 @@ fn translate(compose: &ComposeFile, project: &str, base_dir: &Path) -> Result<Tr
         volume_docs.push(simple_doc(k::VOLUME, &volume_names[key]));
     }
 
+    let (secret_docs, secret_names, config_names) =
+        resolve_compose_secrets(project, compose, &active, base_dir)?;
+
     let mut image_docs = Vec::new();
     let mut containers = BTreeMap::new();
     let mut waits: BTreeMap<String, Vec<DependsOnWait>> = BTreeMap::new();
 
-    for (name, svc) in &compose.services {
+    for (name, svc) in compose.services.iter().filter(|(n, _)| active.contains(*n)) {
         let image_ref = if let Some(build) = &svc.build {
             let tag = svc
                 .image
@@ -1111,16 +1512,23 @@ fn translate(compose: &ComposeFile, project: &str, base_dir: &Path) -> Result<Tr
         } else {
             svc.image.clone().unwrap()
         };
-        let (opts, final_name) = service_to_run_opts(
-            project,
-            name,
-            svc,
-            base_dir,
-            &network_names,
-            &volume_names,
-            &image_ref,
-        )?;
-        containers.insert(name.clone(), (opts, final_name));
+        let replicas = svc.deploy.as_ref().and_then(|d| d.replicas).unwrap_or(1);
+        let mut instances = Vec::with_capacity(replicas as usize);
+        for idx in 1..=replicas {
+            instances.push(service_to_run_opts(
+                project,
+                name,
+                svc,
+                base_dir,
+                &network_names,
+                &volume_names,
+                &secret_names,
+                &config_names,
+                &image_ref,
+                idx,
+            )?);
+        }
+        containers.insert(name.clone(), instances);
 
         let mut w = Vec::new();
         for (dep, condition) in svc.depends_on.entries()? {
@@ -1138,6 +1546,7 @@ fn translate(compose: &ComposeFile, project: &str, base_dir: &Path) -> Result<Tr
         image_docs,
         network_docs,
         volume_docs,
+        secret_docs,
         containers,
         order,
         waits,
@@ -1152,6 +1561,8 @@ struct BuildDocSpec {
     tag: String,
     #[serde(rename = "buildArgs", skip_serializing_if = "Vec::is_empty")]
     build_args: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target: Option<String>,
 }
 #[derive(Serialize)]
 struct ImageDocSpec {
@@ -1164,25 +1575,19 @@ fn service_build_to_image_doc(
     base_dir: &Path,
     tag: &str,
 ) -> Result<ManifestDoc> {
-    let (context_rel, dockerfile, args) = match build {
-        ComposeBuild::Context(c) => (c.clone(), None, Vec::new()),
+    let (context_rel, dockerfile, args, target) = match build {
+        ComposeBuild::Context(c) => (c.clone(), None, Vec::new(), None),
         ComposeBuild::Full {
             context,
             dockerfile,
             args,
             target,
-        } => {
-            if target.is_some() {
-                return Err(Error::Invalid(format!(
-                    "compose: service '{service}': build.target (multi-stage stage selection) is not supported in v1"
-                )));
-            }
-            (
-                context.to_string_lossy().into_owned(),
-                dockerfile.clone(),
-                args.to_kv_pairs(),
-            )
-        }
+        } => (
+            context.to_string_lossy().into_owned(),
+            dockerfile.clone(),
+            args.to_kv_pairs(),
+            target.clone(),
+        ),
     };
     let context_path = base_dir.join(&context_rel);
     let file = dockerfile.map(|f| context_path.join(f).to_string_lossy().into_owned());
@@ -1192,6 +1597,7 @@ fn service_build_to_image_doc(
             file,
             tag: tag.to_string(),
             build_args: args,
+            target,
         },
     };
     Ok(ManifestDoc {
@@ -1217,7 +1623,7 @@ fn service_build_to_image_doc(
 /// accepted limitation of "find a free port" — not something userspace can
 /// close without a kernel-level reservation API neither Docker nor this
 /// engine has.
-fn free_host_port() -> Result<u16> {
+pub(crate) fn free_host_port() -> Result<u16> {
     std::net::TcpListener::bind(("0.0.0.0", 0))
         .and_then(|l| l.local_addr())
         .map(|a| a.port())
@@ -1358,6 +1764,7 @@ fn resolve_volume_mounts(
     Ok((volumes, tmpfs))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn service_to_run_opts(
     project: &str,
     service: &str,
@@ -1365,7 +1772,10 @@ fn service_to_run_opts(
     base_dir: &Path,
     network_names: &BTreeMap<String, String>,
     volume_names: &BTreeMap<String, String>,
+    secret_names: &BTreeMap<String, String>,
+    config_names: &BTreeMap<String, String>,
     image_ref: &str,
+    replica_index: u32,
 ) -> Result<(super::container::RunOpts, String)> {
     let net_keys = svc.networks.keys();
     let net_key = if net_keys.is_empty() {
@@ -1380,13 +1790,15 @@ fn service_to_run_opts(
         }
         net_keys[0].clone()
     };
-    if let Some(entry) = svc.networks.entry(&net_key) {
-        if entry.ipv4_address.is_some() {
-            return Err(Error::Invalid(format!(
-                "compose: service '{service}': a fixed networks.*.ipv4_address is not supported (delonix assigns IPs by IPAM) — remove it"
-            )));
-        }
-    }
+    // `networks.*.ipv4_address` wires straight into the same `--ip` path
+    // `container run` now has: `infra::attach_container_on_ip` reserves the
+    // address in the IPAM registry before the attach, so nothing here
+    // re-validates the subnet — that check already lives at the one place
+    // that knows the network's actual prefix.
+    let fixed_ip = svc
+        .networks
+        .entry(&net_key)
+        .and_then(|entry| entry.ipv4_address.clone());
     let net = network_names.get(&net_key).cloned().ok_or_else(|| {
         Error::Invalid(format!(
             "compose: service '{service}' references undefined network '{net_key}' (declare it under top-level `networks:`)"
@@ -1435,17 +1847,43 @@ fn service_to_run_opts(
         .map(|l| (l.memory.clone(), l.cpus.clone()))
         .unwrap_or((None, None));
 
-    let final_name = svc
-        .container_name
-        .clone()
-        .unwrap_or_else(|| format!("{project}-{service}"));
+    // `container_name:` is refused alongside `deploy.replicas>1` (in
+    // `translate`, before this ever runs) precisely so `replica_index == 1`
+    // is the only case that can reach it here — every other replica gets the
+    // `-<n>` suffix, never the bare service name a 2nd/3rd container would
+    // collide on.
+    let final_name = svc.container_name.clone().unwrap_or_else(|| {
+        if replica_index == 1 {
+            format!("{project}-{service}")
+        } else {
+            format!("{project}-{service}-{replica_index}")
+        }
+    });
+
+    // `target:` mismatches were already refused in `resolve_compose_secrets`
+    // (it sees every service, so it is the one place that can name the
+    // service in the error) — by the time we get here every reference maps
+    // straight onto a resolved delonix secret name. `secret_files: true`
+    // whenever there is at least one, because Compose secrets/configs are
+    // ALWAYS file-mounted (`/run/secrets/<name>`), never injected as env vars.
+    let mut secret_refs: Vec<String> = Vec::new();
+    for r in &svc.secrets {
+        secret_refs.push(secret_names[r.source()].clone());
+    }
+    for r in &svc.configs {
+        secret_refs.push(config_names[r.source()].clone());
+    }
+    let secret_files = !secret_refs.is_empty();
 
     let opts = super::container::RunOpts {
+        secret: secret_refs,
+        secret_files,
         detach: true,
         name: Some(final_name.clone()),
         hostname: svc.hostname.clone(),
         user: svc.user.clone(),
         net,
+        ip: fixed_ip,
         volumes,
         ports,
         privileged: svc.privileged,
@@ -1642,6 +2080,208 @@ fn wait_for_condition(
 }
 
 // ============================================================================
+// `extends:` resolution
+// ============================================================================
+
+/// Merges two `KEY<sep>VALUE` pair lists (as `ComposeEnv::to_kv_pairs`/
+/// `to_host_pairs` already produce), the child's value winning on a shared
+/// key, at that key's ORIGINAL position (`base`'s if it had the key, else
+/// wherever `child` first introduces it) — same "first position, latest
+/// value" rule `docker compose`'s own `extends` uses for `environment:`.
+fn merge_pairs(base: &[String], child: &[String], sep: char) -> Vec<String> {
+    let mut merged: Vec<(String, String)> = Vec::new();
+    let mut upsert = |pair: &str| {
+        let (k, v) = match pair.split_once(sep) {
+            Some((k, v)) => (k.to_string(), v.to_string()),
+            None => (pair.to_string(), String::new()),
+        };
+        match merged.iter_mut().find(|(ek, _)| *ek == k) {
+            Some(existing) => existing.1 = v,
+            None => merged.push((k, v)),
+        }
+    };
+    for p in base {
+        upsert(p);
+    }
+    for p in child {
+        upsert(p);
+    }
+    merged
+        .into_iter()
+        .map(|(k, v)| format!("{k}{sep}{v}"))
+        .collect()
+}
+
+fn merge_env(base: &ComposeEnv, child: &ComposeEnv) -> ComposeEnv {
+    ComposeEnv::List(merge_pairs(&base.to_kv_pairs(), &child.to_kv_pairs(), '='))
+}
+
+fn merge_extra_hosts(base: &ComposeEnv, child: &ComposeEnv) -> ComposeEnv {
+    ComposeEnv::List(merge_pairs(
+        &base.to_host_pairs(),
+        &child.to_host_pairs(),
+        ':',
+    ))
+}
+
+/// Appends `child` to `base`, skipping a `child` entry already present in
+/// `base` — used for `cap_add`/`cap_drop`, where "declared twice" and
+/// "declared once" mean the same thing.
+fn dedup_concat(base: Vec<String>, child: Vec<String>) -> Vec<String> {
+    let mut out = base;
+    for c in child {
+        if !out.contains(&c) {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// `networks:` isn't merged field-by-field — this engine attaches only ONE
+/// network per container anyway (`service_to_run_opts` already warns and
+/// picks the first when a service names more than one), so "the child's own
+/// declaration wins outright, else inherit the base's" is the whole rule,
+/// with none of the real Compose Specification's deeper per-network-entry
+/// merge that would matter for nothing here.
+fn merge_networks(
+    base: ComposeServiceNetworks,
+    child: ComposeServiceNetworks,
+) -> ComposeServiceNetworks {
+    match child {
+        ComposeServiceNetworks::Empty => base,
+        declared => declared,
+    }
+}
+
+/// Merges `base`'s fields into `child`, wherever `child` didn't declare its
+/// own — the Compose Specification's `extends:` semantics. `depends_on` is
+/// the one field NEVER inherited: the Specification excludes it on purpose
+/// (a service's dependency graph is its own, not something it borrows along
+/// with the rest of the configuration it reuses).
+///
+/// `ports`/`volumes` are plain concatenation (base's entries, then child's) —
+/// a real docker-compose dedups list entries by target, which matters when a
+/// base and a child both republish the same container port; this v1 doesn't,
+/// documented simplification rather than silent, and a duplicate publish is
+/// harmless (the second one loses the free-port race and refuses "already in
+/// use", which is at least loud). `privileged`/`read_only` are ORed rather
+/// than overridden — a plain `bool` field (not `Option<bool>`) has no way to
+/// tell "the child said `false`" from "the child didn't say anything", so
+/// there is no way to un-inherit a base's `true` from a child; documented
+/// here rather than silently assumed away.
+fn merge_service(base: ComposeService, child: ComposeService) -> ComposeService {
+    ComposeService {
+        image: child.image.or(base.image),
+        extends: None, // consumed
+        build: child.build.or(base.build),
+        environment: merge_env(&base.environment, &child.environment),
+        env_file: OneOrMany::Many({
+            let mut v = base.env_file.into_vec();
+            v.extend(child.env_file.into_vec());
+            v
+        }),
+        ports: {
+            let mut v = base.ports;
+            v.extend(child.ports);
+            v
+        },
+        volumes: {
+            let mut v = base.volumes;
+            v.extend(child.volumes);
+            v
+        },
+        command: child.command.or(base.command),
+        entrypoint: child.entrypoint.or(base.entrypoint),
+        depends_on: child.depends_on,
+        // NOT inherited, same rule and same reason as `depends_on` above:
+        // `profiles` decides WHETHER a service runs, not how it is built.
+        // Inheriting it would silently enrol a child in its base's profile
+        // and change which services `up` starts — a `extends:` is supposed
+        // to reuse configuration, not membership.
+        profiles: child.profiles,
+        healthcheck: child.healthcheck.or(base.healthcheck),
+        restart: child.restart.or(base.restart),
+        networks: merge_networks(base.networks, child.networks),
+        labels: merge_env(&base.labels, &child.labels),
+        working_dir: child.working_dir.or(base.working_dir),
+        user: child.user.or(base.user),
+        cap_add: dedup_concat(base.cap_add, child.cap_add),
+        cap_drop: dedup_concat(base.cap_drop, child.cap_drop),
+        privileged: base.privileged || child.privileged,
+        tmpfs: OneOrMany::Many({
+            let mut v = base.tmpfs.into_vec();
+            v.extend(child.tmpfs.into_vec());
+            v
+        }),
+        extra_hosts: merge_extra_hosts(&base.extra_hosts, &child.extra_hosts),
+        deploy: child.deploy.or(base.deploy),
+        container_name: child.container_name.or(base.container_name),
+        hostname: child.hostname.or(base.hostname),
+        read_only: base.read_only || child.read_only,
+        secrets: {
+            let mut v = base.secrets;
+            v.extend(child.secrets);
+            v
+        },
+        configs: {
+            let mut v = base.configs;
+            v.extend(child.configs);
+            v
+        },
+    }
+}
+
+/// Resolves every service's `extends:` in place, before anything else looks
+/// at `services` — by the time this returns, no `ComposeService.extends` is
+/// `Some` any more, so `translate`/`service_to_run_opts`/the `depends_on`
+/// graph builder need zero changes to know `extends` ever existed.
+///
+/// A base is resolved (recursively, in case IT also extends something)
+/// before being merged into whoever extends it — `chain` is the path taken
+/// to get here, and a base already on it is a cycle, reported with the full
+/// path rather than just the two names that finally collided.
+fn resolve_extends(services: &mut BTreeMap<String, ComposeService>) -> Result<()> {
+    let names: Vec<String> = services.keys().cloned().collect();
+    for name in names {
+        resolve_one(services, &name, &mut vec![name.clone()])?;
+    }
+    Ok(())
+}
+
+fn resolve_one(
+    services: &mut BTreeMap<String, ComposeService>,
+    name: &str,
+    chain: &mut Vec<String>,
+) -> Result<()> {
+    let Some(base_name) = services
+        .get(name)
+        .and_then(|s| s.extends.as_ref().map(|e| e.service.clone()))
+    else {
+        return Ok(()); // already resolved, or never had one
+    };
+    if !services.contains_key(&base_name) {
+        return Err(Error::Invalid(format!(
+            "compose: service '{name}' extends undefined service '{base_name}'"
+        )));
+    }
+    if chain.contains(&base_name) {
+        chain.push(base_name);
+        return Err(Error::Invalid(format!(
+            "compose: extends cycle: {}",
+            chain.join(" -> ")
+        )));
+    }
+    chain.push(base_name.clone());
+    resolve_one(services, &base_name, chain)?;
+    chain.pop();
+
+    let base = services.get(&base_name).cloned().expect("checked above");
+    let child = services.get(name).cloned().expect("iterating its own key");
+    services.insert(name.to_string(), merge_service(base, child));
+    Ok(())
+}
+
+// ============================================================================
 // Commands
 // ============================================================================
 
@@ -1650,8 +2290,9 @@ fn load_compose(file: Option<PathBuf>) -> Result<(ComposeFile, String, PathBuf, 
     let text = std::fs::read_to_string(&path)
         .map_err(|e| Error::Invalid(format!("reading {}: {e}", path.display())))?;
     check_unsupported_fields(&text)?;
-    let compose: ComposeFile = serde_yaml::from_str(&text)
+    let mut compose: ComposeFile = serde_yaml::from_str(&text)
         .map_err(|e| Error::Invalid(format!("parsing {}: {e}", path.display())))?;
+    resolve_extends(&mut compose.services)?;
     let base_dir = path
         .parent()
         .map(Path::to_path_buf)
@@ -1665,10 +2306,15 @@ fn load_compose(file: Option<PathBuf>) -> Result<(ComposeFile, String, PathBuf, 
     ))
 }
 
-fn cmd_up(file: Option<PathBuf>, project: Option<String>, dry_run: bool) -> Result<()> {
+fn cmd_up(
+    file: Option<PathBuf>,
+    project: Option<String>,
+    dry_run: bool,
+    profile: Vec<String>,
+) -> Result<()> {
     let (compose, default_project, base_dir, _path) = load_compose(file)?;
     let project = project.unwrap_or(default_project);
-    let translated = translate(&compose, &project, &base_dir)?;
+    let translated = translate(&compose, &project, &base_dir, &profile)?;
 
     if dry_run {
         println!("# compose project: {project}");
@@ -1677,6 +2323,7 @@ fn cmd_up(file: Option<PathBuf>, project: Option<String>, dry_run: bool) -> Resu
             .iter()
             .chain(&translated.volume_docs)
             .chain(&translated.image_docs)
+            .chain(&translated.secret_docs)
         {
             println!(
                 "---\n{}",
@@ -1684,11 +2331,12 @@ fn cmd_up(file: Option<PathBuf>, project: Option<String>, dry_run: bool) -> Resu
             );
         }
         for name in &translated.order {
-            let (opts, final_name) = &translated.containers[name];
-            println!(
-                "service {name} -> container {final_name} (image={}, net={})",
-                opts.image, opts.net
-            );
+            for (opts, final_name) in &translated.containers[name] {
+                println!(
+                    "service {name} -> container {final_name} (image={}, net={})",
+                    opts.image, opts.net
+                );
+            }
         }
         return Ok(());
     }
@@ -1696,27 +2344,35 @@ fn cmd_up(file: Option<PathBuf>, project: Option<String>, dry_run: bool) -> Resu
     super::image::apply(&translated.image_docs)?;
     super::network::apply(&translated.network_docs)?;
     super::volume::apply(&translated.volume_docs)?;
+    super::secret::apply(&translated.secret_docs, &base_dir)?;
 
     let (images, store) = open_stores()?;
     for name in &translated.order {
         if let Some(waits) = translated.waits.get(name) {
             for w in waits {
-                let (_, dep_final_name) = translated.containers.get(&w.on).ok_or_else(|| {
-                    Error::Invalid(format!(
-                        "compose: internal error: dependency '{}' not found",
-                        w.on
-                    ))
-                })?;
+                // The canonical (1st) replica is the one `depends_on`/healthcheck
+                // waits target — see `Translated.containers`'s doc-comment for why.
+                let (_, dep_final_name) = translated
+                    .containers
+                    .get(&w.on)
+                    .and_then(|v| v.first())
+                    .ok_or_else(|| {
+                        Error::Invalid(format!(
+                            "compose: internal error: dependency '{}' not found",
+                            w.on
+                        ))
+                    })?;
                 wait_for_condition(&store, &images, dep_final_name, w)?;
             }
         }
-        let (opts, final_name) = translated.containers[name].clone();
-        if store.list()?.iter().any(|c| c.name == final_name) {
-            println!("compose: {name} ({final_name}): already exists, nothing to do");
-            continue;
+        for (opts, final_name) in translated.containers[name].clone() {
+            if store.list()?.iter().any(|c| c.name == final_name) {
+                println!("compose: {name} ({final_name}): already exists, nothing to do");
+                continue;
+            }
+            super::container::cmd_run(&images, &store, opts)?;
+            println!("compose: {name} ({final_name}): created");
         }
-        super::container::cmd_run(&images, &store, opts)?;
-        println!("compose: {name} ({final_name}): created");
     }
     Ok(())
 }
@@ -1872,17 +2528,18 @@ fn cmd_logs(
     Ok(())
 }
 
-fn cmd_config(file: Option<PathBuf>, project: Option<String>) -> Result<()> {
+fn cmd_config(file: Option<PathBuf>, project: Option<String>, profile: Vec<String>) -> Result<()> {
     let (compose, default_project, base_dir, _path) = load_compose(file)?;
     let project = project.unwrap_or(default_project);
-    let translated = translate(&compose, &project, &base_dir)?;
+    let translated = translate(&compose, &project, &base_dir, &profile)?;
     println!("# compose project: {project}");
     for name in &translated.order {
-        let (opts, final_name) = &translated.containers[name];
-        println!(
-            "service {name}:\n  container: {final_name}\n  image: {}\n  network: {}\n  ports: {:?}\n  volumes: {:?}",
-            opts.image, opts.net, opts.ports, opts.volumes
-        );
+        for (opts, final_name) in &translated.containers[name] {
+            println!(
+                "service {name}:\n  container: {final_name}\n  image: {}\n  network: {}\n  ports: {:?}\n  volumes: {:?}",
+                opts.image, opts.net, opts.ports, opts.volumes
+            );
+        }
     }
     Ok(())
 }
@@ -1949,16 +2606,85 @@ mod tests {
     fn topo_sort_ordena_por_dependencia_e_detecta_ciclo() {
         let yaml = "web:\n  image: a\n  depends_on: [api]\napi:\n  image: b\n  depends_on: [db]\ndb:\n  image: c\n";
         let services: BTreeMap<String, ComposeService> = serde_yaml::from_str(yaml).unwrap();
-        let order = topo_sort(&services).unwrap();
+        let all: BTreeSet<String> = services.keys().cloned().collect();
+        let order = topo_sort(&services, &all).unwrap();
         assert_eq!(order, vec!["db", "api", "web"]);
 
         let cyclic = "a:\n  image: x\n  depends_on: [b]\nb:\n  image: y\n  depends_on: [a]\n";
         let services: BTreeMap<String, ComposeService> = serde_yaml::from_str(cyclic).unwrap();
-        assert!(topo_sort(&services).is_err());
+        let all: BTreeSet<String> = services.keys().cloned().collect();
+        assert!(topo_sort(&services, &all).is_err());
 
         let missing = "a:\n  image: x\n  depends_on: [ghost]\n";
         let services: BTreeMap<String, ComposeService> = serde_yaml::from_str(missing).unwrap();
-        assert!(topo_sort(&services).is_err());
+        let all: BTreeSet<String> = services.keys().cloned().collect();
+        assert!(topo_sort(&services, &all).is_err());
+    }
+
+    #[test]
+    fn active_services_skips_an_unrequested_profile() {
+        let yaml = "\
+services:
+  web:
+    image: a
+  debugger:
+    image: b
+    profiles: [debug]
+";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let active = active_services(&compose, &[]);
+        assert_eq!(active, BTreeSet::from(["web".to_string()]));
+        let active = active_services(&compose, &["debug".to_string()]);
+        assert_eq!(
+            active,
+            BTreeSet::from(["web".to_string(), "debugger".to_string()])
+        );
+    }
+
+    /// The rule real `docker compose` uses: a dependency is pulled in even
+    /// outside the requested profile, because the service that needs it
+    /// cannot start without it.
+    #[test]
+    fn active_services_pulls_in_a_dependency_outside_the_requested_profile() {
+        let yaml = "\
+services:
+  app:
+    image: a
+    profiles: [tools]
+    depends_on: [cache]
+  cache:
+    image: b
+    profiles: [infra]
+  unrelated:
+    image: c
+    profiles: [infra]
+";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let active = active_services(&compose, &["tools".to_string()]);
+        assert_eq!(
+            active,
+            BTreeSet::from(["app".to_string(), "cache".to_string()]),
+            "`cache` must be pulled in transitively; `unrelated` must not"
+        );
+    }
+
+    #[test]
+    fn translate_only_creates_active_services() {
+        let yaml = "\
+services:
+  web:
+    image: a
+  debugger:
+    image: b
+    profiles: [debug]
+";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let t = translate(&compose, "p", Path::new("/tmp"), &[]).unwrap();
+        assert_eq!(t.order, vec!["web".to_string()]);
+        assert!(!t.containers.contains_key("debugger"));
+
+        let t = translate(&compose, "p", Path::new("/tmp"), &["debug".to_string()]).unwrap();
+        assert_eq!(t.containers.len(), 2);
     }
 
     #[test]
@@ -2022,7 +2748,7 @@ services:
         condition: service_healthy
 "#;
         let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
-        let t = translate(&compose, "myproj", Path::new("/tmp")).unwrap();
+        let t = translate(&compose, "myproj", Path::new("/tmp"), &[]).unwrap();
         assert_eq!(t.order, vec!["db".to_string(), "app".to_string()]);
         let app_waits = &t.waits["app"];
         assert_eq!(app_waits.len(), 1);
@@ -2031,18 +2757,206 @@ services:
         assert!(app_waits[0].healthcheck.is_some());
     }
 
+    /// `networks.*.ipv4_address` wires straight into `RunOpts.ip` — the same
+    /// `container run --ip` path, no separate mechanism. The engine-level
+    /// half (IPAM reservation, subnet validation) is `infra::
+    /// attach_container_on_ip`'s own responsibility and test, not this one's
+    /// — this only proves the compose YAML is not silently dropped.
     #[test]
-    fn deploy_replicas_diferente_de_1_e_erro() {
+    fn networks_ipv4_address_flui_para_run_opts_ip() {
+        let yaml = "services:\n  web:\n    image: x\n    networks:\n      default:\n        ipv4_address: 10.210.5.5\n";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let t = translate(&compose, "p", Path::new("/tmp"), &[]).unwrap();
+        // `containers` became a Vec when `deploy.replicas` landed — one entry
+        // per replica. These two tests are about the SINGLE-replica case, so
+        // the first (and only) entry is the one they mean.
+        let (opts, _) = &t.containers["web"][0];
+        assert_eq!(opts.ip.as_deref(), Some("10.210.5.5"));
+    }
+
+    /// A service with no `ipv4_address` at all keeps letting the engine pick
+    /// (IPAM-derived) — the common case must not regress into always fixing
+    /// an address that was never asked for.
+    #[test]
+    fn sem_ipv4_address_o_ip_fica_none() {
+        let yaml = "services:\n  web:\n    image: x\n";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let t = translate(&compose, "p", Path::new("/tmp"), &[]).unwrap();
+        // `containers` became a Vec when `deploy.replicas` landed — one entry
+        // per replica. These two tests are about the SINGLE-replica case, so
+        // the first (and only) entry is the one they mean.
+        let (opts, _) = &t.containers["web"][0];
+        assert_eq!(opts.ip, None);
+    }
+
+    /// The success path end-to-end: a `file:` source becomes a `kind: Secret`
+    /// document holding exactly the secret's own name as key, and the
+    /// referencing service's `RunOpts` picks it up with `secret_files: true`
+    /// (Compose secrets are always file-mounted, never env vars).
+    #[test]
+    fn secret_file_source_becomes_a_secret_doc_and_flows_into_run_opts() {
+        let path = std::env::temp_dir().join(format!(
+            "dlx-compose-secret-test-{}-{}.txt",
+            std::process::id(),
+            "a"
+        ));
+        std::fs::write(&path, "s3cr3t\n").unwrap();
+        let yaml = format!(
+            "secrets:\n  db_password:\n    file: {}\nservices:\n  web:\n    image: x\n    secrets:\n      - db_password\n",
+            path.display()
+        );
+        let compose: ComposeFile = serde_yaml::from_str(&yaml).unwrap();
+        let t = translate(&compose, "p", Path::new("/"), &[]).unwrap();
+        std::fs::remove_file(&path).ok();
+
+        let (opts, _) = &t.containers["web"][0];
+        assert!(opts.secret_files, "compose secrets must be file-delivered");
+        assert_eq!(opts.secret.len(), 1);
+        let secret_name = &opts.secret[0];
+
+        let doc = t
+            .secret_docs
+            .iter()
+            .find(|d| &d.metadata.name == secret_name)
+            .expect("a secret doc must exist for the referenced secret");
+        let spec = doc.spec.as_mapping().unwrap();
+        let string_data = spec.get("stringData").unwrap().as_mapping().unwrap();
+        let value = string_data.get("db_password").unwrap().as_str().unwrap();
+        assert_eq!(value, "s3cr3t\n");
+    }
+
+    /// `configs:` goes through the same mechanism as `secrets:` — same
+    /// SecretStore, same file delivery — the "use `kind: Secret` instead"
+    /// message this module always gave for both keys.
+    #[test]
+    fn config_file_source_also_becomes_a_secret_doc() {
+        let path = std::env::temp_dir().join(format!(
+            "dlx-compose-config-test-{}-{}.txt",
+            std::process::id(),
+            "a"
+        ));
+        std::fs::write(&path, "server { }\n").unwrap();
+        let yaml = format!(
+            "configs:\n  nginx_conf:\n    file: {}\nservices:\n  web:\n    image: x\n    configs:\n      - nginx_conf\n",
+            path.display()
+        );
+        let compose: ComposeFile = serde_yaml::from_str(&yaml).unwrap();
+        let t = translate(&compose, "p", Path::new("/"), &[]).unwrap();
+        std::fs::remove_file(&path).ok();
+
+        let (opts, _) = &t.containers["web"][0];
+        assert!(opts.secret_files);
+        assert_eq!(opts.secret.len(), 1);
+    }
+
+    /// A service with neither `secrets:` nor `configs:` never turns on
+    /// `secret_files` — a container with no secrets attached should not
+    /// silently get a tmpfs it never asked for (harmless here, but this is
+    /// the flag `write_secret_files` reads to decide delivery mode).
+    #[test]
+    fn no_secrets_leaves_run_opts_secret_files_false() {
+        let yaml = "services:\n  web:\n    image: x\n";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let t = translate(&compose, "p", Path::new("/tmp"), &[]).unwrap();
+        let (opts, _) = &t.containers["web"][0];
+        assert!(!opts.secret_files);
+        assert!(opts.secret.is_empty());
+    }
+
+    /// `environment:` reads the PROCESS environment at translate time —
+    /// `PATH` is used here specifically to avoid `std::env::set_var` (unsafe
+    /// in this toolchain, and shared mutable state across parallel tests);
+    /// it is a variable every test process already has, for free.
+    #[test]
+    fn secret_environment_source_reads_the_process_env() {
+        let content =
+            resolve_secret_content("secret", "s", None, Some("PATH"), false, Path::new("/tmp"))
+                .unwrap();
+        assert_eq!(content, std::env::var("PATH").unwrap());
+    }
+
+    #[test]
+    fn secret_environment_source_missing_var_is_a_clear_error() {
+        let e = resolve_secret_content(
+            "secret",
+            "s",
+            None,
+            Some("DLX_COMPOSE_TEST_VAR_THAT_DOES_NOT_EXIST_XYZ"),
+            false,
+            Path::new("/tmp"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("is not set"), "{e}");
+    }
+
+    /// `translate()`'s `Result<Translated, _>` cannot use `.unwrap_err()`
+    /// directly (`Translated` has no `Debug`, on purpose — it holds live
+    /// `RunOpts`), so the error-path tests below go through this instead.
+    fn translate_err(compose: &ComposeFile) -> String {
+        match translate(compose, "p", Path::new("/tmp"), &[]) {
+            Ok(_) => panic!("this compose file must be refused"),
+            Err(e) => e.to_string(),
+        }
+    }
+
+    /// A `source:`/`target:` pair that renames the mounted filename cannot be
+    /// honoured — `Container.secret`'s file delivery names every mount after
+    /// the secret's OWN data key, with no per-secret retarget. Refused with
+    /// the specific reason, never silently mounted under the wrong name.
+    #[test]
+    fn secret_target_rename_is_refused() {
+        let yaml = "secrets:\n  db_password:\n    environment: PATH\nservices:\n  web:\n    image: x\n    secrets:\n      - source: db_password\n        target: renamed\n";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let e = translate_err(&compose);
+        assert!(e.contains("target: renamed"), "{e}");
+    }
+
+    /// `external: true` cannot be honoured either — this module can only
+    /// create a secret from a `file:`/`environment:` it can read, never
+    /// reference one that already exists outside the compose file.
+    #[test]
+    fn external_secret_is_refused() {
+        let yaml = "secrets:\n  db_password:\n    external: true\nservices:\n  web:\n    image: x\n    secrets:\n      - db_password\n";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let e = translate_err(&compose);
+        assert!(e.contains("external"), "{e}");
+    }
+
+    #[test]
+    fn config_without_file_is_refused() {
+        let yaml = "configs:\n  app_conf: {}\nservices:\n  web:\n    image: x\n    configs:\n      - app_conf\n";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let e = translate_err(&compose);
+        assert!(e.contains("needs `file:`"), "{e}");
+    }
+
+    #[test]
+    fn undeclared_secret_reference_is_refused() {
+        let yaml = "services:\n  web:\n    image: x\n    secrets:\n      - missing\n";
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        let e = translate_err(&compose);
+        assert!(e.contains("undeclared secret"), "{e}");
+    }
+
+    #[test]
+    fn deploy_replicas_cria_um_container_por_replica() {
         let yaml = "services:\n  svc:\n    image: x\n    deploy:\n      replicas: 3\n";
         let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
-        assert!(translate(&compose, "p", Path::new("/tmp")).is_err());
+        let t = translate(&compose, "p", Path::new("/tmp"), &[]).unwrap();
+        let names: Vec<&String> = t.containers["svc"].iter().map(|(_, n)| n).collect();
+        assert_eq!(
+            names,
+            vec!["p-svc", "p-svc-2", "p-svc-3"],
+            "a 1ª réplica mantém o nome de sempre (depends_on/DNS não mudam), as outras levam sufixo"
+        );
     }
 
     #[test]
     fn service_sem_image_nem_build_e_erro() {
         let yaml = "services:\n  svc:\n    ports: []\n";
         let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
-        assert!(translate(&compose, "p", Path::new("/tmp")).is_err());
+        assert!(translate(&compose, "p", Path::new("/tmp"), &[]).is_err());
     }
 
     #[test]
@@ -2142,6 +3056,140 @@ services:
             "colisão real entre dois pares projecto/chave distintos"
         );
     }
+
+    fn services_of(yaml: &str) -> BTreeMap<String, ComposeService> {
+        let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
+        compose.services
+    }
+
+    /// The base case: a child inherits everything it doesn't declare itself,
+    /// and its own values win where it does.
+    #[test]
+    fn extends_inherits_what_the_child_omits_and_overrides_what_it_declares() {
+        let mut services = services_of(
+            "services:\n  \
+             base:\n    image: alpine\n    working_dir: /base\n    environment: [A=1, B=1]\n  \
+             web:\n    extends: {service: base}\n    working_dir: /web\n",
+        );
+        resolve_extends(&mut services).unwrap();
+        let web = &services["web"];
+        assert_eq!(web.image.as_deref(), Some("alpine"), "inherited from base");
+        assert_eq!(web.working_dir.as_deref(), Some("/web"), "child overrides");
+        assert!(web.extends.is_none(), "consumed after resolution");
+        let mut env = web.environment.to_kv_pairs();
+        env.sort();
+        assert_eq!(env, vec!["A=1".to_string(), "B=1".to_string()]);
+    }
+
+    /// `environment:`/`labels:` MERGE key by key, child winning on a shared
+    /// key — not a full override of the base's map.
+    #[test]
+    fn extends_merges_environment_child_wins_on_shared_keys() {
+        let mut services = services_of(
+            "services:\n  \
+             base:\n    image: x\n    environment: [SHARED=base, ONLY_BASE=b]\n  \
+             web:\n    extends: {service: base}\n    environment: [SHARED=child, ONLY_CHILD=c]\n",
+        );
+        resolve_extends(&mut services).unwrap();
+        let mut env = services["web"].environment.to_kv_pairs();
+        env.sort();
+        assert_eq!(
+            env,
+            vec![
+                "ONLY_BASE=b".to_string(),
+                "ONLY_CHILD=c".to_string(),
+                "SHARED=child".to_string(),
+            ],
+            "child's value wins, base's untouched keys survive"
+        );
+    }
+
+    /// `depends_on:` is the one field the Compose Specification never
+    /// inherits through `extends` — a service's dependency graph is its own.
+    #[test]
+    fn extends_never_inherits_depends_on() {
+        let mut services = services_of(
+            "services:\n  \
+             db:\n    image: postgres\n  \
+             base:\n    image: x\n    depends_on: [db]\n  \
+             web:\n    extends: {service: base}\n    image: y\n",
+        );
+        resolve_extends(&mut services).unwrap();
+        assert!(
+            services["web"].depends_on.names().is_empty(),
+            "web never named `db` itself, and extends must not have given it to it"
+        );
+    }
+
+    /// A chain (`web` extends `mid` extends `base`) resolves transitively —
+    /// `web` ends up with `base`'s fields too, not just `mid`'s own.
+    #[test]
+    fn extends_chain_is_transitive() {
+        let mut services = services_of(
+            "services:\n  \
+             base:\n    image: x\n    working_dir: /base\n  \
+             mid:\n    extends: {service: base}\n  \
+             web:\n    extends: {service: mid}\n    image: y\n",
+        );
+        resolve_extends(&mut services).unwrap();
+        let web = &services["web"];
+        assert_eq!(web.image.as_deref(), Some("y"), "web's own override");
+        assert_eq!(
+            web.working_dir.as_deref(),
+            Some("/base"),
+            "inherited through the chain, not just from the direct base"
+        );
+    }
+
+    #[test]
+    fn extends_of_an_undefined_service_is_a_clear_error() {
+        let mut services =
+            services_of("services:\n  web:\n    extends: {service: ghost}\n    image: y\n");
+        let e = resolve_extends(&mut services).unwrap_err().to_string();
+        assert!(e.contains("ghost"), "{e}");
+        assert!(e.contains("undefined"), "{e}");
+    }
+
+    #[test]
+    fn extends_cycle_is_refused_naming_the_path() {
+        let mut services = services_of(
+            "services:\n  \
+             a:\n    extends: {service: b}\n    image: x\n  \
+             b:\n    extends: {service: a}\n    image: y\n",
+        );
+        let e = resolve_extends(&mut services).unwrap_err().to_string();
+        assert!(e.contains("cycle"), "{e}");
+    }
+
+    /// `cap_add`/`cap_drop` concatenate without duplicating an entry both
+    /// base and child declare.
+    #[test]
+    fn extends_dedups_cap_add() {
+        let mut services = services_of(
+            "services:\n  \
+             base:\n    image: x\n    cap_add: [NET_ADMIN, SYS_TIME]\n  \
+             web:\n    extends: {service: base}\n    cap_add: [NET_ADMIN, SYS_PTRACE]\n",
+        );
+        resolve_extends(&mut services).unwrap();
+        assert_eq!(
+            services["web"].cap_add,
+            vec!["NET_ADMIN", "SYS_TIME", "SYS_PTRACE"]
+        );
+    }
+
+    /// `extends.file` is refused at the raw-YAML check, before typed
+    /// parsing ever runs — this implementation doesn't do multi-file
+    /// compose at all.
+    #[test]
+    fn extends_file_is_refused() {
+        let e = check_unsupported_fields(
+            "services:\n  web:\n    extends: {service: base, file: other.yml}\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("extends.file"), "{e}");
+        assert!(e.contains("multi-file"), "{e}");
+    }
 }
 
 /// The allowlist behind the denylist. This module is what fails if
@@ -2197,12 +3245,18 @@ mod tests_unknown_keys {
 
     /// The specific reasons still win over the generic message — a denied key
     /// must not regress into "not understood".
+    ///
+    /// The `profiles:`/`extends:`/`configs:`/`secrets:` assertions this test
+    /// once had were REMOVED as each shipped: they asserted the key is
+    /// refused, and that stopped being true. A test that keeps a retired
+    /// refusal alive is the «a test can encode the bug» trap this repo has
+    /// already paid for — it would have blocked the very feature it outlived.
+    /// `KNOWN_UNSUPPORTED_TOP` still has `include`, so the property this test
+    /// exists for is still covered.
     #[test]
     fn the_specific_reason_wins_over_the_generic() {
-        let e = err_of("services:\n  web:\n    image: nginx\n    extends: {}\n");
-        assert!(e.contains("inline the service"), "specific reason: {e}");
-        let e = err_of("configs:\n  a: {}\nservices:\n  web:\n    image: nginx\n");
-        assert!(e.contains("kind: Secret"), "specific reason: {e}");
+        let e = err_of("include:\n  - other.yml\nservices:\n  web:\n    image: nginx\n");
+        assert!(e.contains("pass exactly one -f"), "specific reason: {e}");
     }
 
     #[test]
@@ -2280,6 +3334,22 @@ volumes:
         let e = err_of("services:\n  w:\n    image: n\nnetworks:\n  front:\n    driver: bridge\n");
         assert!(e.contains("driver"), "{e}");
         assert!(e.contains("front"), "{e}");
+    }
+
+    #[test]
+    fn a_secret_entry_key_outside_the_list_is_refused() {
+        let e = err_of("services:\n  w:\n    image: n\nsecrets:\n  a:\n    bogus: true\n");
+        assert!(e.contains("bogus"), "{e}");
+        assert!(e.contains("secrets 'a'"), "{e}");
+    }
+
+    #[test]
+    fn a_config_entry_cannot_use_environment_source() {
+        // `environment:` is a `secrets:`-only source in the real Compose
+        // Specification — allowing it under `configs:` too would be a second,
+        // undocumented opinion, so it is refused like any other unknown key.
+        let e = err_of("services:\n  w:\n    image: n\nconfigs:\n  a:\n    environment: X\n");
+        assert!(e.contains("environment"), "{e}");
     }
 
     /// The guard that stops the allowlist from drifting away from the struct it
