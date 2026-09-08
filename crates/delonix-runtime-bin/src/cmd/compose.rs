@@ -3805,10 +3805,20 @@ mod tests_unknown_keys {
     /// already paid for — it would have blocked the very feature it outlived.
     /// `KNOWN_UNSUPPORTED_TOP` still has `include`, so the property this test
     /// exists for is still covered.
+    ///
+    /// The assertion moved off "pass exactly one -f" for the same reason: that
+    /// wording was right while multi-file did not exist, and became the exact
+    /// opposite of the truth when repeated `-f` shipped. What is asserted now
+    /// is what stays true — the refusal names `include` and points at the form
+    /// that DOES work.
     #[test]
     fn the_specific_reason_wins_over_the_generic() {
         let e = err_of("include:\n  - other.yml\nservices:\n  web:\n    image: nginx\n");
-        assert!(e.contains("pass exactly one -f"), "specific reason: {e}");
+        assert!(e.contains("include"), "specific reason: {e}");
+        assert!(
+            e.contains("-f a -f b"),
+            "must point at the form that IS supported: {e}"
+        );
     }
 
     #[test]
