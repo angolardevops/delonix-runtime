@@ -1067,6 +1067,24 @@ fn start_argv(
             args.push(p.clone());
         }
     }
+    // `--privileged` has to REACH the engine, not merely be translated into
+    // capabilities. The engine documents it: "without an explicit list, apply
+    // runc's default masked/readonly paths […] `--privileged` opts out
+    // wholesale, matching Docker/runc semantics" — and runc's default list
+    // contains `/proc/sys`.
+    //
+    // Without this, dropping the explicit `--readonly-path` flags below only
+    // swaps one list for the other: the engine falls back to its defaults and
+    // `/proc/sys` stays read-only. MEASURED — the first version of this fix did
+    // exactly that, and `kube-proxy` failed on the same line with the corrected
+    // binary installed on the node.
+    //
+    // Capabilities and mounts are separate axes of `--privileged`, as
+    // `cap_ceiling`'s note already said. The CRI translated the first and
+    // forgot the second.
+    if rec.privileged {
+        args.push("--privileged".into());
+    }
     args.push("--security-opt".into());
     args.push(format!("no-new-privileges={}", rec.no_new_privs));
     // `privileged` implies unconfined seccomp (the engine does the same on its
@@ -2076,6 +2094,13 @@ mod tests {
         assert!(
             !argv.iter().any(|a| a == "--masked-path"),
             "um privilegiado não leva `--masked-path`: {argv:?}"
+        );
+        // A metade sem a qual a outra não serve de nada: retirar os caminhos
+        // explícitos faz o motor cair nas omissões do runc, que incluem
+        // `/proc/sys`. Só o `--privileged` as desliga.
+        assert!(
+            argv.iter().any(|a| a == "--privileged"),
+            "`privileged: true` tem de CHEGAR ao motor: {argv:?}"
         );
     }
 
