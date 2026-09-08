@@ -3471,7 +3471,7 @@ workers:
     /// (no `--node` at all), never `kubeadm upgrade node`. Silently accepting
     /// it would run the wrong verb against the right host.
     #[test]
-    fn find_upgrade_target_recusa_o_lider() {
+    fn find_upgrade_target_refuses_the_leader() {
         let spec = upgrade_test_spec();
         let err = find_upgrade_target(&spec, "cp1").unwrap_err().to_string();
         assert!(err.contains("cp1"), "{err}");
@@ -3480,7 +3480,7 @@ workers:
 
     /// The other control-plane and every worker ARE valid `--node` targets.
     #[test]
-    fn find_upgrade_target_encontra_outro_control_plane_e_workers() {
+    fn find_upgrade_target_finds_another_control_plane_and_workers() {
         let spec = upgrade_test_spec();
         assert_eq!(find_upgrade_target(&spec, "cp2").unwrap().ip, "10.0.0.11");
         assert_eq!(find_upgrade_target(&spec, "w1").unwrap().ip, "10.0.0.20");
@@ -3489,7 +3489,7 @@ workers:
     /// A name that matches nothing gets a clear error naming what DOES exist
     /// — never a bare "not found" that sends the reader guessing.
     #[test]
-    fn find_upgrade_target_lista_os_nomes_disponiveis_quando_falha() {
+    fn find_upgrade_target_lists_the_available_names_when_it_fails() {
         let spec = upgrade_test_spec();
         let err = find_upgrade_target(&spec, "ghost").unwrap_err().to_string();
         assert!(err.contains("cp2"), "{err}");
@@ -3504,7 +3504,7 @@ workers:
     }
 
     #[test]
-    fn single_cluster_doc_recusa_zero_ou_varios() {
+    fn single_cluster_doc_refuses_zero_or_several() {
         assert!(single_cluster_doc(&[]).is_err());
         let docs = vec![cluster_doc("a"), cluster_doc("b")];
         let err = single_cluster_doc(&docs).unwrap_err().to_string();
@@ -3512,7 +3512,7 @@ workers:
     }
 
     #[test]
-    fn single_cluster_doc_aceita_exactamente_um() {
+    fn single_cluster_doc_accepts_exactly_one() {
         let docs = vec![cluster_doc("only")];
         let (doc, _spec) = single_cluster_doc(&docs).unwrap();
         assert_eq!(doc.metadata.name, "only");

@@ -3135,7 +3135,7 @@ services:
     /// attach_container_on_ip`'s own responsibility and test, not this one's
     /// — this only proves the compose YAML is not silently dropped.
     #[test]
-    fn networks_ipv4_address_flui_para_run_opts_ip() {
+    fn networks_ipv4_address_flows_into_run_opts_ip() {
         let yaml = "services:\n  web:\n    image: x\n    networks:\n      default:\n        ipv4_address: 10.210.5.5\n";
         let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
         let t = translate(&compose, "p", Path::new("/tmp"), &[]).unwrap();
@@ -3150,7 +3150,7 @@ services:
     /// (IPAM-derived) — the common case must not regress into always fixing
     /// an address that was never asked for.
     #[test]
-    fn sem_ipv4_address_o_ip_fica_none() {
+    fn with_no_ipv4_address_the_ip_stays_none() {
         let yaml = "services:\n  web:\n    image: x\n";
         let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
         let t = translate(&compose, "p", Path::new("/tmp"), &[]).unwrap();
@@ -3394,7 +3394,7 @@ services:
     }
 
     #[test]
-    fn deploy_replicas_cria_um_container_por_replica() {
+    fn deploy_replicas_creates_one_container_per_replica() {
         let yaml = "services:\n  svc:\n    image: x\n    deploy:\n      replicas: 3\n";
         let compose: ComposeFile = serde_yaml::from_str(yaml).unwrap();
         let t = translate(&compose, "p", Path::new("/tmp"), &[]).unwrap();

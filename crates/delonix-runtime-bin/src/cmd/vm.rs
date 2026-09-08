@@ -4188,7 +4188,7 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
     /// properties worth locking down; true randomness needs a live RNG this
     /// test does not try to second-guess.
     #[test]
-    fn random_suffix_tem_forma_hex_fixa_e_varia() {
+    fn random_suffix_has_a_fixed_hex_shape_and_varies() {
         let a = super::random_suffix();
         let b = super::random_suffix();
         assert_eq!(a.len(), 8, "4 random bytes hex-encoded is 8 chars: {a:?}");

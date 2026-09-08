@@ -1958,7 +1958,7 @@ mod tests {
     /// 4-field comparison) and must normalize `src` the same way `norm_any`
     /// already does for the match itself (ADR-0029, decision 1).
     #[test]
-    fn cli_rule_origin_e_deterministico_e_normaliza_o_src() {
+    fn cli_rule_origin_is_deterministic_and_normalizes_the_src() {
         assert_eq!(
             cli_rule_origin("in", "tcp", "8069", ""),
             cli_rule_origin("in", "tcp", "8069", "")
@@ -1982,7 +1982,7 @@ mod tests {
     /// or a `FirewallPolicy` apply would stop wiping imperative rules it is
     /// supposed to fully replace (see `is_manifest_origin`'s doc comment).
     #[test]
-    fn is_manifest_origin_distingue_documento_de_origem_cli() {
+    fn is_manifest_origin_tells_a_document_from_a_cli_origin() {
         assert!(!is_manifest_origin(&cli_rule_origin(
             "in", "tcp", "8069", ""
         )));
