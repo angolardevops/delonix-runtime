@@ -4542,8 +4542,8 @@ pub fn route_set_metadata(
     labels: &[(String, Option<String>)],
     annotations: &[(String, Option<String>)],
 ) -> Result<()> {
-    let mut def = route_get(from, to)
-        .ok_or_else(|| Error::NotFound(format!("no such route: {from} -> {to}")))?;
+    let mut def =
+        route_get(from, to).ok_or_else(|| Error::NotFound(format!("route: {from} -> {to}")))?;
     for (k, v) in labels {
         match v {
             Some(v) => {
@@ -4712,7 +4712,7 @@ pub fn service_set_metadata(
     annotations: &[(String, Option<String>)],
 ) -> Result<()> {
     let mut def = service_get(namespace, name)
-        .ok_or_else(|| Error::NotFound(format!("no such service: {namespace}/{name}")))?;
+        .ok_or_else(|| Error::NotFound(format!("service: {namespace}/{name}")))?;
     for (k, v) in labels {
         match v {
             Some(v) => {

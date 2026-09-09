@@ -34,11 +34,11 @@ msgstr "Constrói uma imagem a partir de um Dockerfile ou Delonixfile."
 msgid "Declarative microVMs: create/ls/stop/rm/status."
 msgstr "microVMs declarativas: create/ls/stop/rm/status."
 
-msgid "Declarative microVMs: create/ls/stop/start/status"
-msgstr "microVMs declarativas: create/ls/stop/start/status"
+msgid "Declarative microVMs: create/ls/start/stop/console"
+msgstr "microVMs declarativas: create/ls/start/stop/console"
 
-msgid "Declarative microVMs: create/ls/stop/start/status.\n\n`describe`/`rm` moved to the generic per-Kind verbs — `delonix describe vm <name>` / `delonix delete vm <name>`."
-msgstr "microVMs declarativas: create/ls/stop/start/status.\n\n`describe`/`rm` passaram para os verbos genéricos por-Kind — `delonix describe vm <nome>` / `delonix delete vm <nome>`."
+msgid "Declarative microVMs: create/ls/start/stop/console.\n\n`describe`/`rm` moved to the generic per-Kind verbs — `delonix describe vm <name>` / `delonix delete vm <name>`."
+msgstr "microVMs declarativas: create/ls/start/stop/console.\n\n`describe`/`rm` passaram para os verbos genéricos por-Kind — `delonix describe vm <nome>` / `delonix delete vm <nome>`."
 
 msgid "Named volumes and bind mounts: create/ls/rm/inspect."
 msgstr "Volumes nomeados e bind mounts: create/ls/rm/inspect."
@@ -103,8 +103,8 @@ msgstr "Firewall de ENTRADA (regras L4 + publishes DNAT) de um container na SDN.
 msgid "OUTBOUND firewall (L4 rules + per-network egress policy) for a container."
 msgstr "Firewall de SAÍDA (regras L4 + política de egress por-rede) de um container."
 
-msgid "Embedded L7/HTTP reverse-proxy (`kind: HTTPRoute`): ls/apply/rm."
-msgstr "Reverse-proxy L7/HTTP embutido (`kind: HTTPRoute`): ls/apply/rm."
+msgid "Embedded L7/HTTP reverse-proxy (`kind: HTTPRoute`): apply/rm."
+msgstr "Reverse-proxy L7/HTTP embutido (`kind: HTTPRoute`): apply/rm."
 
 msgid "Boot persistence: systemd units so containers come back up after a reboot."
 msgstr "Persistência no arranque: units systemd para os containers voltarem a subir no boot."
@@ -3655,7 +3655,7 @@ msgstr "workload '{name}': type: {type} exige um bloco '{type}:'"
 msgid "workload '{name}': type: {type} must not carry a '{other}:' block"
 msgstr "workload '{name}': type: {type} não pode levar um bloco '{other}:'"
 
-msgid "no such workload: {name}"
+msgid "workload: {name}"
 msgstr "workload inexistente: {name}"
 
 msgid "workload '{name}' is ambiguous (both a container and a vm) — use `delonix container` or `delonix vm` directly"
@@ -4363,11 +4363,11 @@ msgstr "Lista os containers."
 msgid "Real multi-container pods (N containers sharing a netns): create/ls/describe/rm/logs."
 msgstr "Pods multi-container REAIS (N containers a partilhar uma netns): create/ls/describe/rm/logs."
 
-msgid "Real multi-container pods (N containers sharing a netns): create/ls/logs/exec/cp/attach"
-msgstr "Pods multi-container REAIS (N containers a partilhar uma netns): create/ls/logs/exec/cp/attach"
+msgid "Real multi-container pods (N containers sharing a netns): create/logs/exec/cp/attach/port-forward"
+msgstr "Pods multi-container REAIS (N containers a partilhar uma netns): create/logs/exec/cp/attach/port-forward"
 
-msgid "Real multi-container pods (N containers sharing a netns): create/ls/logs/exec/cp/attach.\n\n`describe`/`rm` moved to the generic per-Kind verbs — `delonix describe pod <name>` / `delonix delete pod <name>`."
-msgstr "Pods multi-container REAIS (N containers a partilhar uma netns): create/ls/logs/exec/cp/attach.\n\n`describe`/`rm` passaram para os verbos genéricos por-Kind — `delonix describe pod <nome>` / `delonix delete pod <nome>`."
+msgid "Real multi-container pods (N containers sharing a netns): create/logs/exec/cp/attach/port-forward.\n\n`describe`/`rm` moved to the generic per-Kind verbs — `delonix describe pod <name>` / `delonix delete pod <name>`."
+msgstr "Pods multi-container REAIS (N containers a partilhar uma netns): create/logs/exec/cp/attach/port-forward.\n\n`describe`/`rm` passaram para os verbos genéricos por-Kind — `delonix describe pod <nome>` / `delonix delete pod <nome>`."
 
 msgid "Create a pod (N containers sharing a netns) from a manifest (`kind: Pod`)."
 msgstr "Cria um pod (N containers a partilhar uma netns) a partir de um manifesto (`kind: Pod`)."
@@ -8184,8 +8184,8 @@ msgstr "Serve uma fatia da Docker Engine API num socket unix.\n\n`docker version
 msgid "no such VM image: {name} (see `delonix image vm ls`)"
 msgstr "não existe a imagem VM: {name} (ver `delonix image vm ls`)"
 
-msgid "VM image '{name}' is the backing file of: {vms} — remove those VMs first (`delonix vm rm <name>`), or pass --force to make them unreadable"
-msgstr "a imagem VM '{name}' é o ficheiro base de: {vms} — remove essas VMs primeiro (`delonix vm rm <nome>`), ou passa --force para as tornar ilegíveis"
+msgid "VM image '{name}' is the backing file of: {vms} — remove those VMs first (`delonix delete vm <name>`), or pass --force to make them unreadable"
+msgstr "a imagem VM '{name}' é o ficheiro base de: {vms} — remove essas VMs primeiro (`delonix delete vm <nome>`), ou passa --force para as tornar ilegíveis"
 
 msgid "VM image '{name}': {vms} back onto it and will become unreadable"
 msgstr "imagem VM '{name}': {vms} assentam nela e vão ficar ilegíveis"
@@ -9944,17 +9944,17 @@ msgstr "tudo aqui é livre de máquina — lê o ficheiro, não o host"
 
 # ---- help: o grupo `backup` consolidado (v0.67.0) ---------------------------
 
-msgid "Archives of ONE resource (container/pod/vm/stack): create, list, inspect, restore, schedule, remove"
-msgstr "Arquivos de UM recurso (container/pod/vm/stack): create, list, inspect, restore, schedule, remove"
+msgid "Archives of ONE resource (container/pod/vm/stack): create, ls, inspect, restore, schedule, remove"
+msgstr "Arquivos de UM recurso (container/pod/vm/stack): create, ls, inspect, restore, schedule, remove"
 
 msgid ""
-"Archives of ONE resource (container/pod/vm/stack): create, list, inspect, restore, schedule, remove.\n"
+"Archives of ONE resource (container/pod/vm/stack): create, ls, inspect, restore, schedule, remove.\n"
 "\n"
 "The archive carries the record and the DATA of the volumes it uses — not the image and not the rootfs, which `backup restore` derives by pulling. A VM is the exception: its overlay disk IS its state, so that one travels.\n"
 "\n"
 "For the whole node — registries, secrets, cluster PKI, the event log — the command is `delonix system backup`, which is a different scope and not a second door to this one."
 msgstr ""
-"Arquivos de UM recurso (container/pod/vm/stack): create, list, inspect, restore, schedule, remove.\n"
+"Arquivos de UM recurso (container/pod/vm/stack): create, ls, inspect, restore, schedule, remove.\n"
 "\n"
 "O arquivo leva o registo e os DADOS dos volumes que usa — não a imagem e não o rootfs, que o `backup restore` deriva por pull. A VM é a excepção: o disco overlay dela É o seu estado, logo esse viaja.\n"
 "\n"
@@ -10437,8 +10437,8 @@ msgstr "Imagens OCI: pull/ls/remove/export. `image vm <cmd>` para as imagens VM 
 msgid "Human-readable detail of one or more images, `kubectl describe`-style.\n\nTags/digest/size/layers + the OCI config: entrypoint/cmd/env/workdir."
 msgstr "Detalhe legível de uma ou mais imagens, ao estilo `kubectl describe`.\n\nTags/digest/tamanho/layers + a config OCI: entrypoint/cmd/env/workdir."
 
-msgid "Golden VM images (`<root>/vm-images/`): ls/pull/push/build/rm/etc"
-msgstr "Imagens VM douradas (`<root>/vm-images/`): ls/pull/push/build/rm/etc"
+msgid "Golden VM images (`<root>/vm-images/`): ls/pull/push/build/rm/describe"
+msgstr "Imagens VM douradas (`<root>/vm-images/`): ls/pull/push/build/rm/describe"
 
 msgid "Publish a local image to an OCI registry.\n\nWithout `target`, publishes under the image's own reference."
 msgstr "Publica uma imagem local num registo OCI.\n\nSem `target`, publica sob a própria referência da imagem."

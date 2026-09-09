@@ -160,7 +160,7 @@ fn doc_namespace_of(name: &str) -> Result<String> {
         .into_iter()
         .find(|d| d.name == name)
         .map(|d| d.namespace)
-        .ok_or_else(|| Error::NotFound(format!("no such service: {name}")))
+        .ok_or_else(|| Error::NotFound(format!("service: {name}")))
 }
 
 /// For `stack ls`/`describe`: declared vs. how many live backends it resolves
@@ -346,7 +346,7 @@ pub(crate) fn cmd_describe(names: &[String]) -> Result<()> {
             .into_iter()
             .find(|d| d.name == *name)
         else {
-            return Err(Error::NotFound(format!("no such service: {name}")));
+            return Err(Error::NotFound(format!("service: {name}")));
         };
         let backends = match_count(&def.namespace, &def.match_labels);
         let mut d = super::output::Describe::new();

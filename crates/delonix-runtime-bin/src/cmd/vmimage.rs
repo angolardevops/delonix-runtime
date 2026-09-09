@@ -420,7 +420,7 @@ pub(crate) fn cmd_rm(store: &VmImageStore, names: &[String], force: bool) -> Res
         if !users.is_empty() {
             if !force {
                 super::output::error(&super::po::tf(
-                    "VM image '{name}' is the backing file of: {vms} — remove those VMs first (`delonix vm rm <name>`), or pass --force to make them unreadable",
+                    "VM image '{name}' is the backing file of: {vms} — remove those VMs first (`delonix delete vm <name>`), or pass --force to make them unreadable",
                     &[("name", name), ("vms", &users.join(", "))],
                 ));
                 failed = true;
