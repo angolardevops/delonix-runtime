@@ -31,17 +31,46 @@
 #
 # ## Usage
 #
-#   scripts/chaos.sh [--bin PATH] [--keep] [scenario ...]
+#   scripts/chaos.sh [--bin PATH] [--keep] [--max-load N] [--force] [scenario ...]
 #
 # With no scenario names, runs them all. `--keep` leaves the sandbox up for
 # post-mortem (remember to `scripts/chaos.sh --clean` afterwards).
+#
+# ## The bench, and why this REFUSES to run on a busy machine
+#
+# Measured 2026-09-09 with concurrent load on the host: `FAIL scale — only 0 of
+# 30 containers got an IP`, plus SKIPs in `abrupt_kill`, `cgroup_netns`,
+# `stack_netroute` and `stack_partial_apply` ("container did not start"). Same
+# harness, same binary, quiet machine: `scale` 30/30 PASS and the other three
+# PASS. A FAIL that reads as a product defect and is really the bench is the
+# worst kind of noise in a gate.
+#
+# So the load check comes FIRST, before `setup` touches anything, and it is the
+# SAME judgement `bench.sh` uses — `scripts/bancada.sh`, sourced by both — at a
+# STRICTER default threshold (`nproc / 4`, against the bench's `nproc / 2`),
+# because 30 concurrent container starts fall off a cliff where a latency
+# measurement only degrades gradually. The two measured points are in
+# `bancada.sh`. `--max-load N` overrides it; `--force` runs anyway and says the
+# verdict is not publishable.
+#
+# ## Exit code
+#
+# 0 only when FAIL == 0. SKIP never fails the run — a scenario whose
+# precondition is absent proves nothing either way — but every SKIP is printed
+# in its own block in the summary, because a silent SKIP is indistinguishable
+# from a green one, and that is how four scenarios went unnoticed.
 
 set -uo pipefail
+
+# shellcheck source=scripts/bancada.sh
+. "$(cd "$(dirname "$0")" && pwd)/bancada.sh"
 
 SANDBOX="${DELONIX_CHAOS_DIR:-/tmp/dlx-chaos}"
 BIN="${DELONIX_CHAOS_BIN:-./target/debug/delonix}"
 IMAGE="${DELONIX_CHAOS_IMAGE:-redis:7-alpine}"
 KEEP=0
+FORCE=0
+MAXLOAD=""
 PASS=0; FAIL=0; SKIP=0
 declare -a RESULTS=()
 
@@ -798,7 +827,7 @@ YAML
 # o que esta stack possui».
 #
 # E o CICLO que distingue, nao um comando: o apply falhado devolve 1 com e sem
-# a correccao, e o `volumes ls` mostra o volume nos dois casos. O que muda e se
+# a correccao, e o `volume ls` mostra o volume nos dois casos. O que muda e se
 # o `destroy` o leva.
 scen_stack_partial_apply() {
   head_ "stack-partial-apply — o que um apply falhado cria continua a ser da stack"
@@ -838,9 +867,9 @@ spec: { pull: "registry.invalid/nao-existe:0.0.0" }
 YAML
   if dlx stack apply -f "$dir/m.yaml" >/dev/null 2>&1; then
     bad "stack-partial-apply" "o apply com uma imagem impossivel devolveu sucesso"
-    dlx volumes rm spa-base spa-novo >/dev/null 2>&1; rm -rf "$dir"; return
+    dlx volume rm spa-base spa-novo >/dev/null 2>&1; rm -rf "$dir"; return
   fi
-  if ! dlx volumes inspect spa-novo >/dev/null 2>&1; then
+  if ! dlx volume inspect spa-novo >/dev/null 2>&1; then
     skip "stack-partial-apply" "o apply morreu antes da camada Volume"; rm -rf "$dir"; return
   fi
 
@@ -854,19 +883,19 @@ metadata: { name: spa-base }
 spec: {}
 YAML
   # Um volume alheio, para provar que a correccao nao passou a levar tudo.
-  dlx volumes create spa-alheio >/dev/null 2>&1
+  dlx volume create spa-alheio >/dev/null 2>&1
   dlx stack destroy -f "$dir/m.yaml" >/dev/null 2>&1
 
-  if dlx volumes inspect spa-novo >/dev/null 2>&1; then
+  if dlx volume inspect spa-novo >/dev/null 2>&1; then
     bad "stack-partial-apply" "o destroy deixou para tras o volume que o apply falhado criou"
-  elif dlx volumes inspect spa-base >/dev/null 2>&1; then
+  elif dlx volume inspect spa-base >/dev/null 2>&1; then
     bad "stack-partial-apply" "o destroy nao levou o volume declarado"
-  elif ! dlx volumes inspect spa-alheio >/dev/null 2>&1; then
+  elif ! dlx volume inspect spa-alheio >/dev/null 2>&1; then
     bad "stack-partial-apply" "o destroy apagou um volume que a stack nao possui"
   else
     ok "stack-partial-apply: o destroy levou o orfao do apply falhado e poupou o alheio"
   fi
-  dlx volumes rm spa-alheio spa-novo spa-base >/dev/null 2>&1
+  dlx volume rm spa-alheio spa-novo spa-base >/dev/null 2>&1
   rm -rf "$dir"
 }
 
@@ -969,7 +998,7 @@ YAML
 #   DELONIX_CHAOS_TRUENAS_POOL=tank scripts/chaos.sh truenas_destroy
 #
 # O que prova, e o que falha se a correccao for revertida:
-#   * `volumes rm` SEM a flag nao pode destruir o dataset — tirar o guarda
+#   * `volume rm` SEM a flag nao pode destruir o dataset — tirar o guarda
 #     `if destroy_remote` faz o passo 2 falhar;
 #   * `--destroy-remote` num volume que nao provisionamos e RECUSADO e deixa o
 #     volume local intacto — tirar a exigencia do carimbo de posse faz o passo 4
@@ -1027,7 +1056,7 @@ YAML
   fi
 
   # 2. `rm` SEM a flag: o dataset TEM de sobreviver.
-  dlx volumes rm chaosvol >/dev/null 2>&1
+  dlx volume rm chaosvol >/dev/null 2>&1
   if [ "$(nas_code "$ds")" = "200" ]; then
     ok "truenas-destroy: rm sem a flag deixou o dataset em paz"
   else
@@ -1036,19 +1065,19 @@ YAML
   fi
 
   # 3. Um volume que NAO provisionamos nao pode ser destruido por engano.
-  dlx volumes create chaosalheio >/dev/null 2>&1
-  if dlx volumes rm chaosalheio --destroy-remote >/dev/null 2>&1; then
+  dlx volume create chaosalheio >/dev/null 2>&1
+  if dlx volume rm chaosalheio --destroy-remote >/dev/null 2>&1; then
     bad "truenas-destroy" "--destroy-remote aceitou um volume sem provisionamento"
-  elif dlx volumes inspect chaosalheio >/dev/null 2>&1; then
+  elif dlx volume inspect chaosalheio >/dev/null 2>&1; then
     ok "truenas-destroy: recusou o alheio E deixou o volume local intacto"
   else
     bad "truenas-destroy" "a recusa removeu o volume local na mesma"
   fi
-  dlx volumes rm chaosalheio >/dev/null 2>&1
+  dlx volume rm chaosalheio >/dev/null 2>&1
 
   # 4. Com a flag e com o carimbo: o dataset morre mesmo.
   dlx stack apply -f "$dir/m.yaml" >/dev/null 2>&1
-  dlx volumes rm chaosvol --destroy-remote >/dev/null 2>&1
+  dlx volume rm chaosvol --destroy-remote >/dev/null 2>&1
   if [ "$(nas_code "$ds")" = "404" ]; then
     ok "truenas-destroy: --destroy-remote destruiu o dataset provisionado"
   else
@@ -1059,7 +1088,7 @@ YAML
   curl -sk -u "$user:$pass" -X DELETE -H 'Content-Type: application/json' \
     --max-time 20 "$url/api/v2.0/pool/dataset/id/$(printf '%s' "$ds" | sed 's|/|%2F|g')" \
     -d '{"recursive":true}' >/dev/null 2>&1
-  dlx volumes rm chaosvol >/dev/null 2>&1
+  dlx volume rm chaosvol >/dev/null 2>&1
   rm -rf "$dir"
 }
 
@@ -1115,8 +1144,10 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --bin) BIN="$2"; shift 2;;
     --keep) KEEP=1; shift;;
+    --max-load) MAXLOAD="$2"; shift 2;;
+    --force) FORCE=1; shift;;
     --clean) teardown_quiet; echo "sandbox limpo."; exit 0;;
-    -h|--help) sed -n '2,40p' "$0"; exit 0;;
+    -h|--help) sed -n '2,60p' "$0"; exit 0;;
     *) SEL+=("$1"); shift;;
   esac
 done
@@ -1125,6 +1156,25 @@ SELECTED=("${SEL[@]:-${ALL[@]}}")
 command -v "$BIN" >/dev/null 2>&1 || [ -x "$BIN" ] || { echo "binário não encontrado: $BIN"; exit 2; }
 
 printf '\033[1mDelonix chaos harness\033[0m — sandbox %s · binário %s\n' "$SANDBOX" "$BIN"
+
+# A bancada primeiro: `setup` já sobe infra e cria rede, e uma recusa depois
+# disso deixaria restos por uma decisão que se podia ter tomado antes de tocar
+# em nada.
+# Divisor 4, e não o 2 do `bench.sh`: medido a 2026-09-09, um load de 11.56
+# passava por baixo do limiar do bench (16.00) e ainda assim dava `scale`
+# 0/30 com três cenários a saltar atrás. Ver `scripts/bancada.sh`.
+bancada_medir "$MAXLOAD" 4
+printf 'bancada: load(1m) %s · %s threads · limiar %s%s\n' \
+  "$BANCADA_LOAD1" "$BANCADA_NCPU" "$BANCADA_THRESHOLD" \
+  "${MAXLOAD:+ (via --max-load)}"
+if [ "$BANCADA_OK" != "1" ]; then
+  if [ "$FORCE" != "1" ]; then
+    bancada_recusa "chaos.sh" \
+      "Aqui a contenção não sai num número, sai num VEREDICTO: um container que não arranca a tempo vira \`FAIL <cenário>\` e lê-se como defeito do motor."
+  fi
+  printf '\033[33mAVISO\033[0m: --force pediu para correr acima do limiar. OS VEREDICTOS NÃO SÃO PUBLICÁVEIS.\n'
+fi
+
 setup
 trap '[ $KEEP -eq 0 ] && teardown_quiet' EXIT
 
@@ -1134,5 +1184,25 @@ done
 
 printf '\n\033[1m── resumo ──\033[0m\n'
 for r in "${RESULTS[@]}"; do printf '  %s\n' "$r"; done
+
+# Um SKIP não chumba — a pré-condição faltou, e isso não é evidência sobre o
+# motor. Mas sai em BLOCO PRÓPRIO: quatro cenários passaram despercebidos
+# porque um SKIP no meio de vinte linhas verdes lê-se como verde.
+if [ "$SKIP" -gt 0 ]; then
+  printf '\n\033[1;33m── %d SKIP: cenários que NÃO foram exercitados ──\033[0m\n' "$SKIP"
+  for r in "${RESULTS[@]}"; do case "$r" in SKIP*) printf '  %s\n' "$r";; esac; done
+  printf '  \033[33m(um SKIP não é um PASS: nenhum destes disse nada sobre o motor)\033[0m\n'
+fi
+if [ "$FAIL" -gt 0 ]; then
+  printf '\n\033[1;31m── %d FAIL ──\033[0m\n' "$FAIL"
+  for r in "${RESULTS[@]}"; do case "$r" in FAIL*) printf '  %s\n' "$r";; esac; done
+fi
 printf '\n  %d PASS · %d FAIL · %d SKIP\n\n' "$PASS" "$FAIL" "$SKIP"
-[ "$FAIL" -eq 0 ]
+
+# EXPLÍCITO, e não um `[ "$FAIL" -eq 0 ]` solto na última linha: aquele era
+# correcto mas frágil — qualquer linha acrescentada depois dele passava a ser o
+# código de saída do harness, em silêncio.
+if [ "$FAIL" -gt 0 ]; then
+  exit 1
+fi
+exit 0

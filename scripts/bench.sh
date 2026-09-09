@@ -29,6 +29,12 @@
 
 set -uo pipefail
 
+# O juízo sobre a bancada é PARTILHADO com o `chaos.sh` — ver
+# `scripts/bancada.sh`. Duas cópias divergem; uma só responde a mesma
+# pergunta a quem quer que a faça.
+# shellcheck source=scripts/bancada.sh
+. "$(cd "$(dirname "$0")" && pwd)/bancada.sh"
+
 RUNS=10
 FORCE=0
 JSON=0
@@ -73,10 +79,10 @@ MEM=$(awk '/MemTotal/{printf "%.0f GiB", $2/1048576}' /proc/meminfo)
 # corrida num nó cheio compara duas perguntas diferentes.
 DENSITY=$("$BIN" container ls 2>/dev/null | tail -n +2 | wc -l | tr -d ' ')
 
-# O limiar: metade dos CPUs. Não é um número mágico — é onde a fila de execução
-# começa a somar-se a cada medição, e o efeito é multiplicativo, não aditivo.
-THRESHOLD="${MAXLOAD:-$(awk -v n="$NCPU" 'BEGIN{printf "%.2f", n/2}')}"
-BANCADA_OK=$(awk -v l="$LOAD1" -v t="$THRESHOLD" 'BEGIN{print (l<t)?1:0}')
+# O limiar e o veredicto vêm do helper partilhado (`bancada_medir`), não de uma
+# segunda opinião escrita aqui.
+bancada_medir "$MAXLOAD"
+THRESHOLD="$BANCADA_THRESHOLD"
 
 echo "== bancada =="
 echo "  cpu:        $CPU ($NCPU threads)"
@@ -95,16 +101,12 @@ echo "  delonix:    $("$BIN" --version 2>/dev/null | head -1)"
 echo
 
 if [[ "$BANCADA_OK" != "1" ]]; then
-  echo "RECUSADO: load $LOAD1 acima do limiar $THRESHOLD."
-  echo
-  echo "  Uma medição aqui mede a CONTENÇÃO desta máquina, não as ferramentas."
-  echo "  Foi assim que a bateria de 2026-08-10 acabou retirada: três motores"
-  echo "  seis vezes mais lentos ao mesmo tempo não é uma propriedade de nenhum."
-  echo
-  echo "  Para medir a sério: uma máquina ociosa e dedicada (a bateria publicada"
-  echo "  usou uma VM criada com o próprio motor), ou esperar que a carga desça."
-  [[ "$FORCE" != "1" ]] && exit 3
-  echo "  --force: a correr na mesma. O RESULTADO NÃO É PUBLICÁVEL."
+  if [[ "$FORCE" != "1" ]]; then
+    bancada_recusa "bench.sh" \
+      "Uma medição aqui mede a CONTENÇÃO desta máquina, não as ferramentas."
+  fi
+  echo "AVISO: load $LOAD1 acima do limiar $THRESHOLD, e --force pediu para correr."
+  echo "  O RESULTADO NÃO É PUBLICÁVEL."
   echo
 fi
 
