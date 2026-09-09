@@ -222,27 +222,42 @@ fn vm_unit(name: &str, rp: &str, root: &str, exe: &str, wanted_by: &str) -> Stri
     )
 }
 
-/// The unit each pod's members must start after: the pod's FIRST container by
-/// name, which is stable (`<pod>-c0`, `-c1`, …) and is the one that holds the
-/// shared namespaces.
+/// The unit each pod's members must start after: the pod's member zero — the
+/// first entry of `spec.containers`, via [`super::pod::member_order`].
+///
+/// **The comment that used to sit here said «the FIRST container by name, which
+/// is stable (`<pod>-c0`, `-c1`, …) and is the one that holds the shared
+/// namespaces», and both halves were wrong.** `<pod>-c0` is only the fallback
+/// name a member gets when the manifest names none; the moment members ARE named
+/// — the normal case — the name orders alphabetically and `create_pod`'s order is
+/// lost. Measured live against a pod of `web` (first) and `api` (second): the
+/// generated `After=` pointed at `api`, ordering `web` — the member that actually
+/// holds the pod's IPC/UTS — behind its peer.
+///
+/// [`super::pod::member_order`] is the same key `ls`, `exec` and `describe` use,
+/// deliberately: «the pod's first member» has to mean ONE thing across the CLI,
+/// and this was the last place still answering it differently. It also carries
+/// the legacy fallback — a member with no index sorts last and the name decides,
+/// which for those pods is the answer this function always gave.
 fn pod_anchors(
     containers: &[delonix_runtime_core::Container],
 ) -> std::collections::BTreeMap<String, String> {
-    let mut first: std::collections::BTreeMap<String, String> = Default::default();
+    let mut first: std::collections::BTreeMap<String, (u32, String)> = Default::default();
     for c in containers {
         let Some(pod) = c.labels.get(super::pod::POD_LABEL) else {
             continue;
         };
+        let key = super::pod::member_order(c);
         first
             .entry(pod.clone())
             .and_modify(|cur| {
-                if c.name < *cur {
-                    *cur = c.name.clone();
+                if key < *cur {
+                    *cur = key.clone();
                 }
             })
-            .or_insert_with(|| c.name.clone());
+            .or_insert(key);
     }
-    first
+    first.into_iter().map(|(p, (_, n))| (p, n)).collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -456,14 +471,15 @@ mod tests {
         assert!(is_boot_unit(&format!("{UNIT_PREFIX}vm-db.service")));
     }
 
-    /// **Os membros de um pod PARTILHAM a netns**, e quem arranca primeiro é
-    /// quem a recria. N units libertados em paralelo pelo systemd correm para
-    /// ser esse — uma corrida que nenhum deles sabe que está a disputar.
+    /// **A pod's members SHARE the netns**, and whoever starts first is the one
+    /// that recreates it. N units released in parallel by systemd race to be
+    /// that one — a race none of them knows it is in.
     ///
-    /// A âncora é o primeiro membro por nome (`<pod>-c0`), que é estável, e os
-    /// restantes ficam atrás dele com `After=`. `Requires=` seria errado: levaria
-    /// o pod inteiro abaixo com a âncora, e um membro parado não é razão para
-    /// parar os pares.
+    /// This is the LEGACY half: members with no [`super::super::pod::POD_INDEX_LABEL`],
+    /// i.e. a pod created by a binary from before the label existed. There the
+    /// only order available is the name, and it is still used. `Requires=` would
+    /// be wrong either way: it would take the whole pod down with the anchor, and
+    /// a member that stops is not a reason to stop its peers.
     #[test]
     fn os_membros_de_um_pod_arrancam_atras_do_primeiro() {
         let c = |nome: &str, pod: Option<&str>| {
@@ -486,7 +502,8 @@ mod tests {
             c("solto", None),
         ];
         let a = pod_anchors(&all);
-        // A âncora é o PRIMEIRO por nome, mesmo tendo aparecido em segundo.
+        // With no index to read, the name is what is left — and it is still
+        // right for these, whose names ARE the creation order (`c0`, `c1`, …).
         assert_eq!(a.get("pa").unwrap(), "pa-c0");
         // Um container sem pod não entra.
         assert!(!a.contains_key("solto"));
@@ -511,6 +528,50 @@ mod tests {
         );
         // E um container fora de um pod continua sem ordenação nenhuma.
         assert!(!anchor_unit.contains("delonix-boot-"), "{anchor_unit}");
+    }
+
+    /// **The anchor used to be the smallest NAME, and the holder is the first
+    /// entry of `spec.containers`** — two different members the moment a
+    /// manifest names them. Measured live against a pod of `web` (first) and
+    /// `api` (second): `system boot enable` wrote `After=delonix-boot-demo-api`
+    /// into `demo-web`'s unit, ordering the member that holds the pod's IPC/UTS
+    /// behind its peer.
+    ///
+    /// The pair below is exactly that one, and it is the pair the legacy test
+    /// above cannot distinguish: it is reverse-alphabetical, so name order and
+    /// manifest order disagree, and only reading
+    /// [`super::super::pod::POD_INDEX_LABEL`] gets it right.
+    #[test]
+    fn the_anchor_is_manifest_member_zero_not_the_smallest_name() {
+        let member = |name: &str, pod: &str, idx: usize| {
+            let mut c = delonix_runtime_core::Container::new(
+                name.into(),
+                name.into(),
+                "alpine".into(),
+                vec!["sleep".into()],
+                "64M".into(),
+            );
+            c.labels
+                .insert(super::super::pod::POD_LABEL.into(), pod.into());
+            c.labels
+                .insert(super::super::pod::POD_INDEX_LABEL.into(), idx.to_string());
+            c
+        };
+        // `web` is member zero and holds the shared IPC/UTS; `api` sorts first.
+        let all = vec![member("demo-api", "demo", 1), member("demo-web", "demo", 0)];
+        assert_eq!(pod_anchors(&all).get("demo").unwrap(), "demo-web");
+
+        // A pod half-migrated — one member stamped by this binary, one written by
+        // an older one — still puts the stamped member zero in front, because an
+        // absent index sorts last rather than being guessed at.
+        let mut legacy = member("demo-api", "demo", 1);
+        legacy.labels.remove(super::super::pod::POD_INDEX_LABEL);
+        assert_eq!(
+            pod_anchors(&[legacy, member("demo-web", "demo", 0)])
+                .get("demo")
+                .unwrap(),
+            "demo-web"
+        );
     }
 
     /// O unit tem de nomear o container nos DOIS lados e carregar a raiz de
