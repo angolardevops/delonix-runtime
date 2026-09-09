@@ -55,12 +55,19 @@ pub const SHAREVOLUME_SPEC_FIELDS: &[&str] = &["storageRef", "quota", "alertPct"
 /// AND from the imperative one (`volume create --parent`) — one function,
 /// so the two paths cannot disagree about what "ensure this share exists"
 /// means.
+///
+/// `namespace: None` is the UNSCOPED ROOT, never the namespace called
+/// `default` — the same meaning `OwnedVolume::namespace: None` carries
+/// everywhere else in the store. Both callers pass what they were actually
+/// given (an absent `--namespace`, an absent `metadata.namespace`) instead of
+/// inventing an owner: a share nobody scoped is written where every unscoped
+/// volume is written, which is where `ls`/`describe`/`rm` read without a flag.
 pub(crate) fn apply_share(
     name: &str,
     from: &str,
     quota: Option<&str>,
     alert_pct: Option<u8>,
-    namespace: &str,
+    namespace: Option<&str>,
 ) -> Result<()> {
     let spec = ShareVolumeSpec {
         storage_ref: from.to_string(),
@@ -69,6 +76,19 @@ pub(crate) fn apply_share(
     };
     apply_one(&super::util::state_root(), name, &spec, namespace)
 }
+
+/// The path component that holds every share with NO owner, under the parent's
+/// `shares/` directory: `<parent>/shares/.root/<name>`.
+///
+/// The leading `.` is what makes it collision-proof, and it is reserved for the
+/// same two reasons `VolumeStore`'s own `.ns` sub-tree uses one: `valid_name`
+/// refuses a leading `.` in a volume name, so no share can ever be called
+/// `.root`, and [`safe_ns`] refuses one in a namespace, so no tenant can
+/// either. Without a reserved component an unscoped share named `teamA` would
+/// take `<parent>/shares/teamA` — the very directory namespace `teamA`'s own
+/// shares live in, which is the two-tenants-one-directory failure `6270fed4`
+/// already had to fix once.
+const NO_OWNER_SUBDIR: &str = ".root";
 
 /// A namespace safe as ONE path component. Rejects the traversal and separator cases
 /// instead of sanitizing them into something else: a namespace that silently becomes a
@@ -85,17 +105,36 @@ fn safe_ns(namespace: &str) -> String {
     namespace.to_string()
 }
 
-fn apply_one(root: &Path, name: &str, spec: &ShareVolumeSpec, namespace: &str) -> Result<()> {
-    let namespace = safe_ns(namespace);
+fn apply_one(
+    root: &Path,
+    name: &str,
+    spec: &ShareVolumeSpec,
+    namespace: Option<&str>,
+) -> Result<()> {
+    let namespace = namespace.map(safe_ns);
     // The parent Storage is NOT namespaced: it is the NAS mount itself, node
     // infrastructure, and scoping it would mean one mount per namespace of the same
     // export. What gets scoped is the SHARE carved out of it.
     let vstore = VolumeStore::open(root)?;
-    let scoped = VolumeStore::open_scoped(root, &namespace)?;
+    // Where the RECORD goes. With an owner, that owner's sub-tree; without one,
+    // the unscoped root — the same store `volume ls`/`describe`/`rm` read when
+    // no `-n` is passed, and the same one a plain `volume create` writes to.
+    // Assuming `default` here is what ACH-001 was: it wrote a record into a
+    // namespace nobody named, and then the three unflagged read commands said
+    // the share did not exist while it sat on disk consuming the parent's quota
+    // — with `volume rm <parent>` seeing nothing hanging off the parent either.
+    let scoped;
+    let store: &VolumeStore = match namespace.as_deref() {
+        Some(ns) => {
+            scoped = VolumeStore::open_scoped(root, ns)?;
+            &scoped
+        }
+        None => &vstore,
+    };
     // An already-existing share keeps the path it was created with. `apply` is
     // "ensure present", so recomputing the path on a re-apply would move the
     // share's data out from under it and orphan every byte already written there.
-    let existing_mountpoint = scoped.inspect(name).ok().map(|v| v.mountpoint);
+    let existing_mountpoint = store.inspect(name).ok().map(|v| v.mountpoint);
     let parent = vstore.inspect(&spec.storage_ref).map_err(|_| {
         Error::Invalid(super::po::tf(
             "ShareVolume '{name}': storageRef '{storage_ref}' does not exist — create it first \
@@ -126,16 +165,37 @@ fn apply_one(root: &Path, name: &str, spec: &ShareVolumeSpec, namespace: &str) -
         Some(mp) => std::path::PathBuf::from(mp),
         None => Path::new(&parent.mountpoint)
             .join("shares")
-            .join(&namespace)
+            .join(namespace.as_deref().unwrap_or(NO_OWNER_SUBDIR))
             .join(name),
     };
-    let vol = scoped.register_external(
+    let vol = store.register_external(
         name,
         &subdir,
         quota_bytes,
         spec.alert_pct,
         Some(&spec.storage_ref),
     )?;
+    // The one thing this can surprise someone with: a share created before the
+    // unscoped path existed landed in `default` (ACH-001's invented owner) and
+    // is still sitting there, reachable only with `-n default`. Two records
+    // answering to one name must never LOOK like one, so say it out loud rather
+    // than adopt it silently — adopting would also de-scope a share someone
+    // deliberately created with `--namespace default`, and on disk the two are
+    // the same record. `namespaces()` is checked first so the probe never
+    // CREATES an empty `default` sub-tree (`open_scoped` would), which would
+    // then show up as an owner that owns nothing.
+    if namespace.is_none()
+        && vstore.namespaces().iter().any(|n| n == "default")
+        && VolumeStore::open_scoped(root, "default")?
+            .inspect(name)
+            .is_ok()
+    {
+        super::output::warn(&super::po::tf(
+            "a share named '{name}' also exists in namespace 'default' (`delonix volume ls -n \
+             default`) — this one is unscoped and SEPARATE from it",
+            &[("name", name)],
+        ));
+    }
     println!(
         "volume/{name}: {} ({} -> {})",
         super::po::t("ready"),
@@ -176,7 +236,7 @@ mod tests {
                 quota: None,
                 alert_pct: None,
             },
-            "teamA",
+            Some("teamA"),
         )
         .unwrap();
         let scoped = VolumeStore::open_scoped(&tmp, "teamA").unwrap();
@@ -204,7 +264,7 @@ mod tests {
             quota: None,
             alert_pct: None,
         };
-        let err = apply_one(&tmp, "sv1", &spec, "default").unwrap_err();
+        let err = apply_one(&tmp, "sv1", &spec, Some("default")).unwrap_err();
         assert!(format!("{err}").contains("storageRef"));
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -221,8 +281,8 @@ mod tests {
             quota: Some("1M".to_string()),
             alert_pct: Some(80),
         };
-        apply_one(&tmp, "tenant-a", &spec, "default").unwrap();
-        apply_one(&tmp, "tenant-b", &spec, "default").unwrap();
+        apply_one(&tmp, "tenant-a", &spec, Some("default")).unwrap();
+        apply_one(&tmp, "tenant-b", &spec, Some("default")).unwrap();
 
         let scoped = VolumeStore::open_scoped(&tmp, "default").unwrap();
         let a = scoped.inspect("tenant-a").unwrap();
@@ -237,12 +297,62 @@ mod tests {
 
         // Idempotent re-apply: same name, `created_unix` preserved.
         std::thread::sleep(std::time::Duration::from_millis(5));
-        apply_one(&tmp, "tenant-a", &spec, "default").unwrap();
+        apply_one(&tmp, "tenant-a", &spec, Some("default")).unwrap();
         let a2 = scoped.inspect("tenant-a").unwrap();
         assert_eq!(a.created_unix, a2.created_unix);
         assert_eq!(
             a.mountpoint, a2.mountpoint,
             "um re-apply não pode mudar o directório debaixo dos dados"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// ACH-001: a share with no `--namespace` lands where the UNFLAGGED reads look.
+    ///
+    /// Before this, `create` wrote into `.ns/default/` while `ls`/`describe`/`rm`
+    /// with no flag read the root — the share existed, consumed the parent's
+    /// quota, and all three answered `no such volume` about it. The test asserts
+    /// both halves: the record IS in the root (what the unflagged `list()`
+    /// returns), and it is NOT in `default`.
+    #[test]
+    fn share_with_no_namespace_lands_in_the_unowned_root() {
+        let tmp = tmp_root("no-owner");
+        let vstore = VolumeStore::open(&tmp).unwrap();
+        vstore.create("nas-shared").unwrap();
+        let spec = ShareVolumeSpec {
+            storage_ref: "nas-shared".to_string(),
+            quota: None,
+            alert_pct: None,
+        };
+        apply_one(&tmp, "solta", &spec, None).unwrap();
+
+        let v = vstore
+            .inspect("solta")
+            .expect("an unowned share belongs in the root, where unflagged ls/describe/rm read");
+        assert_eq!(v.parent.as_deref(), Some("nas-shared"));
+        assert!(
+            vstore.list().unwrap().iter().any(|x| x.name == "solta"),
+            "unflagged `list()` is exactly what unflagged `volume ls` calls"
+        );
+        // The reserved component, not the name of an invented namespace.
+        assert!(v.mountpoint.contains(NO_OWNER_SUBDIR), "{}", v.mountpoint);
+        assert!(!v.mountpoint.contains("shares/default"), "{}", v.mountpoint);
+        // And `default` stays a namespace like any other: empty until someone uses it.
+        assert!(
+            !vstore.namespaces().iter().any(|n| n == "default"),
+            "the unowned path must not CREATE the `default` sub-tree"
+        );
+
+        // The same name under `--namespace default` is a DIFFERENT share, elsewhere.
+        apply_one(&tmp, "solta", &spec, Some("default")).unwrap();
+        let d = VolumeStore::open_scoped(&tmp, "default")
+            .unwrap()
+            .inspect("solta")
+            .unwrap();
+        assert_ne!(
+            v.mountpoint, d.mountpoint,
+            "`--namespace default` and the unowned root are two different places"
         );
 
         let _ = std::fs::remove_dir_all(&tmp);
@@ -264,8 +374,8 @@ mod tests {
             quota: None,
             alert_pct: None,
         };
-        apply_one(&tmp, "db", &spec, "teamA").unwrap();
-        apply_one(&tmp, "db", &spec, "teamB").unwrap();
+        apply_one(&tmp, "db", &spec, Some("teamA")).unwrap();
+        apply_one(&tmp, "db", &spec, Some("teamB")).unwrap();
 
         let a = VolumeStore::open_scoped(&tmp, "teamA")
             .unwrap()
