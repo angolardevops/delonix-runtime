@@ -211,10 +211,16 @@ skip() {
 #   PASS inesperado-> XPASS, CHUMBA. O defeito foi corrigido: tira a marca.
 #
 # O XPASS chumbar é o ponto todo. Sem isso a marca fica para sempre e a bateria
-# passa a testar menos do que diz. Funcionou à primeira: os quatro checks da
-# share entraram aqui como `xfail ACH-001` e saíram no mesmo dia, quando o #256
-# corrigiu o defeito — a marca é para o intervalo entre descobrir e corrigir, e
-# um `xfail` sem utilizadores é o estado bom deste ficheiro, não código morto.
+# passa a testar menos do que diz. Funcionou à primeira, e duas vezes no mesmo
+# dia: os quatro checks da share entraram como `xfail ACH-001` e saíram quando o
+# #256 corrigiu o defeito; o do membro por omissão entrou como `xflaky ACH-011` e
+# saiu quando o #258 o corrigiu.
+#
+# Neste momento os DOIS não têm utilizadores, e isso é o estado BOM — não código
+# morto. A marca é para o intervalo entre descobrir e corrigir; um ficheiro sem
+# marcas nenhumas quer dizer que não há defeito conhecido a fingir de verde. Não
+# os apagues por estarem sem uso: apagá-los é tirar o único sítio onde o próximo
+# defeito conhecido pode ficar visível sem chumbar o portão todos os dias.
 # O JSONL guarda o veredicto CRU do `check` (FAIL/PASS) e, logo a seguir, a
 # decisão que se tomou sobre ele. Reescrever a linha anterior seria mais bonito
 # e mentiria sobre o que o comando fez.
@@ -1650,10 +1656,10 @@ metadata:
   name: p$PFX
 spec:
   containers:
-    - name: a
+    - name: web
       image: $IMG
       command: ["sleep", "120"]
-    - name: b
+    - name: api
       image: $IMG
       command: ["sleep", "120"]
 YAML
@@ -1670,41 +1676,61 @@ if "$BIN" pod create -f "$PODY" >/dev/null 2>"$OUT/pod-$PFX.err"; then
   # POR MEMBRO (não `hostname`: os membros partilham UTS, por isso um
   # `hostname` igual não provaria que o `--container` escolheu o certo — só a
   # mountns, que NÃO é partilhada, distingue).
+  # Os membros chamam-se `web` e `api`, nesta ordem, e a escolha NÃO é
+  # decorativa: a ordem do MANIFESTO tem de ser CONTRÁRIA à alfabética.
+  # Este bloco testava com `a`/`b`, que é precisamente o par que não distingue
+  # as correcções possíveis — ordenar por NOME teria passado aqui por acidente e
+  # deixado um pod `web`/`api` real com o mesmo defeito. Com estes nomes, tanto
+  # o bug como a meia-correcção põem o `api` no lugar do `web`. (O desenho é do
+  # #257, que chegou a ele por outro caminho; salvado aqui porque valia mais do
+  # que o que estava.)
+  #
   # A prova do `--container` é feita com o `--container` EXPLÍCITO nas duas
-  # pontas: escreve-se em `a`, lê-se em `a` (tem de estar lá) e lê-se em `b`
-  # (não pode estar). Isto isola a pergunta «o `--container` escolhe o membro
-  # certo, e a mountns não é partilhada» de ACH-011, abaixo.
-  check "pod exec --container a escreve em a" ok bash -c \
-    "'$BIN' pod exec p$PFX --container a sh -c 'echo do-a > /tmp/mark-$PFX'"
-  check "pod exec --container a relê o que escreveu" ok bash -c \
-    "'$BIN' pod exec p$PFX --container a cat /tmp/mark-$PFX | grep -q do-a"
-  check "'b' não vê a escrita de 'a' (mountns própria)" fail \
-    "$BIN" pod exec "p$PFX" --container b cat "/tmp/mark-$PFX"
+  # pontas: escreve-se em `web`, lê-se em `web` (tem de estar lá) e lê-se em
+  # `api` (não pode estar). Isto isola a pergunta «o `--container` escolhe o
+  # membro certo, e a mountns não é partilhada» da pergunta sobre o membro por
+  # OMISSÃO, abaixo.
+  check "pod exec --container web escreve em web" ok bash -c \
+    "'$BIN' pod exec p$PFX --container web sh -c 'echo do-web > /tmp/mark-$PFX'"
+  check "pod exec --container web relê o que escreveu" ok bash -c \
+    "'$BIN' pod exec p$PFX --container web cat /tmp/mark-$PFX | grep -q do-web"
+  check "'api' não vê a escrita de 'web' (mountns própria)" fail \
+    "$BIN" pod exec "p$PFX" --container api cat "/tmp/mark-$PFX"
 
-  # ACH-011 — DEFEITO REAL, e a natureza dele é a intermitência.
+  # O MEMBRO POR OMISSÃO — e agora com o FACTO medido ao lado do comportamento.
   #
-  # `resolve_target` promete «the pod's first member when omitted» e devolve
-  # `members_of(...).into_iter().next()`, ou seja o primeiro que o
-  # `Store::list` der. E o `Store::list` ordena por `Reverse(created_unix)` —
-  # SEGUNDOS. Dois membros criados no mesmo segundo empatam, o `sort_by_key` é
-  # estável, e o desempate acaba por ser a ordem do `read_dir`: ordem de
-  # sistema de ficheiros, não a ordem declarada no manifesto.
+  # História, porque explica os dois checks: `resolve_target` prometia «the
+  # pod's first member when omitted» e devolvia o primeiro que o `Store::list`
+  # desse. O `Store::list` ordena por `Reverse(created_unix)` — SEGUNDOS —, dois
+  # membros criados no mesmo segundo empatam, e o desempate acabava por ser a
+  # ordem do `read_dir`. Ordem de sistema de ficheiros, não a do manifesto.
   #
-  # Medido 2026-09-09: numa raiz virgem (dois ficheiros no store) o default caiu
-  # em `a` e tudo passou; na raiz da bateria completa caiu em `b`, e os dois
-  # checks seguintes chumbaram a acusar o `--container` de escolher mal — que é
-  # exactamente o oposto do defeito. `pod logs`/`cp`/`attach` herdam-no todos.
+  # Isto esteve aqui marcado `xflaky ACH-011` durante algumas horas, precisamente
+  # porque a natureza do defeito era a intermitência: numa raiz virgem o default
+  # caía em `web` e passava; na raiz da bateria completa caía em `api`, e os
+  # checks vizinhos chumbavam a acusar o `--container` de escolher mal, que é o
+  # oposto do defeito.
   #
-  # `xflaky` e não `xfail`: um `xfail` daria XPASS em metade das corridas e
-  # chumbava o portão por o defeito não ter batido nesta. Nunca chumba, nos dois
-  # sentidos, e sai sempre no bloco do resumo.
-  xflaky ACH-011 "pod exec sem --container vai ao 1.º membro DECLARADO" ok bash -c \
+  # A marca SAIU porque o defeito foi corrigido (#257/#258: um rótulo de posição
+  # carimbado no `pod create`, e `members_of` a ordenar por ele). Medido na `main`
+  # com seis containers de ruído no store — a condição em que batia — 6/6
+  # resoluções em `web`. É o ciclo do ratchet fechado: a marca é para o intervalo
+  # entre descobrir e corrigir, e um XPASS teria chumbado o portão a pedi-la de
+  # volta se eu me tivesse esquecido.
+  #
+  # DOIS checks e não um. O comportamento depende da ordem que o store devolve;
+  # o rótulo não. Sem a correcção o rótulo não existe DE TODO, por isso o
+  # primeiro check apanha a regressão em TODAS as corridas, e não em metade.
+  check "pod create carimba a posição de cada membro" ok bash -c \
+    "'$BIN' container inspect p$PFX-web | grep -q 'pod-index\": \"0\"' && \
+     '$BIN' container inspect p$PFX-api | grep -q 'pod-index\": \"1\"'"
+  check "pod exec sem --container vai ao 1.º membro DECLARADO" ok bash -c \
     "'$BIN' pod exec p$PFX sh -c 'echo do-default > /tmp/mk2-$PFX' && \
-     '$BIN' pod exec p$PFX --container a cat /tmp/mk2-$PFX | grep -q do-default"
-  check "pod exec --container b escreve só em b" ok bash -c \
-    "'$BIN' pod exec p$PFX --container b sh -c 'echo do-b > /tmp/mark2-$PFX'"
-  check "pod exec --container b confirma" ok bash -c \
-    "'$BIN' pod exec p$PFX --container b cat /tmp/mark2-$PFX | grep -q do-b"
+     '$BIN' pod exec p$PFX --container web cat /tmp/mk2-$PFX | grep -q do-default"
+  check "pod exec --container api escreve só em api" ok bash -c \
+    "'$BIN' pod exec p$PFX --container api sh -c 'echo do-api > /tmp/mark2-$PFX'"
+  check "pod exec --container api confirma" ok bash -c \
+    "'$BIN' pod exec p$PFX --container api cat /tmp/mark2-$PFX | grep -q do-api"
   check "pod exec --container inexistente recusa" fail \
     "$BIN" pod exec "p$PFX" --container nope true
 
@@ -1713,8 +1739,8 @@ if "$BIN" pod create -f "$PODY" >/dev/null 2>"$OUT/pod-$PFX.err"; then
   check "pod cp: chegou ao 1.º membro" ok bash -c \
     "'$BIN' pod exec p$PFX cat /tmp/podcp-$PFX.txt | grep -q prova-podcp"
   check "pod cp --container escolhe o membro" ok bash -c \
-    "'$BIN' pod cp '$OUT/podcp-$PFX.txt' p$PFX:/tmp/podcp2-$PFX.txt --container b && \
-     '$BIN' pod exec p$PFX --container b cat /tmp/podcp2-$PFX.txt | grep -q prova-podcp"
+    "'$BIN' pod cp '$OUT/podcp-$PFX.txt' p$PFX:/tmp/podcp2-$PFX.txt --container api && \
+     '$BIN' pod exec p$PFX --container api cat /tmp/podcp2-$PFX.txt | grep -q prova-podcp"
   check "pod cp: membro -> host" ok bash -c \
     "'$BIN' pod cp p$PFX:/tmp/podcp-$PFX.txt '$OUT/podcp-back-$PFX.txt' && grep -q prova-podcp '$OUT/podcp-back-$PFX.txt'"
 
@@ -2268,11 +2294,26 @@ check "ingress ls json separa governado de aberto" ok bash -c \
   # genérico — `get httproutes` e `get gateways`.
   check "get httproutes" ok "$BIN" get httproutes
   check "get gateways" ok "$BIN" get gateways
-  # E os dois RECUSAM `-o json` com razão escrita, em vez de responderem uma
-  # tabela a quem pediu JSON. Recusado-com-razão e em-falta são estados
-  # diferentes, e o portão tem de saber distingui-los.
-  check "get httproutes -o json é recusado, não fingido" 1 "$BIN" get httproutes -o json
-  check "get gateways -o json é recusado, não fingido" 1 "$BIN" get gateways -o json
+  # Estes dois checks nasceram no #255 a exigir que `-o json` fosse RECUSADO com
+  # razão escrita — que era o comportamento medido na v3.0.0. O #259 descobriu
+  # porque: o `NO_JSON_YET` do `verbs.rs` listava-os há muito, e o
+  # `tunnel::cmd_ls`/`httproute::cmd_ls` já tinham braço de JSON completo. A
+  # recusa era a lista a estar velha, não uma decisão. Hoje respondem JSON.
+  #
+  # O portão apanhou a mudança na primeira corrida depois do #259 fundir, com os
+  # dois a chumbarem por rc=0 onde esperavam 1 — que é exactamente o serviço que
+  # ele passou a prestar. Passam a medir o que é verdade, e por um PARSER de JSON
+  # a sério e não por `grep`: um `grep` passa numa tabela com aspas.
+  for _k in httproutes gateways; do
+    check "get $_k -o json é JSON a sério" ok bash -c \
+      "'$BIN' get $_k -o json | python3 -c 'import json,sys; json.load(sys.stdin)'"
+  done
+  # E o Kind que CONTINUA sem JSON é recusado, não fingido — a lista encolheu,
+  # não desapareceu, e recusado-com-razão e em-falta são estados diferentes.
+  check "get kubernetesclusters -o json continua recusado, com razão" 1 \
+    "$BIN" get kubernetesclusters -o json
+  check "…e a recusa diz que a listagem é table-only" ok bash -c \
+    "'$BIN' get kubernetesclusters -o json 2>&1 | grep -q 'table-only'"
   check "net flow --help" ok "$BIN" net flow --help
   # `net boot` dobrou-se em `system boot` no B2 (#151), com `namespace`.
   check "system boot status" ok "$BIN" system boot status
