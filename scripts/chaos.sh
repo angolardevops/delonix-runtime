@@ -46,12 +46,9 @@
 # worst kind of noise in a gate.
 #
 # So the load check comes FIRST, before `setup` touches anything, and it is the
-# SAME judgement `bench.sh` uses — `scripts/bancada.sh`, sourced by both — at a
-# STRICTER default threshold (`nproc / 4`, against the bench's `nproc / 2`),
-# because 30 concurrent container starts fall off a cliff where a latency
-# measurement only degrades gradually. The two measured points are in
-# `bancada.sh`. `--max-load N` overrides it; `--force` runs anyway and says the
-# verdict is not publishable.
+# SAME judgement `bench.sh` uses, at the same threshold — `scripts/bancada.sh`,
+# sourced by both. `--max-load N` overrides it; `--force` runs anyway and says
+# the verdict is not publishable.
 #
 # ## Exit code
 #
@@ -610,20 +607,53 @@ scen_pod_holder_respawn() {
   local before after
   before=$(holder_pid)
   kill -9 "$before" 2>/dev/null; sleep 2
-  dlx net netns up >/dev/null 2>&1
+  # O rc da RECUPERAÇÃO é a metade que faltava, e custou caro (2026-09-09).
+  #
+  # Esta linha era `dlx net netns up >/dev/null 2>&1` e o cenário declarava PASS
+  # a olhar SÓ para os dois membros que já existiam. Medido: com o pin morto por
+  # `kill -9`, o `net netns up` é RECUSADO com rc=1 e uma razão escrita — o
+  # socket de controlo tem listener vivo mas o pidfile debaixo de
+  # `<root>/ingress` desapareceu com o pin, e o motor não reconstrói dali porque
+  # isso desligaria os workloads que ainda lá estão. A recusa é correcta.
+  #
+  # O que não era correcto era o veredicto. Os dois membros continuam a pingar
+  # (a netns deles não foi a lado nenhum), o cenário dizia PASS, e o nó ficava
+  # `ingress DOWN · pin —` com control e slirp vivos: incapaz de aceitar UM
+  # workload novo. E como o sandbox é partilhado pela suite, cada cenário
+  # seguinte que precisa de um attach novo chumbava ou saltava — `FAIL scale —
+  # só 0 de 30 containers ganharam IP`, `SKIP abrupt-kill`, `SKIP cgroup-netns`,
+  # `SKIP stack-netroute` — tudo lido como defeito do motor, tudo herdado daqui.
+  # Foi este cenário que fez o `scripts/bancada.sh` culpar a carga da máquina.
+  local up_out up_rc
+  up_out=$(dlx net netns up 2>&1); up_rc=$?
   sleep 4
   after=$(holder_pid)
   local c0 c1
   neton rp-c0 && c0=up || c0=down
   neton rp-c1 && c1=up || c1=down
-  log "holder $before → $after · rp-c0=$c0 · rp-c1=$c1"
-  if [ "$c0" = up ] && [ "$c1" = up ]; then
-    ok "pod-holder-respawn (os dois membros recuperaram a netns partilhada)"
-  else
+  log "holder $before → ${after:-—} · rp-c0=$c0 · rp-c1=$c1 · netns up rc=$up_rc"
+  if [ "$c0" != up ] || [ "$c1" != up ]; then
     bad "pod-holder-respawn" "membro sem rede depois do respawn (c0=$c0 c1=$c1)"
+  elif [ "$up_rc" -ne 0 ]; then
+    # ACH-015. O `kill -9` do pin na presença de um POD leva o pidfile e deixa o
+    # nó num estado que o próprio motor se recusa a reparar. A recusa tem razão
+    # escrita e é defensável; o que falta é o caminho de volta sem `netns down`.
+    bad "pod-holder-respawn" "os membros recuperaram MAS o nó não aceita workloads \
+novos: \`net netns up\` rc=$up_rc — $(printf '%s' "$up_out" | head -1)"
+  elif [ -z "$after" ]; then
+    bad "pod-holder-respawn" "os membros recuperaram MAS o \`net netns status\` não \
+reporta pin: o nó fica meio-de-pé e o attach seguinte falha"
+  else
+    ok "pod-holder-respawn (os dois membros recuperaram, e o nó volta inteiro: pin $after)"
   fi
   dlx pod rm -f rp >/dev/null 2>&1
   rm -rf "$d"
+  # E o sandbox volta SERVÍVEL para o cenário seguinte, seja qual for o veredicto
+  # acima. Sem isto, um defeito daqui deixa de ser um FAIL e passa a ser cinco:
+  # o próprio, mais os quatro que herdam o nó meio-de-pé. Um cenário só pode
+  # responder pela propriedade que testa.
+  dlx net netns down >/dev/null 2>&1
+  dlx net netns up >/dev/null 2>&1
 }
 
 # THE guarantee of the pin/control split: killing the control plane must not cost
@@ -937,11 +967,54 @@ YAML
   local pin; pin=$(holder_pid)
   [ -z "$pin" ] && { skip "stack-netroute" "holder nao arrancou"; return; }
 
-  # Conta os pares ENTRE REDES no mapa vivo. Os auto-pares (`<b> . <b>`) são o
-  # isolamento intra-rede e não são rotas — contá-los diria «há rota» sempre.
+  # Conta os pares de rota DESTE cenário no mapa vivo. Três coisas, e as três
+  # foram medidas a 2026-09-09 porque as três estavam erradas.
+  #
+  # 1. O `awk` que aqui estava NUNCA filtrou os auto-pares, ao contrário do que o
+  #    comentário dele dizia. Era
+  #
+  #        awk -F'" . "' '{gsub(/"/,""); if ($1 != $2) print}'
+  #
+  #    e o `gsub` mexe no `$0`, o que obriga o awk a RE-SEPARAR os campos com o
+  #    mesmo FS — que depois de tirar as aspas já não casa com nada. Resultado:
+  #    `$1` passa a ser a linha inteira e `$2` fica VAZIO, logo `$1 != $2` é
+  #    sempre verdade e imprime tudo. Verificado com as três linhas de exemplo:
+  #    `dlxA . dlxA` era contado como rota.
+  #
+  # 2. Contava o mapa INTEIRO, que é global ao nó. Com a suite completa, o que
+  #    outro cenário deixou entrava na conta: este chumbava com «apos o prune
+  #    esperava-se so a rota imperativa, ha 3» e «o destroy deixou 2 par(es)
+  #    orfaos» — dois defeitos de outra pessoa, atribuídos a este caminho.
+  #    Sozinho dava 2 PASS; na suite dava 2 FAIL, mesmo binário, máquina quieta
+  #    nas duas. É a mesma lição que o `scale` deste ficheiro já aprendeu à sua
+  #    custa (ver o `du -sk` do SANDBOX): um número tem de medir só o que o
+  #    cenário criou.
+  #
+  # 3. As pontas no mapa são nomes de BRIDGE, não os nomes do manifesto — daí o
+  #    `network inspect -o json` para os ler. `-o json` e não a tabela: o campo
+  #    chama-se `bridge`, e um `awk` sobre colunas alinhadas parte-se no dia em
+  #    que alguém acrescenta uma linha ao `inspect`.
+  brof() {
+    dlx network inspect "$1" -o json 2>/dev/null \
+      | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["bridge"])' 2>/dev/null
+  }
+  local br_web br_db
+  br_web=$(brof nrweb); br_db=$(brof nrdb)
+  [ -n "$br_web" ] && [ -n "$br_db" ] || {
+    skip "stack-netroute" "nao consegui ler o bridge das redes do cenario"
+    dlx stack destroy -f "$dir/m.yaml" >/dev/null 2>&1; rm -rf "$dir"; return
+  }
   npairs() {
     nsenter -t "$pin" -U -m -n -- nft list map ip dlxing netpair 2>/dev/null \
-      | grep -oE '"[^"]+" \. "[^"]+"' | awk -F'" \\. "' '{gsub(/"/,""); if ($1 != $2) print}' | wc -l
+      | DLX_A="$br_web" DLX_B="$br_db" python3 -c '
+import os, re, sys
+a, b = os.environ["DLX_A"], os.environ["DLX_B"]
+n = 0
+for linha in sys.stdin:
+    for x, y in re.findall(r"\"([^\"]+)\" \. \"([^\"]+)\"", linha):
+        if x != y and {x, y} <= {a, b}:
+            n += 1
+print(n)'
   }
 
   # 1. A rota existe no dataplane, não só no relato do comando.
@@ -1160,10 +1233,11 @@ printf '\033[1mDelonix chaos harness\033[0m — sandbox %s · binário %s\n' "$S
 # A bancada primeiro: `setup` já sobe infra e cria rede, e uma recusa depois
 # disso deixaria restos por uma decisão que se podia ter tomado antes de tocar
 # em nada.
-# Divisor 4, e não o 2 do `bench.sh`: medido a 2026-09-09, um load de 11.56
-# passava por baixo do limiar do bench (16.00) e ainda assim dava `scale`
-# 0/30 com três cenários a saltar atrás. Ver `scripts/bancada.sh`.
-bancada_medir "$MAXLOAD" 4
+# Divisor por omissão (metade dos threads), o MESMO do `bench.sh`. Esteve em 4
+# durante algumas horas, com uma justificação que uma terceira medição desfez —
+# o `scale` 0/30 era o cenário anterior, não a carga. A história está escrita no
+# `scripts/bancada.sh`, e vale mais do que o número.
+bancada_medir "$MAXLOAD"
 printf 'bancada: load(1m) %s · %s threads · limiar %s%s\n' \
   "$BANCADA_LOAD1" "$BANCADA_NCPU" "$BANCADA_THRESHOLD" \
   "${MAXLOAD:+ (via --max-load)}"
