@@ -16,20 +16,21 @@
 # melhoria de nenhum: é a bancada. O `bench.sh` transformou essa lição em código
 # e passou a RECUSAR-SE a correr numa máquina carregada.
 #
-# O `chaos.sh` precisava exactamente do mesmo juízo e não o tinha. Medido
-# 2026-09-09, com carga concorrente na máquina: `FAIL scale — só 0 de 30
-# containers ganharam IP`, e SKIP em `abrupt_kill`, `cgroup_netns` e
-# `stack_netroute` («container não arrancou»). Repetido com a máquina mais
-# quieta, sem mudar uma linha: `scale` 30/30 PASS e os outros três PASS.
+# O `chaos.sh` precisava do mesmo juízo e não o tinha: um FAIL que se lê como
+# defeito do produto e é da bancada é a pior espécie de ruído num portão — pior
+# do que não ter portão, porque gasta o crédito de quem o lê.
 #
-# (O `stack_partial_apply`, que saltava ao lado destes, NÃO era da bancada: era
-# a grafia `volumes` — removida no B2 — dentro do próprio cenário. Corrigido.
-# Vale a pena separar as duas causas: uma resolve-se com um portão, a outra com
-# uma correcção, e confundi-las adiava as duas.)
+# DUAS notas de honestidade sobre como este portão apareceu, porque as duas vezes
+# a bancada foi acusada de coisas que não eram dela:
 #
-# Um FAIL que se lê como defeito do produto e é da bancada é a pior espécie de
-# ruído num portão — pior do que não ter portão, porque gasta o crédito de quem
-# o lê.
+#   * o `stack_partial_apply`, que saltava junto com os outros, era a grafia
+#     `volumes` — removida no B2 — dentro do próprio cenário. Corrigido.
+#   * o `scale` 0/30, que foi o caso que MOTIVOU este ficheiro, é o
+#     `pod_holder_respawn` a deixar o sandbox meio-de-pé (ACH-015). Medido e
+#     isolado — ver a secção do limiar abaixo.
+#
+# Separar as causas importa: uma resolve-se com um portão, as outras com
+# correcções, e confundi-las adiava as três.
 #
 # Está aqui, e não copiado nos dois, porque duas cópias divergem: a segunda
 # ganha um limiar «só um pouco mais permissivo» na tarde em que alguém tem
@@ -38,32 +39,42 @@
 #
 # ## O limiar
 #
-# Uma FRACÇÃO dos threads, e a fracção é de quem chama — porque as duas
-# perguntas não têm a mesma sensibilidade, e isso está medido.
+# Metade dos threads, para os DOIS harnesses. Não é um número mágico — é onde a
+# fila de execução começa a somar-se a cada medição, e o efeito é multiplicativo,
+# não aditivo. Quem corre numa máquina DEDICADA quer ser mais estrito do que
+# isso (ali um load de 1 já é alguém a fazer login), e é isso que o `--max-load`
+# serve; é também o que torna a própria recusa testável sem depender da carga
+# real do host onde o teste corre.
 #
-#   `bench.sh`  metade  (`nproc / 2`). Mede latência de arranque: a fila de
-#               execução soma-se a cada amostra, mas soma-se gradualmente.
-#   `chaos.sh`  um quarto (`nproc / 4`). Arranca TRINTA containers em paralelo,
-#               e ali a degradação não é gradual — é um precipício.
+# ## O quarto que aqui esteve, e porque saiu (2026-09-09)
 #
-# O quarto não é um palpite. Medido 2026-09-09 neste host de 32 threads (com
-# java, rustc, postgres e qemu reais a correr ao lado), o MESMO script e o MESMO
-# binário:
+# Este ficheiro afirmou durante algumas horas que o `chaos.sh` precisava de um
+# limiar mais estrito (`nproc / 4`), com dois pontos por trás:
 #
-#   load 11.56  ->  `scale` 0/30 containers com IP. E não recuperou: os três
-#                   cenários seguintes que precisam da rede custom
-#                   (`abrupt_kill`, `cgroup_netns`, `stack_netroute`) saltaram
-#                   com «container não arrancou».
-#   load  5.47  ->  `scale` 30/30, e os mesmos três a PASSAR (6 checks verdes).
+#   load 11.56  ->  `scale` 0/30 containers com IP
+#   load  5.47  ->  `scale` 30/30
 #
-# 11.56 passava por baixo do limiar do `bench.sh` (16.00) sem ser notado, o que
-# é precisamente o falso-defeito que este portão existe para tirar do relatório.
-# O quarto (8.00) cai dentro do intervalo medido. É provisório com dois pontos:
-# quem estreitar o intervalo deve baixá-lo, não subi-lo.
+# O par estava CONFUNDIDO, e a terceira medição desfez-o: a suite completa numa
+# máquina quieta deu `scale` 0/30 a **load 5.49** — praticamente a mesma carga a
+# que tinha passado. A diferença entre as duas corridas nunca foi o load: a que
+# passou era um SUBCONJUNTO de cenários que não incluía o `pod_holder_respawn`, e
+# a que chumbou corria-o imediatamente antes.
 #
-# Quem corre numa máquina DEDICADA quer ser mais estrito ainda (ali um load de 1
-# já é alguém a fazer login) — é isso que o `--max-load` serve, e é também o que
-# torna a própria recusa testável sem depender da carga real do host.
+# Isolado, ao lado, com a máquina quieta nas duas:
+#
+#   `scale` sozinho, load 3.65                       ->  30/30 PASS
+#   `pod_holder_respawn` + `scale`, load 4.30        ->  0/30 FAIL
+#
+# A causa é o cenário anterior deixar o sandbox meio-de-pé (ver ACH-015 e o
+# comentário no `scen_pod_holder_respawn`), não a bancada. O quarto voltou a ser
+# metade porque não há UMA medição que o justifique — e um limiar mais estrito do
+# que o medido é a mesma afirmação-sem-prova que este ficheiro existe para
+# impedir, só virada para o lado prudente.
+#
+# O portão FICA. Não porque o `scale` o exija, mas porque a razão original dele é
+# independente e continua de pé: um veredicto de arnês colhido numa máquina
+# carregada não distingue defeito de contenção, e é indistinguível de um verde
+# para quem o lê.
 
 # Mede a bancada. `$1` (opcional) é um limiar explícito — o `--max-load` de quem
 # chama, e ganha a tudo. `$2` (opcional, default 2) é o divisor de `nproc` que
