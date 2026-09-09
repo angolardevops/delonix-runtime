@@ -1333,6 +1333,13 @@ pub(crate) fn pod_member_run_opts(
         opts.labels.push(format!("delonix.io/pod={pod_name}"));
         opts.labels
             .push(format!("delonix.io/pod-role=app.{member}"));
+        // The member's position in `spec.containers[]`. Nothing else records it:
+        // the store lists newest-first and a name says nothing about order, so
+        // without this the "defaults to the first member" of `pod exec`/`logs`/
+        // `cp`/`attach` resolved to the LAST one declared. See
+        // `super::pod::POD_INDEX_LABEL`.
+        opts.labels
+            .push(format!("{}={i}", super::pod::POD_INDEX_LABEL));
         out.push(opts);
     }
     Ok(out)

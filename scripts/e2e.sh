@@ -1436,6 +1436,14 @@ check "pod ls" ok "$BIN" pod ls
 # «No máximo um», e não «exactamente um», de propósito: num host COM delegação de
 # cgroup não há aviso nenhum e exigir 1 falharia ali por razão errada. O que nunca
 # pode voltar é a repetição por membro — que é o que um pod de 2 já expõe.
+#
+# Os membros chamam-se `web` e `api`, nesta ordem, e a escolha não é decorativa:
+# a ordem do MANIFESTO tem de ser CONTRÁRIA à alfabética. Este bloco testava com
+# `a`/`b`, que é precisamente o par que não distingue as correcções — o membro por
+# omissão era o ÚLTIMO do manifesto (ACH-002: o `Store::list` devolve do mais
+# recente para o mais antigo) e ordenar por nome teria passado aqui por acidente,
+# deixando um pod `web`/`api` na produção com o mesmo bug. Com estes nomes, tanto
+# o bug como a meia-correcção põem o `api` no lugar do `web`, e o teste chumba.
 PODY="$OUT/pod-$PFX.yaml"
 cat >"$PODY" <<YAML
 apiVersion: delonix.io/v1
@@ -1444,10 +1452,10 @@ metadata:
   name: p$PFX
 spec:
   containers:
-    - name: a
+    - name: web
       image: $IMG
       command: ["sleep", "120"]
-    - name: b
+    - name: api
       image: $IMG
       command: ["sleep", "120"]
 YAML
@@ -1458,32 +1466,48 @@ if "$BIN" pod create -f "$PODY" >/dev/null 2>"$OUT/pod-$PFX.err"; then
   "
   check "pod ls mostra-o" ok bash -c "'$BIN' pod ls | grep -q 'p$PFX'"
 
+  # O FACTO que o resolvedor lê, verificado à parte do comportamento. As duas
+  # provas não são a mesma: o comportamento depende da ordem em que o store
+  # devolve os membros, e essa ordem, com o bug, era do `read_dir` — medido, os
+  # dois membros ficam com o MESMO `created_unix`, por isso o `Store::list`
+  # (mais recente primeiro) empata e quem decide é o sistema de ficheiros. Um
+  # check só comportamental apanharia a regressão em metade das corridas; este
+  # apanha-a em todas, porque sem a correcção o rótulo não existe de todo.
+  check "pod create carimba a posição de cada membro" ok bash -c \
+    "'$BIN' container inspect p$PFX-web | grep -q 'pod-index\": \"0\"' && \
+     '$BIN' container inspect p$PFX-api | grep -q 'pod-index\": \"1\"'"
+
   # `pod exec`/`pod cp`/`pod attach` — wrappers finos sobre `container exec/cp/
   # attach`, que resolvem `--container <curto>` (ou o 1.º membro por omissão)
   # para o nome real `<pod>-<membro>` no Store. Provados com uma escrita
   # POR MEMBRO (não `hostname`: os membros partilham UTS, por isso um
   # `hostname` igual não provaria que o `--container` escolheu o certo — só a
   # mountns, que NÃO é partilhada, distingue).
-  check "pod exec vai ao 1.º membro por omissão" ok bash -c \
-    "'$BIN' pod exec p$PFX sh -c 'echo do-a > /tmp/mark-$PFX'"
-  check "pod exec --container a confirma (é o 1.º)" ok bash -c \
-    "'$BIN' pod exec p$PFX --container a cat /tmp/mark-$PFX | grep -q do-a"
-  check "'b' não vê a escrita do 1.º membro (mountns própria)" fail \
-    "$BIN" pod exec "p$PFX" --container b cat "/tmp/mark-$PFX"
-  check "pod exec --container b escreve só em b" ok bash -c \
-    "'$BIN' pod exec p$PFX --container b sh -c 'echo do-b > /tmp/mark2-$PFX'"
-  check "pod exec --container b confirma" ok bash -c \
-    "'$BIN' pod exec p$PFX --container b cat /tmp/mark2-$PFX | grep -q do-b"
+  check "pod exec vai ao 1.º membro do manifesto por omissão" ok bash -c \
+    "'$BIN' pod exec p$PFX sh -c 'echo do-web > /tmp/mark-$PFX'"
+  check "pod exec --container web confirma (é o 1.º do manifesto)" ok bash -c \
+    "'$BIN' pod exec p$PFX --container web cat /tmp/mark-$PFX | grep -q do-web"
+  check "'api' NÃO vê a escrita por omissão (mountns própria)" fail \
+    "$BIN" pod exec "p$PFX" --container api cat "/tmp/mark-$PFX"
+  check "pod exec --container api escreve só em api" ok bash -c \
+    "'$BIN' pod exec p$PFX --container api sh -c 'echo do-api > /tmp/mark2-$PFX'"
+  check "pod exec --container api confirma" ok bash -c \
+    "'$BIN' pod exec p$PFX --container api cat /tmp/mark2-$PFX | grep -q do-api"
   check "pod exec --container inexistente recusa" fail \
     "$BIN" pod exec "p$PFX" --container nope true
 
-  check "pod cp: host -> 1.º membro" ok bash -c \
+  check "pod cp: host -> 1.º membro do manifesto" ok bash -c \
     "echo prova-podcp > '$OUT/podcp-$PFX.txt' && '$BIN' pod cp '$OUT/podcp-$PFX.txt' p$PFX:/tmp/podcp-$PFX.txt"
-  check "pod cp: chegou ao 1.º membro" ok bash -c \
-    "'$BIN' pod exec p$PFX cat /tmp/podcp-$PFX.txt | grep -q prova-podcp"
+  # Pelo NOME, não pelo `pod cp` outra vez: o `--container web` é o que prova em
+  # que membro o `cp` sem `--container` aterrou. Um `pod exec` sem `--container`
+  # aqui concordaria com o `cp` mesmo estando os dois no membro errado.
+  check "pod cp: chegou ao 1.º membro do manifesto (web)" ok bash -c \
+    "'$BIN' pod exec p$PFX --container web cat /tmp/podcp-$PFX.txt | grep -q prova-podcp"
+  check "pod cp: o 2.º membro (api) não o recebeu" fail \
+    "$BIN" pod exec "p$PFX" --container api cat "/tmp/podcp-$PFX.txt"
   check "pod cp --container escolhe o membro" ok bash -c \
-    "'$BIN' pod cp '$OUT/podcp-$PFX.txt' p$PFX:/tmp/podcp2-$PFX.txt --container b && \
-     '$BIN' pod exec p$PFX --container b cat /tmp/podcp2-$PFX.txt | grep -q prova-podcp"
+    "'$BIN' pod cp '$OUT/podcp-$PFX.txt' p$PFX:/tmp/podcp2-$PFX.txt --container api && \
+     '$BIN' pod exec p$PFX --container api cat /tmp/podcp2-$PFX.txt | grep -q prova-podcp"
   check "pod cp: membro -> host" ok bash -c \
     "'$BIN' pod cp p$PFX:/tmp/podcp-$PFX.txt '$OUT/podcp-back-$PFX.txt' && grep -q prova-podcp '$OUT/podcp-back-$PFX.txt'"
 
@@ -1504,6 +1528,11 @@ if "$BIN" pod create -f "$PODY" >/dev/null 2>"$OUT/pod-$PFX.err"; then
   # `delonix vm rm` tinha a mesma quebra em vários pontos deste script — ver
   # `delete vm`/`describe vm` — e foi corrigido numa sessão à parte.
   check "describe pod" ok "$BIN" describe pod "p$PFX"
+  # A ordem da tabela é a do manifesto, não a do store (que é do mais recente
+  # para o mais antigo). Sem isto, `describe` diria «api» primeiro e o operador
+  # leria o pod ao contrário do ficheiro que escreveu.
+  check "describe pod lista os membros por ordem do manifesto" ok bash -c \
+    "'$BIN' describe pod p$PFX | grep -E '^(web|api)' | head -1 | grep -q '^web'"
   check "delete pod -f" ok "$BIN" delete pod "p$PFX" -f
 else
   skip "pod create + aviso de cgroup" "o pod create falhou (holder/SDN indisponível)"

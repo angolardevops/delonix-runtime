@@ -52,6 +52,56 @@ fn pod_ip(members: &[Container], netns: &str) -> String {
         .unwrap_or_else(|| infra::container_ip(netns))
 }
 
+/// The member's position in the manifest's `spec.containers[]`, stamped on each
+/// member at create time.
+///
+/// Membership alone never answered «which is the FIRST member». `Store::list`
+/// returns containers **newest-first**, so a pod whose members straddle a second
+/// boundary comes back in manifest order REVERSED — and members created inside
+/// the same second tie on `created_unix`, leaving `read_dir` to decide. Measured
+/// on a two-member pod: both records carried the SAME `created_unix`, so the
+/// default target of `pod exec`/`logs`/`cp`/`attach` was whichever id the
+/// filesystem happened to hand back first. On the reported run that was member
+/// two: a write with no `--container` landed in `b`, `--container a` could not
+/// see it, and the command still exited 0 — the mountns is NOT shared between
+/// members, so a diagnostic, a migration or a `pod cp` aimed at the app hit the
+/// sidecar in silence. Arbitrary is worse than merely wrong: the same manifest
+/// can answer differently on two hosts, and a green test proves nothing about
+/// the next run.
+///
+/// Ordering by NAME does not fix it: `a`/`b` agree with the manifest by
+/// accident, `web`/`api` do not. Neither does `created_unix` — two members
+/// created in the same second tie, and a later `container start` says nothing
+/// about the manifest. So the order is RECORDED instead of guessed, as a label
+/// like the rest of the pod's derived state ([`POD_LABEL`], [`POD_IP_LABEL`]):
+/// no new store, and it survives restart and reconciliation because labels are
+/// persisted.
+pub(crate) const POD_INDEX_LABEL: &str = "delonix.io/pod-index";
+
+/// A member's declared position, `u32::MAX` when it has none (see [`POD_INDEX_LABEL`]).
+fn pod_index_of(c: &Container) -> u32 {
+    c.labels
+        .get(POD_INDEX_LABEL)
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(u32::MAX)
+}
+
+/// Puts a pod's members back in the order the manifest declared them.
+///
+/// A pod created before [`POD_INDEX_LABEL`] existed carries no index; those fall
+/// back to order by NAME — arbitrary against the manifest, but stable, and the
+/// only thing worse than a wrong default is one that moves between two
+/// invocations. Never an error: an old pod keeps working, it just keeps the
+/// default it already had. An unlabelled member sorts LAST, not first — whatever
+/// it is, it is not the manifest's member 0.
+fn sort_by_manifest_order(members: &mut [Container]) {
+    members.sort_by(|a, b| {
+        pod_index_of(a)
+            .cmp(&pod_index_of(b))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+}
+
 #[derive(Subcommand)]
 pub enum PodCmd {
     /// Create a pod (N containers sharing a netns) from a manifest (`kind: Pod`).
@@ -338,13 +388,18 @@ fn create_pod(name: &str, namespace: Option<String>, spec: PodSpec) -> Result<()
     Ok(())
 }
 
-/// The containers that belong to a pod (by the `delonix.io/pod` label).
+/// The containers that belong to a pod (by the `delonix.io/pod` label), in the
+/// order the manifest declared them. `Store::list` is newest-first, which for a
+/// pod is manifest order reversed at best and `read_dir`'s at worst (see
+/// [`POD_INDEX_LABEL`] and [`sort_by_manifest_order`]).
 fn members_of(store: &delonix_runtime_core::Store, pod: &str) -> Result<Vec<Container>> {
-    Ok(store
+    let mut members: Vec<Container> = store
         .list()?
         .into_iter()
         .filter(|c| c.labels.get(POD_LABEL).map(|v| v == pod).unwrap_or(false))
-        .collect())
+        .collect();
+    sort_by_manifest_order(&mut members);
+    Ok(members)
 }
 
 /// Installs namespace isolation on a pod's SHARED netns address.
@@ -689,9 +744,11 @@ pub(crate) fn describe(names: &[String]) -> Result<()> {
 }
 
 /// The pod's containers, and the ONE the caller means: `--container <short>` by
-/// exact `<pod>-<short>` name, or the pod's first member when omitted. Shared by
-/// `logs`/`exec`/`cp`/`attach` so the "no such pod"/"pod has no container" pair
-/// exists in one place instead of a fourth copy.
+/// exact `<pod>-<short>` name, or the pod's first member when omitted — first as
+/// in `spec.containers[0]`, which is what the `--help` promises and what
+/// [`members_of`] now orders by. Shared by `logs`/`exec`/`cp`/`attach` so the
+/// "no such pod"/"pod has no container" pair exists in one place instead of a
+/// fourth copy.
 fn resolve_target(
     store: &delonix_runtime_core::Store,
     pod: &str,
@@ -977,6 +1034,100 @@ mod tests {
                 "`{default_ish}` has to keep meaning the default bridge"
             );
         }
+    }
+
+    /// A pod member, with the position label optionally set.
+    fn member(name: &str, pod: &str, idx: Option<u32>) -> Container {
+        let mut c = Container::new(
+            name.into(),
+            name.into(),
+            "alpine".into(),
+            vec!["sleep".into()],
+            "64M".into(),
+        );
+        c.labels.insert(POD_LABEL.into(), pod.into());
+        if let Some(i) = idx {
+            c.labels.insert(POD_INDEX_LABEL.into(), i.to_string());
+        }
+        c
+    }
+
+    /// Regression (ACH-002): the default member of `pod exec`/`logs`/`cp`/
+    /// `attach` was not the first one declared. `Store::list` is newest-first,
+    /// and a pod's members usually tie on `created_unix`, so what actually chose
+    /// the default was `read_dir`. Measured on a two-member pod: the write with
+    /// no `--container` landed in the second member, the first could not see it
+    /// — with rc=0.
+    ///
+    /// The names go against alphabetical order on purpose (`web` before `api`):
+    /// sorting by name did not fix this either, and a test using `a`/`b` cannot
+    /// tell the two candidate fixes apart.
+    #[test]
+    fn the_default_member_is_the_first_one_in_the_manifest() {
+        let mut m = vec![member("p-api", "p", Some(1)), member("p-web", "p", Some(0))];
+        sort_by_manifest_order(&mut m);
+        assert_eq!(m[0].name, "p-web");
+        assert_eq!(m[1].name, "p-api");
+    }
+
+    /// Two digits: the order is numeric, not lexicographic — `10` comes after
+    /// `2`, which is the opposite of what a string comparison would say.
+    #[test]
+    fn member_order_is_numeric() {
+        let mut m = vec![member("p-c10", "p", Some(10)), member("p-c2", "p", Some(2))];
+        sort_by_manifest_order(&mut m);
+        assert_eq!(
+            m.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            ["p-c2", "p-c10"]
+        );
+    }
+
+    /// A pod created by an earlier version carries no label. The contract there
+    /// is a STABLE order by name — never an error, and never an order that moves
+    /// between two invocations. An unlabelled member sorts behind the labelled
+    /// ones: whatever it is, it is not the manifest's member 0.
+    #[test]
+    fn a_pod_from_before_the_label_falls_back_to_name_order() {
+        let mut m = vec![member("p-web", "p", None), member("p-api", "p", None)];
+        sort_by_manifest_order(&mut m);
+        assert_eq!(
+            m.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            ["p-api", "p-web"]
+        );
+
+        let mut mixed = vec![
+            member("p-stray", "p", None),
+            member("p-api", "p", Some(1)),
+            member("p-web", "p", Some(0)),
+        ];
+        sort_by_manifest_order(&mut mixed);
+        assert_eq!(
+            mixed.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            ["p-web", "p-api", "p-stray"]
+        );
+    }
+
+    /// The label is written by whoever creates the members — if
+    /// `pod_member_run_opts` stopped stamping it, the ordering tests above would
+    /// stay green against data production would never produce.
+    #[test]
+    fn create_stamps_each_member_with_its_position() {
+        let spec: super::container::PodSpec = serde_yaml::from_str(
+            "containers:\n  - name: web\n    image: nginx\n  - name: api\n    image: redis\n",
+        )
+        .unwrap();
+        let opts = super::container::pod_member_run_opts("p", None, spec, "pod-p").unwrap();
+        let idx = |o: &super::container::RunOpts| {
+            o.labels
+                .iter()
+                .find_map(|l| {
+                    l.strip_prefix(&format!("{POD_INDEX_LABEL}="))
+                        .map(String::from)
+                })
+                .expect("every member carries its position")
+        };
+        assert_eq!(idx(&opts[0]), "0");
+        assert_eq!(idx(&opts[1]), "1");
     }
 
     /// A member with no `name` is `c<i>` by position — the fallback
