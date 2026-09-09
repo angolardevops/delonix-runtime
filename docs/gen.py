@@ -49,8 +49,25 @@ def group_argv(name):
 
 
 def help_of(*args):
+    """O `--help` de um caminho da CLI — e uma recusa se o caminho não existir.
+
+    Este `check` é o gate mais apertado que há contra documentação-fantasma. A
+    versão anterior fazia `(out.stdout or out.stderr)`, portanto um comando
+    REMOVIDO não parava a geração: o clap escrevia `error: unrecognized
+    subcommand 'ls'` no stderr e essa frase ia parar à página como se fosse a
+    descrição do comando. Foi assim que `pod ls` (removido na v2.0.0) e
+    `vm status` (removido na v3.0.0) continuaram documentados — a geração saía
+    0 e o site publicava o erro.
+    """
     out = subprocess.run([BIN, *args, "--help"], capture_output=True, text=True)
-    return (out.stdout or out.stderr).strip()
+    if out.returncode != 0:
+        raise SystemExit(
+            f"gen.py: `delonix {' '.join(args)} --help` saiu {out.returncode} — "
+            f"o comando não existe neste binário ({BIN}).\n"
+            f"  {out.stderr.strip().splitlines()[0] if out.stderr.strip() else ''}\n"
+            "  Corrige a grafia em GROUPS/GROUP_PATH em vez de publicar o erro."
+        )
+    return out.stdout.strip()
 
 
 def split_help_intro(help_text):
@@ -295,7 +312,7 @@ para o comando específico, nunca adivinha).</p>"""},
     },
     "pod": {
         "title": "delonix pod",
-        "tagline": "Pods reais multi-container (create, ls, logs, exec, cp, attach) — N containers como uma unidade.",
+        "tagline": "Pods reais multi-container (create, logs, exec, cp, attach) — N containers como uma unidade.",
         "intro": """Pods de verdade, ao estilo Kubernetes: N containers que <strong>partilham as
 namespaces do pod</strong> e se gerem como uma só unidade. Hoje partilham <strong>netns</strong>
 (o mesmo IP, alcançam-se por <code>localhost</code>), <strong>IPC</strong> (System V/POSIX) e
@@ -318,7 +335,6 @@ partilhada — cada container mantém a sua própria árvore de processos; é a 
 faz nada. Também se pode aplicar pelo <code>delonix stack apply</code> (grupo <code>pods:</code> no
 <code>kind: Stack</code>) e pré-visualizar com <code>--dry-run</code>. Se a criação de um membro
 falha, o pod é desfeito por inteiro (sem meio-pod).</p>"""},
-            "ls": {"examples": [("Listar os pods (POD, CONTAINERS n/N, IP, STATUS)", "delonix pod ls")]},
             "logs": {"examples": [
                 ("Logs do 1.º container do pod", "delonix pod logs web-app"),
                 ("Logs de um container específico (nome curto dentro do pod)", "delonix pod logs web-app --container sidecar -f"),
@@ -337,6 +353,12 @@ do <code>container cp</code>. Sem <code>--container</code>, resolve ao 1.º memb
             ], "notes": """<p>Mesmo contrato do <code>container attach</code>: sem canal de stdin vivo
 para um container já desanexado, por isso <code>-i</code> é recusado com erro claro.</p>"""},
         },
+        "examples": [
+            ("Listar os pods (POD, CONTAINERS n/N, IP, STATUS) — `pod ls` saiu na v2.0.0",
+             "delonix get pods"),
+            ("Detalhe de um pod, em blocos", "delonix describe pod web-app"),
+            ("Remover o pod como unidade", "delonix delete pod web-app"),
+        ],
     },
     "image": {
         "title": "delonix image",
@@ -441,7 +463,7 @@ para saltar; modo root continua sem cache). Sem BuildKit real (sem
     },
     "vm": {
         "title": "delonix vm",
-        "tagline": "microVMs declarativas: create, ls, status, stop, apply.",
+        "tagline": "microVMs declarativas: create, ls, stop, apply.",
         "intro": """MicroVMs geridas pelo trait <code>VmBackend</code> — Cloud Hypervisor ou libvirt.
 O <code>create</code> é idempotente (cria ou auto-recupera) e suporta cloud-init por instância:
 <code>--hostname</code>, <code>--ssh-key</code> e <code>--user-data</code> geram um ISO NoCloud
@@ -536,10 +558,15 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
                  "delonix vm create node1 --ssh-key @~/.ssh/id_ed25519.pub"),
             ]},
             "ls": {"examples": [("", "delonix vm ls")]},
-            "status": {"examples": [("Reconcilia liveness/IP com o backend", "delonix vm status node1")]},
             "stop": {"examples": [("", "delonix vm stop node1")]},
             "apply": {"examples": [("", "delonix vm apply -f delonix-manifest.yaml")]},
         },
+        "examples": [
+            ("Detalhe de uma VM, reconciliando liveness/IP com o backend — "
+             "`vm status` saiu na v3.0.0",
+             "delonix describe vm node1"),
+            ("Remover a VM", "delonix delete vm node1"),
+        ],
     },
     "volumes": {
         "title": "delonix volume",
@@ -977,13 +1004,14 @@ para dar uma única URL pública a vários backends.""",
                 ("Aplicar as HTTPRoutes de um manifesto (sobe/recarrega o proxy)",
                  "delonix net httproute apply -f delonix-manifest.yaml"),
             ]},
-            "ls": {"examples": [
-                ("Estado do proxy + rotas activas", "delonix net httproute ls"),
-            ]},
             "rm": {"examples": [
                 ("Parar o proxy e despublicar as portas", "delonix net httproute rm"),
             ]},
         },
+        "examples": [
+            ("Estado do proxy + rotas activas — `httproute ls` saiu para o verbo genérico",
+             "delonix get httproutes"),
+        ],
     },
     "tunnel": {
         "title": "delonix net tunnel",
@@ -1008,19 +1036,16 @@ NOMEADO com domínio próprio precisa da API do Cloudflare, ainda por implementa
                  "tunnel/demo: running — https://oxipg-197-148-40-67.free.pinggy.net"),
             ], "notes": """<p>Validado ao vivo nesta mesma sessão: tráfego HTTPS real da internet
 chegou a um servidor local através do tunnel (HTTP 200) usando exactamente este comando.</p>"""},
-            "ls": {"examples": [
-                ("Listar túneis (estado + URL pública)", "delonix net tunnel ls",
-                 "NAME    PROVIDER   LOCAL PORT   PUBLIC URL                                    STATUS    UPTIME\n"
-                 "test1   pinggy          18234   https://oxipg-197-148-40-67.free.pinggy.net   Running   Up 34 seconds"),
-            ]},
-            "describe": {"examples": [
-                ("Detalhe de um túnel", "delonix net tunnel describe demo"),
-            ]},
-            "rm": {"examples": [
-                ("Parar e remover (mata o processo agente a sério)", "delonix net tunnel rm demo",
-                 "tunnel/demo: removed"),
-            ]},
         },
+        "examples": [
+            ("Listar túneis (estado + URL pública) — `tunnel ls` saiu para o verbo genérico",
+             "delonix get gateways",
+             "NAME    PROVIDER   LOCAL PORT   PUBLIC URL                                    STATUS    UPTIME\n"
+             "test1   pinggy          18234   https://oxipg-197-148-40-67.free.pinggy.net   Running   Up 34 seconds"),
+            ("Detalhe de um túnel", "delonix describe gateway demo"),
+            ("Parar e remover (mata o processo agente a sério)", "delonix delete gateway demo",
+             "tunnel/demo: removed"),
+        ],
     },
     "flow": {
         "title": "delonix net flow",
@@ -1306,7 +1331,7 @@ lowers to the matching Kind in <code>manifest::load</code>; see
 <a href="../kinds.html">Kinds</a> and <code>examples/workload.yaml</code>.""",
     },
     "pod": {
-        "tagline": "Real multi-container pods (create, ls, logs) — N containers as one unit.",
+        "tagline": "Real multi-container pods (create, logs, exec) — N containers as one unit.",
         "intro": """Real Kubernetes-style pods: N containers that <strong>share the pod's
 namespaces</strong> and are managed as a single unit. Today they share <strong>netns</strong>
 (same IP, reachable via <code>localhost</code>), <strong>IPC</strong> (System V/POSIX) and
@@ -1349,7 +1374,7 @@ it; root mode still has no cache). No real BuildKit (no <code>RUN --mount=secret
 <code>--platform</code>).""",
     },
     "vm": {
-        "tagline": "Declarative microVMs: create, ls, status, stop, apply.",
+        "tagline": "Declarative microVMs: create, ls, stop, apply.",
         "intro": """MicroVMs managed by the <code>VmBackend</code> trait — Cloud Hypervisor or
 libvirt. <code>create</code> is idempotent (creates or self-heals) and supports per-instance
 cloud-init: <code>--hostname</code>, <code>--ssh-key</code> and <code>--user-data</code> generate a
@@ -1735,22 +1760,22 @@ confirm the value is NOT in the final image (not even an empty file).</p>"""},
     "vm": {
         "lab": {"pt": """<p>Cria uma microVM com cloud-init automático e liga-te por SSH.</p>
 <pre><code>delonix vm create dev --hostname dev --ssh-key ~/.ssh/id_ed25519.pub
-delonix vm status dev
-ssh delonix@$(delonix vm status dev --ip)</code></pre>""",
+delonix describe vm dev
+delonix vm ssh dev</code></pre>""",
                 "en": """<p>Create a microVM with automatic cloud-init and SSH into it.</p>
 <pre><code>delonix vm create dev --hostname dev --ssh-key ~/.ssh/id_ed25519.pub
-delonix vm status dev
-ssh delonix@$(delonix vm status dev --ip)</code></pre>"""},
+delonix describe vm dev
+delonix vm ssh dev</code></pre>"""},
         "challenge": {"pt": """<p>Só no backend libvirt: tira um <code>snapshot</code> da VM a
 correr, muda alguma coisa lá dentro, e usa <code>restore</code> para voltar atrás. Confirma que a
 mudança desapareceu.</p>
-<pre><code>delonix vm snapshot dev antes-da-mudanca
-delonix vm restore dev antes-da-mudanca</code></pre>""",
+<pre><code>delonix vm snapshot create dev antes-da-mudanca
+delonix vm snapshot restore dev antes-da-mudanca</code></pre>""",
                 "en": """<p>libvirt backend only: take a <code>snapshot</code> of the running VM,
 change something inside it, then use <code>restore</code> to roll back. Confirm the change is
 gone.</p>
-<pre><code>delonix vm snapshot dev before-the-change
-delonix vm restore dev before-the-change</code></pre>"""},
+<pre><code>delonix vm snapshot create dev before-the-change
+delonix vm snapshot restore dev before-the-change</code></pre>"""},
     },
     "volumes": {
         "lab": {"pt": """<p>Prova que um volume nomeado sobrevive a um restart do container —
@@ -1925,10 +1950,10 @@ configuration.</p>"""},
     "tunnel": {
         "lab": {"pt": """<p>Uma porta local, uma URL pública — sem conta, sem router.</p>
 <pre><code>delonix net tunnel expose 8080
-delonix net tunnel ls</code></pre>""",
+delonix get gateways</code></pre>""",
                 "en": """<p>One local port, one public URL — no account, no router config.</p>
 <pre><code>delonix net tunnel expose 8080
-delonix net tunnel ls</code></pre>"""},
+delonix get gateways</code></pre>"""},
         "challenge": {"pt": """<p>Aponta a porta local do tunnel para a porta onde o
 proxy L7 (<code>httproute</code>) escuta, e confirma que a MESMA URL pública consegue servir vários
 containers backend diferentes, decididos pelo <code>Host</code> do pedido.</p>""",
@@ -2156,6 +2181,23 @@ internet reached a local server through the tunnel (HTTP 200) using exactly this
 # `GROUPS[grupo]["examples"]` ou `GROUPS[grupo]["subs"][sub]["examples"]` —
 # uma legenda vazia ("") fica vazia nas duas línguas (sem legenda nenhuma).
 EXAMPLES_EN = {
+    ("httproute", None): [
+        "Proxy state + active routes — `httproute ls` moved to the generic verb",
+    ],
+    ("tunnel", None): [
+        "List tunnels (state + public URL) — `tunnel ls` moved to the generic verb",
+        "Detail of one tunnel",
+        "Stop and remove it (really kills the agent process)",
+    ],
+    ("pod", None): [
+        "List the pods (POD, CONTAINERS n/N, IP, STATUS) — `pod ls` went away in v2.0.0",
+        "Detail of one pod, in blocks",
+        "Remove the pod as a unit",
+    ],
+    ("vm", None): [
+        "Detail of one VM, reconciling liveness/IP with the backend — `vm status` went away in v3.0.0",
+        "Remove the VM",
+    ],
     ("container", "dash"): ["Containers-only dashboard"],
     ("container", "run"): [
         "Serve nginx on host port 8080 (userspace NAT, no root)",
@@ -4060,11 +4102,11 @@ delonix describe vms dev
 delonix vm console dev
 
 # 4. Checkpoint de sistema — memória E disco, com a VM a correr
-delonix vm snapshot dev limpa
-delonix vm snapshots dev
+delonix vm snapshot create dev limpa
+delonix vm snapshot ls dev
 
 # 5. Estragar alguma coisa lá dentro e voltar atrás
-delonix vm restore dev limpa
+delonix vm snapshot restore dev limpa
 
 delonix delete vms dev</code></pre>
 <p class="note"><strong>Verificação:</strong> o passo 4 devolve sem erro com a
@@ -4321,11 +4363,11 @@ delonix describe vms dev
 delonix vm console dev
 
 # 4. System checkpoint — memory AND disk, VM still running
-delonix vm snapshot dev clean
-delonix vm snapshots dev
+delonix vm snapshot create dev clean
+delonix vm snapshot ls dev
 
 # 5. Break something inside and roll back
-delonix vm restore dev clean
+delonix vm snapshot restore dev clean
 
 delonix delete vms dev</code></pre>
 <p class="note"><strong>Verification:</strong> step 4 returns with no error
@@ -5038,7 +5080,7 @@ pública, tantos backends quantos precisares. Ver <code>examples/httproute.yaml<
 </div>
 
 <h2>Arrumar</h2>
-<pre><code>delonix net tunnel rm delonix-temp
+<pre><code>delonix delete gateway delonix-temp
 delonix container rm -f delonix-temp</code></pre>
 
 <h2>O que isto provou</h2>
@@ -5161,7 +5203,7 @@ many backends as you need. See <code>examples/httproute.yaml</code> +
 </div>
 
 <h2>Cleanup</h2>
-<pre><code>delonix net tunnel rm delonix-temp
+<pre><code>delonix delete gateway delonix-temp
 delonix container rm -f delonix-temp</code></pre>
 
 <h2>What this proved</h2>

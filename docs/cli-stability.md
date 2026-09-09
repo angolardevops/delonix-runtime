@@ -280,7 +280,7 @@ promete não acontecer.
 **O que fica de fora, e é honesto dizê-lo:** os restantes Kinds
 (`Vm`, `Cluster`, `ShareVolume`, `Image`, `Secret`, `Ingress`,
 `FirewallPolicy`, `HTTPRoute`, `Tunnel`, `Workload`, `Stack`) ainda não têm
-schema gerado, e por isso continuam sem promessa. O `delonix schema`/`explain`
+schema gerado, e por isso continuam sem promessa. O `delonix manifest schema`/`explain`
 diz quais são, em vez de os omitir.
 
 > **Três Kinds deixaram de existir** nesta série, fundidos no que já faziam:

@@ -231,9 +231,12 @@ Highlights
   names resolve **per architecture** rather than from a table of numbers, and a
   profile this engine cannot express exactly — argument-filtered rules, for
   instance — is refused rather than approximated into a weaker one.
-- **Short paths for the hot verbs.** ``delonix ps``, ``run``, ``exec``,
-  ``logs``, ``rm``, ``images``. They are the same commands, reached by rewriting
-  argv, so they cannot drift from the grouped form.
+- **One generic verb per question, across every Kind.** ``delonix get``,
+  ``describe`` and ``delete`` take a Kind — ``pods``, ``pod`` and ``po`` are the
+  same question — so the same three verbs answer for containers, VMs, volumes
+  and networks alike, and ``delonix api-resources`` prints the registry they
+  resolve through. The grouped form (``delonix container ps``) stays for what is
+  specific to one Kind.
 
 Kubernetes CRI conformance
 ==========================
@@ -437,7 +440,7 @@ never touched. ``stack destroy`` removes what the stack owns, in reverse order.
 ``--detailed-exitcode`` returns 0/2/1 like ``terraform plan``, which makes a
 drift gate in CI one command.
 
-The schema is **generated from the code** (``delonix schema print``,
+The schema is **generated from the code** (``delonix manifest schema``,
 ``delonix explain Pod.containers``) and published, so an editor gives you
 completion and type checking from one comment at the top of the file. It catches
 a typo in a field name, a ``kind`` the engine does not know, and an
