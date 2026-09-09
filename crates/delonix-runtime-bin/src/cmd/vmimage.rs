@@ -2065,6 +2065,18 @@ fn cmd_build(
             )));
         }
     }
+    // The LAST argument check, and it has to happen HERE: the two paths were
+    // only validated inside `resolve_cri_bin`/`resolve_delonix_bin`, which the
+    // recipe reaches long after `download_*_base` below. Measured 2026-09-09 on
+    // `cargo test --workspace`: a `--delonix-bin` that does not exist was still
+    // being reported as a mistake only after ~600 MB of Ubuntu cloud image had
+    // come off the network — over 7 minutes for a refusal the caller could have
+    // had in microseconds. The resolvers keep the same check, so nothing here
+    // is a second source of truth; this is the same check, moved in front of
+    // the first byte of I/O.
+    check_cri_bin(cri_bin.as_deref())?;
+    check_delonix_bin(delonix_bin.as_deref())?;
+
     let release = match distro {
         Distro::Ubuntu => ubuntu_release,
         Distro::Debian => debian_release,
@@ -4002,7 +4014,11 @@ pub(crate) fn now_unix() -> u64 {
 // Resolution of the `delonix-cri` binary to install in the guest
 // ---------------------------------------------------------------------------
 
-pub(crate) fn resolve_cri_bin(explicit: Option<PathBuf>) -> Result<PathBuf> {
+/// The `--cri-bin` existence check, on its own so `cmd_build` can run it
+/// BEFORE it touches the network. It stays a separate function (rather than a
+/// shared one parameterised by flag name) because `po::tf` translates by exact
+/// msgid: the literal has to remain whole in one place.
+pub(crate) fn check_cri_bin(explicit: Option<&Path>) -> Result<()> {
     if let Some(p) = explicit {
         if !p.exists() {
             return Err(Error::Invalid(super::po::tf(
@@ -4010,6 +4026,13 @@ pub(crate) fn resolve_cri_bin(explicit: Option<PathBuf>) -> Result<PathBuf> {
                 &[("path", &p.display().to_string())],
             )));
         }
+    }
+    Ok(())
+}
+
+pub(crate) fn resolve_cri_bin(explicit: Option<PathBuf>) -> Result<PathBuf> {
+    check_cri_bin(explicit.as_deref())?;
+    if let Some(p) = explicit {
         return Ok(p);
     }
     // Next to the current `delonix` (normal install, release).
@@ -4153,11 +4176,9 @@ fn download_cri_bin() -> Result<PathBuf> {
     Ok(cached)
 }
 
-/// Mirrors `resolve_cri_bin` for the `delonix` engine binary itself (used by
-/// `--no-k8s` golden images). Simpler than the CRI case for tier 2: this
-/// command is already running AS `delonix`, so `current_exe()` IS a valid
-/// `delonix` binary — no "next to the exe" lookup needed.
-pub(crate) fn resolve_delonix_bin(explicit: Option<PathBuf>) -> Result<PathBuf> {
+/// `check_cri_bin` for `--delonix-bin`; see that one for why the two are not
+/// folded into a single flag-parameterised helper.
+pub(crate) fn check_delonix_bin(explicit: Option<&Path>) -> Result<()> {
     if let Some(p) = explicit {
         if !p.exists() {
             return Err(Error::Invalid(super::po::tf(
@@ -4165,6 +4186,17 @@ pub(crate) fn resolve_delonix_bin(explicit: Option<PathBuf>) -> Result<PathBuf> 
                 &[("path", &p.display().to_string())],
             )));
         }
+    }
+    Ok(())
+}
+
+/// Mirrors `resolve_cri_bin` for the `delonix` engine binary itself (used by
+/// `--no-k8s` golden images). Simpler than the CRI case for tier 2: this
+/// command is already running AS `delonix`, so `current_exe()` IS a valid
+/// `delonix` binary — no "next to the exe" lookup needed.
+pub(crate) fn resolve_delonix_bin(explicit: Option<PathBuf>) -> Result<PathBuf> {
+    check_delonix_bin(explicit.as_deref())?;
+    if let Some(p) = explicit {
         return Ok(p);
     }
     if let Ok(exe) = std::env::current_exe() {
@@ -6663,9 +6695,28 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// A `--delonix-bin` that does not exist is refused BEFORE the base image
+    /// is downloaded.
+    ///
+    /// Until 2026-09-09 this test was named for a rule the engine no longer
+    /// has — that `--delonix-bin` without `--no-k8s` is rejected. That
+    /// restriction was deliberately dropped (see the NOTE in `cmd_build`: the
+    /// two binaries travel together on the k8s path too), so the test went
+    /// green only because something further down the build failed. Getting
+    /// there cost a real download: measured over 7 minutes fetching ~600 MB of
+    /// `ubuntu-24.04-server-cloudimg-amd64` before the refusal.
+    ///
+    /// So the assertion is on the MESSAGE, not just on `is_err()`, and on the
+    /// base cache still being empty afterwards — an `is_err()` alone cannot
+    /// tell an argument refusal from a build that died on a missing
+    /// `virt-resize` two hundred lines later.
     #[test]
-    fn delonix_bin_sem_no_k8s_e_rejeitado() {
+    fn a_missing_delonix_bin_is_refused_before_anything_is_downloaded() {
         let (store, dir) = tmp_store();
+        // Under the store's own directory, so no path on the developer's
+        // machine can make this pass or fail by accident — `/tmp/delonix` is a
+        // plausible scratch path and was the old value.
+        let missing = dir.join("no-such-delonix");
         let err = cmd_build(
             &store,
             "t",
@@ -6681,11 +6732,69 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             true,
             false,
             false, // no_k8s = false
-            Some(PathBuf::from("/tmp/delonix")),
+            Some(missing.clone()),
             None, // root_password
             None, // node_exporter
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("--delonix-bin") && err.contains(&missing.display().to_string()),
+            "the refusal must name the flag and the path it was given: {err}"
         );
-        assert!(err.is_err());
+        // The proof that nothing was fetched: the base image would have landed
+        // here (or next to it, as the partial `.download`).
+        let cached = store.base_cache_path(Distro::Ubuntu, "24.04");
+        let base_dir = cached.parent().unwrap();
+        let downloaded: Vec<PathBuf> = std::fs::read_dir(base_dir)
+            .map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.path()).collect())
+            .unwrap_or_default();
+        assert!(
+            downloaded.is_empty(),
+            "the refusal happened after network I/O: {downloaded:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The same guarantee for `--cri-bin`, which shares the trap: it too was
+    /// only validated inside its resolver, downstream of the download.
+    #[test]
+    fn a_missing_cri_bin_is_refused_before_anything_is_downloaded() {
+        let (store, dir) = tmp_store();
+        let missing = dir.join("no-such-delonix-cri");
+        let err = cmd_build(
+            &store,
+            "t",
+            Distro::Ubuntu,
+            "24.04",
+            "bookworm",
+            "9",
+            "42-1.1",
+            None,
+            vec![],
+            vec![],
+            Some(missing.clone()),
+            true,
+            false,
+            false, // no_k8s = false
+            None,
+            None, // root_password
+            None, // node_exporter
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("--cri-bin") && err.contains(&missing.display().to_string()),
+            "the refusal must name the flag and the path it was given: {err}"
+        );
+        let cached = store.base_cache_path(Distro::Ubuntu, "24.04");
+        let downloaded: Vec<PathBuf> = std::fs::read_dir(cached.parent().unwrap())
+            .map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.path()).collect())
+            .unwrap_or_default();
+        assert!(
+            downloaded.is_empty(),
+            "the refusal happened after network I/O: {downloaded:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
