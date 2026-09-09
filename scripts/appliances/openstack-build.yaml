@@ -53,9 +53,26 @@ write_files:
       # build dependencies" + "Install dependencies for the virtual
       # environment". Not a guessed superset: a package this list does not name
       # is a package upstream does not ask for.
-      retry "timeout 900 apt-get install -y git python3-dev libffi-dev gcc libssl-dev libdbus-glib-1-dev python3-venv"
+      retry "timeout 900 apt-get install -y git python3-dev libffi-dev gcc libssl-dev libdbus-glib-1-dev python3-venv python3-dbus"
 
-      python3 -m venv /opt/kolla-venv
+      # --system-site-packages, and python3-dbus above, because kolla 2026.1
+      # manages its containers through systemd and its Ansible modules therefore
+      # `import dbus`. kolla-ansible does not declare it (checked on PyPI: the
+      # 22.1.0 requires_dist is bcrypt, cryptography, hvac, Jinja2, ansible-core,
+      # jmespath, oslo.config, oslo.utils, cliff — no dbus, no docker), so a clean
+      # venv cannot see it and `pull` dies with
+      #
+      #   Module failed: No module named 'dbus'
+      #
+      # after everything above has already succeeded. Measured, twice, on a full
+      # build of this image: bootstrap-servers completes and the pull fails
+      # ~20 minutes in, every time.
+      #
+      # The quickstart's libdbus-glib-1-dev is the header set for building
+      # dbus-python from source instead. That keeps the venv isolated and would
+      # be tidier, but current dbus-python builds with meson, which is not in
+      # this list — untested here, and this file does not ship untested changes.
+      python3 -m venv --system-site-packages /opt/kolla-venv
       # The venv on PATH, and not just called by absolute path. `kolla-ansible`
       # is a shell wrapper that execs `ansible-playbook` and `ansible-galaxy`
       # BY NAME, so an absolute call reaches kolla-ansible and then dies inside
@@ -89,6 +106,22 @@ write_files:
       # which pip lays down under the venv root.
       retry "timeout 900 pip install --retries 10 --timeout 60 \
           'kolla-ansible==@KOLLA_VERSION@'"
+
+      # docker-py IN THE VENV, and it is the other half of --system-site-packages.
+      # That flag also exposes the distro's docker-py, and bootstrap-servers
+      # installs Ubuntu 24.04's python3-docker 5.0.3 while the venv brings
+      # urllib3 2.6.3. Below 7.1, docker-py addresses the daemon as
+      # `http+docker://` — a scheme urllib3 2.x dropped — so the pull dies with
+      #
+      #   docker.errors.DockerException: Error while fetching server API version:
+      #   Not supported URL scheme http+docker
+      #
+      # Measured on a full build, immediately after the dbus fix let it get that
+      # far. Installing it here shadows the distro copy; the version is not a
+      # guess, it is what this release's own upper-constraints pins alongside the
+      # urllib3 it collides with.
+      retry "timeout 300 pip install --retries 10 --timeout 60 docker \
+          -c https://releases.openstack.org/constraints/upper/@RELEASE@"
 
       mkdir -p /etc/kolla
       cp -r /opt/kolla-venv/share/kolla-ansible/etc_examples/kolla/* /etc/kolla/
