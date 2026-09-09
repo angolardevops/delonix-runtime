@@ -10482,8 +10482,15 @@ msgstr "Monta em leitura-apenas — com `--type`"
 msgid "Carve this volume out of an ALREADY-EXISTING one (a quota'd, isolated subdirectory — what `kind: ShareVolume` used to be a Kind of its own for). Mounts nothing of its own: exclusive with `--driver`/`--device`/`--options`/`--type`"
 msgstr "Talha este volume a partir de um JÁ EXISTENTE (um subdirectório isolado e com quota — o que `kind: ShareVolume` costumava ser uma Kind própria para). Não monta nada de seu: exclusivo com `--driver`/`--device`/`--options`/`--type`"
 
-msgid "Namespace that will own the share (default `default`) — only with `--parent`"
-msgstr "Namespace que vai possuir a partilha (por omissão `default`) — só com `--parent`"
+msgid "Namespace that will own the share (default: the unscoped root) — only with `--parent`"
+msgstr "Namespace que vai possuir a partilha (por omissão: a raiz sem âmbito) — só com `--parent`"
+
+msgid ""
+"a share named '{name}' also exists in namespace 'default' (`delonix volume ls "
+"-n default`) — this one is unscoped and SEPARATE from it"
+msgstr ""
+"já existe uma partilha chamada '{name}' na namespace 'default' (`delonix volume "
+"ls -n default`) — esta é sem âmbito e SEPARADA dela"
 
 msgid "Every namespace at once, plus the unscoped root — a share that exists and is invisible is how an operator removes its parent believing nothing hangs off it (B5 CLI collapse: `sharevolume ls` always listed this way; `volume ls` now can too)"
 msgstr "Todas as namespaces de uma vez, mais a raiz sem âmbito — uma partilha que existe e é invisível é como um operador remove o seu pai a acreditar que nada depende dele (fusão B5 da CLI: `sharevolume ls` sempre listou assim; `volume ls` agora também pode)"
