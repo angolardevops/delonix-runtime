@@ -1569,7 +1569,7 @@ pub static ENTRIES: &[Entry] = &[
         path: "pod",
         group: "",
         examples: &[
-            ("which pods exist and which containers each one holds", "delonix pod ls"),
+            ("which pods exist and which containers each one holds", "delonix get pods"),
             ("create one from a manifest — N containers on ONE IP, reaching each other over localhost", "delonix pod create -f examples/pod-multi.yaml"),
             ("the logs of a chosen member", "delonix pod logs web --container api"),
         ],

@@ -353,7 +353,7 @@ pub enum ImageCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::registries))]
         registry: String,
     },
-    /// Golden VM images (`<root>/vm-images/`): ls/pull/push/build/rm/etc.
+    /// Golden VM images (`<root>/vm-images/`): ls/pull/push/build/rm/describe.
     Vm {
         #[command(subcommand)]
         action: VmSub,
