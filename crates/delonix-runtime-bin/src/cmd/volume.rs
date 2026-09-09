@@ -370,12 +370,13 @@ pub(crate) fn stamp(
 pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     let spec: VolumeSpec = manifest::spec_of(doc)?;
     spec.check_share_exclusivity()?;
-    let name = match spec.share_from() {
-        Some(_) => scoped_plan_name(
-            doc.metadata.namespace.as_deref().unwrap_or("default"),
-            &doc.metadata.name,
-        ),
-        None => doc.metadata.name.clone(),
+    // Only a share WITH an owner is qualified. An unscoped one is a plain root
+    // volume, and `actual()` names every root volume bare — qualifying it here
+    // would leave a resource the plan can never match: eternal `Adopt` drift,
+    // and a `--prune`/`destroy` that never reaches it.
+    let name = match (spec.share_from(), doc.metadata.namespace.as_deref()) {
+        (Some(_), Some(ns)) => scoped_plan_name(ns, &doc.metadata.name),
+        _ => doc.metadata.name.clone(),
     };
     Ok(super::reconcile::Desired {
         kind: k::VOLUME.into(),
@@ -491,7 +492,7 @@ pub enum VolumeCmd {
         /// `--driver`/`--device`/`--options`/`--type`.
         #[arg(long, add = ArgValueCandidates::new(super::complete::volumes))]
         parent: Option<String>,
-        /// Namespace that will own the share (default `default`) — only with `--parent`.
+        /// Namespace that will own the share (default: the unscoped root) — only with `--parent`.
         #[arg(short = 'n', long, requires = "parent", add = clap_complete::engine::ArgValueCandidates::new(super::complete::namespaces))]
         namespace: Option<String>,
     },
@@ -776,12 +777,16 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         // implementation of a share rather than a second one that would have to
         // agree with the CLI's.
         if let Some(from) = spec.share_from() {
+            // Absent `metadata.namespace` = the unscoped root, the SAME
+            // reading the imperative path gives an absent `--namespace`: the
+            // two entry points must not disagree about where an unowned share
+            // is written, or one manifest and one command produce two volumes.
             super::sharevolume::apply_share(
                 name,
                 from,
                 spec.quota.as_deref(),
                 spec.alert_pct,
-                doc.metadata.namespace.as_deref().unwrap_or("default"),
+                doc.metadata.namespace.as_deref(),
             )?;
             continue;
         }
@@ -1007,12 +1012,19 @@ fn cmd_create(store: &VolumeStore, name: &str, a: CreateArgs) -> Result<()> {
     if let Some(from) = a.parent {
         // The parent has to exist and be reachable from the UNSCOPED store —
         // same rule `apply_share` already enforces for the manifest path.
+        // No `--namespace` means NO owner — the unscoped root, which is what
+        // `describe`/`rm`'s own `-n` help has always promised as their default
+        // and where a plain `volume create` already writes. Defaulting to
+        // `default` here was ACH-001: the write landed in a namespace nobody
+        // named and the three unflagged read commands then said the share did
+        // not exist. `--namespace <t>` is untouched — that is the isolation
+        // this flag exists for (two tenants, a `db` each).
         super::sharevolume::apply_share(
             name,
             &from,
             a.quota.as_deref(),
             a.alert_pct,
-            a.namespace.as_deref().unwrap_or("default"),
+            a.namespace.as_deref(),
         )?;
         return Ok(());
     }
@@ -1145,24 +1157,26 @@ fn cmd_ls(
     // share that exists and cannot be seen is how an operator removes its
     // parent believing nothing hangs off it (B5 CLI collapse — `sharevolume
     // ls` always listed every namespace this way).
-    let vols: Vec<(String, delonix_volume::Volume)> = if all_namespaces {
+    // `Option<String>` and not a flattened `String`: `None` is the unscoped
+    // root and it is NOT the namespace called `default`. Collapsing the two
+    // into an empty string is what made `-A` print `default` next to a volume
+    // that has no owner at all — the same conflation on the READ side that
+    // ACH-001 was on the write side, and in the one view whose whole job is to
+    // let an operator tell the owners apart before removing a parent.
+    let vols: Vec<(Option<String>, delonix_volume::Volume)> = if all_namespaces {
         store
             .list_all()?
             .into_iter()
-            .map(|ov| (ov.namespace.unwrap_or_default(), ov.volume))
+            .map(|ov| (ov.namespace, ov.volume))
             .collect()
     } else {
         match namespace {
-            None => store
-                .list()?
-                .into_iter()
-                .map(|v| (String::new(), v))
-                .collect(),
+            None => store.list()?.into_iter().map(|v| (None, v)).collect(),
             Some(ns) => store
                 .list_all()?
                 .into_iter()
                 .filter(|ov| ov.namespace.as_deref() == Some(ns))
-                .map(|ov| (ns.to_string(), ov.volume))
+                .map(|ov| (Some(ns.to_string()), ov.volume))
                 .collect(),
         }
     };
@@ -1178,7 +1192,7 @@ fn cmd_ls(
                     mountpoint: v.mountpoint,
                     size_bytes: usage.is_complete().then_some(usage.bytes),
                     used_by,
-                    namespace: (!ns.is_empty()).then_some(ns),
+                    namespace: ns,
                     parent: v.parent,
                     quota_bytes: v.quota_bytes,
                 }
@@ -1221,7 +1235,16 @@ fn cmd_ls(
                 .unwrap_or_else(|| "-".to_string()),
             alert_cell(&usage, &qs),
             used_by,
-            output::namespace_cell(&ns, filtered),
+            // `<none>` is the label `OwnedVolume::owner` already gives the
+            // unscoped root, and `valid_name` refuses the brackets, so it can
+            // never be read as a namespace someone created. Only under a
+            // filter: unfiltered, every row IS the root and a column of
+            // `<none>` would just push the informative ones off the screen
+            // (`drop_uninformative` drops the `-` that `namespace_cell` gives).
+            match &ns {
+                None if filtered => delonix_volume::OwnedVolume::NO_OWNER.to_string(),
+                _ => output::namespace_cell(ns.as_deref().unwrap_or_default(), filtered),
+            },
         ]);
     }
     t.drop_uninformative().print();

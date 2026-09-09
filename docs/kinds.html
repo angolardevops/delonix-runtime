@@ -1143,9 +1143,16 @@ spec:
 # The parent is a `kind: Volume` with a network-share block (`nfs:`/`cifs:`/
 # `webdav:`) — see examples/storage.yaml.
 #
+# `metadata.namespace` (and `--parent`&#x27;s `--namespace`) is OPTIONAL, and leaving
+# it out means NO owner — the share is written to the unscoped root, exactly
+# where a plain `volume create` writes and where `volume ls`/`describe`/`rm`
+# read when given no `-n`. It is not shorthand for a namespace called `default`:
+# `--namespace default` is a real tenant and a different share.
+#
 # Apply with:  delonix volume apply -f sharevolume.yaml
 # Or create a share imperatively, without a manifest at all:
-#   delonix volume create app-data --parent nas --quota 5G
+#   delonix volume create app-data --parent nas --quota 5G     # unowned: `volume ls` shows it
+#   delonix volume create app-data --parent nas -n teamA       # owned:   `volume ls -n teamA`
 apiVersion: storage.delonix.io/v1alpha1
 kind: Volume
 metadata:

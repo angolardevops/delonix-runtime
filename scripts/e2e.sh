@@ -498,13 +498,27 @@ section "volume create --parent (fusão B5 — antigo sharevolume) imperativo"
 SHPARENT="shparent-$PFX"
 check "volume pai" ok "$BIN" volume create "$SHPARENT"
 check "volume create --parent" ok "$BIN" volume create "shchild-$PFX" --parent "$SHPARENT" --quota 1M
-check "a share aparece em volume ls com PARENT" ok \
+# ACH-001 (v3.0.0, ALTA): o `create` sem `--namespace` escrevia em `.ns/default/`
+# e os tres comandos de leitura SEM flag liam a raiz. Medido: `create` devolvia 0
+# com a share no disco a consumir quota do pai, e `describe`/`rm` respondiam
+# `no such volume` (rc=4) sobre uma coisa que existia. Os tres checks abaixo sao
+# um so invariante — **o que se escreve sem flag le-se sem flag** — e por isso
+# nao passa nenhuma: uma flag num deles apagava exactamente o que se quer provar.
+check "ACH-001: a share sem --namespace aparece no ls SEM flag, com PARENT" ok \
   bash -c "'$BIN' volume ls | awk '{print \$1\" \"\$3}' | grep -q 'shchild-$PFX $SHPARENT'"
+check "ACH-001: o describe SEM flag encontra-a" ok \
+  "$BIN" volume describe "shchild-$PFX"
+# O guarda que a invisibilidade contornava: com a share fora do alcance do
+# `volume_refs` do pai, o `rm` do PAI passava sem `--force` e sem uma palavra
+# sobre o que ficava pendurado — o modo de falha que o proprio codigo nomeia.
+check "ACH-001: o rm do PAI recusa por causa dela (o guarda ve-a)" 1 \
+  "$BIN" volume rm "$SHPARENT"
 check "--purge-data é recusado num volume sem --parent" 1 \
   "$BIN" volume rm "$SHPARENT" --purge-data
 SHCDATA="$("$BIN" volume describe "shchild-$PFX" | awk '/Mountpoint/{print $2}')"
 [[ -n "$SHCDATA" ]] && echo "dados" >"$SHCDATA/f.txt"
-check "rm sem --purge-data preserva os dados" ok "$BIN" volume rm "shchild-$PFX"
+check "ACH-001: o rm SEM flag encontra-a (e sem --purge-data preserva os dados)" ok \
+  "$BIN" volume rm "shchild-$PFX"
 check "…e os dados sobreviveram" ok test -f "$SHCDATA/f.txt"
 # Recriar para provar o --purge-data em separado (o rm anterior já desregistou).
 check "volume create --parent outra vez" ok "$BIN" volume create "shchild-$PFX" --parent "$SHPARENT"
