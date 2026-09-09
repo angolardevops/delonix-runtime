@@ -42,6 +42,61 @@ pub(crate) const POD_LABEL: &str = "delonix.io/pod";
 /// as [`POD_LABEL`]: derived state, no new store.
 pub(crate) const POD_IP_LABEL: &str = "delonix.io/pod-ip";
 
+/// The member's position in `spec.containers`, recorded at create time.
+///
+/// «The pod's first member» was a promise with nothing behind it. Membership is derived
+/// from [`POD_LABEL`] over `Store::list`, and that list is sorted by
+/// `Reverse(created_unix)` — in SECONDS. Two members of the same pod are created inside
+/// the same second, so they TIE, `sort_by_key` is stable, and the tie-break fell through
+/// to the order `read_dir` happened to return: filesystem order. Not the declared order,
+/// and not even stable between two roots.
+///
+/// Measured 2026-09-09 on a two-member pod (`a`, `b`), ACH-011: on a pristine root the
+/// default landed on `a`; on the root of the full e2e battery it landed on `b` — same
+/// binary, same manifest. `pod exec`/`logs`/`cp`/`attach` all resolve through
+/// [`resolve_target`], so all four inherited it, and `describe`/`ls`/`actual` read the
+/// namespace, the owner and the last-applied off whichever member came out first.
+///
+/// The manifest's order is the only thing a user can point at, and the container record
+/// did not carry it — only the `<pod>-<member>` name. So it is recorded here, same idiom
+/// as [`POD_IP_LABEL`]: a label on each member, derived state, no new store.
+pub(crate) const POD_INDEX_LABEL: &str = "delonix.io/pod-index";
+
+/// Sort key for a pod's members: the declared order, then the name.
+///
+/// The name is not a cosmetic tie-break — it is what answers for pods created BEFORE the
+/// index label existed. Those carry no index, so they all collapse onto the same first
+/// component and the name decides. Alphabetical is not the order they were declared in,
+/// which cannot be recovered, but it is the same on every root and on every run — and a
+/// wrong-but-stable default is a thing a user can work around, while a coin flip is not.
+fn member_order(c: &Container) -> (u32, String) {
+    (
+        c.labels
+            .get(POD_INDEX_LABEL)
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(u32::MAX),
+        c.name.clone(),
+    )
+}
+
+/// Every pod on the host with its members in declared order, keyed by pod name.
+///
+/// Shared by [`ls`] and [`actual`], which grouped `Store::list` by [`POD_LABEL`] with the
+/// same eight lines each and then both read per-pod fields off `members.first()` — the
+/// `read_dir` coin flip of [`POD_INDEX_LABEL`], twice.
+fn pods_by_label(store: &delonix_runtime_core::Store) -> Result<BTreeMap<String, Vec<Container>>> {
+    let mut pods: BTreeMap<String, Vec<Container>> = BTreeMap::new();
+    for c in store.list()? {
+        if let Some(pod) = c.labels.get(POD_LABEL) {
+            pods.entry(pod.clone()).or_default().push(c);
+        }
+    }
+    for members in pods.values_mut() {
+        members.sort_by_key(member_order);
+    }
+    Ok(pods)
+}
+
 /// The pod's real address: what was allocated at attach time, read back from any member's
 /// label. Falls back to the legacy recomputation for pods created before the label existed
 /// (those are all on the default bridge, where the recomputation is correct).
@@ -338,13 +393,17 @@ fn create_pod(name: &str, namespace: Option<String>, spec: PodSpec) -> Result<()
     Ok(())
 }
 
-/// The containers that belong to a pod (by the `delonix.io/pod` label).
+/// The containers that belong to a pod (by the `delonix.io/pod` label), in the order
+/// they were declared in `spec.containers` — see [`POD_INDEX_LABEL`] for why that has
+/// to be said out loud.
 fn members_of(store: &delonix_runtime_core::Store, pod: &str) -> Result<Vec<Container>> {
-    Ok(store
+    let mut out: Vec<Container> = store
         .list()?
         .into_iter()
         .filter(|c| c.labels.get(POD_LABEL).map(|v| v == pod).unwrap_or(false))
-        .collect())
+        .collect();
+    out.sort_by_key(member_order);
+    Ok(out)
 }
 
 /// Installs namespace isolation on a pod's SHARED netns address.
@@ -511,12 +570,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
 
 pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
     let (_images, store) = open_stores()?;
-    let mut pods: BTreeMap<String, Vec<Container>> = BTreeMap::new();
-    for c in store.list()? {
-        if let Some(pod) = c.labels.get(POD_LABEL) {
-            pods.entry(pod.clone()).or_default().push(c);
-        }
-    }
+    let pods = pods_by_label(&store)?;
     Ok(pods
         .into_iter()
         .map(|(pod, members)| {
@@ -549,8 +603,11 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
             // Ownership and last-applied live on the FIRST member: a pod has no
             // record of its own (membership is derived from the label), so
             // there is nowhere else to put them. `create_pod` stamps every
-            // member, so any of them would do; taking the first keeps it
-            // deterministic.
+            // member, so any of them would do — but «the first» only names ONE
+            // member because `pods_by_label` sorts by the declared order. It
+            // used to name whichever one `read_dir` returned first (ACH-011,
+            // [`POD_INDEX_LABEL`]), and this comment claimed a determinism it
+            // did not have.
             let head = members.first();
             super::reconcile::Actual {
                 kind: k::POD.into(),
@@ -590,12 +647,7 @@ struct PodLsRow {
 pub(crate) fn ls(format: output::OutputFormat, namespace: Option<&str>) -> Result<()> {
     let format = super::config::resolve_output(&super::util::state_root(), format);
     let (_images, store) = open_stores()?;
-    let mut pods: BTreeMap<String, Vec<Container>> = BTreeMap::new();
-    for c in store.list()? {
-        if let Some(pod) = c.labels.get(POD_LABEL) {
-            pods.entry(pod.clone()).or_default().push(c);
-        }
-    }
+    let pods = pods_by_label(&store)?;
     let mut rows = Vec::new();
     for (pod, mut members) in pods {
         let mut running = 0;
@@ -692,6 +744,13 @@ pub(crate) fn describe(names: &[String]) -> Result<()> {
 /// exact `<pod>-<short>` name, or the pod's first member when omitted. Shared by
 /// `logs`/`exec`/`cp`/`attach` so the "no such pod"/"pod has no container" pair
 /// exists in one place instead of a fourth copy.
+///
+/// «First member» means the first in `spec.containers`, and it means it because
+/// [`members_of`] sorts by [`POD_INDEX_LABEL`]. Before that label existed this
+/// line was a promise the code did not keep (ACH-011): it returned whichever
+/// member the filesystem listed first, so the same manifest resolved to a
+/// different container on a different root. Explicit `--container` was always
+/// correct and is untouched.
 fn resolve_target(
     store: &delonix_runtime_core::Store,
     pod: &str,
@@ -997,5 +1056,131 @@ mod tests {
                 "{k} is compared but undocumented"
             );
         }
+    }
+
+    /// A pod member as the store holds one: the membership label, the declared
+    /// position, and a `created_unix` shared with its peers — which is the whole
+    /// point. Real members are created inside the same second, so the store's
+    /// `Reverse(created_unix)` sort TIES on them and the tie-break decides.
+    fn member(pod: &str, short: &str, idx: Option<u32>) -> Container {
+        let mut c = Container::new(
+            format!("id-{pod}-{short}"),
+            format!("{pod}-{short}"),
+            "alpine:3.19".to_string(),
+            vec!["sleep".to_string(), "120".to_string()],
+            "0".to_string(),
+        );
+        c.created_unix = 1_757_000_000;
+        c.labels.insert(POD_LABEL.to_string(), pod.to_string());
+        if let Some(i) = idx {
+            c.labels.insert(POD_INDEX_LABEL.to_string(), i.to_string());
+        }
+        c
+    }
+
+    fn ordered(mut members: Vec<Container>) -> Vec<String> {
+        members.sort_by_key(member_order);
+        members.into_iter().map(|c| c.name).collect()
+    }
+
+    /// ACH-011. The manifest declares `web` then `side`; the store may hand them
+    /// back either way round, because `Store::list` sorts by `created_unix` in
+    /// SECONDS and two members of one pod tie there. Whatever order arrives, the
+    /// declared one comes out — so `pod exec <pod> <cmd>` with no `--container`
+    /// lands on `web` on every root, not on whichever file `read_dir` reached
+    /// first.
+    #[test]
+    fn the_declared_order_survives_whatever_order_the_store_returns() {
+        let declared = ["p-web", "p-side", "p-log"];
+        let forwards = vec![
+            member("p", "web", Some(0)),
+            member("p", "side", Some(1)),
+            member("p", "log", Some(2)),
+        ];
+        let backwards = vec![
+            member("p", "log", Some(2)),
+            member("p", "side", Some(1)),
+            member("p", "web", Some(0)),
+        ];
+        // Alphabetical, which is what a name sort would have produced — and is
+        // NOT the declared order. If this one passed by accident the assertion
+        // would prove nothing.
+        let alphabetical = vec![
+            member("p", "log", Some(2)),
+            member("p", "side", Some(1)),
+            member("p", "web", Some(0)),
+        ];
+        for arrival in [forwards, backwards, alphabetical] {
+            assert_eq!(ordered(arrival), declared);
+        }
+    }
+
+    /// Pods created before the index label existed carry no index. Their declared
+    /// order is gone and cannot be recovered, so the name decides: not the order
+    /// they were written in, but the SAME answer on every root and every run.
+    /// A wrong-but-stable default can be worked around; a coin flip cannot.
+    #[test]
+    fn a_pod_without_the_index_label_still_orders_the_same_way_every_time() {
+        let expected = ["old-alpha", "old-beta", "old-zulu"];
+        let one = vec![
+            member("old", "zulu", None),
+            member("old", "alpha", None),
+            member("old", "beta", None),
+        ];
+        let other = vec![
+            member("old", "beta", None),
+            member("old", "zulu", None),
+            member("old", "alpha", None),
+        ];
+        assert_eq!(ordered(one), expected);
+        assert_eq!(ordered(other), expected);
+    }
+
+    /// A pod that was grown after the label landed: `pod create` stamps every
+    /// member it creates, so a mixed pod only happens across an upgrade. The
+    /// indexed members keep their declared order and the unlabelled ones sort
+    /// after them by name — `u32::MAX` is the sentinel that puts them there.
+    #[test]
+    fn unlabelled_members_sort_after_the_declared_ones() {
+        let mixed = vec![
+            member("m", "extra", None),
+            member("m", "second", Some(1)),
+            member("m", "another", None),
+            member("m", "first", Some(0)),
+        ];
+        assert_eq!(
+            ordered(mixed),
+            ["m-first", "m-second", "m-another", "m-extra"]
+        );
+    }
+
+    /// `members_of` is what `resolve_target` reads, so the ordering has to hold
+    /// through a real `Store` round-trip — the label survives serialization and
+    /// the filter does not undo the sort.
+    #[test]
+    fn members_of_reads_the_declared_order_back_out_of_a_real_store() {
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "delonix-pod-order-{}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+            SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let store = delonix_runtime_core::Store::open(&dir).unwrap();
+        // Saved back-to-front, and with a container that is not in the pod at
+        // all, so the filter has something to drop.
+        store.save(&member("p", "side", Some(1))).unwrap();
+        store.save(&member("p", "web", Some(0))).unwrap();
+        store.save(&member("other", "web", Some(0))).unwrap();
+        let names: Vec<String> = members_of(&store, "p")
+            .unwrap()
+            .into_iter()
+            .map(|c| c.name)
+            .collect();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(names, ["p-web", "p-side"]);
     }
 }
