@@ -9,26 +9,76 @@
 # Regra: NUNCA usar o `delonix` do PATH — processos/binários antigos são uma
 # armadilha conhecida deste repo (ver AGENTS.md). O default é o build local.
 #
-# ## O que este número quer dizer, e o que NÃO quer (medido 2026-08-12)
+# ## Código de saída — o que este portão chumba, e o que não
 #
-# A CLI tem 245 comandos, 218 folhas invocáveis. Esta bateria verifica o `--help`
-# de 100% delas (o ciclo dinâmico abaixo percorre a árvore) e EXECUTA 55 — 25%.
+#   FAIL  > 0  -> 1.  Um check chumbou e não há achado escrito por trás.
+#   XPASS > 0  -> 1.  Um check marcado como defeito conhecido PASSOU: o defeito
+#                     foi corrigido e a marca tem de sair (ver `xfail`).
+#   SKIP  > 0  -> 0, mas em bloco próprio no resumo. Uma medição que não se pôde
+#                     fazer não é um resultado negativo — e também não é um
+#                     verde, que é como se lia quando saía diluída nas
+#                     seiscentas linhas acima.
+#   XFAIL > 0  -> 0.  Chumba por defeito com achado escrito. Fica na bateria,
+#                     fora do portão, e chumba o portão no dia em que passar.
 #
-# **Actualizado 2026-08-15**: `net` (43 folhas em 6 subgrupos) tinha ZERO
-# execuções e passou a ter 19 checks; `compose` tinha ZERO e passou a ter 20.
-# `serve` tinha ZERO e passou a ter 17, `storage` ZERO e passou a ter 8 (dos
-# quais 3 só num host com privilégio de montagem). Continuam sem nenhuma os
-# comandos-folha
-# `dash`/`man`/`version`.
+# Até 2026-09-09 esta linha era `exit 0` incondicional, com a justificação de
+# que «o relatório é o produto». Medido nesse dia: PASS=529 FAIL=36 SKIP=5, e
+# `echo $?` a dizer 0 — qualquer passo de CI construído por cima era decorativo.
+#
+# ## O que o número quer dizer, e o que NÃO quer (medido 2026-09-09, v3.0.0)
+#
+# A CLI tem 276 comandos e **244 folhas invocáveis** (`scripts/cli-tree.sh
+# --leaves`). Esta bateria verifica o `--help` de **244/244 — 100%**, e agora
+# por CONSTRUÇÃO: o ciclo lê o inventário do `cli-tree.sh`, em vez da lista de
+# grupos escrita à mão que lá estava (que dizia 100% e media 167 de 244 — 68%).
+#
+# **EXECUTA 91 — 37%.** As outras 153 têm o contrato verificado e nunca são
+# corridas, concentradas em `net` (28), `image` (25), `vm` (19), `container`
+# (16), `system` (14) e `cluster` (11).
+#
 # Cita-se a FRACÇÃO medida e a data, nunca o total de checks: um total que sobe
-# faz a cobertura parecer melhor sem uma única folha nova exercitada.
-# Os outros 163 têm o contrato verificado e nunca são corridos, concentrados em
-# `net` (45), `image` (31) e `vm` (24). Um verde aqui lê-se com facilidade como
-# «a CLI foi testada», e o que foi testado é sobretudo o texto de ajuda: foi em
-# comandos nunca executados que a auditoria encontrou um errno cru (`node init`)
-# e um `create` de overlay a sair 0 sobre uma rede por realizar.
+# faz a cobertura parecer melhor sem uma única folha nova exercitada — e é
+# literalmente o que aconteceu aqui, com o total a passar de 570 para 688 sem
+# nenhuma folha nova a ser EXECUTADA.
 #
-# ## Isolamento: NÃO o faz por si, ao contrário do `chaos.sh`
+# Um verde aqui lê-se com facilidade como «a CLI foi testada», e o que foi
+# testado é sobretudo o texto de ajuda: foi em comandos nunca executados que a
+# auditoria encontrou um errno cru (`node init`) e um `create` de overlay a sair
+# 0 sobre uma rede por realizar.
+#
+# **E há uma terceira forma de não testar nada, medida 2026-09-09:** um check que
+# chumba sempre. Trinta e seis chumbavam, e trinta e quatro deles por grafias
+# removidas na v2.0.0/v3.0.0 (`volumes`, `schema print`, `pod ls`, `net boot`,
+# `vm status`, `net httproute ls`, `container inspect -o json`) — não por
+# defeitos do motor. Entre eles estavam os três que verificam que um `-m`
+# declarado CHEGA ao cgroup: chumbavam com `_cg_of: command not found`, porque a
+# função não atravessava o `bash -c` do `check`. A verificação que existe por
+# causa do bug do `64Mi` nunca tinha corrido uma única vez, escondida atrás de um
+# vermelho que se lia como defeito conhecido.
+#
+# ## E a QUARTA forma: um check que chumba de vez em quando
+#
+# Assim que o portão passou a valer, três checks começaram a piscar. Nenhum era
+# regressão — a mesma árvore e o mesmo binário deram FAIL=0 na corrida seguinte,
+# a load MAIS ALTA. O que estava errado eram as PRÉ-CONDIÇÕES, e nos três casos
+# da mesma maneira: o check media uma coisa e dependia, sem o dizer, de outra.
+#
+#   `CH: rm com a VM parada` — o `stop` do cloud-hypervisor manda SIGTERM e
+#   devolve SEM esperar que o VMM saia, e o `qemu-img` a seguir apanhava o lock
+#   do qcow2 ainda tomado. Passou a esperar pelo LOCK (a condição de que
+#   depende), não pelo `stop`. Suspeita de defeito registada como ACH-014, sem
+#   marca: uma ocorrência e zero reproduções em 20 tentativas não é um defeito
+#   medido, e uma marca afirmaria mais do que se sabe.
+#
+#   `os dados voltaram` — a causa não era a janela (20s não bastaram). Era que a
+#   pré-condição em cima — escrever no volume — era um ciclo MUDO: fazia
+#   `break` no sucesso e caía em silêncio ao fim de 50 tentativas. Um volume
+#   vazio arquiva-se e restaura-se sem erro, e o vermelho aparecia três checks
+#   depois do sítio onde o problema estava — a mesma misdiagnose que esta secção
+#   já dizia ter corrigido. Agora é um `check` com nome, e o arquivo passou a ser
+#   verificado por DENTRO: a entrada `volumes/x.tar.gz` não são os dados.
+#
+# ## Isolamento: fá-lo por si desde 2026-08-15 (como o `chaos.sh`)
 #
 # **Isola-se por omissão desde 2026-08-15.** Redirecciona `DELONIX_ROOT` E
 # `DELONIX_NET_RUNTIME_DIR` para directórios próprios, cria-os, e derruba a infra
@@ -92,8 +142,11 @@ else
   trap '"$BIN" net netns down >/dev/null 2>&1 || true' EXIT
 fi
 
-PASS=0; FAIL=0; SKIP=0
+PASS=0; FAIL=0; SKIP=0; XFAIL=0; XPASS=0
 declare -a FAILED_NAMES=()
+declare -a SKIPPED_NAMES=()
+declare -a XFAIL_NAMES=()
+declare -a XPASS_NAMES=()
 
 # Prefixo único para tudo o que este teste cria — para a limpeza nunca tocar em
 # recursos do utilizador.
@@ -135,9 +188,83 @@ PY
   fi
 }
 
+# `${2:-}` de propósito: com `set -u`, um `skip` com um argumento só (três
+# deles existiam nesta bateria, todos no ramo de erro da secção de limites)
+# matava o script inteiro a meio, com «unbound variable» e sem relatório. Um
+# harness que morre por causa de uma gralha no seu próprio ramo de excepção é a
+# pior forma de não medir nada.
 skip() {
-  SKIP=$((SKIP+1)); log "  SKIP  $1  — $2"
-  python3 -c 'import json,sys; print(json.dumps({"name":sys.argv[1],"verdict":"SKIP","reason":sys.argv[2]}))' "$1" "$2" >>"$OUT/results.jsonl"
+  local name="$1" reason="${2:-sem razão declarada}"
+  SKIP=$((SKIP+1)); SKIPPED_NAMES+=("$name — $reason"); log "  SKIP  $name  — $reason"
+  python3 -c 'import json,sys; print(json.dumps({"name":sys.argv[1],"verdict":"SKIP","reason":sys.argv[2]}))' \
+    "$name" "$reason" >>"$OUT/results.jsonl"
+}
+
+# --- defeitos JÁ CONHECIDOS: o ratchet, não uma lista de desculpas -----------
+#
+# Um check que chumba por um defeito com achado escrito não pode chumbar o
+# portão todos os dias — ao fim de uma semana ninguém olha para o vermelho. Mas
+# apagá-lo é pior: o defeito desaparece da bateria e volta a ser descoberto do
+# zero. `xfail` é o meio-termo com dentes:
+#
+#   FAIL esperado  -> XFAIL, não chumba, sai em bloco próprio com o achado.
+#   PASS inesperado-> XPASS, CHUMBA. O defeito foi corrigido: tira a marca.
+#
+# O XPASS chumbar é o ponto todo. Sem isso a marca fica para sempre e a bateria
+# passa a testar menos do que diz. Funcionou à primeira, e duas vezes no mesmo
+# dia: os quatro checks da share entraram como `xfail ACH-001` e saíram quando o
+# #256 corrigiu o defeito; o do membro por omissão entrou como `xflaky ACH-011` e
+# saiu quando o #258 o corrigiu.
+#
+# Neste momento os DOIS não têm utilizadores, e isso é o estado BOM — não código
+# morto. A marca é para o intervalo entre descobrir e corrigir; um ficheiro sem
+# marcas nenhumas quer dizer que não há defeito conhecido a fingir de verde. Não
+# os apagues por estarem sem uso: apagá-los é tirar o único sítio onde o próximo
+# defeito conhecido pode ficar visível sem chumbar o portão todos os dias.
+# O JSONL guarda o veredicto CRU do `check` (FAIL/PASS) e, logo a seguir, a
+# decisão que se tomou sobre ele. Reescrever a linha anterior seria mais bonito
+# e mentiria sobre o que o comando fez.
+_xrec() {
+  python3 -c 'import json,sys; print(json.dumps({"name":sys.argv[1],"verdict":sys.argv[2],"achado":sys.argv[3]}))' \
+    "$1" "$2" "$3" >>"$OUT/results.jsonl"
+}
+
+xfail() {
+  local achado="$1" name="$2"; shift 2
+  local before_fail=$FAIL before_pass=$PASS
+  check "$name" "$@"
+  if (( FAIL > before_fail )); then
+    FAIL=$((FAIL-1)); XFAIL=$((XFAIL+1))
+    FAILED_NAMES=("${FAILED_NAMES[@]:0:${#FAILED_NAMES[@]}-1}")
+    XFAIL_NAMES+=("$achado: $name")
+    _xrec "$name" XFAIL "$achado"
+    log "        ^ XFAIL — chumba por $achado (defeito conhecido), não chumba o portão"
+  elif (( PASS > before_pass )); then
+    PASS=$((PASS-1)); XPASS=$((XPASS+1))
+    XPASS_NAMES+=("$achado: $name")
+    _xrec "$name" XPASS "$achado"
+    log "  XPASS $name — $achado já não reproduz: tira o \`xfail\` desta linha"
+  fi
+}
+
+# A variante para um defeito cuja natureza É a intermitência. Um `xfail` normal
+# aqui daria XPASS metade das corridas e chumbava o portão por o defeito não ter
+# batido nesta — que é o mesmo ruído que este trabalho existe para tirar. Nunca
+# chumba, nos dois sentidos, e diz sempre porquê.
+xflaky() {
+  local achado="$1" name="$2"; shift 2
+  local before_fail=$FAIL before_pass=$PASS
+  check "$name" "$@"
+  if (( FAIL > before_fail )); then
+    FAIL=$((FAIL-1)); XFAIL=$((XFAIL+1))
+    FAILED_NAMES=("${FAILED_NAMES[@]:0:${#FAILED_NAMES[@]}-1}")
+    XFAIL_NAMES+=("$achado (intermitente): $name")
+    _xrec "$name" XFAIL "$achado (intermitente)"
+  elif (( PASS > before_pass )); then
+    PASS=$((PASS-1)); XFAIL=$((XFAIL+1))
+    XFAIL_NAMES+=("$achado (intermitente, passou NESTA corrida): $name")
+    _xrec "$name" XFAIL "$achado (intermitente, passou nesta corrida)"
+  fi
 }
 
 section() { log ""; log "=== $1 ==="; }
@@ -151,17 +278,38 @@ section "help / superfície da CLI"
 ########################################
 check "help raiz" ok "$BIN" --help
 check "version" ok "$BIN" --version
-for g in container image build vm volumes network stack system cluster completion; do
-  check "help de '$g'" ok "$BIN" "$g" --help
-done
-# Todos os subcomandos de cada grupo têm de ter --help funcional.
-for g in container image vm volumes network stack system cluster; do
-  subs=$("$BIN" "$g" --help 2>/dev/null | awk '/^(Commands|Subcommands):/{f=1;next} /^$/{f=0} f && $1 !~ /^-/ {print $1}')
-  for s in $subs; do
-    [[ "$s" == "help" ]] && continue
-    check "help de '$g $s'" ok "$BIN" "$g" "$s" --help
-  done
-done
+# O `--help` de TODAS as folhas invocáveis, e o inventário vem do
+# `cli-tree.sh --leaves` — não de uma lista de grupos escrita à mão.
+#
+# A lista à mão era `container image build vm volumes network stack system
+# cluster completion`, e custou duas coisas de uma vez (medido 2026-09-09):
+#
+#   1. `volumes` deixou de existir no B2. O `help de 'volumes'` chumbava — isso
+#      via-se. O que NÃO se via é que o ciclo dos subcomandos derivava a lista
+#      de `"$BIN" volumes --help`, que passou a devolver VAZIO: as dez folhas
+#      do grupo `volume` perderam o check de `--help` sem uma única linha
+#      vermelha a dizê-lo. Uma cobertura que encolhe em silêncio.
+#   2. Faltavam grupos inteiros — `net`, `pod`, `compose`, `backup`, `secret`,
+#      `serve`, `manifest`, `mcp`, `config`, `workload`. E os subgrupos nunca
+#      entravam: `net netns up` está dois níveis abaixo e o ciclo só descia um.
+#
+# Resultado medido antes desta mudança: 167 das 244 folhas com `--help`
+# verificado (68%), contra os «100%» que o cabeçalho deste ficheiro anunciava.
+# Percorrer a árvore põe os 244 lá por CONSTRUÇÃO, e uma folha nova entra na
+# bateria no dia em que nasce.
+LEAVES="$OUT/leaves.txt"
+if DELONIX_BIN="$BIN" bash "$(dirname "$0")/cli-tree.sh" --leaves >"$LEAVES" 2>/dev/null \
+   && [[ -s "$LEAVES" ]]; then
+  _nleaves=$(grep -c . "$LEAVES")
+  log "  (o --help de $_nleaves folhas, inventário do cli-tree.sh)"
+  while read -r _leaf; do
+    [[ -n "$_leaf" ]] || continue
+    # shellcheck disable=SC2086
+    check "help de '$_leaf'" ok "$BIN" $_leaf --help
+  done <"$LEAVES"
+else
+  skip "help de todas as folhas" "o cli-tree.sh não produziu inventário"
+fi
 
 ########################################
 section "comandos de leitura (não destrutivos)"
@@ -171,7 +319,7 @@ check "container ls -a" ok "$BIN" container ls -a
 check "container ls -q" ok "$BIN" container ls -q
 check "image ls" ok "$BIN" image ls
 check "image vm ls" ok "$BIN" image vm ls
-check "volumes ls" ok "$BIN" volumes ls
+check "volume ls" ok "$BIN" volume ls
 check "network ls" ok "$BIN" network ls
 
 # --- `-n/--namespace` FILTRA mesmo, e a coluna esconde-se (A-2/A-3) --------
@@ -180,7 +328,7 @@ check "network ls" ok "$BIN" network ls
 # ACEITE e depois IGNORADA. Um check do `--help` passaria com a filtragem por
 # ligar — por isso estes EXECUTAM e comparam contagens.
 ns_rows() { "$BIN" $1 2>/dev/null | tail -n +2 | grep -c . || true; }
-for grupo in "container ps -a" "workload ls" "pod ls"; do
+for grupo in "container ps -a" "workload ls" "get pods"; do
   todos=$(ns_rows "$grupo")
   # Um namespace que não existe tem de dar ZERO. Se a flag fosse ignorada daria
   # `$todos` — que é exactamente o sintoma do aceite-e-ignorado.
@@ -192,8 +340,26 @@ for grupo in "container ps -a" "workload ls" "pod ls"; do
 done
 # A coluna esconde-se sem namespaces e aparece quando o filtro a nomeia — as
 # duas metades da mesma regra (`output::namespace_cell` + `drop_uninformative`).
-check "sem filtro a coluna NAMESPACE esconde-se" ok bash -c \
-  "! '$BIN' container ps -a | head -1 | grep -q NAMESPACE"
+#
+# Mas só com LINHAS. `drop_uninformative` não deita nada fora de uma tabela
+# vazia, e isso é decidido, documentado e tem teste em Rust: «sem linhas não há
+# prova de que uma coluna seja inútil, e o cabeçalho é a única coisa que um `ls`
+# sem resultados tem para dizer».
+#
+# A versão anterior deste check exigia a coluna escondida sempre, e por isso
+# chumbava numa raiz virgem — que é EXACTAMENTE o estado normal desta bateria
+# desde que passou a isolar-se. Passava por acidente quando havia containers de
+# uma corrida anterior. Um check cujo veredicto depende do que sobrou da última
+# vez não mede o motor, mede a máquina; e este chumbava a acusar de defeito uma
+# decisão de desenho.
+_ps_rows=$("$BIN" container ps -a 2>/dev/null | tail -n +2 | grep -c . || true)
+if (( _ps_rows > 0 )); then
+  check "com linhas todas em default, a coluna NAMESPACE esconde-se" ok bash -c \
+    "! '$BIN' container ps -a | head -1 | grep -q NAMESPACE"
+else
+  check "numa tabela VAZIA nada se esconde (o cabeçalho é tudo o que há)" ok bash -c \
+    "'$BIN' container ps -a | head -1 | grep -q NAMESPACE"
+fi
 check "com -n default a coluna aparece" ok bash -c \
   "'$BIN' container ps -a -n default | head -1 | grep -q NAMESPACE"
 check "vm ls" ok "$BIN" vm ls
@@ -267,7 +433,7 @@ section "erros: a CLI tem de RECUSAR o que é inválido"
 ########################################
 check "container describe de inexistente recusa" fail "$BIN" container describe naoexiste-$PFX
 check "container inspect de inexistente recusa" fail "$BIN" container inspect naoexiste-$PFX
-check "volumes inspect de inexistente recusa" fail "$BIN" volumes inspect naoexiste-$PFX
+check "volume inspect de inexistente recusa" fail "$BIN" volume inspect naoexiste-$PFX
 check "network inspect de inexistente recusa" fail "$BIN" network inspect naoexiste-$PFX
 check "container update sem mudanças recusa" fail "$BIN" container update naoexiste-$PFX
 check "container stop de inexistente recusa" fail "$BIN" container stop naoexiste-$PFX
@@ -284,7 +450,7 @@ section "códigos de saída: a CLASSE da falha, não só que falhou"
 # num sítio só (`cmd::exitcode`), mas a LIGAÇÃO (main.rs, `for_each_id`) só se
 # prova aqui: um teste unitário do mapa passa na mesma com o `main` a ignorá-lo.
 check "inexistente: container inspect diz 4" 4 "$BIN" container inspect naoexiste-$PFX
-check "inexistente: volumes inspect diz 4" 4 "$BIN" volumes inspect naoexiste-$PFX
+check "inexistente: volume inspect diz 4" 4 "$BIN" volume inspect naoexiste-$PFX
 check "inexistente: network inspect diz 4" 4 "$BIN" network inspect naoexiste-$PFX
 check "inexistente: secret rm diz 4" 4 "$BIN" secret rm naoexiste-$PFX
 check "inexistente: delete vm diz 4" 4 "$BIN" delete vm naoexiste-$PFX
@@ -894,7 +1060,7 @@ YAML
 check "stack apply" ok "$BIN" stack apply -f "$WORK/delonix-manifest.yaml"
 check "stack apply idempotente" ok "$BIN" stack apply -f "$WORK/delonix-manifest.yaml"
 check "stack describe" ok "$BIN" stack describe -f "$WORK/delonix-manifest.yaml"
-check "volumes describe do manifesto" ok "$BIN" volumes describe "sv-$PFX"
+check "volume describe do manifesto" ok "$BIN" volume describe "sv-$PFX"
 
 # O ciclo declarativo inteiro (v0.47.0) não tinha UMA verificação aqui: o `plan`,
 # o contrato de exit code que um gate de CI usa, a recusa fail-closed, e o
@@ -913,8 +1079,8 @@ check "stack destroy --dry-run" ok "$BIN" stack destroy -f "$WORK/delonix-manife
 check "stack destroy" ok "$BIN" stack destroy -f "$WORK/delonix-manifest.yaml"
 # O destroy levou o que a stack possui — o `describe` a seguir tem de correr na
 # mesma (parte do ficheiro, não de um registo), mas os recursos já não existem.
-check "volumes describe depois do destroy recusa" fail "$BIN" volumes describe "sv-$PFX"
-"$BIN" volumes rm "sv-$PFX" >/dev/null 2>&1
+check "volume describe depois do destroy recusa" fail "$BIN" volume describe "sv-$PFX"
+"$BIN" volume rm "sv-$PFX" >/dev/null 2>&1
 "$BIN" network rm "sn-$PFX" >/dev/null 2>&1
 
 # ---------------------------------------------------------------------------
@@ -1013,6 +1179,19 @@ check "bench.sh sem binário devolve 2, e diz qual" 2 \
 # do que metade dos threads, onde um load de 1 já é alguém a fazer login.
 check "bench.sh recusa uma bancada acima do limiar (3)" 3 \
   bash scripts/bench.sh --bin "$BIN" --max-load 0
+# O `chaos.sh` faz o mesmo juízo, com o mesmo helper (`scripts/bancada.sh`) e a
+# mesma classe de saída — e a recusa dele tem de acontecer ANTES do `setup`, que
+# já levanta infra e cria rede. Um portão que só recusa depois de mexer no host
+# não é um portão, é um aviso.
+# Sandbox PRÓPRIO para este check, e não o `/tmp/dlx-chaos` por omissão: a
+# segunda metade afirma que o directório NÃO existe, e contra o caminho
+# partilhado isso dependia de nenhuma outra corrida (nem o passo de caos do
+# `chaos.yml`, que corre antes deste no mesmo runner) o ter deixado de pé.
+_CHDIR="$OUT/chaos-guard-$PFX"
+rm -rf "$_CHDIR"
+check "chaos.sh recusa uma bancada acima do limiar (3)" 3 \
+  env DELONIX_CHAOS_DIR="$_CHDIR" bash scripts/chaos.sh --bin "$BIN" --max-load 0
+check "…e recusa ANTES de tocar no sandbox" ok test ! -d "$_CHDIR"
 
 # ---------------------------------------------------------------------------
 # Um limite ou chega ao KERNEL ou é RECUSADO — nunca aceite e ignorado.
@@ -1029,12 +1208,29 @@ check "bench.sh recusa uma bancada acima do limiar (3)" 3 \
 # O teste unitário prova o parser. SÓ um check aqui prova que o binário o
 # aplica — que é a metade que faltava quando o bug entrou.
 section "limites: o que se declara chega ao cgroup, ou é recusado"
+# ACH-009, medido 2026-09-09: estes três checks chumbavam SEMPRE, e pela razão
+# errada — `bash: line 1: _cg_of: command not found`. Duas causas, as duas
+# fatais e as duas invisíveis num relatório que só diz FAIL:
+#
+#   1. O `check` invoca `bash -c`, um processo filho, e uma função de shell não
+#      atravessa um `exec`. Sem `export -f` (e sem `$BIN` no ambiente) o helper
+#      não existe do outro lado.
+#   2. `container inspect` NÃO tem `-o` — a saída já é JSON por omissão, e o
+#      `-o` nunca existiu neste verbo. Mesmo com o helper visível, ele saía 2.
+#
+# O que isto custou é maior do que três linhas vermelhas: a verificação de que
+# um `-m` DECLARADO chega ao cgroup do kernel — a metade que faltava quando o
+# bug do `64Mi` entrou, e a razão de esta secção existir — nunca correu uma
+# única vez. Um FAIL constante lê-se como «defeito conhecido do produto» e é o
+# esconderijo perfeito para um teste que não testa nada.
 _cg_of() { # imprime o valor de um ficheiro do cgroup do container $1
-  local p; p=$("$BIN" container inspect "$1" -o json 2>/dev/null \
+  local p; p=$("$BIN" container inspect "$1" 2>/dev/null \
     | python3 -c 'import json,sys;print(json.load(sys.stdin)[0]["pid"])' 2>/dev/null) || return 1
   [ -n "$p" ] && [ "$p" != None ] || return 1
   cat "/sys/fs/cgroup$(cut -d: -f3 /proc/$p/cgroup)/$2" 2>/dev/null
 }
+export BIN
+export -f _cg_of
 if [ -n "${IMG:-}" ] && "$BIN" image ls 2>/dev/null | grep -q .; then
   for spec in "64M:67108864" "64Mi:67108864" "1Gi:1073741824"; do
     _v=${spec%%:*}; _want=${spec##*:}; _n="${PFX}lim$(echo "$_v" | tr -d '.')"
@@ -1045,7 +1241,7 @@ if [ -n "${IMG:-}" ] && "$BIN" image ls 2>/dev/null | grep -q .; then
       check "-m $_v chega ao kernel como $_want" ok \
         bash -c "[ \"\$(_cg_of $_n memory.max)\" = $_want ]" || true
     else
-      skip "-m $_v: o container não arrancou neste host"
+      skip "-m $_v chega ao kernel" "o container não arrancou neste host"
     fi
     "$BIN" container rm -f "$_n" >/dev/null 2>&1 || true
   done
@@ -1088,13 +1284,13 @@ if [ -n "${IMG:-}" ] && "$BIN" image ls 2>/dev/null | grep -q .; then
   "$BIN" container rm -f "${PFX}limrs" >/dev/null 2>&1 || true
   if "$BIN" container run -d --name "${PFX}limrs" --net none --restart on-failure:3 "$IMG" sleep 30 >/dev/null 2>&1; then
     check "--restart on-failure:3 fica no registo" ok \
-      bash -c "'$BIN' container inspect ${PFX}limrs -o json | grep -q 'on-failure:3'" || true
+      bash -c "'$BIN' container inspect ${PFX}limrs | grep -q 'on-failure:3'" || true
   else
-    skip "--restart on-failure:3: o container não arrancou neste host"
+    skip "--restart on-failure:3 fica no registo" "o container não arrancou neste host"
   fi
   "$BIN" container rm -f "${PFX}limrs" >/dev/null 2>&1 || true
 else
-  skip "limites: sem imagem no store (precisa de rede para o pull)"
+  skip "limites: chegam ao cgroup" "sem imagem no store (precisa de rede para o pull)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -1225,7 +1421,7 @@ check "…e o history desse nome vê a revisão" ok \
 # carimbado o directório, e um destroy sob `own-…` não encontraria nada.
 check "…e o destroy desse nome leva o que ele criou" ok \
   "$BIN" stack destroy -f "$OWORK/m.yaml" --name "own-$PFX"
-check "…e já não está" fail "$BIN" volumes inspect "ov-$PFX"
+check "…e já não está" fail "$BIN" volume inspect "ov-$PFX"
 
 # `stack rollback` — o CICLO, e não os comandos um a um.
 #
@@ -1253,7 +1449,7 @@ check "um segundo apply, com um recurso novo e um campo mudado" ok \
 check "rollback --dry-run não muda nada" ok \
   "$BIN" stack rollback --to 1 -f "$HWORK/hist.yaml" --dry-run
 check "…e o recurso da 2.ª revisão continua lá depois do dry-run" ok \
-  "$BIN" volumes inspect "hv2-$PFX"
+  "$BIN" volume inspect "hv2-$PFX"
 # Uma revisão que não existe é «não existe» (4); uma revisão FALHADA é um
 # argumento inválido (1) — está no registo para ser LIDA, não para ser repetida.
 check "rollback para uma revisão inexistente devolve 4" 4 \
@@ -1291,15 +1487,15 @@ check "rollback --to 1 corre" ok "$BIN" stack rollback --to 1 -f "$HWORK/hist.ya
 # O que VOLTOU: o campo que a revisão 1 declarava. Sem `quota:`, o volume da
 # revisão 1 não tem cap, por isso o `inspect` não pode mostrar os 9G de B.
 check "o campo mudado voltou ao valor da revisão 1" ok \
-  bash -c "! '$BIN' volumes inspect 'hv-$PFX' | grep -qi '9663676416'"
+  bash -c "! '$BIN' volume inspect 'hv-$PFX' | grep -qi '9663676416'"
 # O que NÃO voltou, e é dito em vez de escondido: um rollback não apaga sozinho.
 check "o recurso criado depois SOBREVIVE a um rollback sem --prune" ok \
-  "$BIN" volumes inspect "hv2-$PFX"
+  "$BIN" volume inspect "hv2-$PFX"
 check "…e o rollback avisa que é preciso --prune para o levar" ok \
   bash -c "'$BIN' stack rollback --to 1 -f '$HWORK/hist.yaml' --dry-run 2>&1 | grep -q -- '--prune'"
 check "rollback --prune leva-o" ok \
   "$BIN" stack rollback --to 1 -f "$HWORK/hist.yaml" --prune
-check "…e agora já não está" fail "$BIN" volumes inspect "hv2-$PFX"
+check "…e agora já não está" fail "$BIN" volume inspect "hv2-$PFX"
 # Um rollback É um apply: ganha revisão própria, e a história diz de qual veio.
 check "a história marca o rollback e diz que revisão replicou" ok \
   bash -c "'$BIN' stack history -f '$HWORK/hist.yaml' | grep -q 'rollback of 1'"
@@ -1310,7 +1506,7 @@ check "sem stacks/: o plan continua a funcionar" ok "$BIN" stack plan -f "$HWORK
 check "sem stacks/: o destroy continua a funcionar" ok "$BIN" stack destroy -f "$HWORK/hist.yaml"
 check "sem stacks/: o history diz que não há, sem falhar" ok \
   "$BIN" stack history -f "$HWORK/hist.yaml"
-"$BIN" volumes rm "hv-$PFX" >/dev/null 2>&1
+"$BIN" volume rm "hv-$PFX" >/dev/null 2>&1
 
 # `stack wait` não tinha UM check — e era o balde dos comandos nunca executados a
 # pagar-se outra vez. O `wait` decidia prontidão com `present == "yes"`, e os
@@ -1373,9 +1569,9 @@ check "stack ls não diz 'unsupported kind' de um Kind que o apply aplica" ok \
 ########################################
 section "schema gerado + explain + init"
 ########################################
-check "schema print" ok "$BIN" schema print
-check "schema print --kind Container" ok "$BIN" schema print --kind Container
-check "schema print --kind inexistente recusa" fail "$BIN" schema print --kind NaoExiste
+check "manifest schema" ok "$BIN" manifest schema
+check "manifest schema --kind Container" ok "$BIN" manifest schema --kind Container
+check "manifest schema --kind inexistente recusa" fail "$BIN" manifest schema --kind NaoExiste
 check "explain Kind" ok "$BIN" explain Container
 check "explain campo" ok "$BIN" explain Container.ports
 check "explain campo aninhado" ok "$BIN" explain Pod.containers.image
@@ -1395,7 +1591,7 @@ check "explain campo inexistente recusa" fail "$BIN" explain Container.naoExiste
 SCHEMA_PUB="$(cd "$(dirname "$0")/.." && pwd)/docs/schema/v1/delonix.json"
 if [[ -f "$SCHEMA_PUB" ]]; then
   check "schema publicado == gerado" ok bash -c \
-    "'$BIN' schema print | diff -q - '$SCHEMA_PUB'"
+    "'$BIN' manifest schema | diff -q - '$SCHEMA_PUB'"
 else
   skip "schema publicado == gerado" "sem checkout à mão ($SCHEMA_PUB não existe)"
 fi
@@ -1438,7 +1634,9 @@ section "workload / pod / secret (leitura)"
 check "workload ls" ok "$BIN" workload ls
 check "workload ls -o json" ok "$BIN" workload ls -o json
 check "workload describe inexistente recusa" fail "$BIN" workload describe "nao-existe-$PFX"
-check "pod ls" ok "$BIN" pod ls
+# `pod ls` foi colapsado em `get pods` no B7 (#159) — o grupo `pod` só
+# tem create/logs/attach/cp/exec/port-forward.
+check "get pods" ok "$BIN" get pods
 
 # Um pod REAL de dois membros, pelo aviso que só um pod multi-membro revela.
 #
@@ -1458,10 +1656,10 @@ metadata:
   name: p$PFX
 spec:
   containers:
-    - name: a
+    - name: web
       image: $IMG
       command: ["sleep", "120"]
-    - name: b
+    - name: api
       image: $IMG
       command: ["sleep", "120"]
 YAML
@@ -1470,7 +1668,7 @@ if "$BIN" pod create -f "$PODY" >/dev/null 2>"$OUT/pod-$PFX.err"; then
     n=\$(grep -c 'cgroup delegation' '$OUT/pod-$PFX.err' || true)
     [ \"\$n\" -le 1 ] || { echo \"o aviso saiu \$n vezes (um por membro)\"; exit 1; }
   "
-  check "pod ls mostra-o" ok bash -c "'$BIN' pod ls | grep -q 'p$PFX'"
+  check "get pods mostra-o" ok bash -c "'$BIN' get pods | grep -q 'p$PFX'"
 
   # `pod exec`/`pod cp`/`pod attach` — wrappers finos sobre `container exec/cp/
   # attach`, que resolvem `--container <curto>` (ou o 1.º membro por omissão)
@@ -1478,16 +1676,61 @@ if "$BIN" pod create -f "$PODY" >/dev/null 2>"$OUT/pod-$PFX.err"; then
   # POR MEMBRO (não `hostname`: os membros partilham UTS, por isso um
   # `hostname` igual não provaria que o `--container` escolheu o certo — só a
   # mountns, que NÃO é partilhada, distingue).
-  check "pod exec vai ao 1.º membro por omissão" ok bash -c \
-    "'$BIN' pod exec p$PFX sh -c 'echo do-a > /tmp/mark-$PFX'"
-  check "pod exec --container a confirma (é o 1.º)" ok bash -c \
-    "'$BIN' pod exec p$PFX --container a cat /tmp/mark-$PFX | grep -q do-a"
-  check "'b' não vê a escrita do 1.º membro (mountns própria)" fail \
-    "$BIN" pod exec "p$PFX" --container b cat "/tmp/mark-$PFX"
-  check "pod exec --container b escreve só em b" ok bash -c \
-    "'$BIN' pod exec p$PFX --container b sh -c 'echo do-b > /tmp/mark2-$PFX'"
-  check "pod exec --container b confirma" ok bash -c \
-    "'$BIN' pod exec p$PFX --container b cat /tmp/mark2-$PFX | grep -q do-b"
+  # Os membros chamam-se `web` e `api`, nesta ordem, e a escolha NÃO é
+  # decorativa: a ordem do MANIFESTO tem de ser CONTRÁRIA à alfabética.
+  # Este bloco testava com `a`/`b`, que é precisamente o par que não distingue
+  # as correcções possíveis — ordenar por NOME teria passado aqui por acidente e
+  # deixado um pod `web`/`api` real com o mesmo defeito. Com estes nomes, tanto
+  # o bug como a meia-correcção põem o `api` no lugar do `web`. (O desenho é do
+  # #257, que chegou a ele por outro caminho; salvado aqui porque valia mais do
+  # que o que estava.)
+  #
+  # A prova do `--container` é feita com o `--container` EXPLÍCITO nas duas
+  # pontas: escreve-se em `web`, lê-se em `web` (tem de estar lá) e lê-se em
+  # `api` (não pode estar). Isto isola a pergunta «o `--container` escolhe o
+  # membro certo, e a mountns não é partilhada» da pergunta sobre o membro por
+  # OMISSÃO, abaixo.
+  check "pod exec --container web escreve em web" ok bash -c \
+    "'$BIN' pod exec p$PFX --container web sh -c 'echo do-web > /tmp/mark-$PFX'"
+  check "pod exec --container web relê o que escreveu" ok bash -c \
+    "'$BIN' pod exec p$PFX --container web cat /tmp/mark-$PFX | grep -q do-web"
+  check "'api' não vê a escrita de 'web' (mountns própria)" fail \
+    "$BIN" pod exec "p$PFX" --container api cat "/tmp/mark-$PFX"
+
+  # O MEMBRO POR OMISSÃO — e agora com o FACTO medido ao lado do comportamento.
+  #
+  # História, porque explica os dois checks: `resolve_target` prometia «the
+  # pod's first member when omitted» e devolvia o primeiro que o `Store::list`
+  # desse. O `Store::list` ordena por `Reverse(created_unix)` — SEGUNDOS —, dois
+  # membros criados no mesmo segundo empatam, e o desempate acabava por ser a
+  # ordem do `read_dir`. Ordem de sistema de ficheiros, não a do manifesto.
+  #
+  # Isto esteve aqui marcado `xflaky ACH-011` durante algumas horas, precisamente
+  # porque a natureza do defeito era a intermitência: numa raiz virgem o default
+  # caía em `web` e passava; na raiz da bateria completa caía em `api`, e os
+  # checks vizinhos chumbavam a acusar o `--container` de escolher mal, que é o
+  # oposto do defeito.
+  #
+  # A marca SAIU porque o defeito foi corrigido (#257/#258: um rótulo de posição
+  # carimbado no `pod create`, e `members_of` a ordenar por ele). Medido na `main`
+  # com seis containers de ruído no store — a condição em que batia — 6/6
+  # resoluções em `web`. É o ciclo do ratchet fechado: a marca é para o intervalo
+  # entre descobrir e corrigir, e um XPASS teria chumbado o portão a pedi-la de
+  # volta se eu me tivesse esquecido.
+  #
+  # DOIS checks e não um. O comportamento depende da ordem que o store devolve;
+  # o rótulo não. Sem a correcção o rótulo não existe DE TODO, por isso o
+  # primeiro check apanha a regressão em TODAS as corridas, e não em metade.
+  check "pod create carimba a posição de cada membro" ok bash -c \
+    "'$BIN' container inspect p$PFX-web | grep -q 'pod-index\": \"0\"' && \
+     '$BIN' container inspect p$PFX-api | grep -q 'pod-index\": \"1\"'"
+  check "pod exec sem --container vai ao 1.º membro DECLARADO" ok bash -c \
+    "'$BIN' pod exec p$PFX sh -c 'echo do-default > /tmp/mk2-$PFX' && \
+     '$BIN' pod exec p$PFX --container web cat /tmp/mk2-$PFX | grep -q do-default"
+  check "pod exec --container api escreve só em api" ok bash -c \
+    "'$BIN' pod exec p$PFX --container api sh -c 'echo do-api > /tmp/mark2-$PFX'"
+  check "pod exec --container api confirma" ok bash -c \
+    "'$BIN' pod exec p$PFX --container api cat /tmp/mark2-$PFX | grep -q do-api"
   check "pod exec --container inexistente recusa" fail \
     "$BIN" pod exec "p$PFX" --container nope true
 
@@ -1496,8 +1739,8 @@ if "$BIN" pod create -f "$PODY" >/dev/null 2>"$OUT/pod-$PFX.err"; then
   check "pod cp: chegou ao 1.º membro" ok bash -c \
     "'$BIN' pod exec p$PFX cat /tmp/podcp-$PFX.txt | grep -q prova-podcp"
   check "pod cp --container escolhe o membro" ok bash -c \
-    "'$BIN' pod cp '$OUT/podcp-$PFX.txt' p$PFX:/tmp/podcp2-$PFX.txt --container b && \
-     '$BIN' pod exec p$PFX --container b cat /tmp/podcp2-$PFX.txt | grep -q prova-podcp"
+    "'$BIN' pod cp '$OUT/podcp-$PFX.txt' p$PFX:/tmp/podcp2-$PFX.txt --container api && \
+     '$BIN' pod exec p$PFX --container api cat /tmp/podcp2-$PFX.txt | grep -q prova-podcp"
   check "pod cp: membro -> host" ok bash -c \
     "'$BIN' pod cp p$PFX:/tmp/podcp-$PFX.txt '$OUT/podcp-back-$PFX.txt' && grep -q prova-podcp '$OUT/podcp-back-$PFX.txt'"
 
@@ -1580,7 +1823,7 @@ if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
       "'$BIN' vm snapshot restore '$SVM' s2 && ! virsh -c qemu:///system domstate '$SVM' >/dev/null 2>&1"
     # s1 foi tirado com a VM a correr: restaurá-lo TEM de a trazer de volta.
     check "restore de um snapshot vivo traz a VM de volta a correr" ok bash -c \
-      "'$BIN' vm snapshot restore '$SVM' s1 && '$BIN' vm status '$SVM' | grep -q Running"
+      "'$BIN' vm snapshot restore '$SVM' s1 && '$BIN' vm ls -o json | python3 -c \"import json,sys; sys.exit(0 if any(v['name']=='$SVM' and v['status']=='Running' for v in json.load(sys.stdin)) else 1)\""
     check "vm snapshot rm" ok "$BIN" vm snapshot rm "$SVM" s2
     # Sair da LISTA não é sair do disco: o `qemu-img` é a única testemunha.
     check "e sai mesmo do disco, não só da lista" ok bash -c \
@@ -1647,6 +1890,28 @@ elif command -v cloud-hypervisor >/dev/null; then
       "'$BIN' vm snapshot ls '$CVM' | grep -qx s1"
     check "CH: rm com a VM a correr RECUSA" fail "$BIN" vm snapshot rm "$CVM" s1
     "$BIN" vm stop "$CVM" >/dev/null 2>&1
+    # ESPERA PELA CONDIÇÃO, e a condição é o lock do qcow2 — não o `stop`.
+    #
+    # `CloudHypervisor::stop` (delonix-vm/src/lib.rs) manda SIGTERM e devolve
+    # SEM esperar que o VMM saia. O `snapshot rm` que vem a seguir passa pelo
+    # `qemu-img`, que precisa do lock de escrita do disco, e uma corrida de cinco
+    # hoje (2026-09-09, load ~18) apanhou o VMM ainda vivo:
+    #
+    #     qemu-img: Could not open '…qcow2': Failed to lock byte 100
+    #
+    # NÃO vai marcado como defeito do produto: não o consegui reproduzir à ordem
+    # (0 falhas em 20 tentativas apertadas a load 22), e uma marca sobre uma
+    # ocorrência só afirma mais do que se mediu. Está aberto como ACH-014.
+    #
+    # O que vai é a pré-condição explícita. Este check mede se o `snapshot rm`
+    # APAGA o snapshot; se o `stop` é síncrono é outra pergunta, e misturá-las
+    # dava um vermelho intermitente que se lê como defeito do `snapshot rm`.
+    # O `qemu-img snapshot -l` SEM `-U` pede o mesmo lock que o `rm` vai pedir,
+    # por isso é a condição exacta e não um proxy dela.
+    for _ in $(seq 50); do
+      qemu-img snapshot -l "$CDISK" >/dev/null 2>&1 && break
+      sleep 0.2
+    done
     check "CH: rm com a VM parada" ok "$BIN" vm snapshot rm "$CVM" s1
     check "CH: e saiu do disco" ok bash -c \
       "! qemu-img snapshot -l '$SROOT/vms/$CVM.qcow2' 2>/dev/null | grep -qw s1"
@@ -1671,7 +1936,7 @@ section "backup / restore por recurso"
 # with the code.
 BKDIR="$OUT/backups"; rm -rf "$BKDIR"; mkdir -p "$BKDIR"
 BKC="bk-$PFX"; BKV="bkvol-$PFX"
-"$BIN" volumes create "$BKV" >/dev/null 2>&1
+"$BIN" volume create "$BKV" >/dev/null 2>&1
 "$BIN" container run -d --name "$BKC" -v "$BKV":/data alpine:latest sleep 300 >/dev/null 2>&1
 # Esperar que a escrita PERSISTA, e não que o comando devolva 0.
 #
@@ -1684,11 +1949,20 @@ BKC="bk-$PFX"; BKV="bkvol-$PFX"
 # já registava desde 2026-08-25 e atribuía ao restore. Não era o restore: nunca
 # havia dados para repor. Um backup de um volume vazio restaura um volume vazio,
 # e o check chumbava três passos depois do sítio onde o problema estava.
-for _ in $(seq 50); do
-  "$BIN" container exec "$BKC" sh -c 'echo prova > /data/f.txt' >/dev/null 2>&1
-  "$BIN" container exec "$BKC" cat /data/f.txt 2>/dev/null | grep -q prova && break
-  sleep 0.2
-done
+#
+# E é um CHECK, não um ciclo mudo. O ciclo anterior fazia `break` no sucesso e
+# CAÍA em silêncio depois de 50 tentativas: se a escrita nunca pegasse, a bateria
+# seguia, arquivava um volume vazio, e o vermelho aparecia três checks à frente
+# em «os dados voltaram» — que é EXACTAMENTE a misdiagnose que este comentário
+# diz ter corrigido, ainda possível. Uma pré-condição que falha em silêncio move
+# o vermelho para longe da causa, que é a única coisa que um relatório não pode
+# fazer.
+check "a escrita no volume PERSISTIU (pré-condição do backup)" ok bash -c \
+  "for _ in \$(seq 50); do
+     '$BIN' container exec '$BKC' sh -c 'echo prova > /data/f.txt' >/dev/null 2>&1
+     '$BIN' container exec '$BKC' cat /data/f.txt 2>/dev/null | grep -q prova && exit 0
+     sleep 0.2
+   done; exit 1"
 
 check "backup create --dry-run não escreve nada" ok "$BIN" backup create container "$BKC" --to "$BKDIR" --dry-run
 check "backup create --dry-run mesmo não escreveu" ok bash -c "[[ -z \"\$(ls -A '$BKDIR')\" ]]"
@@ -1696,6 +1970,12 @@ check "backup create container" ok "$BIN" backup create container "$BKC" --to "$
 check "o arquivo existe" ok bash -c "ls '$BKDIR'/container-$BKC-*.tar.gz >/dev/null"
 check "o arquivo leva os dados do volume" ok bash -c \
   "tar tzf '$BKDIR'/container-$BKC-*.tar.gz | grep -q '^volumes/$BKV.tar.gz$'"
+# A ENTRADA não são os DADOS. O check acima passa sobre um `volumes/x.tar.gz` de
+# volume VAZIO, e um backup vazio restaura-se sem erro — o `restore` diz «volume
+# restored» e o ficheiro não volta. Era o único sítio onde um arquivo oco passava
+# por bom, e é o que deixava «os dados voltaram» a chumbar longe da causa.
+check "…e o tarball do volume tem mesmo o ficheiro dentro" ok bash -c \
+  "tar xzOf '$BKDIR'/container-$BKC-*.tar.gz 'volumes/$BKV.tar.gz' | tar tz | grep -q 'f.txt'"
 check "e NÃO leva o rootfs (é derivável da imagem)" ok bash -c \
   "! tar tzf '$BKDIR'/container-$BKC-*.tar.gz | grep -q '^rootfs/'"
 
@@ -1711,8 +1991,14 @@ check "backup restore --force pára, repõe e arranca" ok bash -c \
 # passou na seguinte, sem nada ter mudado no motor. É a mesma armadilha que o
 # AGENTS.md já regista a propósito da captura das imagens Proxmox — esperar por
 # tempo na operação que mede o resultado.
+# A janela era 30×0.2s = 6s, e 6s não chegaram (medido 2026-09-09, load ~18: o
+# check chumbou, e a MESMA árvore e o MESMO binário deram FAIL=0 duas corridas
+# depois a load 21). Esperar por condição não protege de nada se o limite for
+# apertado: 100×0.2s = 20s. O limite existe para o teste terminar, não para o
+# medir — se um dia estes 20s não bastarem, o problema é o restore e não a
+# janela, e aí o vermelho é o certo.
 check "os dados voltaram" ok bash -c \
-  "for _ in \$(seq 30); do '$BIN' container exec '$BKC' cat /data/f.txt 2>/dev/null | grep -q prova && exit 0; sleep 0.2; done; exit 1"
+  "for _ in \$(seq 100); do '$BIN' container exec '$BKC' cat /data/f.txt 2>/dev/null | grep -q prova && exit 0; sleep 0.2; done; exit 1"
 
 # Classes de saída: «não existe» tem de ser distinguível de «rebentou».
 check "backup create de inexistente devolve 4" 4 "$BIN" backup create container "nao-existe-$PFX" --to "$BKDIR"
@@ -1871,10 +2157,17 @@ services:
     deploy:
       replicas: 3
 YAML
-check "compose recusa deploy.replicas != 1" fail \
-  "$BIN" compose config -f "$CWORK/replicas.yml" -p "cp$PFX"
-check "e a recusa NOMEIA o campo" ok bash -c \
-  "'$BIN' compose config -f '$CWORK/replicas.yml' -p 'cp$PFX' 2>&1 | grep -qi 'replicas'"
+# Estes dois checks nasceram quando o motor RECUSAVA `deploy.replicas` e
+# esperavam a recusa. Hoje o campo está implementado: `replicas: 3` resolve para
+# TRÊS containers, com o sufixo `-2`/`-3` no nome. Um check que exige uma recusa
+# que já não acontece não é «o produto regrediu» — é o teste a ficar velho, e
+# apagá-lo perdia a única prova de que a implementação faz o que diz.
+check "compose deploy.replicas: 3 resolve para 3 containers" ok bash -c \
+  "[ \"\$('$BIN' compose config -f '$CWORK/replicas.yml' -p 'cp$PFX' | grep -c '^  container:')\" -eq 3 ]"
+# E os três têm NOMES distintos: três linhas com o mesmo nome seriam um só
+# container contado três vezes, que é o defeito que esta grafia convida.
+check "…e os 3 têm nomes distintos" ok bash -c \
+  "[ \"\$('$BIN' compose config -f '$CWORK/replicas.yml' -p 'cp$PFX' | awk '/^  container:/{print \$2}' | sort -u | wc -l)\" -eq 3 ]"
 
 cat >"$CWORK/extends.yml" <<YAML
 services:
@@ -1894,10 +2187,14 @@ services:
     image: alpine:3.19
     profiles: ["dev"]
 YAML
-check "compose recusa profiles: por-serviço" fail \
-  "$BIN" compose config -f "$CWORK/profiles.yml" -p "cp$PFX"
-check "e a recusa NOMEIA os profiles" ok bash -c \
-  "'$BIN' compose config -f '$CWORK/profiles.yml' -p 'cp$PFX' 2>&1 | grep -qi 'profiles'"
+# Idem para `profiles:`: já não é recusado, é HONRADO. Um serviço com profile
+# fica FORA do projecto resolvido até alguém pedir `--profile`, e é esse par que
+# vale medir — a metade «não aparece» sozinha passaria com o campo ignorado e o
+# serviço a faltar por outra razão qualquer.
+check "compose profiles: sem --profile o serviço fica FORA" ok bash -c \
+  "! '$BIN' compose config -f '$CWORK/profiles.yml' -p 'cp$PFX' | grep -q 's-$PFX'"
+check "…e com --profile dev entra" ok bash -c \
+  "'$BIN' compose config -f '$CWORK/profiles.yml' -p 'cp$PFX' --profile dev | grep -q 's-$PFX'"
 
 # A porta com IP de host tem HISTÓRIA, e a primeira versão deste check estava
 # errada: o `compose.rs` chegou a DESCARTAR o IP em silêncio (publicando em
@@ -1976,7 +2273,7 @@ else
 # obrigava um script a parsear colunas alinhadas E TRADUZIDAS (`--l18n=pt` muda
 # os cabeçalhos). Estes checks passam a saída por um parser de JSON a sério, e
 # não por `grep` — um `grep` passa numa tabela com aspas.
-for leitura in "net ingress ls" "net egress ls" "net tunnel ls" "net httproute ls"; do
+for leitura in "net ingress ls" "net egress ls"; do
   check "$leitura -o json é JSON a sério" ok bash -c \
     "'$BIN' $leitura -o json | python3 -c 'import json,sys; json.load(sys.stdin)'"
 done
@@ -1992,19 +2289,43 @@ check "ingress ls json separa governado de aberto" ok bash -c \
     "$BIN" net egress allow naoexiste-$PFX 80
 
   # --- os outros verbos respondem, e a classe de erro é a certa ---------------
-  check "net httproute ls" ok "$BIN" net httproute ls
-  check "net tunnel ls" ok "$BIN" net tunnel ls
+  # As LISTAGENS de HTTPRoute e Gateway não vivem no `net`: o `net httproute`
+  # tem apply/rm e o `net tunnel` tem expose/apply. Quem lista é o verbo
+  # genérico — `get httproutes` e `get gateways`.
+  check "get httproutes" ok "$BIN" get httproutes
+  check "get gateways" ok "$BIN" get gateways
+  # Estes dois checks nasceram no #255 a exigir que `-o json` fosse RECUSADO com
+  # razão escrita — que era o comportamento medido na v3.0.0. O #259 descobriu
+  # porque: o `NO_JSON_YET` do `verbs.rs` listava-os há muito, e o
+  # `tunnel::cmd_ls`/`httproute::cmd_ls` já tinham braço de JSON completo. A
+  # recusa era a lista a estar velha, não uma decisão. Hoje respondem JSON.
+  #
+  # O portão apanhou a mudança na primeira corrida depois do #259 fundir, com os
+  # dois a chumbarem por rc=0 onde esperavam 1 — que é exactamente o serviço que
+  # ele passou a prestar. Passam a medir o que é verdade, e por um PARSER de JSON
+  # a sério e não por `grep`: um `grep` passa numa tabela com aspas.
+  for _k in httproutes gateways; do
+    check "get $_k -o json é JSON a sério" ok bash -c \
+      "'$BIN' get $_k -o json | python3 -c 'import json,sys; json.load(sys.stdin)'"
+  done
+  # E o Kind que CONTINUA sem JSON é recusado, não fingido — a lista encolheu,
+  # não desapareceu, e recusado-com-razão e em-falta são estados diferentes.
+  check "get kubernetesclusters -o json continua recusado, com razão" 1 \
+    "$BIN" get kubernetesclusters -o json
+  check "…e a recusa diz que a listagem é table-only" ok bash -c \
+    "'$BIN' get kubernetesclusters -o json 2>&1 | grep -q 'table-only'"
   check "net flow --help" ok "$BIN" net flow --help
-  check "net boot status" ok "$BIN" net boot status
+  # `net boot` dobrou-se em `system boot` no B2 (#151), com `namespace`.
+  check "system boot status" ok "$BIN" system boot status
   # O grupo tem `status`, não `ls`. Fica fixado: a primeira versão deste check
   # assumiu `ls` (o verbo do resto da CLI) e chumbou com rc=2 — se algum dia o
   # `ls` for acrescentado, é uma escolha e não um acidente.
-  check "net boot ls NÃO existe (é status)" 2 "$BIN" net boot ls
+  check "system boot ls NÃO existe (é status)" 2 "$BIN" system boot ls
 
-  # `net boot enable/disable` escreve units systemd em ~/.config/systemd/user,
+  # `system boot enable/disable` escreve units systemd em ~/.config/systemd/user,
   # que o DELONIX_ROOT NÃO redirecciona — num host com produção isso mexe fora
   # do isolamento. Fica declarado por cobrir, nunca corrido às escondidas.
-  skip "net boot enable/disable" "escreve units em ~/.config/systemd/user, fora do DELONIX_ROOT"
+  skip "system boot enable/disable" "escreve units em ~/.config/systemd/user, fora do DELONIX_ROOT"
 
   # --- e a infra desce sem deixar restos --------------------------------------
   check "net netns down" ok "$BIN" net netns down
@@ -2155,7 +2476,7 @@ YAML
 
 # 1. Uma lista vazia continua a ser um ARRAY. Um `[]` que virasse `""` ou `null`
 #    parte todo o `jq '.[]'` que exista lá fora, e parte-o em silêncio.
-for g in "container ps" "image ls" "volumes ls" "network ls" "vm ls" "secret ls"; do
+for g in "container ps" "image ls" "volume ls" "network ls" "vm ls" "secret ls"; do
   check "lista vazia de '$g' é um array JSON" ok bash -c \
     "'$BIN' $g -o json 2>/dev/null | python3 -c 'import json,sys; v=json.load(sys.stdin); assert isinstance(v, list)'"
 done
@@ -2165,7 +2486,7 @@ done
 #    deixa de classificar num nó com outra locale — o mesmo defeito que os
 #    códigos de saída existem para fechar, na outra ponta.
 check "o -o json de uma listagem é idêntico em EN e PT" ok bash -c \
-  "diff <('$BIN' volumes ls -o json 2>/dev/null) <('$BIN' --l18n=pt volumes ls -o json 2>/dev/null)"
+  "diff <('$BIN' volume ls -o json 2>/dev/null) <('$BIN' --l18n=pt volume ls -o json 2>/dev/null)"
 check "o -o json de um plano é idêntico em EN e PT" ok bash -c \
   "diff <('$BIN' stack plan -f '$E2E_OUTMF' -o json 2>/dev/null) <('$BIN' --l18n=pt stack plan -f '$E2E_OUTMF' -o json 2>/dev/null)"
 
@@ -2194,10 +2515,16 @@ rm -f "$E2E_OUTMF"
 ########################################
 section "verbos genéricos — encaminham, não reimplementam"
 ########################################
-# A promessa do `cmd::verbs` é que `get pods` e `pod ls` são a MESMA execução.
-# Um teste unitário não o pode mostrar: prova-se comparando as duas saídas, e é
-# a igualdade BYTE A BYTE que distingue encaminhar de reescrever parecido.
-for par in "get:pods|pod:ls" "get:networks|network:ls" "get:volumes|volumes:ls" \
+# A promessa do `cmd::verbs` é que `get networks` e `network ls` são a MESMA
+# execução. Um teste unitário não o pode mostrar: prova-se comparando as duas
+# saídas, e é a igualdade BYTE A BYTE que distingue encaminhar de reescrever
+# parecido.
+#
+# O par `get pods | pod ls` saiu daqui porque `pod ls` já não existe (colapsado
+# no B7). Deixá-lo virou `get pods` contra `get pods` — uma tautologia sempre
+# verde, que é pior do que não ter o check: ocupa a linha do relatório e não
+# compara nada. Entrou `image ls`, que existe e é um par a sério.
+for par in "get:images|image:ls" "get:networks|network:ls" "get:volumes|volume:ls" \
            "get:secrets|secret:ls" "get:virtualmachines|vm:ls"; do
   novo_v="${par%%|*}"; velho_v="${par##*|}"
   # shellcheck disable=SC2086
@@ -2232,18 +2559,57 @@ check "delete sem nome recusa"    1 "$BIN" delete pods
 section "limpeza"
 ########################################
 "$BIN" container rm -f "$C" >/dev/null 2>&1
-check "volumes rm" ok "$BIN" volumes rm "$VOL"
+check "volume rm" ok "$BIN" volume rm "$VOL"
 check "network rm" ok "$BIN" network rm "$NET"
 
 ########################################
 log ""
 log "======================================"
-log " PASS=$PASS  FAIL=$FAIL  SKIP=$SKIP"
+log " PASS=$PASS  FAIL=$FAIL  SKIP=$SKIP  XFAIL=$XFAIL  XPASS=$XPASS"
 log " detalhe: $OUT/results.jsonl"
+
+# Os SKIP em BLOCO PRÓPRIO, e não diluídos nas seiscentas linhas acima. Um SKIP
+# não chumba — a pré-condição faltou, e isso não diz nada sobre o motor — mas
+# lido de passagem é indistinguível de um verde, e foi assim que cenários
+# inteiros passaram despercebidos. Quem lê o resumo tem de ver o que NÃO foi
+# exercitado sem ir procurar.
+if (( SKIP > 0 )); then
+  log ""
+  log " $SKIP SKIP — o que NÃO foi exercitado (não chumba, mas também não prova nada):"
+  for f in "${SKIPPED_NAMES[@]}"; do log "   ~ $f"; done
+fi
+if (( XFAIL > 0 )); then
+  log ""
+  log " $XFAIL XFAIL — chumbam por defeito CONHECIDO, com achado escrito:"
+  for f in "${XFAIL_NAMES[@]}"; do log "   x $f"; done
+fi
+if (( XPASS > 0 )); then
+  log ""
+  log " $XPASS XPASS — marcados como defeito conhecido e PASSARAM. Tira a marca:"
+  for f in "${XPASS_NAMES[@]}"; do log "   ! $f"; done
+fi
 if (( FAIL > 0 )); then
   log ""
-  log " falhas:"
+  log " $FAIL falhas:"
   for f in "${FAILED_NAMES[@]}"; do log "   - $f"; done
 fi
 log "======================================"
-exit 0   # o relatório é o produto; um FAIL não deve abortar a recolha
+
+# O código de saída.
+#
+# Até 2026-09-09 esta linha era `exit 0`, justificada com «o relatório é o
+# produto; um FAIL não deve abortar a recolha». A primeira metade é verdade e
+# não mudou — nada aqui aborta a meio, o `check` regista e segue. A segunda era
+# um non-sequitur: o código de saída é a ÚLTIMA coisa que este script faz,
+# depois de a recolha estar completa, e sair 0 com 36 FAIL tornava decorativo
+# qualquer passo de CI construído por cima (medido: PASS=529 FAIL=36 SKIP=5, e
+# `echo $?` a dizer 0).
+#
+# SKIP não chumba, de propósito: uma medição que não se pôde fazer não é um
+# resultado negativo — a mesma regra que já governa o `schema publicado ==
+# gerado` fora do checkout. Sai em destaque no bloco acima, que é onde tem de
+# custar a ignorar.
+if (( FAIL > 0 || XPASS > 0 )); then
+  exit 1
+fi
+exit 0
