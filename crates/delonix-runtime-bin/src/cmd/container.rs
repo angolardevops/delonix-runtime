@@ -1333,6 +1333,12 @@ pub(crate) fn pod_member_run_opts(
         opts.labels.push(format!("delonix.io/pod={pod_name}"));
         opts.labels
             .push(format!("delonix.io/pod-role=app.{member}"));
+        // The member's position in `spec.containers`. Nothing else carries it —
+        // the container record keeps only the `<pod>-<member>` name — and
+        // without it «the pod's first member» resolved to whatever `read_dir`
+        // returned first (ACH-011). See `pod::POD_INDEX_LABEL`.
+        opts.labels
+            .push(format!("{}={i}", super::pod::POD_INDEX_LABEL));
         out.push(opts);
     }
     Ok(out)
@@ -8434,6 +8440,21 @@ containers:
         assert_eq!(opts[0].name.as_deref(), Some("myapp-web"));
         assert_eq!(opts[1].name.as_deref(), Some("myapp-side"));
         assert_eq!(opts[0].ports, vec!["8080:80/tcp"]);
+        // The declared position, stamped on each member. It is the ONLY record
+        // of the manifest's order — the container keeps just the
+        // `<pod>-<member>` name — and `pod::members_of` sorts by it so that
+        // «the pod's first member» resolves to `web` and not to whatever
+        // `read_dir` returned first (ACH-011).
+        assert!(
+            opts[0].labels.iter().any(|l| l == "delonix.io/pod-index=0"),
+            "{:?}",
+            opts[0].labels
+        );
+        assert!(
+            opts[1].labels.iter().any(|l| l == "delonix.io/pod-index=1"),
+            "{:?}",
+            opts[1].labels
+        );
     }
 
     #[test]
