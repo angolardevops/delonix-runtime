@@ -1,7 +1,8 @@
 # kind: Pod — a REAL multi-container pod: N containers sharing the pod's network
 # namespace (same IP, localhost between them), like a Kubernetes Pod. Apply with:
 #   delonix pod create -f examples/pod-multi.yaml      (or `stack apply`)
-# Manage as a unit:  delonix pod ls | describe web-app | logs web-app | rm web-app
+# Manage as a unit:  delonix get pods | describe pod web-app | pod logs web-app
+#                    | delete pod web-app
 #
 # Same k8s-shaped schema as `kind: Container` (spec.containers[]), but here N
 # containers are allowed and they share the pod sandbox. The web + sidecar reach

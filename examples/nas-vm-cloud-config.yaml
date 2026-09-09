@@ -10,7 +10,7 @@
 #     --ssh-key @~/.ssh/id_ed25519.pub \
 #     --user-data examples/nas-vm-cloud-config.yaml
 #
-#   IP=$(delonix vm status nas | awk '/ip:/{print $2}')
+#   IP=$(delonix vm ls -o json | jq -r '.[] | select(.name=="nas") | .ip')
 #
 # Then mount its shares as Delonix volumes (from the host or a container):
 #   delonix volume create media-nfs --type nfs  --server $IP --share /srv/share

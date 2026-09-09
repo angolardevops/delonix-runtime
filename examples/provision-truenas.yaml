@@ -12,9 +12,9 @@
 #
 # To DESTROY what was provisioned (irreversible, and on another machine):
 #
-#   delonix volumes rm dados --destroy-remote
+#   delonix volume rm dados --destroy-remote
 #
-# Without that flag, `volumes rm` removes only the local volume and leaves the
+# Without that flag, `volume rm` removes only the local volume and leaves the
 # dataset alone. And it is refused outright for a volume that merely mounts a
 # share somebody else made — there is no claim of ownership to act on.
 apiVersion: core.delonix.io/v1alpha1

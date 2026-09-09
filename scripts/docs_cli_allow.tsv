@@ -1,0 +1,57 @@
+# Citações `delonix …` que a documentação corrente escreve DE PROPÓSITO e que
+# não resolvem na árvore do binário. Cada linha é uma excepção com razão — o
+# `docs_cli_gate.py` recusa tudo o que não esteja aqui.
+#
+# Formato:  <ficheiro>\t<citação normalizada>\t<razão>
+# O ficheiro é o caminho relativo à raiz; a citação é o texto já normalizado
+# pelo gate (`delonix` + os tokens que parecem subcomandos).
+#
+# Duas famílias, e a diferença importa:
+#
+#   PROSA — «delonix» aparece como nome do produto ou dentro de saída capturada,
+#   e o que vem a seguir não é um subcomando. Não é dívida; é o extractor a não
+#   conseguir distinguir prosa de comando sem contexto humano.
+#
+#   HISTÓRICO/HIPOTÉTICO — a citação é de um comando que NÃO existe, e o facto
+#   de não existir É o assunto da frase (uma nota de migração, uma lição, um ADR
+#   ainda por aceitar, um contraste com o Docker). Corrigir a grafia destruía o
+#   sentido da frase.
+#
+# Antes de acrescentar uma linha: se a frase ENSINA o leitor a correr o comando,
+# não é excepção — é o bug que este gate existe para apanhar.
+
+# --- PROSA ---------------------------------------------------------------
+docs/c4.html	delonix netns	rótulo mermaid do re-exec interno `delonix netns holder`, não um comando público
+docs/c4.html	delonix run	rótulo `participant CLI as delonix run` num diagrama de sequência
+docs/kinds.html	delonix extensions	comentário YAML: «# delonix extensions (pod-level):»
+docs/kinds.html	delonix values also	comentário YAML sobre valores aceites, não uma invocação
+examples/pod.yaml	delonix extensions	comentário YAML: «# delonix extensions (pod-level):»
+docs/comandos/cluster.html	delonix picks a free one	prosa do `--help` do clap: «Omit = delonix picks a free one»
+docs/comandos/cluster.html	delonix generates its own	prosa do `--help` do clap
+docs/guia-vm.html	delonix base	saída capturada do build: «official delonix base delonix-vm-base:ubuntu-24.04»
+docs/guia-vm-lab.md	delonix base	saída capturada do build (a mesma linha, antes de gerar)
+docs/guia-rede.md	delonix state root on this	mensagem de erro capturada: «another delonix state root on this user…»
+
+# --- HISTÓRICO / HIPOTÉTICO ---------------------------------------------
+docs/cli-stability.md	delonix restore	nota de migração da v0.67.0: o `delonix restore` de raiz passou a `backup restore`
+docs/estabilidade.html	delonix restore	gerado de docs/cli-stability.md
+docs/cli-stability.md	delonix netns attach	lição escrita: o `delonix-cri` continuou a invocar a grafia velha durante meses
+docs/estabilidade.html	delonix netns attach	gerado de docs/cli-stability.md
+docs/cri-conformance.md	delonix netns attach	a mesma quebra, do lado do CRI
+docs/gitops.md	delonix gitops	proposto pelo ADR-0021, ainda `Proposed` — a frase di-lo
+docs/gitops.html	delonix gitops	gerado de docs/gitops.md
+docs/paridade-docker-podman.md	delonix ps	contraste deliberado: «`delonix container ps`, não `delonix ps`»
+docs/paridade-docker-podman.md	delonix stop	hipótese recusada: um `delonix stop <nome>` a significar «container» em silêncio
+docs/roadmap/13-improvements-traceability.md	delonix node add	M06 BLOCKED: o ADR-0010 recusou a API de gestão remota; a linha diz que não existe
+
+# --- HISTÓRICO: grafias antigas citadas COMO antigas -----------------------
+docs/cli-stability.md	delonix image list	nota da v1.0.0 sobre os atalhos; a própria linha remete para a v2.0.0, onde a grafia mudou outra vez
+docs/estabilidade.html	delonix image list	gerado de docs/cli-stability.md
+docs/cli-stability.md	delonix backup vm x	forma anterior à v0.67.0, citada a propósito de o grupo `backup` não ter promessa de estabilidade
+docs/estabilidade.html	delonix backup vm x	gerado de docs/cli-stability.md
+docs/guia-vm-lab.md	delonix vm snapshot lab-probe base-limpa	transcrito da armadilha medida na v0.51.x — o texto acima diz «os comandos abaixo são os da versão antiga»
+docs/guia-vm-lab.md	delonix vm snapshots lab-probe	o mesmo transcrito, já rotulado como versão antiga
+docs/guia-vm-lab.md	delonix vm restore lab-probe base-limpa	o mesmo transcrito, já rotulado como versão antiga
+docs/guia-vm.html	delonix vm snapshot lab-probe base-limpa	gerado de docs/guia-vm-lab.md
+docs/guia-vm.html	delonix vm snapshots lab-probe	gerado de docs/guia-vm-lab.md
+docs/guia-vm.html	delonix vm restore lab-probe base-limpa	gerado de docs/guia-vm-lab.md

@@ -1538,7 +1538,7 @@ pub static ENTRIES: &[Entry] = &[
             ("one snapshot, for a pipe or a terminal without a TTY", "delonix network dash --once"),
             ("JSON, to feed a script or a dashboard", "delonix network dash --json"),
         ],
-        see_also: &["dash", "network ls", "system monitor"],
+        see_also: &["dashboard", "network ls", "system monitor"],
     },
     Entry {
         path: "network node",
@@ -1768,7 +1768,7 @@ pub static ENTRIES: &[Entry] = &[
             ("the management API on the default unix socket, for a control-plane on this same host", "delonix serve api"),
             ("a socket of your own", "delonix serve api --addr unix:///tmp/delonix-mgmt.sock"),
         ],
-        see_also: &["serve cri", "dash", "system info"],
+        see_also: &["serve cri", "dashboard", "system info"],
     },
     Entry {
         path: "serve cri",
@@ -1918,7 +1918,7 @@ pub static ENTRIES: &[Entry] = &[
             ("where the disk went", "delonix system df"),
             ("get it back, orphan container directories included", "delonix system prune -f"),
         ],
-        see_also: &["dash", "system events", "container stats", "image ls"],
+        see_also: &["dashboard", "system events", "container stats", "image ls"],
     },
     Entry {
         path: "backup",
@@ -2058,7 +2058,7 @@ pub static ENTRIES: &[Entry] = &[
             ("engine state in one screen: rootless, cgroup delegation, network infra, counts", "delonix system info"),
             ("the same screen in Portuguese", "delonix system info --l18n pt"),
         ],
-        see_also: &["system setup", "system df", "system virt", "dash"],
+        see_also: &["system setup", "system df", "system virt", "dashboard"],
     },
     Entry {
         path: "system regulate",
@@ -2087,7 +2087,7 @@ pub static ENTRIES: &[Entry] = &[
             ("the raw counters, no dashboard formatting", "delonix system metrics"),
             ("machine-readable, the same collector dash --json and Prometheus use", "delonix system metrics -o json"),
         ],
-        see_also: &["dash", "system resources", "serve api"],
+        see_also: &["dashboard", "system resources", "serve api"],
     },
     Entry {
         path: "system setup",
@@ -2138,7 +2138,7 @@ pub static ENTRIES: &[Entry] = &[
             ("one sample and out — the shape for a script or a cron line", "delonix system monitor --no-stream"),
             ("a slower refresh on a busy host", "delonix system monitor --interval 3000"),
         ],
-        see_also: &["dash", "network ls", "system events", "container stats"],
+        see_also: &["dashboard", "network ls", "system events", "container stats"],
     },
     Entry {
         path: "version",
@@ -2146,7 +2146,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("which build this is, and the commit it came from", "delonix version"),
         ],
-        see_also: &["system info", "dash", "completion"],
+        see_also: &["system info", "dashboard", "completion"],
     },
     Entry {
         path: "vm",
@@ -2202,7 +2202,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("resume a VM suspended with `pause`, exactly where it left off", "delonix vm unpause dev"),
         ],
-        see_also: &["vm pause", "vm status"],
+        see_also: &["vm pause", "describe"],
     },
     Entry {
         path: "vm prune",
@@ -2414,7 +2414,7 @@ pub static ENTRIES: &[Entry] = &[
             ("one snapshot of text, for a terminal that is not interactive", "delonix vm dash --once"),
             ("the same numbers as JSON, for a script or a dashboard datasource", "delonix vm dash --json"),
         ],
-        see_also: &["vm ls", "get", "dash", "container dash"],
+        see_also: &["vm ls", "get", "dashboard", "container dash"],
     },
     Entry {
         path: "volume",
@@ -2548,7 +2548,7 @@ pub static ENTRIES: &[Entry] = &[
             ("one snapshot, for CI or a terminal without a TTY", "delonix volume dash --once"),
             ("JSON, to alert on a share filling up", "delonix volume dash --json"),
         ],
-        see_also: &["dash", "volume ls", "system df"],
+        see_also: &["dashboard", "volume ls", "system df"],
     },
     Entry {
         path: "workload",

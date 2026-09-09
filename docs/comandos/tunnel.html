@@ -196,6 +196,8 @@ SEE ALSO:
   ingress publish
 
   delonix › net › tunnel</code></pre></div>
+<h2><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h2><div class="ex"><div class='cap lang-pt'>Listar túneis (estado + URL pública) — `tunnel ls` saiu para o verbo genérico</div><div class='cap lang-en'>List tunnels (state + public URL) — `tunnel ls` moved to the generic verb</div><pre><code>delonix get gateways</code></pre><div class="out"><pre><code>NAME    PROVIDER   LOCAL PORT   PUBLIC URL                                    STATUS    UPTIME
+test1   pinggy          18234   https://oxipg-197-148-40-67.free.pinggy.net   Running   Up 34 seconds</code></pre></div></div><div class="ex"><div class='cap lang-pt'>Detalhe de um túnel</div><div class='cap lang-en'>Detail of one tunnel</div><pre><code>delonix describe gateway demo</code></pre></div><div class="ex"><div class='cap lang-pt'>Parar e remover (mata o processo agente a sério)</div><div class='cap lang-en'>Stop and remove it (really kills the agent process)</div><pre><code>delonix delete gateway demo</code></pre><div class="out"><pre><code>tunnel/demo: removed</code></pre></div></div>
 <h2 id='apply'><code>tunnel apply</code></h2>
 <p class='intro'>Apply the <code>kind: Gateway</code> documents of a manifest (idempotent)</p>
 <div class='help'><pre><code>Usage: delonix net tunnel apply [OPTIONS]
@@ -289,31 +291,12 @@ SEE ALSO:
 chegou a um servidor local através do tunnel (HTTP 200) usando exactamente este comando.</p></div><div class='lang-en'><p>Validated live in this very session: real HTTPS traffic from the
 internet reached a local server through the tunnel (HTTP 200) using exactly this command.</p></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Expor uma porta local sem escrever manifesto (pinggy, grátis, efémero)</div><div class='cap lang-en'>Expose a local port with no manifest (pinggy, free, ephemeral)</div><pre><code>delonix net tunnel expose 8080 --name demo</code></pre><div class="out"><pre><code>tunnel/demo: running — https://oxipg-197-148-40-67.free.pinggy.net</code></pre></div></div>
-<h2 id='ls'><code>tunnel ls</code></h2>
-<p class='intro'>error: unrecognized subcommand &#x27;ls&#x27;</p>
-<div class='help'><pre><code>Usage: delonix net tunnel [OPTIONS] &lt;COMMAND&gt;
-
-For more information, try &#x27;--help&#x27;.</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Listar túneis (estado + URL pública)</div><div class='cap lang-en'>List tunnels (status + public URL)</div><pre><code>delonix net tunnel ls</code></pre><div class="out"><pre><code>NAME    PROVIDER   LOCAL PORT   PUBLIC URL                                    STATUS    UPTIME
-test1   pinggy          18234   https://oxipg-197-148-40-67.free.pinggy.net   Running   Up 34 seconds</code></pre></div></div>
-<h2 id='describe'><code>tunnel describe</code></h2>
-<p class='intro'>error: unrecognized subcommand &#x27;describe&#x27;</p>
-<div class='help'><pre><code>Usage: delonix net tunnel [OPTIONS] &lt;COMMAND&gt;
-
-For more information, try &#x27;--help&#x27;.</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Detalhe de um túnel</div><div class='cap lang-en'>Tunnel detail</div><pre><code>delonix net tunnel describe demo</code></pre></div>
-<h2 id='rm'><code>tunnel rm</code></h2>
-<p class='intro'>error: unrecognized subcommand &#x27;rm&#x27;</p>
-<div class='help'><pre><code>Usage: delonix net tunnel [OPTIONS] &lt;COMMAND&gt;
-
-For more information, try &#x27;--help&#x27;.</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Parar e remover (mata o processo agente a sério)</div><div class='cap lang-en'>Stop and remove (really kills the agent process)</div><pre><code>delonix net tunnel rm demo</code></pre><div class="out"><pre><code>tunnel/demo: removed</code></pre></div></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Uma porta local, uma URL pública — sem conta, sem router.</p>
 <pre><code>delonix net tunnel expose 8080
-delonix net tunnel ls</code></pre></div><div class='callout lang-en'><p>One local port, one public URL — no account, no router config.</p>
+delonix get gateways</code></pre></div><div class='callout lang-en'><p>One local port, one public URL — no account, no router config.</p>
 <pre><code>delonix net tunnel expose 8080
-delonix net tunnel ls</code></pre></div>
+delonix get gateways</code></pre></div>
 <h2><span class='lang-pt'>Desafio</span><span class='lang-en'>Challenge</span></h2>
 <div class='callout lang-pt'><p>Aponta a porta local do tunnel para a porta onde o
 proxy L7 (<code>httproute</code>) escuta, e confirma que a MESMA URL pública consegue servir vários
