@@ -69,7 +69,7 @@ pub(crate) const POD_INDEX_LABEL: &str = "delonix.io/pod-index";
 /// component and the name decides. Alphabetical is not the order they were declared in,
 /// which cannot be recovered, but it is the same on every root and on every run — and a
 /// wrong-but-stable default is a thing a user can work around, while a coin flip is not.
-fn member_order(c: &Container) -> (u32, String) {
+pub(crate) fn member_order(c: &Container) -> (u32, String) {
     (
         c.labels
             .get(POD_INDEX_LABEL)
