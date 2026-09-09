@@ -381,11 +381,11 @@ delonix describe vms dev
 delonix vm console dev
 
 # 4. Checkpoint de sistema — memória E disco, com a VM a correr
-delonix vm snapshot dev limpa
-delonix vm snapshots dev
+delonix vm snapshot create dev limpa
+delonix vm snapshot ls dev
 
 # 5. Estragar alguma coisa lá dentro e voltar atrás
-delonix vm restore dev limpa
+delonix vm snapshot restore dev limpa
 
 delonix delete vms dev</code></pre>
 <p class="note"><strong>Verificação:</strong> o passo 4 devolve sem erro com a
@@ -404,11 +404,11 @@ delonix describe vms dev
 delonix vm console dev
 
 # 4. System checkpoint — memory AND disk, VM still running
-delonix vm snapshot dev clean
-delonix vm snapshots dev
+delonix vm snapshot create dev clean
+delonix vm snapshot ls dev
 
 # 5. Break something inside and roll back
-delonix vm restore dev clean
+delonix vm snapshot restore dev clean
 
 delonix delete vms dev</code></pre>
 <p class="note"><strong>Verification:</strong> step 4 returns with no error

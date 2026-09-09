@@ -119,8 +119,8 @@ accionada duas vezes durante a montagem do laboratório e evitou levar a máquin
 delonix vm stop dev       # 0,4 s — preserva disco e registo
 delonix vm start dev      # 0,9 s — mesmo overlay, disco preservado
 delonix vm restart dev    # 1,3 s — sempre um arranque real
-delonix vm rm dev         # pára e apaga overlay + registo
-delonix vm rm dev --force # descarta o registo local mesmo se o libvirt falhar
+delonix delete vm dev     # pára e apaga overlay + registo
+delonix delete vm dev -f  # descarta o registo local mesmo se o libvirt falhar
 ```
 
 > **`stop` faz `undefine` do domínio libvirt** — para não deixar domínios órfãos.
@@ -142,7 +142,7 @@ original — que também é idempotente.
 delonix vm ls          # tabela
 delonix vm ls --ports  # + sonda TCP real a 22/6443/10250/80/443
 delonix vm ls -o json  # para script
-delonix vm status [nome]
+delonix describe vm [nome]
 delonix image vm describe <nome>...  # detalhe de uma IMAGEM de VM
 delonix vm dash --once # KPIs + tabela
 ```
@@ -854,7 +854,7 @@ delonix vm dash                          # painel interactivo
 Para desmontar tudo:
 
 ```bash
-for v in lab-dns lab-dhcp lab-samba lab-cli lab-nas lab-fw; do delonix vm rm $v; done
+for v in lab-dns lab-dhcp lab-samba lab-cli lab-nas lab-fw; do delonix delete vm $v; done
 virsh -c qemu:///system net-destroy labnet
 virsh -c qemu:///system net-undefine labnet
 ```

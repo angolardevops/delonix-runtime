@@ -108,7 +108,7 @@ cada comando, nos passos 6 e 7 do [guia](../../docs/guia-vm-lab.md#passo-6--o-na
 ## Desmontar
 
 ```bash
-for v in lab-dns lab-dhcp lab-samba lab-cli lab-nas lab-fw; do delonix vm rm $v; done
+for v in lab-dns lab-dhcp lab-samba lab-cli lab-nas lab-fw; do delonix delete vm $v; done
 virsh -c qemu:///system net-destroy labnet
 virsh -c qemu:///system net-undefine labnet
 ```

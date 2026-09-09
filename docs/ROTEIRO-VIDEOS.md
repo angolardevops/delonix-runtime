@@ -100,7 +100,7 @@ própria com um Dockerfile normal.
 **Falar:** Volume nomeado — o dado vive fora do ciclo de vida do container.
 
 ```bash
-delonix volumes create dados
+delonix volume create dados
 delonix container run -d --name db -v dados:/var/lib/postgresql/data postgres:16-alpine
 delonix container rm -f db
 # recria — o volume, não o container, é que guardava os dados
@@ -349,14 +349,14 @@ delonix net ingress ls db
 **Falar:** O dashboard — não é um snapshot, é ao vivo (o equivalente a um `htop` do runtime).
 
 ```bash
-delonix dash
+delonix dashboard
 # setas para navegar, `m` alterna o gráfico containers/memória
 ```
 
 **Falar:** Também dá para script/Grafana — JSON puro, sem TUI.
 
 ```bash
-delonix dash --json | jq '.tiles'
+delonix dashboard --json | jq '.tiles'
 ```
 
 **Falar:** Disco — o vilão silencioso de qualquer runtime rootless (rootfs por container).

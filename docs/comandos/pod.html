@@ -143,7 +143,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 </nav>
 <main>
 <h1>delonix pod</h1>
-<p class='tagline lang-pt'>Pods reais multi-container (create, ls, logs, exec, cp, attach) — N containers como uma unidade.</p><p class='tagline lang-en'>Real multi-container pods (create, ls, logs) — N containers as one unit.</p>
+<p class='tagline lang-pt'>Pods reais multi-container (create, logs, exec, cp, attach) — N containers como uma unidade.</p><p class='tagline lang-en'>Real multi-container pods (create, logs, exec) — N containers as one unit.</p>
 <p class='lang-pt'>Pods de verdade, ao estilo Kubernetes: N containers que <strong>partilham as
 namespaces do pod</strong> e se gerem como uma só unidade. Hoje partilham <strong>netns</strong>
 (o mesmo IP, alcançam-se por <code>localhost</code>), <strong>IPC</strong> (System V/POSIX) e
@@ -212,6 +212,7 @@ SEE ALSO:
   stack apply
 
   delonix › pod</code></pre></div>
+<h2><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h2><div class="ex"><div class='cap lang-pt'>Listar os pods (POD, CONTAINERS n/N, IP, STATUS) — `pod ls` saiu na v2.0.0</div><div class='cap lang-en'>List the pods (POD, CONTAINERS n/N, IP, STATUS) — `pod ls` went away in v2.0.0</div><pre><code>delonix get pods</code></pre></div><div class="ex"><div class='cap lang-pt'>Detalhe de um pod, em blocos</div><div class='cap lang-en'>Detail of one pod, in blocks</div><pre><code>delonix describe pod web-app</code></pre></div><div class="ex"><div class='cap lang-pt'>Remover o pod como unidade</div><div class='cap lang-en'>Remove the pod as a unit</div><pre><code>delonix delete pod web-app</code></pre></div>
 <h2 id='create'><code>pod create</code></h2>
 <p class='intro'>Create a pod (N containers sharing a netns) from a manifest (<code>kind: Pod</code>)</p>
 <div class='help'><pre><code>Usage: delonix pod create [OPTIONS]
@@ -246,12 +247,6 @@ containers, it does nothing. Can also be applied via <code>delonix stack apply</
 <code>pods:</code> group in <code>kind: Stack</code>) and previewed with <code>--dry-run</code>.
 If creating one member fails, the whole pod is torn down (no half-pod).</p></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Criar um pod (web + sidecar que fala por localhost) de um manifesto</div><div class='cap lang-en'>Create a pod (web + sidecar talking over localhost) from a manifest</div><pre><code>delonix pod create -f examples/pod-multi.yaml</code></pre></div>
-<h2 id='ls'><code>pod ls</code></h2>
-<p class='intro'>error: unrecognized subcommand &#x27;ls&#x27;</p>
-<div class='help'><pre><code>Usage: delonix pod [OPTIONS] &lt;COMMAND&gt;
-
-For more information, try &#x27;--help&#x27;.</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Listar os pods (POD, CONTAINERS n/N, IP, STATUS)</div><div class='cap lang-en'>List pods (POD, CONTAINERS n/N, IP, STATUS)</div><pre><code>delonix pod ls</code></pre></div>
 <h2 id='logs'><code>pod logs</code></h2>
 <p class='intro'>Logs of a pod&#x27;s container (defaults to the first member)</p>
 <div class='help'><pre><code>Usage: delonix pod logs [OPTIONS] &lt;POD&gt;

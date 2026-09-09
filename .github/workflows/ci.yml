@@ -57,6 +57,13 @@ jobs:
       - run: cargo build --release -p delonix-runtime-bin
       - name: Every CLI leaf has a decided destination
         run: scripts/cli-tree.sh --gate
+      # The other half of the same question. `--gate` above guards the tree
+      # against growing without a decision; this one guards the DOCUMENTATION
+      # against still teaching a command the tree no longer has. Two removals in
+      # a row (`pod ls` in v2.0.0, `vm status` in v3.0.0) left eight current
+      # pages teaching `unrecognized subcommand`, and nothing here noticed.
+      - name: Every `delonix …` in the current docs resolves in the tree
+        run: python3 scripts/docs_cli_gate.py
 
   # ---- Lint: clippy a falhar em QUALQUER warning (gate estrito) ----
   clippy:
