@@ -514,6 +514,38 @@ mod tests {
         assert!(list_conf_files(Path::new("/nao/existe/de/todo")).is_empty());
     }
 
+    /// Waits until `bin` can actually be exec'ed.
+    ///
+    /// `execve` fails with `ETXTBSY` while any process still holds the file open for
+    /// writing. Our own handle is closed before we get here, but on a loaded test
+    /// binary (`--test-threads=8`) another test may have forked in the window while it
+    /// was open: `fork` copies the descriptor into the child, where it lives until that
+    /// child exec's (Rust opens files `O_CLOEXEC`) or exits. That is a race in the test
+    /// harness, not in `invoke` — `cni-spawn` reporting the raw errno is correct — so we
+    /// drain the window here instead of retrying the code under test. Once one spawn
+    /// succeeds the wait is over for good: the descriptor is closed, so no new process
+    /// can inherit it.
+    fn wait_until_executable(bin: &Path) {
+        for _ in 0..200 {
+            match Command::new(bin)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                Ok(mut child) => {
+                    let _ = child.wait();
+                    return;
+                }
+                Err(e) if e.raw_os_error() == Some(libc::ETXTBSY) => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(e) => panic!("{} is not executable: {e}", bin.display()),
+            }
+        }
+        panic!("{} still ETXTBSY after 2s", bin.display());
+    }
+
     /// Executor E2E: a fake plugin (shell) validates the `CNI_COMMAND` env, reads the
     /// config from stdin and returns a CNI result — exercises invoke/run_one/add/del.
     #[test]
@@ -532,8 +564,12 @@ case "$CNI_COMMAND" in
 esac
 "#;
         let plugin = bindir.join("faux");
+        // `fs::write` closes the handle before it returns and the chmod never reopens
+        // it, so nothing *we* hold keeps the file busy — but that alone is not enough
+        // to make the exec below safe; see wait_until_executable.
         std::fs::write(&plugin, script).unwrap();
         std::fs::set_permissions(&plugin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        wait_until_executable(&plugin);
 
         let net = parse_config(r#"{"cniVersion":"1.0.0","name":"t","plugins":[{"type":"faux"}]}"#)
             .unwrap();
