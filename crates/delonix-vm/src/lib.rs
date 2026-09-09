@@ -18,7 +18,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use delonix_net::infra;
 use delonix_runtime_core::{Error, JsonStore, Result, Status, Vm, VmBootSpec};
@@ -253,6 +253,89 @@ fn adopt_pid_starttime(vm: &mut Vm) -> bool {
 /// if the guard is dropped — a test on `safe_to_signal` alone would keep passing.
 fn vmm_to_signal(vm: &Vm) -> Option<i32> {
     vm.pid.filter(|&p| safe_to_signal(p, vm.pid_starttime))
+}
+
+/// How long `stop` waits for the VMM to leave after the `SIGTERM`, before
+/// escalating to `SIGKILL` — the same ten seconds `container stop` grants by
+/// default, so both halves of the engine mean the same thing by "stop".
+const VMM_TERM_GRACE: Duration = Duration::from_secs(10);
+/// And after the `SIGKILL`. Only the kernel is left to do here, so it is
+/// short; it is not zero because the exit still has to be observed.
+const VMM_KILL_GRACE: Duration = Duration::from_secs(2);
+
+/// State letter (field 3 of `/proc/<pid>/stat`) — `R`, `S`, `D`, `Z`, …
+/// `None` when the process is gone or unreadable.
+fn proc_state(pid: i32) -> Option<char> {
+    let s = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // The comm (field 2) may contain spaces and parentheses — same cut as
+    // `proc_starttime`: everything after the LAST ')'.
+    s[s.rfind(')')? + 1..]
+        .split_whitespace()
+        .next()?
+        .chars()
+        .next()
+}
+
+/// `true` once `pid` is no longer RUNNING: gone, or a zombie.
+///
+/// The zombie counts, and that is why this is not written as
+/// `!safe_to_signal(...)`: `kill(pid, 0)` succeeds on a zombie, but a zombie
+/// has already closed every descriptor it held — including the qcow2's, which
+/// is the only thing the caller is waiting for. `boot_ch` launches the VMM
+/// orphaned (it backgrounds it and the `sh` exits), so init reaps it and the
+/// window is normally invisible; making the wait depend on that timing anyway
+/// would trade a race for a stall.
+fn vmm_left(pid: i32, starttime: Option<u64>) -> bool {
+    !safe_to_signal(pid, starttime) || proc_state(pid) == Some('Z')
+}
+
+/// Polls [`vmm_left`] until it says yes or `limit` runs out.
+fn wait_vmm_left(pid: i32, starttime: Option<u64>, limit: Duration) -> bool {
+    let deadline = Instant::now() + limit;
+    loop {
+        if vmm_left(pid, starttime) {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// `SIGTERM`, wait, `SIGKILL`, wait. `true` if the VMM really left.
+///
+/// **The wait is the point.** `SIGTERM` and an immediate `Ok(())` — which is
+/// what this used to be — let `stop` return while the vmm still held the
+/// qcow2's write lock, so `vm stop && vm snapshot rm` failed with `qemu-img:
+/// Failed to lock byte 100` whenever the next process reached `qemu-img`
+/// first. That sequence is not one a user invented: it is the one
+/// `offline_snapshot_op` prints when it refuses a snapshot of a running VM.
+/// Measured on this host at 2026-09-09, against a VM booting a real image.
+/// The lock outlived the `SIGTERM` in **35 of 35** samples — never zero —
+/// 26 ms at the median and 954 ms in the tail, against the ~70 ms `vm stop`
+/// still spends after the signal on `vm_detach`. Whether that shows depends
+/// on the DISK, not the CPU: with the host's disk busy, `vm stop` returned
+/// with the vmm still in `R`/`S` in **14 of 25** runs and `vm stop && vm
+/// snapshot rm` failed in **4 of 25**; with the disk idle, both are 0 of 25,
+/// which is why the failure read as unreproducible. With this wait, both are
+/// 0 of 25 under the same busy disk.
+///
+/// Split out of `stop` for the same reason `vmm_to_signal` was: so a test can
+/// hold it to its contract without a hypervisor.
+fn terminate_vmm(pid: i32, starttime: Option<u64>, grace: Duration, kill_grace: Duration) -> bool {
+    // SAFETY: `pid` confirmed alive and ours by the caller's `vmm_to_signal`.
+    unsafe {
+        libc::kill(pid, libc::SIGTERM);
+    }
+    if wait_vmm_left(pid, starttime, grace) {
+        return true;
+    }
+    // SAFETY: same pid, and `vmm_left` says it is still the process we started.
+    unsafe {
+        libc::kill(pid, libc::SIGKILL);
+    }
+    wait_vmm_left(pid, starttime, kill_grace)
 }
 
 /// `true` if a VM with this name already exists.
@@ -1264,11 +1347,26 @@ impl VmBackend for CloudHypervisorBackend {
         // every signal with `safe_to_signal` for a long time (sixteen call
         // sites); the VM side simply never got it, and its record did not even
         // carry the `starttime` to check against.
+        //
+        // Signal AND WAIT — see `terminate_vmm`. A `stop` that returns while
+        // the vmm runs is not a stop: the record says `Stopped` and `pid:
+        // null`, so `is_running` answers no to everyone who asks next, while
+        // the process is still there holding the disk. The detach below is
+        // downstream of the same fact — pulling the tap out from under a live
+        // guest is not a teardown either — so a VMM that will not leave is an
+        // error here, not something to keep walking past.
         if let Some(pid) = vmm_to_signal(vm) {
-            // SAFETY: pid confirmed alive AND confirmed to be the same process
-            // we started, by `vmm_to_signal`.
-            unsafe {
-                libc::kill(pid, libc::SIGTERM);
+            if !terminate_vmm(pid, vm.pid_starttime, VMM_TERM_GRACE, VMM_KILL_GRACE) {
+                return Err(Error::Runtime {
+                    context: "vm",
+                    message: format!(
+                        "cloud-hypervisor (pid {pid}) of VM '{}' did not exit after SIGTERM and \
+                         SIGKILL ({}s) — it still holds the VM's disk, so a snapshot would fail; \
+                         the VM is left as it is instead of being recorded as stopped",
+                        vm.name,
+                        (VMM_TERM_GRACE + VMM_KILL_GRACE).as_secs()
+                    ),
+                });
             }
         }
         // The record's own address if it learned one; otherwise the lease its MAC
@@ -6363,5 +6461,137 @@ mod tests_identidade_do_vmm {
         assert_eq!(vm.pid, Some(42));
         assert_eq!(vm.pid_starttime, None);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// ACH-014: `stop` used to SIGTERM the vmm and return, so the disk it holds was
+/// still locked when the next command opened it. These hold `terminate_vmm` to
+/// the only contract that matters — it does not return while the process runs.
+///
+/// The subject is a real orphaned process, launched the way `boot_ch` launches
+/// the vmm (backgrounded from a `sh` that then exits), so its pid behaves like
+/// the vmm's: reaped by init, not by this test.
+#[cfg(test)]
+mod tests_the_stop_waits_for_the_vmm {
+    use super::*;
+
+    /// Backgrounds `cmd` from a shell that exits, and returns the orphan's pid.
+    ///
+    /// The `</dev/null >/dev/null 2>&1` is not tidiness: without it the orphan
+    /// inherits this call's stdout pipe and `output()` blocks until the orphan
+    /// itself exits — the subject would be dead before the test began. It is
+    /// also exactly what `boot_ch` writes when it launches the vmm.
+    fn spawn_orphan(cmd: &str) -> i32 {
+        let out = Command::new("sh")
+            .arg("-c")
+            .arg(format!("{cmd} </dev/null >/dev/null 2>&1 & echo $!"))
+            .output()
+            .expect("sh has to run");
+        String::from_utf8_lossy(&out.stdout)
+            .trim()
+            .parse()
+            .expect("the shell has to print the pid")
+    }
+
+    /// `true` while the process still EXECUTES — the property `stop` was
+    /// returning in spite of. A zombie is not running: it has closed its
+    /// descriptors, and the qcow2 lock with them.
+    fn still_running(pid: i32) -> bool {
+        matches!(proc_state(pid), Some(st) if st != 'Z')
+    }
+
+    #[test]
+    fn it_does_not_return_while_the_vmm_is_still_running() {
+        let pid = spawn_orphan("sleep 30");
+        let starttime = proc_starttime(pid);
+        assert!(still_running(pid), "the subject has to be up to be stopped");
+
+        assert!(terminate_vmm(
+            pid,
+            starttime,
+            Duration::from_secs(5),
+            Duration::from_secs(2)
+        ));
+        assert!(
+            !still_running(pid),
+            "terminate_vmm returned with the process still running — this is ACH-014"
+        );
+    }
+
+    /// A vmm that ignores the `SIGTERM` must not turn `stop` into a lie either:
+    /// the grace runs out, the `SIGKILL` goes, and only then does it return.
+    #[test]
+    fn it_escalates_to_sigkill_when_the_sigterm_is_ignored() {
+        let pid = spawn_orphan("trap '' TERM; sleep 30");
+        let starttime = proc_starttime(pid);
+        // Give the shell a moment to install the trap, or the SIGTERM lands
+        // first and the test proves nothing.
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(still_running(pid), "the subject has to be up to be stopped");
+
+        let began = Instant::now();
+        assert!(terminate_vmm(
+            pid,
+            starttime,
+            Duration::from_millis(300),
+            Duration::from_secs(2)
+        ));
+        assert!(!still_running(pid), "the SIGKILL did not land");
+        assert!(
+            began.elapsed() >= Duration::from_millis(300),
+            "it returned before the grace was up: the SIGTERM was never waited on"
+        );
+    }
+
+    /// The wait is on the process LEAVING, not on it being reaped: a zombie
+    /// has already released the disk, and blocking on the reaper — which is
+    /// init, not us — would trade the race for a stall.
+    #[test]
+    fn a_zombie_counts_as_gone() {
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg("exit 0")
+            .spawn()
+            .expect("sh has to run");
+        let pid = child.id() as i32;
+        let starttime = proc_starttime(pid);
+        // Nobody calls `wait` here, so it stays a zombie: alive to `kill(pid, 0)`
+        // and with a readable `/proc`, which is exactly the shape that would
+        // hang a wait written as `!safe_to_signal(...)`.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while proc_state(pid) != Some('Z') && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(proc_state(pid), Some('Z'), "the subject has to be a zombie");
+        assert!(vmm_left(pid, starttime));
+        assert!(wait_vmm_left(pid, starttime, Duration::from_millis(50)));
+        let _ = child.wait();
+    }
+
+    /// And the timeout is a timeout: a process that will not leave makes the
+    /// wait say so instead of waiting forever.
+    #[test]
+    fn the_wait_gives_up_when_the_process_stays() {
+        let pid = spawn_orphan("sleep 30");
+        let starttime = proc_starttime(pid);
+        let began = Instant::now();
+        assert!(!wait_vmm_left(pid, starttime, Duration::from_millis(200)));
+        assert!(began.elapsed() >= Duration::from_millis(200));
+        // SAFETY: our own subject, spawned above.
+        unsafe {
+            libc::kill(pid, libc::SIGKILL);
+        }
+    }
+
+    /// `proc_state` has to survive a comm with spaces and parentheses in it —
+    /// the same trap `proc_starttime` documents.
+    #[test]
+    fn the_state_is_read_after_the_comm() {
+        let me = std::process::id() as i32;
+        assert!(
+            matches!(proc_state(me), Some('R') | Some('S')),
+            "this very process has to read as running"
+        );
+        assert_eq!(proc_state(-1), None, "a pid with no /proc reads as None");
     }
 }
