@@ -706,7 +706,7 @@ spec:
 <pre><code># Volume — a named local volume (data survives `container rm`). For NETWORK
 # storage (NFS/SMB/WebDAV) the SAME Kind takes an `nfs:`/`cifs:`/`webdav:` block
 # (see examples/storage.yaml).
-# Apply with:  delonix volumes apply -f examples/volume.yaml
+# Apply with:  delonix volume apply -f examples/volume.yaml
 apiVersion: storage.delonix.io/v1alpha1
 kind: Volume
 metadata:
@@ -954,7 +954,8 @@ spec:
 <pre><code># kind: Pod — a REAL multi-container pod: N containers sharing the pod&#x27;s network
 # namespace (same IP, localhost between them), like a Kubernetes Pod. Apply with:
 #   delonix pod create -f examples/pod-multi.yaml      (or `stack apply`)
-# Manage as a unit:  delonix pod ls | describe web-app | logs web-app | rm web-app
+# Manage as a unit:  delonix get pods | describe pod web-app | pod logs web-app
+#                    | delete pod web-app
 #
 # Same k8s-shaped schema as `kind: Container` (spec.containers[]), but here N
 # containers are allowed and they share the pod sandbox. The web + sidecar reach

@@ -19,7 +19,7 @@ com IP descobrível pela DHCP da SDN e alcançável por qualquer container na me
       --cmdline "console=ttyS0 root=/dev/vda1 rw" \
       --hostname nasvm --ssh-key @~/.ssh/id_ed25519.pub
 
-    delonix vm status nasvm      # Running, ip: 10.219.x.x (DHCP da SDN)
+    delonix describe vm nasvm    # Running, ip: 10.219.x.x (DHCP da SDN)
 
 ## 3. Alcançar a VM (de qualquer container na mesma rede)
     delonix container run --net pnet -d --name probe alpine sleep 300
@@ -49,7 +49,7 @@ Como o `mount -t cifs` corre no netns do HOST, publica-se a porta SMB da VM para
 ingress e monta-se por `127.0.0.1`:
 
     delonix net netns publish nasvm 4445:445 --ip <ip-da-vm>    # DNAT host:4445 → VM:445
-    sudo -E delonix storage create nastest \                    # mount precisa de CAP_SYS_ADMIN
+    sudo -E delonix volume create nastest \                    # mount precisa de CAP_SYS_ADMIN
       --type cifs --server 127.0.0.1 --share delonixnas \
       --options "port=4445,guest,vers=3.0"
     sudo -E delonix container run -v nastest:/nas alpine \

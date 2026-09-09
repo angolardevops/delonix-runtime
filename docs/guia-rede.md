@@ -371,7 +371,7 @@ O esquema sai do próprio binário, não de um `.md` que envelhece:
 
 ```bash
 delonix explain Network       # referência de campos, estilo kubectl explain
-delonix schema --help         # JSON Schema gerado do código (pede um alvo)
+delonix manifest schema       # JSON Schema gerado do código
 ```
 
 O manifesto precisa de `apiVersion: delonix.io/v1` — sem ele a recusa é
