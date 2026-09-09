@@ -1661,7 +1661,10 @@ fn cmd_snapshot(store: &VolumeStore, action: SnapshotCmd) -> Result<()> {
 pub(crate) struct VolumeRefs {
     /// `name (running)` / `name (stopped)` per referencing container.
     pub containers: Vec<String>,
-    /// Names of `ShareVolume`s whose data lives INSIDE this volume.
+    /// The shares whose data lives INSIDE this volume, spelled the way the
+    /// planner already spells them: `<namespace>/<name>` for a scoped one, the
+    /// bare name for a share carved out with no owner. An operator told only
+    /// `db` cannot find which tenant to talk to when two of them have one.
     pub shares: Vec<String>,
 }
 
@@ -1705,16 +1708,43 @@ pub(crate) fn volume_refs(store: &VolumeStore, name: &str) -> VolumeRefs {
         }
     }
 
-    // A ShareVolume is a real subdirectory of its parent Storage, registered as
-    // its own volume record — so "is a share of this" is exactly "my mountpoint
-    // lives under yours".
-    if let Ok(all) = store.list() {
-        for v in all {
-            if v.name == vol.name {
-                continue;
-            }
-            if std::path::Path::new(&v.mountpoint).starts_with(mount) {
-                out.shares.push(v.name);
+    // A share is a real subdirectory of its parent volume, registered as its own
+    // volume record — so "is a share of this" is exactly "my mountpoint lives
+    // under yours".
+    //
+    // BUG FIXED HERE (measured live on v3.0.0): the walk used `store.list()`,
+    // which by design reads only the direct children of the store root and so
+    // CANNOT see `volumes/.ns/<ns>/` — every share deliberately scoped to a
+    // tenant was invisible to the guard, and `volume rm <parent>` succeeded with
+    // no `--force` and no refusal, leaving the tenant's record pointing into a
+    // deleted tree. `list_all` is the call that spans the sub-trees, and its own
+    // doc comment names this failure class; `volume ls -A` has used it all along
+    // for exactly this reason.
+    //
+    // The walk starts from the UNSCOPED root, never from `store`: `cmd_rm_with`
+    // hands us a store already rooted at `.ns/<ns>` when `-n` is given, and
+    // `list_all` on that one would look for `.ns` under `.ns/<ns>/` and find
+    // nothing — the same blindness one directory deeper. The lookup of `name`
+    // above stays on the caller's store, which is what makes a scoped `rm`
+    // resolve its own volume.
+    if let Ok(root) = VolumeStore::open(state_root()) {
+        if let Ok(all) = root.list_all() {
+            for owned in all {
+                // Self is excluded by MOUNTPOINT, not by name. Once the walk
+                // spans namespaces the name stops being unique — two tenants
+                // both call it `db` — and `v.name == vol.name` would read one
+                // tenant's share as "myself" and drop it from the guard. The
+                // path is what is unique on disk, and comparing it excludes self
+                // exactly, since `starts_with` is true for equal paths.
+                if owned.volume.mountpoint == vol.mountpoint {
+                    continue;
+                }
+                if std::path::Path::new(&owned.volume.mountpoint).starts_with(mount) {
+                    out.shares.push(match &owned.namespace {
+                        Some(ns) => scoped_plan_name(ns, &owned.volume.name),
+                        None => owned.volume.name.clone(),
+                    });
+                }
             }
         }
     }
