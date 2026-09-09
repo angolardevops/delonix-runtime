@@ -966,7 +966,7 @@ impl VolumeStore {
     /// 1. the namespace's own volume (`.ns/<namespace>/<name>`) — what a `ShareVolume`
     ///    declared in that namespace registers, so `-v db:/data` in `teamA` reaches
     ///    `teamA`'s `db` and never `teamB`'s;
-    /// 2. the global volume (`<name>`) — every plain `delonix volumes create`, and every
+    /// 2. the global volume (`<name>`) — every plain `delonix volume create`, and every
     ///    share that predates the scoping. This is the "two read paths" the migration
     ///    decision asked for: nothing that exists today stops resolving.
     ///
