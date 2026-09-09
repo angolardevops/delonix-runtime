@@ -3071,11 +3071,11 @@ fn print_vm_next_steps(name: &str, ip: Option<&str>, has_key: bool, ssh_user: Op
             super::po::t("open the serial console (back to host: Ctrl+])"),
         ),
         (
-            format!("delonix vm status {name}"),
+            "delonix vm ls".to_string(),
             super::po::t("state, backend and IP"),
         ),
         (
-            format!("delonix vm describe {name}"),
+            format!("delonix describe vm {name}"),
             super::po::t("full details"),
         ),
         (

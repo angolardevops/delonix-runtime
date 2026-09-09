@@ -107,7 +107,7 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::container::ContainerCmd,
     },
-    /// Real multi-container pods (N containers sharing a netns): create/ls/logs/exec/cp/attach.
+    /// Real multi-container pods (N containers sharing a netns): create/logs/exec/cp/attach/port-forward.
     ///
     /// `describe`/`rm` moved to the generic per-Kind verbs — `delonix describe
     /// pod <name>` / `delonix delete pod <name>`.
@@ -122,7 +122,7 @@ enum Cmd {
     },
     /// Build an image from a Dockerfile or Delonixfile.
     Build(cmd::build::BuildArgs),
-    /// Declarative microVMs: create/ls/stop/start/status.
+    /// Declarative microVMs: create/ls/start/stop/console.
     ///
     /// `describe`/`rm` moved to the generic per-Kind verbs — `delonix
     /// describe vm <name>` / `delonix delete vm <name>`.
@@ -305,7 +305,7 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::system::SystemCmd,
     },
-    /// Archives of ONE resource (container/pod/vm/stack): create, list, inspect, restore, schedule, remove.
+    /// Archives of ONE resource (container/pod/vm/stack): create, ls, inspect, restore, schedule, remove.
     ///
     /// The archive carries the record and the DATA of the volumes it uses — not
     /// the image and not the rootfs, which `backup restore` derives by pulling.
@@ -795,114 +795,6 @@ fn main() {
     }
 }
 
-/// Every user-facing help string has to have a Portuguese translation, and the
-/// only honest way to know is to walk the built `Command` and ask the catalog.
-///
-/// Measured before this test existed: **103 of the 232 subcommands printed
-/// their help in English under `--l18n=pt`** — the `container` group, the
-/// everyday surface, was 28 of them. The mechanism was never broken (see
-/// `po::translate_help`); what was missing were the catalog entries, and
-/// nothing was watching.
-/// Every `delonix <x>` a message tells the user to run has to EXIST.
-///
-/// The v0.30.0 reorganization moved seven groups under `net` and three under
-/// `serve`, as a clean cut with no aliases — which is the right call for a CLI,
-/// and leaves every message that still names the old form telling the operator
-/// to run something that answers `unrecognized subcommand`.
-///
-/// Found by using the product: after a reboot, `net boot status` said
-/// «run `delonix boot enable`» — the recovery instruction, pointing at a command
-/// removed 19 versions earlier. Five more were sitting next to it (`tunnel ls`,
-/// `tunnel describe`, `ingress publish`/`unpublish`). None of them is caught by
-/// anything else: they are string literals, and the compiler has no opinion
-/// about the inside of a string.
-#[cfg(test)]
-mod comandos_citados_tests {
-    use clap::CommandFactory;
-
-    /// Words that follow `delonix ` in prose without naming a subcommand.
-    ///
-    /// Kept EXPLICIT rather than heuristic: a regex that skipped anything it did
-    /// not recognise would skip the typo too, and this test exists precisely to
-    /// catch the name that stopped being real.
-    const NAO_SAO_COMANDOS: &[&str] = &[
-        "<group>",
-        "<grupo>",
-        "<x>",
-        "<command>",
-        "<comando>",
-        "--help",
-        "--version",
-        "-h",
-        "-v",
-        "engine",
-        "runtime",
-        // `delonix netns holder|run` EXISTE — é o re-exec interno do holder,
-        // interceptado a partir de `std::env::args()` CRUA em `main()`, antes de
-        // o clap ver seja o que for. Não estar na árvore do clap é deliberado
-        // (não é superfície pública), e por isso tem de ser dito aqui em vez de
-        // o teste o dar como morto.
-        "netns",
-    ];
-
-    fn fontes() -> Vec<(&'static str, &'static str)> {
-        vec![
-            ("boot.rs", include_str!("cmd/boot.rs")),
-            ("tunnel.rs", include_str!("cmd/tunnel.rs")),
-            ("vm.rs", include_str!("cmd/vm.rs")),
-            ("container.rs", include_str!("cmd/container.rs")),
-            ("network.rs", include_str!("cmd/network.rs")),
-            ("volume.rs", include_str!("cmd/volume.rs")),
-            ("firewall.rs", include_str!("cmd/firewall.rs")),
-            ("rbackup.rs", include_str!("cmd/rbackup.rs")),
-            ("system.rs", include_str!("cmd/system.rs")),
-            ("stack.rs", include_str!("cmd/stack.rs")),
-            ("image.rs", include_str!("cmd/image.rs")),
-            ("vmimage.rs", include_str!("cmd/vmimage.rs")),
-        ]
-    }
-
-    #[test]
-    fn nenhuma_mensagem_manda_correr_um_comando_que_nao_existe() {
-        let cmd = super::Cli::command();
-        let reais: Vec<String> = cmd
-            .get_subcommands()
-            .map(|s| s.get_name().to_string())
-            .collect();
-
-        let mut mortos: Vec<String> = Vec::new();
-        for (ficheiro, src) in fontes() {
-            for (i, linha) in src.lines().enumerate() {
-                // Só o que está entre CRASES. É como este código escreve um
-                // comando executável, em comentários e em mensagens; sem esta
-                // restrição a varredura casa prosa (`delonix and`, `delonix tem`)
-                // e o ruído afogaria o achado — que foi exactamente o que a 1.ª
-                // versão deste teste fez.
-                let mut resto = linha;
-                while let Some(p) = resto.find("`delonix ") {
-                    resto = &resto[p + "`delonix ".len()..];
-                    let palavra: String = resto
-                        .chars()
-                        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
-                        .collect();
-                    if palavra.is_empty()
-                        || NAO_SAO_COMANDOS.contains(&palavra.as_str())
-                        || reais.contains(&palavra)
-                    {
-                        continue;
-                    }
-                    mortos.push(format!("{ficheiro}:{}: delonix {palavra}", i + 1));
-                }
-            }
-        }
-        assert!(
-            mortos.is_empty(),
-            "mensagem(ns) a mandar correr um comando inexistente:\n  {}",
-            mortos.join("\n  ")
-        );
-    }
-}
-
 /// The advisory names flags. They have to be flags that exist.
 ///
 /// Written after shipping four that did not: `--memory-swap`, `--pids-limit`,
@@ -964,6 +856,14 @@ mod advisory_flag_tests {
     }
 }
 
+/// Every user-facing help string has to have a Portuguese translation, and the
+/// only honest way to know is to walk the built `Command` and ask the catalog.
+///
+/// Measured before this test existed: **103 of the 232 subcommands printed
+/// their help in English under `--l18n=pt`** — the `container` group, the
+/// everyday surface, was 28 of them. The mechanism was never broken (see
+/// `po::translate_help`); what was missing were the catalog entries, and
+/// nothing was watching.
 #[cfg(test)]
 mod help_i18n_tests {
     use clap::CommandFactory;
@@ -1297,5 +1197,261 @@ mod container_image_contract_tests {
         for f in ['i', 't', 'e', 'w', 'u'] {
             assert!(short.contains(&f), "`container exec -{f}` desapareceu");
         }
+    }
+}
+
+/// Every command this CLI names in its own text has to EXIST in this CLI.
+///
+/// This replaces `comandos_citados_tests`, which was written for the same class
+/// and could not see any of it. That test compared only the FIRST word after
+/// the tool name against the TOP-LEVEL subcommand names, over a hand-written
+/// list of twelve files. So a reference to `pod ls` passed — `pod` is real, and
+/// the second word was never read — and with it every one of these, live in
+/// v3.0.0:
+///
+/// * the top-level `--help` advertised three verbs that answer `unrecognized
+///   subcommand` (`backup … list`, `pod … ls`, `vm … status`), plus `net
+///   httproute … ls` and an `image vm … etc`;
+/// * ten messages told the operator to run one — four `pod ls`, a `pod
+///   describe`, a `pod rm -f`, a `vm rm`, an `image inspect`, and, worst of the
+///   set, a `vm status` printed in the "next steps" block right after a
+///   SUCCESSFUL `vm create`, which is exactly where somebody new goes next.
+///
+/// Two shapes go stale when a command is removed, so there are two tests, both
+/// against the live `clap` tree and never a second list to forget:
+/// [`no_group_summary_advertises_a_verb_that_does_not_exist`] and
+/// [`no_string_in_the_sources_tells_the_operator_to_run_a_dead_command`].
+///
+/// The origin story of the old test is worth keeping: it came from using the
+/// product, when `net boot status` said «run `delonix boot enable`» — a
+/// recovery instruction pointing at a command removed 19 versions earlier.
+#[cfg(test)]
+mod dead_command_reference_tests {
+    use clap::CommandFactory;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    /// path (`["net", "ingress"]`) → the names AND aliases of its subcommands.
+    /// A command absent from this map is a leaf: whatever follows it on a
+    /// command line is an argument, and arguments are none of our business.
+    fn tree(
+        cmd: &clap::Command,
+        path: Vec<String>,
+        out: &mut BTreeMap<Vec<String>, BTreeSet<String>>,
+    ) {
+        let kids: BTreeSet<String> = cmd
+            .get_subcommands()
+            .flat_map(|s| {
+                std::iter::once(s.get_name().to_string())
+                    .chain(s.get_all_aliases().map(|a| a.to_string()))
+            })
+            .collect();
+        if kids.is_empty() {
+            return;
+        }
+        for sub in cmd.get_subcommands() {
+            let mut p = path.clone();
+            p.push(sub.get_name().to_string());
+            tree(sub, p, out);
+        }
+        out.insert(path, kids);
+    }
+
+    /// Trailing punctuation is the norm here, not the exception: these
+    /// references live inside backticks, parentheses and sentences (``(see
+    /// `delonix get pods`)``). Without this the token would be ``pods`)`` and
+    /// would never be checked — a silent hole exactly where the real bugs were.
+    fn clean(tok: &str) -> &str {
+        tok.trim_matches(|c: char| "`'\".,;:)(!?".contains(c))
+    }
+
+    fn is_word(tok: &str) -> bool {
+        !tok.is_empty()
+            && tok.starts_with(|c: char| c.is_ascii_lowercase())
+            && tok
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    }
+
+    fn subcommand_at<'a>(root: &'a clap::Command, path: &[String]) -> Option<&'a clap::Command> {
+        let mut cur = root;
+        for seg in path {
+            cur = cur.get_subcommands().find(|s| s.get_name() == seg)?;
+        }
+        Some(cur)
+    }
+
+    /// Slash runs anywhere in the summary, plus the comma list after a colon.
+    fn candidate_lists(about: &str) -> Vec<Vec<String>> {
+        let mut out = Vec::new();
+        for chunk in about.split_whitespace() {
+            if chunk.contains('/') {
+                out.push(chunk.split('/').map(str::to_string).collect());
+            }
+        }
+        if let Some((_, tail)) = about.split_once(": ") {
+            out.push(tail.split(',').map(|s| s.trim().to_string()).collect());
+        }
+        out
+    }
+
+    /// A group's summary lists its own verbs (`create/logs/exec/cp/attach`).
+    ///
+    /// **The majority rule is what makes this usable.** The same punctuation
+    /// carries prose that only LOOKS like a verb list — `Archives of ONE
+    /// resource (container/pod/vm/stack)`, `Low-level network/infra plumbing`,
+    /// ``Kubernetes clusters: `kubeadm` bootstrap, VM provisioning`` — and
+    /// demanding those resolve would flood this test with noise until somebody
+    /// deleted it. So a candidate list is JUDGED only when more than half of
+    /// its tokens already are subcommands of that group; then every one of them
+    /// has to be. It cannot catch a list that was wrong from the start, and it
+    /// is not meant to: the failure mode is a removal turning one verb of an
+    /// otherwise correct list stale, which is what the last three releases did.
+    #[test]
+    fn no_group_summary_advertises_a_verb_that_does_not_exist() {
+        let cmd = super::Cli::command();
+        let mut t = BTreeMap::new();
+        tree(&cmd, vec![], &mut t);
+        let mut bad = Vec::new();
+        for (path, kids) in &t {
+            let label = if path.is_empty() {
+                String::new()
+            } else {
+                format!(" {}", path.join(" "))
+            };
+            let Some(about) =
+                subcommand_at(&cmd, path).and_then(|c| c.get_about().map(|s| s.to_string()))
+            else {
+                continue;
+            };
+            for list in candidate_lists(&about) {
+                let toks: Vec<&str> = list
+                    .iter()
+                    .map(|s| clean(s))
+                    .filter(|t| is_word(t))
+                    .collect();
+                if toks.len() < 2 {
+                    continue;
+                }
+                let hits = toks.iter().filter(|t| kids.contains(**t)).count();
+                if hits * 2 <= toks.len() {
+                    continue; // prose, not a verb list
+                }
+                for t in toks.iter().filter(|t| !kids.contains(**t)) {
+                    bad.push(format!(
+                        "`delonix{label}` advertises `{t}` in its summary — no such subcommand"
+                    ));
+                }
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "{} lying summary/summaries:\n  {}",
+            bad.len(),
+            bad.join("\n  ")
+        );
+    }
+
+    /// The `delonix …` runs on a line that are DELIMITED as commands: the word
+    /// has to sit immediately after a backtick or a double quote, and the span
+    /// ends at the matching one.
+    ///
+    /// That is not tidiness, it is what separates a command from a sentence.
+    /// ``the `delonix network` that owns it`` closes the backtick after
+    /// `network`, so `that` never enters the span; ``(see `delonix get pods`)``
+    /// puts the whole path inside it. Reading to end-of-line instead flagged
+    /// fifteen ordinary English comments, and a test that cries wolf gets
+    /// deleted — which is how the previous one ended up matching only the first
+    /// word.
+    fn command_spans(line: &str) -> Vec<&str> {
+        let b = line.as_bytes();
+        let mut out = Vec::new();
+        for (i, _) in line.match_indices("delonix ") {
+            if i == 0 {
+                continue;
+            }
+            let delim = b[i - 1];
+            if delim != b'`' && delim != b'"' {
+                continue;
+            }
+            let rest = &line[i + 8..];
+            out.push(match rest.find(delim as char) {
+                Some(end) => &rest[..end],
+                None => rest,
+            });
+        }
+        out
+    }
+
+    /// Every crate source, not a hand-written list of twelve: the messages that
+    /// were stale live in `pod.rs`, `workload.rs`, `dockerapi.rs` and
+    /// `manual_entries.rs`, and none of those was on it.
+    fn rust_sources() -> Vec<std::path::PathBuf> {
+        let mut out = Vec::new();
+        let mut stack = vec![std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src")];
+        while let Some(dir) = stack.pop() {
+            let Ok(rd) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        out
+    }
+
+    /// Every `delonix <path>` written in this crate's sources — error messages,
+    /// "next steps" blocks, manual examples, doc comments — has to resolve.
+    ///
+    /// Walking a span stops at the first thing that cannot be a subcommand: a
+    /// flag, a `<placeholder>`, a `{interpolation}`, or simply a leaf, after
+    /// which everything is an argument. A first token that is not a top-level
+    /// command means the sentence was about something else and is left alone —
+    /// which is also why `` `delonix netns holder` `` needs no exception here:
+    /// that re-exec is intercepted from the raw `std::env::args()` before clap
+    /// sees anything, deliberately absent from the public tree.
+    #[test]
+    fn no_string_in_the_sources_tells_the_operator_to_run_a_dead_command() {
+        let cmd = super::Cli::command();
+        let mut t = BTreeMap::new();
+        tree(&cmd, vec![], &mut t);
+        let mut bad = Vec::new();
+        for file in rust_sources() {
+            let src = std::fs::read_to_string(&file).unwrap_or_default();
+            for (lineno, line) in src.lines().enumerate() {
+                for span in command_spans(line) {
+                    let mut path: Vec<String> = Vec::new();
+                    for raw in span.split_whitespace() {
+                        let Some(kids) = t.get(&path) else { break }; // leaf: arguments from here on
+                        let tok = clean(raw);
+                        if !is_word(tok) {
+                            break;
+                        }
+                        if !kids.contains(tok) {
+                            if !path.is_empty() {
+                                bad.push(format!(
+                                    "{}:{}: `delonix {} {tok}` — no such `{tok}`",
+                                    file.display(),
+                                    lineno + 1,
+                                    path.join(" ")
+                                ));
+                            }
+                            break;
+                        }
+                        path.push(tok.to_string());
+                    }
+                }
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "{} reference(s) to commands that do not exist:\n  {}",
+            bad.len(),
+            bad.join("\n  ")
+        );
     }
 }
