@@ -607,6 +607,26 @@ check "a recusa nomeia a forma nova" ok \
 # namespaces de uma vez, o que `sharevolume ls` sempre fazia por omissão).
 check "volume ls -A mostra os dois" ok \
   bash -c "test \$('$BIN' volume ls -A | grep -c 'sh-$PFX') -eq 2"
+# O guarda do `volume rm` do PAI, contra um share possuído por uma NAMESPACE.
+# Medido vivo na v3.0.0: dava rc=0 sem `--force` e sem uma linha de recusa — o
+# `volume_refs` procurava os shares com `store.list()`, que por desenho não vê a
+# sub-árvore `volumes/.ns/<ns>/`, e o pai era destruído por baixo dos inquilinos,
+# que ficavam como registo a apontar para uma árvore apagada. A metade NÃO
+# namespaced já estava coberta; esta é a que faltava, e é a que um cliente real
+# usa, porque um share existe precisamente para ter dono.
+check "volume rm do pai é RECUSADO por um share namespaced" fail \
+  "$BIN" volume rm "$SHPAI"
+# Recusar não chega: a recusa tem de dizer QUEM segura o pai, e com a namespace
+# ao lado do nome. Dois inquilinos aqui têm um share com o MESMO nome (`sh-$PFX`
+# em shteam-a e em shteam-b) — um erro que dissesse só `sh-$PFX` não diria a qual
+# dos dois donos ir falar. A grafia é a `<ns>/<nome>` que o plano já usa.
+check "a recusa nomeia os shares com a namespace" ok \
+  bash -c "'$BIN' volume rm '$SHPAI' 2>&1 | grep -q 'shteam-a/sh-$PFX' && '$BIN' volume rm '$SHPAI' 2>&1 | grep -q 'shteam-b/sh-$PFX'"
+# E a recusa é um guarda, não um bloqueio: o `--force` continua a ser o caminho
+# escrito no próprio texto do erro. Sem esta terceira asserção, um `rm` que
+# recusasse SEMPRE passava as duas de cima.
+check "o pai continua de pé depois das duas recusas" ok \
+  bash -c "'$BIN' volume ls | grep -q '$SHPAI'"
 # Dois inquilinos com o MESMO nome de share: o reconciliador identifica por
 # (kind, nome), por isso sem qualificar a namespace os dois seriam UM recurso —
 # um apareceria como deriva do outro em todos os planos, e um `--replace` levava
