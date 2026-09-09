@@ -4,6 +4,103 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v3.0.0 — o `--vm` e o `sharevolume` desaparecem, e o compose fica completo
+
+Trinta e nove commits desde a `v2.0.0`. É `3.0.0` e não `2.1.0` porque a superfície da
+CLI **perdeu 14 folhas sem alias** — e uma delas está num grupo que o
+`docs/cli-stability.md` declara *Estável*, que é a mesma razão pela qual a `v2.0.0`
+não coube num `1.x`.
+
+### Quebras — o que deixa de existir, e o que usar
+
+Medido contra `v2.0.0:scripts/cli_baseline.tsv`: **249 → 244 folhas**, 14 fora e 9
+dentro. Nada disto tem alias: um script que ainda invoque a forma antiga falha com
+`unrecognized subcommand`, nunca em silêncio.
+
+| Deixou de existir | Usa |
+|---|---|
+| `image build`, `image convert`, `image import`, `image init`, `image ls-remote` (as formas com `--vm`) | `image vm build\|convert\|import\|init\|ls-remote` |
+| `sharevolume apply\|describe\|ls\|rm` | `volume create --parent <volume>`, `volume ls -A`, `volume describe`, `volume rm` |
+| `sharevolume migrate` | — removido; ver o aviso abaixo |
+| `storage create`, `storage ls` | `volume create --type nfs\|cifs\|smb\|webdav …`, `volume ls` |
+| `pod ls` | `get pods` |
+| `vm status` | `get vms`, ou `vm describe <nome>` |
+
+**Um `ShareRecord` nunca migrado (anterior à v0.53.x) deixa de ser lido.** O
+`sharevolume migrate` que o convertia foi removido nesta série; quem estiver nesse
+estado tem de o correr num binário anterior **antes** de actualizar.
+
+### Dois defeitos que derrubavam um cluster inteiro
+
+Nenhum falhava a compilar nem um teste unitário — só falhavam um nó a sério.
+
+- **`PodSandboxStatus` devolvia `linux: null`, e nenhum `kubeadm` subia** (#233).
+- **Um contentor privilegiado levava os `masked`/`readonly paths` na mesma** (#239).
+  O kubelet manda `readonly_paths` com `/proc/sys` para TODOS os contentores; decidir
+  quais honrar é do runtime, e para um privilegiado a resposta é nenhum — como no
+  containerd e no CRI-O. Sem isto o `kube-proxy` não escrevia `nf_conntrack_max`,
+  ficava em `CrashLoopBackOff`, e sem ele não há `ClusterIP` nem CoreDNS: o plano de
+  serviço inteiro do cluster caía por dois argumentos.
+
+E um terceiro que não tem nada de Kubernetes: **o `mount(2)` clássico trunca o
+`lowerdir=` em SILÊNCIO acima de ~4 KB**, por isso uma imagem com muitas layers dava
+`ENOENT` a preparar o rootfs. Medida a fronteira: 20 layers montam, 30 falham sempre,
+e a `paketobuildpacks/builder-jammy-base` precisa de 9 107 bytes. O overlay passou para
+a API nova (`fsopen`/`fsconfig`/`fsmount`), uma chamada `lowerdir+` por layer — sem
+tecto a que uma chamada por layer possa esbarrar (ADR-0037).
+
+### O `docker compose` deixou de ter buracos
+
+Oito capacidades numa série: `profiles:` (com fecho transitivo por `depends_on`),
+`extends:` (mesmo ficheiro, `depends_on` nunca herdado), `build.target`,
+`deploy.replicas`, `networks.*.ipv4_address` fixo, `configs:`/`secrets:` de topo,
+volumes anónimos, e **multi-ficheiro** (`-f a.yml -f b.yml`).
+
+Fica de fora só a directiva `include:` do YAML — tem regras próprias de relatividade
+de caminhos e de propagação do nome do projecto, e a recusa aponta para `-f a -f b`.
+
+**Um volume anónimo é nomeado pelo CAMINHO e não pela posição no ficheiro.** Trocar
+duas linhas `- /path` — uma edição banal — trocaria qual volume respalda qual caminho:
+uma base de dados subiria sobre o volume que tinha os logs, em silêncio e com os dados
+intactos no sítio errado.
+
+### Dois Kinds novos
+
+- **`kind: Service`** (ADR-0032) — selecciona containers por `matchLabels` e publica-os
+  como vários registos DNS `A` sob `<nome>.<namespace>.delonix.internal`, com rotação
+  na resposta. **Sem VIP, sem dataplane novo, sem daemon.** Um cliente que resolve uma
+  vez e mantém a ligação não é rebalanceado — a limitação de qualquer round-robin por DNS.
+- **`kind: App`** (ADR-0035) — Cloud Native Buildpacks ligadas a um caminho de build
+  real. Os três módulos CNB existiam desde sempre no `delonix-image` **sem um único
+  chamador**; o que os impedia era o `creator` exportar para um registo OCI que o
+  container builder não alcançava. Resolvido com um registo descartável na SDN.
+
+### Comandos novos
+
+`image sign` (ECDSA-P256 compatível com cosign, chave gerada uma vez a `0600` na
+criação), `cluster drain`/`uncordon`/`upgrade`, `vm migrate` (stop-copy-start, com
+paragem real — a migração a quente é NO-GO medido, ADR-0031), `vm pause`/`unpause`,
+`net capture`, `pod port-forward`.
+
+### O que NÃO muda
+
+O motor continua daemonless e rootless-first. Nenhuma dependência nova entrou no
+supply chain por causa do `image sign` — o `ring` já estava no `delonix-image` para o
+`verify`. A gestão de frota continua bloqueada pelo ADR-0010, e o `cluster
+drain`/`upgrade` não a reabre: são operações sobre a API do Kubernetes e sobre SSH, o
+caminho que o próprio ADR chama *built and shipped*.
+
+### Higiene medida, não afirmada
+
+O `Cargo.toml` esteve 38 commits a dizer `2.0.0` — o binário da série e o publicado
+apresentavam-se com o mesmo número, e o que discriminava passava a ser o
+comportamento. E o *ratchet* de língua estava a ser usado como um tecto que se
+levanta: o #218 subiu `identifiers` de 1056 para 1061 e o #220 para 1062. Dezasseis
+nomes de teste traduzidos; a base **desce** para **1045**, abaixo dos 1049 da própria
+`v2.0.0`.
+
+---
+
 ## v2.0.0 — `image list`/`backup list` voltam a `ls`
 
 Reversão de uma quebra de contrato anterior, ela própria uma quebra de contrato — por
