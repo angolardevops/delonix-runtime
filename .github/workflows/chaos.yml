@@ -45,8 +45,80 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The environment question lives in a JOB of its own, and that placement IS
+  # the fix. A step-level `if` can only skip STEPS, and a job whose every
+  # meaningful step skipped still reports SUCCESS: measured 2026-09-09 on run
+  # 34332409932, where the check was green and neither the harness nor the E2E
+  # battery had run. A green check that proved nothing is indistinguishable
+  # from one that proved something — the exact class this repository gates
+  # against, here applied to the gate itself.
+  #
+  # As a job-level `if` the harness reports `skipped` instead, which GitHub
+  # renders apart from `success` in the checks list and still does not block a
+  # merge. That keeps both halves of the original decision: a blocked runner is
+  # not the engine's fault and must not go red every week, and a run that
+  # measured nothing must not read as green.
+  #
+  # The probe needs neither the built binary nor any rootless dependency —
+  # `unshare -r -n true` is the whole question — so it costs seconds. Keep
+  # `runs-on` identical to the harness job below: the moment they differ, the
+  # probe stops describing the box that would have run the harness.
+  userns:
+    name: environment probe (userns)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      userns: ${{ steps.preflight.outputs.userns }}
+    steps:
+      # A pergunta de AMBIENTE — este host CONSEGUE correr o motor? A pergunta
+      # de CÓDIGO — o motor arranca? — é o passo `Preflight` do job de baixo, e
+      # as duas nunca se podem confundir. A lição que obrigou a separá-las: o
+      # arnês silencia a saída de cada comando (é o que o torna legível), por
+      # isso um motor que nem arranca produzia uma parede de SKIPs sem UMA linha
+      # a dizer porquê.
+      #
+      # MEDIDO no runner alojado `ubuntu-24.04`: user namespaces não
+      # privilegiados estão bloqueados —
+      #
+      #     unshare: write failed /proc/self/uid_map: Operation not permitted
+      #
+      # …e sem eles um motor rootless não corre de todo. Isso NÃO é uma falha do
+      # Delonix, e marcar o job vermelho por causa disso todas as semanas só
+      # ensina a ignorar o CI. Quando o ambiente não dá, o arnês fica `skipped`
+      # SEM afirmar que passou; quando o ambiente dá e o motor falha, é vermelho.
+      - name: Preflight — o ambiente suporta rootless?
+        id: preflight
+        run: |
+          if unshare -r -n true 2>/tmp/userns.err; then
+            echo "userns=ok" >> "$GITHUB_OUTPUT"
+            echo "user namespaces: disponíveis"
+          else
+            echo "userns=blocked" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Arnês de caos NÃO CORREU::user namespaces não privilegiados bloqueados neste runner — $(cat /tmp/userns.err)"
+            {
+              echo '## Arnês de caos — NÃO CORREU'
+              echo
+              echo 'O runner alojado não permite user namespaces não privilegiados:'
+              echo
+              echo '```'
+              cat /tmp/userns.err
+              echo '```'
+              echo
+              echo 'Um motor rootless não corre sem eles. **Isto não é um resultado do arnês** —'
+              echo 'nada foi provado nesta corrida. O job `chaos harness (runner limpo)` fica'
+              echo '`skipped` e não `success`, precisamente para não se ler como um verde.'
+              echo
+              echo 'Para o exercitar a sério é preciso um runner **self-hosted**, ou uma VM'
+              echo '(`delonix vm create` + `scripts/chaos.sh`), que é como os achados desta'
+              echo 'série foram encontrados.'
+              [ -e /dev/kvm ] && echo && echo '`/dev/kvm` está presente: uma VM aninhada neste runner é viável como passo seguinte.'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   chaos:
     name: chaos harness (runner limpo)
+    needs: userns
+    if: needs.userns.outputs.userns == 'ok'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -94,60 +166,14 @@ jobs:
             echo "o host não restringe userns — perfil desnecessário"
           fi
 
-      # PREFLIGHT, e faz DUAS perguntas distintas que nunca se podem confundir:
-      #
-      #   1. este host CONSEGUE correr o motor?   → problema de AMBIENTE
-      #   2. o motor arranca?                     → problema de CÓDIGO
-      #
-      # A lição que o obrigou a existir: o arnês silencia a saída de cada comando
-      # (é o que o torna legível), por isso um motor que nem arranca produzia uma
-      # parede de SKIPs sem UMA linha a dizer porquê.
-      #
-      # MEDIDO no runner alojado `ubuntu-24.04`: user namespaces não privilegiados
-      # estão bloqueados —
-      #
-      #     unshare: write failed /proc/self/uid_map: Operation not permitted
-      #
-      # …e sem eles um motor rootless não corre de todo. Isso NÃO é uma falha do
-      # Delonix, e marcar o job vermelho por causa disso todas as semanas só ensina
-      # a ignorar o CI. Quando o ambiente não dá, o job diz-o alto e sai verde SEM
-      # afirmar que passou; quando o ambiente dá e o motor falha, é vermelho.
-      - name: Preflight — o ambiente suporta rootless?
-        id: preflight
-        run: |
-          if unshare -r -n true 2>/tmp/userns.err; then
-            echo "userns=ok" >> "$GITHUB_OUTPUT"
-            echo "user namespaces: disponíveis"
-          else
-            echo "userns=blocked" >> "$GITHUB_OUTPUT"
-            echo "::warning title=Arnês de caos NÃO CORREU::user namespaces não privilegiados bloqueados neste runner — $(cat /tmp/userns.err)"
-            {
-              echo '## Arnês de caos — NÃO CORREU'
-              echo
-              echo 'O runner alojado não permite user namespaces não privilegiados:'
-              echo
-              echo '```'
-              cat /tmp/userns.err
-              echo '```'
-              echo
-              echo 'Um motor rootless não corre sem eles. **Isto não é um resultado do arnês** —'
-              echo 'nada foi provado nesta corrida.'
-              echo
-              echo 'Para o exercitar a sério é preciso um runner **self-hosted**, ou uma VM'
-              echo '(`delonix vm create` + `scripts/chaos.sh`), que é como os achados desta'
-              echo 'série foram encontrados.'
-              [ -e /dev/kvm ] && echo && echo '`/dev/kvm` está presente: uma VM aninhada neste runner é viável como passo seguinte.'
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
-
       - name: Puxa a imagem de teste
-        if: steps.preflight.outputs.userns == 'ok'
         run: |
           ./target/release/delonix image pull docker.io/library/redis:7-alpine
 
-      # Só corre quando o ambiente dá. Aqui um erro é do MOTOR, e é vermelho.
+      # The CODE question, and only it: the environment one was already answered
+      # by the `userns` job, without which this one does not even start. A
+      # failure here is the ENGINE's, and it is red.
       - name: Preflight — o motor arranca?
-        if: steps.preflight.outputs.userns == 'ok'
         run: |
           set -x
           export DELONIX_ROOT=/tmp/dlx-preflight DELONIX_NET_RUNTIME_DIR=/tmp/dlx-pf
@@ -181,7 +207,6 @@ jobs:
       # self-hosted runner, or in a VM — which is where the harness is actually
       # exercised.
       - name: Corre o arnês de caos
-        if: steps.preflight.outputs.userns == 'ok'
         env:
           DELONIX_CHAOS_BIN: ./target/release/delonix
           DELONIX_CHAOS_SCALE: ${{ github.event.inputs.scale || '30' }}
@@ -218,7 +243,6 @@ jobs:
       # `DELONIX_ROOT`/`DELONIX_NET_RUNTIME_DIR` próprios: mesmo isolamento do
       # arnês, para o E2E nunca tocar no que outro passo deixou de pé.
       - name: Bateria E2E da CLI
-        if: steps.preflight.outputs.userns == 'ok'
         run: |
           set -o pipefail
           E2E=/tmp/dlx-e2e
@@ -236,7 +260,7 @@ jobs:
       # que um SKIP fique visível em vez de se perder no ruído. Um skip não falha
       # o job, mas é informação: significa que aquela propriedade não foi provada.
       - name: Resumo
-        if: always() && steps.preflight.outputs.userns == 'ok'
+        if: always()
         run: |
           {
             echo '## Arnês de caos'
@@ -256,7 +280,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Guarda o log
-        if: always() && steps.preflight.outputs.userns == 'ok'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: chaos-log
