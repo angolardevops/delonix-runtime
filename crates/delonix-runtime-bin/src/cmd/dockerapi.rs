@@ -515,7 +515,7 @@ pub(crate) const API_UNIMPLEMENTED: &[(&str, &str, &str)] = &[
     (
         "GET",
         "/images/{name}/json",
-        "not written yet; `delonix image inspect` covers it",
+        "not written yet; `delonix image describe` covers it",
     ),
     (
         "GET",

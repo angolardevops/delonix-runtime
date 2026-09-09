@@ -402,7 +402,7 @@ pub(crate) fn remove_pod(name: &str, force: bool) -> Result<()> {
     let members = members_of(&store, name)?;
     if members.is_empty() {
         return Err(Error::NotFound(format!(
-            "no such pod: {name} (see `delonix pod ls`)"
+            "pod: {name} (see `delonix get pods`)"
         )));
     }
     // Remove each member, PROPAGATING failures (no silent success — the invariant).
@@ -418,7 +418,7 @@ pub(crate) fn remove_pod(name: &str, force: bool) -> Result<()> {
     }
     if !failed.is_empty() {
         return Err(Error::Invalid(format!(
-            "pod '{name}': {}/{} container(s) NOT removed ({}). Retry with `delonix pod rm -f {name}`.",
+            "pod '{name}': {}/{} container(s) NOT removed ({}). Retry with `delonix delete pod {name} --force`.",
             failed.len(),
             members.len(),
             failed.join("; ")
@@ -663,7 +663,7 @@ pub(crate) fn describe(names: &[String]) -> Result<()> {
         let mut members = members_of(&store, name)?;
         if members.is_empty() {
             return Err(Error::NotFound(format!(
-                "no such pod: {name} (see `delonix pod ls`)"
+                "pod: {name} (see `delonix get pods`)"
             )));
         }
         let mut d = output::Describe::new();
@@ -700,7 +700,7 @@ fn resolve_target(
     let members = members_of(store, pod)?;
     if members.is_empty() {
         return Err(Error::NotFound(format!(
-            "no such pod: {pod} (see `delonix pod ls`)"
+            "pod: {pod} (see `delonix get pods`)"
         )));
     }
     match container_short {
@@ -709,7 +709,7 @@ fn resolve_target(
             .find(|c| c.name == format!("{pod}-{short}"))
             .ok_or_else(|| {
                 Error::Invalid(format!(
-                    "pod '{pod}' has no container '{short}' (see `delonix pod describe {pod}`)"
+                    "pod '{pod}' has no container '{short}' (see `delonix describe pod {pod}`)"
                 ))
             }),
         None => Ok(members.into_iter().next().unwrap()),
@@ -806,7 +806,7 @@ fn port_forward(pod: &str, ports: &[String]) -> Result<()> {
     let (_, store) = open_stores()?;
     if members_of(&store, pod)?.is_empty() {
         return Err(Error::NotFound(format!(
-            "no such pod: {pod} (see `delonix pod ls`)"
+            "pod: {pod} (see `delonix get pods`)"
         )));
     }
     let netns = pod_netns_name(pod);

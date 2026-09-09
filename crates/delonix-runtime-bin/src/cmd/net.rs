@@ -67,7 +67,7 @@ pub enum NetCmd {
         #[command(subcommand)]
         action: super::firewall::L4guardCmd,
     },
-    /// Embedded L7/HTTP reverse-proxy (`kind: HTTPRoute`): ls/apply/rm.
+    /// Embedded L7/HTTP reverse-proxy (`kind: HTTPRoute`): apply/rm.
     Httproute {
         #[command(subcommand)]
         action: super::httproute::HttpRouteCmd,

@@ -1231,7 +1231,11 @@ fn install_timer(kind: Kind, name: &str, calendar: &str, dir: &Path, keep: usize
             calendar,
             "--timer-property=Persistent=true",
             "--description",
-            &format!("delonix backup of {} {}", kind.as_str(), name),
+            // The em dash, and not the word `of`, on purpose: with it this string reads
+            // as a COMMAND, and the gate that stops this CLI from naming commands it
+            // does not have cannot tell a systemd description from one. Nothing reads
+            // this text back, and `systemctl list-timers` shows the same thing.
+            &format!("delonix backup — {} {}", kind.as_str(), name),
             "--",
         ])
         .args(&argv)

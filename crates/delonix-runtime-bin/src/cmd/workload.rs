@@ -315,9 +315,7 @@ fn owner<'a>(ds: &'a [Box<dyn ComputeDriver>], name: &str) -> Result<&'a dyn Com
             found = Some(d.as_ref());
         }
     }
-    found.ok_or_else(|| {
-        Error::NotFound(super::po::tf("no such workload: {name}", &[("name", name)]))
-    })
+    found.ok_or_else(|| Error::NotFound(super::po::tf("workload: {name}", &[("name", name)])))
 }
 
 /// `delonix workload` — one surface over both compute types (ADR-0002, Phase 2a).
@@ -606,8 +604,14 @@ mod tests {
     fn owner_none_is_no_such_workload() {
         // `&dyn ComputeDriver` (the Ok type) is not Debug, so `.err().unwrap()`
         // rather than `.unwrap_err()`.
+        //
+        // EQUALITY, not `contains`. This assertion used to be a `contains` and
+        // passed for four releases over `no such no such workload: ghost` —
+        // `Error::NotFound`'s Display already writes the prefix, and this call
+        // site wrote it a second time. A substring check cannot see a doubled
+        // prefix, which is the one thing that went wrong here.
         let e = owner(&ds(false, false), "ghost").err().unwrap().to_string();
-        assert!(e.contains("no such workload"), "{e}");
+        assert_eq!(e, "no such workload: ghost");
     }
 
     #[test]
