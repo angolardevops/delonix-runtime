@@ -596,6 +596,27 @@ msgstr "imagens"
 msgid "VM images"
 msgstr "imagens VM"
 
+msgid "VM disks"
+msgstr "discos de VM"
+
+msgid "build cache"
+msgstr "cache de build"
+
+msgid "image builds"
+msgstr "builds de imagem"
+
+msgid "other"
+msgstr "outros"
+
+msgid "TOTAL"
+msgstr "TOTAL"
+
+msgid "part of the tree was unreadable from outside the user namespace (rootless subuid): the marked figures are lower bounds"
+msgstr "parte da árvore ficou ilegível de fora do namespace de utilizador (subuid rootless): os valores marcados são limites inferiores"
+
+msgid "build cache: {size}, a pure cache with no GC — `system prune` does NOT touch it. To reclaim it, delete `{path}`; the next build repopulates what it needs."
+msgstr "cache de build: {size}, uma cache pura sem GC — o `system prune` NÃO lhe toca. Para a recuperar, apaga `{path}`; a build seguinte repõe o que precisar."
+
 msgid "{n} orphan container dir(s) — {size} reclaimable.\nLeftovers from abruptly killed containers (a normal `rm` cleans them)."
 msgstr "{n} directório(s) de container órfão(s) — {size} recuperáveis.\nSão restos de containers mortos abruptamente (o `rm` normal limpa-os)."
 

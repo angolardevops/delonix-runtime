@@ -1735,6 +1735,95 @@ fn strict_exit(failed: bool) -> Result<()> {
     Ok(())
 }
 
+/// The areas `system df` names, as `(label, directory)`.
+///
+/// **`other` is not decoration — it is the whole point.** This list used to be
+/// five hardcoded rows, and a store of 190 GiB reported 105: `build-cache`
+/// (23 GiB), `vms/` (59 GiB of live VM overlay disks) and `images-build`
+/// (2.6 GiB) were simply not on it. Nothing said so; the table just summed to
+/// less, and the one command an operator runs to answer «where did my disk go»
+/// answered with 55 % of the disk.
+///
+/// So the table is closed by construction now: whatever sits at the top of the
+/// state root and is not a named area lands in `other`, and the TOTAL always
+/// matches the store. A subsystem added tomorrow shows up as a number somebody
+/// can ask about, instead of disappearing.
+const DF_AREAS: &[(&str, &str)] = &[
+    ("images", "blobs"),
+    ("layers", "layers"),
+    ("containers", "containers"),
+    ("volumes", "volumes"),
+    ("VM images", "vm-images"),
+    ("VM disks", "vms"),
+    ("build cache", "build-cache"),
+    ("image builds", "images-build"),
+];
+
+/// One row of `system df`: the label, the bytes, and whether it is a pure cache.
+pub(crate) struct DfRow {
+    pub label: String,
+    pub bytes: u64,
+    /// `false` when the walk hit directories this uid cannot read — rootless
+    /// subuid trees are the NORMAL case here, not an edge — so `bytes` is a
+    /// floor. A TOTAL that claims to account for the whole store while quietly
+    /// under-reporting is the same dishonest number this change exists to
+    /// remove, one level up.
+    pub complete: bool,
+}
+
+/// Measures every area plus whatever the named ones do not cover.
+///
+/// Split out of `cmd_df` so the closure property — the rows sum to the store —
+/// is testable against a temporary root instead of against this machine.
+pub(crate) fn df_rows(root: &std::path::Path) -> Vec<DfRow> {
+    let mut rows: Vec<DfRow> = DF_AREAS
+        .iter()
+        .map(|(label, dir)| {
+            let u = delonix_volume::measure(&root.join(dir));
+            DfRow {
+                label: (*label).to_string(),
+                bytes: u.bytes,
+                complete: u.is_complete(),
+            }
+        })
+        .collect();
+    // Everything else at the top level, in ONE bucket. Files count too: a stray
+    // multi-gigabyte artefact in the root is exactly what this must not hide.
+    let named: std::collections::HashSet<&str> = DF_AREAS.iter().map(|(_, d)| *d).collect();
+    let mut other = 0u64;
+    let mut other_complete = true;
+    if let Ok(rd) = std::fs::read_dir(root) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if named.contains(name.as_str()) {
+                continue;
+            }
+            let p = e.path();
+            other += if p.is_dir() {
+                let u = delonix_volume::measure(&p);
+                other_complete &= u.is_complete();
+                u.bytes
+            } else {
+                // ALLOCATED bytes (`st_blocks` × 512), not `len()`. The gate
+                // below caught this: `dir_size` measures `du`-style and a loose
+                // 2 KiB file bills 4 KiB, so mixing the two made the rows sum to
+                // 2048 less than the store. A total that does not add up is
+                // exactly the defect this whole change exists to remove.
+                use std::os::unix::fs::MetadataExt;
+                std::fs::metadata(&p)
+                    .map(|m| m.blocks().saturating_mul(512))
+                    .unwrap_or(0)
+            };
+        }
+    }
+    rows.push(DfRow {
+        label: "other".to_string(),
+        bytes: other,
+        complete: other_complete,
+    });
+    rows
+}
+
 fn cmd_df() -> Result<()> {
     let root = state_root();
     let (_, store) = open_stores()?;
@@ -1761,20 +1850,49 @@ fn cmd_df() -> Result<()> {
         super::po::t("SIZE"),
         super::po::t("RECLAIMABLE")
     );
-    for (label, dir) in [
-        (super::po::t("images"), root.join("blobs")),
-        ("layers", root.join("layers")),
-        ("containers", containers_dir.clone()),
-        ("volumes", root.join("volumes")),
-        (super::po::t("VM images"), root.join("vm-images")),
-    ] {
-        let size = dir_size(&dir);
-        let recl = if label == "containers" {
+    let rows = df_rows(&root);
+    let mut total = 0u64;
+    let mut build_cache = 0u64;
+    for row in &rows {
+        total += row.bytes;
+        if row.label == "build cache" {
+            build_cache = row.bytes;
+        }
+        // `-` and not `0 B`: for every area but `containers` this command has
+        // not MEASURED what could be reclaimed, and printing a zero would read
+        // as «nothing to gain here».
+        let recl = if row.label == "containers" {
             human(orphan)
         } else {
             "-".to_string()
         };
-        println!("{label:<16}  {:>10}  {recl:>12}", human(size));
+        let label = super::po::t_dyn(&row.label);
+        let size = if row.complete {
+            human(row.bytes)
+        } else {
+            format!("≥ {}", human(row.bytes))
+        };
+        println!("{label:<16}  {size:>10}  {recl:>12}");
+    }
+    let partial = rows.iter().any(|r| !r.complete);
+    println!(
+        "{:<16}  {:>10}  {:>12}",
+        super::po::t("TOTAL"),
+        if partial {
+            format!("≥ {}", human(total))
+        } else {
+            human(total)
+        },
+        ""
+    );
+    if partial {
+        println!(
+            "  {}",
+            super::po::t(
+                "part of the tree was unreadable from outside the user namespace (rootless \
+                 subuid): the marked figures are lower bounds",
+            )
+        );
     }
     if orphan_n > 0 {
         println!(
@@ -1782,6 +1900,22 @@ fn cmd_df() -> Result<()> {
             super::po::tf(
                 "{n} orphan container dir(s) — {size} reclaimable.\nLeftovers from abruptly killed containers (a normal `rm` cleans them).",
                 &[("n", &orphan_n.to_string()), ("size", &human(orphan))]
+            )
+        );
+    }
+    // Said only when it is worth saying. The build cache is a PURE cache — the
+    // backup classifier already treats it as one, and it never travels — but it
+    // has no GC and `system prune` does not touch it, so an operator staring at
+    // a full disk needs to be told which command does not solve this.
+    if build_cache > 512 * 1024 * 1024 {
+        println!(
+            "\n{}",
+            super::po::tf(
+                "build cache: {size}, a pure cache with no GC — `system prune` does NOT touch it. To reclaim it, delete `{path}`; the next build repopulates what it needs.",
+                &[
+                    ("size", &human(build_cache)),
+                    ("path", &root.join("build-cache").display().to_string())
+                ]
             )
         );
     }
@@ -2464,5 +2598,98 @@ mod setup_tests {
         let (fatal, nice) =
             super::missing_controllers(&have(&["cpu", "cpuset", "io", "memory", "pids"]));
         assert!(fatal.is_empty() && nice.is_empty());
+    }
+}
+
+/// `system df` has to account for the WHOLE store.
+///
+/// Measured on a real node at 2026-09-09: a state root of 190 GiB reported
+/// 105 GiB. `build-cache` (23 GiB), `vms/` (59 GiB of live VM overlay disks and
+/// their data) and `images-build` (2.6 GiB) were not on the five-row list, and
+/// nothing said so — the table just summed to less. 45 % of the disk was
+/// invisible to the one command an operator runs to find it.
+///
+/// The list of named areas is now closed by an `other` bucket, so the property
+/// this test fixes is not «these eight labels exist» (a list can always grow a
+/// ninth directory nobody adds to it) but «the rows sum to the store».
+#[cfg(test)]
+mod df_tests {
+    use super::*;
+
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!(
+            "delonix-df-test-{tag}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn write(path: &std::path::Path, bytes: usize) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, vec![b'x'; bytes]).unwrap();
+    }
+
+    /// The closure property, and the regression that motivated it: a directory
+    /// the named list does not know about is still COUNTED, in `other`.
+    #[test]
+    fn the_rows_account_for_everything_in_the_root() {
+        let root = scratch("closure");
+        // Two named areas…
+        write(&root.join("blobs/a"), 4096);
+        write(&root.join("build-cache/aa/layer.tar"), 8192);
+        // …and two the list has never heard of: a directory and a loose file.
+        write(&root.join("a-subsystem-invented-tomorrow/data"), 16384);
+        write(&root.join("stray.bin"), 2048);
+
+        let rows = df_rows(&root);
+        let total: u64 = rows.iter().map(|r| r.bytes).sum();
+        let on_disk = dir_size(&root);
+        assert_eq!(
+            total, on_disk,
+            "the rows sum to {total} and the store holds {on_disk} — some area is not counted"
+        );
+
+        let other = rows.iter().find(|r| r.label == "other").unwrap();
+        assert!(
+            other.bytes >= 16384 + 2048,
+            "what the list does not name has to land in `other`, and {} bytes did",
+            other.bytes
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The three areas whose absence was the bug. Named explicitly: a future
+    /// tidy-up that drops one of them would otherwise pass, because `other`
+    /// would silently absorb it — correct for the total, and a regression for
+    /// the operator, who would stop seeing WHICH thing is eating the disk.
+    #[test]
+    fn the_three_areas_that_were_missing_have_their_own_row() {
+        let root = scratch("named");
+        for d in ["vms", "build-cache", "images-build"] {
+            write(&root.join(d).join("f"), 1024);
+        }
+        let rows = df_rows(&root);
+        for label in ["VM disks", "build cache", "image builds"] {
+            let row = rows.iter().find(|r| r.label == label).unwrap_or_else(|| {
+                panic!("`{label}` no longer has a row of its own in `system df`")
+            });
+            assert!(row.bytes >= 1024, "`{label}` measured {} bytes", row.bytes);
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// An empty root is not an error, and every area still has a row: a table
+    /// that hides its zeros makes «the area is gone» and «the area is empty»
+    /// look the same.
+    #[test]
+    fn an_empty_root_still_prints_every_area() {
+        let root = scratch("empty");
+        let rows = df_rows(&root);
+        assert_eq!(rows.len(), DF_AREAS.len() + 1);
+        assert!(rows.iter().all(|r| r.bytes == 0));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
