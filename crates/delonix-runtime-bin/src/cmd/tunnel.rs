@@ -402,29 +402,152 @@ fn config_hash(spec: &TunnelSpec, token: &Option<String>) -> String {
     format!("{:016x}", h.finish())
 }
 
-/// The agent is genuinely alive AND is really ours: same identity-guard
-/// pattern as `ingress_proxy::running_pid`, checking the provider's OWN
-/// binary name in `/proc/<pid>/cmdline`. Narrower than that guard (`ssh`/
-/// `ngrok`/`cloudflared` are common process names, unlike the unique
-/// `ingress-proxy`) — an accepted, documented gap: a PID recycled into an
-/// unrelated process of the SAME binary is (rare, but) not detected.
+/// The provider binary this engine spawns for a tunnel — `argv[0]`, not a
+/// substring of the whole blob.
+///
+/// `None` for a provider this build does not know: an unknown provider owns no
+/// process here, so nothing may be signalled on its behalf.
+fn provider_bin(provider: &str) -> Option<&'static str> {
+    match provider {
+        "pinggy" => Some("ssh"),
+        "ngrok" => Some("ngrok"),
+        "cloudflare" => Some("cloudflared"),
+        _ => None,
+    }
+}
+
+/// The argv elements that carry OUR local port, for `rec`'s provider — the
+/// discriminator that separates one agent from another of the same binary.
+///
+/// Each is a whole argv element that [`spawn_pinggy_at`]/[`spawn_ngrok`]/
+/// [`spawn_cloudflare_quick`] build verbatim. Both spellings of the cloudflare
+/// origin are accepted because the record's `insecure_skip_tls_verify` decides
+/// which was used, and a stranger's argv contains neither.
+fn port_tokens(rec: &TunnelRecord) -> Vec<String> {
+    let p = rec.local_port;
+    match rec.provider.as_str() {
+        "pinggy" => vec![format!("0:localhost:{p}")],
+        "ngrok" => vec![p.to_string(), format!("https://localhost:{p}")],
+        "cloudflare" => vec![
+            cloudflare_origin_url(p, false),
+            cloudflare_origin_url(p, true),
+        ],
+        _ => vec![],
+    }
+}
+
+/// The word that says WHAT the agent was told to do — `ssh -R` to pinggy,
+/// `ngrok http`, `cloudflared tunnel`. Without it, an unrelated `ssh` that
+/// happened to forward the same port number would still pass.
+fn provider_anchor(provider: &str) -> Option<&'static str> {
+    match provider {
+        "pinggy" => Some("pinggy"),
+        "ngrok" => Some("http"),
+        "cloudflare" => Some("tunnel"),
+        _ => None,
+    }
+}
+
+/// Whether an argv names an agent WE spawned FOR THIS RECORD. PURE.
+///
+/// Three conditions, and each one earns its place against something measured on
+/// this host on 2026-09-10 while ACH-018 was being written:
+///
+///   * `argv[0]`'s file name IS the provider binary. The old guard asked whether
+///     the whole NUL-joined blob CONTAINED `"ssh"`, and four live processes of
+///     this uid passed it — `/usr/bin/ssh-agent`, two Ansible `ssh: … [mux]`
+///     control masters, and `/usr/libexec/gcr-ssh-agent`. A fifth, a plain
+///     `bash`, passed for spelling `ssh` inside a path in its argv. It is the
+///     same "substring of the blob" that ACH-017 removed from the L7 proxy.
+///   * an argv element is one of [`port_tokens`] — our local port, so one
+///     agent is not mistaken for another of the same binary.
+///   * an argv element is the [`provider_anchor`] — what the agent was told to
+///     do, so a real `ssh` that merely forwards the same port is not ours.
+///
+/// This is deliberately the argv side ONLY. Two roots on one uid can spawn
+/// agents whose argv is identical; separating THOSE is [`env_allows_this_root`].
+fn agent_argv_is_ours(cmdline: &[u8], rec: &TunnelRecord) -> bool {
+    let Some(bin) = provider_bin(&rec.provider) else {
+        return false;
+    };
+    let argv: Vec<String> = cmdline
+        .split(|b| *b == 0)
+        .filter(|s| !s.is_empty())
+        .map(|s| String::from_utf8_lossy(s).into_owned())
+        .collect();
+    let Some(argv0) = argv.first() else {
+        return false;
+    };
+    if std::path::Path::new(argv0)
+        .file_name()
+        .and_then(|s| s.to_str())
+        != Some(bin)
+    {
+        return false;
+    }
+    let tokens = port_tokens(rec);
+    if !argv.iter().any(|a| tokens.iter().any(|t| a == t)) {
+        return false;
+    }
+    match provider_anchor(&rec.provider) {
+        Some(anchor) => argv.iter().any(|a| a.contains(anchor)),
+        None => false,
+    }
+}
+
+/// The value of `name` in a raw `/proc/<pid>/environ`. PURE.
+fn env_value(raw: &[u8], name: &str) -> Option<String> {
+    let prefix = format!("{name}=");
+    raw.split(|b| *b == 0)
+        .filter(|s| !s.is_empty())
+        .map(|s| String::from_utf8_lossy(s).into_owned())
+        .find_map(|e| e.strip_prefix(&prefix).map(|v| v.to_string()))
+}
+
+/// Whether a live agent's environment allows it to be OURS. PURE.
+///
+/// `spawn_and_capture` pins `DELONIX_ROOT` on every agent it starts, so an agent
+/// of ANOTHER root names that root here and is refused — which is the whole
+/// point, because two roots on one uid produce byte-identical argv.
+///
+/// **The absence of the variable is tolerated, and that is deliberate.** An
+/// agent started by a build older than this one carries no `DELONIX_ROOT`,
+/// because nothing pinned it; demanding it would turn every pre-upgrade tunnel
+/// into an unstoppable orphan whose `rm` reports success without signalling
+/// anything. It is the same shape as the tolerance ACH-016 wrote for a
+/// pre-v0.34.2 holder, and it costs nothing that the argv side does not already
+/// cover: a stranger never gets this far.
+fn env_allows_this_root(raw: &[u8], root: &std::path::Path) -> bool {
+    match env_value(raw, "DELONIX_ROOT") {
+        Some(v) => std::path::Path::new(&v) == root,
+        None => true,
+    }
+}
+
+/// The agent is genuinely alive AND is really ours.
+///
+/// Its first version asked whether the `/proc/<pid>/cmdline` CONTAINED the
+/// provider's binary name, and called the gap "rare". It was not rare: see
+/// [`agent_argv_is_ours`] for what passed it, measured. The pid read here is the
+/// one [`stop_process`] sends `SIGTERM` to.
 fn is_alive(rec: &TunnelRecord) -> bool {
     let Some(pid) = rec.pid else { return false };
-    let want = match rec.provider.as_str() {
-        "pinggy" => "ssh",
-        "ngrok" => "ngrok",
-        "cloudflare" => "cloudflared",
-        _ => return false,
+    let Ok(cmdline) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
+        return false;
     };
-    std::fs::read(format!("/proc/{pid}/cmdline"))
-        .map(|c| String::from_utf8_lossy(&c).contains(want))
-        .unwrap_or(false)
+    if !agent_argv_is_ours(&cmdline, rec) {
+        return false;
+    }
+    let raw = std::fs::read(format!("/proc/{pid}/environ")).unwrap_or_default();
+    env_allows_this_root(&raw, &state_root())
 }
 
 fn stop_process(rec: &TunnelRecord) {
     if let Some(pid) = rec.pid {
         if is_alive(rec) {
-            // SAFETY: signalling a PID we just confirmed alive AND ours (cmdline guard).
+            // SAFETY: signalling a PID we just confirmed alive AND ours — the
+            // argv names this record's agent and the environ does not name
+            // another root.
             unsafe { libc::kill(pid, libc::SIGTERM) };
         }
     }
@@ -532,6 +655,14 @@ fn spawn_and_capture(
     })?;
     let mut cmd = Command::new(bin);
     cmd.args(args).stdin(Stdio::null()).stdout(log).stderr(log2);
+    // The ownership proof for `is_alive`/`stop_process`. The provider binaries
+    // ignore an environment variable they do not know, and this is the only
+    // thing that separates two `DELONIX_ROOT`s on one uid: their agents' argv
+    // is byte-identical, so the argv guard alone cannot tell them apart. Pinned
+    // rather than inherited because the machine's default root exports nothing
+    // — the same measurement that denied `ingress_proxy` this proof (ACH-017),
+    // with the difference that WE spawn this child and can simply set it.
+    cmd.env("DELONIX_ROOT", state_root());
     // SAFETY: setsid in the child (post-fork, pre-exec) detaches it from this
     // process so it survives the CLI exiting — same pattern as `ingress_proxy`.
     unsafe {
@@ -1224,6 +1355,176 @@ mod tests {
         assert_ne!(h0, config_hash(&tls_changed, &None));
         // Same effective config → same hash (idempotency check for `apply_one`).
         assert_eq!(h0, config_hash(&base, &None));
+    }
+
+    /// A `TunnelRecord` for the guard tests — only the fields the guard reads
+    /// carry meaning here.
+    fn guard_rec(provider: &str, port: u16) -> TunnelRecord {
+        TunnelRecord {
+            name: "t".to_string(),
+            provider: provider.to_string(),
+            local_port: port,
+            hostname: None,
+            config_hash: "x".to_string(),
+            pid: Some(1),
+            public_url: None,
+            created_unix: 0,
+            started_unix: None,
+            agent_web_port: None,
+            insecure_skip_tls_verify: false,
+        }
+    }
+
+    fn argv_blob(parts: &[&str]) -> Vec<u8> {
+        let mut v = Vec::new();
+        for p in parts {
+            v.extend_from_slice(p.as_bytes());
+            v.push(0);
+        }
+        v
+    }
+
+    /// ACH-018. Every one of these was ALIVE on the development host on
+    /// 2026-09-10 and passed the old `cmdline.contains("ssh")` guard, whose pid
+    /// `stop_process` sends `SIGTERM` to. None is a tunnel.
+    #[test]
+    fn the_guard_refuses_the_ssh_processes_the_old_one_accepted() {
+        let rec = guard_rec("pinggy", 8080);
+        for (what, argv) in [
+            (
+                "the user's ssh-agent",
+                vec![
+                    "/usr/bin/ssh-agent",
+                    "-D",
+                    "-a",
+                    "/run/user/1000/keyring/.ssh",
+                ],
+            ),
+            (
+                "gcr-ssh-agent",
+                vec![
+                    "/usr/libexec/gcr-ssh-agent",
+                    "--base-dir",
+                    "/run/user/1000/gcr",
+                ],
+            ),
+            (
+                "an Ansible mux",
+                vec!["ssh: /home/walter/.ansible/cp/3648f59cba [mux]"],
+            ),
+            (
+                "a path that merely spells ssh",
+                vec!["/bin/bash", "-c", "source /home/walter/.claude/x-ssh-y.sh"],
+            ),
+        ] {
+            assert!(
+                !agent_argv_is_ours(&argv_blob(&argv), &rec),
+                "the guard accepted {what}, which is not a tunnel"
+            );
+        }
+    }
+
+    /// A REAL `ssh`, same user, going somewhere else — the shape `argv[0]`
+    /// alone does not separate.
+    #[test]
+    fn the_guard_refuses_a_real_ssh_that_is_not_our_agent() {
+        let rec = guard_rec("pinggy", 8080);
+        assert!(
+            !agent_argv_is_ours(
+                &argv_blob(&["ssh", "-R", "0:localhost:9999", "--", "free.pinggy.io"]),
+                &rec
+            ),
+            "different local port"
+        );
+        assert!(
+            !agent_argv_is_ours(
+                &argv_blob(&[
+                    "ssh",
+                    "-R",
+                    "0:localhost:8080",
+                    "--",
+                    "walter@servidor.interno"
+                ]),
+                &rec
+            ),
+            "same port, destination is not the provider"
+        );
+    }
+
+    /// The argv `spawn_pinggy_at` actually builds.
+    #[test]
+    fn the_guard_accepts_the_agent_we_spawned() {
+        let rec = guard_rec("pinggy", 8080);
+        assert!(agent_argv_is_ours(
+            &argv_blob(&[
+                "ssh",
+                "-p",
+                "443",
+                "-o",
+                "StrictHostKeyChecking=accept-new",
+                "-o",
+                "ServerAliveInterval=30",
+                "-o",
+                "ExitOnForwardFailure=yes",
+                "-R",
+                "0:localhost:8080",
+                "--",
+                "free.pinggy.io",
+            ]),
+            &rec
+        ));
+        let ng = guard_rec("ngrok", 8080);
+        assert!(agent_argv_is_ours(
+            &argv_blob(&["ngrok", "http", "8080", "--log", "stdout"]),
+            &ng
+        ));
+        let cf = guard_rec("cloudflare", 8080);
+        assert!(agent_argv_is_ours(
+            &argv_blob(&[
+                "cloudflared",
+                "tunnel",
+                "--url",
+                &cloudflare_origin_url(8080, false)
+            ]),
+            &cf
+        ));
+    }
+
+    /// A provider this build does not know owns no process here.
+    #[test]
+    fn the_guard_refuses_an_unknown_provider() {
+        let rec = guard_rec("carrier-pigeon", 8080);
+        assert!(!agent_argv_is_ours(
+            &argv_blob(&["ssh", "0:localhost:8080"]),
+            &rec
+        ));
+    }
+
+    /// ACH-018, the half that separates TWO roots: the argv of two agents of the
+    /// same provider and port is byte-identical; only the environ tells them apart.
+    #[test]
+    fn the_environ_separates_two_roots_and_tolerates_an_older_agent() {
+        let mine = std::path::Path::new("/tmp/root-a");
+        let env = |v: &str| {
+            let mut b = Vec::new();
+            b.extend_from_slice(format!("DELONIX_ROOT={v}").as_bytes());
+            b.push(0);
+            b.extend_from_slice(b"PATH=/usr/bin");
+            b.push(0);
+            b
+        };
+        assert!(env_allows_this_root(&env("/tmp/root-a"), mine), "ours");
+        assert!(
+            !env_allows_this_root(&env("/tmp/root-b"), mine),
+            "another root's"
+        );
+        // An agent started by a build older than this fix carries no such
+        // variable — tolerated on purpose, or its `rm` would start reporting
+        // success without signalling anything.
+        assert!(
+            env_allows_this_root(b"PATH=/usr/bin\0", mine),
+            "pre-fix agent"
+        );
     }
 
     #[test]
