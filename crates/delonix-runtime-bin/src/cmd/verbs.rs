@@ -294,7 +294,7 @@ pub(crate) fn get(
         }),
         k if k == kinds::SECRET => super::secret::run(super::secret::SecretCmd::Ls { output }),
         k if k == kinds::IMAGE => super::image::run(super::image::ImageCmd::Ls { output }),
-        k if k == kinds::CLUSTER => super::cluster::cmd_ls(),
+        k if k == kinds::CLUSTER => super::cluster::cmd_ls(true),
         k if k == kinds::GATEWAY => super::tunnel::cmd_ls(output),
         k if k == kinds::HTTP_ROUTE => super::httproute::cmd_ls(output),
         // The route group's own listing, which already shows both the record and

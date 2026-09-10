@@ -37,6 +37,15 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["cluster kube generate", "stack apply", "vm create", "image vm pull"],
     },
     Entry {
+        path: "cluster ls",
+        group: "Interact",
+        examples: &[
+            ("the clusters that are up, kind-mode and VM alike", "delonix cluster ls"),
+            ("plus the ones whose every node is stopped", "delonix cluster ls -A"),
+        ],
+        see_also: &["get", "cluster health", "vm ls", "cluster prune"],
+    },
+    Entry {
         path: "cluster create",
         group: "Lifecycle",
         examples: &[
