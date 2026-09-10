@@ -646,8 +646,8 @@ EXAMPLES:
   # remove a stopped container
   delonix container rm web
 
-  # force it even while running, and drop its anonymous volumes
-  delonix container rm -f -v web
+  # force it even while running
+  delonix container rm -f web
 
   # everything that has already exited
   delonix container rm $(delonix container ps -aq)
