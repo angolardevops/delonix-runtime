@@ -168,6 +168,7 @@ Commands:
   health      Is the control-plane answering, and is every node `Ready`?
   kubeconfig  Print a cluster&#x27;s kubeconfig from the local cache (no live SSH)
   load        Load local images into a kind-mode cluster&#x27;s nodes, **without a registry**
+  ls          List this host&#x27;s clusters — kind-mode AND VM-based
   uncordon    Mark a drained node schedulable again
   apply       Apply the `kind: KubernetesCluster` document(s) of a manifest
   kube        Generate a Kubernetes manifest from a container/pod already running locally
@@ -184,7 +185,7 @@ Options:
 COMMAND MAP:
   Lifecycle    create · kubeadm · upgrade
   Create       init
-  Interact     load · kubeconfig · health · drain · uncordon
+  Interact     ls · load · kubeconfig · health · drain · uncordon
   Declarative  kube · apply
   Maintenance  prune
 

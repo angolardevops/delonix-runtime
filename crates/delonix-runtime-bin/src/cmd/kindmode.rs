@@ -1485,7 +1485,14 @@ fn k8s_version_from_image(image: &str) -> Option<String> {
     version.starts_with('v').then(|| version.to_string())
 }
 
-pub(crate) fn list(store: &Store) -> Result<()> {
+/// `all` = show clusters with every node stopped as well.
+///
+/// The default hides them, the same split `docker ps` / `ps -a` makes. The
+/// reason is the same too: a host that has provisioned clusters over months
+/// answers "what is running now" badly when the answer sits buried among a
+/// dozen stopped ones. Nothing is lost -- the count of what was hidden is
+/// printed, so the listing never pretends the others do not exist.
+pub(crate) fn list(store: &Store, all: bool) -> Result<()> {
     use std::collections::BTreeMap;
     let mut clusters: BTreeMap<String, Vec<Container>> = BTreeMap::new();
     for mut c in store.list()? {
@@ -1497,7 +1504,27 @@ pub(crate) fn list(store: &Store) -> Result<()> {
         }
         clusters.entry(name).or_default().push(c);
     }
-    if clusters.is_empty() {
+    // ------------------------------------------------------------------
+    //  VM-based clusters, which this listing did not see at all
+    // ------------------------------------------------------------------
+    // MEASURED 2026-09-10: `get clusters` printed "(no clusters)" on a machine
+    // where `vm ls` showed nine VMs forming four clusters. Everything above
+    // derives membership from the `io.x-k8s.kind.cluster` LABEL, which only
+    // kind-mode nodes (containers) carry -- and `cluster kubeadm` provisions
+    // VMs.
+    //
+    // So the listing was right about what it looked at and wrong about what it
+    // said. "No clusters" and "no clusters OF THE KIND I know" are different
+    // claims, and only the second one was true.
+    //
+    // Membership comes from the naming convention `cluster kubeadm` already
+    // commits to and that `vm ls` already reads for its ROLE column:
+    // `<cluster>-cp<N>` and `<cluster>-w<N>`. Deriving it, rather than keeping a
+    // registry, is the same reasoning `cluster prune` states: a registry drifts,
+    // the trace cannot.
+    let vm_clusters = vm_clusters(&super::util::state_root());
+
+    if clusters.is_empty() && vm_clusters.is_empty() {
         println!(
             "{}",
             super::po::t("(no clusters — create one with `delonix cluster create`)")
@@ -1514,8 +1541,15 @@ pub(crate) fn list(store: &Store) -> Result<()> {
     // `kitamba-benguela-81` stops pushing the other columns out of
     // alignment (which the fixed-width `println!` did). Full names,
     // not abbreviated.
+    let (mut shown, mut hidden) = (0usize, 0usize);
     let mut t = super::output::Table::new(&[
         "NAME",
+        // Two different things share this list and they are not interchangeable:
+        // a `kind` cluster is containers on this host, a `vm` cluster is virtual
+        // machines. Half the columns below can only be answered for one of them,
+        // and a reader who cannot tell which is which reads the dashes as
+        // breakage.
+        "MODE",
         "STATE",
         "CONTROL-PLANES",
         "WORKERS",
@@ -1540,11 +1574,17 @@ pub(crate) fn list(store: &Store) -> Result<()> {
             .iter()
             .filter(|c| matches!(c.status, delonix_runtime_core::Status::Running))
             .count();
-        let estado = if running == nodes.len() {
+        let state = if running == nodes.len() {
             "up".to_string()
         } else {
             format!("{running}/{} up", nodes.len())
         };
+
+        if !all && running == 0 {
+            hidden += 1;
+            continue;
+        }
+        shown += 1;
 
         // Apiserver port: the one published by the control-plane.
         let api = cp
@@ -1589,7 +1629,8 @@ pub(crate) fn list(store: &Store) -> Result<()> {
 
         t.row(vec![
             name.clone(),
-            estado,
+            "kind".to_string(),
+            state,
             cp.len().to_string(),
             workers.to_string(),
             api,
@@ -1599,8 +1640,124 @@ pub(crate) fn list(store: &Store) -> Result<()> {
             k8s_version,
         ]);
     }
+
+    // The dashes below are deliberate and each one has a reason, not a gap:
+    //
+    //   API PORT      a VM cluster's apiserver listens on the VM, not on a port
+    //                 published to this host. There is nothing here to report.
+    //   LAST RESTART  the event log records CONTAINER lifecycle. A VM restart
+    //                 leaves no entry in it, and inventing one from `started_unix`
+    //                 would report a boot as a restart.
+    //   CRI SOCKET    read from the cluster's `kubeadm.conf` when it exists, same
+    //                 as above. Absent for a cluster created elsewhere.
+    //
+    // Printing `-` for something unknown is the point. Guessing 6443 because it
+    // usually is would make this table look more informed than it is.
+    for (name, vms) in vm_clusters {
+        let total = vms.len();
+        let cps = vms
+            .iter()
+            .filter(|(_, role, _)| *role == "control-plane")
+            .count();
+        let running = vms.iter().filter(|(_, _, running)| *running).count();
+        let state = if running == total {
+            "up".to_string()
+        } else {
+            format!("{running}/{total} up")
+        };
+
+        if !all && running == 0 {
+            hidden += 1;
+            continue;
+        }
+        shown += 1;
+        let uptime = vms
+            .iter()
+            .filter(|(_, role, _)| *role == "control-plane")
+            .find_map(|(started, _, _)| *started)
+            // `output::now_unix` + `saturating_sub`, the same pair `fmt_vm_uptime`
+            // in `vm.rs` uses. A clock that went backwards gives 0, not a
+            // gigantic uptime from an underflow.
+            .map(|s| fmt_dur(super::output::now_unix().saturating_sub(s)))
+            .unwrap_or_else(|| "-".into());
+        let cri = std::fs::read_to_string(cluster_dir(&name).join("kubeadm.conf"))
+            .ok()
+            .and_then(|t| {
+                t.lines()
+                    .find(|l| l.trim_start().starts_with("criSocket:"))
+                    .and_then(|l| l.split_once(':').map(|(_, v)| v.trim().to_string()))
+            })
+            .unwrap_or_else(|| "-".into());
+        t.row(vec![
+            name,
+            "vm".to_string(),
+            state,
+            cps.to_string(),
+            (total - cps).to_string(),
+            "-".to_string(),
+            uptime,
+            "—".to_string(),
+            cri,
+            "-".to_string(),
+        ]);
+    }
+
+    // Everything there is was filtered out: say THAT, not "no clusters".
+    // The two claims are different and only one of them is true here.
+    if shown == 0 {
+        println!(
+            "{}",
+            super::po::tf(
+                "(no cluster running — {n} stopped; `delonix cluster ls -A` shows them)",
+                &[("n", &hidden.to_string())],
+            )
+        );
+        return Ok(());
+    }
+
     t.print();
     Ok(())
+}
+
+/// One VM cluster's nodes: `(started_unix, role, running)` each.
+///
+/// Named because clippy is right that the bare type is unreadable where it is
+/// used, and it appears in both the signature and the local.
+type VmClusterNodes = Vec<(Option<u64>, &'static str, bool)>;
+
+/// The VM-based clusters on this host: name -> (started_unix, role, running).
+///
+/// Reads the naming convention `cluster kubeadm` commits to and `vm ls` already
+/// reads for its ROLE column. A VM outside it -- created standalone, or by
+/// something that is not this engine -- belongs to no cluster and is skipped,
+/// never guessed into one.
+///
+/// A cluster provisioned entirely outside the engine (Ansible, for instance)
+/// does not appear here and cannot: it leaves no trace the engine owns. That is
+/// the boundary behind `cluster health` answering `no such cluster kind` for
+/// one of those.
+fn vm_clusters(base: &std::path::Path) -> std::collections::BTreeMap<String, VmClusterNodes> {
+    use std::collections::BTreeMap;
+    let mut out: BTreeMap<String, VmClusterNodes> = BTreeMap::new();
+    let Ok(vms) = delonix_vm::list(base) else {
+        // A machine with no VM backend at all is not an error for a LISTING --
+        // it just has no VM clusters. Failing here would make `get clusters`
+        // useless on a host that only ever runs kind mode.
+        return out;
+    };
+    for vm in vms {
+        // The convention is decoded in ONE place (`vm::vm_cluster_member`),
+        // which the ROLE column of `vm ls` reads too. A VM outside it belongs
+        // to no cluster and is skipped, never guessed into one.
+        let Some((prefix, role)) = super::vm::vm_cluster_member(&vm.name) else {
+            continue;
+        };
+        let running = matches!(vm.status, delonix_runtime_core::Status::Running);
+        out.entry(prefix.to_string())
+            .or_default()
+            .push((vm.started_unix, role, running));
+    }
+    out
 }
 
 /// `delonix describe kubernetesclusters <name>` — the per-cluster detail

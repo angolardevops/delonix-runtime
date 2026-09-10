@@ -16,6 +16,7 @@
 ~	cluster kubeconfig
 ~	cluster kube generate
 =	cluster load
+~	cluster ls
 ~	cluster prune
 ~	cluster uncordon
 ~	cluster upgrade
