@@ -444,6 +444,19 @@ fn target_for(host: &HostSpec, ssh: &SshSpec) -> SshTarget {
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum ClusterCmd {
+    /// List this host's clusters — kind-mode AND VM-based.
+    ///
+    /// Shows what is up; `-A` adds the ones whose every node is stopped.
+    // Why it came back: `cluster` was the only kind left without an `ls` (`vm`,
+    // `image`, `container`, `network` and `volume` all kept theirs), and the
+    // generic `get clusters` it had been folded into saw kind-mode nodes only.
+    // Kept as a `//` comment: this is the reason for the command, not help text
+    // the user needs at the prompt (and every help line is a string to translate).
+    Ls {
+        /// Also show clusters whose every node is stopped.
+        #[arg(short = 'A', long)]
+        all: bool,
+    },
     /// Initialize a project with the cluster manifests (kind/vm/ssh).
     ///
     /// Files ALREADY FILLED IN (images included), ready to use without editing
@@ -771,6 +784,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
         | ClusterCmd::Prune { .. } => {
             unreachable!("tratados acima")
         }
+        ClusterCmd::Ls { all } => cmd_ls(all),
         ClusterCmd::Kube { action } => super::kube::run(action),
         ClusterCmd::Apply { file } => {
             let path = manifest::resolve_path(file)?;
@@ -912,10 +926,14 @@ fn cmd_kubeconfig(name: Option<String>) -> Result<()> {
     Ok(())
 }
 
-/// `cluster ls`'s old body — now also the target of the generic `get clusters`.
-pub(crate) fn cmd_ls() -> Result<()> {
+/// `cluster ls`'s body — also the target of the generic `get clusters`.
+///
+/// The two verbs pass different `all`, on purpose: `get` is the kubectl-shaped
+/// verb and `kubectl get` lists a resource whatever state it is in, while `ls`
+/// is the docker-shaped one and `docker ps` lists what is up.
+pub(crate) fn cmd_ls(all: bool) -> Result<()> {
     let (_, store) = super::util::open_stores()?;
-    super::kindmode::list(&store)
+    super::kindmode::list(&store, all)
 }
 
 /// `cluster delete`'s old body — now also the target of the generic `delete clusters`.

@@ -2495,19 +2495,42 @@ fn fmt_vm_uptime(started_unix: Option<u64>) -> String {
 /// already committed to everywhere else (`cluster ls` derives similarly from
 /// labels rather than its own store). A VM outside that convention (manifest/
 /// `vm create` standalone) has no role to report — "-", not a guess.
-fn vm_role(vm_name: &str) -> &'static str {
-    let suffix = vm_name.rsplit('-').next().unwrap_or("");
+/// The cluster a VM belongs to, and its role in it — the ONE place the
+/// `<cluster>-cp<N>` / `<cluster>-w<N>` convention that `cluster kubeadm`
+/// commits to is decoded.
+///
+/// Two readers share it: the ROLE column below, and cluster membership in
+/// `kindmode::list`. The second was first written with its own copy of the
+/// rules; two copies of a naming convention drift apart in silence, and no
+/// test would have caught the disagreement because each copy would have
+/// passed its own.
+///
+/// A name with no `-` at all (`cp1`) yields `None`: there is no cluster for it
+/// to be a control-plane OF. That is stricter than reading the suffix alone,
+/// and it is the point — a role without a cluster is not a role.
+pub(crate) fn vm_cluster_member(vm_name: &str) -> Option<(&str, &'static str)> {
+    let (prefix, suffix) = vm_name.rsplit_once('-')?;
+    if prefix.is_empty() {
+        return None;
+    }
+    let numbered = |n: &str| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit());
     if let Some(n) = suffix.strip_prefix("cp") {
-        if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) {
-            return "control-plane";
+        if numbered(n) {
+            return Some((prefix, "control-plane"));
         }
     }
     if let Some(n) = suffix.strip_prefix('w') {
-        if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) {
-            return "worker";
+        if numbered(n) {
+            return Some((prefix, "worker"));
         }
     }
-    "-"
+    None
+}
+
+fn vm_role(vm_name: &str) -> &'static str {
+    vm_cluster_member(vm_name)
+        .map(|(_, role)| role)
+        .unwrap_or("-")
 }
 
 /// GPU column: count of PCI passthrough devices attached at boot (SR-IOV VFs
@@ -3811,7 +3834,7 @@ mod tests {
     use super::{
         fmt_vm_gpu, fmt_vm_status, fmt_vm_uptime, looks_like_address, manifest, normalize_vm_spec,
         parse_ip_gateways, parse_ss_binds, resolve_vm_defaults, unconverged_fields_condition,
-        vm_role, ManifestDoc, VmSpec, RECONCILED_VM_FIELDS,
+        vm_cluster_member, vm_role, ManifestDoc, VmSpec, RECONCILED_VM_FIELDS,
     };
     use delonix_runtime_core::Status;
 
@@ -3909,6 +3932,25 @@ mod tests {
         assert_eq!(vm_role("my-custom-vm"), "-");
         assert_eq!(vm_role("lab-cp"), "-"); // sem número, não bate no padrão
         assert_eq!(vm_role("lab-cpx"), "-"); // sufixo não-numérico
+    }
+
+    /// `vm ls`'s ROLE column and `cluster ls`'s membership must decode the
+    /// convention identically — they now call the same function, and this
+    /// pins the pair (cluster, role) that the second reader depends on.
+    #[test]
+    fn vm_cluster_member_returns_both_cluster_and_role() {
+        assert_eq!(vm_cluster_member("lab-cp1"), Some(("lab", "control-plane")));
+        assert_eq!(vm_cluster_member("lab-w2"), Some(("lab", "worker")));
+        // A hyphenated cluster name keeps every segment but the last.
+        assert_eq!(
+            vm_cluster_member("delonix-stage-cp1"),
+            Some(("delonix-stage", "control-plane"))
+        );
+        // No cluster to belong to.
+        assert_eq!(vm_cluster_member("dev"), None);
+        assert_eq!(vm_cluster_member("cp1"), None);
+        assert_eq!(vm_cluster_member("-cp1"), None);
+        assert_eq!(vm_cluster_member("lab-cp"), None);
     }
 
     #[test]

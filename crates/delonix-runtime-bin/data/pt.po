@@ -1890,6 +1890,21 @@ msgstr "Remove um cluster do modo kind (pára e apaga os nós + kubeconfig)."
 msgid "Apply the `kind: KubernetesCluster` document(s) of a manifest."
 msgstr "Aplica o(s) documento(s) `kind: KubernetesCluster` de um manifesto."
 
+msgid "List this host's clusters — kind-mode AND VM-based"
+msgstr "Lista os clusters desta máquina — em modo kind E baseados em VM"
+
+msgid "List this host's clusters — kind-mode AND VM-based.\n\nShows what is up; `-A` adds the ones whose every node is stopped."
+msgstr "Lista os clusters desta máquina — em modo kind E baseados em VM.\n\nMostra o que está de pé; `-A` acrescenta aqueles cujos nós estão todos parados."
+
+msgid "Also show clusters whose every node is stopped"
+msgstr "Mostra também os clusters cujos nós estão todos parados"
+
+msgid "the clusters that are up, kind-mode and VM alike"
+msgstr "os clusters de pé, tanto em modo kind como em VM"
+
+msgid "plus the ones whose every node is stopped"
+msgstr "mais aqueles cujos nós estão todos parados"
+
 msgid "Provision VMs (golden VM image) + `kubeadm` bootstrap — from zero to a working cluster, without writing a manifest by hand."
 msgstr "Provisiona VMs (imagem VM dourada) + bootstrap `kubeadm` — do zero a um cluster a funcionar, sem escrever um manifesto à mão."
 
