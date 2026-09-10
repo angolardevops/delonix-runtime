@@ -140,6 +140,22 @@ pub struct VmConfig {
     /// VNC graphical console (`--vnc`) — **libvirt backend only** (Cloud Hypervisor
     /// has no display). Binds to `127.0.0.1` on an auto port; see `vm vnc`.
     pub vnc: bool,
+    /// Capture the serial console to `<vmdir>/<name>.serial` instead of exposing
+    /// it as an interactive socket (Cloud Hypervisor) or pty (libvirt).
+    ///
+    /// **The two are mutually exclusive, in both backends**, and that is why this
+    /// is a per-VM choice and not a second sink: the guest writes to a single
+    /// `/dev/console` (`ttyS0`), and CH's `--serial` takes ONE destination
+    /// (`off|null|pty|tty|file=|socket=`). With capture on, `delonix vm console`
+    /// has nothing to attach to for this VM, and says so.
+    ///
+    /// Exists for an UNATTENDED reader that needs the boot log as a file — the DKS
+    /// reads the `kubeadm join` marker its control-plane prints on the console.
+    /// That reader was written when the serial WAS a file; the interactive console
+    /// (`487c9d3f`, 2026-07-20) moved it to a socket and left the file unwritten,
+    /// and nothing noticed because the reader's `unwrap_or_default()` reads a
+    /// missing file as "the node has not printed yet".
+    pub serial_capture: bool,
     /// Static IP (`--ip`) — libvirt `nat` mode only: materialized as a DHCP
     /// reservation (`<host mac=… ip=…/>`) on the libvirt network, so the guest
     /// needs NO cloud-init network config. Must belong to the network's subnet.
@@ -1586,6 +1602,17 @@ pub fn console_socket(base: &Path, name: &str) -> std::path::PathBuf {
     base.join("vms").join(format!("{name}.console"))
 }
 
+/// Where a capture-mode VM's serial console is written (`<base>/vms/<name>.serial`).
+///
+/// THE formula, with one owner. It used to be spelled out separately in `boot_ch`
+/// and in the DKS reader over in the PaaS, which is exactly how the two came to
+/// disagree: the interactive console moved the writer to a socket and the reader
+/// went on opening a file nobody wrote. Same discipline as `fw_rule_tail` — the
+/// writer and the reader share the format or they drift.
+pub fn serial_log_path(base: &Path, name: &str) -> std::path::PathBuf {
+    base.join("vms").join(format!("{name}.serial"))
+}
+
 /// A minimal HTTP/1.1 `PUT` with no request body, used only for Cloud
 /// Hypervisor's `vm.pause`/`vm.resume` (which have no response body either —
 /// both answer `204 No Content`). There is no HTTP client anywhere in this
@@ -1659,13 +1686,30 @@ fn http_status_is_2xx(status_line: &str) -> bool {
         .is_some_and(|code| (200..300).contains(&code))
 }
 
+/// Cloud Hypervisor's `--serial` destination: a capture FILE or an interactive
+/// SOCKET.
+///
+/// **Pure, and one or the other — never both.** `--serial` takes a single
+/// destination (`off|null|pty|tty|file=<path>|socket=<path>`, read off the
+/// binary's own `--help`) and the guest writes to a single `/dev/console`
+/// (`ttyS0`), so "capture *and* stay interactive" is not expressible. Splitting
+/// the decision out is what lets it be tested without a hypervisor: a live VM was
+/// never going to be the thing standing between this and a regression.
+fn ch_serial_dest(capture: bool, serial: &Path, console: &Path) -> String {
+    if capture {
+        format!("file={}", serial.display())
+    } else {
+        format!("socket={}", console.display())
+    }
+}
+
 fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) -> Result<i32> {
     let join = infra::infra_join_argv().ok_or_else(|| Error::Runtime {
         context: "vm",
         message: "the ingress (rootless infra) is not up".into(),
     })?;
     let sock = vmdir.join(format!("{}.sock", cfg.name));
-    let serial = vmdir.join(format!("{}.serial", cfg.name));
+    let serial = serial_log_path(vmdir.parent().unwrap_or(vmdir), &cfg.name);
     let log = vmdir.join(format!("{}.log", cfg.name));
     let pidfile = vmdir.join(format!("{}.pid", cfg.name));
     let _ = std::fs::remove_file(&sock);
@@ -1726,16 +1770,21 @@ fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) ->
     }
     ch.push("--net".into());
     ch.push(format!("tap={tap},mac={mac}"));
-    // Serial on a UNIX SOCKET (not a log file): this is what enables an
-    // INTERACTIVE console (`delonix vm console`) — CH accepts bytes in both
-    // directions over the socket. The boot and the getty (ttyS0) appear here.
+    // Serial: EITHER an interactive socket OR a capture file — see
+    // `ch_serial_dest` for why there is no "both".
     let console = console_socket(vmdir.parent().unwrap_or(vmdir), &cfg.name);
-    let _ = std::fs::remove_file(&console);
+    // Drop the stale endpoint of the mode we are entering. For capture this is
+    // not tidying: readers take the LAST marker they find, so a log left from a
+    // previous boot would serve a join token that expired with it.
+    let _ = std::fs::remove_file(if cfg.serial_capture {
+        &serial
+    } else {
+        &console
+    });
     ch.push("--serial".into());
-    ch.push(format!("socket={}", console.display()));
+    ch.push(ch_serial_dest(cfg.serial_capture, &serial, &console));
     ch.push("--console".into());
     ch.push("off".into());
-    let _ = &serial; // (the serial log file gave way to the socket)
 
     // background inside the netns; no pid-ns ⇒ $! is the real PID on the host.
     let ch_str = ch.iter().map(|a| shq(a)).collect::<Vec<_>>().join(" ");
@@ -2157,6 +2206,27 @@ fn cpu_quota_micros(vcpus: u32) -> Option<u64> {
     }
 }
 
+/// Where this VM's serial console is captured, or `None` for the interactive pty.
+///
+/// The path is DERIVED — `<vmdir>/<name>.serial`, the same formula `boot_ch` uses —
+/// and never comes from a caller: `cfg.name` is already validated by
+/// [`valid_vm_name`], so nothing caller-controlled reaches the domain XML. The
+/// overlay always lives in the VM directory (`create` builds it as
+/// `vmdir/<name>.qcow2`), which is what makes the parent recoverable here without
+/// widening this pure function's signature.
+fn serial_capture_path(cfg: &VmConfig, overlay: &str) -> Option<String> {
+    if !cfg.serial_capture {
+        return None;
+    }
+    let vmdir = Path::new(overlay).parent()?;
+    let base = vmdir.parent().unwrap_or(vmdir);
+    Some(
+        serial_log_path(base, &cfg.name)
+            .to_string_lossy()
+            .into_owned(),
+    )
+}
+
 pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     // Full-domain escape hatch: the manifest author owns the entire XML. The
     // rootless seclabel is still injected at boot (`create`, via the </domain>
@@ -2432,9 +2502,24 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
             xml_escape(model)
         ));
     }
-    // serial console (boot logs).
-    s.push_str("    <serial type='pty'><target type='isa-serial' port='0'/></serial>\n");
-    s.push_str("    <console type='pty'><target type='serial' port='0'/></console>\n");
+    // serial console (boot logs) — a capture FILE or an interactive pty, never
+    // both: one guest `/dev/console` maps to one serial port. See
+    // `VmConfig::serial_capture`.
+    match serial_capture_path(cfg, overlay) {
+        Some(path) => {
+            let path = xml_escape(&path);
+            s.push_str(&format!(
+                "    <serial type='file'><source path='{path}'/><target type='isa-serial' port='0'/></serial>\n"
+            ));
+            s.push_str(&format!(
+                "    <console type='file'><source path='{path}'/><target type='serial' port='0'/></console>\n"
+            ));
+        }
+        None => {
+            s.push_str("    <serial type='pty'><target type='isa-serial' port='0'/></serial>\n");
+            s.push_str("    <console type='pty'><target type='serial' port='0'/></console>\n");
+        }
+    }
     // Emulated TPM 2.0 (opt-in) — some guests (Windows, Secure Boot) require it.
     if cfg.tpm {
         s.push_str("    <tpm model='tpm-crb'>\n      <backend type='emulator' version='2.0'/>\n    </tpm>\n");
@@ -4179,6 +4264,7 @@ fn boot_spec_of(cfg: &VmConfig) -> VmBootSpec {
         bridge,
         volumes,
         vnc,
+        serial_capture,
         static_ip,
         machine,
         cpu_model,
@@ -4206,6 +4292,7 @@ fn boot_spec_of(cfg: &VmConfig) -> VmBootSpec {
         bridge: bridge.clone(),
         volumes: volumes.clone(),
         vnc: *vnc,
+        serial_capture: *serial_capture,
         static_ip: static_ip.clone(),
         machine: machine.clone(),
         cpu_model: cpu_model.clone(),
@@ -4261,6 +4348,7 @@ fn config_from(vm: &Vm) -> VmConfig {
         bridge: b.bridge.clone(),
         volumes: b.volumes.clone(),
         vnc: b.vnc,
+        serial_capture: b.serial_capture,
         static_ip: b.static_ip.clone(),
         machine: b.machine.clone(),
         cpu_model: b.cpu_model.clone(),
@@ -5694,6 +5782,110 @@ Format specific information:
         vm.namespace = "teamA".into();
         assert_eq!(config_from(&vm).namespace.as_deref(), Some("teamA"));
         assert_eq!(vm_namespace_of(&config_from(&vm)), "teamA");
+    }
+
+    /// Capture and the interactive console are MUTUALLY EXCLUSIVE, and the XML has
+    /// to say which. Revert the fix (unconditional pty) and this fails — it is the
+    /// defect that left `<vmdir>/<name>.serial` unwritten and blocked every
+    /// multi-node DKS cluster.
+    #[test]
+    fn libvirt_xml_captures_the_serial_to_a_file_when_asked() {
+        let mut cfg = test_vm_cfg("1G");
+        cfg.name = "dks-cp1".into();
+        cfg.serial_capture = true;
+        let xml = libvirt_domain_xml(
+            &cfg,
+            "/var/lib/delonix/vms/dks-cp1.qcow2",
+            "52:54:00:aa:bb:cc",
+        );
+        assert!(
+            xml.contains(
+                "<serial type='file'><source path='/var/lib/delonix/vms/dks-cp1.serial'/>"
+            ),
+            "the serial had to be captured to the file the reader opens; XML:\n{xml}"
+        );
+        assert!(
+            !xml.contains("<serial type='pty'>"),
+            "one guest /dev/console maps to one port — never both destinations"
+        );
+    }
+
+    /// The default must stay byte-for-byte what it was: `delonix vm console` is a
+    /// shipped feature, and capture is opt-in per VM precisely so it survives.
+    #[test]
+    fn without_capture_the_libvirt_xml_keeps_the_interactive_console() {
+        let cfg = test_vm_cfg("1G");
+        let xml = libvirt_domain_xml(&cfg, "/var/lib/delonix/vms/t.qcow2", "52:54:00:aa:bb:cc");
+        assert!(
+            xml.contains("<serial type='pty'>"),
+            "the default has to stay interactive"
+        );
+        assert!(
+            !xml.contains(".serial"),
+            "nothing should point at a capture file"
+        );
+    }
+
+    /// The Cloud Hypervisor half of the same rule. Revert the fix and this fails:
+    /// capture silently produced `socket=`, and `<name>.serial` stayed unwritten.
+    #[test]
+    fn the_ch_serial_destination_is_file_or_socket_never_both() {
+        let serial = Path::new("/var/lib/delonix/vms/n1.serial");
+        let console = Path::new("/var/lib/delonix/vms/n1.console");
+        assert_eq!(
+            ch_serial_dest(true, serial, console),
+            "file=/var/lib/delonix/vms/n1.serial"
+        );
+        assert_eq!(
+            ch_serial_dest(false, serial, console),
+            "socket=/var/lib/delonix/vms/n1.console"
+        );
+    }
+
+    /// The path is DERIVED from the same formula `boot_ch` uses, so the writer and
+    /// the reader cannot drift apart — the discipline `fw_rule_tail` already
+    /// enforces on the firewall side.
+    #[test]
+    fn the_capture_path_comes_from_the_vmdir_and_the_name() {
+        let mut cfg = test_vm_cfg("1G");
+        cfg.name = "n1".into();
+        cfg.serial_capture = true;
+        assert_eq!(
+            serial_capture_path(&cfg, "/var/lib/delonix/vms/n1.qcow2").as_deref(),
+            Some("/var/lib/delonix/vms/n1.serial")
+        );
+        cfg.serial_capture = false;
+        assert_eq!(
+            serial_capture_path(&cfg, "/var/lib/delonix/vms/n1.qcow2"),
+            None
+        );
+    }
+
+    /// The trap this repo has already paid four times (`-v`, `-p` on a custom
+    /// network, extra networks, `Container.pod`): state needed to REBUILD the
+    /// resource has to be persisted. `vm start` rebuilds the `VmConfig` from the
+    /// record — without this round-trip a restarted DKS node came back interactive
+    /// and the unattended reader went quiet again.
+    #[test]
+    fn serial_capture_survives_a_restart() {
+        let mut cfg = test_vm_cfg("1G");
+        cfg.serial_capture = true;
+        let mut vm = Vm::new(
+            "v".into(),
+            "d".into(),
+            "o".into(),
+            1,
+            "1G".into(),
+            "ingress".into(),
+            "t".into(),
+            "52:54:00:00:00:01".into(),
+            "s".into(),
+        );
+        vm.boot = boot_spec_of(&cfg);
+        assert!(
+            config_from(&vm).serial_capture,
+            "a capture-mode VM that loses the flag on restart goes silent"
+        );
     }
 
     /// A backend that exists only to be asked questions — no hypervisor, no

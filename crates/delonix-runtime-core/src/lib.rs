@@ -1188,6 +1188,13 @@ pub struct VmBootSpec {
     /// VNC graphical console (libvirt only).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub vnc: bool,
+    /// Serial console captured to a file instead of an interactive socket/pty.
+    /// Persisted because `vm start` REBUILDS the `VmConfig` from this record: a
+    /// capture-mode VM that lost the flag on restart would come back interactive,
+    /// and the unattended reader that depends on it would go quiet — the same trap
+    /// already paid by `-v`, `-p` on a custom network and `Container.pod`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub serial_capture: bool,
     /// Static IP — libvirt `nat` mode only (a DHCP reservation).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub static_ip: Option<String>,
