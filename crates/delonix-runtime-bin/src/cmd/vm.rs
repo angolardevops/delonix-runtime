@@ -1513,6 +1513,12 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
             // `kind: VM` herda o tamanho da imagem. Acrescentá-lo é o passo
             // seguinte, e é o que liga a quota do inquilino ao manifesto.
             disk_size_gib: None,
+            // A VM someone creates from the CLI is one they mean to WATCH, so it
+            // keeps the interactive console. Capture-to-file serves an unattended
+            // reader (the DKS) that builds the `VmConfig` as a library; leaving it
+            // off the CLI is deliberate, and it keeps `vm console` always useful
+            // here. See `VmConfig::serial_capture`.
+            serial_capture: false,
             name: name.clone(),
             // `disk` e não `spec.disk`: é o resolvido por `resolve_vm_disk` —
             // o caminho no disco de uma imagem nossa, ou a tag produzida quando
@@ -3146,6 +3152,16 @@ fn cmd_console(base: &std::path::Path, name: &str, escape: Option<&str>) -> Resu
         return Err(Error::Invalid(super::po::tf(
             "VM '{name}' is not running — start it first",
             &[("name", name)],
+        )));
+    }
+    // Capture and an interactive console are mutually exclusive (one guest
+    // `/dev/console`, one serial port), so this VM has nowhere to attach. Say so
+    // and name the file — the alternative was `virsh console`/the socket bridge
+    // failing with a message about a missing pty that explains nothing.
+    if vm.boot.serial_capture {
+        return Err(Error::Invalid(super::po::tf(
+            "VM '{name}' captures its serial console to a file, so there is no interactive console to attach to — read {path} instead, or recreate the VM without capture",
+            &[("name", name), ("path", &delonix_vm::serial_log_path(base, name).display().to_string())],
         )));
     }
     let esc = resolve_escape(escape)?;

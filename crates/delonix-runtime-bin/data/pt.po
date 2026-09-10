@@ -10736,3 +10736,6 @@ msgstr "depois cada outro control-plane/worker, um de cada vez — `kubeadm upgr
 
 msgid "a control-plane that schedules nothing anyway: skip the automatic drain/uncordon"
 msgstr "um control-plane que de qualquer forma não escalona nada: salta a drenagem/reintegração automática"
+
+msgid "VM '{name}' captures its serial console to a file, so there is no interactive console to attach to — read {path} instead, or recreate the VM without capture"
+msgstr "a VM '{name}' captura a consola série para ficheiro, por isso não há consola interactiva a que ligar — lê antes {path}, ou recria a VM sem captura"
