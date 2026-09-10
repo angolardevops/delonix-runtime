@@ -130,7 +130,8 @@ teardown_quiet() {
   # esta linha é para quando ele NÃO chega ao fim (--keep, um ^C, um timeout).
   # Um pin do sandbox deixado de pé é uma netns e um slirp a mais no host, e a
   # corrida seguinte encontrá-los-ia com um `root2` já ocupado.
-  [ -d "$SANDBOX/root2" ] && dlx2 net netns down >/dev/null 2>&1
+  dlx net httproute rm >/dev/null 2>&1
+  [ -d "$SANDBOX/root2" ] && { dlx2 net httproute rm >/dev/null 2>&1; dlx2 net netns down >/dev/null 2>&1; }
   sleep 1
   for d in images layers blobs; do rm -f "$SANDBOX/root/$d"; done   # symlinks only
   rm -rf "$SANDBOX"
@@ -870,6 +871,14 @@ scen_posse_destrutiva() {
   # Este cenário mede as duas metades, e é a única coisa nesta bateria que as
   # mede a correr — os testes unitários cobrem a decisão pura, não o comando.
   posse_cross_root
+
+  # --- 6. e o mesmo para o proxy L7 (ACH-017) -------------------------------
+  # A guarda do `running_pid` do `ingress_proxy` procurava `ingress-proxy` no
+  # `cmdline` inteiro, e todo o root do mesmo uid corre um proxy que diz isso.
+  # Reproduzido a 2026-09-09: com o proxy do root B no `proxy.pid` do root A, o
+  # `httproute apply` de A devolveu rc=0 a dizer «proxy #… reloaded (SIGHUP)» —
+  # o de B — sem nunca subir o seu, e o `httproute rm` de A matou o de B.
+  posse_proxy_cross_root
   dlx net netns down >/dev/null 2>&1
 }
 
@@ -929,6 +938,96 @@ posse_cross_root() {
   fi
   dlx2 net netns down >/dev/null 2>&1
   rm -rf "$SANDBOX/root2" "$SANDBOX/run2"
+}
+
+# O bloco 6 do `posse_destrutiva` — a mesma pergunta, no proxy L7.
+#
+# DELIBERADAMENTE com o seu próprio segundo root, e não pendurado no bloco 5: o
+# 5 mata a infra INTEIRA do root principal a meio, e o proxy vive na netns dela.
+# Encadeá-los faria um medir os restos do outro — que é exactamente o defeito
+# que o #268 corrigiu nesta bateria.
+posse_proxy_cross_root() {
+  local p1=18080 p2=18081
+  for p in $p1 $p2; do
+    if ss -ltn 2>/dev/null | grep -qE "[:.]$p\b"; then
+      skip "posse-destrutiva/proxy-cross-root" "porta $p ocupada no host — um cenário que chumba por isso não diz nada do motor"
+      return
+    fi
+  done
+  mkdir -p "$SANDBOX/root2" "$SANDBOX/run2"
+  local real="${XDG_DATA_HOME:-$HOME/.local/share}/delonix"
+  for d in images layers blobs; do [ -d "$real/$d" ] && ln -sfn "$real/$d" "$SANDBOX/root2/$d"; done
+
+  # O backend só precisa de ter IP na SDN (é isso que o apply valida); não tem
+  # de falar HTTP, e as asserções são sobre pids, não sobre respostas.
+  manifesto_httproute() { # $1 = ficheiro, $2 = porta, $3 = backend
+    cat > "$1" <<YAML
+apiVersion: gateway.delonix.io/v1alpha1
+kind: HTTPRoute
+metadata: { name: r$2 }
+spec:
+  entrypoints: [{ port: $2 }]
+  rules:
+    - paths:
+        - path: /
+          backend: { service: $3, port: 80 }
+YAML
+  }
+
+  dlx net netns up >/dev/null 2>&1
+  dlx container run -d --name pxa --net chaosnet "$IMAGE" sleep 300 >/dev/null 2>&1
+  dlx2 net netns up >/dev/null 2>&1
+  dlx2 network create p2net >/dev/null 2>&1
+  dlx2 container run -d --name pxb --net p2net "$IMAGE" sleep 300 >/dev/null 2>&1
+  sleep 2
+  manifesto_httproute "$SANDBOX/hr-a.yaml" $p1 pxa
+  manifesto_httproute "$SANDBOX/hr-b.yaml" $p2 pxb
+  dlx2 net httproute apply -f "$SANDBOX/hr-b.yaml" >/dev/null 2>&1
+  dlx  net httproute apply -f "$SANDBOX/hr-a.yaml" >/dev/null 2>&1
+  sleep 2
+  local pa pb
+  pa=$(cat "$SANDBOX/root/httproute/proxy.pid" 2>/dev/null)
+  pb=$(cat "$SANDBOX/root2/httproute/proxy.pid" 2>/dev/null)
+  if [ -z "$pa" ] || [ -z "$pb" ]; then
+    skip "posse-destrutiva/proxy-cross-root" "um dos proxies não subiu (A=${pa:-—} B=${pb:-—})"
+    proxy_cross_root_limpa; return
+  fi
+
+  # O proxy de A morre e o número é reciclado para o proxy de B.
+  kill -9 "$pa" 2>/dev/null; sleep 1
+  printf '%s' "$pb" > "$SANDBOX/root/httproute/proxy.pid"
+
+  # (a) LEITURA — o apply de A tem de subir o SEU proxy, não recarregar o de B.
+  local out; out=$(dlx net httproute apply -f "$SANDBOX/hr-a.yaml" 2>&1); sleep 2
+  local novo; novo=$(cat "$SANDBOX/root/httproute/proxy.pid" 2>/dev/null)
+  # (b) DESTRUIÇÃO — o `rm` de A não pode levar o proxy de B.
+  dlx net httproute rm >/dev/null 2>&1; sleep 2
+  local pbv; kill -0 "$pb" 2>/dev/null && pbv=VIVO || pbv=MORTO
+  log "proxy do outro root: $pb $pbv · o nosso era $pa, ficou ${novo:-—}"
+
+  if printf '%s' "$out" | grep -q "reloaded (SIGHUP)"; then
+    bad "posse-destrutiva/proxy-cross-root" "o apply recarregou por SIGHUP um proxy que não é seu — $(printf '%s' "$out" | head -1)"
+  elif [ -z "$novo" ] || [ "$novo" = "$pb" ]; then
+    bad "posse-destrutiva/proxy-cross-root" "o apply adoptou o proxy do outro root (${novo:-—})"
+  elif [ "$pbv" != VIVO ]; then
+    bad "posse-destrutiva/proxy-cross-root" "o \`httproute rm\` matou o proxy do outro root ($pb)"
+  else
+    ok "posse-destrutiva/proxy-cross-root: o pid reciclado de outro root não é recarregado nem morto"
+  fi
+  proxy_cross_root_limpa
+}
+
+# Arrumação do bloco 6 — chamada dos dois lados (SKIP e fim normal), porque um
+# proxy do sandbox deixado de pé fica com uma porta do host presa.
+proxy_cross_root_limpa() {
+  dlx2 net httproute rm >/dev/null 2>&1
+  dlx  net httproute rm >/dev/null 2>&1
+  dlx2 container rm -f pxb >/dev/null 2>&1
+  dlx  container rm -f pxa >/dev/null 2>&1
+  dlx2 net netns down >/dev/null 2>&1
+  for d in images layers blobs; do rm -f "$SANDBOX/root2/$d"; done
+  rm -rf "$SANDBOX/root2" "$SANDBOX/run2"
+  rm -f "$SANDBOX/hr-a.yaml" "$SANDBOX/hr-b.yaml"
 }
 
 scen_control_restart() {

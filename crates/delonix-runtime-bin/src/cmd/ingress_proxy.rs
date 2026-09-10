@@ -805,10 +805,61 @@ pub fn auto_deregister(name: &str) {
     let _ = with_auto_locked(|auto| auto.retain(|a| a.name != name));
 }
 
-/// The proxy's PID if it is ALIVE **and really ours** (the `/proc/<pid>/cmdline`
-/// contains `ingress-proxy`), else `None` (and cleans up an orphan pidfile). The
-/// identity guard is essential: without it, a PID recycled by the kernel would make
-/// `SIGHUP`/`SIGTERM` hit an unrelated process (SIGHUP default = terminate).
+/// Whether a live process's `/proc/<pid>/cmdline` is an `ingress-proxy` started
+/// by **THIS state root**. PURE, so the recycled-pid cases are testable without
+/// spawning a proxy.
+///
+/// **The root half is ACH-017, and it was measured.** The old test asked only
+/// whether the blob contained `ingress-proxy`, and every `DELONIX_ROOT` on this
+/// uid runs a proxy whose argv says exactly that — so a pid recycled onto
+/// ANOTHER root's proxy passed as ours, and the pid is what `SIGHUP`/`SIGTERM`
+/// go to. Reproduced 2026-09-09 with two isolated roots: `net httproute apply`
+/// from root A returned `rc=0` printing "proxy #2470290 reloaded (SIGHUP)" —
+/// B's proxy — while A's own port answered nothing, and `net httproute rm` from
+/// A then killed B's proxy and took B's `:18081` down with it.
+///
+/// **The token is the `--config` path, not the environment.** `spawn_proxy`
+/// does not pin `DELONIX_ROOT` on the child (it inherits the caller's
+/// environment, and the machine's default root exports nothing), so the environ
+/// proof that identifies the netns pin is unavailable here — the same reason it
+/// is unavailable for `slirp4netns`, and the same answer: the ownership token is
+/// the path WE choose in the argv. `config_path()` is `state_root()/httproute/
+/// config.json`, it is per-root, and `spawn_proxy` has passed it since the
+/// commit that first spawned a proxy at all (478e09aa) — so there is no
+/// in-place-upgrade trap of a proxy this cannot name.
+///
+/// `ingress-proxy` also stops being a substring of the whole blob and becomes an
+/// argv element of its own: a path or an image name that merely spells it must
+/// not let a process pose as the proxy. Same rule, and same reason, as the
+/// `argv[0]`-only test for `slirp4netns` in `delonix_net::infra`.
+fn proxy_argv_is_ours(cmdline: &[u8], cfg: &std::path::Path) -> bool {
+    let argv: Vec<String> = cmdline
+        .split(|b| *b == 0)
+        .filter(|s| !s.is_empty())
+        .map(|s| String::from_utf8_lossy(s).into_owned())
+        .collect();
+    if !argv.iter().any(|a| a == "ingress-proxy") {
+        return false;
+    }
+    // We emit the separated form; the `--config=<path>` spelling is equally
+    // valid and costs one line to accept.
+    argv.windows(2)
+        .any(|w| w[0] == "--config" && std::path::Path::new(&w[1]) == cfg)
+        || argv
+            .iter()
+            .filter_map(|a| a.strip_prefix("--config="))
+            .any(|v| std::path::Path::new(v) == cfg)
+}
+
+/// The proxy's PID if it is ALIVE **and really ours** — an `ingress-proxy`
+/// serving THIS root's config ([`proxy_argv_is_ours`]) — else `None` (and cleans
+/// up an orphan pidfile).
+///
+/// The identity guard is essential: without it, a PID recycled by the kernel
+/// would make `SIGHUP`/`SIGTERM` hit an unrelated process (SIGHUP default =
+/// terminate). Its first version asked only whether the process was *a* proxy,
+/// which is a different question from whether it is *ours* — see
+/// [`proxy_argv_is_ours`] for what that cost, measured.
 fn running_pid() -> Option<i32> {
     let pid: i32 = std::fs::read_to_string(pid_path())
         .ok()?
@@ -816,12 +867,15 @@ fn running_pid() -> Option<i32> {
         .parse()
         .ok()?;
     let is_ours = std::fs::read(format!("/proc/{pid}/cmdline"))
-        .map(|c| String::from_utf8_lossy(&c).contains("ingress-proxy"))
+        .map(|c| proxy_argv_is_ours(&c, &config_path()))
         .unwrap_or(false);
     if is_ours {
         Some(pid)
     } else {
-        let _ = std::fs::remove_file(pid_path()); // dead OR recycled PID — orphan
+        // Dead, recycled by something else, or ANOTHER root's proxy: in all
+        // three the file is a lie about this root's proxy, and removing it is
+        // the correct cleanup. Signalling the pid would not be.
+        let _ = std::fs::remove_file(pid_path());
         None
     }
 }
@@ -878,7 +932,8 @@ pub fn ensure_running(cfg: &ProxyConfig) -> Result<()> {
                 );
             }
         }
-        // SAFETY: SIGHUP to a pid we confirmed alive AND ours (cmdline guard).
+        // SAFETY: SIGHUP to a pid confirmed alive AND confirmed to be THIS
+        // root's proxy (`proxy_argv_is_ours`).
         unsafe { libc::kill(pid, libc::SIGHUP) };
         eprintln!(
             "{}",
@@ -1061,7 +1116,8 @@ pub fn stop() -> Result<()> {
         }
     }
     if let Some(pid) = running_pid() {
-        // SAFETY: SIGTERM to a pid confirmed alive and ours.
+        // SAFETY: SIGTERM to a pid confirmed alive and confirmed to be THIS
+        // root's proxy (`proxy_argv_is_ours`).
         unsafe { libc::kill(pid, libc::SIGTERM) };
     }
     let _ = std::fs::remove_file(pid_path());
@@ -1094,7 +1150,8 @@ pub(crate) fn stop_keeping_sources() -> Result<()> {
         }
     }
     if let Some(pid) = running_pid() {
-        // SAFETY: SIGTERM to a pid confirmed alive and ours (cmdline guard).
+        // SAFETY: SIGTERM to a pid confirmed alive and confirmed to be THIS
+        // root's proxy (`proxy_argv_is_ours`).
         unsafe { libc::kill(pid, libc::SIGTERM) };
     }
     let _ = std::fs::remove_file(pid_path());
@@ -1110,6 +1167,147 @@ pub fn is_running() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ACH-017: the proxy's pidfile has to prove the ROOT, not just the shape.
+    ///
+    /// **Reproduced 2026-09-09**, two isolated roots (`DELONIX_ROOT` +
+    /// `DELONIX_NET_RUNTIME_DIR`) on one uid, each with its own L7 proxy, with
+    /// root A's `proxy.pid` made to name root B's live proxy — the state a pid
+    /// wrap-around leaves behind. Both halves fired:
+    ///
+    /// * READ — `net httproute apply` from A returned `rc=0` and printed
+    ///   "proxy #2470290 reloaded (SIGHUP)" and "proxy serving", while A's own
+    ///   `:18080` answered nothing at all. The SIGHUP went to B's proxy, A's
+    ///   proxy was never respawned, and the command said it was serving.
+    /// * KILL — `net httproute rm` from A then SIGTERMed B's proxy: B's
+    ///   `:18081` went from `200` to no response. One root's teardown took the
+    ///   other root's L7 down.
+    ///
+    /// The argv could not have separated them on `ingress-proxy` alone — that
+    /// string is in every root's proxy. What separates them is the `--config`
+    /// path, which is derived from the root.
+    mod tests_proxy_ownership_proof {
+        use std::path::Path;
+
+        /// A real `/proc/<pid>/cmdline`: NUL-separated, trailing NUL.
+        fn cmdline(parts: &[&str]) -> Vec<u8> {
+            let mut v = Vec::new();
+            for p in parts {
+                v.extend_from_slice(p.as_bytes());
+                v.push(0);
+            }
+            v
+        }
+
+        /// The argv `spawn_proxy` actually writes, measured on the reproduction.
+        fn proxy_of(root: &str) -> Vec<u8> {
+            cmdline(&[
+                "/tmp/tgt/debug/delonix",
+                "ingress-proxy",
+                "--config",
+                &format!("{root}/httproute/config.json"),
+            ])
+        }
+
+        fn ours() -> std::path::PathBuf {
+            std::path::PathBuf::from("/tmp/dxp/a/httproute/config.json")
+        }
+
+        #[test]
+        fn our_own_proxy_is_recognized() {
+            assert!(super::super::proxy_argv_is_ours(
+                &proxy_of("/tmp/dxp/a"),
+                &ours()
+            ));
+        }
+
+        /// THE finding. Same binary, same subcommand, another root.
+        #[test]
+        fn another_roots_proxy_does_not_pass_as_ours() {
+            assert!(
+                !super::super::proxy_argv_is_ours(&proxy_of("/tmp/dxp/b"), &ours()),
+                "root B's proxy must not pass as ours — this is the process that \
+                 took the SIGTERM"
+            );
+        }
+
+        /// The `nsenter` wrapper form, in case it ever stops `exec`ing the proxy:
+        /// the two facts are still there as their own arguments, so the answer
+        /// must not change.
+        #[test]
+        fn the_nsenter_wrapper_form_answers_the_same() {
+            let wrapped = cmdline(&[
+                "nsenter",
+                "-t",
+                "4242",
+                "-U",
+                "-m",
+                "-n",
+                "--preserve-credentials",
+                "--",
+                "/tmp/tgt/debug/delonix",
+                "ingress-proxy",
+                "--config",
+                "/tmp/dxp/a/httproute/config.json",
+            ]);
+            assert!(super::super::proxy_argv_is_ours(&wrapped, &ours()));
+        }
+
+        /// `--config=<path>` is as valid as the separated form we emit.
+        #[test]
+        fn the_joined_config_spelling_is_accepted() {
+            let joined = cmdline(&[
+                "delonix",
+                "ingress-proxy",
+                "--config=/tmp/dxp/a/httproute/config.json",
+            ]);
+            assert!(super::super::proxy_argv_is_ours(&joined, &ours()));
+        }
+
+        /// `ingress-proxy` as a SUBSTRING of the blob is not the proxy. The old
+        /// test searched the whole `cmdline` for it, so any process whose path
+        /// or argument merely spelled it answered yes.
+        #[test]
+        fn a_process_that_only_spells_the_name_is_not_the_proxy() {
+            let impostor = cmdline(&[
+                "/usr/bin/tail",
+                "-f",
+                "/tmp/dxp/a/httproute/ingress-proxy.log",
+            ]);
+            assert!(!super::super::proxy_argv_is_ours(&impostor, &ours()));
+        }
+
+        /// A recycled pid on an unrelated process — the case the guard was
+        /// written for, and which must keep being refused.
+        #[test]
+        fn a_recycled_pid_on_a_stranger_is_not_ours() {
+            let stranger = cmdline(&["/usr/lib/firefox/firefox", "-contentproc"]);
+            assert!(!super::super::proxy_argv_is_ours(&stranger, &ours()));
+            assert!(!super::super::proxy_argv_is_ours(&[], &ours()));
+        }
+
+        /// No `--config` at all is no token, and no token is no proof — the same
+        /// rule the slirp's ownership check follows.
+        #[test]
+        fn a_proxy_without_a_config_proves_nothing() {
+            let bare = cmdline(&["delonix", "ingress-proxy"]);
+            assert!(!super::super::proxy_argv_is_ours(&bare, &ours()));
+        }
+
+        /// A prefix is not a path: `/tmp/dxp/ab` must not answer for
+        /// `/tmp/dxp/a`, which is what a plain `starts_with` would have done.
+        #[test]
+        fn a_sibling_root_with_a_prefix_name_is_not_ours() {
+            assert!(!super::super::proxy_argv_is_ours(
+                &proxy_of("/tmp/dxp/ab"),
+                &ours()
+            ));
+            assert_ne!(
+                Path::new("/tmp/dxp/ab/httproute/config.json"),
+                ours().as_path()
+            );
+        }
+    }
 
     fn r(host: &str, path: &str, backend: &str) -> Route {
         Route {
