@@ -127,23 +127,132 @@ teardown_quiet() {
 # ---------------------------------------------------------------- scenarios --
 
 # The failure this whole harness was built to catch. See
-# `cmd::netns::reconcile_after_respawn`.
+# `cmd::netns::reconcile_after_respawn` and, for the repair this now asserts,
+# `infra::adopt_pin`.
+#
+# ## This scenario declared PASS over ACH-015 for as long as it existed
+#
+# It used to assert ONE thing — that `ck1` still pinged its gateway — and print
+# `pid $before → $after` from the CONTAINER's pid. Both halves were misleading.
+# Measured 2026-09-09 against `28ca3766`, on this exact scenario:
+#
+#     netns up rc=1  (refused: "another delonix state root … already owns")
+#     status:        ingress DOWN — pin — · control 1902451 · slirp 1902469
+#     ck1:           rede OK          ← the only thing the scenario looked at
+#     workload NOVO: rc=1             ← the node was dead for anything new
+#
+# `ck1` pings because its netns never died — the control plane is INSIDE those
+# namespaces and holds them open. So the assertion was true, and proved nothing
+# about the property in the scenario's own name: the holder did not come back.
+# And the pid pair was the container's, which nobody had restarted, so it
+# printed two identical numbers and read like proof of a respawn.
+#
+# The suite hid it too. `holder_kill` runs FIRST and left the node half-up, and
+# `posse_destrutiva`, further down the list, does a `netns down` + `up` — so the
+# wreckage was cleaned up before anything could report it.
+#
+# It now asserts the whole property, and the strongest form of it: after the pin
+# dies, `netns up` must SUCCEED, a NEW pin must exist, and nothing else may move
+# — not the control, not the slirp, not the netns, not the container. That last
+# clause is the one that matters. A recovery-by-restart would also leave `ck1`
+# pinging and would look identical to the old assertion; re-pinning the
+# surviving namespaces costs the workload nothing at all.
 scen_holder_kill() {
-  head_ "holder-kill — o holder morre e volta; o container tem de recuperar rede"
+  head_ "holder-kill — o pin morre e volta, sem custar a rede a ninguém"
   dlx net netns up >/dev/null 2>&1
   dlx container run -d --name ck1 --net chaosnet "$IMAGE" sleep 600 >/dev/null 2>&1
   sleep 2
   neton ck1 || { skip "holder-kill" "rede não subiu no cenário base"; return; }
-  local before; before=$(cpid ck1)
-  kill -9 "$(holder_pid)" 2>/dev/null; sleep 2
-  dlx net netns up >/dev/null 2>&1; sleep 3
-  if neton ck1; then
-    local after; after=$(cpid ck1)
-    ok "holder-kill (recuperado; pid $before → $after)"
+  local pin_b ctl_b sli_b wl_b
+  pin_b=$(holder_pid); ctl_b=$(control_pid); sli_b=$(slirp_pid); wl_b=$(cpid ck1)
+  kill -9 "$pin_b" 2>/dev/null; sleep 2
+  # O rc da RECUPERAÇÃO, sem pipe pelo meio — foi a sua ausência que deixou este
+  # cenário verde por cima de um nó incapaz de aceitar um único workload novo.
+  local up_out up_rc
+  up_out=$(dlx net netns up 2>&1); up_rc=$?
+  sleep 3
+  local pin_a ctl_a sli_a wl_a
+  pin_a=$(holder_pid); ctl_a=$(control_pid); sli_a=$(slirp_pid); wl_a=$(cpid ck1)
+  log "pin $pin_b → ${pin_a:-—} · control $ctl_b → ${ctl_a:-—} · slirp $sli_b → ${sli_a:-—} · ck1 $wl_b → ${wl_a:-—} · netns up rc=$up_rc"
+  if [ "$up_rc" -ne 0 ]; then
+    bad "holder-kill" "\`net netns up\` recusa depois de o pin morrer (rc=$up_rc) — $(printf '%s' "$up_out" | head -1)"
+  elif [ -z "$pin_a" ]; then
+    bad "holder-kill" "o \`netns status\` não reporta pin — o nó ficou meio-de-pé"
+  elif [ "$pin_a" = "$pin_b" ]; then
+    bad "holder-kill" "o pin não foi substituído ($pin_b) — o pidfile mente sobre um processo morto"
+  elif ! neton ck1; then
+    bad "holder-kill" "o container ficou sem rede depois do respawn"
+  elif [ "$ctl_b" != "$ctl_a" ] || [ "$sli_b" != "$sli_a" ]; then
+    bad "holder-kill" "re-pinar reiniciou o que não era seu (control $ctl_b→$ctl_a · slirp $sli_b→$sli_a)"
+  elif [ "$wl_b" != "$wl_a" ]; then
+    bad "holder-kill" "o container foi REINICIADO ($wl_b→$wl_a) — as namespaces sobreviveram, ninguém tinha de mexer nele"
   else
-    bad "holder-kill" "container ficou sem rede depois do respawn"
+    # E a metade que faltava por inteiro: um nó que não aceita trabalho novo não
+    # recuperou, por muito que os workloads antigos continuem a pingar.
+    local novo_out novo_rc
+    novo_out=$(dlx container run -d --name ck1b --net chaosnet "$IMAGE" sleep 60 2>&1); novo_rc=$?
+    sleep 2
+    if [ "$novo_rc" -ne 0 ]; then
+      bad "holder-kill" "recuperado para os antigos, fechado para os novos: \`container run --net\` rc=$novo_rc — $(printf '%s' "$novo_out" | head -1)"
+    elif ! neton ck1b; then
+      bad "holder-kill" "o workload novo arrancou mas não ganhou rede"
+    else
+      ok "holder-kill (pin $pin_b→$pin_a; control, slirp e container intocados; aceita trabalho novo)"
+    fi
+    dlx container rm -f ck1b >/dev/null 2>&1
   fi
   dlx container rm -f ck1 >/dev/null 2>&1
+}
+
+# THE OTHER SIDE of `holder_kill`, and the boundary of `infra::adopt_pin`.
+#
+# Re-pinning is only available while something is still holding the namespaces
+# open — in practice, the control plane. Kill the pin AND the control and there
+# is nothing left to adopt: the netns is gone, every veth in it with it, and the
+# only honest recovery is the destructive one — rebuild from zero and RESTART
+# the workloads that were stranded (`cmd::netns::reconcile_after_respawn`).
+#
+# This scenario exists because `adopt_pin` made the cheap path the common one,
+# and a repair that silently starts firing where it should not is the failure
+# nobody would notice. Here the container MUST come back with a different pid:
+# if it does not, either the adoption ran on namespaces that were already dead,
+# or the reconciliation abandoned a workload and said nothing — which is the
+# exact defect `pod_holder_respawn` was written for.
+scen_full_holder_death() {
+  head_ "full-holder-death — sem ninguém a segurar as namespaces, reconstrói e diz que reiniciou"
+  dlx net netns up >/dev/null 2>&1
+  dlx container run -d --name fh1 --net chaosnet "$IMAGE" sleep 600 >/dev/null 2>&1
+  sleep 2
+  neton fh1 || { skip "full-holder-death" "rede não subiu no cenário base"; dlx container rm -f fh1 >/dev/null 2>&1; return; }
+  local pin_b ctl_b wl_b
+  pin_b=$(holder_pid); ctl_b=$(control_pid); wl_b=$(cpid fh1)
+  [ -n "$ctl_b" ] || { skip "full-holder-death" "binário sem plano de controlo separado"; dlx container rm -f fh1 >/dev/null 2>&1; return; }
+  # A ORDEM importa: o control primeiro. Ao contrário, o pin morre, o `netns
+  # status` seguinte encontraria a infra adoptável, e o cenário mediria o outro
+  # caminho sem dar por isso.
+  kill -9 "$ctl_b" 2>/dev/null; kill -9 "$pin_b" 2>/dev/null; sleep 2
+  local up_out up_rc
+  up_out=$(dlx net netns up 2>&1); up_rc=$?
+  sleep 4
+  local pin_a ctl_a wl_a
+  pin_a=$(holder_pid); ctl_a=$(control_pid); wl_a=$(cpid fh1)
+  log "pin $pin_b → ${pin_a:-—} · control $ctl_b → ${ctl_a:-—} · fh1 $wl_b → ${wl_a:-—} · netns up rc=$up_rc"
+  if [ "$up_rc" -ne 0 ]; then
+    bad "full-holder-death" "\`net netns up\` não reconstrói com tudo morto (rc=$up_rc) — $(printf '%s' "$up_out" | head -1)"
+  elif [ -z "$pin_a" ] || [ "$pin_a" = "$pin_b" ]; then
+    bad "full-holder-death" "não há pin novo (${pin_a:-—}) — a infra não foi reconstruída"
+  elif [ "$wl_b" = "$wl_a" ]; then
+    bad "full-holder-death" "o container NÃO foi reiniciado ($wl_b) — a netns dele morreu com o pin, \
+por isso ou ficou abandonado em silêncio, ou alguém adoptou namespaces mortas"
+  elif ! printf '%s' "$up_out" | grep -q "recovered"; then
+    bad "full-holder-death" "reconstruiu e reiniciou o container mas não o REPORTOU — \
+uma recuperação silenciosa é indistinguível de uma que não aconteceu"
+  elif ! neton fh1; then
+    bad "full-holder-death" "o container foi reiniciado e continua sem rede"
+  else
+    ok "full-holder-death (reconstruído: pin $pin_b→$pin_a, fh1 $wl_b→$wl_a, e reportado)"
+  fi
+  dlx container rm -f fh1 >/dev/null 2>&1
 }
 
 # A healthy system must not be disturbed by the recovery path — the guard that
@@ -604,8 +713,8 @@ scen_pod_holder_respawn() {
     skip "pod-holder-respawn" "o pod não ganhou rede no cenário base"
     dlx pod rm -f rp >/dev/null 2>&1; rm -rf "$d"; return
   fi
-  local before after
-  before=$(holder_pid)
+  local before after ctl_b sli_b
+  before=$(holder_pid); ctl_b=$(control_pid); sli_b=$(slirp_pid)
   kill -9 "$before" 2>/dev/null; sleep 2
   # O rc da RECUPERAÇÃO é a metade que faltava, e custou caro (2026-09-09).
   #
@@ -628,21 +737,37 @@ scen_pod_holder_respawn() {
   up_out=$(dlx net netns up 2>&1); up_rc=$?
   sleep 4
   after=$(holder_pid)
-  local c0 c1
+  local c0 c1 ctl_a sli_a
+  ctl_a=$(control_pid); sli_a=$(slirp_pid)
   neton rp-c0 && c0=up || c0=down
   neton rp-c1 && c1=up || c1=down
-  log "holder $before → ${after:-—} · rp-c0=$c0 · rp-c1=$c1 · netns up rc=$up_rc"
+  log "holder $before → ${after:-—} · control $ctl_b → ${ctl_a:-—} · slirp $sli_b → ${sli_a:-—} · rp-c0=$c0 · rp-c1=$c1 · netns up rc=$up_rc"
   if [ "$c0" != up ] || [ "$c1" != up ]; then
     bad "pod-holder-respawn" "membro sem rede depois do respawn (c0=$c0 c1=$c1)"
   elif [ "$up_rc" -ne 0 ]; then
-    # ACH-015. O `kill -9` do pin na presença de um POD leva o pidfile e deixa o
-    # nó num estado que o próprio motor se recusa a reparar. A recusa tem razão
-    # escrita e é defensável; o que falta é o caminho de volta sem `netns down`.
+    # ACH-015, CORRIGIDO 2026-09-09 (`infra::adopt_pin`) — esta linha é agora a
+    # guarda da correcção e não o registo do defeito.
+    #
+    # O que se media aqui: o `kill -9` do pin deixava um `holder.pid` a nomear um
+    # número morto, o `ensure_up` lia isso como «não há pin», encontrava o
+    # listener do control — que continua vivo DENTRO das namespaces e por isso as
+    # segura — e recusava reconstruir, com razão. Mas as duas saídas que a recusa
+    # oferecia eram «usa o outro root» (não havia outro root: era o mesmo) e
+    # `net netns down` (que destrói exactamente o que a recusa protegia). Um
+    # `kill -9` custava o nó inteiro para trabalho novo, para sempre.
+    #
+    # A reparação não reconstrói nada: entra nas namespaces que já lá estão e
+    # volta a pinar. Se esta linha voltar a disparar, ou a prova de posse do
+    # control deixou de bater certo, ou o `adopt_pin` regrediu.
     bad "pod-holder-respawn" "os membros recuperaram MAS o nó não aceita workloads \
 novos: \`net netns up\` rc=$up_rc — $(printf '%s' "$up_out" | head -1)"
   elif [ -z "$after" ]; then
     bad "pod-holder-respawn" "os membros recuperaram MAS o \`net netns status\` não \
 reporta pin: o nó fica meio-de-pé e o attach seguinte falha"
+  elif [ "$after" = "$before" ]; then
+    bad "pod-holder-respawn" "o pin não foi substituído ($before) — o pidfile mente sobre um processo morto"
+  elif [ "$ctl_b" != "$ctl_a" ] || [ "$sli_b" != "$sli_a" ]; then
+    bad "pod-holder-respawn" "re-pinar reiniciou o que não era seu (control $ctl_b→$ctl_a · slirp $sli_b→$sli_a)"
   else
     ok "pod-holder-respawn (os dois membros recuperaram, e o nó volta inteiro: pin $after)"
   fi
@@ -1211,7 +1336,7 @@ $(cat "/sys/fs/cgroup$cg1/memory.max" 2>/dev/null || echo ausente))"
   dlx container rm -f ckg0 ckg1 >/dev/null 2>&1
 }
 
-ALL=(holder_kill control_restart posse_destrutiva holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_holder_respawn scale abrupt_kill aggregate_ceiling delegated_scope cgroup_netns disk_full write_failure stack_converge stack_netroute stack_partial_apply truenas_destroy)
+ALL=(holder_kill full_holder_death control_restart posse_destrutiva holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_holder_respawn scale abrupt_kill aggregate_ceiling delegated_scope cgroup_netns disk_full write_failure stack_converge stack_netroute stack_partial_apply truenas_destroy)
 
 while [ $# -gt 0 ]; do
   case "$1" in
