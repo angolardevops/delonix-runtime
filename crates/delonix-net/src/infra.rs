@@ -188,18 +188,29 @@ fn control_reachable() -> bool {
 /// Deliberately does NOT auto-restart the infra: killing a live holder frees its
 /// netns, dropping the network of every container attached to the SDN. That is the
 /// operator's call, so the message says exactly what to run instead. PURE.
-/// The actionable message for "this root has no pin, but the user's shared
-/// control socket answers" — two `DELONIX_ROOT`s on one uid.
+/// The actionable message for "a listener answers on the control socket and
+/// NOTHING can prove whose it is".
+///
+/// It used to be the message for "the pin is gone", and stated a cause it had
+/// never checked: *another* state root owns the infra. ACH-015 showed what that
+/// costs. The branch is reached whenever there is no LIVE pin, so a pidfile
+/// naming a pid that merely died arrives here too — and the operator was then
+/// sent looking for a second root that did not exist, while the real owner was
+/// his own control plane, alive, two lines up in `net netns status`. The
+/// wording now states only what was measured: a listener exists, and this root
+/// cannot show a control process of its own to account for it.
 ///
 /// Pure so the wording is testable: it is the whole value of the branch, and the
 /// branch itself cannot be exercised without two live holders.
 fn foreign_holder_message(sock: &Path, ours: &Path) -> String {
     format!(
-        "another delonix state root on this user already owns the network infra: `{}` has a \
-         live listener, but there is no pidfile under `{}`. The sockets are per-USER while the \
-         pidfiles are per-ROOT, so rebuilding from here would delete that infra and unplug \
-         every workload on it. Either use that root (unset/point `DELONIX_ROOT` at it), or stop \
-         it deliberately with `delonix net netns down` from the root that owns it.",
+        "`{}` has a live listener, but nothing under `{}` can prove whose it is: there is no \
+         control pidfile naming a live `netns control` started by THIS root. Rebuilding from \
+         here would delete that infra and unplug every workload on it, so it is refused. If \
+         the infra is another root's, use that root (unset/point `DELONIX_ROOT` at it); if it \
+         is this one's and its `ingress/` was wiped by hand, stop it deliberately with \
+         `delonix net netns down` and bring it back up — that DOES restart every workload on \
+         the SDN.",
         sock.display(),
         ours.display()
     )
@@ -449,6 +460,50 @@ fn read_pid_verified(kind: PidKind, path: &Path) -> Option<i32> {
     }
     proc_argv(pid).filter(|argv| argv_matches(kind, argv))?;
     Some(pid)
+}
+
+/// The value of `key` in a NUL-separated `/proc/<pid>/environ` blob. PURE, so
+/// the identity check that depends on it is testable without a process.
+fn env_value(raw: &[u8], key: &str) -> Option<String> {
+    let prefix = format!("{key}=");
+    raw.split(|b| *b == 0)
+        .filter(|e| !e.is_empty())
+        .find_map(|e| {
+            String::from_utf8_lossy(e)
+                .strip_prefix(&prefix)
+                .map(str::to_owned)
+        })
+}
+
+/// Whether a live process was started by **this** root — i.e. carries the two
+/// variables `start_control`/`start_pin` pin explicitly on every child
+/// (`DELONIX_ROOT` and `DELONIX_NET_RUNTIME_DIR`) and both match ours. PURE on
+/// the environ blob for the same reason as [`should_signal`].
+///
+/// This is a stronger question than [`argv_matches`], and the difference is the
+/// whole point of [`own_control_pid`]: every root on this user runs a control
+/// process with the SAME argv, so argv alone cannot tell one root's control
+/// plane from another's — and adopting the wrong one's namespaces would be the
+/// exact cross-root accident the guard in `ensure_up_locked` exists to prevent.
+fn env_names_this_root(raw: &[u8], root: &Path, runtime: &Path) -> bool {
+    env_value(raw, "DELONIX_ROOT").as_deref() == root.to_str()
+        && env_value(raw, RUNTIME_DIR_ENV).as_deref() == runtime.to_str()
+}
+
+/// The control process **this** root started, proven alive and proven ours, or
+/// `None`. Three independent facts have to hold: the pidfile under our own
+/// `ingress/` names it, the live process wearing that number really is a
+/// `netns control` ([`read_pid_verified`]), and its environment names our root
+/// and our runtime dir ([`env_names_this_root`]) — which is what survives a pid
+/// wrap-around onto another root's control plane.
+///
+/// `/proc/<pid>/environ` is readable only by the process's own uid, and every
+/// delonix process on this path shares ours; a failure to read it is answered
+/// with `None`, i.e. "cannot prove it is ours", never with an assumption.
+fn own_control_pid() -> Option<i32> {
+    let pid = read_pid_verified(PidKind::Control, &control_pid_path())?;
+    let raw = std::fs::read(format!("/proc/{pid}/environ")).ok()?;
+    env_names_this_root(&raw, &base_root(), &runtime_dir()).then_some(pid)
 }
 
 // ---- ingress nft (inside the infra netns) -----------------------------------
@@ -957,6 +1012,30 @@ fn ensure_up_locked() -> Result<()> {
     // attached to it. The paragraphs above are kept as the history that produced
     // the guard — but read them as history, not as a live failure mode.
     if control_reachable() {
+        // ACH-015. Reaching here does NOT mean somebody else owns this infra —
+        // and the message used to say it did. The branch above answers
+        // "is there a LIVE pin", so a `holder.pid` naming a pid that simply died
+        // lands here just like a missing one, and the operator was told to go
+        // find a second root that does not exist. Measured 2026-09-09: after
+        // `kill -9` on the pin, `holder.pid` is still on disk with its old
+        // number, and the listener on the socket is this very root's control
+        // plane, still holding the namespaces open.
+        //
+        // So ask the only question that separates the two: is that listener
+        // provably OURS? `own_control_pid` answers with three independent facts
+        // and never with an assumption. When it is ours, the namespaces are ours
+        // too and can be re-pinned in place, touching nothing — see `adopt_pin`.
+        // When it cannot be proven, the refusal below stands unchanged, because
+        // the cost of being wrong is every workload on somebody else's node.
+        if let Some(control) = own_control_pid() {
+            let pin = adopt_pin(control)?;
+            // The uplink belongs to the pin, not to the control — restart it
+            // only if it, too, is gone. Same rule as the pin-alive branch above.
+            if read_pid_verified(PidKind::Slirp, &slirp_pid_path()).is_none() {
+                start_slirp(pin)?;
+            }
+            return Ok(());
+        }
         return Err(Error::Runtime {
             context: "control socket",
             message: foreign_holder_message(&control_sock_path(), &ingress_dir()),
@@ -1221,6 +1300,157 @@ fn start_pin() -> Result<i32> {
         context: "ingress holder",
         message: "timeout waiting for the netns holder".into(),
     })
+}
+
+/// Re-pins namespaces that OUTLIVED their pin — the repair for ACH-015.
+///
+/// **The state this exists for, reproduced 3/3 on 2026-09-09.** `kill -9` the
+/// pin (an OOM kill, a crash, an operator) and the namespaces do not die with
+/// it: the control plane was started with `nsenter -t <pin> -U -m -n`, so it is
+/// *inside* them and holds all three open. Every workload keeps its wire — the
+/// bridge, the veths and the pinned `/run/netns/*` are all exactly where they
+/// were. What is gone is the one process whose pid was the HANDLE to those
+/// namespaces, and `holder.pid` now names a number nobody is using.
+///
+/// Before this function, that cost the node everything it had not already
+/// started. `ensure_up_locked` saw no live pin, found a listener on the control
+/// socket, and refused — correctly, because rebuilding from there would have
+/// killed the live control plane and unplugged every workload on it. But the two
+/// ways out it offered were "use the other root" (there is no other root) and
+/// `net netns down` (which destroys precisely what the refusal was protecting).
+/// So a single `kill -9` turned into a choice between a node that never accepts
+/// another workload and a node that drops the ones it has. Measured, on both the
+/// pod and the plain-container path: `net netns up` and
+/// `container run --net <net>` both `rc=1`, forever.
+///
+/// **Why re-pinning is safe where rebuilding is not.** This does not create a
+/// namespace, a bridge, a veth or a rule; it starts one process that enters the
+/// namespaces that are already there and calls `pause()`. Nothing on the
+/// dataplane moves, which is the same guarantee the control-plane restart in
+/// `ensure_up_locked` already makes — this is that branch's mirror image, for
+/// the half of the split that was assumed never to die.
+///
+/// **Why the userns can be re-entered at all**, given that
+/// `reconcile_after_respawn` documents adoption as impossible: that entry is
+/// about a *different* operation. Binding a dead holder's netns into a NEW
+/// userns (`ip netns attach`) needs CAP_SYS_ADMIN over the userns that owns it,
+/// and a fresh holder has none — that remains true. Here the owning userns is
+/// still alive and we JOIN it, which is the same `nsenter` that `start_control`
+/// has always done. Verified live before writing this: `nsenter -t <control> -U
+/// -m -n` from the unprivileged CLI lands as uid 0 inside, and sees `delonix0`,
+/// `tap0`, the pod's veth and `/run/netns/pod-rp`.
+///
+/// **Deliberately NOT attempted when the control socket is unreachable.** A
+/// control process that is alive but wedged would need its own restart on top of
+/// this, and that is a second failure mode with its own design (two control
+/// processes must not end up sharing one socket). It has not been reproduced, so
+/// it is not handled here — the caller only reaches this function with a live
+/// listener answering.
+///
+/// Failure NEVER falls back to a rebuild: the pidfile we wrote is removed and
+/// the half-started pin is signalled, leaving the caller exactly the state it
+/// had. A `teardown_locked()` here — as `start_pin` does on the same timeout —
+/// would kill the live control plane this function exists to preserve.
+fn adopt_pin(control: i32) -> Result<i32> {
+    let exe = std::env::current_exe().map_err(|e| Error::Runtime {
+        context: "current_exe",
+        message: e.to_string(),
+    })?;
+    let _ = std::fs::remove_file(status_path());
+    let child = Command::new("nsenter")
+        .args([
+            "-t",
+            &control.to_string(),
+            "-U",
+            "-m",
+            "-n",
+            "--preserve-credentials",
+            "--",
+        ])
+        .arg(&exe)
+        .args(["netns", "pin"])
+        // Same two variables, for the same reason, as every other child on this
+        // path: inside the userns `geteuid()` is 0, so a pin left to compute the
+        // paths itself would write its status where nobody is looking.
+        .env("DELONIX_ROOT", base_root())
+        .env(runtime_dir_env().0, runtime_dir_env().1)
+        .env("DELONIX_INTERNAL", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        // A FILE, never the caller's stderr — the adopted pin outlives this
+        // command exactly like the original one, and inheriting a pipe here
+        // would hang `out=$(delonix …)` for the life of the infra (measured
+        // 2026-08-15, see `start_pin`).
+        .stderr(
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(pin_log_path())
+                .map(Stdio::from)
+                .unwrap_or_else(|_| Stdio::null()),
+        )
+        .spawn()
+        .map_err(|e| Error::Runtime {
+            context: "spawn nsenter",
+            message: e.to_string(),
+        })?;
+    let pid = child.id() as i32;
+    let _ = std::fs::write(holder_pid_path(), pid.to_string());
+    // Same as `start_pin`: the pin lives for the whole life of the infra.
+    std::mem::forget(child);
+
+    for _ in 0..100 {
+        if !pid_alive(pid) {
+            return Err(adopt_failed(
+                pid,
+                "the re-pinned holder died during startup",
+            ));
+        }
+        match std::fs::read_to_string(status_path()) {
+            Ok(s) if s.trim() == "pinned" => {
+                // The status file is the infra's stage marker, and after an
+                // adoption the infra is not merely pinned — the control plane
+                // that kept these namespaces alive is still serving. Put it back
+                // to what `start_control` last wrote, so the file does not claim
+                // a state the node has been past for minutes.
+                write_status("ready");
+                return Ok(pid);
+            }
+            Ok(s) if s.trim_start().starts_with("err:") => {
+                return Err(adopt_failed(
+                    pid,
+                    s.trim().trim_start_matches("err:").trim(),
+                ));
+            }
+            _ => std::thread::sleep(std::time::Duration::from_millis(50)),
+        }
+    }
+    Err(adopt_failed(
+        pid,
+        "timeout waiting for the re-pinned holder",
+    ))
+}
+
+/// Undoes a failed [`adopt_pin`] and wraps `why`. Signals the candidate only if
+/// it really is a pin (the [`should_signal`] rule), and removes the pidfile that
+/// was written optimistically — a `holder.pid` naming a process that never
+/// signalled `pinned` is the same lie the file existed to avoid.
+fn adopt_failed(pid: i32, why: &str) -> Error {
+    let argv = if pid_alive(pid) { proc_argv(pid) } else { None };
+    if should_signal(PidKind::Pin, argv.as_deref()) {
+        // SAFETY: kill() with a pid confirmed alive AND confirmed ours.
+        unsafe { libc::kill(pid, libc::SIGTERM) };
+    }
+    let _ = std::fs::remove_file(holder_pid_path());
+    Error::Runtime {
+        context: "ingress holder",
+        message: format!(
+            "{why}: this root's control plane is alive and still holds the namespaces, but \
+             re-pinning them failed. The running workloads are untouched. Recover with \
+             `delonix net netns down` followed by `delonix net netns up` — that DOES restart \
+             every workload on the SDN."
+        ),
+    }
 }
 
 /// Starts the **single slirp** attached to the holder's netns (`tap0`), with an api-socket
@@ -8916,6 +9146,35 @@ Inter-|   Receive                                                |  Transmit
         // Nunca sugerir a reconstrução: é isso que destrói a infra alheia.
         assert!(!m.contains("rebuild it"));
     }
+
+    /// ACH-015, the diagnosis half. The message must never again ASSERT a cause
+    /// nobody measured.
+    ///
+    /// The old wording opened with "another delonix state root on this user
+    /// already owns the network infra" and went on with "there is no pidfile
+    /// under <root>/ingress". Measured 2026-09-09 in the state that produced it:
+    /// the root was the SAME one, `holder.pid` was on disk with its old number,
+    /// and the socket's owner was this very root's control plane. Two claims,
+    /// both false, and they are what sent the operator to the two wrong exits.
+    #[test]
+    fn the_message_asserts_no_cause_it_did_not_measure() {
+        let m = super::foreign_holder_message(
+            std::path::Path::new("/tmp/delonix-net-1000/control.sock"),
+            std::path::Path::new("/home/w/cri/state/ingress"),
+        );
+        assert!(
+            !m.contains("another delonix state root on this user already owns"),
+            "claims an owner it never checked: {m}"
+        );
+        assert!(
+            !m.contains("there is no pidfile under"),
+            "claims a file is absent when it may well be there: {m}"
+        );
+        // What was actually proven, and only this: a listener exists, and this
+        // root cannot produce a control plane of its own to account for it.
+        assert!(m.contains("live listener"));
+        assert!(m.contains("prove"));
+    }
 }
 
 #[cfg(test)]
@@ -9079,6 +9338,130 @@ mod tests_pidfile_read_identity {
     // namespaces this suite must not touch. `argv_matches` owns that half in
     // `tests_identidade_do_pidfile`, and `read_pid_verified` is the composition
     // of the two halves each of which is covered.
+}
+
+/// ACH-015: the proof that a live control plane belongs to THIS root.
+///
+/// It is what authorises `adopt_pin` to enter another process's namespaces, so
+/// it is where the bar has to be high. The argv alone will not do — EVERY root
+/// on this uid runs a control plane with the SAME `delonix netns control` — and
+/// that is exactly why the decision looks at the environment, which
+/// `start_control` pins explicitly on every child.
+#[cfg(test)]
+mod tests_control_ownership_proof {
+    use super::{env_names_this_root, env_value};
+    use std::path::Path;
+
+    /// A real `/proc/<pid>/environ`: NUL-separated entries, no guaranteed order,
+    /// with a trailing NUL.
+    fn environ(pairs: &[&str]) -> Vec<u8> {
+        let mut v = Vec::new();
+        for p in pairs {
+            v.extend_from_slice(p.as_bytes());
+            v.push(0);
+        }
+        v
+    }
+
+    #[test]
+    fn reads_the_variable_whatever_its_position() {
+        let raw = environ(&["LANG=C", "DELONIX_ROOT=/a/b", "PATH=/usr/bin"]);
+        assert_eq!(env_value(&raw, "DELONIX_ROOT").as_deref(), Some("/a/b"));
+        assert_eq!(env_value(&raw, "PATH").as_deref(), Some("/usr/bin"));
+        assert_eq!(env_value(&raw, "ABSENT"), None);
+    }
+
+    /// A prefix is not a name. Without this, `DELONIX_ROOT_BACKUP=/x` would
+    /// answer for `DELONIX_ROOT` and the ownership proof would accept the wrong
+    /// value.
+    #[test]
+    fn does_not_confuse_a_variable_with_the_prefix_of_another() {
+        let raw = environ(&["DELONIX_ROOTX=/wrong", "DELONIX_ROOT_BACKUP=/also"]);
+        assert_eq!(env_value(&raw, "DELONIX_ROOT"), None);
+    }
+
+    /// An empty variable is a value, not an absence — and must not match a root
+    /// whose path happens to be empty by accident of construction.
+    #[test]
+    fn an_empty_variable_is_a_value() {
+        let raw = environ(&["DELONIX_ROOT="]);
+        assert_eq!(env_value(&raw, "DELONIX_ROOT").as_deref(), Some(""));
+    }
+
+    #[test]
+    fn both_variables_matching_prove_the_owner() {
+        let raw = environ(&[
+            "DELONIX_ROOT=/tmp/dlx/root",
+            "DELONIX_NET_RUNTIME_DIR=/tmp/dlx/run",
+            "DELONIX_INTERNAL=1",
+        ]);
+        assert!(env_names_this_root(
+            &raw,
+            Path::new("/tmp/dlx/root"),
+            Path::new("/tmp/dlx/run")
+        ));
+    }
+
+    /// The case that costs the most, and so gets the most explicit test: a
+    /// SECOND root on the same uid. The argv is identical, the socket answers,
+    /// and only the environment tells them apart. If this assertion falls,
+    /// `adopt_pin` can re-pin another infra's namespaces — which is precisely
+    /// the cross-root accident the guard in `ensure_up_locked` exists to prevent.
+    #[test]
+    fn another_roots_control_does_not_pass_as_ours() {
+        let foreign = environ(&[
+            "DELONIX_ROOT=/home/w/cri/state",
+            "DELONIX_NET_RUNTIME_DIR=/tmp/delonix-net-1000-cri",
+        ]);
+        assert!(!env_names_this_root(
+            &foreign,
+            Path::new("/tmp/dlx/root"),
+            Path::new("/tmp/dlx/run")
+        ));
+    }
+
+    /// BOTH variables, not one. The root and the runtime dir are independent
+    /// (`root_suffix` ties them, but each is overridable by its own env var),
+    /// and accepting half a proof is accepting an infra whose sockets are
+    /// somebody else's.
+    #[test]
+    fn half_a_proof_is_not_a_proof() {
+        let root_only = environ(&[
+            "DELONIX_ROOT=/tmp/dlx/root",
+            "DELONIX_NET_RUNTIME_DIR=/tmp/other/run",
+        ]);
+        assert!(!env_names_this_root(
+            &root_only,
+            Path::new("/tmp/dlx/root"),
+            Path::new("/tmp/dlx/run")
+        ));
+        let runtime_only = environ(&[
+            "DELONIX_ROOT=/tmp/other/root",
+            "DELONIX_NET_RUNTIME_DIR=/tmp/dlx/run",
+        ]);
+        assert!(!env_names_this_root(
+            &runtime_only,
+            Path::new("/tmp/dlx/root"),
+            Path::new("/tmp/dlx/run")
+        ));
+    }
+
+    /// A process carrying neither — an older binary, or something not ours at
+    /// all — proves nothing. Fails CLOSED: no proof, no adoption.
+    #[test]
+    fn an_environment_without_the_variables_fails_closed() {
+        let raw = environ(&["LANG=C", "PATH=/usr/bin"]);
+        assert!(!env_names_this_root(
+            &raw,
+            Path::new("/tmp/dlx/root"),
+            Path::new("/tmp/dlx/run")
+        ));
+        assert!(!env_names_this_root(
+            &[],
+            Path::new("/tmp/dlx/root"),
+            Path::new("/tmp/dlx/run")
+        ));
+    }
 }
 
 /// A decisão do `kill_pidfile`, isolada — é este módulo que falha se alguém
