@@ -10757,3 +10757,11 @@ msgstr "a puxar {reference}…"
 
 msgid "pulling {reference} (linux/{arch})…"
 msgstr "a puxar {reference} (linux/{arch})…"
+
+# stack apply: uma adopção muda de dono, e diz-se
+msgid "{kind}/{name}: adopted — it belonged to no stack, and a `destroy` or `apply --prune` of '{stack}' now removes it"
+msgstr "{kind}/{name}: adoptado — não pertencia a stack nenhuma, e um `destroy` ou `apply --prune` de '{stack}' passa a removê-lo"
+
+# manifesto: documentos que se dissolveram não são um ficheiro vazio
+msgid "{path}: every document expanded to nothing — no resource left to apply (a misspelt `kind: Stack` group does this; see the warnings above)"
+msgstr "{path}: todos os documentos se dissolveram — não sobrou recurso nenhum para aplicar (um grupo de `kind: Stack` mal escrito faz isto; ver os avisos acima)"
