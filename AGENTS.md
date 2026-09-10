@@ -4530,6 +4530,36 @@ checklist para quem mexer aqui do que como lista de correcções:
   TERCEIRA cópia de `is_alive` (lia `/proc`, a do motor usa `kill(pid,0)`); Aceita-se `netns holder` além de
   `netns pin` de propósito — o `teardown` é o comando de recuperação de um upgrade in-place, e
   o processo vivo aí é de um binário pré-split;
+- **o argv de um processo não é a prova de que ele é NOSSO** — e esta apareceu TRÊS vezes em
+  crates diferentes antes de alguém lhe dar nome. Todo o `DELONIX_ROOT` do mesmo uid corre
+  processos com argv idêntico, por isso perguntar «é este um processo do TIPO certo» nunca
+  responde «é este processo MEU». As três: o `read_pid_verified` do `delonix-net` validava o pin
+  e o slirp pelo argv (ACH-016, #273 — havia CINCO pins vivos neste host, de cinco roots); o
+  `running_pid` do `ingress_proxy` procurava `ingress-proxy` no cmdline (ACH-017, #274); e o
+  `is_alive` do `cmd/tunnel.rs` perguntava se o cmdline CONTINHA `"ssh"` (ACH-018, #275).
+  As duas metades doem de maneiras opostas, e a segunda é a pior por não fazer barulho: a
+  ESCRITA mata o processo de outro (o pid vai para `SIGTERM`, e um `SIGHUP` por omissão também
+  termina); a LEITURA dá o recurso alheio por nosso, devolve `rc=0` e **não faz o trabalho** — o
+  `apply` do proxy dizia «serving» sem servir, e o do túnel dava-o por já a correr sem o
+  arrancar.
+  **Cada processo prova-o com o que TEM, e mede-se antes de decidir**: o pin e o control levam
+  `DELONIX_ROOT` pinado por nós; o `slirp4netns` não leva UMA variável `DELONIX_*` (não é o nosso
+  binário) e o token é o `--api-socket` que nós escolhemos; o proxy L7 é o `--config`; e o agente
+  de um túnel não tinha token nenhum — a resposta aí foi **pinar a variável no spawn**, que é
+  nosso, em vez de procurar um token que não existia. Um token no argv só serve se for um caminho
+  que NÓS derivamos do root.
+  **Uma substring do blob não é um argumento**: o guarda do túnel casava `/usr/bin/ssh-agent`,
+  dois `ssh: … [mux]` do Ansible, o `gcr-ssh-agent` e um `bash` que soletrava `ssh` dentro de um
+  caminho — quatro processos vivos e um quinto acidental, nenhum deles um túnel. Compara-se o
+  **nome de ficheiro do `argv[0]`**, e exige-se além disso um elemento que carregue a NOSSA porta
+  ou o NOSSO caminho.
+  **A tolerância escreve-se, nunca se assume**: um processo de um binário anterior à correcção não
+  leva a variável que passámos a exigir, e exigi-la torna a recuperação um no-op silencioso — o
+  `rm` reporta sucesso sem sinalizar nada, e o órfão fica para sempre. Tolera-se a AUSÊNCIA,
+  nunca um valor que nomeie outro root.
+  **E foi a varredura POR PADRÃO que achou a terceira** — nenhum finder por-subsistema tinha o
+  `cmd/tunnel.rs` na sua superfície. É a mesma lição que a auditoria #3 já tinha deixado escrita
+  para o `bpf.rs`;
 
 **Achado vivo da varredura (v0.42.2)**: `delonix system info` reportava `cgroup2 delegated: yes`
 incondicionalmente, por ler os ficheiros do cgroup raiz do host — o comando que se corre para
