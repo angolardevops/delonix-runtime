@@ -80,6 +80,13 @@ skip() { SKIP=$((SKIP+1)); RESULTS+=("SKIP  $1 — $2"); printf '  \033[33m∼ S
 dlx() { env DELONIX_ROOT="$SANDBOX/root" DELONIX_NET_RUNTIME_DIR="$SANDBOX/run" \
              DELONIX_NO_CGROUP_WARN=1 timeout 180 "$BIN" "$@"; }
 
+# O SEGUNDO root do sandbox — o "outro inquilino" do mesmo uid. Existe só para
+# o `posse_destrutiva`, e é o que torna a posse cross-root observável: sem uma
+# segunda infra viva, "não destrói o que não prova ser seu" não tem contra-prova.
+# Estado E sockets separados, tal como um `delonix-cri` a correr ao lado da CLI.
+dlx2() { env DELONIX_ROOT="$SANDBOX/root2" DELONIX_NET_RUNTIME_DIR="$SANDBOX/run2" \
+              DELONIX_NO_CGROUP_WARN=1 timeout 180 "$BIN" "$@"; }
+
 # The pin owns the namespaces (see `infra::pin_main`); killing it is what a
 # "holder death" now means for every workload on the node.
 holder_pid() { dlx net netns status 2>/dev/null | grep -oP 'pin \K[0-9]+' || true; }
@@ -119,6 +126,11 @@ teardown_quiet() {
   [ -d "$SANDBOX" ] || return 0
   for c in $(dlx container ps -aq 2>/dev/null); do dlx container rm -f "$c" >/dev/null 2>&1; done
   dlx net netns down >/dev/null 2>&1
+  # O segundo root do `posse_cross_root` arruma-se sozinho no fim do cenário;
+  # esta linha é para quando ele NÃO chega ao fim (--keep, um ^C, um timeout).
+  # Um pin do sandbox deixado de pé é uma netns e um slirp a mais no host, e a
+  # corrida seguinte encontrá-los-ia com um `root2` já ocupado.
+  [ -d "$SANDBOX/root2" ] && dlx2 net netns down >/dev/null 2>&1
   sleep 1
   for d in images layers blobs; do rm -f "$SANDBOX/root/$d"; done   # symlinks only
   rm -rf "$SANDBOX"
@@ -830,16 +842,16 @@ scen_posse_destrutiva() {
     bad "posse-destrutiva/teardown" "ficheiro de socket sobreviveu ao teardown"
   fi
 
-  # --- 4. o runtime dir por-root NÃO é verificado aqui, de propósito ---------
-  # Tentei-o e o check só sabia SALTAR: subir infra a partir de um segundo root
-  # dentro do sandbox não é fiável neste ambiente. E um check que nunca corre
-  # não é um check — é um SKIP a fazer de conta.
-  #
-  # O invariante está fixado onde é DETERMINÍSTICO: o teste unitário
+  # --- 4. o runtime dir por-root não se verifica AQUI, e a razão mudou -------
+  # A nota original dizia que subir infra a partir de um segundo root dentro do
+  # sandbox "não é fiável neste ambiente". Isso foi medido outra vez a
+  # 2026-09-09, quatro corridas seguidas, e o segundo root subiu nas quatro — é
+  # o que o bloco 5 abaixo passa a usar. O que se mantém é a escolha de fixar
+  # este invariante onde ele é DETERMINÍSTICO: o teste unitário
   # `base_root_e_runtime_dir_honram_env_vars_explicitas` (delonix-net) exige que
   # um root alternativo resolva uma pasta DIFERENTE da do root por omissão, que
   # o root por omissão mantenha o nome nu byte a byte, e que o caminho do socket
-  # fique abaixo dos 108 bytes do `sun_path`. É pura, corre sempre, e falha se o
+  # fique abaixo dos 108 bytes do `sun_path`. É puro, corre sempre, e falha se o
   # `root_suffix` for revertido.
   #
   # A primeira versão deste check contava `/tmp/delonix-net-*` inteiro e
@@ -848,7 +860,75 @@ scen_posse_destrutiva() {
   # porque é a mesma armadilha do filtro largo que esta série já pagou três
   # vezes: um verde sobre uma medição que não exercita nada.
 
+  # --- 5. um pid reciclado por OUTRO root não é nosso (ACH-016) -------------
+  # A guarda de posse dos pidfiles olhava só para o argv, e o argv de um pin de
+  # outro root é byte a byte o nosso. Reproduzido a 2026-09-09 com dois roots
+  # isolados: com o pin do root B no `holder.pid` do root A, o `netns up` de A
+  # devolveu rc=0 e arrancou o control plane de A DENTRO das namespaces de B, e o
+  # `netns down` de A matou o pin e o slirp de B.
+  #
+  # Este cenário mede as duas metades, e é a única coisa nesta bateria que as
+  # mede a correr — os testes unitários cobrem a decisão pura, não o comando.
+  posse_cross_root
   dlx net netns down >/dev/null 2>&1
+}
+
+# O bloco 5 do `posse_destrutiva`, à parte por ser o único que precisa de uma
+# segunda infra viva — e por ter de a arrumar aconteça o que acontecer.
+posse_cross_root() {
+  mkdir -p "$SANDBOX/root2" "$SANDBOX/run2"
+  dlx2 net netns up >/dev/null 2>&1
+  local p2 s2
+  p2=$(dlx2 net netns status 2>/dev/null | grep -oP 'pin \K[0-9]+')
+  s2=$(dlx2 net netns status 2>/dev/null | grep -oP 'slirp \K[0-9]+')
+  if [ -z "$p2" ] || [ -z "$s2" ]; then
+    skip "posse-destrutiva/cross-root" "o segundo root não subiu — sem contra-prova não se mede nada"
+    dlx2 net netns down >/dev/null 2>&1; rm -rf "$SANDBOX/root2" "$SANDBOX/run2"
+    return
+  fi
+  local ns2; ns2=$(readlink "/proc/$p2/ns/net" 2>/dev/null)
+
+  # A infra do root principal morre por INTEIRO (crash/OOM) e o número do pin é
+  # reciclado para o pin do outro root. Escrever o pidfile é o estado que a
+  # reciclagem deixa: o `pid_max` é global e este host tem produção viva, por
+  # isso a reciclagem em si não se força aqui.
+  dlx net netns up >/dev/null 2>&1
+  local p1 c1 l1
+  p1=$(holder_pid); c1=$(control_pid); l1=$(slirp_pid)
+  kill -9 "$l1" "$c1" "$p1" 2>/dev/null; sleep 2
+  printf '%s' "$p2" > "$SANDBOX/root/ingress/holder.pid"
+  printf '%s' "$s2" > "$SANDBOX/root/ingress/slirp.pid"
+  rm -f "$SANDBOX/root/ingress/control.pid"
+
+  # (a) LEITURA — o status não pode reclamar como seu o que é do outro root.
+  local st; st=$(dlx net netns status 2>&1)
+  # (b) o `up` tem de reconstruir a NOSSA infra, e não entrar nas namespaces alheias.
+  dlx net netns up >/dev/null 2>&1; sleep 3
+  local novo ns_novo; novo=$(holder_pid); ns_novo=$(readlink "/proc/${novo:-0}/ns/net" 2>/dev/null)
+  # (c) DESTRUIÇÃO — o `down` não pode levar nada do outro root.
+  dlx net netns down >/dev/null 2>&1; sleep 2
+  local p2v s2v
+  kill -0 "$p2" 2>/dev/null && p2v=VIVO || p2v=MORTO
+  kill -0 "$s2" 2>/dev/null && s2v=VIVO || s2v=MORTO
+  log "outro root: pin $p2 $p2v · slirp $s2 $s2v · netns $ns2 · o nosso pin novo ${novo:-—} em ${ns_novo:-—}"
+
+  if printf '%s' "$st" | grep -qE "pin $p2( |\b)"; then
+    bad "posse-destrutiva/cross-root" "o \`netns status\` reclama o pin $p2, que é do outro root"
+  elif printf '%s' "$st" | grep -qE "slirp $s2( |\b)"; then
+    bad "posse-destrutiva/cross-root" "o \`netns status\` reclama o slirp $s2, que é do outro root"
+  elif [ -z "$novo" ] || [ "$novo" = "$p2" ]; then
+    bad "posse-destrutiva/cross-root" "o \`netns up\` adoptou o pin do outro root (${novo:-—})"
+  elif [ -n "$ns2" ] && [ "$ns_novo" = "$ns2" ]; then
+    bad "posse-destrutiva/cross-root" "reconstruímos DENTRO das namespaces do outro root ($ns_novo)"
+  elif [ "$p2v" != VIVO ]; then
+    bad "posse-destrutiva/cross-root" "o \`netns down\` matou o pin do outro root ($p2)"
+  elif [ "$s2v" != VIVO ]; then
+    bad "posse-destrutiva/cross-root" "o \`netns down\` matou o slirp do outro root ($s2)"
+  else
+    ok "posse-destrutiva/cross-root: o pid reciclado de outro root não é lido, não é entrado e não é morto"
+  fi
+  dlx2 net netns down >/dev/null 2>&1
+  rm -rf "$SANDBOX/root2" "$SANDBOX/run2"
 }
 
 scen_control_restart() {

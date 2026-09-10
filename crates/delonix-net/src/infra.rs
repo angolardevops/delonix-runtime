@@ -155,6 +155,21 @@ fn legacy_control_sock_path() -> PathBuf {
     ingress_dir().join("control.sock")
 }
 
+/// Where the ingress slirp's api-socket lived BEFORE v0.34.2 — under
+/// `ingress_dir()`, i.e. under `DELONIX_ROOT`, exactly like the control socket
+/// above and for the same reason.
+///
+/// `teardown_locked` has always removed this file; it is given a name here
+/// because the OWNERSHIP proof needs it too (ACH-016). A slirp started by a
+/// pre-v0.34.2 build carries THIS path in its `--api-socket`, and the path is
+/// still per-ROOT, so it proves the slirp is ours just as well as today's does.
+/// Refusing it would silently break the one recovery [`stale_holder_message`]
+/// promises: "kills holder + slirp by pidfile, so it works whatever build
+/// started them".
+fn legacy_slirp_sock_path() -> PathBuf {
+    ingress_dir().join("slirp.sock")
+}
+
 /// Waits (up to ~2s, the same budget as [`control_query`]'s retry loop) for the
 /// control socket to appear. Returns immediately on the happy path — the file is
 /// already there — so this costs one `stat` when everything is fine. The wait
@@ -388,8 +403,19 @@ fn argv_matches(kind: PidKind, argv: &[String]) -> bool {
         // happens to spell the tool's name must not be able to pose as one.
         PidKind::Slirp => argv.first().is_some_and(|a| a.ends_with("slirp4netns")),
         PidKind::Control => pair("netns", "control"),
-        PidKind::Pin => pair("netns", "pin") || pair("netns", "holder"),
+        PidKind::Pin => pair("netns", "pin") || is_pre_split_holder(argv),
     }
+}
+
+/// The PRE-SPLIT spelling of the pin: `netns holder`, from a build older than
+/// v0.42.0. PURE.
+///
+/// Split out of [`argv_matches`] rather than left inline because it is the ONE
+/// process shape [`env_proves_this_root`] is allowed to be lenient about, and a
+/// leniency keyed on a literal buried in a `match` arm is a leniency nobody
+/// finds again.
+fn is_pre_split_holder(argv: &[String]) -> bool {
+    argv.windows(2).any(|w| w[0] == "netns" && w[1] == "holder")
 }
 
 /// The argv of a live process, NUL-separated in `/proc/<pid>/cmdline`.
@@ -404,15 +430,25 @@ fn proc_argv(pid: i32) -> Option<Vec<String>> {
 }
 
 /// Sends `SIGTERM` to the pid in `path` **only if that pid is really the process
-/// `kind` says it is**, and removes the pidfile either way.
+/// `kind` says it is AND was started by this state root**, and removes the
+/// pidfile either way.
 ///
 /// A mismatch means the pidfile is stale — the process died and something else
 /// now holds its number. Removing the file is the correct cleanup; signalling it
 /// would not be.
+///
+/// **The second half of that sentence is ACH-016, and it was measured, not
+/// feared.** Two isolated roots on one uid, 2026-09-09: `holder.pid` of root A
+/// made to name root B's live pin (which is what a pid wrap-around leaves
+/// behind), then `delonix net netns down` from root A — B's pin took the
+/// SIGTERM and B's node went `ingress DOWN — pin —`. The same run did it to B's
+/// slirp. The argv could not have stopped either: every root on this uid runs a
+/// pin spelled `delonix netns pin` and a `slirp4netns` spelled the same way.
 fn kill_pidfile(path: &Path, kind: PidKind) {
     if let Some(pid) = read_pid(path) {
         let argv = if pid_alive(pid) { proc_argv(pid) } else { None };
-        if should_signal(kind, argv.as_deref()) {
+        let ours = argv.as_deref().is_some_and(|a| proc_is_ours(kind, pid, a));
+        if should_signal(kind, argv.as_deref(), ours) {
             // SAFETY: kill() with a pid confirmed alive AND confirmed ours.
             unsafe { libc::kill(pid, libc::SIGTERM) };
         }
@@ -424,8 +460,14 @@ fn kill_pidfile(path: &Path, kind: PidKind) {
 /// said. `None` = the pid is gone. Split out so the recycled-pid case is covered
 /// by a test that fails if the identity check is dropped — a test on
 /// `argv_matches` alone would keep passing without it.
-fn should_signal(kind: PidKind, argv: Option<&[String]>) -> bool {
-    argv.is_some_and(|a| argv_matches(kind, a))
+///
+/// `ours` — [`proc_is_ours`]'s answer — is a SEPARATE argument for exactly that
+/// reason, one level up: a signature taking only the argv could not express the
+/// ACH-016 fix at all, because the argv of another root's pin is byte-for-byte
+/// ours. Both halves are required, and the test that fails without the second
+/// one is `another_roots_pin_never_takes_a_sigterm`.
+fn should_signal(kind: PidKind, argv: Option<&[String]>, ours: bool) -> bool {
+    ours && argv.is_some_and(|a| argv_matches(kind, a))
 }
 
 /// The pid in `path`, but ONLY when the live process wearing that number really
@@ -453,13 +495,25 @@ fn should_signal(kind: PidKind, argv: Option<&[String]>) -> bool {
 /// waited on keeps its `/proc/<pid>` directory, so `pid_alive` stays true for as
 /// long as the parent lives; its `cmdline` is empty, so `argv_matches` correctly
 /// calls it dead.
+///
+/// **The argv alone was not enough, and ACH-016 is the measurement of that.**
+/// It answers "is this the right KIND of process", which stops a recycled pid
+/// that landed on a browser — the case the paragraphs above were written for —
+/// and stops nothing at all when it landed on ANOTHER STATE ROOT's process of
+/// the same kind. Every root this user runs spawns a pin spelled `delonix netns
+/// pin`; five were alive on this host while the fix was being written. Measured
+/// on 2026-09-09 with two isolated roots: with root B's pin in root A's
+/// `holder.pid`, `net netns up` from A read it as its own and started A's
+/// control plane INSIDE B's namespaces (`net:[4026536584]`, the same inode as
+/// B's pin), returning `rc=0`. So the read now demands the second question too —
+/// [`proc_is_ours`] — and answers `None` when it cannot be proven.
 fn read_pid_verified(kind: PidKind, path: &Path) -> Option<i32> {
     let pid = read_pid(path)?;
     if !pid_alive(pid) {
         return None;
     }
-    proc_argv(pid).filter(|argv| argv_matches(kind, argv))?;
-    Some(pid)
+    let argv = proc_argv(pid).filter(|argv| argv_matches(kind, argv))?;
+    proc_is_ours(kind, pid, &argv).then_some(pid)
 }
 
 /// The value of `key` in a NUL-separated `/proc/<pid>/environ` blob. PURE, so
@@ -481,29 +535,99 @@ fn env_value(raw: &[u8], key: &str) -> Option<String> {
 /// the environ blob for the same reason as [`should_signal`].
 ///
 /// This is a stronger question than [`argv_matches`], and the difference is the
-/// whole point of [`own_control_pid`]: every root on this user runs a control
-/// process with the SAME argv, so argv alone cannot tell one root's control
-/// plane from another's — and adopting the wrong one's namespaces would be the
-/// exact cross-root accident the guard in `ensure_up_locked` exists to prevent.
+/// whole point of [`proc_is_ours`]: every root on this user runs a control
+/// process — and a pin — with the SAME argv, so argv alone cannot tell one
+/// root's from another's. Adopting the wrong one's namespaces, or entering them
+/// to start a control plane, is the exact cross-root accident the guard in
+/// `ensure_up_locked` exists to prevent (ACH-015 for the control plane,
+/// ACH-016 for the pin and the slirp).
 fn env_names_this_root(raw: &[u8], root: &Path, runtime: &Path) -> bool {
     env_value(raw, "DELONIX_ROOT").as_deref() == root.to_str()
         && env_value(raw, RUNTIME_DIR_ENV).as_deref() == runtime.to_str()
 }
 
-/// The control process **this** root started, proven alive and proven ours, or
-/// `None`. Three independent facts have to hold: the pidfile under our own
-/// `ingress/` names it, the live process wearing that number really is a
-/// `netns control` ([`read_pid_verified`]), and its environment names our root
-/// and our runtime dir ([`env_names_this_root`]) — which is what survives a pid
-/// wrap-around onto another root's control plane.
+/// Whether a live process's environment PROVES it was started by this root.
 ///
-/// `/proc/<pid>/environ` is readable only by the process's own uid, and every
-/// delonix process on this path shares ours; a failure to read it is answered
-/// with `None`, i.e. "cannot prove it is ours", never with an assumption.
-fn own_control_pid() -> Option<i32> {
-    let pid = read_pid_verified(PidKind::Control, &control_pid_path())?;
-    let raw = std::fs::read(format!("/proc/{pid}/environ")).ok()?;
-    env_names_this_root(&raw, &base_root(), &runtime_dir()).then_some(pid)
+/// [`env_names_this_root`] is the strict form and the usual answer. The second
+/// clause is one documented exception, and it is there so this proof does not
+/// silently break the in-place-upgrade recovery. `DELONIX_ROOT` has been pinned
+/// on every child of this engine since its first commit — verified on this
+/// host's production pin (pid 16634), started months ago by the installed
+/// binary, which carries it although nobody exported it — but
+/// `DELONIX_NET_RUNTIME_DIR` only exists since v0.34.2 (2026-07-27). A holder
+/// older than that carries the first and not the second, spells itself `netns
+/// holder`, and is EXACTLY the process [`stale_holder_message`] tells the
+/// operator to remove with `net netns down`. Demanding a variable that build
+/// never set would turn that recovery into a silent no-op — the same failure
+/// mode [`argv_matches`] documents for the same recovery.
+///
+/// The exception costs nothing where it matters, because `DELONIX_ROOT` on its
+/// own already separates two roots on one uid: the recycled pid ACH-016 is about
+/// belongs to ANOTHER root's pin, and that pin names the other root here. The
+/// runtime dir is a second, redundant witness — required of every process new
+/// enough to carry it, never invented for one that is not. PURE.
+fn env_proves_this_root(argv: &[String], raw: &[u8], root: &Path, runtime: &Path) -> bool {
+    if env_names_this_root(raw, root, runtime) {
+        return true;
+    }
+    is_pre_split_holder(argv)
+        && env_value(raw, RUNTIME_DIR_ENV).is_none()
+        && env_value(raw, "DELONIX_ROOT").as_deref() == root.to_str()
+}
+
+/// Whether a `slirp4netns` argv names one of OUR ingress api-sockets. PURE.
+///
+/// The slirp gets no environment of ours, so the environ proof above is not
+/// available for it — measured on this host, 2026-09-09: the production ingress
+/// slirp (pid 16689) carries not one `DELONIX_*` variable, while the pin beside
+/// it (16634) carries both. The reason is in [`start_slirp`]: it is not our
+/// binary and it is spawned with the caller's environment rather than a pinned
+/// one, so it only has those variables when the operator happened to export
+/// them.
+///
+/// What it does carry is the one thing WE choose in its argv: `--api-socket`,
+/// whose path is derived from `DELONIX_ROOT` and is therefore per-root. That is
+/// the same ownership token [`crate::Slirp::is_ours`] already uses for the
+/// orphan reaper, and it is read here by the same parser so the two cannot
+/// drift.
+///
+/// **Only the INGRESS sockets, not [`crate::slirp_container_sock`].** A
+/// per-container slirp of ours is ours, but it is not the uplink; accepting it
+/// here would let `ingress/slirp.pid` resolve to a container's slirp — the
+/// teardown would kill that container's network and `ensure_up` would report an
+/// uplink that does not exist.
+fn slirp_argv_is_our_ingress(pid: i32, argv: &[String], sock: &Path, legacy: &Path) -> bool {
+    let raw: Vec<&[u8]> = argv.iter().map(|s| s.as_bytes()).collect();
+    crate::slirp_from_argv(pid, &raw)
+        .and_then(|s| s.api_sock)
+        .is_some_and(|p| p == sock || p == legacy)
+}
+
+/// Whether the live process `pid` is not merely the KIND its pidfile claims
+/// ([`argv_matches`]) but also **this state root's** — the half that was
+/// missing, and the whole of ACH-016.
+///
+/// The kind and the owner are two different questions and they are answered from
+/// two different places, because the two processes carry two different tokens:
+/// the pin and the control plane carry a pinned environment, the slirp carries
+/// an api-socket path we chose. Asking each for what it actually has is why
+/// there is a `match` here instead of one rule.
+///
+/// `/proc/<pid>/environ` is readable by the process's own uid, and every delonix
+/// process on this path shares ours — including one inside its own user
+/// namespace, since the environ read is `PTRACE_MODE_READ` and not an attach,
+/// so Yama's descendant rule does not apply (verified live on the pin and the
+/// slirp of both roots of the reproduction). A failure to read it is therefore
+/// evidence of a process that is NOT ours, and is answered `false`: "cannot
+/// prove it is ours" — never an assumption either way.
+fn proc_is_ours(kind: PidKind, pid: i32, argv: &[String]) -> bool {
+    match kind {
+        PidKind::Slirp => {
+            slirp_argv_is_our_ingress(pid, argv, &slirp_sock_path(), &legacy_slirp_sock_path())
+        }
+        PidKind::Pin | PidKind::Control => std::fs::read(format!("/proc/{pid}/environ"))
+            .is_ok_and(|raw| env_proves_this_root(argv, &raw, &base_root(), &runtime_dir())),
+    }
 }
 
 // ---- ingress nft (inside the infra netns) -----------------------------------
@@ -1022,12 +1146,20 @@ fn ensure_up_locked() -> Result<()> {
         // plane, still holding the namespaces open.
         //
         // So ask the only question that separates the two: is that listener
-        // provably OURS? `own_control_pid` answers with three independent facts
-        // and never with an assumption. When it is ours, the namespaces are ours
-        // too and can be re-pinned in place, touching nothing — see `adopt_pin`.
-        // When it cannot be proven, the refusal below stands unchanged, because
-        // the cost of being wrong is every workload on somebody else's node.
-        if let Some(control) = own_control_pid() {
+        // provably OURS? `read_pid_verified` answers with three independent
+        // facts — our own `ingress/` names it, the live process really is a
+        // `netns control`, and its environment names our root and our runtime
+        // dir — and never with an assumption. When it is ours, the namespaces
+        // are ours too and can be re-pinned in place, touching nothing — see
+        // `adopt_pin`. When it cannot be proven, the refusal below stands
+        // unchanged, because the cost of being wrong is every workload on
+        // somebody else's node.
+        //
+        // The proof used to live in a function of its own here (`own_control_pid`,
+        // ACH-015). ACH-016 moved it into the pidfile READ itself, where it
+        // covers the pin and the slirp too — the two pidfiles that were still
+        // being read on the argv alone.
+        if let Some(control) = read_pid_verified(PidKind::Control, &control_pid_path()) {
             let pin = adopt_pin(control)?;
             // The uplink belongs to the pin, not to the control — restart it
             // only if it, too, is gone. Same rule as the pin-alive branch above.
@@ -1169,7 +1301,7 @@ fn teardown_locked() {
     // behind from the build it just killed — a leftover legacy file would make a
     // LATER diagnosis blame an old binary that is no longer running.
     let _ = std::fs::remove_file(legacy_control_sock_path());
-    let _ = std::fs::remove_file(ingress_dir().join("slirp.sock"));
+    let _ = std::fs::remove_file(legacy_slirp_sock_path());
     let _ = std::fs::remove_file(status_path());
     // Clean state — no stale markers holding the infra up in the next cycle.
     let _ = std::fs::remove_dir_all(refs_dir());
@@ -1437,7 +1569,10 @@ fn adopt_pin(control: i32) -> Result<i32> {
 /// signalled `pinned` is the same lie the file existed to avoid.
 fn adopt_failed(pid: i32, why: &str) -> Error {
     let argv = if pid_alive(pid) { proc_argv(pid) } else { None };
-    if should_signal(PidKind::Pin, argv.as_deref()) {
+    let ours = argv
+        .as_deref()
+        .is_some_and(|a| proc_is_ours(PidKind::Pin, pid, a));
+    if should_signal(PidKind::Pin, argv.as_deref(), ours) {
         // SAFETY: kill() with a pid confirmed alive AND confirmed ours.
         unsafe { libc::kill(pid, libc::SIGTERM) };
     }
@@ -9464,6 +9599,240 @@ mod tests_control_ownership_proof {
     }
 }
 
+/// ACH-016: the same proof, for the two pidfiles that were still read on the
+/// argv alone — the PIN and the SLIRP.
+///
+/// **Reproduced on 2026-09-09**, two isolated roots (`DELONIX_ROOT` +
+/// `DELONIX_NET_RUNTIME_DIR`) on one uid, with the pin of root B written into
+/// root A's `holder.pid` — the state a pid wrap-around leaves behind. Both
+/// halves fired:
+///
+/// * READ — `delonix net netns up` from A returned `rc=0` and started A's
+///   control plane inside B's namespaces (`net:[4026536584]`, B's pin's own net
+///   inode). A's control socket was then served from another root's netns.
+/// * KILL — `delonix net netns down` from A SIGTERMed B's pin; B's node was left
+///   `ingress DOWN — pin —`. The same run did it to B's slirp, and B's uplink
+///   went with it.
+///
+/// The argv could not have stopped either, and that is the point: five delonix
+/// pins were alive on this host at the time, from five different roots, every
+/// one of them spelled `… delonix netns pin`.
+///
+/// The pin and the slirp are proven by DIFFERENT tokens because they carry
+/// different things — measured on the same host: the production pin (16634)
+/// carries `DELONIX_ROOT` and `DELONIX_NET_RUNTIME_DIR` although nobody exported
+/// them, and the production slirp (16689) carries no `DELONIX_*` at all. See
+/// [`proc_is_ours`].
+#[cfg(test)]
+mod tests_pin_ownership_proof {
+    use super::{env_proves_this_root, is_pre_split_holder, slirp_argv_is_our_ingress};
+    use std::path::Path;
+
+    fn argv(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn environ(pairs: &[&str]) -> Vec<u8> {
+        let mut v = Vec::new();
+        for p in pairs {
+            v.extend_from_slice(p.as_bytes());
+            v.push(0);
+        }
+        v
+    }
+
+    /// The two roots of the reproduction, with their real paths.
+    const OURS: &str = "/tmp/dx16/a";
+    const OURS_RUN: &str = "/tmp/dx16/ra";
+
+    /// THE finding. Same binary, same argv, another `DELONIX_ROOT`.
+    #[test]
+    fn another_roots_pin_does_not_pass_as_ours() {
+        let pin = argv(&["/tmp/tgt/debug/delonix", "netns", "pin"]);
+        let theirs = environ(&[
+            "DELONIX_INTERNAL=1",
+            "DELONIX_ROOT=/tmp/dx16/b",
+            "DELONIX_NET_RUNTIME_DIR=/tmp/dx16/rb",
+        ]);
+        assert!(
+            !env_proves_this_root(&pin, &theirs, Path::new(OURS), Path::new(OURS_RUN)),
+            "root B's pin must not pass as ours — this is what entered B's namespaces"
+        );
+        let ours = environ(&[
+            "DELONIX_INTERNAL=1",
+            "DELONIX_ROOT=/tmp/dx16/a",
+            "DELONIX_NET_RUNTIME_DIR=/tmp/dx16/ra",
+        ]);
+        assert!(
+            env_proves_this_root(&pin, &ours, Path::new(OURS), Path::new(OURS_RUN)),
+            "and ours stays recognized — otherwise the fix takes the node down"
+        );
+    }
+
+    /// The in-place-upgrade RECOVERY must not become a silent no-op.
+    ///
+    /// A `netns holder` from a binary older than v0.34.2 (2026-07-27) carries no
+    /// `DELONIX_NET_RUNTIME_DIR` — the variable did not exist yet — and it is
+    /// exactly the process `stale_holder_message` tells the operator to remove
+    /// with `net netns down`. Demanding that variable of it would be a refusal
+    /// to kill it that says nothing.
+    #[test]
+    fn a_pre_split_holder_without_the_runtime_dir_is_still_ours() {
+        let holder = argv(&["/usr/local/bin/delonix", "netns", "holder"]);
+        assert!(is_pre_split_holder(&holder));
+        let old = environ(&["DELONIX_INTERNAL=1", "DELONIX_ROOT=/tmp/dx16/a"]);
+        assert!(env_proves_this_root(
+            &holder,
+            &old,
+            Path::new(OURS),
+            Path::new(OURS_RUN)
+        ));
+    }
+
+    /// And the allowance opens no door: it still takes OUR root.
+    #[test]
+    fn another_roots_pre_split_holder_is_not_ours() {
+        let holder = argv(&["/usr/local/bin/delonix", "netns", "holder"]);
+        let theirs = environ(&["DELONIX_ROOT=/tmp/dx16/b"]);
+        assert!(!env_proves_this_root(
+            &holder,
+            &theirs,
+            Path::new(OURS),
+            Path::new(OURS_RUN)
+        ));
+        // Nor with no root at all: silence is not proof.
+        assert!(!env_proves_this_root(
+            &holder,
+            &environ(&["LANG=C"]),
+            Path::new(OURS),
+            Path::new(OURS_RUN)
+        ));
+    }
+
+    /// The allowance is for the PRE-SPLIT spelling only. A `netns pin` comes
+    /// from a binary that pins both variables — the spelling is from 2026-08-05,
+    /// the variable from 2026-07-27 — so one of them missing there does not mean
+    /// an old build, it means a process whose owner we do not know.
+    #[test]
+    fn the_allowance_does_not_extend_to_a_modern_pin() {
+        let pin = argv(&["/usr/local/bin/delonix", "netns", "pin"]);
+        let half = environ(&["DELONIX_ROOT=/tmp/dx16/a"]);
+        assert!(!env_proves_this_root(
+            &pin,
+            &half,
+            Path::new(OURS),
+            Path::new(OURS_RUN)
+        ));
+    }
+
+    /// A DIFFERENT runtime dir contradicts even in the pre-split spelling: there
+    /// the variable IS present, and what it says is that the process is from
+    /// somewhere else.
+    #[test]
+    fn a_different_runtime_dir_contradicts_even_in_the_pre_split_shape() {
+        let holder = argv(&["/usr/local/bin/delonix", "netns", "holder"]);
+        let raw = environ(&[
+            "DELONIX_ROOT=/tmp/dx16/a",
+            "DELONIX_NET_RUNTIME_DIR=/tmp/dx16/rb",
+        ]);
+        assert!(!env_proves_this_root(
+            &holder,
+            &raw,
+            Path::new(OURS),
+            Path::new(OURS_RUN)
+        ));
+    }
+
+    // ---- the slirp: the token is the `--api-socket`, not the environment ----
+
+    fn slirp(sock: Option<&str>, target: i32) -> Vec<String> {
+        let mut v = argv(&["slirp4netns", "--configure", "--mtu=65520"]);
+        if let Some(s) = sock {
+            v.push(format!("--api-socket={s}"));
+        }
+        v.push(target.to_string());
+        v.push("tap0".into());
+        v
+    }
+
+    #[test]
+    fn our_own_ingress_slirp_is_ours() {
+        let ours = Path::new("/tmp/dx16/ra/slirp.sock");
+        let legacy = Path::new("/tmp/dx16/a/ingress/slirp.sock");
+        assert!(slirp_argv_is_our_ingress(
+            7,
+            &slirp(Some("/tmp/dx16/ra/slirp.sock"), 4242),
+            ours,
+            legacy
+        ));
+        // And one from a pre-v0.34.2 build, which is what
+        // `stale_holder_message` promises to bring down "whatever build started
+        // them".
+        assert!(slirp_argv_is_our_ingress(
+            7,
+            &slirp(Some("/tmp/dx16/a/ingress/slirp.sock"), 4242),
+            ours,
+            legacy
+        ));
+    }
+
+    /// The slirp side of the finding: `net netns down` from root A killed root
+    /// B's slirp, and B's node lost its uplink. The argv shape is the same; only
+    /// the socket path separates the two.
+    #[test]
+    fn another_roots_ingress_slirp_is_not_ours() {
+        assert!(!slirp_argv_is_our_ingress(
+            7,
+            &slirp(Some("/tmp/dx16/rb/slirp.sock"), 4242),
+            Path::new("/tmp/dx16/ra/slirp.sock"),
+            Path::new("/tmp/dx16/a/ingress/slirp.sock")
+        ));
+    }
+
+    /// A PER-CONTAINER slirp of ours is ours, and still is not the ingress one.
+    /// Accepting it here would let `ingress/slirp.pid` resolve to a container's
+    /// network: the teardown would kill it, and `ensure_up` would report an
+    /// uplink that does not exist.
+    #[test]
+    fn a_container_slirp_of_ours_is_not_the_ingress_one() {
+        let per_container = crate::slirp_container_sock(4242);
+        assert!(!slirp_argv_is_our_ingress(
+            7,
+            &slirp(Some(&per_container.to_string_lossy()), 4242),
+            Path::new("/tmp/dx16/ra/slirp.sock"),
+            Path::new("/tmp/dx16/a/ingress/slirp.sock")
+        ));
+    }
+
+    /// With no `--api-socket` there is no token at all — and with no token
+    /// nothing is destroyed. Same rule the orphan reaper already follows
+    /// (`tests_posse_do_slirp`).
+    #[test]
+    fn a_slirp_without_an_api_socket_proves_nothing() {
+        assert!(!slirp_argv_is_our_ingress(
+            7,
+            &slirp(None, 4242),
+            Path::new("/tmp/dx16/ra/slirp.sock"),
+            Path::new("/tmp/dx16/a/ingress/slirp.sock")
+        ));
+        // Nor does another tool's `slirp4netns` (the Podman shape).
+        let podman = argv(&[
+            "slirp4netns",
+            "--disable-host-loopback",
+            "--api-socket",
+            "/run/user/1000/libpod/tmp/slirp4netns.sock",
+            "1234",
+            "tap0",
+        ]);
+        assert!(!slirp_argv_is_our_ingress(
+            7,
+            &podman,
+            Path::new("/tmp/dx16/ra/slirp.sock"),
+            Path::new("/tmp/dx16/a/ingress/slirp.sock")
+        ));
+    }
+}
+
 /// A decisão do `kill_pidfile`, isolada — é este módulo que falha se alguém
 /// voltar a matar por presença de PID em vez de por identidade.
 #[cfg(test)]
@@ -9474,20 +9843,51 @@ mod tests_decisao_de_matar {
         parts.iter().map(|s| s.to_string()).collect()
     }
 
+    /// `ours` is deliberately `true` throughout: it isolates the argv half, and
+    /// that half is the one that has to refuse a pid recycled onto a process
+    /// with nothing to do with us.
     #[test]
     fn um_pid_reciclado_por_outro_processo_nao_leva_sigterm() {
         let alheio = argv(&["/usr/lib/firefox/firefox", "-contentproc"]);
         assert!(
-            !should_signal(PidKind::Pin, Some(&alheio)),
+            !should_signal(PidKind::Pin, Some(&alheio), true),
             "pidfile obsoleto + PID reciclado: NUNCA sinalizar"
         );
-        assert!(!should_signal(PidKind::Control, Some(&alheio)));
-        assert!(!should_signal(PidKind::Slirp, Some(&alheio)));
+        assert!(!should_signal(PidKind::Control, Some(&alheio), true));
+        assert!(!should_signal(PidKind::Slirp, Some(&alheio), true));
+    }
+
+    /// ACH-016, the destructive half — the one the argv CANNOT catch.
+    ///
+    /// The argv here is ours byte for byte, because it really is a delonix pin,
+    /// only one belonging to another `DELONIX_ROOT` on the same uid. Measured
+    /// 2026-09-09: with root B's pin in root A's `holder.pid`, a `net netns
+    /// down` from A killed B's pin and left B's node at `ingress DOWN — pin —`.
+    /// Ownership is the only thing that separates the two, which is why it is an
+    /// argument of its own.
+    #[test]
+    fn another_roots_pin_never_takes_a_sigterm() {
+        let same_as_ours = argv(&["/usr/local/bin/delonix", "netns", "pin"]);
+        assert!(
+            argv_matches(PidKind::Pin, &same_as_ours),
+            "another root's argv IS ours — that is the whole problem"
+        );
+        assert!(!should_signal(PidKind::Pin, Some(&same_as_ours), false));
+        // Same for the slirp: another root's `slirp4netns` has the same shape.
+        let slirp = argv(&["slirp4netns", "--configure", "9", "tap0"]);
+        assert!(!should_signal(PidKind::Slirp, Some(&slirp), false));
+        assert!(!should_signal(
+            PidKind::Control,
+            Some(&argv(&["delonix", "netns", "control"])),
+            false
+        ));
     }
 
     #[test]
     fn um_pid_morto_nao_leva_sigterm() {
-        assert!(!should_signal(PidKind::Pin, None));
+        assert!(!should_signal(PidKind::Pin, None, false));
+        // Not even with ownership proven: with no process there is nothing to signal.
+        assert!(!should_signal(PidKind::Pin, None, true));
     }
 
     /// O outro lado: o teardown continua a matar o que é mesmo nosso — senão a
@@ -9496,18 +9896,25 @@ mod tests_decisao_de_matar {
     fn o_nosso_continua_a_ser_morto() {
         assert!(should_signal(
             PidKind::Pin,
-            Some(&argv(&["delonix", "netns", "pin"]))
+            Some(&argv(&["delonix", "netns", "pin"])),
+            true
         ));
         assert!(should_signal(
             PidKind::Control,
-            Some(&argv(&["delonix", "netns", "control"]))
+            Some(&argv(&["delonix", "netns", "control"])),
+            true
         ));
         assert!(should_signal(
             PidKind::Slirp,
-            Some(&argv(&["slirp4netns", "--configure", "9", "tap0"]))
+            Some(&argv(&["slirp4netns", "--configure", "9", "tap0"])),
+            true
         ));
         assert!(
-            should_signal(PidKind::Pin, Some(&argv(&["delonix", "netns", "holder"]))),
+            should_signal(
+                PidKind::Pin,
+                Some(&argv(&["delonix", "netns", "holder"])),
+                true
+            ),
             "recuperação de um upgrade in-place"
         );
     }
