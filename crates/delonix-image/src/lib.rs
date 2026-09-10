@@ -113,4 +113,40 @@ mod tests {
         assert_eq!(holders, 1, "a tag não pode apontar para duas imagens");
         std::fs::remove_dir_all(&root).ok();
     }
+
+    /// Loading an archive must never DROP a name the same image already had.
+    ///
+    /// `image load` stored the archive's `repo_tags` verbatim, and `save` writes
+    /// the whole record — so an archive of an image already present replaced its
+    /// name list instead of adding to it. Measured 2026-09-10 against the real
+    /// binary: a store holding `alpine:3.20` and `mirror/app:v1` (same id), plus
+    /// `image load` of a `save` of `mirror/app:v1`, kept only the latter. On an
+    /// offline node that is a manifest whose image name stops resolving.
+    #[test]
+    fn loading_an_archive_keeps_the_images_other_names() {
+        use image::{Image, ImageConfig, ImageStore};
+        let root = std::env::temp_dir().join(format!("delonix-loadtags-{}", std::process::id()));
+        std::fs::remove_dir_all(&root).ok();
+        let store = ImageStore::open(&root).unwrap();
+        let id = format!("sha256:{}", "c".repeat(64));
+        store
+            .save(&Image {
+                id: id.clone(),
+                repo_tags: vec!["alpine:3.20".into(), "mirror/app:v1".into()],
+                layers: vec![],
+                config: ImageConfig::default(),
+                created_unix: 1,
+            })
+            .unwrap();
+        // What `load` now computes for the same id, from an archive that names
+        // only ONE of the two.
+        let merged = store.merged_tags_all(&id, &["mirror/app:v1".to_string()]);
+        assert!(
+            merged.contains(&"alpine:3.20".to_string()),
+            "the SAME image's other name must survive the load: {merged:?}"
+        );
+        assert!(merged.contains(&"mirror/app:v1".to_string()));
+        assert_eq!(merged.len(), 2, "and no name may end up duplicated");
+        std::fs::remove_dir_all(&root).ok();
+    }
 }

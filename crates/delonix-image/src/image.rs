@@ -160,7 +160,35 @@ impl ImageStore {
     /// can have several tags — like Docker). Avoids losing the previous tag when
     /// two builds produce the same config (e.g. a cache hit in the same second).
     pub(crate) fn merged_tags(&self, id: &str, new_tag: &str) -> Vec<String> {
-        let mut tags = vec![normalise_tag(new_tag)];
+        self.merged_tags_all(id, std::slice::from_ref(&new_tag.to_string()))
+    }
+
+    /// [`merged_tags`] for an archive that carries SEVERAL names for the same
+    /// image, which is what `image load` gets.
+    ///
+    /// **`load` did not merge at all, and that lost names nobody asked to lose.**
+    /// It stored the archive's `repo_tags` verbatim and `save` writes the whole
+    /// record, so loading an archive of an image already present replaced its
+    /// name list. Measured 2026-09-10: a store holding `alpine:3.20` and
+    /// `mirror/app:v1` (same id — same content), plus `image load` of a `save` of
+    /// `mirror/app:v1`, was left holding `mirror/app:v1` alone. `alpine:3.20`
+    /// was gone, and with it whatever a manifest, a compose file or a running
+    /// node referred to by that name — on an offline node, that is a `run` that
+    /// can no longer resolve its image.
+    ///
+    /// `load` is the one verb an operator reads as purely additive. The rule this
+    /// restores is docker's: identical content is one id with several names, and
+    /// bringing in one name never removes another. A name that belongs to a
+    /// DIFFERENT id still moves — `enforce_tag_uniqueness` keeps doing that, and
+    /// that one is intended.
+    pub(crate) fn merged_tags_all(&self, id: &str, new_tags: &[String]) -> Vec<String> {
+        let mut tags: Vec<String> = Vec::new();
+        for t in new_tags {
+            let t = normalise_tag(t);
+            if !tags.contains(&t) {
+                tags.push(t);
+            }
+        }
         if let Ok(data) = fs::read(self.record_path(id)) {
             if let Ok(existing) = serde_json::from_slice::<Image>(&data) {
                 for t in existing.repo_tags {

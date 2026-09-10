@@ -318,7 +318,10 @@ impl VmImageStore {
 
     pub fn get(&self, name: &str) -> Result<VmImage> {
         let bytes = std::fs::read(self.meta_path(name))
-            .map_err(|e| Error::not_found_or_io(e, || format!("imagem VM '{name}'")))?;
+            // `VM image`, not `imagem VM`: the sentence is assembled by `NotFound`'s
+            // Display (`no such {0}`), which is English, and the result came out
+            // half-translated — `no such imagem VM 'x'` — even with the CLI in EN.
+            .map_err(|e| Error::not_found_or_io(e, || format!("VM image '{name}'")))?;
         Ok(serde_json::from_slice(&bytes)?)
     }
 }
@@ -450,14 +453,25 @@ pub(crate) fn cmd_rm(store: &VmImageStore, names: &[String], force: bool) -> Res
         println!("{}", img.name);
     }
     if failed {
-        let msg: String = super::po::t("one or more VM images were not removed").into();
-        // A CLASSE da saída importa: um lote onde tudo o que falhou foi por
-        // ausência diz «não existe» (4), não o genérico (1) — é o que um
-        // reconciliador lê para decidir entre criar e parar.
-        return Err(if missing {
-            Error::NotFound(msg)
+        // The exit CLASS matters: a batch whose every failure was an absence
+        // says "not found" (4), not the generic 1 — that is what a reconciler
+        // reads to decide between creating and stopping.
+        //
+        // **But the summary must not come back as an `Error`, and that is what
+        // produced a broken sentence.** `NotFound`'s Display is `no such {0}`,
+        // built to receive a NOUN (`VM image: x`), and it was being handed a
+        // whole sentence: measured 2026-09-10, `image vm rm <missing>` answered
+        // with TWO lines — the good one ("no such VM image: naoexiste (see …)")
+        // and, under it, "error no such one or more VM images were not removed".
+        //
+        // Every failure was already printed above with its own context, exactly
+        // as containers' `for_each_id` does; all that is left here is the exit
+        // code, and that is what this does — with no second message that adds
+        // nothing and ruins the first.
+        std::process::exit(if missing {
+            super::exitcode::NOT_FOUND
         } else {
-            Error::Invalid(msg)
+            super::exitcode::GENERIC
         });
     }
     Ok(())
