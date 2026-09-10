@@ -1313,6 +1313,223 @@ else
   skip "limites: chegam ao cgroup" "sem imagem no store (precisa de rede para o pull)"
 fi
 
+########################################
+# A secção acima prova que o número DECLARADO chega ao ficheiro do cgroup. Não
+# prova que o kernel o IMPÕE — e são coisas diferentes: `memory.max` escrito com
+# o valor certo num cgroup cujo controlador não está delegado lê-se igualzinho e
+# não limita nada. É a diferença entre «o formulário foi preenchido» e «a porta
+# está trancada», e era metade que faltava: das 689 verificações desta bateria,
+# ZERO exercitavam um workload a TENTAR passar do que lhe foi permitido.
+#
+# O que se mede aqui é o comportamento sob tentativa de abuso, sempre com prova
+# de DOIS lados — que o tecto corta quem o excede E que deixa passar quem cabe.
+# Um teste só do lado de cima passa num motor que recusa tudo.
+#
+# Medido a 2026-09-09 neste host (32 cores, 30,5 GiB, rootless com `cpu memory
+# pids` delegados): `-m 64M` deixa alocar 16 MiB e mata aos 256 MiB (rc=137);
+# 1500 forks param nos 512 de `pids.max` com `can't fork`; e 4 ciclos ocupados
+# sob `--cpus 0.5` consomem 0,500 cores com `nr_throttled=217`.
+#
+# O que ISTO NÃO PROVA, e está declarado onde se paga: o tecto de I/O de disco.
+# O `user@<uid>.service` do systemd nunca delega o controlador `io` a um
+# utilizador rootless, por isso `io.max` não existe na base e um container PODE
+# saturar o disco. O motor di-lo em voz alta (aviso no `run`, `DLX-RES-002` no
+# `system doctor`) — mas dizer não é impor, e por isso não há aqui um check a
+# fingir que há tecto.
+########################################
+section "limites: o que se declara é IMPOSTO, não só escrito"
+
+_leaf_of() { # imprime o caminho do cgroup da leaf do container $1
+  local p; p=$("$BIN" container inspect "$1" 2>/dev/null \
+    | python3 -c 'import json,sys;print(json.load(sys.stdin)[0]["pid"])' 2>/dev/null) || return 1
+  [ -n "$p" ] && [ "$p" != None ] || return 1
+  echo "/sys/fs/cgroup$(cut -d: -f3 "/proc/$p/cgroup" 2>/dev/null)"
+}
+export -f _leaf_of
+export IMG PFX
+
+if [ -n "${IMG:-}" ] && "$BIN" image ls 2>/dev/null | grep -q .; then
+
+  # --- MEMÓRIA: o tecto corta, e corta no sítio certo ------------------------
+  #
+  # `dd` aloca um buffer do tamanho de `bs`, o que faz dele um alocador LIMITADO
+  # e determinístico — ao contrário de um `tail /dev/zero`, que cresce até
+  # alguém o matar e por isso só sabe responder «morreu», nunca «morreu no
+  # sítio certo». Com 16 MiB dentro de um tecto de 64 MiB tem de passar; com
+  # 256 MiB tem de ser morto pelo kernel.
+  check "-m 64M: 16 MiB cabem (o tecto não estrangula quem respeita)" ok \
+    bash -c 'timeout 60 "$BIN" container run --rm --net none -m 64M "$IMG" \
+             dd if=/dev/zero of=/dev/null bs=16M count=1'
+  check "-m 64M: 256 MiB são MORTOS pelo kernel (o tecto é imposto)" fail \
+    bash -c 'timeout 60 "$BIN" container run --rm --net none -m 64M "$IMG" \
+             dd if=/dev/zero of=/dev/null bs=256M count=1'
+  # E o mesmo pedido tem de passar sem tecto declarado — senão o check acima
+  # estaria a medir um `dd` que falha por outra razão qualquer.
+  check "…e os mesmos 256 MiB passam sem -m (era mesmo o tecto)" ok \
+    bash -c 'timeout 60 "$BIN" container run --rm --net none "$IMG" \
+             dd if=/dev/zero of=/dev/null bs=256M count=1'
+
+
+  # --- ACH-016 (CORRIGIDO): os filhos do workload também levam com o tecto ---
+  #
+  # O tecto de memória chegou a aplicar-se ao PID 1 do container e a MAIS
+  # NINGUÉM: tudo o que o workload forkasse corria fora da leaf, sem tecto
+  # nenhum — e quase todo o workload real forka (o nginx lança workers, o postgres lança backends, um
+  # entrypoint em shell lança o que lhe mandarem).
+  #
+  # Medido a 2026-09-09 neste host, com `-m 64M`:
+  #   alocar 256 MiB no PRÓPRIO PID 1  -> rc=137, morto pelo kernel  (correcto)
+  #   alocar 256 MiB num FILHO forkado -> rc=0, 3/3                  (escapa)
+  #   alocar 2 GiB   num FILHO forkado -> rc=0, ou seja 32x o tecto  (escapa)
+  # E os filhos aparecem no `cgroup.procs` do cgroup de QUEM INVOCOU o
+  # `delonix`, não na leaf `dlx-<id>` — fora do `dlx-containers`, portanto fora
+  # também do tecto agregado de 85% que protege o host.
+  #
+  # CAUSA, lida no código e não deduzida (`crates/delonix-runtime/src/lib.rs`):
+  # o `setup_cgroup` corria DEPOIS do byte "GO" que liberta o filho para executar
+  # o entrypoint, e a migração de cgroup v2 move UM processo, nunca a sua
+  # descendência. O comentário no sítio raciocina sobre a janela — «every
+  # millisecond it is not in one is a millisecond it runs uncapped» — e o que lhe
+  # escapa é que a janela dura milissegundos mas a consequência é PERMANENTE:
+  # quem for forkado lá dentro fica fora da leaf para sempre. O padrão da
+  # correcção já existe a três funções de distância, e está escrito no próprio
+  # ficheiro para a REDE: «NETWORK BEFORE THE GO (critical order): the child is
+  # still BLOCKED waiting ... so the network is ready BEFORE the entrypoint
+  # runs». O cgroup passou a ter o mesmo tratamento — e este check é o que
+  # impede a regressão: medido depois da correcção, 5/5 filhos mortos, com os
+  # 3 processos na leaf e o CPU estrangulado nos 0,50 cores pedidos.
+  #
+  # TRÊS TENTATIVAS, e não uma, de propósito: era uma corrida, e o primeiro
+  # container de um host chegava a ganhá-la (medido: 1 correcto em 6). Uma só
+  # tentativa deixaria uma regressão passar de vez em quando — que é a quarta
+  # forma de não testar nada descrita no cabeçalho desta bateria.
+  check "-m 64M: um FILHO forkado também é morto (não só o PID 1)" ok bash -c '
+    for i in 1 2 3; do
+      timeout 60 "$BIN" container run --rm --net none -m 64M "$IMG" \
+        sh -c "dd if=/dev/zero of=/dev/null bs=256M count=1 & wait" >/dev/null 2>&1
+      if [ $? -eq 0 ]; then
+        echo "tentativa $i: o filho alocou 256 MiB com um tecto de 64 MiB — o tecto não o cobre"
+        exit 1
+      fi
+    done
+  '
+
+  # --- O QUE UM CONTAINER LEVA SEM PEDIR NADA -------------------------------
+  #
+  # Um container sem uma única flag não pode ficar sem tecto: era exactamente
+  # isso que fazia «sem limite» querer dizer «o host inteiro». Três propriedades
+  # numa só corrida, porque as três vivem na mesma leaf.
+  _n="${PFX}enfdef"
+  "$BIN" container rm -f "$_n" >/dev/null 2>&1 || true
+  if "$BIN" container run -d --name "$_n" --net none "$IMG" sleep 60 >/dev/null 2>&1; then
+    check "sem flags: a leaf TEM tecto de memória (não 'max')" ok \
+      bash -c '[ "$(cat "$(_leaf_of '"$_n"')/memory.max")" != max ]'
+    # Sem isto o tecto de memória é contornável: as páginas saem para swap e o
+    # container passa do que lhe foi permitido sem nunca tocar em `memory.max`.
+    check "sem flags: memory.swap.max=0 (não se escapa ao tecto pelo swap)" ok \
+      bash -c '[ "$(cat "$(_leaf_of '"$_n"')/memory.swap.max")" = 0 ]'
+    check "sem flags: pids.max=512 (anti fork-bomb por omissão)" ok \
+      bash -c '[ "$(cat "$(_leaf_of '"$_n"')/pids.max")" = 512 ]'
+  else
+    skip "sem flags: os tectos por omissão" "o container não arrancou neste host"
+  fi
+  "$BIN" container rm -f "$_n" >/dev/null 2>&1 || true
+
+  # --- PIDs: a fork-bomb pára dentro, e o host não dá por ela ---------------
+  #
+  # 1500 forks contra um tecto de 512. A prova é de dois lados: o container tem
+  # de FALHAR (o kernel recusou-lhe processos) e a contagem de processos do HOST
+  # tem de ficar na mesma — um tecto que só matasse o container depois de ele
+  # encher a tabela de processos do host não serviria de nada.
+  check "fork-bomb: pára nos 512 e o host não perde processos" ok bash -c '
+    antes=$(ps -e --no-headers | wc -l)
+    "$BIN" container rm -f '"${PFX}"'enffork >/dev/null 2>&1
+    timeout 90 "$BIN" container run --name '"${PFX}"'enffork --net none "$IMG" \
+      sh -c "i=0; while [ \$i -lt 1500 ]; do sleep 60 & i=\$((i+1)); done" >/dev/null 2>&1
+    rc=$?
+    "$BIN" container rm -f '"${PFX}"'enffork >/dev/null 2>&1
+    depois=$(ps -e --no-headers | wc -l)
+    [ $rc -ne 0 ] || { echo "1500 forks passaram com pids.max=512 — o tecto não foi imposto"; exit 1; }
+    d=$(( depois - antes ))
+    [ "$d" -lt 200 ] || { echo "o host ganhou $d processos — a fork-bomb escapou ao cgroup"; exit 1; }
+  '
+
+  # --- CPU: o quota estrangula mesmo ---------------------------------------
+  #
+  # Quatro ciclos ocupados sob `--cpus 0.5` consumiriam 4 cores sem quota. A
+  # medição é o delta de `cpu.stat/usage_usec` sobre uma janela de 5s, comparado
+  # com o que foi pedido. A tolerância é larga de propósito (até 0,75 core para
+  # um pedido de 0,5): num host carregado a contabilidade do kernel oscila, e um
+  # limiar apertado dava um check a piscar — que é a quarta forma de não testar
+  # nada que o cabeçalho desta bateria descreve. Mesmo 0,75 está muito abaixo
+  # dos 4 cores que passariam sem quota nenhuma, que é o que isto tem de apanhar.
+  _n="${PFX}enfcpu"
+  "$BIN" container rm -f "$_n" >/dev/null 2>&1 || true
+  if "$BIN" container run -d --name "$_n" --net none --cpus 0.5 "$IMG" \
+       sh -c 'i=0; while [ $i -lt 4 ]; do (while :; do :; done) & i=$((i+1)); done; sleep 120' >/dev/null 2>&1 \
+     && sleep 3 && [ -r "$(_leaf_of "$_n" 2>/dev/null)/cpu.stat" ]; then
+    check "--cpus 0.5: 4 ciclos ocupados ficam por ~0.5 core (não 4)" ok bash -c '
+      cg=$(_leaf_of '"$_n"') || exit 1
+      # A PRÉ-CONDIÇÃO PRIMEIRO. Um cgroup onde só está o PID 1 lê 0 cores, e
+      # 0 <= 0.75 daria PASS a um motor que não conta os filhos — foi
+      # exactamente assim que este check passou vazio enquanto o ACH-016
+      # reproduzia. Um check tem de falhar quando não consegue medir.
+      n=$(wc -l < "$cg/cgroup.procs")
+      [ "$n" -ge 3 ] || { echo "só $n processo(s) na leaf: os ciclos ocupados não estão contabilizados (ACH-016?)"; exit 1; }
+      u1=$(awk "/usage_usec/{print \$2}" "$cg/cpu.stat"); sleep 5
+      u2=$(awk "/usage_usec/{print \$2}" "$cg/cpu.stat")
+      python3 -c "
+import sys
+cores = ($u2 - $u1) / 5e6
+print(\"cores consumidos = %.3f (pedido: 0.5)\" % cores)
+if cores < 0.05:
+    print(\"nada foi consumido — a medição não vale\"); sys.exit(1)
+sys.exit(0 if cores <= 0.75 else 1)"
+    '
+  else
+    skip "--cpus 0.5 estrangula mesmo" "este cgroup não delega o controlador cpu — a quota não é imponível aqui"
+  fi
+  "$BIN" container rm -f "$_n" >/dev/null 2>&1 || true
+
+  # --- O TECTO AGREGADO: a soma de todos também tem limite ------------------
+  #
+  # Cada container pode estar dentro do seu tecto e a SOMA matar o host na mesma.
+  # É a razão de existir do orçamento no cgroup pai (85% do host por omissão);
+  # em rootless ele não existiu durante versões, e «sem limite» era mesmo sem
+  # limite. Verifica-se onde os workloads deste utilizador realmente vivem: o
+  # PAI da leaf, seja ele a `delonix.slice` (root) ou a base delegada (rootless).
+  _n="${PFX}enfagg"
+  "$BIN" container rm -f "$_n" >/dev/null 2>&1 || true
+  if "$BIN" container run -d --name "$_n" --net none "$IMG" sleep 60 >/dev/null 2>&1; then
+    check "o cgroup PAI tem tecto agregado de memória (a soma não mata o host)" ok \
+      bash -c '[ "$(cat "$(dirname "$(_leaf_of '"$_n"')")/memory.max")" != max ]'
+    check "…e tecto agregado de pids" ok \
+      bash -c '[ "$(cat "$(dirname "$(_leaf_of '"$_n"')")/pids.max")" != max ]'
+  else
+    skip "tecto agregado" "o container não arrancou neste host"
+  fi
+  "$BIN" container rm -f "$_n" >/dev/null 2>&1 || true
+
+  # --- FUGA: 20 ciclos não podem deixar rasto -------------------------------
+  #
+  # Um motor que limita bem cada container e deixa restos a cada corrida acaba
+  # no mesmo sítio, só mais devagar. Mede-se o que este repo já viu vazar:
+  # directórios de container, descritores de ficheiro do processo, e cgroups
+  # sem processos nenhuns. O `dlx-*` conta-se por NOME de leaf viva: um cgroup
+  # sem processos que sobreviva aos 20 ciclos é rasto, não trabalho em curso.
+  check "20 ciclos de run/rm não deixam cgroups nem directórios para trás" ok bash -c '
+    dirs0=$(ls "$DELONIX_ROOT/containers" 2>/dev/null | wc -l)
+    fds0=$(ls /proc/self/fd | wc -l)
+    for i in $(seq 20); do "$BIN" container run --rm --net none "$IMG" true >/dev/null 2>&1; done
+    dirs1=$(ls "$DELONIX_ROOT/containers" 2>/dev/null | wc -l)
+    fds1=$(ls /proc/self/fd | wc -l)
+    [ "$dirs1" -le "$dirs0" ] || { echo "ficaram $((dirs1-dirs0)) registos de container por limpar"; exit 1; }
+    [ "$fds1" -le "$((fds0+2))" ] || { echo "vazaram $((fds1-fds0)) descritores"; exit 1; }
+  '
+else
+  skip "limites: são impostos, não só escritos" "sem imagem no store (precisa de rede para o pull)"
+fi
+
 # ---------------------------------------------------------------------------
 # `system doctor` — o host mente em silêncio, e alguém tem de perguntar.
 #

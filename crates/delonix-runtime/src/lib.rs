@@ -5500,6 +5500,7 @@ fn spawn(
     // User namespace: the parent maps the uid/gid and releases the child via the pipe.
     // Network already configured by the hook before the GO? (only on the userns/sync path)
     let mut net_done = false;
+    let mut cgroup_done = false;
     if let Some((r, w)) = sync {
         // SAFETY: the parent closes the read and uses the write to release the child.
         unsafe {
@@ -5530,6 +5531,32 @@ fn spawn(
         // network already up. Without userns (sync=None) there is no blocking point: the
         // hook runs further below, as before (the race remains, but that path
         // is not the rootless/Kind one).
+        // CGROUP BEFORE THE GO (critical order) — same reason as the network
+        // right below, and it was missing for exactly the same class of race.
+        //
+        // A cgroup v2 migration moves ONE process, never its descendants. With
+        // this write after the GO, the entrypoint was already running: anything
+        // it forked in that window stayed in the CALLER's cgroup — outside the
+        // leaf, outside `dlx-containers`, and therefore outside both the
+        // per-container ceiling and the aggregate one that protects the host.
+        // The window lasts milliseconds; the consequence is PERMANENT, because
+        // nothing ever moves those descendants back.
+        //
+        // Measured before this fix, with `-m 64M`: allocating 256 MiB in PID 1
+        // was killed (rc=137, correct), and the SAME allocation in a forked
+        // child returned 0 — three times out of three; at 2 GiB it also
+        // returned 0, i.e. 32x the ceiling. The children showed up in the
+        // invoking shell's `cgroup.procs`. Registered as ACH-016 in
+        // `scripts/e2e.sh`, which fails on it until this lands.
+        if let Err(e) = setup_cgroup(container, pid.as_raw()) {
+            // SAFETY: same teardown as the userns-map failure just above.
+            unsafe {
+                libc::close(w);
+            }
+            let _ = kill(pid, Signal::SIGKILL);
+            return Err(e);
+        }
+        cgroup_done = true;
         let net_err = spec.on_started.and_then(|hook| hook(pid.as_raw()).err());
         // SAFETY: writes 1 byte (the "you may proceed") and closes the write.
         unsafe {
@@ -5672,7 +5699,12 @@ fn spawn(
     // limits hang off, and every millisecond it is not in one is a millisecond
     // it runs uncapped. Mounting allocates nothing, so waiting first would buy
     // no safety and cost that.
-    setup_cgroup(container, pid.as_raw())?;
+    // Already done before the GO on the userns path (the rootless default). The
+    // path without userns has no sync point to block the child on, so it keeps
+    // the historical placement — the same asymmetry the network hook has.
+    if !cgroup_done {
+        setup_cgroup(container, pid.as_raw())?;
+    }
 
     // Configures the network (or other startup) BEFORE waiting/returning. Only the
     // path WITHOUT userns reaches here (no sync point to block the child on) — with
