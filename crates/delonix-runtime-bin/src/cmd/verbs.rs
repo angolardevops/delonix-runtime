@@ -309,9 +309,14 @@ pub(crate) fn get(
         k if k == kinds::FIREWALL_POLICY => super::firewall::list_all_policies(output),
         // `ports` stays FALSE: `vm ls --ports` does real network I/O against
         // every VM, and a `get` must not probe the network unasked.
+        // `all` is TRUE for the same reason it is for clusters: `get` is the
+        // kubectl-shaped verb and `kubectl get` lists a resource whatever state
+        // it is in, while `ls` is the docker-shaped one and `docker ps` lists
+        // what is up.
         k if k == kinds::VM => super::vm::run(super::vm::VmCmd::Ls {
             ports: false,
             output,
+            all: true,
             namespace,
         }),
         // The list above already decided this Kind routes; reaching here means the
