@@ -444,6 +444,19 @@ fn target_for(host: &HostSpec, ssh: &SshSpec) -> SshTarget {
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum ClusterCmd {
+    /// Run `kubectl` against a cluster BY NAME: `delonix cluster <name> get pods`.
+    ///
+    /// Everything after the name goes to `kubectl` untouched.
+    // Deliberately a passthrough and not a reimplementation. `run_kubectl`'s own
+    // doc comment already states the rule this follows -- shell out to the host's
+    // real client, never reimplement it -- and the reason is the same one that
+    // makes `cluster ls` print `-` instead of guessing: a table that is ALMOST
+    // `kubectl`'s, subtly different per Kind, is worse than no table.
+    //
+    // What this removes is the real friction, which was never the printing: it
+    // was finding and exporting the right KUBECONFIG for the cluster you meant.
+    #[command(external_subcommand)]
+    Kubectl(Vec<String>),
     /// List this host's clusters — kind-mode AND VM-based.
     ///
     /// Shows what is up; `-A` adds the ones whose every node is stopped.
@@ -832,6 +845,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
             unreachable!("tratados acima")
         }
         ClusterCmd::Ls { all } => cmd_ls(all),
+        ClusterCmd::Kubectl(args) => cmd_kubectl(&args),
         ClusterCmd::Kube { action } => super::kube::run(action),
         ClusterCmd::Apply { file } => {
             let path = manifest::resolve_path(file)?;
@@ -927,7 +941,27 @@ fn cached_kubeconfig_names() -> Vec<String> {
                 .map(String::from)
         })
         .collect();
+    // The kubeconfigs `delonix-deploy` writes, named after `cluster.name` — the
+    // same second place `kubeconfig_path_or_hint` reads. Listing only the cache
+    // made this hint LIE: it said `delonix-dev` was unavailable on a machine
+    // where `delonix cluster <name> get nodes` worked for that very name, because
+    // that cluster is provisioned by Ansible and never enters the engine's cache.
+    if let Some(home) = std::env::var_os("HOME") {
+        names.extend(
+            std::fs::read_dir(PathBuf::from(home).join(".kube"))
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter_map(|e| {
+                    e.file_name()
+                        .to_str()
+                        .and_then(|f| f.strip_prefix("config-"))
+                        .map(String::from)
+                }),
+        );
+    }
     names.sort();
+    names.dedup();
     names
 }
 
@@ -1007,23 +1041,72 @@ fn cmd_health(name: Option<&str>) -> Result<()> {
 /// is already resolved (or given explicitly by `cluster upgrade`, which
 /// reads it straight off the manifest and never goes through
 /// `resolve_kubeconfig_name` at all).
-fn kubeconfig_path_or_hint(name: &str) -> Result<PathBuf> {
-    let path = state_root()
-        .join("clusters")
-        .join(format!("{name}-kubeconfig.yaml"));
-    if !path.exists() {
-        let names = cached_kubeconfig_names();
-        let hint = if names.is_empty() {
-            super::po::t("run `cluster create`/`cluster apply`/`cluster kubeadm` first").into()
-        } else {
-            super::po::tf("available: {names}", &[("names", &names.join(", "))])
-        };
+/// Two places, in this order, and the second one is the point.
+///
+/// The engine's own cache holds the clusters the engine created. A cluster
+/// provisioned by something else leaves nothing there -- and `~/.kube/config-<name>`
+/// is exactly what `delonix-deploy`'s `k8s_control_plane` role writes for every
+/// cluster it builds, naming the file after `cluster.name`.
+///
+/// Reading it is NOT the engine claiming to own those clusters: it does not
+/// list them, does not track them, and cannot create or destroy them. It is
+/// being handed a name and finding the credentials for it, which is what an
+/// operator does by hand today with `export KUBECONFIG=`.
+/// `delonix cluster <name> <kubectl args...>`.
+fn cmd_kubectl(args: &[String]) -> Result<()> {
+    let Some((name, rest)) = args.split_first() else {
+        // clap does not hand an external subcommand an empty vector, but the
+        // signature allows it and an `unwrap` here would be a panic in a CLI.
+        return Err(Error::Invalid(
+            super::po::t(
+                "cluster: a name and a kubectl command, e.g. `delonix cluster <name> get pods`",
+            )
+            .to_string(),
+        ));
+    };
+    if rest.is_empty() {
         return Err(Error::Invalid(super::po::tf(
-            "no cached kubeconfig for cluster '{name}' — {hint}",
-            &[("name", name), ("hint", &hint)],
+            "cluster {name}: nothing to run — e.g. `delonix cluster {name} get pods`",
+            &[("name", name)],
         )));
     }
-    Ok(path)
+    let kubeconfig = kubeconfig_path_or_hint(name)?;
+    run_kubectl(&kubeconfig, rest)
+}
+
+fn kubeconfig_candidates(name: &str, root: &Path, home: Option<&Path>) -> Vec<PathBuf> {
+    let mut v = vec![root
+        .join("clusters")
+        .join(format!("{name}-kubeconfig.yaml"))];
+    if let Some(h) = home {
+        v.push(h.join(".kube").join(format!("config-{name}")));
+    }
+    v
+}
+
+fn kubeconfig_path_or_hint(name: &str) -> Result<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let candidatos = kubeconfig_candidates(name, &state_root(), home.as_deref());
+    if let Some(p) = candidatos.iter().find(|p| p.exists()) {
+        return Ok(p.clone());
+    }
+    let cache = candidatos[0].clone();
+    let names = cached_kubeconfig_names();
+    let hint = if names.is_empty() {
+        super::po::t("run `cluster create`/`cluster apply`/`cluster kubeadm` first").into()
+    } else {
+        super::po::tf("available: {names}", &[("names", &names.join(", "))])
+    };
+    // Naming BOTH paths that were tried, because "no kubeconfig" sends the
+    // reader looking in the wrong one half the time.
+    Err(Error::Invalid(super::po::tf(
+        "no kubeconfig for cluster '{name}' — tried {cache} and ~/.kube/config-{name} ({hint})",
+        &[
+            ("name", name),
+            ("cache", &cache.display().to_string()),
+            ("hint", &hint),
+        ],
+    )))
 }
 
 /// `kubectl` on the OPERATOR's own machine — never reimplemented here, same
@@ -3224,6 +3307,27 @@ Then you can join any number of worker nodes by running the following on each as
 kubeadm join 10.0.0.10:6443 --token abcdef.0123456789abcdef \\
 	--discovery-token-ca-cert-hash sha256:1111111111111111111111111111111111111111111111111111111111111111
 ";
+
+    /// The engine's cache comes FIRST and `~/.kube/config-<name>` second, and
+    /// both are always offered. The second place is what makes
+    /// `delonix cluster <name> get pods` work on a cluster the engine did not
+    /// create -- every `dev` and `producao` cluster in this house is provisioned
+    /// by Ansible, which writes exactly that file.
+    #[test]
+    fn kubeconfig_is_looked_for_in_the_cache_first_then_the_deploy_path() {
+        use std::path::Path;
+        let v = super::kubeconfig_candidates("lab", Path::new("/state"), Some(Path::new("/h")));
+        assert_eq!(
+            v,
+            vec![
+                std::path::PathBuf::from("/state/clusters/lab-kubeconfig.yaml"),
+                std::path::PathBuf::from("/h/.kube/config-lab"),
+            ]
+        );
+        // No HOME: the cache is still offered, rather than refusing outright.
+        let v = super::kubeconfig_candidates("lab", Path::new("/state"), None);
+        assert_eq!(v.len(), 1);
+    }
 
     #[test]
     fn valid_endpoint_aceita_host_ip_e_porta() {
