@@ -10765,3 +10765,22 @@ msgstr "{kind}/{name}: adoptado — não pertencia a stack nenhuma, e um `destro
 # manifesto: documentos que se dissolveram não são um ficheiro vazio
 msgid "{path}: every document expanded to nothing — no resource left to apply (a misspelt `kind: Stack` group does this; see the warnings above)"
 msgstr "{path}: todos os documentos se dissolveram — não sobrou recurso nenhum para aplicar (um grupo de `kind: Stack` mal escrito faz isto; ver os avisos acima)"
+
+# categorias do COMMAND MAP da raiz
+msgid "Workloads"
+msgstr "Cargas"
+
+msgid "Artifacts"
+msgstr "Artefactos"
+
+msgid "Clusters"
+msgstr "Clusters"
+
+msgid "Resources"
+msgstr "Recursos"
+
+msgid "Serve"
+msgstr "Servir"
+
+msgid "Engine"
+msgstr "Motor"
