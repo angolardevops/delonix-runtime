@@ -29,6 +29,7 @@ GROUP_PATH = {
     "netns": ("net", "netns"),
     "flow": ("net", "flow"),
     "capture": ("net", "capture"),
+    "l4guard": ("net", "l4guard"),
     "ingress": ("net", "ingress"),
     "egress": ("net", "egress"),
     "httproute": ("net", "httproute"),
@@ -36,7 +37,6 @@ GROUP_PATH = {
     "boot": ("system", "boot"),
     "namespace": ("system", "namespace"),
     "dash": ("dashboard",),
-    "volumes": ("volume",),
     "cri": ("serve", "cri"),
     "api": ("serve", "api"),
     "docker-api": ("serve", "docker-api"),
@@ -46,6 +46,73 @@ GROUP_PATH = {
 
 def group_argv(name):
     return GROUP_PATH.get(name, (name,))
+
+
+# The 9 category labels `delonix --help`'s COMMAND MAP prints for the ROOT
+# groups (`crates/delonix-runtime-bin/src/cmd/manual.rs::ROOT_GROUP_ORDER`) —
+# mirrored here only for the PT translation, since `pt.po` already carries
+# the exact string and re-deriving it from the binary would need `--l18n=pt`
+# runs this script doesn't otherwise make.
+CATEGORY_PT = {
+    "Workloads": "Cargas de trabalho",
+    "Artifacts": "Artefactos",
+    "Storage": "Armazenamento",
+    "Networking": "Rede",
+    "Clusters": "Clusters",
+    "Declarative": "Declarativo",
+    "Resources": "Recursos",
+    "Serve": "Servir",
+    "Engine": "Motor",
+}
+
+# A page-key alias for the one root command whose GROUPS/GROUP_PATH key
+# doesn't match its own name (`dashboard` documents as `dash`, kept for the
+# page's stable URL — renaming it would break every existing bookmark/link).
+ROOT_NAME_TO_PAGE_KEY = {"dashboard": "dash"}
+
+
+def root_command_categories():
+    """The root COMMAND MAP, as `[(category, [member_names]), ...]`.
+
+    Parses `delonix --help`'s own categorized listing — the SAME text
+    `manual.rs::ROOT_GROUP_ORDER` renders — instead of hand-authoring a 4th
+    copy of the taxonomy here (the site would then have its own opinion of
+    what belongs where, free to drift from the CLI's). Each member name is
+    resolved through `ROOT_NAME_TO_PAGE_KEY` to the page-key that actually
+    documents it.
+    """
+    root_help = help_of()
+    m = re.search(r"COMMAND MAP:\n((?:  .+\n?)+)", root_help)
+    if not m:
+        raise SystemExit("gen.py: `delonix --help` has no COMMAND MAP section to parse")
+    cats = []
+    for line in m.group(1).splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split(None, 1)
+        if len(parts) != 2:
+            continue
+        category, rest = parts
+        members = [ROOT_NAME_TO_PAGE_KEY.get(n, n) for n in rest.split(" · ")]
+        cats.append((category, members))
+    return cats
+
+
+def children_of_top_level():
+    """Parent page-key -> nested child page-keys, derived from `GROUP_PATH`.
+
+    A `GROUP_PATH` entry with more than one element (`ingress` -> `("net",
+    "ingress")`) names a subgroup that lives under a parent's page instead of
+    getting a root category slot of its own. Deriving this from the SAME
+    dict `site_group_keys()` reads keeps the nesting and the top-level count
+    from ever disagreeing about what counts as a child.
+    """
+    children = {}
+    for key, path in GROUP_PATH.items():
+        if len(path) > 1:
+            children.setdefault(path[0], []).append(key)
+    return children
 
 
 def help_of(*args):
@@ -116,7 +183,7 @@ SOURCE_FILES = {
     "image": "image.rs",
     "build": "build.rs",
     "vm": "vm.rs",
-    "volumes": "volume.rs",
+    "volume": "volume.rs",
     "network": "network.rs",
     "stack": "stack.rs",
     "compose": "compose.rs",
@@ -568,7 +635,7 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
             ("Remover a VM", "delonix delete vm node1"),
         ],
     },
-    "volumes": {
+    "volume": {
         "title": "delonix volume",
         "tagline": "Volumes nomeados e bind mounts: create, ls, inspect, rm, apply.",
         "intro": """Wrapper fino sobre o <code>VolumeStore</code>. No <code>container run</code>,
@@ -1305,6 +1372,154 @@ de estabilidade</a>. Para saber o que mudou entre duas versões há
             ("Um campo aninhado", "delonix explain Pod.containers.image"),
         ],
     },
+    "net": {
+        "title": "delonix net",
+        "tagline": "A infra-estrutura de baixo nível da rede — netns, flow, ingress, egress, httproute, tunnel, l4guard, capture.",
+        "intro": """Plumbing de rede/infra de baixo nível, agrupado desde a reestruturação da CLI
+(v0.30.0): <code>netns</code>/<code>flow</code>/<code>ingress</code>/<code>egress</code>/
+<code>httproute</code>/<code>tunnel</code>/<code>l4guard</code>/<code>capture</code>/<code>boot</code>
+viviam soltos na raiz, fáceis de invocar como se fossem um comando principal por engano. Cada
+subgrupo aqui tem a sua própria página (ver a barra lateral) — esta é só a porta de entrada.<br><br>
+Não confundir com <code>network</code> (sem o "net"): esse é o Kind que o cliente cria (bridge,
+overlay, subnet); este é o que corre por baixo — a firewall por-container, o holder netns, o
+proxy L7, o rate-limit de borda.""",
+        "subs": {},
+    },
+    "l4guard": {
+        "title": "delonix net l4guard",
+        "tagline": "Guarda de DDoS L4 à entrada — rate de ligação por origem e tecto de concorrentes.",
+        "intro": """Um guarda GLOBAL (não por-container) contra rajadas de ligações novas ou um
+único par IP:porta a esgotar as slots do slirp único do ingress — a fronteira antes de qualquer
+firewall por-container. Só alcançável por manifesto (<code>kind: L4Guard</code>) até esta versão;
+<code>net l4guard status</code> mostra se está activo, com os contadores de descarte.""",
+        "subs": {},
+    },
+    "serve": {
+        "title": "delonix serve",
+        "tagline": "Serve um endpoint de protocolo num socket unix — cri, api, docker-api.",
+        "intro": """Os três "fala este protocolo por um socket": <code>serve cri</code> (o
+endpoint <code>runtime.v1</code> que um <code>kubelet</code> consome directamente, substituindo
+containerd/CRI-O), <code>serve api</code> (a API de gestão LOCAL, HTTP+JSON, para um
+control-plane externo) e <code>serve docker-api</code> (a fatia da Docker Engine API que basta
+para <code>docker version/ps/create/start/stop/rm</code> via <code>DOCKER_HOST=unix://…</code>).
+Os três correm em primeiro plano, um processo por invocação — sem daemon residente.""",
+        "subs": {},
+    },
+    "api": {
+        "title": "delonix serve api",
+        "tagline": "A API de gestão LOCAL (HTTP+JSON) num socket unix, para um control-plane externo.",
+        "intro": """A superfície que um control-plane externo consome para operar o motor —
+métricas Prometheus incluídas. É LOCAL por desenho (só o próprio uid alcança o socket) e o
+<code>docs/cli-stability.md</code> pede para não se construir automação em cima dela sem ler o
+ADR-0010 primeiro: não é uma API remota nem multi-tenant.""",
+        "subs": {},
+    },
+    "manifest": {
+        "title": "delonix manifest",
+        "tagline": "Trabalhar num manifesto sem tocar no host — render com defaults preenchidos.",
+        "intro": """<code>manifest render</code> faz o round-trip de um documento pelo seu struct
+tipado e imprime o YAML completo, com os <code>#[serde(default)]</code> materializados — o
+equivalente a um <code>kubectl --dry-run=client -o yaml</code>. Não aplica nada; é a forma de ver
+o que um <code>kind:</code> escrito à mão vai realmente ficar depois de o motor o ler.""",
+        "subs": {},
+    },
+    "mcp": {
+        "title": "delonix mcp",
+        "tagline": "Servidor Model Context Protocol — superfície de controlo de IA LOCAL, sem inquilino.",
+        "intro": """ADR-0025. <strong>Não estável</strong> — ver <code>docs/cli-stability.md</code>.
+As ferramentas expostas chamam directamente a <code>Store</code>/os crates de domínio, nunca
+constroem shell arbitrário; é <code>stdio</code>-only nesta fase, pensado para um assistente de IA
+local operar o motor sem sair da máquina.""",
+        "subs": {},
+    },
+    "api-resources": {
+        "title": "delonix api-resources",
+        "tagline": "Todos os Kinds que este motor serve: plural, nomes curtos, apiVersion e forma.",
+        "intro": """Lido do MESMO registo que o parser, o schema e o reconciliador leem — não há
+uma segunda tabela para discordar deles. Responde a "o que posso escrever num manifesto, e o que
+escrevo a seguir a <code>explain</code>". A coluna <code>FORM</code> é a que não se adivinha: diz
+se um documento desse Kind sobrevive ao <code>load</code> sob o seu próprio nome — é por isso que
+um <code>kind: Egress</code> nunca aparece num plano como <code>Egress</code> (fundiu-se em
+<code>FirewallPolicy</code>).""",
+        "subs": {},
+    },
+    "apply": {
+        "title": "delonix apply",
+        "tagline": "Converge um manifesto — a grafia canónica de `stack apply`.",
+        "intro": """Promovido à raiz porque o verbo pertence ao MANIFESTO, não a um grupo: um
+ficheiro com uma Network, um Volume e um Pod não é mais uma operação de "network" do que de
+"stack". <code>delonix apply -f ficheiro.yaml</code> é o mesmo que <code>delonix stack apply -f
+ficheiro.yaml</code> — os dois nomes convergem no mesmo código.""",
+        "subs": {},
+    },
+    "plan": {
+        "title": "delonix plan",
+        "tagline": "Mostra o que um apply mudaria, e não muda nada.",
+        "intro": """A grafia promovida de <code>stack plan</code>, pela mesma razão do
+<code>apply</code> acima. <code>--detailed-exitcode</code> devolve 0/1/2 (sem
+mudanças/erro/há diferenças) — o contrato do <code>terraform plan</code>, para um gate de deriva
+em CI.""",
+        "subs": {},
+    },
+    "diff": {
+        "title": "delonix diff",
+        "tagline": "O manifesto, o last-applied e o observado de UM recurso, lado a lado.",
+        "intro": """O <code>stack plan</code> já calcula isto por dentro para cada recurso — só
+que nunca imprime mais do que o VEREDICTO (Create/Update/Replace/NoOp). Este comando imprime os
+três VALORES subjacentes, para um recurso nomeado, lado a lado — a ferramenta para quando o
+veredicto por si só não explica a deriva.""",
+        "subs": {},
+    },
+    "wait": {
+        "title": "delonix wait",
+        "tagline": "Bloqueia até os recursos do manifesto estarem prontos.",
+        "intro": """Substituto directo de um <code>sleep</code> arbitrário em CI/scripts: espera
+pela condição de prontidão real de cada recurso declarativo do manifesto (a mesma que o
+<code>stack ls</code> mostra), com <code>--timeout</code> a limitar a espera.""",
+        "subs": {},
+    },
+    "delete": {
+        "title": "delonix delete",
+        "tagline": "Remove recursos por Kind e nome — a forma genérica de dez `rm`s.",
+        "intro": """Sem nome, <strong>recusa-se</strong> em vez de remover todos os recursos do
+Kind: um argumento em falta é muito mais vezes um erro de escrita do que uma intenção, e este
+verbo não tem uma segunda oportunidade para perguntar. O Kind resolve-se pelo mesmo registo que
+<code>api-resources</code> imprime, por isso <code>pods</code>/<code>pod</code>/<code>po</code>
+são a mesma pergunta.""",
+        "subs": {},
+    },
+    "describe": {
+        "title": "delonix describe",
+        "tagline": "Detalhe de um recurso, em blocos — a forma genérica de dez `describe`s.",
+        "intro": """O mesmo formato <code>kubectl</code>-like que cada grupo já dava ao seu
+próprio <code>describe</code>, só que por Kind em vez de por comando — para quem prefere um único
+verbo genérico a decorar dez.""",
+        "subs": {},
+    },
+    "get": {
+        "title": "delonix get",
+        "tagline": "Lista recursos de um Kind — a forma genérica de dez `ls`s.",
+        "intro": """O Kind resolve-se pelo MESMO registo que <code>api-resources</code> imprime,
+por isso <code>pods</code>, <code>pod</code> e <code>po</code> são a mesma pergunta, e um Kind
+renomeado numa versão anterior continua a responder ao nome antigo.""",
+        "subs": {},
+    },
+    "man": {
+        "title": "delonix man",
+        "tagline": "Páginas de manual em roff, geradas a partir deste binário — uma por comando.",
+        "intro": """Gerado do MESMO parser <code>clap</code> que responde ao <code>--help</code> —
+nunca uma segunda fonte a poder divergir da CLI real. Sem argumento gera as páginas de todos os
+comandos; com um, só a desse.""",
+        "subs": {},
+    },
+    "version": {
+        "title": "delonix version",
+        "tagline": "Imprime a versão (o mesmo texto que `--version`).",
+        "intro": """Existe a par da flag porque "<code>&lt;ferramenta&gt; version</code>" é o que
+se escreve primeiro por hábito (git/docker/kubectl/podman respondem todos) — e imprime o texto
+VERBATIM da flag, para os dois nunca poderem divergir.""",
+        "subs": {},
+    },
 }
 
 # Tradução EN de `tagline`/`intro` por grupo (nível de página, não por
@@ -1381,7 +1596,7 @@ cloud-init: <code>--hostname</code>, <code>--ssh-key</code> and <code>--user-dat
 NoCloud ISO automatically. It's the layer <code>delonix cluster kubeadm</code> uses to provision
 nodes.""",
     },
-    "volumes": {
+    "volume": {
         "tagline": "Named volumes and bind mounts: create, ls, inspect, rm, apply.",
         "intro": """A thin wrapper over <code>VolumeStore</code>. In <code>container run</code>,
 <code>-v name:/dest[:ro]</code> resolves to a named volume (created on demand) and
@@ -1604,6 +1819,120 @@ a <code>docker-compose.yml</code> already runs natively under <code>delonix comp
 a second manifest would leave the project with two sources of truth. The command says so instead
 of generating anyway.""",
     },
+    "net": {
+        "tagline": "The low-level network plumbing — netns, flow, ingress, egress, httproute, tunnel, l4guard, capture.",
+        "intro": """Low-level network/infra plumbing, grouped since the CLI restructuring
+(v0.30.0): <code>netns</code>/<code>flow</code>/<code>ingress</code>/<code>egress</code>/
+<code>httproute</code>/<code>tunnel</code>/<code>l4guard</code>/<code>capture</code>/<code>boot</code>
+used to sit loose at the root, easy to invoke by mistake as if they were a top-level command. Each
+subgroup here has its own page (see the sidebar) — this is just the front door.<br><br>
+Not to be confused with <code>network</code> (no "net"): that is the Kind the client creates
+(bridge, overlay, subnet); this is what runs underneath — the per-container firewall, the netns
+holder, the L7 proxy, the edge rate limiter.""",
+    },
+    "l4guard": {
+        "tagline": "The inbound L4 DDoS guard — per-source connection rate and a concurrent cap.",
+        "intro": """A GLOBAL guard (not per-container) against bursts of new connections or a
+single IP:port pair exhausting the ingress's single slirp's slots — the boundary before any
+per-container firewall. Only reachable via manifest (<code>kind: L4Guard</code>) until this
+version; <code>net l4guard status</code> shows whether it is active, with its drop counters.""",
+    },
+    "serve": {
+        "tagline": "Serve a protocol endpoint on a unix socket — cri, api, docker-api.",
+        "intro": """The three "speak this protocol over a socket" commands: <code>serve cri</code>
+(the <code>runtime.v1</code> endpoint a <code>kubelet</code> talks to directly, replacing
+containerd/CRI-O), <code>serve api</code> (the LOCAL management API, HTTP+JSON, for an external
+control plane) and <code>serve docker-api</code> (the slice of the Docker Engine API that covers
+<code>docker version/ps/create/start/stop/rm</code> via <code>DOCKER_HOST=unix://…</code>). All
+three run in the foreground, one process per invocation — no resident daemon.""",
+    },
+    "api": {
+        "tagline": "The LOCAL management API (HTTP+JSON) on a unix socket, for an external control plane.",
+        "intro": """The surface an external control plane consumes to operate the engine —
+Prometheus metrics included. LOCAL by design (only the owning uid reaches the socket), and
+<code>docs/cli-stability.md</code> asks that no automation be built on top of it without reading
+ADR-0010 first: it is not a remote or multi-tenant API.""",
+    },
+    "manifest": {
+        "tagline": "Work on a manifest without touching the host — render with defaults filled in.",
+        "intro": """<code>manifest render</code> round-trips a document through its typed struct
+and prints the full YAML with <code>#[serde(default)]</code>s materialized — the equivalent of a
+<code>kubectl --dry-run=client -o yaml</code>. It applies nothing; it is how you see what a
+hand-written <code>kind:</code> will actually become once the engine reads it.""",
+    },
+    "mcp": {
+        "tagline": "Model Context Protocol server — a LOCAL, tenancy-free AI control surface.",
+        "intro": """ADR-0025. <strong>Not stable</strong> — see <code>docs/cli-stability.md</code>.
+The exposed tools call the <code>Store</code>/domain crates directly, never build arbitrary
+shell; it is <code>stdio</code>-only in this phase, meant for a local AI assistant to operate the
+engine without leaving the machine.""",
+    },
+    "api-resources": {
+        "tagline": "Every Kind this engine serves: plural, shortnames, apiVersion and form.",
+        "intro": """Read from the SAME registry the parser, the schema and the reconciler read —
+there is no second table to disagree with them. It answers «what can I write in a manifest, and
+what do I type after <code>explain</code>». The <code>FORM</code> column is the one that cannot be
+guessed: it says whether a document of that Kind survives the load under its own name — which is
+why a <code>kind: Egress</code> never shows up in a plan as <code>Egress</code> (it merged into
+<code>FirewallPolicy</code>).""",
+    },
+    "apply": {
+        "tagline": "Converge a manifest — the canonical spelling of `stack apply`.",
+        "intro": """Promoted to the root because the verb belongs to the MANIFEST, not to one
+group: a file with a Network, a Volume and a Pod in it is no more a "network" operation than a
+"stack" one. <code>delonix apply -f file.yaml</code> is the same as <code>delonix stack apply -f
+file.yaml</code> — both names converge on the same code.""",
+    },
+    "plan": {
+        "tagline": "Show what an apply would change, and change nothing.",
+        "intro": """The promoted spelling of <code>stack plan</code>, for the same reason as
+<code>apply</code> above. <code>--detailed-exitcode</code> returns 0/1/2 (no changes/error/there
+are differences) — the same contract as <code>terraform plan</code>, for a drift gate in CI.""",
+    },
+    "diff": {
+        "tagline": "The manifest, last-applied, and observed values for one resource — side by side.",
+        "intro": """<code>stack plan</code> already computes this internally for every resource —
+it only ever prints the VERDICT (Create/Update/Replace/NoOp). This prints the three underlying
+VALUES, for one named resource, side by side — the tool for when the verdict alone doesn't
+explain the drift.""",
+    },
+    "wait": {
+        "tagline": "Block until the manifest's resources are ready.",
+        "intro": """A drop-in replacement for an arbitrary <code>sleep</code> in CI/scripts: it
+waits for each declarative resource's real readiness condition (the same one <code>stack
+ls</code> shows), with <code>--timeout</code> bounding the wait.""",
+    },
+    "delete": {
+        "tagline": "Remove resources by Kind and name — the generic form of ten `rm`s.",
+        "intro": """With no name it REFUSES rather than removing every resource of the Kind: a
+missing argument is far more often a typo than an intention, and this verb doesn't get a second
+chance to ask. The Kind resolves through the same registry <code>api-resources</code> prints, so
+<code>pods</code>/<code>pod</code>/<code>po</code> are the same question.""",
+    },
+    "describe": {
+        "tagline": "Detail of one resource, in blocks — the generic form of ten `describe`s.",
+        "intro": """The same <code>kubectl</code>-like block format that each group already gave
+its own <code>describe</code>, just keyed by Kind instead of by command — for whoever prefers one
+generic verb to memorizing ten.""",
+    },
+    "get": {
+        "tagline": "List resources of a Kind — the generic form of ten `ls` commands.",
+        "intro": """The Kind is resolved through the SAME registry <code>api-resources</code>
+prints, so <code>pods</code>, <code>pod</code> and <code>po</code> are the same question, and a
+Kind renamed in an earlier version still answers to its old name.""",
+    },
+    "man": {
+        "tagline": "Manual pages in roff, generated from this binary — one per command.",
+        "intro": """Generated from the SAME <code>clap</code> parser that answers
+<code>--help</code> — never a second source that could drift from the real CLI. With no argument
+it generates every command's page; with one, just that command's.""",
+    },
+    "version": {
+        "tagline": "Print the version (same output as `--version`).",
+        "intro": """Exists alongside the flag because "<code>&lt;tool&gt; version</code>" is what
+gets typed first out of habit (git/docker/kubectl/podman all answer it) — and it prints the
+flag's text VERBATIM, so the two can never disagree.""",
+    },
 }
 
 
@@ -1777,7 +2106,7 @@ gone.</p>
 <pre><code>delonix vm snapshot create dev before-the-change
 delonix vm snapshot restore dev before-the-change</code></pre>"""},
     },
-    "volumes": {
+    "volume": {
         "lab": {"pt": """<p>Prova que um volume nomeado sobrevive a um restart do container —
 ao contrário de escrever directamente no rootfs.</p>
 <pre><code>delonix volume create dados
@@ -2320,22 +2649,22 @@ EXAMPLES_EN = {
     ("vm", "status"): ["Reconciles liveness/IP with the backend"],
     ("vm", "stop"): [""],
     ("vm", "apply"): [""],
-    ("volumes", "snapshot"): [
+    ("volume", "snapshot"): [
         "Take and list a volume's snapshots",
         "Roll back to a snapshot (the volume's current contents are replaced)",
         "Delete a snapshot that is no longer useful",
     ],
-    ("volumes", "describe"): ["Volume detail (usage, quota, mounts)"],
-    ("volumes", "create"): [
+    ("volume", "describe"): ["Volume detail (usage, quota, mounts)"],
+    ("volume", "create"): [
         "With quota and the nfs driver available",
         "NFS from a TrueNAS, mounted straight as a volume",
         "SMB/CIFS with the password from the vault, never from argv",
         "An isolated, individually-quota'd slice of an already-existing volume",
     ],
-    ("volumes", "ls"): ["", "Every namespace at once — a share is never invisible"],
-    ("volumes", "inspect"): [""],
-    ("volumes", "rm"): ["", "Un-register a share's record; the DATA stays unless you ask for --purge-data"],
-    ("volumes", "apply"): [""],
+    ("volume", "ls"): ["", "Every namespace at once — a share is never invisible"],
+    ("volume", "inspect"): [""],
+    ("volume", "rm"): ["", "Un-register a share's record; the DATA stays unless you ask for --purge-data"],
+    ("volume", "apply"): [""],
     ("network", "describe"): ["Network detail, kubectl-style"],
     ("network", "node"): [
         "This node's WireGuard key, to hand out to the overlay's peers",
@@ -2960,7 +3289,7 @@ delonix container stop web       # a porta fecha sozinha
 delonix container start web      # rearranca com o mesmo estado</code></pre>
 
 <h2>Referência da CLI</h2>
-<div class="cards">{cards}</div>
+{cards}
 
 <h2>Porque é diferente</h2>
 <table>
@@ -3024,7 +3353,7 @@ delonix container stop web       # the port closes on its own
 delonix container start web      # restarts with the same state</code></pre>
 
 <h2>CLI reference</h2>
-<div class="cards">{cards}</div>
+{cards}
 
 <h2>Why it's different</h2>
 <table>
@@ -4935,20 +5264,23 @@ def cheatsheet_page():
     body.append(f"<h2>{bi('span', 'Tarefas comuns', 'Common tasks')}</h2>")
     body.append(examples_html(CHEAT_TASKS, CHEAT_TASKS_EN))
     body.append(f"<h2>{bi('span', 'Todos os grupos', 'All groups')}</h2>")
-    order = list(GROUPS.keys()) + ["cri"]
-    for g in order:
+
+    def entry_html(g, level):
+        # `level` decides `<h3>` (root group, its own category section) vs
+        # `<h4>` (nested child, under its parent) — the same distinction
+        # `GROUP_PATH`/`children_of_top_level()` already draw, so a group
+        # never has to say twice whether it's top-level or a child.
+        tag = "h3" if level == 1 else "h4"
         title = GROUPS[g]["title"] if g in GROUPS else "delonix serve cri"
         href = f"comandos/{g}.html" if g in GROUPS else "cri.html"
         subs = subcommands_of(g)
-        head = f"<h3 id='{g}'><a href='{href}'><code>{html.escape(title)}</code></a></h3>"
+        head = f"<{tag} id='{g}'><a href='{href}'><code>{html.escape(title)}</code></a></{tag}>"
         if not subs:
             tl_en = GROUPS_EN.get(g, {}).get("tagline") if g in GROUPS else "Serves the CRI endpoint (runtime.v1) on a unix socket."
             tl = GROUPS[g]["tagline"] if g in GROUPS else "Serve o endpoint CRI (runtime.v1) num socket unix."
             if tl_en:
-                body.append(head + bi("p", html.escape(tl), html.escape(tl_en)))
-            else:
-                body.append(head + f"<p>{html.escape(tl)}</p>")
-            continue
+                return head + bi("p", html.escape(tl), html.escape(tl_en))
+            return head + f"<p>{html.escape(tl)}</p>"
         prefix = " ".join(group_argv(g)) if g in GROUPS else "serve cri"
         rows = "".join(
             f"<tr><td><code>{html.escape(prefix)} {html.escape(s)}</code></td><td>{html.escape(d)}</td></tr>"
@@ -4958,7 +5290,15 @@ def cheatsheet_page():
         # por omissão — não precisa de tradução própria, ao contrário da prosa
         # autoral desta página.
         table_head = bi("span", "Comando", "Command") + "</th><th>" + bi("span", "O que faz", "What it does")
-        body.append(head + f"<table><tr><th>{table_head}</th></tr>{rows}</table>")
+        return head + f"<table><tr><th>{table_head}</th></tr>{rows}</table>"
+
+    children = children_of_top_level()
+    for category, members in root_command_categories():
+        body.append(f"<h2 class='category'>{bi('span', CATEGORY_PT.get(category, category), category)}</h2>")
+        for g in members:
+            body.append(entry_html(g, 1))
+            for child in children.get(g, []):
+                body.append(entry_html(child, 2))
     body.append(f"<h2>{bi('span', 'Global', 'Global')}</h2>")
     body.append(bi("p",
         "<code>--l18n en|pt</code> — idioma da saída (EN por omissão; "
@@ -5231,11 +5571,23 @@ def main():
         if en:
             return bi("span", html.escape(g["tagline"]), html.escape(en))
         return html.escape(g["tagline"])
-    cards = "".join(
-        f'<div class="card"><b><a href="comandos/{n}.html">{html.escape(g["title"])}</a></b>'
-        f'<p>{card_tagline(n, g)}</p></div>'
-        for n, g in GROUPS.items()
-    )
+    def card_html(n):
+        g = GROUPS[n]
+        cls = "card"
+        return (f'<div class="{cls}"><b><a href="comandos/{n}.html">{html.escape(g["title"])}</a></b>'
+                f'<p>{card_tagline(n, g)}</p></div>')
+    children = children_of_top_level()
+    cat_blocks = []
+    for category, members in root_command_categories():
+        cat_cards = "".join(
+            card_html(g) + "".join(card_html(c) for c in children.get(g, []) if c in GROUPS)
+            for g in members if g in GROUPS
+        )
+        cat_blocks.append(
+            f"<h3 class='category'>{bi('span', CATEGORY_PT.get(category, category), category)}</h3>"
+            f'<div class="cards">{cat_cards}</div>'
+        )
+    cards = "".join(cat_blocks)
     index_html = bi("div", INDEX_PT, INDEX_EN).replace("{ver}", ver).replace("{cards}", cards)
     page("index.html", "Delonix Engine", index_html)
     cheatsheet_page()
