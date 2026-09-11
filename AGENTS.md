@@ -2410,8 +2410,17 @@ static pod que nunca passou pelo API server.
   crate) e `crates/delonix-cri/tests/grpc_status.rs` faz o round-trip a sério — sobe o servidor num
   socket unix, chama `Version` e `Status` pelo cliente gerado, e exige as duas condições que o
   kubelet lê. Verificado que apanha regressão: com o `Status` a devolver condições vazias, chumba
-  em «faltou RuntimeReady: []». Continua por validar com um **kubelet** real — isso precisa de um
-  nó, não de um cliente.
+  em «faltou RuntimeReady: []».
+  **E desde 2026-09-11 está exercitado pelo `crictl`**, o cliente OFICIAL do projecto
+  Kubernetes, contra um `serve cri` real neste host: `version` (`RuntimeName: delonix`,
+  `RuntimeApiVersion: v1`), `info` (`RuntimeReady: true`, com o `capabilityCeiling` visível),
+  `images`, e o ciclo inteiro que o kubelet conduz — `runp` (sandbox `Ready`) → `create` →
+  `start` (`Running`) → `exec`. Os **labels e annotations do kubelet sobrevivem**
+  (`io.kubernetes.pod.name`/`.namespace`/`container.name` voltam no `ListContainers`, que é como o
+  `crictl ps` preenche as colunas POD e NAMESPACE — um container criado SEM eles aparece como
+  `unknown`, e isso é o cliente a dizer a verdade, não o motor a perdê-los: medido dos dois lados).
+  Continua por validar com um **kubelet** real — isso precisa de um nó, não de um cliente —, mas
+  já não é «três linhas de blocking» nem só um teste interno.
 - **Por fazer, deliberadamente**: nada disto toca no `container run` da CLI (lá quem escolhe é o
   operador, não um pedido remoto — um tecto local seria o utilizador a limitar-se a si mesmo); e
   `add_ambient_capabilities` do CRI continua sem tradução nenhuma no motor (gap pré-existente,
