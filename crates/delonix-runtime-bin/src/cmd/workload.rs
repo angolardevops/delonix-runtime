@@ -204,8 +204,18 @@ fn force_microvm_backend(name: &str, block: &mut serde_yaml::Value) -> Result<()
     Ok(())
 }
 
+/// A `kind: Workload` carrying the wrong block for its `type:`.
+///
+/// **`Invalid` and not `NotFound`, which is what it used to be** — and the
+/// variant was wrong in both halves. `NotFound`'s Display is `no such {0}`, so a
+/// malformed manifest answered `no such workload 'w1': type: vm must not carry a
+/// 'container:' block` (measured 2026-09-10) — a sentence about a document that
+/// is right there in the file. And the CLASS was 4, "does not exist", which is
+/// what a reconciler reads to decide it should CREATE the thing; a manifest that
+/// cannot be parsed is a 1. The sibling check twenty lines up (`type: microvm`
+/// with the wrong backend) already used `Invalid` for exactly this shape.
 fn mismatch(name: &str, ty: &str, other: &str) -> Error {
-    Error::NotFound(super::po::tf(
+    Error::Invalid(super::po::tf(
         "workload '{name}': type: {type} must not carry a '{other}:' block",
         &[("name", name), ("type", ty), ("other", other)],
     ))

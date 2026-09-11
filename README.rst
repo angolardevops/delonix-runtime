@@ -339,6 +339,16 @@ for stable, language-independent output (ADR-0005). Full, always-current
 reference (embeds the real ``--help``) at
 https://angolardevops.github.io/delonix-runtime/cheatsheet.html.
 
+Since v2.0.0 the surface has two halves that mean the same thing. The
+**imperative** groups below are the ones you type by hand (``container ps``,
+``volume ls``); the **generic verbs** — ``get`` · ``describe`` · ``delete`` ·
+``apply`` · ``plan`` · ``diff`` · ``wait`` · ``explain`` · ``api-resources`` —
+address the same resources by Kind and plural (``get volumes``,
+``describe networks lab``), which is what a script or a `kubectl`-shaped habit
+wants. ``delonix api-resources`` prints the whole catalogue: plural,
+shortnames, apiVersion, and the FORM of each Kind (``primary``, ``sugar → X``,
+``sunset → X``).
+
 .. list-table::
    :header-rows: 1
    :widths: 16 84
@@ -350,43 +360,51 @@ https://angolardevops.github.io/delonix-runtime/cheatsheet.html.
    * - ``container``
      - Lifecycle: run, ps, start, stop, rm, exec, logs, inspect, stats, update, apply.
    * - ``pod``
-     - Real multi-container pods (``kind: Pod``): create, ls, describe, rm, logs — N containers sharing netns/IPC/UTS as one unit.
-   * - ``image``
-     - OCI images: pull, ls, rm, export, scan; with ``--vm``, golden VM images (build/push).
-   * - ``build``
-     - Build an image from a Dockerfile or Delonixfile (no daemon, no BuildKit).
+     - Real multi-container pods (``kind: Pod``): create, logs, exec, cp, attach, port-forward — N containers sharing netns/IPC/UTS as one unit. Listing and removal go through ``get pods``/``delete pods``.
    * - ``vm``
-     - Declarative microVMs: create, ls, status, start, stop, rm, apply, snapshot/restore (libvirt system checkpoints).
+     - Declarative microVMs: create, ls, start, stop, console, apply, snapshot (create/ls/rm/restore), migrate.
    * - ``workload``
      - Unified compute layer over containers **and** VMs (ADR-0002): ls, describe, stop, rm — creation stays declarative via ``kind: Workload``.
-   * - ``volumes``
-     - Named volumes and bind mounts: create, ls, inspect, snapshot, rm.
-   * - ``network``
-     - User bridge networks: create, ls, inspect, rm.
+   * - ``image``
+     - OCI images: pull, ls, remove, export, scan, sign, verify. ``image vm <cmd>`` for golden VM images (build/import/push/convert).
+   * - ``build``
+     - Build an image from a Dockerfile or Delonixfile (no daemon, no BuildKit).
+   * - ``volume``
+     - Named volumes, bind mounts, network shares and per-tenant slices: create (including ``--type nfs|cifs|webdav`` and ``--parent``), ls, describe, inspect, snapshot, prune, rm.
    * - ``secret``
-     - Encrypted-at-rest secret vault — the producer of ``run --secret``.
-   * - ``storage``
-     - Network volumes (NFS/CIFS/WebDAV), k8s-PersistentVolume style — the same thing as a ``kind: Volume`` with an ``nfs:``/``cifs:``/``webdav:`` block.
-   * - ``schema`` · ``explain``
-     - The manifest schema, generated from the code, and the ``kubectl explain``-style field reference that reads from it.
-   * - ``sharevolume``
-     - An isolated, individually-quota'd slice of a network share — several container/vm/pod share one NAS export without seeing each other's data.
+     - Encrypted-at-rest secret vault — the producer of ``run --secret``: create, set, unset, ls, inspect, rotate, rotate-key, apply.
+   * - ``network``
+     - User bridge/overlay networks: create, ls, inspect, describe, route, diagnose, vlan, node, apply.
+   * - ``net``
+     - Low-level network/infra, grouped: ``netns`` (rootless ingress infra), ``flow`` (live per-container traffic via eBPF), ``ingress``/``egress`` (L4 firewall), ``l4guard`` (ingress-wide DDoS guard), ``capture`` (tcpdump on a container's SDN interface), ``httproute`` (embedded L7/HTTP(S) reverse-proxy with hot reload and ``run --expose`` auto-registration), ``tunnel`` (expose a port publicly via pinggy/ngrok/cloudflare).
    * - ``stack``
-     - The IaC cycle over a whole manifest: ``plan`` (what would change, and why), ``apply`` (converges hot; refuses a recreate without ``--replace``), ``destroy``, ``wait``, ``validate``, ``init``.
+     - The IaC cycle over a whole manifest: ``plan`` (what would change, and why), ``apply`` (converges hot; refuses a recreate without ``--replace``), ``destroy``, ``prune``, ``wait``, ``validate``, ``history``, ``rollback``, ``init``.
+   * - ``manifest``
+     - Work on a manifest without touching the host: ``render`` (defaults filled in), ``schema`` (JSON Schema generated from the Rust types, ADR-0007), ``validate``.
    * - ``compose``
      - Native ``docker-compose.yml`` support (up/down/ps/logs/config) — no Docker involved.
    * - ``cluster``
-     - Kubernetes from scratch: ``kubeadm`` bootstrap over SSH, full VM provisioning (with automatic HA/HAProxy for multi-control-plane), or manifest generation from a running container/pod (``cluster kube generate``).
-   * - ``net``
-     - Low-level network/infra, grouped: ``netns`` (rootless ingress infra), ``flow`` (live per-container traffic via eBPF), ``ingress``/``egress`` (L4 firewall), ``httproute`` (embedded L7/HTTP(S) reverse-proxy with hot reload and ``run --expose`` auto-registration), ``tunnel`` (expose a port publicly via pinggy/ngrok/cloudflare), ``boot`` (systemd persistence across reboots).
+     - Kubernetes from scratch: ``kubeadm`` bootstrap over SSH, full VM provisioning (with automatic HA/HAProxy for multi-control-plane), day-2 (``drain``/``uncordon``/``upgrade``/``health``), and manifest generation from a running container/pod (``cluster kube generate``).
+   * - ``backup``
+     - Archives of ONE resource (container/pod/vm/stack): create, ls, inspect, restore, schedule, remove. The archive carries the record and the volume DATA — never the rootfs, which is re-derived from the image.
    * - ``serve``
-     - Serve a protocol endpoint on a unix socket, grouped: ``cri`` (Kubernetes ``runtime.v1``), ``api`` (management API, HTTP+JSON), ``docker-api`` (a slice of the Docker Engine API, full container lifecycle).
+     - Serve a protocol endpoint on a unix socket, grouped: ``cri`` (Kubernetes ``runtime.v1``), ``api`` (management API, HTTP+JSON, plus Prometheus ``/metrics``), ``docker-api`` (a slice of the Docker Engine API, full container lifecycle).
+   * - ``mcp``
+     - Model Context Protocol server — a LOCAL, tenancy-free AI control surface: ``serve``, ``capabilities`` (the tool risk table), ``doctor``.
    * - ``system``
-     - The engine itself: events, info, df, prune (GC), monitor, thermal.
-   * - ``dash``
-     - Interactive htop-style TUI dashboard — RAM/network/disk KPIs, per-container uptime, ``--json`` for scripts/Grafana, plus Prometheus ``/metrics`` on ``serve api``/``serve cri``.
-   * - ``completion``
-     - Dynamic autocompletion for bash/zsh/fish/elvish/powershell.
+     - The engine itself: events, info, features, doctor, resources, metrics, df, prune (GC), backup/restore of the whole node, boot (systemd persistence across reboots), namespace, monitor, thermal, regulate, virt, setup.
+   * - ``dashboard``
+     - Interactive htop-style TUI — RAM/network/disk KPIs, per-container uptime, ``--json`` for scripts/Grafana. Each resource group also has its own ``dash``.
+   * - ``config``
+     - A small, local preference (e.g. ``output``) — never a remote context: get, set, unset.
+   * - ``completion`` · ``man`` · ``version``
+     - Dynamic autocompletion for bash/zsh/fish/elvish/powershell; roff manual pages generated from this binary; the version string.
+   * - ``get`` · ``describe`` · ``delete``
+     - The generic form of the per-group ``ls``/``describe``/``rm``, addressed by Kind and plural: ``get volumes``, ``describe networks lab``, ``delete secrets db-pass``.
+   * - ``apply`` · ``plan`` · ``diff`` · ``wait``
+     - The declarative verbs over a manifest, without naming a stack: converge it, see what would change, compare declared vs last-applied vs observed, block until ready.
+   * - ``explain`` · ``api-resources``
+     - The field reference for a Kind (``kubectl explain`` style, read from the generated schema) and the catalogue of every Kind this engine serves.
 
 Languages
 =========
@@ -415,7 +433,8 @@ stale:
    virtualmachines   vm           compute.delonix.io/v1alpha1     VirtualMachine  ...
    networks          net          networking.delonix.io/v1alpha1  Network         ...
 
-Sixteen at the time of writing, each in the group of its domain
+Nineteen at the time of writing (2026-09-10; ``api-resources`` is the count that
+cannot go stale), each in the group of its domain
 (``compute``/``networking``/``gateway``/``storage``/``artifact``/``core``/
 ``infrastructure``). ``apiVersion: delonix.io/v1`` is still accepted everywhere
 — a Kind takes **its own group or the legacy one**, and nothing else.

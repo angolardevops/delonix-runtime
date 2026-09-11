@@ -16,7 +16,7 @@
 pub static ENTRIES: &[Entry] = &[
     Entry {
         path: "build",
-        group: "",
+        group: "Artifacts",
         examples: &[
             ("build and tag from the Dockerfile in this directory", "delonix build -t myapp:v1 ."),
             ("a Delonixfile, or any other build file path", "delonix build -t myapp:v1 -f Delonixfile ."),
@@ -27,7 +27,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "cluster",
-        group: "",
+        group: "Clusters",
         examples: &[
             ("a local Kubernetes cluster with no manifest and no Docker", "delonix cluster create --name dev"),
             ("what is up, node by node", "delonix get clusters"),
@@ -171,7 +171,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "completion",
-        group: "",
+        group: "Engine",
         examples: &[
             ("what a shell needs to complete this CLI", "delonix completion shell bash"),
             ("what an editor needs to colour a VMfile", "delonix completion editor vim"),
@@ -199,7 +199,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "compose",
-        group: "",
+        group: "Declarative",
         examples: &[
             ("a docker-compose.yml running natively — no daemon, no Docker", "delonix compose up -d"),
             ("what belongs to this project", "delonix compose ps"),
@@ -258,7 +258,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "container",
-        group: "",
+        group: "Workloads",
         examples: &[
             ("a web service in seconds — host port 8080 onto the container's 80", "delonix container run -d -p 8080:80 --name web nginx"),
             ("what is running, and for how long", "delonix container ps"),
@@ -523,7 +523,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "dashboard",
-        group: "",
+        group: "Engine",
         examples: &[
             ("an htop-style live view of containers, VMs, networks and volumes", "delonix dashboard"),
             ("one text snapshot and exit — the default when stdout is not a terminal", "delonix dashboard --once"),
@@ -533,7 +533,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "api-resources",
-        group: "",
+        group: "Declarative",
         examples: &[
             ("every Kind, with the plural and the shortnames a caller can type", "delonix api-resources"),
             ("the stable half, for automation (ADR-0005)", "delonix api-resources -o json"),
@@ -543,7 +543,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "apply",
-        group: "",
+        group: "Declarative",
         examples: &[
             ("converge a manifest — creates, updates hot, and refuses a recreate", "delonix apply -f delonix-manifest.yaml"),
             ("see it first, change nothing", "delonix apply -f delonix-manifest.yaml --dry-run"),
@@ -553,7 +553,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "plan",
-        group: "",
+        group: "Declarative",
         examples: &[
             ("what an apply would change", "delonix plan -f delonix-manifest.yaml"),
             ("a drift gate for CI: 0 none, 2 changes, 1 error", "delonix plan -f delonix-manifest.yaml --detailed-exitcode"),
@@ -563,7 +563,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "wait",
-        group: "",
+        group: "Declarative",
         examples: &[
             ("block until the manifest's resources are ready", "delonix wait -f delonix-manifest.yaml"),
             ("give up after a minute (exit 124)", "delonix wait -f delonix-manifest.yaml --timeout 60"),
@@ -572,7 +572,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "manifest",
-        group: "",
+        group: "Declarative",
         examples: &[
             ("everything here is host-free — it reads the file, not the machine", "delonix manifest validate -f delonix-manifest.yaml"),
         ],
@@ -606,7 +606,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "get",
-        group: "",
+        group: "Resources",
         examples: &[
             ("list a Kind — plural, singular and shortname are the same question", "delonix get pods"),
             ("the stable half, for automation (ADR-0005)", "delonix get pods -o json"),
@@ -617,7 +617,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "describe",
-        group: "",
+        group: "Resources",
         examples: &[
             ("detail of one resource, in blocks", "delonix describe pod api"),
             ("a Kind with no name lists them instead", "delonix describe network backend"),
@@ -626,7 +626,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "delete",
-        group: "",
+        group: "Resources",
         examples: &[
             ("remove by Kind and name", "delonix delete pod api"),
             ("with no name it REFUSES — it will not take every one of them", "delonix delete pods"),
@@ -635,7 +635,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "diff",
-        group: "",
+        group: "Declarative",
         examples: &[
             ("desired, last-applied and observed, side by side", "delonix diff container web -f prod.yaml"),
             ("a drift gate: exit 2 means desired and observed disagree", "delonix diff container web -f prod.yaml --detailed-exitcode"),
@@ -644,7 +644,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "config",
-        group: "",
+        group: "Engine",
         examples: &[
             ("every key, or none set", "delonix config get"),
             ("make -o json the default everywhere", "delonix config set output json"),
@@ -678,7 +678,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "explain",
-        group: "",
+        group: "Declarative",
         examples: &[
             ("every field of a Kind, `kubectl explain` style, straight from the generated schema", "delonix explain Container"),
             ("drill into one field instead of reading the whole Kind", "delonix explain Container.ports"),
@@ -688,7 +688,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "image",
-        group: "",
+        group: "Artifacts",
         examples: &[
             ("fetch an image from a registry", "delonix image pull postgres:16"),
             ("what is on disk, and how much of it", "delonix image ls"),
@@ -976,7 +976,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "init",
-        group: "",
+        group: "Engine",
         examples: &[
             ("look at this directory and start the right project for it, saying what it detected and why", "delonix init"),
             ("a directory other than the current one", "delonix init ./myapp"),
@@ -987,7 +987,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "man",
-        group: "",
+        group: "Engine",
         examples: &[
             ("read the manual for a command, the way you would any other tool", "delonix man container run | man -l -"),
             ("install every page so `man delonix-container-run` works from anywhere", "delonix man --dir ~/.local/share/man && sudo mandb"),
@@ -997,7 +997,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "net",
-        group: "",
+        group: "Networking",
         examples: &[
             ("who can reach what: the inbound policy, rules and published ports of every container on the SDN", "delonix net ingress ls"),
             ("the state of the rootless plumbing every `--net <network>` container depends on", "delonix net netns status"),
@@ -1448,7 +1448,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "network",
-        group: "",
+        group: "Networking",
         examples: &[
             ("a bridge network of its own, where containers reach each other by name", "delonix network create app"),
             ("what exists, with driver, bridge and subnet", "delonix network ls"),
@@ -1576,7 +1576,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "pod",
-        group: "",
+        group: "Workloads",
         examples: &[
             ("which pods exist and which containers each one holds", "delonix get pods"),
             ("create one from a manifest — N containers on ONE IP, reaching each other over localhost", "delonix pod create -f examples/pod-multi.yaml"),
@@ -1639,7 +1639,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "secret",
-        group: "",
+        group: "Artifacts",
         examples: &[
             ("what exists — names and key counts; the values are never printed", "delonix secret ls"),
             ("create one without the value ever reaching argv or the shell history", "printf 'PASSWORD=s3cr3t\\n' | delonix secret create db-pass --from-env-file -"),
@@ -1729,7 +1729,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "mcp",
-        group: "",
+        group: "Serve",
         examples: &[
             ("start it — an AI client spawns this itself as a child process; run it by hand only to test", "delonix mcp serve"),
             ("confirm this node is ready before pointing an AI client at it", "delonix mcp doctor"),
@@ -1763,7 +1763,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "serve",
-        group: "",
+        group: "Serve",
         examples: &[
             ("be the runtime a kubelet talks to, in place of containerd/CRI-O", "delonix serve cri"),
             ("answer a real docker CLI on a socket of your own", "delonix serve docker-api --addr unix:///tmp/delonix-docker.sock"),
@@ -1802,7 +1802,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "stack",
-        group: "",
+        group: "Declarative",
         examples: &[
             ("everything a manifest declares, in dependency order", "delonix stack apply -f delonix-manifest.yaml"),
             ("what would change, before anything changes", "delonix stack plan -f prod.yaml"),
@@ -1921,7 +1921,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "system",
-        group: "",
+        group: "Engine",
         examples: &[
             ("is this rootless, is the cgroup delegated, what is the network doing", "delonix system info"),
             ("where the disk went", "delonix system df"),
@@ -1931,7 +1931,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "backup",
-        group: "Configure",
+        group: "Engine",
         examples: &[
             ("archive one resource, now", "delonix backup create container db"),
             ("what archives exist", "delonix backup ls --from /srv/backups"),
@@ -2151,7 +2151,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "version",
-        group: "",
+        group: "Engine",
         examples: &[
             ("which build this is, and the commit it came from", "delonix version"),
         ],
@@ -2159,7 +2159,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "vm",
-        group: "",
+        group: "Workloads",
         examples: &[
             ("the official golden image, ready to boot without installing anything", "delonix vm pull"),
             ("a VM from it, waiting until it has a real IP", "delonix vm create dev --vcpus 2 --memory 4G --wait"),
@@ -2427,7 +2427,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "volume",
-        group: "",
+        group: "Storage",
         examples: &[
             ("a named volume, so the data outlives the container that writes to it", "delonix volume create pgdata"),
             ("what exists, with driver and mountpoint", "delonix volume ls"),
@@ -2561,7 +2561,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "workload",
-        group: "",
+        group: "Workloads",
         examples: &[
             ("containers AND VMs in one table, so you stop guessing which group owns what", "delonix workload ls"),
             ("stop something by name — routed to whichever backend owns it", "delonix workload stop web"),

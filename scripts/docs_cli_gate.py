@@ -241,6 +241,56 @@ def collect() -> list[Path]:
     return seen
 
 
+def readme_group_table() -> list[str]:
+    """The `Group` column of README.rst's «Command groups» list-table.
+
+    Each cell is a code-span (``x``) or a couple joined by `·`; what comes back
+    is the flat set of group names the table claims to document.
+    """
+    readme = ROOT / "README.rst"
+    if not readme.exists():
+        return []
+    text = readme.read_text(encoding="utf-8", errors="replace")
+    try:
+        table = text.split("Command groups", 1)[1].split("\nLanguages", 1)[0]
+    except IndexError:
+        return []
+    names: list[str] = []
+    for line in table.splitlines():
+        stripped = line.strip()
+        # Only the FIRST column of a row (`   * - ``x``` ), never the prose in
+        # the second: that one legitimately names subcommands and flags.
+        if not stripped.startswith("* - "):
+            continue
+        names.extend(re.findall(r"``([a-z][a-z0-9-]*)``", stripped))
+    return names
+
+
+def check_readme_groups(nodes: set[str], leaves: set[str]) -> list[str]:
+    """**Every top-level group is in the README table, and the table invents none.**
+
+    The `delonix ...` citation check above never saw this: a table cell holding
+    ```volumes``` is not a command line, so nothing tried to resolve it. Measured
+    2026-09-10, with the gate green: the table still documented five groups that
+    the v2/v3 restructuring had removed (`volumes`, `storage`, `sharevolume`,
+    `schema`, `dash`) and promised six subcommands that were cut with them
+    (`pod ls/describe/rm`, `vm status`, `image --vm`, `net boot`) — while
+    fourteen real groups, the generic verbs among them, were missing entirely.
+
+    A reader picking a group name off that table typed a command the binary
+    answers `unrecognized subcommand` to, which is the exact failure the rest of
+    this gate exists to prevent.
+    """
+    tops = {p.split()[0] for p in list(nodes) + list(leaves) if p}
+    claimed = set(readme_group_table())
+    problems = []
+    for name in sorted(claimed - tops):
+        problems.append(f"README.rst cita o grupo `{name}`, que o binário não tem")
+    for name in sorted(tops - claimed):
+        problems.append(f"README.rst não documenta o grupo `{name}`")
+    return problems
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--list", action="store_true", help="mostra cada citação resolvida")
@@ -301,10 +351,22 @@ def main() -> int:
             print(f"  {rel}\t{cmd}", file=sys.stderr)
         rc = 1
 
+    table = check_readme_groups(nodes, leaves)
+    if table:
+        print(
+            f"FALHA: {len(table)} divergência(s) entre a tabela «Command groups» "
+            "do README e os grupos do binário:",
+            file=sys.stderr,
+        )
+        for line in table:
+            print(f"  {line}", file=sys.stderr)
+        rc = 1
+
     if rc == 0:
         print(
             f"ok: as {total} citações da documentação corrente resolvem na árvore "
-            f"({len(allow)} excepções declaradas)"
+            f"({len(allow)} excepções declaradas), e a tabela de grupos do README "
+            "bate com o binário"
         )
     return rc
 

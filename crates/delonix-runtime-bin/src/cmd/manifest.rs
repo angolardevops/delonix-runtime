@@ -620,8 +620,19 @@ pub fn load_str(text: &str, label: &str) -> Result<Vec<ManifestDoc>> {
         }
     }
     if docs.is_empty() {
+        // NOT the same failure as an empty file, and saying so matters: here the
+        // file HAD documents and every one of them dissolved — a `kind: Stack`
+        // whose groups were all misspelt expands to nothing, and so does a file
+        // of Kinds that only lower into others.
+        //
+        // Measured 2026-09-10: a Stack with `contaienrs:` (one letter out)
+        // warned correctly — "unknown field 'contaienrs' in spec — ignored" —
+        // and then failed with «<path> is empty (no YAML documents)», about a
+        // file the user can see is not empty. The line that named the real cause
+        // scrolled past above; the one that stopped the command pointed at the
+        // wrong thing.
         return Err(Error::Invalid(super::po::tf(
-            "{path} is empty (no YAML documents)",
+            "{path}: every document expanded to nothing — no resource left to apply (a misspelt `kind: Stack` group does this; see the warnings above)",
             &[("path", label)],
         )));
     }
