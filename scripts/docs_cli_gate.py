@@ -291,6 +291,59 @@ def check_readme_groups(nodes: set[str], leaves: set[str]) -> list[str]:
     return problems
 
 
+def site_group_keys() -> set[str]:
+    """The real top-level command each `docs/gen.py` page documents.
+
+    Imports `docs/gen.py` as a module (its only module-level work is defining
+    dicts/functions and reading `sys.argv[1]` into a path — nothing runs the
+    binary until a function is actually called) so this reads the REAL
+    `GROUPS`/`GROUP_PATH`, never a second, hand-parsed copy of them that could
+    itself drift from the file it is meant to check.
+
+    A `GROUPS` key whose `GROUP_PATH` has more than one element is a NESTED
+    CHILD of another group (`ingress` → `net ingress`, `boot` → `system
+    boot`) — it is not supposed to have a top-level page of its own, so it is
+    excluded here rather than compared against the top-level command list.
+    The one single-element alias in `GROUP_PATH` (`dash` → `dashboard`) is
+    resolved to the real name it documents.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("delonix_docs_gen", ROOT / "docs" / "gen.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    tops = set()
+    for key in mod.GROUPS:
+        path = mod.GROUP_PATH.get(key, (key,))
+        if len(path) > 1:
+            continue
+        tops.add(path[0])
+    return tops
+
+
+def check_site_groups(nodes: set[str], leaves: set[str]) -> list[str]:
+    """**Every top-level group has a site page, and `docs/gen.py`'s `GROUPS` invents none.**
+
+    Same shape as `check_readme_groups`, aimed at `docs/gen.py`'s own
+    hand-authored taxonomy instead of README.rst's. Measured 2026-09-11, with
+    `check_readme_groups` GREEN the whole time (it only reads README.rst):
+    14 of the 33 real groups — the entire generic-verb half of the CLI, plus
+    `net`/`serve` overview pages and `net l4guard` — had no page anywhere on
+    the site. The citation-resolution gate above never saw this either: a
+    missing PAGE produces no orphan citation, because there is no citation to
+    check in a page that was never written.
+    """
+    tops = {p.split()[0] for p in list(nodes) + list(leaves) if p}
+    documented = site_group_keys()
+    problems = []
+    for name in sorted(documented - tops):
+        problems.append(f"docs/gen.py's GROUPS documenta `{name}`, que o binário não tem")
+    for name in sorted(tops - documented):
+        problems.append(f"docs/gen.py's GROUPS não tem página para `{name}`")
+    return problems
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--list", action="store_true", help="mostra cada citação resolvida")
@@ -362,11 +415,22 @@ def main() -> int:
             print(f"  {line}", file=sys.stderr)
         rc = 1
 
+    site = check_site_groups(nodes, leaves)
+    if site:
+        print(
+            f"FALHA: {len(site)} divergência(s) entre as páginas do site "
+            "(docs/gen.py's GROUPS) e os grupos do binário:",
+            file=sys.stderr,
+        )
+        for line in site:
+            print(f"  {line}", file=sys.stderr)
+        rc = 1
+
     if rc == 0:
         print(
             f"ok: as {total} citações da documentação corrente resolvem na árvore "
             f"({len(allow)} excepções declaradas), e a tabela de grupos do README "
-            "bate com o binário"
+            "e as páginas do site batem com o binário"
         )
     return rc
 
