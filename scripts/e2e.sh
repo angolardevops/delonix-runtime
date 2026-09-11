@@ -889,6 +889,24 @@ else
   skip "tudo o que precisa de $IMG" "a imagem não pôde ser obtida — ver o skip acima"
 fi
 
+# `image load` é o verbo que qualquer pessoa lê como ADITIVO — trazer um
+# arquivo para dentro. Até 2026-09-10 substituía a lista de nomes da imagem:
+# um store com `alpine:3.19` e um segundo nome para o MESMO id, mais um
+# `load` do `save` do segundo, ficava só com o segundo. O primeiro nome
+# desaparecia, e com ele o que um manifesto ou um compose lhe chamasse — num
+# nó offline, um `run` que deixa de resolver a sua imagem.
+if [[ $E2E_HAVE_IMAGE -eq 1 ]]; then
+  TAGX="e2e-load-$PFX:v1"
+  check "image load: um arquivo não deita fora os outros nomes da mesma imagem" ok bash -c "
+    '$BIN' image tag '$IMG' '$TAGX' >/dev/null 2>&1 || exit 1
+    '$BIN' image save '$TAGX' -o '$OUT/loadtags.tar' >/dev/null 2>&1 || exit 1
+    '$BIN' image load -i '$OUT/loadtags.tar' >/dev/null 2>&1 || exit 1
+    '$BIN' image ls | grep -qF '$IMG ' || { echo 'o nome original desapareceu no load'; '$BIN' image ls; exit 1; }
+    '$BIN' image ls | grep -qF '$TAGX' || { echo 'o nome do arquivo não ficou'; exit 1; }"
+  "$BIN" image remove "$TAGX" >/dev/null 2>&1
+  rm -f "$OUT/loadtags.tar"
+fi
+
 ########################################
 section "container: ciclo de vida + hot reconfig"
 ########################################
@@ -2116,6 +2134,29 @@ else
 fi
 check "secret ls" ok "$BIN" secret ls
 check "secret inspect inexistente recusa" fail "$BIN" secret inspect "nao-existe-$PFX"
+
+# `secret create` sobre um nome que JÁ existe substitui o segredo inteiro — e
+# até 2026-09-10 respondia `created (1 key(s))`, que se lê como «criei um
+# segredo novo» e não como «duas credenciais desapareceram». Medido nesse dia:
+# um segredo com `a=1,b=2` mais um `create --from-literal c=3` ficava só com
+# `c`, sem uma linha a dizê-lo. O caminho declarativo (`kind: Secret`) TEM de
+# continuar a substituir — é o que aplicar um manifesto significa —, por isso o
+# que se exige aqui não é uma recusa: é que uma substituição se chame uma, e
+# nomeie o que levou.
+SEC="sec-$PFX"
+check "secret create: um nome novo diz 'created'" ok bash -c "
+  '$BIN' secret create '$SEC' --from-literal a=1 --from-literal b=2 2>&1 | grep -q created"
+check "secret create: por cima de um existente diz 'replaced' e NOMEIA o que largou" ok bash -c "
+  out=\$('$BIN' secret create '$SEC' --from-literal c=3 2>&1)
+  printf '%s\n' \"\$out\"
+  printf '%s' \"\$out\" | grep -q replaced || exit 1
+  printf '%s' \"\$out\" | grep -q 'a, b' || exit 1"
+check "secret create: e as chaves largadas foram MESMO largadas" ok bash -c "
+  keys=\$('$BIN' secret inspect '$SEC' 2>&1)
+  printf '%s' \"\$keys\" | grep -q 'c=' || exit 1
+  printf '%s' \"\$keys\" | grep -qE '(^|[^a-z])a=' && exit 1
+  exit 0"
+"$BIN" secret rm "$SEC" >/dev/null 2>&1
 
 ########################################
 section "vm (só o que não precisa de hipervisor)"

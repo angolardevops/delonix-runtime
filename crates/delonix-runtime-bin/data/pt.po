@@ -10743,3 +10743,17 @@ msgstr "a VM '{name}' captura a consola série para ficheiro, por isso não há 
 # container healthcheck: sem sonda nem no container nem na imagem
 msgid "no health probe for '{name}': the container has no --health-cmd and image '{image}' defines no HEALTHCHECK"
 msgstr "não há sonda de saúde para '{name}': o container não tem --health-cmd e a imagem '{image}' não define HEALTHCHECK"
+
+# secret create: substituir um segredo existente diz-se, e nomeia o que levou
+msgid "secret '{name}' replaced ({n} key(s))"
+msgstr "segredo '{name}' substituído ({n} chave(s))"
+
+msgid "secret '{name}' replaced ({n} key(s)) — {d} key(s) dropped: {keys} (use `secret set` to add keys without replacing)"
+msgstr "segredo '{name}' substituído ({n} chave(s)) — {d} chave(s) perdida(s): {keys} (usa `secret set` para acrescentar chaves sem substituir)"
+
+# util: o aviso de pull que estava escrito à mão em português
+msgid "pulling {reference}…"
+msgstr "a puxar {reference}…"
+
+msgid "pulling {reference} (linux/{arch})…"
+msgstr "a puxar {reference} (linux/{arch})…"

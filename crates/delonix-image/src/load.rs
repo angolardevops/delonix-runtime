@@ -86,9 +86,16 @@ pub fn load_docker_archive(store: &ImageStore, tar_path: &Path) -> Result<Image>
         })
         .unwrap_or_else(crate::image::host_arch_default);
 
+    // `merged_tags_all` and not the archive's list verbatim: the same id can
+    // carry several names, and loading one archive must not drop the others.
+    // See the doc comment there for the measurement.
+    let repo_tags = store.merged_tags_all(
+        &config_digest,
+        &manifest.repo_tags.clone().unwrap_or_default(),
+    );
     let image = Image {
         id: config_digest,
-        repo_tags: manifest.repo_tags.unwrap_or_default(),
+        repo_tags,
         layers: manifest.layers.iter().map(|l| path_to_digest(l)).collect(),
         config: ImageConfig {
             cmd: inner.cmd().clone().unwrap_or_default(),
