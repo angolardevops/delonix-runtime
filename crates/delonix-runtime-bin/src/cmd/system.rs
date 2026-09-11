@@ -21,7 +21,7 @@ pub enum SystemCmd {
     /// appends its own line (see `delonix_runtime_core::events`).
     Events {
         /// Follow continuously (Ctrl-C to exit).
-        #[arg(short, long)]
+        #[arg(short, long, visible_short_alias = 'w')]
         follow: bool,
         /// Show only the last N (default: all).
         #[arg(short = 'n', long)]
