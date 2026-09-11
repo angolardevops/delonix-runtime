@@ -20,6 +20,13 @@ O que NÃO se verifica, e porquê:
   * `docs/releases/*.md`, `docs/RELEASES.md`, `docs/AUDITORIA-E2E.md` e
     `docs/discovery/*` são registo histórico datado. É CORRECTO citarem a grafia
     da versão de que falam — reescrevê-las apagava o registo.
+  * Os cinco relatórios de auditoria/medição em `docs/` (`COMPARACAO-DOCKER-
+    PODMAN.md`, `paridade-docker-podman.md`, `comparacao-medida.md`,
+    `RELATORIO-PRE-PRODUCAO.md`, `cri-conformance.md`) são da MESMA classe —
+    cada um já tem data e versão no próprio cabeçalho, e nenhum é reescrito a
+    cada release. Ficam publicados (`comparacao.html`/`cri.html`/`AGENTS.md`/
+    `cli-stability.md` ligam-nos como o detalhe por trás de um resumo), só não
+    são "documentação corrente" para efeitos deste gate.
   * Só se extraem citações de CONTEXTO DE CÓDIGO (`<code>`, `<pre>`, cercas de
     markdown, `::` de reST, comentários de YAML). Prosa como «o delonix é um
     motor» não é uma citação de comando e não se tenta resolver.
@@ -44,6 +51,16 @@ EXCLUDE = (
     "docs/RELEASES.md",
     "docs/AUDITORIA-E2E.md",
     "docs/discovery/",
+    # Relatórios de auditoria/medição datados — ver a nota no docstring do
+    # módulo. Medido 2026-09-11: nenhum produzia uma citação órfã hoje; a
+    # exclusão é preventiva de categorização, não a correcção de uma falha
+    # activa — mas pertencem à mesma classe dos quatro de cima, e não à
+    # "documentação corrente" que este gate mantém sincronizada com o binário.
+    "docs/COMPARACAO-DOCKER-PODMAN.md",
+    "docs/paridade-docker-podman.md",
+    "docs/comparacao-medida.md",
+    "docs/RELATORIO-PRE-PRODUCAO.md",
+    "docs/cri-conformance.md",
 )
 
 TARGETS = (
