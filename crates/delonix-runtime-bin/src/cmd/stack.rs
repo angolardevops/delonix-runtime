@@ -1933,6 +1933,31 @@ fn converge_and_stamp(
     changes: &[Change],
 ) -> Result<()> {
     for c in changes {
+        // **An ADOPTION changes owner, and changing owner is what authorises
+        // the destruction — so it is said out loud.**
+        //
+        // `plan` already said it ("exists and belongs to no stack — will be
+        // taken over"); `apply` said nothing, and the only line that came out
+        // was the per-Kind handler's: `already exists, nothing to do`. Measured
+        // 2026-09-10 in an isolated root: a container created BY HAND
+        // (`container run -d --name meu-container`), a manifest declaring that
+        // name, and `stack apply` answering "already exists, nothing to do" —
+        // while stamping `delonix.io/stack` on it. The `stack destroy` that
+        // followed took it, asking nothing (the manifest IS the authorisation,
+        // by design).
+        //
+        // So the step where somebody else's resource becomes destroyable by
+        // this stack announced itself as "nothing to do". Whoever runs `plan`
+        // first sees it; whoever applies straight away did not.
+        if c.action == Action::Adopt {
+            println!(
+                "{}",
+                super::po::tf(
+                    "{kind}/{name}: adopted — it belonged to no stack, and a `destroy` or `apply --prune` of '{stack}' now removes it",
+                    &[("kind", &c.kind), ("name", &c.name), ("stack", stack)],
+                )
+            );
+        }
         if !super::kinds::converges(&c.kind) {
             continue;
         }

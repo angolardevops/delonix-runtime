@@ -79,6 +79,28 @@ const GROUP_ORDER: &[&str] = &[
     "Advanced",
 ];
 
+/// The order of the ROOT's own map — a separate list, and it has to be.
+///
+/// The root and a group share three category NAMES (`Networking`, `Storage`,
+/// `Declarative`) on purpose: they mean the same thing at both levels, and a
+/// second spelling would be a second vocabulary to learn. But they do not share
+/// a POSITION. Inside `container`, `Declarative` belongs at the end, after the
+/// lifecycle verbs; at the root it belongs next to the other ways of describing
+/// what you want. Ranking both from one list put `Storage` and `Networking`
+/// after `Engine` — the engine's own housekeeping ahead of two resource
+/// families, which reads as an afterthought.
+const ROOT_GROUP_ORDER: &[&str] = &[
+    "Workloads",
+    "Artifacts",
+    k::STORAGE,
+    "Networking",
+    "Clusters",
+    "Declarative",
+    "Resources",
+    "Serve",
+    "Engine",
+];
+
 include!("manual_entries.rs");
 
 /// The entry for a path, if the table has one.
@@ -96,12 +118,10 @@ fn group_of(path: &str) -> &'static str {
     entry(path).map(|e| e.group).unwrap_or("")
 }
 
-/// Sort key for a category: its index in `GROUP_ORDER`, or the end.
-fn group_rank(g: &str) -> usize {
-    GROUP_ORDER
-        .iter()
-        .position(|x| *x == g)
-        .unwrap_or(GROUP_ORDER.len())
+/// Sort key for a category, in the order that level uses.
+fn group_rank(g: &str, root: bool) -> usize {
+    let order = if root { ROOT_GROUP_ORDER } else { GROUP_ORDER };
+    order.iter().position(|x| *x == g).unwrap_or(order.len())
 }
 
 /// Wraps at `width` columns, preserving paragraph breaks and never splitting a
@@ -172,7 +192,7 @@ fn command_map(cmd: &clap::Command, path: &str) -> Option<String> {
     if cats.iter().all(|(g, _)| g.is_empty()) {
         return None;
     }
-    cats.sort_by_key(|(g, _)| group_rank(g));
+    cats.sort_by_key(|(g, _)| group_rank(g, path.is_empty()));
     let label_w = cats
         .iter()
         .map(|(g, _)| po::t(g).chars().count())
@@ -201,11 +221,23 @@ fn command_map(cmd: &clap::Command, path: &str) -> Option<String> {
 fn tail(cmd: &clap::Command, path: &str) -> Option<String> {
     let e = entry(path);
     let map = command_map(cmd, path);
-    // Nothing editorial and no map to derive: leave clap's own `after_help`
-    // (the root's SHORTCUTS block) alone rather than overwriting it with a
-    // breadcrumb nobody asked for.
-    e?;
-    let e = e.unwrap();
+    // **The condition this comment described was an AND, and the code tested
+    // only the first half.** "Nothing editorial and no map to derive" — but
+    // `e?` returned early whenever the manual had no entry, map or no map, and
+    // the one path that reaches here with a map and no entry is the ROOT. So
+    // every group printed a COMMAND MAP except the single place where the shape
+    // of the CLI is decided: `delonix --help` listed all 33 groups flat, with
+    // the imperative surface, the generic verbs and the declarative ones in one
+    // undifferentiated column.
+    let Some(e) = e else {
+        return map.map(|m| {
+            let mut out = String::new();
+            out.push_str(po::t("COMMAND MAP"));
+            out.push_str(":\n");
+            out.push_str(&m);
+            out.trim_end().to_string()
+        });
+    };
     let mut out = String::new();
     if let Some(map) = map {
         out.push_str(po::t("COMMAND MAP"));
@@ -269,7 +301,9 @@ fn apply_at(mut cmd: clap::Command, path: String) -> clap::Command {
         } else {
             format!("{path} {name}")
         };
-        let rank = group_rank(group_of(&child));
+        // The same order the map uses, so clap's flat `Commands:` list and the
+        // COMMAND MAP above it never disagree about what comes first.
+        let rank = group_rank(group_of(&child), path.is_empty());
         cmd = cmd.mut_subcommand(&name, |s| {
             // `help` is clap's own and has no place in a category.
             let s = if s.get_name() == "help" {
@@ -286,6 +320,43 @@ fn apply_at(mut cmd: clap::Command, path: String) -> clap::Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **The root has a COMMAND MAP, and every top-level group is in it.**
+    ///
+    /// Two failures at once, and the second is the one that rots: a root with no
+    /// map prints 33 groups as one flat column, and a map built by hand goes
+    /// stale the first time a group is added. This derives the expected set from
+    /// the live `clap` tree, so a new group either lands in a category or shows
+    /// up here as missing.
+    #[test]
+    fn the_root_help_maps_every_top_level_group() {
+        use clap::CommandFactory;
+        let cmd = apply(<crate::Cli as CommandFactory>::command());
+        let tail = cmd
+            .get_after_long_help()
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        assert!(
+            tail.contains("COMMAND MAP"),
+            "a raiz devia ter COMMAND MAP; tail = {tail:?}"
+        );
+        let missing: Vec<String> = cmd
+            .get_subcommands()
+            .filter(|s| s.get_name() != "help" && !s.is_hide_set())
+            .map(|s| s.get_name().to_string())
+            .filter(|n| !tail.contains(n.as_str()))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "grupo(s) de topo fora do COMMAND MAP da raiz: {missing:?}"
+        );
+        // And no group may be dumped under the uncategorised heading: `Other` at
+        // the ROOT means somebody added a group and never said what it is.
+        assert!(
+            !tail.contains("\n  Other "),
+            "há grupo(s) de topo sem categoria — dá-lhes uma em `manual_entries.rs`:\n{tail}"
+        );
+    }
 
     #[test]
     fn quebra_o_texto_sem_cortar_palavras() {

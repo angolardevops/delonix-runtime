@@ -1245,6 +1245,82 @@ check "…e recusa ANTES de tocar no sandbox" ok test ! -d "$_CHDIR"
 #
 # O teste unitário prova o parser. SÓ um check aqui prova que o binário o
 # aplica — que é a metade que faltava quando o bug entrou.
+# **Uma ADOPÇÃO tem de se anunciar.** O `plan` sempre disse «exists and belongs
+# to no stack — will be taken over»; o `apply` não dizia nada, e a única linha
+# que saía era a do handler por-Kind: `already exists, nothing to do`. Medido a
+# 2026-09-10: um container criado À MÃO, um manifesto que declara esse nome, e o
+# `apply` a responder «nothing to do» enquanto lhe carimbava `delonix.io/stack`
+# — a partir daí o `stack destroy` (que não pergunta nada, por desenho) leva-o.
+# O passo em que o recurso de outra pessoa passa a ser destruível por esta stack
+# anunciava-se como «nada a fazer».
+if [[ $E2E_HAVE_IMAGE -eq 1 ]]; then
+  ADOPT="adopt-$PFX"
+  cat > "$OUT/adopt.yaml" <<YAML
+apiVersion: core.delonix.io/v1alpha1
+kind: Stack
+metadata: { name: st-$PFX }
+spec:
+  containers:
+    - name: $ADOPT
+      spec:
+        image: $IMG
+        command: ["sleep", "300"]
+YAML
+  "$BIN" container run -d --name "$ADOPT" "$IMG" sleep 300 >/dev/null 2>&1
+  check "stack apply: uma adopção DIZ-SE (e não «nothing to do» sozinho)" ok bash -c "
+    out=\$('$BIN' stack apply -f '$OUT/adopt.yaml' 2>&1)
+    printf '%s\n' \"\$out\"
+    printf '%s' \"\$out\" | grep -qi adopted || { echo 'o apply adoptou sem o dizer'; exit 1; }"
+  check "e o carimbo de posse ficou mesmo lá" ok bash -c "
+    '$BIN' container inspect '$ADOPT' | grep -q 'delonix.io/stack'"
+  "$BIN" container rm -f "$ADOPT" >/dev/null 2>&1
+  rm -f "$OUT/adopt.yaml"
+fi
+
+# Um `kind: Stack` com um GRUPO mal escrito (`contaienrs:`) expande para nada, e
+# a mensagem que parava o comando era «<ficheiro> is empty (no YAML documents)»
+# — sobre um ficheiro que o utilizador vê que não está vazio. O aviso que nomeia
+# a causa real («unknown field 'contaienrs'») fica acima, e o erro apontava para
+# o sítio errado.
+cat > "$OUT/typo-stack.yaml" <<'YAML'
+apiVersion: core.delonix.io/v1alpha1
+kind: Stack
+metadata: { name: typo }
+spec:
+  contaienrs:
+    - name: c1
+      spec:
+        image: alpine:3.19
+YAML
+check "manifesto: um grupo mal escrito NÃO se chama «ficheiro vazio»" ok bash -c "
+  out=\$('$BIN' stack validate -f '$OUT/typo-stack.yaml' 2>&1)
+  printf '%s\n' \"\$out\"
+  printf '%s' \"\$out\" | grep -q 'is empty' && { echo 'chamou vazio a um ficheiro com um documento'; exit 1; }
+  printf '%s' \"\$out\" | grep -qi 'expanded to nothing' || exit 1"
+rm -f "$OUT/typo-stack.yaml"
+
+# A mesma classe, noutros dois sítios: o `Display` do `NotFound` é `no such {0}`
+# e recebia frases inteiras. Medido a 2026-09-10: um `kind: Workload` com o bloco
+# errado respondia «no such workload 'w1': type: vm must not carry a
+# 'container:' block» — com classe **4** («não existe»), que é o que um
+# reconciliador lê para decidir CRIAR, sobre um manifesto que não parseia.
+cat > "$OUT/w-mismatch.yaml" <<'YAML'
+apiVersion: compute.delonix.io/v1alpha1
+kind: Workload
+metadata: { name: wmm }
+spec:
+  type: vm
+  container:
+    image: alpine:3.19
+YAML
+check "workload com bloco errado é INVÁLIDO (1), não «não existe» (4)" 1 \
+  "$BIN" stack validate -f "$OUT/w-mismatch.yaml"
+check "e a mensagem não se lê como «no such <frase>»" ok bash -c "
+  out=\$('$BIN' stack validate -f '$OUT/w-mismatch.yaml' 2>&1)
+  printf '%s' \"\$out\" | grep -q 'no such workload' && { echo \"\$out\"; exit 1; }
+  exit 0"
+rm -f "$OUT/w-mismatch.yaml"
+
 section "limites: o que se declara chega ao cgroup, ou é recusado"
 # ACH-009, medido 2026-09-09: estes três checks chumbavam SEMPRE, e pela razão
 # errada — `bash: line 1: _cg_of: command not found`. Duas causas, as duas

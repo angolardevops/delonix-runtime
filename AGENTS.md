@@ -121,10 +121,19 @@ uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
   <signal>` sends an arbitrary signal (name or number) without forcing a `Stopped` status — the
   real outcome (`Crashed` for anything that actually terminates the process) is picked up on the
   next observation, same as any other unexpected death; `wait` blocks and prints the real exit
-  code **only when a `--restart` supervisor is the process's real parent** (it alone captures a
-  genuine `waitpid` status) — a plain `-d` container with no supervisor still surfaces as
-  `Crashed`/137 on death, a pre-existing architectural limit (the engine isn't the real parent),
-  not a bug in `wait` itself. `exec -e/-w/-u` are per-call overrides (never persisted); `exec -w`
+  code for **any** detached container: `run -d` always forks a supervisor
+  (`should_supervise = detach && forkable`), and only the real parent can `waitpid`. The sentence
+  that stood here ("only with a `--restart` supervisor") described the PREVIOUS decision, and it
+  stayed true for `start`/`restart` longer than it should have — those kept re-creating the process
+  with nobody watching unless a restart policy happened to be set, so `run -d … 'exit 7'` gave
+  `wait` = 7 while the SAME container, after a `container start`, answered "exit code … was not
+  captured". Measured 2026-09-10 and fixed by pointing `start` at the same question `run` asks.
+  **And a REQUESTED stop is never a crash**: the supervisor honours `stopped_by_user`, so a `stop`
+  that needs SIGKILL — the ordinary case, since a PID 1 with no SIGTERM handler does not die on it
+  — ends `Exited (0)` and not `Dead`, and `wait` answers **0**. `stop` also persists through
+  `update` and no longer through `save`: `save` rewrote the whole record from a copy read BEFORE
+  `cmd_stop` set that flag, and with it a `stop` on a `--restart always` container was undone by
+  its own supervisor four seconds later. `exec -e/-w/-u` are per-call overrides (never persisted); `exec -w`
   also fixed a real bug found while adding it — `exec` used to hardcode `chdir("/")`
   unconditionally, ignoring the container's own configured `workdir` even with no `-w` at all.
   `logs --tail/--since/--timestamps` only work for containers run with `--log-cri` (the only log
@@ -2401,8 +2410,17 @@ static pod que nunca passou pelo API server.
   crate) e `crates/delonix-cri/tests/grpc_status.rs` faz o round-trip a sério — sobe o servidor num
   socket unix, chama `Version` e `Status` pelo cliente gerado, e exige as duas condições que o
   kubelet lê. Verificado que apanha regressão: com o `Status` a devolver condições vazias, chumba
-  em «faltou RuntimeReady: []». Continua por validar com um **kubelet** real — isso precisa de um
-  nó, não de um cliente.
+  em «faltou RuntimeReady: []».
+  **E desde 2026-09-11 está exercitado pelo `crictl`**, o cliente OFICIAL do projecto
+  Kubernetes, contra um `serve cri` real neste host: `version` (`RuntimeName: delonix`,
+  `RuntimeApiVersion: v1`), `info` (`RuntimeReady: true`, com o `capabilityCeiling` visível),
+  `images`, e o ciclo inteiro que o kubelet conduz — `runp` (sandbox `Ready`) → `create` →
+  `start` (`Running`) → `exec`. Os **labels e annotations do kubelet sobrevivem**
+  (`io.kubernetes.pod.name`/`.namespace`/`container.name` voltam no `ListContainers`, que é como o
+  `crictl ps` preenche as colunas POD e NAMESPACE — um container criado SEM eles aparece como
+  `unknown`, e isso é o cliente a dizer a verdade, não o motor a perdê-los: medido dos dois lados).
+  Continua por validar com um **kubelet** real — isso precisa de um nó, não de um cliente —, mas
+  já não é «três linhas de blocking» nem só um teste interno.
 - **Por fazer, deliberadamente**: nada disto toca no `container run` da CLI (lá quem escolhe é o
   operador, não um pedido remoto — um tecto local seria o utilizador a limitar-se a si mesmo); e
   `add_ambient_capabilities` do CRI continua sem tradução nenhuma no motor (gap pré-existente,

@@ -1621,8 +1621,11 @@ fn cmd_snapshot(store: &VolumeStore, action: SnapshotCmd) -> Result<()> {
             let v = store.inspect(&volume)?;
             let tarball = store.snapshot_path(&volume, &snap)?;
             if !tarball.exists() {
+                // `of volume` and not `do volume`: this string is fed to
+                // `NotFound`'s English Display (`no such {0}`), and the result
+                // came out half-translated — `no such snapshot x do volume y`.
                 return Err(Error::NotFound(format!(
-                    "snapshot {snap} do volume {volume}"
+                    "snapshot '{snap}' of volume '{volume}'"
                 )));
             }
             super::output::warn(&super::po::tf(
