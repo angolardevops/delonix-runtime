@@ -37,11 +37,8 @@ docs/cli-stability.md	delonix restore	nota de migração da v0.67.0: o `delonix 
 docs/estabilidade.html	delonix restore	gerado de docs/cli-stability.md
 docs/cli-stability.md	delonix netns attach	lição escrita: o `delonix-cri` continuou a invocar a grafia velha durante meses
 docs/estabilidade.html	delonix netns attach	gerado de docs/cli-stability.md
-docs/cri-conformance.md	delonix netns attach	a mesma quebra, do lado do CRI
 docs/gitops.md	delonix gitops	proposto pelo ADR-0021, ainda `Proposed` — a frase di-lo
 docs/gitops.html	delonix gitops	gerado de docs/gitops.md
-docs/paridade-docker-podman.md	delonix ps	contraste deliberado: «`delonix container ps`, não `delonix ps`»
-docs/paridade-docker-podman.md	delonix stop	hipótese recusada: um `delonix stop <nome>` a significar «container» em silêncio
 docs/roadmap/13-improvements-traceability.md	delonix node add	M06 BLOCKED: o ADR-0010 recusou a API de gestão remota; a linha diz que não existe
 
 # --- HISTÓRICO: grafias antigas citadas COMO antigas -----------------------
