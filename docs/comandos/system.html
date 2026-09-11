@@ -161,6 +161,7 @@ Commands:
   features   What each capability promises, and the EVIDENCE for it
   info       Engine state: rootless?, cgroup delegation, network infra, counts
   metrics    The raw counters: containers/VMs/networks/volumes/images, memory, network, disk
+  namespace  Isolation namespaces: ls/describe — a namespace exists while something is in it, so there is no create/rm
   resources  How much this host has, how much the engine can actually enforce, and what is under pressure right now
   backup     Save this node&#x27;s state into one archive
   regulate   Give the contended CPU back to the workloads that are waiting for it
@@ -171,7 +172,6 @@ Commands:
   thermal    Thermal governor for Delonix&#x27;s CPU budget. Runs continuously (see `--once`)
   monitor    Active network connections per container (via conntrack)
   boot       Boot persistence: systemd units so containers come back up after a reboot
-  namespace  Isolation namespaces: ls/describe — a namespace exists while something is in it, so there is no create/rm
   help       Print this message or the help of the given subcommand(s)
 
 Options:
@@ -182,12 +182,11 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 COMMAND MAP:
-  Inspect      events · info · features · doctor · resources · metrics · df
+  Inspect      events · info · features · doctor · resources · metrics · df · namespace
   Configure    setup · regulate · backup · restore · virt
   Maintenance  prune · thermal
   Dashboards   monitor
   Advanced     boot
-  Other        namespace
 
 EXAMPLES:
   # is this rootless, is the cgroup delegated, what is the network doing

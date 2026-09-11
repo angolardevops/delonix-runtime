@@ -358,6 +358,72 @@ mod tests {
         );
     }
 
+    /// **Every group in the tree, not just the root.**
+    ///
+    /// `the_root_help_maps_every_top_level_group` above only ever looked at the
+    /// ROOT's own map. Measured 2026-09-11: four groups deeper in the tree had
+    /// the exact defect that test exists to catch, and none of them tripped it —
+    /// `config get/set/unset` all had `group: ""`, which made `command_map`'s
+    /// own "nothing categorised here" guard fire and suppress the map ENTIRELY
+    /// (`delonix config --help` printed no COMMAND MAP at all); `net httproute
+    /// apply/rm` did the same for `net httproute --help`; `system boot
+    /// disable/enable/status` did the same for `system boot --help`; and
+    /// `system namespace` — the ONE empty child among many categorised
+    /// siblings — landed under a bare `Other` heading in `system --help`,
+    /// which reads as "nobody decided what this is" to anyone reading it.
+    ///
+    /// This walks the WHOLE tree and asks `command_map` the same two questions
+    /// at every node that has real children: did it produce a map at all
+    /// (catches the "all empty, suppressed" case), and if so, does any of its
+    /// lines start with the uncategorised `Other` heading (catches the "one
+    /// empty sibling" case). The root itself is skipped — the test above
+    /// already covers it, with an additional check (that the rendered
+    /// `--help` text actually reaches the reader) that this one does not need
+    /// to repeat.
+    #[test]
+    fn no_group_has_uncategorized_subcommands() {
+        use clap::CommandFactory;
+
+        fn walk(cmd: &clap::Command, path: String, bad: &mut Vec<String>) {
+            let kids: Vec<&clap::Command> = cmd
+                .get_subcommands()
+                .filter(|s| s.get_name() != "help" && !s.is_hide_set())
+                .collect();
+            if kids.is_empty() {
+                return;
+            }
+            if !path.is_empty() {
+                match command_map(cmd, &path) {
+                    None => bad.push(format!(
+                        "{path}: no subcommand is categorised — the COMMAND MAP is suppressed entirely"
+                    )),
+                    Some(map) => {
+                        if map.lines().any(|l| l.trim_start().starts_with("Other")) {
+                            bad.push(format!("{path}: has subcommand(s) under 'Other'"));
+                        }
+                    }
+                }
+            }
+            for k in &kids {
+                let child_path = if path.is_empty() {
+                    k.get_name().to_string()
+                } else {
+                    format!("{path} {}", k.get_name())
+                };
+                walk(k, child_path, bad);
+            }
+        }
+
+        let root = <crate::Cli as CommandFactory>::command();
+        let mut bad = Vec::new();
+        walk(&root, String::new(), &mut bad);
+        assert!(
+            bad.is_empty(),
+            "group(s) with incomplete categorisation in manual_entries.rs:\n  {}",
+            bad.join("\n  ")
+        );
+    }
+
     #[test]
     fn quebra_o_texto_sem_cortar_palavras() {
         let w = wrap("um dois tres quatro cinco", 12, "  ");

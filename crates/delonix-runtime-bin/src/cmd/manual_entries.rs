@@ -654,7 +654,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "config get",
-        group: "",
+        group: "Inspect",
         examples: &[
             ("one key, or every key with none named", "delonix config get output"),
         ],
@@ -662,7 +662,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "config set",
-        group: "",
+        group: "Configure",
         examples: &[
             ("make -o json the default everywhere", "delonix config set output json"),
         ],
@@ -670,7 +670,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "config unset",
-        group: "",
+        group: "Configure",
         examples: &[
             ("back to the plain table default", "delonix config unset output"),
         ],
@@ -1245,7 +1245,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "net httproute apply",
-        group: "",
+        group: "Declarative",
         examples: &[
             ("the routes from the manifest in this directory", "delonix net httproute apply"),
             ("from a file of your own — a re-apply reloads by SIGHUP, same pid, no dropped connection", "delonix net httproute apply -f examples/httproute.yaml"),
@@ -1258,7 +1258,7 @@ pub static ENTRIES: &[Entry] = &[
     // leaf could take) — see the `get`/`describe`/`delete` entries.
     Entry {
         path: "net httproute rm",
-        group: "",
+        group: "Maintenance",
         examples: &[
             ("stop the proxy and unpublish its ports — only the MANUAL routes go, the ones auto-registered by `container run --expose` survive", "delonix net httproute rm"),
         ],
@@ -1308,7 +1308,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "system boot disable",
-        group: "",
+        group: "Configure",
         examples: &[
             ("disable and delete the generated units — what is running keeps running, it just no longer comes back by itself", "delonix system boot disable"),
         ],
@@ -1316,7 +1316,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "system boot enable",
-        group: "",
+        group: "Configure",
         examples: &[
             ("one unit per RUNNING container; rootless installs user units and turns linger on, so they start without a login", "delonix system boot enable"),
             ("bake a gentler policy into the units than the `always` default", "delonix system boot enable --restart on-failure:3"),
@@ -1325,7 +1325,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "system boot status",
-        group: "",
+        group: "Inspect",
         examples: &[
             ("which units exist, and whether they are user units with linger or system units", "delonix system boot status"),
         ],
@@ -1422,7 +1422,7 @@ pub static ENTRIES: &[Entry] = &[
     },
     Entry {
         path: "system namespace",
-        group: "",
+        group: "Inspect",
         examples: &[
             ("every namespace in use, and what is in each", "delonix system namespace ls"),
             ("what one tenant holds, and whether the boundary is enforced here", "delonix system namespace describe inquilino-b"),
