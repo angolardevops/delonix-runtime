@@ -4,6 +4,171 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v3.1.0 — a auditoria grupo a grupo: 33 achados, zero folha nova, e o README já não ensina uma CLI de há duas versões
+
+Vinte e nove commits desde a `v3.0.0`, quase todos de uma varredura sistemática da
+CLI **grupo a grupo** (`container`, `image`, `secret`, `stack`, `manifest`, `net`)
+mais o resíduo de correcções que a série ACH já vinha registando desde a `v3.0.0`.
+Sem quebras de superfície — o `cli-tree.sh --gate` confirma as mesmas 245 folhas da
+linha de base; esta release é comportamento, não forma.
+
+Cada achado abaixo foi medido contra o binário ANTES de haver código, e tem gate
+próprio (`scripts/e2e.sh` ou teste unitário) que chumba se a correcção for revertida.
+
+### `container` — a sonda de saúde enchia o container de zombies, e o `stop` não parava
+
+- **A sonda de `--health-cmd` deixava DOIS zombies por execução.** O watchdog que a
+  mata ao fim do timeout nunca era esperado (`wait`), nem o `sleep` que ele próprio
+  usava. Medido com `--health-interval 2`: +8 processos zombie a cada 10s, sem
+  tecto — com o `pids.max=512` por omissão, um container com healthcheck deixa de
+  conseguir forkar em ~10 minutos a esse intervalo, e em menos de três horas com o
+  intervalo por omissão de 30s. O watchdog passa a matar E reapar o seu próprio
+  filho, e o chamador passa a esperar por ele.
+- **Um `stop` pedido podia ficar `Crashed`.** `runtime::stop` já grava `Stopped`
+  "mesmo que precise de SIGKILL" — e precisa, sempre que o PID 1 não tem handler de
+  SIGTERM (o caso mais comum: `alpine sleep 600`). O supervisor, à espera no mesmo
+  processo, via `Signaled` e escrevia `Crashed` por cima — `ps -a` dizia `Dead`,
+  `wait` respondia 137, para um container que o operador tinha acabado de mandar
+  parar. Corrigido honrando `stopped_by_user` no ponto onde o supervisor regista o
+  estado final.
+- **`start`/`restart` perdiam o supervisor.** `run -d` forka sempre um (é o que
+  torna o exit code de um detached conhecível); `start` só o fazia com uma política
+  de restart definida. `run -d … 'exit 7'` dava `wait` = 7; o MESMO container, após
+  um `container start`, respondia "exit code … was not captured". Agora `start`
+  faz a mesma pergunta que `run`.
+- **`container healthcheck <id>` ignorava a sonda do próprio container.** Lia só o
+  `HEALTHCHECK` da imagem — um `run --health-cmd …` mostrava `Up (healthy)` no
+  `ps` e o verbo respondia "image defines no HEALTHCHECK", vermelho permanente no
+  script de CI que é a razão de existir deste comando.
+- **`container port` mostrava `0.0.0.0` sobre um bind de loopback.**
+
+### `image`/`secret` — um `load` que apagava nomes, um `create` que apagava chaves
+
+- **`image load` apagava os OUTROS nomes da mesma imagem.** `pull` já funde tags
+  (`merged_tags`, "identical content ⇒ same id, can have several tags — like
+  Docker"); `load` guardava o `repo_tags` do arquivo tal e qual, e `save` escreve o
+  registo inteiro. Medido: um store com `alpine:3.20` e um segundo nome para o
+  MESMO id, mais um `load` do `save` do segundo, ficava só com o segundo — num nó
+  offline, um manifesto ou compose que use o primeiro nome deixa de resolver.
+- **`secret create` sobre um segredo existente apagava as chaves não repetidas e
+  respondia `created`.** `a=1,b=2` mais `secret create --from-literal c=3` deixava
+  só `c`, lido como "criei um segredo novo". Passa a dizer `replaced (1 key(s)) —
+  2 key(s) dropped: a, b` e a apontar para `secret set`, o verbo não-destrutivo.
+- Duas mensagens partidas: `image vm rm` de um inexistente respondia com uma 2.ª
+  linha sem sentido (`no such one or more VM images were not removed` — o molde
+  `no such {0}` recebia uma frase inteira), e `image vm describe`/o aviso de pull
+  do `resolve_or_pull` saíam meio-traduzidos numa CLI em inglês.
+
+### `stack`/`manifest`/verbos genéricos — uma adopção que mudava o dono em silêncio
+
+- **`stack apply` adoptava um recurso alheio e dizia "nothing to do".** Adoptar é o
+  instante em que um recurso sem dono passa a ser destruível pela stack — é a
+  posse que autoriza o `destroy`/`--prune`. Medido de ponta a ponta: container
+  criado à mão → `apply` responde "already exists, nothing to do" e carimba
+  `delonix.io/stack` → `destroy` remove-o. O `apply` continua a adoptar (recusar
+  partiria o caso normal de trazer para um manifesto o que já existe) — agora
+  di-lo: `Container/x: adopted — it belonged to no stack, and a destroy or apply
+  --prune of 'st' now removes it`.
+- Um `kind: Stack` com um grupo mal escrito (`contaienrs:`) expandia para nada, e o
+  erro dizia "`<ficheiro>` is empty (no YAML documents)" sobre um ficheiro com um
+  documento — o aviso que nomeava a causa real ficava para trás no scroll.
+- Mais duas mensagens que o molde `no such {0}` estragava: um `kind: Workload`
+  inválido saía com classe **4** ("não existe") para um manifesto que nem
+  parseia — passa a `Invalid` (1), como já era o irmão vinte linhas acima — e
+  `volume snapshot restore` respondia meia frase em português dentro do molde
+  inglês.
+
+### Herdados da série ACH desde a `v3.0.0`
+
+- **ACH-011 — `pod exec` sem `--container` era um sorteio.** O desempate entre
+  membros nascidos no mesmo segundo caía na ordem do `read_dir`, que é aleatória a
+  cada `pod create`. Passa a usar o índice declarado no manifesto.
+- **ACH-014 — o `stop` do backend cloud-hypervisor devolvia com o VMM ainda a
+  segurar o disco.** Um `qemu-img` a seguir apanhava o lock do qcow2 ainda tomado.
+- **ACH-015/016 — um `kill -9` no *pin* de rede fechava o nó a trabalho novo para
+  sempre, e o pidfile provava o argv em vez do dono real** — um `netns down` de um
+  root podia matar o *pin* de outro.
+- **ACH-017 — o `rm` de um HTTPRoute de um root matava o proxy L7 de OUTRO root**,
+  e o `apply` dizia "serving" sem estar a servir.
+- **ACH-018 — a prova de posse de um túnel era "o cmdline contém `ssh`"**, o que
+  qualquer `ssh-agent`/mux Ansible do mesmo utilizador passava — e o `stop`
+  mandava SIGTERM a esse processo alheio.
+- **Runtime — o tecto de recursos cobria o PID 1 e mais ninguém.** `-m 64M`
+  matava uma alocação feita pelo próprio PID 1 (correcto) e deixava passar a
+  MESMA alocação feita por um filho forkado (3 em 3 corridas). A bateria tinha 700
+  verificações e nenhuma testava um workload a tentar exceder o limite.
+- **`vm` — a série do console foi para um socket unix e o ficheiro que o DKS lê
+  ficou por escrever.** Das seis referências a `.serial` nos dois repositórios,
+  cinco liam e nenhuma escrevia.
+- **`cluster` — `get clusters` dizia "no clusters" com quatro clusters de VM na
+  máquina.** A pertença era derivada de uma etiqueta que só os nós em modo *kind*
+  carregam.
+- **`volume` — o `rm` do pai não via os shares de um inquilino, e destruía-os**
+  (ACH-001), e um `pod` sem membros nomeados escolhia a âncora de boot pelo menor
+  nome em vez do primeiro do manifesto.
+
+### README e `--help` alinhados com a restruturação (ACH-032, ACH-033)
+
+A tabela "Command groups" do README ainda descrevia a CLI de antes do B2/B5/B6/B7:
+citava cinco grupos removidos (`volumes`, `storage`, `sharevolume`, `schema`,
+`dash`), prometia seis subcomandos cortados (`pod ls/describe/rm`, `vm status`,
+`image --vm`, `net boot`) e omitia catorze grupos reais — os verbos genéricos entre
+eles. Reescrita com os 33 grupos actuais e a contagem de Kinds corrigida (16 → 19).
+
+A RAIZ da CLI (`delonix --help`) era o único sítio sem COMMAND MAP — listava os 33
+grupos numa coluna plana, sem distinguir o imperativo do genérico do declarativo.
+Causa: um comentário que descrevia um AND com o código a testar só metade. Agora
+publica o mapa, categorizado (`Workloads`, `Artifacts`, `Storage`, `Networking`,
+`Clusters`, `Declarative`, `Resources`, `Serve`, `Engine`).
+
+Dois gates novos garantem que isto não volta a acontecer: `check_readme_groups`
+(`docs_cli_gate.py`) compara a tabela do README com os grupos reais do binário nos
+dois sentidos, e `the_root_help_maps_every_top_level_group` deriva o conjunto
+esperado da árvore `clap` viva.
+
+### Harness e infra-estrutura de CI
+
+- Um portão que saía **0 com 36 falhas** — o `scripts/e2e.sh` não tinha exit code
+  próprio, e três verificações do tecto de recursos nunca corriam (`_cg_of` não
+  atravessava o `bash -c` do `check`).
+- Um job de CI com todos os passos saltados reportava `SUCCESS` — a sonda agora
+  sobe até ao veredicto real da job.
+- Os cenários de caos partilhavam um sandbox, e três culpavam-se do que outro
+  deixara para trás.
+- As recusas de verbos removidos pelo B4 apontavam para comandos que já não
+  existem.
+
+### Validado, sem achado
+
+O ciclo de registo completo contra um `registry:2` real subido pelo próprio motor
+(`push`/`pull`/`login`/`sign`/`verify` com ECDSA-P256, incluindo a recusa da chave
+errada); `serve docker-api` conduzido pelo cliente `docker` real (v29.7.2:
+`create`→`start`→`inspect`→`stop`→`rm`); **`serve cri` conduzido pelo `crictl`
+oficial do Kubernetes** — `version`/`info`/`images` e o ciclo `runp`→`create`→
+`start`→`exec`, com os labels `io.kubernetes.pod.*` a sobreviverem ao
+`ListContainers`; `backup`/`compose`/`build`/`pod`/`network`/`net` (ingress,
+egress, l4guard, flow, netns, httproute, tunnel) e os verbos genéricos, todos pelo
+efeito — dados de backup destruídos e repostos, `depends_on` do compose respeitado,
+`RUN`+`COPY` do build verificados dentro do container final, netns partilhada de um
+pod confirmada pelo mesmo IP nos dois membros.
+
+### Conhecido, não corrigido nesta série
+
+- `spec.resources.limits.{memory,cpu}` é honrado na forma Pod (`spec.containers[]`)
+  e avisado-e-ignorado na forma plana do mesmo `kind: Container`.
+- `container stats` não aceita `--no-stream`, embora o `system monitor` use esse
+  nome para o mesmo conceito.
+- `image vm ls-remote` sem argumento pode passar de 90s numa ligação lenta (vai a
+  vários repositórios oficiais) e não tem `--timeout`.
+
+### Não validado nesta release
+
+Um `cluster kubeadm`/`apply` real (multi-VM com SSH entre si), `image vm build` de
+ponta a ponta, e um kubelet de verdade a falar com `serve cri` (o `crictl` prova o
+protocolo; um kubelet é outra máquina).
+
+---
+
 ## v3.0.0 — o `--vm` e o `sharevolume` desaparecem, e o compose fica completo
 
 Trinta e nove commits desde a `v2.0.0`. É `3.0.0` e não `2.1.0` porque a superfície da
