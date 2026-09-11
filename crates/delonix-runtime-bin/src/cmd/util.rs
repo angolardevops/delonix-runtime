@@ -47,7 +47,14 @@ pub(crate) fn resolve_or_pull_with_creds(
     match images.resolve(reference) {
         Ok(img) => Ok(img),
         Err(_) => {
-            eprintln!("a puxar {reference}…");
+            // English in the source, Portuguese from the catalogue: written by
+            // hand in Portuguese, this line came out translated on a CLI the user
+            // had set to English — the debt v0.32.2 removed from 380 places, and
+            // that survived in these two.
+            eprintln!(
+                "{}",
+                super::po::tf("pulling {reference}…", &[("reference", reference)])
+            );
             match creds {
                 None => delonix_image::pull_from_registry(images, reference),
                 Some(c) => delonix_image::registry::pull_from_registry_with_creds(
@@ -82,7 +89,13 @@ pub(crate) fn resolve_or_pull_platform(
             return Ok(img);
         }
     }
-    eprintln!("a puxar {reference} (linux/{arch})…");
+    eprintln!(
+        "{}",
+        super::po::tf(
+            "pulling {reference} (linux/{arch})…",
+            &[("reference", reference), ("arch", arch)],
+        )
+    );
     delonix_image::registry::pull_from_registry_with_creds_platform(
         images,
         reference,

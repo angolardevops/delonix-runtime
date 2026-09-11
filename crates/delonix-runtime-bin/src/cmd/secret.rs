@@ -542,18 +542,55 @@ pub fn run(action: SecretCmd) -> Result<()> {
                 ));
             }
             let n = data.len();
+            // **What this REPLACES has to be said out loud.** `save` writes the
+            // whole secret, so a `create` over an existing name drops every key
+            // the new call did not repeat. Measured 2026-09-10: a secret holding
+            // `a=1,b=2`, plus `secret create <it> --from-literal c=3`, was left
+            // holding `c` alone — and the command answered `created (1 key(s))`,
+            // which reads as "a new secret", not as "two credentials are gone".
+            //
+            // The help does say "Create/replace", and the declarative path
+            // (`kind: Secret`) MUST keep replacing — that is what applying a
+            // manifest means. So nothing is refused here; what changes is that a
+            // replacement calls itself one, and names what it took. The
+            // non-destructive verb (`secret set`) is pointed at, because someone
+            // who lost keys to this almost certainly wanted it.
+            let previous = store.load(&name).ok();
+            let existed = previous.is_some();
+            let dropped: Vec<String> = previous
+                .map(|old| {
+                    old.data
+                        .keys()
+                        .filter(|k| !data.contains_key(*k))
+                        .cloned()
+                        .collect()
+                })
+                .unwrap_or_default();
             store.save(&Secret {
                 name: name.clone(),
                 data,
                 updated_unix: now_unix(),
             })?;
-            println!(
-                "{}",
-                super::po::tf(
+            let line = match (existed, dropped.is_empty()) {
+                (false, _) => super::po::tf(
                     "secret '{name}' created ({n} key(s))",
                     &[("name", &name), ("n", &n.to_string())],
-                )
-            );
+                ),
+                (true, true) => super::po::tf(
+                    "secret '{name}' replaced ({n} key(s))",
+                    &[("name", &name), ("n", &n.to_string())],
+                ),
+                (true, false) => super::po::tf(
+                    "secret '{name}' replaced ({n} key(s)) — {d} key(s) dropped: {keys} (use `secret set` to add keys without replacing)",
+                    &[
+                        ("name", &name),
+                        ("n", &n.to_string()),
+                        ("d", &dropped.len().to_string()),
+                        ("keys", &dropped.join(", ")),
+                    ],
+                ),
+            };
+            println!("{line}");
         }
         SecretCmd::Ls { output } => {
             let output =
