@@ -435,6 +435,112 @@ mod tests {
         );
     }
 
+    /// Splits a published example into the argv `clap` would receive, or `None`
+    /// when there is nothing to validate (a pipeline whose first half is not
+    /// ours, an example that does not invoke the binary).
+    ///
+    /// Deliberately conservative: cuts at the first `|`, `&&`, `;` or `>`, drops
+    /// an environment prefix (`DELONIX_ROOT=… delonix …`) and replaces a command
+    /// substitution with an opaque value — what is validated is the SHAPE of the
+    /// command, not what a shell would make of it.
+    fn example_argv(line: &str) -> Option<Vec<String>> {
+        let mut cut = line.to_string();
+        for sep in ["|", "&&", ";", ">"] {
+            if let Some(i) = cut.find(sep) {
+                cut.truncate(i);
+            }
+        }
+        while let (Some(a), Some(b)) = (cut.find("$("), cut.find(')')) {
+            if b < a {
+                break;
+            }
+            cut.replace_range(a..=b, "SUBST");
+        }
+        let mut argv: Vec<String> = Vec::new();
+        let mut current = String::new();
+        let mut quote: Option<char> = None;
+        for ch in cut.chars() {
+            match (quote, ch) {
+                (Some(q), c) if c == q => quote = None,
+                (Some(_), c) => current.push(c),
+                (None, c @ ('"' | '\'')) => quote = Some(c),
+                (None, c) if c.is_whitespace() => {
+                    if !current.is_empty() {
+                        argv.push(std::mem::take(&mut current));
+                    }
+                }
+                (None, c) => current.push(c),
+            }
+        }
+        if !current.is_empty() {
+            argv.push(current);
+        }
+        while argv
+            .first()
+            .is_some_and(|t| t.contains('=') && !t.starts_with('-'))
+        {
+            argv.remove(0);
+        }
+        match argv.first().map(String::as_str) {
+            Some("delonix") => Some(argv),
+            _ => None,
+        }
+    }
+
+    /// **A published example has to PARSE against the live `clap` tree.**
+    ///
+    /// The sibling test below requires an example to NAME its command, and that
+    /// is a different question: an example can name the right command and pass
+    /// it a flag that does not exist. Measured 2026-09-10 against the `--help` of
+    /// all 244 leaves: **five published examples were refused by the binary
+    /// itself** — `container rm -f -v web` (docker's `-v`, which this engine
+    /// never had), `cluster drain lab lab-w1` and `cluster uncordon lab lab-w1`
+    /// (the cluster is `--name`, not a second positional) and `cluster upgrade …
+    /// --node lab-w1` (the node is positional; the flag never existed, and the
+    /// command's own prose said the same).
+    ///
+    /// The cost is the usual one for wrong documentation: whoever copies gets
+    /// `rc=2`, and whoever "fixes" it by hand can hit something else —
+    /// `cluster drain lab` parses, and drains a NODE called `lab`.
+    #[test]
+    fn published_examples_parse_against_the_live_clap_tree() {
+        use clap::error::ErrorKind;
+        use clap::CommandFactory;
+        let mut wrong = Vec::new();
+        for e in ENTRIES {
+            for (_, line) in e.examples {
+                let Some(argv) = example_argv(line) else {
+                    continue;
+                };
+                let cmd = <crate::Cli as CommandFactory>::command();
+                if let Err(err) = cmd.try_get_matches_from(argv) {
+                    // Only the classes that prove the EXAMPLE is wrong. An
+                    // invalid value (`<version>`, `…`) or a missing file is a
+                    // consequence of an example being an example.
+                    if matches!(
+                        err.kind(),
+                        ErrorKind::UnknownArgument
+                            | ErrorKind::InvalidSubcommand
+                            | ErrorKind::TooManyValues
+                    ) {
+                        let why = err
+                            .to_string()
+                            .lines()
+                            .next()
+                            .unwrap_or_default()
+                            .to_string();
+                        wrong.push(format!("{}: {line}\n      -> {why}", e.path));
+                    }
+                }
+            }
+        }
+        assert!(
+            wrong.is_empty(),
+            "example(s) the binary itself refuses:\n  {}",
+            wrong.join("\n  ")
+        );
+    }
+
     /// Um exemplo tem de começar pelo comando que documenta — senão documenta
     /// outro. Apanha o erro de copiar-colar entre entradas vizinhas, que é
     /// invisível a olho numa tabela de 234 linhas.
