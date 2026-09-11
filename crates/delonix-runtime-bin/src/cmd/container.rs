@@ -5349,7 +5349,18 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
     // silently dropping the policy the user asked for. See `run_supervised`'s doc comment
     // for why only the container's real parent can enforce it.
     let policy = c.restart_policy.clone().unwrap_or_default();
-    if policy_supervised(&policy) {
+    // `should_supervise` and not `policy_supervised` — the SAME question `run -d`
+    // asks. The two drifted apart when the policy stopped being part of that
+    // decision on the `run` side: from then on a `run -d` always forked a
+    // supervisor (that is what makes a detached container's exit code knowable),
+    // while `start`/`restart` re-created the process with nobody watching unless
+    // a restart policy happened to be set. Measured on this engine, 2026-09-10,
+    // with `run -d ... sh -c 'sleep 1; exit 7'`: `wait` gave the real `7`, and
+    // after a plain `container start` of the SAME container it refused —
+    // `exit code ... was not captured`, pointing at `--restart` as the fix when
+    // the container had just lost the supervisor it already had. `ps -a` showed
+    // `Exited (unknown)` for the same reason.
+    if should_supervise(&policy, true, true) {
         let start_id = c.id.clone();
         delonix_runtime_core::events::emit(
             &super::util::state_root(),
@@ -5628,6 +5639,31 @@ pub(crate) fn cmd_rename(store: &Store, id: &str, new_name: &str) -> Result<()> 
 }
 
 /// `docker port <container>` — published ports, `hostPort/proto -> containerPort`.
+/// The address `container port` shows for a published port.
+///
+/// **The old answer was the literal `0.0.0.0` whenever the spec carried no
+/// address, and this engine's default publish address is `127.0.0.1`.** So the
+/// one command an operator reads to audit exposure claimed *every interface* for
+/// a port bound to loopback only — measured 2026-09-10: `ss -tlnp` showed
+/// `127.0.0.1:31060` for the same port `container port` printed as
+/// `0.0.0.0:31060`. The justification on the line was "it is `docker port`'s
+/// format, and scripts read it", but docker prints `0.0.0.0` because docker
+/// really binds there; copying the FORM inverted the MEANING.
+///
+/// `fmt_ports`, forty lines up, already got this right for the `ps` column and
+/// wrote down why — "inventing one would be an assertion of exposure that may be
+/// false". Two readers of the same field with opposite rules, and the inventing
+/// one was the auditing one.
+///
+/// The remaining caveat is stated rather than hidden: the effective address is
+/// not persisted with the port, so this recomputes the same default the publish
+/// path uses (`DELONIX_PUBLISH_ADDR`, else loopback). Changing that variable
+/// between the `run` and this command would make it stale — a narrower gap than
+/// a constant that is wrong by default.
+pub(crate) fn published_addr_for_display(spec_addr: Option<String>) -> String {
+    delonix_net::publish_bind_addr(spec_addr.as_deref())
+}
+
 pub(crate) fn cmd_port(store: &Store, id: &str) -> Result<()> {
     let c = find(store, id)?;
     if c.ports.is_empty() {
@@ -5639,12 +5675,7 @@ pub(crate) fn cmd_port(store: &Store, id: &str) -> Result<()> {
         // `host_part = "127.0.0.1"` e imprimia-se **`19555:80/tcp -> 0.0.0.0:127.0.0.1`**
         // — um endereço que não existe, sobre um serviço restrito a loopback.
         if let Ok((addr, hp, cp, proto)) = delonix_net::parse_publish_addr(spec) {
-            // Sem endereço explícito mantém-se o `0.0.0.0` histórico desta saída:
-            // é o formato do `docker port`, e scripts existentes lêem-no.
-            println!(
-                "{cp}/{proto} -> {}:{hp}",
-                addr.as_deref().unwrap_or("0.0.0.0")
-            );
+            println!("{cp}/{proto} -> {}:{hp}", published_addr_for_display(addr));
         } else {
             println!("{spec}");
         }
@@ -5967,12 +5998,21 @@ fn cmd_ssh(store: &Store, id: &str, command: &[String]) -> Result<()> {
 /// Exits with 1 on `unhealthy`, to serve as a gate in scripts/CI.
 fn cmd_healthcheck(images: &ImageStore, store: &Store, id: &str) -> Result<()> {
     let c = find(store, id)?;
-    let img = images.resolve(&c.image)?;
-    let hc = img
-        .config
-        .healthcheck
-        .clone()
-        .ok_or_else(|| Error::Invalid(format!("image '{}' defines no HEALTHCHECK", c.image)))?;
+    // `health_command` and not the image's `HEALTHCHECK` alone — the container's
+    // own `--health-cmd` wins, exactly as it does for the monitor that writes the
+    // `(healthy)`/`(unhealthy)` column. Reading only the image made this verb
+    // refuse the one container that is DEFINITELY being health-checked: a
+    // `run --health-cmd ... alpine` showed `Up (healthy)` in `ps` while
+    // `container healthcheck <it>` answered `image 'alpine:3.20' defines no
+    // HEALTHCHECK` and exited 1 — a permanent red in the CI script this verb
+    // exists for. The resolution order was already written down one function
+    // below; this caller was the one that never used it.
+    let hc = health_command(images, &c).ok_or_else(|| {
+        Error::Invalid(super::po::tf(
+            "no health probe for '{name}': the container has no --health-cmd and image '{image}' defines no HEALTHCHECK",
+            &[("name", &c.name), ("image", &c.image)],
+        ))
+    })?;
     if !c.is_live() {
         return Err(Error::NotRunning(short_id(&c.id).to_string()));
     }
@@ -7198,10 +7238,34 @@ pub(crate) fn health_opts(
 ///
 /// The exit code survives: a probe killed by the watchdog comes back as 137
 /// (128+SIGKILL), which is a failure by the same rule as any non-zero.
+///
+/// **And the watchdog has to be reaped, or the leak comes back as zombies.**
+/// The first version fired the watchdog off as `(sleep T; kill …) &` and later
+/// sent it a plain `kill`, with no `wait` anywhere. Two processes survived every
+/// single probe: the subshell (killed but never waited for) and the `sleep` it
+/// was blocked on (never signalled at all, orphaned to the container's PID 1).
+/// Nothing reaps them, because the container's PID 1 is the workload — a
+/// `sleep`, a server, anything but an init.
+///
+/// Measured on this engine, 2026-09-10, on a container with `--health-interval
+/// 2`: **+8 zombies every 10s**, growing without bound, invisible to `container
+/// top` (zombies are not in `cgroup.procs`) and visible only as `pids.current`
+/// climbing in `stats`. With the engine's default `pids.max=512` that is a
+/// container which stops being able to fork — in ~10 minutes at a 2s interval,
+/// in under three hours at the default 30s. A health check is a thing operators
+/// add to be safe; this made it a slow fuse.
+///
+/// So the watchdog now traps `TERM`, kills AND reaps its own `sleep`, and the
+/// caller waits for the watchdog itself. Validated against the real binary in
+/// all three shells a probe can land in (busybox `ash`, `dash`, `bash`): five
+/// probes leave `pids.current` exactly where it started, and a probe that
+/// genuinely exceeds its timeout still dies at the deadline with 137.
 pub(crate) fn health_probe_argv(cmd: &str, timeout_secs: u64) -> Vec<String> {
     let script = format!(
-        "{cmd} & __p=$!; (sleep {timeout_secs}; kill -9 $__p 2>/dev/null) & __w=$!; \
-         wait $__p; __rc=$?; kill $__w 2>/dev/null; exit $__rc"
+        "{cmd} & __p=$!; \
+         ( trap 'kill -9 $__z 2>/dev/null; wait $__z 2>/dev/null; exit 0' TERM; \
+           sleep {timeout_secs} & __z=$!; wait $__z; kill -9 $__p 2>/dev/null ) & __w=$!; \
+         wait $__p; __rc=$?; kill $__w 2>/dev/null; wait $__w 2>/dev/null; exit $__rc"
     );
     vec!["/bin/sh".to_string(), "-c".to_string(), script]
 }
@@ -7345,6 +7409,30 @@ mod fmt_ports_tests {
         assert_eq!(
             super::fmt_ports(&["0.0.0.0:8080:80/udp".to_string()]),
             "0.0.0.0:8080->80/udp"
+        );
+    }
+
+    /// `container port` never claims an exposure it cannot back up.
+    ///
+    /// The regression this locks: printing the literal `0.0.0.0` for a spec with
+    /// no address, while the engine publishes on `127.0.0.1` by default. An
+    /// explicit address in the spec is a fact and passes through untouched.
+    #[test]
+    fn published_addr_never_widens_a_loopback_bind() {
+        // No address in the spec → the default the publish path actually uses.
+        assert_eq!(
+            super::published_addr_for_display(None),
+            "127.0.0.1",
+            "an absent address must not read as every interface"
+        );
+        // An explicit one is a fact, whatever it is.
+        assert_eq!(
+            super::published_addr_for_display(Some("0.0.0.0".into())),
+            "0.0.0.0"
+        );
+        assert_eq!(
+            super::published_addr_for_display(Some("192.168.1.10".into())),
+            "192.168.1.10"
         );
     }
 
@@ -8580,6 +8668,22 @@ containers:
         assert!(a[2].contains("kill -9 $__p"));
         // O código de saída do probe sobrevive ao wrapper.
         assert!(a[2].contains("exit $__rc"));
+        // And the watchdog is REAPED — both halves, because neither is enough on
+        // its own. Without `wait $__w` the subshell stays a zombie; without the
+        // trap that kills AND waits for its `sleep`, that one is orphaned onto
+        // the container's PID 1 (the workload, which reaps nothing). Measured
+        // before this fix: +8 zombies every 10s at `--health-interval 2`, until
+        // the cgroup's `pids.max` is reached.
+        assert!(
+            a[2].contains("wait $__w"),
+            "the wrapper must reap the watchdog: {}",
+            a[2]
+        );
+        assert!(
+            a[2].contains("trap") && a[2].contains("wait $__z"),
+            "the watchdog must kill AND reap its own sleep: {}",
+            a[2]
+        );
     }
 
     #[test]

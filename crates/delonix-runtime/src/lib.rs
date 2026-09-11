@@ -5780,7 +5780,27 @@ pub fn wait_and_record(store: &Store, container: &mut Container) -> Result<Statu
     // same container right now — see `Store::update`.
     let final_status = status.clone();
     let _ = store.update(&container.id, |c| {
-        c.status = final_status.clone();
+        // **A requested stop is never a crash**, and this is where that promise
+        // was being broken. [`stop`] already writes `Stopped` "even if SIGKILL
+        // was needed"; the supervisor then waited on the same process, saw
+        // `Signaled`, and wrote `Crashed` over it. Whoever wrote last won.
+        //
+        // It is not an edge case: a PID 1 with no SIGTERM handler does not die
+        // on SIGTERM at all (the kernel only delivers it to PID 1 if a handler
+        // is installed), so `stop` reaches its SIGKILL for the most ordinary
+        // container there is. Measured, 2026-09-10, `run -d alpine sleep 600`
+        // followed by `stop`: `ps -a` said `Dead`, `dash` counted it under
+        // PROBLEMS as "killed by signal (crash)", and `wait` answered 137 — for
+        // a container the operator had just asked to stop.
+        //
+        // The RETURNED status stays the real one: the `die` event keeps the true
+        // exit code, and the restart policy keeps deciding on what actually
+        // happened to the process. Only what a reader sees is corrected.
+        c.status = if c.stopped_by_user && matches!(final_status, Status::Crashed) {
+            Status::Stopped
+        } else {
+            final_status.clone()
+        };
         c.pid = None;
         true
     });
@@ -6803,7 +6823,7 @@ pub fn stop(store: &Store, container: &mut Container, timeout_secs: u64) -> Resu
     if !safe_to_signal(pid, st) {
         container.status = Status::Stopped;
         container.pid = None;
-        store.save(container)?;
+        persist_stop(store, container)?;
         remove_container_cgroup(container);
         return Ok(());
     }
@@ -6822,8 +6842,39 @@ pub fn stop(store: &Store, container: &mut Container, timeout_secs: u64) -> Resu
     // needed (it is not a crash: it was a requested stop).
     container.status = Status::Stopped;
     container.pid = None;
-    store.save(container)?;
+    persist_stop(store, container)?;
     remove_container_cgroup(container);
+    Ok(())
+}
+
+/// Writes a stop's outcome with `update` and never `save`.
+///
+/// **`save` writes the WHOLE record this process loaded, so it silently undoes
+/// whatever another writer put there in the meantime** — and there is always
+/// another writer here: `cmd_stop` marks `stopped_by_user = true` (via `update`)
+/// immediately before calling [`stop`], on the very record this function then
+/// wrote back from a copy read BEFORE that mark. The flag went back to `false`
+/// every single time.
+///
+/// Measured, 2026-09-10, `run -d --restart always alpine sleep 600` followed by
+/// `stop -t 1`: `stopped_by_user` read `false` right after the stop, and four
+/// seconds later the container was `Running` again — the supervisor consults
+/// that same flag to decide whether to resurrect, so **`stop` did not stop it**.
+/// The doc comment on `cmd_stop` had already measured this exact failure once
+/// ("6 incarnations after a `stop`") and the flag is what was added to prevent
+/// it; a `save` on the way out was quietly cancelling it.
+///
+/// The second victim was the recorded status: with the flag gone, the
+/// supervisor's `wait_and_record` classified an intentional SIGKILL as
+/// `Crashed`, so `ps -a` said `Dead` and `dash` counted a PROBLEM for a
+/// container the operator had asked to stop.
+fn persist_stop(store: &Store, container: &Container) -> Result<()> {
+    let status = container.status.clone();
+    store.update(&container.id, |cur| {
+        cur.status = status.clone();
+        cur.pid = None;
+        true
+    })?;
     Ok(())
 }
 

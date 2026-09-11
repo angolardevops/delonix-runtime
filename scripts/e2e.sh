@@ -1804,6 +1804,118 @@ check "stack ls não diz 'unsupported kind' de um Kind que o apply aplica" ok \
   bash -c "! '$BIN' stack ls -f '$WORK/declarativos.yaml' | grep -q 'unsupported kind'"
 
 ########################################
+section "container: quem grava o estado terminal, e a sonda de saúde"
+########################################
+# Três defeitos medidos a 2026-09-10 na varredura do grupo `container`, todos da
+# mesma família: quem escreve o veredicto final sobre um container, e com que
+# informação.
+#
+#   1. UM `stop` PEDIDO FICAVA `crashed`. O `runtime::stop` grava `Stopped`
+#      "even if SIGKILL was needed"; o supervisor, que espera no MESMO processo,
+#      via `Signaled` e escrevia `Crashed` por cima. Não é caso de fronteira: um
+#      PID 1 sem handler de SIGTERM não morre com SIGTERM (o kernel só lho
+#      entrega se houver handler), por isso o `stop` chega ao SIGKILL para o
+#      container mais banal que existe — `alpine sleep 600`. Sintoma medido:
+#      `ps -a` a dizer `Dead`, o `dash` a contá-lo em PROBLEMS como "killed by
+#      signal (crash)", e o `wait` a responder 137, para um container que o
+#      operador acabara de mandar parar.
+#
+#   2. O `start` PERDIA O SUPERVISOR. O `run -d` forka sempre um (é o que torna
+#      o exit code de um container detached conhecível); o `start`/`restart` só
+#      o faziam se houvesse política de restart. Medido: `run -d ... sh -c
+#      'sleep 1; exit 7'` dava `wait` = 7, e depois de um `container start` do
+#      MESMO container o `wait` recusava — a apontar para `--restart` como
+#      remédio, quando o container tinha acabado de perder o supervisor que já
+#      tinha. `ps -a` dizia `Exited (unknown)`.
+#
+#   3. O `healthcheck` IGNORAVA A SONDA DO CONTAINER. Lia só o `HEALTHCHECK` da
+#      imagem, por isso um `run --health-cmd … alpine` mostrava `Up (healthy)`
+#      no `ps` enquanto `container healthcheck <ele>` respondia "image
+#      'alpine:3.20' defines no HEALTHCHECK" com rc=1 — vermelho permanente no
+#      script de CI que é a razão de este verbo existir.
+#
+# E o quarto, que só se vê a contar processos: a sonda deixava DOIS zombies por
+# execução (o subshell do watchdog, morto e nunca esperado, e o `sleep` dele,
+# nunca sinalizado e órfão do PID 1 do container, que é o workload e não reapa
+# nada). Medido com `--health-interval 2`: +8 a cada 10s, sem tecto, invisível
+# ao `container top` (zombies não estão em `cgroup.procs`) e visível só como
+# `pids.current` a subir. Com o `pids.max=512` por omissão, um container com
+# healthcheck deixa de conseguir forkar em ~10 minutos a 2s de intervalo e em
+# menos de três horas com o intervalo por omissão.
+TSTOP="tstop-$PFX"; TWAIT="twait-$PFX"; THC="thc-$PFX"; TZ="tz-$PFX"
+
+"$BIN" container run -d --name "$TSTOP" "$IMG" sleep 600 >/dev/null 2>&1
+check "stop: uma paragem PEDIDA nunca fica 'crashed', mesmo tendo precisado de SIGKILL" ok bash -c "
+  '$BIN' container stop -t 1 '$TSTOP' >/dev/null 2>&1
+  # Janela generosa de propósito: o supervisor grava DEPOIS do stop, e é essa
+  # segunda escrita que era o defeito. No binário defeituoso ela chegava em
+  # menos de um segundo, sempre.
+  st=
+  for _ in \$(seq 1 30); do
+    st=\$('$BIN' container inspect '$TSTOP' 2>/dev/null | python3 -c 'import json,sys;print(json.load(sys.stdin)[0][\"status\"])' 2>/dev/null)
+    [ \"\$st\" = Crashed ] && break
+    sleep 0.1
+  done
+  [ \"\$st\" = Stopped ] || { echo \"status=\$st (esperado Stopped)\"; '$BIN' container ps -a | grep '$TSTOP'; exit 1; }
+"
+
+check "start: o exit code REAL continua a ser capturado depois de um start" ok bash -c "
+  '$BIN' container rm -f '$TWAIT' >/dev/null 2>&1
+  '$BIN' container run -d --name '$TWAIT' '$IMG' /bin/sh -c 'sleep 1; exit 7' >/dev/null 2>&1
+  primeiro=\$('$BIN' container wait '$TWAIT' 2>&1)
+  [ \"\$primeiro\" = 7 ] || { echo \"run -d: wait deu '\$primeiro', esperado 7\"; exit 1; }
+  '$BIN' container start '$TWAIT' >/dev/null 2>&1
+  segundo=\$('$BIN' container wait '$TWAIT' 2>&1)
+  [ \"\$segundo\" = 7 ] || { echo \"depois do start: wait deu '\$segundo', esperado 7\"; exit 1; }
+"
+
+"$BIN" container rm -f "$THC" >/dev/null 2>&1
+"$BIN" container run -d --name "$THC" --health-cmd "test -f /tmp/ok" \
+  --health-interval 2 --health-timeout 2 --health-retries 1 "$IMG" sleep 300 >/dev/null 2>&1
+check "healthcheck: corre a sonda DO CONTAINER (unhealthy = rc 1, nunca 'no HEALTHCHECK')" 1 bash -c "
+  out=\$('$BIN' container healthcheck '$THC' 2>&1); rc=\$?
+  printf '%s\n' \"\$out\"
+  printf '%s' \"\$out\" | grep -q 'defines no HEALTHCHECK' && { echo 'leu so a imagem'; exit 99; }
+  exit \$rc
+"
+check "healthcheck: a mesma sonda a passar dá rc 0 e diz healthy" ok bash -c "
+  '$BIN' container exec '$THC' /bin/sh -c 'touch /tmp/ok' >/dev/null 2>&1
+  out=\$('$BIN' container healthcheck '$THC' 2>&1) || { echo \"\$out\"; exit 1; }
+  printf '%s' \"\$out\" | grep -q healthy || { echo \"\$out\"; exit 1; }
+"
+
+"$BIN" container rm -f "$TZ" >/dev/null 2>&1
+"$BIN" container run -d --name "$TZ" --health-cmd "true" --health-interval 1 \
+  --health-timeout 1 "$IMG" sleep 300 >/dev/null 2>&1
+if [ -n "$(_cg_of "$TZ" pids.current 2>/dev/null)" ]; then
+  check "healthcheck: a sonda não deixa processos por reapar dentro do container" ok bash -c "
+    antes=\$(_cg_of '$TZ' pids.current)
+    sleep 12   # ~12 sondas a um intervalo de 1s
+    depois=\$(_cg_of '$TZ' pids.current)
+    # O container corre um \`sleep\` e mais nada: sem fuga, o número não se mexe.
+    # Uma sonda a decorrer no instante da leitura explica 2, nunca uma dezena.
+    [ \$((depois - antes)) -le 3 ] || { echo \"pids.current: \$antes → \$depois após ~12 sondas\"; exit 1; }
+  "
+else
+  skip "healthcheck: a sonda não deixa processos por reapar" "cgroup do container ilegível (rootless sem delegação?)"
+fi
+TALW="talw-$PFX"
+"$BIN" container rm -f "$TALW" >/dev/null 2>&1
+"$BIN" container run -d --restart always --name "$TALW" "$IMG" sleep 600 >/dev/null 2>&1
+check "stop: PÁRA mesmo um container --restart always (o supervisor não o ressuscita)" ok bash -c "
+  '$BIN' container stop -t 1 '$TALW' >/dev/null 2>&1
+  # O supervisor decide reiniciar depois do seu \`waitpid\`; 5s cobrem-no com
+  # folga (medido no binário defeituoso: de volta a Running em ~4s, e o
+  # \`stopped_by_user\` a ler \`false\` logo a seguir ao stop, apagado pelo
+  # \`save\` do próprio stop).
+  sleep 5
+  st=\$('$BIN' container inspect '$TALW' 2>/dev/null | python3 -c 'import json,sys;print(json.load(sys.stdin)[0][\"status\"])' 2>/dev/null)
+  [ \"\$st\" = Running ] && { echo 'ressuscitou: um stop pedido não parou o container'; exit 1; }
+  [ \"\$st\" = Stopped ] || { echo \"status=\$st (esperado Stopped)\"; exit 1; }
+"
+"$BIN" container rm -f "$TSTOP" "$TWAIT" "$THC" "$TZ" "$TALW" >/dev/null 2>&1
+
+########################################
 section "schema gerado + explain + init"
 ########################################
 check "manifest schema" ok "$BIN" manifest schema

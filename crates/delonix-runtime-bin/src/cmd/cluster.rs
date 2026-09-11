@@ -667,9 +667,9 @@ pub enum ClusterCmd {
     /// Upgrade a `mode: ssh` cluster to a newer Kubernetes version, kubeadm-style.
     ///
     /// Mirrors kubeadm's own manual, one-node-at-a-time procedure — deliberately
-    /// NOT an unattended whole-cluster cascade. Without `--node`, upgrades the
-    /// control-plane LEADER only (`spec.controlPlane.hosts[0]`, the one host
-    /// `kubeadm upgrade apply` runs on); with `--node <name>`, upgrades that
+    /// NOT an unattended whole-cluster cascade. With no NODE argument, upgrades
+    /// the control-plane LEADER only (`spec.controlPlane.hosts[0]`, the one host
+    /// `kubeadm upgrade apply` runs on); with `<NODE>`, upgrades that
     /// other control-plane or worker host (`kubeadm upgrade node`). Drains
     /// before and uncordons after each node automatically, unless `--no-drain`.
     Upgrade {
@@ -1205,7 +1205,7 @@ fn upgrade_control_plane_leader(
     Ok(())
 }
 
-/// `--to <version> --node <name>`: kubeadm's own `upgrade node` step, for
+/// `--to <version> <NODE>`: kubeadm's own `upgrade node` step, for
 /// every host EXCEPT the leader (other control-planes, and workers).
 fn upgrade_one_node(
     cluster_name: &str,
