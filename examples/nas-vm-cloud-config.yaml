@@ -13,9 +13,9 @@
 #   IP=$(delonix vm ls -o json | jq -r '.[] | select(.name=="nas") | .ip')
 #
 # Then mount its shares as Delonix volumes (from the host or a container):
-#   delonix volume create media-nfs --type nfs  --server $IP --share /srv/share
-#   delonix volume create media-smb --type cifs --server $IP --share share \
-#           --username delonix --password delonix
+#   delonix volume create media-nfs --driver nfs  --opt server=$IP --opt share=/srv/share
+#   delonix volume create media-smb --driver cifs --opt server=$IP --opt share=share \
+#           --opt username=delonix --opt password=delonix
 #   delonix container run --rm -v media-nfs:/m alpine ls -la /m
 #
 # NFS/CIFS mounts need CAP_SYS_ADMIN — run the `volume create` under a user that

@@ -633,10 +633,9 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
 <code>-v nome:/destino[:ro]</code> resolve para um volume nomeado (criado on-demand) e
 <code>-v /host:/destino[:ro]</code> para um bind mount — a distinção é automática.
 <br><br>
-Três formas de <code>create</code> (fusão B5 da CLI — <code>storage create</code>/<code>sharevolume</code>
-eram a única via imperativa até aqui): local/dispositivo <code>nfs</code> cru (<code>--driver</code>),
-uma partilha de rede amigável — NFS/CIFS/WebDAV, com credenciais do cofre (<code>--type</code>), ou uma
-fatia isolada e com quota talhada de um volume já existente (<code>--parent</code>).""",
+Duas formas de <code>create</code>: um driver com as suas opções (<code>--driver</code>/<code>--opt</code>,
+ao estilo <code>docker volume create</code> — local por omissão, ou NFS/CIFS/SMB/WebDAV com credenciais
+do cofre), ou uma fatia isolada e com quota talhada de um volume já existente (<code>--parent</code>).""",
         "subs": {
             "snapshot": {"examples": [
                 ('Tirar e listar snapshots de um volume',
@@ -649,11 +648,11 @@ fatia isolada e com quota talhada de um volume já existente (<code>--parent</co
                 ('Detalhe de um volume (uso, quota, montagens)',
                  'delonix volume describe dados')]},
             "create": {"examples": [
-                ("Com quota e driver nfs disponíveis", "delonix volume create dados --quota 10G"),
+                ("Com quota, driver local por omissão", "delonix volume create dados --quota 10G"),
                 ("NFS de um TrueNAS, montado directamente como volume",
-                 "delonix volume create media --type nfs --server 10.0.0.5 --share /mnt/pool/media"),
+                 "delonix volume create media --driver nfs --opt server=10.0.0.5 --opt share=/mnt/pool/media"),
                 ("SMB/CIFS com a password do cofre, nunca do argv",
-                 "delonix volume create docs --type cifs --server nas --share docs --username user --password-secret nas-pass"),
+                 "delonix volume create docs --driver cifs --opt server=nas --opt share=docs --opt username=user --opt password-secret=nas-pass"),
                 ("Uma fatia isolada e com quota própria de um volume já existente",
                  "delonix volume create tenant-a --parent media --quota 1G"),
             ]},
@@ -1588,10 +1587,10 @@ nodes.""",
 <code>-v name:/dest[:ro]</code> resolves to a named volume (created on demand) and
 <code>-v /host:/dest[:ro]</code> to a bind mount — the distinction is automatic.
 <br><br>
-Three shapes of <code>create</code> (B5 CLI collapse — <code>storage create</code>/<code>sharevolume</code>
-were the only imperative path before this): a plain/raw <code>nfs</code> device (<code>--driver</code>),
-a friendly network share — NFS/CIFS/WebDAV, with vault credentials (<code>--type</code>), or an
-isolated, quota'd slice carved out of an already-existing volume (<code>--parent</code>).""",
+Two shapes of <code>create</code>: a driver with its options (<code>--driver</code>/<code>--opt</code>,
+Docker's own <code>docker volume create</code> idiom — local by default, or NFS/CIFS/SMB/WebDAV with
+vault credentials), or an isolated, quota'd slice carved out of an already-existing volume
+(<code>--parent</code>).""",
     },
     "network": {
         "tagline": "User networks: create, ls, inspect, rm, apply — bridge and overlay are physically realized.",
@@ -4091,13 +4090,13 @@ CHEAT_TASKS = [
     ("Firewall: só deixar entrar Postgres da SDN", "delonix net ingress allow db tcp/5432 --from 10.219.0.0/16\ndelonix net ingress policy db deny"),
     ("Firewall: egress da rede só p/ DNS + CIDRs", "delonix net egress net backend allowlist --to 10.0.0.0/8"),
     ("Tráfego por container ao vivo (eBPF)", "sudo delonix net flow --watch"),
-    ("Volume de rede de um NAS (NFS)", "delonix volume create media --type nfs --server 10.0.0.5 --share /mnt/pool/media"),
+    ("Volume de rede de um NAS (NFS)", "delonix volume create media --driver nfs --opt server=10.0.0.5 --opt share=/mnt/pool/media"),
     ("Segredo no cofre (não no argv)", "printf 'password=s3nha' | delonix secret create db-pass --from-env-file -"),
     ("Expor um container à internet pública (sem conta, sem router)",
      "delonix container run -d --name web --expose 80 nginx\ndelonix net tunnel expose 8080",
      "tunnel/tunnel-8080: running — https://oxipg-197-148-40-67.free.pinggy.net"),
     ("NAS partilhado por vários tenants, cada um com a sua quota",
-     "delonix volume create nas --type nfs --server 10.0.0.5 --share /pool/data\n"
+     "delonix volume create nas --driver nfs --opt server=10.0.0.5 --opt share=/pool/data\n"
      "delonix volume create tenant-a --parent nas --quota 5G"),
     ("microVM com cloud-init", "delonix vm create node1 --disk base.qcow2 --ssh-key @~/.ssh/id_ed25519.pub"),
     ("Cluster Kubernetes do zero", "delonix cluster kubeadm --name lab --control-plane 1 --workers 2"),

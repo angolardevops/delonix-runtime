@@ -2418,9 +2418,8 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("a local named volume — the default driver", "delonix volume create pgdata"),
             ("with a size cap, so one workload cannot fill the whole disk", "delonix volume create pgdata --quota 20g"),
-            ("an NFS export straight as a volume, without the friendlier `--type` declaration", "delonix volume create backups --driver nfs --device 10.0.0.5:/mnt/pool/backups --options vers=4.1,soft"),
-            ("a NAS export becomes a named volume any container can mount", "delonix volume create nas --type nfs --server 10.0.0.5 --share /mnt/pool/media"),
-            ("an SMB share with the password read from the vault, never from the shell history", "delonix volume create backups --type smb --server nas.local --share backups --username delonix --password-secret nas-creds"),
+            ("a NAS export becomes a named volume any container can mount", "delonix volume create nas --driver nfs --opt server=10.0.0.5 --opt share=/mnt/pool/media"),
+            ("an SMB share with the password read from the vault, never from the shell history", "delonix volume create backups --driver smb --opt server=nas.local --opt share=backups --opt username=delonix --opt password-secret=nas-creds"),
             ("an isolated, individually-quota'd slice carved out of an already-mounted volume", "delonix volume create app-data --parent nas --quota 5g"),
         ],
         see_also: &["volume ls", "volume inspect", "secret create", "container run"],

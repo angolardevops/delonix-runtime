@@ -515,23 +515,31 @@ check "snapshot já existente diz 5 (conflito)" 5 "$BIN" volume snapshot create 
 check "snapshot rm" ok "$BIN" volume snapshot rm "$VOL" s1
 
 ########################################
-section "volume create: --type (fusão B5 — antigo storage create)"
+section "volume create: --driver/--opt (Sprint 6 — fusão do --type/--server/--share)"
 ########################################
 # `storage`/`sharevolume` tinham ZERO checks executados — o balde dos
-# «comandos nunca executados» — e o próprio grupo `storage` já não existe:
-# fundido em `volume create --type` (B5 CLI collapse).
+# «comandos nunca executados» — e o próprio grupo `storage` já não existe.
+# O `--type`/`--server`/`--share`/`--device`/`--options` da fusão B5 tinha DUAS
+# formas para a mesma informação (a amigável e a crua); o Sprint 6 fecha-as
+# numa só, ao estilo `docker volume create --driver <nome> --opt k=v`.
 STGN="stg-$PFX"
-check "volume create --type desconhecido recusa" 2 \
-  "$BIN" volume create "$STGN" --type naoexiste --server 10.99.99.99 --share /x
-check "volume create --type sem --share recusa" 2 \
-  "$BIN" volume create "$STGN" --type nfs --server 10.99.99.99
-check "--type e --driver são exclusivos" 2 \
-  "$BIN" volume create "$STGN" --type nfs --server 10.99.99.99 --share /x --driver nfs
-if "$BIN" volume create "$STGN" --type nfs --server 10.99.99.99 --share /exports/x >/dev/null 2>&1; then
+check "--type já não existe (corte limpo, sem alias)" 2 \
+  "$BIN" volume create "$STGN" --type nfs --server 10.99.99.99 --share /x
+check "volume create --driver desconhecido recusa" 1 \
+  "$BIN" volume create "$STGN" --driver naoexiste --opt server=10.99.99.99 --opt share=/x
+check "volume create --driver nfs sem --opt share recusa" 1 \
+  "$BIN" volume create "$STGN" --driver nfs --opt server=10.99.99.99
+check "--opt com --driver local (que não leva opções) recusa" 1 \
+  "$BIN" volume create "$STGN" --driver local --opt server=10.99.99.99
+check "--opt com chave desconhecida recusa" 1 \
+  "$BIN" volume create "$STGN" --driver nfs --opt server=10.99.99.99 --opt share=/x --opt bogus=1
+check "--driver e --parent são exclusivos" 2 \
+  "$BIN" volume create "$STGN" --driver nfs --opt server=10.99.99.99 --opt share=/x --parent "$VOL"
+if "$BIN" volume create "$STGN" --driver nfs --opt server=10.99.99.99 --opt share=/exports/x >/dev/null 2>&1; then
   check "volume ls mostra-o" ok bash -c "'$BIN' volume ls | grep -q '$STGN'"
   "$BIN" volume rm -f "$STGN" >/dev/null 2>&1
 else
-  skip "volume create --type com NAS real" "montar NFS/CIFS exige CAP_SYS_ADMIN — não exercitável em rootless"
+  skip "volume create --driver nfs com NAS real" "montar NFS/CIFS exige CAP_SYS_ADMIN — não exercitável em rootless"
   check "um create falhado não deixa registo em volume ls" ok bash -c \
     "! '$BIN' volume ls 2>/dev/null | grep -q '$STGN'"
 fi
