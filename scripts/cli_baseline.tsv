@@ -51,7 +51,6 @@
 =	container restart
 =	container rm
 =	container run
-→	container ssh
 =	container start
 =	container stats
 =	container stop

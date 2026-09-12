@@ -10798,3 +10798,14 @@ msgstr "Substitui um segredo EXISTENTE em vez de recusar. Sem isto, `create` só
 
 msgid "secret '{name}' already exists — use `secret set` to add/update its keys, or `secret create --force` to replace it"
 msgstr "o segredo '{name}' já existe — usa `secret set` para acrescentar/actualizar as suas chaves, ou `secret create --force` para o substituir"
+
+# ---- CLI restructuring Sprint 2 (2026-09-12): container ssh removed, folded into exec ----
+
+msgid "Execute a command inside a running container.\n\nWith no command, tries `bash` and falls back to `sh` (which exists in any image) — `container exec -it <id>` is the interactive shell, same as `container exec -it <id> bash` would give if `bash` is there."
+msgstr "Executa um comando dentro de um container a correr.\n\nSem comando, tenta `bash` e cai para `sh` (que existe em qualquer imagem) — `container exec -it <id>` é a shell interactiva, o mesmo que `container exec -it <id> bash` daria se `bash` existisse."
+
+msgid "Command + arguments. Omit it for the bash/sh fallback shell"
+msgstr "Comando + argumentos. Omite-o para a shell de recurso bash/sh"
+
+msgid "an interactive shell, no command needed — tries bash, falls back to sh"
+msgstr "uma shell interactiva, sem precisar de comando — tenta bash, cai para sh"
