@@ -439,57 +439,42 @@ fn actual_of(name: String, v: &delonix_volume::Volume) -> super::reconcile::Actu
 pub enum VolumeCmd {
     /// Create a named volume.
     ///
-    /// Three shapes, and a document may use only one: a plain/`nfs`-device
-    /// volume (`--driver`), a friendly network share (`--type`), or a
-    /// quota'd slice of an already-existing volume (`--parent`) — the same
-    /// three the `kind: Volume` manifest accepts as `nfs:`/`cifs:`/`webdav:`
-    /// and `share:` blocks (B5 CLI collapse: `storage create`/`sharevolume`
-    /// were the only imperative way to reach the last two before this).
+    /// Two shapes, and a document may use only one: a driver + its options
+    /// (`--driver`/`--opt`), or a quota'd slice of an already-existing volume
+    /// (`--parent`) — the same two the `kind: Volume` manifest accepts as
+    /// `nfs:`/`cifs:`/`webdav:` and `share:` blocks.
     Create {
         name: String,
-        /// `local` (default) or `nfs` — the RAW device form. For a friendlier
-        /// network declaration (with credentials), use `--type` instead.
-        #[arg(long, default_value = "local", conflicts_with_all = ["type", "parent"])]
+        /// Volume driver: `local` (default, a plain local directory) | `nfs`
+        /// | `cifs`/`smb` (Samba/Windows) | `webdav` (Nextcloud/ownCloud).
+        ///
+        /// Non-local drivers are configured entirely through `--opt` —
+        /// the same idiom `docker volume create --driver <name> --opt k=v`
+        /// uses, and one flag family instead of the two this used to have
+        /// (`--type`+`--server`/`--share` for the network form, `--driver
+        /// nfs`+`--device` for the raw one — the same information written
+        /// twice two different ways).
+        #[arg(long, default_value = "local", conflicts_with = "parent")]
         driver: String,
-        /// Device/export (`nfs` driver).
-        #[arg(long, conflicts_with_all = ["type", "parent"])]
-        device: Option<String>,
-        /// Additional mount options (`nfs` driver, or the friendly `--type` form).
-        #[arg(long, conflicts_with = "parent")]
-        options: Option<String>,
+        /// Driver option, `key=value`. Repeatable. For `nfs`/`cifs`/`smb`/
+        /// `webdav`: `server` (required — host/IP, or the base URL for
+        /// `webdav`), `share` (required — NFS path, CIFS share name, or the
+        /// WebDAV URL path), `username`, `password` (prefer
+        /// `password-secret`), `password-secret` (vault secret with a
+        /// `password` key), `ro=true` (mount read-only), `options` (extra
+        /// mount options, e.g. `vers=4.1,soft`).
+        #[arg(long = "opt", value_name = "KEY=VALUE", conflicts_with = "parent")]
+        opt: Vec<String>,
         /// Quota (e.g. `2g`) — only applied if `--quota` is given.
         #[arg(long)]
         quota: Option<String>,
         /// Usage percentage above which `ls`/`describe` flag a WARN (default 90).
         #[arg(long = "alert-pct")]
         alert_pct: Option<u8>,
-        /// Network storage type — `nfs` | `cifs`/`smb` (Samba/Windows) |
-        /// `webdav` (Nextcloud/ownCloud). Requires `--server`/`--share`.
-        #[arg(long = "type", value_parser = ["nfs", "cifs", "smb", "webdav"], requires_all = ["server", "share"], conflicts_with = "parent")]
-        r#type: Option<String>,
-        /// Server (host/IP), or the base URL in the `webdav` case — with `--type`.
-        #[arg(long, requires = "type")]
-        server: Option<String>,
-        /// Export/share: NFS path (`/mnt/pool/media`), CIFS share name
-        /// (`media`), or the path in the WebDAV URL — with `--type`.
-        #[arg(long, requires = "type")]
-        share: Option<String>,
-        /// User (cifs/webdav) — with `--type`.
-        #[arg(long, requires = "type")]
-        username: Option<String>,
-        /// Password (cifs/webdav) — prefer `--password-secret`. With `--type`.
-        #[arg(long, requires = "type")]
-        password: Option<String>,
-        /// Vault secret with the `password` key (cifs/webdav) — with `--type`.
-        #[arg(long = "password-secret", requires = "type", add = clap_complete::engine::ArgValueCandidates::new(super::complete::secrets))]
-        password_secret: Option<String>,
-        /// Mount read-only — with `--type`.
-        #[arg(long = "read-only", requires = "type")]
-        read_only: bool,
         /// Carve this volume out of an ALREADY-EXISTING one (a quota'd,
         /// isolated subdirectory — what `kind: ShareVolume` used to be a Kind
         /// of its own for). Mounts nothing of its own: exclusive with
-        /// `--driver`/`--device`/`--options`/`--type`.
+        /// `--driver`/`--opt`.
         #[arg(long, add = ArgValueCandidates::new(super::complete::volumes))]
         parent: Option<String>,
         /// Namespace that will own the share (default: the unscoped root) — only with `--parent`.
@@ -638,17 +623,9 @@ pub fn run(action: VolumeCmd) -> Result<()> {
         VolumeCmd::Create {
             name,
             driver,
-            device,
-            options,
+            opt,
             quota,
             alert_pct,
-            r#type,
-            server,
-            share,
-            username,
-            password,
-            password_secret,
-            read_only,
             parent,
             namespace,
         } => cmd_create(
@@ -656,17 +633,9 @@ pub fn run(action: VolumeCmd) -> Result<()> {
             &name,
             CreateArgs {
                 driver,
-                device,
-                options,
+                opt,
                 quota,
                 alert_pct,
-                r#type,
-                server,
-                share,
-                username,
-                password,
-                password_secret,
-                read_only,
                 parent,
                 namespace,
             },
@@ -968,29 +937,62 @@ fn create_volume(
 }
 
 /// Everything `VolumeCmd::Create` can carry — one struct so `cmd_create`
-/// takes one argument instead of fourteen, and so the three creation shapes
-/// (plain/`nfs`-device, friendly `--type` network share, `--parent` share)
-/// stay readable as one function instead of an unwieldy call site.
+/// takes one argument instead of six, and so the two creation shapes (a
+/// driver + its `--opt`s, or a `--parent` share) stay readable as one
+/// function instead of an unwieldy call site.
 struct CreateArgs {
     driver: String,
-    device: Option<String>,
-    options: Option<String>,
+    opt: Vec<String>,
     quota: Option<String>,
     alert_pct: Option<u8>,
-    r#type: Option<String>,
-    server: Option<String>,
-    share: Option<String>,
-    username: Option<String>,
-    password: Option<String>,
-    password_secret: Option<String>,
-    read_only: bool,
     parent: Option<String>,
     namespace: Option<String>,
 }
 
-/// `volume create` — dispatches on which of the three shapes was given.
-/// `clap`'s `conflicts_with`/`requires` on the flags themselves already rule
-/// out a mix; this just picks the one that is left.
+/// The four network drivers `--opt` configures. `local` is not here on
+/// purpose: it takes none, and that absence is what makes `--opt` with
+/// `--driver local` a mistake worth refusing instead of silently ignoring.
+const NETWORK_DRIVERS: [&str; 4] = ["nfs", "cifs", "smb", "webdav"];
+
+/// The `--opt` keys a network driver understands. Checked against every key
+/// given — an unrecognised one (`--opt serevr=...`) is far more often a typo
+/// than a driver-specific extension nobody documented, and this repo's rule
+/// is to refuse that, never guess past it.
+const NETWORK_OPT_KEYS: [&str; 7] = [
+    "server",
+    "share",
+    "username",
+    "password",
+    "password-secret",
+    "ro",
+    "options",
+];
+
+/// Parses `--opt key=value` (repeatable) into a map, refusing anything that
+/// is not `key=value` or whose key a network driver does not understand.
+fn parse_driver_opts(opt: &[String]) -> Result<std::collections::BTreeMap<String, String>> {
+    let mut map = std::collections::BTreeMap::new();
+    for spec in opt {
+        let Some((k, v)) = spec.split_once('=') else {
+            return Err(Error::Invalid(super::po::tf(
+                "invalid --opt '{spec}' (use key=value)",
+                &[("spec", spec)],
+            )));
+        };
+        if !NETWORK_OPT_KEYS.contains(&k) {
+            return Err(Error::Invalid(super::po::tf(
+                "unknown --opt key '{k}' — one of: {keys}",
+                &[("k", k), ("keys", &NETWORK_OPT_KEYS.join(", "))],
+            )));
+        }
+        map.insert(k.to_string(), v.to_string());
+    }
+    Ok(map)
+}
+
+/// `volume create` — dispatches on which of the two shapes was given.
+/// `clap`'s `conflicts_with` on `--parent` already rules out a mix with
+/// `--driver`/`--opt`; this just picks the one that is left.
 fn cmd_create(store: &VolumeStore, name: &str, a: CreateArgs) -> Result<()> {
     if let Some(from) = a.parent {
         // The parent has to exist and be reachable from the UNSCOPED store —
@@ -1011,50 +1013,70 @@ fn cmd_create(store: &VolumeStore, name: &str, a: CreateArgs) -> Result<()> {
         )?;
         return Ok(());
     }
-    if let Some(kind) = a.r#type {
-        let spec = super::storage::NetShareSpec {
-            server: a.server.unwrap_or_default(),
-            share: a.share.unwrap_or_default(),
-            username: a.username,
-            password: a.password,
-            password_secret: a.password_secret,
-            read_only: a.read_only,
-            mount_options: a.options,
-        };
-        super::storage::ensure_share_credentials(name, &kind, &spec)?;
-        let m = super::storage::share_mount(name, &kind, &spec)?;
-        let vol = create_volume(
-            store,
-            name,
-            &m.driver,
-            Some(m.device.clone()),
-            m.options,
-            a.quota,
-            a.alert_pct,
-        )?;
-        println!(
-            "{}",
-            super::po::tf(
-                "volume '{name}' created and mounted ({driver} · {device})",
-                &[
-                    ("name", &vol.name),
-                    ("driver", &m.driver),
-                    ("device", &m.device)
-                ],
-            )
-        );
+    let opts = parse_driver_opts(&a.opt)?;
+    if a.driver == "local" {
+        if let Some(k) = opts.keys().next() {
+            return Err(Error::Invalid(super::po::tf(
+                "--opt {k}=... was given with --driver local, which takes no options — --opt only applies to nfs/cifs/smb/webdav",
+                &[("k", k)],
+            )));
+        }
+        let vol = create_volume(store, name, "local", None, None, a.quota, a.alert_pct)?;
+        println!("{}", vol.name);
         return Ok(());
     }
+    if !NETWORK_DRIVERS.contains(&a.driver.as_str()) {
+        return Err(Error::Invalid(super::po::tf(
+            "unknown volume driver '{driver}' — one of: local, {drivers}",
+            &[
+                ("driver", &a.driver),
+                ("drivers", &NETWORK_DRIVERS.join(", ")),
+            ],
+        )));
+    }
+    let server = opts.get("server").cloned().ok_or_else(|| {
+        Error::Invalid(super::po::tf(
+            "--driver {driver} needs --opt server=<host>",
+            &[("driver", &a.driver)],
+        ))
+    })?;
+    let share = opts.get("share").cloned().ok_or_else(|| {
+        Error::Invalid(super::po::tf(
+            "--driver {driver} needs --opt share=<path>",
+            &[("driver", &a.driver)],
+        ))
+    })?;
+    let spec = super::storage::NetShareSpec {
+        server,
+        share,
+        username: opts.get("username").cloned(),
+        password: opts.get("password").cloned(),
+        password_secret: opts.get("password-secret").cloned(),
+        read_only: matches!(opts.get("ro").map(String::as_str), Some("true") | Some("1")),
+        mount_options: opts.get("options").cloned(),
+    };
+    super::storage::ensure_share_credentials(name, &a.driver, &spec)?;
+    let m = super::storage::share_mount(name, &a.driver, &spec)?;
     let vol = create_volume(
         store,
         name,
-        &a.driver,
-        a.device,
-        a.options,
+        &m.driver,
+        Some(m.device.clone()),
+        m.options,
         a.quota,
         a.alert_pct,
     )?;
-    println!("{}", vol.name);
+    println!(
+        "{}",
+        super::po::tf(
+            "volume '{name}' created and mounted ({driver} · {device})",
+            &[
+                ("name", &vol.name),
+                ("driver", &m.driver),
+                ("device", &m.device)
+            ],
+        )
+    );
     Ok(())
 }
 

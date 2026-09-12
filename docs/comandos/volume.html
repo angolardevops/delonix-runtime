@@ -148,17 +148,16 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <code>-v nome:/destino[:ro]</code> resolve para um volume nomeado (criado on-demand) e
 <code>-v /host:/destino[:ro]</code> para um bind mount — a distinção é automática.
 <br><br>
-Três formas de <code>create</code> (fusão B5 da CLI — <code>storage create</code>/<code>sharevolume</code>
-eram a única via imperativa até aqui): local/dispositivo <code>nfs</code> cru (<code>--driver</code>),
-uma partilha de rede amigável — NFS/CIFS/WebDAV, com credenciais do cofre (<code>--type</code>), ou uma
-fatia isolada e com quota talhada de um volume já existente (<code>--parent</code>).</p><p class='lang-en'>A thin wrapper over <code>VolumeStore</code>. In <code>container run</code>,
+Duas formas de <code>create</code>: um driver com as suas opções (<code>--driver</code>/<code>--opt</code>,
+ao estilo <code>docker volume create</code> — local por omissão, ou NFS/CIFS/SMB/WebDAV com credenciais
+do cofre), ou uma fatia isolada e com quota talhada de um volume já existente (<code>--parent</code>).</p><p class='lang-en'>A thin wrapper over <code>VolumeStore</code>. In <code>container run</code>,
 <code>-v name:/dest[:ro]</code> resolves to a named volume (created on demand) and
 <code>-v /host:/dest[:ro]</code> to a bind mount — the distinction is automatic.
 <br><br>
-Three shapes of <code>create</code> (B5 CLI collapse — <code>storage create</code>/<code>sharevolume</code>
-were the only imperative path before this): a plain/raw <code>nfs</code> device (<code>--driver</code>),
-a friendly network share — NFS/CIFS/WebDAV, with vault credentials (<code>--type</code>), or an
-isolated, quota'd slice carved out of an already-existing volume (<code>--parent</code>).</p>
+Two shapes of <code>create</code>: a driver with its options (<code>--driver</code>/<code>--opt</code>,
+Docker's own <code>docker volume create</code> idiom — local by default, or NFS/CIFS/SMB/WebDAV with
+vault credentials), or an isolated, quota'd slice carved out of an already-existing volume
+(<code>--parent</code>).</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/volume.rs"><code>cmd/volume.rs</code></a></p>
 <div class='help'><pre><code>Usage: delonix volume [OPTIONS] &lt;COMMAND&gt;
 
@@ -270,7 +269,7 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Detalhe de um volume (uso, quota, montagens)</div><div class='cap lang-en'>Volume detail (usage, quota, mounts)</div><pre><code>delonix volume describe dados</code></pre></div>
 <h2 id='create'><code>volume create</code></h2>
 <p class='intro'>Create a named volume.</p>
-<p class='intro'>Three shapes, and a document may use only one: a plain/<code>nfs</code>-device volume (<code>--driver</code>), a friendly network share (<code>--type</code>), or a quota&#x27;d slice of an already-existing volume (<code>--parent</code>) — the same three the <code>kind: Volume</code> manifest accepts as <code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code> and <code>share:</code> blocks (B5 CLI collapse: <code>storage create</code>/<code>sharevolume</code> were the only imperative way to reach the last two before this).</p>
+<p class='intro'>Two shapes, and a document may use only one: a driver + its options (<code>--driver</code>/<code>--opt</code>), or a quota&#x27;d slice of an already-existing volume (<code>--parent</code>) — the same two the <code>kind: Volume</code> manifest accepts as <code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code> and <code>share:</code> blocks.</p>
 <div class='help'><pre><code>Usage: delonix volume create [OPTIONS] &lt;NAME&gt;
 
 Arguments:
@@ -279,18 +278,17 @@ Arguments:
 
 Options:
       --driver &lt;DRIVER&gt;
-          `local` (default) or `nfs` — the RAW device form. For a friendlier network declaration (with credentials), use `--type` instead
+          Volume driver: `local` (default, a plain local directory) | `nfs` | `cifs`/`smb` (Samba/Windows) | `webdav` (Nextcloud/ownCloud).
+          
+          Non-local drivers are configured entirely through `--opt` — the same idiom `docker volume create --driver &lt;name&gt; --opt k=v` uses, and one flag family instead of the two this used to have (`--type`+`--server`/`--share` for the network form, `--driver nfs`+`--device` for the raw one — the same information written twice two different ways).
           
           [default: local]
 
       --l18n &lt;en|pt&gt;
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
-      --device &lt;DEVICE&gt;
-          Device/export (`nfs` driver)
-
-      --options &lt;OPTIONS&gt;
-          Additional mount options (`nfs` driver, or the friendly `--type` form)
+      --opt &lt;KEY=VALUE&gt;
+          Driver option, `key=value`. Repeatable. For `nfs`/`cifs`/`smb`/ `webdav`: `server` (required — host/IP, or the base URL for `webdav`), `share` (required — NFS path, CIFS share name, or the WebDAV URL path), `username`, `password` (prefer `password-secret`), `password-secret` (vault secret with a `password` key), `ro=true` (mount read-only), `options` (extra mount options, e.g. `vers=4.1,soft`)
 
       --quota &lt;QUOTA&gt;
           Quota (e.g. `2g`) — only applied if `--quota` is given
@@ -298,31 +296,8 @@ Options:
       --alert-pct &lt;ALERT_PCT&gt;
           Usage percentage above which `ls`/`describe` flag a WARN (default 90)
 
-      --type &lt;TYPE&gt;
-          Network storage type — `nfs` | `cifs`/`smb` (Samba/Windows) | `webdav` (Nextcloud/ownCloud). Requires `--server`/`--share`
-          
-          [possible values: nfs, cifs, smb, webdav]
-
-      --server &lt;SERVER&gt;
-          Server (host/IP), or the base URL in the `webdav` case — with `--type`
-
-      --share &lt;SHARE&gt;
-          Export/share: NFS path (`/mnt/pool/media`), CIFS share name (`media`), or the path in the WebDAV URL — with `--type`
-
-      --username &lt;USERNAME&gt;
-          User (cifs/webdav) — with `--type`
-
-      --password &lt;PASSWORD&gt;
-          Password (cifs/webdav) — prefer `--password-secret`. With `--type`
-
-      --password-secret &lt;PASSWORD_SECRET&gt;
-          Vault secret with the `password` key (cifs/webdav) — with `--type`
-
-      --read-only
-          Mount read-only — with `--type`
-
       --parent &lt;PARENT&gt;
-          Carve this volume out of an ALREADY-EXISTING one (a quota&#x27;d, isolated subdirectory — what `kind: ShareVolume` used to be a Kind of its own for). Mounts nothing of its own: exclusive with `--driver`/`--device`/`--options`/`--type`
+          Carve this volume out of an ALREADY-EXISTING one (a quota&#x27;d, isolated subdirectory — what `kind: ShareVolume` used to be a Kind of its own for). Mounts nothing of its own: exclusive with `--driver`/`--opt`
 
   -n, --namespace &lt;NAMESPACE&gt;
           Namespace that will own the share (default: the unscoped root) — only with `--parent`
@@ -337,16 +312,12 @@ EXAMPLES:
   # with a size cap, so one workload cannot fill the whole disk
   delonix volume create pgdata --quota 20g
 
-  # an NFS export straight as a volume, without the friendlier `--type`
-  # declaration
-  delonix volume create backups --driver nfs --device 10.0.0.5:/mnt/pool/backups --options vers=4.1,soft
-
   # a NAS export becomes a named volume any container can mount
-  delonix volume create nas --type nfs --server 10.0.0.5 --share /mnt/pool/media
+  delonix volume create nas --driver nfs --opt server=10.0.0.5 --opt share=/mnt/pool/media
 
   # an SMB share with the password read from the vault, never from the shell
   # history
-  delonix volume create backups --type smb --server nas.local --share backups --username delonix --password-secret nas-creds
+  delonix volume create backups --driver smb --opt server=nas.local --opt share=backups --opt username=delonix --opt password-secret=nas-creds
 
   # an isolated, individually-quota&#x27;d slice carved out of an already-mounted
   # volume
@@ -357,7 +328,7 @@ SEE ALSO:
   container run
 
   delonix › volume › create</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Com quota e driver nfs disponíveis</div><div class='cap lang-en'>With quota and the nfs driver available</div><pre><code>delonix volume create dados --quota 10G</code></pre></div><div class="ex"><div class='cap lang-pt'>NFS de um TrueNAS, montado directamente como volume</div><div class='cap lang-en'>NFS from a TrueNAS, mounted straight as a volume</div><pre><code>delonix volume create media --type nfs --server 10.0.0.5 --share /mnt/pool/media</code></pre></div><div class="ex"><div class='cap lang-pt'>SMB/CIFS com a password do cofre, nunca do argv</div><div class='cap lang-en'>SMB/CIFS with the password from the vault, never from argv</div><pre><code>delonix volume create docs --type cifs --server nas --share docs --username user --password-secret nas-pass</code></pre></div><div class="ex"><div class='cap lang-pt'>Uma fatia isolada e com quota própria de um volume já existente</div><div class='cap lang-en'>An isolated, individually-quota&#x27;d slice of an already-existing volume</div><pre><code>delonix volume create tenant-a --parent media --quota 1G</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Com quota, driver local por omissão</div><div class='cap lang-en'>With quota and the nfs driver available</div><pre><code>delonix volume create dados --quota 10G</code></pre></div><div class="ex"><div class='cap lang-pt'>NFS de um TrueNAS, montado directamente como volume</div><div class='cap lang-en'>NFS from a TrueNAS, mounted straight as a volume</div><pre><code>delonix volume create media --driver nfs --opt server=10.0.0.5 --opt share=/mnt/pool/media</code></pre></div><div class="ex"><div class='cap lang-pt'>SMB/CIFS com a password do cofre, nunca do argv</div><div class='cap lang-en'>SMB/CIFS with the password from the vault, never from argv</div><pre><code>delonix volume create docs --driver cifs --opt server=nas --opt share=docs --opt username=user --opt password-secret=nas-pass</code></pre></div><div class="ex"><div class='cap lang-pt'>Uma fatia isolada e com quota própria de um volume já existente</div><div class='cap lang-en'>An isolated, individually-quota&#x27;d slice of an already-existing volume</div><pre><code>delonix volume create tenant-a --parent media --quota 1G</code></pre></div>
 <h2 id='ls'><code>volume ls</code></h2>
 <p class='intro'>List the volumes</p>
 <div class='help'><pre><code>Usage: delonix volume ls [OPTIONS]
