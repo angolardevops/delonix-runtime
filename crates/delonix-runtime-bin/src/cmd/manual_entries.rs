@@ -482,9 +482,9 @@ pub static ENTRIES: &[Entry] = &[
             ("publish a new port on a RUNNING container — the PID does not change", "delonix container update --publish-add 9000:80 web"),
             ("swap a port in one command: removals run before additions", "delonix container update --publish-rm 8080 --publish-add 8080:9000 web"),
             ("raise the memory and CPU caps live", "delonix container update --memory 1G --cpus 2 db"),
-            ("attach it to another network and cap that link's bandwidth", "delonix container update --net-connect backend --net-rate 10mbit web"),
+            ("cap the bandwidth of its existing network link", "delonix container update --net-rate 10mbit web"),
         ],
-        see_also: &["container run", "container restart", "network create"],
+        see_also: &["container run", "container restart", "network connect"],
     },
     Entry {
         path: "container apply",
@@ -1458,6 +1458,22 @@ pub static ENTRIES: &[Entry] = &[
             ("close it again", "delonix network route web db --rm"),
         ],
         see_also: &["network create", "net ingress", "container run"],
+    },
+    Entry {
+        path: "network connect",
+        group: "Lifecycle",
+        examples: &[
+            ("hot multi-home a running container onto a second network", "delonix network connect backend web"),
+        ],
+        see_also: &["network disconnect", "container update", "network create"],
+    },
+    Entry {
+        path: "network disconnect",
+        group: "Lifecycle",
+        examples: &[
+            ("drop the extra network — the primary one stays", "delonix network disconnect backend web"),
+        ],
+        see_also: &["network connect", "container update"],
     },
     Entry {
         path: "network rm",

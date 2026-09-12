@@ -2272,6 +2272,32 @@ internos (`cmd_backup`/`cmd_restore` em `backup.rs`) ficam como estão — imple
 superfície; a prosa e as mensagens de erro do módulo (`io_err("system backup")` etc.) foram
 actualizadas para citar o comando real.
 
+## Reestruturação da CLI (semântica Docker/Podman/kubectl) — Sprint 5: `network connect`/`disconnect`
+
+Auditoria DevOps/SRE (2026-09-12) apontou `--net-connect`/`--net-disconnect` como flags enterradas
+em `container update`, ao lado de portas/volumes/limites — a única coisa ali que não é sobre o
+CONTAINER em si, é sobre a filiação de uma REDE. Verificado primeiro contra os discovery docs
+(`51_CLI_INVENTARIO.md`): não há decisão escrita especificamente sobre isto — a visão de longo
+prazo do documento para `network`/`net` é uma migração declarativa muito maior (tudo via `apply
+-f` contra Kinds como `NetworkPolicy`/`Service`), claramente fora do âmbito de um sprint, e que
+não impede esta melhoria imperativa modesta e local.
+
+**O que muda**: `network connect <REDE> <CONTAINER>` / `network disconnect <REDE> <CONTAINER>` —
+o verbo e a ordem de argumentos do próprio Docker (`docker network connect NETWORK CONTAINER`).
+Mecanismo idêntico ao que já existia (`infra::attach_extra_container`/`detach_extra_container`,
+as mesmas guardas — recusa em `--net host/none`, recusa duplicado, reaplica a firewall à nova/
+antiga IP), extraído para `cmd_network_connect`/`cmd_network_disconnect` (`pub(crate)` em
+`container.rs`, chamados de `network.rs`).
+
+**Deliberadamente NÃO movido**: `--net-rate`/`--net-burst`/`--net-rate-clear` (limite de banda)
+ficam em `container update`. Não são sobre QUAL rede — são um limite do próprio container,
+irmão de `-m`/`-c`, e o Docker não tem verbo equivalente para alinhar. Só a filiação de rede
+(que rede o container está) tinha um verbo Docker à espera.
+
+Corte limpo: `container update --net-connect`/`--net-disconnect` falham com "unexpected
+argument". `container update` fica com `--publish-add/-rm`, `--volume-add/-rm`, `--net-rate/
+--net-burst/--net-rate-clear`, `-m`, `-c` — mais nítido por ficar sem o que não pertencia ali.
+
 ## Falhas silenciosas corrigidas (fail-closed) + 1 documentada
 
 Da análise Docker/Podman (`docs/COMPARACAO-DOCKER-PODMAN.md`), quatro casos em

@@ -104,6 +104,11 @@ classify() {
       # `mcp` (ADR-0025) é superfície nova, sem relação nenhuma com a
       # reestruturação — mesma razão do `api-resources` acima.
       else if (c ~ /^mcp /)                                       cls = "="
+      # `network connect`/`disconnect` (Sprint 5): nasceram já com o nome-alvo
+      # (o verbo do Docker), não são a renomeação de nada — mesma razão do
+      # `api-resources`, nunca `→` porque não há decisão externa por trás,
+      # só o mesmo mecanismo a mudar de casa dentro deste repo.
+      else if (c == "network connect" || c == "network disconnect") cls = "="
       else                                                        cls = "~"
       print cls "\t" c
     }'

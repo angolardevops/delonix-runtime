@@ -428,6 +428,31 @@ pub enum NetworkCmd {
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: output::OutputFormat,
     },
+    /// Connect a RUNNING container to an additional network, hot.
+    ///
+    /// Multi-homing — the container keeps its primary network, this adds
+    /// another. Moved here from `container update --net-connect` (Sprint 5 of
+    /// the CLI restructuring): this is Docker's own verb and argument order
+    /// (`docker network connect NETWORK CONTAINER`), for the one operation
+    /// that is about a NETWORK's membership, not a container's ports/volumes/
+    /// limits — `container update` keeps those, which Docker cannot do hot at
+    /// all.
+    Connect {
+        #[arg(add = ArgValueCandidates::new(super::complete::networks))]
+        network: String,
+        #[arg(add = ArgValueCandidates::new(super::complete::containers))]
+        container: String,
+    },
+    /// Disconnect a container from an additional network, hot.
+    ///
+    /// Refuses on the PRIMARY network — that one only goes away with the
+    /// container itself.
+    Disconnect {
+        #[arg(add = ArgValueCandidates::new(super::complete::networks))]
+        network: String,
+        #[arg(add = ArgValueCandidates::new(super::complete::containers))]
+        container: String,
+    },
     /// List the networks.
     Ls {
         /// Output format: `table` (default) or `json` (ADR-0005).
@@ -506,6 +531,16 @@ pub enum NetworkCmd {
 pub fn run(action: NetworkCmd) -> Result<()> {
     let store = NetworkStore::open(state_root())?;
     match action {
+        NetworkCmd::Connect { network, container } => {
+            let cstore =
+                delonix_runtime_core::Store::open(super::util::state_root().join("containers"))?;
+            super::container::cmd_network_connect(&cstore, &container, &network)
+        }
+        NetworkCmd::Disconnect { network, container } => {
+            let cstore =
+                delonix_runtime_core::Store::open(super::util::state_root().join("containers"))?;
+            super::container::cmd_network_disconnect(&cstore, &container, &network)
+        }
         NetworkCmd::Vlan {
             parent,
             id,

@@ -1062,14 +1062,15 @@ CN="cn-$PFX"
 NET2="net2-$PFX"
 if "$BIN" network create "$NET2" --subnet 10.252.0.0/16 >/dev/null 2>&1 && \
    "$BIN" container run -d --name "$CN" --net "$NET" "$IMG" sleep 600 >/dev/null 2>&1; then
-  check "update: net-connect a quente" ok "$BIN" container update "$CN" --net-connect "$NET2"
-  check "update: rede extra no describe" ok bash -c "'$BIN' container describe '$CN' | grep -q '$NET2'"
-  check "update: net-connect repetido recusa" fail "$BIN" container update "$CN" --net-connect "$NET2"
+  check "network connect a quente" ok "$BIN" network connect "$NET2" "$CN"
+  check "network connect: rede extra no describe" ok bash -c "'$BIN' container describe '$CN' | grep -q '$NET2'"
+  check "network connect repetido recusa" fail "$BIN" network connect "$NET2" "$CN"
   check "update: net-rate a quente" ok "$BIN" container update "$CN" --net-rate 10mbit
   check "update: taxa inválida recusa" fail "$BIN" container update "$CN" --net-rate depressa
   check "update: net-rate-clear" ok "$BIN" container update "$CN" --net-rate-clear
-  check "update: net-disconnect a quente" ok "$BIN" container update "$CN" --net-disconnect "$NET2"
-  check "update: net-disconnect de rede não ligada recusa" fail "$BIN" container update "$CN" --net-disconnect "$NET2"
+  check "network disconnect a quente" ok "$BIN" network disconnect "$NET2" "$CN"
+  check "network disconnect de rede não ligada recusa" fail "$BIN" network disconnect "$NET2" "$CN"
+  check "container update --net-connect deixou de existir (corte limpo)" 2 "$BIN" container update "$CN" --net-connect "$NET2"
   "$BIN" container rm -f "$CN" >/dev/null 2>&1
 else
   skip "hot reconfig em rede custom" "não foi possível criar rede/container em rede custom"

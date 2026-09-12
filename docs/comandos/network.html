@@ -162,17 +162,19 @@ need <code>CAP_NET_ADMIN</code> in the host's init-netns, outside the rootless m
 <div class='help'><pre><code>Usage: delonix network [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  create    Create a network
-  rm        Remove a network
-  route     Open a DIRECTED path from one network to another (ADR-0013 tier B)
-  vlan      802.1Q VLAN on a physical NIC — **the one command here that needs root**
-  describe  Readable detail of one or more networks, `kubectl describe` style
-  diagnose  The LIVE state of this node&#x27;s network, and what disagrees with it
-  inspect   Detail of a network
-  ls        List the networks
-  apply     Apply the `kind: Network` documents of a manifest (idempotent by name)
-  node      WireGuard identity of THIS node, for the encrypted overlay between nodes
-  help      Print this message or the help of the given subcommand(s)
+  connect     Connect a RUNNING container to an additional network, hot
+  create      Create a network
+  disconnect  Disconnect a container from an additional network, hot
+  rm          Remove a network
+  route       Open a DIRECTED path from one network to another (ADR-0013 tier B)
+  vlan        802.1Q VLAN on a physical NIC — **the one command here that needs root**
+  describe    Readable detail of one or more networks, `kubectl describe` style
+  diagnose    The LIVE state of this node&#x27;s network, and what disagrees with it
+  inspect     Detail of a network
+  ls          List the networks
+  apply       Apply the `kind: Network` documents of a manifest (idempotent by name)
+  node        WireGuard identity of THIS node, for the encrypted overlay between nodes
+  help        Print this message or the help of the given subcommand(s)
 
 Options:
       --l18n &lt;en|pt&gt;
@@ -182,7 +184,7 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 COMMAND MAP:
-  Lifecycle    vlan · route · create · rm
+  Lifecycle    vlan · route · connect · disconnect · create · rm
   Inspect      diagnose · ls · inspect · describe
   Declarative  apply
   Advanced     node
@@ -324,6 +326,63 @@ SEE ALSO:
 
   delonix › network › create</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Rede bridge para um grupo de serviços</div><div class='cap lang-en'>Bridge network for a group of services</div><pre><code>delonix network create backend</code></pre></div><div class="ex"><div class='cap lang-pt'>Overlay cifrado entre nós (VXLAN + WireGuard)</div><div class='cap lang-en'>Encrypted overlay between nodes (VXLAN + WireGuard)</div><pre><code>delonix network create mesh --driver overlay --vni 42 --peer 10.0.0.2</code></pre></div>
+<h2 id='connect'><code>network connect</code></h2>
+<p class='intro'>Connect a RUNNING container to an additional network, hot.</p>
+<p class='intro'>Multi-homing — the container keeps its primary network, this adds another. Moved here from <code>container update --net-connect</code> (Sprint 5 of the CLI restructuring): this is Docker&#x27;s own verb and argument order (<code>docker network connect NETWORK CONTAINER</code>), for the one operation that is about a NETWORK&#x27;s membership, not a container&#x27;s ports/volumes/ limits — <code>container update</code> keeps those, which Docker cannot do hot at all.</p>
+<div class='help'><pre><code>Usage: delonix network connect [OPTIONS] &lt;NETWORK&gt; &lt;CONTAINER&gt;
+
+Arguments:
+  &lt;NETWORK&gt;
+          
+
+  &lt;CONTAINER&gt;
+          
+
+Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # hot multi-home a running container onto a second network
+  delonix network connect backend web
+
+SEE ALSO:
+  delonix network disconnect · delonix container update · delonix network
+  create
+
+  delonix › network › connect</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Multi-home a quente de um container a correr</div><div class='cap lang-en'>Hot multi-home a running container</div><pre><code>delonix network connect backend web</code></pre></div>
+<h2 id='disconnect'><code>network disconnect</code></h2>
+<p class='intro'>Disconnect a container from an additional network, hot.</p>
+<p class='intro'>Refuses on the PRIMARY network — that one only goes away with the container itself.</p>
+<div class='help'><pre><code>Usage: delonix network disconnect [OPTIONS] &lt;NETWORK&gt; &lt;CONTAINER&gt;
+
+Arguments:
+  &lt;NETWORK&gt;
+          
+
+  &lt;CONTAINER&gt;
+          
+
+Options:
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # drop the extra network — the primary one stays
+  delonix network disconnect backend web
+
+SEE ALSO:
+  delonix network connect · delonix container update
+
+  delonix › network › disconnect</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Larga a rede adicional — a principal fica</div><div class='cap lang-en'>Drop the extra network — the primary one stays</div><pre><code>delonix network disconnect backend web</code></pre></div>
 <h2 id='ls'><code>network ls</code></h2>
 <p class='intro'>List the networks</p>
 <div class='help'><pre><code>Usage: delonix network ls [OPTIONS]

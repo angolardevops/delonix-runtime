@@ -181,7 +181,7 @@ Commands:
   cp           Copy files between the host and a container
   exec         Execute a command inside a running container
   rename       Give a container a new name
-  update       **Reconfigure a RUNNING container without stopping it** — ports, volumes, networks, and bandwidth cap
+  update       **Reconfigure a RUNNING container without stopping it** — ports, volumes, and bandwidth cap
   apply        Apply the `kind: Container` documents of a manifest (idempotent by name)
   init         Initialize a project with a Delonixfile + manifest
   prune        Remove every stopped container and the rootfs debris they left behind
@@ -1200,8 +1200,9 @@ SEE ALSO:
   delonix › container › describe</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Detalhe estilo `kubectl describe` (para humanos; `inspect` é para scripts)</div><div class='cap lang-en'>`kubectl describe`-style detail (for humans; `inspect` is for scripts)</div><pre><code>delonix container describe web</code></pre></div>
 <h2 id='update'><code>container update</code></h2>
-<p class='intro'><strong>Reconfigure a RUNNING container without stopping it</strong> — ports, volumes, networks, and bandwidth cap.</p>
+<p class='intro'><strong>Reconfigure a RUNNING container without stopping it</strong> — ports, volumes, and bandwidth cap.</p>
 <p class='intro'>Unlike docker (where changing a port or a volume forces recreating the container), here the dataplane doesn&#x27;t belong to the process lifecycle: ports are DNAT/hostfwd in front of the network and volumes come in through the kernel&#x27;s mount API (<code>open_tree</code>/<code>move_mount</code>) in the mount namespace of the already-live container. The PID doesn&#x27;t change and the process is never interrupted.</p>
+<p class='intro'>For which NETWORKS the container is on, see <code>network connect</code>/<code>network disconnect</code> — Docker&#x27;s own verb for that, kept apart from ports/ volumes/limits, which Docker cannot reconfigure hot at all.</p>
 <p class='intro'>The changes are persisted in the registry, so a later <code>container start</code> reproduces the new configuration, not the original.</p>
 <div class='help'><pre><code>Usage: delonix container update [OPTIONS] &lt;ID&gt;
 
@@ -1224,12 +1225,6 @@ Options:
 
       --volume-rm &lt;TARGET&gt;
           Unmount hot, by the TARGET path inside the container. Repeatable
-
-      --net-connect &lt;NETWORK&gt;
-          Connect the container to an additional network hot (multi-homing). Repeatable
-
-      --net-disconnect &lt;NETWORK&gt;
-          Disconnect the container from an additional network. Repeatable
 
       --net-rate &lt;RATE&gt;
           Bandwidth cap, in bit/s with a suffix (`10mbit`, `512kbit`, `1gbit`)
@@ -1259,24 +1254,29 @@ EXAMPLES:
   # raise the memory and CPU caps live
   delonix container update --memory 1G --cpus 2 db
 
-  # attach it to another network and cap that link&#x27;s bandwidth
-  delonix container update --net-connect backend --net-rate 10mbit web
+  # cap the bandwidth of its existing network link
+  delonix container update --net-rate 10mbit web
 
 SEE ALSO:
-  delonix container run · delonix container restart · delonix network create
+  delonix container run · delonix container restart · delonix network connect
 
   delonix › container › update</code></pre></div>
-<div class='lang-pt'><p>Reconfigura portas, volumes, redes, limite de banda e limites de
+<div class='lang-pt'><p>Reconfigura portas, volumes, limite de banda e limites de
 memória/CPU de um container <strong>a correr</strong>, sem o parar — o PID não muda. Remoções
 correm antes das adições, para <code>--publish-rm 8080 --publish-add 8080:9000</code> funcionar
 num só comando. <code>--memory</code>/<code>--cpus</code> reescrevem o cgroup real de imediato
-(<code>memory.max</code>/<code>cpu.max</code>) — nada de esperar por um <code>restart</code>.</p></div><div class='lang-en'><p>Reconfigures a <strong>running</strong> container's ports,
-volumes, networks, bandwidth limit and memory/CPU limits without stopping it — the PID doesn't
+(<code>memory.max</code>/<code>cpu.max</code>) — nada de esperar por um <code>restart</code>.
+A filiação de REDE (a que redes o container está ligado) mudou-se para
+<code>delonix network connect</code>/<code>network disconnect</code> — o verbo do próprio Docker
+para isso.</p></div><div class='lang-en'><p>Reconfigures a <strong>running</strong> container's ports,
+volumes, bandwidth limit and memory/CPU limits without stopping it — the PID doesn't
 change. Removals run before additions, so <code>--publish-rm 8080 --publish-add 8080:9000</code>
 works in a single command. <code>--memory</code>/<code>--cpus</code> rewrite the real cgroup
 immediately (<code>memory.max</code>/<code>cpu.max</code>) — no waiting for a
-<code>restart</code>.</p></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Troca uma porta a QUENTE, sem reiniciar</div><div class='cap lang-en'>Hot-swap a port, no restart</div><pre><code>delonix container update web --publish-add 9090:80</code></pre></div><div class="ex"><div class='cap lang-pt'>Liga a uma rede nova + limite de banda</div><div class='cap lang-en'>Connect to a new network + bandwidth limit</div><pre><code>delonix container update web --net-connect backend --net-rate 10mbit</code></pre></div><div class="ex"><div class='cap lang-pt'>Sobe o limite de memória/CPU a QUENTE, sem reiniciar</div><div class='cap lang-en'>Raise the memory/CPU limit on the fly, no restart</div><pre><code>delonix container update web --memory 512M --cpus 2</code></pre></div>
+<code>restart</code>. Which NETWORKS the container is on moved to
+<code>delonix network connect</code>/<code>network disconnect</code> — Docker's own verb for
+that.</p></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Troca uma porta a QUENTE, sem reiniciar</div><div class='cap lang-en'>Hot-swap a port, no restart</div><pre><code>delonix container update web --publish-add 9090:80</code></pre></div><div class="ex"><div class='cap lang-pt'>Limita a banda da rede que já tem</div><div class='cap lang-en'>Cap the bandwidth of its existing network link</div><pre><code>delonix container update web --net-rate 10mbit</code></pre></div><div class="ex"><div class='cap lang-pt'>Sobe o limite de memória/CPU a QUENTE, sem reiniciar</div><div class='cap lang-en'>Raise the memory/CPU limit on the fly, no restart</div><pre><code>delonix container update web --memory 512M --cpus 2</code></pre></div>
 <h2 id='attach'><code>container attach</code></h2>
 <p class='intro'>Re-attach to a running container&#x27;s output stream (output only).</p>
 <p class='intro'>Same log file <code>logs -f</code> reads. Unlike <code>docker attach</code>, this is OUTPUT-ONLY: a detached container&#x27;s stdin has nowhere to go (this engine keeps no live conduit to it once started, unlike a persistent per-container shim) — <code>-i</code>/<code>--stdin</code> is refused with a clear error instead of silently doing nothing.</p>

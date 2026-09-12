@@ -134,7 +134,9 @@
 ~	net tunnel apply
 ~	net tunnel expose
 ~	network apply
+=	network connect
 ~	network create
+=	network disconnect
 ~	network describe
 ~	network diagnose
 ~	network inspect
