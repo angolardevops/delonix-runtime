@@ -1899,9 +1899,8 @@ pub static ENTRIES: &[Entry] = &[
             ("archive one resource, now", "delonix backup create container db"),
             ("what archives exist", "delonix backup ls --from /srv/backups"),
             ("put one back", "delonix backup restore container-db-20260811-205312.tar.gz"),
-            ("the whole NODE instead of one resource — a different scope", "delonix system backup"),
         ],
-        see_also: &["backup create", "backup ls", "backup restore", "system backup"],
+        see_also: &["backup create", "backup ls", "backup restore", "system snapshot"],
     },
     Entry {
         path: "backup create",
@@ -1914,7 +1913,7 @@ pub static ENTRIES: &[Entry] = &[
             ("actually stop it, for an application that keeps state only in RAM", "delonix backup create container cache --stop --to /srv/backups"),
             ("see what would go in, without writing anything", "delonix backup create pod api --dry-run"),
         ],
-        see_also: &["backup schedule", "backup ls", "backup restore", "system backup"],
+        see_also: &["backup schedule", "backup ls", "backup restore", "system snapshot"],
     },
     Entry {
         path: "backup schedule",
@@ -1923,7 +1922,7 @@ pub static ENTRIES: &[Entry] = &[
             ("twice a day on a systemd user timer, keeping the newest two", "delonix backup schedule container db --max-for-day 2 --to /srv/backups"),
             ("or on your own schedule, in crontab syntax", "delonix backup schedule stack loja --cron \"30 3 * * 1\" --to /srv/backups"),
         ],
-        see_also: &["backup create", "backup ls", "system backup"],
+        see_also: &["backup create", "backup ls", "system snapshot"],
     },
     Entry {
         path: "backup ls",
@@ -1954,7 +1953,7 @@ pub static ENTRIES: &[Entry] = &[
             ("refuse unless it holds a VM — the archive already says, this asserts it", "delonix backup restore vm-dev-20260811-210109.tar.gz --kind vm"),
             ("what it would touch, without touching it", "delonix backup restore vm-dev-20260811-210109.tar.gz --dry-run"),
         ],
-        see_also: &["backup inspect", "system restore", "container start", "vm start"],
+        see_also: &["backup inspect", "system snapshot restore", "container start", "vm start"],
     },
     Entry {
         path: "backup remove",
@@ -1966,25 +1965,34 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["backup ls", "backup create"],
     },
     Entry {
-        path: "system backup",
+        path: "system snapshot",
         group: "Configure",
         examples: &[
-            ("the registries, IPAM, secrets and PKI — everything that cannot be rebuilt", "delonix system backup"),
-            ("name the file yourself", "delonix system backup -o /mnt/nas/node-a.tar.gz"),
-            ("take the volumes' data with it (this is the part that can be hundreds of GiB)", "delonix system backup --volumes"),
-            ("to rebuild a node from scratch: without the key the secrets never decrypt there", "delonix system backup --volumes --include-master-key"),
+            ("the registries, IPAM, secrets and PKI — everything that cannot be rebuilt", "delonix system snapshot create"),
+            ("put the state back (refuses while a container or VM is still running)", "delonix system snapshot restore node-a.tar.gz"),
         ],
-        see_also: &["system restore", "volume snapshot", "system df", "secret ls"],
+        see_also: &["system snapshot create", "system snapshot restore", "backup", "vm snapshot"],
     },
     Entry {
-        path: "system restore",
+        path: "system snapshot create",
         group: "Configure",
         examples: &[
-            ("what it would change, without writing anything", "delonix system restore node-a.tar.gz --dry-run"),
-            ("put the state back (refuses while a container or VM is still running)", "delonix system restore node-a.tar.gz"),
-            ("restore anyway, accepting that the running workloads lose their registry", "delonix system restore node-a.tar.gz --force"),
+            ("the registries, IPAM, secrets and PKI — everything that cannot be rebuilt", "delonix system snapshot create"),
+            ("name the file yourself", "delonix system snapshot create -o /mnt/nas/node-a.tar.gz"),
+            ("take the volumes' data with it (this is the part that can be hundreds of GiB)", "delonix system snapshot create --volumes"),
+            ("to rebuild a node from scratch: without the key the secrets never decrypt there", "delonix system snapshot create --volumes --include-master-key"),
         ],
-        see_also: &["system backup", "container ls", "vm ls", "secret ls"],
+        see_also: &["system snapshot restore", "volume snapshot", "system df", "secret ls"],
+    },
+    Entry {
+        path: "system snapshot restore",
+        group: "Configure",
+        examples: &[
+            ("what it would change, without writing anything", "delonix system snapshot restore node-a.tar.gz --dry-run"),
+            ("put the state back (refuses while a container or VM is still running)", "delonix system snapshot restore node-a.tar.gz"),
+            ("restore anyway, accepting that the running workloads lose their registry", "delonix system snapshot restore node-a.tar.gz --force"),
+        ],
+        see_also: &["system snapshot create", "container ls", "vm ls", "secret ls"],
     },
     Entry {
         path: "system df",

@@ -1132,7 +1132,7 @@ user units + <code>loginctl enable-linger</code>; root → system units), com <c
     "backup": {
         "title": "delonix backup",
         "tagline": "Backup de UM recurso — container, pod, vm ou stack — em tar.gz.",
-        "intro": """Não confundir com o <code>system backup</code>, que leva o NÓ inteiro. Aqui o arquivo leva o
+        "intro": """Não confundir com o <code>system snapshot create</code>, que leva o NÓ inteiro. Aqui o arquivo leva o
 registo do recurso e os DADOS dos volumes que ele usa — não a imagem nem o rootfs, porque um rootfs
 medido são 435 MB contra 1,5 KB de registo, e a imagem é endereçada por conteúdo e volta a
 descarregar-se. A VM é a excepção: o overlay dela É o estado dela, por isso viaja (a base dourada

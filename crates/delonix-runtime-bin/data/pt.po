@@ -10820,3 +10820,23 @@ msgstr "Foca-se num só tipo de recurso em vez do resumo global"
 
 msgid "focused on one kind of resource instead of the global summary"
 msgstr "focado num só tipo de recurso em vez do resumo global"
+
+# ---- CLI restructuring Sprint 4 (2026-09-12): system backup/restore -> system snapshot create/restore ----
+
+msgid "The archive written by `system snapshot create`"
+msgstr "O arquivo escrito por `system snapshot create`"
+
+msgid "Point-in-time capture of this node's whole state — `create` saves it into one archive, `restore` puts it back"
+msgstr "Captura num instante do estado inteiro deste nó — `create` guarda-o num arquivo, `restore` repõe-no"
+
+msgid "Point-in-time capture of this node's whole state — `create` saves it into one archive, `restore` puts it back.\n\nSame vocabulary as `vm snapshot`/`volume snapshot`: a point-in-time capture, scoped here to the whole node instead of one resource. Renamed from the top-level `system backup`/`system restore` (which collided by name, not by scope, with the unrelated `backup` group — one resource's data, never the node's) — the two scopes stay exactly as separate as they always were, only the shared word is gone."
+msgstr "Captura num instante do estado inteiro deste nó — `create` guarda-o num arquivo, `restore` repõe-no.\n\nMesmo vocabulário de `vm snapshot`/`volume snapshot`: uma captura num instante, aqui à escala do nó inteiro em vez de um só recurso. Renomeado de `system backup`/`system restore` (que colidia de nome, não de âmbito, com o grupo `backup`, sem relação — os dados de um recurso, nunca os do nó) — os dois âmbitos ficam tão separados como sempre estiveram, só a palavra partilhada desapareceu."
+
+msgid "Put a node's state back from a `system snapshot create` archive"
+msgstr "Repõe o estado de um nó a partir de um arquivo do `system snapshot create`"
+
+msgid "Put a node's state back from a `system snapshot create` archive.\n\nDestructive on purpose: the covered set becomes exactly what the archive holds. It verifies the whole archive BEFORE touching anything, refuses a format it does not know, refuses to run over live workloads without `--force`, and proves afterwards that the restored secrets decrypt."
+msgstr "Repõe o estado de um nó a partir de um arquivo do `system snapshot create`.\n\nDestrutivo de propósito: o conjunto coberto passa a ser exactamente o que o arquivo tem. Verifica o arquivo inteiro ANTES de tocar em nada, recusa um formato que não conheça, recusa correr sobre workloads vivos sem `--force`, e prova a seguir que os segredos repostos decifram."
+
+msgid "Archives of ONE resource (container/pod/vm/stack): create, ls, inspect, restore, schedule, remove.\n\nThe archive carries the record and the DATA of the volumes it uses — not the image and not the rootfs, which `backup restore` derives by pulling. A VM is the exception: its overlay disk IS its state, so that one travels.\n\nFor the whole node — registries, secrets, cluster PKI, the event log — the command is `delonix system snapshot create`, which is a different scope and not a second door to this one."
+msgstr "Arquivos de UM recurso (container/pod/vm/stack): create, ls, inspect, restore, schedule, remove.\n\nO arquivo carrega o registo e os DADOS dos volumes que usa — não a imagem nem o rootfs, que `backup restore` deriva por pull. Uma VM é a excepção: o seu disco overlay É o seu estado, por isso esse viaja.\n\nPara o nó inteiro — registos, segredos, PKI de cluster, o registo de eventos — o comando é `delonix system snapshot create`, que é outro âmbito e não uma segunda porta para este grupo."

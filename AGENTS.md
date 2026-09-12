@@ -2230,6 +2230,48 @@ Escopo isolado a `crates/delonix-runtime-bin/src/cmd/container.rs` + `manual_ent
 desde a Fase CLI-0, sai da linha de base no mesmo commit que a remove do binário). `vm ssh`
 intocado.
 
+## Reestruturação da CLI (semântica Docker/Podman/kubectl) — Sprint 3: 6 dashboards → `dashboard --scope`
+
+`docs/discovery/51_CLI_INVENTARIO.md` §9/§22: `container dash`/`image dash`/`network dash`/
+`volume dash`/`vm dash` removidos — o motor por trás já era um único `DashScope`/`DashData`/`run`
+partilhado, a única duplicação era a casca `clap` (6 cópias de `{once, json}` a delegar numa
+linha). `dash` nunca foi um verbo Docker/Podman/kubectl com forma familiar por-domínio a
+preservar (ao contrário de `ls`/`apply`), por isso não se aplica aqui a regra deste CLI de manter
+o verbo familiar ao lado do genérico.
+
+`dashboard --scope <all|container|vm|network|volume|image>` (omitir = `all`, o comportamento de
+sempre). `DashScope` ganhou `clap::ValueEnum` com nomes renomeados para bater com os substantivos
+de grupo já usados no resto da CLI (`Vms`→`vm`, `Storage`→`volume`, `Images`→`image`).
+
+**Corte limpo**: os 5 `<grupo> dash` falham com `unrecognized subcommand`. `manual_entries.rs`
+perdeu as 5 `Entry` "`<grupo> dash`" (os `see_also` que apontavam para elas passam a apontar para
+`dashboard`); `docs/gen.py` perdeu os mesmos 5 blocos de exemplo e ganhou o exemplo `--scope` no
+`dashboard`; `scripts/cli_baseline.tsv` caiu de 245 para 240 folhas.
+
+Validado ao vivo: `dashboard --once` (visão global), `dashboard --scope container --once`
+(focado), e as 5 formas antigas a falhar com `unrecognized subcommand`.
+
+## Reestruturação da CLI (semântica Docker/Podman/kubectl) — Sprint 4: `system backup`/`restore` → `system snapshot create`/`restore`
+
+Auditoria DevOps/SRE (2026-09-12) apontou `system backup`/`system restore` como colisão de nome
+com o grupo `backup` (arquivo de UM recurso) — não de âmbito, os dois já eram objectos diferentes
+e documentados como tal desde a v0.67.0 (ADR-0020 tinha-os classificado como "uma segunda porta" e
+foi corrigido). A primeira leitura desta auditoria tratou essa decisão de v0.67.0 como definitiva e
+descartou o sprint; reconsiderado a pedido — a decisão de MANTER OS ÂMBITOS SEPARADOS continua de
+pé (e não é tocada aqui), mas nada nela impedia mudar só o NOME do verbo de nó.
+
+**O que muda**: `system backup`/`system restore` → `system snapshot create`/`system snapshot
+restore` — mesmo vocabulário de `vm snapshot`/`volume snapshot` (captura num instante), agora à
+escala do nó em vez de um recurso. O âmbito, o formato do arquivo (`FORMAT = 1`, inalterado), e
+tudo o que cada verbo faz ficam exactamente como estavam — só a palavra partilhada com `backup`
+desaparece, que era a fonte real da confusão (o próprio `--help` já precisava de um parágrafo a
+explicar "isto não é uma segunda porta").
+
+Corte limpo: `system backup`/`system restore` falham com `unrecognized subcommand`. Os nomes
+internos (`cmd_backup`/`cmd_restore` em `backup.rs`) ficam como estão — implementação, não
+superfície; a prosa e as mensagens de erro do módulo (`io_err("system backup")` etc.) foram
+actualizadas para citar o comando real.
+
 ## Falhas silenciosas corrigidas (fail-closed) + 1 documentada
 
 Da análise Docker/Podman (`docs/COMPARACAO-DOCKER-PODMAN.md`), quatro casos em

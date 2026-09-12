@@ -1,9 +1,9 @@
 //! `delonix backup create|schedule|list|inspect|restore|remove` — archives of
-//! ONE resource, as opposed to `system backup`, which takes the whole node.
+//! ONE resource, as opposed to `system snapshot create`, which takes the whole node.
 //!
 //! Those are two different objects, not two doors to one. ADR-0020 first said
 //! otherwise and was corrected: this group archives a container/pod/vm/stack
-//! with its volume data; `system backup` archives a node's entire state root.
+//! with its volume data; `system snapshot create` archives a node's entire state root.
 //!
 //! # What goes in the archive, and why not everything
 //!
@@ -90,7 +90,7 @@ pub const FORMAT: u32 = 1;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Meta {
     /// Format version. A reader that does not know it REFUSES rather than
-    /// guessing at a layout it has never seen — the same gate `system backup`
+    /// guessing at a layout it has never seen — the same gate `system snapshot create`
     /// uses, and for the same reason: guessing wrong here overwrites state.
     pub format: u32,
     pub delonix_version: String,
@@ -786,10 +786,10 @@ fn write_vm_archive(
 /// restore as a SEPARATE top-level `restore`, and neither could answer "what
 /// archives do I have" — the operator read the directory with `ls`.
 ///
-/// `system backup` is deliberately NOT folded in here, and ADR-0020 got that
+/// `system snapshot create` is deliberately NOT folded in here, and ADR-0020 got that
 /// wrong: it listed the two as "several doors to one object". Measured, they are
 /// two different objects — this group archives ONE resource with its volume
-/// data, `system backup` archives the whole state root of a node (registries,
+/// data, `system snapshot create` archives the whole state root of a node (registries,
 /// secrets, cluster PKI, the event log). Folding them would delete a capability,
 /// not tidy one.
 #[derive(Debug, clap::Subcommand)]
