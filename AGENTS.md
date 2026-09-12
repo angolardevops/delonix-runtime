@@ -2202,6 +2202,34 @@ connect/disconnect`, `volume create --driver`+`--opt`, `container ssh`→`shell`
 6 dashboards, `system backup`→`system snapshot`) ficam para sessões próprias, cada um no seu
 worktree, cada um com o seu PR — corte limpo, sem alias, como todo o resto desta CLI.
 
+## Reestruturação da CLI (semântica Docker/Podman/kubectl) — Sprint 2: `container ssh` removido
+
+Auditoria DevOps/SRE (2026-09-12) apontou `container ssh` como uma colisão de nome (a mesma
+palavra que `vm ssh`, com semânticas opostas — um é `exec -t` local, o outro SSH real por rede).
+Antes de inventar uma resolução própria, `docs/discovery/51_CLI_INVENTARIO.md` §10.4 já tinha a
+decisão escrita, de uma fase anterior desta mesma reestruturação (Fase CLI-0/CLI-5): remover
+`container ssh` por inteiro e absorver o único valor real que tinha — o fallback "tenta `bash`,
+cai para `sh`" — em `container exec` quando corre sem `COMMAND`. Nem Docker nem Podman têm um
+verbo `ssh` à parte; `exec` é o que os dois ensinam.
+
+**Corte limpo**: `container ssh` falha com `unrecognized subcommand`. `container exec` ganhou o
+fallback (`command` deixou de ser `required`) e o doc-comment/`--help` dizem-no.
+
+**Bug real herdado, encontrado a validar ao vivo — não a ler código.** O argv que `cmd_ssh`
+sempre usou era `exec /bin/bash 2>/dev/null || exec /bin/sh`. Medido contra `busybox sh`/`dash`
+(fora do delonix, para isolar a causa): um `exec` que falha por o binário não existir **termina a
+shell não-interactiva no local** — nunca chega ao `||`. Contra `alpine` (sem `bash`), o fallback
+que `container ssh` prometia desde sempre **nunca corria** — o comando falhava a fingir que a
+segunda metade do `||` ia salvar, e não ia. Corrigido para `command -v bash >/dev/null 2>&1 &&
+exec bash || exec sh`, que só testa a presença do binário. Validado ao vivo nos dois lados: um
+container `alpine` (sem bash) cai para `sh`; um comando explícito continua a funcionar
+inalterado.
+
+Escopo isolado a `crates/delonix-runtime-bin/src/cmd/container.rs` + `manual_entries.rs` +
+`docs/gen.py` + `scripts/cli_baseline.tsv`/`cli-tree.sh` (a folha `container ssh`, classe `→`
+desde a Fase CLI-0, sai da linha de base no mesmo commit que a remove do binário). `vm ssh`
+intocado.
+
 ## Falhas silenciosas corrigidas (fail-closed) + 1 documentada
 
 Da análise Docker/Podman (`docs/COMPARACAO-DOCKER-PODMAN.md`), quatro casos em
