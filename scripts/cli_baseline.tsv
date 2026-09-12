@@ -34,7 +34,6 @@
 =	container attach
 =	container commit
 =	container cp
-=	container dash
 =	container describe
 =	container diff
 =	container exec
@@ -65,7 +64,6 @@
 =	explain
 ~	get
 ~	image apply
-~	image dash
 ~	image describe
 =	image export
 ~	image history
@@ -137,7 +135,6 @@
 ~	net tunnel expose
 ~	network apply
 ~	network create
-~	network dash
 ~	network describe
 ~	network diagnose
 ~	network inspect
@@ -203,7 +200,6 @@
 =	vm console
 ~	vm convert
 ~	vm create
-~	vm dash
 ~	vm default-backend
 ~	vm init
 ~	vm ls
@@ -227,7 +223,6 @@
 ~	vm vnc
 ~	volume apply
 ~	volume create
-~	volume dash
 ~	volume describe
 ~	volume inspect
 ~	volume ls

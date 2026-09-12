@@ -10809,3 +10809,14 @@ msgstr "Comando + argumentos. Omite-o para a shell de recurso bash/sh"
 
 msgid "an interactive shell, no command needed — tries bash, falls back to sh"
 msgstr "uma shell interactiva, sem precisar de comando — tenta bash, cai para sh"
+
+# ---- CLI restructuring Sprint 3 (2026-09-12): 6 dashboards -> dashboard --scope ----
+
+msgid "Runtime summary/KPI dashboard (interactive htop-style TUI).\n\nGlobal by default, or focused with `--scope`. Renamed from `dash` (§22): the group is declared NOT stable, and an old spelling that keeps working is one nobody migrates away from — `delonix dash` now fails loudly instead of quietly staying the habit. The five per-group `<group> dash` verbs (`container dash`, `vm dash`, ...) folded into `--scope` for the same reason: this dashboard was never a Docker/Podman/kubectl verb with a familiar per-group shape worth preserving five times over."
+msgstr "Painel de resumo/KPIs do runtime (TUI interactiva, estilo htop).\n\nGlobal por omissão, ou focado com `--scope`. Renomeado de `dash` (§22): o grupo está declarado NÃO estável, e uma grafia antiga que continua a funcionar é uma de que ninguém migra — `delonix dash` passa a falhar alto em vez de ficar o hábito em silêncio. Os cinco verbos por-grupo `<grupo> dash` (`container dash`, `vm dash`, ...) fundiram-se em `--scope` pela mesma razão: este painel nunca foi um verbo Docker/Podman/kubectl com uma forma familiar por-domínio que valesse a pena preservar cinco vezes."
+
+msgid "Focus on one kind of resource instead of the global summary"
+msgstr "Foca-se num só tipo de recurso em vez do resumo global"
+
+msgid "focused on one kind of resource instead of the global summary"
+msgstr "focado num só tipo de recurso em vez do resumo global"
