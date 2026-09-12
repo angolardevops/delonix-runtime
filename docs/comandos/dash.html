@@ -145,8 +145,10 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <h1>delonix dashboard</h1>
 <p class='tagline lang-pt'>Dashboard de resumo/KPIs (TUI estilo htop) — RAM/rede/disco, uptime por-container, JSON e Prometheus.</p><p class='tagline lang-en'>Summary/KPI dashboard (htop-style TUI) — RAM/network/disk, per-container uptime, JSON and Prometheus.</p>
 <p class='lang-pt'>Vista viva do estado do runtime — containers, VMs, imagens, redes, storage — num
-só ecrã, sem precisar de correr <code>ls</code> em 5 grupos diferentes. Cada grupo também tem o
-seu próprio (<code>container dash</code>, <code>vm dash</code>, ...); este é o agregado global.
+só ecrã, sem precisar de correr <code>ls</code> em 5 grupos diferentes. <code>--scope
+&lt;container|vm|network|volume|image&gt;</code> foca num só grupo — substituiu os cinco
+<code>&lt;grupo&gt; dash</code> que existiam antes (corte limpo, sem alias): a mesma tela, cinco
+cascas <code>clap</code> idênticas a menos para manter.
 KPIs dinâmicos: memória do slice cgroup, tráfego rx/tx acumulado por-container (com contagem
 explícita de containers <code>--net host/none</code> não medidos, nunca somados como zero em
 silêncio), uso de disco por área (imagens/volumes/VM-images/containers), e uptime real por
@@ -178,6 +180,11 @@ Options:
       --l18n &lt;en|pt&gt;
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
+      --scope &lt;SCOPE&gt;
+          Focus on one kind of resource instead of the global summary
+          
+          [possible values: all, container, vm, network, volume, image]
+
       --once
           Print ONE text snapshot and exit (no TUI) — for scripts/CI; the default when stdout is not a terminal
 
@@ -191,6 +198,9 @@ EXAMPLES:
   # an htop-style live view of containers, VMs, networks and volumes
   delonix dashboard
 
+  # focused on one kind of resource instead of the global summary
+  delonix dashboard --scope container
+
   # one text snapshot and exit — the default when stdout is not a terminal
   delonix dashboard --once
 
@@ -198,11 +208,11 @@ EXAMPLES:
   delonix dashboard --json
 
 SEE ALSO:
-  delonix container dash · delonix vm dash · delonix system info · delonix
+  delonix container stats · delonix vm ls · delonix system info · delonix
   serve api
 
   delonix › dashboard</code></pre></div>
-<h2><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h2><div class="ex"><div class='cap lang-pt'>TUI interactiva</div><div class='cap lang-en'>Interactive TUI</div><pre><code>delonix dashboard</code></pre></div><div class="ex"><div class='cap lang-pt'>Snapshot único, para um script</div><div class='cap lang-en'>One-off snapshot, for a script</div><pre><code>delonix dashboard --once</code></pre></div><div class="ex"><div class='cap lang-pt'>JSON, para um datasource ou pipeline</div><div class='cap lang-en'>JSON, for a datasource or pipeline</div><pre><code>delonix dashboard --json | jq &#x27;.tiles&#x27;</code></pre></div>
+<h2><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h2><div class="ex"><div class='cap lang-pt'>TUI interactiva</div><div class='cap lang-en'>Interactive TUI</div><pre><code>delonix dashboard</code></pre></div><div class="ex"><div class='cap lang-pt'>Focado num só grupo de recursos</div><div class='cap lang-en'>Focused on one kind of resource</div><pre><code>delonix dashboard --scope container</code></pre></div><div class="ex"><div class='cap lang-pt'>Snapshot único, para um script</div><div class='cap lang-en'>One-off snapshot, for a script</div><pre><code>delonix dashboard --once</code></pre></div><div class="ex"><div class='cap lang-pt'>JSON, para um datasource ou pipeline</div><div class='cap lang-en'>JSON, for a datasource or pipeline</div><pre><code>delonix dashboard --json | jq &#x27;.tiles&#x27;</code></pre></div>
 <h2><span class='lang-pt'>Laboratório</span><span class='lang-en'>Lab</span></h2>
 <div class='callout lang-pt'><p>Um ecrã só, sem correr <code>ls</code> em 5 grupos diferentes.</p>
 <pre><code>delonix dashboard --once

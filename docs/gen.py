@@ -2744,7 +2744,7 @@ EXAMPLES_EN = {
     ("system", "prune"): ["Reclaim space (GC)"],
     ("system", "df"): ["Disk usage"],
     ("system", "info"): [""],
-    ("dash", None): ["Interactive TUI", "One-off snapshot, for a script", "JSON, for a datasource or pipeline"],
+    ("dash", None): ["Interactive TUI", "Focused on one kind of resource", "One-off snapshot, for a script", "JSON, for a datasource or pipeline"],
     ("docker-api", None): [
         "Serve on the default socket",
         "A real `docker` talking to delonix",
