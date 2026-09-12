@@ -144,7 +144,7 @@ delonix vm ls --ports  # + sonda TCP real a 22/6443/10250/80/443
 delonix vm ls -o json  # para script
 delonix describe vm [nome]
 delonix image vm describe <nome>...  # detalhe de uma IMAGEM de VM
-delonix vm dash --once # KPIs + tabela
+delonix dashboard --scope vm --once    # KPIs + tabela
 ```
 
 ```
@@ -848,7 +848,7 @@ delonix vm stop lab-samba && delonix vm start lab-nas
 delonix vm start lab-fw
 
 delonix vm ls                            # o que está de pé
-delonix vm dash                          # painel interactivo
+delonix dashboard --scope vm             # painel interactivo
 ```
 
 Para desmontar tudo:

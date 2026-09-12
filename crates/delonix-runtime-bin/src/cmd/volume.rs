@@ -594,19 +594,6 @@ pub enum VolumeCmd {
         #[command(subcommand)]
         action: SnapshotCmd,
     },
-    /// Volumes/storage dashboard (KPIs + table) — TUI, or `--once` snapshot.
-    ///
-    /// Moved here from `storage dash` (B5 CLI collapse): the scope it renders
-    /// (`DashScope::Storage`) always covered BOTH network storages and plain
-    /// volumes together (its own title says "STORAGE/VOLUMES") — `storage` was
-    /// never the only Kind it described, just the only group that could reach
-    /// it. `volume` is now that one entry point.
-    Dash {
-        #[arg(long)]
-        once: bool,
-        #[arg(long)]
-        json: bool,
-    },
 }
 
 /// `delonix volume snapshot` — crash-consistent (taken with the workload
@@ -646,12 +633,8 @@ pub enum SnapshotCmd {
 }
 
 pub fn run(action: VolumeCmd) -> Result<()> {
-    if let VolumeCmd::Dash { once, json } = action {
-        return super::dash::run(super::dash::DashScope::Storage, once, json);
-    }
     let store = VolumeStore::open(state_root())?;
     match action {
-        VolumeCmd::Dash { .. } => unreachable!("handled above"),
         VolumeCmd::Create {
             name,
             driver,

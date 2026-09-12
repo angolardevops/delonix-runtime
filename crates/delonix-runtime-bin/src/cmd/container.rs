@@ -1519,14 +1519,6 @@ pub(crate) fn container_to_run_opts(
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum ContainerCmd {
-    /// Dashboard (KPIs + table + problems) of the containers — interactive TUI, or
-    /// `--once` for a text snapshot.
-    Dash {
-        #[arg(long)]
-        once: bool,
-        #[arg(long)]
-        json: bool,
-    },
     /// Initialize a project with a Delonixfile + manifest.
     ///
     /// Files ALREADY FILLED IN (images included), ready to use without editing
@@ -2132,14 +2124,10 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             up,
         );
     }
-    if let ContainerCmd::Dash { once, json } = action {
-        return super::dash::run(super::dash::DashScope::Containers, once, json);
-    }
     let (images, store) = open_stores()?;
     match action {
         // Handled at the top of `run` (returns early).
         ContainerCmd::Init { .. } => unreachable!("handled above"),
-        ContainerCmd::Dash { .. } => unreachable!("handled above"),
         ContainerCmd::Run {
             detach,
             name,

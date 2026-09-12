@@ -268,9 +268,6 @@ gerar na mesma.""",
 JSON no <code>$DELONIX_ROOT</code>. Em rootless, o rootfs do container é uma cópia flat
 <em>persistente</em> — as escritas sobrevivem a <code>stop</code>/<code>start</code>, como no Docker.""",
         "subs": {
-            "dash": {"examples": [
-                ('Dashboard só dos containers',
-                 'delonix container dash')]},
             "run": {"examples": [
                 ("Servir nginx na porta 8080 do host (NAT userspace, sem root)",
                  "delonix container run -d --name web -p 8080:80 nginx"),
@@ -482,9 +479,6 @@ image + kubeadm/kubelet/kubectl + <code>delonix-cri</code> — a base do <code>d
             "describe": {"examples": [
                 ('Camadas, config e digest de uma imagem',
                  'delonix image describe nginx:alpine')]},
-            "dash": {"examples": [
-                ('Dashboard só das imagens',
-                 'delonix image dash')]},
             "pull": {"examples": [
                 ("Referência com tag e digest (formato combinado suportado)",
                  "delonix image pull kindest/node:v1.34.0@sha256:7416a6…"),
@@ -612,11 +606,6 @@ automaticamente. É a camada que o <code>delonix cluster kubeadm</code> usa para
                  'delonix vm init --name lab'),
                 ('Scaffold de um VMfile para CONSTRUIR a tua imagem',
                  'delonix vm init --vmfile --name minha-base')]},
-            "dash": {"examples": [
-                ('Dashboard só das VMs (htop-style; `q` sai)',
-                 'delonix vm dash'),
-                ('Snapshot para um script ou para o Grafana',
-                 "delonix vm dash --json | jq '.tiles'")]},
             "create": {"examples": [
                 ("VM a partir da imagem dourada, com chave SSH — o nome é POSICIONAL",
                  "delonix vm create node1 --disk k8s-golden --vcpus 2 --memory 4G --ssh-key @~/.ssh/id_ed25519.pub"),
@@ -690,17 +679,6 @@ fatia isolada e com quota talhada de um volume já existente (<code>--parent</co
                  'delonix volume prune --namespace acme -f'),
                 ('A loja inteira: a raiz sem dono E todos os inquilinos',
                  'delonix volume prune -A -f')]},
-            # Moved here from `storage dash` in the B5 CLI collapse — the
-            # screen always covered volumes AND storages together (its own
-            # title says "STORAGE/VOLUMES"), `storage` was only one of the
-            # two paths to it until now.
-            "dash": {"examples": [
-                ('Um TUI ao vivo de volumes e storages, com uso por área',
-                 'delonix volume dash'),
-                ('Um só retrato, para CI ou um terminal sem TTY',
-                 'delonix volume dash --once'),
-                ('JSON, para alertar quando um volume se aproxima da quota',
-                 'delonix volume dash --json')]},
         },
     },
     "namespace": {
@@ -772,9 +750,6 @@ registados no store — o <code>create</code> AVISA alto que a rede não foi rea
                  'delonix network node init'),
                 ('Só a chave pública, para compor num script',
                  'delonix network node key')]},
-            "dash": {"examples": [
-                ('Dashboard só das redes',
-                 'delonix network dash')]},
             "create": {"examples": [
                 ("Rede bridge para um grupo de serviços", "delonix network create backend"),
                 ("Overlay cifrado entre nós (VXLAN + WireGuard)", "delonix network create mesh --driver overlay --vni 42 --peer 10.0.0.2"),
@@ -1239,8 +1214,10 @@ fluxo de eventos.""",
         "title": "delonix dashboard",
         "tagline": "Dashboard de resumo/KPIs (TUI estilo htop) — RAM/rede/disco, uptime por-container, JSON e Prometheus.",
         "intro": """Vista viva do estado do runtime — containers, VMs, imagens, redes, storage — num
-só ecrã, sem precisar de correr <code>ls</code> em 5 grupos diferentes. Cada grupo também tem o
-seu próprio (<code>container dash</code>, <code>vm dash</code>, ...); este é o agregado global.
+só ecrã, sem precisar de correr <code>ls</code> em 5 grupos diferentes. <code>--scope
+&lt;container|vm|network|volume|image&gt;</code> foca num só grupo — substituiu os cinco
+<code>&lt;grupo&gt; dash</code> que existiam antes (corte limpo, sem alias): a mesma tela, cinco
+cascas <code>clap</code> idênticas a menos para manter.
 KPIs dinâmicos: memória do slice cgroup, tráfego rx/tx acumulado por-container (com contagem
 explícita de containers <code>--net host/none</code> não medidos, nunca somados como zero em
 silêncio), uso de disco por área (imagens/volumes/VM-images/containers), e uptime real por
@@ -1255,6 +1232,7 @@ recalculam em background a cada 30s, o scrape em si fica sempre rápido.""",
         "subs": {},
         "examples": [
             ("TUI interactiva", "delonix dashboard"),
+            ("Focado num só grupo de recursos", "delonix dashboard --scope container"),
             ("Snapshot único, para um script", "delonix dashboard --once"),
             ("JSON, para um datasource ou pipeline", "delonix dashboard --json | jq '.tiles'"),
         ],
@@ -2526,7 +2504,6 @@ EXAMPLES_EN = {
         "Detail of one VM, reconciling liveness/IP with the backend — `vm status` went away in v3.0.0",
         "Remove the VM",
     ],
-    ("container", "dash"): ["Containers-only dashboard"],
     ("container", "run"): [
         "Serve nginx on host port 8080 (userspace NAT, no root)",
         "Run on a user-created network, published via ingress",
@@ -2597,7 +2574,6 @@ EXAMPLES_EN = {
     ("image", "history"): ["Which instruction created each layer"],
     ("image", "tag"): ["Give the same image a second name (copies nothing)"],
     ("image", "describe"): ["An image's layers, config and digest"],
-    ("image", "dash"): ["Images-only dashboard"],
     ("image", "pull"): ["Reference with tag and digest (combined format supported)"],
     ("image", "ls"): [""],
     ("image", "rm"): [""],
@@ -2633,7 +2609,6 @@ EXAMPLES_EN = {
         "From a registry of yours, with your own local name",
     ],
     ("vm", "init"): ["Project with a manifest, ready to run", "Scaffold a VMfile to BUILD your image"],
-    ("vm", "dash"): ["VMs-only dashboard (htop-style; `q` to quit)", "Snapshot for a script or for Grafana"],
     ("vm", "ssh"): [
         "Enter a VM by NAME — the IP comes from the record, and the default user is "
         "`delonix` (not the distro's own, which exists and does not carry the key)",
@@ -2669,7 +2644,6 @@ EXAMPLES_EN = {
         "This node's WireGuard key, to hand out to the overlay's peers",
         "Just the public key, for composing in a script",
     ],
-    ("network", "dash"): ["Networks-only dashboard"],
     ("network", "create"): ["Bridge network for a group of services", "Encrypted overlay between nodes (VXLAN + WireGuard)"],
     ("network", "ls"): [""],
     ("network", "inspect"): [""],
@@ -2770,7 +2744,7 @@ EXAMPLES_EN = {
     ("system", "prune"): ["Reclaim space (GC)"],
     ("system", "df"): ["Disk usage"],
     ("system", "info"): [""],
-    ("dash", None): ["Interactive TUI", "One-off snapshot, for a script", "JSON, for a datasource or pipeline"],
+    ("dash", None): ["Interactive TUI", "Focused on one kind of resource", "One-off snapshot, for a script", "JSON, for a datasource or pipeline"],
     ("docker-api", None): [
         "Serve on the default socket",
         "A real `docker` talking to delonix",

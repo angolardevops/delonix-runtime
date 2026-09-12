@@ -454,13 +454,6 @@ fn default_network() -> String {
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum VmCmd {
-    /// Dashboard (KPIs + table) of the VMs — interactive TUI, or `--once` snapshot.
-    Dash {
-        #[arg(long)]
-        once: bool,
-        #[arg(long)]
-        json: bool,
-    },
     /// Bootstrap a project with a VM manifest.
     ///
     /// Files ALREADY FILLED IN (images included), ready to use without editing
@@ -1654,14 +1647,10 @@ pub fn run(action: VmCmd) -> Result<()> {
             up,
         );
     }
-    if let VmCmd::Dash { once, json } = action {
-        return super::dash::run(super::dash::DashScope::Vms, once, json);
-    }
     let base = state_root();
     match action {
         // Handled at the top of `run` (does `return`).
         VmCmd::Init { .. } => unreachable!("tratado acima"),
-        VmCmd::Dash { .. } => unreachable!("tratado acima"),
         VmCmd::Create {
             name,
             disk_size_gib,

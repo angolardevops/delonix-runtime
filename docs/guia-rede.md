@@ -406,9 +406,9 @@ Lê-se: infra em baixo, sem slirp, `refcount 0` (nenhum workload a segurá-la). 
 ```bash
 delonix net flow             # RX/TX por container, agora
 delonix net flow -w          # redesenhado de 2 em 2s
-delonix network dash         # TUI de redes
-delonix network dash --once  # um instantâneo, para pipe
-delonix network dash --json
+delonix dashboard --scope network         # TUI de redes
+delonix dashboard --scope network --once  # um instantâneo, para pipe
+delonix dashboard --scope network --json
 ```
 
 O `net flow` usa eBPF quando está disponível e **degrada para contadores de

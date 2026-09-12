@@ -1,5 +1,7 @@
-//! `delonix dash` — runtime summary/KPI dashboard. Global (`delonix dash`)
-//! or contextual per group (`delonix container dash`, `vm dash`, ...).
+//! `delonix dashboard` — runtime summary/KPI dashboard. Global by default,
+//! or focused with `--scope <container|image|network|volume|vm>` — the single
+//! entry point that replaced the five per-group `<group> dash` verbs
+//! (`51_CLI_INVENTARIO.md` §22).
 //!
 //! Two outputs from the SAME `DashData` (pure snapshot of the stores):
 //!  * **interactive TUI** (default, in a terminal): tiles + table + problems
@@ -22,14 +24,26 @@ use super::po;
 use super::util::state_root;
 
 /// Dashboard scope: global or focused on a group of resources.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+///
+/// `clap::ValueEnum` for `dashboard --scope` (discovery doc `51_CLI_INVENTARIO.md`
+/// §22: the five per-group `<container|image|network|volume|vm> dash` verbs
+/// consolidate into this flag — `dash` never was a Docker/Podman/kubectl verb
+/// with a familiar per-group shape to preserve, unlike `ls`/`apply`, so there is
+/// no idiom argument for keeping five siblings of a TUI this engine invented.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, clap::ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum DashScope {
+    #[value(name = "all")]
     Global,
+    #[value(name = "container")]
     Containers,
+    #[value(name = "vm")]
     Vms,
+    #[value(name = "network")]
     Networks,
+    #[value(name = "volume")]
     Storage,
+    #[value(name = "image")]
     Images,
 }
 

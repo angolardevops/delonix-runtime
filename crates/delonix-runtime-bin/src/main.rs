@@ -346,11 +346,17 @@ enum Cmd {
     },
     /// Runtime summary/KPI dashboard (interactive htop-style TUI).
     ///
-    /// Global, or per group (`container dash`, `vm dash`, ...). Renamed from
-    /// `dash` (§22): the group is declared NOT stable, and an old spelling that
-    /// keeps working is one nobody migrates away from — `delonix dash` now fails
-    /// loudly instead of quietly staying the habit.
+    /// Global by default, or focused with `--scope`. Renamed from `dash` (§22):
+    /// the group is declared NOT stable, and an old spelling that keeps working
+    /// is one nobody migrates away from — `delonix dash` now fails loudly
+    /// instead of quietly staying the habit. The five per-group `<group> dash`
+    /// verbs (`container dash`, `vm dash`, ...) folded into `--scope` for the
+    /// same reason: this dashboard was never a Docker/Podman/kubectl verb with
+    /// a familiar per-group shape worth preserving five times over.
     Dashboard {
+        /// Focus on one kind of resource instead of the global summary.
+        #[arg(long, value_enum)]
+        scope: Option<cmd::dash::DashScope>,
         /// Print ONE text snapshot and exit (no TUI) — for scripts/CI; the default when stdout is not a terminal.
         #[arg(long)]
         once: bool,
@@ -540,7 +546,9 @@ fn run() -> Result<()> {
         Cmd::Serve { action } => cmd::serve::run(action),
         Cmd::Mcp { action } => cmd::mcp::run(action),
         Cmd::IngressProxy { config } => cmd::ingress_proxy::run(&config),
-        Cmd::Dashboard { once, json } => cmd::dash::run(cmd::dash::DashScope::Global, once, json),
+        Cmd::Dashboard { scope, once, json } => {
+            cmd::dash::run(scope.unwrap_or(cmd::dash::DashScope::Global), once, json)
+        }
         Cmd::Completion { action } => match action {
             CompletionCmd::Shell { shell } => cmd_completion(shell),
             CompletionCmd::Editor { editor, dir } => cmd_syntax(editor, dir.as_deref()),

@@ -428,13 +428,6 @@ pub enum NetworkCmd {
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: output::OutputFormat,
     },
-    /// Dashboard (KPIs + table) of the networks — interactive TUI, or `--once` snapshot.
-    Dash {
-        #[arg(long)]
-        once: bool,
-        #[arg(long)]
-        json: bool,
-    },
     /// List the networks.
     Ls {
         /// Output format: `table` (default) or `json` (ADR-0005).
@@ -513,9 +506,6 @@ pub enum NetworkCmd {
 pub fn run(action: NetworkCmd) -> Result<()> {
     let store = NetworkStore::open(state_root())?;
     match action {
-        NetworkCmd::Dash { once, json } => {
-            super::dash::run(super::dash::DashScope::Networks, once, json)
-        }
         NetworkCmd::Vlan {
             parent,
             id,

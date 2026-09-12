@@ -287,7 +287,7 @@ delonix vm ls --ports  # + sonda TCP real a 22/6443/10250/80/443
 delonix vm ls -o json  # para script
 delonix describe vm [nome]
 delonix image vm describe &lt;nome&gt;...  # detalhe de uma IMAGEM de VM
-delonix vm dash --once # KPIs + tabela
+delonix dashboard --scope vm --once    # KPIs + tabela
 </code></pre>
 <pre><code>NAME      IMAGE                          BACKEND   VCPUS  MEMORY  STATUS   IP             UPTIME        PORTS OPEN
 lab-dns   delonix-vm-base_ubuntu-24.04   libvirt       1  1G      Running  192.168.122.2  Up 2 minutes  22
@@ -918,7 +918,7 @@ delonix vm stop lab-samba &amp;&amp; delonix vm start lab-nas
 delonix vm start lab-fw
 
 delonix vm ls                            # o que está de pé
-delonix vm dash                          # painel interactivo
+delonix dashboard --scope vm             # painel interactivo
 </code></pre>
 <p>Para desmontar tudo:</p>
 <pre><code class="language-bash">for v in lab-dns lab-dhcp lab-samba lab-cli lab-nas lab-fw; do delonix delete vm $v; done

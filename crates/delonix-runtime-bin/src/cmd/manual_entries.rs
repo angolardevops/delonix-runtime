@@ -422,7 +422,7 @@ pub static ENTRIES: &[Entry] = &[
             ("CPU, memory and PIDs of everything running, one sample", "delonix container stats"),
             ("just these two", "delonix container stats web db"),
         ],
-        see_also: &["container dash", "container top", "system df"],
+        see_also: &["dashboard", "container top", "system df"],
     },
     Entry {
         path: "container top",
@@ -504,23 +504,15 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["init", "stack init", "container apply"],
     },
     Entry {
-        path: "container dash",
-        group: "Dashboards",
-        examples: &[
-            ("interactive dashboard of the containers", "delonix container dash"),
-            ("one text snapshot, for a script or CI", "delonix container dash --once"),
-        ],
-        see_also: &["dashboard", "container stats", "container ps"],
-    },
-    Entry {
         path: "dashboard",
         group: "Engine",
         examples: &[
             ("an htop-style live view of containers, VMs, networks and volumes", "delonix dashboard"),
+            ("focused on one kind of resource instead of the global summary", "delonix dashboard --scope container"),
             ("one text snapshot and exit — the default when stdout is not a terminal", "delonix dashboard --once"),
             ("one JSON snapshot, for a script or a Grafana JSON datasource", "delonix dashboard --json"),
         ],
-        see_also: &["container dash", "vm dash", "system info", "serve api"],
+        see_also: &["container stats", "vm ls", "system info", "serve api"],
     },
     Entry {
         path: "api-resources",
@@ -841,16 +833,6 @@ pub static ENTRIES: &[Entry] = &[
             ("from a file of your own", "delonix image apply -f delonix-manifest.yaml"),
         ],
         see_also: &["stack apply", "stack plan", "image pull"],
-    },
-    Entry {
-        path: "image dash",
-        group: "Dashboards",
-        examples: &[
-            ("a live view of the image store, htop-style", "delonix image dash"),
-            ("one snapshot, for a log or a terminal that is not a TTY", "delonix image dash --once"),
-            ("the same numbers as JSON, for a script or a Grafana datasource", "delonix image dash --json"),
-        ],
-        see_also: &["image ls", "dashboard", "system df"],
     },
     Entry {
         path: "image vm",
@@ -1519,7 +1501,7 @@ pub static ENTRIES: &[Entry] = &[
             ("name, driver, bridge and subnet of each network", "delonix network ls"),
             ("as JSON, to feed automation", "delonix network ls -o json"),
         ],
-        see_also: &["network inspect", "network describe", "network dash"],
+        see_also: &["network inspect", "network describe", "dashboard"],
     },
     Entry {
         path: "network apply",
@@ -1529,16 +1511,6 @@ pub static ENTRIES: &[Entry] = &[
             ("the networks of a shipped example, leaving the other kinds alone", "delonix network apply -f examples/network.yaml"),
         ],
         see_also: &["stack apply", "stack plan", "network create", "volume apply"],
-    },
-    Entry {
-        path: "network dash",
-        group: "Dashboards",
-        examples: &[
-            ("a live TUI of the networks and their traffic", "delonix network dash"),
-            ("one snapshot, for a pipe or a terminal without a TTY", "delonix network dash --once"),
-            ("JSON, to feed a script or a dashboard", "delonix network dash --json"),
-        ],
-        see_also: &["dashboard", "network ls", "system monitor"],
     },
     Entry {
         path: "network node",
@@ -2239,7 +2211,7 @@ pub static ENTRIES: &[Entry] = &[
             ("the same rows as JSON, for a script", "delonix vm ls -o json"),
             ("only one isolation namespace — and the NAMESPACE column stays, which it does not when every row would say `default`", "delonix vm ls --namespace teamA"),
         ],
-        see_also: &["get", "describe", "vm dash", "vm prune", "image vm ls"],
+        see_also: &["get", "describe", "dashboard", "vm prune", "image vm ls"],
     },
     Entry {
         path: "vm console",
@@ -2407,16 +2379,6 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["vm snapshot ls", "vm snapshot create", "get"],
     },
     Entry {
-        path: "vm dash",
-        group: "Dashboards",
-        examples: &[
-            ("a live TUI of every VM — state, resources and problems, refreshed in place", "delonix vm dash"),
-            ("one snapshot of text, for a terminal that is not interactive", "delonix vm dash --once"),
-            ("the same numbers as JSON, for a script or a dashboard datasource", "delonix vm dash --json"),
-        ],
-        see_also: &["vm ls", "get", "dashboard", "container dash"],
-    },
-    Entry {
         path: "volume",
         group: "Storage",
         examples: &[
@@ -2424,7 +2386,7 @@ pub static ENTRIES: &[Entry] = &[
             ("what exists, with driver and mountpoint", "delonix volume ls"),
             ("how much disk one of them really holds, measured from inside the userns", "delonix volume inspect pgdata"),
         ],
-        see_also: &["container run", "volume create", "volume snapshot", "volume dash"],
+        see_also: &["container run", "volume create", "volume snapshot", "dashboard"],
     },
     Entry {
         path: "volume create",
@@ -2539,16 +2501,6 @@ pub static ENTRIES: &[Entry] = &[
             ("put the data back as it was — it REPLACES the contents, so stop the consumers first", "delonix volume snapshot restore pgdata before-upgrade"),
         ],
         see_also: &["volume snapshot ls", "volume snapshot create", "container stop"],
-    },
-    Entry {
-        path: "volume dash",
-        group: "Dashboards",
-        examples: &[
-            ("a live TUI of volumes and storages, with usage per area", "delonix volume dash"),
-            ("one snapshot, for CI or a terminal without a TTY", "delonix volume dash --once"),
-            ("JSON, to alert on a share filling up", "delonix volume dash --json"),
-        ],
-        see_also: &["dashboard", "volume ls", "system df"],
     },
     Entry {
         path: "workload",
