@@ -144,7 +144,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <main>
 <h1>delonix backup</h1>
 <p class='tagline'>Backup de UM recurso — container, pod, vm ou stack — em tar.gz.</p>
-<p>Não confundir com o <code>system backup</code>, que leva o NÓ inteiro. Aqui o arquivo leva o
+<p>Não confundir com o <code>system snapshot create</code>, que leva o NÓ inteiro. Aqui o arquivo leva o
 registo do recurso e os DADOS dos volumes que ele usa — não a imagem nem o rootfs, porque um rootfs
 medido são 435 MB contra 1,5 KB de registo, e a imagem é endereçada por conteúdo e volta a
 descarregar-se. A VM é a excepção: o overlay dela É o estado dela, por isso viaja (a base dourada
@@ -200,12 +200,9 @@ EXAMPLES:
   # put one back
   delonix backup restore container-db-20260811-205312.tar.gz
 
-  # the whole NODE instead of one resource — a different scope
-  delonix system backup
-
 SEE ALSO:
   delonix backup create · delonix backup ls · delonix backup restore · delonix
-  system backup
+  system snapshot
 
   delonix › backup</code></pre></div>
 <h2><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h2><div class="ex"><div class="cap">O registo e os dados dos volumes, aqui mesmo</div><pre><code>delonix backup create container db</code></pre></div><div class="ex"><div class="cap">Para um NAS, através de um volume nomeado</div><pre><code>delonix backup create container db --to volume:nas-backups</code></pre></div><div class="ex"><div class="cap">Uma stack inteira: cada membro e cada volume, o partilhado uma só vez</div><pre><code>delonix backup create stack loja --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Uma VM A CORRER — o convidado não pára e o PID não muda</div><pre><code>delonix backup create vm dev --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Consistência ao nível do filesystem do convidado (precisa do qemu-guest-agent lá dentro)</div><pre><code>delonix backup create vm dev --quiesce --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Parar mesmo, para uma aplicação que só tem estado em RAM</div><pre><code>delonix backup create container cache --stop --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Ver o que entraria, sem escrever nada</div><pre><code>delonix backup create pod api --dry-run</code></pre></div><div class="ex"><div class="cap">Duas vezes por dia, guardando os dois mais recentes</div><pre><code>delonix backup schedule container db --max-for-day 2 --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Ou no horário que quiseres, em sintaxe de crontab</div><pre><code>delonix backup schedule stack loja --cron &quot;30 3 * * 1&quot; --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Que arquivos existem, e o que cada um leva</div><pre><code>delonix backup ls --from /srv/backups</code></pre></div><div class="ex"><div class="cap">O que está dentro de um, sem o desempacotar</div><pre><code>delonix backup inspect container-db-20260811-205312.tar.gz --from /srv/backups</code></pre></div><div class="ex"><div class="cap">Repor os dados (recusa enquanto estiver a correr)</div><pre><code>delonix backup restore container-db-20260811-205312.tar.gz</code></pre></div><div class="ex"><div class="cap">Parar, repor e arrancar de novo</div><pre><code>delonix backup restore ./container-db-20260811-205312.tar.gz --force</code></pre></div><div class="ex"><div class="cap">Afirmar o kind, para que um arquivo trocado seja recusado</div><pre><code>delonix backup restore vm-dev-20260811-210109.tar.gz --kind vm</code></pre></div><div class="ex"><div class="cap">Apagar um arquivo (recusa o que não foi este comando a escrever)</div><pre><code>delonix backup remove container-db-20260811-205312.tar.gz --from /srv/backups</code></pre></div>

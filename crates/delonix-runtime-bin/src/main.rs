@@ -312,8 +312,8 @@ enum Cmd {
     /// A VM is the exception: its overlay disk IS its state, so that one travels.
     ///
     /// For the whole node — registries, secrets, cluster PKI, the event log —
-    /// the command is `delonix system backup`, which is a different scope and
-    /// not a second door to this one.
+    /// the command is `delonix system snapshot create`, which is a different
+    /// scope and not a second door to this one.
     Backup {
         #[command(subcommand)]
         action: cmd::rbackup::BackupCmd,
