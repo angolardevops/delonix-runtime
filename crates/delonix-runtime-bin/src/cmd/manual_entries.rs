@@ -262,7 +262,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("a web service in seconds — host port 8080 onto the container's 80", "delonix container run -d -p 8080:80 --name web nginx"),
             ("what is running, and for how long", "delonix container ps"),
-            ("a shell inside it, without stopping anything", "delonix container ssh web"),
+            ("a shell inside it, without stopping anything", "delonix container exec -it web"),
         ],
         see_also: &["pod", "image", "workload", "compose up"],
     },
@@ -462,19 +462,10 @@ pub static ENTRIES: &[Entry] = &[
         group: "Interact",
         examples: &[
             ("run a command inside a container that is already up", "delonix container exec web nginx -t"),
-            ("an interactive shell", "delonix container exec -it web sh"),
+            ("an interactive shell, no command needed — tries bash, falls back to sh", "delonix container exec -it web"),
             ("as another user, in another directory, with an extra variable", "delonix container exec -u root -w /srv -e DEBUG=1 web env"),
         ],
-        see_also: &["container ssh", "container attach", "container logs"],
-    },
-    Entry {
-        path: "container ssh",
-        group: "Interact",
-        examples: &[
-            ("a shell inside the container — tries bash, falls back to sh", "delonix container ssh web"),
-            ("one command and out", "delonix container ssh web cat /etc/hosts"),
-        ],
-        see_also: &["container exec", "container logs"],
+        see_also: &["container attach", "container logs"],
     },
     Entry {
         path: "container rename",

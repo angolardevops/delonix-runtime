@@ -1945,16 +1945,6 @@ pub enum ContainerCmd {
         /// Tag for the new image (e.g. `app:v2`).
         tag: String,
     },
-    /// Interactive shell inside a container (shortcut for `exec -t`).
-    ///
-    /// With no command, it tries `bash` and falls back to `sh`, which exists
-    /// in any image.
-    Ssh {
-        #[arg(add = ArgValueCandidates::new(super::complete::containers))]
-        id: String,
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        command: Vec<String>,
-    },
     /// Run the image's `HEALTHCHECK` inside the container. Exits with 1 if
     /// `unhealthy` — usable in a script/CI.
     Healthcheck {
@@ -1977,6 +1967,8 @@ pub enum ContainerCmd {
     /// web:/etc/nginx.conf .`).
     Cp { src: String, dst: String },
     /// Execute a command inside a running container.
+    ///
+    /// With no command, tries `bash` and falls back to `sh` (which exists in any image) — `container exec -it <id>` is the interactive shell, same as `container exec -it <id> bash` would give if `bash` is there.
     Exec {
         /// Interactive (attaches stdin).
         #[arg(short = 'i', long)]
@@ -1999,7 +1991,8 @@ pub enum ContainerCmd {
         user: Option<String>,
         #[arg(add = ArgValueCandidates::new(super::complete::containers))]
         id: String,
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
+        /// Command + arguments. Omit it for the bash/sh fallback shell.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,
     },
     /// Show the full spec of one or more containers (Store JSON).
@@ -2356,7 +2349,6 @@ pub fn run(action: ContainerCmd) -> Result<()> {
         ContainerCmd::Pause { ids } => for_each_id(&ids, |id| cmd_freeze(&store, id, true)),
         ContainerCmd::Unpause { ids } => for_each_id(&ids, |id| cmd_freeze(&store, id, false)),
         ContainerCmd::Commit { id, tag } => cmd_commit(&images, &store, &id, &tag),
-        ContainerCmd::Ssh { id, command } => cmd_ssh(&store, &id, &command),
         ContainerCmd::Healthcheck { id } => cmd_healthcheck(&images, &store, &id),
         ContainerCmd::Top { id } => cmd_top(&store, &id),
         ContainerCmd::Diff { id } => cmd_diff(&images, &store, &id),
@@ -5864,6 +5856,29 @@ pub(crate) fn cmd_exec(
     command: &[String],
 ) -> Result<()> {
     let c = find(store, id)?;
+    // No command: the interactive-shell fallback. `container ssh` used to be a
+    // separate verb for exactly this substitution — removed, folded in here
+    // (docs/discovery/51_CLI_INVENTARIO.md §10.4: the name promised SSH and
+    // delivered `exec -t` with a default command, which `exec` itself can do).
+    //
+    // `command -v bash`, never `exec bash 2>/dev/null || exec sh` (what
+    // `container ssh` used to run): a failed `exec` in a non-interactive POSIX
+    // shell terminates that shell on the spot instead of falling through to the
+    // `||` — measured live against busybox and dash, not assumed. `container
+    // ssh` carried this exact bug on any image without `bash` (alpine
+    // included): the fallback it promised never ran. `command -v` only tests
+    // for the binary, so the failure never reaches `exec`.
+    let fallback;
+    let command: &[String] = if command.is_empty() {
+        fallback = vec![
+            "/bin/sh".into(),
+            "-c".into(),
+            "command -v bash >/dev/null 2>&1 && exec bash || exec sh".into(),
+        ];
+        &fallback
+    } else {
+        command
+    };
     let _ = interactive; // stdin is inherited; the flag keeps CLI parity
                          // `container_fs_root` and not a path built here: an `exec` targets a RUNNING
                          // container, so it resolves to `/proc/<pid>/root` — the merged tree as the
@@ -5976,22 +5991,6 @@ fn cmd_commit(images: &ImageStore, store: &Store, id: &str, tag: &str) -> Result
     };
     println!("{}  {}", img.short_id(), img.repo_tags.join(", "));
     Ok(())
-}
-
-/// `container ssh` — interactive shell. With no command, tries bash and falls back to sh.
-fn cmd_ssh(store: &Store, id: &str, command: &[String]) -> Result<()> {
-    let c = find(store, id)?;
-    let argv: Vec<String> = if command.is_empty() {
-        // `exec` in the shell: bash replaces sh instead of leaving a parent waiting.
-        vec![
-            "/bin/sh".into(),
-            "-c".into(),
-            "exec /bin/bash 2>/dev/null || exec /bin/sh".into(),
-        ]
-    } else {
-        command.to_vec()
-    };
-    std::process::exit(runtime::exec(&c, &argv, true)?);
 }
 
 /// `container healthcheck` — runs the image's `HEALTHCHECK` inside it.

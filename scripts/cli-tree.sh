@@ -84,7 +84,9 @@ classify() {
       else if (c ~ /^net l4guard/)                                cls = "→"
       else if (c == "stack history")                              cls = "→"
       else if (c == "stack rollback")                             cls = "→"
-      else if (c == "container ssh")                              cls = "→"
+      # `container ssh` era esta classe — executado (secção 10.4): removido, o
+      # fallback bash/sh absorvido por `container exec` sem comando. O braço
+      # sai com ele, para não classificar uma folha que já não existe.
       else if (c == "vm bridge" || c == "vm unbridge")            cls = "→"
       else if (c ~ /^container /)                                 cls = "="
       else if (c ~ /^vm (start|stop|restart|console|ssh)$/)       cls = "="

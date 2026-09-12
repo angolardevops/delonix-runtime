@@ -572,6 +572,21 @@ A capacidade útil não é o comando, é o **fallback**: `container exec -it <id
 sem comando passa a tentar `bash` e a cair para `sh`, que é o que a pessoa
 queria. Feito isso, `ssh` não acrescenta nada e sai no corte limpo da CLI-5.
 
+**FEITO (2026-09-12, Sprint 2 da reestruturação da CLI pedida numa auditoria
+DevOps/SRE).** `container ssh` removido (corte limpo — falha com `unrecognized
+subcommand`, nunca em silêncio); `container exec` sem `COMMAND` faz o fallback.
+**Bug real herdado, apanhado a validar ao vivo e não por leitura**: o argv
+original do `cmd_ssh` era `exec /bin/bash 2>/dev/null || exec /bin/sh` — e um
+`exec` falhado numa shell POSIX NÃO-interactiva termina essa shell no local, sem
+chegar ao `||` (confirmado com `busybox sh`/`dash`, não só suposto). Contra
+qualquer imagem sem `bash` — `alpine` incluída — o fallback que `container ssh`
+prometia nunca corria; devolvia sempre o `exec` da shell inteira a falhar.
+Corrigido de caminho para `command -v bash >/dev/null 2>&1 && exec bash || exec
+sh`, que só testa a presença do binário e nunca chega a um `exec` que possa
+falhar. `vm ssh` (SSH real, por rede, para dentro de uma VM) fica intocado — a
+colisão de nome que isto também resolvia era com este `container ssh`, nunca
+com esse.
+
 ### 10.5 `vm bridge` / `vm unbridge` → `network bridge` / `network unbridge`
 
 **Recebem uma REDE como argumento** (`vm bridge <NETWORK>`), o que decide a

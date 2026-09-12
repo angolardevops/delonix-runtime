@@ -180,7 +180,6 @@ Commands:
   commit       Create an image from a container&#x27;s CURRENT rootfs state (whatever was written inside becomes a new layer)
   cp           Copy files between the host and a container
   exec         Execute a command inside a running container
-  ssh          Interactive shell inside a container (shortcut for `exec -t`)
   rename       Give a container a new name
   update       **Reconfigure a RUNNING container without stopping it** — ports, volumes, networks, and bandwidth cap
   apply        Apply the `kind: Container` documents of a manifest (idempotent by name)
@@ -199,7 +198,7 @@ Options:
 COMMAND MAP:
   Lifecycle    run · start · stop · kill · wait · restart · rm · pause · unpause
   Inspect      ps · port · healthcheck · top · diff · inspect · describe · stats · logs
-  Interact     commit · ssh · cp · exec · attach
+  Interact     commit · cp · exec · attach
   Configure    rename · update
   Declarative  init · apply
   Maintenance  prune
@@ -213,7 +212,7 @@ EXAMPLES:
   delonix container ps
 
   # a shell inside it, without stopping anything
-  delonix container ssh web
+  delonix container exec -it web
 
 SEE ALSO:
   delonix pod · delonix image · delonix workload · delonix compose up
@@ -658,15 +657,16 @@ SEE ALSO:
   delonix › container › rm</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Forçar remoção de vários</div><div class='cap lang-en'>Force-remove several</div><pre><code>delonix container rm -f web db cache</code></pre></div>
 <h2 id='exec'><code>container exec</code></h2>
-<p class='intro'>Execute a command inside a running container</p>
-<div class='help'><pre><code>Usage: delonix container exec [OPTIONS] &lt;ID&gt; &lt;COMMAND&gt;...
+<p class='intro'>Execute a command inside a running container.</p>
+<p class='intro'>With no command, tries <code>bash</code> and falls back to <code>sh</code> (which exists in any image) — <code>container exec -it &lt;id&gt;</code> is the interactive shell, same as <code>container exec -it &lt;id&gt; bash</code> would give if <code>bash</code> is there.</p>
+<div class='help'><pre><code>Usage: delonix container exec [OPTIONS] &lt;ID&gt; [COMMAND]...
 
 Arguments:
   &lt;ID&gt;
           
 
-  &lt;COMMAND&gt;...
-          
+  [COMMAND]...
+          Command + arguments. Omit it for the bash/sh fallback shell
 
 Options:
   -i, --interactive
@@ -694,17 +694,17 @@ EXAMPLES:
   # run a command inside a container that is already up
   delonix container exec web nginx -t
 
-  # an interactive shell
-  delonix container exec -it web sh
+  # an interactive shell, no command needed — tries bash, falls back to sh
+  delonix container exec -it web
 
   # as another user, in another directory, with an extra variable
   delonix container exec -u root -w /srv -e DEBUG=1 web env
 
 SEE ALSO:
-  delonix container ssh · delonix container attach · delonix container logs
+  delonix container attach · delonix container logs
 
   delonix › container › exec</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Shell interactiva</div><div class='cap lang-en'>Interactive shell</div><pre><code>delonix container exec -it web sh</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Shell interactiva — sem comando, tenta bash e cai para sh</div><div class='cap lang-en'>Interactive shell</div><pre><code>delonix container exec -it web</code></pre></div>
 <h2 id='logs'><code>container logs</code></h2>
 <p class='intro'>Show the logs (detached containers)</p>
 <div class='help'><pre><code>Usage: delonix container logs [OPTIONS] &lt;ID&gt;
@@ -1101,37 +1101,6 @@ SEE ALSO:
 
   delonix › container › commit</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Cria uma imagem a partir do rootfs actual do container</div><div class='cap lang-en'>Creates an image from the container&#x27;s current rootfs</div><pre><code>delonix container commit web minha-app:debug</code></pre></div>
-<h2 id='ssh'><code>container ssh</code></h2>
-<p class='intro'>Interactive shell inside a container (shortcut for <code>exec -t</code>).</p>
-<p class='intro'>With no command, it tries <code>bash</code> and falls back to <code>sh</code>, which exists in any image.</p>
-<div class='help'><pre><code>Usage: delonix container ssh [OPTIONS] &lt;ID&gt; [COMMAND]...
-
-Arguments:
-  &lt;ID&gt;
-          
-
-  [COMMAND]...
-          
-
-Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
-  -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)
-
-EXAMPLES:
-  # a shell inside the container — tries bash, falls back to sh
-  delonix container ssh web
-
-  # one command and out
-  delonix container ssh web cat /etc/hosts
-
-SEE ALSO:
-  delonix container exec · delonix container logs
-
-  delonix › container › ssh</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Atalho para `exec -t` — tenta bash, cai para sh</div><div class='cap lang-en'>Shortcut for `exec -t` — tries bash, falls back to sh</div><pre><code>delonix container ssh web</code></pre></div>
 <h2 id='healthcheck'><code>container healthcheck</code></h2>
 <p class='intro'>Run the image&#x27;s <code>HEALTHCHECK</code> inside the container. Exits with 1 if <code>unhealthy</code> — usable in a script/CI</p>
 <div class='help'><pre><code>Usage: delonix container healthcheck [OPTIONS] &lt;ID&gt;
