@@ -525,8 +525,16 @@ não é um grupo real). A superfície deles vive hoje em <code>delonix volume</c
   <code>delonix backup schedule</code>, com a mesma semântica: instala o temporizador <strong>e</strong>
   tira o primeiro arquivo. Corte limpo, sem aliases — a forma antiga falha com
   «unrecognized subcommand», nunca em silêncio.</p>
-<p><strong><code>delonix system backup</code> não foi tocado.</strong> É outro âmbito — o state root
-  inteiro de um nó — e não uma segunda porta para este grupo.
+<p><strong><code>delonix system backup</code> não foi tocado nessa data.</strong> É outro âmbito — o
+  state root inteiro de um nó — e não uma segunda porta para este grupo.</p>
+<p><strong>Mudou depois (Sprint 4 da reestruturação da CLI, 2026-09-12):</strong> o próprio
+  <code>system backup</code>/<code>system restore</code> foi renomeado para <code>system snapshot
+  create</code>/<code>system snapshot restore</code> — mesmo vocabulário de <code>vm snapshot</code>/
+  <code>volume snapshot</code> (captura num instante), só que à escala do nó. O ÂMBITO
+  não mudou nem se fundiu com este grupo — só a PALAVRA partilhada («backup»)
+  desapareceu, que era a fonte real da confusão que o parágrafo anterior já
+  andava a explicar por escrito. Corte limpo: a forma antiga falha com
+  «unrecognized subcommand».
 * <strong>Tudo o que começa por <code>net netns</code></strong> — plumbing interno exposto por
   conveniência de depuração.
 * <strong>O formato dos ficheiros de estado</strong> em <code>$DELONIX_ROOT</code>. Lê-se pelo <code>inspect</code>,

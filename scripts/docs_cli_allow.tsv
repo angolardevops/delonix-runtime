@@ -52,3 +52,5 @@ docs/guia-vm-lab.md	delonix vm restore lab-probe base-limpa	o mesmo transcrito, 
 docs/guia-vm.html	delonix vm snapshot lab-probe base-limpa	gerado de docs/guia-vm-lab.md
 docs/guia-vm.html	delonix vm snapshots lab-probe	gerado de docs/guia-vm-lab.md
 docs/guia-vm.html	delonix vm restore lab-probe base-limpa	gerado de docs/guia-vm-lab.md
+docs/cli-stability.md	delonix system backup	citação histórica — descreve o estado ANTES do Sprint 4 (system backup/restore -> system snapshot create/restore), não o actual
+docs/estabilidade.html	delonix system backup	gerado de docs/cli-stability.md
