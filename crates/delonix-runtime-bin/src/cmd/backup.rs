@@ -1,5 +1,5 @@
-//! `delonix system backup` / `delonix system restore` — save and put back the
-//! state of a NODE.
+//! `delonix system snapshot create` / `delonix system snapshot restore` —
+//! save and put back the state of a NODE.
 //!
 //! # What this exists to fix
 //!
@@ -357,7 +357,7 @@ fn walk(root: &Path, dir: &Path, scope: &Scope, p: &mut Plan) -> Result<()> {
         // An unreadable directory is NOT an empty one — the trap this repo has
         // already catalogued. Refuse rather than quietly back up less.
         Err(e) => return Err(Error::Runtime {
-            context: "system backup",
+            context: "system snapshot create",
             message: po::tf(
                 "cannot read {dir}: {err} — a directory that cannot be read is not an empty one",
                 &[("dir", &dir.display().to_string()), ("err", &e.to_string())],
@@ -472,7 +472,7 @@ fn live_workloads(root: &Path) -> Vec<String> {
 // backup
 // ---------------------------------------------------------------------------
 
-/// `delonix system backup`.
+/// `delonix system snapshot create`.
 pub fn cmd_backup(out: Option<String>, scope: Scope, root: &Path) -> Result<()> {
     if !root.is_dir() {
         return Err(Error::Invalid(po::tf(
@@ -486,7 +486,7 @@ pub fn cmd_backup(out: Option<String>, scope: Scope, root: &Path) -> Result<()> 
     let staging = root.join(format!(".restore-staging-{}", std::process::id()));
     let mut vol_snaps: Vec<(String, PathBuf)> = Vec::new();
     if scope.volumes {
-        std::fs::create_dir_all(&staging).map_err(io_err("system backup"))?;
+        std::fs::create_dir_all(&staging).map_err(io_err("system snapshot create"))?;
         let store = delonix_volume::VolumeStore::open(root)?;
         for v in store.list()? {
             if delonix_volume::is_network_driver(&v.driver) {
@@ -619,7 +619,7 @@ fn write_archive(
         .truncate(true)
         .mode(0o600)
         .open(&tmp)
-        .map_err(io_err("system backup"))?;
+        .map_err(io_err("system snapshot create"))?;
     let enc = flate2::write::GzEncoder::new(f, flate2::Compression::default());
     let mut b = tar::Builder::new(enc);
     b.follow_symlinks(false);
@@ -631,7 +631,7 @@ fn write_archive(
     h.set_mtime(manifest.created_unix);
     h.set_cksum();
     b.append_data(&mut h, "manifest.json", &mj[..])
-        .map_err(io_err("system backup"))?;
+        .map_err(io_err("system snapshot create"))?;
 
     for rel in &p.include {
         let src = root.join(rel);
@@ -640,7 +640,7 @@ fn write_archive(
         match std::fs::File::open(&src) {
             Ok(mut f) => {
                 b.append_file(format!("state/{rel}"), &mut f)
-                    .map_err(io_err("system backup"))?;
+                    .map_err(io_err("system snapshot create"))?;
             }
             Err(e) => eprintln!(
                 "{}",
@@ -652,16 +652,16 @@ fn write_archive(
         }
     }
     for (name, tarball) in vol_snaps {
-        let mut f = std::fs::File::open(tarball).map_err(io_err("system backup"))?;
+        let mut f = std::fs::File::open(tarball).map_err(io_err("system snapshot create"))?;
         b.append_file(format!("volumes/{name}.tar.gz"), &mut f)
-            .map_err(io_err("system backup"))?;
+            .map_err(io_err("system snapshot create"))?;
     }
-    let mut enc = b.into_inner().map_err(io_err("system backup"))?;
-    enc.flush().map_err(io_err("system backup"))?;
-    let f = enc.finish().map_err(io_err("system backup"))?;
-    f.sync_all().map_err(io_err("system backup"))?;
+    let mut enc = b.into_inner().map_err(io_err("system snapshot create"))?;
+    enc.flush().map_err(io_err("system snapshot create"))?;
+    let f = enc.finish().map_err(io_err("system snapshot create"))?;
+    f.sync_all().map_err(io_err("system snapshot create"))?;
     drop(f);
-    std::fs::rename(&tmp, outp).map_err(io_err("system backup"))?;
+    std::fs::rename(&tmp, outp).map_err(io_err("system snapshot create"))?;
     Ok(())
 }
 
@@ -687,16 +687,16 @@ struct Survey {
 /// learned this the expensive way: it used to clear the live data first and
 /// discover the corruption afterwards, with nothing to put back.
 fn survey(archive: &Path) -> Result<Survey> {
-    let f = std::fs::File::open(archive).map_err(io_err("system restore"))?;
+    let f = std::fs::File::open(archive).map_err(io_err("system snapshot restore"))?;
     let mut a = tar::Archive::new(flate2::read::GzDecoder::new(f));
     let mut manifest: Option<Manifest> = None;
     let (mut state, mut volumes, mut unknown) = (Vec::new(), Vec::new(), Vec::<String>::new());
     let mut sink = std::io::sink();
-    for e in a.entries().map_err(io_err("system restore"))? {
-        let mut e = e.map_err(io_err("system restore"))?;
+    for e in a.entries().map_err(io_err("system snapshot restore"))? {
+        let mut e = e.map_err(io_err("system snapshot restore"))?;
         let name = e
             .path()
-            .map_err(io_err("system restore"))?
+            .map_err(io_err("system snapshot restore"))?
             .to_string_lossy()
             .into_owned();
         let kind = e.header().entry_type();
@@ -718,11 +718,11 @@ fn survey(archive: &Path) -> Result<Survey> {
         let name = name.strip_prefix("./").unwrap_or(&name).to_string();
         if name == "manifest.json" {
             let mut buf = Vec::new();
-            std::io::copy(&mut e, &mut buf).map_err(io_err("system restore"))?;
+            std::io::copy(&mut e, &mut buf).map_err(io_err("system snapshot restore"))?;
             manifest = Some(serde_json::from_slice(&buf)?);
             continue;
         }
-        std::io::copy(&mut e, &mut sink).map_err(io_err("system restore"))?;
+        std::io::copy(&mut e, &mut sink).map_err(io_err("system snapshot restore"))?;
         if let Some(rel) = name.strip_prefix("state/") {
             state.push(rel.to_string());
         } else if let Some(v) = name
@@ -758,7 +758,7 @@ fn survey(archive: &Path) -> Result<Survey> {
     })
 }
 
-/// `delonix system restore`.
+/// `delonix system snapshot restore`.
 pub fn cmd_restore(archive: &str, force: bool, dry_run: bool, root: &Path) -> Result<()> {
     let ap = PathBuf::from(archive);
     // 1. VALIDATE BEFORE TOUCHING ANYTHING.
@@ -847,7 +847,7 @@ pub fn cmd_restore(archive: &str, force: bool, dry_run: bool, root: &Path) -> Re
     // 4. Extract to staging. A failure here leaves the node untouched.
     let staging = root.join(format!(".restore-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&staging);
-    std::fs::create_dir_all(&staging).map_err(io_err("system restore"))?;
+    std::fs::create_dir_all(&staging).map_err(io_err("system snapshot restore"))?;
     if let Err(e) = extract(&ap, &staging) {
         let _ = std::fs::remove_dir_all(&staging);
         return Err(e);
@@ -891,7 +891,7 @@ pub fn cmd_restore(archive: &str, force: bool, dry_run: bool, root: &Path) -> Re
                 }
                 Err(e) => {
                     vol_err.get_or_insert(Error::Runtime {
-                        context: "system restore",
+                        context: "system snapshot restore",
                         message: po::tf(
                             "volume '{name}' has data in the backup but no registry entry: {err}",
                             &[("name", v), ("err", &e.to_string())],
@@ -942,15 +942,15 @@ pub fn cmd_restore(archive: &str, force: bool, dry_run: bool, root: &Path) -> Re
 }
 
 fn extract(archive: &Path, dest: &Path) -> Result<()> {
-    let f = std::fs::File::open(archive).map_err(io_err("system restore"))?;
+    let f = std::fs::File::open(archive).map_err(io_err("system snapshot restore"))?;
     let mut a = tar::Archive::new(flate2::read::GzDecoder::new(f));
     a.set_preserve_permissions(true);
     a.set_overwrite(true);
-    for e in a.entries().map_err(io_err("system restore"))? {
-        let mut e = e.map_err(io_err("system restore"))?;
+    for e in a.entries().map_err(io_err("system snapshot restore"))? {
+        let mut e = e.map_err(io_err("system snapshot restore"))?;
         let name = e
             .path()
-            .map_err(io_err("system restore"))?
+            .map_err(io_err("system snapshot restore"))?
             .to_string_lossy()
             .into_owned();
         if !e.header().entry_type().is_file() {
@@ -958,9 +958,9 @@ fn extract(archive: &Path, dest: &Path) -> Result<()> {
         }
         let out = safe_rel(dest, &name)?;
         if let Some(d) = out.parent() {
-            std::fs::create_dir_all(d).map_err(io_err("system restore"))?;
+            std::fs::create_dir_all(d).map_err(io_err("system snapshot restore"))?;
         }
-        e.unpack(&out).map_err(io_err("system restore"))?;
+        e.unpack(&out).map_err(io_err("system snapshot restore"))?;
     }
     Ok(())
 }
@@ -982,9 +982,9 @@ fn swap_in(
         }
         let saved = safe_rel(aside, rel)?;
         if let Some(d) = saved.parent() {
-            std::fs::create_dir_all(d).map_err(io_err("system restore"))?;
+            std::fs::create_dir_all(d).map_err(io_err("system snapshot restore"))?;
         }
-        std::fs::rename(&live, &saved).map_err(io_err("system restore"))?;
+        std::fs::rename(&live, &saved).map_err(io_err("system snapshot restore"))?;
         moved.push((live, saved));
         Ok(())
     };
@@ -996,9 +996,9 @@ fn swap_in(
         let src = safe_rel(&staging.join("state"), rel)?;
         let dst = safe_rel(root, rel)?;
         if let Some(d) = dst.parent() {
-            std::fs::create_dir_all(d).map_err(io_err("system restore"))?;
+            std::fs::create_dir_all(d).map_err(io_err("system snapshot restore"))?;
         }
-        std::fs::rename(&src, &dst).map_err(io_err("system restore"))?;
+        std::fs::rename(&src, &dst).map_err(io_err("system snapshot restore"))?;
     }
     Ok(())
 }
@@ -1019,8 +1019,8 @@ fn verify_secrets(root: &Path, m: &Manifest) -> Result<()> {
     }
     let store = delonix_runtime_core::SecretStore::open(root)?;
     let mut names = Vec::new();
-    for e in std::fs::read_dir(root.join("secrets")).map_err(io_err("system restore"))? {
-        let p = e.map_err(io_err("system restore"))?.path();
+    for e in std::fs::read_dir(root.join("secrets")).map_err(io_err("system snapshot restore"))? {
+        let p = e.map_err(io_err("system snapshot restore"))?.path();
         if p.extension().and_then(|x| x.to_str()) != Some("json") {
             continue;
         }
@@ -1046,7 +1046,7 @@ fn verify_secrets(root: &Path, m: &Manifest) -> Result<()> {
         return Ok(());
     }
     Err(Error::Runtime {
-        context: "system restore",
+        context: "system snapshot restore",
         message: po::tf(
             "{n} secret(s) did not decrypt after the restore ({list}). The archive carries the \
              secrets encrypted; the key that opens them is this node's master key, and it only \
