@@ -2211,26 +2211,39 @@ fi
 check "secret ls" ok "$BIN" secret ls
 check "secret inspect inexistente recusa" fail "$BIN" secret inspect "nao-existe-$PFX"
 
-# `secret create` sobre um nome que JÁ existe substitui o segredo inteiro — e
-# até 2026-09-10 respondia `created (1 key(s))`, que se lê como «criei um
-# segredo novo» e não como «duas credenciais desapareceram». Medido nesse dia:
-# um segredo com `a=1,b=2` mais um `create --from-literal c=3` ficava só com
-# `c`, sem uma linha a dizê-lo. O caminho declarativo (`kind: Secret`) TEM de
-# continuar a substituir — é o que aplicar um manifesto significa —, por isso o
-# que se exige aqui não é uma recusa: é que uma substituição se chame uma, e
-# nomeie o que levou.
+# `secret create` sobre um nome que JÁ existe: até 2026-09-10 substituía o
+# segredo inteiro em silêncio (`created (1 key(s))` sobre uma substituição real
+# — lia-se como «criei um segredo novo», não «duas credenciais desapareceram»).
+# Corrigido nesse dia para pelo menos avisar (ACH-024..027, #278). Desde
+# 2026-09-12 (Sprint 1 da reestruturação da CLI) `create` deixou de substituir
+# por omissão de todo — só cria, a mesma garantia que `kubectl create secret`/
+# `docker secret create` dão — e exige `--force` para o comportamento antigo.
+# `secret set`/`secret apply` (o caminho declarativo, que TEM de continuar a
+# substituir — é o que aplicar um manifesto significa) ficam de fora desta
+# recusa de propósito: só o `create` imperativo pede intenção explícita.
 SEC="sec-$PFX"
 check "secret create: um nome novo diz 'created'" ok bash -c "
   '$BIN' secret create '$SEC' --from-literal a=1 --from-literal b=2 2>&1 | grep -q created"
-check "secret create: por cima de um existente diz 'replaced' e NOMEIA o que largou" ok bash -c "
-  out=\$('$BIN' secret create '$SEC' --from-literal c=3 2>&1)
+check "secret create: por cima de um existente RECUSA sem --force" 5 "$BIN" secret create "$SEC" --from-literal c=3
+check "secret create: a recusa não mexeu em nada" ok bash -c "
+  keys=\$('$BIN' secret inspect '$SEC' 2>&1)
+  printf '%s' \"\$keys\" | grep -q 'a=' && printf '%s' \"\$keys\" | grep -q 'b=' || exit 1
+  printf '%s' \"\$keys\" | grep -q 'c=' && exit 1
+  exit 0"
+check "secret create --force: por cima de um existente diz 'replaced' e NOMEIA o que largou" ok bash -c "
+  out=\$('$BIN' secret create '$SEC' --force --from-literal c=3 2>&1)
   printf '%s\n' \"\$out\"
   printf '%s' \"\$out\" | grep -q replaced || exit 1
   printf '%s' \"\$out\" | grep -q 'a, b' || exit 1"
-check "secret create: e as chaves largadas foram MESMO largadas" ok bash -c "
+check "secret create --force: e as chaves largadas foram MESMO largadas" ok bash -c "
   keys=\$('$BIN' secret inspect '$SEC' 2>&1)
   printf '%s' \"\$keys\" | grep -q 'c=' || exit 1
   printf '%s' \"\$keys\" | grep -qE '(^|[^a-z])a=' && exit 1
+  exit 0"
+check "secret set continua não-destrutivo por cima de um existente" ok bash -c "
+  '$BIN' secret set '$SEC' d=4 >/dev/null 2>&1
+  keys=\$('$BIN' secret inspect '$SEC' 2>&1)
+  printf '%s' \"\$keys\" | grep -q 'c=' && printf '%s' \"\$keys\" | grep -q 'd=' || exit 1
   exit 0"
 "$BIN" secret rm "$SEC" >/dev/null 2>&1
 

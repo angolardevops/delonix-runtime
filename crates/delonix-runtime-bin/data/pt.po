@@ -10784,3 +10784,17 @@ msgstr "Servir"
 
 msgid "Engine"
 msgstr "Motor"
+
+# ---- CLI restructuring Sprint 1 (2026-09-12): secret create vs secret set ---
+
+msgid "Create a secret from literals and/or a `.env` file."
+msgstr "Cria um segredo a partir de literais e/ou de um ficheiro `.env`."
+
+msgid "Create a secret from literals and/or a `.env` file.\n\nRefuses if the name already exists — pass `--force` to replace it, or use `secret set` to add/update keys instead."
+msgstr "Cria um segredo a partir de literais e/ou de um ficheiro `.env`.\n\nRecusa se o nome já existir — passa `--force` para o substituir, ou usa `secret set` para acrescentar/actualizar chaves."
+
+msgid "Replace an EXISTING secret instead of refusing. Without it, `create` only creates — the same guarantee `kubectl create secret`/`docker secret create` give; use `secret set` to add or update keys of one that already exists without this flag"
+msgstr "Substitui um segredo EXISTENTE em vez de recusar. Sem isto, `create` só cria — a mesma garantia que `kubectl create secret`/`docker secret create` dão; usa `secret set` para acrescentar ou actualizar chaves de um que já exista sem esta flag"
+
+msgid "secret '{name}' already exists — use `secret set` to add/update its keys, or `secret create --force` to replace it"
+msgstr "o segredo '{name}' já existe — usa `secret set` para acrescentar/actualizar as suas chaves, ou `secret create --force` para o substituir"
