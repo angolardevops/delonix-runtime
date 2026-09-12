@@ -48,7 +48,9 @@ fn secret_user_names(name: &str) -> Option<Vec<String>> {
 
 #[derive(Subcommand)]
 pub enum SecretCmd {
-    /// Create a secret from literals and/or a `.env` file. Refuses if the name already exists — pass `--force` to replace it, or use `secret set` to add/update keys instead.
+    /// Create a secret from literals and/or a `.env` file.
+    ///
+    /// Refuses if the name already exists — pass `--force` to replace it, or use `secret set` to add/update keys instead.
     Create {
         name: String,
         /// `KEY=value` pair. Repeatable.
