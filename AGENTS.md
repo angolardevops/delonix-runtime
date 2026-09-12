@@ -2298,6 +2298,37 @@ Corte limpo: `container update --net-connect`/`--net-disconnect` falham com "une
 argument". `container update` fica com `--publish-add/-rm`, `--volume-add/-rm`, `--net-rate/
 --net-burst/--net-rate-clear`, `-m`, `-c` — mais nítido por ficar sem o que não pertencia ali.
 
+## Reestruturação da CLI (semântica Docker/Podman/kubectl) — Sprint 6: `volume create --driver/--opt`
+
+Pedido do utilizador: eliminar as ambiguidades e duplicados da CLI e trazer semântica alinhada a
+Docker/Podman/kubectl, sprint a sprint, um grupo de comandos por vez. Sprint 6 fecha o `volume
+create`, cujo `--help` acumulava DUAS formas para a MESMA informação de partilha de rede — a
+amigável (`--type`/`--server`/`--share`/`--username`/`--password`/`--password-secret`/
+`--read-only`) e a crua (`--driver nfs`+`--device`+`--options`) — herdadas sem fusão das fusões B5
+anteriores (`storage create` e o `--driver nfs` cru do próprio `volume create`).
+
+**A forma nova é uma só**, ao estilo `docker volume create --driver <nome> --opt k=v`:
+
+```
+delonix volume create <nome> --driver <local|nfs|cifs|smb|webdav> [--opt chave=valor]... [--quota <q>] [--alert-pct <n>]
+delonix volume create <nome> --parent <volume> [--namespace <ns>] [--quota <q>] [--alert-pct <n>]
+```
+
+`--opt` aceita `server`/`share`/`username`/`password`/`password-secret`/`ro`/`options` — exactamente
+as mesmas chaves que a forma amigável antiga cobria, só que como pares repetíveis em vez de uma flag
+por chave. `--driver local` (a omissão) não aceita `--opt` nenhum — um `--opt` com `local` é a mesma
+classe de erro que passar `--type`/`--server` sem sentido tinha antes. **A forma crua `--driver
+nfs`+`--device` foi ABSORVIDA, não preservada como terceira via**: `--opt server=<host> --opt
+share=<caminho>` produz o MESMO device string (`server:/caminho`) que `--device` escrevia à mão, e
+mantê-la ao lado seria a mesma informação escrita duas vezes de duas formas diferentes que este
+sprint existe para fechar. `--parent` continua exclusivo (`conflicts_with`) com `--driver`/`--opt` —
+é a terceira forma antiga (`sharevolume`/fatia com quota), que não muda.
+
+**Corte limpo, sem alias** (`volume` ainda não está no `docs/cli-stability.md` — ver a tabela de
+grupos estáveis): `--type`/`--server`/`--share`/`--username`/`--password`/`--password-secret`/
+`--read-only`/`--device`/`--options` deixam de existir; um script que ainda os use falha com
+`unrecognized argument`, nunca em silêncio.
+
 ## Falhas silenciosas corrigidas (fail-closed) + 1 documentada
 
 Da análise Docker/Podman (`docs/COMPARACAO-DOCKER-PODMAN.md`), quatro casos em
