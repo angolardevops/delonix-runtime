@@ -419,7 +419,7 @@ completa() {                      # $@ = a linha, com "" na posição a completa
 # Estes dois não dependem de estado nenhum do host: o `man` lê o catálogo de
 # páginas, o `restore` é um caminho de ficheiro.
 check "man completa nomes de comando" ok completa delonix man ""
-check "system restore completa caminhos" ok completa delonix system restore ""
+check "system snapshot restore completa caminhos" ok completa delonix system snapshot restore ""
 # Este só vale onde o recurso existe — zero num host sem imagens VM é a resposta
 # honesta, não uma falha, e um SKIP declarado conta como NÃO COBERTO.
 if [ "$("$BIN" image vm ls 2>/dev/null | tail -n +2 | wc -l)" -gt 0 ]; then
@@ -2522,10 +2522,15 @@ check "e o arquivo desapareceu" ok bash -c \
 check "o \`restore\` de raiz deixou de existir" 2 "$BIN" restore container x
 check "o \`backup <kind>\` sem verbo deixou de existir" 2 "$BIN" backup container "$BKC"
 
-# E o `system backup` NÃO foi dobrado aqui: é outro âmbito (o state root do nó),
-# e o ADR-0020 chegou a classificá-lo como uma segunda porta para este grupo.
-check "system backup continua a existir, separado" ok "$BIN" system backup --help
-check "system restore continua a existir, separado" ok "$BIN" system restore --help
+# E o âmbito de nó NÃO foi dobrado aqui: é outro objecto (o state root do nó),
+# e o ADR-0020 chegou a classificá-lo como uma segunda porta para este grupo —
+# corrigido depois. Só a PALAVRA colidia (não o âmbito); desde o Sprint 4 da
+# reestruturação da CLI, o verbo de nó chama-se `system snapshot`, e o antigo
+# `system backup`/`system restore` falha com "unrecognized subcommand".
+check "system backup deixou de existir (corte limpo)" 2 "$BIN" system backup --help
+check "system restore deixou de existir (corte limpo)" 2 "$BIN" system restore --help
+check "system snapshot create continua a existir, separado" ok "$BIN" system snapshot create --help
+check "system snapshot restore continua a existir, separado" ok "$BIN" system snapshot restore --help
 
 "$BIN" container rm -f "$BKC" >/dev/null 2>&1
 "$BIN" volume rm -f "$BKV" >/dev/null 2>&1

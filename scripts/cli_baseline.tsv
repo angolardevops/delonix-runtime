@@ -174,7 +174,7 @@
 →	stack rollback
 ~	stack validate
 ~	stack wait
-~	system backup
+~	system snapshot create
 ~	system boot disable
 ~	system boot enable
 ~	system boot status
@@ -190,7 +190,7 @@
 =	system prune
 =	system regulate
 =	system resources
-~	system restore
+~	system snapshot restore
 =	system setup
 ~	system thermal
 ~	system virt

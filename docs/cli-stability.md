@@ -345,8 +345,17 @@ diz quais são, em vez de os omitir.
   tira o primeiro arquivo. Corte limpo, sem aliases — a forma antiga falha com
   «unrecognized subcommand», nunca em silêncio.
 
-  **`delonix system backup` não foi tocado.** É outro âmbito — o state root
-  inteiro de um nó — e não uma segunda porta para este grupo.
+  **`delonix system backup` não foi tocado nessa data.** É outro âmbito — o
+  state root inteiro de um nó — e não uma segunda porta para este grupo.
+
+  **Mudou depois (Sprint 4 da reestruturação da CLI, 2026-09-12):** o próprio
+  `system backup`/`system restore` foi renomeado para `system snapshot
+  create`/`system snapshot restore` — mesmo vocabulário de `vm snapshot`/
+  `volume snapshot` (captura num instante), só que à escala do nó. O ÂMBITO
+  não mudou nem se fundiu com este grupo — só a PALAVRA partilhada («backup»)
+  desapareceu, que era a fonte real da confusão que o parágrafo anterior já
+  andava a explicar por escrito. Corte limpo: a forma antiga falha com
+  «unrecognized subcommand».
 * **Tudo o que começa por `net netns`** — plumbing interno exposto por
   conveniência de depuração.
 * **O formato dos ficheiros de estado** em `$DELONIX_ROOT`. Lê-se pelo `inspect`,
