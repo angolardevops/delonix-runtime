@@ -188,13 +188,6 @@ fn default_context() -> PathBuf {
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum ImageCmd {
-    /// Dashboard (KPIs + table) of images — interactive TUI, or `--once` snapshot.
-    Dash {
-        #[arg(long)]
-        once: bool,
-        #[arg(long)]
-        json: bool,
-    },
     /// Pull an image from a registry.
     Pull {
         image: String,
@@ -528,9 +521,6 @@ pub enum VmSub {
 pub fn run(action: ImageCmd) -> Result<()> {
     // login/logout are agnostic to container-vs-VM (same auth.json).
     match &action {
-        ImageCmd::Dash { once, json } => {
-            return super::dash::run(super::dash::DashScope::Images, *once, *json);
-        }
         ImageCmd::Login {
             registry,
             username,
@@ -626,7 +616,6 @@ pub fn run(action: ImageCmd) -> Result<()> {
     }
     let (images, store) = open_stores()?;
     match action {
-        ImageCmd::Dash { .. } => unreachable!("tratado no topo de run"),
         ImageCmd::Pull { image, verify } => cmd_pull(&images, &image, verify.as_deref()),
         ImageCmd::Ls { output } => cmd_ls(&images, output),
         ImageCmd::Describe { names } => cmd_describe(&images, &names),

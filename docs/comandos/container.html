@@ -185,7 +185,6 @@ Commands:
   apply        Apply the `kind: Container` documents of a manifest (idempotent by name)
   init         Initialize a project with a Delonixfile + manifest
   prune        Remove every stopped container and the rootfs debris they left behind
-  dash         Dashboard (KPIs + table + problems) of the containers — interactive TUI, or `--once` for a text snapshot
   help         Print this message or the help of the given subcommand(s)
 
 Options:
@@ -202,7 +201,6 @@ COMMAND MAP:
   Configure    rename · update
   Declarative  init · apply
   Maintenance  prune
-  Dashboards   dash
 
 EXAMPLES:
   # a web service in seconds — host port 8080 onto the container&#x27;s 80
@@ -218,35 +216,6 @@ SEE ALSO:
   delonix pod · delonix image · delonix workload · delonix compose up
 
   delonix › container</code></pre></div>
-<h2 id='dash'><code>container dash</code></h2>
-<p class='intro'>Dashboard (KPIs + table + problems) of the containers — interactive TUI, or <code>--once</code> for a text snapshot</p>
-<div class='help'><pre><code>Usage: delonix container dash [OPTIONS]
-
-Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
-      --once
-          
-
-      --json
-          
-
-  -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)
-
-EXAMPLES:
-  # interactive dashboard of the containers
-  delonix container dash
-
-  # one text snapshot, for a script or CI
-  delonix container dash --once
-
-SEE ALSO:
-  delonix dashboard · delonix container stats · delonix container ps
-
-  delonix › container › dash</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Dashboard só dos containers</div><div class='cap lang-en'>Containers-only dashboard</div><pre><code>delonix container dash</code></pre></div>
 <h2 id='run'><code>container run</code></h2>
 <p class='intro'>Run a container from an image (pulls it if missing)</p>
 <div class='help'><pre><code>Usage: delonix container run [OPTIONS] &lt;IMAGE&gt; [COMMAND]...
@@ -795,7 +764,7 @@ EXAMPLES:
   delonix container stats web db
 
 SEE ALSO:
-  delonix container dash · delonix container top · delonix system df
+  delonix dashboard · delonix container top · delonix system df
 
   delonix › container › stats</code></pre></div>
 <div class='lang-pt'><p>CPU%/memória/PIDs lidos do cgroup v2 do próprio container (resolvido por

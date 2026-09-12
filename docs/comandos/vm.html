@@ -179,7 +179,6 @@ Commands:
   init             Bootstrap a project with a VM manifest
   prune            Reclaim the VM state directory: everything in it no VM record accounts for
   snapshot         Point-in-time snapshots of a VM (checkpoints in the VM&#x27;s own disk)
-  dash             Dashboard (KPIs + table) of the VMs — interactive TUI, or `--once` snapshot
   help             Print this message or the help of the given subcommand(s)
 
 Options:
@@ -198,7 +197,6 @@ COMMAND MAP:
   Storage      pull · ls-remote · push · convert
   Declarative  init · apply
   Maintenance  prune · snapshot
-  Dashboards   dash
 
 EXAMPLES:
   # the official golden image, ready to boot without installing anything
@@ -747,38 +745,6 @@ SEE ALSO:
 
   delonix › vm › init</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Projecto com manifesto, pronto a correr</div><div class='cap lang-en'>Project with a manifest, ready to run</div><pre><code>delonix vm init --name lab</code></pre></div><div class="ex"><div class='cap lang-pt'>Scaffold de um VMfile para CONSTRUIR a tua imagem</div><div class='cap lang-en'>Scaffold a VMfile to BUILD your image</div><pre><code>delonix vm init --vmfile --name minha-base</code></pre></div>
-<h2 id='dash'><code>vm dash</code></h2>
-<p class='intro'>Dashboard (KPIs + table) of the VMs — interactive TUI, or <code>--once</code> snapshot</p>
-<div class='help'><pre><code>Usage: delonix vm dash [OPTIONS]
-
-Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
-      --once
-          
-
-      --json
-          
-
-  -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)
-
-EXAMPLES:
-  # a live TUI of every VM — state, resources and problems, refreshed in place
-  delonix vm dash
-
-  # one snapshot of text, for a terminal that is not interactive
-  delonix vm dash --once
-
-  # the same numbers as JSON, for a script or a dashboard datasource
-  delonix vm dash --json
-
-SEE ALSO:
-  delonix vm ls · delonix get · delonix dashboard · delonix container dash
-
-  delonix › vm › dash</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Dashboard só das VMs (htop-style; `q` sai)</div><div class='cap lang-en'>VMs-only dashboard (htop-style; `q` to quit)</div><pre><code>delonix vm dash</code></pre></div><div class="ex"><div class='cap lang-pt'>Snapshot para um script ou para o Grafana</div><div class='cap lang-en'>Snapshot for a script or for Grafana</div><pre><code>delonix vm dash --json | jq &#x27;.tiles&#x27;</code></pre></div>
 <h2 id='create'><code>vm create</code></h2>
 <p class='intro'>Create (or auto-recover) a VM</p>
 <div class='help'><pre><code>Usage: delonix vm create [OPTIONS] &lt;NAME&gt;
@@ -945,7 +911,7 @@ EXAMPLES:
   delonix vm ls --namespace teamA
 
 SEE ALSO:
-  delonix get · delonix describe · delonix vm dash · delonix vm prune ·
+  delonix get · delonix describe · delonix dashboard · delonix vm prune ·
   delonix image vm ls
 
   delonix › vm › ls</code></pre></div>

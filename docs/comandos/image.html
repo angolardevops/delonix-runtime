@@ -173,7 +173,6 @@ Commands:
   save      Save an image to a portable archive (`docker save`&#x27;s counterpart)
   apply     Apply the `kind: Image` documents of a manifest
   prune     Remove unused images and the CAS blobs nobody references any more
-  dash      Dashboard (KPIs + table) of images — interactive TUI, or `--once` snapshot
   vm        Golden VM images (`&lt;root&gt;/vm-images/`): ls/pull/push/build/rm/describe
   help      Print this message or the help of the given subcommand(s)
 
@@ -191,7 +190,6 @@ COMMAND MAP:
   Storage      export · save · load
   Declarative  apply
   Maintenance  prune
-  Dashboards   dash
   Advanced     vm
 
 EXAMPLES:
@@ -540,38 +538,6 @@ SEE ALSO:
 
   delonix › image › describe</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Camadas, config e digest de uma imagem</div><div class='cap lang-en'>An image&#x27;s layers, config and digest</div><pre><code>delonix image describe nginx:alpine</code></pre></div>
-<h2 id='dash'><code>image dash</code></h2>
-<p class='intro'>Dashboard (KPIs + table) of images — interactive TUI, or <code>--once</code> snapshot</p>
-<div class='help'><pre><code>Usage: delonix image dash [OPTIONS]
-
-Options:
-      --l18n &lt;en|pt&gt;
-          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
-
-      --once
-          
-
-      --json
-          
-
-  -h, --help
-          Print help (see a summary with &#x27;-h&#x27;)
-
-EXAMPLES:
-  # a live view of the image store, htop-style
-  delonix image dash
-
-  # one snapshot, for a log or a terminal that is not a TTY
-  delonix image dash --once
-
-  # the same numbers as JSON, for a script or a Grafana datasource
-  delonix image dash --json
-
-SEE ALSO:
-  delonix image ls · delonix dashboard · delonix system df
-
-  delonix › image › dash</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Dashboard só das imagens</div><div class='cap lang-en'>Images-only dashboard</div><pre><code>delonix image dash</code></pre></div>
 <h2 id='pull'><code>image pull</code></h2>
 <p class='intro'>Pull an image from a registry</p>
 <div class='help'><pre><code>Usage: delonix image pull [OPTIONS] &lt;IMAGE&gt;
