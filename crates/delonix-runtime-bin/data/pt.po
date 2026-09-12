@@ -10840,3 +10840,32 @@ msgstr "Repõe o estado de um nó a partir de um arquivo do `system snapshot cre
 
 msgid "Archives of ONE resource (container/pod/vm/stack): create, ls, inspect, restore, schedule, remove.\n\nThe archive carries the record and the DATA of the volumes it uses — not the image and not the rootfs, which `backup restore` derives by pulling. A VM is the exception: its overlay disk IS its state, so that one travels.\n\nFor the whole node — registries, secrets, cluster PKI, the event log — the command is `delonix system snapshot create`, which is a different scope and not a second door to this one."
 msgstr "Arquivos de UM recurso (container/pod/vm/stack): create, ls, inspect, restore, schedule, remove.\n\nO arquivo carrega o registo e os DADOS dos volumes que usa — não a imagem nem o rootfs, que `backup restore` deriva por pull. Uma VM é a excepção: o seu disco overlay É o seu estado, por isso esse viaja.\n\nPara o nó inteiro — registos, segredos, PKI de cluster, o registo de eventos — o comando é `delonix system snapshot create`, que é outro âmbito e não uma segunda porta para este grupo."
+
+# ---- CLI restructuring Sprint 5 (2026-09-12): network connect/disconnect, moved out of container update ----
+
+msgid "**Reconfigure a RUNNING container without stopping it** — ports, volumes, and bandwidth cap"
+msgstr "**Reconfigura um container A CORRER sem o parar** — portas, volumes e limite de banda"
+
+msgid "**Reconfigure a RUNNING container without stopping it** — ports, volumes, and bandwidth cap.\n\nUnlike docker (where changing a port or a volume forces recreating the container), here the dataplane doesn't belong to the process lifecycle: ports are DNAT/hostfwd in front of the network and volumes come in through the kernel's mount API (`open_tree`/`move_mount`) in the mount namespace of the already-live container. The PID doesn't change and the process is never interrupted.\n\nFor which NETWORKS the container is on, see `network connect`/`network disconnect` — Docker's own verb for that, kept apart from ports/ volumes/limits, which Docker cannot reconfigure hot at all.\n\nThe changes are persisted in the registry, so a later `container start` reproduces the new configuration, not the original."
+msgstr "**Reconfigura um container A CORRER sem o parar** — portas, volumes e limite de banda.\n\nAo contrário do docker (onde mudar uma porta ou um volume obriga a recriar o container), aqui o dataplane não pertence ao ciclo de vida do processo: as portas são DNAT/hostfwd à frente da rede e os volumes entram pela API de montagem do kernel (`open_tree`/`move_mount`) no namespace de montagem do container já vivo. O PID não muda e o processo nunca é interrompido.\n\nPara saber em que REDES o container está, ver `network connect`/`network disconnect` — o verbo do próprio Docker para isso, à parte de portas/volumes/limites, que o Docker não consegue reconfigurar a quente de todo.\n\nAs mudanças ficam persistidas no registo, por isso um `container start` mais tarde reproduz a configuração nova, não a original."
+
+msgid "cap the bandwidth of its existing network link"
+msgstr "limita a banda da ligação de rede que já tem"
+
+msgid "Connect a RUNNING container to an additional network, hot"
+msgstr "Liga um container A CORRER a uma rede adicional, a quente"
+
+msgid "Connect a RUNNING container to an additional network, hot.\n\nMulti-homing — the container keeps its primary network, this adds another. Moved here from `container update --net-connect` (Sprint 5 of the CLI restructuring): this is Docker's own verb and argument order (`docker network connect NETWORK CONTAINER`), for the one operation that is about a NETWORK's membership, not a container's ports/volumes/ limits — `container update` keeps those, which Docker cannot do hot at all."
+msgstr "Liga um container A CORRER a uma rede adicional, a quente.\n\nMulti-homing — o container mantém a rede principal, isto acrescenta outra. Movido para aqui de `container update --net-connect` (Sprint 5 da reestruturação da CLI): é o próprio verbo e ordem de argumentos do Docker (`docker network connect NETWORK CONTAINER`), para a operação que é sobre a filiação de uma REDE, não sobre portas/volumes/limites de um container — `container update` fica com esses, que o Docker não consegue reconfigurar a quente de todo."
+
+msgid "hot multi-home a running container onto a second network"
+msgstr "multi-home a quente de um container a correr para uma segunda rede"
+
+msgid "Disconnect a container from an additional network, hot"
+msgstr "Desliga um container de uma rede adicional, a quente"
+
+msgid "Disconnect a container from an additional network, hot.\n\nRefuses on the PRIMARY network — that one only goes away with the container itself."
+msgstr "Desliga um container de uma rede adicional, a quente.\n\nRecusa na rede PRINCIPAL — essa só desaparece com o próprio container."
+
+msgid "drop the extra network — the primary one stays"
+msgstr "larga a rede adicional — a principal fica"

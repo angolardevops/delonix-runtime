@@ -337,13 +337,16 @@ real desse processo).</p>"""},
             ]},
             "update": {"examples": [
                 ("Troca uma porta a QUENTE, sem reiniciar", "delonix container update web --publish-add 9090:80"),
-                ("Liga a uma rede nova + limite de banda", "delonix container update web --net-connect backend --net-rate 10mbit"),
+                ("Limita a banda da rede que já tem", "delonix container update web --net-rate 10mbit"),
                 ("Sobe o limite de memória/CPU a QUENTE, sem reiniciar", "delonix container update web --memory 512M --cpus 2"),
-            ], "notes": """<p>Reconfigura portas, volumes, redes, limite de banda e limites de
+            ], "notes": """<p>Reconfigura portas, volumes, limite de banda e limites de
 memória/CPU de um container <strong>a correr</strong>, sem o parar — o PID não muda. Remoções
 correm antes das adições, para <code>--publish-rm 8080 --publish-add 8080:9000</code> funcionar
 num só comando. <code>--memory</code>/<code>--cpus</code> reescrevem o cgroup real de imediato
-(<code>memory.max</code>/<code>cpu.max</code>) — nada de esperar por um <code>restart</code>.</p>"""},
+(<code>memory.max</code>/<code>cpu.max</code>) — nada de esperar por um <code>restart</code>.
+A filiação de REDE (a que redes o container está ligado) mudou-se para
+<code>delonix network connect</code>/<code>network disconnect</code> — o verbo do próprio Docker
+para isso.</p>"""},
             "attach": {"examples": [("Volta a ligar ao stream de output de um container detached", "delonix container attach web")],
                        "notes": """<p>Deliberadamente <strong>só output</strong> — ao contrário do
 <code>docker attach</code>, não há stdin ao vivo para um container já iniciado em detached (sem
@@ -753,6 +756,12 @@ registados no store — o <code>create</code> AVISA alto que a rede não foi rea
             "create": {"examples": [
                 ("Rede bridge para um grupo de serviços", "delonix network create backend"),
                 ("Overlay cifrado entre nós (VXLAN + WireGuard)", "delonix network create mesh --driver overlay --vni 42 --peer 10.0.0.2"),
+            ]},
+            "connect": {"examples": [
+                ("Multi-home a quente de um container a correr", "delonix network connect backend web"),
+            ]},
+            "disconnect": {"examples": [
+                ("Larga a rede adicional — a principal fica", "delonix network disconnect backend web"),
             ]},
             "ls": {"examples": [("", "delonix network ls")]},
             "route": {"examples": [
@@ -2438,11 +2447,13 @@ next observation.</p>""",
 with no supervisor shows <code>Crashed</code>/137, a known architectural limit (the engine isn't
 that process's real parent).</p>""",
     ("container", "update"): """<p>Reconfigures a <strong>running</strong> container's ports,
-volumes, networks, bandwidth limit and memory/CPU limits without stopping it — the PID doesn't
+volumes, bandwidth limit and memory/CPU limits without stopping it — the PID doesn't
 change. Removals run before additions, so <code>--publish-rm 8080 --publish-add 8080:9000</code>
 works in a single command. <code>--memory</code>/<code>--cpus</code> rewrite the real cgroup
 immediately (<code>memory.max</code>/<code>cpu.max</code>) — no waiting for a
-<code>restart</code>.</p>""",
+<code>restart</code>. Which NETWORKS the container is on moved to
+<code>delonix network connect</code>/<code>network disconnect</code> — Docker's own verb for
+that.</p>""",
     ("container", "attach"): """<p>Deliberately <strong>output-only</strong> — unlike
 <code>docker attach</code>, there's no live stdin to an already-started detached container (no
 persistent per-container shim). <code>-i</code>/<code>--stdin</code> is refused with a clear error
@@ -2536,7 +2547,7 @@ EXAMPLES_EN = {
     ("container", "describe"): ["`kubectl describe`-style detail (for humans; `inspect` is for scripts)"],
     ("container", "update"): [
         "Hot-swap a port, no restart",
-        "Connect to a new network + bandwidth limit",
+        "Cap the bandwidth of its existing network link",
         "Raise the memory/CPU limit on the fly, no restart",
     ],
     ("container", "attach"): ["Reconnect to a detached container's output stream"],
@@ -2645,6 +2656,8 @@ EXAMPLES_EN = {
         "Just the public key, for composing in a script",
     ],
     ("network", "create"): ["Bridge network for a group of services", "Encrypted overlay between nodes (VXLAN + WireGuard)"],
+    ("network", "connect"): ["Hot multi-home a running container"],
+    ("network", "disconnect"): ["Drop the extra network — the primary one stays"],
     ("network", "ls"): [""],
     ("network", "inspect"): [""],
     ("network", "rm"): [""],

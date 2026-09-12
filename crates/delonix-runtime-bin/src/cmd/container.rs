@@ -2000,8 +2000,8 @@ pub enum ContainerCmd {
         #[arg(required = true, add = ArgValueCandidates::new(super::complete::containers))]
         ids: Vec<String>,
     },
-    /// **Reconfigure a RUNNING container without stopping it** — ports, volumes,
-    /// networks, and bandwidth cap.
+    /// **Reconfigure a RUNNING container without stopping it** — ports,
+    /// volumes, and bandwidth cap.
     ///
     /// Unlike docker (where changing a port or a volume forces recreating the
     /// container), here the dataplane doesn't belong to the process lifecycle:
@@ -2009,6 +2009,10 @@ pub enum ContainerCmd {
     /// the kernel's mount API (`open_tree`/`move_mount`) in the mount namespace of
     /// the already-live container. The PID doesn't change and the process is never
     /// interrupted.
+    ///
+    /// For which NETWORKS the container is on, see `network connect`/`network
+    /// disconnect` — Docker's own verb for that, kept apart from ports/
+    /// volumes/limits, which Docker cannot reconfigure hot at all.
     ///
     /// The changes are persisted in the registry, so a later `container start`
     /// reproduces the new configuration, not the original.
@@ -2027,12 +2031,6 @@ pub enum ContainerCmd {
         /// Unmount hot, by the TARGET path inside the container. Repeatable.
         #[arg(long = "volume-rm", value_name = "TARGET")]
         volume_rm: Vec<String>,
-        /// Connect the container to an additional network hot (multi-homing). Repeatable.
-        #[arg(long = "net-connect", value_name = "NETWORK", add = ArgValueCandidates::new(super::complete::networks))]
-        net_connect: Vec<String>,
-        /// Disconnect the container from an additional network. Repeatable.
-        #[arg(long = "net-disconnect", value_name = "NETWORK", add = ArgValueCandidates::new(super::complete::networks))]
-        net_disconnect: Vec<String>,
         /// Bandwidth cap, in bit/s with a suffix (`10mbit`, `512kbit`, `1gbit`).
         #[arg(long = "net-rate", value_name = "RATE")]
         net_rate: Option<String>,
@@ -2349,8 +2347,6 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             publish_rm,
             volume_add,
             volume_rm,
-            net_connect,
-            net_disconnect,
             net_rate,
             net_burst,
             net_rate_clear,
@@ -2364,8 +2360,6 @@ pub fn run(action: ContainerCmd) -> Result<()> {
                 publish_rm,
                 volume_add,
                 volume_rm,
-                net_connect,
-                net_disconnect,
                 net_rate,
                 net_burst,
                 net_rate_clear,
@@ -6439,8 +6433,6 @@ pub(crate) struct UpdateOpts {
     pub(crate) publish_rm: Vec<String>,
     pub(crate) volume_add: Vec<String>,
     pub(crate) volume_rm: Vec<String>,
-    pub(crate) net_connect: Vec<String>,
-    pub(crate) net_disconnect: Vec<String>,
     pub(crate) net_rate: Option<String>,
     pub(crate) net_burst: Option<String>,
     pub(crate) net_rate_clear: bool,
@@ -6454,8 +6446,6 @@ impl UpdateOpts {
             && self.publish_rm.is_empty()
             && self.volume_add.is_empty()
             && self.volume_rm.is_empty()
-            && self.net_connect.is_empty()
-            && self.net_disconnect.is_empty()
             && self.net_rate.is_none()
             && !self.net_rate_clear
             && self.memory.is_none()
@@ -6476,11 +6466,118 @@ impl UpdateOpts {
 
 /// Next free interface index for an additional network. `eth0` is always the
 /// primary network, so the extras start at 1 — and we reuse holes left by a
-/// `--net-disconnect` instead of always counting upward.
+/// `network disconnect` instead of always counting upward.
 fn next_extra_idx(c: &Container) -> u32 {
     (1u32..)
         .find(|i| !c.extra_networks.iter().any(|n| n.idx == *i))
         .unwrap_or(1)
+}
+
+/// `network connect` — hot-attach a RUNNING container to an additional
+/// network (multi-homing), keeping its primary network untouched.
+///
+/// Moved out of `container update --net-connect` (CLI Sprint 5): this is
+/// Docker's own verb and argument order for network topology, kept separate
+/// from `container update`'s ports/volumes/limits — which stay there because
+/// Docker cannot reconfigure THOSE hot at all, so there is no upstream verb
+/// to align with.
+pub(crate) fn cmd_network_connect(store: &Store, id: &str, network: &str) -> Result<()> {
+    let mut c = find(store, id)?;
+    runtime::reconcile_status(&mut c);
+    if !matches!(c.status, Status::Running | Status::Paused) {
+        return Err(Error::Invalid(super::po::tf(
+            "container '{name}' is not running ({status}) — connecting a network acts on the LIVE \
+             process. Start it with `delonix container start {name}` first.",
+            &[("name", &c.name), ("status", &c.status.to_string())],
+        )));
+    }
+    if c.network.is_none() {
+        return Err(Error::Invalid(super::po::tf(
+            "'{name}' runs on the slirp-per-container path (--net host/none), which has no \
+             holder-managed netns — connecting an additional network is only possible for \
+             a container created with `--net <network>`",
+            &[("name", &c.name)],
+        )));
+    }
+    if c.extra_networks.iter().any(|n| n.network == network)
+        || c.network.as_deref() == Some(network)
+    {
+        return Err(Error::Invalid(format!(
+            "'{}' is already attached to network '{network}'",
+            c.name
+        )));
+    }
+    let idx = next_extra_idx(&c);
+    let (ifname, ip) = infra::attach_extra_container(&c.id, idx, network, &c.namespace)?;
+    let en = delonix_runtime_core::ExtraNet {
+        network: network.to_string(),
+        ip: ip.clone(),
+        idx,
+    };
+    c = store.update(&c.id, |cur| {
+        cur.extra_networks.push(en.clone());
+        true
+    })?;
+    // The firewall has to be re-applied so the NEW IP is governed too — without this
+    // the container gains an address that no `ingress`/`egress`/`Dependency` rule
+    // reaches, which is exactly how a `policy deny` container stayed reachable over a
+    // second network.
+    if let Some(fw) = c.firewall.clone() {
+        if let Err(e) = apply_firewall_everywhere(&c, &fw) {
+            eprintln!("{}: firewall not extended to {ip}: {e}", c.name);
+        }
+    }
+    println!(
+        "{}: attached to network {network} — {ip} on {ifname}",
+        c.name
+    );
+    Ok(())
+}
+
+/// `network disconnect` — the inverse of [`cmd_network_connect`]. Refuses a
+/// network the container is not actually attached to as an EXTRA one — the
+/// primary network (`c.network`) never shows up in `extra_networks`, so
+/// naming it here lands in that same refusal, not a special case: it only
+/// goes away with the container itself.
+pub(crate) fn cmd_network_disconnect(store: &Store, id: &str, network: &str) -> Result<()> {
+    let mut c = find(store, id)?;
+    runtime::reconcile_status(&mut c);
+    if !matches!(c.status, Status::Running | Status::Paused) {
+        return Err(Error::Invalid(super::po::tf(
+            "container '{name}' is not running ({status}) — disconnecting a network acts on the \
+             LIVE process. Start it with `delonix container start {name}` first.",
+            &[("name", &c.name), ("status", &c.status.to_string())],
+        )));
+    }
+    let Some(en) = c
+        .extra_networks
+        .iter()
+        .find(|n| n.network == network)
+        .cloned()
+    else {
+        return Err(Error::Invalid(format!(
+            "container '{}' is not attached to the extra network '{network}'",
+            c.name
+        )));
+    };
+    infra::detach_extra_container(&c.id, en.idx, &en.ip);
+    c = store.update(&c.id, |cur| {
+        let before = cur.extra_networks.len();
+        cur.extra_networks.retain(|x| x.network != network);
+        cur.extra_networks.len() != before
+    })?;
+    // Re-apply so the released IP loses its jumps: IPAM will hand that address to
+    // another container, which must not inherit this one's firewall.
+    if let Some(fw) = c.firewall.clone() {
+        if let Err(e) = apply_firewall_everywhere(&c, &fw) {
+            eprintln!("{}: firewall not re-applied after detach: {e}", c.name);
+        }
+    }
+    println!(
+        "{}: detached from network {network} (eth{})",
+        c.name, en.idx
+    );
+    Ok(())
 }
 
 /// `container update` — HOT reconfiguration of a running container.
@@ -6505,7 +6602,7 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
         ));
     }
     if o.is_empty() {
-        return Err(Error::Invalid("nothing to do: pass at least one change (--publish-add/--publish-rm/--volume-add/--volume-rm/--net-connect/--net-disconnect/--net-rate/--net-rate-clear/--memory/--cpus)".into()));
+        return Err(Error::Invalid("nothing to do: pass at least one change (--publish-add/--publish-rm/--volume-add/--volume-rm/--net-rate/--net-rate-clear/--memory/--cpus) — for network topology, see `network connect`/`network disconnect`".into()));
     }
     let mut c = find(store, id)?;
     runtime::reconcile_status(&mut c);
@@ -6531,30 +6628,6 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
         })?;
         println!("{}: volume {target} hot-unmounted", c.name);
     }
-    for net in &o.net_disconnect {
-        let Some(en) = c.extra_networks.iter().find(|n| &n.network == net).cloned() else {
-            return Err(Error::Invalid(format!(
-                "container '{}' is not attached to the extra network '{net}'",
-                c.name
-            )));
-        };
-        infra::detach_extra_container(&c.id, en.idx, &en.ip);
-        let n = net.clone();
-        c = store.update(&c.id, |cur| {
-            let before = cur.extra_networks.len();
-            cur.extra_networks.retain(|x| x.network != n);
-            cur.extra_networks.len() != before
-        })?;
-        // Re-apply so the released IP loses its jumps: IPAM will hand that address to
-        // another container, which must not inherit this one's firewall.
-        if let Some(fw) = c.firewall.clone() {
-            if let Err(e) = apply_firewall_everywhere(&c, &fw) {
-                eprintln!("{}: firewall not re-applied after detach: {e}", c.name);
-            }
-        }
-        println!("{}: detached from network {net} (eth{})", c.name, en.idx);
-    }
-
     // --- additions ---
     // Ranges expand here too, so `update --publish-add 8000-8002:9000-9002` behaves
     // exactly like the same range on `run` — a flag that works in one place and not
@@ -6588,46 +6661,6 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
             );
         }
     }
-    for net in &o.net_connect {
-        if c.network.is_none() {
-            return Err(Error::Invalid(super::po::tf(
-                "'{name}' runs on the slirp-per-container path (--net host/none), which has no \
-                 holder-managed netns — hot-connecting additional networks is only possible for \
-                 a container created with `--net <network>`",
-                &[("name", &c.name)],
-            )));
-        }
-        if c.extra_networks.iter().any(|n| &n.network == net)
-            || c.network.as_deref() == Some(net.as_str())
-        {
-            return Err(Error::Invalid(format!(
-                "'{}' is already attached to network '{net}'",
-                c.name
-            )));
-        }
-        let idx = next_extra_idx(&c);
-        let (ifname, ip) = infra::attach_extra_container(&c.id, idx, net, &c.namespace)?;
-        let en = delonix_runtime_core::ExtraNet {
-            network: net.clone(),
-            ip: ip.clone(),
-            idx,
-        };
-        c = store.update(&c.id, |cur| {
-            cur.extra_networks.push(en.clone());
-            true
-        })?;
-        // The firewall has to be re-applied so the NEW IP is governed too — without this
-        // the container gains an address that no `ingress`/`egress`/`Dependency` rule
-        // reaches, which is exactly how a `policy deny` container stayed reachable over a
-        // second network.
-        if let Some(fw) = c.firewall.clone() {
-            if let Err(e) = apply_firewall_everywhere(&c, &fw) {
-                eprintln!("{}: firewall not extended to {ip}: {e}", c.name);
-            }
-        }
-        println!("{}: attached to network {net} — {ip} on {ifname}", c.name);
-    }
-
     // --- bandwidth cap ---
     if o.net_rate_clear {
         infra::clear_net_rate(&c.id);
