@@ -48,7 +48,7 @@ fn secret_user_names(name: &str) -> Option<Vec<String>> {
 
 #[derive(Subcommand)]
 pub enum SecretCmd {
-    /// Create/replace a secret from literals and/or a `.env` file.
+    /// Create a secret from literals and/or a `.env` file. Refuses if the name already exists — pass `--force` to replace it, or use `secret set` to add/update keys instead.
     Create {
         name: String,
         /// `KEY=value` pair. Repeatable.
@@ -60,6 +60,9 @@ pub enum SecretCmd {
         /// Take the value from an environment VARIABLE: `--from-env DB_PASSWORD` stores `$DB_PASSWORD` under that name, `--from-env password=PGPASSWORD` under `password`. Repeatable. The value never appears in argv, unlike `--from-literal`.
         #[arg(long = "from-env")]
         from_env: Vec<String>,
+        /// Replace an EXISTING secret instead of refusing. Without it, `create` only creates — the same guarantee `kubectl create secret`/`docker secret create` give; use `secret set` to add or update keys of one that already exists without this flag.
+        #[arg(short, long)]
+        force: bool,
     },
     /// List the secrets (name + number of keys; values NEVER shown).
     Ls {
@@ -499,11 +502,25 @@ pub fn run(action: SecretCmd) -> Result<()> {
             from_literal,
             from_env_file,
             from_env,
+            force,
         } => {
             if !valid_name(&name) {
                 return Err(Error::Invalid(super::po::tf(
                     "invalid secret name: {name}",
                     &[("name", &format!("{name:?}"))],
+                )));
+            }
+            // Checked BEFORE parsing any input source, so a refusal is instant
+            // and never depends on an `.env` file/env var actually resolving.
+            // `create` only creates (the `kubectl create secret`/`docker secret
+            // create` guarantee) — `--force` is the explicit opt-in for the
+            // "replace and say what was dropped" behavior below, and `secret
+            // set` is the non-destructive way to touch an existing one.
+            let previous = store.load(&name).ok();
+            if previous.is_some() && !force {
+                return Err(Error::Conflict(super::po::tf(
+                    "secret '{name}' already exists — use `secret set` to add/update its keys, or `secret create --force` to replace it",
+                    &[("name", &name)],
                 )));
             }
             let mut data = std::collections::BTreeMap::new();
@@ -542,20 +559,16 @@ pub fn run(action: SecretCmd) -> Result<()> {
                 ));
             }
             let n = data.len();
-            // **What this REPLACES has to be said out loud.** `save` writes the
-            // whole secret, so a `create` over an existing name drops every key
-            // the new call did not repeat. Measured 2026-09-10: a secret holding
-            // `a=1,b=2`, plus `secret create <it> --from-literal c=3`, was left
-            // holding `c` alone — and the command answered `created (1 key(s))`,
-            // which reads as "a new secret", not as "two credentials are gone".
-            //
-            // The help does say "Create/replace", and the declarative path
-            // (`kind: Secret`) MUST keep replacing — that is what applying a
-            // manifest means. So nothing is refused here; what changes is that a
-            // replacement calls itself one, and names what it took. The
-            // non-destructive verb (`secret set`) is pointed at, because someone
-            // who lost keys to this almost certainly wanted it.
-            let previous = store.load(&name).ok();
+            // **What a `--force` replace TAKES has to be said out loud.** `save`
+            // writes the whole secret, so replacing an existing name drops every
+            // key the new call did not repeat. Measured 2026-09-10: a secret
+            // holding `a=1,b=2`, plus `secret create <it> --force --from-literal
+            // c=3`, was left holding `c` alone — and the command answered
+            // `created (1 key(s))`, which reads as "a new secret", not as "two
+            // credentials are gone". `--force` still replaces (it has to, for
+            // whoever really means to start over), but the message now names
+            // what it took, and the non-destructive verb (`secret set`) is
+            // pointed at.
             let existed = previous.is_some();
             let dropped: Vec<String> = previous
                 .map(|old| {

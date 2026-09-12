@@ -2169,6 +2169,39 @@ documentação desde a v0.29.0). Validado ao vivo: build/clippy/fmt/test limpos,
 PT exacto via `--l18n=pt` em várias amostras, incluindo alinhamento de colunas independente por
 língua no `volumes inspect`.
 
+## Reestruturação da CLI (semântica Docker/Podman/kubectl) — Sprint 1: `secret create` vs `secret set`
+
+Sessão de auditoria (2026-09-12, persona DevOps/Platform/SRE, base de comparação Docker/Podman/
+kubectl) encontrou uma ambiguidade genuína: `secret create` e `secret set` respondiam à mesma
+pergunta ("um segredo com este nome ainda não existe") de duas formas indistinguíveis pelo nome do
+verbo — a única coisa que os separava era o texto do `--help`. O achado ANTERIOR desta mesma
+família (`create` apagava chaves em silêncio ao substituir) já tinha sido corrigido no dia
+anterior (ACH-024..027, #278, `15b09162`) — essa correcção fica intacta e não é revertida aqui.
+
+**O que falta ao #278**: `create` continuava a ACEITAR substituir um segredo existente, só que
+agora avisando alto em vez de em silêncio. `secret create db-pass` sobre um nome já usado sempre
+respondia (nunca recusava), o que não é a garantia que `kubectl create secret`/`docker secret
+create` dão — nos dois, `create` só cria, e tentar de novo sobre um nome existente é erro.
+
+**Fechado**: `secret create` ganhou `-f`/`--force`. Sem ele, recusa (`Error::Conflict`, código de
+saída `5`/`DX_CONFLICT` — já existia, sem produtor neste grupo) se o nome já existir, apontando
+para `secret set` (upsert) ou `secret create --force` (a substituição já corrigida no #278,
+incluindo a mensagem que nomeia as chaves largadas). `secret set`/`secret apply` (caminho
+declarativo, `kind: Secret`) ficam **fora** desta recusa de propósito — `apply` tem de continuar
+idempotente («garante presente»), e só o verbo imperativo `create` ganhou a exigência de
+intenção explícita. Validado ao vivo (`DELONIX_ROOT` isolado): criar de novo sem `--force` deixa o
+segredo original intacto (confirmado por `secret inspect --reveal`); com `--force`, substitui e
+nomeia o que largou; `secret apply` do mesmo `kind: Secret` duas vezes seguidas continua `rc=0`
+sem pedir nada. Gate em `scripts/e2e.sh` (secção `secret`), com o caso `create --force` mantido a
+par do caso novo (recusa) — não há regressão do que o #278 já garantia.
+
+Parte do plano de reestruturação da CLI pedido nesta sessão (remover ambiguidades/duplicados,
+trazer semântica Docker/Podman/kubectl, preservar o hot-plug de rede/volume em
+`container update` como diferenciador) — os sprints seguintes (dedup `vm`/`image vm`, `network
+connect/disconnect`, `volume create --driver`+`--opt`, `container ssh`→`shell`, consolidação dos
+6 dashboards, `system backup`→`system snapshot`) ficam para sessões próprias, cada um no seu
+worktree, cada um com o seu PR — corte limpo, sem alias, como todo o resto desta CLI.
+
 ## Falhas silenciosas corrigidas (fail-closed) + 1 documentada
 
 Da análise Docker/Podman (`docs/COMPARACAO-DOCKER-PODMAN.md`), quatro casos em
