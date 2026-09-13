@@ -11,6 +11,7 @@ descrever flags que não existem. Regenerar depois de mexer na CLI:
 O conteúdo editorial (introduções, exemplos, notas) vive nos dicts abaixo.
 """
 
+import functools
 import html
 import os
 import re
@@ -70,6 +71,13 @@ CATEGORY_PT = {
 # page's stable URL — renaming it would break every existing bookmark/link).
 ROOT_NAME_TO_PAGE_KEY = {"dashboard": "dash"}
 
+# The one nested child (`GROUP_PATH["cri"] = ("serve", "cri")`) with no
+# dedicated page of its own — it's documented at the hand-written `cri.html`
+# guide instead (see the `page("cri.html", ...)` call in `main()`, and the
+# `cri` special case in `sidebar()`/`cheatsheet_page()`'s `entry_html`).
+# Named once so the two call sites can't drift on this fallback's href/label.
+CRI_FALLBACK = ("cri.html", "delonix serve cri")
+
 
 def root_command_categories():
     """The root COMMAND MAP, as `[(category, [member_names]), ...]`.
@@ -115,6 +123,7 @@ def children_of_top_level():
     return children
 
 
+@functools.lru_cache(maxsize=None)
 def help_of(*args):
     """O `--help` de um caminho da CLI — e uma recusa se o caminho não existir.
 
@@ -2813,8 +2822,9 @@ nav.side a:hover{background:var(--accent-soft);text-decoration:none}
 nav.side a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
 nav.side h6.cat{margin:.9rem 0 .15rem;padding:0 .55rem;font-size:.7rem;letter-spacing:.03em;
 text-transform:uppercase;color:var(--muted);opacity:.75;font-weight:600}
-nav.side a.sub{padding-left:1.3rem;font-size:.85rem;color:var(--muted)}
-nav.side a.sub:hover{color:var(--ink)}
+nav.side a.sub{padding-left:1.3rem;font-size:.85rem}
+nav.side a.sub:not(.on){color:var(--muted)}
+nav.side a.sub:not(.on):hover{color:var(--ink)}
 nav.side .brand .toggles{display:flex;align-items:center;gap:.4rem;margin-left:auto}
 .theme-toggle{appearance:none;border:1px solid var(--line);background:var(--bg);color:var(--ink);
 border-radius:8px;width:30px;height:30px;flex-shrink:0;display:inline-flex;align-items:center;
@@ -2941,13 +2951,17 @@ def sidebar(active, depth=0):
         )
 
     def link(href, label, sub=False):
+        # `sub` and `on` are independent facts about a link (nested under a
+        # parent group, and/or the current page) — combine both classes
+        # instead of picking one, or an active nested-command page loses its
+        # indentation the moment it becomes active (`nav.side a.sub` styling
+        # gone, the page looks like a top-level entry in its own sidebar).
+        classes = []
+        if sub:
+            classes.append("sub")
         if href == active:
-            cls = "on"
-        elif sub:
-            cls = "sub"
-        else:
-            cls = ""
-        cls_attr = f' class="{cls}"' if cls else ""
+            classes.append("on")
+        cls_attr = f' class="{" ".join(classes)}"' if classes else ""
         return f'<a href="{p}{href}"{cls_attr}>{html.escape(label)}</a>'
 
     doc_html = "".join(
@@ -2972,7 +2986,7 @@ def sidebar(active, depth=0):
                 if child in GROUPS:
                     cmd_parts.append(link(f"comandos/{child}.html", GROUPS[child]["title"], sub=True))
                 else:
-                    cmd_parts.append(link("cri.html", "delonix serve cri", sub=True))
+                    cmd_parts.append(link(*CRI_FALLBACK, sub=True))
     cmd_html = "".join(cmd_parts)
 
     return f"""<nav class="side">
@@ -5303,8 +5317,8 @@ def cheatsheet_page():
         # `GROUP_PATH`/`children_of_top_level()` already draw, so a group
         # never has to say twice whether it's top-level or a child.
         tag = "h3" if level == 1 else "h4"
-        title = GROUPS[g]["title"] if g in GROUPS else "delonix serve cri"
-        href = f"comandos/{g}.html" if g in GROUPS else "cri.html"
+        title = GROUPS[g]["title"] if g in GROUPS else CRI_FALLBACK[1]
+        href = f"comandos/{g}.html" if g in GROUPS else CRI_FALLBACK[0]
         subs = subcommands_of(g)
         head = f"<{tag} id='{g}'><a href='{href}'><code>{html.escape(title)}</code></a></{tag}>"
         if not subs:

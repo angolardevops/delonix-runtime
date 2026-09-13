@@ -41,8 +41,9 @@ nav.side a:hover{background:var(--accent-soft);text-decoration:none}
 nav.side a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
 nav.side h6.cat{margin:.9rem 0 .15rem;padding:0 .55rem;font-size:.7rem;letter-spacing:.03em;
 text-transform:uppercase;color:var(--muted);opacity:.75;font-weight:600}
-nav.side a.sub{padding-left:1.3rem;font-size:.85rem;color:var(--muted)}
-nav.side a.sub:hover{color:var(--ink)}
+nav.side a.sub{padding-left:1.3rem;font-size:.85rem}
+nav.side a.sub:not(.on){color:var(--muted)}
+nav.side a.sub:not(.on):hover{color:var(--ink)}
 nav.side .brand .toggles{display:flex;align-items:center;gap:.4rem;margin-left:auto}
 .theme-toggle{appearance:none;border:1px solid var(--line);background:var(--bg);color:var(--ink);
 border-radius:8px;width:30px;height:30px;flex-shrink:0;display:inline-flex;align-items:center;
