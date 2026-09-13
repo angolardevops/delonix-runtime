@@ -2495,6 +2495,42 @@ template `httpd` (o mais rápido, sem gestor de pacotes), corre `--up` com
 tecto de 180s, e confirma `memory_max` do manifesto no container real — salta
 com razão clara se o ambiente não completar (rede lenta, ou o achado acima).
 
+## `delonix init` adopta um projecto existente em vez de o gerar por cima (2026-09-13)
+
+Pedido do utilizador: `init` deve poder transformar um projecto JÁ EXISTENTE
+num app delonix, não só gerar um do zero. Medido antes de escrever código: já
+não escrevia por cima de ficheiros com o MESMO nome (o guarda de `--force`),
+mas continuava a gerar o código de exemplo do template inteiro ao lado do
+código real — um `src/index.ts`/`README.md`/`package.json` de demonstração
+apareciam num projecto Node real que já tinha o seu próprio `server.js`, e o
+`Delonixfile` gerado assumia sempre a disposição de ficheiros da demo (`COPY
+src ./src`, `CMD ["node", "dist/index.js"]`), nunca a do projecto real.
+
+**Fechado**: `render_template` (`cmd/scaffold.rs`) muda para modo de ADOPÇÃO
+quando o directório-alvo já tem conteúdo (`dir_has_content`, um sinal
+genérico — não uma evidência por-template, precisamente para cobrir também
+re-correr `init` uma segunda vez sobre o SEU PRÓPRIO output, que não pode
+voltar a despejar o código de exemplo por cima de edições já feitas). Em
+adopção, só três ficheiros são escritos — `Delonixfile`/`delonix-manifest.
+yaml`/`.dockerignore` — nunca `src/`, `test/`, `README.md` nem os manifestos
+de linguagem (`package.json`/`go.mod`/`pyproject.toml`/...) do template.
+
+**Honesto sobre o que não resolve**: o `Delonixfile` gerado em adopção
+CONTINUA a assumir a disposição de ficheiros da demo (não há introspecção do
+projecto real — inferir o ponto de entrada certo de 11 ecossistemas
+diferentes de forma fiável, sem adivinhar, ficaria para uma fatia própria).
+Por isso a mensagem final é um AVISO explícito a mandar rever COPY/CMD antes
+do `build`, nunca "pronto" — o `build` falha alto se as COPY não baterem
+certo com a estrutura real, que é o comportamento seguro; o caso em que os
+caminhos calham coincidir (ex.: o projecto real já tem uma pasta `src/`)
+funciona sem edição nenhuma.
+
+6 testes novos (`cmd::scaffold::tests`): `dir_has_content` nos três casos
+(inexistente/vazio/com conteúdo), o scaffold completo num directório vazio
+continua intacto (regressão), a adopção só escreve o glue e preserva o
+código real, e uma segunda passagem sobre o próprio output não recria o
+código de exemplo.
+
 ## Falhas silenciosas corrigidas (fail-closed) + 1 documentada
 
 Da análise Docker/Podman (`docs/COMPARACAO-DOCKER-PODMAN.md`), quatro casos em

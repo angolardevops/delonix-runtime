@@ -100,8 +100,35 @@ fn subst(s: &str, o: &InitOpts, module: &str, port: &str) -> String {
         .replace("__PORT__", port)
 }
 
+/// The only files a template writes when ADOPTING an existing project — never
+/// its demo source (`src/`, `test/`, `README.md`, `package.json`/`go.mod`/...):
+/// those are the template author's own example code, and dropping them next
+/// to a real project would either collide with what is already there or sit
+/// unused. `Delonixfile`/`delonix-manifest.yaml`/`.dockerignore` are the only
+/// three that are pure Delonix glue with no assumption baked in beyond the
+/// demo's file layout — and that one assumption is exactly what the warning
+/// after generation exists to flag, not hide.
+const ADOPT_FILES: [&str; 3] = ["Delonixfile", "delonix-manifest.yaml", ".dockerignore"];
+
+/// True when `dir` already has something in it. The signal for "this is a
+/// real, already-existing project" is deliberately this generic (not
+/// per-template evidence like `package.json`): it also covers `delonix init`
+/// re-run a second time on its own output, which must not splat the demo
+/// files back over edits the user has since made.
+fn dir_has_content(dir: &Path) -> bool {
+    std::fs::read_dir(dir)
+        .map(|mut it| it.next().is_some())
+        .unwrap_or(false)
+}
+
 /// Generates a project from an embedded template. `show_next` prints the next
 /// steps (build/apply/curl) — suppressed when `--up` will do them.
+///
+/// Switches to ADOPT mode when `o.dir` already has content: writes only
+/// [`ADOPT_FILES`] instead of the full demo project, and warns that the
+/// `Delonixfile`'s `COPY`/`CMD` assume the demo's own file layout and need a
+/// look before `build`/`--up` — never presented as "ready", since the shape
+/// of the real project might not match what got written.
 fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
     if tname == "list" {
         println!(
@@ -126,9 +153,13 @@ fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
         })?;
     let module = python_module(&o.name);
     let (port, health) = template_meta(tname);
+    let adopt = dir_has_content(&o.dir);
     std::fs::create_dir_all(&o.dir)?;
     let mut n = 0;
     for (rel, content) in files {
+        if adopt && !ADOPT_FILES.contains(rel) {
+            continue;
+        }
         let dest = o.dir.join(subst(rel, o, &module, port));
         n += usize::from(write_file(
             &dest,
@@ -143,17 +174,36 @@ fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
         );
         return Ok(());
     }
-    println!(
-        "{}",
-        super::po::tf(
-            "done. Project '{name}' ({tname}) in {dir}.",
-            &[
-                ("name", &o.name),
-                ("tname", tname),
-                ("dir", &o.dir.display().to_string())
-            ],
-        )
-    );
+    if adopt {
+        println!(
+            "{}",
+            super::po::tf(
+                "adopted '{name}' ({tname}) in {dir} — only Delonixfile/manifest/dockerignore \
+                 were written, the project's own code was left untouched.",
+                &[
+                    ("name", &o.name),
+                    ("tname", tname),
+                    ("dir", &o.dir.display().to_string())
+                ],
+            )
+        );
+        super::output::warn(super::po::t(
+            "the Delonixfile's COPY/CMD assume the demo project's own file layout — \
+             review them against this project's actual structure before `build`",
+        ));
+    } else {
+        println!(
+            "{}",
+            super::po::tf(
+                "done. Project '{name}' ({tname}) in {dir}.",
+                &[
+                    ("name", &o.name),
+                    ("tname", tname),
+                    ("dir", &o.dir.display().to_string())
+                ],
+            )
+        );
+    }
     if show_next {
         let cd = if o.dir == Path::new(".") {
             String::new()
@@ -882,4 +932,134 @@ fn readme(o: &InitOpts) -> String {
            comentário no topo do `delonix-manifest.yaml`.\n",
         name = o.name
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "delonix-scaffold-test-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    #[test]
+    fn dir_has_content_e_falso_para_um_caminho_que_nao_existe() {
+        let dir = scratch("missing");
+        assert!(
+            !dir_has_content(&dir),
+            "um caminho inexistente não tem conteúdo"
+        );
+    }
+
+    #[test]
+    fn dir_has_content_e_falso_para_um_directorio_vazio() {
+        let dir = scratch("empty");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(!dir_has_content(&dir));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn dir_has_content_e_verdadeiro_assim_que_ha_uma_entrada() {
+        let dir = scratch("nonempty");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("ja-tem-algo"), "x").unwrap();
+        assert!(dir_has_content(&dir));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Um directório vazio continua a receber o scaffold INTEIRO — o caso
+    /// coberto desde sempre, e o que não pode regredir com a chegada do modo
+    /// de adopção.
+    #[test]
+    fn scaffold_num_directorio_vazio_escreve_o_projecto_completo() {
+        let dir = scratch("scaffold-empty");
+        let o = InitOpts {
+            dir: dir.clone(),
+            name: "app".into(),
+            image: None,
+            force: false,
+            template: Some("node".into()),
+            up: false,
+        };
+        render_template("node", &o, false).unwrap();
+        assert!(dir.join("Delonixfile").exists());
+        assert!(dir.join("delonix-manifest.yaml").exists());
+        assert!(
+            dir.join("src/index.ts").exists(),
+            "o scaffold completo tem de escrever o código de exemplo também"
+        );
+        assert!(dir.join("package.json").exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Um directório com um projecto REAL já lá dentro só recebe o Delonixfile,
+    /// o manifesto e o dockerignore — nunca o código de exemplo do template,
+    /// que colidiria com (ou ficaria sem uso ao lado de) o código verdadeiro.
+    #[test]
+    fn adopcao_num_projecto_existente_so_escreve_o_glue() {
+        let dir = scratch("adopt");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("package.json"), "{}").unwrap();
+        std::fs::write(dir.join("server.js"), "// o código real do utilizador").unwrap();
+        let o = InitOpts {
+            dir: dir.clone(),
+            name: "app".into(),
+            image: None,
+            force: false,
+            template: Some("node".into()),
+            up: false,
+        };
+        render_template("node", &o, false).unwrap();
+        assert!(dir.join("Delonixfile").exists());
+        assert!(dir.join("delonix-manifest.yaml").exists());
+        assert!(dir.join(".dockerignore").exists());
+        assert!(
+            !dir.join("src").exists(),
+            "adopção nunca escreve o código de exemplo do template"
+        );
+        assert!(
+            !dir.join("README.md").exists(),
+            "adopção nunca escreve o README do template"
+        );
+        // O código real do utilizador sobrevive intacto.
+        assert_eq!(
+            std::fs::read_to_string(dir.join("server.js")).unwrap(),
+            "// o código real do utilizador"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Re-correr `init` sobre o SEU PRÓPRIO scaffold anterior (agora não-vazio)
+    /// tem de mudar para adopção — nunca voltar a despejar o código de exemplo
+    /// por cima de edições que o utilizador já tenha feito.
+    #[test]
+    fn re_correr_init_sobre_o_proprio_output_muda_para_adopcao() {
+        let dir = scratch("rerun");
+        let o = InitOpts {
+            dir: dir.clone(),
+            name: "app".into(),
+            image: None,
+            force: false,
+            template: Some("node".into()),
+            up: false,
+        };
+        render_template("node", &o, false).unwrap();
+        std::fs::remove_dir_all(dir.join("src")).unwrap();
+        render_template("node", &o, false).unwrap();
+        assert!(
+            !dir.join("src").exists(),
+            "a segunda passagem não pode recriar o código de exemplo"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

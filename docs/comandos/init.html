@@ -204,6 +204,10 @@ EXAMPLES:
   # regenerate on top of files that already exist
   delonix init --force
 
+  # adopt an EXISTING project — only Delonixfile/manifest/dockerignore are
+  # written, the project&#x27;s own code is untouched
+  delonix init ./my-existing-app
+
 SEE ALSO:
   delonix stack init · delonix vm init · delonix stack apply · delonix compose
   up
