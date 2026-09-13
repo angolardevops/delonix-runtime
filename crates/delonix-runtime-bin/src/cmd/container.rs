@@ -7816,7 +7816,7 @@ mod tests {
     /// `host_port_conflict_error` is the check that closes that gap: it must
     /// fire the instant the port is taken, and clear the instant it's freed.
     #[test]
-    fn host_port_conflict_error_pega_processo_alheio_e_liberta_quando_o_porto_fica_livre() {
+    fn host_port_conflict_error_names_a_foreign_holder_and_clears_once_freed() {
         use std::net::TcpListener;
         let held = TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port");
         let port = held.local_addr().unwrap().port();
