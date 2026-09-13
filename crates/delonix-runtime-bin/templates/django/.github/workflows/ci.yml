@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: uv run ruff check .
+      # No app/model code ships in this scaffold yet, so there is nothing for
+      # pytest to collect — `manage.py check` is Django's own project-wide
+      # sanity check (settings load, URLs resolve, no obvious misconfiguration)
+      # and needs no test files to be useful. Swap/add `uv run pytest` once
+      # you have real apps and tests.
+      - run: uv run python manage.py check

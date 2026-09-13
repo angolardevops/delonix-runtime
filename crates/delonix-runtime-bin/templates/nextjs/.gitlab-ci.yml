@@ -1,0 +1,12 @@
+image: node:20-slim
+
+stages:
+  - build
+
+build:
+  stage: build
+  before_script:
+    - corepack enable
+  script:
+    - pnpm install
+    - pnpm build

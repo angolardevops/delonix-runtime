@@ -104,11 +104,26 @@ fn subst(s: &str, o: &InitOpts, module: &str, port: &str) -> String {
 /// its demo source (`src/`, `test/`, `README.md`, `package.json`/`go.mod`/...):
 /// those are the template author's own example code, and dropping them next
 /// to a real project would either collide with what is already there or sit
-/// unused. `Delonixfile`/`delonix-manifest.yaml`/`.dockerignore` are the only
-/// three that are pure Delonix glue with no assumption baked in beyond the
-/// demo's file layout — and that one assumption is exactly what the warning
-/// after generation exists to flag, not hide.
-const ADOPT_FILES: [&str; 3] = ["Delonixfile", "delonix-manifest.yaml", ".dockerignore"];
+/// unused.
+///
+/// `Delonixfile`/`delonix-manifest.yaml`/`.dockerignore` carry the one
+/// assumption this whole mode has to make (the demo's file layout) — flagged
+/// by the warning after generation, not hidden. The rest — CI/CD pipelines,
+/// SonarQube config, git-flow/Conventional-Commits docs, commitlint config —
+/// are generic: they describe the LANGUAGE's own build/test commands (already
+/// read from the template's real `package.json`/`pyproject.toml`/etc., not
+/// invented), never a source path specific to the demo app, so they carry no
+/// such risk and are exactly as safe to hand to a real project as to a fresh one.
+const ADOPT_FILES: [&str; 8] = [
+    "Delonixfile",
+    "delonix-manifest.yaml",
+    ".dockerignore",
+    ".github/workflows/ci.yml",
+    ".gitlab-ci.yml",
+    "sonar-project.properties",
+    "CONTRIBUTING.md",
+    "commitlint.config.js",
+];
 
 /// True when `dir` already has something in it. The signal for "this is a
 /// real, already-existing project" is deliberately this generic (not
@@ -178,8 +193,9 @@ fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
         println!(
             "{}",
             super::po::tf(
-                "adopted '{name}' ({tname}) in {dir} — only Delonixfile/manifest/dockerignore \
-                 were written, the project's own code was left untouched.",
+                "adopted '{name}' ({tname}) in {dir} — only Delonix/CI glue was written \
+                 (Delonixfile, manifest, CI/CD, SonarQube, CONTRIBUTING.md), the project's \
+                 own code was left untouched.",
                 &[
                     ("name", &o.name),
                     ("tname", tname),
@@ -999,6 +1015,10 @@ mod tests {
             "o scaffold completo tem de escrever o código de exemplo também"
         );
         assert!(dir.join("package.json").exists());
+        assert!(
+            dir.join(".github/workflows/ci.yml").exists(),
+            "um scaffold novo já nasce com CI/CD pronto"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -1036,6 +1056,32 @@ mod tests {
             std::fs::read_to_string(dir.join("server.js")).unwrap(),
             "// o código real do utilizador"
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// CI/CD (workflows, SonarQube, CONTRIBUTING.md, commitlint) does not
+    /// assume the demo's file layout — only the language's own commands,
+    /// already read from the template's real `package.json` — so it is
+    /// included in adopt mode too, unlike the Delonixfile/manifest.
+    #[test]
+    fn adopcao_tambem_recebe_o_ci_cd_generico() {
+        let dir = scratch("adopt-cicd");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("package.json"), "{}").unwrap();
+        let o = InitOpts {
+            dir: dir.clone(),
+            name: "app".into(),
+            image: None,
+            force: false,
+            template: Some("node".into()),
+            up: false,
+        };
+        render_template("node", &o, false).unwrap();
+        assert!(dir.join(".github/workflows/ci.yml").exists());
+        assert!(dir.join(".gitlab-ci.yml").exists());
+        assert!(dir.join("sonar-project.properties").exists());
+        assert!(dir.join("CONTRIBUTING.md").exists());
+        assert!(dir.join("commitlint.config.js").exists());
         std::fs::remove_dir_all(&dir).ok();
     }
 
