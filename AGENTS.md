@@ -2455,6 +2455,46 @@ grupos estáveis): `--type`/`--server`/`--share`/`--username`/`--password`/`--pa
 `--read-only`/`--device`/`--options` deixam de existir; um script que ainda os use falha com
 `unrecognized argument`, nunca em silêncio.
 
+## `delonix init -t <template> --up` corria um `container run` à parte do manifesto (2026-09-13)
+
+Pedido do utilizador: `init -t` deve nascer já a funcionar. Ao investigar o
+`--up` (que já existia — build + arranque + espera por saúde + imprime a
+URL), encontrou-se um bug real: `build_and_up` (`cmd/scaffold.rs`) construía
+a imagem e a seguir arrancava com um `container run --name X -d -p
+porta:porta tag` escrito à mão, **sem olhar para o `delonix-manifest.yaml`
+que acabara de gerar**. Isso ignorava rede, volumes, containers extra, e até
+campos do PRÓPRIO container — `memory`/`cpus`/`restart`/`readOnly`/`tmpfs`,
+todos declarados no manifesto e nenhum chegava ao container via `--up`.
+
+**O template `odoo` já dizia isto no seu próprio comentário**: "Odoo will not
+boot without the database, so `stack apply` (not a lone `container run`) is
+the way in" — `--up` violava exactamente essa frase à primeira utilização (o
+container `odoo` web arrancaria sozinho, sem rede nem base de dados, e nunca
+ficaria saudável).
+
+**Corrigido**: `build_and_up` passa a chamar `delonix stack apply` — o MESMO
+comando que o texto de "next steps" (sem `--up`) já manda o utilizador correr
+à mão. Não há duas formas de trazer o projecto a viver, só uma, e agora as
+duas (`--up` e o caminho manual) passam pela mesma. Validado ao vivo (template
+`node`): antes do fix `container inspect` não mostrava `readOnly`/`tmpfs`
+nenhum quando gerados via `--up`; depois, `memory_max: 512M`, `cpus: 1.0`,
+`restart_policy: always`, `read_only: true`, `tmpfs: ["/tmp"]` — todos os
+campos do manifesto, confirmados no registo real do container.
+
+**Achado à parte, não corrigido aqui**: publicar uma porta de host já ocupada
+por um processo QUE NÃO é outro container delonix (medido com um processo do
+sistema a escutar em `:8080`) faz `container run -p 8080:8080` **pendurar**
+15s+ em vez de recusar rápido com o erro "porta ocupada" que o motor já dá
+para outros conflitos. Reproduzido tanto via `container run` cru como via
+`stack apply` (o mesmo `cmd_run` por baixo dos dois) — não é uma regressão
+desta correcção, é um bug pré-existente no caminho de publish do slirp.
+Sinalizado para investigação própria.
+
+Gate novo em `scripts/e2e.sh` (secção "stack init --template --up"): gera o
+template `httpd` (o mais rápido, sem gestor de pacotes), corre `--up` com
+tecto de 180s, e confirma `memory_max` do manifesto no container real — salta
+com razão clara se o ambiente não completar (rede lenta, ou o achado acima).
+
 ## Falhas silenciosas corrigidas (fail-closed) + 1 documentada
 
 Da análise Docker/Podman (`docs/COMPARACAO-DOCKER-PODMAN.md`), quatro casos em
