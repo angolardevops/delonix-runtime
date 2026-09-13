@@ -2531,6 +2531,55 @@ continua intacto (regressão), a adopção só escreve o glue e preserva o
 código real, e uma segunda passagem sobre o próprio output não recria o
 código de exemplo.
 
+## CI/CD, SonarQube e gitflow/semver prontos nos 7 templates com código real (2026-09-13)
+
+Pedido do utilizador: todo projecto de `init` deve ter um fluxo de CI/CD
+pronto para GitHub e GitLab, config de SonarQube, gitflow, semver e commits
+semânticos já configurados. Medido antes de escrever um único YAML: os
+`package.json`/`pyproject.toml`/`composer.json` REAIS de cada template, para
+o CI só invocar comandos que existem de facto — nunca inventados.
+
+**Âmbito, decidido com o utilizador**: só os 7 templates com código de
+aplicação e testes próprios (`go`/`python`/`django`/`node`/`nestjs`/
+`nextjs`/`laravel`). `httpd`/`nginx`/`haproxy`/`odoo` ficam de fora — não têm
+código de utilizador nem testes para um pipeline exercitar, e um workflow
+genérico aí seria decorativo.
+
+**O que cada template ganhou**: `.github/workflows/ci.yml` + `.gitlab-ci.yml`
+(o comando exacto que o próprio `README.md` já documenta para correr
+localmente — `go build/vet/test`; `uv sync` + `ruff check` + `pytest`;
+`manage.py check` em vez de `pytest` no `django`, que não tem testes ainda;
+`pnpm build`+`test` no `node`; só `pnpm build` em `nestjs`/`nextjs`, que não
+têm script de `test`/`lint` — invocá-los teria falhado com "missing script";
+`composer install`+`.env`+`sqlite`+`artisan test` no `laravel`, replicando
+exactamente os passos do README), `sonar-project.properties` (sources/tests
+reais por linguagem — o `laravel` aponta só a `routes,bootstrap,public`
+porque este scaffold não tem `app/`/`config/` ainda), `CONTRIBUTING.md`
+(modelo de branches git-flow — `main`/`develop`/`feature`/`release`/
+`hotfix` — sem exigir o CLI `git-flow` instalado, mais Conventional Commits
+e SemVer como documentação), e `commitlint.config.js` só nos três templates
+JS (`node`/`nestjs`/`nextjs`, onde o ecossistema já é `npm`/`pnpm` — nos
+outros 4 seria uma dependência Node.js estranha a um projecto Go/Python/PHP).
+
+**Decisão explícita, confirmada com o utilizador**: nada assume ferramentas
+externas instaladas. `git-flow`/`semantic-release`/`@commitlint/*` NÃO são
+chamados nem verificados — só documentados/config prontos, para o utilizador
+instalar quando decidir usá-los. Um hook `commit-msg` que validasse sem
+dependência nenhuma foi considerado e recusado (âmbito maior do que pedido).
+
+`ADOPT_FILES` cresce de 3 para 8 entradas: o CI/CD/SonarQube/CONTRIBUTING/
+commitlint entram TAMBÉM ao adoptar um projecto existente (Sprint 8, acima),
+ao contrário do Delonixfile — descrevem só comandos da linguagem já lidos do
+`package.json` real, nunca um caminho específico da demo, por isso não têm o
+mesmo risco de descasarem da estrutura real que levou o Delonixfile a ficar
+de fora.
+
+Validado ao vivo: os 7 templates gerados e o `.github/workflows/ci.yml`/
+`.gitlab-ci.yml` de cada um confirmados com `yaml.safe_load` (todos válidos);
+o modo de adopção confirmado a escrever os 8 ficheiros de glue mantendo o
+código real intocado. 2 testes novos em `scaffold.rs` (CI/CD entra no
+scaffold vazio E na adopção).
+
 ## Falhas silenciosas corrigidas (fail-closed) + 1 documentada
 
 Da análise Docker/Podman (`docs/COMPARACAO-DOCKER-PODMAN.md`), quatro casos em

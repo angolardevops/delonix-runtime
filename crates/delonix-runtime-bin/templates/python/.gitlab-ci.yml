@@ -1,0 +1,13 @@
+image: python:3.11-slim
+
+stages:
+  - test
+
+test:
+  stage: test
+  before_script:
+    - pip install uv
+  script:
+    - uv sync
+    - uv run ruff check .
+    - uv run pytest

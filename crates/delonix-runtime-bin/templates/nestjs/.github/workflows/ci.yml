@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: corepack enable
+      - run: pnpm install
+      # No `test`/`lint` script ships in this scaffold yet — `build` (the Nest
+      # compiler) is the real check available today. Add `pnpm test` here once
+      # you add tests (`@nestjs/testing` + Jest is the framework's own default).
+      - run: pnpm build
