@@ -872,8 +872,10 @@ mudar o PID** e o caminho declarativo nunca lhe chamou — 5.ª ocorrência do p
   ÚLTIMO lugar. `destroy` usa a ordem INVERSA de `KINDS`, **derivada** e não escrita 2.ª vez.
 - **`--detailed-exitcode`** (0/2/1) — contrato do `terraform plan`, para um gate de deriva em CI.
 - **Âmbito: 12 dos 13 Kinds convergem** (`CONVERGING_KINDS`) — Network/NetworkRoute/Volume/
-  ShareVolume/Image/Vm/Container/Pod/FirewallPolicy/HTTPRoute/Ingress/Tunnel. **Esta linha já
-  esteve errada duas vezes** (dizia 8, depois 11 de 12 quando o `KINDS` já tinha 13) — a lista
+  ShareVolume/Image/VirtualMachine/Container/Pod/NetworkPolicy/HTTPRoute/Ingress/Gateway. **Esta
+  linha já esteve errada duas vezes** (dizia 8, depois 11 de 12 quando o `KINDS` já tinha 13, e
+  depois usou os nomes `Vm`/`FirewallPolicy`/`Tunnel` que a v0.64.0 tornou aliases — ver "Os Kinds
+  ganham grupos e nomes definitivos" abaixo) — a lista
   autoritativa é a constante, e `stack plan --fields` imprime-a.
   **Só o `Secret` fica** «garante presente», e por uma razão que não é falta de atenção: o estado
   são valores cifrados, e um plano não os decifra para comparar. O plano marca-o `!` — **nunca o
@@ -1040,7 +1042,130 @@ duas correcções revertidas uma de cada vez: sem `container::converge` falha em
 sem convergir a memória (64M)»; sem `refuse_unallowed` falha em «a recusa mexeu no container» — o
 apply destrói-o para o recriar com uma imagem que não existe, e deixa-o sem PID.
 
-## Manifesto/apply (`delonix-manifest.yaml`)
+## Os Kinds ganham grupos e nomes definitivos — `Gateway`, `VirtualMachine`, `KubernetesCluster` (v0.64.0, ADR-0020)
+
+Esta secção estava em falta neste ficheiro — encontrada a auditar `cmd/kinds.rs` e a notar que
+`Gateway`, `KubernetesCluster` e o nome canónico `VirtualMachine` não apareciam em lado nenhum do
+AGENTS.md, apesar de o resto do ficheiro documentar com o mesmo detalhe renomeações muito mais
+pequenas (uma única flag). Reconstruído por `git log -p`/`git show` de
+`crates/delonix-runtime-bin/src/cmd/kinds.rs` e `cmd/manifest.rs`, contra `docs/releases/v0.64.0.md`
+(o registo público já escrito) e confirmado ao vivo — não é hipótese, é o que o binário desta
+sessão (`93ec5842`, v3.1.0, construído com `CARGO_TARGET_DIR` isolado) responde.
+
+**Não é código morto nem trabalho de outra sessão por terminar.** As três entradas fazem parte de
+UM commit fechado e testado (`0b0a6ba3`, #127, 2026-08-27, squash de duas sessões de trabalho —
+`38c4e28d` mediu o custo com a primeira renomeação antes de o multiplicar, `10b889cd` fez as
+restantes três), com release note própria (`docs/releases/v0.64.0.md`) e um seguimento (#166,
+2026-08-29) que corrigiu uma regressão real que ESTA mudança deixou passar. Estão em produção desde
+a v0.64.0; a v3.1.0 de hoje é a mesma tabela.
+
+**O que mudou — grupos por `apiVersion`, e quatro renomeações com alias silencioso.** Os grupos
+abaixo são o `delonix api-resources` de HOJE (`93ec5842`, v3.1.0) e não o instantâneo do
+`docs/releases/v0.64.0.md` — `Storage`/`ShareVolume` fundiram-se em `Volume` e `Egress` fundiu-se na
+`NetworkPolicy` num commit do MESMO dia (`e3e3c272`, #128, já coberto acima em "Fusões de Kinds"),
+e `Service`/`NetworkAccessRule` chegaram depois (secções próprias mais abaixo):
+
+```
+core.delonix.io/v1alpha1             Secret · Stack
+compute.delonix.io/v1alpha1          Pod · VirtualMachine · Container · Workload
+networking.delonix.io/v1alpha1       Network · NetworkRoute · NetworkPolicy · NetworkAccessRule · Service · Dependency
+gateway.delonix.io/v1alpha1          Gateway · HTTPRoute · Ingress
+storage.delonix.io/v1alpha1          Volume
+artifact.delonix.io/v1alpha1         Image · App
+infrastructure.delonix.io/v1alpha1   KubernetesCluster
+```
+
+| antes | agora | módulo que a serve |
+|---|---|---|
+| `Vm` | `VirtualMachine` | `cmd/vm.rs` |
+| `FirewallPolicy` | `NetworkPolicy` | `cmd/firewall.rs` |
+| `Tunnel` | `Gateway` | `cmd/tunnel.rs` (o ficheiro manteve o nome antigo; o Kind não) |
+| `Cluster` | `KubernetesCluster` | `cmd/cluster.rs` |
+
+Medido antes de mexer, e o número decidiu o desenho: **284 sítios** do NOME de um Kind eram literais
+de string repetidos em código (a 1.ª estimativa, por regex, dizia 106 — errou por quase 3×, e só o
+compilador com os testes deu o número certo, em 4 passagens porque as 3 primeiras ficaram
+incompletas: padrões `"X" | k::Y =>` só apanhavam a alternativa colada ao `=>`, os DESTINOS de uma
+redução como `Form::Sunset(POD)` são nomes de Kind como quaisquer outros, e uma constante
+`#[cfg(test)]` a meio do `manifest.rs` moveu a fronteira "é teste" e deixou 53 sítios depois dela por
+migrar). Ficaram constantes em `cmd/kinds.rs` (`pub(crate) const VM/GATEWAY/CLUSTER/…`, doc-comment
+no topo do ficheiro) e uma tabela `KIND_ALIASES` em `cmd/manifest.rs` — ver "IaC nativo" acima para a
+mesma história do lado dos FACTOS de um Kind, que esta reestruturação fecha do lado do NOME.
+
+**Alias silencioso, não depreciação** — a distinção é a mesma que o resto do ficheiro já usa para
+`ShareVolume`/`Storage`/`Egress`: uma renomeação não muda o que o documento SIGNIFICA, portanto não
+há nada para o autor migrar, e avisar treinava as pessoas a ignorar avisos. Uma FUSÃO
+(`Egress`→`NetworkPolicy`) continua a avisar, porque aí a semântica mudou. `KIND_ALIASES` é
+case-insensitive (`vm`/`VM`/`Vm`/`VirtualMachine` resolvem todos ao mesmo), e o alias vale em TODO o
+lado — carregador, `explain`, `stack apply --replace` — não só no `load`; a v0.64.0 corrigiu um bug
+concreto em que `explain Cluster` recusava um nome que o próprio manifesto já aceitava.
+
+**`kind: Container` foi ANUNCIADO, não reescrito — e isto corrigiu o texto inicial do próprio
+ADR-0020** (não o parágrafo "Fusões de Kinds (18 → 15)" acima, que já estava certo — só usava a
+palavra genérica "depreciação" para o que é agora um mecanismo com nome próprio). O `docs/adr/
+0020-cli-restructuring.md` dizia, na primeira versão, que `Container` baixaria para um `Pod` de um
+único elemento, lido directamente do §3.3 da especificação, sem confrontar o que este repo já tinha
+medido. Está errado e o código já sabia porquê: um `Pod` constrói SEMPRE uma netns partilhada com os
+membros a entrar por re-exec `--pod`, e baixar um `Container` declarativo dava-lhe um holder de
+netns extra e um caminho de rede diferente — não é um degrau de grafia, é mudar a FORMA de execução
+em silêncio, de manifestos que já correm. Daí uma forma nova em `Form`, `Sunset(&'static str)`:
+sobrevive ao `load`, mantém o `apply` próprio, nomeia o sucessor — distinta de `Sugar`/`Compat`, que
+SÃO reescritos. O aviso sai UMA vez por load com a contagem, não um por documento (um manifesto com
+vinte containers ficaria afogado). A variante `Form::Deprecated` que este mecanismo substituiu foi
+depois REMOVIDA do enum por inteiro, quando os últimos três Kinds que a usavam deixaram de precisar
+dela — uma variante sem construtor é peso morto que o `-D warnings` deste repo não deixa ficar.
+
+**Confirmado ao vivo nesta sessão**, binário construído do `HEAD` de `origin/main` (`93ec5842`):
+
+```
+$ delonix stack plan --fields   # (tabela "All Kinds, by area of action", cauda)
+VirtualMachine      compute        primary                                yes            registry
+Container           compute        sunset → Pod                           yes            registry
+Gateway              net-exposure   primary                                -              registry
+KubernetesCluster   composition    primary                                -              not observable
+
+$ delonix api-resources
+virtualmachines      vm            compute.delonix.io/v1alpha1          VirtualMachine      true   compute   primary
+gateways             gw            gateway.delonix.io/v1alpha1          Gateway             false  net-exposure  primary
+kubernetesclusters   kc,clusters   infrastructure.delonix.io/v1alpha1   KubernetesCluster   false  composition   primary
+```
+
+`Gateway` está totalmente ligada: `in_stack: true`, `converges: true`, `teardown: false` (razão
+escrita — "a tunnel has no labels to stamp ownership on"), `Presence::Registry`; o
+`examples/tunnel.yaml` publicado já usa `kind: Gateway` (com o comentário a explicar a troca) e
+valida (`delonix manifest validate -f examples/tunnel.yaml` → OK). `KubernetesCluster` fica
+DELIBERADAMENTE fora do `KINDS`/`stack apply` — `in_stack: false` — por ser um procedimento remoto
+por SSH sobre hosts que já existem, não um recurso deste nó; é a mesma feature já documentada em
+"Cluster kubeadm" acima, só que essa secção ainda escrevia `kind: Cluster` antes desta correcção.
+
+**Testado, não só compilado**: `cargo test` (release, `CARGO_TARGET_DIR` isolado desta sessão) —
+`cmd::kinds::tests::*` (8 testes, incl. `nenhum_kind_aparece_duas_vezes`,
+`o_destino_de_uma_reducao_existe` — que apanharia um `Form::Sunset("Pod")` a apontar para um Kind
+inexistente), `cmd::manifest::tests::a_renamed_kind_keeps_answering_to_its_old_name` (as quatro
+grafias antigas resolvem, com as duas casings extremas) e as 39 `cmd::cluster::tests::*` —
+**48/48 passaram**. Todos os `examples/*.yaml` validam à excepção de
+`nas-vm-cloud-config.yaml` (falha pré-existente e sem relação — é um fragmento de cloud-init sem
+`apiVersion`, não um manifesto; não é regressão desta investigação).
+
+**Seguimento real, não hipotético: `delonix get clusters` chegou partido à v1.0.0** (#166, `1cb7692c`,
+2026-08-29). `KindFacts.plural` de `KubernetesCluster` é `kubernetesclusters` — a pluralização
+literal que todos os outros Kinds seguem — mas o manual embutido e as notas de migração da v0.69.0
+prometiam exactamente `get clusters`/`delete clusters` como substituto do `cluster ls`/`cluster
+delete` removidos. Reportado ao vivo contra o binário publicado: `delonix get clusters` respondia
+"no such resource kind 'clusters'". Corrigido registando `"clusters"` como SHORTNAME (mantendo
+`kubernetesclusters` como plural canónico, para não quebrar a promessa do ADR-0005 de que um Kind
+renomeado continua a responder ao nome antigo) — confirmado ao vivo nesta sessão (`delonix get
+clusters` lista, em vez de recusar, um cluster `kind` local já em execução neste host — não é um
+fixture criado para este teste, é estado real deixado por outra sessão). A mesma investigação
+encontrou e corrigiu dois checks obsoletos em `scripts/e2e.sh`/`scripts/install.sh` (`cluster ls`,
+extinto desde antes da B7; `completion bash`, extinto desde o `completion shell <shell>` da
+v0.67.0 — o instalador registava em silêncio um ficheiro de completação vazio em toda instalação
+nova).
+
+**O que fica por corrigir, fora do âmbito desta secção**: `docs/cli-stability.md:281-282` ainda lista
+`Vm`/`Cluster`/`Tunnel` como os nomes dos Kinds "ainda não têm X" (são aliases válidos, mas já não são
+o nome canónico); é a mesma classe de deriva que esta secção fecha aqui, só que noutro ficheiro, e
+não foi tocada nesta passagem para manter o âmbito no que a tarefa pediu.
 
 Manifesto declarativo multi-documento, ao estilo Kubernetes (`apiVersion: delonix.io/v1` /
 `kind` / `metadata.name` / `spec`), para os 5 Kinds com grupo de CLI: `Network`/`Volume`/
@@ -1785,7 +1910,8 @@ fala via `--container-runtime-endpoint`, substituindo containerd/CRI-O.
 
 ## Cluster kubeadm (`delonix cluster apply`)
 
-`delonix cluster apply [-f cloud.yaml]` (`kind: Cluster`) — bootstrap `kubeadm` idempotente sobre
+`delonix cluster apply [-f cloud.yaml]` (`kind: KubernetesCluster`, `Cluster` continua a resolver
+como alias — ver "Os Kinds ganham grupos e nomes definitivos" abaixo) — bootstrap `kubeadm` idempotente sobre
 SSH em hosts JÁ VIVOS e alcançáveis (não cria VMs — isso é `delonix vm create`, acima). Módulos:
 `cmd/remote.rs` (shell-out a `ssh`/`scp` do sistema, `sudo -n` para os comandos remotos — o
 utilizador SSH tem de já ter sudo NOPASSWD), `cmd/k8s_recipes.rs` (catálogo PARTILHADO com
