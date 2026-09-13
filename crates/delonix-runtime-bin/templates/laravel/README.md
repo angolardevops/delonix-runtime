@@ -34,3 +34,11 @@ The image bakes an `APP_KEY` and the SQLite DB. Config is **not** cached at
 build (so runtime env overrides still take effect). For real secrets in
 production, set `APP_KEY` (and DB credentials) via `delonix secret` and add the
 corresponding `env` entries to `delonix-manifest.yaml`.
+
+## Contributing
+
+CI (`.github/workflows/ci.yml` for GitHub, `.gitlab-ci.yml` for GitLab) runs
+`php artisan test` (SQLite, same as above) on every push and PR.
+`sonar-project.properties` is ready for a SonarQube/SonarCloud scan. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the branching model (git-flow), commit
+message format (Conventional Commits) and versioning (SemVer).

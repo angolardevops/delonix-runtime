@@ -1,0 +1,17 @@
+image: php:8.3-cli
+
+stages:
+  - test
+
+test:
+  stage: test
+  before_script:
+    - apt-get update -yqq && apt-get install -yqq git unzip libsqlite3-dev
+    - docker-php-ext-install pdo_sqlite
+    - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+  script:
+    - composer install --no-interaction --prefer-dist
+    - cp .env.example .env
+    - php artisan key:generate
+    - touch database/database.sqlite
+    - php artisan test

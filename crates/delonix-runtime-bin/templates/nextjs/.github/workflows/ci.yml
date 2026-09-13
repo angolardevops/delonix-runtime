@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: corepack enable
+      - run: pnpm install
+      # No `test`/`lint` script ships in this scaffold yet — `build` (the
+      # Next.js production build, which type-checks by default) is the real
+      # check available today. Add `pnpm test` once you add a test runner.
+      - run: pnpm build

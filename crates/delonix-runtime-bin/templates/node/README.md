@@ -37,3 +37,12 @@ delonix build -t __NAME__:dev .     # build the image from the Delonixfile
 delonix stack apply                 # bring it up (kind: Container)
 curl localhost:__PORT__/api/v1/health/live
 ```
+
+## Contributing
+
+CI (`.github/workflows/ci.yml` for GitHub, `.gitlab-ci.yml` for GitLab) runs
+`pnpm build`/`pnpm test` on every push and PR. `sonar-project.properties` is
+ready for a SonarQube/SonarCloud scan, and `commitlint.config.js` for
+Conventional Commits (once you `pnpm add -D @commitlint/cli @commitlint/
+config-conventional`). See [CONTRIBUTING.md](CONTRIBUTING.md) for the
+branching model (git-flow) and versioning (SemVer).

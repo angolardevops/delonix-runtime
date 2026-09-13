@@ -19,3 +19,11 @@ delonix build -t __NAME__:dev .
 delonix stack apply
 curl localhost:__PORT__/api/v1/health/live
 ```
+
+## Contributing
+
+CI (`.github/workflows/ci.yml` for GitHub, `.gitlab-ci.yml` for GitLab) runs
+`ruff check`/`manage.py check` via `uv` on every push and PR. `sonar-project.
+properties` is ready for a SonarQube/SonarCloud scan. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the branching model (git-flow), commit
+message format (Conventional Commits) and versioning (SemVer).
