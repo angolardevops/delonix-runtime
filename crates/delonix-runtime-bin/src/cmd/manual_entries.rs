@@ -955,6 +955,7 @@ pub static ENTRIES: &[Entry] = &[
             ("a directory other than the current one", "delonix init ./myapp"),
             ("override the guess when the detection picked the broader rule", "delonix init -t go"),
             ("regenerate on top of files that already exist", "delonix init --force"),
+            ("adopt an EXISTING project — only Delonixfile/manifest/dockerignore are written, the project's own code is untouched", "delonix init ./my-existing-app"),
         ],
         see_also: &["stack init", "vm init", "stack apply", "compose up"],
     },
