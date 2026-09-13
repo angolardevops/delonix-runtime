@@ -82,6 +82,12 @@ enum Cmd {
     ///
     /// Detects and dispatches to `stack init`/`vm init` with the matching
     /// template, saying what it detected and why.
+    ///
+    /// ADOPTS an existing, non-empty project instead of scaffolding: only
+    /// `Delonixfile`/`delonix-manifest.yaml`/`.dockerignore` are written, the
+    /// project's own code is never touched — a warning follows, since the
+    /// Delonixfile still assumes the template's own file layout and needs a
+    /// look before `build`.
     Init {
         /// Project directory (default: the current one).
         #[arg(value_hint = clap::ValueHint::DirPath)]

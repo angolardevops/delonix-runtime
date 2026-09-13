@@ -70,6 +70,11 @@ pub enum StackCmd {
     ///
     /// Files ALREADY FILLED IN (images included), ready to use without
     /// editing anything.
+    ///
+    /// ADOPTS an existing, non-empty project instead: only
+    /// `Delonixfile`/`delonix-manifest.yaml`/`.dockerignore` are written, the
+    /// project's own code is never touched — a warning follows, since the
+    /// Delonixfile still assumes the template's own file layout.
     Init {
         /// Project directory (default: the current one).
         #[arg(value_hint = clap::ValueHint::DirPath, default_value = ".")]
