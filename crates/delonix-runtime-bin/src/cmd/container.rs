@@ -3106,7 +3106,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // itself isn't in the store yet) — checking here would give a false conflict.
     if std::env::var("DELONIX_REEXEC_ID").is_err() {
         for spec in &ports {
-            let (hp, cp, _) = delonix_net::parse_publish(spec)?;
+            let (addr, hp, cp, _) = delonix_net::parse_publish_addr(spec)?;
             if let Some(owner) = port_owner(store, &hp)? {
                 // Structured like the `cluster apply` recipes: the fact first,
                 // then the possible ways out as ready-to-copy commands — whoever
@@ -3126,6 +3126,20 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
                         ("cp", cp.as_str()),
                     ],
                 )));
+            }
+            // `port_owner` only knows about OUR containers — a host process this
+            // engine never heard of (another user's server, a stray listener) is
+            // invisible to it and, on top of that, sails through the privilege
+            // probe above too (`can_bind_host_port` deliberately answers `true`
+            // for `EADDRINUSE` — see its doc comment — precisely so as not to
+            // steal THIS diagnosis). Without this check the conflict only
+            // surfaced deep inside the slirp handshake, minutes later once the
+            // image had already been pulled and a container already created for
+            // it — measured: `delonix container run -d -p 8080:8080 <image>`
+            // against a host process already on :8080 took 15s+ to fail, with the
+            // raw `add_hostfwd failed` JSON as the only clue.
+            if let Some(e) = host_port_conflict_error(&hp, &cp, addr.as_deref()) {
+                return Err(e);
             }
         }
     }
@@ -4983,6 +4997,36 @@ pub(crate) fn port_owner(store: &Store, host_port: &str) -> Result<Option<String
         }
     }
     Ok(None)
+}
+
+/// Host-level "is this port already held by something delonix doesn't track"
+/// check — factored out of `cmd_run`'s preflight loop so it's unit-testable on
+/// its own, without spinning up a whole container. `None` = free to bind (as far
+/// as a busy-port conflict goes; privilege and `port_owner` are separate checks
+/// upstream of this one). Structured like the sibling errors in this preflight:
+/// the fact first, then ready-to-copy ways out.
+fn host_port_conflict_error(hp: &str, cp: &str, addr: Option<&str>) -> Option<Error> {
+    let p = hp.parse::<u16>().ok()?;
+    let bind = delonix_net::publish_bind_addr(addr);
+    if !delonix_net::host_port_busy(&bind, p) {
+        return None;
+    }
+    let who =
+        delonix_net::host_port_owner_process(p).unwrap_or_else(|| "another process".to_string());
+    let alt = p as u32 + 10000;
+    Some(Error::Invalid(super::po::tf(
+        "port {hp} is already in use on the host by {who} — not a delonix container\n\
+         \n\
+         fix it with ONE of these:\n\
+         \x20 delonix container run -p {alt}:{cp} ...    # publish on another port\n\
+         \x20 ss -tlnp | grep :{hp}    # or find and stop whoever holds it",
+        &[
+            ("hp", hp),
+            ("who", &who),
+            ("alt", &alt.to_string()),
+            ("cp", cp),
+        ],
+    )))
 }
 
 /// Publish a port; if it fails because the port is held by an **orphan process**
@@ -7760,6 +7804,38 @@ mod tests {
         assert_eq!(
             super::mount_to_spec(&deep, root),
             "/var/lib/delonix/volumes/dados/_data/sub:/x"
+        );
+    }
+
+    /// REGRESSION: a host port held by a process this engine has never heard of
+    /// (not a delonix container, so `port_owner` says `None`; not a privilege
+    /// question either, so `can_bind_host_port` says `true`) used to sail
+    /// through `cmd_run`'s whole preflight silently and only blow up deep inside
+    /// the slirp handshake — measured as a 15s+ hang on `delonix container run -d
+    /// -p 8080:8080 <image>` against a host process already listening on :8080.
+    /// `host_port_conflict_error` is the check that closes that gap: it must
+    /// fire the instant the port is taken, and clear the instant it's freed.
+    #[test]
+    fn host_port_conflict_error_pega_processo_alheio_e_liberta_quando_o_porto_fica_livre() {
+        use std::net::TcpListener;
+        let held = TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port");
+        let port = held.local_addr().unwrap().port();
+        let hp = port.to_string();
+
+        let err = super::host_port_conflict_error(&hp, "80", None)
+            .expect("a real listener holds this port right now");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("already in use on the host") && msg.contains(&hp),
+            "expected a busy-port diagnosis naming port {hp}, got: {msg}"
+        );
+        // Ready-to-copy alternative, same convention as the sibling errors above.
+        assert!(msg.contains(&(port as u32 + 10000).to_string()), "{msg}");
+
+        drop(held);
+        assert!(
+            super::host_port_conflict_error(&hp, "80", None).is_none(),
+            "a freed port must not still be reported as busy"
         );
     }
 
