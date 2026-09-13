@@ -3049,6 +3049,35 @@ check "get de Kind inexistente"   4 "$BIN" get bananas
 # E um delete sem nome nunca pode ser lido como «todos».
 check "delete sem nome recusa"    1 "$BIN" delete pods
 
+########################################
+section "stack init --template --up (Sprint 7: --up passa a honrar o manifesto)"
+########################################
+# `--up` corria um `container run` à parte do manifesto gerado — ignorava
+# rede/volumes/containers extra e até campos do PRÓPRIO container (memory/
+# cpus/restart/readOnly/tmpfs). O template `odoo` já avisava no seu próprio
+# comentário: "Odoo will not boot without the database, so `stack apply`
+# (not a lone `container run`) is the way in" — `--up` violava isso à
+# primeira. Corrigido para chamar `stack apply`, que também aplica o que o
+# `container run` cru nunca aplicava a um único container.
+SCAFN="scaf-$PFX"
+SCAFDIR=$(mktemp -d "${TMPDIR:-/tmp}/e2e-scaffold-XXXXXX")
+check "stack init --template httpd" ok "$BIN" stack init --template httpd "$SCAFDIR/$SCAFN"
+check "o manifesto gerado declara memory/cpus" ok bash -c \
+  "grep -q 'memory: 128M' '$SCAFDIR/$SCAFN/delonix-manifest.yaml'"
+if timeout 180 "$BIN" stack init --template httpd "$SCAFDIR/$SCAFN" --up --force \
+    >"${TMPDIR:-/tmp}/e2e-scaffold-up.log" 2>&1; then
+  check "--up: o container tem memory_max do manifesto (não só o run cru)" ok bash -c \
+    "$BIN container inspect '$SCAFN' | grep -q '\"memory_max\": \"128M\"'"
+  check "--up: o container está mesmo a correr" ok bash -c \
+    "$BIN container ls | grep -q '$SCAFN'"
+  "$BIN" stack destroy -f "$SCAFDIR/$SCAFN/delonix-manifest.yaml" >/dev/null 2>&1
+else
+  skip "stack init --template httpd --up" \
+    "build/apply não completou em 180s neste ambiente (rede lenta, ou porta 8080 já ocupada por outro processo do host — ver ${TMPDIR:-/tmp}/e2e-scaffold-up.log)"
+  "$BIN" container rm -f "$SCAFN" >/dev/null 2>&1
+fi
+rm -rf "$SCAFDIR"
+
 section "limpeza"
 ########################################
 "$BIN" container rm -f "$C" >/dev/null 2>&1

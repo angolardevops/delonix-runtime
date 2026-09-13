@@ -275,8 +275,20 @@ fn prompt_yes(question: &str, default_yes: bool) -> bool {
     }
 }
 
-/// Builds the image, starts the container and waits until healthy — each step
-/// with animated progress (like `cluster create`). A single command until it is UP.
+/// Builds the image, applies the generated manifest and waits until healthy —
+/// each step with animated progress (like `cluster create`). A single command
+/// until it is UP.
+///
+/// Goes through `delonix stack apply` and NOT a hand-rolled `container run`:
+/// the manifest is the actual declaration (network, volumes, extra
+/// containers, `restart`/`memory`/`cpus`/`env`/`readOnly`/`tmpfs`), and a
+/// parallel fast path that only started the ONE main container booted
+/// something that did not match what `stack apply` — the command every
+/// generated README tells the user to run — would bring up. The `odoo`
+/// template is the sharpest example: its own manifest comment says "Odoo
+/// will not boot without the database, so `stack apply` (not a lone
+/// `container run`) is the way in" — the old fast path violated that on the
+/// very first `--up`.
 fn build_and_up(name: &str, dir: &Path, port: &str, health: &str) -> Result<()> {
     let exe = std::env::current_exe().map_err(|e| Error::Invalid(e.to_string()))?;
     let tag = format!("{name}:dev");
@@ -286,22 +298,8 @@ fn build_and_up(name: &str, dir: &Path, port: &str, health: &str) -> Result<()> 
     run_quiet(&exe, dir, &["build", "-t", &tag, "."])?;
     p.ok();
 
-    p.step(&format!("Starting container {name}"), "🚀");
-    let _ = run_quiet(&exe, dir, &["container", "rm", name, "-f"]);
-    run_quiet(
-        &exe,
-        dir,
-        &[
-            "container",
-            "run",
-            "--name",
-            name,
-            "-d",
-            "-p",
-            &format!("{port}:{port}"),
-            &tag,
-        ],
-    )?;
+    p.step(&format!("Applying the stack ({name})"), "🚀");
+    run_quiet(&exe, dir, &["stack", "apply"])?;
     p.ok();
 
     p.step("Waiting until healthy", "❤️ ");
@@ -310,7 +308,7 @@ fn build_and_up(name: &str, dir: &Path, port: &str, health: &str) -> Result<()> 
 
     println!("\n✨ {name} is UP → http://localhost:{port}{health}");
     println!("   logs:  delonix container logs -f {name}");
-    println!("   stop:  delonix container rm -f {name}");
+    println!("   stop:  delonix stack destroy   (tears down everything the stack owns)");
     Ok(())
 }
 
