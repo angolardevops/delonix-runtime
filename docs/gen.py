@@ -2811,6 +2811,10 @@ color:var(--muted)}
 nav.side a{display:block;padding:.28rem .55rem;border-radius:6px;color:var(--ink);font-size:.93rem}
 nav.side a:hover{background:var(--accent-soft);text-decoration:none}
 nav.side a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+nav.side h6.cat{margin:.9rem 0 .15rem;padding:0 .55rem;font-size:.7rem;letter-spacing:.03em;
+text-transform:uppercase;color:var(--muted);opacity:.75;font-weight:600}
+nav.side a.sub{padding-left:1.3rem;font-size:.85rem;color:var(--muted)}
+nav.side a.sub:hover{color:var(--ink)}
 nav.side .brand .toggles{display:flex;align-items:center;gap:.4rem;margin-left:auto}
 .theme-toggle{appearance:none;border:1px solid var(--line);background:var(--bg);color:var(--ink);
 border-radius:8px;width:30px;height:30px;flex-shrink:0;display:inline-flex;align-items:center;
@@ -2898,25 +2902,36 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 
 def sidebar(active, depth=0):
     p = "../" * depth
-    # (href, rótulo PT, rótulo EN) — as páginas ligadas continuam PT-only por
-    # agora (ver relatório de âmbito), mas o rótulo do menu já traduz.
-    items_docs = [
-        ("index.html", "Início", "Home"),
-        ("cheatsheet.html", "Cheatsheet", "Cheatsheet"),
-        ("estrutura.html", "Estrutura de recursos", "Resource structure"),
-        ("kinds.html", "Kinds e templates", "Kinds & templates"),
-        ("gitops.html", "GitOps e CI", "GitOps & CI"),
-        ("estabilidade.html", "Promessa de estabilidade", "Stability promise"),
-        ("cloud.html", "cloud-init, cloud-img e CH", "cloud-init, cloud-img & CH"),
-        ("labs.html", "Laboratórios", "Labs"),
-        ("guia-vm.html", "Guia de VMs e lab de rede", "VM & network lab guide"),
-        ("arquitectura.html", "Arquitectura", "Architecture"),
-        ("c4.html", "Modelo C4 e system design", "C4 model & system design"),
-        ("cri.html", "CRI — kubelet sem containerd", "CRI — kubelet without containerd"),
-        ("comparacao.html", "Delonix vs Docker vs Podman", "Delonix vs Docker vs Podman"),
-        ("tutorial-delonix-temp.html", "Projecto completo: Delonix Temp", "Full project: Delonix Temp"),
+    # (section PT, section EN, [(href, label PT, label EN), ...]) — the 14
+    # guides grouped by theme (Get started/Concepts/Guides/Reference), in
+    # the style of kubectl's quick-reference (Concepts/Tasks/Tutorials/
+    # Reference) instead of one flat list. Same hrefs/labels as always —
+    # pure reorganization, zero new page.
+    doc_groups = [
+        ("Começar", "Get started", [
+            ("index.html", "Início", "Home"),
+            ("cheatsheet.html", "Cheatsheet", "Cheatsheet"),
+            ("tutorial-delonix-temp.html", "Projecto completo: Delonix Temp", "Full project: Delonix Temp"),
+        ]),
+        ("Conceitos", "Concepts", [
+            ("estrutura.html", "Estrutura de recursos", "Resource structure"),
+            ("kinds.html", "Kinds e templates", "Kinds & templates"),
+            ("arquitectura.html", "Arquitectura", "Architecture"),
+            ("c4.html", "Modelo C4 e system design", "C4 model & system design"),
+            ("cri.html", "CRI — kubelet sem containerd", "CRI — kubelet without containerd"),
+        ]),
+        ("Guias", "Guides", [
+            ("gitops.html", "GitOps e CI", "GitOps & CI"),
+            ("cloud.html", "cloud-init, cloud-img e CH", "cloud-init, cloud-img & CH"),
+            ("guia-vm.html", "Guia de VMs e lab de rede", "VM & network lab guide"),
+            ("labs.html", "Laboratórios", "Labs"),
+        ]),
+        ("Referência", "Reference", [
+            ("estabilidade.html", "Promessa de estabilidade", "Stability promise"),
+            ("comparacao.html", "Delonix vs Docker vs Podman", "Delonix vs Docker vs Podman"),
+        ]),
     ]
-    items_cmd = [(f"comandos/{g}.html", GROUPS[g]["title"]) for g in GROUPS]
+
     def link_bi(href, pt, en):
         cls = ' class="on"' if href == active else ""
         return (
@@ -2924,9 +2939,42 @@ def sidebar(active, depth=0):
             f"<span class='lang-pt'>{html.escape(pt)}</span>"
             f"<span class='lang-en'>{html.escape(en)}</span></a>"
         )
-    def link(href, label):
-        cls = ' class="on"' if href == active else ""
-        return f'<a href="{p}{href}"{cls}>{html.escape(label)}</a>'
+
+    def link(href, label, sub=False):
+        if href == active:
+            cls = "on"
+        elif sub:
+            cls = "sub"
+        else:
+            cls = ""
+        cls_attr = f' class="{cls}"' if cls else ""
+        return f'<a href="{p}{href}"{cls_attr}>{html.escape(label)}</a>'
+
+    doc_html = "".join(
+        f"<h5>{bi('span', section_pt, section_en)}</h5>"
+        f"{''.join(link_bi(h, pt, en) for h, pt, en in entries)}"
+        for section_pt, section_en, entries in doc_groups
+    )
+
+    # CLI reference, categorized by the SAME `COMMAND MAP:` (9 categories) and
+    # nesting (`children_of_top_level()`) the cheatsheet already uses — not a
+    # 4th copy of the taxonomy. `cri` is the only child with no
+    # `comandos/cri.html` (documented at the `cri.html` guide instead), same
+    # fallback `cheatsheet_page()` already handles.
+    children = children_of_top_level()
+    cmd_parts = []
+    for category, members in root_command_categories():
+        cmd_parts.append(f"<h6 class='cat'>{bi('span', CATEGORY_PT.get(category, category), category)}</h6>")
+        for g in members:
+            if g in GROUPS:
+                cmd_parts.append(link(f"comandos/{g}.html", GROUPS[g]["title"]))
+            for child in children.get(g, []):
+                if child in GROUPS:
+                    cmd_parts.append(link(f"comandos/{child}.html", GROUPS[child]["title"], sub=True))
+                else:
+                    cmd_parts.append(link("cri.html", "delonix serve cri", sub=True))
+    cmd_html = "".join(cmd_parts)
+
     return f"""<nav class="side">
 <div class="brand"><span class="dot">▲</span> Delonix Engine
 <div class="toggles">
@@ -2935,10 +2983,9 @@ def sidebar(active, depth=0):
 <button class="theme-toggle" type="button" aria-label="Alternar tema claro/escuro" title="Tema claro/escuro">
 <span class="i-moon">🌙</span><span class="i-sun">☀️</span></button>
 </div></div>
-<h5>{bi('span', 'Documentação', 'Docs')}</h5>
-{''.join(link_bi(h, pt, en) for h, pt, en in items_docs)}
+{doc_html}
 <h5>{bi('span', 'Referência CLI', 'CLI reference')}</h5>
-{''.join(link(h, l) for h, l in items_cmd)}
+{cmd_html}
 <h5>{bi('span', 'Projecto', 'Project')}</h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
