@@ -1,0 +1,93 @@
+# Odoo __TEMPLATE_VERSION__ — DEV manifest: addons/ and config/odoo-dev.conf
+# are BIND-MOUNTED (not baked into the image), and odoo-dev.conf sets
+# `dev_mode = all` — Odoo's own live reload (autoreload restarts the server on
+# a .py change; qweb/xml templates are re-read from disk on every request).
+# Edit a file on the host and Odoo picks it up — no `delonix build` needed for
+# a normal addons/config edit, only for a Delonixfile or base-image change.
+#
+#     delonix build -t __NAME__:dev .              # once, or after a Delonixfile change
+#     delonix stack apply -f delonix-manifest.dev.yaml
+#
+# Shares the network/volumes/secret names with delonix-manifest.yaml on
+# purpose — this is the SAME stack run with the dev override. Don't
+# `stack apply` both manifests against the same delonix root at once.
+---
+apiVersion: delonix.io/v1
+kind: Network
+metadata:
+  name: __NAME__-net
+spec:
+  driver: bridge
+---
+apiVersion: delonix.io/v1
+kind: Volume
+metadata:
+  name: __NAME__-dbdata
+spec:
+  driver: local
+---
+apiVersion: delonix.io/v1
+kind: Volume
+metadata:
+  name: __NAME__-odoo
+spec:
+  driver: local
+---
+# Same secret/credentials as delonix-manifest.yaml — see that file for why a
+# single Secret feeds both images' own env-var names, and how to replace the
+# cleartext dev default before using this outside a laptop.
+apiVersion: delonix.io/v1
+kind: Secret
+metadata:
+  name: __NAME__-db-credentials
+spec:
+  stringData:
+    POSTGRES_USER: odoo
+    POSTGRES_PASSWORD: odoo
+    USER: odoo
+    PASSWORD: odoo
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: __NAME__-db
+  labels: { app: __NAME__, tier: db }
+spec:
+  image: postgres:16
+  restart: always
+  network: __NAME__-net
+  networkAlias: [db]
+  env:
+    vars:
+      - "POSTGRES_DB=postgres"
+    secrets:
+      - __NAME__-db-credentials
+  volumes:
+    - "__NAME__-dbdata:/var/lib/postgresql/data"
+  memory: 512M
+  cpus: "1.0"
+---
+apiVersion: delonix.io/v1
+kind: Container
+metadata:
+  name: __NAME__
+  labels: { app: __NAME__, tier: web }
+spec:
+  image: __NAME__:dev
+  restart: always
+  network: __NAME__-net
+  ports:
+    - "__PORT__:8069"
+  env:
+    vars:
+      - "HOST=db"
+    secrets:
+      - __NAME__-db-credentials
+  volumes:
+    # Bind mounts (host paths, resolved from the CWD `stack apply` runs in —
+    # run it from the project root): edit here, Odoo reloads live.
+    - "./addons:/mnt/extra-addons"
+    - "./config/odoo-dev.conf:/etc/odoo/odoo.conf"
+    - "__NAME__-odoo:/var/lib/odoo"
+  memory: 1G
+  cpus: "2.0"
