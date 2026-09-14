@@ -2662,6 +2662,18 @@ Validado ao vivo com toolchains reais (não só testes unitários): `go build`/
 install` sobre um `node -v 5.1.0` a resolver `fastify@5.12.4` (dentro do pin
 `^5.1.0`) e `pnpm add dotenv` a escrever no `package.json` normalmente.
 
+**Passagem seguinte, o ciclo completo dos quatro templates que só tinham
+sido confirmados por grep/parser** (`python`/`node`/`nextjs`/`nestjs`) — a
+mesma passagem que apanhou o bug do `laravel` acima, agora nos outros: `uv
+sync` + `ruff check` + `pytest` (default `0.115.*` e um `-v 0.116` explícito,
+os dois a resolver dentro do pin) para `python`; `pnpm install` + `pnpm test`
++ `pnpm build` para `node` (os 2 testes `node:test` passam, `tsc` sem
+erros); `pnpm install` + `pnpm build` + `pnpm start` + `curl
+/api/v1/health/live` de facto a responder para `nextjs` E `nestjs`
+(`@nestjs/{common,core,platform-express,cli}` confirmados na MESMA linha
+`10.4.x`, nunca majors misturadas). **Zero bugs novos** — ao contrário do
+`laravel`, estes quatro já faziam o que o README promete.
+
 **`composer install` real (PHP 8.3 + Composer 2.10 instalados de propósito
 para esta verificação) encontrou um bug PRÉ-EXISTENTE no template `laravel`,
 anterior a esta sessão e a esta feature**: `php artisan test` — o comando que
