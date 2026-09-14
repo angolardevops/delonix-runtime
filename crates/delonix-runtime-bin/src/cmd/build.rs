@@ -55,7 +55,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use clap::Args;
-use delonix_image::build::{parse_dockerfile_with_args, RunStep, Step};
+use delonix_image::build::{parse_dockerfile_with_args, substitute_vars, RunStep, Step};
 use delonix_image::{Image, ImageStore};
 use delonix_runtime::{self as runtime, RunSpec};
 use delonix_runtime_core::{generate_id, Container, Error, Result, Store};
@@ -462,13 +462,28 @@ fn build_one_stage(
             }
             match step {
                 Step::Env { key, val } => {
+                    // `ENV PATH=/app/.venv/bin:$PATH` is one of the most common
+                    // Dockerfile idioms there is — the `$PATH` refers to whatever
+                    // is ALREADY in `cur_env` (the base image's own env, or an
+                    // earlier `ENV` in this same file), not a literal string to
+                    // carry forward verbatim. Expanding HERE (not left to the
+                    // exec shell) matters because `sh_export` deliberately
+                    // single-quotes every value it emits (anti-injection) — a
+                    // `$PATH` inside single quotes never expands there, so
+                    // without this the value landed in the container byte for
+                    // byte. Measured live: the `python` template's own `ENV
+                    // PATH=/app/.venv/bin:$PATH` dropped `/usr/local/bin` from
+                    // PATH entirely, and `RUN pip install` failed with "pip:
+                    // not found" on an image where pip was sitting right there.
+                    let val = expand_env_value(&cur_env, val);
                     let prefix = format!("{key}=");
                     cur_env.retain(|kv| !kv.starts_with(&prefix));
                     cur_env.push(format!("{key}={val}"));
                     // Doesn't touch the rootfs, but DOES affect every RUN from
                     // here on — must still shift the chain, or two Dockerfiles
                     // differing only in an ENV value would collide on the same
-                    // cache key for their next RUN.
+                    // cache key for their next RUN. Hashes the EXPANDED value:
+                    // it is what actually changed the environment.
                     chain_hash = hash_link(&chain_hash, &format!("ENV:{key}={val}"));
                 }
                 Step::Workdir(dir) => {
@@ -1151,6 +1166,23 @@ fn sh_export(kv: &str) -> String {
     }
 }
 
+/// Expands `$VAR`/`${VAR}` in an `ENV` instruction's value against the
+/// environment accumulated SO FAR (`cur_env`: the base image's own env, plus
+/// any earlier `ENV` in this same Dockerfile) — same substitution
+/// `substitute_vars` already does for `ARG`, reused here because the two
+/// problems are identical (expand now, against known values; leave anything
+/// unknown untouched). Has to happen HERE, in Rust, and not be left to the
+/// exec shell: `sh_export` single-quotes every value it emits, and `$VAR`
+/// inside single quotes never expands in `/bin/sh`.
+fn expand_env_value(cur_env: &[String], val: &str) -> String {
+    let known: HashMap<String, String> = cur_env
+        .iter()
+        .filter_map(|kv| kv.split_once('='))
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    substitute_vars(val, &known)
+}
+
 /// `<root>/build-cache/<hash>/rootfs` — the layer cache root.
 fn build_cache_dir() -> PathBuf {
     super::util::state_root().join("build-cache")
@@ -1450,10 +1482,45 @@ fn copy_dir_all(src: &Path, dst: &Path, canon_context: &Path, canon_rootfs: &Pat
 #[cfg(test)]
 mod tests {
     use super::{
-        confine_to, default_build_file, parse_build_secrets, parse_platform, safe_join, sh_export,
-        valid_secret_id,
+        confine_to, default_build_file, expand_env_value, parse_build_secrets, parse_platform,
+        safe_join, sh_export, valid_secret_id,
     };
     use std::path::Path;
+
+    /// Regression: `ENV PATH=/app/.venv/bin:$PATH` — one of the most common
+    /// Dockerfile idioms — was carried forward LITERALLY (the `$PATH` token
+    /// itself, not its value), because nothing ever expanded an `ENV`'s value
+    /// against the environment accumulated so far. Found live: the `python`
+    /// template's own Delonixfile does exactly this, and it dropped
+    /// `/usr/local/bin` from `PATH` entirely — `pip install` failed with
+    /// "pip: not found" on an image where pip was right there.
+    #[test]
+    fn expand_env_value_substitui_path_pelo_valor_da_imagem_base() {
+        let base_env = vec!["PATH=/usr/local/bin:/usr/bin:/bin".to_string()];
+        assert_eq!(
+            expand_env_value(&base_env, "/app/.venv/bin:$PATH"),
+            "/app/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+        );
+    }
+
+    /// A later `ENV` sees the value of an EARLIER `ENV` in the same
+    /// Dockerfile, not just what the base image shipped — the chain has to
+    /// keep expanding forward, not just once against the base.
+    #[test]
+    fn expand_env_value_ve_um_env_anterior_no_mesmo_ficheiro() {
+        let cur_env = vec!["APP_HOME=/app".to_string()];
+        assert_eq!(
+            expand_env_value(&cur_env, "${APP_HOME}/.venv/bin"),
+            "/app/.venv/bin"
+        );
+    }
+
+    /// A reference to a variable that was never set stays untouched — same
+    /// "leave unknown alone" rule `substitute_vars` already has for `ARG`.
+    #[test]
+    fn expand_env_value_deixa_variavel_desconhecida_intocada() {
+        assert_eq!(expand_env_value(&[], "$UNKNOWN/bin"), "$UNKNOWN/bin");
+    }
 
     #[test]
     fn valid_secret_id_aceita_charset_e_recusa_o_resto() {
