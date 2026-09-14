@@ -1447,6 +1447,9 @@ msgstr "imagem vazia"
 msgid "app templates scaffold containerized apps — use `delonix stack init --template <t>`; this command scaffolds a VM/cluster project"
 msgstr "os templates de app criam apps em containers — usa `delonix stack init --template <t>`; este comando cria um projecto de VM/cluster"
 
+msgid "-v/--template-version needs a template to apply it to — pass -t/--template"
+msgstr "-v/--template-version precisa de um template a que se aplicar — passa -t/--template"
+
 msgid "no local VM images — run `delonix image vm build` (or `pull`) first, or pass the image/disk explicitly"
 msgstr "sem imagens VM locais — corre `delonix image vm build` (ou `pull`) primeiro, ou passa a imagem/disco explicitamente"
 
@@ -10893,8 +10896,26 @@ msgstr "Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + REA
 msgid "adopt an EXISTING project — only the Delonix/CI glue is written, the project's own code is untouched"
 msgstr "adopta um projecto EXISTENTE — só o Delonix/CI é escrito, o código do projecto fica intocado"
 
-msgid "pick the template's version (currently only `odoo`)"
-msgstr "escolhe a versão do template (por agora só `odoo`)"
+msgid "pick the template's version — an image tag for `odoo`"
+msgstr "escolhe a versão do template — uma tag de imagem para o `odoo`"
 
-msgid "Version parameter some templates read (currently only `odoo`, e.g. `-v 18.0`) — refused with a clear error on a template that has none"
-msgstr "Parâmetro de versão que alguns templates leem (por agora só `odoo`, ex. `-v 18.0`) — recusado com erro claro num template que não tenha nenhuma"
+msgid "...or a bare major/major.minor for `django`, pinned as `==X.Y.*`"
+msgstr "...ou um major/major.minor nu para o `django`, fixado como `==X.Y.*`"
+
+msgid "...or a framework version for `laravel`/`nextjs`/`nestjs`/`node`"
+msgstr "...ou a versão da framework para `laravel`/`nextjs`/`nestjs`/`node`"
+
+msgid "...or a Go toolchain version — this template has no framework to pin"
+msgstr "...ou a versão do toolchain do Go — este template não tem framework para fixar"
+
+msgid "pin a Django project to an exact major.minor line"
+msgstr "fixa um projecto Django numa linha major.minor exacta"
+
+msgid "pin a Laravel project to a framework major"
+msgstr "fixa um projecto Laravel a um major da framework"
+
+msgid "pin the Go toolchain a template builds against"
+msgstr "fixa o toolchain do Go contra o qual um template constrói"
+
+msgid "Version parameter some templates read — an image tag, a framework version, or a toolchain version, depending on the template; the exact accepted form is documented in that template's own README. Refused with a clear error on a template that has none"
+msgstr "Parâmetro de versão que alguns templates leem — uma tag de imagem, uma versão de framework, ou uma versão de toolchain, conforme o template; a forma exacta aceite está documentada no README do próprio template. Recusado com erro claro num template que não tenha nenhuma"

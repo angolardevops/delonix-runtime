@@ -1,8 +1,9 @@
-# __NAME__
+# __NAME__ (FastAPI __TEMPLATE_VERSION__)
 
-A FastAPI service scaffolded by `delonix ... init --template python` — a complete,
-best-practices starting point: **uv**-managed, layered code, health probes, tests,
-a single-stage non-root-friendly `Delonixfile`, and a Delonix manifest.
+A FastAPI service scaffolded by `delonix init -t python -v __TEMPLATE_VERSION__`
+— pinned to `fastapi==__TEMPLATE_VERSION__.*`, a complete, best-practices
+starting point: **uv**-managed, layered code, health probes, tests, a
+single-stage non-root-friendly `Delonixfile`, and a Delonix manifest.
 
 ## Layout
 
@@ -30,6 +31,13 @@ uv add <package>                           # add a dependency
 ```
 
 Don't have uv? Install it: `curl -LsSf https://astral.sh/uv/install.sh | sh`.
+
+## Choosing a FastAPI version
+
+Regenerate with `-v <major.minor>` to pin another line, e.g.
+`delonix init -t python -v 0.116 --force .` (`--force`: `init` never
+overwrites without it). Omit `-v` and it falls back to this template's own
+default (`__TEMPLATE_VERSION__`, from `template.meta`).
 
 ## Build & deploy with Delonix
 

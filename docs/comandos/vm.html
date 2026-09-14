@@ -724,7 +724,7 @@ Options:
           Generate a complete PROJECT for a stack (e.g. `python`) with best practices, instead of the generic scaffold. `--template list` shows the available ones
 
   -v, --template-version &lt;TEMPLATE_VERSION&gt;
-          Version parameter some templates read (currently only `odoo`, e.g. `-v 18.0`) — refused with a clear error on a template that has none
+          Version parameter some templates read — an image tag, a framework version, or a toolchain version, depending on the template; the exact accepted form is documented in that template&#x27;s own README. Refused with a clear error on a template that has none
 
       --up
           After generating, build the image, start it, and wait until healthy
