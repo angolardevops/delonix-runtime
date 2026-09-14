@@ -4,7 +4,7 @@
 # Single-stage (`delonix build` is single-stage) — so the final image carries the
 # Go toolchain (~350 MB). For a slim prod image, multi-stage build to scratch/
 # distroless once delonix build supports it. The binary is static (CGO off).
-FROM golang:1.23-alpine
+FROM golang:__TEMPLATE_VERSION__-alpine
 ENV CGO_ENABLED=0
 WORKDIR /app
 COPY go.mod ./

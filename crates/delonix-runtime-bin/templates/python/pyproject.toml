@@ -1,10 +1,12 @@
 [project]
 name = "__NAME__"
 version = "0.1.0"
-description = "A FastAPI service scaffolded by `delonix ... init --template python`."
+description = "A FastAPI service scaffolded by `delonix init -t python -v __TEMPLATE_VERSION__`."
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.115",
+    # `==X.Y.*`, not `>=X.Y`: a patch release lands with a plain `uv sync`, a
+    # minor/major upgrade needs a new `-v` (see `delonix init -t python -v`).
+    "fastapi==__TEMPLATE_VERSION__.*",
     "uvicorn[standard]>=0.32",
     "pydantic-settings>=2.6",
 ]

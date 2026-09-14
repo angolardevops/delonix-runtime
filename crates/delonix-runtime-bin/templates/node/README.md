@@ -1,9 +1,10 @@
-# __NAME__
+# __NAME__ (Fastify __TEMPLATE_VERSION__)
 
-A Fastify + TypeScript service scaffolded by `delonix ... init --template node` —
-a complete, best-practices starting point: **pnpm**-managed, ESM + strict TS,
-health probes, tests (node:test via tsx), a single-stage `Delonixfile`, and a
-Delonix manifest.
+A Fastify + TypeScript service scaffolded by
+`delonix init -t node -v __TEMPLATE_VERSION__` — pinned to
+`fastify: ^__TEMPLATE_VERSION__`, a complete, best-practices starting point:
+**pnpm**-managed, ESM + strict TS, health probes, tests (node:test via tsx),
+a single-stage `Delonixfile`, and a Delonix manifest.
 
 ## Layout
 
@@ -28,7 +29,15 @@ pnpm dev                 # tsx watch (hot reload)
 curl localhost:__PORT__/api/v1/health/live
 pnpm test
 pnpm build && pnpm start # production build + run
+pnpm add <package>       # add a dependency
 ```
+
+## Choosing a Fastify version
+
+Regenerate with `-v <major.minor.patch>` to pin another line, e.g.
+`delonix init -t node -v 5.1.0 --force .` (`--force`: `init` never
+overwrites without it). Omit `-v` and it falls back to this template's own
+default (`__TEMPLATE_VERSION__`, from `template.meta`).
 
 ## Build & deploy with Delonix
 

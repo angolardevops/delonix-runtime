@@ -2580,7 +2580,7 @@ o modo de adopção confirmado a escrever os 8 ficheiros de glue mantendo o
 código real intocado. 2 testes novos em `scaffold.rs` (CI/CD entra no
 scaffold vazio E na adopção).
 
-## `-v`/`--template-version` — a versão de um template escolhida por flag, não hardcoded (#296, estendido para `django`)
+## `-v`/`--template-version` — a versão de um template escolhida por flag, não hardcoded (#296, estendido aos 11 templates)
 
 O `odoo` (#296) introduziu o mecanismo, ao lado do `-v` da própria imagem:
 `template.meta` ganha `version=<default>`, o `build.rs` embebe-o em
@@ -2621,6 +2621,50 @@ init`/o `init` de topo a tinham (o #296 tocou os três, não os quatro); o
 "unexpected argument '-v'" antes desta correcção — a mesma classe de
 "feature só num dos caminhos triplicados" que este repo já catalogou várias
 vezes (`ls-remote`, `vm pull`).
+
+**Estendido aos 9 templates restantes na mesma sessão** — completa o
+conjunto: os 11 templates têm agora `-v`, cada um pinando o que faz sentido
+para o seu ecossistema, sem comando `delonix add` nenhum (decisão repetida
+em todos): `go` (sem framework — pina o TOOLCHAIN, em `go.mod` **e** no
+`FROM golang:` do Delonixfile, os dois sempre iguais); `laravel` (pina
+`laravel/framework` em `composer.json`, com o `php`/FrankenPHP
+DELIBERADAMENTE fora — são eixos independentes); `node` (pina o `fastify`,
+o único "framework" que este template tem); `nextjs` (pina o `next`);
+`nestjs` (pina os QUATRO pacotes `@nestjs/*` — core/common/platform-express/
+cli — SEMPRE JUNTOS, porque uma instalação NestJS de majors misturados não é
+uma combinação suportada); `python` (pina o `fastapi`, mesma correcção do
+`>=` sem tecto que o `django` já tinha levado); `nginx`/`httpd`/`haproxy`
+(pinam a tag da imagem, o mesmo idioma do `odoo` — nenhum tem ficheiro de
+dependências, só o `FROM`). O texto do `--help` deixou de nomear framework a
+framework (crescia a cada extensão) e passa a apontar para o README do
+próprio template, que é onde a forma exacta aceite (`5`, `5.1.0`, uma tag de
+imagem, ...) já tinha de estar documentada de qualquer forma.
+
+**Segundo gap fechado, este genuíno e novo desta extensão**: `-v` **sem**
+`-t`/`--template` nenhum (nem escolhido por menu interactivo) nunca chegava a
+`render_template`/`resolve_version` — `init()` saltava directamente para o
+scaffold genérico e a flag desaparecia, sem erro, sem aviso. Reproduzido ao
+vivo: `delonix init -v 5.2 app` (sem `-t`) gerava o scaffold genérico como se
+`-v` nunca tivesse sido escrito. Corrigido com uma guarda em `init()` logo a
+seguir a resolver `chosen` — a mesma classe de "flag que o utilizador passou
+e o motor engolia" que a razão de existir desta funcionalidade já nomeava.
+
+A lógica de resolução (`resolve_version`) foi extraída para uma função pura,
+independente das tabelas `TEMPLATES`/`TEMPLATE_META` embebidas — precisou de
+o ser: com os 11 templates a declarar `version=`, já não sobra nenhum
+template REAL "sem versão" contra o qual testar a recusa (o teste que a
+provava usava o `node` como fixture, e deixou de servir assim que o `node`
+ganhou a sua própria). `resolve_version("um-template-futuro", Some(v), "")`
+prova a recusa sem depender de nenhum template existir de todo.
+
+Validado ao vivo com toolchains reais (não só testes unitários): `go build`/
+`go vet`/`go test` sobre um projecto `-v 1.22` gerado, todos a passar; `pnpm
+install` sobre um `node -v 5.1.0` a resolver `fastify@5.12.4` (dentro do pin
+`^5.1.0`) e `pnpm add dotenv` a escrever no `package.json` normalmente; JSON/
+TOML gerados por `laravel`/`python` confirmados válidos por parser real.
+**Não validado ao vivo**: `composer install` (sem PHP/Composer neste
+sandbox) — a estrutura do `composer.json` está correcta, mas a resolução
+real de um `laravel/framework: ^11` fica por confirmar.
 
 ## Falhas silenciosas corrigidas (fail-closed) + 1 documentada
 

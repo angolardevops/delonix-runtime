@@ -1,3 +1,3 @@
 module __NAME__
 
-go 1.23
+go __TEMPLATE_VERSION__

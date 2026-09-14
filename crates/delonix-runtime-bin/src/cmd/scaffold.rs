@@ -57,12 +57,13 @@ pub(crate) struct InitOpts {
     /// `--up`: after generating, builds the image, starts the container and
     /// waits until it is healthy — all with animated progress, in a single command.
     pub up: bool,
-    /// `-v`/`--template-version`: a version parameter some templates read
-    /// (`odoo`: an image tag, e.g. `-v 18.0`; `django`: a bare major or
-    /// major.minor, e.g. `-v 5.2`, pinned as `django==5.2.*`). Refused with a
-    /// clear error on a template that has no `version=` in its
-    /// `template.meta` — a version flag that is silently ignored would be
-    /// worse than one that does not exist yet.
+    /// `-v`/`--template-version`: a version parameter some templates read —
+    /// an image tag (`odoo`), a framework version (`django`/`laravel`/
+    /// `nextjs`/`nestjs`/`node`/`python`), or a toolchain version (`go`, which
+    /// has no framework to pin) — each documents the exact accepted form in
+    /// its own README. Refused with a clear error on a template that has no
+    /// `version=` in its `template.meta` — a version flag that is silently
+    /// ignored would be worse than one that does not exist yet.
     pub template_version: Option<String>,
 }
 
@@ -80,6 +81,28 @@ fn template_meta(name: &str) -> (&'static str, &'static str, &'static str) {
         .find(|(n, _, _, _)| *n == name)
         .map(|(_, p, h, v)| (*p, *h, *v))
         .unwrap_or(("8000", "/api/v1/health/live", ""))
+}
+
+/// Resolves `-v`/`--template-version` against a template's own default. `-v`
+/// only means anything on a template that declares one (`default_version`
+/// non-empty in its `template.meta`) — refusing it elsewhere beats silently
+/// ignoring a flag the user explicitly passed. Pure and independent of the
+/// embedded `TEMPLATES`/`TEMPLATE_META` tables, so the refusal is testable
+/// without depending on a real template that happens to have no `version=`
+/// (as of this writing, every shipped template does).
+fn resolve_version<'a>(
+    tname: &str,
+    requested: Option<&'a str>,
+    default_version: &'a str,
+) -> Result<&'a str> {
+    match (requested, default_version) {
+        (Some(_), "") => Err(Error::Invalid(super::po::tf(
+            "template '{tname}' has no version parameter — drop -v/--template-version",
+            &[("tname", tname)],
+        ))),
+        (Some(v), _) => Ok(v),
+        (None, d) => Ok(d),
+    }
 }
 
 /// Derives a valid Python module from the project name: lowercase,
@@ -178,19 +201,7 @@ fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
         })?;
     let module = python_module(&o.name);
     let (port, health, default_version) = template_meta(tname);
-    // `-v` only means anything on a template that declares its own default
-    // version — refusing it elsewhere beats silently ignoring a flag the
-    // user explicitly passed.
-    let version = match (&o.template_version, default_version) {
-        (Some(_), "") => {
-            return Err(Error::Invalid(super::po::tf(
-                "template '{tname}' has no version parameter — drop -v/--template-version",
-                &[("tname", tname)],
-            )));
-        }
-        (Some(v), _) => v.as_str(),
-        (None, d) => d,
-    };
+    let version = resolve_version(tname, o.template_version.as_deref(), default_version)?;
     let adopt = dir_has_content(&o.dir);
     std::fs::create_dir_all(&o.dir)?;
     let mut n = 0;
@@ -479,6 +490,18 @@ pub(crate) fn init(target: Target, o: &InitOpts) -> Result<()> {
         None if templates_apply && stdin_is_tty() => choose_template_interactive()?,
         None => None,
     };
+    // Same non-negotiable as inside `render_template`: `-v` without a
+    // template to apply it to (no `-t`, and none picked from the interactive
+    // menu either) would otherwise be silently swallowed right here, never
+    // reaching `resolve_version` at all.
+    if chosen.is_none() && o.template_version.is_some() {
+        return Err(Error::Invalid(
+            super::po::t(
+                "-v/--template-version needs a template to apply it to — pass -t/--template",
+            )
+            .into(),
+        ));
+    }
     // A template (via flag or menu) → complete project; optionally an animated
     // build+run (`--up`, or the interactive question).
     if let Some(t) = &chosen {
@@ -1139,25 +1162,50 @@ mod tests {
     /// `-v`/`--template-version` only means anything on a template that
     /// declares its own default version (`template.meta`'s `version=`) —
     /// passing it to another one has to be a clear refusal, never a value
-    /// silently ignored.
+    /// silently ignored. Exercised against `resolve_version` directly
+    /// (not through a real template) because every shipped template now
+    /// declares a version — this proves the guard survives even so, for
+    /// whatever future template doesn't.
     #[test]
     fn v_recusa_num_template_sem_versao() {
-        let dir = scratch("v-no-version");
+        let err = resolve_version("future-template", Some("1.2.3"), "").unwrap_err();
+        assert!(
+            err.to_string().contains("has no version parameter"),
+            "erro inesperado: {err}"
+        );
+    }
+
+    /// Without `-v`, a template with no default (`""`) just gets `""` back —
+    /// no refusal, because nothing was explicitly asked for.
+    #[test]
+    fn sem_v_e_sem_default_nao_e_erro() {
+        assert_eq!(resolve_version("future-template", None, "").unwrap(), "");
+    }
+
+    /// `-v` with NO `-t`/`--template` at all — no real template to apply it
+    /// to, and `resolve_version` is never even reached — used to be silently
+    /// swallowed by `init()` before ever getting there. Refused now, same
+    /// non-negotiable as everywhere else this flag is checked. A non-TTY
+    /// test process never opens the interactive menu, so `chosen` stays
+    /// `None` deterministically here.
+    #[test]
+    fn v_sem_t_nenhum_e_recusado_antes_de_gerar_seja_o_que_for() {
+        let dir = scratch("v-sem-t");
         let o = InitOpts {
             dir: dir.clone(),
             name: "app".into(),
             image: None,
             force: false,
-            template: Some("node".into()),
+            template: None,
             template_version: Some("1.2.3".into()),
             up: false,
         };
-        let err = render_template("node", &o, false).unwrap_err();
+        let err = init(Target::Container, &o).unwrap_err();
         assert!(
-            err.to_string().contains("has no version parameter"),
+            err.to_string().contains("needs a template to apply it to"),
             "erro inesperado: {err}"
         );
-        std::fs::remove_dir_all(&dir).ok();
+        assert!(!dir.exists(), "não devia ter gerado nada");
     }
 
     /// The `odoo` template substitutes `__TEMPLATE_VERSION__` with the `-v`
@@ -1291,5 +1339,198 @@ mod tests {
             "um major nu devia fixar `==5.*`, não uma versão específica:\n{pyproject}"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `-v` on `python` pins `pyproject.toml`'s FastAPI dependency the same
+    /// way `django` pins its own — `==X.Y.*`, not the unbounded `>=X.Y` the
+    /// template hardcoded before this session.
+    #[test]
+    fn python_com_v_fixa_o_fastapi_como_wildcard() {
+        let dir = scratch("python-v");
+        let o = InitOpts {
+            dir: dir.clone(),
+            name: "myapp".into(),
+            image: None,
+            force: false,
+            template: Some("python".into()),
+            template_version: Some("0.116".into()),
+            up: false,
+        };
+        render_template("python", &o, false).unwrap();
+        let pyproject = std::fs::read_to_string(dir.join("pyproject.toml")).unwrap();
+        assert!(
+            pyproject.contains("\"fastapi==0.116.*\""),
+            "pyproject.toml não fixou o fastapi pedido:\n{pyproject}"
+        );
+        assert!(!pyproject.contains("__TEMPLATE_VERSION__"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `-v` on `go` has no framework to pin — it fixes the TOOLCHAIN, in
+    /// BOTH `go.mod` (what `go build` enforces) and the Delonixfile's `FROM`
+    /// (what actually builds it). The two must never disagree.
+    #[test]
+    fn go_com_v_fixa_o_toolchain_no_gomod_e_no_delonixfile() {
+        let dir = scratch("go-v");
+        let o = InitOpts {
+            dir: dir.clone(),
+            name: "myapp".into(),
+            image: None,
+            force: false,
+            template: Some("go".into()),
+            template_version: Some("1.22".into()),
+            up: false,
+        };
+        render_template("go", &o, false).unwrap();
+        let gomod = std::fs::read_to_string(dir.join("go.mod")).unwrap();
+        assert!(
+            gomod.contains("go 1.22"),
+            "go.mod não fixou a versão:\n{gomod}"
+        );
+        let delonixfile = std::fs::read_to_string(dir.join("Delonixfile")).unwrap();
+        assert!(
+            delonixfile.contains("FROM golang:1.22-alpine"),
+            "Delonixfile não fixou o toolchain:\n{delonixfile}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `-v` on `laravel` pins `composer.json`'s `laravel/framework` — the PHP
+    /// version stays independent (it tracks the FrankenPHP base image, not `-v`).
+    #[test]
+    fn laravel_com_v_fixa_o_framework_sem_tocar_no_php() {
+        let dir = scratch("laravel-v");
+        let o = InitOpts {
+            dir: dir.clone(),
+            name: "myapp".into(),
+            image: None,
+            force: false,
+            template: Some("laravel".into()),
+            template_version: Some("11".into()),
+            up: false,
+        };
+        render_template("laravel", &o, false).unwrap();
+        let composer = std::fs::read_to_string(dir.join("composer.json")).unwrap();
+        assert!(
+            composer.contains("\"laravel/framework\": \"^11\""),
+            "composer.json não fixou o framework pedido:\n{composer}"
+        );
+        assert!(
+            composer.contains("\"php\": \"^8.2\""),
+            "a versão do PHP não devia mexer com -v:\n{composer}"
+        );
+        assert!(!composer.contains("__TEMPLATE_VERSION__"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `-v` on `node` pins `package.json`'s `fastify` dependency.
+    #[test]
+    fn node_com_v_fixa_o_fastify() {
+        let dir = scratch("node-v");
+        let o = InitOpts {
+            dir: dir.clone(),
+            name: "myapp".into(),
+            image: None,
+            force: false,
+            template: Some("node".into()),
+            template_version: Some("5.1.0".into()),
+            up: false,
+        };
+        render_template("node", &o, false).unwrap();
+        let pkg = std::fs::read_to_string(dir.join("package.json")).unwrap();
+        assert!(
+            pkg.contains("\"fastify\": \"^5.1.0\""),
+            "package.json não fixou o fastify pedido:\n{pkg}"
+        );
+        assert!(!pkg.contains("__TEMPLATE_VERSION__"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `-v` on `nextjs` pins `package.json`'s `next` dependency.
+    #[test]
+    fn nextjs_com_v_fixa_o_next() {
+        let dir = scratch("nextjs-v");
+        let o = InitOpts {
+            dir: dir.clone(),
+            name: "myapp".into(),
+            image: None,
+            force: false,
+            template: Some("nextjs".into()),
+            template_version: Some("14.2.0".into()),
+            up: false,
+        };
+        render_template("nextjs", &o, false).unwrap();
+        let pkg = std::fs::read_to_string(dir.join("package.json")).unwrap();
+        assert!(
+            pkg.contains("\"next\": \"^14.2.0\""),
+            "package.json não fixou o next pedido:\n{pkg}"
+        );
+        assert!(!pkg.contains("__TEMPLATE_VERSION__"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `-v` on `nestjs` pins EVERY `@nestjs/*` package to the SAME version —
+    /// core, common, platform-express and the CLI move together, never a
+    /// mixed-major install.
+    #[test]
+    fn nestjs_com_v_fixa_todos_os_pacotes_nestjs_juntos() {
+        let dir = scratch("nestjs-v");
+        let o = InitOpts {
+            dir: dir.clone(),
+            name: "myapp".into(),
+            image: None,
+            force: false,
+            template: Some("nestjs".into()),
+            template_version: Some("10.0.0".into()),
+            up: false,
+        };
+        render_template("nestjs", &o, false).unwrap();
+        let pkg = std::fs::read_to_string(dir.join("package.json")).unwrap();
+        for pkg_name in [
+            "@nestjs/common",
+            "@nestjs/core",
+            "@nestjs/platform-express",
+            "@nestjs/cli",
+        ] {
+            assert!(
+                pkg.contains(&format!("\"{pkg_name}\": \"^10.0.0\"")),
+                "{pkg_name} não ficou fixado à mesma versão:\n{pkg}"
+            );
+        }
+        assert!(!pkg.contains("__TEMPLATE_VERSION__"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `-v` on the pure-config templates (`nginx`/`httpd`/`haproxy`) pins the
+    /// upstream image tag, the same idiom as `odoo` — never a dependency file.
+    #[test]
+    fn nginx_httpd_haproxy_com_v_fixam_a_tag_da_imagem() {
+        for (tpl, from_prefix) in [
+            ("nginx", "FROM nginx:"),
+            ("httpd", "FROM httpd:"),
+            ("haproxy", "FROM haproxy:"),
+        ] {
+            let dir = scratch(&format!("{tpl}-v"));
+            let o = InitOpts {
+                dir: dir.clone(),
+                name: "myapp".into(),
+                image: None,
+                force: false,
+                template: Some(tpl.into()),
+                template_version: Some("9.9".into()),
+                up: false,
+            };
+            render_template(tpl, &o, false).unwrap();
+            let delonixfile = std::fs::read_to_string(dir.join("Delonixfile")).unwrap();
+            assert!(
+                delonixfile.contains(&format!("{from_prefix}9.9-alpine")),
+                "{tpl}: Delonixfile não fixou a tag pedida:\n{delonixfile}"
+            );
+            assert!(
+                !delonixfile.contains("__TEMPLATE_VERSION__"),
+                "{tpl}: token não substituído"
+            );
+            std::fs::remove_dir_all(&dir).ok();
+        }
     }
 }
