@@ -58,10 +58,11 @@ pub(crate) struct InitOpts {
     /// waits until it is healthy — all with animated progress, in a single command.
     pub up: bool,
     /// `-v`/`--template-version`: a version parameter some templates read
-    /// (currently only `odoo`, e.g. `-v 18.0`). Refused with a clear error on
-    /// a template that has no `version=` in its `template.meta` — a version
-    /// flag that is silently ignored would be worse than one that does not
-    /// exist yet.
+    /// (`odoo`: an image tag, e.g. `-v 18.0`; `django`: a bare major or
+    /// major.minor, e.g. `-v 5.2`, pinned as `django==5.2.*`). Refused with a
+    /// clear error on a template that has no `version=` in its
+    /// `template.meta` — a version flag that is silently ignored would be
+    /// worse than one that does not exist yet.
     pub template_version: Option<String>,
 }
 
@@ -1209,6 +1210,85 @@ mod tests {
         assert!(
             !delonixfile.contains("__TEMPLATE_VERSION__"),
             "sem -v, a versão por omissão do template.meta tem de preencher o token:\n{delonixfile}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `-v` on the `django` template pins `pyproject.toml`'s dependency as
+    /// `django==<version>.*` — a bare major (`5`) or major.minor (`5.2`), the
+    /// same token substituted into the README so the generated project
+    /// documents what it was actually pinned to.
+    #[test]
+    fn django_com_v_fixa_a_dependencia_como_wildcard() {
+        let dir = scratch("django-v");
+        let o = InitOpts {
+            dir: dir.clone(),
+            name: "myapp".into(),
+            image: None,
+            force: false,
+            template: Some("django".into()),
+            template_version: Some("5.2".into()),
+            up: false,
+        };
+        render_template("django", &o, false).unwrap();
+        let pyproject = std::fs::read_to_string(dir.join("pyproject.toml")).unwrap();
+        assert!(
+            pyproject.contains("\"django==5.2.*\""),
+            "pyproject.toml não fixou a versão pedida:\n{pyproject}"
+        );
+        assert!(
+            !pyproject.contains("__TEMPLATE_VERSION__"),
+            "token não substituído"
+        );
+        let readme = std::fs::read_to_string(dir.join("README.md")).unwrap();
+        assert!(readme.contains("django==5.2.*"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Without `-v`, `django` falls back to `template.meta`'s own default
+    /// (`5.1`) — never a literal `>=5.1` again (that let a future major in
+    /// unannounced) and never the raw token surviving into the file.
+    #[test]
+    fn django_sem_v_usa_a_versao_por_omissao() {
+        let dir = scratch("django-default-v");
+        let o = InitOpts {
+            dir: dir.clone(),
+            name: "myapp".into(),
+            image: None,
+            force: false,
+            template: Some("django".into()),
+            template_version: None,
+            up: false,
+        };
+        render_template("django", &o, false).unwrap();
+        let pyproject = std::fs::read_to_string(dir.join("pyproject.toml")).unwrap();
+        assert!(
+            pyproject.contains("\"django==5.1.*\""),
+            "sem -v, devia cair no default do template.meta:\n{pyproject}"
+        );
+        assert!(!pyproject.contains("__TEMPLATE_VERSION__"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A bare major (`-v 5`, no minor) is a valid form too — it pins
+    /// `django==5.*`, i.e. "any 5.x", not a specific minor.
+    #[test]
+    fn django_com_v_major_nu_fixa_qualquer_5x() {
+        let dir = scratch("django-v-major");
+        let o = InitOpts {
+            dir: dir.clone(),
+            name: "myapp".into(),
+            image: None,
+            force: false,
+            template: Some("django".into()),
+            template_version: Some("5".into()),
+            up: false,
+        };
+        render_template("django", &o, false).unwrap();
+        let pyproject = std::fs::read_to_string(dir.join("pyproject.toml")).unwrap();
+        assert!(
+            pyproject.contains("\"django==5.*\""),
+            "um major nu devia fixar `==5.*`, não uma versão específica:\n{pyproject}"
         );
         std::fs::remove_dir_all(&dir).ok();
     }

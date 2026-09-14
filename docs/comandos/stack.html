@@ -346,7 +346,7 @@ Options:
           Generates a complete PROJECT for a stack (e.g. `python`) with best practices, instead of the generic scaffold. `--template list` shows the available ones
 
   -v, --template-version &lt;TEMPLATE_VERSION&gt;
-          Version parameter some templates read (currently only `odoo`, e.g. `-v 18.0`) — refused with a clear error on a template that has none
+          Version parameter some templates read: `odoo` takes an image tag (`-v 18.0`), `django` a bare major or major.minor (`-v 5`, `-v 5.2`) — refused with a clear error on a template that has none
 
       --up
           After generating, builds the image, starts it and waits for it to become healthy
@@ -367,6 +367,9 @@ EXAMPLES:
 
   # generate, build and wait until it answers healthy
   delonix stack init -t go --up
+
+  # pin a Django project to an exact major.minor line
+  delonix stack init -t django -v 5.2
 
 SEE ALSO:
   delonix stack apply · delonix stack plan · delonix init · delonix cluster

@@ -1540,6 +1540,11 @@ pub enum ContainerCmd {
         /// practices, instead of the generic scaffold. `--template list` shows the available ones.
         #[arg(long, short = 't')]
         template: Option<String>,
+        /// Version parameter some templates read: `odoo` takes an image tag
+        /// (`-v 18.0`), `django` a bare major or major.minor (`-v 5`, `-v
+        /// 5.2`) — refused with a clear error on a template that has none.
+        #[arg(short = 'v', long = "template-version")]
+        template_version: Option<String>,
         /// After generating, build the image, start it, and wait until it's healthy.
         #[arg(long)]
         up: bool,
@@ -2109,6 +2114,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
         image,
         force,
         template,
+        template_version,
         up,
     } = action
     {
@@ -2119,6 +2125,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             image,
             force,
             template,
+            template_version,
             up,
         );
     }
@@ -7172,6 +7179,7 @@ pub(crate) fn cmd_attach(
 }
 
 /// Handles this group's `init` (see `cmd::scaffold`).
+#[allow(clippy::too_many_arguments)] // mirrors the `ContainerCmd::Init` clap variant 1:1
 fn cmd_init(
     target: super::scaffold::Target,
     dir: PathBuf,
@@ -7179,6 +7187,7 @@ fn cmd_init(
     image: Option<String>,
     force: bool,
     template: Option<String>,
+    template_version: Option<String>,
     up: bool,
 ) -> Result<()> {
     let name = name.unwrap_or_else(|| {
@@ -7204,7 +7213,7 @@ fn cmd_init(
             image,
             force,
             template,
-            template_version: None,
+            template_version,
             up,
         },
     )

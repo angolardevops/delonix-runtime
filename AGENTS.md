@@ -2580,6 +2580,48 @@ o modo de adopção confirmado a escrever os 8 ficheiros de glue mantendo o
 código real intocado. 2 testes novos em `scaffold.rs` (CI/CD entra no
 scaffold vazio E na adopção).
 
+## `-v`/`--template-version` — a versão de um template escolhida por flag, não hardcoded (#296, estendido para `django`)
+
+O `odoo` (#296) introduziu o mecanismo, ao lado do `-v` da própria imagem:
+`template.meta` ganha `version=<default>`, o `build.rs` embebe-o em
+`TEMPLATE_META`, e o scaffolder substitui `__TEMPLATE_VERSION__` em TODOS os
+ficheiros do template (não só um) pelo valor de `-v`/`--template-version` —
+ou o default do `template.meta`, se omitido —, a mesma disciplina do
+`__NAME__`/`__MODULE__`/`__PORT__`. Um template SEM `version=` recusa `-v`
+com erro claro ("has no version parameter — drop -v/--template-version"), em
+vez de o aceitar e ignorar em silêncio — a mesma regra de "nunca uma flag que
+o utilizador passou e o motor engole" que o resto da CLI já segue.
+
+**`django` adoptou o mesmo mecanismo** (`template.meta`'s `version=5.1`):
+`-v 5` (major nu) ou `-v 5.1`/`-v 5.2` (major.minor) fixa
+`pyproject.toml`'s `"django==<versão>.*"` — o wildcard PEP 440 `==X.Y.*`/
+`==X.*`, não o `>=5.1` que o template usava antes e que deixava QUALQUER
+major futura entrar sem aviso na primeira `uv sync`. Sem `-v`, cai no
+default do `template.meta` (`django==5.1.*`, inalterado do comportamento
+anterior a esta sessão — só a FORMA do pin mudou, de "sem tecto" para
+"tecto na major"). O README gerado passa a nomear a versão resolvida
+(`# __NAME__ (Django __TEMPLATE_VERSION__)`) e a documentar `uv add
+<pacote>` — não há (nem se decidiu criar) um `delonix <algo> add` genérico:
+a ferramenta nativa de cada ecossistema (`uv add`/`npm install`/`composer
+require`/`go get`) já resolve isto, e reimplementá-la seria a mesma classe
+de "código a mais" que este repo evita em todo o lado.
+
+Validado ao vivo com um `uv` real (não só teste unitário): `delonix init -t
+django -v 5.2 app` → `uv sync` resolveu e instalou Django `5.2.17` (dentro
+do pin `==5.2.*`) → `uv add python-dotenv` acrescentou a dependência a
+`pyproject.toml` normalmente, sem tocar em mais nada → `manage.py check`
+passou. Os quatro pontos de entrada testados (`init`, `stack init`,
+`container init`, e a recusa num template sem `version=`).
+
+**Gap fechado de caminho, não introduzido por esta sessão**: `container
+init` (`ContainerCmd::Init`) nunca tinha ganho a flag — só `stack init`/`vm
+init`/o `init` de topo a tinham (o #296 tocou os três, não os quatro); o
+`cmd_init` deste grupo passava sempre `template_version: None` para o
+`InitOpts`. `delonix container init -t django -v 5.2` falhava com
+"unexpected argument '-v'" antes desta correcção — a mesma classe de
+"feature só num dos caminhos triplicados" que este repo já catalogou várias
+vezes (`ls-remote`, `vm pull`).
+
 ## Falhas silenciosas corrigidas (fail-closed) + 1 documentada
 
 Da análise Docker/Podman (`docs/COMPARACAO-DOCKER-PODMAN.md`), quatro casos em

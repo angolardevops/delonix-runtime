@@ -10893,8 +10893,14 @@ msgstr "Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + REA
 msgid "adopt an EXISTING project — only the Delonix/CI glue is written, the project's own code is untouched"
 msgstr "adopta um projecto EXISTENTE — só o Delonix/CI é escrito, o código do projecto fica intocado"
 
-msgid "pick the template's version (currently only `odoo`)"
-msgstr "escolhe a versão do template (por agora só `odoo`)"
+msgid "pick the template's version — an image tag for `odoo`"
+msgstr "escolhe a versão do template — uma tag de imagem para o `odoo`"
 
-msgid "Version parameter some templates read (currently only `odoo`, e.g. `-v 18.0`) — refused with a clear error on a template that has none"
-msgstr "Parâmetro de versão que alguns templates leem (por agora só `odoo`, ex. `-v 18.0`) — recusado com erro claro num template que não tenha nenhuma"
+msgid "...or a bare major/major.minor for `django`, pinned as `==X.Y.*`"
+msgstr "...ou um major/major.minor nu para o `django`, fixado como `==X.Y.*`"
+
+msgid "pin a Django project to an exact major.minor line"
+msgstr "fixa um projecto Django numa linha major.minor exacta"
+
+msgid "Version parameter some templates read: `odoo` takes an image tag (`-v 18.0`), `django` a bare major or major.minor (`-v 5`, `-v 5.2`) — refused with a clear error on a template that has none"
+msgstr "Parâmetro de versão que alguns templates leem: o `odoo` recebe uma tag de imagem (`-v 18.0`), o `django` um major nu ou major.minor (`-v 5`, `-v 5.2`) — recusado com erro claro num template que não tenha nenhuma"
