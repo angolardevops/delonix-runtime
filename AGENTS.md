@@ -2660,11 +2660,34 @@ prova a recusa sem depender de nenhum template existir de todo.
 Validado ao vivo com toolchains reais (não só testes unitários): `go build`/
 `go vet`/`go test` sobre um projecto `-v 1.22` gerado, todos a passar; `pnpm
 install` sobre um `node -v 5.1.0` a resolver `fastify@5.12.4` (dentro do pin
-`^5.1.0`) e `pnpm add dotenv` a escrever no `package.json` normalmente; JSON/
-TOML gerados por `laravel`/`python` confirmados válidos por parser real.
-**Não validado ao vivo**: `composer install` (sem PHP/Composer neste
-sandbox) — a estrutura do `composer.json` está correcta, mas a resolução
-real de um `laravel/framework: ^11` fica por confirmar.
+`^5.1.0`) e `pnpm add dotenv` a escrever no `package.json` normalmente.
+
+**`composer install` real (PHP 8.3 + Composer 2.10 instalados de propósito
+para esta verificação) encontrou um bug PRÉ-EXISTENTE no template `laravel`,
+anterior a esta sessão e a esta feature**: `php artisan test` — o comando que
+o próprio README e o `.github/workflows/ci.yml`/`.gitlab-ci.yml` do template
+prometem e correm — respondia `Command "test" is not defined"`. A causa: o
+comando não vem de `laravel/framework` (confirmado por grep no vendor —
+zero ocorrências de `TestCommand` em toda a árvore), vem do
+`nunomaduro/collision`, que o `composer.json` deste template nunca listava
+em `require-dev`. Ou seja: o CI deste template, se alguém o tivesse mesmo
+corrido, teria estado sempre vermelho — a validação anterior (#293) só
+confirmara o YAML com `yaml.safe_load` (sintaxe), nunca o comando lá dentro a
+sério. Corrigido acrescentando `nunomaduro/collision` (a mesma versão que o
+skeleton oficial do Laravel usa) — `composer install` → `php artisan test`
+confirmados a passar de ponta a ponta, com o default (`^12.0`, sem `-v`) e
+com `-v 12.5`.
+
+**Achado à parte, sobre o próprio mecanismo `-v` e não um bug dele**: pinar
+um MAJOR ANTIGO (`-v 11`, `-v 10`) faz o `composer install` recusar-se por
+inteiro — o Composer 2.10+ bloqueia por omissão QUALQUER `^<major>` em que
+UMA release qualquer tenha um advisory de segurança publicado, e ao fim da
+vida de um major isso é quase garantido (confirmado ao vivo para as duas
+majors: `PKSA-...` citados na recusa). É o Composer a proteger o utilizador,
+não um defeito do delonix — mas tornava `-v 11` um mau exemplo na
+documentação (um utilizador que o copiasse batia nisto sem contexto), por
+isso os exemplos passaram a `-v 12.5` (um minor dentro do major actual, sem
+o problema) e o README do template ganhou uma nota a explicar o porquê.
 
 ## Falhas silenciosas corrigidas (fail-closed) + 1 documentada
 
