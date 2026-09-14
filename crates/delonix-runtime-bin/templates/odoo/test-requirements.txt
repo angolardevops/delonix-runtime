@@ -1,0 +1,5 @@
+# Same convention as requirements.txt, for OCA addons only needed to RUN
+# TESTS (e.g. a demo/mock addon another module's test suite depends on) —
+# kept separate so the production image (Delonixfile) never installs them.
+#
+#   git+https://github.com/OCA/<repo>.git@__TEMPLATE_VERSION__#subdirectory=<addon>

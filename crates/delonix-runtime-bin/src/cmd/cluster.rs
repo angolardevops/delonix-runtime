@@ -2668,6 +2668,7 @@ fn cmd_init(
             image,
             force,
             template: None,
+            template_version: None,
             up: false,
         },
     )

@@ -1,4 +1,12 @@
 .git
 .gitignore
+.secrets.env
 README.md
 delonix-manifest.yaml
+delonix-manifest.dev.yaml
+.pre-commit-config.yaml
+.pylintrc
+.pylintrc-mandatory
+.editorconfig
+requirements.txt
+test-requirements.txt

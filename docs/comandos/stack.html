@@ -320,7 +320,7 @@ SEE ALSO:
 <h2 id='init'><code>stack init</code></h2>
 <p class='intro'>Initializes a COMPLETE project: Delonixfile + manifest + cluster + README.</p>
 <p class='intro'>Files ALREADY FILLED IN (images included), ready to use without editing anything.</p>
-<p class='intro'>ADOPTS an existing, non-empty project instead: only <code>Delonixfile</code>/<code>delonix-manifest.yaml</code>/<code>.dockerignore</code> are written, the project&#x27;s own code is never touched — a warning follows, since the Delonixfile still assumes the template&#x27;s own file layout.</p>
+<p class='intro'>ADOPTS an existing, non-empty project instead: only the Delonix/CI glue (Delonixfile, manifest, CI/CD, SonarQube, CONTRIBUTING.md) is written, the project&#x27;s own code is never touched — a warning follows, since the Delonixfile still assumes the template&#x27;s own file layout.</p>
 <div class='help'><pre><code>Usage: delonix stack init [OPTIONS] [DIR]
 
 Arguments:
@@ -344,6 +344,9 @@ Options:
 
   -t, --template &lt;TEMPLATE&gt;
           Generates a complete PROJECT for a stack (e.g. `python`) with best practices, instead of the generic scaffold. `--template list` shows the available ones
+
+  -v, --template-version &lt;TEMPLATE_VERSION&gt;
+          Version parameter some templates read (currently only `odoo`, e.g. `-v 18.0`) — refused with a clear error on a template that has none
 
       --up
           After generating, builds the image, starts it and waits for it to become healthy

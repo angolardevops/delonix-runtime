@@ -1,9 +1,24 @@
-# Delonixfile — Odoo 19 (official image). Odoo IS the image; PostgreSQL and the
-# network that wires them live in delonix-manifest.yaml — bring the whole thing
-# up with `delonix stack apply` (Odoo needs a database to boot; a bare
-# `container run` of this image alone will not become healthy).
+# Delonixfile — Odoo __TEMPLATE_VERSION__ (official image). Odoo IS the image;
+# PostgreSQL and the network that wires them live in delonix-manifest.yaml —
+# bring the whole thing up with `delonix stack apply` (Odoo needs a database to
+# boot; a bare `container run` of this image alone will not become healthy).
+#
+# Two manifests, one image:
+#   delonix-manifest.yaml      prod-shaped: config/odoo.conf and addons/ are
+#                              BAKED IN below, nothing bind-mounted.
+#   delonix-manifest.dev.yaml  addons/ and config/odoo-dev.conf are
+#                              BIND-MOUNTED over what this image ships —
+#                              edit Python/XML on the host and Odoo's own
+#                              `dev_mode = all` (autoreload + qweb + xml)
+#                              picks it up live, no rebuild needed.
+#
 # Build with:  delonix build -t __NAME__:dev .
-FROM odoo:19
+FROM odoo:__TEMPLATE_VERSION__
 # Your custom modules land here — Odoo scans /mnt/extra-addons on startup.
+# (delonix-manifest.dev.yaml bind-mounts over this directory for live reload.)
 COPY addons /mnt/extra-addons
+# Baked-in PROD config. delonix-manifest.dev.yaml bind-mounts
+# config/odoo-dev.conf over /etc/odoo/odoo.conf instead — editing it never
+# needs a rebuild, in either manifest (only THIS baked-in copy is frozen).
+COPY config/odoo.conf /etc/odoo/odoo.conf
 # health: Odoo's built-in /web/health (see delonix-manifest.yaml + template.meta).

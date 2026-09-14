@@ -480,6 +480,10 @@ pub enum VmCmd {
         /// practices, instead of the generic scaffold. `--template list` shows the available ones.
         #[arg(long, short = 't')]
         template: Option<String>,
+        /// Version parameter some templates read (currently only `odoo`, e.g.
+        /// `-v 18.0`) — refused with a clear error on a template that has none.
+        #[arg(short = 'v', long = "template-version")]
+        template_version: Option<String>,
         /// After generating, build the image, start it, and wait until healthy.
         #[arg(long)]
         up: bool,
@@ -1618,6 +1622,7 @@ pub fn run(action: VmCmd) -> Result<()> {
         force,
         vmfile,
         template,
+        template_version,
         up,
     } = action
     {
@@ -1644,6 +1649,7 @@ pub fn run(action: VmCmd) -> Result<()> {
             image,
             force,
             template,
+            template_version,
             up,
         );
     }
@@ -3589,6 +3595,7 @@ pub(crate) fn generate_seed_iso(
 /// Handles the `init` of this group (see `cmd::scaffold`).
 /// The generator behind `vm init`, exposed so `delonix init` can dispatch here once it has
 /// DETECTED a VM project (a `VMfile`) instead of duplicating it.
+#[allow(clippy::too_many_arguments)] // mirrors the `StackCmd::Init`/`VmCmd::Init` clap variant 1:1
 pub(crate) fn init_for(
     target: super::scaffold::Target,
     dir: PathBuf,
@@ -3596,6 +3603,7 @@ pub(crate) fn init_for(
     image: Option<String>,
     force: bool,
     template: Option<String>,
+    template_version: Option<String>,
     up: bool,
 ) -> Result<()> {
     let name = name.unwrap_or_else(|| {
@@ -3621,6 +3629,7 @@ pub(crate) fn init_for(
             image,
             force,
             template,
+            template_version,
             up,
         },
     )
