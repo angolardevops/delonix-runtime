@@ -1,2 +1,3 @@
 port=8069
 health=/web/health
+version=18.0

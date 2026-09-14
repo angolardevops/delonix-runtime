@@ -57,6 +57,12 @@ pub(crate) struct InitOpts {
     /// `--up`: after generating, builds the image, starts the container and
     /// waits until it is healthy — all with animated progress, in a single command.
     pub up: bool,
+    /// `-v`/`--template-version`: a version parameter some templates read
+    /// (currently only `odoo`, e.g. `-v 18.0`). Refused with a clear error on
+    /// a template that has no `version=` in its `template.meta` — a version
+    /// flag that is silently ignored would be worse than one that does not
+    /// exist yet.
+    pub template_version: Option<String>,
 }
 
 /// Names of the available templates, for `--help`/errors.
@@ -64,14 +70,15 @@ pub(crate) fn template_names() -> Vec<&'static str> {
     TEMPLATES.iter().map(|(n, _)| *n).collect()
 }
 
-/// `(port, health-path)` of a template (from the `template.meta` embedded by
-/// build.rs). Default `8000` + the apps' health if the template does not declare it.
-fn template_meta(name: &str) -> (&'static str, &'static str) {
+/// `(port, health-path, default-version)` of a template (from the
+/// `template.meta` embedded by build.rs). Default `8000` + the apps' health +
+/// no version if the template does not declare one.
+fn template_meta(name: &str) -> (&'static str, &'static str, &'static str) {
     TEMPLATE_META
         .iter()
-        .find(|(n, _, _)| *n == name)
-        .map(|(_, p, h)| (*p, *h))
-        .unwrap_or(("8000", "/api/v1/health/live"))
+        .find(|(n, _, _, _)| *n == name)
+        .map(|(_, p, h, v)| (*p, *h, *v))
+        .unwrap_or(("8000", "/api/v1/health/live", ""))
 }
 
 /// Derives a valid Python module from the project name: lowercase,
@@ -93,11 +100,13 @@ fn python_module(name: &str) -> String {
     m
 }
 
-/// Substitutes the `__NAME__`/`__MODULE__`/`__PORT__` tokens (in contents AND paths).
-fn subst(s: &str, o: &InitOpts, module: &str, port: &str) -> String {
+/// Substitutes the `__NAME__`/`__MODULE__`/`__PORT__`/`__TEMPLATE_VERSION__`
+/// tokens (in contents AND paths).
+fn subst(s: &str, o: &InitOpts, module: &str, port: &str, version: &str) -> String {
     s.replace("__NAME__", &o.name)
         .replace("__MODULE__", module)
         .replace("__PORT__", port)
+        .replace("__TEMPLATE_VERSION__", version)
 }
 
 /// The only files a template writes when ADOPTING an existing project — never
@@ -167,7 +176,20 @@ fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
             ))
         })?;
     let module = python_module(&o.name);
-    let (port, health) = template_meta(tname);
+    let (port, health, default_version) = template_meta(tname);
+    // `-v` only means anything on a template that declares its own default
+    // version — refusing it elsewhere beats silently ignoring a flag the
+    // user explicitly passed.
+    let version = match (&o.template_version, default_version) {
+        (Some(_), "") => {
+            return Err(Error::Invalid(super::po::tf(
+                "template '{tname}' has no version parameter — drop -v/--template-version",
+                &[("tname", tname)],
+            )));
+        }
+        (Some(v), _) => v.as_str(),
+        (None, d) => d,
+    };
     let adopt = dir_has_content(&o.dir);
     std::fs::create_dir_all(&o.dir)?;
     let mut n = 0;
@@ -175,10 +197,10 @@ fn render_template(tname: &str, o: &InitOpts, show_next: bool) -> Result<()> {
         if adopt && !ADOPT_FILES.contains(rel) {
             continue;
         }
-        let dest = o.dir.join(subst(rel, o, &module, port));
+        let dest = o.dir.join(subst(rel, o, &module, port, version));
         n += usize::from(write_file(
             &dest,
-            &subst(content, o, &module, port),
+            &subst(content, o, &module, port, version),
             o.force,
         )?);
     }
@@ -462,7 +484,7 @@ pub(crate) fn init(target: Target, o: &InitOpts) -> Result<()> {
         let do_up = o.up || (stdin_is_tty() && prompt_yes("Build and start it now?", true));
         render_template(t, o, !do_up)?;
         if do_up {
-            let (port, health) = template_meta(t);
+            let (port, health, _) = template_meta(t);
             build_and_up(&o.name, &o.dir, port, health)?;
         }
         return Ok(());
@@ -1005,6 +1027,7 @@ mod tests {
             image: None,
             force: false,
             template: Some("node".into()),
+            template_version: None,
             up: false,
         };
         render_template("node", &o, false).unwrap();
@@ -1037,6 +1060,7 @@ mod tests {
             image: None,
             force: false,
             template: Some("node".into()),
+            template_version: None,
             up: false,
         };
         render_template("node", &o, false).unwrap();
@@ -1074,6 +1098,7 @@ mod tests {
             image: None,
             force: false,
             template: Some("node".into()),
+            template_version: None,
             up: false,
         };
         render_template("node", &o, false).unwrap();
@@ -1097,6 +1122,7 @@ mod tests {
             image: None,
             force: false,
             template: Some("node".into()),
+            template_version: None,
             up: false,
         };
         render_template("node", &o, false).unwrap();
@@ -1105,6 +1131,84 @@ mod tests {
         assert!(
             !dir.join("src").exists(),
             "a segunda passagem não pode recriar o código de exemplo"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `-v`/`--template-version` only means anything on a template that
+    /// declares its own default version (`template.meta`'s `version=`) —
+    /// passing it to another one has to be a clear refusal, never a value
+    /// silently ignored.
+    #[test]
+    fn v_recusa_num_template_sem_versao() {
+        let dir = scratch("v-no-version");
+        let o = InitOpts {
+            dir: dir.clone(),
+            name: "app".into(),
+            image: None,
+            force: false,
+            template: Some("node".into()),
+            template_version: Some("1.2.3".into()),
+            up: false,
+        };
+        let err = render_template("node", &o, false).unwrap_err();
+        assert!(
+            err.to_string().contains("has no version parameter"),
+            "erro inesperado: {err}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The `odoo` template substitutes `__TEMPLATE_VERSION__` with the `-v`
+    /// value in EVERY file — the Delonixfile (`FROM odoo:<version>`), the
+    /// `.pylintrc`/`.pylintrc-mandatory` (`valid-odoo-versions=<version>`)
+    /// and `config/odoo.conf`, not just the README.
+    #[test]
+    fn odoo_com_v_substitui_a_versao_em_todos_os_ficheiros() {
+        let dir = scratch("odoo-v");
+        let o = InitOpts {
+            dir: dir.clone(),
+            name: "myodoo".into(),
+            image: None,
+            force: false,
+            template: Some("odoo".into()),
+            template_version: Some("18.0".into()),
+            up: false,
+        };
+        render_template("odoo", &o, false).unwrap();
+        let delonixfile = std::fs::read_to_string(dir.join("Delonixfile")).unwrap();
+        assert!(
+            delonixfile.contains("FROM odoo:18.0"),
+            "Delonixfile não referenciou a versão pedida:\n{delonixfile}"
+        );
+        let pylintrc = std::fs::read_to_string(dir.join(".pylintrc")).unwrap();
+        assert!(pylintrc.contains("valid-odoo-versions=18.0"));
+        assert!(
+            !delonixfile.contains("__TEMPLATE_VERSION__"),
+            "token não substituído"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Without `-v`, the `odoo` template falls back to `template.meta`'s own
+    /// default version — the token must never survive by anyone's omission.
+    #[test]
+    fn odoo_sem_v_usa_a_versao_por_omissao() {
+        let dir = scratch("odoo-default-v");
+        let o = InitOpts {
+            dir: dir.clone(),
+            name: "myodoo".into(),
+            image: None,
+            force: false,
+            template: Some("odoo".into()),
+            template_version: None,
+            up: false,
+        };
+        render_template("odoo", &o, false).unwrap();
+        let delonixfile = std::fs::read_to_string(dir.join("Delonixfile")).unwrap();
+        assert!(
+            !delonixfile.contains("__TEMPLATE_VERSION__"),
+            "sem -v, a versão por omissão do template.meta tem de preencher o token:\n{delonixfile}"
         );
         std::fs::remove_dir_all(&dir).ok();
     }

@@ -1,0 +1,10 @@
+# Cross-repo OCA addon dependencies — the current OCA convention (replaced
+# oca_dependencies.txt + git-aggregator). A module in addons/ that `depends`
+# on an addon from another OCA repo (e.g. `queue_job` from OCA/queue) gets it
+# installed here, pinned to the SAME Odoo series as this project:
+#
+#   git+https://github.com/OCA/queue.git@__TEMPLATE_VERSION__#subdirectory=queue_job
+#
+# `pip install -r requirements.txt` (inside the image's build, or your own
+# venv for local tooling) resolves them. Nothing pinned by default — this
+# file exists so the first real dependency has a documented place to land.

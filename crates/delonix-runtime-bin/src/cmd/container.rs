@@ -7204,6 +7204,7 @@ fn cmd_init(
             image,
             force,
             template,
+            template_version: None,
             up,
         },
     )

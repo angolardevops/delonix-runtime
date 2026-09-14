@@ -83,11 +83,11 @@ enum Cmd {
     /// Detects and dispatches to `stack init`/`vm init` with the matching
     /// template, saying what it detected and why.
     ///
-    /// ADOPTS an existing, non-empty project instead of scaffolding: only
-    /// `Delonixfile`/`delonix-manifest.yaml`/`.dockerignore` are written, the
-    /// project's own code is never touched — a warning follows, since the
-    /// Delonixfile still assumes the template's own file layout and needs a
-    /// look before `build`.
+    /// ADOPTS an existing, non-empty project instead of scaffolding: only the
+    /// Delonix/CI glue (Delonixfile, manifest, CI/CD, SonarQube,
+    /// CONTRIBUTING.md) is written, the project's own code is never touched —
+    /// a warning follows, since the Delonixfile still assumes the template's
+    /// own file layout and needs a look before `build`.
     Init {
         /// Project directory (default: the current one).
         #[arg(value_hint = clap::ValueHint::DirPath)]
@@ -95,6 +95,10 @@ enum Cmd {
         /// Force a template instead of the detected one (`stack init -t list` shows them).
         #[arg(short = 't', long)]
         template: Option<String>,
+        /// Version parameter some templates read (currently only `odoo`, e.g.
+        /// `-v 18.0`) — refused with a clear error on a template that has none.
+        #[arg(short = 'v', long = "template-version")]
+        template_version: Option<String>,
         /// Overwrite files that already exist.
         #[arg(long)]
         force: bool,
@@ -536,8 +540,9 @@ fn run() -> Result<()> {
         Cmd::Init {
             dir,
             template,
+            template_version,
             force,
-        } => cmd::init::run(dir, template, force),
+        } => cmd::init::run(dir, template, template_version, force),
         Cmd::Version => {
             // CARGO_BIN_NAME, not CARGO_PKG_NAME: the package is `delonix-runtime-bin`
             // and the binary clap names is `delonix`. Caught by diffing the two outputs —

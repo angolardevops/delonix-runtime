@@ -71,9 +71,9 @@ pub enum StackCmd {
     /// Files ALREADY FILLED IN (images included), ready to use without
     /// editing anything.
     ///
-    /// ADOPTS an existing, non-empty project instead: only
-    /// `Delonixfile`/`delonix-manifest.yaml`/`.dockerignore` are written, the
-    /// project's own code is never touched — a warning follows, since the
+    /// ADOPTS an existing, non-empty project instead: only the Delonix/CI glue
+    /// (Delonixfile, manifest, CI/CD, SonarQube, CONTRIBUTING.md) is written,
+    /// the project's own code is never touched — a warning follows, since the
     /// Delonixfile still assumes the template's own file layout.
     Init {
         /// Project directory (default: the current one).
@@ -92,6 +92,10 @@ pub enum StackCmd {
         /// instead of the generic scaffold. `--template list` shows the available ones.
         #[arg(long, short = 't')]
         template: Option<String>,
+        /// Version parameter some templates read (currently only `odoo`, e.g.
+        /// `-v 18.0`) — refused with a clear error on a template that has none.
+        #[arg(short = 'v', long = "template-version")]
+        template_version: Option<String>,
         /// After generating, builds the image, starts it and waits for it to become healthy.
         #[arg(long)]
         up: bool,
@@ -293,6 +297,7 @@ pub fn run(action: StackCmd) -> Result<()> {
         image,
         force,
         template,
+        template_version,
         up,
     } = action
     {
@@ -303,6 +308,7 @@ pub fn run(action: StackCmd) -> Result<()> {
             image,
             force,
             template,
+            template_version,
             up,
         );
     }
@@ -2406,7 +2412,13 @@ fn volume_refs(doc: &manifest::ManifestDoc) -> Vec<String> {
         .filter_map(|v| v.as_str())
         .filter_map(|s| {
             let name = s.split(':').next().unwrap_or("");
-            if name.is_empty() || name.starts_with('/') {
+            // Mirrors `delonix_volume::VolumeStore::resolve_spec_in`'s own
+            // `named` test EXACTLY (`/host:...` AND `./relative:...` are both
+            // bind mounts, not named-volume references) — a validator that
+            // only excluded the `/`-prefixed form flagged every relative bind
+            // mount (`./addons:/mnt/extra-addons`) as an undeclared volume,
+            // even though `stack apply` resolves and mounts it correctly.
+            if name.is_empty() || name.starts_with('/') || name.starts_with('.') {
                 None // bind mount or junk — not a named volume
             } else {
                 Some(name.to_string())
@@ -2876,6 +2888,7 @@ fn validate_graph_with(
 /// Handles the `init` of this group (see `cmd::scaffold`).
 /// The generator behind `stack init`/`vm init`, exposed so `delonix init` can dispatch to
 /// it after DETECTING which one the directory calls for (`cmd::init`) instead of copying it.
+#[allow(clippy::too_many_arguments)] // mirrors the `StackCmd::Init`/`VmCmd::Init` clap variant 1:1
 pub(crate) fn init_for(
     target: super::scaffold::Target,
     dir: PathBuf,
@@ -2883,6 +2896,7 @@ pub(crate) fn init_for(
     image: Option<String>,
     force: bool,
     template: Option<String>,
+    template_version: Option<String>,
     up: bool,
 ) -> Result<()> {
     let name = name.unwrap_or_else(|| {
@@ -2908,6 +2922,7 @@ pub(crate) fn init_for(
             image,
             force,
             template,
+            template_version,
             up,
         },
     )
@@ -3058,12 +3073,18 @@ spec: { disk: d, network: bridge }
 
     #[test]
     fn volume_nomeado_por_declarar_e_sinalizado_mas_bind_mount_nao() {
+        // `/host/ok` (absolute) and `./relative` (relative) are the TWO forms
+        // of bind mount `delonix_volume::VolumeStore::resolve_spec_in`
+        // recognizes (`named = !starts_with('/') && !starts_with('.')`) — a
+        // validator that only excluded the first one flagged
+        // `./addons:/mnt/extra-addons` as an undeclared named volume, even
+        // though the real `stack apply` mounts it with no error at all.
         let issues = check(
             "\
 apiVersion: delonix.io/v1
 kind: Container
 metadata: { name: web }
-spec: { image: nginx, volumes: [\"semvolume:/x\", \"/host/ok:/y\"] }
+spec: { image: nginx, volumes: [\"semvolume:/x\", \"/host/ok:/y\", \"./addons:/z\"] }
 ",
         );
         assert_eq!(issues.len(), 1, "{issues:?}");

@@ -1,5 +1,10 @@
-# Odoo 19 + PostgreSQL, wired over a Delonix bridge network.
-# Bring the WHOLE stack up (network → volumes → db → odoo) with one command:
+# Odoo __TEMPLATE_VERSION__ + PostgreSQL, wired over a Delonix bridge network —
+# the PROD-shaped manifest: config/odoo.conf and addons/ are baked into the
+# image, nothing bind-mounted. For local development with live reload, use
+# delonix-manifest.dev.yaml instead.
+#
+# Bring the WHOLE stack up (network → volumes → secret → db → odoo) with one
+# command:
 #     delonix stack apply
 # Odoo will not boot without the database, so `stack apply` (not a lone
 # `container run`) is the way in.
@@ -25,6 +30,27 @@ metadata:
 spec:
   driver: local
 ---
+# ONE secret feeding both images' own env-var names — POSTGRES_USER/
+# POSTGRES_PASSWORD for the official postgres image, plain USER/PASSWORD for
+# the official odoo image's entrypoint.sh — so rotating a credential means
+# editing this ONE document, not two container specs.
+#
+# `stringData` in cleartext is the DEV default (`delonix stack apply` will
+# print a WARNING about exactly this). Before a real deployment, replace it
+# with `fromEnvFile: .secrets.env` (a file you keep OUT of git — see
+# .dockerignore) or run `delonix secret create __NAME__-db-credentials
+# --from-env-file - --force` and drop `stringData` from this document.
+apiVersion: delonix.io/v1
+kind: Secret
+metadata:
+  name: __NAME__-db-credentials
+spec:
+  stringData:
+    POSTGRES_USER: odoo
+    POSTGRES_PASSWORD: odoo
+    USER: odoo
+    PASSWORD: odoo
+---
 apiVersion: delonix.io/v1
 kind: Container
 metadata:
@@ -36,9 +62,10 @@ spec:
   network: __NAME__-net
   networkAlias: [db]          # Odoo reaches PostgreSQL at host `db`
   env:
-    - "POSTGRES_USER=odoo"
-    - "POSTGRES_PASSWORD=odoo"
-    - "POSTGRES_DB=postgres"  # Odoo creates its own DBs; keep the bootstrap DB
+    vars:
+      - "POSTGRES_DB=postgres" # Odoo creates its own DBs; keep the bootstrap DB
+    secrets:
+      - __NAME__-db-credentials
   volumes:
     - "__NAME__-dbdata:/var/lib/postgresql/data"
   memory: 512M
@@ -56,9 +83,10 @@ spec:
   ports:
     - "__PORT__:8069"
   env:
-    - "HOST=db"               # matches the db container's networkAlias
-    - "USER=odoo"
-    - "PASSWORD=odoo"
+    vars:
+      - "HOST=db"               # matches the db container's networkAlias
+    secrets:
+      - __NAME__-db-credentials
   volumes:
     - "__NAME__-odoo:/var/lib/odoo"
   memory: 1G

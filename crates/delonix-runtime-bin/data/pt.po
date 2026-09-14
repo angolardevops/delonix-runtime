@@ -10884,11 +10884,17 @@ msgstr "larga a rede adicional — a principal fica"
 
 # ---- delonix init: adopt an existing project (2026-09-13) ----
 
-msgid "Start the right project for THIS directory.\n\nDetects and dispatches to `stack init`/`vm init` with the matching template, saying what it detected and why.\n\nADOPTS an existing, non-empty project instead of scaffolding: only `Delonixfile`/`delonix-manifest.yaml`/`.dockerignore` are written, the project's own code is never touched — a warning follows, since the Delonixfile still assumes the template's own file layout and needs a look before `build`."
-msgstr "Arranca o projecto certo para ESTE directório.\n\nDetecta e encaminha para `stack init`/`vm init` com o template correspondente, dizendo o que detectou e porquê.\n\nADOPTA um projecto existente e não-vazio em vez de o gerar: só `Delonixfile`/`delonix-manifest.yaml`/`.dockerignore` são escritos, o código do projecto nunca é tocado — segue-se um aviso, porque o Delonixfile continua a assumir a disposição de ficheiros do próprio template e precisa de ser revisto antes do `build`."
+msgid "Start the right project for THIS directory.\n\nDetects and dispatches to `stack init`/`vm init` with the matching template, saying what it detected and why.\n\nADOPTS an existing, non-empty project instead of scaffolding: only the Delonix/CI glue (Delonixfile, manifest, CI/CD, SonarQube, CONTRIBUTING.md) is written, the project's own code is never touched — a warning follows, since the Delonixfile still assumes the template's own file layout and needs a look before `build`."
+msgstr "Arranca o projecto certo para ESTE directório.\n\nDetecta e encaminha para `stack init`/`vm init` com o template correspondente, dizendo o que detectou e porquê.\n\nADOPTA um projecto existente e não-vazio em vez de o gerar: só o Delonix/CI (Delonixfile, manifesto, CI/CD, SonarQube, CONTRIBUTING.md) é escrito, o código do projecto nunca é tocado — segue-se um aviso, porque o Delonixfile continua a assumir a disposição de ficheiros do próprio template e precisa de ser revisto antes do `build`."
 
-msgid "Initializes a COMPLETE project: Delonixfile + manifest + cluster + README.\n\nFiles ALREADY FILLED IN (images included), ready to use without editing anything.\n\nADOPTS an existing, non-empty project instead: only `Delonixfile`/`delonix-manifest.yaml`/`.dockerignore` are written, the project's own code is never touched — a warning follows, since the Delonixfile still assumes the template's own file layout."
-msgstr "Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + README.\n\nFicheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada.\n\nADOPTA um projecto existente e não-vazio em vez disso: só `Delonixfile`/`delonix-manifest.yaml`/`.dockerignore` são escritos, o código do projecto nunca é tocado — segue-se um aviso, porque o Delonixfile continua a assumir a disposição de ficheiros do próprio template."
+msgid "Initializes a COMPLETE project: Delonixfile + manifest + cluster + README.\n\nFiles ALREADY FILLED IN (images included), ready to use without editing anything.\n\nADOPTS an existing, non-empty project instead: only the Delonix/CI glue (Delonixfile, manifest, CI/CD, SonarQube, CONTRIBUTING.md) is written, the project's own code is never touched — a warning follows, since the Delonixfile still assumes the template's own file layout."
+msgstr "Inicializa um projecto COMPLETO: Delonixfile + manifesto + cluster + README.\n\nFicheiros JÁ PREENCHIDOS (imagens incluídas), prontos a usar sem editar nada.\n\nADOPTA um projecto existente e não-vazio em vez disso: só o Delonix/CI (Delonixfile, manifesto, CI/CD, SonarQube, CONTRIBUTING.md) é escrito, o código do projecto nunca é tocado — segue-se um aviso, porque o Delonixfile continua a assumir a disposição de ficheiros do próprio template."
 
-msgid "adopt an EXISTING project — only Delonixfile/manifest/dockerignore are written, the project's own code is untouched"
-msgstr "adopta um projecto EXISTENTE — só Delonixfile/manifesto/dockerignore são escritos, o código do projecto fica intocado"
+msgid "adopt an EXISTING project — only the Delonix/CI glue is written, the project's own code is untouched"
+msgstr "adopta um projecto EXISTENTE — só o Delonix/CI é escrito, o código do projecto fica intocado"
+
+msgid "pick the template's version (currently only `odoo`)"
+msgstr "escolhe a versão do template (por agora só `odoo`)"
+
+msgid "Version parameter some templates read (currently only `odoo`, e.g. `-v 18.0`) — refused with a clear error on a template that has none"
+msgstr "Parâmetro de versão que alguns templates leem (por agora só `odoo`, ex. `-v 18.0`) — recusado com erro claro num template que não tenha nenhuma"

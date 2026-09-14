@@ -113,7 +113,12 @@ pub(crate) fn detect(has: &dyn Fn(&str) -> bool, pkg_json: Option<&str>) -> Dete
 
 /// Detects and dispatches. `template` overrides the detection entirely — the guess is a
 /// convenience, never something the user has to fight.
-pub fn run(dir: Option<std::path::PathBuf>, template: Option<String>, force: bool) -> Result<()> {
+pub fn run(
+    dir: Option<std::path::PathBuf>,
+    template: Option<String>,
+    template_version: Option<String>,
+    force: bool,
+) -> Result<()> {
     let dir = dir.unwrap_or_else(|| std::path::PathBuf::from("."));
     let d = &dir;
     let has = |f: &str| Path::new(d).join(f).exists();
@@ -162,6 +167,7 @@ pub fn run(dir: Option<std::path::PathBuf>, template: Option<String>, force: boo
             None,
             force,
             chosen,
+            template_version,
             false,
         );
     }
@@ -172,6 +178,7 @@ pub fn run(dir: Option<std::path::PathBuf>, template: Option<String>, force: boo
         None,
         force,
         chosen,
+        template_version,
         false,
     )
 }
