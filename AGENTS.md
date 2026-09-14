@@ -2701,6 +2701,40 @@ documentação (um utilizador que o copiasse batia nisto sem contexto), por
 isso os exemplos passaram a `-v 12.5` (um minor dentro do major actual, sem
 o problema) e o README do template ganhou uma nota a explicar o porquê.
 
+**Última passagem: os 11 Delonixfiles construídos e corridos a sério com
+`docker` puro** (nunca com o `delonix` deste mesmo host — produção real corre
+aqui, ver a nota de método no fim desta secção) — o que faltava depois da
+passagem anterior ter validado a camada da APLICAÇÃO (`uv`/`pnpm`/`go`/
+`composer`) mas não a IMAGEM que o `Delonixfile` produz. `docker build` dos
+11 (`go`/`nginx`/`httpd`/`haproxy`/`node`/`nextjs`/`nestjs`/`python`/
+`django`/`laravel`/`odoo`) — **zero falhas**; nenhum usa as extensões
+Delonix (`SCAN`/`CPUS`/`MEMORY`/`SECURITY`), por isso um `docker build -f
+Delonixfile .` cru já basta, sem precisar do `delonix build`. Os 10
+standalone corridos com `docker run` real + `curl` ao health path exacto que
+o `template.meta`/README prometem — todos a responder (`nginx`/`httpd`/
+`haproxy` em `/healthz`, os restantes em `/api/v1/health/live`). `odoo`
+precisa da base de dados (o README já avisa que sozinho nunca fica saudável)
+— replicado à mão com `docker network create` + um `postgres:16` com o
+`networkAlias: db` do manifesto + as credenciais do `kind: Secret`
+(`POSTGRES_USER`/`POSTGRES_PASSWORD`/`USER`/`PASSWORD`, todas `odoo`): depois
+de ~25s de arranque, `/web/health` respondeu `{"status": "pass"}`. **Zero
+bugs novos** — o `laravel` continua a ser a única correcção real desta série
+inteira. Todos os containers/rede/imagens de teste foram removidos a seguir
+(nomes/portas próprios, nunca os do estado real deste host — ver a nota
+abaixo).
+
+**Nota de método, para quem repetir isto neste ou noutro host partilhado**:
+este host corre delonix a sério (containers de produção — Odoo, Postgres,
+Redis, coturn, Ollama — todos vivos durante esta verificação). Por isso a
+validação usou **`docker` puro em vez de `delonix build`/`delonix stack
+apply`** — o `docker` é um motor de containers completamente separado, sem
+nenhum ponto de contacto com o holder/SDN/registo do `delonix` deste host, e
+os nomes/portas/rede da verificação (`tpl-*`, `odoo-test-*`, portas
+19001-19011) foram escolhidos para nunca colidir com o que já lá estava.
+`delonix build`/`stack apply` teriam sido a prova mais fiel (é o motor real
+que os utilizadores usam), mas nunca num host de produção partilhado sem ser
+esse o pedido explícito.
+
 ## Falhas silenciosas corrigidas (fail-closed) + 1 documentada
 
 Da análise Docker/Podman (`docs/COMPARACAO-DOCKER-PODMAN.md`), quatro casos em
