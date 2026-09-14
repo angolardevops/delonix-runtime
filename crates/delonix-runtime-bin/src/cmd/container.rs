@@ -3550,14 +3550,12 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     c.sysctls = sysctl;
 
     // ---- network ----
-    // `--network-alias` is recorded but the internal DNS (dns_resolve) does NOT yet
-    // consult it — it resolves by name only. Warn instead of pretending (a finding from
-    // the Docker/Podman analysis; invariant "no silent failure").
-    if !network_alias.is_empty() {
-        super::output::warn(super::po::t(
-            "--network-alias is recorded but the internal DNS does not resolve aliases yet — only the container name resolves",
-        ));
-    }
+    // `--network-alias` IS resolved by the internal DNS (see
+    // `delonix-net::infra`'s DNS index, which reads `net_aliases`) — this used
+    // to warn that it was recorded-but-ignored, which stopped being true once
+    // that index started consulting it and nobody removed the warning. Left
+    // here as documentation of where to look if that ever regresses, not as
+    // a live check.
     c.net_aliases = network_alias;
     if knows_none {
         c.dns_knows = Some(Vec::new());

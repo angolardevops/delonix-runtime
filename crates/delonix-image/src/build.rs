@@ -133,12 +133,17 @@ pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
     parse_dockerfile_with_args(text, &[])
 }
 
-/// Substitutes `${NAME}`/`$NAME` occurrences of an already-declared `ARG` in
+/// Substitutes `${NAME}`/`$NAME` occurrences of an already-known variable in
 /// `line`. Deliberately simple — no `${NAME:-default}`/`${NAME:+alt}` shell
 /// parameter-expansion forms, just plain substitution — covers the common
-/// Dockerfile ARG-interpolation case (`FROM alpine:${VERSION}`,
+/// Dockerfile interpolation case (`FROM alpine:${VERSION}`,
 /// `RUN pip install pkg==${PKG_VERSION}`) without pulling in a shell parser.
-fn substitute_args(line: &str, known: &HashMap<String, String>) -> String {
+///
+/// Shared by two callers with two different "known" maps: parsing (`ARG`s,
+/// here) and the builder (`ENV`s, in `delonix-runtime-bin::cmd::build` —
+/// `pub` for exactly that reason). Same substitution either way; only which
+/// variables are "known" differs.
+pub fn substitute_vars(line: &str, known: &HashMap<String, String>) -> String {
     let mut out = String::with_capacity(line.len());
     let mut chars = line.char_indices().peekable();
     while let Some((i, ch)) = chars.next() {
@@ -205,7 +210,7 @@ pub fn parse_dockerfile_with_args(text: &str, cli_args: &[(String, String)]) -> 
             continue;
         }
         let (instr, rest) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
-        let rest = substitute_args(rest.trim(), &known_args);
+        let rest = substitute_vars(rest.trim(), &known_args);
         let rest = rest.as_str();
         let instr_up = instr.to_ascii_uppercase();
         // The steps go to the current STAGE (the last of `stages`); FROM opens a new one.
@@ -873,7 +878,7 @@ impl ImageStore {
 mod tests {
     use super::{
         join_continuations, parse_dockerfile_with_args, parse_env_pairs, parse_run_flags,
-        resolve_target_stage, substitute_args, Step,
+        resolve_target_stage, substitute_vars, Step,
     };
     use std::collections::HashMap;
 
@@ -923,19 +928,19 @@ mod tests {
     }
 
     #[test]
-    fn substitute_args_replaces_braced_and_bare_names() {
+    fn substitute_vars_replaces_braced_and_bare_names() {
         let mut known = HashMap::new();
         known.insert("V".to_string(), "3.19".to_string());
         known.insert("PKG".to_string(), "curl".to_string());
-        assert_eq!(substitute_args("alpine:${V}", &known), "alpine:3.19");
+        assert_eq!(substitute_vars("alpine:${V}", &known), "alpine:3.19");
         assert_eq!(
-            substitute_args("apt install $PKG now", &known),
+            substitute_vars("apt install $PKG now", &known),
             "apt install curl now"
         );
         // Unknown name: left untouched, not replaced with empty.
-        assert_eq!(substitute_args("echo $UNKNOWN", &known), "echo $UNKNOWN");
+        assert_eq!(substitute_vars("echo $UNKNOWN", &known), "echo $UNKNOWN");
         // `$` not followed by a valid name start: untouched.
-        assert_eq!(substitute_args("price: $5", &known), "price: $5");
+        assert_eq!(substitute_vars("price: $5", &known), "price: $5");
     }
 
     #[test]
