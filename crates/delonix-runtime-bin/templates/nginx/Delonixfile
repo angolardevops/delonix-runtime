@@ -1,6 +1,6 @@
 # Delonixfile — production-ready nginx (static + reverse-proxy ready).
 # Build with:  delonix build -t __NAME__:dev .
-FROM nginx:1.27-alpine
+FROM nginx:__TEMPLATE_VERSION__-alpine
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY html /usr/share/nginx/html
 EXPOSE __PORT__

@@ -2580,6 +2580,115 @@ o modo de adopção confirmado a escrever os 8 ficheiros de glue mantendo o
 código real intocado. 2 testes novos em `scaffold.rs` (CI/CD entra no
 scaffold vazio E na adopção).
 
+## `-v`/`--template-version` — a versão de um template escolhida por flag, não hardcoded (#296, estendido aos 11 templates)
+
+O `odoo` (#296) introduziu o mecanismo, ao lado do `-v` da própria imagem:
+`template.meta` ganha `version=<default>`, o `build.rs` embebe-o em
+`TEMPLATE_META`, e o scaffolder substitui `__TEMPLATE_VERSION__` em TODOS os
+ficheiros do template (não só um) pelo valor de `-v`/`--template-version` —
+ou o default do `template.meta`, se omitido —, a mesma disciplina do
+`__NAME__`/`__MODULE__`/`__PORT__`. Um template SEM `version=` recusa `-v`
+com erro claro ("has no version parameter — drop -v/--template-version"), em
+vez de o aceitar e ignorar em silêncio — a mesma regra de "nunca uma flag que
+o utilizador passou e o motor engole" que o resto da CLI já segue.
+
+**`django` adoptou o mesmo mecanismo** (`template.meta`'s `version=5.1`):
+`-v 5` (major nu) ou `-v 5.1`/`-v 5.2` (major.minor) fixa
+`pyproject.toml`'s `"django==<versão>.*"` — o wildcard PEP 440 `==X.Y.*`/
+`==X.*`, não o `>=5.1` que o template usava antes e que deixava QUALQUER
+major futura entrar sem aviso na primeira `uv sync`. Sem `-v`, cai no
+default do `template.meta` (`django==5.1.*`, inalterado do comportamento
+anterior a esta sessão — só a FORMA do pin mudou, de "sem tecto" para
+"tecto na major"). O README gerado passa a nomear a versão resolvida
+(`# __NAME__ (Django __TEMPLATE_VERSION__)`) e a documentar `uv add
+<pacote>` — não há (nem se decidiu criar) um `delonix <algo> add` genérico:
+a ferramenta nativa de cada ecossistema (`uv add`/`npm install`/`composer
+require`/`go get`) já resolve isto, e reimplementá-la seria a mesma classe
+de "código a mais" que este repo evita em todo o lado.
+
+Validado ao vivo com um `uv` real (não só teste unitário): `delonix init -t
+django -v 5.2 app` → `uv sync` resolveu e instalou Django `5.2.17` (dentro
+do pin `==5.2.*`) → `uv add python-dotenv` acrescentou a dependência a
+`pyproject.toml` normalmente, sem tocar em mais nada → `manage.py check`
+passou. Os quatro pontos de entrada testados (`init`, `stack init`,
+`container init`, e a recusa num template sem `version=`).
+
+**Gap fechado de caminho, não introduzido por esta sessão**: `container
+init` (`ContainerCmd::Init`) nunca tinha ganho a flag — só `stack init`/`vm
+init`/o `init` de topo a tinham (o #296 tocou os três, não os quatro); o
+`cmd_init` deste grupo passava sempre `template_version: None` para o
+`InitOpts`. `delonix container init -t django -v 5.2` falhava com
+"unexpected argument '-v'" antes desta correcção — a mesma classe de
+"feature só num dos caminhos triplicados" que este repo já catalogou várias
+vezes (`ls-remote`, `vm pull`).
+
+**Estendido aos 9 templates restantes na mesma sessão** — completa o
+conjunto: os 11 templates têm agora `-v`, cada um pinando o que faz sentido
+para o seu ecossistema, sem comando `delonix add` nenhum (decisão repetida
+em todos): `go` (sem framework — pina o TOOLCHAIN, em `go.mod` **e** no
+`FROM golang:` do Delonixfile, os dois sempre iguais); `laravel` (pina
+`laravel/framework` em `composer.json`, com o `php`/FrankenPHP
+DELIBERADAMENTE fora — são eixos independentes); `node` (pina o `fastify`,
+o único "framework" que este template tem); `nextjs` (pina o `next`);
+`nestjs` (pina os QUATRO pacotes `@nestjs/*` — core/common/platform-express/
+cli — SEMPRE JUNTOS, porque uma instalação NestJS de majors misturados não é
+uma combinação suportada); `python` (pina o `fastapi`, mesma correcção do
+`>=` sem tecto que o `django` já tinha levado); `nginx`/`httpd`/`haproxy`
+(pinam a tag da imagem, o mesmo idioma do `odoo` — nenhum tem ficheiro de
+dependências, só o `FROM`). O texto do `--help` deixou de nomear framework a
+framework (crescia a cada extensão) e passa a apontar para o README do
+próprio template, que é onde a forma exacta aceite (`5`, `5.1.0`, uma tag de
+imagem, ...) já tinha de estar documentada de qualquer forma.
+
+**Segundo gap fechado, este genuíno e novo desta extensão**: `-v` **sem**
+`-t`/`--template` nenhum (nem escolhido por menu interactivo) nunca chegava a
+`render_template`/`resolve_version` — `init()` saltava directamente para o
+scaffold genérico e a flag desaparecia, sem erro, sem aviso. Reproduzido ao
+vivo: `delonix init -v 5.2 app` (sem `-t`) gerava o scaffold genérico como se
+`-v` nunca tivesse sido escrito. Corrigido com uma guarda em `init()` logo a
+seguir a resolver `chosen` — a mesma classe de "flag que o utilizador passou
+e o motor engolia" que a razão de existir desta funcionalidade já nomeava.
+
+A lógica de resolução (`resolve_version`) foi extraída para uma função pura,
+independente das tabelas `TEMPLATES`/`TEMPLATE_META` embebidas — precisou de
+o ser: com os 11 templates a declarar `version=`, já não sobra nenhum
+template REAL "sem versão" contra o qual testar a recusa (o teste que a
+provava usava o `node` como fixture, e deixou de servir assim que o `node`
+ganhou a sua própria). `resolve_version("um-template-futuro", Some(v), "")`
+prova a recusa sem depender de nenhum template existir de todo.
+
+Validado ao vivo com toolchains reais (não só testes unitários): `go build`/
+`go vet`/`go test` sobre um projecto `-v 1.22` gerado, todos a passar; `pnpm
+install` sobre um `node -v 5.1.0` a resolver `fastify@5.12.4` (dentro do pin
+`^5.1.0`) e `pnpm add dotenv` a escrever no `package.json` normalmente.
+
+**`composer install` real (PHP 8.3 + Composer 2.10 instalados de propósito
+para esta verificação) encontrou um bug PRÉ-EXISTENTE no template `laravel`,
+anterior a esta sessão e a esta feature**: `php artisan test` — o comando que
+o próprio README e o `.github/workflows/ci.yml`/`.gitlab-ci.yml` do template
+prometem e correm — respondia `Command "test" is not defined"`. A causa: o
+comando não vem de `laravel/framework` (confirmado por grep no vendor —
+zero ocorrências de `TestCommand` em toda a árvore), vem do
+`nunomaduro/collision`, que o `composer.json` deste template nunca listava
+em `require-dev`. Ou seja: o CI deste template, se alguém o tivesse mesmo
+corrido, teria estado sempre vermelho — a validação anterior (#293) só
+confirmara o YAML com `yaml.safe_load` (sintaxe), nunca o comando lá dentro a
+sério. Corrigido acrescentando `nunomaduro/collision` (a mesma versão que o
+skeleton oficial do Laravel usa) — `composer install` → `php artisan test`
+confirmados a passar de ponta a ponta, com o default (`^12.0`, sem `-v`) e
+com `-v 12.5`.
+
+**Achado à parte, sobre o próprio mecanismo `-v` e não um bug dele**: pinar
+um MAJOR ANTIGO (`-v 11`, `-v 10`) faz o `composer install` recusar-se por
+inteiro — o Composer 2.10+ bloqueia por omissão QUALQUER `^<major>` em que
+UMA release qualquer tenha um advisory de segurança publicado, e ao fim da
+vida de um major isso é quase garantido (confirmado ao vivo para as duas
+majors: `PKSA-...` citados na recusa). É o Composer a proteger o utilizador,
+não um defeito do delonix — mas tornava `-v 11` um mau exemplo na
+documentação (um utilizador que o copiasse batia nisto sem contexto), por
+isso os exemplos passaram a `-v 12.5` (um minor dentro do major actual, sem
+o problema) e o README do template ganhou uma nota a explicar o porquê.
+
 ## Falhas silenciosas corrigidas (fail-closed) + 1 documentada
 
 Da análise Docker/Podman (`docs/COMPARACAO-DOCKER-PODMAN.md`), quatro casos em

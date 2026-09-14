@@ -95,8 +95,10 @@ enum Cmd {
         /// Force a template instead of the detected one (`stack init -t list` shows them).
         #[arg(short = 't', long)]
         template: Option<String>,
-        /// Version parameter some templates read (currently only `odoo`, e.g.
-        /// `-v 18.0`) — refused with a clear error on a template that has none.
+        /// Version parameter some templates read — an image tag, a framework
+        /// version, or a toolchain version, depending on the template; the
+        /// exact accepted form is documented in that template's own README.
+        /// Refused with a clear error on a template that has none.
         #[arg(short = 'v', long = "template-version")]
         template_version: Option<String>,
         /// Overwrite files that already exist.

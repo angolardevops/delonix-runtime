@@ -9,14 +9,14 @@
     "start:dev": "nest start --watch"
   },
   "dependencies": {
-    "@nestjs/common": "^10.4.0",
-    "@nestjs/core": "^10.4.0",
-    "@nestjs/platform-express": "^10.4.0",
+    "@nestjs/common": "^__TEMPLATE_VERSION__",
+    "@nestjs/core": "^__TEMPLATE_VERSION__",
+    "@nestjs/platform-express": "^__TEMPLATE_VERSION__",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },
   "devDependencies": {
-    "@nestjs/cli": "^10.4.0",
+    "@nestjs/cli": "^__TEMPLATE_VERSION__",
     "@types/node": "^22.10.0",
     "typescript": "^5.7.0"
   }
