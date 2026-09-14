@@ -189,7 +189,7 @@ Options:
           Force a template instead of the detected one (`stack init -t list` shows them)
 
   -v, --template-version &lt;TEMPLATE_VERSION&gt;
-          Version parameter some templates read (currently only `odoo`, e.g. `-v 18.0`) — refused with a clear error on a template that has none
+          Version parameter some templates read — an image tag, a framework version, or a toolchain version, depending on the template; the exact accepted form is documented in that template&#x27;s own README. Refused with a clear error on a template that has none
 
       --force
           Overwrite files that already exist
@@ -215,8 +215,17 @@ EXAMPLES:
   # project&#x27;s own code is untouched
   delonix init ./my-existing-app
 
-  # pick the template&#x27;s version (currently only `odoo`)
+  # pick the template&#x27;s version — an image tag for `odoo`
   delonix init -t odoo -v 18.0
+
+  # ...or a bare major/major.minor for `django`, pinned as `==X.Y.*`
+  delonix init -t django -v 5.2 myapp
+
+  # ...or a framework version for `laravel`/`nextjs`/`nestjs`/`node`
+  delonix init -t laravel -v 12.5 myapp
+
+  # ...or a Go toolchain version — this template has no framework to pin
+  delonix init -t go -v 1.22 myapp
 
 SEE ALSO:
   delonix stack init · delonix vm init · delonix stack apply · delonix compose

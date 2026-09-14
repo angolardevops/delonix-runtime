@@ -92,8 +92,10 @@ pub enum StackCmd {
         /// instead of the generic scaffold. `--template list` shows the available ones.
         #[arg(long, short = 't')]
         template: Option<String>,
-        /// Version parameter some templates read (currently only `odoo`, e.g.
-        /// `-v 18.0`) — refused with a clear error on a template that has none.
+        /// Version parameter some templates read — an image tag, a framework
+        /// version, or a toolchain version, depending on the template; the
+        /// exact accepted form is documented in that template's own README.
+        /// Refused with a clear error on a template that has none.
         #[arg(short = 'v', long = "template-version")]
         template_version: Option<String>,
         /// After generating, builds the image, starts it and waits for it to become healthy.

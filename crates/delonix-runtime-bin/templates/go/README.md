@@ -1,9 +1,11 @@
-# __NAME__
+# __NAME__ (Go __TEMPLATE_VERSION__)
 
-A Go HTTP service scaffolded by `delonix ... init --template go` — stdlib-only
-(no framework), Go modules, standard layout (`cmd/`, `internal/`), the Go 1.22+
-method+pattern `ServeMux`, tests with `net/http/httptest`, a single-stage
-`Delonixfile`, and a Delonix manifest.
+A Go HTTP service scaffolded by `delonix init -t go -v __TEMPLATE_VERSION__` —
+stdlib-only (no framework, so `-v` pins the **toolchain**, not a package: both
+`go.mod`'s `go __TEMPLATE_VERSION__` and the Delonixfile's
+`FROM golang:__TEMPLATE_VERSION__-alpine`), Go modules, standard layout
+(`cmd/`, `internal/`), the 1.22+ method+pattern `ServeMux`, tests with
+`net/http/httptest`, a single-stage `Delonixfile`, and a Delonix manifest.
 
 ## Layout
 
@@ -24,7 +26,15 @@ go run ./cmd/__NAME__
 curl localhost:__PORT__/api/v1/health/live
 go test ./...
 go build -o server ./cmd/__NAME__ && ./server
+go get <module>                  # add a dependency (updates go.mod/go.sum)
 ```
+
+## Choosing a Go version
+
+Regenerate with `-v <major.minor>` to build against another toolchain, e.g.
+`delonix init -t go -v 1.22 --force .` (`--force`: `init` never overwrites
+without it). Omit `-v` and it falls back to this template's own default
+(`__TEMPLATE_VERSION__`, from `template.meta`).
 
 ## Build & deploy with Delonix
 
