@@ -457,6 +457,38 @@ pub enum ClusterCmd {
         #[arg(short = 'A', long)]
         all: bool,
     },
+    /// Stop every node of a kind-mode cluster at once — no rebuild, no state lost.
+    ///
+    /// The container-level `container stop` already exists per node; this is
+    /// the cluster-wide convenience `container`'s own multi-id form doesn't
+    /// give you (it takes explicit ids, never a label). `cluster ls -A` is
+    /// where a fully-stopped cluster shows up afterwards.
+    Stop {
+        /// Cluster name. Omit when there is only one.
+        #[arg(add = ArgValueCandidates::new(super::complete::clusters))]
+        name: Option<String>,
+    },
+    /// Start every node of a stopped kind-mode cluster back up.
+    Start {
+        /// Cluster name. Omit when there is only one.
+        #[arg(add = ArgValueCandidates::new(super::complete::clusters))]
+        name: Option<String>,
+    },
+    /// Remove a kind-mode cluster entirely — nodes, network, kubeconfig, `~/.kube/config` entry.
+    ///
+    /// Volumes are left alone, on purpose, same as `docker`. The same
+    /// removal `delonix delete clusters <name>` already does (the generic
+    /// kubectl-style verb this engine gives every Kind) — this is just the
+    /// more discoverable spelling inside `cluster --help`, with a
+    /// confirmation prompt `delete` does not have.
+    Destroy {
+        /// Cluster name. Omit when there is only one.
+        #[arg(add = ArgValueCandidates::new(super::complete::clusters))]
+        name: Option<String>,
+        /// Skip the confirmation prompt (REQUIRED when stdin is not a terminal).
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
     /// Initialize a project with the cluster manifests (kind/vm/ssh).
     ///
     /// Files ALREADY FILLED IN (images included), ready to use without editing
@@ -774,6 +806,18 @@ pub fn run(action: ClusterCmd) -> Result<()> {
             let (images, store) = super::util::open_stores()?;
             return super::kindmode::load(&images, &store, refs, name.as_deref());
         }
+        ClusterCmd::Stop { ref name } => {
+            let (_, store) = super::util::open_stores()?;
+            return super::kindmode::stop(&store, name.as_deref());
+        }
+        ClusterCmd::Start { ref name } => {
+            let (images, store) = super::util::open_stores()?;
+            return super::kindmode::start(&images, &store, name.as_deref());
+        }
+        ClusterCmd::Destroy { ref name, force } => {
+            let (images, store) = super::util::open_stores()?;
+            return super::kindmode::destroy(&images, &store, name.as_deref(), force);
+        }
         _ => {}
     }
     match action {
@@ -781,7 +825,10 @@ pub fn run(action: ClusterCmd) -> Result<()> {
         ClusterCmd::Create { .. }
         | ClusterCmd::Init { .. }
         | ClusterCmd::Load { .. }
-        | ClusterCmd::Prune { .. } => {
+        | ClusterCmd::Prune { .. }
+        | ClusterCmd::Stop { .. }
+        | ClusterCmd::Start { .. }
+        | ClusterCmd::Destroy { .. } => {
             unreachable!("tratados acima")
         }
         ClusterCmd::Ls { all } => cmd_ls(all),

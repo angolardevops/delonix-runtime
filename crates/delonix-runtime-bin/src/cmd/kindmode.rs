@@ -1434,6 +1434,79 @@ pub(crate) fn delete(images: &ImageStore, store: &Store, name: &str) -> Result<(
     Ok(())
 }
 
+/// `cluster destroy` — the same removal [`delete`] does, behind a
+/// confirmation prompt. `delete clusters <name>` (the generic verb every
+/// Kind gets) calls `delete` directly with none — this is the more
+/// discoverable spelling inside `cluster --help`, guarded the same way
+/// `cluster prune` already is, not a second removal path.
+pub(crate) fn destroy(
+    images: &ImageStore,
+    store: &Store,
+    name: Option<&str>,
+    force: bool,
+) -> Result<()> {
+    let (resolved, nodes) = cluster_nodes(store, name)?;
+    if !super::prune::confirm(
+        force,
+        &super::po::tf(
+            "`cluster destroy` removes cluster '{name}' — pass --force to confirm when not on \
+             a terminal",
+            &[("name", &resolved)],
+        ),
+        Some(super::po::tf(
+            "This will remove {n} node(s) of cluster '{name}', its network, its cached \
+             kubeconfig, and the matching ~/.kube/config context. Volumes are left alone.",
+            &[("n", &nodes.len().to_string()), ("name", &resolved)],
+        )),
+        super::po::t("Continue? [y/N]"),
+    )? {
+        return Ok(());
+    }
+    delete(images, store, &resolved)
+}
+
+/// `cluster stop` — every node of one cluster, in one call. Workers first,
+/// control-plane last: a worker losing its apiserver mid-shutdown just
+/// retries and gives up cleanly, but the reverse (apiserver gone while
+/// workers are still mid-stop) has nothing to report to.
+pub(crate) fn stop(store: &Store, name: Option<&str>) -> Result<()> {
+    let (resolved, mut nodes) = cluster_nodes(store, name)?;
+    nodes.sort_by_key(is_control_plane);
+    super::output::info(&format!(
+        "{} \"{resolved}\"",
+        super::po::t("Stopping cluster")
+    ));
+    for n in &nodes {
+        container::cmd_stop(store, &n.id, 10)?;
+    }
+    Ok(())
+}
+
+/// `cluster start` — the reverse order of [`stop`]: control-plane first, so
+/// the apiserver is there by the time workers come back looking for it.
+pub(crate) fn start(images: &ImageStore, store: &Store, name: Option<&str>) -> Result<()> {
+    let (resolved, mut nodes) = cluster_nodes(store, name)?;
+    nodes.sort_by_key(|c| !is_control_plane(c));
+    super::output::info(&format!(
+        "{} \"{resolved}\"",
+        super::po::t("Starting cluster")
+    ));
+    for n in &nodes {
+        container::cmd_start(images, store, &n.id)?;
+    }
+    Ok(())
+}
+
+/// Whether `c` is a control-plane node, by the same label `list()` already
+/// reads (`io.x-k8s.kind.role`) — the single source of truth for node role,
+/// not a second guess from the name.
+fn is_control_plane(c: &Container) -> bool {
+    c.labels
+        .get("io.x-k8s.kind.role")
+        .map(|r| r == "control-plane")
+        .unwrap_or(false)
+}
+
 /// How long the node process has been up (seconds). Comes from
 /// `/proc/<pid>/stat` (field 22: start in ticks since boot) crossed with
 /// `/proc/uptime` — and NOT from the registry's `created_unix`, which is the creation time
@@ -2001,6 +2074,71 @@ mod tests {
         assert_eq!(checks.len(), 3);
         assert!(!checks[1].1);
         assert_eq!(checks[1].0, "etcd failed: reason withheld");
+    }
+
+    fn fake_node(name: &str, role: &str) -> Container {
+        let mut c = Container::new(
+            name.to_string(),
+            name.to_string(),
+            "kindest/node:v1.34.0".into(),
+            vec!["/usr/local/bin/entrypoint".into()],
+            "max".into(),
+        );
+        c.labels.insert("io.x-k8s.kind.role".into(), role.into());
+        c
+    }
+
+    #[test]
+    fn is_control_plane_reads_the_role_label() {
+        assert!(is_control_plane(&fake_node(
+            "lab-control-plane",
+            "control-plane"
+        )));
+        assert!(!is_control_plane(&fake_node("lab-worker", "worker")));
+        // No label at all (shouldn't happen for a real node, but must not panic
+        // or misclassify as control-plane by default — that would make `stop`
+        // shut the apiserver down FIRST, the exact ordering bug this exists to avoid).
+        assert!(!is_control_plane(&Container::new(
+            "x".into(),
+            "x".into(),
+            "img".into(),
+            vec![],
+            "max".into()
+        )));
+    }
+
+    /// REGRESSION: `stop` shuts workers down before the control-plane, and
+    /// `start` brings the control-plane up before workers — get this backwards
+    /// and a worker either wastes its shutdown retrying a dead apiserver, or
+    /// comes back up with nowhere to register against yet.
+    #[test]
+    fn stop_and_start_order_workers_and_control_plane_oppositely() {
+        let mut for_stop = [
+            fake_node("lab-control-plane", "control-plane"),
+            fake_node("lab-worker", "worker"),
+            fake_node("lab-worker2", "worker"),
+        ];
+        for_stop.sort_by_key(is_control_plane);
+        assert_eq!(
+            for_stop.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            ["lab-worker", "lab-worker2", "lab-control-plane"],
+            "stop order: workers first, control-plane last"
+        );
+
+        let mut for_start = [
+            fake_node("lab-worker", "worker"),
+            fake_node("lab-worker2", "worker"),
+            fake_node("lab-control-plane", "control-plane"),
+        ];
+        for_start.sort_by_key(|c| !is_control_plane(c));
+        assert_eq!(
+            for_start
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>(),
+            ["lab-control-plane", "lab-worker", "lab-worker2"],
+            "start order: control-plane first, workers after"
+        );
     }
 
     #[test]
