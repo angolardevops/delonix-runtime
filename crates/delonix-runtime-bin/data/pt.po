@@ -11033,3 +11033,8 @@ msgstr "aviso: -m/--cpus/--cpu-weight foram pedidos mas esta sessão não tem de
 
 msgid "-m/--cpus/--cpu-weight were requested but this session has no cgroup2 delegation, so the kernel would never see them — the container would run unlimited while this command reports success. Fix: systemd-run --user --scope -p Delegate=yes -- delonix container run ... (see `delonix system doctor`), or set DELONIX_ALLOW_UNENFORCED_LIMITS=1 to run unenforced anyway."
 msgstr "-m/--cpus/--cpu-weight foram pedidos mas esta sessão não tem delegação de cgroup2, por isso o kernel nunca os aplicaria — o container correria sem limite enquanto este comando reporta sucesso. Correcção: systemd-run --user --scope -p Delegate=yes -- delonix container run ... (ver `delonix system doctor`), ou define DELONIX_ALLOW_UNENFORCED_LIMITS=1 para correr sem aplicar de qualquer forma."
+
+# ---- ADR 0038: o cgroup do kubelet ----
+
+msgid "Internal: the kubelet's cgroup for this pod (CRI `cgroup_parent`, ADR 0038). Unspecified limits mean no limit under it."
+msgstr "Interno: o cgroup do kubelet para este pod (`cgroup_parent` do CRI, ADR 0038). Limites não especificados significam sem limite debaixo dele."
