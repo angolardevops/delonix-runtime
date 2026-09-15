@@ -95,46 +95,152 @@ second consumer beyond the CLI* — is now met three times over (CRI, node agent
 ### D1. Four layers, one dependency direction
 
 ```
-delivery   ─►  application  ─►  domain
-   │               ▲
-   └── composes ── adapters (implement application ports)
+interfaces ─► contexts (domain + app) ◄─ adapters / providers
+     │                                        ▲
+     └──────────── composes (bins/) ──────────┘
 ```
 
-- **Domain** — types, invariants and pure rules. No I/O, no `tokio`, no `libc`, no `nix`,
-  no `std::fs`. Errors per bounded context.
-- **Application** — use cases (`RunContainer`, `ApplyStack`, `CreateVirtualMachine`, …)
-  and the **ports** they need. Knows no kernel, no HTTP, no provider.
-- **Adapters** — implement ports: kernel, SDN, filesystem stores, OCI registry, each VM
-  and storage provider.
-- **Delivery** — CLI, node API (gRPC + REST), CRI, MCP, Docker API shim. Parse, call a use
-  case, present. The **composition root** (which adapters back which ports) lives here and
-  only here.
+- **Foundation** — `delonix-model`: identifiers, `ResourceMeta`, `Status`, `Condition`,
+  quantities and the `DX_*` error codes every context maps to. Pure.
+- **Contexts** — one crate per bounded context, each with two internal modules:
+  `domain/` (types, invariants, pure rules — no I/O, no `tokio`, `libc`, `nix`,
+  `std::fs`) and `app/` (use cases such as `RunContainer`, `ApplyStack`,
+  `CreateVirtualMachine`, and the **ports** they need). A context knows no kernel, no
+  HTTP and no provider.
+- **Adapters and providers** — implement ports: kernel, SDN, filesystem state, OCI
+  registry, each VM and storage provider.
+- **Interfaces** — CLI, node API, CRI, MCP, Docker API shim, as **libraries**: parse,
+  call a use case, present.
+- **Binaries** — `bins/<name>/src/main.rs` only: the composition root (which adapter backs
+  which port) plus the call into one interface library. No business logic in a binary.
 
-### D2. Target crate map
+### D2. Naming convention, crate map and binaries
 
-Crates are renamed **when they are restructured, never twice** (the same rule as the PaaS
-plan). Names describe the role; "runtime" stops meaning three things.
+#### D2.1 The convention
 
-| Layer | Target crate | Comes from |
+| Role | Name | Example |
 |---|---|---|
-| domain | `delonix-domain` | types and `Status` from `runtime-core`; `delonix-net-rules` |
-| domain | `delonix-manifest` | `cmd/{kinds,reconcile,manifest,schema}.rs` — the Kind table, planner, generated schema |
-| domain | `delonix-security` | `delonix-security-runtime` (already clean) |
-| application | `delonix-app` | use cases out of `cmd/*`; the ports; `ComputeDriver` (ADR-0002 Phase 2b, option B) |
-| adapter | `delonix-linux` | `delonix-runtime` (namespaces, cgroups, mounts, seccomp) |
-| adapter | `delonix-sdn` | `delonix-net` (holder, nftables, slirp, DNS, overlay) |
-| adapter | `delonix-store` | `Store`/`JsonStore`/secret vault out of `runtime-core` |
-| adapter | `delonix-oci` | `delonix-image` + `delonix-scan` |
-| adapter | `delonix-volume` | unchanged name |
-| adapter | `delonix-provider-cloud-hypervisor`, `-libvirt`, `-proxmox`, `-truenas` | split out of `delonix-vm`; `delonix-proxmox`, `delonix-truenas` |
-| cross-cutting | `delonix-telemetry` | `telemetry`/`metrics` out of `runtime-core` |
-| delivery | `delonix-cli` (binary `delonix`) | `delonix-runtime-bin`, thin |
-| delivery | `delonix-node-api` | new; replaces `delonix-mgmt` |
-| delivery | `delonix-node-proto` | new; generated from `proto/delonix/node/v1` — the crate the node agent links |
-| delivery | `delonix-cri`, `delonix-mcp` | unchanged names |
+| Shared foundation (pure) | `delonix-model` | ids, `ResourceMeta`, `Status`, `DX_*` |
+| Bounded context | `delonix-<context>` | `delonix-compute` |
+| Technology adapter | `delonix-<technology>` | `delonix-linux`, `delonix-sdn` |
+| Pluggable provider | `delonix-provider-<technology>` | `delonix-provider-proxmox` |
+| Interface library | `delonix-<protocol>` | `delonix-cri`, `delonix-node-api` |
+| Binary | same name as the interface it serves | `bins/delonix-cri` |
 
-Not `delonix-api`/`delonix-core`: those names belong to the private monorepo, and a
-public crate with the same name is a guardrail #3 confusion waiting to happen.
+A crate exists only if it (a) is a bounded context, (b) isolates a heavy or privileged
+dependency (kernel, HTTP, gRPC, guestfs), or (c) is a separately installed binary.
+No `-core`, `-common`, `-utils` or `-types`: that is how `delonix-runtime-core` became the
+sink of everything. Not `delonix-api`/`delonix-core` either: those names belong to the
+private monorepo (guardrail #3 confusion). Crates are renamed **when they are
+restructured, never twice**.
+
+#### D2.2 Contexts are named after the API groups already published
+
+The manifest `apiVersion` groups have been public since v0.64.0 (ADR-0020). Using them as
+context boundaries gives **one vocabulary** across YAML, proto, crates and docs.
+
+| Published group | Context crate | Holds |
+|---|---|---|
+| `compute.delonix.io` | `delonix-compute` | Container, Pod, VirtualMachine, Workload; the **one** run specification that replaces the four translators; ports `WorkloadRuntime`, `SandboxProvider`, `VmProvider`; `ComputeDriver` (ADR-0002 Phase 2b, option B) |
+| `networking.delonix.io` | `delonix-networking` | Network, NetworkRoute, NetworkPolicy, NetworkAccessRule, Service, Dependency; absorbs `delonix-net-rules`; port `NetworkProvider` |
+| `gateway.delonix.io` | `delonix-gateway` | Gateway, HTTPRoute, Ingress — route tables and tunnels; ports `L7Dataplane`, `TunnelProvider` |
+| `storage.delonix.io` | `delonix-storage` | Volume, shares, quota, snapshots and resource backups; ports `StorageProvider`, `Provisioner` |
+| `artifact.delonix.io` | `delonix-artifact` | Image, App — pull, build plan (Dockerfile/Delonixfile), CNB plan, signing policy, VM image recipes; ports `ImageRegistry`, `ImageStore`, `Scanner`, `ImageBuilder` |
+| `infrastructure.delonix.io` | `delonix-cluster` | KubernetesCluster — kubeadm and kind bootstrap, etcd, PKI, load balancer plan; port `RemoteExecutor` |
+| `core.delonix.io` (Stack) | `delonix-stack` | manifest loading, the Kind table, the planner, apply/destroy, compose translation, revisions, the generated schema |
+| `core.delonix.io` (Secret) | `delonix-security` | secrets and the credential vault model, policy, admission, capability and seccomp profiles, redaction; absorbs `delonix-security-runtime` |
+| (node) | `delonix-node` | boot units, prune/GC, events, health, capacity, node snapshot; ports `ServiceManager`, `EventSink` |
+
+#### D2.3 Adapters and providers
+
+| Crate | Comes from | Implements |
+|---|---|---|
+| `delonix-linux` | `delonix-runtime` | `WorkloadRuntime`, `SandboxProvider` — namespaces, cgroups, mounts, capabilities, seccomp |
+| `delonix-sdn` | `delonix-net` | `NetworkProvider` — netns holder, nftables, slirp, DNS, DHCP, overlay, WireGuard, CNI client |
+| `delonix-oci` | `delonix-image` | `ImageRegistry`, `ImageStore` — registry client, CAS, layers, overlay, image layout |
+| `delonix-scanner` | `delonix-scan` | `Scanner` — SBOM, CVE |
+| `delonix-state` | stores of `delonix-runtime-core` | `StateRepository<T>`, `SecretVault` — JSON records with flock, encryption at rest |
+| `delonix-l7proxy` | `cmd/ingress_proxy.rs` | `L7Dataplane` — the HTTP proxy |
+| `delonix-ssh` | `cmd/remote.rs` | `RemoteExecutor` |
+| `delonix-guestfs` | the build half of `cmd/vmimage.rs` | `ImageBuilder` for VM images (`virt-customize`, `qemu-img`) |
+| `delonix-telemetry` | `telemetry`/`metrics` of `delonix-runtime-core` | tracing, OpenTelemetry, Prometheus registry |
+| `delonix-provider-cloud-hypervisor` | split out of `delonix-vm` | `VmProvider` |
+| `delonix-provider-libvirt` | split out of `delonix-vm` | `VmProvider` |
+| `delonix-provider-proxmox` | `delonix-proxmox` | `VmProvider` |
+| `delonix-provider-openstack` | ADR-0039 (in review) | `VmProvider` |
+| `delonix-provider-truenas` | `delonix-truenas` | `Provisioner` |
+| `delonix-provider-mount` | `delonix-volume` | `StorageProvider` — local, NFS, SMB, WebDAV |
+
+#### D2.4 Interfaces and binaries — one long-running role per executable
+
+Measured on `origin/main`: the `delonix` executable holds **seven** long-running programs
+(CLI, `serve cri`, `serve api`, `serve docker-api`, `mcp`, the hidden `ingress-proxy`,
+`netns pin`/`control`) and **nine** internal re-exec entry points (`__apirun`, `__ovlhold`,
+`__ovlmigrate`, `__rmtree`, `__duusage`, `__volsnap`, `__buildtar`, `__netnsconnect`, and
+the container init). `delonix-cri` additionally has its own `[[bin]]`, so the CRI server
+exists twice. The CLI links the servers and the servers exec the CLI back.
+
+| Interface library | Binary | Replaces |
+|---|---|---|
+| `delonix-cli` (clap tree, presenters, i18n catalog, TUI) | `delonix` | the CLI, with no server inside |
+| `delonix-cri` | `delonix-cri` | `delonix serve cri` and the duplicate `[[bin]]` |
+| `delonix-node-api` + `delonix-node-proto` | `delonix-node-api` | `delonix serve api` and `delonix-mgmt` |
+| `delonix-mcp` | `delonix-mcp` | `delonix mcp` |
+| `delonix-docker-api` | `delonix-docker-api` | `delonix serve docker-api` |
+| `delonix-l7proxy` | `delonix-gateway-proxy` | `delonix ingress-proxy` |
+| `delonix-sdn` | `delonix-netns-holder` | `delonix netns pin` / `control` |
+| `delonix-linux` | `delonix-launcher` | the nine `__*` re-execs and the container init |
+
+- **Clean cut, no alias** for `delonix serve …` and `delonix mcp`: they are declared not
+  stable in `cli-stability.md`, and the systemd units call the binaries directly. Keeping
+  an exec shortcut would put back a second door to the same server.
+- **`delonix-launcher` owns every spawn that creates namespaces.** It is the
+  `ProcessLauncher` adapter of D5: it receives a typed spec over an inherited fd, never an
+  argv built by another program. The CLI, the CRI and the node API stop creating user
+  namespaces themselves; only the launcher and the netns holder do.
+
+#### D2.5 Directory layout
+
+```
+crates/
+  foundation/   model, telemetry
+  contexts/     compute, networking, gateway, storage, artifact, stack, cluster, security, node
+  adapters/     linux, sdn, oci, scanner, state, l7proxy, ssh, guestfs
+  providers/    provider-cloud-hypervisor, provider-libvirt, provider-proxmox,
+                provider-openstack, provider-truenas, provider-mount
+  interfaces/   cli, cri, node-api, node-proto, mcp, docker-api
+bins/           delonix, delonix-cri, delonix-node-api, delonix-mcp, delonix-docker-api,
+                delonix-gateway-proxy, delonix-netns-holder, delonix-launcher
+```
+
+The layer is readable from the path, and the D7 fitness test uses it: a crate under
+`contexts/` may depend only on `foundation/`; `adapters/` and `providers/` on
+`foundation/` and `contexts/`; `interfaces/` on everything but `bins/`; `bins/` composes.
+
+#### D2.6 Where the 80 CLI modules go
+
+| Destination | Modules today (`crates/delonix-runtime-bin/src/cmd/`) |
+|---|---|
+| `delonix-model` | `names` (generated names, used by compute and cluster) |
+| `delonix-compute` | `container`, `pod`, `workload`, `vm` (use cases), `cdi` |
+| `delonix-networking` | `network`, `netroute`, `firewall`, `network_access_rule`, `service`, `dependency`, `namespace`, `vlan`, `netns`, `flow`, `capture`, `vmbridge` (use cases; their dataplane halves are already in `delonix-sdn`) |
+| `delonix-gateway` | `httproute`, `tunnel` |
+| `delonix-storage` | `volume`, `storage`, `sharevolume`, `provision`, `backup`, `rbackup` |
+| `delonix-artifact` | `image`, `build`, `scan`, `app`, `vmfile`, `vmimage` (recipes) |
+| `delonix-cluster` | `cluster`, `kindmode`, `kubeadm_config`, `k8s_recipes`, `etcd`, `pki`, `lb`, `kube` |
+| `delonix-stack` | `manifest`, `kinds`, `reconcile`, `stack`, `compose`, `revision`, `schema`, `diff`, `resource`, `verbs`, `conditions` |
+| `delonix-security` | `secret`, `policy` (node runtime policy ceiling) |
+| `delonix-node` | `boot`, `prune`, `system` |
+| `delonix-linux` (launcher side) | `mapped` (handlers of the `__rmtree`/`__volsnap` re-execs) |
+| `delonix-cli` | `output`, `po`, `man`, `manual`, `manual_entries`, `complete`, `dash`, `exitcode`, `init`, `scaffold`, `compatibility`, `features`, `config`, `net`, `manifestcmd`, `mod` |
+| `delonix-docker-api` / `delonix-mcp` / `delonix-l7proxy` | `dockerapi` / `mcp` / `ingress_proxy` |
+| `delonix-ssh` | `remote` |
+| composition root (`bins/delonix`) | `vmbackends`, `util` (state root and store opening) |
+| removed | `serve` (replaced by the binaries) |
+
+The split is by the business rule a module owns, not by its file name: where a module
+mixes a use case with printing (most of `container`, `vm`, `system`), the use case moves to
+the context and the printing stays in `delonix-cli`.
 
 ### D3. Provider ports with capability discovery
 
@@ -188,7 +294,7 @@ ngc-api (control plane) ──gRPC, network, mTLS──► ngc-agent (one per no
                                                      │
                                          unix socket, SO_PEERCRED
                                                      ▼
-                                     delonix serve api  (this engine)
+                                     delonix-node-api  (this engine)
 ```
 
 - **One contract, two encodings.** `proto/delonix/node/v1/*.proto` is the source of truth
@@ -202,7 +308,7 @@ ngc-api (control plane) ──gRPC, network, mTLS──► ngc-agent (one per no
   plane. A DevOps team integrating from **off** the node goes through the control plane's
   public API, not through this socket. Opening TCP here is still ADR-0010's question and
   still answered no.
-- **No daemon (guardrail #1).** `delonix serve api` is started by systemd socket
+- **No daemon (guardrail #1).** `delonix-node-api` is started by systemd socket
   activation (`LISTEN_FDS`) and may exit when idle, exactly as the CRI unit does today.
   Long-running work is an `Operation` **persisted under the state root before it is
   acknowledged**; an operation cut by a restart ends `FAILED/Interrupted`, never `RUNNING`
@@ -224,9 +330,9 @@ ngc-api (control plane) ──gRPC, network, mTLS──► ngc-agent (one per no
 
 - The reason the CRI forks today is real: `clone` is unsafe inside a multi-threaded tokio
   process. The fix is **not** to keep forking the CLI but to put that constraint behind the
-  `ProcessLauncher` port: a small re-exec helper (`delonix __launch`) receiving a typed spec
-  over an fd — the pattern `__apirun` already uses for the Docker API. The CRI maps
-  `runtime.v1` onto `delonix-app` use cases in-process; only the final spawn crosses a
+  `ProcessLauncher` port, implemented by the `delonix-launcher` binary (D2.4) receiving a
+  typed spec over an fd — the pattern `__apirun` already uses for the Docker API. The CRI
+  maps `runtime.v1` onto the `delonix-compute` use cases in-process; only the final spawn crosses a
   process boundary, and it carries a typed spec, not an argv.
 - The CRI gaps in §5 become the CRI track of the plan (P6), with ADR-0038 as its resource
   policy. RuntimeClass handlers (`container`, `microvm`) get their own ADR when the
@@ -275,14 +381,15 @@ crates.
 
 | Phase | Work | Gate (measured, in CI) |
 |---|---|---|
-| **P0 rails** | D7 fitness tests and ratchets at today's numbers; `[workspace.lints]` (`undocumented_unsafe_blocks = deny`); workspace-level dependency versions | CI red on any new layer violation, new subprocess call or new library `println!` |
+| **P0 rails** | D7 fitness tests and ratchets at today's numbers; `[workspace.lints]` (`undocumented_unsafe_blocks = deny`); workspace-level dependency versions; the `crates/{foundation,contexts,adapters,providers,interfaces}` + `bins/` directories with the current crates moved into their layer **without renaming** | CI red on any new layer violation, new subprocess call or new library `println!`; `cargo build --workspace` and the e2e battery unchanged after the move |
 | **P1 contract** | Vendor `google/api/http.proto`, add REST annotations; `delonix-node-proto` crate; generated OpenAPI in `docs/api/`; `buf` in CI | contract compiles, lint clean, breaking-check wired; OpenAPI regenerated = committed |
-| **P2 extract** | `delonix-manifest` first (already pure), then one `ContainerSpec` replacing the four translators, then container/pod/vm/network/volume/image/stack use cases into `delonix-app` — one context per PR, no behaviour change | CLI crate lines ratchet down each PR; e2e battery unchanged; each migrated use case has zero subprocess paths in CRI/mgmt/mcp |
-| **P3 split core** | `delonix-domain` / `delonix-store` / `delonix-telemetry`; errors per context with a mapping to `DX_*`; `vm → net::infra` calls moved behind `NetworkProvider` | fitness test green with domain free of I/O; `delonix-vm` no longer depends on `delonix-net` |
-| **P4 ports** | D3: neutral `VmSpec` + `Extensions`; provider crates split; `NetworkProvider`, `StorageProvider`, `ImageRegistry` ports | substitution test green (CH ↔ libvirt); zero provider-name matching outside composition |
-| **P5 node API** | `delonix-node-api` serving gRPC + REST on the socket, socket activation, persisted operations, `WatchEvents`, health, capacity | contract conformance suite against the generated client; `delonix-mgmt` routes all mapped |
-| **P6 CRI** | in-process CRI over `delonix-app`; stats/eviction, events, `UpdateContainerResources`, record locking, digests, RuntimeConfig | critest ≥ current in rootless **and** a root run published; real-kubelet e2e on a node |
-| **P7 observability** | D6 in full: semantic conventions, propagation, metric renames, JSON logs | one trace spans kubelet → CRI → spawn in a recorded run; zero library `println!` |
+| **P1b launcher spike** | GO/NO-GO (guardrail #5): a `delonix-launcher` executable spawning a rootless container and an overlay hold, on the golden `delonix-vm-base:ubuntu-24.04` with `kernel.apparmor_restrict_unprivileged_userns=1`, with the AppArmor profile naming the launcher and the holder but not the CLI; plus an in-place upgrade where a holder started as `delonix netns pin` is recognised by the new `delonix-netns-holder` | both measured on the golden; a written NO-GO keeps the re-execs inside each binary and amends D2.4 |
+| **P2 extract** | `delonix-model` and `delonix-stack` first (already nearly pure), then the one run specification in `delonix-compute` replacing the four translators, then `networking`, `storage`, `artifact`, `gateway`, `cluster`, `security`, `node` — one context per PR, no behaviour change; `delonix-cli` becomes a library and `bins/delonix` its `main.rs` | CLI crate lines ratchet down each PR; e2e battery unchanged; each migrated use case has zero subprocess paths in CRI/mgmt/mcp |
+| **P3 adapters** | rename and split: `delonix-linux`, `delonix-sdn`, `delonix-oci`, `delonix-scanner`, `delonix-state`, `delonix-telemetry`, `delonix-l7proxy`, `delonix-ssh`, `delonix-guestfs`; errors per crate mapped to `DX_*`; the `vm → net::infra` calls moved behind `NetworkProvider`; the servers become their own binaries and `delonix serve`/`delonix mcp` are removed | fitness test green; `delonix-runtime-core` gone; no binary links another interface's server |
+| **P4 providers** | D3: neutral `VmSpec` + `Extensions`; `delonix-provider-*` crates; `NetworkProvider`, `StorageProvider`, `ImageRegistry` ports; `delonix-launcher` lands if P1b said GO | substitution test green (CH ↔ libvirt); zero provider-name matching outside composition roots |
+| **P5 node API** | `delonix-node-api` serving gRPC + REST on the socket, socket activation, persisted operations, `WatchEvents`, health, capacity | contract conformance suite against the generated client; `delonix-mgmt` routes all mapped, then removed |
+| **P6 CRI** | in-process CRI over `delonix-compute`; stats/eviction, events, `UpdateContainerResources`, record locking, digests, RuntimeConfig | critest ≥ current in rootless **and** a root run published; real-kubelet e2e on a node |
+| **P7 observability** | D6 in full: semantic conventions, propagation, metric renames, JSON logs | one trace spans kubelet → CRI → launcher in a recorded run; zero library `println!` |
 
 P0 and P1 do not move code and can start immediately. P2 unlocks the node agent's
 parity work on the PaaS side (their F3) and is the long pole.
@@ -303,6 +410,13 @@ parity work on the PaaS side (their F3) and is the long pole.
   (guardrail #1). Socket activation plus a persisted event log and persisted operations
   cover the node agent's needs; a resident process would need its own ADR with evidence
   of what activation cannot do.
+- **One `delonix-app` crate for the whole application layer** (this ADR's first draft).
+  Rejected on review: a single application crate becomes the next junk drawer, and it
+  hides the bounded contexts the API groups already name. Each context crate owns its own
+  use cases and ports.
+- **Keep the servers and helpers inside `delonix`.** Rejected: seven long-running programs
+  and nine re-execs in one executable are what let the CLI link the servers while the
+  servers exec the CLI. One role per executable removes the cycle by construction.
 - **Put ports in `delonix-runtime-core`.** Rejected: core is already the sink of every
   crate and carries infrastructure; ports belong to the application that needs them, and
   a separate crate keeps the domain free of I/O.
@@ -316,7 +430,21 @@ new VM/storage/network provider is a new crate plus a composition-root line; the
 agent links a generated client instead of copying engine code; failures classify the same
 way in every interface; one trace across the kubelet boundary.
 
-**Harder / cost:** a long migration with coordination windows; crate renames touch
+**Harder / cost, in order of risk:**
+
+1. **AppArmor on Ubuntu 23.10+.** The profile `install.sh` writes authorises user
+   namespaces for the path `…/delonix` only (`scripts/install.sh:591`). Any new executable
+   that creates a user namespace fails with `EPERM`, which reads as an engine bug (it cost an
+   hour on 2026-08-12). With every such spawn in `delonix-launcher`, the profile names the
+   launcher and the netns holder — measured in P1b before anything merges.
+2. **In-place upgrade of the network holder.** Recovery recognises the live holder by its
+   argv (`netns pin` / `netns holder`, ACH-016). The new `delonix-netns-holder` must accept
+   the old form for one release cycle, or an upgrade rebuilds the network of every running
+   container.
+3. **Distribution.** The release goes from two executables to eight; `install.sh`, the
+   systemd units and `delonix-deploy` change with it.
+
+Also: a long migration with coordination windows; crate renames touch
 `delonix-paas` (pin), `delonix-deploy` and docs (the PaaS plan measured ~74 references to
 the runtime); two API servers coexist until `delonix-mgmt` is removed; the proto becomes a
 stability promise that `cli-stability.md` must record; `tonic`/`prost` move from the CRI
@@ -335,8 +463,8 @@ unmeasured ✅.
 
 - The OCI runtime-spec/containerd-shim-v2 interop and RuntimeClass `microvm` handler —
   separate ADR once P6 lands.
-- Moving the VM image factory (`vmimage.rs`, 7 482 lines) out of the engine — it is a
-  build tool, not a node operation; flagged for P2 review.
+- Whether the VM image factory (`delonix-guestfs` + the recipes in `delonix-artifact`)
+  eventually leaves this repository — it is a build tool, not a node operation.
 - The exact metric rename table (P7) and the API stability tier of each service (P5).
 
 ## Proven vs not validated
