@@ -1809,7 +1809,24 @@ pub static ENTRIES: &[Entry] = &[
             ("a socket of your own, then `export DOCKER_HOST=unix:///tmp/delonix-docker.sock`", "delonix serve docker-api --addr unix:///tmp/delonix-docker.sock"),
             ("see where the slice ends before third-party tooling hits a 404 mid-run", "delonix serve docker-api --matrix"),
         ],
-        see_also: &["serve api", "compose up", "container ps"],
+        see_also: &["serve api", "compose up", "container ps", "compatibility docker"],
+    },
+    Entry {
+        path: "compatibility",
+        group: "Serve",
+        examples: &[
+            ("what this engine serves, refuses (with a reason), and never considered", "delonix compatibility docker"),
+        ],
+        see_also: &["serve docker-api", "api-resources"],
+    },
+    Entry {
+        path: "compatibility docker",
+        group: "Advanced",
+        examples: &[
+            ("what this engine serves, refuses (with a reason), and never considered", "delonix compatibility docker"),
+            ("the same table, for a script or another tool's CI", "delonix compatibility docker -o json"),
+        ],
+        see_also: &["serve docker-api", "compose up"],
     },
     Entry {
         path: "stack",

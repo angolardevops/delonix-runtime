@@ -298,6 +298,11 @@ diz quais são, em vez de os omitir.
   hoje, não esta promessa. A **API de gestão** (`serve api`) é local (socket
   unix, só o próprio uid) e não tem contrato publicado: não construas automação
   sobre ela — para isso existe a CLI, com `-o json`.
+* **`compatibility`** — a mesma tabela do `serve docker-api --matrix`, mas
+  como verbo de topo e com `-o json`. Ainda só cobre `docker`; `compose`/
+  `cri`/`oci` são superfícies futuras, cada uma com o seu próprio "três
+  estados" por construir. Sem promessa de campos até `compose`/`cri`/`oci`
+  entrarem — o formato pode mudar de forma para os acomodar.
 * **`cluster`, `vm`, `pod`, `workload`, `net`** —
   a superfície ainda está a assentar. (O *schema* de `kind: Pod` é estável, ver
   acima; o que não é estável é o grupo de comandos `delonix pod`.)
