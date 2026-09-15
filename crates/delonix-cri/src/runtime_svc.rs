@@ -516,8 +516,41 @@ impl RuntimeService for DelonixRuntime {
         &self,
         _r: Request<RuntimeConfigRequest>,
     ) -> Result<Response<RuntimeConfigResponse>, Status> {
-        Ok(Response::new(RuntimeConfigResponse { linux: None }))
+        Ok(Response::new(RuntimeConfigResponse {
+            linux: Some(LinuxRuntimeConfiguration {
+                cgroup_driver: engine_cgroup_driver() as i32,
+            }),
+        }))
     }
+}
+
+/// The cgroup driver this runtime ACTUALLY is, told to the kubelet.
+///
+/// The engine manages cgroups by writing `/sys/fs/cgroup` directly — `mkdir` of
+/// the leaf, limits, `cgroup.procs` — and never asks systemd for a unit. That is
+/// the `cgroupfs` driver. The kubelet reads this at startup and builds its pod
+/// hierarchy with the same driver, so both managers agree on who owns what.
+///
+/// This used to answer `linux: None`, and the kubelet fell back to its own config
+/// — `systemd`, kubeadm's default. The kubelet then created the pod cgroups as
+/// systemd slices with nothing inside them (the containers live in
+/// `delonix.slice`), and systemd drops a controller from a slice when no unit
+/// under it needs one. `cpuset` is the one it drops: on every unit change or
+/// `daemon-reload` it vanished from `kubepods.slice`, the kubelet's check of the
+/// pod cgroup failed on the missing controller, and it killed the pod — which it
+/// reads as «pod cgroup does not exist», with no log line of its own.
+///
+/// MEASURED 2026-09-15, VM of `delonix-vm-k8s:1.36`, k8s 1.36.4, one node:
+/// `cpuset` toggling in the pod slices on a 100 ms watch, each kill inside a window
+/// without it, and one `systemctl daemon-reload` removing it on demand. Same node
+/// reset, only `cgroupDriver: cgroupfs` changed: apiserver `/livez` 84/84 over
+/// 7 min, 0 `StopContainer`, 0 `SandboxChanged` — against 20 stops in 3 min.
+///
+/// `SYSTEMD` is the proto's zero value, so a `None` or a default here is the bug
+/// back. The honest `SYSTEMD` answer needs the engine to place containers in a
+/// transient scope under the pod slice (ADR 0038); until it does, this stays.
+fn engine_cgroup_driver() -> CgroupDriver {
+    CgroupDriver::Cgroupfs
 }
 
 pub mod lifecycle;
@@ -700,6 +733,34 @@ mod tests {
         // A correr: pronta, haja workloads ou não.
         assert!(super::network_ready_rootless(true, 0));
         assert!(super::network_ready_rootless(true, 3));
+    }
+}
+
+/// The kubelet takes its cgroup driver from this answer — see `engine_cgroup_driver`.
+#[cfg(test)]
+mod tests_runtime_config {
+    use crate::cri::runtime_service_server::RuntimeService;
+    use crate::cri::*;
+
+    /// `linux: None` sends the kubelet back to its own config (`systemd` under
+    /// kubeadm), and `SYSTEMD` is the proto's zero value — both are the crash-loop.
+    #[tokio::test]
+    async fn the_kubelet_is_told_cgroupfs() {
+        let base = std::env::temp_dir();
+        let rt = super::DelonixRuntime::new(
+            base.clone(),
+            crate::streaming::Streamer::new(base, "http://127.0.0.1:0".into()),
+            crate::CapCeiling::unlimited(),
+        );
+        let resp = rt
+            .runtime_config(tonic::Request::new(RuntimeConfigRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+        let linux = resp
+            .linux
+            .expect("an absent answer means the kubelet's own driver");
+        assert_eq!(linux.cgroup_driver, CgroupDriver::Cgroupfs as i32);
     }
 }
 
