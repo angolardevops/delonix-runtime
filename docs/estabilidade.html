@@ -480,7 +480,13 @@ manifesto em git merece um degrau em vez de um erro.</p>
   <code>delonix serve docker-api --matrix</code>, e é essa tabela que diz o que existe
   hoje, não esta promessa. A <strong>API de gestão</strong> (<code>serve api</code>) é local (socket
   unix, só o próprio uid) e não tem contrato publicado: não construas automação
-  sobre ela — para isso existe a CLI, com <code>-o json</code>.</li>
+  sobre ela — para isso existe a CLI, com <code>-o json</code>. As rotas dela estão
+  <strong>congeladas</strong> (só correcções) enquanto o contrato local de nó que a substitui
+  é decidido (ADR-0040 e ADR-0041, ambos <em>Proposed</em>); uma promessa para esse
+  contrato só entra nesta página quando a primeira vaga dele fechar.</li>
+<li><strong>O nome do executável <code>delonix</code> é deste motor.</strong> O control plane deixa de
+  produzir um binário com esse nome (ADR 0038 do control plane); um <code>delonix</code>
+  instalado por este projecto é sempre a CLI descrita nesta página.</li>
 <li><strong><code>compatibility</code></strong> — a mesma tabela do <code>serve docker-api --matrix</code>, mas
   como verbo de topo e com <code>-o json</code>. Ainda só cobre <code>docker</code>; <code>compose</code>/
   <code>cri</code>/<code>oci</code> são superfícies futuras, cada uma com o seu próprio "três
