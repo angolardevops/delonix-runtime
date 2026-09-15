@@ -6279,10 +6279,10 @@ reposto, zero falhas e o init concluído.
   2/24 amostras, 20 `StopContainer`; `main`+correcção → init ok, 0/24, 19. Uma corrida de cada:
   indistinguíveis. **O control-plane de nó único nesta imagem entra em crash-loop desde antes
   desta série** — o kubelet pára o etcd (SIGTERM) em ciclo — e isso fica por investigar à parte.
-- **Dois achados do kubelet real, também por fazer**: o eviction manager falha a obter as
-  estatísticas («stat failed on /var/lib/delonix/containers/cri-<id>: no such file») — o nó fica
-  sem a protecção de pressão de memória/disco que o Kubernetes espera; e o nó fica `NotReady`
-  por `BridgeMissing` (`delonix0`) com uma CNI de bridge configurada.
+- **Dois achados do kubelet real, fechados depois**: o eviction manager falhava a obter as
+  estatísticas («stat failed on /var/lib/delonix/containers/cri-<id>: no such file»), fechado no
+  #316; e o nó ficava `NotReady` por `BridgeMissing` (`delonix0`) com uma CNI de bridge
+  configurada, fechado mais abaixo em «nó `NotReady` por `BridgeMissing`».
 
 ### RESOLVIDO — o crash-loop do control-plane de nó único era o `cpuset` a desaparecer (2026-09-15)
 
@@ -6329,11 +6329,65 @@ Três armadilhas desta investigação:
   hierarquia do kubelet (Node Allocatable, QoS, limites de pod). Só a colocação numa scope
   transitória sob o `cgroup_parent` permite responder `SYSTEMD` com verdade.
 
-**Continua por fazer**, medido no mesmo nó já estável: o **kube-proxy em CrashLoopBackOff**
-(`open /proc/sys/net/netfilter/nf_conntrack_max: read-only file system` com o registo CRI a dizer
-`privileged: true`; o #237 não fecha este caminho) e o nó **`NotReady` por `BridgeMissing`**
-(`delonix0`), que deixa o CoreDNS `Pending`. O eviction manager sem estatísticas e o `kubeadm
-reset` com órfãos ficaram fechados no #316 (ver «CRI num nó kubeadm» acima).
+O kube-proxy em CrashLoopBackOff e o nó `NotReady` por `BridgeMissing`, que ficavam por fazer
+aqui, estão na secção seguinte. O eviction manager sem estatísticas e o `kubeadm reset` com órfãos
+ficaram fechados no #316 (ver «CRI num nó kubeadm» acima).
+
+### RESOLVIDO — nó `NotReady` por `BridgeMissing`: em root o CRI nunca teve rede de pod (2026-09-15)
+
+Medido numa VM da `delonix-vm-k8s:1.36` (k8s 1.36.4, CRI em root por systemd, sem
+`DELONIX_CNI=1`) com `/etc/cni/net.d/10-bridge.conflist` (bridge `cni0`, host-local
+`10.244.0.0/24`). Controlo = binários da `origin/main`, e o mesmo `kubeadm init` num snapshot
+reposto: nó `NotReady` com `BridgeMissing: bridge 'delonix0' does not exist in /sys/class/net`, e
+o CoreDNS `Pending`. **O `BridgeMissing` escondia cinco defeitos em fila**, cada um só visível
+depois de o anterior sair do caminho:
+
+1. **O `NetworkReady` em root media uma coisa que não pode existir.** A bridge nativa vive no
+   netns do holder (`unshare --user --net`, também em root), nunca no `/sys/class/net` do host.
+2. **E o caminho root do `RunPodSandbox` nunca funcionou**: chamava `pod create cri-<id>
+   --network`, que o clap recusa (`unexpected argument 'cri-…' found`, porque o `pod create` só
+   aceita `-f`). A chamada vem do commit inicial, e a infra nativa em root nem subia (`control
+   socket: No such file or directory`). O `BridgeMissing` tapava isto porque nenhum pod chegava a
+   ser agendado. **Decisão**: em root a rede do pod é a cadeia CNI do nó, no host, como no
+   containerd. Netns nomeado `/run/netns/cri-<id>`, `ADD` dos plugins (a mesma função
+   `cni::attach_named_netns` que o holder rootless usa), e os containers entram por
+   `nsenter --net` com `--net host`. O `NetworkReady` mede o mesmo facto que o sandbox usa
+   (`cni::readiness`: a config parseia, e todos os binários, `ipam.type` incluído, estão no
+   `CNI_PATH`). **Nunca a bridge**, que só o primeiro `ADD` cria: pedi-la era reabrir o impasse
+   «não pronto → nenhum pod → nada a cria». Sem config: `NetworkPluginNotReady`, e o sandbox é
+   recusado com a razão. O `DEL` usa a conflist gravada no registo do sandbox. Rootless fica como
+   estava (`DELONIX_CNI=1`, opt-in).
+3. **Um `USER` não-root com `--cap-drop ALL` não arrancava** (o CoreDNS: uid 65532, `drop: ALL`).
+   O `setuid` corria depois do `drop_capabilities`, e a mensagem falava de subuid para o que era
+   uma capability em falta. A troca passou para antes, com `PR_SET_KEEPCAPS` (a ordem do runc).
+   O processo continua a chegar ao `execve` com `CapEff 0` (medido).
+4. **`--privileged` não deixava `/proc/sys` gravável**: o `mask_proc_paths` remontava-o só de
+   leitura sempre, desfazendo o #237 no motor. kube-proxy: `nf_conntrack_max: read-only file
+   system`. Medido nos dois sentidos: com `--privileged` escreve, sem ele continua recusado.
+5. **O CRI nunca passou uma variável de ambiente a um container**: ninguém lia o
+   `ContainerConfig.envs`. CoreDNS: `KUBERNETES_SERVICE_HOST and KUBERNETES_SERVICE_PORT must be
+   defined`. Passam por `--env-file0` (interno: `KEY=VAL` separados por NUL, o formato do
+   `/proc/<pid>/environ`), num ficheiro 0600 em `cri/env/`, que é apagado no `RemoveContainer`.
+   **Não pelo argv**, porque um `run -d` mantém a linha de comandos visível no `ps` durante a vida
+   do pod. **Nem pelo `--env-file`**, que corta espaços e lê linha a linha, e por isso estraga um
+   certificado vindo de um Secret. No registo JSON do CRI fica só o caminho do ficheiro.
+
+E o sexto, que já não era defeito mas política: o CoreDNS a correr como 65532 dava `listen tcp
+:53: bind: permission denied`. O containerd 2.x põe `ip_unprivileged_port_start=0` e
+`ping_group_range` em cada netns de pod (`enable_unprivileged_ports`/`_icmp`). O sandbox CNI em
+root faz o mesmo, e aplica lá os `net.*` do pod por cima (sob `--net host` o motor recusá-los-ia),
+numa thread que faz `setns` e escreve em `/proc/sys/net`, sem shell.
+
+**Prova, no mesmo nó reposto, com o `kubeadm init` original**: nó `Ready`, CoreDNS `1/1 Running`
+com `10.244.0.2`/`.3` e 0 reinícios, `dig @10.244.0.2` e `dig @10.96.0.10` a responder, apagar um
+pod liberta o netns e o lease (o substituto recebe `.4`), deployment busybox 2/2 com IP de pod, e
+`wget http://web.default.svc.cluster.local` de outro pod balanceado pelas duas réplicas.
+
+**Não medido**: o caminho CNI rootless depois de passar a partilhar o corpo do `ADD` (que agora
+sobe o `lo` e faz `DEL` quando o `ADD` falha), e mais do que um nó. O `hostPort` num sandbox CNI
+em root também fica por fazer: não se publica pelo ingress nativo, e o `portMappings` ainda não
+chega ao plugin `portmap` como `runtimeConfig`. O port-forward em root continua a procurar o
+container `pod-cri-<id>`, que este caminho não cria.
 
 ## `HYPERVISOR` no VMfile + `vm convert` + `vm default-backend` (v0.45.x)
 

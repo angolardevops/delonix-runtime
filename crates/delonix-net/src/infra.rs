@@ -2620,30 +2620,16 @@ fn do_cni_add(netns: &str, id: &str, ifname: &str, hex: &str) -> Result<String> 
     let netns = sanitize(netns);
     let bytes = hex_decode(hex).ok_or_else(|| Error::Invalid("invalid conflist hex".into()))?;
     let conf = crate::cni::parse_config(&String::from_utf8_lossy(&bytes))?;
-    // empty netns (the plugin moves the veth there); clears leftovers of attempts.
-    run_ok("ip", &["netns", "del", &netns]);
-    run("ip", &["netns", "add", &netns])?;
-    let path = format!("/run/netns/{netns}");
-    match crate::cni::add(&conf, &crate::cni::plugin_dirs(), id, &path, ifname) {
-        Ok(r) => Ok(r.ips.first().map(|i| i.address.clone()).unwrap_or_default()),
-        Err(e) => {
-            // rollback: doesn't leave the netns orphan if the plugin failed.
-            run_ok("ip", &["netns", "del", &netns]);
-            Err(e)
-        }
-    }
+    // Same body as a root CRI's host netns — see `cni::attach_named_netns`.
+    crate::cni::attach_named_netns(&conf, &netns, id, ifname)
 }
 
 /// Rootless CNI (holder): runs the plugins' `DEL` and removes the netns. Best-effort.
 fn do_cni_del(netns: &str, id: &str, ifname: &str, hex: &str) -> Result<()> {
     let netns = sanitize(netns);
-    if let Some(bytes) = hex_decode(hex) {
-        if let Ok(conf) = crate::cni::parse_config(&String::from_utf8_lossy(&bytes)) {
-            let path = format!("/run/netns/{netns}");
-            let _ = crate::cni::del(&conf, &crate::cni::plugin_dirs(), id, &path, ifname);
-        }
-    }
-    run_ok("ip", &["netns", "del", &netns]);
+    let conf = hex_decode(hex)
+        .and_then(|bytes| crate::cni::parse_config(&String::from_utf8_lossy(&bytes)).ok());
+    crate::cni::detach_named_netns(conf.as_ref(), &netns, id, ifname);
     Ok(())
 }
 

@@ -1706,6 +1706,11 @@ pub enum ContainerCmd {
         /// Load variables from a `.env` file (`KEY=VAL` per line). Repeatable.
         #[arg(long = "env-file")]
         env_file: Vec<String>,
+        /// (internal) `KEY=VAL` entries separated by NUL — the `/proc/<pid>/environ`
+        /// format. Used by `delonix-cri`: values arrive byte-exact (newlines,
+        /// spaces) and never on the argv. Applied before `-e`, which still wins.
+        #[arg(long = "env-file0", hide = true)]
+        env_file0: Vec<String>,
         // ---- fs & limits ----
         /// Mount a tmpfs (`/path[:options]`). Repeatable.
         #[arg(long)]
@@ -2173,6 +2178,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             secret,
             secret_files,
             env_file,
+            env_file0,
             tmpfs,
             ulimit,
             dns,
@@ -2225,7 +2231,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
                 rm,
                 restart,
                 devices,
-                env,
+                env: with_env_file0(&env_file0, env)?,
                 labels,
                 image,
                 command,
@@ -2741,6 +2747,33 @@ pub(crate) fn compose_io_max(
         }
     }
     Ok((!parts.is_empty()).then(|| parts.join(" ")))
+}
+
+/// Reads `--env-file0` files (NUL-separated `KEY=VAL`, the `/proc/<pid>/environ`
+/// format) and puts their entries BEFORE the `-e` values, so an explicit `-e`
+/// still overrides. An entry without `KEY=` is refused, not skipped: a variable
+/// that silently does not arrive is how a pod dies later for an unrelated-looking
+/// reason.
+fn with_env_file0(files: &[String], env: Vec<String>) -> Result<Vec<String>> {
+    let mut out = Vec::new();
+    for f in files {
+        let bytes =
+            std::fs::read(f).map_err(|e| Error::Invalid(format!("--env-file0 {f}: {e}")))?;
+        for entry in bytes.split(|b| *b == 0).filter(|e| !e.is_empty()) {
+            let s = String::from_utf8(entry.to_vec())
+                .map_err(|_| Error::Invalid(format!("--env-file0 {f}: an entry is not UTF-8")))?;
+            match s.split_once('=') {
+                Some((k, _)) if !k.is_empty() => out.push(s),
+                _ => {
+                    return Err(Error::Invalid(format!(
+                        "--env-file0 {f}: an entry is not `KEY=VALUE`"
+                    )))
+                }
+            }
+        }
+    }
+    out.extend(env);
+    Ok(out)
 }
 
 /// Arguments for `container run` (CLI and manifest), grouped — the list passed
@@ -7813,6 +7846,23 @@ mod runspec_parity_tests {
 
 #[cfg(test)]
 mod tests {
+    /// `--env-file0`: byte-exact values (multi-line, `=` inside the value),
+    /// before `-e` (which wins), and an entry without `KEY=` is refused rather
+    /// than silently dropped.
+    #[test]
+    fn env_file0_reads_exact_entries_and_dash_e_wins() {
+        let dir = std::env::temp_dir().join(format!("dlx-envf0-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("a.env0");
+        std::fs::write(&f, b"A=1\0CERT=x\n  y=z\0").unwrap();
+        let fs = vec![f.to_string_lossy().into_owned()];
+        let got = super::with_env_file0(&fs, vec!["A=2".into()]).unwrap();
+        assert_eq!(got, ["A=1", "CERT=x\n  y=z", "A=2"]);
+        std::fs::write(&f, b"NOEQUALS\0").unwrap();
+        assert!(super::with_env_file0(&fs, vec![]).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// **The contract of the whole reconciler**: an unchanged manifest must
     /// produce ZERO differences. Both sides of the diff are normalized by
     /// separate functions, and the moment one of them drifts, every plan starts

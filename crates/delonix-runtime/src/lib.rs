@@ -729,6 +729,77 @@ fn set_no_new_privs() {
     }
 }
 
+/// Becomes `uid`/`gid` (with `groups`) WITHOUT losing the capability sets, so
+/// the confinement that follows can still narrow them.
+///
+/// `PR_SET_KEEPCAPS` keeps the PERMITTED set across `setuid` from 0; the kernel
+/// still clears the EFFECTIVE set, which is then raised back to the permitted
+/// one — `drop_capabilities` needs CAP_SETPCAP to shrink the bounding set, and
+/// the NNP-off seccomp path needs CAP_SYS_ADMIN. KEEPCAPS does not survive the
+/// `execve`. setgid BEFORE setuid (after setuid the group can no longer change).
+fn switch_user_keeping_caps(uid: u32, gid: u32, groups: &[u32]) -> std::result::Result<(), String> {
+    #[repr(C)]
+    struct CapHeader {
+        version: u32,
+        pid: i32,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct CapData {
+        effective: u32,
+        permitted: u32,
+        inheritable: u32,
+    }
+    // SAFETY: plain prctl/setgroups/setgid/setuid on our own credentials, and
+    // capget/capset with a valid v3 header and 2 data structs.
+    unsafe {
+        if libc::prctl(libc::PR_SET_KEEPCAPS, 1, 0, 0, 0) != 0 {
+            return Err(format!(
+                "PR_SET_KEEPCAPS failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        if libc::setgroups(groups.len(), groups.as_ptr()) != 0 {
+            eprintln!(
+                "delonix: setgroups({groups:?}) failed — are the gids inside the mapped range?"
+            );
+        }
+        if libc::setgid(gid) != 0 {
+            return Err(format!(
+                "setgid({gid}) failed: {} — is the gid inside the mapped range?",
+                std::io::Error::last_os_error()
+            ));
+        }
+        if libc::setuid(uid) != 0 {
+            return Err(format!(
+                "setuid({uid}) failed: {} — is the uid inside the mapped range (subuid)?",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let hdr = CapHeader {
+            version: 0x2008_0522, // _LINUX_CAPABILITY_VERSION_3
+            pid: 0,
+        };
+        let mut data = [CapData::default(); 2];
+        if libc::syscall(libc::SYS_capget, &hdr as *const _, data.as_mut_ptr()) != 0 {
+            return Err(format!(
+                "capget failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        for d in &mut data {
+            d.effective = d.permitted;
+        }
+        if libc::syscall(libc::SYS_capset, &hdr as *const _, data.as_ptr()) != 0 {
+            return Err(format!(
+                "capset failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Drops all capabilities except `keep` (mask). Without this, the container's
 /// root is the REAL host root (can load modules, reboot the machine,
 /// create device nodes for the host disk, etc.).
@@ -1764,7 +1835,7 @@ fn setup_rootfs(
         )?;
     }
     apply_sysctls(sysctls, has_own_netns); // --sysctl: BEFORE /proc/sys becomes read-only (B13)
-    mask_proc_paths();
+    mask_proc_paths(privileged);
     // `/sys` READ-ONLY (B13): prevents writing to kernel/device controls
     // from the container. nosuid/nodev/noexec for defense. (Skips if there is no /sys.)
     // --privileged EXCEPTION: `/sys` RW + `cgroup2` RW delegated, so the systemd inside
@@ -1827,7 +1898,7 @@ fn setup_rootfs(
 /// (can cause host panic/reboot) and `kcore` (kernel memory). Wires them to
 /// `/dev/null`/read-only. Best-effort: runs before seccomp, with caps still
 /// present. (Replicates Docker's *masked paths*.)
-fn mask_proc_paths() {
+fn mask_proc_paths(privileged: bool) {
     // bind /dev/null over sysrq-trigger -> writes go to the void.
     let _ = mount(
         Some("/dev/null"),
@@ -1844,7 +1915,20 @@ fn mask_proc_paths() {
         MsFlags::MS_BIND,
         None::<&str>,
     );
-    // /proc/sys read-only (prevents changing host sysctls).
+    // /proc/sys read-only (prevents changing host sysctls) — except under
+    // `--privileged`, whose whole meaning is «no such protection» (Docker/runc
+    // leave it writable too).
+    //
+    // Unconditional before, and it undid the CRI's fix for kube-proxy (#237):
+    // the CRI stopped sending `/proc/sys` as a read-only path and passed
+    // `--privileged`, but this remount put it back regardless. Measured
+    // 2026-09-15 on a kubeadm node: `--privileged --net host` still showed
+    // `proc /proc/sys proc ro`, and kube-proxy died on `open
+    // /proc/sys/net/netfilter/nf_conntrack_max: read-only file system` — no
+    // ClusterIP, so no CoreDNS.
+    if privileged {
+        return;
+    }
     let _ = mount(
         Some("/proc/sys"),
         "/proc/sys",
@@ -3115,6 +3199,47 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
             libc::close(w);
         }
     }
+    // image `USER` (≠ root): switch to the requested uid/gid HERE, while the
+    // capabilities to do it are still held — and keep them across the switch
+    // (`PR_SET_KEEPCAPS`), so the confinement below narrows them exactly as it
+    // does for a root container. runc's order.
+    //
+    // It used to run last, just before the `execve`, AFTER `drop_capabilities`.
+    // With `--cap-drop ALL` (every pod that follows the Kubernetes restricted
+    // profile, the kubeadm CoreDNS among them) CAP_SETUID/CAP_SETGID were already
+    // gone, and the container died with `setuid(65532) failed — the image USER
+    // is not mapped` — a message about a subuid map, for a missing capability.
+    // Measured 2026-09-15 on a kubeadm node: CoreDNS in CrashLoopBackOff with
+    // exactly that, reproduced by hand with `--cap-drop ALL --user 65532`, and
+    // the same run without `--cap-drop` started.
+    //
+    // What the process ends up with does not change: the `execve` of a non-root
+    // uid recomputes its capabilities from the file (and, under NO_NEW_PRIVS,
+    // never beyond what it already had), so it still reaches the program with
+    // none of its own.
+    let mut user_switched = false;
+    if let Some(uid) = run_uid.filter(|u| *u != 0) {
+        let gid = run_gid.unwrap_or(uid);
+        chown_tree_once("/", uid, gid);
+        // The stdout/stderr are the log_shim's pipe, created as uid 0. "unprivileged"
+        // images (nginx, etc.) link /var/log/.../*.log → /dev/stdout
+        // (= /proc/self/fd/1) and REOPEN it already as the USER — which would fail without
+        // the pipe belonging to it. fchown of the 3 fds gives them that access.
+        // SAFETY: fchown over valid open fds (0/1/2); errors ignored.
+        unsafe {
+            libc::fchown(0, uid, gid);
+            libc::fchown(1, uid, gid);
+            libc::fchown(2, uid, gid);
+        }
+        let mut groups: Vec<u32> = vec![gid];
+        groups.extend_from_slice(group_add);
+        groups.dedup();
+        if let Err(e) = switch_user_keeping_caps(uid, gid, &groups) {
+            eprintln!("delonix: {e}");
+            return 126;
+        }
+        user_switched = true;
+    }
     if no_new_privs {
         set_no_new_privs(); // no execve gains privileges (anti-escalation)
         drop_capabilities(cap_keep); // drop caps (after the mounts, before the exec)
@@ -3172,49 +3297,11 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
         }
     }
     apply_env(hostname, env); // clean environment + image/stack/CLI ENV
-                              // image `USER` (≠ root): switch to the requested uid/gid BEFORE the `execve`. Done
-                              // last — after the mounts/caps/seccomp, which needed uid 0. We are
-                              // inside the user namespace (root of the ns), so we have CAP_CHOWN/SETUID over the
-                              // mapped range: we hand ownership of the rootfs to the uid (once; marker so as not to
-                              // repeat) and drop privileges. setgid BEFORE setuid (after setuid one can no longer
-                              // change group). E.g.: Elasticsearch refuses to run as root.
-    if let Some(uid) = run_uid {
-        if uid != 0 {
-            let gid = run_gid.unwrap_or(uid);
-            chown_tree_once("/", uid, gid);
-            // The stdout/stderr are the log_shim's pipe, created as uid 0. "unprivileged"
-            // images (nginx, etc.) link /var/log/.../*.log → /dev/stdout
-            // (= /proc/self/fd/1) and REOPEN it already as the USER — which would fail without
-            // the pipe belonging to it. fchown of the 3 fds gives them that access.
-            // SAFETY: fchown over valid open fds (0/1/2); errors ignored.
-            unsafe {
-                libc::fchown(0, uid, gid);
-                libc::fchown(1, uid, gid);
-                libc::fchown(2, uid, gid);
-            }
-            // SAFETY: we are root in the user ns → setgid/setgroups/setuid succeed.
-            unsafe {
-                let mut groups: Vec<u32> = vec![gid];
-                groups.extend_from_slice(group_add);
-                groups.dedup();
-                libc::setgroups(groups.len(), groups.as_ptr());
-                if libc::setgid(gid) != 0 {
-                    eprintln!("delonix: setgid({gid}) failed");
-                }
-                if libc::setuid(uid) != 0 {
-                    eprintln!(
-                        "delonix: setuid({uid}) failed — the image USER is not mapped (subuid?)"
-                    );
-                    return 126;
-                }
-            }
-        }
-    }
-    // Supplementary groups with NO uid switch. The block above only runs for a
-    // non-root `USER`, and a container that stays root still needs its groups —
-    // that is exactly the `SupplementalGroups` case, and reading `id -G` was how
-    // it showed up as missing.
-    if run_uid.is_none_or(|u| u == 0) && !group_add.is_empty() {
+                              // Supplementary groups with NO uid switch. The block above only runs for a
+                              // non-root `USER`, and a container that stays root still needs its groups —
+                              // that is exactly the `SupplementalGroups` case, and reading `id -G` was how
+                              // it showed up as missing.
+    if !user_switched && !group_add.is_empty() {
         let mut groups: Vec<u32> = group_add.to_vec();
         groups.dedup();
         // SAFETY: we are root in the user ns → setgroups succeeds for mapped gids.
