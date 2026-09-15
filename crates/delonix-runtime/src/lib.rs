@@ -3778,12 +3778,24 @@ pub fn cgroup_limits_apply() -> bool {
         return current_cgroup_v2()
             .is_some_and(|cur| delegated_base_usable(std::path::Path::new(&cur)));
     }
-    let probe = format!(
-        "{}/.delonix-probe-{}",
-        delonix_runtime_core::DELONIX_SLICE,
-        std::process::id()
-    );
-    match std::fs::create_dir(&probe) {
+    root_slice_writable(std::path::Path::new(delonix_runtime_core::DELONIX_SLICE))
+}
+
+/// Root mode: can the engine create a container cgroup under `slice`?
+///
+/// **Creates the slice when it is missing**, exactly as the first container's
+/// `setup_cgroup` would. The probe used to be a plain `create_dir` of
+/// `<slice>/.delonix-probe-<pid>`, which fails with `ENOENT` on a node where no
+/// container has run yet — the slice is born with the first one. So a FRESH
+/// root node, with every controller delegated, was judged «no delegation», and
+/// every `-m`/`--cpus`/`--cpu-weight` refused. Measured on a real kubeadm node
+/// (2026-09-15, k8s 1.36.4): 477 `StartContainer` failures for the static pods
+/// (they carry CPU requests, which the CRI now passes as `--cpu-weight`), and a
+/// deadlock — the slice never appeared because nothing could start. It cleared
+/// the instant one unlimited container created the slice by hand.
+fn root_slice_writable(slice: &std::path::Path) -> bool {
+    let probe = slice.join(format!(".delonix-probe-{}", std::process::id()));
+    match std::fs::create_dir_all(&probe) {
         Ok(()) => {
             let _ = std::fs::remove_dir(&probe);
             true
@@ -8921,5 +8933,40 @@ mod oom_tests {
         std::fs::remove_file(dir.join("memory.events.local")).unwrap();
         assert_eq!(oom_kill_count(&dir.to_string_lossy()), Some(9));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod root_slice_probe_tests {
+    use super::root_slice_writable;
+
+    /// A fresh node has no slice yet: the probe must create it, not answer
+    /// «no delegation» (which refused every limited container on a new node).
+    #[test]
+    fn a_missing_slice_is_created_not_reported_as_undelegated() {
+        let base = std::env::temp_dir().join(format!("dlx-slice-probe-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let slice = base.join("delonix.slice");
+        assert!(!slice.exists());
+        assert!(root_slice_writable(&slice));
+        assert!(
+            slice.is_dir(),
+            "the slice is left in place, as setup_cgroup would"
+        );
+        assert_eq!(
+            std::fs::read_dir(&slice).unwrap().count(),
+            0,
+            "the probe itself is removed"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Nowhere to write: still false.
+    #[test]
+    fn an_unwritable_parent_is_still_refused() {
+        assert!(!root_slice_writable(std::path::Path::new(
+            "/proc/delonix.slice"
+        )));
     }
 }
