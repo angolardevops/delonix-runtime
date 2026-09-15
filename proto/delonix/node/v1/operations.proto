@@ -1,0 +1,77 @@
+// Delonix node API — long-running operations.
+//
+// Status: DRAFT contract for ADR-0040.
+//
+// Every mutation that can take longer than a request (pull, build, VM create, stack
+// apply) returns an Operation immediately. The server is socket-activated and may exit
+// when idle (no daemon, guardrail #1), so an Operation is PERSISTED under the state root
+// before it is acknowledged — a client that reconnects after the process restarted still
+// gets an answer, and an operation interrupted by a restart ends FAILED with
+// reason "Interrupted", never RUNNING forever.
+syntax = "proto3";
+
+package delonix.node.v1;
+
+import "delonix/node/v1/common.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/angolardevops/delonix-runtime/gen/go/delonix/node/v1;nodev1";
+
+service OperationService {
+  rpc GetOperation(GetOperationRequest) returns (Operation);
+  rpc ListOperations(ListOperationsRequest) returns (ListOperationsResponse);
+  // Streams state changes until the operation is done, then closes.
+  rpc WatchOperation(GetOperationRequest) returns (stream Operation);
+  // Best effort: an operation past its point of no return reports FAILED_PRECONDITION.
+  rpc CancelOperation(CancelOperationRequest) returns (Operation);
+}
+
+message Operation {
+  string id = 1;
+  OperationState state = 2;
+  // "Container/web", "Stack/shop" — what the operation acts on.
+  string target = 3;
+  string verb = 4; // "create", "pull", "apply", …
+  // Human progress line, and a 0..100 figure when the operation can measure one (-1 if not).
+  string progress_message = 5;
+  int32 progress_percent = 6;
+  google.protobuf.Timestamp create_time = 7;
+  google.protobuf.Timestamp end_time = 8;
+  // Set when state = SUCCEEDED: the typed result (e.g. a Container).
+  google.protobuf.Any result = 9;
+  // Set when state = FAILED.
+  ErrorDetail error = 10;
+  // The caller's request_id this operation answered, for idempotent retries.
+  string request_id = 11;
+  // W3C trace id of the request that started it, so an operation and its spans join up.
+  string trace_id = 12;
+}
+
+enum OperationState {
+  OPERATION_STATE_UNSPECIFIED = 0;
+  OPERATION_STATE_PENDING = 1;
+  OPERATION_STATE_RUNNING = 2;
+  OPERATION_STATE_SUCCEEDED = 3;
+  OPERATION_STATE_FAILED = 4;
+  OPERATION_STATE_CANCELLED = 5;
+}
+
+message GetOperationRequest {
+  string id = 1;
+}
+
+message ListOperationsRequest {
+  PageRequest page = 1;
+  // Only unfinished operations when true.
+  bool active_only = 2;
+}
+
+message ListOperationsResponse {
+  repeated Operation operations = 1;
+  PageResponse page = 2;
+}
+
+message CancelOperationRequest {
+  string id = 1;
+}
