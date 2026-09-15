@@ -1,0 +1,431 @@
+// Delonix node API — compute: containers, pods and virtual machines.
+//
+// Status: DRAFT contract for ADR-0040.
+//
+// One run specification (`ContainerSpec`) replaces the four translators that exist today
+// (CLI RunOpts, mgmt RunSpecBody, the CRI's start_argv, the Docker-API shim). The CLI,
+// the manifest, the Docker shim and the CRI all lower INTO it; the engine executes it.
+syntax = "proto3";
+
+package delonix.node.v1;
+
+import "delonix/node/v1/common.proto";
+import "delonix/node/v1/operations.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/field_mask.proto";
+
+option go_package = "github.com/angolardevops/delonix-runtime/gen/go/delonix/node/v1;nodev1";
+
+// ---------------------------------------------------------------------------- containers
+
+service ContainerService {
+  rpc CreateContainer(CreateContainerRequest) returns (Operation);
+  rpc GetContainer(GetResourceRequest) returns (Container);
+  rpc ListContainers(ListResourcesRequest) returns (ListContainersResponse);
+  // Hot reconfiguration without changing the PID (ports, volumes, networks, limits) —
+  // the engine's differentiator; fields outside the mask are untouched.
+  rpc UpdateContainer(UpdateContainerRequest) returns (Container);
+  rpc DeleteContainer(DeleteResourceRequest) returns (Operation);
+  rpc StartContainer(ContainerActionRequest) returns (Container);
+  rpc StopContainer(StopContainerRequest) returns (Container);
+  rpc KillContainer(KillContainerRequest) returns (Container);
+  rpc WaitContainer(ContainerActionRequest) returns (WaitContainerResponse);
+  // Bidirectional: stdin frames in, stdout/stderr frames out, exit code last.
+  rpc Exec(stream ExecFrame) returns (stream ExecFrame);
+  rpc Logs(LogsRequest) returns (stream LogChunk);
+  rpc Stats(ContainerActionRequest) returns (ContainerStats);
+}
+
+message ContainerSpec {
+  string image = 1;
+  repeated string entrypoint = 2; // empty = image default; [""] clears it
+  repeated string command = 3;
+  map<string, string> env = 4;
+  // Secret references, resolved at spawn and never persisted as plaintext.
+  repeated SecretRef secrets = 5;
+  string workdir = 6;
+  string user = 7;
+  string hostname = 8;
+  Resources resources = 9;
+  repeated Mount mounts = 10;
+  repeated NetworkAttachment networks = 11;
+  repeated PortMapping ports = 12;
+  SecurityContext security = 13;
+  RestartPolicy restart = 14;
+  HealthCheck health_check = 15;
+  // The pod this container joins (shares net/ipc/uts). Empty = standalone.
+  string pod = 16;
+  repeated string devices = 17; // CDI names ("nvidia.com/gpu=all") or host device paths
+  repeated string tmpfs = 18;
+  bool read_only_rootfs = 19;
+  map<string, string> sysctls = 20;
+  string log_format = 21; // "json-file" | "cri"
+}
+
+message SecretRef {
+  string secret = 1;
+  string key = 2; // empty = all keys
+  SecretDelivery delivery = 3;
+}
+
+enum SecretDelivery {
+  SECRET_DELIVERY_UNSPECIFIED = 0;
+  SECRET_DELIVERY_ENV = 1;
+  SECRET_DELIVERY_FILE = 2; // /run/secrets/<key>, mode 0600
+}
+
+message Mount {
+  oneof source {
+    string volume = 1;
+    string host_path = 2;
+  }
+  string target = 3;
+  bool read_only = 4;
+}
+
+message NetworkAttachment {
+  string network = 1; // "host" and "none" are reserved names
+  string ipv4_address = 2; // empty = allocated
+  repeated string aliases = 3;
+}
+
+message PortMapping {
+  string host_ip = 1; // empty = 127.0.0.1 (the safe default)
+  int32 host_port = 2; // 0 = pick a free port
+  int32 container_port = 3;
+  Protocol protocol = 4;
+}
+
+enum Protocol {
+  PROTOCOL_UNSPECIFIED = 0;
+  PROTOCOL_TCP = 1;
+  PROTOCOL_UDP = 2;
+}
+
+message SecurityContext {
+  bool privileged = 1;
+  repeated string cap_add = 2;
+  repeated string cap_drop = 3;
+  string seccomp_profile = 4; // "" = default allowlist, "unconfined"
+  string apparmor_profile = 5;
+  bool no_new_privileges = 6;
+  repeated string masked_paths = 7;
+  repeated string readonly_paths = 8;
+}
+
+message RestartPolicy {
+  RestartMode mode = 1;
+  int32 max_retries = 2;
+}
+
+enum RestartMode {
+  RESTART_MODE_UNSPECIFIED = 0; // = NO
+  RESTART_MODE_NO = 1;
+  RESTART_MODE_ON_FAILURE = 2;
+  RESTART_MODE_ALWAYS = 3;
+  RESTART_MODE_UNLESS_STOPPED = 4;
+}
+
+message HealthCheck {
+  repeated string command = 1;
+  google.protobuf.Duration interval = 2;
+  google.protobuf.Duration timeout = 3;
+  int32 retries = 4;
+  google.protobuf.Duration start_period = 5;
+}
+
+message Container {
+  ResourceMeta meta = 1;
+  ContainerSpec spec = 2;
+  ContainerStatus status = 3;
+}
+
+message ContainerStatus {
+  ContainerPhase phase = 1;
+  int32 pid = 2;
+  // Set once the container has exited AND the code was actually observed. Absent means
+  // "not captured" — never a fabricated 137.
+  optional int32 exit_code = 3;
+  // Machine-readable termination reason: "OOMKilled", "Error", "Completed", "StoppedByUser".
+  string reason = 4;
+  repeated string ip_addresses = 5;
+  repeated Condition conditions = 6;
+  string image_digest = 7;
+}
+
+enum ContainerPhase {
+  CONTAINER_PHASE_UNSPECIFIED = 0;
+  CONTAINER_PHASE_CREATED = 1;
+  CONTAINER_PHASE_RUNNING = 2;
+  CONTAINER_PHASE_PAUSED = 3;
+  CONTAINER_PHASE_EXITED = 4;
+  CONTAINER_PHASE_DEAD = 5;
+}
+
+message CreateContainerRequest {
+  ResourceMeta meta = 1; // name/namespace/labels; server-owned fields ignored
+  ContainerSpec spec = 2;
+  // Idempotency key: the same request_id within the retention window returns the SAME
+  // Operation instead of creating a second container.
+  string request_id = 3;
+  bool start = 4; // default create-and-start is explicit, not implied
+}
+
+message GetResourceRequest {
+  string name = 1;
+  string namespace = 2;
+}
+
+message ListResourcesRequest {
+  ListFilter filter = 1;
+  PageRequest page = 2;
+}
+
+message ListContainersResponse {
+  repeated Container containers = 1;
+  PageResponse page = 2;
+}
+
+message UpdateContainerRequest {
+  Container container = 1; // meta.name/namespace + meta.etag identify it
+  google.protobuf.FieldMask update_mask = 2; // required; empty mask = INVALID_ARGUMENT
+}
+
+message DeleteResourceRequest {
+  string name = 1;
+  string namespace = 2;
+  string etag = 3;
+  bool force = 4; // stop a running resource first
+  string request_id = 5;
+}
+
+message ContainerActionRequest {
+  string name = 1;
+  string namespace = 2;
+}
+
+message StopContainerRequest {
+  string name = 1;
+  string namespace = 2;
+  google.protobuf.Duration grace_period = 3;
+}
+
+message KillContainerRequest {
+  string name = 1;
+  string namespace = 2;
+  string signal = 3; // "SIGTERM" or number
+}
+
+message WaitContainerResponse {
+  optional int32 exit_code = 1;
+  string reason = 2;
+}
+
+message ExecFrame {
+  oneof frame {
+    ExecStart start = 1; // first client frame
+    bytes stdin = 2;
+    bytes stdout = 3;
+    bytes stderr = 4;
+    TerminalSize resize = 5;
+    int32 exit_code = 6; // last server frame
+  }
+}
+
+message ExecStart {
+  string container = 1;
+  string namespace = 2;
+  repeated string command = 3; // empty = shell (bash, falling back to sh)
+  map<string, string> env = 4;
+  string workdir = 5;
+  string user = 6;
+  bool tty = 7;
+  google.protobuf.Duration timeout = 8;
+}
+
+message TerminalSize {
+  uint32 rows = 1;
+  uint32 cols = 2;
+}
+
+message LogsRequest {
+  string container = 1;
+  string namespace = 2;
+  bool follow = 3;
+  int64 tail_lines = 4; // 0 = all
+  google.protobuf.Duration since = 5;
+  bool timestamps = 6;
+}
+
+message LogChunk {
+  LogStream stream = 1;
+  bytes data = 2;
+  int64 timestamp_unix_nanos = 3; // 0 when the log format carries none
+}
+
+enum LogStream {
+  LOG_STREAM_UNSPECIFIED = 0;
+  LOG_STREAM_STDOUT = 1;
+  LOG_STREAM_STDERR = 2;
+}
+
+message ContainerStats {
+  int64 cpu_usage_nanos = 1;
+  int64 memory_working_set_bytes = 2;
+  int64 memory_limit_bytes = 3;
+  int64 pids = 4;
+  int64 network_rx_bytes = 5;
+  int64 network_tx_bytes = 6;
+  int64 writable_layer_bytes = 7;
+  repeated string unmeasured = 8;
+}
+
+// ---------------------------------------------------------------------------------- pods
+
+service PodService {
+  rpc CreatePod(CreatePodRequest) returns (Operation);
+  rpc GetPod(GetResourceRequest) returns (Pod);
+  rpc ListPods(ListResourcesRequest) returns (ListPodsResponse);
+  rpc DeletePod(DeleteResourceRequest) returns (Operation);
+}
+
+message PodSpec {
+  repeated NamedContainer containers = 1;
+  bool share_process_namespace = 2;
+  repeated NetworkAttachment networks = 3;
+  repeated PortMapping ports = 4;
+}
+
+message NamedContainer {
+  string name = 1;
+  ContainerSpec spec = 2;
+}
+
+message Pod {
+  ResourceMeta meta = 1;
+  PodSpec spec = 2;
+  repeated Container members = 3;
+  repeated Condition conditions = 4;
+}
+
+message CreatePodRequest {
+  ResourceMeta meta = 1;
+  PodSpec spec = 2;
+  string request_id = 3;
+}
+
+message ListPodsResponse {
+  repeated Pod pods = 1;
+  PageResponse page = 2;
+}
+
+// ------------------------------------------------------------------------ virtual machines
+
+service VirtualMachineService {
+  rpc CreateVirtualMachine(CreateVirtualMachineRequest) returns (Operation);
+  rpc GetVirtualMachine(GetResourceRequest) returns (VirtualMachine);
+  rpc ListVirtualMachines(ListResourcesRequest) returns (ListVirtualMachinesResponse);
+  rpc DeleteVirtualMachine(DeleteResourceRequest) returns (Operation);
+  rpc StartVirtualMachine(VirtualMachineActionRequest) returns (Operation);
+  // Stop keeps the disk. Destroy (DeleteVirtualMachine) releases it. On a remote provider
+  // these are different calls, and conflating them deletes a customer's data.
+  rpc StopVirtualMachine(VirtualMachineActionRequest) returns (Operation);
+  rpc PauseVirtualMachine(VirtualMachineActionRequest) returns (VirtualMachine);
+  rpc ResumeVirtualMachine(VirtualMachineActionRequest) returns (VirtualMachine);
+  rpc CreateSnapshot(SnapshotRequest) returns (Operation);
+  rpc ListSnapshots(VirtualMachineActionRequest) returns (ListSnapshotsResponse);
+  rpc RestoreSnapshot(SnapshotRequest) returns (Operation);
+  rpc DeleteSnapshot(SnapshotRequest) returns (Operation);
+  // Serial console, bidirectional bytes.
+  rpc Console(stream ConsoleFrame) returns (stream ConsoleFrame);
+}
+
+message VirtualMachineSpec {
+  // Image store reference or path. Resolved by the engine the same way for every
+  // entry point (the CLI and the manifest diverged on this once).
+  string image = 1;
+  int32 vcpus = 2; // 0 = image default, then 1
+  int64 memory_bytes = 3; // 0 = image default, then 1 GiB
+  int64 disk_bytes = 4;
+  repeated NetworkAttachment networks = 5;
+  CloudInit cloud_init = 6;
+  // Provider selection is a REQUIREMENT, not a name: the engine picks a provider that
+  // supports every listed capability, or honours `provider` when set explicitly.
+  string provider = 7;
+  repeated string required_capabilities = 8;
+  ProviderExtensions extensions = 9;
+  RestartMode restart = 10;
+}
+
+message CloudInit {
+  string hostname = 1;
+  repeated string ssh_authorized_keys = 2;
+  string user_data = 3;
+}
+
+message VirtualMachine {
+  ResourceMeta meta = 1;
+  VirtualMachineSpec spec = 2;
+  VirtualMachineStatus status = 3;
+}
+
+message VirtualMachineStatus {
+  VirtualMachinePhase phase = 1;
+  string provider = 2; // the provider actually selected
+  repeated string ip_addresses = 3;
+  // True when the address is computed (e.g. derived from the MAC) rather than observed
+  // from the guest. "Has an IP" is only "is up" when this is false.
+  bool ip_predicted = 4;
+  repeated Condition conditions = 5;
+}
+
+enum VirtualMachinePhase {
+  VIRTUAL_MACHINE_PHASE_UNSPECIFIED = 0;
+  VIRTUAL_MACHINE_PHASE_PROVISIONING = 1;
+  VIRTUAL_MACHINE_PHASE_RUNNING = 2;
+  VIRTUAL_MACHINE_PHASE_PAUSED = 3;
+  VIRTUAL_MACHINE_PHASE_STOPPED = 4;
+  VIRTUAL_MACHINE_PHASE_FAILED = 5;
+}
+
+message CreateVirtualMachineRequest {
+  ResourceMeta meta = 1;
+  VirtualMachineSpec spec = 2;
+  string request_id = 3;
+  bool wait_until_reachable = 4;
+}
+
+message ListVirtualMachinesResponse {
+  repeated VirtualMachine virtual_machines = 1;
+  PageResponse page = 2;
+}
+
+message VirtualMachineActionRequest {
+  string name = 1;
+  string namespace = 2;
+  string request_id = 3;
+}
+
+message SnapshotRequest {
+  string virtual_machine = 1;
+  string namespace = 2;
+  string snapshot = 3;
+  string request_id = 4;
+}
+
+message Snapshot {
+  string name = 1;
+  bool includes_memory = 2;
+  string state = 3; // guest state at capture: "running", "shutoff"
+}
+
+message ListSnapshotsResponse {
+  repeated Snapshot snapshots = 1;
+}
+
+message ConsoleFrame {
+  oneof frame {
+    VirtualMachineActionRequest open = 1;
+    bytes data = 2;
+  }
+}

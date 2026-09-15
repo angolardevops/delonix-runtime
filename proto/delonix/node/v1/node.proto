@@ -1,0 +1,98 @@
+// Delonix node API — node identity, health, capacity and events (the PaaS request R5).
+//
+// Status: DRAFT contract for ADR-0040.
+syntax = "proto3";
+
+package delonix.node.v1;
+
+import "delonix/node/v1/common.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/angolardevops/delonix-runtime/gen/go/delonix/node/v1;nodev1";
+
+service NodeService {
+  rpc GetNodeInfo(GetNodeInfoRequest) returns (NodeInfo);
+  // Liveness of the engine AND of what it depends on, one condition each. A consumer
+  // must not read "the socket answered" as "the node can run workloads".
+  rpc GetHealth(GetHealthRequest) returns (Health);
+  rpc GetCapacity(GetCapacityRequest) returns (Capacity);
+  rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse);
+  // Server-streamed engine events (the same records as `delonix system events`).
+  // `since` replays from the persisted event log first, so a reconnecting agent does not
+  // miss what happened while it was away — within the log's retention, which the first
+  // message states.
+  rpc WatchEvents(WatchEventsRequest) returns (stream Event);
+}
+
+message GetNodeInfoRequest {}
+
+message NodeInfo {
+  string engine_version = 1; // "3.1.0"
+  string engine_commit = 2;
+  string api_version = 3; // "delonix.node.v1"
+  string hostname = 4;
+  string kernel = 5;
+  string arch = 6;
+  bool rootless = 7;
+  string cgroup_driver = 8; // "cgroupfs" | "systemd"
+  bool cgroup_delegated = 9;
+  repeated string supported_workload_types = 10; // "container", "pod", "vm", "microvm"
+}
+
+message GetHealthRequest {}
+
+message Health {
+  // Overall = worst of the parts. Each part is a Condition with a stable reason:
+  // "NetworkReady", "StoreWritable", "CgroupDelegated", "ProvidersAvailable".
+  ConditionStatus overall = 1;
+  repeated Condition conditions = 2;
+}
+
+message GetCapacityRequest {}
+
+message Capacity {
+  int64 cpu_millis_total = 1;
+  int64 cpu_millis_allocatable = 2;
+  int64 memory_bytes_total = 3;
+  int64 memory_bytes_allocatable = 4;
+  int64 pids_allocatable = 5;
+  repeated FilesystemCapacity filesystems = 6;
+  int32 containers_running = 7;
+  int32 vms_running = 8;
+  // Fields that could not be measured are listed here instead of being reported as 0.
+  // A zero that comes from a failed measurement is not a zero.
+  repeated string unmeasured = 9;
+}
+
+message FilesystemCapacity {
+  string role = 1; // "state", "images", "volumes", "vm-images"
+  string mountpoint = 2;
+  int64 bytes_total = 3;
+  int64 bytes_available = 4;
+  int64 inodes_total = 5;
+  int64 inodes_available = 6;
+}
+
+message ListProvidersRequest {
+  string kind = 1; // empty = all
+}
+
+message ListProvidersResponse {
+  repeated ProviderInfo providers = 1;
+}
+
+message WatchEventsRequest {
+  google.protobuf.Timestamp since = 1; // unset = only new events
+  repeated string kinds = 2; // "container", "vm", "network", "security", …
+  string namespace = 3;
+}
+
+message Event {
+  google.protobuf.Timestamp time = 1;
+  string kind = 2;
+  string action = 3; // "start", "die", "oom", "create", "delete", …
+  string target = 4; // "Container/web"
+  string namespace = 5;
+  map<string, string> attributes = 6;
+  string trace_id = 7;
+}

@@ -1,0 +1,267 @@
+// Delonix node API — networks, volumes, images and declarative stacks.
+//
+// Status: DRAFT contract for ADR-0040.
+syntax = "proto3";
+
+package delonix.node.v1;
+
+import "delonix/node/v1/common.proto";
+import "delonix/node/v1/compute.proto";
+import "delonix/node/v1/operations.proto";
+
+option go_package = "github.com/angolardevops/delonix-runtime/gen/go/delonix/node/v1;nodev1";
+
+// ------------------------------------------------------------------------------ networks
+
+service NetworkService {
+  rpc CreateNetwork(CreateNetworkRequest) returns (Operation);
+  rpc GetNetwork(GetResourceRequest) returns (Network);
+  rpc ListNetworks(ListResourcesRequest) returns (ListNetworksResponse);
+  rpc DeleteNetwork(DeleteResourceRequest) returns (Operation);
+  rpc ConnectContainer(NetworkMembershipRequest) returns (Container);
+  rpc DisconnectContainer(NetworkMembershipRequest) returns (Container);
+}
+
+message NetworkSpec {
+  // Topology, not implementation: "bridge" (single-node L2) or "overlay" (multi-node).
+  // WHICH dataplane realizes it is the network provider's choice; the implementation
+  // name never appears in a field the caller writes.
+  NetworkTopology topology = 1;
+  string ipv4_cidr = 2; // empty = allocated
+  OverlaySpec overlay = 3;
+  ProviderExtensions extensions = 4;
+}
+
+enum NetworkTopology {
+  NETWORK_TOPOLOGY_UNSPECIFIED = 0; // = BRIDGE
+  NETWORK_TOPOLOGY_BRIDGE = 1;
+  NETWORK_TOPOLOGY_OVERLAY = 2;
+}
+
+message OverlaySpec {
+  uint32 vni = 1;
+  bool encrypted = 2;
+  repeated OverlayPeer peers = 3;
+}
+
+message OverlayPeer {
+  string node_ip = 1;
+  string public_key = 2; // required when encrypted
+  string tunnel_ip = 3;
+}
+
+message Network {
+  ResourceMeta meta = 1;
+  NetworkSpec spec = 2;
+  repeated Condition conditions = 3; // "Realized" is read from the dataplane record
+}
+
+message CreateNetworkRequest {
+  ResourceMeta meta = 1;
+  NetworkSpec spec = 2;
+  string request_id = 3;
+}
+
+message ListNetworksResponse {
+  repeated Network networks = 1;
+  PageResponse page = 2;
+}
+
+message NetworkMembershipRequest {
+  string network = 1;
+  string container = 2;
+  string namespace = 3;
+  string ipv4_address = 4;
+}
+
+// ------------------------------------------------------------------------------- volumes
+
+service VolumeService {
+  rpc CreateVolume(CreateVolumeRequest) returns (Operation);
+  rpc GetVolume(GetResourceRequest) returns (Volume);
+  rpc ListVolumes(ListResourcesRequest) returns (ListVolumesResponse);
+  rpc DeleteVolume(DeleteVolumeRequest) returns (Operation);
+}
+
+message VolumeSpec {
+  oneof source {
+    LocalVolume local = 1;
+    RemoteShare remote = 2;
+    ShareOf share_of = 3;
+  }
+  int64 quota_bytes = 4;
+  int32 alert_percent = 5;
+  // Ask a storage provider to CREATE the backing share (dataset, quota, export) before
+  // mounting it. Absent = the share must already exist.
+  ProvisionRequest provision = 6;
+}
+
+message LocalVolume {}
+
+message RemoteShare {
+  RemoteProtocol protocol = 1;
+  string server = 2;
+  string share = 3;
+  string credentials_secret = 4; // never an inline password
+  bool read_only = 5;
+}
+
+enum RemoteProtocol {
+  REMOTE_PROTOCOL_UNSPECIFIED = 0;
+  REMOTE_PROTOCOL_NFS = 1;
+  REMOTE_PROTOCOL_SMB = 2;
+  REMOTE_PROTOCOL_WEBDAV = 3;
+}
+
+message ShareOf {
+  string parent_volume = 1;
+}
+
+message ProvisionRequest {
+  string provider = 1; // a registered storage provider id
+  ProviderExtensions extensions = 2;
+}
+
+message Volume {
+  ResourceMeta meta = 1;
+  VolumeSpec spec = 2;
+  // Absent when usage could not be measured (e.g. unreadable subuid-owned data) —
+  // unknown is not zero.
+  optional int64 used_bytes = 3;
+  repeated Condition conditions = 4;
+}
+
+message CreateVolumeRequest {
+  ResourceMeta meta = 1;
+  VolumeSpec spec = 2;
+  string request_id = 3;
+}
+
+message ListVolumesResponse {
+  repeated Volume volumes = 1;
+  PageResponse page = 2;
+}
+
+message DeleteVolumeRequest {
+  DeleteResourceRequest target = 1;
+  // Also destroy data the engine provisioned remotely. Refused for a volume the engine
+  // did not provision.
+  bool destroy_remote = 2;
+}
+
+// -------------------------------------------------------------------------------- images
+
+service ImageService {
+  rpc PullImage(PullImageRequest) returns (Operation);
+  rpc GetImage(GetImageRequest) returns (Image);
+  rpc ListImages(ListImagesRequest) returns (ListImagesResponse);
+  rpc DeleteImage(GetImageRequest) returns (Operation);
+  rpc PushImage(PushImageRequest) returns (Operation);
+  rpc BuildImage(BuildImageRequest) returns (Operation);
+  rpc ScanImage(GetImageRequest) returns (Operation);
+}
+
+message Image {
+  string reference = 1;
+  string digest = 2; // sha256:… — always present; a reference without digest is not an image
+  repeated string repo_digests = 3;
+  int64 size_bytes = 4;
+  string os = 5;
+  string architecture = 6;
+  map<string, string> labels = 7;
+}
+
+message PullImageRequest {
+  string reference = 1; // tag or @sha256 digest; a digest pin verifies the manifest too
+  string platform = 2; // "linux/arm64"; empty = host
+  string credentials_secret = 3;
+  string request_id = 4;
+}
+
+message GetImageRequest {
+  string reference = 1;
+}
+
+message ListImagesRequest {
+  PageRequest page = 1;
+  string reference_prefix = 2;
+}
+
+message ListImagesResponse {
+  repeated Image images = 1;
+  PageResponse page = 2;
+}
+
+message PushImageRequest {
+  string reference = 1;
+  string destination = 2;
+  string credentials_secret = 3;
+  string request_id = 4;
+}
+
+message BuildImageRequest {
+  // Build context as a path on this node. Uploading a context over the socket is a
+  // later addition, deliberately not in v1.
+  string context_path = 1;
+  string file = 2; // Delonixfile/Dockerfile; empty = auto
+  repeated string tags = 3;
+  string target_stage = 4;
+  string platform = 5;
+  map<string, string> build_args = 6;
+  repeated string secret_refs = 7;
+  bool no_cache = 8;
+  string request_id = 9;
+}
+
+// -------------------------------------------------------------------------------- stacks
+
+service StackService {
+  // Pure: computes the plan, changes nothing. Same answer as `delonix stack plan`.
+  rpc PlanStack(PlanStackRequest) returns (StackPlan);
+  rpc ApplyStack(ApplyStackRequest) returns (Operation);
+  rpc DestroyStack(DestroyStackRequest) returns (Operation);
+}
+
+message PlanStackRequest {
+  string stack = 1;
+  // Multi-document manifest (YAML or JSON), validated against docs/schema/v1/delonix.json.
+  bytes manifest = 2;
+  bool prune = 3;
+}
+
+message StackPlan {
+  repeated PlannedChange changes = 1;
+  bool has_changes = 2; // the --detailed-exitcode answer
+}
+
+message PlannedChange {
+  string target = 1; // "Container/web"
+  ChangeAction action = 2;
+  repeated string fields = 3;
+  string reason = 4;
+}
+
+enum ChangeAction {
+  CHANGE_ACTION_UNSPECIFIED = 0;
+  CHANGE_ACTION_NO_OP = 1;
+  CHANGE_ACTION_CREATE = 2;
+  CHANGE_ACTION_UPDATE = 3;
+  CHANGE_ACTION_REPLACE = 4;
+  CHANGE_ACTION_DELETE = 5;
+  CHANGE_ACTION_ADOPT = 6;
+  CHANGE_ACTION_CONFLICT = 7;
+}
+
+message ApplyStackRequest {
+  string stack = 1;
+  bytes manifest = 2;
+  bool prune = 3;
+  repeated string replace = 4; // "VirtualMachine/db" — recreation must be named
+  string request_id = 5;
+}
+
+message DestroyStackRequest {
+  string stack = 1;
+  bytes manifest = 2;
+  string request_id = 3;
+}
