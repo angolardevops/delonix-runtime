@@ -2127,6 +2127,21 @@ fn quiet(prog: &str, args: &[&str]) -> std::result::Result<String, String> {
 /// Powers off the domain (`virsh destroy`) only if it is NOT already "shut off" —
 /// idempotent and silent (destroy on a stopped domain is an error in virsh, and was
 /// one of the raw messages that `vm rm` let escape).
+/// Does a `virsh domstate` answer mean the domain is ALIVE — the question
+/// [`VmBackend::is_running`] asks, and the same one Cloud Hypervisor answers
+/// with "the VMM process is there"?
+///
+/// `paused` counts. BUG FIXED HERE, reproduced on libvirt: `vm pause` left the
+/// domain `paused` (confirmed by `virsh domstate`), but only `running` was
+/// accepted, so the next `vm ls` took the reconciliation's "powered off" branch
+/// and reported `Stopped` with `pid=None` for a VM whose guest memory was
+/// intact. The `Paused` guard in [`status`] lives inside the alive branch, so it
+/// only ever worked on Cloud Hypervisor. Treating `paused` as alive also stops
+/// the offline snapshot path from undefining a domain a restore left paused.
+fn libvirt_domstate_is_alive(s: &str) -> bool {
+    s == "running" || s == "paused"
+}
+
 fn libvirt_poweroff(uri: &str, name: &str) -> Result<()> {
     let state = capture("virsh", &["-c", uri, "domstate", "--", name]).unwrap_or_default();
     if state.is_empty() || state == "shut off" {
@@ -3483,8 +3498,7 @@ impl LibvirtBackend {
 
     fn is_running_uri(&self, uri: &str, name: &str) -> bool {
         capture("virsh", &["-c", uri, "domstate", "--", name])
-            .map(|s| s == "running")
-            .unwrap_or(false)
+            .is_some_and(|s| libvirt_domstate_is_alive(&s))
     }
 
     /// The libvirt network a domain's interface actually sources from (the
@@ -4496,7 +4510,7 @@ pub fn status(base: &Path, name: &str) -> Result<Vm> {
     let backend = backend_for(&named)?;
     st.update(name, |vm| {
         let old_ip = vm.ip.clone();
-        let was_running = vm.status == Status::Running;
+        let old_status = vm.status.clone();
         // Records written before `pid_starttime` existed carry `None`, which
         // `safe_to_signal` treats as the old behaviour — so the guard is inert
         // for every VM already on disk until it is booted again. Adopt it here,
@@ -4528,7 +4542,13 @@ pub fn status(base: &Path, name: &str) -> Result<Vm> {
         // `create` saved the record): the record is what the holder's internal DNS
         // reads to resolve `<vm-name>` for containers — a stale null IP there means
         // the name never resolves. Only writes when something actually changed.
-        adopted || vm.ip != old_ip || was_running != (vm.status == Status::Running)
+        //
+        // The status comparison is on the WHOLE status, not on "was it
+        // Running": `Paused -> Stopped` (a paused VMM that really died) is a
+        // change too, and the old `was_running != is_running` saw both sides as
+        // "not running" and left `Paused` on disk while `vm ls` said `Stopped`
+        // — so `vm unpause` went on to aim at a VM that no longer existed.
+        adopted || vm.ip != old_ip || vm.status != old_status
     })
 }
 
@@ -5013,6 +5033,112 @@ Format specific information:
             src.contains(r#"s == "running""#),
             "a comparação de liveness mudou de forma — idem"
         );
+    }
+
+    /// REGRESSION (reproduced on libvirt): `vm pause` left the domain
+    /// `paused` and the next `vm ls` said `Stopped`, because only `running`
+    /// counted as alive and the `Paused` guard in `status()` lives inside the
+    /// alive branch. Removing the `|| s == "paused"` makes this test fail.
+    #[test]
+    fn a_paused_libvirt_domain_is_alive() {
+        assert!(libvirt_domstate_is_alive("running"));
+        assert!(
+            libvirt_domstate_is_alive("paused"),
+            "a paused domain keeps the guest memory intact — it is not a powered-off VM"
+        );
+        for dead in ["shut off", "crashed", ""] {
+            assert!(!libvirt_domstate_is_alive(dead), "{dead:?} is not alive");
+        }
+    }
+
+    /// `status()` reconciling a `Paused` record, both halves: with the VMM
+    /// alive `Paused` stays (no silent thaw of the record), and with the VMM
+    /// dead `Stopped` is WRITTEN to disk — it used to be only returned, because
+    /// change detection compared "was it Running?" and `Paused` and `Stopped`
+    /// both answer "no". The disk kept `Paused` while `vm ls` said `Stopped`,
+    /// and `vm unpause` then aimed at a VM that no longer existed.
+    #[test]
+    fn status_of_a_paused_vm_keeps_paused_and_persists_its_death() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static ALIVE: AtomicBool = AtomicBool::new(true);
+
+        struct Pausable;
+        impl VmBackend for Pausable {
+            fn id(&self) -> &'static str {
+                "pausavel"
+            }
+            fn available(&self) -> bool {
+                true
+            }
+            fn auto_selectable(&self) -> bool {
+                false
+            }
+            fn boot(
+                &self,
+                _: &Path,
+                _: &VmConfig,
+                _: &str,
+                _: &dyn Fn(CreateStage),
+            ) -> Result<Boot> {
+                unreachable!()
+            }
+            fn is_running(&self, _: &Vm) -> bool {
+                ALIVE.load(Ordering::SeqCst)
+            }
+            fn ip(&self, _: &Vm) -> Option<String> {
+                None
+            }
+            fn stop(&self, _: &Path, _: &Vm) -> Result<()> {
+                Ok(())
+            }
+        }
+        register_backend(BackendRegistration {
+            id: "pausavel",
+            aliases: &[],
+            auto_selectable: false,
+            new: Box::new(|| Ok(Box::new(Pausable))),
+        })
+        .expect("registar");
+
+        let base = std::env::temp_dir().join(format!(
+            "delonix-paused-status-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(vms_dir(&base)).unwrap();
+        let st = store(&base).unwrap();
+        let mut vm = Vm::new(
+            "p".into(),
+            "d".into(),
+            "o".into(),
+            1,
+            "1G".into(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+        );
+        vm.backend = "pausavel".into();
+        vm.status = Status::Paused;
+        st.save("p", &vm).unwrap();
+
+        ALIVE.store(true, Ordering::SeqCst);
+        assert_eq!(status(&base, "p").unwrap().status, Status::Paused);
+        assert_eq!(st.load("p").unwrap().status, Status::Paused);
+
+        ALIVE.store(false, Ordering::SeqCst);
+        assert_eq!(status(&base, "p").unwrap().status, Status::Stopped);
+        assert_eq!(
+            st.load("p").unwrap().status,
+            Status::Stopped,
+            "`vm ls` said Stopped while the record on disk stayed Paused"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+        backends().write().unwrap().retain(|b| b.id != "pausavel");
     }
 
     /// REGRESSION (protecção do host): o XML tem de levar um tecto que o HOST
