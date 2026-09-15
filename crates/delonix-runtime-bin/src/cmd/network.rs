@@ -468,6 +468,15 @@ pub enum NetworkCmd {
         #[command(subcommand)]
         action: NodeCmd,
     },
+    /// The IP lease registry — the `/16` anti-collision allocator.
+    ///
+    /// Visibility and reclaim for the leak `network diagnose` already
+    /// reports (measured: 391 leases, 47 with a live container — 88%
+    /// orphaned).
+    Ipam {
+        #[command(subcommand)]
+        action: IpamCmd,
+    },
     /// Create a network.
     Create {
         name: String,
@@ -583,6 +592,7 @@ pub fn run(action: NetworkCmd) -> Result<()> {
         NetworkCmd::Diagnose { output } => cmd_diagnose(&store, output),
         NetworkCmd::Ls { output } => cmd_ls(&store, output),
         NetworkCmd::Node { action } => cmd_node(action),
+        NetworkCmd::Ipam { action } => cmd_ipam(action),
         NetworkCmd::Create {
             name,
             driver,
@@ -910,16 +920,18 @@ fn cmd_diagnose(store: &NetworkStore, format: output::OutputFormat) -> Result<()
                 leases.len(),
                 ownerless * 100 / leases.len().max(1),
             ),
-            // No `fix` that reclaims, on purpose. Reclaiming a lease that is
-            // still in use hands one IP to two containers, and deciding that
-            // needs the allocator's lock and a grace period. A `/16` holds ~65k
-            // addresses, so this is monotonic rather than urgent — and it is now
-            // at least VISIBLE, which it was not before.
+            // The reaper (`network ipam prune`) exists and is safe to run — it
+            // takes the allocator's lock and only reclaims a lease that stays
+            // orphaned across a grace window, so it never hands a live
+            // container's address to someone else. Naming the fix here, not
+            // just leaving it visible, closes the leak this same finding used
+            // to only describe.
             fix: Some(
                 concat!(
-                    "monotonic leak, not urgent: a /16 holds ~65k addresses. There is no ",
-                    "reaper yet — reclaiming needs the allocator lock and a grace period, ",
-                    "because a container holds its lease before it has a record",
+                    "monotonic leak, not urgent: a /16 holds ~65k addresses. Run ",
+                    "`delonix network ipam prune` to reclaim (or `--dry-run` to preview) — ",
+                    "safe under load: it only takes a lease that stays orphaned across a ",
+                    "grace window, the allocator's lock guards every write",
                 )
                 .into(),
             ),
@@ -1438,6 +1450,151 @@ pub(crate) fn cmd_rm(store: &NetworkStore, name: &str) -> Result<()> {
     }
     infra::network_remove(name);
     println!("{name}");
+    Ok(())
+}
+
+/// Subcommands of `network ipam` — the `id -> ip` lease registry.
+#[derive(clap::Subcommand)]
+pub enum IpamCmd {
+    /// List every lease this node holds, with its owner (or `<orphaned>`).
+    ///
+    /// Read-only — same guarantee as `network diagnose`'s address-registry
+    /// check: no lock taken, nothing reclaimed. `network ipam prune` is the
+    /// only command that reclaims.
+    Ls {
+        /// Only leases whose prefix belongs to this network (by name).
+        #[arg(add = ArgValueCandidates::new(super::complete::networks))]
+        network: Option<String>,
+        /// Output format: `table` (default) or `json` (ADR-0005).
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: output::OutputFormat,
+    },
+    /// Reclaim leases with no live container.
+    ///
+    /// The fix `network diagnose`'s address-registry finding points at. Safe
+    /// under load, same shape as `system prune`: a lease first seen orphaned
+    /// is only a CANDIDATE, and is reclaimed on a LATER run that still finds
+    /// it orphaned past the grace window — never on the pass that first
+    /// notices it, so a container mid-creation never loses the address it
+    /// just allocated. Runs under the allocator's own lock.
+    Prune {
+        /// Preview what would be reclaimed, without touching the registry.
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+/// `network ipam ls`/`network ipam prune`.
+fn cmd_ipam(action: IpamCmd) -> Result<()> {
+    match action {
+        IpamCmd::Ls { network, output } => cmd_ipam_ls(network, output),
+        IpamCmd::Prune { dry_run } => cmd_ipam_prune(dry_run),
+    }
+}
+
+/// Lease owners (`id -> label`) — the one set `ls`/`prune`/`system prune`
+/// share (`prune::lease_owners`), so the listing and the reaper never disagree.
+fn live_lease_owners() -> Result<std::collections::HashMap<String, String>> {
+    let (_, store) = super::util::open_stores()?;
+    super::prune::lease_owners(&store)
+}
+
+/// Resolves a network NAME to the `/16` prefix its leases are filed under
+/// (`ipam::registry_key`) — the same key `all_leases` returns, so filtering
+/// by name and by prefix never disagree.
+fn ipam_prefix_of_network(store: &NetworkStore, network: &str) -> Result<String> {
+    let n = store.get(network)?;
+    Ok(delonix_net::ipam::registry_key(&n.prefix))
+}
+
+fn cmd_ipam_ls(network: Option<String>, output: output::OutputFormat) -> Result<()> {
+    let owners = live_lease_owners()?;
+    let filter_prefix = match &network {
+        None => None,
+        Some(name) => {
+            let store = NetworkStore::open(state_root())?;
+            Some(ipam_prefix_of_network(&store, name)?)
+        }
+    };
+    let leases: Vec<_> = delonix_net::ipam::all_leases()
+        .into_iter()
+        .filter(|(prefix, _, _)| filter_prefix.as_deref().is_none_or(|p| p == prefix))
+        .collect();
+
+    #[derive(serde::Serialize)]
+    struct Row {
+        prefix: String,
+        id: String,
+        ip: String,
+        owner: String,
+    }
+    let rows: Vec<Row> = leases
+        .into_iter()
+        .map(|(prefix, id, ip)| {
+            let owner = owners
+                .get(&id)
+                .cloned()
+                .unwrap_or_else(|| "<orphaned>".to_string());
+            Row {
+                prefix,
+                id,
+                ip,
+                owner,
+            }
+        })
+        .collect();
+
+    if output == output::OutputFormat::Json {
+        return output::print_json(&rows);
+    }
+    let mut t = output::Table::new(&["PREFIX", "ID", "IP", "OWNER"]);
+    for r in &rows {
+        t.row(vec![
+            r.prefix.clone(),
+            super::container::short_id(&r.id).to_string(),
+            r.ip.clone(),
+            r.owner.clone(),
+        ]);
+    }
+    t.print();
+    Ok(())
+}
+
+fn cmd_ipam_prune(dry_run: bool) -> Result<()> {
+    let live: std::collections::HashSet<String> = live_lease_owners()?.into_keys().collect();
+    if dry_run {
+        let candidates: Vec<_> = delonix_net::ipam::all_leases()
+            .into_iter()
+            .filter(|(_, id, _)| !live.contains(id))
+            .collect();
+        if candidates.is_empty() {
+            println!(
+                "{}",
+                super::po::t("no orphaned leases (or none past the grace window yet)")
+            );
+            return Ok(());
+        }
+        println!(
+            "{}",
+            super::po::tf(
+                "{n} lease(s) would be considered for reclaim on a later run (a fresh \
+                 sighting always waits out the grace window first):",
+                &[("n", &candidates.len().to_string())],
+            )
+        );
+        for (prefix, id, ip) in &candidates {
+            println!("  {prefix}/{} {ip}", super::container::short_id(id));
+        }
+        return Ok(());
+    }
+    let freed = delonix_net::ipam::reap_orphan_leases(&live);
+    println!(
+        "{}",
+        super::po::tf(
+            "reclaimed {n} orphaned lease(s)",
+            &[("n", &freed.to_string())],
+        )
+    );
     Ok(())
 }
 

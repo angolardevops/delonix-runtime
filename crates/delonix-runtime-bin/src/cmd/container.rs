@@ -2952,6 +2952,103 @@ pub(crate) fn warn_if_namespace_isolation_inert(namespace: &str) {
     }
 }
 
+/// Refuses `-m`/`--cpus`/`--cpu-weight` when this session has no real cgroup2
+/// delegation, instead of accepting the flag and letting the kernel ignore it.
+///
+/// # Why this is a refusal now, and was a warning before
+///
+/// `cgroup_limits_apply()` already told the truth here — it just never
+/// stopped anything. A container created without delegation runs with
+/// `memory.max=max`/`cpu.max=max` regardless of `-m 128M`, and the `run`
+/// command still exits 0. That is not a best-effort limit, it is a limit that
+/// does not exist while claiming success — the exact shape of silent failure
+/// this engine refuses everywhere else (`ingress ls` used to say `allow` for a
+/// blocked port; this is the same mistake on the cgroup side).
+///
+/// # Scope, deliberately narrow
+///
+/// `cgroup_limits_apply()` proves delegation of the base that `memory`/`cpu`/
+/// `pids` share (a `Delegate=yes` scope typically hands over exactly those
+/// three). It says nothing about `cpuset`/`io`, which this host's own
+/// `user@.service` routinely does NOT delegate even when `memory`/`cpu` are
+/// fine — see this repo's own measurement of that split (AGENTS.md, "cgroup
+/// delegation: cpu fatal, cpuset/io optional"). Refusing `--cpuset`/
+/// `--io-weight`/`--io-max` on the same signal would be
+/// inventing a precision this probe was never built to have, and would refuse
+/// requests this host can actually satisfy. Those three keep the pre-existing
+/// best-effort behaviour until they get their own controller-specific probe.
+///
+/// # Escape hatch
+///
+/// `DELONIX_ALLOW_UNENFORCED_LIMITS=1` runs anyway, loudly. Same shape as
+/// `DELONIX_FORWARD_POLICY=accept`/`DELONIX_ENABLE_IPV6=1` elsewhere in this
+/// engine: a deliberate, visible opt-out, never a silent one.
+fn preflight_resource_limits(opts: &RunOpts) -> Result<()> {
+    let asked = opts.memory.is_some() || opts.cpus.is_some() || opts.cpu_weight.is_some();
+    let escape_hatch = std::env::var_os("DELONIX_ALLOW_UNENFORCED_LIMITS").is_some();
+    resource_limits_decision(asked, runtime::cgroup_limits_apply(), escape_hatch)
+}
+
+/// The decision `preflight_resource_limits` makes, pulled out pure so it can
+/// be tested against the three states (not asked / asked-and-delegated /
+/// asked-and-not) without a real cgroup2 tree.
+fn resource_limits_decision(asked: bool, delegated: bool, escape_hatch: bool) -> Result<()> {
+    if !asked || delegated {
+        return Ok(());
+    }
+    if escape_hatch {
+        eprintln!(
+            "{}",
+            super::po::t(
+                "warning: -m/--cpus/--cpu-weight were requested but this session has \
+                 no cgroup2 delegation, so the kernel will not see them — continuing \
+                 unenforced because DELONIX_ALLOW_UNENFORCED_LIMITS is set"
+            )
+        );
+        return Ok(());
+    }
+    Err(delonix_runtime_core::Error::Unavailable(
+        super::po::t(
+            "-m/--cpus/--cpu-weight were requested but this session has no cgroup2 \
+             delegation, so the kernel would never see them — the container would run \
+             unlimited while this command reports success. Fix: systemd-run --user \
+             --scope -p Delegate=yes -- delonix container run ... (see `delonix system \
+             doctor`), or set DELONIX_ALLOW_UNENFORCED_LIMITS=1 to run unenforced anyway.",
+        )
+        .to_string(),
+    ))
+}
+
+#[cfg(test)]
+mod resource_limits_preflight_tests {
+    use super::resource_limits_decision;
+
+    #[test]
+    fn nada_pedido_nunca_recusa_seja_qual_for_a_delegacao() {
+        assert!(resource_limits_decision(false, false, false).is_ok());
+        assert!(resource_limits_decision(false, true, false).is_ok());
+    }
+
+    #[test]
+    fn pedido_e_delegado_segue_sem_aviso_nenhum() {
+        assert!(resource_limits_decision(true, true, false).is_ok());
+    }
+
+    #[test]
+    fn pedido_sem_delegacao_e_sem_escape_hatch_recusa() {
+        let err = resource_limits_decision(true, false, false).unwrap_err();
+        assert_eq!(
+            crate::cmd::exitcode::for_error(&err),
+            crate::cmd::exitcode::UNAVAILABLE
+        );
+    }
+
+    #[test]
+    fn pedido_sem_delegacao_com_escape_hatch_segue() {
+        assert!(resource_limits_decision(true, false, true).is_ok());
+    }
+}
+
 pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Result<()> {
     // The node's runtime policy, BEFORE anything is created or pulled. Same
     // placement reason as the capability ceiling in the CRI: everything reaching
@@ -2974,6 +3071,9 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             opts.net.is_empty() || opts.net == "host",
         ),
     )?;
+    // Same reasoning, same place as the policy check above: refuse before
+    // anything is created, not after. See `preflight_resource_limits`.
+    preflight_resource_limits(&opts)?;
     // Intact copy for the re-exec (the destructuring below consumes opts).
     let opts_copy = opts.clone();
     let RunOpts {

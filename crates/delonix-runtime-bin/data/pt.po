@@ -10966,3 +10966,67 @@ msgstr "Cobertura da Docker Engine API.\n\nServido, recusado com razão, e o que
 
 msgid "Machine-readable JSON instead of the table (ADR-0005)."
 msgstr "JSON máquina-legível em vez da tabela (ADR-0005)."
+
+# ---- network ipam ls / prune — o ceifador do lease registry (2026-09-15) ----
+
+msgid "no orphaned leases (or none past the grace window yet)"
+msgstr "nenhum lease órfão (ou nenhum além da janela de graça ainda)"
+
+msgid "{n} lease(s) would be considered for reclaim on a later run (a fresh sighting always waits out the grace window first):"
+msgstr "{n} lease(s) seriam considerados para reclamar numa corrida posterior (uma observação nova espera sempre a janela de graça primeiro):"
+
+msgid "reclaimed {n} orphaned lease(s)"
+msgstr "reclamados {n} lease(s) órfão(s)"
+
+msgid "net: {n} orphan IPAM lease(s) reaped"
+msgstr "net: {n} lease(s) IPAM órfão(s) ceifado(s)"
+
+msgid "The IP lease registry — the `/16` anti-collision allocator"
+msgstr "O registo de leases de IP — o alocador anti-colisão do `/16`"
+
+msgid "The IP lease registry — the `/16` anti-collision allocator.\n\nVisibility and reclaim for the leak `network diagnose` already reports (measured: 391 leases, 47 with a live container — 88% orphaned)."
+msgstr "O registo de leases de IP — o alocador anti-colisão do `/16`.\n\nVisibilidade e reclamação para a fuga que o `network diagnose` já reporta (medido: 391 leases, 47 com um container vivo — 88% órfãos)."
+
+msgid "List every lease this node holds, with its owner (or `<orphaned>`)"
+msgstr "Lista todos os leases que este nó tem, com o dono (ou `<orphaned>`)"
+
+msgid "List every lease this node holds, with its owner (or `<orphaned>`).\n\nRead-only — same guarantee as `network diagnose`'s address-registry check: no lock taken, nothing reclaimed. `network ipam prune` is the only command that reclaims."
+msgstr "Lista todos os leases que este nó tem, com o dono (ou `<orphaned>`).\n\nSó leitura — a mesma garantia da verificação do registo de endereços do `network diagnose`: nenhum lock é tomado, nada é reclamado. `network ipam prune` é o único comando que reclama."
+
+msgid "Reclaim leases with no live container"
+msgstr "Reclama leases sem container vivo"
+
+msgid "Reclaim leases with no live container.\n\nThe fix `network diagnose`'s address-registry finding points at. Safe under load, same shape as `system prune`: a lease first seen orphaned is only a CANDIDATE, and is reclaimed on a LATER run that still finds it orphaned past the grace window — never on the pass that first notices it, so a container mid-creation never loses the address it just allocated. Runs under the allocator's own lock."
+msgstr "Reclama leases sem container vivo.\n\nA correcção para a qual o achado do registo de endereços do `network diagnose` aponta. Seguro sob carga, na mesma forma do `system prune`: um lease visto órfão pela primeira vez é só um CANDIDATO, e é reclamado numa corrida POSTERIOR que ainda o encontre órfão além da janela de graça — nunca na passagem que primeiro o nota, para um container em criação nunca perder o endereço que acabou de alocar. Corre sob o lock do próprio alocador."
+
+msgid "Only leases whose prefix belongs to this network (by name)"
+msgstr "Só os leases cujo prefixo pertence a esta rede (por nome)"
+
+msgid "Preview what would be reclaimed, without touching the registry"
+msgstr "Antevê o que seria reclamado, sem tocar no registo"
+
+msgid "see every lease this node holds, and which ones have no live owner"
+msgstr "vê todos os leases que este nó tem, e quais não têm dono vivo"
+
+msgid "reclaim the leases network diagnose already flags as orphaned"
+msgstr "reclama os leases que o network diagnose já assinala como órfãos"
+
+msgid "every lease on this node, with its owner or `<orphaned>`"
+msgstr "todos os leases deste nó, com o dono ou `<orphaned>`"
+
+msgid "only the leases of one network"
+msgstr "só os leases de uma rede"
+
+msgid "preview what would be reclaimed, without touching the registry"
+msgstr "antevê o que seria reclamado, sem tocar no registo"
+
+msgid "reclaim leases with no live container, past the grace window"
+msgstr "reclama leases sem container vivo, além da janela de graça"
+
+# ---- container run: préflight de limites de recurso sem delegação de cgroup2 ----
+
+msgid "warning: -m/--cpus/--cpu-weight were requested but this session has no cgroup2 delegation, so the kernel will not see them — continuing unenforced because DELONIX_ALLOW_UNENFORCED_LIMITS is set"
+msgstr "aviso: -m/--cpus/--cpu-weight foram pedidos mas esta sessão não tem delegação de cgroup2, por isso o kernel nunca os vai ver — a continuar sem aplicar porque DELONIX_ALLOW_UNENFORCED_LIMITS está definida"
+
+msgid "-m/--cpus/--cpu-weight were requested but this session has no cgroup2 delegation, so the kernel would never see them — the container would run unlimited while this command reports success. Fix: systemd-run --user --scope -p Delegate=yes -- delonix container run ... (see `delonix system doctor`), or set DELONIX_ALLOW_UNENFORCED_LIMITS=1 to run unenforced anyway."
+msgstr "-m/--cpus/--cpu-weight foram pedidos mas esta sessão não tem delegação de cgroup2, por isso o kernel nunca os aplicaria — o container correria sem limite enquanto este comando reporta sucesso. Correcção: systemd-run --user --scope -p Delegate=yes -- delonix container run ... (ver `delonix system doctor`), ou define DELONIX_ALLOW_UNENFORCED_LIMITS=1 para correr sem aplicar de qualquer forma."
