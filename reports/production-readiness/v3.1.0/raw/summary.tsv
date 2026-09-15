@@ -1,0 +1,8 @@
+fmt	0	1s	cargo fmt --all --check
+lang	0	1s	python3 scripts/lang_ratchet.py
+check	0	42s	cargo check --workspace --all-targets --locked
+clippy	0	50s	cargo clippy --workspace --all-targets --locked -- -D warnings
+test	0	423s	cargo test --workspace --locked --no-fail-fast
+doctest	0	22s	cargo test --workspace --doc --locked
+deny	0	3s	cargo deny check
+DONE

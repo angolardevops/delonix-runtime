@@ -1,0 +1,8 @@
+table ip dlxing {
+	chain fwdeny {
+		type filter hook forward priority filter - 10; policy accept;
+		ct state established,related accept
+		iifname . oifname vmap @netpair
+		iifname @dlxbr oifname @dlxbr counter packets 0 bytes 0 drop
+	}
+}

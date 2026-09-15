@@ -1,0 +1,266 @@
+{
+  "engineVersion": "3.1.0",
+  "refused": [
+    {
+      "method": "POST",
+      "path": "/containers/{id}/exec",
+      "reason": "needs HTTP hijacking (a raw bidirectional stream over the upgraded connection); use `delonix container exec`"
+    },
+    {
+      "method": "POST",
+      "path": "/containers/{id}/attach",
+      "reason": "same hijacking requirement, and this engine keeps no live stdin conduit to an already-started detached container"
+    },
+    {
+      "method": "GET",
+      "path": "/containers/{id}/logs",
+      "reason": "not written yet; `delonix container logs` covers it"
+    },
+    {
+      "method": "GET",
+      "path": "/events",
+      "reason": "not written yet; `delonix system events` covers it"
+    },
+    {
+      "method": "POST",
+      "path": "/build",
+      "reason": "not written yet; `delonix build` covers it"
+    },
+    {
+      "method": "GET|POST|DELETE",
+      "path": "/networks",
+      "reason": "not written yet; `delonix network` covers it"
+    },
+    {
+      "method": "POST",
+      "path": "/networks/create",
+      "reason": "not written yet; `delonix network create` covers it"
+    },
+    {
+      "method": "GET",
+      "path": "/networks/{id}",
+      "reason": "not written yet; `delonix network inspect` covers it"
+    },
+    {
+      "method": "POST",
+      "path": "/images/create",
+      "reason": "not written yet — this is the pull, and most tools call it first; `delonix image pull` covers it from the CLI"
+    },
+    {
+      "method": "GET",
+      "path": "/images/{name}/json",
+      "reason": "not written yet; `delonix image describe` covers it"
+    },
+    {
+      "method": "GET",
+      "path": "/containers/{id}/stats",
+      "reason": "not written yet — it is a live metric stream, and this engine exposes those over Prometheus (`/metrics`) instead; `delonix dash` covers the interactive case"
+    },
+    {
+      "method": "GET|POST|DELETE",
+      "path": "/volumes",
+      "reason": "not written yet; `delonix volume` covers it"
+    }
+  ],
+  "served": [
+    {
+      "mapsTo": "liveness",
+      "method": "GET|HEAD",
+      "path": "/_ping"
+    },
+    {
+      "mapsTo": "engine version",
+      "method": "GET",
+      "path": "/version"
+    },
+    {
+      "mapsTo": "engine state",
+      "method": "GET",
+      "path": "/info"
+    },
+    {
+      "mapsTo": "container ps",
+      "method": "GET",
+      "path": "/containers/json"
+    },
+    {
+      "mapsTo": "image ls",
+      "method": "GET",
+      "path": "/images/json"
+    },
+    {
+      "mapsTo": "container run -d (creates AND starts; HostConfig.RestartPolicy is REFUSED)",
+      "method": "POST",
+      "path": "/containers/create"
+    },
+    {
+      "mapsTo": "idempotent 304 if already running",
+      "method": "POST",
+      "path": "/containers/{id}/start"
+    },
+    {
+      "mapsTo": "container stop",
+      "method": "POST",
+      "path": "/containers/{id}/stop"
+    },
+    {
+      "mapsTo": "container kill",
+      "method": "POST",
+      "path": "/containers/{id}/kill"
+    },
+    {
+      "mapsTo": "container wait",
+      "method": "POST",
+      "path": "/containers/{id}/wait"
+    },
+    {
+      "mapsTo": "container restart",
+      "method": "POST",
+      "path": "/containers/{id}/restart"
+    },
+    {
+      "mapsTo": "container rename",
+      "method": "POST",
+      "path": "/containers/{id}/rename"
+    },
+    {
+      "mapsTo": "container rm",
+      "method": "DELETE",
+      "path": "/containers/{id}"
+    },
+    {
+      "mapsTo": "container inspect",
+      "method": "GET",
+      "path": "/containers/{id}/json"
+    }
+  ],
+  "surface": "docker",
+  "upstreamUsed": [
+    {
+      "method": "GET",
+      "path": "/_ping",
+      "seenIn": "compose, kind — the first call any client makes",
+      "state": "served"
+    },
+    {
+      "method": "GET",
+      "path": "/version",
+      "seenIn": "compose, kind",
+      "state": "served"
+    },
+    {
+      "method": "GET",
+      "path": "/info",
+      "seenIn": "kind — `info --format {{json .}}`",
+      "state": "served"
+    },
+    {
+      "method": "GET",
+      "path": "/containers/json",
+      "seenIn": "kind — `ps -a --filter label=...`",
+      "state": "served"
+    },
+    {
+      "method": "POST",
+      "path": "/containers/create",
+      "seenIn": "kind, compose — `run`",
+      "state": "served"
+    },
+    {
+      "method": "POST",
+      "path": "/containers/{id}/start",
+      "seenIn": "compose",
+      "state": "served"
+    },
+    {
+      "method": "POST",
+      "path": "/containers/{id}/stop",
+      "seenIn": "compose",
+      "state": "served"
+    },
+    {
+      "method": "POST",
+      "path": "/containers/{id}/kill",
+      "seenIn": "compose",
+      "state": "served"
+    },
+    {
+      "method": "POST",
+      "path": "/containers/{id}/wait",
+      "seenIn": "compose",
+      "state": "served"
+    },
+    {
+      "method": "POST",
+      "path": "/containers/{id}/restart",
+      "seenIn": "compose",
+      "state": "served"
+    },
+    {
+      "method": "POST",
+      "path": "/containers/{id}/rename",
+      "seenIn": "compose",
+      "state": "served"
+    },
+    {
+      "method": "DELETE",
+      "path": "/containers/{id}",
+      "seenIn": "kind — `rm -f -v <n>`",
+      "state": "served"
+    },
+    {
+      "method": "GET",
+      "path": "/containers/{id}/json",
+      "seenIn": "kind — four distinct `inspect --format`",
+      "state": "served"
+    },
+    {
+      "method": "GET",
+      "path": "/containers/{id}/logs",
+      "seenIn": "kind — `logs -f <n>`",
+      "state": "refused"
+    },
+    {
+      "method": "POST",
+      "path": "/containers/{id}/exec",
+      "seenIn": "kind — `exec --privileged [-i] <n> <cmd>`",
+      "state": "refused"
+    },
+    {
+      "method": "POST",
+      "path": "/images/create",
+      "seenIn": "kind — `pull <ref>`",
+      "state": "refused"
+    },
+    {
+      "method": "GET",
+      "path": "/images/{name}/json",
+      "seenIn": "kind — `inspect --type=image <ref>`",
+      "state": "refused"
+    },
+    {
+      "method": "GET",
+      "path": "/networks",
+      "seenIn": "kind — `network ls --filter=name=^kind$`",
+      "state": "refused"
+    },
+    {
+      "method": "POST",
+      "path": "/networks/create",
+      "seenIn": "kind — `network create -d=bridge …`",
+      "state": "refused"
+    },
+    {
+      "method": "GET",
+      "path": "/networks/{id}",
+      "seenIn": "kind — `network inspect bridge -f …`",
+      "state": "refused"
+    },
+    {
+      "method": "GET",
+      "path": "/containers/{id}/stats",
+      "seenIn": "Testcontainers, Dev Containers, GitLab Runner — per AGENTS.md, not captured here",
+      "state": "refused"
+    }
+  ]
+}

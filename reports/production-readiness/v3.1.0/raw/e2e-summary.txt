@@ -1,0 +1,25 @@
+=== stack init --template --up (Sprint 7: --up passa a honrar o manifesto) ===
+  PASS  stack init --template httpd
+  PASS  o manifesto gerado declara memory/cpus
+  PASS  --up: o container tem memory_max do manifesto (não só o run cru)
+  PASS  --up: o container está mesmo a correr
+
+=== limpeza ===
+  PASS  volume rm
+  PASS  network rm
+
+======================================
+ PASS=729  FAIL=1  SKIP=5  XFAIL=0  XPASS=0
+ detalhe: /tmp/delonix-e2e/results.jsonl
+
+ 5 SKIP — o que NÃO foi exercitado (não chumba, mas também não prova nada):
+   ~ image vm rm completa — não há imagens VM neste host
+   ~ ferramenta em falta diz 69 — este host TEM virt-customize — o caminho não é exercitável aqui
+   ~ volume create --driver nfs com NAS real — montar NFS/CIFS exige CAP_SYS_ADMIN — não exercitável em rootless
+   ~ wg ausente: caminho de falha — este host TEM wg — o caminho não é exercitável aqui
+   ~ system boot enable/disable — escreve units em ~/.config/systemd/user, fora do DELONIX_ROOT
+
+ 1 falhas:
+   - healthcheck: a sonda não deixa processos por reapar dentro do container
+======================================
+E2E_DONE rc=1 secs=152
