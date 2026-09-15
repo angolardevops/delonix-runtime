@@ -376,6 +376,188 @@ pub fn plugin_dirs() -> Vec<PathBuf> {
     }
 }
 
+/// Can the CNI layer configure a sandbox RIGHT NOW? This is what a CRI's
+/// `NetworkReady` has to report when CNI is the network path.
+///
+/// **It measures the things an `ADD` needs, and nothing it would create.** The
+/// bridge of a bridge conflist (`cni0`) does not exist until the first `ADD`
+/// makes it, so asking for it would be the same deadlock `NetworkReady` already
+/// had once (not ready → no pod → nothing creates it → never ready). What CAN
+/// be checked without inventing a state: the config parses, has a chain, and
+/// every binary that chain will exec — each plugin's `type` and its `ipam.type`
+/// — is in `CNI_PATH`. Same contract as containerd's «cni plugin not
+/// initialized», one step stricter: containerd only finds a missing binary at
+/// the first `ADD`, on a node already reported `Ready`.
+#[derive(Clone, Debug)]
+pub enum Readiness {
+    /// Config found, parsed, and every plugin binary is present.
+    Ready(NetConfList),
+    /// No `*.conflist`/`*.conf` in the directory — the normal state of a node
+    /// before its cluster network add-on is installed.
+    NoConfig(PathBuf),
+    /// The first config exists but cannot be used.
+    InvalidConfig(String),
+    /// The chain names binaries that are not in `CNI_PATH`.
+    PluginMissing(Vec<String>),
+}
+
+impl Readiness {
+    /// `(reason, message)` for a CRI `RuntimeCondition`; `None` when ready.
+    pub fn not_ready(&self, plugin_dirs: &[PathBuf]) -> Option<(&'static str, String)> {
+        let path = || {
+            plugin_dirs
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(":")
+        };
+        match self {
+            Readiness::Ready(_) => None,
+            Readiness::NoConfig(dir) => Some((
+                "NetworkPluginNotReady",
+                format!("no CNI network config in {}", dir.display()),
+            )),
+            Readiness::InvalidConfig(e) => Some(("NetworkPluginNotReady", e.clone())),
+            Readiness::PluginMissing(m) => Some((
+                "NetworkPluginNotReady",
+                format!(
+                    "CNI plugin binaries not found in {}: {}",
+                    path(),
+                    m.join(", ")
+                ),
+            )),
+        }
+    }
+}
+
+/// See [`Readiness`]. Reads the directory and stats the binaries — no exec.
+pub fn readiness(conf_dir: &Path, plugin_dirs: &[PathBuf]) -> Readiness {
+    let net = match load_default(conf_dir) {
+        Ok(Some(net)) => net,
+        Ok(None) => return Readiness::NoConfig(conf_dir.to_path_buf()),
+        Err(e) => return Readiness::InvalidConfig(e.to_string()),
+    };
+    if net.plugins.is_empty() {
+        return Readiness::InvalidConfig(format!("CNI config `{}` has no plugins", net.name));
+    }
+    let mut missing = Vec::new();
+    for plugin in &net.plugins {
+        let Some(typ) = plugin.get("type").and_then(|t| t.as_str()) else {
+            return Readiness::InvalidConfig(format!(
+                "CNI config `{}` has a plugin without a `type` field",
+                net.name
+            ));
+        };
+        // `ipam.type` is exec'ed by the main plugin from the same CNI_PATH; a
+        // bridge without `host-local` fails every ADD just the same.
+        let ipam = plugin
+            .get("ipam")
+            .and_then(|i| i.get("type"))
+            .and_then(|t| t.as_str());
+        for bin in std::iter::once(typ).chain(ipam) {
+            if resolve_plugin(plugin_dirs, bin).is_none() && !missing.iter().any(|m| m == bin) {
+                missing.push(bin.to_string());
+            }
+        }
+    }
+    if missing.is_empty() {
+        Readiness::Ready(net)
+    } else {
+        Readiness::PluginMissing(missing)
+    }
+}
+
+/// Where `ip netns add <name>` puts a named netns.
+pub fn named_netns_path(name: &str) -> String {
+    format!("/run/netns/{name}")
+}
+
+/// Creates the EMPTY named netns `name` and runs the chain's `ADD` into it.
+/// Returns the first IP (CIDR) the IPAM assigned.
+///
+/// Runs in whatever namespaces the CALLER is in: in the rootless holder
+/// (`infra::do_cni_add`) and in the host for a root CRI — one body, so the two
+/// paths cannot drift. Brings `lo` up (a pod expects `127.0.0.1`, and neither
+/// the bridge plugin nor the engine does it for a joined netns). On failure it
+/// runs `DEL` too, so an address the IPAM already handed out is not leaked, and
+/// removes the netns.
+pub fn attach_named_netns(
+    net: &NetConfList,
+    name: &str,
+    container_id: &str,
+    ifname: &str,
+) -> Result<String> {
+    crate::run_ok("ip", &["netns", "del", name]); // leftovers of a previous attempt
+    crate::run("ip", &["netns", "add", name])?;
+    crate::run_ok("ip", &["-n", name, "link", "set", "lo", "up"]);
+    let path = named_netns_path(name);
+    match add(net, &plugin_dirs(), container_id, &path, ifname) {
+        Ok(r) => Ok(r.ips.first().map(|i| i.address.clone()).unwrap_or_default()),
+        Err(e) => {
+            let _ = del(net, &plugin_dirs(), container_id, &path, ifname);
+            crate::run_ok("ip", &["netns", "del", name]);
+            Err(e)
+        }
+    }
+}
+
+/// Writes `net.*` sysctls INSIDE the network namespace at `netns_path`.
+///
+/// On a throwaway thread that `setns`es into it: `/proc/sys/net` resolves
+/// against the CALLING thread's netns, and a thread may switch its own network
+/// namespace without touching the rest of the process. No shell, no `sysctl`
+/// binary, and a key that is not a plain `net.` name is refused rather than
+/// turned into a path.
+pub fn set_netns_sysctls(netns_path: &str, sysctls: &[(String, String)]) -> Result<()> {
+    for (k, _) in sysctls {
+        let ok = k.starts_with("net.")
+            && !k.contains("..")
+            && k.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+        if !ok {
+            return Err(Error::Invalid(format!("not a net.* sysctl: {k:?}")));
+        }
+    }
+    let path = netns_path.to_string();
+    let sysctls = sysctls.to_vec();
+    let err = |context: &'static str, message: String| Error::Runtime { context, message };
+    std::thread::spawn(move || -> Result<()> {
+        use std::os::fd::AsRawFd as _;
+        let f =
+            std::fs::File::open(&path).map_err(|e| err("netns-open", format!("{path}: {e}")))?;
+        // SAFETY: setns on a valid netns fd; CLONE_NEWNET only changes THIS
+        // thread, which exits right after.
+        if unsafe { libc::setns(f.as_raw_fd(), libc::CLONE_NEWNET) } != 0 {
+            return Err(err(
+                "netns-setns",
+                format!("{path}: {}", std::io::Error::last_os_error()),
+            ));
+        }
+        for (k, v) in &sysctls {
+            let file = format!("/proc/sys/{}", k.replace('.', "/"));
+            std::fs::write(&file, v).map_err(|e| err("netns-sysctl", format!("{k}={v}: {e}")))?;
+        }
+        Ok(())
+    })
+    .join()
+    .map_err(|_| err("netns-sysctl", "the sysctl thread panicked".into()))?
+}
+
+/// `DEL` of the chain (when there is one) and removal of the named netns.
+/// Best-effort, like [`del`].
+pub fn detach_named_netns(net: Option<&NetConfList>, name: &str, container_id: &str, ifname: &str) {
+    if let Some(net) = net {
+        let _ = del(
+            net,
+            &plugin_dirs(),
+            container_id,
+            &named_netns_path(name),
+            ifname,
+        );
+    }
+    crate::run_ok("ip", &["netns", "del", name]);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -506,6 +688,64 @@ mod tests {
             .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
             .collect();
         assert_eq!(got, vec!["10-a.conf", "20-b.conflist"]);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// `NetworkReady` on a CNI node measures what an `ADD` needs: the config and
+    /// the binaries. The four states, and what is NOT asked for — the bridge
+    /// (`cni0`), which only the first `ADD` creates.
+    #[test]
+    fn readiness_measures_config_and_binaries_not_the_bridge() {
+        let tmp = std::env::temp_dir().join(format!("dlx-cni-ready-{}", std::process::id()));
+        let (conf, bin) = (tmp.join("net.d"), tmp.join("bin"));
+        std::fs::create_dir_all(&conf).unwrap();
+        std::fs::create_dir_all(&bin).unwrap();
+        let dirs = vec![bin.clone()];
+
+        // No config: the normal state before the network add-on.
+        let r = readiness(&conf, &dirs);
+        assert!(matches!(r, Readiness::NoConfig(_)), "{r:?}");
+        assert_eq!(r.not_ready(&dirs).unwrap().0, "NetworkPluginNotReady");
+
+        // Bridge config without binaries: the plugin AND the ipam are missing.
+        std::fs::write(
+            conf.join("10-bridge.conflist"),
+            r#"{"cniVersion":"1.0.0","name":"bridge","plugins":[
+                {"type":"bridge","bridge":"cni0","ipam":{"type":"host-local"}},
+                {"type":"portmap"}]}"#,
+        )
+        .unwrap();
+        match readiness(&conf, &dirs) {
+            Readiness::PluginMissing(m) => assert_eq!(m, ["bridge", "host-local", "portmap"]),
+            other => panic!("expected PluginMissing, got {other:?}"),
+        }
+
+        // With the binaries: ready, with no bridge in existence.
+        for b in ["bridge", "host-local", "portmap"] {
+            std::fs::write(bin.join(b), b"").unwrap();
+        }
+        let r = readiness(&conf, &dirs);
+        assert!(
+            matches!(r, Readiness::Ready(ref n) if n.name == "bridge"),
+            "{r:?}"
+        );
+        assert!(r.not_ready(&dirs).is_none());
+
+        // A broken first config (in order) does not pass for ready.
+        std::fs::write(conf.join("05-broken.conflist"), "{ not json").unwrap();
+        assert!(matches!(
+            readiness(&conf, &dirs),
+            Readiness::InvalidConfig(_)
+        ));
+        std::fs::write(
+            conf.join("05-broken.conflist"),
+            r#"{"cniVersion":"1.0.0","name":"x","plugins":[{"bridge":"cni0"}]}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            readiness(&conf, &dirs),
+            Readiness::InvalidConfig(_)
+        ));
         let _ = std::fs::remove_dir_all(&tmp);
     }
 

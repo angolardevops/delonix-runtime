@@ -124,9 +124,8 @@ impl RuntimeService for DelonixRuntime {
         // `NetworkReady`: BEFORE this it was always a fixed `true` — it masked
         // real SDN failures (bridge/slirp/holder down), making the node go
         // `Ready` in K8s even without working networking. Now it actually checks,
-        // in BOTH modes (rootless: holder+slirp alive via pidfiles; root:
-        // existence of the `delonix0` bridge via sysfs — a read, with no
-        // privilege at all).
+        // in BOTH modes (rootless: holder+slirp alive via pidfiles; root: the
+        // CNI chain the sandboxes are networked with — reads and stats only).
         let network_ready = if delonix_runtime::is_rootless() {
             let st = delonix_net::infra::status();
             // DOWN-AND-UNUSED IS NOT BROKEN, and conflating the two deadlocks
@@ -175,21 +174,22 @@ impl RuntimeService for DelonixRuntime {
                 )
             }
         } else {
-            let up = std::path::Path::new("/sys/class/net")
-                .join(delonix_net::infra::INFRA_BRIDGE)
-                .exists();
-            if up {
-                cond("NetworkReady", true, "", "")
-            } else {
-                cond(
-                    "NetworkReady",
-                    false,
-                    "BridgeMissing",
-                    &format!(
-                        "bridge '{}' does not exist in /sys/class/net",
-                        delonix_net::infra::INFRA_BRIDGE
-                    ),
-                )
+            // ROOT: the pod network IS the CNI chain (`run_pod_sandbox`), so this
+            // reports whether that chain can run — config + binaries, see
+            // `cni::Readiness`. Same source of truth as the sandbox path, so the
+            // two cannot disagree.
+            //
+            // It used to check `/sys/class/net/delonix0`, and that could never be
+            // true: the native bridge lives inside the holder's netns
+            // (`unshare --user --net`, in root too), never in the host's
+            // `/sys/class/net`. Measured 2026-09-15 on a kubeadm node (VM,
+            // k8s 1.36.4) with `/etc/cni/net.d/10-bridge.conflist`: node
+            // `NotReady` with `BridgeMissing` forever, CoreDNS `Pending`.
+            let dirs = delonix_net::cni::plugin_dirs();
+            let r = root_cni_readiness(&dirs);
+            match r.not_ready(&dirs) {
+                None => cond("NetworkReady", true, "", ""),
+                Some((reason, message)) => cond("NetworkReady", false, reason, &message),
             }
         };
         // `info` is only populated for a verbose request (CRI contract). The
@@ -472,7 +472,13 @@ impl RuntimeService for DelonixRuntime {
             .and_then(|c| c.network_config)
             .map(|n| n.pod_cidr)
             .unwrap_or_default();
-        match pod_cidr_verdict(&cidr, delonix_net::cni::enabled_conf().is_some()) {
+        let cni = if delonix_runtime::is_rootless() {
+            delonix_net::cni::enabled_conf().is_some()
+        } else {
+            // Root networks every pod through CNI (see `run_pod_sandbox`).
+            true
+        };
+        match pod_cidr_verdict(&cidr, cni) {
             PodCidrVerdict::Nothing => {}
             PodCidrVerdict::DelegatedToCni => tracing::info!(
                 pod_cidr = %cidr,
@@ -554,6 +560,17 @@ fn engine_cgroup_driver() -> CgroupDriver {
 }
 
 pub mod lifecycle;
+
+/// The CNI chain a ROOT CRI networks its pods with, and whether it can run.
+///
+/// One function behind `status` (`NetworkReady`) and `run_pod_sandbox`, so the
+/// condition the kubelet reads is the same fact the sandbox path acts on.
+fn root_cni_readiness(dirs: &[std::path::PathBuf]) -> delonix_net::cni::Readiness {
+    delonix_net::cni::readiness(
+        std::path::Path::new(delonix_net::cni::DEFAULT_CONF_DIR),
+        dirs,
+    )
+}
 
 /// Is the rootless network plane ready? **Pure**, so the rule can be tested
 /// without an infra namespace — see `network_ready_distingue_ocio_de_avaria`.

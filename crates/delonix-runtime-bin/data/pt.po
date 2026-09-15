@@ -4847,6 +4847,9 @@ msgstr "Interactivo (liga o stdin)"
 msgid "(internal) init PID of the pod's infra container — join its IPC/UTS namespaces (shared pod IPC + hostname). Set by `delonix pod`"
 msgstr "(interno) PID do init do container de infra do pod — junta-se às suas namespaces IPC/UTS (IPC e hostname partilhados do pod). Definido pelo `delonix pod`"
 
+msgid "(internal) `KEY=VAL` entries separated by NUL — the `/proc/<pid>/environ` format. Used by `delonix-cri`: values arrive byte-exact (newlines, spaces) and never on the argv. Applied before `-e`, which still wins"
+msgstr "(interno) entradas `KEY=VAL` separadas por NUL — o formato do `/proc/<pid>/environ`. Usado pelo `delonix-cri`: os valores chegam exactos (quebras de linha, espaços) e nunca pelo argv. Aplicado antes do `-e`, que continua a ganhar"
+
 msgid "Join a pod's netns (`--net <network>`), sharing IP/ports"
 msgstr "Junta-se à netns de um pod (`--net <rede>`), partilhando IP/portas"
 
