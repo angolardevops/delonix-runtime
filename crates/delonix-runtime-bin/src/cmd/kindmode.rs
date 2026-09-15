@@ -514,6 +514,20 @@ fn preflight_cgroup_controllers() -> Result<()> {
     if have.iter().any(|c| c == "cpu") {
         return Ok(());
     }
+    // The fix below is EXACTLY the manual escape hatch this error used to just
+    // print and leave to the operator — do it for them, transparently, instead
+    // of making every `cluster create` start with a copy-pasted `systemd-run`
+    // prefix. `DELONIX_NO_AUTO_DELEGATE` opts out (scripts/CI that want the
+    // plain error instead of a re-exec), and `DELONIX_DELEGATE_ATTEMPTED`
+    // guards the one retry: a host where the fresh scope STILL doesn't
+    // delegate `cpu` must surface the real error, not loop forever.
+    if std::env::var_os("DELONIX_NO_AUTO_DELEGATE").is_none()
+        && std::env::var_os("DELONIX_DELEGATE_ATTEMPTED").is_none()
+    {
+        if let Some(code) = reexec_under_delegated_scope("systemd-run") {
+            std::process::exit(code);
+        }
+    }
     Err(Error::Invalid(super::po::tf(
         "the `cpu` cgroup controller is not delegated to this shell, and a Kubernetes node cannot \
          boot without it (its entrypoint exits with `UserNS: cpu controller needs to be \
@@ -522,6 +536,37 @@ fn preflight_cgroup_controllers() -> Result<()> {
          `delonix system setup` explains it, and only sends you to /etc if that is not enough.",
         &[("have", &have.join(" "))],
     )))
+}
+
+/// Re-execs THIS SAME invocation (same argv, unchanged) inside a fresh
+/// `systemd-run --user --scope -p Delegate=yes` transient scope — the
+/// delegated cgroup a rootless Kubernetes node needs to boot.
+///
+/// `None` means the wrapper itself couldn't even be tried (no `systemd-run`
+/// on this host, or it isn't a systemd system at all): the caller falls
+/// through to the normal error unchanged, same as before this existed.
+/// `Some(code)` is the re-exec'd process's own exit code, whatever it was —
+/// this call's result becomes `create`'s exit, not just this preflight's.
+///
+/// Spawn-and-wait, not `exec(2)`: matches the re-exec convention already used
+/// for entering a netns (`reexec_start`) rather than introducing a second
+/// idiom for the same kind of "run myself again, differently housed" step.
+///
+/// `runner` is `"systemd-run"` in production — a parameter only so the tests
+/// below can swap in `/bin/true`/`/bin/false`/a name that doesn't exist,
+/// without needing a real systemd user session (or root) to exercise the
+/// "wrapper missing" and "exit code propagates" branches.
+fn reexec_under_delegated_scope(runner: &str) -> Option<i32> {
+    let exe = std::env::current_exe().ok()?;
+    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    let status = std::process::Command::new(runner)
+        .args(["--user", "--scope", "--quiet", "-p", "Delegate=yes", "--"])
+        .arg(&exe)
+        .args(&args)
+        .env("DELONIX_DELEGATE_ATTEMPTED", "1")
+        .status()
+        .ok()?;
+    Some(status.code().unwrap_or(1))
 }
 
 /// Creates the cluster: boots the control-plane node and bootstraps it with `kubeadm`.
@@ -2139,6 +2184,29 @@ mod tests {
             ["lab-control-plane", "lab-worker", "lab-worker2"],
             "start order: control-plane first, workers after"
         );
+    }
+
+    /// No `systemd-run` on the host (or any other reason the wrapper itself
+    /// can't even be spawned) must fall through cleanly to `None` — the
+    /// caller's job is to fall back to the plain, pre-existing error message,
+    /// never to panic or hang trying.
+    #[test]
+    fn reexec_under_delegated_scope_returns_none_when_the_wrapper_is_missing() {
+        assert_eq!(
+            reexec_under_delegated_scope("delonix-test-binary-that-does-not-exist-anywhere"),
+            None
+        );
+    }
+
+    /// The re-exec'd process's exit code has to become `create`'s exit code —
+    /// `/bin/true`/`/bin/false` stand in for `systemd-run` here precisely
+    /// because they ignore whatever args are thrown at them and always exit
+    /// with a fixed, known code, so this exercises the plumbing without
+    /// needing a real systemd user session (or root) to run against.
+    #[test]
+    fn reexec_under_delegated_scope_propagates_the_child_exit_code() {
+        assert_eq!(reexec_under_delegated_scope("/bin/true"), Some(0));
+        assert_eq!(reexec_under_delegated_scope("/bin/false"), Some(1));
     }
 
     #[test]
