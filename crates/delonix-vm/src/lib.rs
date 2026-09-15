@@ -770,6 +770,22 @@ pub trait VmBackend {
         Err(unsupported_pause(self.id(), "unpause"))
     }
 
+    /// Checked once, right after [`VmBackend::stop`] has already confirmed the
+    /// vmm gone and the caller has already persisted `Status::Stopped` — this
+    /// is a POST-CONDITION check, not a precondition, so an `Err` here must
+    /// never be read as "the stop failed" (the record is already correct by
+    /// the time this runs). Default: nothing to check.
+    ///
+    /// Exists for exactly one known failure mode (BUG-VM-001, cloud-hypervisor
+    /// only): a real guest write in flight at the moment of `stop` can leave
+    /// the qcow2 corrupted even though the vmm exited cleanly. Nothing this
+    /// engine controls can repair that; what it owes the operator is not
+    /// making them discover it three commands later from an unrelated
+    /// `restore`/`snapshot` error.
+    fn disk_health(&self, _vmdir: &Path, _vm: &Vm) -> Result<()> {
+        Ok(())
+    }
+
     /// Brings an already-created VM back up, instead of creating one.
     ///
     /// `Ok(None)` — the default — means "I have no way to resume; create it the
@@ -1372,7 +1388,23 @@ impl VmBackend for CloudHypervisorBackend {
         // guest is not a teardown either — so a VMM that will not leave is an
         // error here, not something to keep walking past.
         if let Some(pid) = vmm_to_signal(vm) {
-            if !terminate_vmm(pid, vm.pid_starttime, VMM_TERM_GRACE, VMM_KILL_GRACE) {
+            // `PUT /api/v1/vmm.shutdown` FIRST, `SIGTERM`/`SIGKILL` only as a
+            // fallback — this is BUG-VM-001 (measured live, 2026-09-14): a real
+            // guest write in flight at the moment of `SIGTERM` left the qcow2
+            // refcount table corrupted, even though `terminate_vmm` faithfully
+            // waited for the process to be fully, confirmably gone before the
+            // next command ran (the OS-level exit was clean; the disk was not).
+            // A signal is delivered asynchronously — Cloud Hypervisor has to
+            // catch it and unwind whatever I/O was mid-flight from inside a
+            // handler. `vmm.shutdown` runs on its own ordinary async path
+            // instead: the block backend drops through its normal Rust
+            // destructor chain, the same way `pause`/`resume` above already
+            // talk to this VM over its own api-socket rather than a signal.
+            // Confirmed live against this exact binary (CH v53.0): the call
+            // answers `200` and the process is gone by the time it returns.
+            let graceful = ch_api_put(&vm.api_socket, "/api/v1/vmm.shutdown").is_ok()
+                && wait_vmm_left(pid, vm.pid_starttime, VMM_TERM_GRACE);
+            if !graceful && !terminate_vmm(pid, vm.pid_starttime, VMM_TERM_GRACE, VMM_KILL_GRACE) {
                 return Err(Error::Runtime {
                     context: "vm",
                     message: format!(
@@ -1393,6 +1425,27 @@ impl VmBackend for CloudHypervisorBackend {
             .or_else(|| infra::dhcp_ip_for_mac(&vm.network, &vm.mac));
         infra::vm_detach(&vm.name, ip.as_deref());
         Ok(())
+    }
+
+    fn disk_health(&self, vmdir: &Path, vm: &Vm) -> Result<()> {
+        let disk = ch_overlay(vmdir, vm);
+        if !disk_looks_corrupt(&disk) {
+            return Ok(());
+        }
+        Err(Error::Runtime {
+            context: "vm",
+            message: format!(
+                "VM '{}' stopped, but `qemu-img check` now finds its disk corrupted \
+                 (BUG-VM-001) — measured live to happen even through a graceful \
+                 `vmm.shutdown`, with a real guest write in flight at the moment of \
+                 `stop`, which points at Cloud Hypervisor's own qcow2 writer under host \
+                 memory pressure, not at anything `stop` controls. Do NOT run `snapshot \
+                 restore` against it — try `qemu-img check -r all {}` first, and consider \
+                 `--backend libvirt` for VMs that need reliable disk snapshots.",
+                vm.name,
+                disk.display()
+            ),
+        })
     }
 
     // ---- pause/unpause -----------------------------------------------------
@@ -1514,6 +1567,21 @@ fn qemu_img_snapshot(vmdir: &Path, vm: &Vm, flag: &str, name: &str) -> Result<()
         context: "qemu-img snapshot",
         message: e,
     })
+}
+
+/// `true` only when `qemu-img check` confirms the image IS corrupted — its
+/// documented exit code 2, "check completed, image is corrupted". Exit 0
+/// (clean), 3 (leaked-but-not-corrupt clusters — wasted space, not damage) and
+/// anything unreachable (binary missing, disk gone) all answer `false`: this
+/// exists to add a loud diagnosis on top of a REAL positive, never to block
+/// `stop` on a guess — same reasoning as `preflight_cgroup_controllers`'s
+/// "cannot tell — do not block" elsewhere in this engine.
+fn disk_looks_corrupt(disk: &Path) -> bool {
+    stable_cmd("qemu-img")
+        .args(["check", "--"])
+        .arg(disk)
+        .status()
+        .is_ok_and(|st| st.code() == Some(2))
 }
 
 /// Pure parser for the `Snapshot list:` block of `qemu-img info`. Written
@@ -3919,7 +3987,12 @@ pub fn stop(base: &Path, name: &str) -> Result<()> {
     vm.status = Status::Stopped;
     vm.pid = None;
     vm.started_unix = None;
-    st.save(name, &vm)
+    st.save(name, &vm)?;
+    // AFTER the save: the vmm is confirmed gone and the record already says
+    // so correctly either way — an `Err` from here is a diagnosis on top of a
+    // stop that already happened, never a reason to leave the record lying
+    // about a dead vmm being `Running`. See `VmBackend::disk_health`.
+    backend.disk_health(&vmdir, &vm)
 }
 
 /// Loads a VM record, mapping the shared `NotFound` to the VM-specific
@@ -4763,6 +4836,136 @@ Format specific information:
         // No response at all (connection reset before a full status line).
         assert!(!super::http_status_is_2xx(""));
         assert!(!super::http_status_is_2xx("garbage"));
+    }
+
+    /// `qemu-img`/`qemu-io` are not guaranteed on every CI runner (confirmed
+    /// absent there, not just some subcommand failing) — same guard the
+    /// `delonix-runtime-bin` `vmimage` tests already use for the same tool:
+    /// `.status()` mapped to `false` on any error, never `.expect(...)`, so a
+    /// host without the tool skips silently instead of failing the suite.
+    fn run_ok(prog: &str, args: &[&str]) -> bool {
+        std::process::Command::new(prog)
+            .args(args)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
+    /// BUG-VM-001: a clean, freshly-created qcow2 must never read as
+    /// corrupted — `disk_looks_corrupt` exists to add a diagnosis on top of a
+    /// REAL positive, and a false positive here would fail every `vm stop`.
+    #[test]
+    fn disk_looks_corrupt_says_no_for_a_clean_image() {
+        let path =
+            std::env::temp_dir().join(format!("dlx-diskhealth-clean-{}.qcow2", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        if !run_ok(
+            "qemu-img",
+            &["create", "-f", "qcow2", &path.to_string_lossy(), "16M"],
+        ) {
+            return; // qemu-img absent: this host cannot run the check either
+        }
+        assert!(
+            !super::disk_looks_corrupt(&path),
+            "a fresh image is not corrupt"
+        );
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// A genuinely corrupted qcow2 has to read as corrupt — this is the exact
+    /// signal `VmBackend::disk_health` relies on to surface BUG-VM-001
+    /// immediately instead of silently. Real data is written first (so
+    /// clusters and L2 entries actually exist), then the file is truncated
+    /// short — reproducing, without hand-crafting qcow2 internals, the exact
+    /// error class measured live on this host ("counting reference for a
+    /// region exceeding the end of the file"), not a stand-in for it.
+    #[test]
+    fn disk_looks_corrupt_says_yes_for_a_truncated_image() {
+        let path = std::env::temp_dir().join(format!(
+            "dlx-diskhealth-truncated-{}.qcow2",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        if !run_ok(
+            "qemu-img",
+            &["create", "-f", "qcow2", &path.to_string_lossy(), "16M"],
+        ) {
+            return; // qemu-img absent: this host cannot run the check either
+        }
+        if !run_ok(
+            "qemu-io",
+            &["-c", "write -P 0x5a 0 1M", &path.to_string_lossy()],
+        ) {
+            std::fs::remove_file(&path).ok();
+            return; // qemu-io absent: same reasoning
+        }
+        let len = std::fs::metadata(&path).unwrap().len();
+        let f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        f.set_len(len - 65536).unwrap(); // one cluster short — the same
+                                         // shape as a write cut off mid-flight
+        drop(f);
+        assert!(
+            super::disk_looks_corrupt(&path),
+            "a truncated image with real allocated data has to read as corrupt"
+        );
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// A path that does not exist must not panic, and must not read as
+    /// corrupt — `disk_looks_corrupt` only answers `true` on a CONFIRMED
+    /// positive (`qemu-img check` exit code 2), never on "could not tell".
+    #[test]
+    fn disk_looks_corrupt_tolerates_a_missing_file() {
+        let path =
+            std::env::temp_dir().join(format!("dlx-diskhealth-missing-{}", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        assert!(!super::disk_looks_corrupt(&path));
+    }
+
+    /// The default `VmBackend::disk_health` (libvirt, and any future backend
+    /// that never overrides it) has nothing to check and must never fail
+    /// `stop` on a made-up diagnosis.
+    #[test]
+    fn disk_health_default_is_a_no_op() {
+        struct Nothing;
+        impl VmBackend for Nothing {
+            fn id(&self) -> &'static str {
+                "nothing"
+            }
+            fn available(&self) -> bool {
+                true
+            }
+            fn boot(
+                &self,
+                _: &Path,
+                _: &VmConfig,
+                _: &str,
+                _: &dyn Fn(CreateStage),
+            ) -> Result<Boot> {
+                unimplemented!()
+            }
+            fn is_running(&self, _: &Vm) -> bool {
+                false
+            }
+            fn ip(&self, _: &Vm) -> Option<String> {
+                None
+            }
+            fn stop(&self, _: &Path, _: &Vm) -> Result<()> {
+                Ok(())
+            }
+        }
+        let vm = Vm::new(
+            "x".into(),
+            "d".into(),
+            "o".into(),
+            1,
+            "1G".into(),
+            "n".into(),
+            "tap".into(),
+            "mac".into(),
+            "sock".into(),
+        );
+        assert!(Nothing.disk_health(Path::new("/tmp"), &vm).is_ok());
     }
 
     /// REGRESSION: toda a ferramenta cujo OUTPUT este crate parseia tem de
