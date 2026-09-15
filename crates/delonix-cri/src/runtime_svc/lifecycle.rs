@@ -56,9 +56,19 @@ struct SandboxRec {
     #[serde(default)]
     port_mappings: Vec<String>,
     /// IP (address, without CIDR) assigned by the CNI IPAM when the sandbox was
-    /// configured by CNI plugins (rootless, via holder). Empty = native SDN.
+    /// configured by CNI plugins (rootless via the holder, or root in the host).
+    /// Empty = native SDN.
     #[serde(default)]
     cni_ip: String,
+    /// ROOT + CNI: the sandbox's named netns in the HOST (`/run/netns/cri-<id>`),
+    /// which its containers enter. Empty on every other path.
+    #[serde(default)]
+    cni_netns: String,
+    /// The conflist (JSON) the sandbox was configured with, so the `DEL` runs the
+    /// same chain — and frees the same IPAM lease — even if `/etc/cni/net.d`
+    /// changed in the meantime.
+    #[serde(default)]
+    cni_conf: String,
 }
 
 /// `NODE` when the sandbox shares the host's namespace, `POD` otherwise — the
@@ -245,6 +255,54 @@ struct ContainerRec {
     /// `delonix run --user <name>` does it). Empty = not used.
     #[serde(default)]
     run_as_username: String,
+    /// The container's environment (`ContainerConfig.envs`) as an `--env-file0`
+    /// file, `<root>/cri/env/<id>.env0`. Only the PATH is recorded: the values
+    /// are Secret material as often as not, and this JSON is written with the
+    /// default mode. Empty = the pod declared no variables.
+    #[serde(default)]
+    env_file0: String,
+}
+
+/// Where a container's environment file lives (see `ContainerRec.env_file0`).
+fn env_path(base: &Path, id: &str) -> PathBuf {
+    base.join("cri").join("env").join(format!("{id}.env0"))
+}
+
+/// `KEY=VAL` entries, NUL-separated — the `/proc/<pid>/environ` format, which
+/// carries a value byte-exact (newlines, leading spaces), unlike `--env-file`'s
+/// line-per-variable `.env`.
+fn env0_bytes(envs: &[KeyValue]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for kv in envs.iter().filter(|kv| !kv.key.is_empty()) {
+        out.extend_from_slice(kv.key.as_bytes());
+        out.push(b'=');
+        out.extend_from_slice(kv.value.as_bytes());
+        out.push(0);
+    }
+    out
+}
+
+/// Writes the environment file 0600 in a 0700 directory, created that way
+/// (never widened after the fact, so there is no window where it is readable).
+fn write_env_file(base: &Path, id: &str, envs: &[KeyValue]) -> Result<String, Status> {
+    use std::io::Write as _;
+    use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
+    let path = env_path(base, id);
+    let dir = path.parent().expect("env_path has a parent");
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
+        .map_err(st)?;
+    let _ = std::fs::remove_file(&path);
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)
+        .map_err(st)?;
+    f.write_all(&env0_bytes(envs)).map_err(st)?;
+    Ok(path.to_string_lossy().into_owned())
 }
 
 /// `true` if the AppArmor profile is loaded on the host (in
@@ -389,6 +447,18 @@ fn delonix(base: &Path, args: &[&str]) -> Result<std::process::Output, Status> {
 /// hangs" bug). A file has no EOF to wait for — the command's exit status is
 /// what we wait on, and the file is read afterwards.
 fn delonix_detached_why(base: &Path, args: &[&str]) -> Result<Option<String>, Status> {
+    delonix_detached_why_in(base, None, args)
+}
+
+/// [`delonix_detached_why`], run inside the network namespace at `netns` when
+/// given (`nsenter --net`, which switches ONLY the netns — the engine keeps the
+/// host's mount namespace, so the rootfs it mounts stays visible to the `rm`
+/// that unmounts it).
+fn delonix_detached_why_in(
+    base: &Path,
+    netns: Option<&str>,
+    args: &[&str],
+) -> Result<Option<String>, Status> {
     use std::process::Stdio;
     let err_dir = base.join("cri").join("tmp");
     std::fs::create_dir_all(&err_dir).map_err(st)?;
@@ -398,7 +468,15 @@ fn delonix_detached_why(base: &Path, args: &[&str]) -> Result<Option<String>, St
         delonix_runtime_core::generate_id()
     ));
     let err_file = std::fs::File::create(&err_path).map_err(st)?;
-    let status = Command::new(delonix_bin())
+    let mut cmd = match netns {
+        Some(ns) => {
+            let mut c = Command::new("nsenter");
+            c.arg(format!("--net={ns}")).arg("--").arg(delonix_bin());
+            c
+        }
+        None => Command::new(delonix_bin()),
+    };
+    let status = cmd
         .env("DELONIX_ROOT", base)
         .env("DELONIX_INTERNAL", "1")
         .args(args)
@@ -521,13 +599,17 @@ pub fn run_pod_sandbox(
     // REAL Delonix pod: an infra container (`pod-cri-<id>`) holds the shared
     // netns ("pause"-style), which the sandbox's containers then join via
     // `--pod`. That is what gives pod networking and namespace sharing.
-    // CNI (opt-in `DELONIX_CNI=1` + conflist): the sandbox gets its network from
-    // real CNI plugins (the cluster chain, e.g. Calico), as in containerd/CRI-O.
-    // Rootless → the plugins run in the holder (owner of the netns); the netns is
-    // named `cri-<id>` so the sandbox's containers join via `--pod cri-<id>`
-    // (join_argv). Without the flag, `enabled_conf()` is None and it follows the
-    // native (SDN) path unchanged.
+    // CNI: the sandbox gets its network from real CNI plugins (the cluster chain,
+    // e.g. Calico), as in containerd/CRI-O.
+    // * Rootless, opt-in (`DELONIX_CNI=1` + conflist) → the plugins run in the
+    //   holder (owner of the netns); the netns is named `cri-<id>` so the
+    //   sandbox's containers join via `--pod cri-<id>` (join_argv). Without the
+    //   flag, `enabled_conf()` is None and it follows the native (SDN) path.
+    // * Root → ALWAYS the node's conflist, in the host (see the branch below);
+    //   without a usable one the sandbox is refused and `NetworkReady` says why.
     let mut cni_ip = String::new();
+    let mut cni_netns = String::new();
+    let mut cni_conf = String::new();
     if !host_network {
         let pod = format!("cri-{id}");
         let cni = delonix_net::cni::enabled_conf();
@@ -548,12 +630,75 @@ pub fn run_pod_sandbox(
                     "failed to create the ingress sandbox {pod}: {why}"
                 )));
             }
-        } else if let Some(why) = delonix_detached_why(base, &["pod", "create", &pod, "--network"])?
-        {
-            // ROOT: infra container (`pod-cri-<id>`) holds the netns ("pause"-style).
-            return Err(Status::internal(format!(
-                "failed to create the pod sandbox {pod}: {why}"
-            )));
+        } else {
+            // ROOT: the pod network is the node's CNI chain, in the HOST — the
+            // containerd/CRI-O model. The plugins create the bridge (`cni0`), the
+            // veth and the IPAM lease; the host routes to the pod IP, which is what
+            // the kubelet's probes, kube-proxy and every other node need.
+            //
+            // It used to run `pod create cri-<id> --network`, and that never
+            // worked: `pod create` only takes `-f <manifest>`, so clap refused it
+            // (`unexpected argument 'cri-…' found`) — measured 2026-09-15 on a
+            // kubeadm node, and the call dates from the initial commit. Nor could
+            // the native infra have served it there: in root it did not come up at
+            // all (`control socket: No such file or directory`). The CRI in root
+            // never had a working non-`hostNetwork` pod; `NetworkReady` pinned to
+            // `BridgeMissing` hid it, because no such pod was ever scheduled.
+            let dirs = delonix_net::cni::plugin_dirs();
+            let conf = match super::root_cni_readiness(&dirs) {
+                delonix_net::cni::Readiness::Ready(conf) => conf,
+                other => {
+                    let (_, why) = other.not_ready(&dirs).unwrap_or_default();
+                    return Err(Status::failed_precondition(format!(
+                        "cannot network the pod sandbox {pod}: {why}"
+                    )));
+                }
+            };
+            let conf_json = serde_json::to_string(&conf)
+                .map_err(|e| Status::internal(format!("serializing conflist: {e}")))?;
+            let cidr = delonix_net::cni::attach_named_netns(
+                &conf,
+                &pod,
+                &pod,
+                delonix_net::cni::DEFAULT_IFNAME,
+            )
+            .map_err(|e| Status::internal(format!("CNI ADD of sandbox {pod}: {e}")))?;
+            cni_ip = cidr.split('/').next().unwrap_or("").to_string();
+            if cni_ip.is_empty() {
+                // A pod without an address reads as networked and is not.
+                delonix_net::cni::detach_named_netns(
+                    Some(&conf),
+                    &pod,
+                    &pod,
+                    delonix_net::cni::DEFAULT_IFNAME,
+                );
+                return Err(Status::internal(format!(
+                    "CNI ADD of sandbox {pod} returned no IP address (network `{}`)",
+                    conf.name
+                )));
+            }
+            cni_netns = delonix_net::cni::named_netns_path(&pod);
+            // The pod's `net.*` sysctls belong to the pod's netns, and here the
+            // containers join it with `--net host`, where the engine (rightly)
+            // refuses `net.*`. So they are set HERE, once, on top of the two
+            // defaults containerd 2.x applies to every pod netns
+            // (`enable_unprivileged_ports`/`_icmp`): a non-root process may bind
+            // a port below 1024 and ping inside its OWN namespace. Without the
+            // first, the kubeadm CoreDNS (uid 65532, `drop: ALL`) died on
+            // `listen tcp :53: bind: permission denied` — measured 2026-09-15.
+            let sysctls = pod_netns_sysctls(&sysctls);
+            if let Err(e) = delonix_net::cni::set_netns_sysctls(&cni_netns, &sysctls) {
+                delonix_net::cni::detach_named_netns(
+                    Some(&conf),
+                    &pod,
+                    &pod,
+                    delonix_net::cni::DEFAULT_IFNAME,
+                );
+                return Err(Status::internal(format!(
+                    "sysctls of the pod sandbox {pod}: {e}"
+                )));
+            }
+            cni_conf = conf_json;
         }
     }
     let rec = SandboxRec {
@@ -589,10 +734,29 @@ pub fn run_pod_sandbox(
             .unwrap_or_default(),
         port_mappings: cri_port_specs(&cfg.port_mappings),
         cni_ip,
+        cni_netns,
+        cni_conf,
     };
     write_rec(&sb_dir(base), &id, &rec)?;
     delonix_runtime_core::metrics::inc_pod_sandbox_created();
     Ok(Response::new(RunPodSandboxResponse { pod_sandbox_id: id }))
+}
+
+/// What a root CNI sandbox writes into its netns: containerd's two defaults,
+/// then the pod's own `net.*` (which win — a pod that sets
+/// `ip_unprivileged_port_start` keeps its value).
+fn pod_netns_sysctls(pod: &[String]) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = vec![
+        ("net.ipv4.ip_unprivileged_port_start".into(), "0".into()),
+        ("net.ipv4.ping_group_range".into(), "0 2147483647".into()),
+    ];
+    for s in pod {
+        if let Some((k, v)) = s.split_once('=').filter(|(k, _)| k.starts_with("net.")) {
+            out.retain(|(ok, _)| ok != k);
+            out.push((k.to_string(), v.to_string()));
+        }
+    }
+    out
 }
 
 pub fn stop_pod_sandbox(
@@ -671,7 +835,17 @@ pub fn remove_pod_sandbox(
     // Remove the real Delonix pod (infra container + netns), if it existed.
     if let Ok(sb) = read_rec::<SandboxRec>(&sb_dir(base), &id) {
         if !sb.host_network {
-            if !sb.cni_ip.is_empty() {
+            if !sb.cni_netns.is_empty() {
+                // ROOT + CNI: the chain it was configured with, then the netns.
+                let pod = format!("cri-{id}");
+                let conf = delonix_net::cni::parse_config(&sb.cni_conf).ok();
+                delonix_net::cni::detach_named_netns(
+                    conf.as_ref(),
+                    &pod,
+                    &pod,
+                    delonix_net::cni::DEFAULT_IFNAME,
+                );
+            } else if !sb.cni_ip.is_empty() {
                 // CNI-configured sandbox (rootless): plugin DEL in the holder.
                 if let Some(conf) = delonix_net::cni::enabled_conf() {
                     let cj = serde_json::to_string(&conf).unwrap_or_default();
@@ -679,9 +853,10 @@ pub fn remove_pod_sandbox(
                 }
             } else if delonix_runtime::is_rootless() {
                 let _ = delonix(base, &["net", "netns", "detach", &format!("cri-{id}")]);
-            } else {
-                let _ = delonix(base, &["pod", "rm", &format!("cri-{id}")]);
             }
+            // No root branch without `cni_netns`: it used to run `pod rm cri-<id>`,
+            // a command that does not exist, with its result discarded. A root
+            // sandbox record is only ever written after the CNI `ADD` succeeded.
         }
     }
     remove_rec(&sb_dir(base), &id);
@@ -957,6 +1132,17 @@ pub fn create_container(
             }
         }
     };
+    // The environment the kubelet computed — the pod's `env`, `envFrom`, and the
+    // service variables (`KUBERNETES_SERVICE_HOST`/`_PORT`) it adds to every
+    // container. Nothing read `cfg.envs` before this: no container this CRI ever
+    // ran got a single variable from its pod. Measured 2026-09-15 on a kubeadm
+    // node: CoreDNS dying on «unable to load in-cluster configuration,
+    // KUBERNETES_SERVICE_HOST and KUBERNETES_SERVICE_PORT must be defined».
+    let env_file0 = if cfg.envs.is_empty() {
+        String::new()
+    } else {
+        write_env_file(base, &id, &cfg.envs)?
+    };
     let rec = ContainerRec {
         id: id.clone(),
         sandbox_id: req.pod_sandbox_id,
@@ -991,6 +1177,7 @@ pub fn create_container(
         run_as_user,
         run_as_group,
         run_as_username,
+        env_file0,
     };
     write_rec(&ct_dir(base), &id, &rec)?;
     delonix_runtime_core::metrics::inc_container_created();
@@ -1125,6 +1312,12 @@ fn start_argv(
             // log do CRI, fica `Up` e serve tráfego. A diferença era esta linha.
             args.push("--net".into());
             args.push("host".into());
+        } else if !sb.cni_netns.is_empty() {
+            // ROOT + CNI: `start_container` runs the engine INSIDE the sandbox's
+            // netns (`nsenter --net`), so "the network I am in" is the pod's.
+            // `--pod` would look for a holder netns this path never made.
+            args.push("--net".into());
+            args.push("host".into());
         } else {
             args.push("--pod".into());
             args.push(format!("cri-{}", rec.sandbox_id));
@@ -1160,14 +1353,23 @@ fn start_argv(
         // directamente aos portos do host. Publicar aqui pedia DNAT para um
         // netns que não existe — e era o sintoma pelo qual este defeito se
         // deixou ver (`6443->6443` num pod `hostNetwork`).
-        if !sb.host_network {
+        // Nor on a CNI sandbox in root: `hostPort` there is the `portmap`
+        // plugin's job, and publishing would DNAT through the native ingress.
+        if !sb.host_network && sb.cni_netns.is_empty() {
             for p in &sb.port_mappings {
                 args.push("--publish".into());
                 args.push(p.clone());
             }
         }
         // pod sysctls, applied to the container (shares the pod's namespaces).
-        for s in &sb.sysctls {
+        // `net.*` of a root CNI sandbox are already in its netns (see
+        // `pod_netns_sysctls`); under `--net host` the engine would refuse them.
+        let own_net = !sb.cni_netns.is_empty();
+        for s in sb
+            .sysctls
+            .iter()
+            .filter(|s| !(own_net && s.starts_with("net.")))
+        {
             args.push("--sysctl".into());
             args.push(s.clone());
         }
@@ -1269,6 +1471,12 @@ fn start_argv(
     // `--` separates the flags from the positionals: prevents an `image`/`command`
     // coming from the CRI request and starting with `-` from being interpreted as
     // a flag (injection).
+    // Values by FILE, never on the argv: a detached `run` keeps its command line
+    // for the container's whole life, readable by every user in `ps`.
+    if !rec.env_file0.is_empty() {
+        args.push("--env-file0".into());
+        args.push(rec.env_file0.clone());
+    }
     args.push("--".into());
     args.push(rec.image.clone());
     args.extend(rec.command.iter().cloned());
@@ -1296,7 +1504,11 @@ pub fn start_container(
     // a refusal that named its own fix, and it took reproducing the argv by
     // hand on the node to read it (2026-09-15) — the same trap
     // `delonix_detached_why` already documents for sandboxes.
-    if let Some(why) = delonix_detached_why(base, &argv)? {
+    let netns = sandbox
+        .as_ref()
+        .filter(|sb| !sb.host_network && !sb.cni_netns.is_empty())
+        .map(|sb| sb.cni_netns.as_str());
+    if let Some(why) = delonix_detached_why_in(base, netns, &argv)? {
         return Err(Status::internal(format!(
             "failed to start container {id}: {why}"
         )));
@@ -1376,6 +1588,9 @@ pub fn remove_container(
             "removal of 'cri-{id}' failed (record preserved for retry): {}",
             String::from_utf8_lossy(&out.stderr).trim()
         )));
+    }
+    if valid_cri_id(&id) {
+        let _ = std::fs::remove_file(env_path(base, &id));
     }
     remove_rec(&ct_dir(base), &id);
     Ok(Response::new(RemoveContainerResponse {}))
@@ -2449,6 +2664,123 @@ mod tests {
         );
         let j = pos("--publish").expect("as portas do pod são publicadas");
         assert_eq!(argv[j + 1], "8080:80");
+    }
+
+    /// ROOT + CNI: the container enters the sandbox netns through
+    /// `start_container`'s `nsenter`, so the argv asks for the network it is in
+    /// (`--net host`) and NOT `--pod` (which looks for a holder netns this path
+    /// never made). Nor does it publish: `hostPort` under CNI is `portmap`'s.
+    #[test]
+    fn root_cni_sandbox_enters_by_netns_and_does_not_publish() {
+        let rec = ContainerRec {
+            image: "registry.k8s.io/coredns/coredns:v1.14.2".into(),
+            sandbox_id: "sb3".into(),
+            ..Default::default()
+        };
+        let sb = SandboxRec {
+            id: "sb3".into(),
+            host_network: false,
+            port_mappings: vec!["53:53/udp".into()],
+            cni_ip: "10.244.0.2".into(),
+            cni_netns: "/run/netns/cri-sb3".into(),
+            ..Default::default()
+        };
+
+        let argv = start_argv(&rec, Some(&sb), crate::CapCeiling::default(), "c3");
+        let pos = |f: &str| argv.iter().position(|a| a == f);
+
+        let i = pos("--net").unwrap_or_else(|| panic!("`--net` missing in {argv:?}"));
+        assert_eq!(argv[i + 1], "host");
+        assert!(pos("--pod").is_none(), "{argv:?}");
+        assert!(pos("--publish").is_none(), "{argv:?}");
+    }
+
+    /// The netns sysctls of a root CNI sandbox: containerd's two defaults, the
+    /// pod's `net.*` on top (they win); every other sysctl stays with the
+    /// container.
+    #[test]
+    fn pod_netns_sysctls_containerd_defaults_and_the_pod_wins() {
+        let got = pod_netns_sysctls(&[
+            "net.ipv4.ip_unprivileged_port_start=80".into(),
+            "kernel.shm_rmid_forced=1".into(),
+            "net.core.somaxconn=1024".into(),
+        ]);
+        assert_eq!(
+            got,
+            [
+                (
+                    "net.ipv4.ping_group_range".to_string(),
+                    "0 2147483647".to_string()
+                ),
+                (
+                    "net.ipv4.ip_unprivileged_port_start".to_string(),
+                    "80".to_string()
+                ),
+                ("net.core.somaxconn".to_string(), "1024".to_string()),
+            ]
+        );
+
+        let rec = ContainerRec {
+            image: "img".into(),
+            ..Default::default()
+        };
+        let sb = SandboxRec {
+            cni_netns: "/run/netns/cri-x".into(),
+            sysctls: vec![
+                "net.core.somaxconn=1024".into(),
+                "kernel.shm_rmid_forced=1".into(),
+            ],
+            ..Default::default()
+        };
+        let argv = start_argv(&rec, Some(&sb), crate::CapCeiling::default(), "c");
+        assert!(!argv.iter().any(|a| a.starts_with("net.")), "{argv:?}");
+        assert!(
+            argv.iter().any(|a| a == "kernel.shm_rmid_forced=1"),
+            "{argv:?}"
+        );
+    }
+
+    /// The pod's variables reach the engine by file, byte-exact (multi-line and
+    /// spaces included) and off the argv, which a `run -d` keeps visible in `ps`.
+    #[test]
+    fn pod_envs_go_by_file_never_by_argv() {
+        let envs = vec![
+            KeyValue {
+                key: "KUBERNETES_SERVICE_HOST".into(),
+                value: "10.96.0.1".into(),
+            },
+            KeyValue {
+                key: "CERT".into(),
+                value: "-----BEGIN-----\n  line\n-----END-----".into(),
+            },
+        ];
+        assert_eq!(
+            env0_bytes(&envs),
+            b"KUBERNETES_SERVICE_HOST=10.96.0.1\0CERT=-----BEGIN-----\n  line\n-----END-----\0"
+        );
+
+        let base = tmp_base("env0");
+        let path = write_env_file(&base, "abc", &envs).unwrap();
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(Path::new(&path)), 0o600);
+        assert_eq!(mode(Path::new(&path).parent().unwrap()), 0o700);
+
+        let rec = ContainerRec {
+            image: "img".into(),
+            env_file0: path.clone(),
+            ..Default::default()
+        };
+        let argv = start_argv(&rec, None, crate::CapCeiling::default(), "abc");
+        let i = argv
+            .iter()
+            .position(|a| a == "--env-file0")
+            .expect("--env-file0");
+        assert_eq!(argv[i + 1], path);
+        let sep = argv.iter().position(|a| a == "--").unwrap();
+        assert!(i < sep, "the flag must come before `--`: {argv:?}");
+        assert!(!argv.iter().any(|a| a.contains("10.96.0.1")), "{argv:?}");
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// The ceiling has to bite at CREATE, on the real CRI request path — not just
