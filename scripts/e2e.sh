@@ -1653,6 +1653,18 @@ check "system doctor sem --strict não falha" ok \
 # onde as ferramentas não existem.
 check "system doctor --strict detecta um host sem as ferramentas" fail \
   bash -c "PATH=/nonexistent '$BIN' system doctor --strict"
+# Três promessas do dataplane que só falham SOB CARGA e nunca ao correr o
+# doctor em repouso: conntrack cheio dropa pacotes novos em silêncio, a
+# tabela ARP cheia deixa vizinhos inalcançáveis, e uma gama de portas
+# efémeras estreita esgota sob muitas ligações SNAT simultâneas. O `doctor`
+# não pode provar a carga — só que a MEDIÇÃO aparece, com o número real ao
+# lado (não um sim/não sem contexto).
+check "…mede a tabela conntrack, não só se existe" ok \
+  bash -c "'$BIN' system doctor | grep -q 'conntrack table'"
+check "…mede a tabela de vizinhos ARP" ok \
+  bash -c "'$BIN' system doctor | grep -q 'ARP/neighbour table'"
+check "…mede a largura da gama de portas efémeras" ok \
+  bash -c "'$BIN' system doctor | grep -q 'ephemeral port range'"
 
 # ---------------------------------------------------------------------------
 # A matriz de compatibilidade da Docker Engine API tem de dizer TRÊS estados.
