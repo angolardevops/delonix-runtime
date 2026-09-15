@@ -171,6 +171,54 @@ fn ensure_owner_writable(p: &Path) {
     }
 }
 
+/// Atomically publishes a freshly-extracted `tmp` layer directory as `dir`,
+/// REPLACING whatever might already be sitting there.
+///
+/// `rename(2)` refuses to land a directory on top of a non-empty one
+/// (`ENOTEMPTY`) — so once `dir` exists without ever having been marked
+/// `.extracted` (a partial extraction from a crashed/killed run, or content
+/// left behind by an older, buggy extractor), it stayed there FOREVER: every
+/// later `ensure_layers` call re-extracted correctly into a fresh `tmp` and
+/// then silently discarded that correct work, because the plain
+/// `rename(&tmp, &dir)` onto the stale, non-empty `dir` always failed.
+/// Measured live: a `kindest/node:v1.34.0` layer stuck at 3 entries total
+/// (no `/usr`, no `/bin` — every exec inside the image failed with `ENOENT`)
+/// for weeks, re-"extracted" without error on every `container run`, never
+/// actually landing the fix.
+///
+/// The swap: move whatever is at `dir` out of the way first (rename onto a
+/// VACANT path always succeeds), THEN rename `tmp` into `dir`'s now-vacant
+/// place, THEN remove the displaced old directory. A reader that already
+/// opened `dir` (an overlay mount already using the stale lowerdir) keeps
+/// its inode — Unix rename only repoints the directory ENTRY — so an
+/// in-flight container is undisturbed; only callers arriving after the swap
+/// see the fix. If the second rename fails, the first is undone so `dir`
+/// is never left missing for whoever else is reading it.
+fn publish_layer_dir(tmp: &Path, dir: &Path) -> Result<()> {
+    let Some(parent) = dir.parent() else {
+        std::fs::rename(tmp, dir)?;
+        return Ok(());
+    };
+    let name = dir.file_name().and_then(|s| s.to_str()).unwrap_or("layer");
+    let doomed = parent.join(format!(".{name}.doomed.{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&doomed);
+    let displaced = std::fs::rename(dir, &doomed).is_ok();
+    match std::fs::rename(tmp, dir) {
+        Ok(()) => {
+            if displaced {
+                let _ = std::fs::remove_dir_all(&doomed);
+            }
+            Ok(())
+        }
+        Err(e) => {
+            if displaced {
+                let _ = std::fs::rename(&doomed, dir);
+            }
+            Err(e.into())
+        }
+    }
+}
+
 impl ImageStore {
     /// Extracts an image into a FLAT rootfs at `dest` (applies all layers in
     /// order, with *whiteouts*) — the basis of an OCI runtime *bundle* (C1).
@@ -204,10 +252,18 @@ impl ImageStore {
                 let data = self.cas().read(digest)?;
                 extract_layer(&data, &tmp)?;
                 std::fs::write(tmp.join(".extracted"), b"ok")?;
-                // publish atomically. If another process already published (the rename
-                // fails because the destination exists), we discard our temp.
-                if marker.exists() || std::fs::rename(&tmp, &dir).is_err() {
+                // Publish atomically. If another process already finished (the
+                // marker appeared while we were extracting our own copy), theirs
+                // wins and we discard ours — same outcome either way, since both
+                // are correct extractions of the same immutable digest. Otherwise
+                // `publish_layer_dir` REPLACES whatever is at `dir` (missing,
+                // or a stale/broken leftover with no marker) with our fresh copy —
+                // seeing `dir` merely EXIST here is not proof it is valid.
+                if marker.exists() {
                     let _ = std::fs::remove_dir_all(&tmp);
+                } else if let Err(e) = publish_layer_dir(&tmp, &dir) {
+                    let _ = std::fs::remove_dir_all(&tmp);
+                    return Err(e);
                 }
             }
             dirs.push(dir);
@@ -418,7 +474,7 @@ impl ImageStore {
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_layer_flat, extract_layer};
+    use super::{apply_layer_flat, extract_layer, publish_layer_dir};
 
     /// Regression: a layer with a READ-ONLY directory (mode 0555, e.g.
     /// `/usr/lib64`) and files inside it. In ROOTLESS, `unpack_in` created the
@@ -521,6 +577,128 @@ mod tests {
             b.finish().unwrap();
         }
         buf
+    }
+
+    /// Coverage guard for `ensure_layers`'s actual extraction path (bulk
+    /// `tar::Archive::unpack()`, via `extract_layer` — NOT `apply_layer_flat`,
+    /// which `export_rootfs`/the flat bundle path uses). Confirms it is NOT
+    /// the read-only-dir bug the two regressions above fixed on the flat
+    /// path: `tar`'s bulk `unpack()` already defers directory permissions
+    /// until every entry underneath is written, so `extract_layer` itself
+    /// was never broken this way. (Investigated live on a real
+    /// `kindest/node:v1.34.0` failure — the actual bug turned out to be one
+    /// layer down, in how `ensure_layers` PUBLISHES what this function
+    /// extracts: see `publish_layer_dir`'s tests below.)
+    #[test]
+    fn extract_layer_handles_readonly_dirs_via_tars_deferred_permissions() {
+        let mut buf = Vec::new();
+        {
+            let mut b = tar::Builder::new(&mut buf);
+            let mut dh = tar::Header::new_gnu();
+            dh.set_entry_type(tar::EntryType::Directory);
+            dh.set_size(0);
+            dh.set_mode(0o555); // r-xr-xr-x, no write — e.g. /usr/lib64
+            dh.set_cksum();
+            b.append_data(&mut dh, "ro/", std::io::empty()).unwrap();
+            let content = b"glibc";
+            let mut fh = tar::Header::new_gnu();
+            fh.set_size(content.len() as u64);
+            fh.set_mode(0o644);
+            fh.set_cksum();
+            b.append_data(&mut fh, "ro/libc.so.6", &content[..])
+                .unwrap();
+            b.finish().unwrap();
+        }
+        let dir = std::env::temp_dir().join(format!("delonix-extract-ro-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        extract_layer(&buf, &dir).unwrap();
+        assert!(
+            dir.join("ro/libc.so.6").exists(),
+            "ficheiro dentro de directório read-only tem de sobreviver a `extract_layer` \
+             (o caminho que `ensure_layers`/`prepare_overlay`/`mount_rootfs` realmente usa) — \
+             não só a `apply_layer_flat`"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// THE bug, isolated: `rename(2)` refuses to land a directory on top of a
+    /// non-empty one (`ENOTEMPTY`) — verified directly against this host's
+    /// kernel before writing this fix. `ensure_layers`'s old one-line publish
+    /// (`std::fs::rename(&tmp, &dir).is_err()` → discard `tmp` on ANY
+    /// failure, ENOTEMPTY included) treated that failure exactly like "someone
+    /// else already published" and threw away the fresh, correct extraction —
+    /// forever, since the stale `dir` it fell back to never gets a chance to
+    /// be replaced on a LATER call either. Measured live: a real
+    /// `kindest/node:v1.34.0` layer stuck at 3 entries (no `/usr`, no `/bin`)
+    /// for weeks this way — every `container run` re-extracted correctly and
+    /// silently discarded it, no error, `ls`-provable from outside the
+    /// engine.
+    #[test]
+    fn publish_layer_dir_replaces_a_stale_dir_with_no_marker() {
+        let root =
+            std::env::temp_dir().join(format!("delonix-publish-stale-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        // The stale, pre-existing `dir`: has content, but never got a valid
+        // `.extracted` marker — a partial extraction from a crashed run, or
+        // (as measured) content an older, buggy extractor left behind.
+        let dir = root.join("layerhash");
+        std::fs::create_dir_all(dir.join("kind")).unwrap();
+        std::fs::write(dir.join("kind/stale-marker"), b"old").unwrap();
+        assert!(!dir.join(".extracted").exists());
+
+        // The fresh, correct re-extraction, in its own tmp dir — same shape
+        // `ensure_layers` produces before calling us.
+        let tmp = root.join(".layerhash.1234.tmp");
+        std::fs::create_dir_all(tmp.join("usr/local/bin")).unwrap();
+        std::fs::write(tmp.join("usr/local/bin/entrypoint"), b"#!/bin/sh\n").unwrap();
+        std::fs::write(tmp.join(".extracted"), b"ok").unwrap();
+
+        publish_layer_dir(&tmp, &dir).expect("publish must replace the stale dir");
+
+        assert!(
+            dir.join("usr/local/bin/entrypoint").exists(),
+            "the fresh extraction must win — this is exactly what a real \
+             `kindest/node` container needs to exec"
+        );
+        assert!(
+            dir.join(".extracted").exists(),
+            "the published dir must carry the marker, so the NEXT `ensure_layers` \
+             call trusts it instead of re-extracting every time"
+        );
+        assert!(
+            !dir.join("kind/stale-marker").exists(),
+            "the stale content must be GONE, not merged with the fresh extraction"
+        );
+        assert!(
+            !tmp.exists(),
+            "the source tmp dir is consumed by the rename"
+        );
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// The ordinary case (no prior `dir` at all) must keep working exactly as
+    /// before — this is the path every FIRST extraction of an image takes.
+    #[test]
+    fn publish_layer_dir_handles_a_dir_that_never_existed() {
+        let root =
+            std::env::temp_dir().join(format!("delonix-publish-fresh-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        let dir = root.join("layerhash");
+        let tmp = root.join(".layerhash.1234.tmp");
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(tmp.join("file.txt"), b"content").unwrap();
+
+        publish_layer_dir(&tmp, &dir).expect("publish must succeed when dir never existed");
+        assert!(dir.join("file.txt").exists());
+        assert!(!tmp.exists());
+
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]
