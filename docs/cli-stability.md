@@ -297,7 +297,13 @@ diz quais são, em vez de os omitir.
   `delonix serve docker-api --matrix`, e é essa tabela que diz o que existe
   hoje, não esta promessa. A **API de gestão** (`serve api`) é local (socket
   unix, só o próprio uid) e não tem contrato publicado: não construas automação
-  sobre ela — para isso existe a CLI, com `-o json`.
+  sobre ela — para isso existe a CLI, com `-o json`. As rotas dela estão
+  **congeladas** (só correcções) enquanto o contrato local de nó que a substitui
+  é decidido (ADR-0040 e ADR-0041, ambos *Proposed*); uma promessa para esse
+  contrato só entra nesta página quando a primeira vaga dele fechar.
+* **O nome do executável `delonix` é deste motor.** O control plane deixa de
+  produzir um binário com esse nome (ADR 0038 do control plane); um `delonix`
+  instalado por este projecto é sempre a CLI descrita nesta página.
 * **`compatibility`** — a mesma tabela do `serve docker-api --matrix`, mas
   como verbo de topo e com `-o json`. Ainda só cobre `docker`; `compose`/
   `cri`/`oci` são superfícies futuras, cada uma com o seu próprio "três

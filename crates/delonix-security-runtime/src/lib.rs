@@ -40,8 +40,8 @@
 //! crate. ADR-0010 (Rejected, 2026-08-10) and ADR-0025 (Accepted, 2026-08-29)
 //! both place tenancy, identity and approval in `delonix-paas`. The layer that
 //! has tenants consumes this one and adds them on its own side of the line —
-//! the same way `RemoteRuntime` already layers on `delonix-mgmt` without
-//! linking its crates. See ADR-0026.
+//! the way the control plane's node agent is to consume the engine's local
+//! contract without linking its crates (ADR-0041, Proposed). See ADR-0026.
 //!
 //! # Modules
 //!
