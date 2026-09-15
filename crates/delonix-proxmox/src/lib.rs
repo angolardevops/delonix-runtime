@@ -1273,6 +1273,7 @@ impl VmBackend for ProxmoxBackend {
             mac: String::new(),
             api_socket: format!("proxmox:{}:{vmid}", self.client.node),
             ip: None,
+            lease_floor: None,
         })
     }
 
@@ -1389,6 +1390,7 @@ impl VmBackend for ProxmoxBackend {
             mac: String::new(),
             api_socket: vm.api_socket.clone(),
             ip: None,
+            lease_floor: None,
         }))
     }
 
