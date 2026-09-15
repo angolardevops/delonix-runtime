@@ -1510,10 +1510,10 @@ mod tests {
         );
     }
 
-    /// A mensagem REAL do nó (PVE 9.2, histórico de tarefas) é contenção de
-    /// lock; metade dela não é.
+    /// The node's REAL message (PVE 9.2, task log) is lock contention; half of
+    /// it is not.
     #[test]
-    fn reconhece_a_contencao_de_lock_do_no() {
+    fn recognises_the_nodes_lock_contention() {
         let real = Error::Invalid(
             "proxmox: task failed: can't lock file '/var/lock/qemu-server/lock-100.conf' - got \
              timeout"
@@ -1532,9 +1532,9 @@ mod tests {
         Error::Invalid("task failed: can't lock file 'lock-100.conf' - got timeout".into())
     }
 
-    /// Repete enquanto o lock está ocupado, e pára logo que passa.
+    /// Retries while the lock is busy, and stops as soon as it clears.
     #[test]
-    fn repete_em_contencao_de_lock_ate_passar() {
+    fn retries_on_lock_contention_until_it_clears() {
         let mut n = 0;
         let r = retry_on_lock("stop", Duration::from_secs(5), Duration::ZERO, || {
             n += 1;
@@ -1547,9 +1547,9 @@ mod tests {
         assert_eq!(r.unwrap(), 3);
     }
 
-    /// Qualquer OUTRA falha sai à primeira: repetir um 400 é martelar o nó.
+    /// Any OTHER failure returns at once: retrying a 400 is hammering the node.
     #[test]
-    fn outra_falha_nao_se_repete() {
+    fn other_failures_are_not_retried() {
         let mut n = 0;
         let r: Result<()> = retry_on_lock("stop", Duration::from_secs(5), Duration::ZERO, || {
             n += 1;
@@ -1559,10 +1559,10 @@ mod tests {
         assert_eq!(n, 1);
     }
 
-    /// Com tecto: um lock que nunca liberta vira erro, não um comando pendurado
-    /// — e o erro diz que esperou e quantas vezes tentou.
+    /// Bounded: a lock that never clears becomes an error, not a hung command —
+    /// and the error says it waited and how many times it tried.
     #[test]
-    fn a_contencao_tem_tecto() {
+    fn lock_contention_has_a_ceiling() {
         let mut n = 0;
         let r: Result<()> = retry_on_lock(
             "stop",
@@ -1574,28 +1574,29 @@ mod tests {
             },
         );
         let e = r.unwrap_err().to_string();
-        assert!(n > 1, "tem de ter repetido pelo menos uma vez");
+        assert!(n > 1, "it must have retried at least once");
         assert!(e.contains("got timeout") && e.contains("attempts"), "{e}");
     }
 
-    /// Nome de snapshot repetido é conflito (5), como no libvirt.
+    /// A snapshot name already taken is a conflict (5), as on libvirt.
     #[test]
-    fn snapshot_repetido_e_conflito() {
+    fn a_taken_snapshot_name_is_a_conflict() {
         assert!(matches!(taken_snapshot(100, "s1"), Error::Conflict(_)));
     }
 
-    /// Cada chave vai UMA vez no corpo do create. O `ipconfig0` ia duas (lista
-    /// fixa + `cloud_init_form`) e o nó recusava TODOS os creates com `400
-    /// ipconfig0: type check ('string') failed - got ARRAY` — medido num PVE 9.2.
-    /// O teste acima só perguntava se a chave estava lá, e um duplicado está.
+    /// Every key goes ONCE in the create body. `ipconfig0` went twice (fixed
+    /// list + `cloud_init_form`) and the node refused EVERY create with `400
+    /// ipconfig0: type check ('string') failed - got ARRAY` — measured on a PVE
+    /// 9.2. The test above only asked whether the key was there, and a
+    /// duplicate is.
     #[test]
-    fn o_create_manda_cada_chave_uma_so_vez() {
-        let casos = [
+    fn the_create_sends_each_key_once() {
+        let cases = [
             cfg_com(&[]),
             cfg_com(&["ssh-ed25519 AAAA x"]),
             VmConfig {
                 static_ip: Some("10.0.0.5/24,gw=10.0.0.1".into()),
-                hostname: Some("outro".into()),
+                hostname: Some("other".into()),
                 ..cfg_com(&["ssh-ed25519 AAAA x"])
             },
             VmConfig {
@@ -1603,23 +1604,23 @@ mod tests {
                 ..cfg_com(&[])
             },
         ];
-        for cfg in &casos {
+        for cfg in &cases {
             let f = create_form(100, &cfg.name, cfg, "local-lvm", 8, "virtio,bridge=vmbr0");
-            let mut chaves: Vec<&str> = f.iter().map(|(k, _)| *k).collect();
-            chaves.sort_unstable();
-            let n = chaves.len();
-            chaves.dedup();
-            assert_eq!(n, chaves.len(), "chave repetida no create: {f:?}");
+            let mut keys: Vec<&str> = f.iter().map(|(k, _)| *k).collect();
+            keys.sort_unstable();
+            let n = keys.len();
+            keys.dedup();
+            assert_eq!(n, keys.len(), "key repeated in the create: {f:?}");
         }
-        // O hostname explícito ganha ao nome da VM, como no configure_clone.
-        let f = create_form(100, "no1", &casos[2], "local-lvm", 8, "virtio");
-        assert!(f.contains(&("name", "outro".into())), "{f:?}");
+        // An explicit hostname wins over the VM name, as in configure_clone.
+        let f = create_form(100, "no1", &cases[2], "local-lvm", 8, "virtio");
+        assert!(f.contains(&("name", "other".into())), "{f:?}");
         assert!(
             f.contains(&("ipconfig0", "ip=10.0.0.5/24,gw=10.0.0.1".into())),
             "{f:?}"
         );
-        // Um appliance não leva rede de cloud-init nem drive.
-        let f = create_form(100, "no1", &casos[3], "local-lvm", 8, "virtio");
+        // An appliance gets neither cloud-init network config nor a drive.
+        let f = create_form(100, "no1", &cases[3], "local-lvm", 8, "virtio");
         assert!(
             !f.iter().any(|(k, _)| *k == "ipconfig0" || *k == "ide2"),
             "{f:?}"
