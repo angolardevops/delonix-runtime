@@ -105,14 +105,17 @@ the draft on `integra/adr-0040`.
 | 13 | **node health** (dependencies) | store check in MCP `doctor_checks` `delonix-mcp/src/lib.rs:773-818`; CRI `Status` — `RuntimeReady` **always true** (`delonix-cri/src/runtime_svc.rs:123`), `NetworkReady` real | `system doctor` `cmd/system.rs:2037-2150` (br_netfilter, cgroup2 delegation, subuid, `slirp4netns`/`nft`/`ip`) — **checks are bin-private**; no `max_user_namespaces` check | mgmt `/v1/net/status` (lib); nothing aggregates health | `GetHealth` |
 | 14 | **events, watch** | `delonix-runtime-core/src/events.rs`: append-only `events.jsonl`, rotates at 4 MiB, `read_from(offset)` `:139` — resumable | `system events -f` (1 s poll) `cmd/system.rs:941-985`; writers are almost all in the CLI; **VM and cluster emit none** | **—** (Docker `/events` refused, `dockerapi.rs:481`) | `WatchEvents` |
 
-**Found while measuring, out of this ADR's scope** (recorded, not fixed here): in root
-mode without CNI the CRI's `RunPodSandbox` runs `delonix pod create <pod> --network`
-(`runtime_svc/lifecycle.rs:551`) and `RemovePodSandbox` runs `delonix pod rm`
-(`:683`, result discarded). `PodCmd` accepts only `create -f` and has no `rm`
-(`cmd/pod.rs:111-130`; `main.rs:122` moved rm to `delete pod`). Confirmed by reading the
-clap tree; **not run**. The published CRI numbers are rootless-only, which is consistent
-with nobody having hit it. This is the class of bug R3 exists to remove: an argv contract
-between two crates that no compiler checks.
+**Found while measuring, out of this ADR's scope — fixed since, in #322** (squash
+`9669dba8`, 2026-09-15): at `a6b68bee`, in root mode without CNI, the CRI's
+`RunPodSandbox` ran `delonix pod create <pod> --network` (`runtime_svc/lifecycle.rs:551`)
+and `RemovePodSandbox` ran `delonix pod rm` (`:683`, result discarded), while `PodCmd`
+accepted only `create -f` and had no `rm` (`cmd/pod.rs:111-130`). #322 moved root
+sandboxes onto CNI on the host (a named netns per sandbox, CNI DEL on removal) and
+removed both argv forms; its author proved it on a kubeadm VM (node Ready, CoreDNS,
+Service by ClusterIP, netns and lease released on pod deletion) — measured there, not by
+this ADR. The lesson stays: this is the class of bug R3 exists to remove, an argv
+contract between two crates that no compiler checks, and it survived because the
+published CRI numbers are rootless-only.
 
 ### Guardrails this decision touches
 
@@ -163,7 +166,7 @@ cuts ports in the order container, pod, volume, ingress, tunnel, secret):
 | **W3** | VMs: create from a spec, start, stop, delete, `Console`, snapshots | 1–4 | manifest → `VmConfig` moves out of `cmd/vm.rs`; console becomes a `VmBackend` capability (ADR-0040 D3), not a `virsh` exec in the CLI; **VM lifecycle emits events** |
 | **W4** | Stacks: plan, apply, destroy, **history, rollback** | 5, 5b | the planner lands in `delonix-stack` (ADR-0040 P2); history/rollback added to the proto |
 | **W5** | **`GatewayService`**: HTTPRoute/Ingress get/list/apply/delete | 6 | added to the proto (absent today); the L7 proxy's lifetime is stated by the contract (it is a spawned process today) |
-| **W6** | Pods outside the CRI, including **stop** | 8 | the root-mode CRI argv bug fixed first; pod stop exists in the engine before it exists in the contract |
+| **W6** | Pods outside the CRI, including **stop** | 8 | pod stop exists in the engine before it exists in the contract |
 | **W7** | **`ClusterService`**: kubeadm create as an `Operation` with persisted progress | 11 | **a kubeadm destroy exists** — an API that creates what it cannot delete leaks by construction; progress written to the operation record, not a spinner |
 | — | **tunnel** | 6b | **refused with reason** for now: it drives third-party binaries and accounts (pinggy/ngrok/cloudflare) — the agent asked for no tunnel RPC in R2, and a public tunnel opened from the node is a control-plane decision. Reopens with a named need |
 | — | **secrets** | — | **not measured here**: the agent's port list names a secret port, R2 did not. A separate question — whether platform secrets should reach the node store at all is `ngolacloud-cyber-resilience` material |
@@ -307,7 +310,7 @@ in neither repository; the `events.jsonl` offset reader; the ADR-0040 draft prot
 list.
 
 **Not validated:** nothing was built or run for this ADR; the root-mode CRI pod argv bug
-is read from code, not reproduced; socket activation, idle exit and reconnect are designed,
+was read from code here and fixed and proven live elsewhere (#322), not by this ADR; socket activation, idle exit and reconnect are designed,
 not spiked (D5); whether `delonix_volume` and `delonix_net::infra` spawn processes
 internally was not opened (their mgmt handlers do not); whether MCP `network.inspect`
 includes HTTPRoute state was not confirmed; the agent's actual RPC call pattern and
