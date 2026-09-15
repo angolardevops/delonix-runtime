@@ -626,6 +626,55 @@ pub(crate) const API_UPSTREAM_USED: &[(&str, &str, &str)] = &[
     ),
 ];
 
+/// Whether a route [`API_UPSTREAM_USED`] names is actually served — the same
+/// question [`print_matrix`] and [`matrix_json`] both answer, kept in ONE
+/// place so the table and the JSON payload cannot drift on which rows they
+/// call "served" vs "refused".
+fn upstream_state(method: &str, path: &str) -> &'static str {
+    if API_MATRIX
+        .iter()
+        .any(|(m, p, _)| *p == path && m.contains(method))
+    {
+        "served"
+    } else {
+        "refused"
+    }
+}
+
+/// [`API_MATRIX`]/[`API_UNIMPLEMENTED`]/[`API_UPSTREAM_USED`] as one JSON
+/// object — the machine-readable twin of [`print_matrix`], for `delonix
+/// compatibility docker -o json` (ADR-0005: a reader who quotes this payload
+/// quotes a measurement, so the engine version travels with it, same as the
+/// table's header line).
+pub(crate) fn matrix_json() -> serde_json::Value {
+    let served: Vec<_> = API_MATRIX
+        .iter()
+        .map(|(m, p, to)| json!({"method": m, "path": p, "mapsTo": to}))
+        .collect();
+    let refused: Vec<_> = API_UNIMPLEMENTED
+        .iter()
+        .map(|(m, p, why)| json!({"method": m, "path": p, "reason": why}))
+        .collect();
+    let upstream_used: Vec<_> = API_UPSTREAM_USED
+        .iter()
+        .map(|(m, p, seen)| {
+            json!({
+                "method": m,
+                "path": p,
+                "state": upstream_state(m, p),
+                "seenIn": seen,
+            })
+        })
+        .collect();
+    json!({
+        "surface": "docker",
+        "engineVersion": env!("CARGO_PKG_VERSION"),
+        "served": served,
+        "refused": refused,
+        "upstreamUsed": upstream_used,
+    })
+}
+
 /// Prints [`API_MATRIX`] and [`API_UNIMPLEMENTED`] as a table.
 pub(crate) fn print_matrix() {
     // The header carries the NUMBERS and the VERSION, because this repo's rule
@@ -671,14 +720,7 @@ pub(crate) fn print_matrix() {
     );
     let mut w = super::output::Table::new(&["METHOD", "PATH", "STATE", "SEEN IN"]);
     for (m, p, seen) in API_UPSTREAM_USED {
-        let state = if API_MATRIX
-            .iter()
-            .any(|(mm, pp, _)| pp == p && mm.contains(m))
-        {
-            super::po::t("served")
-        } else {
-            super::po::t("refused")
-        };
+        let state = super::po::t(upstream_state(m, p));
         w.row(vec![
             m.to_string(),
             p.to_string(),
@@ -1539,6 +1581,34 @@ mod matrix_tests {
             unclassified.len(),
             unclassified.join("\n  "),
         );
+    }
+
+    /// [`super::matrix_json`] and [`print_matrix`]'s table read the SAME
+    /// three consts and the SAME `upstream_state` helper — this pins that
+    /// they cannot drift apart on shape or on which rows are "served" vs
+    /// "refused", the failure mode a hand-duplicated JSON payload would
+    /// eventually hit.
+    #[test]
+    fn matrix_json_agrees_with_the_tables_it_is_built_from() {
+        let v = super::matrix_json();
+        assert_eq!(v["surface"], "docker");
+        assert_eq!(v["served"].as_array().unwrap().len(), API_MATRIX.len());
+        assert_eq!(
+            v["refused"].as_array().unwrap().len(),
+            API_UNIMPLEMENTED.len()
+        );
+        assert_eq!(
+            v["upstreamUsed"].as_array().unwrap().len(),
+            API_UPSTREAM_USED.len()
+        );
+        for (row, (m, p, _)) in v["upstreamUsed"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(API_UPSTREAM_USED)
+        {
+            assert_eq!(row["state"], super::upstream_state(m, p));
+        }
     }
 
     /// Reads THIS FILE'S OWN SOURCE and requires every dispatch arm to have a

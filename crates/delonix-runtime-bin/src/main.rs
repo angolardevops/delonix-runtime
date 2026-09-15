@@ -344,6 +344,14 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::net::NetCmd,
     },
+    /// What this engine covers of another tool's surface.
+    ///
+    /// Served, refused with a reason, and never a silent gap. NOT stable: see
+    /// `docs/cli-stability.md`.
+    Compatibility {
+        #[command(subcommand)]
+        action: cmd::compatibility::CompatibilityCmd,
+    },
     /// Serve a protocol endpoint on a unix socket, grouped: cri/api/docker-api.
     Serve {
         #[command(subcommand)]
@@ -556,6 +564,7 @@ fn run() -> Result<()> {
         Cmd::Backup { action } => cmd::rbackup::cmd_backup(action),
         Cmd::Cluster { action } => cmd::cluster::run(action),
         Cmd::Net { action } => cmd::net::run(action),
+        Cmd::Compatibility { action } => cmd::compatibility::run(action),
         Cmd::Serve { action } => cmd::serve::run(action),
         Cmd::Mcp { action } => cmd::mcp::run(action),
         Cmd::IngressProxy { config } => cmd::ingress_proxy::run(&config),
@@ -1030,6 +1039,7 @@ mod cli_stability_classification_tests {
         "apply",
         "backup",
         "cluster",
+        "compatibility",
         "compose",
         "completion",
         "config",

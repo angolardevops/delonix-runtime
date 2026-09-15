@@ -113,6 +113,10 @@ classify() {
       # `api-resources`, nunca `→` porque não há decisão externa por trás,
       # só o mesmo mecanismo a mudar de casa dentro deste repo.
       else if (c == "network connect" || c == "network disconnect") cls = "="
+      # `compatibility docker`: superfície nova (delonix-engine/SKILL.md §4),
+      # a mesma tabela que já existia em `serve docker-api --matrix` exposta
+      # por um caminho novo — nasce no destino, sem grafia antiga para partir.
+      else if (c ~ /^compatibility /)                             cls = "="
       else                                                        cls = "~"
       print cls "\t" c
     }'
