@@ -1426,6 +1426,17 @@ constroem shell arbitrário; é <code>stdio</code>-only nesta fase, pensado para
 local operar o motor sem sair da máquina.""",
         "subs": {},
     },
+    "compatibility": {
+        "title": "delonix compatibility",
+        "tagline": "O que este motor cobre da superfície de outra ferramenta — servido, recusado com razão, nunca em silêncio.",
+        "intro": """<code>compatibility docker</code> expõe a mesma tabela de três estados que
+<code>serve docker-api --matrix</code> já publicava (servido / recusado com razão / o que
+ferramentas reais como <code>kind</code>/<code>compose</code> chamam), agora como verbo de topo e
+com <code>-o json</code> para CI/scripts de terceiros. <strong>Não estável</strong> — ver
+<code>docs/cli-stability.md</code>. <code>compose</code>/<code>cri</code>/<code>oci</code> ficam de
+fora por agora: nenhum tem hoje uma superfície de três estados própria para reutilizar.""",
+        "subs": {},
+    },
     "api-resources": {
         "title": "delonix api-resources",
         "tagline": "Todos os Kinds que este motor serve: plural, nomes curtos, apiVersion e forma.",
@@ -1860,6 +1871,15 @@ hand-written <code>kind:</code> will actually become once the engine reads it.""
 The exposed tools call the <code>Store</code>/domain crates directly, never build arbitrary
 shell; it is <code>stdio</code>-only in this phase, meant for a local AI assistant to operate the
 engine without leaving the machine.""",
+    },
+    "compatibility": {
+        "tagline": "What this engine covers of another tool's surface — served, refused with a reason, never in silence.",
+        "intro": """<code>compatibility docker</code> exposes the same three-state table
+<code>serve docker-api --matrix</code> already published (served / refused with a reason / what
+real tooling like <code>kind</code>/<code>compose</code> calls), now as a top-level verb and with
+<code>-o json</code> for CI/third-party scripts. <strong>Not stable</strong> — see
+<code>docs/cli-stability.md</code>. <code>compose</code>/<code>cri</code>/<code>oci</code> are left
+out for now: none has a three-state surface of its own to reuse today.""",
     },
     "api-resources": {
         "tagline": "Every Kind this engine serves: plural, shortnames, apiVersion and form.",

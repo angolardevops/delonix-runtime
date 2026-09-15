@@ -5,6 +5,7 @@ pub mod build;
 pub mod capture;
 pub mod cdi;
 pub mod cluster;
+pub mod compatibility;
 pub mod complete;
 pub mod compose;
 pub mod conditions;

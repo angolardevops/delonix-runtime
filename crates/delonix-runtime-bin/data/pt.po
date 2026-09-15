@@ -6179,6 +6179,12 @@ msgstr "um socket teu, e depois `export DOCKER_HOST=unix:///tmp/delonix-docker.s
 msgid "see where the slice ends before third-party tooling hits a 404 mid-run"
 msgstr "ver onde acaba a fatia antes de uma ferramenta de terceiros levar com um 404 a meio"
 
+msgid "what this engine serves, refuses (with a reason), and never considered"
+msgstr "o que este motor serve, recusa (com razão), e nunca considerou"
+
+msgid "the same table, for a script or another tool's CI"
+msgstr "a mesma tabela, para um script ou a CI de outra ferramenta"
+
 msgid "the schema generated from the code — point an editor at it and the manifest completes as you type"
 msgstr "o schema gerado a partir do código — aponta-lhe um editor e o manifesto completa-se à medida que escreves"
 
@@ -10943,3 +10949,20 @@ msgstr "fixa o toolchain do Go contra o qual um template constrói"
 
 msgid "Version parameter some templates read — an image tag, a framework version, or a toolchain version, depending on the template; the exact accepted form is documented in that template's own README. Refused with a clear error on a template that has none"
 msgstr "Parâmetro de versão que alguns templates leem — uma tag de imagem, uma versão de framework, ou uma versão de toolchain, conforme o template; a forma exacta aceite está documentada no README do próprio template. Recusado com erro claro num template que não tenha nenhuma"
+
+# ---- delonix compatibility: docker (2026-09-15) ----
+
+msgid "What this engine covers of another tool's surface."
+msgstr "O que este motor cobre da superfície de outra ferramenta."
+
+msgid "What this engine covers of another tool's surface.\n\nServed, refused with a reason, and never a silent gap. NOT stable: see `docs/cli-stability.md`."
+msgstr "O que este motor cobre da superfície de outra ferramenta.\n\nServido, recusado com razão, e nunca uma lacuna silenciosa. NÃO estável: ver `docs/cli-stability.md`."
+
+msgid "Docker Engine API coverage."
+msgstr "Cobertura da Docker Engine API."
+
+msgid "Docker Engine API coverage.\n\nServed, refused with a reason, and what real tooling (`kind`, `compose`) is observed calling."
+msgstr "Cobertura da Docker Engine API.\n\nServido, recusado com razão, e o que ferramentas reais (`kind`, `compose`) são observadas a chamar."
+
+msgid "Machine-readable JSON instead of the table (ADR-0005)."
+msgstr "JSON máquina-legível em vez da tabela (ADR-0005)."
