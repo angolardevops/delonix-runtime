@@ -348,61 +348,8 @@ impl Client {
         storage: &str,
         gib: u32,
     ) -> Result<()> {
-        let mem = mem_mib(&cfg.memory).to_string();
-        let cores = cfg.vcpus.max(1).to_string();
-        let scsi0 = format!("{storage}:{gib}");
-        let vmid_s = vmid.to_string();
-        let net0 = self.net0_arg(cfg);
-        // `ip=dhcp` unless an address was asked for. Proxmox's own cloud-init
-        // writes this into the guest, which is why `static_ip` is one of the
-        // few `VmConfig` fields this backend CAN honour — the local backends
-        // reach the same end through a NoCloud seed ISO, which is a file on
-        // this host and therefore meaningless on a node elsewhere.
-        let ipconfig0 = match &cfg.static_ip {
-            Some(ip) => format!("ip={ip}"),
-            None => "ip=dhcp".to_string(),
-        };
-        let ci = cloud_init_form(cfg);
-        let mut form: Vec<(&str, &str)> = vec![
-            ("vmid", vmid_s.as_str()),
-            ("name", name),
-            ("memory", mem.as_str()),
-            ("cores", cores.as_str()),
-            ("ostype", "l26"),
-            ("scsihw", "virtio-scsi-single"),
-            ("scsi0", scsi0.as_str()),
-            // A NIC on a bridge of the node. `virtio` alone is the model —
-            // the value goes in the property's default key, and spelling
-            // that key out (`model=virtio`) is what the API refuses. The
-            // ADR recorded this shape as refused too; that was an artefact
-            // of the spike's `curl -d`, which does not URL-encode.
-            // `reqwest`'s `.form()` does, and the node accepts it:
-            // measured, `net0 = virtio=BC:24:11:F4:F9:9C,bridge=vmbr0`.
-            ("net0", net0.as_str()),
-            ("ipconfig0", ipconfig0.as_str()),
-            // Enable the QEMU guest agent CHANNEL. This is the host side
-            // only: it adds the virtio-serial port the agent talks over,
-            // and without it the node will not even try — every
-            // `/agent/...` call answers "QEMU guest agent is not running"
-            // no matter what the guest has installed. Whether an agent
-            // answers on the other end is the image's business, which is
-            // exactly why `ip()` treats silence as "unknown" and not as an
-            // error (see `parse_agent_ip`).
-            ("agent", "1"),
-        ];
-        form.extend(ci.iter().map(|(k, v)| (*k, v.as_str())));
-        // The cloud-init drive, and only when there is something to put in it:
-        // an empty one on an image with no cloud-init is a CD-ROM the guest
-        // ignores, but it also silently costs a disk on the node's storage.
-        //
-        // `!ci.is_empty()` and not just `static_ip`: a hostname or an SSH key is
-        // just as much something to deliver, and without the drive the node has
-        // nowhere to write them — the settings would be accepted and never
-        // reach the guest, which is the aceite-e-ignorado this repo refuses.
-        let ide2 = format!("{storage}:cloudinit");
-        if !ci.is_empty() {
-            form.push(("ide2", ide2.as_str()));
-        }
+        let form = create_form(vmid, name, cfg, &self.net0_arg(cfg), storage, gib);
+        let form: Vec<(&str, &str)> = form.iter().map(|(k, v)| (*k, v.as_str())).collect();
         let body = self.post_form(&format!("/nodes/{}/qemu", self.node), &form, true)?;
         self.wait_upid(&body, "create")
     }
@@ -928,6 +875,78 @@ fn refuse_unsupported(cfg: &VmConfig) -> Result<()> {
     )))
 }
 
+/// The whole `POST /nodes/{node}/qemu` form of [`Client::create_vm`]. Pure, so
+/// its shape is testable without a node.
+///
+/// **Every key appears ONCE.** The form goes out as `key=value` pairs, and the
+/// node reads a repeated key as an array — which no property of this call is:
+///
+/// ```text
+/// 400 Bad Request {"errors":{"ipconfig0":"type check ('string') failed - got ARRAY"}}
+/// ```
+///
+/// Measured against a live PVE 9.2 on EVERY `vm create --backend proxmox` with a
+/// new disk: this list carried `ipconfig0` from before cloud-init became intent,
+/// and [`cloud_init_form`] then added it a second time. `name` has the same trap
+/// — the cloud-init half sends it when the hostname differs from the VM name,
+/// and it is then the only `name`, because on Proxmox the VM name IS the
+/// hostname the guest gets. The vmid, not the name, is what later calls address.
+fn create_form(
+    vmid: u32,
+    name: &str,
+    cfg: &VmConfig,
+    net0: &str,
+    storage: &str,
+    gib: u32,
+) -> Vec<(&'static str, String)> {
+    let ci = cloud_init_form(cfg);
+    let mut form: Vec<(&'static str, String)> = vec![("vmid", vmid.to_string())];
+    // `ipconfig0` is NOT in this list: it is cloud-init, and `cloud_init_form`
+    // owns it — including the `static_ip` it carries, which this backend CAN
+    // honour because Proxmox's own cloud-init writes it into the guest.
+    if !ci.iter().any(|(k, _)| *k == "name") {
+        form.push(("name", name.to_string()));
+    }
+    form.extend([
+        ("memory", mem_mib(&cfg.memory).to_string()),
+        ("cores", cfg.vcpus.max(1).to_string()),
+        ("ostype", "l26".to_string()),
+        ("scsihw", "virtio-scsi-single".to_string()),
+        ("scsi0", format!("{storage}:{gib}")),
+        // A NIC on a bridge of the node. `virtio` alone is the model —
+        // the value goes in the property's default key, and spelling
+        // that key out (`model=virtio`) is what the API refuses. The
+        // ADR recorded this shape as refused too; that was an artefact
+        // of the spike's `curl -d`, which does not URL-encode.
+        // `reqwest`'s `.form()` does, and the node accepts it:
+        // measured, `net0 = virtio=BC:24:11:F4:F9:9C,bridge=vmbr0`.
+        ("net0", net0.to_string()),
+        // Enable the QEMU guest agent CHANNEL. This is the host side
+        // only: it adds the virtio-serial port the agent talks over,
+        // and without it the node will not even try — every
+        // `/agent/...` call answers "QEMU guest agent is not running"
+        // no matter what the guest has installed. Whether an agent
+        // answers on the other end is the image's business, which is
+        // exactly why `ip()` treats silence as "unknown" and not as an
+        // error (see `parse_agent_ip`).
+        ("agent", "1".to_string()),
+    ]);
+    // The cloud-init drive, and only when there is something to put in it:
+    // an empty one on an image with no cloud-init is a CD-ROM the guest
+    // ignores, but it also silently costs a disk on the node's storage.
+    //
+    // `!ci.is_empty()` and not just `static_ip`: a hostname or an SSH key is
+    // just as much something to deliver, and without the drive the node has
+    // nowhere to write them — the settings would be accepted and never
+    // reach the guest, which is the aceite-e-ignorado this repo refuses.
+    let with_drive = !ci.is_empty();
+    form.extend(ci);
+    if with_drive {
+        form.push(("ide2", format!("{storage}:cloudinit")));
+    }
+    form
+}
+
 /// Translates the cloud-init INTENT of a `VmConfig` into the node's own
 /// cloud-init parameters. **This is the whole point of the intent fields.**
 ///
@@ -1373,6 +1392,76 @@ mod tests {
             !f.iter().any(|(k, _)| *k == "sshkeys" || *k == "ciuser"),
             "{f:?}"
         );
+    }
+
+    /// Every key of the `create_vm` form goes out ONCE. The node reads a
+    /// repeated key as an array, and against a live PVE 9.2 EVERY
+    /// `vm create --backend proxmox` with a new disk died like this:
+    /// `400 {"errors":{"ipconfig0":"type check ('string') failed - got ARRAY"}}`
+    /// — the fixed list carried `ipconfig0` and `cloud_init_form` added it
+    /// again. The test above uses `any()`, which is why it never saw the copy.
+    #[test]
+    fn every_create_form_key_is_sent_once() {
+        let cases = [
+            ("dhcp, no keys", cfg_com(&[])),
+            ("with keys", cfg_com(&["ssh-ed25519 AAAA x"])),
+            (
+                "static ip and a hostname other than the name",
+                VmConfig {
+                    static_ip: Some("10.0.0.5/24,gw=10.0.0.1".into()),
+                    hostname: Some("other-host".into()),
+                    ..cfg_com(&["ssh-ed25519 AAAA x"])
+                },
+            ),
+            (
+                "appliance",
+                VmConfig {
+                    cloud_init: Some(false),
+                    hostname: Some("other-host".into()),
+                    ..cfg_com(&[])
+                },
+            ),
+        ];
+        for (case, cfg) in cases {
+            let f = create_form(900, &cfg.name, &cfg, "virtio,bridge=vmbr0", "local-lvm", 1);
+            let mut seen = std::collections::HashSet::new();
+            for (k, _) in &f {
+                assert!(seen.insert(*k), "{case}: `{k}` repeated in {f:?}");
+            }
+            assert!(seen.contains("name"), "{case}: no `name` in {f:?}");
+        }
+    }
+
+    /// The `ipconfig0` and `name` that go out are the cloud-init ones: the
+    /// requested address, and the hostname when it differs from the name (on
+    /// Proxmox the VM name IS the hostname). An appliance gets neither
+    /// `ipconfig0` nor a cloud-init drive.
+    #[test]
+    fn the_create_form_carries_the_intent_values() {
+        let cfg = VmConfig {
+            static_ip: Some("10.0.0.5/24,gw=10.0.0.1".into()),
+            hostname: Some("other-host".into()),
+            ..cfg_com(&[])
+        };
+        let f = create_form(900, &cfg.name, &cfg, "virtio,bridge=vmbr0", "local-lvm", 1);
+        let val = |k: &str| f.iter().find(|(x, _)| *x == k).map(|(_, v)| v.clone());
+        assert_eq!(
+            val("ipconfig0").as_deref(),
+            Some("ip=10.0.0.5/24,gw=10.0.0.1")
+        );
+        assert_eq!(val("name").as_deref(), Some("other-host"));
+        assert_eq!(val("ide2").as_deref(), Some("local-lvm:cloudinit"));
+
+        let app = VmConfig {
+            cloud_init: Some(false),
+            ..cfg_com(&[])
+        };
+        let f = create_form(900, &app.name, &app, "virtio,bridge=vmbr0", "local-lvm", 1);
+        assert!(
+            !f.iter().any(|(k, _)| *k == "ipconfig0" || *k == "ide2"),
+            "{f:?}"
+        );
+        assert!(f.iter().any(|(k, v)| *k == "name" && v == "no1"), "{f:?}");
     }
 
     /// Um appliance não leva cloud-init nenhum — e a lista VAZIA é o que faz o
