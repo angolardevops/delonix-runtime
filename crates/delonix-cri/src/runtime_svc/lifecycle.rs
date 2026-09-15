@@ -333,18 +333,48 @@ fn st<E: std::fmt::Display>(e: E) -> Status {
     Status::internal(e.to_string())
 }
 
-/// `true` if the stderr of a `delonix container rm/stop` indicates the target
-/// **does not exist** — the CRI contract requires `RemoveContainer`/`StopContainer`
-/// to be IDEMPOTENT (a missing container counts as already removed/stopped). The
-/// canonical `delonix` message is "container não encontrado"; we also cover the
-/// docker/english variants for robustness.
-fn stderr_not_found(stderr: &[u8]) -> bool {
-    let e = String::from_utf8_lossy(stderr).to_lowercase();
-    e.contains("não encontrado")
-        || e.contains("nao encontrado")
-        || e.contains("not found")
-        || e.contains("no such")
-        || e.contains("não existe")
+/// Does the engine still hold `cri-<id>`? `None` when its store cannot be read —
+/// which is NOT absence, and callers keep the CRI record in that case.
+///
+/// This replaced a stderr classifier, `stderr_not_found`, that took any output
+/// containing «not found» or «no such» as «the container does not exist». The
+/// engine's `Error::NotFound` prints «no such {0}» for EVERY resource (image,
+/// network, volume, a missing file), so a `rm -f` that failed halfway on one of
+/// those was read as idempotent success and the record was deleted with the
+/// container still on disk. Measured on a `kubeadm reset` (2026-09-15, k8s 1.36.4):
+/// etcd, `Exited (0)` in the engine, sandbox and CRI record gone — invisible to the
+/// kubelet, and `rm -f` on it by hand afterwards worked first time. The store is
+/// the thing to ask, not a sentence about it.
+fn engine_has(base: &Path, cri_id: &str) -> Option<bool> {
+    let store = delonix_runtime_core::Store::open(base.join("containers")).ok()?;
+    match store.load(&format!("cri-{cri_id}")) {
+        Ok(_) => Some(true),
+        Err(delonix_runtime_core::Error::NotFound(_)) => Some(false),
+        Err(_) => None,
+    }
+}
+
+/// `rm -f` of a CRI container, judged by the engine's store afterwards. `Ok` only
+/// when the container is really gone — which also makes it idempotent: a container
+/// that never existed is gone too. A failed `rm` is logged with its stderr even when
+/// the container turns out to be gone, so the cause is never swallowed again.
+fn engine_remove(base: &Path, cri_id: &str) -> Result<(), Status> {
+    let name = format!("cri-{cri_id}");
+    let out = delonix(base, &["container", "rm", "-f", &name])?;
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stderr = stderr.trim();
+    if !out.status.success() {
+        tracing::warn!(container = %name, status = %out.status, stderr = %stderr, "container rm -f failed");
+    }
+    match engine_has(base, cri_id) {
+        Some(false) => Ok(()),
+        Some(true) => Err(Status::internal(format!(
+            "removal of '{name}' failed, the engine still has it (record preserved for retry): {stderr}"
+        ))),
+        None => Err(Status::internal(format!(
+            "removal of '{name}' could not be verified, the engine store is unreadable (record preserved for retry): {stderr}"
+        ))),
+    }
 }
 
 /// Whitelist for CRI ids (`container_id`/`pod_sandbox_id`) used to build filesystem
@@ -822,14 +852,8 @@ pub fn remove_pod_sandbox(
         if c.sandbox_id != id {
             continue;
         }
-        let name = format!("cri-{}", c.id);
-        let out = delonix(base, &["container", "rm", "-f", &name])?;
-        if !(out.status.success() || stderr_not_found(&out.stderr)) {
-            return Err(Status::internal(format!(
-                "sandbox {id}: removal of '{name}' failed (records preserved for retry): {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            )));
-        }
+        engine_remove(base, &c.id)
+            .map_err(|e| Status::internal(format!("sandbox {id}: {}", e.message())))?;
         remove_rec(&ct_dir(base), &c.id);
     }
     // Remove the real Delonix pod (infra container + netns), if it existed.
@@ -1550,12 +1574,14 @@ pub fn stop_container(
         base,
         &["container", "stop", "-t", &secs, &format!("cri-{id}")],
     )?;
-    // CRI contract: stopping a container that no longer exists is success (idempotent).
-    if !out.status.success() && stderr_not_found(&out.stderr) {
-        return Ok(Response::new(StopContainerResponse {}));
+    if !out.status.success() {
+        tracing::warn!(container = %format!("cri-{id}"), status = %out.status,
+            stderr = %String::from_utf8_lossy(&out.stderr).trim(), "container stop failed");
     }
-    // Verify it actually STOPPED (reconciled). Idempotent: already stopped/absent
-    // = OK. If it is still alive, propagate an error → the kubelet retries (instead
+    // Verify it actually STOPPED (reconciled), whatever `stop` printed: an absent
+    // container is stopped (the CRI's idempotence), an alive one is not — and a
+    // stderr that merely MENTIONED «not found» used to return success here without
+    // looking. If it is still alive, propagate an error → the kubelet retries (instead
     // of assuming it stopped and moving on to RemoveContainer on a still-running
     // process).
     if let Some(c) = load_reconciled(base, &id) {
@@ -1581,14 +1607,9 @@ pub fn remove_container(
     // the JSON was deleted even with a failed `rm -f` → leak of rootfs/subuid/netns
     // with no trace for the kubelet to retry. Idempotent (CRI contract): a container
     // that no longer exists counts as removed.
-    let out = delonix(base, &["container", "rm", "-f", &format!("cri-{id}")])?;
-    let gone = out.status.success() || stderr_not_found(&out.stderr);
-    if !gone {
-        return Err(Status::internal(format!(
-            "removal of 'cri-{id}' failed (record preserved for retry): {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        )));
-    }
+    // The engine's store is the verdict (not a phrase on stderr), and the env file
+    // written for this container goes with it (#322).
+    engine_remove(base, &id)?;
     if valid_cri_id(&id) {
         let _ = std::fs::remove_file(env_path(base, &id));
     }
@@ -2958,6 +2979,33 @@ mod tests {
         let gone = writable_layer_usage(&tmp, "nope", 1);
         assert_eq!(gone.fs_id.unwrap().mountpoint, tmp.to_string_lossy());
         assert_eq!(gone.used_bytes.unwrap().value, 0);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Removal is judged by the engine's store, three ways: present, absent, and
+    /// unknown. Unknown must never read as absent — that is how a record got
+    /// deleted with its container still on disk.
+    #[test]
+    fn engine_has_answers_from_the_store_and_unreadable_is_not_absent() {
+        let tmp = std::env::temp_dir().join(format!("dlx-cri-has-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let store = delonix_runtime_core::Store::open(tmp.join("containers")).unwrap();
+        let c = delonix_runtime_core::Container::new(
+            "a9c6bb47c90e87bf".into(),
+            "cri-bfc39487ccd4adf6".into(),
+            "img:1".into(),
+            vec![],
+            String::new(),
+        );
+        store.save(&c).unwrap();
+        assert_eq!(engine_has(&tmp, "bfc39487ccd4adf6"), Some(true));
+        assert_eq!(engine_has(&tmp, "0000000000000000"), Some(false));
+
+        // A store that cannot be read (here: `containers` is a file) is unknown.
+        let broken = tmp.join("broken");
+        std::fs::create_dir_all(&broken).unwrap();
+        std::fs::write(broken.join("containers"), b"not a directory").unwrap();
+        assert_eq!(engine_has(&broken, "bfc39487ccd4adf6"), None);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
