@@ -92,6 +92,53 @@ pub fn crash_reason_of(pid: i32, _starttime: Option<u64>) -> &'static str {
     }
 }
 
+/// `crash_reason` for a container the kernel's OOM killer took down.
+pub const OOM_KILLED: &str = "oom_killed";
+
+/// The `oom_kill` counter out of a cgroup v2 `memory.events` file's text.
+fn parse_oom_kill(events: &str) -> Option<u64> {
+    events.lines().find_map(|l| {
+        let (key, value) = l.split_once(' ')?;
+        (key == "oom_kill").then(|| value.trim().parse().ok())?
+    })
+}
+
+/// How many times the OOM killer has fired INSIDE this cgroup.
+///
+/// `memory.events.local` first: the plain `memory.events` is hierarchical, and a
+/// Kind node's leaf holds a whole systemd tree — one pod's OOM in there would
+/// read as the NODE having been OOM-killed. The plain file is only the fallback
+/// for a kernel without `.local` (< 5.2). `None` when neither is readable (no
+/// memory controller, or the cgroup is already gone).
+fn oom_kill_count(cgroup: &str) -> Option<u64> {
+    ["memory.events.local", "memory.events"]
+        .iter()
+        .find_map(|f| std::fs::read_to_string(format!("{cgroup}/{f}")).ok())
+        .and_then(|text| parse_oom_kill(&text))
+}
+
+/// Did THIS death come from the OOM killer?
+///
+/// Decided on the counter going UP across the wait, never on it being non-zero:
+/// a leaf that survived an earlier run (a failed `rmdir`, a Kind node's leaf
+/// reused on purpose) brings its old count along, and «> 0» would call a clean
+/// `kill -9` an OOM. And only for a death that is a failure — a container whose
+/// init exited 0 while a CHILD was OOM-killed did not die of it.
+///
+/// Why it has to be read here at all: the cgroup is removed right after the
+/// wait, so the counter is gone by the time anyone else looks. Measured
+/// (2026-09-15, `-m 48M tail /dev/zero`): `oom_kill 2` in `memory.events`, the
+/// leaf gone 20 ms later, and the record left `Crashed` with `crash_reason: null`
+/// — the CRI answering `Error` for what the kernel knew was an OOM.
+fn died_of_oom(status: &Status, before: Option<u64>, after: Option<u64>) -> bool {
+    let failed = matches!(status, Status::Crashed | Status::Failed(_));
+    match (before, after) {
+        (Some(b), Some(a)) => failed && a > b,
+        (None, Some(a)) => failed && a > 0,
+        _ => false,
+    }
+}
+
 fn now_unix() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -5788,9 +5835,15 @@ fn spawn(
         return Ok(container.status.clone());
     }
 
+    let cgroup = live_cgroup(container);
+    let oom_before = oom_kill_count(&cgroup);
     let status = waitpid(pid, None).map_err(syserr("waitpid"))?;
     container.status = wait_to_status(status);
     container.pid = None;
+    if died_of_oom(&container.status, oom_before, oom_kill_count(&cgroup)) {
+        container.crash_reason = Some(OOM_KILLED.to_string());
+        container.crashed_at = Some(now_unix());
+    }
     store.save(container)?;
     remove_container_cgroup(container);
     // RETURN the terminal status instead of discarding it. In the foreground we
@@ -5817,8 +5870,13 @@ pub fn wait_and_record(store: &Store, container: &mut Container) -> Result<Statu
     let pid = container
         .pid
         .ok_or_else(|| Error::NotRunning(container.short_id().to_string()))?;
+    // Resolved while the init is still alive: `live_cgroup` reads
+    // `/proc/<pid>/cgroup`, which is gone once the wait reaps it.
+    let cgroup = live_cgroup(container);
+    let oom_before = oom_kill_count(&cgroup);
     let st = waitpid(Pid::from_raw(pid), None).map_err(syserr("waitpid"))?;
     let status = wait_to_status(st);
+    let oom = died_of_oom(&status, oom_before, oom_kill_count(&cgroup));
     // `update` (flock) and not `save`: the CRI/CLI may be reconciling the
     // same container right now — see `Store::update`.
     let final_status = status.clone();
@@ -5845,10 +5903,20 @@ pub fn wait_and_record(store: &Store, container: &mut Container) -> Result<Statu
             final_status.clone()
         };
         c.pid = None;
+        // Not over a requested stop: the operator's `stop` is the cause there,
+        // whatever the counter did meanwhile.
+        if oom && !c.stopped_by_user {
+            c.crash_reason = Some(OOM_KILLED.to_string());
+            c.crashed_at = Some(now_unix());
+        }
         true
     });
     container.status = status.clone();
     container.pid = None;
+    if oom && !container.stopped_by_user {
+        container.crash_reason = Some(OOM_KILLED.to_string());
+        container.crashed_at = Some(now_unix());
+    }
     remove_container_cgroup(container);
     Ok(status)
 }
@@ -8801,5 +8869,57 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
             "devia ter esperado ~120ms e desistido, esperou {waited:?}"
         );
         unsafe { libc::close(fds[1]) };
+    }
+}
+
+#[cfg(test)]
+mod oom_tests {
+    use super::*;
+
+    const EVENTS: &str = "low 0\nhigh 0\nmax 1466\noom 1\noom_kill 2\noom_group_kill 0\n";
+
+    #[test]
+    fn reads_the_oom_kill_counter_and_not_oom_group_kill() {
+        assert_eq!(parse_oom_kill(EVENTS), Some(2));
+        assert_eq!(parse_oom_kill("oom_group_kill 5\n"), None);
+        assert_eq!(parse_oom_kill(""), None);
+    }
+
+    /// The measured case: a SIGKILLed init and the counter up across the wait.
+    #[test]
+    fn a_crash_with_the_counter_up_is_an_oom() {
+        assert!(died_of_oom(&Status::Crashed, Some(0), Some(2)));
+        assert!(died_of_oom(&Status::Failed(137), Some(0), Some(1)));
+    }
+
+    /// A reused leaf brings its old count: a plain `kill -9` must not read as OOM.
+    #[test]
+    fn a_stale_counter_from_an_earlier_run_is_not_an_oom() {
+        assert!(!died_of_oom(&Status::Crashed, Some(3), Some(3)));
+    }
+
+    /// A child OOM-killed under an init that still exited 0 is not a death by OOM.
+    #[test]
+    fn a_clean_exit_is_never_an_oom() {
+        assert!(!died_of_oom(&Status::Stopped, Some(0), Some(1)));
+    }
+
+    /// No readable counter after the wait: we do not know, so we do not say OOM.
+    #[test]
+    fn an_unreadable_counter_is_not_an_oom() {
+        assert!(!died_of_oom(&Status::Crashed, Some(0), None));
+        assert!(!died_of_oom(&Status::Crashed, None, None));
+    }
+
+    #[test]
+    fn the_local_file_wins_over_the_hierarchical_one() {
+        let dir = std::env::temp_dir().join(format!("dlx-oom-local-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("memory.events"), "oom_kill 9\n").unwrap();
+        std::fs::write(dir.join("memory.events.local"), "oom_kill 1\n").unwrap();
+        assert_eq!(oom_kill_count(&dir.to_string_lossy()), Some(1));
+        std::fs::remove_file(dir.join("memory.events.local")).unwrap();
+        assert_eq!(oom_kill_count(&dir.to_string_lossy()), Some(9));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

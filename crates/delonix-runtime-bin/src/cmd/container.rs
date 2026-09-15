@@ -4308,6 +4308,14 @@ fn fmt_status_of(c: &Container, uptime: Option<u64>) -> String {
     if exit_code_unknown(c) {
         return "Exited (unknown)".to_string();
     }
+    // The column an operator reads to find out why a container is down. «Dead»
+    // alone reads the same for an OOM and for an external `kill -9`, and those
+    // two have opposite fixes (raise `-m`, or find who sent the signal).
+    if c.crash_reason.as_deref() == Some(delonix_runtime::OOM_KILLED)
+        && matches!(c.status, Status::Crashed | Status::Failed(_))
+    {
+        return format!("{} (OOMKilled)", fmt_status(&c.status, uptime));
+    }
     let base = fmt_status(&c.status, uptime);
     // Health only qualifies a RUNNING container. Appending "(healthy)" to
     // `Exited (0)` would be reporting the last thing we saw as if it were still
