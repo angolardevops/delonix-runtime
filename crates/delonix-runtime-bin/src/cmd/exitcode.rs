@@ -51,10 +51,17 @@
 //! **What is deliberately NOT here**, because each one would be a number that
 //! can never come back:
 //!
-//! * *Host precondition unsatisfied* (a session without cgroup delegation, say)
-//!   is not an error variant at all — the engine warns and carries on, so there
-//!   is nothing to classify. Giving it a code would mean inventing the
-//!   condition first.
+//! * *Host precondition unsatisfied* used to mean "the engine warns and
+//!   carries on, so there is nothing to classify" — still true for most of
+//!   them. It stopped being true for ONE case: a session without cgroup2
+//!   delegation asking for `-m`/`--cpus`/`--cpu-weight` now REFUSES
+//!   (`preflight_resource_limits` in `cmd/container.rs`), because warning and
+//!   continuing there means accepting a limit the kernel will never enforce
+//!   while reporting success — the exact class of silent failure this table
+//!   exists to stop elsewhere. That refusal reuses [`Error::Unavailable`] (a
+//!   capability this host does not have) rather than inventing a variant: no
+//!   new number was needed, an existing one already had a real producer to
+//!   extend.
 //! * *Retryable* (75), which the CLI restructuring proposed, has **no producer
 //!   today**: the retrying that exists (`publish_with_retry`) happens inside the
 //!   engine and never reaches a caller. Publishing it would repeat the mistake

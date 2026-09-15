@@ -1834,6 +1834,146 @@ fn read_sysctl(name: &str) -> Option<String> {
         .map(|s| s.trim().to_string())
 }
 
+/// Usage percentage of the conntrack table, from the two sysctls that already
+/// exist for it. Pure so the threshold can be tested without a real table.
+///
+/// `None` on anything unreadable/zero — never folded into a percentage, the
+/// same "unreadable is not zero" rule the rest of this module already keeps.
+fn conntrack_usage_pct(max: Option<&str>, count: Option<&str>) -> Option<u64> {
+    let max: u64 = max?.trim().parse().ok()?;
+    let count: u64 = count?.trim().parse().ok()?;
+    if max == 0 {
+        return None;
+    }
+    Some(count.saturating_mul(100) / max)
+}
+
+fn check_conntrack_table() -> Check {
+    let max = read_sysctl("net.netfilter.nf_conntrack_max");
+    let count = read_sysctl("net.netfilter.nf_conntrack_count");
+    let pct = conntrack_usage_pct(max.as_deref(), count.as_deref());
+    Check {
+        name: "conntrack table",
+        ok: pct.map(|p| p < 80),
+        detail: match (&count, &max, pct) {
+            (Some(c), Some(m), Some(p)) => format!("{c}/{m} ({p}%)"),
+            _ => "nf_conntrack sysctls unreadable — is nf_conntrack loaded?".to_string(),
+        },
+        fix: "raise net.netfilter.nf_conntrack_max (install.sh --production tunes this) \
+— a full table makes the kernel drop NEW connections silently, which reads as random \
+network loss from the workload's side, never as a resource error"
+            .to_string(),
+        silent: true,
+    }
+}
+
+/// Usage percentage of the ARP/neighbour table against `gc_thresh3` (the hard
+/// ceiling — past it the kernel starts dropping entries under memory pressure
+/// rather than growing the table). `entries` is the line count of `/proc/net/arp`
+/// minus its header, read the same way the rest of this module reads `/proc`.
+fn neigh_usage_pct(gc_thresh3: Option<&str>, entries: Option<u64>) -> Option<u64> {
+    let thresh: u64 = gc_thresh3?.trim().parse().ok()?;
+    let entries = entries?;
+    if thresh == 0 {
+        return None;
+    }
+    Some(entries.saturating_mul(100) / thresh)
+}
+
+fn check_neigh_table() -> Check {
+    let thresh = read_sysctl("net.ipv4.neigh.default.gc_thresh3");
+    let entries = std::fs::read_to_string("/proc/net/arp")
+        .ok()
+        .map(|s| s.lines().count().saturating_sub(1) as u64);
+    let pct = neigh_usage_pct(thresh.as_deref(), entries);
+    Check {
+        name: "ARP/neighbour table",
+        ok: pct.map(|p| p < 80),
+        detail: match (entries, &thresh, pct) {
+            (Some(e), Some(t), Some(p)) => format!("{e}/{t} ({p}%)"),
+            _ => "gc_thresh3 or /proc/net/arp unreadable".to_string(),
+        },
+        fix: "raise net.ipv4.neigh.default.gc_thresh{1,2,3} (install.sh --production \
+tunes this) — a full table drops ARP entries under a dense network and neighbours \
+become unreachable with no error from this engine"
+            .to_string(),
+        silent: true,
+    }
+}
+
+/// Width of the ephemeral port range this host hands out for outbound/SNAT
+/// connections. `"32768\t60999"` (the kernel default) is ~28k ports; below
+/// [`NARROW_PORT_RANGE`] is a host somebody already tuned down, which a busy
+/// node can exhaust under many simultaneous outbound connections.
+const NARROW_PORT_RANGE: u32 = 10_000;
+
+fn ephemeral_port_range_width(range: Option<&str>) -> Option<u32> {
+    let (lo, hi) = range?.split_once(char::is_whitespace)?;
+    let lo: u32 = lo.trim().parse().ok()?;
+    let hi: u32 = hi.trim().parse().ok()?;
+    hi.checked_sub(lo)
+}
+
+fn check_ephemeral_port_range() -> Check {
+    let range = read_sysctl("net.ipv4.ip_local_port_range");
+    let width = ephemeral_port_range_width(range.as_deref());
+    Check {
+        name: "ephemeral port range (outbound/SNAT capacity)",
+        ok: width.map(|w| w >= NARROW_PORT_RANGE),
+        detail: match (&range, width) {
+            (Some(r), Some(w)) => format!("{r} ({w} ports)"),
+            _ => "ip_local_port_range unreadable".to_string(),
+        },
+        fix: format!(
+            "widen net.ipv4.ip_local_port_range — a busy node with many outbound/SNAT \
+connections at once exhausts a narrow range and new connections fail with \
+EADDRNOTAVAIL, which looks like a network problem, not a port budget. \
+(current width is below {NARROW_PORT_RANGE})"
+        ),
+        silent: true,
+    }
+}
+
+#[cfg(test)]
+mod doctor_resource_checks_tests {
+    use super::*;
+
+    #[test]
+    fn conntrack_zero_ou_ausente_nunca_conta_como_zero_por_cento() {
+        assert_eq!(conntrack_usage_pct(Some("0"), Some("0")), None);
+        assert_eq!(conntrack_usage_pct(None, Some("5")), None);
+        assert_eq!(conntrack_usage_pct(Some("100"), None), None);
+    }
+
+    #[test]
+    fn conntrack_percentagem_real() {
+        assert_eq!(conntrack_usage_pct(Some("262144"), Some("785")), Some(0));
+        assert_eq!(conntrack_usage_pct(Some("1000"), Some("850")), Some(85));
+    }
+
+    #[test]
+    fn neigh_percentagem_real() {
+        assert_eq!(neigh_usage_pct(Some("1024"), Some(3)), Some(0));
+        assert_eq!(neigh_usage_pct(Some("100"), Some(90)), Some(90));
+        assert_eq!(neigh_usage_pct(None, Some(1)), None);
+    }
+
+    #[test]
+    fn largura_da_gama_de_portas_efemeras() {
+        // This kernel's real default, measured: "32768\t60999".
+        assert_eq!(
+            ephemeral_port_range_width(Some("32768\t60999")),
+            Some(28231)
+        );
+        assert!(ephemeral_port_range_width(Some("32768\t60999")).unwrap() >= NARROW_PORT_RANGE);
+        // A genuinely narrow range, already tuned down by someone.
+        assert_eq!(ephemeral_port_range_width(Some("60000\t61000")), Some(1000));
+        assert!(ephemeral_port_range_width(Some("60000\t61000")).unwrap() < NARROW_PORT_RANGE);
+        assert_eq!(ephemeral_port_range_width(Some("garbage")), None);
+        assert_eq!(ephemeral_port_range_width(None), None);
+    }
+}
+
 fn have_tool(bin: &str) -> bool {
     std::env::var_os("PATH")
         .map(|paths| {
@@ -1915,6 +2055,17 @@ fn cmd_doctor(strict: bool) -> Result<()> {
             .to_string(),
         silent: true,
     });
+
+    // Three more promises this engine's dataplane depends on that fail
+    // SILENTLY under load, never at check time: a table that is fine at rest
+    // fills up only once real traffic arrives, and the kernel does not raise
+    // an error when it drops for it — the workload just sees packet loss it
+    // cannot explain. `install.sh --production` already tunes all three;
+    // this is the runtime half that was missing — telling an operator BEFORE
+    // the pressure, not after.
+    checks.push(check_conntrack_table());
+    checks.push(check_neigh_table());
+    checks.push(check_ephemeral_port_range());
 
     if rootless {
         // Read the user's own line rather than assuming the login name matches.
