@@ -1615,6 +1615,86 @@ fn container_cgroup_metrics(base: &Path, id: &str) -> ContainerCgroupMetrics {
     }
 }
 
+/// The directory holding a CRI container's writable layer, as the engine laid it
+/// out: `<root>/containers/<engine id>/upper`, or the container directory itself
+/// for a flat rootfs. `None` when the engine has no record or no directory.
+///
+/// The engine id is NOT the CRI name. This used to announce
+/// `<root>/containers/cri-<cri id>` — the container's NAME — which never exists on
+/// disk, so every `stat` the kubelet made failed («failed to get device for dir
+/// …/containers/cri-<id>: stat failed … no such file or directory») and the
+/// eviction manager got no summary stats at all: node-pressure eviction, the
+/// kubelet's last line of node protection, was off on every node this runtime
+/// served (measured 2026-09-15, k8s 1.36.4).
+fn writable_layer_dir(base: &Path, cri_id: &str) -> Option<PathBuf> {
+    let root = base.join("containers");
+    let c = delonix_runtime_core::Store::open(&root)
+        .ok()?
+        .load(&format!("cri-{cri_id}"))
+        .ok()?;
+    let dir = root.join(&c.id);
+    let upper = dir.join("upper");
+    if upper.is_dir() {
+        Some(upper)
+    } else if dir.is_dir() {
+        Some(dir)
+    } else {
+        None
+    }
+}
+
+/// Bytes on disk (allocated blocks, like `du`) and inodes under `dir`, without
+/// following symlinks and without leaving `dir`'s filesystem. A hard link counts
+/// once. Unreadable entries are skipped: a partial sum is still a lower bound,
+/// which is the safe direction for eviction.
+fn dir_usage(dir: &Path) -> (u64, u64) {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(top) = std::fs::symlink_metadata(dir) else {
+        return (0, 0);
+    };
+    let dev = top.dev();
+    let mut seen = std::collections::HashSet::new();
+    let (mut bytes, mut inodes) = (0u64, 0u64);
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(p) = stack.pop() {
+        let Ok(m) = std::fs::symlink_metadata(&p) else {
+            continue;
+        };
+        if m.dev() != dev || !seen.insert(m.ino()) {
+            continue;
+        }
+        bytes += m.blocks() * 512;
+        inodes += 1;
+        if m.is_dir() {
+            if let Ok(rd) = std::fs::read_dir(&p) {
+                stack.extend(rd.flatten().map(|e| e.path()));
+            }
+        }
+    }
+    (bytes, inodes)
+}
+
+/// The CRI `writable_layer` of a container: a mountpoint the kubelet can `stat`
+/// and the usage measured there. A container the engine no longer knows reports
+/// the engine root (which exists) with zero usage, instead of a path that fails.
+fn writable_layer_usage(base: &Path, cri_id: &str, ts: i64) -> FilesystemUsage {
+    let (mountpoint, (bytes, inodes)) = match writable_layer_dir(base, cri_id) {
+        Some(d) => {
+            let usage = dir_usage(&d);
+            (d, usage)
+        }
+        None => (base.to_path_buf(), (0, 0)),
+    };
+    FilesystemUsage {
+        timestamp: ts,
+        fs_id: Some(FilesystemIdentifier {
+            mountpoint: mountpoint.to_string_lossy().into_owned(),
+        }),
+        used_bytes: u64v(bytes),
+        inodes_used: u64v(inodes),
+    }
+}
+
 /// Builds a container's real metrics from its cgroup v2.
 fn container_stats_for(base: &Path, r: &ContainerRec) -> ContainerStats {
     let ts = now_ns();
@@ -1651,18 +1731,7 @@ fn container_stats_for(base: &Path, r: &ContainerRec) -> ContainerStats {
             page_faults: u64v(pgfault),
             major_page_faults: u64v(pgmajfault),
         }),
-        writable_layer: Some(FilesystemUsage {
-            timestamp: ts,
-            fs_id: Some(FilesystemIdentifier {
-                mountpoint: base
-                    .join("containers")
-                    .join(format!("cri-{}", r.id))
-                    .to_string_lossy()
-                    .into_owned(),
-            }),
-            used_bytes: u64v(0),
-            inodes_used: u64v(0),
-        }),
+        writable_layer: Some(writable_layer_usage(base, &r.id, ts)),
         swap: Some(SwapUsage {
             timestamp: ts,
             swap_available_bytes: u64v(0),
@@ -2471,6 +2540,47 @@ mod tests {
             ..Default::default()
         };
         assert!(ceiling_reduces(&capped, &privileged));
+    }
+
+    /// The kubelet `stat`s the writable layer's mountpoint to find its device. The
+    /// engine keys the container directory by its OWN id, not by the `cri-<id>`
+    /// name — announcing the name gave a path that never existed, and the eviction
+    /// manager ran without stats.
+    #[test]
+    fn writable_layer_points_at_the_engine_directory_and_measures_it() {
+        let tmp = std::env::temp_dir().join(format!("dlx-cri-wl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let store = delonix_runtime_core::Store::open(tmp.join("containers")).unwrap();
+        let c = delonix_runtime_core::Container::new(
+            "e1e1e1e1e1e1e1e1".into(),
+            "cri-abc".into(),
+            "img:1".into(),
+            vec![],
+            String::new(),
+        );
+        store.save(&c).unwrap();
+        let upper = tmp
+            .join("containers")
+            .join("e1e1e1e1e1e1e1e1")
+            .join("upper");
+        std::fs::create_dir_all(upper.join("var")).unwrap();
+        std::fs::write(upper.join("var").join("data"), vec![7u8; 64 * 1024]).unwrap();
+
+        let fs = writable_layer_usage(&tmp, "abc", 1);
+        let mp = fs.fs_id.unwrap().mountpoint;
+        assert_eq!(mp, upper.to_string_lossy());
+        assert!(
+            std::path::Path::new(&mp).is_dir(),
+            "the kubelet must be able to stat it"
+        );
+        assert!(fs.used_bytes.unwrap().value >= 64 * 1024);
+        assert_eq!(fs.inodes_used.unwrap().value, 3, "upper, var, data");
+
+        // Unknown to the engine: a path that exists, and no invented usage.
+        let gone = writable_layer_usage(&tmp, "nope", 1);
+        assert_eq!(gone.fs_id.unwrap().mountpoint, tmp.to_string_lossy());
+        assert_eq!(gone.used_bytes.unwrap().value, 0);
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
