@@ -44,6 +44,11 @@ struct SandboxRec {
     /// Pod `sysctl`s (`key=value`), applied to the sandbox's containers.
     #[serde(default)]
     sysctls: Vec<String>,
+    /// The kubelet's `linux.cgroup_parent` for this pod (ADR 0038), validated at
+    /// `RunPodSandbox`. Empty = the kubelet sent none (a bare `crictl`), and the containers
+    /// keep the engine's own placement and house ceiling.
+    #[serde(default)]
+    cgroup_parent: String,
     /// The pod's `DNSConfig` and `PortMappings`, both of which were read by
     /// nobody. Same shape of gap as the container mounts: accepted by the API,
     /// dropped on the floor, and invisible because nothing errored.
@@ -569,6 +574,23 @@ fn exit_reason(exit: Option<i32>, oom_killed: bool) -> String {
     }
 }
 
+/// The sandbox's `linux.cgroup_parent`, validated (ADR 0038). Empty when the kubelet sent
+/// none. An invalid one is `invalid_argument`, never silently dropped: a pod started outside
+/// the hierarchy its limits live on would run unlimited while the kubelet believes otherwise.
+fn cgroup_parent_of(cfg: &PodSandboxConfig) -> Result<String, Status> {
+    let raw = cfg
+        .linux
+        .as_ref()
+        .map(|l| l.cgroup_parent.trim().to_string())
+        .unwrap_or_default();
+    if raw.is_empty() {
+        return Ok(raw);
+    }
+    delonix_runtime_core::KubeCgroupParent::parse(&raw)
+        .map(|k| k.parent)
+        .map_err(Status::invalid_argument)
+}
+
 // ---- pods (sandboxes) -----------------------------------------------------
 
 pub fn run_pod_sandbox(
@@ -579,6 +601,9 @@ pub fn run_pod_sandbox(
         .config
         .ok_or_else(|| Status::invalid_argument("missing config"))?;
     let md = cfg.metadata.clone().unwrap_or_default();
+    // Validated FIRST, before the sandbox has created anything: an invalid parent is a
+    // refusal the kubelet sees on the pod, not a netns left behind (ADR 0038).
+    let cgroup_parent = cgroup_parent_of(&cfg)?;
     let id = delonix_runtime_core::generate_id();
     // Host network? (namespace_options.network == NODE) → no own infra/netns.
     let ns = cfg
@@ -717,6 +742,7 @@ pub fn run_pod_sandbox(
         host_pid,
         host_ipc,
         sysctls,
+        cgroup_parent,
         dns_servers: cfg
             .dns_config
             .as_ref()
@@ -1281,6 +1307,11 @@ fn start_argv(
         format!("cri-{id}"),
     ];
     args.extend(resource_argv(&rec.resources));
+    // The kubelet's hierarchy (ADR 0038). Only with it do unspecified limits mean no limit.
+    if let Some(sb) = sandbox.filter(|sb| !sb.cgroup_parent.is_empty()) {
+        args.push("--kube-cgroup-parent".into());
+        args.push(sb.cgroup_parent.clone());
+    }
     // Logs in the path/format the kubelet/crictl expect (CRI), if any.
     if !rec.log_path.is_empty() {
         args.push("--log-file".into());
@@ -2485,6 +2516,48 @@ mod tests {
         assert_eq!(shares_to_weight(1024), 39);
         assert_eq!(shares_to_weight(262_144), 10_000);
         assert_eq!(shares_to_weight(1), 1);
+    }
+
+    /// The kubelet's parent reaches `container run`, and only when there is one.
+    #[test]
+    fn the_kubelets_cgroup_parent_reaches_container_run() {
+        let rec = ContainerRec::default();
+        let sb = SandboxRec {
+            cgroup_parent: "kubepods-burstable-podabc.slice".into(),
+            ..Default::default()
+        };
+        let argv = start_argv(&rec, Some(&sb), crate::CapCeiling::default(), "x");
+        let i = argv
+            .iter()
+            .position(|a| a == "--kube-cgroup-parent")
+            .expect("the parent was not passed");
+        assert_eq!(argv[i + 1], "kubepods-burstable-podabc.slice");
+        let bare = start_argv(
+            &rec,
+            Some(&SandboxRec::default()),
+            crate::CapCeiling::default(),
+            "x",
+        );
+        assert!(!bare.iter().any(|a| a == "--kube-cgroup-parent"));
+    }
+
+    /// An escaping parent is refused at the sandbox, not dropped.
+    #[test]
+    fn an_escaping_cgroup_parent_is_refused() {
+        let cfg = |p: &str| PodSandboxConfig {
+            linux: Some(LinuxPodSandboxConfig {
+                cgroup_parent: p.into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(cgroup_parent_of(&cfg("")).unwrap(), "");
+        assert_eq!(
+            cgroup_parent_of(&cfg("/kubepods/besteffort/podx")).unwrap(),
+            "/kubepods/besteffort/podx"
+        );
+        assert!(cgroup_parent_of(&cfg("/kubepods/../..")).is_err());
+        assert!(cgroup_parent_of(&cfg("delonix.slice")).is_err());
     }
 
     /// An OOM is `OOMKilled`, not the `Error` an external SIGKILL also gets.

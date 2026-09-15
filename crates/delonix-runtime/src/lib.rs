@@ -19,7 +19,9 @@ pub mod seccomp_profile;
 pub mod workload_view;
 
 use capabilities::{all_caps_mask, resolve_cap_keep};
-use delonix_runtime_core::{Container, Error, Mount, Result, Status, Store};
+use delonix_runtime_core::{
+    Container, Error, KubeCgroupDriver, KubeCgroupParent, Mount, Result, Status, Store,
+};
 
 /// RFC3339 with nanosecond precision, for the *logging shim* (timestamped
 /// container stdout). Deliberate local copy: `delonix-runtime` does not
@@ -4805,6 +4807,11 @@ fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
     // their own cgroup in the CHILD (`setup_node_cgroup_ns` — sibling leaf with cpu
     // delegated + empty cgroup-ns root, kubelet invariants). Placing them
     // here in the parent changed the base the child uses and broke that validated dance.
+    // The kubelet's hierarchy (ADR 0038) — before every other placement, because on this
+    // path the kubelet owns resource policy and the engine only carries it out.
+    if let Some(k) = &c.kube_cgroup {
+        return setup_kube_cgroup(c, k, pid);
+    }
     let kind_node = c.labels.keys().any(|k| k.starts_with("io.x-k8s.kind"));
     if !kind_node && (is_rootless() || in_userns()) {
         // **The cgroup2 may be COVERED, and it is the normal path that covers it.**
@@ -5892,7 +5899,15 @@ fn spawn(
     // path without userns has no sync point to block the child on, so it keeps
     // the historical placement — the same asymmetry the network hook has.
     if !cgroup_done {
-        setup_cgroup(container, pid.as_raw())?;
+        // A cgroup that could not be set up must not leave the container running: it is
+        // already past `execve` here, outside every ceiling, and still holding the
+        // descriptors its caller waits on — a `run -d` hung forever on exactly this
+        // (measured 2026-09-15, a cgroupfs pod parent with no controllers enabled). Same
+        // teardown the userns path already does above.
+        if let Err(e) = setup_cgroup(container, pid.as_raw()) {
+            let _ = kill(pid, Signal::SIGKILL);
+            return Err(e);
+        }
     }
 
     // Configures the network (or other startup) BEFORE waiting/returning. Only the
@@ -7166,6 +7181,403 @@ fn node_cgroup_leaf_marker(cid: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("delonix-node-cgroup-{cid}"))
 }
 
+// ---------------------------------------------------------------------------
+// The kubelet's cgroup hierarchy (ADR 0038)
+// ---------------------------------------------------------------------------
+
+/// The resource values for a container placed in the kubelet's hierarchy, already in the
+/// units the kernel and systemd take. `None` = not specified = no limit: under a kubelet
+/// parent the node is protected by Node Allocatable and eviction, not by a runtime default.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct KubeLimits {
+    memory_bytes: Option<u64>,
+    /// CFS quota per second of wall time, in microseconds (0.5 core = 500 000).
+    cpu_quota_usec: Option<u64>,
+    cpu_weight: Option<u64>,
+    cpuset: Option<String>,
+    io_weight: Option<u64>,
+}
+
+/// PURE. `memory_max`/`cpus` of `"max"` or empty mean unlimited here.
+fn kube_limits(c: &Container) -> Result<KubeLimits> {
+    let memory_bytes = match mem_limit_write_value(&c.memory_max).as_deref() {
+        None => {
+            return Err(Error::Invalid(format!(
+                "--memory {}: not a size",
+                c.memory_max
+            )));
+        }
+        Some("max") => None,
+        Some(bytes) => Some(
+            bytes
+                .parse::<u64>()
+                .map_err(|_| Error::Invalid(format!("--memory {}: not a size", c.memory_max)))?,
+        ),
+    };
+    let cpus = c.cpus.trim();
+    let cpu_quota_usec = if cpus.is_empty() || cpus.eq_ignore_ascii_case("max") {
+        None
+    } else {
+        let cores: f64 = cpus
+            .parse()
+            .ok()
+            .filter(|v: &f64| v.is_finite() && *v > 0.0)
+            .ok_or_else(|| Error::Invalid(format!("--cpus {cpus}: not a number of cores")))?;
+        Some(((cores * 1_000_000.0).round() as u64).max(10_000))
+    };
+    let weight = |v: &Option<String>, what: &str| -> Result<Option<u64>> {
+        v.as_deref()
+            .map(|w| {
+                w.trim()
+                    .parse::<u64>()
+                    .ok()
+                    .filter(|n| (1..=10_000).contains(n))
+                    .ok_or_else(|| Error::Invalid(format!("--{what} {w}: weight must be 1–10000")))
+            })
+            .transpose()
+    };
+    Ok(KubeLimits {
+        memory_bytes,
+        cpu_quota_usec,
+        cpu_weight: weight(&c.cpu_weight, "cpu-weight")?,
+        cpuset: c.cpuset.clone().filter(|s| !s.trim().is_empty()),
+        io_weight: weight(&c.io_weight, "io-weight")?,
+    })
+}
+
+/// PURE. A `cpuset.cpus` list (`0-3,6`) as systemd's `AllowedCPUs` bitmask: byte `i`, bit
+/// `j` = CPU `8i + j`. `None` for anything that is not a CPU list.
+fn cpuset_to_mask(list: &str) -> Option<Vec<u8>> {
+    let mut cpus: Vec<usize> = Vec::new();
+    for part in list.trim().split(',') {
+        let part = part.trim();
+        let (a, b) = match part.split_once('-') {
+            Some((a, b)) => (
+                a.trim().parse::<usize>().ok()?,
+                b.trim().parse::<usize>().ok()?,
+            ),
+            None => {
+                let n = part.parse::<usize>().ok()?;
+                (n, n)
+            }
+        };
+        if a > b || b >= 4096 {
+            return None;
+        }
+        cpus.extend(a..=b);
+    }
+    let max = *cpus.iter().max()?;
+    let mut mask = vec![0u8; max / 8 + 1];
+    for cpu in cpus {
+        mask[cpu / 8] |= 1 << (cpu % 8);
+    }
+    Some(mask)
+}
+
+/// PURE. The `busctl call … StartTransientUnit` argv for a container's scope.
+///
+/// `pids` carries the container's init AND the process that waits on it (the supervisor):
+/// systemd removes a scope's cgroup the moment it empties, so without the waiter inside,
+/// `memory.events` — the only record of an OOM kill — is gone before `waitpid` returns
+/// (measured in the ADR 0038 spike). `TasksMax` is lifted: systemd's default task ceiling
+/// would be a limit nobody specified, and the pod's pids limit is the kubelet's.
+fn transient_scope_argv(
+    unit: &str,
+    slice: &str,
+    pids: &[u32],
+    l: &KubeLimits,
+) -> Result<Vec<String>> {
+    let mut props: Vec<Vec<String>> = Vec::new();
+    let mut pid_prop = vec!["PIDs".to_string(), "au".to_string(), pids.len().to_string()];
+    pid_prop.extend(pids.iter().map(u32::to_string));
+    props.push(pid_prop);
+    props.push(vec!["Slice".into(), "s".into(), slice.to_string()]);
+    props.push(vec!["Delegate".into(), "b".into(), "true".into()]);
+    props.push(vec!["TasksMax".into(), "t".into(), u64::MAX.to_string()]);
+    if let Some(m) = l.memory_bytes {
+        props.push(vec!["MemoryMax".into(), "t".into(), m.to_string()]);
+        // No swap beyond the memory limit — otherwise the ceiling is walked around.
+        props.push(vec!["MemorySwapMax".into(), "t".into(), "0".into()]);
+    }
+    if let Some(q) = l.cpu_quota_usec {
+        props.push(vec!["CPUQuotaPerSecUSec".into(), "t".into(), q.to_string()]);
+    }
+    if let Some(w) = l.cpu_weight {
+        props.push(vec!["CPUWeight".into(), "t".into(), w.to_string()]);
+    }
+    if let Some(w) = l.io_weight {
+        props.push(vec!["IOWeight".into(), "t".into(), w.to_string()]);
+    }
+    if let Some(set) = &l.cpuset {
+        let mask = cpuset_to_mask(set)
+            .ok_or_else(|| Error::Invalid(format!("--cpuset {set}: not a CPU list")))?;
+        let mut p = vec![
+            "AllowedCPUs".to_string(),
+            "ay".to_string(),
+            mask.len().to_string(),
+        ];
+        p.extend(mask.iter().map(u8::to_string));
+        props.push(p);
+    }
+    let mut argv: Vec<String> = [
+        "call",
+        "org.freedesktop.systemd1",
+        "/org/freedesktop/systemd1",
+        "org.freedesktop.systemd1.Manager",
+        "StartTransientUnit",
+        "ssa(sv)a(sa(sv))",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    argv.push(unit.to_string());
+    argv.push("fail".to_string());
+    argv.push(props.len().to_string());
+    for p in props {
+        argv.extend(p);
+    }
+    argv.push("0".to_string());
+    Ok(argv)
+}
+
+/// PURE. The wanted controllers the parent actually offers, in the order asked.
+fn controllers_to_enable(available: &str, wanted: &[&str]) -> Vec<String> {
+    let have: Vec<&str> = available.split_whitespace().collect();
+    wanted
+        .iter()
+        .filter(|w| have.contains(w))
+        .map(|w| w.to_string())
+        .collect()
+}
+
+/// Places a container in the kubelet's hierarchy — ADR 0038.
+fn setup_kube_cgroup(c: &Container, k: &KubeCgroupParent, pid: i32) -> Result<()> {
+    if is_rootless() || in_userns() {
+        return Err(Error::Invalid(format!(
+            "cgroup parent {}: placing a container in the kubelet's cgroup hierarchy needs the root runtime",
+            k.parent
+        )));
+    }
+    let limits = kube_limits(c)?;
+    match k.driver {
+        KubeCgroupDriver::Systemd => {
+            // The container's pid in the unit name: a restart policy calls `create_with`
+            // again from the same supervisor while the previous scope still holds it, and a
+            // fixed name would collide with the unit that is being emptied.
+            let unit = format!("delonix-{}-{}.scope", c.id, pid);
+            let argv =
+                transient_scope_argv(&unit, &k.parent, &[pid as u32, std::process::id()], &limits)?;
+            let out = std::process::Command::new("busctl")
+                .args(&argv)
+                .output()
+                .map_err(|e| Error::Runtime {
+                    context: "cgroup",
+                    message: format!("busctl (needed for the systemd cgroup driver): {e}"),
+                })?;
+            if !out.status.success() {
+                return Err(Error::Runtime {
+                    context: "cgroup",
+                    message: format!(
+                        "systemd refused scope {unit} under {}: {}",
+                        k.parent,
+                        String::from_utf8_lossy(&out.stderr).trim()
+                    ),
+                });
+            }
+            // The call returns a queued job, not a finished one. Nothing is enforced until
+            // the pid is actually inside the scope, so wait for the kernel to say so.
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                let now_in = std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
+                    .map(|s| s.contains(&unit))
+                    .unwrap_or(false);
+                if now_in {
+                    break;
+                }
+                if std::time::Instant::now() >= deadline {
+                    return Err(Error::Runtime {
+                        context: "cgroup",
+                        message: format!(
+                            "container {pid} never entered scope {unit} under {}",
+                            k.parent
+                        ),
+                    });
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            let scope_dir = std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
+                .ok()
+                .and_then(|s| {
+                    s.lines()
+                        .find_map(|l| l.strip_prefix("0::"))
+                        .map(|r| format!("/sys/fs/cgroup{}", r.trim()))
+                })
+                .unwrap_or_else(|| live_cgroup(c));
+            if !attach_device_filter(&scope_dir) {
+                eprintln!(
+                    "delonix: warning — device cgroup (eBPF) not applied on {}; block devices rely on caps/seccomp only",
+                    c.name
+                );
+            }
+            Ok(())
+        }
+        KubeCgroupDriver::Cgroupfs => {
+            let parent = k.path();
+            if !std::path::Path::new(&parent).is_dir() {
+                // The kubelet creates the pod cgroup before it asks for containers; one
+                // that is missing is a kubelet/runtime disagreement to surface, not a
+                // directory to invent outside its hierarchy.
+                return Err(Error::Runtime {
+                    context: "cgroup",
+                    message: format!("cgroup parent {} does not exist ({parent})", k.parent),
+                });
+            }
+            let leaf = format!("{parent}/delonix-{}", c.id);
+            std::fs::create_dir_all(&leaf).map_err(|e| Error::Runtime {
+                context: "cgroup",
+                message: format!("could not create {leaf}: {e}"),
+            })?;
+            // One controller per write, and only those the parent has: the kernel refuses a
+            // whole line if ONE controller in it is unavailable, which left a kubelet pod
+            // cgroup with `cpu memory pids` enabling nothing at all.
+            let available =
+                std::fs::read_to_string(format!("{parent}/cgroup.controllers")).unwrap_or_default();
+            for ctl in controllers_to_enable(&available, &["cpu", "memory", "pids", "cpuset", "io"])
+            {
+                let _ = std::fs::write(
+                    format!("{parent}/cgroup.subtree_control"),
+                    format!("+{ctl}"),
+                );
+            }
+            write_limit(
+                &leaf,
+                "memory.max",
+                &limits
+                    .memory_bytes
+                    .map_or("max".to_string(), |b| b.to_string()),
+            )?;
+            if limits.memory_bytes.is_some() {
+                let _ = std::fs::write(format!("{leaf}/memory.swap.max"), "0");
+            }
+            write_limit(
+                &leaf,
+                "cpu.max",
+                &limits.cpu_quota_usec.map_or("max 100000".to_string(), |q| {
+                    format!("{} 100000", (q / 10).max(1000))
+                }),
+            )?;
+            let _ = std::fs::write(format!("{leaf}/pids.max"), "max");
+            if let Some(w) = limits.cpu_weight {
+                write_limit(&leaf, "cpu.weight", &w.to_string())?;
+            }
+            if let Some(set) = &limits.cpuset {
+                write_limit(&leaf, "cpuset.cpus", set)?;
+            }
+            if let Some(w) = limits.io_weight {
+                write_limit(&leaf, "io.weight", &w.to_string())?;
+            }
+            if !attach_device_filter(&leaf) {
+                eprintln!(
+                    "delonix: warning — device cgroup (eBPF) not applied on {}; block devices rely on caps/seccomp only",
+                    c.name
+                );
+            }
+            std::fs::write(format!("{leaf}/cgroup.procs"), pid.to_string())?;
+            Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
+mod kube_cgroup_tests {
+    use super::*;
+
+    fn ctr(mem: &str, cpus: &str) -> Container {
+        let mut c = Container::new("abc".into(), "n".into(), "img".into(), vec![], mem.into());
+        c.cpus = cpus.into();
+        c
+    }
+
+    #[test]
+    fn unspecified_is_unlimited_and_specified_is_converted() {
+        let none = kube_limits(&ctr("max", "")).unwrap();
+        assert_eq!(none, KubeLimits::default());
+        let mut c = ctr("64Mi", "0.5");
+        c.cpu_weight = Some("20".into());
+        c.cpuset = Some("0-1".into());
+        let l = kube_limits(&c).unwrap();
+        assert_eq!(l.memory_bytes, Some(67_108_864));
+        assert_eq!(l.cpu_quota_usec, Some(500_000));
+        assert_eq!(l.cpu_weight, Some(20));
+        assert_eq!(l.cpuset.as_deref(), Some("0-1"));
+    }
+
+    #[test]
+    fn unreadable_limits_are_refused_not_dropped() {
+        assert!(kube_limits(&ctr("lots", "")).is_err());
+        assert!(kube_limits(&ctr("max", "500m")).is_err());
+        let mut c = ctr("max", "");
+        c.cpu_weight = Some("0".into());
+        assert!(kube_limits(&c).is_err());
+    }
+
+    #[test]
+    fn only_available_controllers_are_enabled() {
+        assert_eq!(
+            controllers_to_enable(
+                "cpu memory pids",
+                &["cpu", "memory", "pids", "cpuset", "io"]
+            ),
+            vec!["cpu", "memory", "pids"]
+        );
+        assert!(controllers_to_enable("", &["cpu"]).is_empty());
+    }
+
+    #[test]
+    fn cpuset_becomes_systemds_bitmask() {
+        assert_eq!(cpuset_to_mask("0"), Some(vec![1]));
+        assert_eq!(cpuset_to_mask("0-1"), Some(vec![3]));
+        assert_eq!(cpuset_to_mask("0,9"), Some(vec![1, 2]));
+        assert_eq!(cpuset_to_mask("3-1"), None);
+        assert_eq!(cpuset_to_mask("x"), None);
+    }
+
+    /// The argv that the spike proved against systemd 259, shape for shape.
+    #[test]
+    fn scope_argv_matches_the_spike() {
+        let l = KubeLimits {
+            memory_bytes: Some(67_108_864),
+            cpu_quota_usec: Some(500_000),
+            cpu_weight: Some(20),
+            ..Default::default()
+        };
+        let a = transient_scope_argv(
+            "delonix-x-1.scope",
+            "kubepods-burstable-podx.slice",
+            &[10, 20],
+            &l,
+        )
+        .unwrap();
+        let joined = a.join(" ");
+        assert!(joined.starts_with("call org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager StartTransientUnit ssa(sv)a(sa(sv)) delonix-x-1.scope fail 8 "), "{joined}");
+        assert!(
+            joined.contains("PIDs au 2 10 20 "),
+            "the waiter must be in the scope: {joined}"
+        );
+        assert!(joined.contains("Slice s kubepods-burstable-podx.slice Delegate b true"));
+        assert!(joined.contains("MemoryMax t 67108864 MemorySwapMax t 0"));
+        assert!(joined.contains("CPUQuotaPerSecUSec t 500000 CPUWeight t 20"));
+        assert!(joined.ends_with(" 0"));
+        let unlimited = transient_scope_argv("u.scope", "s.slice", &[1], &KubeLimits::default())
+            .unwrap()
+            .join(" ");
+        assert!(
+            !unlimited.contains("MemoryMax") && !unlimited.contains("CPUQuota"),
+            "{unlimited}"
+        );
+    }
+}
+
 /// Removes the container's cgroup in ALL possible locations: the
 /// root-mode path (`Container::cgroup()`) and the rootless delegated leaves — the
 /// current base (dedicated scope) and the escape-base `dlx-containers` under the `user@`.
@@ -7184,6 +7596,13 @@ fn node_cgroup_leaf_marker(cid: &str) -> std::path::PathBuf {
 /// confirmed reproducible in 5/5 clusters. Reading the marker `setup_node_cgroup_ns`
 /// left behind removes the guess entirely for this case.
 fn remove_container_cgroup(container: &Container) {
+    // The kubelet's hierarchy: a cgroupfs leaf is ours to remove; a systemd scope is removed
+    // by systemd itself when its last process — the supervisor — leaves.
+    if let Some(k) = &container.kube_cgroup {
+        if k.driver == KubeCgroupDriver::Cgroupfs {
+            remove_cgroup_tree(&format!("{}/delonix-{}", k.path(), container.id));
+        }
+    }
     remove_cgroup_tree(&container.cgroup());
     if let Some(cur) = current_cgroup_v2() {
         remove_cgroup_tree(&format!("{cur}/dlx-{}", container.id));

@@ -1642,6 +1642,10 @@ pub enum ContainerCmd {
         /// CPUs the container is pinned to (`cpuset.cpus`, e.g. `0-3`, `0,2`).
         #[arg(long)]
         cpuset: Option<String>,
+        /// Internal: the kubelet's cgroup for this pod (CRI `cgroup_parent`, ADR 0038).
+        /// Unspecified limits mean no limit under it.
+        #[arg(long = "kube-cgroup-parent", hide = true)]
+        kube_cgroup_parent: Option<String>,
         /// Relative I/O weight (`io.weight`, 1–10000).
         #[arg(long = "io-weight", value_parser = parse_cgroup_weight)]
         io_weight: Option<String>,
@@ -2159,6 +2163,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
             cpus,
             cpu_weight,
             cpuset,
+            kube_cgroup_parent,
             io_weight,
             device_read_bps,
             device_write_bps,
@@ -2243,6 +2248,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
                 // Sem flag de CLI: o nível de grupo entra pelo MANIFESTO
                 // (`cgroupParent`), que é quem sabe agrupar cargas.
                 cgroup_parent: None,
+                kube_cgroup_parent,
                 io_weight,
                 no_supervisor: false,
                 io_max: compose_io_max(
@@ -2831,6 +2837,9 @@ pub(crate) struct RunOpts {
     pub(crate) cpuset: Option<String>,
     #[serde(default)]
     pub(crate) cgroup_parent: Option<delonix_runtime_core::CgroupParent>,
+    /// The kubelet's cgroup for the pod (ADR 0038) — set only by the CRI.
+    #[serde(default)]
+    pub(crate) kube_cgroup_parent: Option<String>,
     #[serde(default)]
     pub(crate) io_weight: Option<String>,
     /// Composed cgroup-v2 `io.max` value half (`rbps=… wbps=…`), device excluded
@@ -3082,6 +3091,45 @@ mod resource_limits_preflight_tests {
     }
 }
 
+/// The limits a container gets when the operator did not specify them. PURE.
+///
+/// Under the kubelet's cgroup hierarchy (ADR 0038) «not specified» is no limit — `max` —
+/// because the kubelet protects the node there (Node Allocatable, QoS, eviction), and a
+/// runtime default in its place measurably throttled the control plane (etcd at 0.85 cores
+/// on a 4-vCPU node). Everywhere else the house ceiling stays: standing alone, nothing else
+/// stops one unlimited container from taking the host.
+fn kube_default_limits(
+    memory: Option<String>,
+    cpus: Option<String>,
+    under_kubelet: bool,
+) -> (Option<String>, Option<String>) {
+    if !under_kubelet {
+        return (memory, cpus);
+    }
+    (
+        memory.or_else(|| Some("max".to_string())),
+        cpus.or_else(|| Some(String::new())),
+    )
+}
+
+#[cfg(test)]
+mod kube_default_limits_tests {
+    use super::kube_default_limits;
+
+    #[test]
+    fn only_the_kubelets_hierarchy_lifts_the_house_ceiling() {
+        assert_eq!(kube_default_limits(None, None, false), (None, None));
+        assert_eq!(
+            kube_default_limits(None, None, true),
+            (Some("max".to_string()), Some(String::new()))
+        );
+        assert_eq!(
+            kube_default_limits(Some("64M".into()), Some("0.5".into()), true),
+            (Some("64M".into()), Some("0.5".into()))
+        );
+    }
+}
+
 pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Result<()> {
     // The node's runtime policy, BEFORE anything is created or pulled. Same
     // placement reason as the capability ceiling in the CRI: everything reaching
@@ -3135,6 +3183,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         cpu_weight,
         cpuset,
         cgroup_parent,
+        kube_cgroup_parent,
         io_weight,
         io_max,
         no_supervisor,
@@ -3448,6 +3497,15 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // all — which let one leaking container consume everything the slice had,
     // while the engine only PRINTED a warning saying so. Under k8s the pod
     // cgroup caps it anyway, so the derived ceiling costs that path nothing.
+    // The kubelet's hierarchy (ADR 0038): validated here, at the CLI boundary, so a bad
+    // value never reaches the engine; and its presence is the ONE thing that lifts the
+    // house ceiling — see `kube_default_limits`.
+    let kube_cgroup = kube_cgroup_parent
+        .as_deref()
+        .map(delonix_runtime_core::KubeCgroupParent::parse)
+        .transpose()
+        .map_err(Error::Invalid)?;
+    let (memory, cpus) = kube_default_limits(memory, cpus, kube_cgroup.is_some());
     let eff_memory = memory.unwrap_or_else(runtime::default_memory_max);
     let mut c = Container::new(id.clone(), cname, image.clone(), cmd, eff_memory);
     c.namespace = namespace.clone();
@@ -3513,6 +3571,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     c.cpu_weight = cpu_weight;
     c.cpuset = cpuset;
     c.cgroup_parent = cgroup_parent;
+    c.kube_cgroup = kube_cgroup;
     c.io_weight = io_weight;
     c.io_max = io_max;
 
