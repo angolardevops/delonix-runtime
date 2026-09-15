@@ -1348,6 +1348,14 @@ pub struct Vm {
     /// restarted 5 minutes ago should show an uptime of 5 minutes, not 1 day.
     #[serde(default)]
     pub started_unix: Option<u64>,
+    /// The latest DHCP `Expiry Time` the network already held for this VM's MAC
+    /// when the CURRENT boot started (libvirt; `None` elsewhere). A lease at or
+    /// below it belongs to an earlier boot and is never this boot's address —
+    /// see `delonix_vm::pick_lease_ip`. Needed because the MAC is derived from
+    /// the name: a VM deleted and re-created under the same name inherits the
+    /// old incarnation's unexpired lease, and it was announced as the new IP.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dhcp_lease_floor: Option<String>,
     /// The boot shape this VM was created with — see [`VmBootSpec`] for why it
     /// is persisted at all. Absent in every record written before it existed,
     /// which is not the same as "this VM has none": see `config_from`.
@@ -1407,6 +1415,7 @@ impl Vm {
             backend: default_vm_backend(),
             devices: Vec::new(),
             started_unix: None,
+            dhcp_lease_floor: None,
             // Filled in by `delonix_vm::create_with` from the `VmConfig` that
             // is booting this VM; empty here so `Vm::new` keeps its signature
             // (nine positional arguments is already too many).
