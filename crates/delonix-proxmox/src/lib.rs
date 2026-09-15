@@ -348,63 +348,11 @@ impl Client {
         storage: &str,
         gib: u32,
     ) -> Result<()> {
-        let mem = mem_mib(&cfg.memory).to_string();
-        let cores = cfg.vcpus.max(1).to_string();
-        let scsi0 = format!("{storage}:{gib}");
-        let vmid_s = vmid.to_string();
-        let net0 = self.net0_arg(cfg);
-        // `ip=dhcp` unless an address was asked for. Proxmox's own cloud-init
-        // writes this into the guest, which is why `static_ip` is one of the
-        // few `VmConfig` fields this backend CAN honour — the local backends
-        // reach the same end through a NoCloud seed ISO, which is a file on
-        // this host and therefore meaningless on a node elsewhere.
-        let ipconfig0 = match &cfg.static_ip {
-            Some(ip) => format!("ip={ip}"),
-            None => "ip=dhcp".to_string(),
-        };
-        let ci = cloud_init_form(cfg);
-        let mut form: Vec<(&str, &str)> = vec![
-            ("vmid", vmid_s.as_str()),
-            ("name", name),
-            ("memory", mem.as_str()),
-            ("cores", cores.as_str()),
-            ("ostype", "l26"),
-            ("scsihw", "virtio-scsi-single"),
-            ("scsi0", scsi0.as_str()),
-            // A NIC on a bridge of the node. `virtio` alone is the model —
-            // the value goes in the property's default key, and spelling
-            // that key out (`model=virtio`) is what the API refuses. The
-            // ADR recorded this shape as refused too; that was an artefact
-            // of the spike's `curl -d`, which does not URL-encode.
-            // `reqwest`'s `.form()` does, and the node accepts it:
-            // measured, `net0 = virtio=BC:24:11:F4:F9:9C,bridge=vmbr0`.
-            ("net0", net0.as_str()),
-            ("ipconfig0", ipconfig0.as_str()),
-            // Enable the QEMU guest agent CHANNEL. This is the host side
-            // only: it adds the virtio-serial port the agent talks over,
-            // and without it the node will not even try — every
-            // `/agent/...` call answers "QEMU guest agent is not running"
-            // no matter what the guest has installed. Whether an agent
-            // answers on the other end is the image's business, which is
-            // exactly why `ip()` treats silence as "unknown" and not as an
-            // error (see `parse_agent_ip`).
-            ("agent", "1"),
-        ];
-        form.extend(ci.iter().map(|(k, v)| (*k, v.as_str())));
-        // The cloud-init drive, and only when there is something to put in it:
-        // an empty one on an image with no cloud-init is a CD-ROM the guest
-        // ignores, but it also silently costs a disk on the node's storage.
-        //
-        // `!ci.is_empty()` and not just `static_ip`: a hostname or an SSH key is
-        // just as much something to deliver, and without the drive the node has
-        // nowhere to write them — the settings would be accepted and never
-        // reach the guest, which is the aceite-e-ignorado this repo refuses.
-        let ide2 = format!("{storage}:cloudinit");
-        if !ci.is_empty() {
-            form.push(("ide2", ide2.as_str()));
-        }
-        let body = self.post_form(&format!("/nodes/{}/qemu", self.node), &form, true)?;
-        self.wait_upid(&body, "create")
+        let form = create_form(vmid, name, cfg, storage, gib, &self.net0_arg(cfg));
+        let form: Vec<(&str, &str)> = form.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        self.task("create", || {
+            self.post_form(&format!("/nodes/{}/qemu", self.node), &form, true)
+        })
     }
 
     /// Applies to an already-cloned VM the configuration the clone did not carry.
@@ -438,15 +386,17 @@ impl Client {
         // just succeeded, leaving a VM on the node with the template's CPU,
         // memory and no key: the exact half-configured state this function
         // exists to prevent. Measured against a live PVE 9.2.
-        let body = self.post_form(
-            &format!("/nodes/{}/qemu/{vmid}/config", self.node),
-            &form,
-            true,
-        )?;
         // A config change is applied synchronously and answers `data: null` —
-        // there is no UPID to wait on, unlike clone/start/stop.
-        let _ = body;
-        Ok(())
+        // there is no UPID to wait on, unlike clone/start/stop. It takes the
+        // same config lock, though, so it goes through the same retry.
+        with_lock_retry("configure", || {
+            self.post_form(
+                &format!("/nodes/{}/qemu/{vmid}/config", self.node),
+                &form,
+                true,
+            )
+            .map(|_| ())
+        })
     }
 
     /// The `net0` property: model, bridge and optional VLAN tag.
@@ -480,12 +430,13 @@ impl Client {
     /// somebody made about that template.
     pub fn clone_template(&self, template: u32, vmid: u32, name: &str) -> Result<()> {
         let newid = vmid.to_string();
-        let body = self.post_form(
-            &format!("/nodes/{}/qemu/{template}/clone", self.node),
-            &[("newid", newid.as_str()), ("name", name), ("full", "1")],
-            true,
-        )?;
-        self.wait_upid(&body, "clone")
+        self.task("clone", || {
+            self.post_form(
+                &format!("/nodes/{}/qemu/{template}/clone", self.node),
+                &[("newid", newid.as_str()), ("name", name), ("full", "1")],
+                true,
+            )
+        })
     }
 
     /// A VM's configuration, as the node has it.
@@ -504,45 +455,74 @@ impl Client {
     }
 
     pub fn start(&self, vmid: u32) -> Result<()> {
-        let body = self.post_form(
-            &format!("/nodes/{}/qemu/{vmid}/status/start", self.node),
-            &[],
-            true,
-        )?;
-        self.wait_upid(&body, "start")
+        self.task("start", || {
+            self.post_form(
+                &format!("/nodes/{}/qemu/{vmid}/status/start", self.node),
+                &[],
+                true,
+            )
+        })
     }
 
     pub fn stop(&self, vmid: u32) -> Result<()> {
-        let body = self.post_form(
-            &format!("/nodes/{}/qemu/{vmid}/status/stop", self.node),
-            &[],
-            true,
-        )?;
-        self.wait_upid(&body, "stop")
+        self.task("stop", || {
+            self.post_form(
+                &format!("/nodes/{}/qemu/{vmid}/status/stop", self.node),
+                &[],
+                true,
+            )
+        })
     }
 
+    /// Takes a snapshot, refusing a name that is already taken as a CONFLICT.
+    ///
+    /// Asked first rather than read out of the task's failure: the node says
+    /// `snapshot name 's1' already used` inside a task that came back as a
+    /// generic failure (exit 1), where libvirt's backend answers the same case
+    /// with exit 5. A script telling «pick another name» from «something broke»
+    /// cannot parse the message. The node's own refusal is still mapped, for
+    /// the window between the question and the create.
     pub fn snapshot(&self, vmid: u32, name: &str) -> Result<()> {
-        let body = self.post_form(
-            &format!("/nodes/{}/qemu/{vmid}/snapshot", self.node),
-            // `vmstate=1`: include RAM, so a snapshot of a RUNNING VM is a
-            // system checkpoint and not just a disk image at an arbitrary
-            // instant. It is what the libvirt backend's `snapshot-create-as`
-            // gives here, and `restore` returning a guest to a half-written
-            // filesystem instead of to a running state would be the same verb
-            // meaning two things.
-            &[("snapname", name), ("vmstate", "1")],
-            true,
-        )?;
-        self.wait_upid(&body, "snapshot")
+        if self.snapshots(vmid)?.iter().any(|s| s == name) {
+            return Err(taken_snapshot(vmid, name));
+        }
+        self.task("snapshot", || {
+            self.post_form(
+                &format!("/nodes/{}/qemu/{vmid}/snapshot", self.node),
+                // `vmstate=1`: include RAM, so a snapshot of a RUNNING VM is a
+                // system checkpoint and not just a disk image at an arbitrary
+                // instant. It is what the libvirt backend's `snapshot-create-as`
+                // gives here, and `restore` returning a guest to a half-written
+                // filesystem instead of to a running state would be the same
+                // verb meaning two things.
+                &[("snapname", name), ("vmstate", "1")],
+                true,
+            )
+        })
+        .map_err(|e| {
+            if e.to_string().contains("already used") {
+                taken_snapshot(vmid, name)
+            } else {
+                e
+            }
+        })
     }
 
+    /// Reverts to a snapshot; a name the VM does not have is NOT FOUND (exit 4),
+    /// as on libvirt, and not whatever shape the node's refusal takes.
     pub fn rollback(&self, vmid: u32, name: &str) -> Result<()> {
-        let body = self.post_form(
-            &format!("/nodes/{}/qemu/{vmid}/snapshot/{name}/rollback", self.node),
-            &[],
-            true,
-        )?;
-        self.wait_upid(&body, "rollback")
+        if !self.snapshots(vmid)?.iter().any(|s| s == name) {
+            return Err(Error::NotFound(format!(
+                "snapshot of Proxmox VM {vmid}: {name}"
+            )));
+        }
+        self.task("rollback", || {
+            self.post_form(
+                &format!("/nodes/{}/qemu/{vmid}/snapshot/{name}/rollback", self.node),
+                &[],
+                true,
+            )
+        })
     }
 
     /// The VM's snapshot names.
@@ -563,12 +543,38 @@ impl Client {
     }
 
     pub fn destroy(&self, vmid: u32) -> Result<()> {
-        let body = self.send(
-            self.http
-                .delete(self.url(&format!("/nodes/{}/qemu/{vmid}", self.node))),
-            true,
-        )?;
-        self.wait_upid(&body, "destroy")
+        let url = self.url(&format!("/nodes/{}/qemu/{vmid}", self.node));
+        self.task("destroy", || self.send_authed(|| self.http.delete(&url)))
+    }
+
+    /// Issues a task-creating request and waits for the task — **again, while
+    /// the node answers that the VM's config lock is busy**.
+    ///
+    /// The lock is not held by anything this backend does. Measured on a PVE
+    /// 9.2, in the node's journal: when a QEMU process exits (a `qmstop`, or the
+    /// restart inside a `qmrollback` of a snapshot with RAM), `qmeventd` runs
+    /// `qm cleanup`, which takes `lock-<vmid>.conf` and — if the VM is already
+    /// running again by then — sits on it until it gives up:
+    ///
+    /// ```text
+    /// qmeventd: Starting cleanup for 100 / trying to acquire lock... OK
+    /// qmeventd: VM cleanup: QEMU process 2031 for VM 100 still running (or newly started)
+    /// qmeventd: aborting cleanup, VM is still running after 30 seconds
+    /// ```
+    ///
+    /// Every task that needs the lock in that window waits 10 s and fails with
+    /// `can't lock file '/var/lock/qemu-server/lock-100.conf' - got timeout`.
+    /// So a `vm restart` (stop, start) passed and the NEXT one failed, every
+    /// time; so did anything right after a `vm snapshot restore`. Nothing waits
+    /// for the cleanup to be over, and the API has no way to ask.
+    ///
+    /// Retrying is safe for exactly this failure: the lock is taken before the
+    /// task does anything, so a task that could not get it changed nothing.
+    fn task(&self, what: &str, issue: impl Fn() -> Result<String>) -> Result<()> {
+        with_lock_retry(what, || {
+            let body = issue()?;
+            self.wait_upid(&body, what)
+        })
     }
 
     /// Reads the UPID out of a response and waits for that task.
@@ -624,6 +630,73 @@ impl Client {
 // ===========================================================================
 // Pure helpers
 // ===========================================================================
+
+/// How long to keep retrying an operation the node refuses because the VM's
+/// config lock is busy. `qmeventd` holds it for at most 30 s after a QEMU exit
+/// (see [`Client::task`]) and every attempt already spends the node's own 10 s
+/// waiting for it, so 90 s covers the cleanup with room for one more — and
+/// still ends: a lock held by something that never lets go must surface as an
+/// error, not as a command that hangs.
+const LOCK_RETRY_WINDOW: Duration = Duration::from_secs(90);
+const LOCK_RETRY_PAUSE: Duration = Duration::from_secs(1);
+
+/// Is this the node refusing because the VM's config lock is taken?
+///
+/// Matched on the message, like [`is_unauthorized`], and on BOTH halves: a
+/// `can't lock file` without `got timeout` is a permission or filesystem
+/// problem that no amount of waiting fixes.
+fn is_lock_timeout(e: &Error) -> bool {
+    let m = e.to_string();
+    m.contains("can't lock file") && m.contains("got timeout")
+}
+
+fn with_lock_retry<T>(what: &str, op: impl FnMut() -> Result<T>) -> Result<T> {
+    retry_on_lock(what, LOCK_RETRY_WINDOW, LOCK_RETRY_PAUSE, op)
+}
+
+/// Runs `op` again while it fails on a busy config lock, until `window` has
+/// passed. Any other outcome — success or a different failure — returns at
+/// once. Durations are parameters so the ceiling is a test, not a comment.
+fn retry_on_lock<T>(
+    what: &str,
+    window: Duration,
+    pause: Duration,
+    mut op: impl FnMut() -> Result<T>,
+) -> Result<T> {
+    let started = Instant::now();
+    let mut attempt = 1u32;
+    loop {
+        match op() {
+            Err(e) if is_lock_timeout(&e) => {
+                if started.elapsed() >= window {
+                    return Err(Error::Invalid(format!(
+                        "{e} — the VM's config lock stayed busy for {}s over {attempt} attempts \
+                         of '{what}'; something on the node is still holding it (check the \
+                         node's task log for this VM)",
+                        started.elapsed().as_secs()
+                    )));
+                }
+                tracing::info!(
+                    what,
+                    attempt,
+                    "proxmox: the VM's config lock is busy on the node, retrying"
+                );
+                std::thread::sleep(pause);
+                attempt += 1;
+            }
+            other => return other,
+        }
+    }
+}
+
+/// A snapshot name the VM already has — `Conflict` (exit 5), the same class
+/// libvirt's backend gives: the next move is «pick another name or remove that
+/// one», not «something broke».
+fn taken_snapshot(vmid: u32, name: &str) -> Error {
+    Error::Conflict(format!(
+        "Proxmox VM {vmid} already has a snapshot named '{name}'"
+    ))
+}
 
 fn parse<T: for<'de> Deserialize<'de>>(body: &str, what: &str) -> Result<T> {
     serde_json::from_str(body).map_err(|e| {
@@ -992,6 +1065,68 @@ fn cloud_init_form(cfg: &VmConfig) -> Vec<(&'static str, String)> {
         out.push(("sshkeys", urlencode(&cfg.ssh_keys.join("\n"))));
     }
     out
+}
+
+/// The body of `POST /nodes/<node>/qemu`. Pure, so that "each key goes ONCE"
+/// is a test and not a hope.
+///
+/// It was not once. `ipconfig0` sat in the fixed list here AND came back from
+/// [`cloud_init_form`] (added there by `23af3c45`), so the node got two values
+/// and refused every create with `400 ipconfig0: type check ('string') failed -
+/// got ARRAY` — measured against a PVE 9.2. The unit test only asked whether
+/// the key was *present*, which a duplicate satisfies. The network config now
+/// lives only in `cloud_init_form`, next to the drive that carries it: an
+/// appliance (`cloud_init: false`) gets neither.
+fn create_form(
+    vmid: u32,
+    name: &str,
+    cfg: &VmConfig,
+    storage: &str,
+    gib: u32,
+    net0: &str,
+) -> Vec<(&'static str, String)> {
+    let ci = cloud_init_form(cfg);
+    let mut form: Vec<(&'static str, String)> = vec![
+        ("vmid", vmid.to_string()),
+        ("name", name.to_string()),
+        ("memory", mem_mib(&cfg.memory).to_string()),
+        ("cores", cfg.vcpus.max(1).to_string()),
+        ("ostype", "l26".into()),
+        ("scsihw", "virtio-scsi-single".into()),
+        ("scsi0", format!("{storage}:{gib}")),
+        // A NIC on a bridge of the node. `virtio` alone is the model — the
+        // value goes in the property's default key, and spelling that key out
+        // (`model=virtio`) is what the API refuses. The ADR recorded this shape
+        // as refused too; that was an artefact of the spike's `curl -d`, which
+        // does not URL-encode. `reqwest`'s `.form()` does, and the node accepts
+        // it: measured, `net0 = virtio=BC:24:11:F4:F9:9C,bridge=vmbr0`.
+        ("net0", net0.to_string()),
+        // Enable the QEMU guest agent CHANNEL. This is the host side only: it
+        // adds the virtio-serial port the agent talks over, and without it the
+        // node will not even try — every `/agent/...` call answers "QEMU guest
+        // agent is not running" no matter what the guest has installed.
+        // Whether an agent answers on the other end is the image's business,
+        // which is exactly why `ip()` treats silence as "unknown" and not as an
+        // error (see `parse_agent_ip`).
+        ("agent", "1".into()),
+    ];
+    // The cloud-init drive, and only when there is something to put in it: an
+    // empty one on an image with no cloud-init is a CD-ROM the guest ignores,
+    // but it also silently costs a disk on the node's storage.
+    let has_ci = !ci.is_empty();
+    // `name` is the one key both halves can carry: `cloud_init_form` sends an
+    // explicit `hostname` as `name`, because the node's cloud-init reads the VM
+    // name as the hostname — the same thing `configure_clone` does. The more
+    // specific value wins, by name and not by a generic de-duplication, which
+    // would make the test below pass whatever got sent twice.
+    if ci.iter().any(|(k, _)| *k == "name") {
+        form.retain(|(k, _)| *k != "name");
+    }
+    form.extend(ci);
+    if has_ci {
+        form.push(("ide2", format!("{storage}:cloudinit")));
+    }
+    form
 }
 
 /// The vmid out of the handle `boot` stored (`proxmox:<node>:<vmid>`). Pure, so
@@ -1371,6 +1506,122 @@ mod tests {
         );
         assert!(
             !f.iter().any(|(k, _)| *k == "sshkeys" || *k == "ciuser"),
+            "{f:?}"
+        );
+    }
+
+    /// A mensagem REAL do nó (PVE 9.2, histórico de tarefas) é contenção de
+    /// lock; metade dela não é.
+    #[test]
+    fn reconhece_a_contencao_de_lock_do_no() {
+        let real = Error::Invalid(
+            "proxmox: task failed: can't lock file '/var/lock/qemu-server/lock-100.conf' - got \
+             timeout"
+                .into(),
+        );
+        assert!(is_lock_timeout(&real));
+        assert!(!is_lock_timeout(&Error::Invalid(
+            "proxmox: task failed: can't lock file '/x': Permission denied".into()
+        )));
+        assert!(!is_lock_timeout(&Error::Invalid(
+            "proxmox: task failed: snapshot name 's1' already used".into()
+        )));
+    }
+
+    fn lock_err() -> Error {
+        Error::Invalid("task failed: can't lock file 'lock-100.conf' - got timeout".into())
+    }
+
+    /// Repete enquanto o lock está ocupado, e pára logo que passa.
+    #[test]
+    fn repete_em_contencao_de_lock_ate_passar() {
+        let mut n = 0;
+        let r = retry_on_lock("stop", Duration::from_secs(5), Duration::ZERO, || {
+            n += 1;
+            if n < 3 {
+                Err(lock_err())
+            } else {
+                Ok(n)
+            }
+        });
+        assert_eq!(r.unwrap(), 3);
+    }
+
+    /// Qualquer OUTRA falha sai à primeira: repetir um 400 é martelar o nó.
+    #[test]
+    fn outra_falha_nao_se_repete() {
+        let mut n = 0;
+        let r: Result<()> = retry_on_lock("stop", Duration::from_secs(5), Duration::ZERO, || {
+            n += 1;
+            Err(Error::Invalid("proxmox: returned HTTP 400".into()))
+        });
+        assert!(r.is_err());
+        assert_eq!(n, 1);
+    }
+
+    /// Com tecto: um lock que nunca liberta vira erro, não um comando pendurado
+    /// — e o erro diz que esperou e quantas vezes tentou.
+    #[test]
+    fn a_contencao_tem_tecto() {
+        let mut n = 0;
+        let r: Result<()> = retry_on_lock(
+            "stop",
+            Duration::from_millis(30),
+            Duration::from_millis(5),
+            || {
+                n += 1;
+                Err(lock_err())
+            },
+        );
+        let e = r.unwrap_err().to_string();
+        assert!(n > 1, "tem de ter repetido pelo menos uma vez");
+        assert!(e.contains("got timeout") && e.contains("attempts"), "{e}");
+    }
+
+    /// Nome de snapshot repetido é conflito (5), como no libvirt.
+    #[test]
+    fn snapshot_repetido_e_conflito() {
+        assert!(matches!(taken_snapshot(100, "s1"), Error::Conflict(_)));
+    }
+
+    /// Cada chave vai UMA vez no corpo do create. O `ipconfig0` ia duas (lista
+    /// fixa + `cloud_init_form`) e o nó recusava TODOS os creates com `400
+    /// ipconfig0: type check ('string') failed - got ARRAY` — medido num PVE 9.2.
+    /// O teste acima só perguntava se a chave estava lá, e um duplicado está.
+    #[test]
+    fn o_create_manda_cada_chave_uma_so_vez() {
+        let casos = [
+            cfg_com(&[]),
+            cfg_com(&["ssh-ed25519 AAAA x"]),
+            VmConfig {
+                static_ip: Some("10.0.0.5/24,gw=10.0.0.1".into()),
+                hostname: Some("outro".into()),
+                ..cfg_com(&["ssh-ed25519 AAAA x"])
+            },
+            VmConfig {
+                cloud_init: Some(false),
+                ..cfg_com(&[])
+            },
+        ];
+        for cfg in &casos {
+            let f = create_form(100, &cfg.name, cfg, "local-lvm", 8, "virtio,bridge=vmbr0");
+            let mut chaves: Vec<&str> = f.iter().map(|(k, _)| *k).collect();
+            chaves.sort_unstable();
+            let n = chaves.len();
+            chaves.dedup();
+            assert_eq!(n, chaves.len(), "chave repetida no create: {f:?}");
+        }
+        // O hostname explícito ganha ao nome da VM, como no configure_clone.
+        let f = create_form(100, "no1", &casos[2], "local-lvm", 8, "virtio");
+        assert!(f.contains(&("name", "outro".into())), "{f:?}");
+        assert!(
+            f.contains(&("ipconfig0", "ip=10.0.0.5/24,gw=10.0.0.1".into())),
+            "{f:?}"
+        );
+        // Um appliance não leva rede de cloud-init nem drive.
+        let f = create_form(100, "no1", &casos[3], "local-lvm", 8, "virtio");
+        assert!(
+            !f.iter().any(|(k, _)| *k == "ipconfig0" || *k == "ide2"),
             "{f:?}"
         );
     }
