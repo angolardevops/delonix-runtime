@@ -10966,3 +10966,11 @@ msgstr "Cobertura da Docker Engine API.\n\nServido, recusado com razão, e o que
 
 msgid "Machine-readable JSON instead of the table (ADR-0005)."
 msgstr "JSON máquina-legível em vez da tabela (ADR-0005)."
+
+# ---- container run: préflight de limites de recurso sem delegação de cgroup2 ----
+
+msgid "warning: -m/--cpus/--cpu-weight were requested but this session has no cgroup2 delegation, so the kernel will not see them — continuing unenforced because DELONIX_ALLOW_UNENFORCED_LIMITS is set"
+msgstr "aviso: -m/--cpus/--cpu-weight foram pedidos mas esta sessão não tem delegação de cgroup2, por isso o kernel nunca os vai ver — a continuar sem aplicar porque DELONIX_ALLOW_UNENFORCED_LIMITS está definida"
+
+msgid "-m/--cpus/--cpu-weight were requested but this session has no cgroup2 delegation, so the kernel would never see them — the container would run unlimited while this command reports success. Fix: systemd-run --user --scope -p Delegate=yes -- delonix container run ... (see `delonix system doctor`), or set DELONIX_ALLOW_UNENFORCED_LIMITS=1 to run unenforced anyway."
+msgstr "-m/--cpus/--cpu-weight foram pedidos mas esta sessão não tem delegação de cgroup2, por isso o kernel nunca os aplicaria — o container correria sem limite enquanto este comando reporta sucesso. Correcção: systemd-run --user --scope -p Delegate=yes -- delonix container run ... (ver `delonix system doctor`), ou define DELONIX_ALLOW_UNENFORCED_LIMITS=1 para correr sem aplicar de qualquer forma."
