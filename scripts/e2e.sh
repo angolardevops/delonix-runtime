@@ -2311,6 +2311,29 @@ if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
       "virsh -c qemu:///system snapshot-list '$SVM' --name | grep -qx s1"
     check "vm snapshot restore depois do start" ok "$BIN" vm snapshot restore "$SVM" s1
 
+    # BUG REAL, reproduzido 2026-09-15: `vm pause` devolvia 0 e o libvirt dizia
+    # `paused`, mas o `vm ls` seguinte reportava `Stopped` — só `running`
+    # contava como vivo, e a guarda do Paused está no ramo «vivo». O rc do
+    # pause não prova nada: o que se lê é o REGISTO, e duas vezes, porque é a
+    # reconciliação de um `ls` que o estragava.
+    vm_status_is() {
+      "$BIN" vm ls -o json | python3 -c "import json,sys; sys.exit(0 if any(v['name']==sys.argv[1] and v['status']==sys.argv[2] for v in json.load(sys.stdin)) else 1)" "$1" "$2"
+    }
+    check "vm pause" ok "$BIN" vm pause "$SVM"
+    check "o libvirt confirma paused" ok bash -c \
+      "[ \"\$(virsh -c qemu:///system domstate '$SVM')\" = paused ]"
+    check "o vm ls diz Paused (não Stopped)" ok vm_status_is "$SVM" Paused
+    check "e continua Paused num segundo ls" ok vm_status_is "$SVM" Paused
+    check "vm unpause" ok "$BIN" vm unpause "$SVM"
+    check "o vm ls volta a dizer Running" ok vm_status_is "$SVM" Running
+    # Parar uma VM PAUSADA: o domínio tem de ir embora e o registo dizer Stopped.
+    check "vm pause (antes do stop)" ok "$BIN" vm pause "$SVM"
+    check "vm stop de uma VM pausada" ok "$BIN" vm stop "$SVM"
+    check "o domínio pausado foi desfeito" ok bash -c \
+      "! virsh -c qemu:///system domstate '$SVM' >/dev/null 2>&1"
+    check "e o vm ls diz Stopped" ok vm_status_is "$SVM" Stopped
+    check "vm start depois do stop de uma VM pausada" ok "$BIN" vm start "$SVM"
+
     # Com a VM PARADA os três verbos continuam a funcionar — o domínio libvirt
     # não existe nesse estado, e é definido só o tempo do comando.
     check "vm stop (2.ª vez)" ok "$BIN" vm stop "$SVM"
