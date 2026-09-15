@@ -599,15 +599,46 @@ pub fn stop_pod_sandbox(
     base: &Path,
     id: String,
 ) -> Result<Response<StopPodSandboxResponse>, Status> {
-    // stop the sandbox's containers and mark it NotReady.
+    // The CRI contract: «if there are any running containers in the sandbox, they
+    // must be forcibly terminated». The graceful stop is the kubelet's, and it
+    // already happened (`StopContainer` with the pod's grace) before it gets here.
+    //
+    // This used to call `container stop` WITHOUT `-t`, i.e. with the engine's own
+    // long grace, one container after the other, and ignore the result. `kubeadm
+    // reset` gives `StopPodSandbox` a 2 s deadline: measured 2026-09-15 (k8s
+    // 1.36.4), every call ended `DeadlineExceeded`, kubeadm gave up after its
+    // retries, and the node was left with 2 engine containers, 1 sandbox and 2
+    // container records that nothing would ever remove.
+    // Logged for the same reason `StopContainer` is: without it a `kubeadm reset`
+    // left no trace on this side at all, even when it worked.
+    tracing::info!(sandbox = %id, "CRI StopPodSandbox");
+    let mut still_running = Vec::new();
     for c in list_recs::<ContainerRec>(&ct_dir(base)) {
-        if c.sandbox_id == id {
-            let _ = delonix(base, &["container", "stop", &format!("cri-{}", c.id)]);
+        if c.sandbox_id != id {
+            continue;
         }
+        let name = format!("cri-{}", c.id);
+        let _ = delonix(base, &["container", "stop", "-t", "0", &name])?;
+        // Judged by the reconciled state, not by the exit status: stopping an
+        // already-exited container is success, and a "stopped" process that is
+        // still alive is not.
+        if load_reconciled(base, &c.id).is_some_and(|k| {
+            matches!(k.status, delonix_runtime_core::Status::Running) && k.is_live()
+        }) {
+            still_running.push(name);
+        }
+    }
+    // Only a sandbox whose containers are really down is NotReady: an error makes
+    // the kubelet (or kubeadm) retry, instead of believing a live pod is gone.
+    if !still_running.is_empty() {
+        return Err(Status::internal(format!(
+            "sandbox {id}: still running after a forced stop: {}",
+            still_running.join(", ")
+        )));
     }
     if let Ok(mut r) = read_rec::<SandboxRec>(&sb_dir(base), &id) {
         r.stopped = true;
-        let _ = write_rec(&sb_dir(base), &id, &r);
+        write_rec(&sb_dir(base), &id, &r)?;
     }
     Ok(Response::new(StopPodSandboxResponse {}))
 }
@@ -616,11 +647,26 @@ pub fn remove_pod_sandbox(
     base: &Path,
     id: String,
 ) -> Result<Response<RemovePodSandboxResponse>, Status> {
+    // Same rule as `remove_container`: the record goes only AFTER the engine
+    // removed the container. Dropping it on a failed `rm -f` is how a node ends up
+    // with an engine container that no CRI record points at — invisible to the
+    // kubelet, so never retried and never reclaimed (measured after a `kubeadm
+    // reset`, 2026-09-15). `rm -f` kills a container that is still running, so
+    // this holds whether or not `StopPodSandbox` came first.
+    tracing::info!(sandbox = %id, "CRI RemovePodSandbox");
     for c in list_recs::<ContainerRec>(&ct_dir(base)) {
-        if c.sandbox_id == id {
-            let _ = delonix(base, &["container", "rm", "-f", &format!("cri-{}", c.id)]);
-            remove_rec(&ct_dir(base), &c.id);
+        if c.sandbox_id != id {
+            continue;
         }
+        let name = format!("cri-{}", c.id);
+        let out = delonix(base, &["container", "rm", "-f", &name])?;
+        if !(out.status.success() || stderr_not_found(&out.stderr)) {
+            return Err(Status::internal(format!(
+                "sandbox {id}: removal of '{name}' failed (records preserved for retry): {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            )));
+        }
+        remove_rec(&ct_dir(base), &c.id);
     }
     // Remove the real Delonix pod (infra container + netns), if it existed.
     if let Ok(sb) = read_rec::<SandboxRec>(&sb_dir(base), &id) {
@@ -1615,6 +1661,86 @@ fn container_cgroup_metrics(base: &Path, id: &str) -> ContainerCgroupMetrics {
     }
 }
 
+/// The directory holding a CRI container's writable layer, as the engine laid it
+/// out: `<root>/containers/<engine id>/upper`, or the container directory itself
+/// for a flat rootfs. `None` when the engine has no record or no directory.
+///
+/// The engine id is NOT the CRI name. This used to announce
+/// `<root>/containers/cri-<cri id>` — the container's NAME — which never exists on
+/// disk, so every `stat` the kubelet made failed («failed to get device for dir
+/// …/containers/cri-<id>: stat failed … no such file or directory») and the
+/// eviction manager got no summary stats at all: node-pressure eviction, the
+/// kubelet's last line of node protection, was off on every node this runtime
+/// served (measured 2026-09-15, k8s 1.36.4).
+fn writable_layer_dir(base: &Path, cri_id: &str) -> Option<PathBuf> {
+    let root = base.join("containers");
+    let c = delonix_runtime_core::Store::open(&root)
+        .ok()?
+        .load(&format!("cri-{cri_id}"))
+        .ok()?;
+    let dir = root.join(&c.id);
+    let upper = dir.join("upper");
+    if upper.is_dir() {
+        Some(upper)
+    } else if dir.is_dir() {
+        Some(dir)
+    } else {
+        None
+    }
+}
+
+/// Bytes on disk (allocated blocks, like `du`) and inodes under `dir`, without
+/// following symlinks and without leaving `dir`'s filesystem. A hard link counts
+/// once. Unreadable entries are skipped: a partial sum is still a lower bound,
+/// which is the safe direction for eviction.
+fn dir_usage(dir: &Path) -> (u64, u64) {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(top) = std::fs::symlink_metadata(dir) else {
+        return (0, 0);
+    };
+    let dev = top.dev();
+    let mut seen = std::collections::HashSet::new();
+    let (mut bytes, mut inodes) = (0u64, 0u64);
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(p) = stack.pop() {
+        let Ok(m) = std::fs::symlink_metadata(&p) else {
+            continue;
+        };
+        if m.dev() != dev || !seen.insert(m.ino()) {
+            continue;
+        }
+        bytes += m.blocks() * 512;
+        inodes += 1;
+        if m.is_dir() {
+            if let Ok(rd) = std::fs::read_dir(&p) {
+                stack.extend(rd.flatten().map(|e| e.path()));
+            }
+        }
+    }
+    (bytes, inodes)
+}
+
+/// The CRI `writable_layer` of a container: a mountpoint the kubelet can `stat`
+/// and the usage measured there. A container the engine no longer knows reports
+/// the engine root (which exists) with zero usage, instead of a path that fails.
+fn writable_layer_usage(base: &Path, cri_id: &str, ts: i64) -> FilesystemUsage {
+    let (mountpoint, (bytes, inodes)) = match writable_layer_dir(base, cri_id) {
+        Some(d) => {
+            let usage = dir_usage(&d);
+            (d, usage)
+        }
+        None => (base.to_path_buf(), (0, 0)),
+    };
+    FilesystemUsage {
+        timestamp: ts,
+        fs_id: Some(FilesystemIdentifier {
+            mountpoint: mountpoint.to_string_lossy().into_owned(),
+        }),
+        used_bytes: u64v(bytes),
+        inodes_used: u64v(inodes),
+    }
+}
+
 /// Builds a container's real metrics from its cgroup v2.
 fn container_stats_for(base: &Path, r: &ContainerRec) -> ContainerStats {
     let ts = now_ns();
@@ -1651,18 +1777,7 @@ fn container_stats_for(base: &Path, r: &ContainerRec) -> ContainerStats {
             page_faults: u64v(pgfault),
             major_page_faults: u64v(pgmajfault),
         }),
-        writable_layer: Some(FilesystemUsage {
-            timestamp: ts,
-            fs_id: Some(FilesystemIdentifier {
-                mountpoint: base
-                    .join("containers")
-                    .join(format!("cri-{}", r.id))
-                    .to_string_lossy()
-                    .into_owned(),
-            }),
-            used_bytes: u64v(0),
-            inodes_used: u64v(0),
-        }),
+        writable_layer: Some(writable_layer_usage(base, &r.id, ts)),
         swap: Some(SwapUsage {
             timestamp: ts,
             swap_available_bytes: u64v(0),
@@ -2471,6 +2586,47 @@ mod tests {
             ..Default::default()
         };
         assert!(ceiling_reduces(&capped, &privileged));
+    }
+
+    /// The kubelet `stat`s the writable layer's mountpoint to find its device. The
+    /// engine keys the container directory by its OWN id, not by the `cri-<id>`
+    /// name — announcing the name gave a path that never existed, and the eviction
+    /// manager ran without stats.
+    #[test]
+    fn writable_layer_points_at_the_engine_directory_and_measures_it() {
+        let tmp = std::env::temp_dir().join(format!("dlx-cri-wl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let store = delonix_runtime_core::Store::open(tmp.join("containers")).unwrap();
+        let c = delonix_runtime_core::Container::new(
+            "e1e1e1e1e1e1e1e1".into(),
+            "cri-abc".into(),
+            "img:1".into(),
+            vec![],
+            String::new(),
+        );
+        store.save(&c).unwrap();
+        let upper = tmp
+            .join("containers")
+            .join("e1e1e1e1e1e1e1e1")
+            .join("upper");
+        std::fs::create_dir_all(upper.join("var")).unwrap();
+        std::fs::write(upper.join("var").join("data"), vec![7u8; 64 * 1024]).unwrap();
+
+        let fs = writable_layer_usage(&tmp, "abc", 1);
+        let mp = fs.fs_id.unwrap().mountpoint;
+        assert_eq!(mp, upper.to_string_lossy());
+        assert!(
+            std::path::Path::new(&mp).is_dir(),
+            "the kubelet must be able to stat it"
+        );
+        assert!(fs.used_bytes.unwrap().value >= 64 * 1024);
+        assert_eq!(fs.inodes_used.unwrap().value, 3, "upper, var, data");
+
+        // Unknown to the engine: a path that exists, and no invented usage.
+        let gone = writable_layer_usage(&tmp, "nope", 1);
+        assert_eq!(gone.fs_id.unwrap().mountpoint, tmp.to_string_lossy());
+        assert_eq!(gone.used_bytes.unwrap().value, 0);
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
