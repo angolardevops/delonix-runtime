@@ -4838,6 +4838,19 @@ Format specific information:
         assert!(!super::http_status_is_2xx("garbage"));
     }
 
+    /// `qemu-img`/`qemu-io` are not guaranteed on every CI runner (confirmed
+    /// absent there, not just some subcommand failing) — same guard the
+    /// `delonix-runtime-bin` `vmimage` tests already use for the same tool:
+    /// `.status()` mapped to `false` on any error, never `.expect(...)`, so a
+    /// host without the tool skips silently instead of failing the suite.
+    fn run_ok(prog: &str, args: &[&str]) -> bool {
+        std::process::Command::new(prog)
+            .args(args)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
     /// BUG-VM-001: a clean, freshly-created qcow2 must never read as
     /// corrupted — `disk_looks_corrupt` exists to add a diagnosis on top of a
     /// REAL positive, and a false positive here would fail every `vm stop`.
@@ -4846,13 +4859,12 @@ Format specific information:
         let path =
             std::env::temp_dir().join(format!("dlx-diskhealth-clean-{}.qcow2", std::process::id()));
         let _ = std::fs::remove_file(&path);
-        let status = std::process::Command::new("qemu-img")
-            .args(["create", "-f", "qcow2"])
-            .arg(&path)
-            .arg("16M")
-            .status()
-            .expect("qemu-img has to run");
-        assert!(status.success());
+        if !run_ok(
+            "qemu-img",
+            &["create", "-f", "qcow2", &path.to_string_lossy(), "16M"],
+        ) {
+            return; // qemu-img absent: this host cannot run the check either
+        }
         assert!(
             !super::disk_looks_corrupt(&path),
             "a fresh image is not corrupt"
@@ -4874,19 +4886,19 @@ Format specific information:
             std::process::id()
         ));
         let _ = std::fs::remove_file(&path);
-        assert!(std::process::Command::new("qemu-img")
-            .args(["create", "-f", "qcow2"])
-            .arg(&path)
-            .arg("16M")
-            .status()
-            .expect("qemu-img create has to run")
-            .success());
-        assert!(std::process::Command::new("qemu-io")
-            .args(["-c", "write -P 0x5a 0 1M"])
-            .arg(&path)
-            .status()
-            .expect("qemu-io has to run")
-            .success());
+        if !run_ok(
+            "qemu-img",
+            &["create", "-f", "qcow2", &path.to_string_lossy(), "16M"],
+        ) {
+            return; // qemu-img absent: this host cannot run the check either
+        }
+        if !run_ok(
+            "qemu-io",
+            &["-c", "write -P 0x5a 0 1M", &path.to_string_lossy()],
+        ) {
+            std::fs::remove_file(&path).ok();
+            return; // qemu-io absent: same reasoning
+        }
         let len = std::fs::metadata(&path).unwrap().len();
         let f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
         f.set_len(len - 65536).unwrap(); // one cluster short — the same
