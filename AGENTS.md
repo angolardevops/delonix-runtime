@@ -6389,6 +6389,49 @@ em root também fica por fazer: não se publica pelo ingress nativo, e o `portMa
 chega ao plugin `portmap` como `runtimeConfig`. O port-forward em root continua a procurar o
 container `pod-cri-<id>`, que este caminho não cria.
 
+## O CRI põe os containers na hierarquia do kubelet (ADR 0038, fase 1)
+
+O `cgroup_parent` que o kubelet manda em cada `RunPodSandbox` era ignorado: todo o container
+ia para `delonix.slice`, fora do sítio onde o Kubernetes aplica Node Allocatable, QoS e os
+limites do pod. E um pod sem limites herdava o tecto da casa (o etcd a 0,85 cores). Agora:
+
+- **`KubeCgroupParent::parse` (core) é a fronteira de privilégio.** O valor chega pelo socket
+  CRI e vira um caminho onde o runtime ROOT escreve um processo. Slice systemd (`*.slice`, sem
+  `/`, sem componente vazio entre hífens) ou caminho cgroupfs absoluto, segmento a segmento;
+  `..`, relativos, a raiz e o próprio `delonix.slice` são **recusados, nunca reescritos**. A
+  validação corre no início do `RunPodSandbox`, antes de a netns existir.
+- **Driver systemd → scope transitório pedido ao systemd** (`busctl call … StartTransientUnit`,
+  `Slice=`, `Delegate=yes`), com os limites como propriedades — é o contrato de delegação do
+  systemd e o que o runc usa. O nome leva o pid do container porque um restart chama o
+  `create_with` outra vez do mesmo supervisor com o scope antigo ainda ocupado.
+- **O supervisor entra no scope com o container**, e não é enfeite: o systemd apaga o cgroup do
+  scope no instante em que fica vazio, e com ele o `memory.events` que o #309 lê para detectar
+  OOM. Medido no spike; com o supervisor lá dentro o contador sobrevive, e é o systemd que limpa
+  quando o supervisor sai. Custo: os poucos MiB do supervisor contam no pod.
+- **Driver cgroupfs → leaf `<pai>/delonix-<id>`**, e os controladores activam-se **um a um e só
+  os que o pai oferece**: o kernel recusa a linha inteira se UM controlador faltar, e um pod com
+  `cpu memory pids` ficava sem controlador nenhum.
+- **«Não especificado» só é «sem limite» debaixo do kubelet** (`kube_default_limits`, puro): com
+  a flag escondida `--kube-cgroup-parent`, `-m`/`--cpus` em falta ficam `max`; sem ela, o tecto da
+  casa fica exactamente como estava. É a condição que o ADR põe para as duas mudanças entrarem
+  juntas — sem hierarquia do kubelet, o tecto da casa é a única protecção que existe.
+- **BUG PRÉ-EXISTENTE que isto tornou alcançável**: no caminho SEM userns, um `setup_cgroup`
+  falhado devolvia o erro com o container JÁ a correr — fora de qualquer tecto e a segurar os
+  descritores que o chamador espera. Um `run -d` pendurou indefinidamente (medido, com um pai
+  cgroupfs sem controladores). O caminho COM userns já matava o filho; o outro passou a fazê-lo.
+  Medido depois: erro em 95 ms, com a razão, e zero processos do container falhado vivos.
+
+**Validado ao vivo** num nó root (`delonix-vm-k8s:1.36`, systemd 259) com `crictl`, sem kubelet:
+scope sob o slice do pod com `memory.max 67108864`, `cpu.max 50000 100000`, `cpu.weight 20`,
+`swap 0` e o supervisor lá dentro; sem limites → `max`/`max`/`max`; um container a esgotar 32 MiB
+→ `exit 137`, `reason OOMKilled`; cgroupfs → leaf em `/kubepods/burstable/pod…/delonix-<id>`; pai
+com `..` → `InvalidArgument`; sandbox sem pai → `delonix.slice` e tecto da casa inalterados.
+
+**Por fazer (ADR 0038, fases seguintes)**: estatísticas para o eviction manager,
+`oom_score_adj`, `unified`/hugepages, `UpdateContainerResources` (via `SetUnitProperties`, já
+provado no spike), e a validação com um kubelet estável — bloqueada pelo crash-loop do
+control-plane, investigado à parte.
+
 ## `HYPERVISOR` no VMfile + `vm convert` + `vm default-backend` (v0.45.x)
 
 Três lacunas fechadas na pilha de imagens VM já existente (`vm build`/`vm create`), pedidas

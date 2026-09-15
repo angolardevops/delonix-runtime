@@ -300,6 +300,106 @@ pub struct CgroupParent {
     pub pids_max: Option<String>,
 }
 
+/// Which of the kubelet's two cgroup drivers named a sandbox's `cgroup_parent` (ADR 0038).
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum KubeCgroupDriver {
+    /// `kubepods-burstable-pod<uid>.slice` — a systemd slice; the container goes into a
+    /// transient scope under it, requested from systemd.
+    Systemd,
+    /// `/kubepods/burstable/pod<uid>` — a plain cgroupfs path; the container gets a leaf
+    /// under it.
+    Cgroupfs,
+}
+
+/// The cgroup a KUBELET chose for a pod (the CRI sandbox's `linux.cgroup_parent`).
+///
+/// Unlike [`CgroupParent`], which the engine creates inside its own delegated base, this
+/// hierarchy belongs to the kubelet: Node Allocatable, the QoS classes and the pod's own
+/// limits live on it. On this path an unspecified limit means NO limit, because the node is
+/// protected by the kubelet — ADR 0038, and the reason the house ceiling is only lifted when
+/// a parent like this exists.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct KubeCgroupParent {
+    pub driver: KubeCgroupDriver,
+    /// The value exactly as the kubelet sent it, already validated by [`Self::parse`].
+    pub parent: String,
+}
+
+impl KubeCgroupParent {
+    /// Validates the kubelet's `cgroup_parent`. PURE.
+    ///
+    /// **A privilege boundary.** The value arrives over the CRI socket and ends up as a
+    /// cgroup path the root runtime writes a process into. A `..` or a relative path would
+    /// put a pod's containers outside the hierarchy that limits them; `/` or the engine's
+    /// own slice would put them where nothing does. Refused, never rewritten — a caller
+    /// that gets back a different cgroup than it asked for believes a limit that is not
+    /// there.
+    pub fn parse(value: &str) -> std::result::Result<Self, String> {
+        let v = value.trim();
+        let seg_ok = |seg: &str| {
+            !seg.is_empty()
+                && seg != "."
+                && seg != ".."
+                && seg.len() <= 255
+                && seg
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | ':'))
+        };
+        if let Some(name) = v.strip_suffix(".slice") {
+            // systemd: one unit name, no path. Dashes are hierarchy (`a-b.slice` lives in
+            // `a.slice`), so an empty component (`a--b`, `-a`, `a-`) names nothing.
+            if v.contains('/') || !seg_ok(v) || name.is_empty() || name == "-" {
+                return Err(format!("invalid systemd cgroup parent {v:?}"));
+            }
+            if name.split('-').any(str::is_empty) {
+                return Err(format!(
+                    "invalid systemd cgroup parent {v:?}: empty slice component"
+                ));
+            }
+            if name == "delonix" || name.starts_with("delonix-") {
+                return Err(format!("cgroup parent {v:?} is the engine's own slice"));
+            }
+            return Ok(KubeCgroupParent {
+                driver: KubeCgroupDriver::Systemd,
+                parent: v.to_string(),
+            });
+        }
+        if let Some(rest) = v.strip_prefix('/') {
+            let segs: Vec<&str> = rest.split('/').collect();
+            if rest.is_empty() || !segs.iter().all(|s| seg_ok(s)) || v.len() > 4096 {
+                return Err(format!("invalid cgroupfs cgroup parent {v:?}"));
+            }
+            if segs[0] == DELONIX_SLICE.trim_start_matches("/sys/fs/cgroup/") {
+                return Err(format!("cgroup parent {v:?} is the engine's own slice"));
+            }
+            return Ok(KubeCgroupParent {
+                driver: KubeCgroupDriver::Cgroupfs,
+                parent: v.to_string(),
+            });
+        }
+        Err(format!(
+            "cgroup parent {v:?} is neither a systemd slice (`*.slice`) nor an absolute cgroupfs path"
+        ))
+    }
+
+    /// The directory under the cgroup2 mount this parent names. For a slice, systemd's
+    /// own expansion: `a-b-c.slice` → `a.slice/a-b.slice/a-b-c.slice`.
+    pub fn path(&self) -> String {
+        match self.driver {
+            KubeCgroupDriver::Cgroupfs => format!("/sys/fs/cgroup{}", self.parent),
+            KubeCgroupDriver::Systemd => {
+                let name = self.parent.trim_end_matches(".slice");
+                let parts: Vec<&str> = name.split('-').collect();
+                let chain: Vec<String> = (1..=parts.len())
+                    .map(|i| format!("{}.slice", parts[..i].join("-")))
+                    .collect();
+                format!("/sys/fs/cgroup/{}", chain.join("/"))
+            }
+        }
+    }
+}
+
 /// Validates a cgroup group name as a SINGLE, safe path segment. PURE.
 ///
 /// This is a privilege boundary, not tidiness. The name reaches this engine from
@@ -657,6 +757,10 @@ pub struct Container {
     /// (see this module's header).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cgroup_parent: Option<CgroupParent>,
+    /// The kubelet's cgroup for this container's pod (ADR 0038). `None` everywhere except
+    /// the CRI path; persisted so `start`/`restart` land in the same place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kube_cgroup: Option<KubeCgroupParent>,
     /// `key→value` annotations — deliberately SEPARATE from `labels`, the same
     /// split Kubernetes makes and for the same reason: labels are short,
     /// identifying and get shown/filtered on (`ps --filter label=`), annotations
@@ -966,6 +1070,7 @@ impl Container {
             // Sem grupo por omissão: um container avulso continua a pendurar
             // directamente da base delegada, exactamente como antes.
             cgroup_parent: None,
+            kube_cgroup: None,
             pid: None,
             pid_starttime: None,
             status: Status::Created,
@@ -1754,5 +1859,53 @@ mod tests_record_is_live {
     #[test]
     fn a_dead_pid_is_not_live() {
         assert!(!rec(Some(i32::MAX), None).is_live());
+    }
+}
+
+#[cfg(test)]
+mod kube_cgroup_parent_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_what_the_kubelet_sends() {
+        let s = KubeCgroupParent::parse("kubepods-burstable-pod1a2b_3c.slice").unwrap();
+        assert_eq!(s.driver, KubeCgroupDriver::Systemd);
+        assert_eq!(
+            s.path(),
+            "/sys/fs/cgroup/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod1a2b_3c.slice"
+        );
+        let f = KubeCgroupParent::parse("/kubepods/burstable/pod1a2b-3c").unwrap();
+        assert_eq!(f.driver, KubeCgroupDriver::Cgroupfs);
+        assert_eq!(f.path(), "/sys/fs/cgroup/kubepods/burstable/pod1a2b-3c");
+        assert_eq!(
+            KubeCgroupParent::parse("kubepods.slice").unwrap().path(),
+            "/sys/fs/cgroup/kubepods.slice"
+        );
+    }
+
+    #[test]
+    fn refuses_escapes_and_the_engines_own_slice() {
+        for bad in [
+            "",
+            "/",
+            "kubepods",
+            "../etc",
+            "/kubepods/../..",
+            "/kubepods//x",
+            "/kubepods/./x",
+            "kube/pods.slice",
+            "-.slice",
+            "a--b.slice",
+            "-a.slice",
+            "a-.slice",
+            ".slice",
+            "delonix.slice",
+            "delonix-x.slice",
+            "/delonix.slice/x",
+            "/kube pods",
+            "/kube\npods",
+        ] {
+            assert!(KubeCgroupParent::parse(bad).is_err(), "accepted {bad:?}");
+        }
     }
 }
