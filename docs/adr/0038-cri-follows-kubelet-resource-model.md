@@ -98,3 +98,37 @@ alone), then (5), (3), (4).
   parent = unlimited. Documented where each is decided, not discovered.
 - Known limitation until the crash-loop is fixed: validation of the placement and eviction
   behaviour under a real, stable kubelet cannot be claimed.
+
+## Spike result (2026-09-15): GO, with the systemd transient scope
+
+Run on a VM of `delonix-vm-k8s:1.36` (systemd 259, cgroup v2, `delonix-cri` as root), without a
+kubelet — `crictl` plus the slice a kubelet's **systemd** cgroup driver builds
+(`kubepods-burstable-pod<uid>.slice`, the default `cgroupDriver` of kubeadm 1.36):
+
+| question | measured |
+|---|---|
+| A. where does a CRI container land today with `cgroup_parent` set | `/delonix.slice/delonix-<id>` — **outside** the pod slice |
+| C1. engine-created leaf written directly into the slice | placement held across `daemon-reload` and `set-property`; the slice's `MemoryMax=200M` OOM-killed a real allocator |
+| C2. transient scope requested over D-Bus (`StartTransientUnit`, `Slice=`, `Delegate=yes`) | same placement and ceiling results as C1 |
+| C2, limits as unit properties | `MemoryMax`/`CPUQuotaPerSecUSec`/`CPUWeight` at creation → `memory.max 67108864`, `cpu.max 50000 100000`, `cpu.weight 20`; `SetUnitProperties` live → `134217728` and `150000 100000` **with the same PID**; `AllowedCPUs` → `cpuset.cpus 0` |
+| C2, OOM detection | **systemd removes the scope's cgroup the instant it empties** — `memory.events.local` was gone before it could be read, and the unit ends `Result=success`, `not-found` (only the journal says «The kernel OOM killer killed some processes»). With a second, long-lived process in the same scope the directory survives the OOM, `oom_kill 1` is readable, it survives `daemon-reload`, and systemd removes it when that process exits. |
+
+Design that follows:
+
+- **systemd driver → transient scope, not a foreign leaf.** C1 worked for every operation
+  measured, but it writes inside a unit systemd was never asked to delegate; C2 is the contract
+  systemd offers for exactly this, and the one runc's systemd cgroup manager uses. Limits go in as
+  unit properties and `UpdateContainerResources` becomes `SetUnitProperties`.
+- **The container's supervisor joins its scope.** Without it the OOM detection of #309 has
+  nothing to read: the cgroup is gone before `waitpid` returns. With it, the scope's lifetime is
+  the supervisor's, the counter is read after the wait, and systemd does the cleanup. Cost: the
+  supervisor's few MiB are accounted to the pod.
+- **cgroupfs driver → a leaf under the given path** (C1's mechanism), since there is no systemd
+  unit to ask.
+- **D-Bus without a new dependency**: `busctl` (part of systemd, present wherever the systemd
+  driver is) behind the same shell-out discipline as `ip`/`nft`. A D-Bus crate in an engine crate
+  would be a supply-chain decision of its own (guardrail 4).
+
+Not measured by the spike: the cgroupfs driver end to end, `oom_score_adj`, `unified`,
+hugepages, and anything under a live kubelet (the control-plane crash-loop on this image is
+investigated separately).
