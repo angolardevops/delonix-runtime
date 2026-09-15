@@ -4372,11 +4372,25 @@ lê-se como «nada vive» e reclamaria tudo na passagem seguinte, o contra-exemp
 + um órfão real): o órfão sai à 2.ª passagem, o pod e o container ficam, pelos dois
 caminhos; com `containers/` a `chmod 000` o comando recusa sem escrever candidato nenhum.
 
-**Uma fonte da fuga, medida de passagem e NÃO corrigida**: o `attach_container` faz o
-`allocate` ANTES do `acquire`/linha de controlo, e nenhum caminho de erro liberta o lease.
-Um attach que falha (medido: um `DELONIX_NET_RUNTIME_DIR` longo demais para o `SUN_LEN`)
-deixa o lease para trás sem container nenhum. O ceifador limpa-o agora; libertar no
-próprio erro exige decidir o caso do re-attach, em que o lease já existia antes da chamada.
+**Uma fonte da fuga, FECHADA na origem**: o `attach_container` fazia o `allocate` ANTES do
+`acquire`/linha de controlo, e nenhum caminho de erro devolvia o lease — um attach que
+falha (medido: um `DELONIX_NET_RUNTIME_DIR` longo demais para o `SUN_LEN`) deixava-o para
+trás sem container nenhum. Os três attaches (`attach_container`, `_on_ip`, `_extra`) passam
+por `restore_lease`, que repõe o registo no estado de ANTES da chamada e não simplesmente
+liberta: num re-attach (o `start` de um parado, a netns de um pod recriada) o lease já lá
+estava, e libertá-lo por uma falha transitória mudava o IP do container à tentativa
+seguinte. Medido na mesma falha: binário antigo deixou o lease, binário novo deixou `{}`.
+
+**O MESMO defeito vivia no ceifador de REFS, e era pior — medido ao vivo**: o conjunto de
+vivos do `system prune` eram ids de container + `cri-*` + `vm-*`. O marcador de um pod é
+`pod-<nome>`, e caía como órfão. Um pod sozinho num nó, `system prune --force` depois da
+janela de graça: o marcador foi ceifado, o conjunto ficou vazio, o `teardown_locked`
+desmontou a infra, e o pod A CORRER ficou sem `eth0` e com `Network unreachable`. Uma
+limpeza de rotina derrubava a rede de um nó só com pods. `prune::live_ref_owners` junta a
+netns de todo o pod com pelo menos um membro vivo; um pod todo parado continua ceifável.
+Validado: o mesmo cenário com o binário novo deixa `ingress UP · refcount 1` e o pod com
+IP e ping. **A lição repete a desta secção**: um lease e um marcador são chaveados pelo id
+passado ao attach, e esse id NÃO é sempre um id de container.
 
 Ver [docs/RELATORIO-PRE-PRODUCAO.md](docs/RELATORIO-PRE-PRODUCAO.md) para a bateria E2E completa
 (139 PASS / 1 FAIL) e a lista de gaps.

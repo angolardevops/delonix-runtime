@@ -5550,8 +5550,13 @@ pub fn attach_container(id: &str, net: &str, namespace: &str) -> Result<(String,
         default_route: gateway,
         ..
     } = resolve_net(net)?;
+    let previous_lease = crate::ipam::lookup(&prefix, id);
     let ip = crate::ipam::allocate(&prefix, id)?; // unique lease (anti-collision), stable per id
-    acquire(id)?; // ensure_up + ref marker for `id`
+    if let Err(e) = acquire(id) {
+        // ensure_up + ref marker for `id`
+        restore_lease(&prefix, id, previous_lease);
+        return Err(e);
+    }
     let netns = sanitize(id);
     // `namespace` sanitized (goes to a control-line token): no spaces/garbage.
     let ns = sanitize(if namespace.is_empty() {
@@ -5571,8 +5576,28 @@ pub fn attach_container(id: &str, net: &str, namespace: &str) -> Result<(String,
         Ok(()) => Ok((netns, ip)),
         Err(e) => {
             release(id); // undoes the ref marker if the attach failed
+            restore_lease(&prefix, id, previous_lease);
             Err(e)
         }
+    }
+}
+
+/// Puts `id`'s lease in `prefix` back to what it was BEFORE a failed attach.
+///
+/// The lease is taken before the attach can fail (the address has to exist
+/// before the holder is asked to wire it), and no error path gave it back: a
+/// failed attach left a lease with no container behind it — one of the
+/// sources of the measured IPAM leak (88% orphaned). Measured: an attach
+/// that dies on the control socket left the lease in the registry.
+///
+/// **Back to the previous state, not simply freed**: a re-attach (a stopped
+/// container's `start`, a pod netns recreated after a holder respawn) finds
+/// its stable lease already there, and freeing it on a transient failure
+/// would hand that container a DIFFERENT address on the next try.
+fn restore_lease(prefix: &str, id: &str, previous: Option<String>) {
+    match previous {
+        None => crate::ipam::release(prefix, id),
+        Some(ip) => crate::ipam::reserve(prefix, id, &ip),
     }
 }
 
@@ -5607,8 +5632,12 @@ pub fn attach_container_on_ip(
             "IP {ip} does not belong to network {net} ({prefix}.0.0/16)"
         )));
     }
+    let previous_lease = crate::ipam::lookup(&prefix, id);
     crate::ipam::reserve(&prefix, id, ip);
-    acquire(id)?;
+    if let Err(e) = acquire(id) {
+        restore_lease(&prefix, id, previous_lease);
+        return Err(e);
+    }
     let netns = sanitize(id);
     let ns = sanitize(if namespace.is_empty() {
         "default"
@@ -5624,6 +5653,7 @@ pub fn attach_container_on_ip(
         Ok(()) => Ok((netns, ip.to_string())),
         Err(e) => {
             release(id);
+            restore_lease(&prefix, id, previous_lease);
             Err(e)
         }
     }
@@ -5646,6 +5676,7 @@ pub fn attach_extra_container(
         default_route: gateway,
         ..
     } = resolve_net(net)?;
+    let previous_lease = crate::ipam::lookup(&prefix, id);
     let ip = crate::ipam::allocate(&prefix, id)?; // unique lease on the additional network
     let ifname = format!("eth{idx}");
     let netns = sanitize(id);
@@ -5656,7 +5687,10 @@ pub fn attach_extra_container(
     } else {
         format!("attach-extra {netns} {ifname} {ip} {bridge} {gateway} {namespace}")
     };
-    control_send(&line)?;
+    if let Err(e) = control_send(&line) {
+        restore_lease(&prefix, id, previous_lease);
+        return Err(e);
+    }
     Ok((ifname, ip))
 }
 
@@ -9921,5 +9955,65 @@ mod tests_decisao_de_matar {
             ),
             "recuperação de um upgrade in-place"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests_restore_lease {
+    use super::restore_lease;
+
+    fn with_root<T>(tag: &str, f: impl FnOnce() -> T) -> T {
+        let mut env = crate::testenv::lock();
+        let dir =
+            std::env::temp_dir().join(format!("dlx-restore-lease-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        env.set("DELONIX_ROOT", &dir);
+        let out = f();
+        let _ = std::fs::remove_dir_all(&dir);
+        out
+    }
+
+    /// A lease the failed attach CREATED is freed — the leak the reaper was
+    /// otherwise left to clean up.
+    #[test]
+    fn a_lease_created_by_a_failed_attach_is_freed() {
+        with_root("new", || {
+            let previous = crate::ipam::lookup("10.88", "failed01");
+            crate::ipam::allocate("10.88", "failed01").unwrap();
+            restore_lease("10.88", "failed01", previous);
+            assert_eq!(crate::ipam::lookup("10.88", "failed01"), None);
+        });
+    }
+
+    /// A lease that was ALREADY there (a re-attach) survives the failure with
+    /// the same address — freeing it would move the container's IP.
+    #[test]
+    fn a_preexisting_lease_survives_a_failed_reattach() {
+        with_root("keep", || {
+            let ip = crate::ipam::allocate("10.88", "stable01").unwrap();
+            let previous = crate::ipam::lookup("10.88", "stable01");
+            crate::ipam::allocate("10.88", "stable01").unwrap();
+            restore_lease("10.88", "stable01", previous);
+            assert_eq!(
+                crate::ipam::lookup("10.88", "stable01").as_deref(),
+                Some(ip.as_str())
+            );
+        });
+    }
+
+    /// A fixed-IP re-attach that fails puts the OLD pinned address back, not
+    /// the one the failed call just reserved.
+    #[test]
+    fn a_failed_fixed_ip_reattach_restores_the_old_address() {
+        with_root("pin", || {
+            crate::ipam::reserve("10.88", "pinned01", "10.88.1.1");
+            let previous = crate::ipam::lookup("10.88", "pinned01");
+            crate::ipam::reserve("10.88", "pinned01", "10.88.2.2");
+            restore_lease("10.88", "pinned01", previous);
+            assert_eq!(
+                crate::ipam::lookup("10.88", "pinned01").as_deref(),
+                Some("10.88.1.1")
+            );
+        });
     }
 }

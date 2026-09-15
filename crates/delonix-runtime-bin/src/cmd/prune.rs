@@ -232,6 +232,28 @@ pub(crate) fn lease_owners(store: &Store) -> Result<std::collections::HashMap<St
     ))
 }
 
+/// Ref markers a live workload still holds: every live container id, PLUS the
+/// pod netns (`pod-<name>`) of every pod with at least one live member.
+///
+/// A pod's marker is written under its netns name, never under a member id —
+/// so a set of container ids alone called it orphaned. Measured live
+/// (2026-09-15): a pod alone on a node, `system prune --force`, and the reaper
+/// took `pod-<name>`, found the marker set empty, and tore the ingress infra
+/// down — the running pod left with no `eth0` and `Network unreachable`.
+fn live_ref_owners(containers: &[(String, Option<String>, bool)]) -> HashSet<String> {
+    let mut live = HashSet::new();
+    for (id, pod, is_live) in containers {
+        if !is_live {
+            continue;
+        }
+        live.insert(id.clone());
+        if let Some(pod) = pod {
+            live.insert(pod.clone());
+        }
+    }
+    live
+}
+
 /// Pure core of [`lease_owners`] — takes what was read, touches nothing.
 fn lease_owners_from(
     containers: &[(String, String, Option<String>)],
@@ -355,12 +377,13 @@ pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<Con
     //    pods (`cri-*`) and VMs (`vm-*`), which belong to other stores and are
     //    never reaped here. The reaper frees only markers with no live owner,
     //    and tears the infra down if it ends up empty; it NEVER touches a live id.
-    let mut live_refs: HashSet<String> = store
-        .list()?
-        .iter()
-        .filter(|c| c.is_live())
-        .map(|c| c.id.clone())
-        .collect();
+    let listed = store.list()?;
+    let mut live_refs: HashSet<String> = live_ref_owners(
+        &listed
+            .iter()
+            .map(|c| (c.id.clone(), c.pod.clone(), c.is_live()))
+            .collect::<Vec<_>>(),
+    );
     for id in delonix_net::infra::attached_refs() {
         // A `vm-<name>` ref is checked against the VM store instead of being
         // assumed alive. Assuming made it IMMORTAL: nothing on the system ever
@@ -1408,6 +1431,30 @@ mod tests {
         ));
     }
     use super::*;
+
+    /// A running pod's ingress ref is `pod-<name>`, and it must survive a
+    /// prune — reaping it tore the whole node's network down under the pod.
+    #[test]
+    fn a_running_pod_keeps_its_ingress_ref() {
+        let live = live_ref_owners(&[
+            ("m1".to_string(), Some("pod-web".to_string()), true),
+            ("m2".to_string(), Some("pod-web".to_string()), false),
+        ]);
+        assert!(live.contains("pod-web"), "{live:?}");
+        assert!(live.contains("m1"));
+        assert!(
+            !live.contains("m2"),
+            "a stopped member holds no ref of its own"
+        );
+    }
+
+    /// A pod whose members are ALL stopped holds nothing — its marker is a
+    /// genuine orphan and stays reapable, exactly as before.
+    #[test]
+    fn a_fully_stopped_pod_releases_its_ref() {
+        let live = live_ref_owners(&[("m1".to_string(), Some("pod-old".to_string()), false)]);
+        assert!(live.is_empty(), "{live:?}");
+    }
 
     /// A pod leases under its netns name, not under any container id — a
     /// liveness set built from container ids alone reclaimed a running pod's
