@@ -1,0 +1,68 @@
+     Running unittests src/lib.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/delonix_cri-326dd281bdbe0a97)
+test result: ok. 41 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.94s
+     Running unittests src/bin/delonix-cri.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/delonix_cri-f06b1bd11f41d566)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/grpc_status.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/grpc_status-fe45dc9f0babb651)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+     Running unittests src/lib.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/delonix_image-2f0bf912f19d8119)
+test result: ok. 81 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.86s
+     Running unittests src/lib.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/delonix_mcp-e6ab060b6b78e90e)
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running unittests src/lib.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/delonix_mgmt-605ed988116726d6)
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.26s
+     Running unittests src/lib.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/delonix_net-356f1cafac268d94)
+test result: ok. 172 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 99.17s
+     Running tests/firewall_summary.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/firewall_summary-0efa4e0c20c79331)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/ip_invariants.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/ip_invariants-18007e707397c607)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+     Running tests/netdef_naming.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/netdef_naming-131bb4bdad2f5f04)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/network_alloc_race.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/network_alloc_race-651ad7bc7180473e)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running tests/reposicoes_rootless.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/reposicoes_rootless-5bfbb691967900e3)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/delonix_net_rules-2102ec36b6c6ed22)
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/delonix_proxmox-92eacef37025c33d)
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/live.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/live-55d0124825781dd9)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/delonix_runtime-7af548f337c5c3a5)
+test result: ok. 90 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.10s
+     Running tests/advisor_fixtures.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/advisor_fixtures-ad7bf33c8d304d48)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+     Running tests/cgroup_parent.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/cgroup_parent-aa76242628b9ad0a)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running unittests src/main.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/delonix-0a7ed704227fb377)
+test result: ok. 862 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.02s
+     Running tests/architecture.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/architecture-d65a208dade8174c)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+     Running unittests src/lib.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/delonix_runtime_core-2238c1fc5a5c3c4d)
+test result: ok. 71 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.94s
+     Running unittests src/lib.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/delonix_scan-bb50b8a0b55141e6)
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/delonix_security_runtime-a9caa62f53a4212c)
+test result: ok. 55 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running unittests src/lib.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/delonix_truenas-17e5ba99fd55e6c4)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/live.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/live-ec9186d20c5a92bf)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/delonix_vm-fee99bb9587b96e8)
+test result: ok. 95 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.54s
+     Running unittests src/lib.rs (/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/deps/delonix_volume-d72b2ffec9df1973)
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.43s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

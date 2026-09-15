@@ -1,0 +1,137 @@
+Delonix chaos harness — sandbox /tmp/dlx-chaos · binário /tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/delonix
+bancada: load(1m) 2.93 · 32 threads · limiar 16.00
+
+▸ holder-kill — o pin morre e volta, sem custar a rede a ninguém
+  pin 461171 → 461279 · control 461174 → 461174 · slirp 461193 → 461193 · ck1 461234 → 461234 · netns up rc=0
+  ✓ PASS holder-kill (pin 461171→461279; control, slirp e container intocados; aceita trabalho novo)
+
+▸ full-holder-death — sem ninguém a segurar as namespaces, reconstrói e diz que reiniciou
+  pin 461437 → 461654 · control 461440 → 461657 · fh1 461495 → 461708 · netns up rc=0
+  ✓ PASS full-holder-death (reconstruído: pin 461437→461654, fh1 461495→461708, e reportado)
+
+▸ control-restart — matar o plano de controlo não pode mexer em nada
+  pin 461769→461769 · control 461772→461880 · workload 461827→461827
+  ✓ PASS control-restart (pin e workload intocados, controlo reposto)
+
+▸ posse-destrutiva — nada destrói o que não prova ser seu
+  ✓ PASS posse-destrutiva/pin: capturar a saída de quem levanta a infra não pendura
+  ✓ PASS posse-destrutiva/teardown: o socket de controlo não fica órfão
+  outro root: pin 461990 VIVO · slirp 462012 VIVO · netns net:[4026533658] · o nosso pin novo 462080 em net:[4026533451]
+  ✓ PASS posse-destrutiva/cross-root: o pid reciclado de outro root não é lido, não é entrado e não é morto
+  proxy do outro root: 462337 VIVO · o nosso era 462372, ficou 462416
+  ✓ PASS posse-destrutiva/proxy-cross-root: o pid reciclado de outro root não é recarregado nem morto
+
+▸ holder-wedge — um par que liga e não escreve não pode prender o holder
+  ✓ PASS holder-wedge (attach serviu em 4s, com um par silencioso agarrado)
+
+▸ slirp-kill — matar o slirp não pode deixar o motor num estado que mente
+  status após a morte do slirp: ingress DOWN — pin 462658 · control 462661 · slirp — · bridge delonix0 (10.200.0.1) · refcount 1
+  ✓ PASS slirp-kill (o estado reporta a ausência, não finge saúde)
+
+▸ idempotent-up — 'netns up' num sistema saudável não pode reiniciar nada
+  ✓ PASS idempotent-up (pid 462836 intocado)
+
+▸ oom — um container que estoura o limite tem de morrer, não fazer swap
+  ✓ PASS oom (morreu no limite: Dead)
+
+▸ concurrent-attach — N attaches em paralelo não podem repetir IPs
+  ✓ PASS concurrent-attach (8 containers, 8 IPs distintos)
+
+▸ namespace-isolation — cross-namespace bloqueado, same-namespace aberto
+  cross-ns=blocked · same-ns=open
+  ✓ PASS namespace-isolation (fronteira fechada, mesma namespace aberta)
+
+▸ pod-namespace-isolation — pods de namespaces diferentes não se alcançam
+  cross-ns=blocked · same-ns=open
+  ✓ PASS pod-namespace-isolation (fronteira fechada entre pods, mesma namespace aberta)
+
+▸ pod-holder-respawn — um pod tem de recuperar a rede como um container
+  holder 463593 → 463887 · control 463596 → 463596 · slirp 463615 → 463615 · rp-c0=up · rp-c1=up · netns up rc=0
+  ✓ PASS pod-holder-respawn (os dois membros recuperaram, e o nó volta inteiro: pin 463887)
+
+▸ scale — 30 containers: IPs únicos, tecto agregado de pé, limpeza completa
+  containers com IP: 30/30 · IPs distintos: 30
+  ✓ PASS scale (30 containers, 30 IPs distintos)
+  disco não devolvido após a limpeza: 0 MiB
+  ✓ PASS scale-cleanup (0 MiB retidos)
+
+▸ abrupt-kill — matar o init à bruta tem de reconciliar o estado
+  ✓ PASS abrupt-kill (estado reconciliado: ck4 -)
+
+▸ aggregate-ceiling — a base do motor tem de ter tecto dimensionado ao host
+  leaf   memory.max = 134217728
+  parent memory.max = 27878400000   (/user.slice/user-1000.slice/user@1000.service/dlx-containers)
+  ✓ PASS aggregate-ceiling (pai limitado a 27878400000 bytes)
+
+▸ delegated-scope — sob um scope delegado, TODOS os limites têm de aplicar
+  memory.max=134217728 cpu.max=50000 100000 pids.max=512 swap=0 oom.group=1
+  ✓ PASS delegated-scope (os cinco limites aplicados)
+
+▸ cgroup-netns — o re-exec de rede custom não pode deixar o container no cgroup do chamador
+  chamador      = /user.slice/user-1000.slice/user@1000.service/app.slice/app-com.anthropic.Claude-419344.scope
+  --net none    = /user.slice/user-1000.slice/user@1000.service/dlx-containers/dlx-0cd914eb38a33b8a
+  --net custom  = /user.slice/user-1000.slice/user@1000.service/dlx-containers/dlx-e53dc065e64b7a39
+  ✓ PASS cgroup-netns (leaf própria nos dois caminhos, memory.max=134217728)
+
+▸ disk-full — sem espaço, falhar limpo; nunca publicar estado truncado
+SKIP: demasiado espaço livre para esgotar em segurança (90.5 GiB)
+TMP-ORFAOS: nenhum
+  ✓ PASS disk-full (padrão tmp→fsync→rename não deixa órfãos)
+
+▸ write-failure — escrita impossível tem de falhar alto e não deixar lixo
+  ✓ PASS write-failure (falhou alto, rc=77, zero temporários órfãos)
+
+▸ stack-converge — o apply converge a quente e recusa o que nao converge
+  ✓ PASS stack-converge: memoria a quente (pid 466803 intocado, controlo 466811 intocado)
+  ✓ PASS stack-converge: campo frio recusado, nada tocado
+  ✓ PASS stack-converge: destroy levou os da stack e poupou o alheio
+
+▸ stack-netroute — o prune e o destroy fecham mesmo a rota
+  ✓ PASS stack-netroute: o prune fechou a declarada e poupou a imperativa
+  ✓ PASS stack-netroute: destroy sem orfaos no mapa nem no registo
+
+▸ stack-partial-apply — o que um apply falhado cria continua a ser da stack
+  ✓ PASS stack-partial-apply: o destroy levou o orfao do apply falhado e poupou o alheio
+
+▸ truenas-destroy — o remoto so morre com a flag, e so o que e nosso
+  ∼ SKIP truenas-destroy — DELONIX_CHAOS_TRUENAS_URL/USER/PASS nao definidos
+
+── resumo ──
+  PASS  holder-kill (pin 461171→461279; control, slirp e container intocados; aceita trabalho novo)
+  PASS  full-holder-death (reconstruído: pin 461437→461654, fh1 461495→461708, e reportado)
+  PASS  control-restart (pin e workload intocados, controlo reposto)
+  PASS  posse-destrutiva/pin: capturar a saída de quem levanta a infra não pendura
+  PASS  posse-destrutiva/teardown: o socket de controlo não fica órfão
+  PASS  posse-destrutiva/cross-root: o pid reciclado de outro root não é lido, não é entrado e não é morto
+  PASS  posse-destrutiva/proxy-cross-root: o pid reciclado de outro root não é recarregado nem morto
+  PASS  holder-wedge (attach serviu em 4s, com um par silencioso agarrado)
+  PASS  slirp-kill (o estado reporta a ausência, não finge saúde)
+  PASS  idempotent-up (pid 462836 intocado)
+  PASS  oom (morreu no limite: Dead)
+  PASS  concurrent-attach (8 containers, 8 IPs distintos)
+  PASS  namespace-isolation (fronteira fechada, mesma namespace aberta)
+  PASS  pod-namespace-isolation (fronteira fechada entre pods, mesma namespace aberta)
+  PASS  pod-holder-respawn (os dois membros recuperaram, e o nó volta inteiro: pin 463887)
+  PASS  scale (30 containers, 30 IPs distintos)
+  PASS  scale-cleanup (0 MiB retidos)
+  PASS  abrupt-kill (estado reconciliado: ck4 -)
+  PASS  aggregate-ceiling (pai limitado a 27878400000 bytes)
+  PASS  delegated-scope (os cinco limites aplicados)
+  PASS  cgroup-netns (leaf própria nos dois caminhos, memory.max=134217728)
+  PASS  disk-full (padrão tmp→fsync→rename não deixa órfãos)
+  PASS  write-failure (falhou alto, rc=77, zero temporários órfãos)
+  PASS  stack-converge: memoria a quente (pid 466803 intocado, controlo 466811 intocado)
+  PASS  stack-converge: campo frio recusado, nada tocado
+  PASS  stack-converge: destroy levou os da stack e poupou o alheio
+  PASS  stack-netroute: o prune fechou a declarada e poupou a imperativa
+  PASS  stack-netroute: destroy sem orfaos no mapa nem no registo
+  PASS  stack-partial-apply: o destroy levou o orfao do apply falhado e poupou o alheio
+  SKIP  truenas-destroy — DELONIX_CHAOS_TRUENAS_URL/USER/PASS nao definidos
+
+── 1 SKIP: cenários que NÃO foram exercitados ──
+  SKIP  truenas-destroy — DELONIX_CHAOS_TRUENAS_URL/USER/PASS nao definidos
+  (um SKIP não é um PASS: nenhum destes disse nada sobre o motor)
+
+  29 PASS · 0 FAIL · 1 SKIP
+
+CHAOS_DONE rc=0 secs=177

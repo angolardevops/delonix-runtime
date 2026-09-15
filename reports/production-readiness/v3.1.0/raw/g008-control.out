@@ -1,0 +1,7 @@
+== ctl shim=0 nft=/usr/sbin/nft
+network create rc=0
+run rc=0
+container ip=10.235.84.23
+		iifname "vha58c4b7d" ip saddr != 10.235.84.23 drop
+[2m2026-09-15T16:50:46.003047Z[0m [32m INFO[0m [2mdelonix_image::registry[0m[2m:[0m pulling library/alpine:latest from registry-1.docker.io [3mrepo[0m[2m=[0mlibrary/alpine [3mreference[0m[2m=[0mlatest [3mhost[0m[2m=[0mregistry-1.docker.io
+[2m2026-09-15T16:50:47.007607Z[0m [32m INFO[0m [2mdelonix_image::registry[0m[2m:[0m platform selected: linux/amd64 [3march[0m[2m=[0mamd64
