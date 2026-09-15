@@ -609,6 +609,9 @@ pub fn stop_pod_sandbox(
     // 1.36.4), every call ended `DeadlineExceeded`, kubeadm gave up after its
     // retries, and the node was left with 2 engine containers, 1 sandbox and 2
     // container records that nothing would ever remove.
+    // Logged for the same reason `StopContainer` is: without it a `kubeadm reset`
+    // left no trace on this side at all, even when it worked.
+    tracing::info!(sandbox = %id, "CRI StopPodSandbox");
     let mut still_running = Vec::new();
     for c in list_recs::<ContainerRec>(&ct_dir(base)) {
         if c.sandbox_id != id {
@@ -648,8 +651,9 @@ pub fn remove_pod_sandbox(
     // removed the container. Dropping it on a failed `rm -f` is how a node ends up
     // with an engine container that no CRI record points at — invisible to the
     // kubelet, so never retried and never reclaimed (measured after a `kubeadm
-    // reset`, 2026-09-15). And the forced stop first: `RemovePodSandbox` must
-    // succeed on a sandbox whose containers are still running.
+    // reset`, 2026-09-15). `rm -f` kills a container that is still running, so
+    // this holds whether or not `StopPodSandbox` came first.
+    tracing::info!(sandbox = %id, "CRI RemovePodSandbox");
     for c in list_recs::<ContainerRec>(&ct_dir(base)) {
         if c.sandbox_id != id {
             continue;
