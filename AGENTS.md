@@ -4347,6 +4347,37 @@ Enquanto não existir, o tecto é largo (um `/16` dá 65 mil endereços por rede
 é invisível — mas é monótono, e hoje não há um único comando que o mostre. O
 `network ipam ls` (só leitura) é o passo que vem antes de qualquer ceifa.
 
+**FECHADO (2026-09-15): `network ipam ls` + `network ipam prune`**, e o `system prune`
+varre-o também (um timer `--auto` fecha a fuga sem um segundo agendamento). O ceifador
+(`ipam::reap_orphan_leases`) corre sob o `IpamLock`, e um lease visto órfão pela primeira
+vez é só CANDIDATO: é reclamado numa corrida POSTERIOR que ainda o encontre órfão além do
+MESMO `REF_MARKER_GRACE` (a constante é partilhada, para as duas janelas não divergirem).
+O relógio vive num ficheiro à parte (`ipam/reap-candidates`, **sem** `.json`, para o
+`all_leases` o saltar como salta o `lock`).
+
+**O rascunho tinha o defeito que esta secção previa, e só a leitura dos chamadores o
+apanhou**: julgava vivo «há container com este id». Mas um lease é chaveado pelo id que
+se passou ao `attach_container`, e um POD aluga como `pod-<nome>` (a netns), o
+`netns attach` com um nome à escolha, o CRI com o id do sandbox. Quinze segundos depois
+da primeira passagem, o `prune` entregava o IP de um pod A CORRER ao container seguinte.
+A vivacidade passou a sair de UMA função, `prune::lease_owners`, partilhada pelo `ls`,
+pelo `prune` e pelo `system prune`: todos os registos de container (parados incluídos — um
+`start` devolve o mesmo IP), o `pod` de cada membro, e todo o marcador de ref ligado. As
+duas últimas erram para o lado de GUARDAR: um marcador órfão segura o seu lease uma
+passagem a mais, e isso recupera-se; um IP duplicado não.
+
+**E falha FECHADO**: um store ilegível é `Err` (exit 77), nunca um conjunto vazio — vazio
+lê-se como «nada vive» e reclamaria tudo na passagem seguinte, o contra-exemplo do
+`reap_orphan_hostfwds` citado acima. Validado ao vivo com roots isolados (pod + container
++ um órfão real): o órfão sai à 2.ª passagem, o pod e o container ficam, pelos dois
+caminhos; com `containers/` a `chmod 000` o comando recusa sem escrever candidato nenhum.
+
+**Uma fonte da fuga, medida de passagem e NÃO corrigida**: o `attach_container` faz o
+`allocate` ANTES do `acquire`/linha de controlo, e nenhum caminho de erro liberta o lease.
+Um attach que falha (medido: um `DELONIX_NET_RUNTIME_DIR` longo demais para o `SUN_LEN`)
+deixa o lease para trás sem container nenhum. O ceifador limpa-o agora; libertar no
+próprio erro exige decidir o caso do re-attach, em que o lease já existia antes da chamada.
+
 Ver [docs/RELATORIO-PRE-PRODUCAO.md](docs/RELATORIO-PRE-PRODUCAO.md) para a bateria E2E completa
 (139 PASS / 1 FAIL) e a lista de gaps.
 

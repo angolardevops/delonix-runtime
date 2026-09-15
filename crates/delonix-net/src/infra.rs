@@ -941,7 +941,11 @@ pub fn release(id: &str) {
 /// between `acquire` and `store.save`; generous on purpose since the cost
 /// of skipping a genuinely-orphaned marker for a few extra seconds is
 /// nothing, while the cost of the race is total ingress teardown.
-const REF_MARKER_GRACE: std::time::Duration = std::time::Duration::from_secs(15);
+///
+/// `pub(crate)`: `ipam::reap_orphan_leases` reuses the SAME constant for the
+/// SAME reason (a lease is written before the container's Store record), so
+/// the two reapers cannot silently drift to different grace windows.
+pub(crate) const REF_MARKER_GRACE: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// Marker `mtime`-based grace check, factored out for testing without
 /// needing a real clock race: `now` and `grace` are parameters, not
