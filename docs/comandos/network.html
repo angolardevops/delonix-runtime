@@ -177,6 +177,7 @@ Commands:
   inspect     Detail of a network
   ls          List the networks
   apply       Apply the `kind: Network` documents of a manifest (idempotent by name)
+  ipam        The IP lease registry — the `/16` anti-collision allocator
   node        WireGuard identity of THIS node, for the encrypted overlay between nodes
   help        Print this message or the help of the given subcommand(s)
 
@@ -191,7 +192,7 @@ COMMAND MAP:
   Lifecycle    vlan · route · connect · disconnect · create · rm
   Inspect      diagnose · ls · inspect · describe
   Declarative  apply
-  Advanced     node
+  Advanced     node · ipam
 
 EXAMPLES:
   # a bridge network of its own, where containers reach each other by name
