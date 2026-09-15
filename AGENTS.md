@@ -6284,6 +6284,57 @@ reposto, zero falhas e o init concluído.
   sem a protecção de pressão de memória/disco que o Kubernetes espera; e o nó fica `NotReady`
   por `BridgeMissing` (`delonix0`) com uma CNI de bridge configurada.
 
+### RESOLVIDO — o crash-loop do control-plane de nó único era o `cpuset` a desaparecer (2026-09-15)
+
+**Causa**: o `RuntimeConfig` do CRI respondia `linux: None`, e o kubelet ficava com o
+`cgroupDriver` da sua config — `systemd`, o de omissão do kubeadm. Criava os cgroups de pod como
+slices do systemd **vazios** (os containers vivem em `/delonix.slice/delonix-<id>`, fora deles), e
+o systemd retira um controlador de um slice quando nenhuma unit por baixo o pede. O que ele retira
+é o `cpuset`. O kubelet, no `SyncPod`, valida o cgroup do pod contra os controladores do nó; com
+`cpuset` em falta dá «o cgroup não existe» e, se o pod já tinha um container a correr, faz
+`killPod` **sem uma linha de log própria**. O sandbox fica NotReady, e o sync seguinte regista
+`SandboxChanged` e recria-o com attempt+1. É por isso que o sintoma parecia um problema de sandbox.
+
+**Como se provou** (VM da `delonix-vm-k8s:1.36`, k8s 1.36.4, kubelet a `--v=4`):
+1. Os kills vêm logo a seguir a `"Got phase for pod"`, sem `computePodActions` pelo meio, e com
+   as sondas a passar. Esse é o caminho `!pcm.Exists(pod) && !firstSync` do kubelet.
+2. Um vigia de 100 ms sobre `kubepods.slice/*/*pod*.slice/cgroup.controllers` mostrou o `cpuset`
+   a ir e vir, com cada kill dentro de uma janela sem ele.
+3. **À vontade**: um `systemctl daemon-reload` retira-o de `kubepods.slice` e de
+   `kubepods-burstable.slice` na hora. Uma scope `Delegate=yes` dentro do slice do pod
+   (`systemd-run --scope --slice=… -p Delegate=yes`) segura-o em dois reloads, e ao pará-la cai
+   outra vez. É por isto que o containerd/runc não tem o problema: cada container é uma scope
+   delegada dentro do slice.
+4. **Controlo por intervenção**, com o mesmo nó reposto e só o driver a mudar
+   (`KubeletConfiguration.cgroupDriver: cgroupfs`): `/livez` 84/84 em 7 min, 0 `StopContainer`,
+   0 `SandboxChanged`.
+
+**Correcção**: `engine_cgroup_driver()` → `CGROUPFS`, que é o que o motor é (escreve em
+`/sys/fs/cgroup` e nunca pede units ao systemd). O kubelet 1.36 usa o valor do CRI e ignora o
+da config (`"Using cgroup driver setting received from the CRI runtime" cgroupDriver="cgroupfs"`).
+Com o `kubeadm init` **original**, sem mexer na config: `/livez` 24/24, depois 60/60 com dez
+`daemon-reload` pelo meio, 0 kills, e o control-plane com `RESTARTS 0` aos 7 min. Antes eram
+20 stops em 3 min. `SYSTEMD` é o valor ZERO do proto, por isso um `None` ou um default reabre o
+bug. O teste `the_kubelet_is_told_cgroupfs` falha com a correcção revertida (verificado).
+
+Três armadilhas desta investigação:
+- **O `RESTARTS` herda-se entre `kubeadm init`s**: o UID de um static pod é o mesmo quando o
+  manifesto é igual, e o kubelet conta os reinícios pelos `N.log` em `/var/log/pods`, que o
+  `kubeadm reset` não apaga. `RESTARTS 6` com um único container `Up 7 minutes` era herança.
+  Para medir, apagar com `sudo sh -c 'rm -rf /var/log/pods/*'` (o glob fora do `sh -c` é
+  expandido sem permissão e não apaga nada).
+- **Os primeiros 2 minutos enganam**: a corrida de base deu 23/24 no `/livez` e parecia sã. O
+  ciclo acelera depois, e foi preciso contar `StopContainer` além do `/livez`.
+- **Isto NÃO fecha o ponto 1 do ADR 0038**: os containers continuam em `delonix.slice`, fora da
+  hierarquia do kubelet (Node Allocatable, QoS, limites de pod). Só a colocação numa scope
+  transitória sob o `cgroup_parent` permite responder `SYSTEMD` com verdade.
+
+**Continua por fazer**, medido no mesmo nó já estável: o **kube-proxy em CrashLoopBackOff**
+(`open /proc/sys/net/netfilter/nf_conntrack_max: read-only file system` com o registo CRI a dizer
+`privileged: true`; o #237 não fecha este caminho) e o nó **`NotReady` por `BridgeMissing`**
+(`delonix0`), que deixa o CoreDNS `Pending`. O eviction manager sem estatísticas e o `kubeadm
+reset` com órfãos ficaram fechados no #316 (ver «CRI num nó kubeadm» acima).
+
 ## `HYPERVISOR` no VMfile + `vm convert` + `vm default-backend` (v0.45.x)
 
 Três lacunas fechadas na pilha de imagens VM já existente (`vm build`/`vm create`), pedidas
