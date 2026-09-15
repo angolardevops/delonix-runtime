@@ -93,6 +93,10 @@ classify() {
       else if (c ~ /^vm snapshot /)                               cls = "="
       else if (c ~ /^image (pull|push|build|scan|verify|convert|import|export|tag|login|logout)$/) cls = "="
       else if (c == "pod logs" || c == "cluster load")            cls = "="
+      # `cluster stop/start/destroy`: nascem já com o ciclo de vida completo
+      # pedido pelo utilizador, sem nenhuma renomeação por trás — mesma razão
+      # do `cluster load` acima, não `~`.
+      else if (c ~ /^cluster (stop|start|destroy)$/)              cls = "="
       else if (c == "secret create" || c == "stack init")         cls = "="
       else if (c ~ /^system (info|events|df|prune|doctor|features|setup|resources|regulate)$/) cls = "="
       # `api-resources` é da árvore-alvo, não da antiga: nasce no destino, logo

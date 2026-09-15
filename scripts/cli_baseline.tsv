@@ -9,6 +9,7 @@
 !	build
 ~	cluster apply
 ~	cluster create
+=	cluster destroy
 ~	cluster drain
 ~	cluster health
 ~	cluster init
@@ -18,6 +19,8 @@
 =	cluster load
 ~	cluster ls
 ~	cluster prune
+=	cluster start
+=	cluster stop
 ~	cluster uncordon
 ~	cluster upgrade
 ~	completion editor
@@ -136,9 +139,9 @@
 ~	network apply
 =	network connect
 ~	network create
-=	network disconnect
 ~	network describe
 ~	network diagnose
+=	network disconnect
 ~	network inspect
 ~	network ls
 ~	network node init
@@ -176,7 +179,6 @@
 →	stack rollback
 ~	stack validate
 ~	stack wait
-~	system snapshot create
 ~	system boot disable
 ~	system boot enable
 ~	system boot status
@@ -192,8 +194,9 @@
 =	system prune
 =	system regulate
 =	system resources
-~	system snapshot restore
 =	system setup
+~	system snapshot create
+~	system snapshot restore
 ~	system thermal
 ~	system virt
 =	version
