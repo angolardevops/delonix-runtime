@@ -651,14 +651,12 @@ fn capture(prog: &str, args: &[&str]) -> Option<String> {
     Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-/// Pure parser for `virsh net-dhcp-leases` output: among the entries matching
-/// `mac` (case-insensitive), returns the address of the one with the LATEST
-/// `Expiry Time`. See [`LibvirtBackend::ip_from_leases`] for why this is the
-/// only reliable signal (`domifaddr` can list several stale entries for the
-/// same MAC in no useful order). The expiry format (`YYYY-MM-DD HH:MM:SS`) is
-/// zero-padded and lexicographically sortable — plain string `max` is exact,
-/// no date parsing needed.
-fn parse_leases_latest_ip(out: &str, mac: &str) -> Option<String> {
+/// The `(expiry, ip)` of every `virsh net-dhcp-leases` entry for `mac`
+/// (case-insensitive). The expiry format (`YYYY-MM-DD HH:MM:SS`) is zero-padded
+/// and lexicographically sortable, so plain string comparison orders it — no
+/// date parsing, and no time zone to get wrong (every value compared comes from
+/// the same `virsh` on the same host).
+fn lease_entries(out: &str, mac: &str) -> Vec<(String, String)> {
     let mac_lower = mac.to_ascii_lowercase();
     out.lines()
         .filter_map(|l| {
@@ -672,8 +670,67 @@ fn parse_leases_latest_ip(out: &str, mac: &str) -> Option<String> {
             ip.parse::<std::net::Ipv4Addr>().ok()?;
             Some((expiry, ip.to_string()))
         })
+        .collect()
+}
+
+/// Pure parser for `virsh net-dhcp-leases` output: among the entries matching
+/// `mac`, returns the address of the one with the LATEST `Expiry Time`. See
+/// [`LibvirtBackend::ip_from_leases`] for why this is the only reliable signal
+/// (`domifaddr` can list several stale entries for the same MAC in no useful
+/// order).
+#[cfg(test)]
+fn parse_leases_latest_ip(out: &str, mac: &str) -> Option<String> {
+    match pick_lease_ip(out, mac, None) {
+        LeasePick::Current(ip) => Some(ip),
+        LeasePick::OnlyStale | LeasePick::NoLease => None,
+    }
+}
+
+/// What the lease table says about THIS boot's address.
+#[derive(Debug, PartialEq, Eq)]
+enum LeasePick {
+    /// A lease issued during this boot — the address to report.
+    Current(String),
+    /// The MAC has leases, but every one of them predates this boot. Reporting
+    /// any of them is reporting a dead VM's address; the caller must NOT fall
+    /// back to another source that reads the same table (`domifaddr` does).
+    OnlyStale,
+    /// No lease for this MAC at all.
+    NoLease,
+}
+
+/// Picks this boot's address from `virsh net-dhcp-leases` output: the latest
+/// lease for `mac` whose expiry is strictly after `floor` (see
+/// [`leases_max_expiry`], taken before the domain started).
+///
+/// BUG FIXED HERE, measured 2026-09-15: the MAC is derived from the VM's name
+/// ([`mac_for`]), and `delete vm` does not — cannot, through libvirt — release
+/// the dnsmasq lease. A VM deleted and re-created under the same name therefore
+/// found its predecessor's unexpired lease under its own MAC, and before the
+/// new guest had asked for an address that lease was the ONLY one: `vm create
+/// --wait` announced `ip 192.168.122.223` while the guest came up on `.224`.
+/// Once the new guest leases, its expiry is always the later one (same network,
+/// same lease time, issued later), so the stale entry only ever wins in that
+/// window — which is exactly when the banner is printed.
+///
+/// A guest that renews the SAME address after a `vm stop`/`vm start` gets a new
+/// expiry, above the floor, so it is still reported.
+fn pick_lease_ip(out: &str, mac: &str, floor: Option<&str>) -> LeasePick {
+    let entries = lease_entries(out, mac);
+    if entries.is_empty() {
+        return LeasePick::NoLease;
+    }
+    entries
+        .into_iter()
+        .filter(|(expiry, _)| floor.is_none_or(|f| expiry.as_str() > f))
         .max_by(|a, b| a.0.cmp(&b.0))
-        .map(|(_, ip)| ip)
+        .map_or(LeasePick::OnlyStale, |(_, ip)| LeasePick::Current(ip))
+}
+
+/// The latest expiry already in the lease table for `mac` — the floor a boot
+/// records before its domain starts. `None` when the MAC has no lease yet.
+fn leases_max_expiry(out: &str, mac: &str) -> Option<String> {
+    lease_entries(out, mac).into_iter().map(|(e, _)| e).max()
 }
 
 // ===========================================================================
@@ -693,6 +750,9 @@ pub struct Boot {
     pub api_socket: String,
     /// The VM's IP, if known at boot.
     pub ip: Option<String>,
+    /// See [`Vm::dhcp_lease_floor`]. Only a backend whose IP comes from a DHCP
+    /// lease table that outlives the VM sets it.
+    pub lease_floor: Option<String>,
 }
 
 /// The virtualization mechanism behind a microVM. Allows having Cloud
@@ -1352,6 +1412,7 @@ impl VmBackend for CloudHypervisorBackend {
             tap,
             mac,
             api_socket: sock.to_string_lossy().into_owned(),
+            lease_floor: None,
         })
     }
 
@@ -3087,6 +3148,9 @@ impl VmBackend for LibvirtBackend {
             // about how many times it has been stopped.
             Self::redefine_preserved_snapshots(uri, &cfg.name, vmdir);
         }
+        // BEFORE the domain starts: whatever the lease table holds for this MAC
+        // now belongs to an earlier boot (see `pick_lease_ip`).
+        let lease_floor = Self::leases_of(uri, &cfg.name).and_then(|o| leases_max_expiry(&o, &mac));
         on(CreateStage::Start);
         let out = stable_cmd("virsh")
             .args(["-c", uri, "start", "--", &cfg.name])
@@ -3104,15 +3168,19 @@ impl VmBackend for LibvirtBackend {
         }
         Ok(Boot {
             pid: None, // managed by libvirtd — liveness via virsh domstate
-            ip: Self::ip_from_leases(uri, &cfg.name, &mac)
-                .or_else(|| self.ip_uri(uri, &cfg.name))
-                .or_else(|| cfg.static_ip.clone()),
+            ip: match Self::ip_from_leases(uri, &cfg.name, &mac, lease_floor.as_deref()) {
+                LeasePick::Current(ip) => Some(ip),
+                LeasePick::OnlyStale => None,
+                LeasePick::NoLease => self.ip_uri(uri, &cfg.name),
+            }
+            .or_else(|| cfg.static_ip.clone()),
             // The EFFECTIVE mode (not the requested one): lets `vm describe`
             // and the bin tell a reachable VM (nat/bridge) from an egress-only
             // one (user) — the basis of the "no reachable IP" warning.
             tap: cfg.net_mode.clone().unwrap_or_else(|| "user".into()),
             mac,
             api_socket: String::new(),
+            lease_floor,
         })
     }
 
@@ -3122,7 +3190,13 @@ impl VmBackend for LibvirtBackend {
 
     fn ip(&self, vm: &Vm) -> Option<String> {
         let uri = libvirt_uri_of(&vm.name);
-        Self::ip_from_leases(uri, &vm.name, &vm.mac).or_else(|| self.ip_uri(uri, &vm.name))
+        match Self::ip_from_leases(uri, &vm.name, &vm.mac, vm.dhcp_lease_floor.as_deref()) {
+            LeasePick::Current(ip) => Some(ip),
+            // `domifaddr` reads the same lease table without the floor — asking
+            // it would hand back the very address just rejected.
+            LeasePick::OnlyStale => None,
+            LeasePick::NoLease => self.ip_uri(uri, &vm.name),
+        }
     }
 
     fn stop(&self, _vmdir: &Path, vm: &Vm) -> Result<()> {
@@ -3535,10 +3609,17 @@ impl LibvirtBackend {
     /// taking the MAX expiry is the only actually-correct signal available,
     /// not a heuristic. Falls back to [`Self::ip_uri`] (`domifaddr`) when
     /// this doesn't resolve (non-libvirt-managed network, no lease yet, ...).
-    fn ip_from_leases(uri: &str, name: &str, mac: &str) -> Option<String> {
+    /// `floor` is this boot's [`Vm::dhcp_lease_floor`]: leases at or below it
+    /// are an earlier boot's (see [`pick_lease_ip`]). A table that cannot be
+    /// read is [`LeasePick::NoLease`], which keeps the `domifaddr` fallback.
+    fn ip_from_leases(uri: &str, name: &str, mac: &str, floor: Option<&str>) -> LeasePick {
+        Self::leases_of(uri, name).map_or(LeasePick::NoLease, |out| pick_lease_ip(&out, mac, floor))
+    }
+
+    /// Raw `virsh net-dhcp-leases` of the network the domain is attached to.
+    fn leases_of(uri: &str, name: &str) -> Option<String> {
         let network = Self::network_of(uri, name)?;
-        let out = capture("virsh", &["-c", uri, "net-dhcp-leases", "--", &network])?;
-        parse_leases_latest_ip(&out, mac)
+        capture("virsh", &["-c", uri, "net-dhcp-leases", "--", &network])
     }
 
     /// IP via `virsh domifaddr` (may be empty in user-mode networking without an agent).
@@ -3857,6 +3938,7 @@ libvirt+qemu"
     vm.restart_policy = cfg.restart_policy.clone();
     vm.namespace = ns.clone();
     vm.ip = boot.ip;
+    vm.dhcp_lease_floor = boot.lease_floor;
     vm.backend = backend.id().to_string();
     vm.devices = cfg.devices.clone();
     vm.boot = boot_spec_of(cfg);
@@ -4680,6 +4762,66 @@ mod tests {
         );
         // No lease at all for this MAC.
         assert_eq!(parse_leases_latest_ip(out, "aa:bb:cc:dd:ee:ff"), None);
+    }
+
+    /// The re-created VM. Real `virsh net-dhcp-leases default` rows captured
+    /// on 2026-09-15 for `procsys-fix`, deleted and re-created twice under the
+    /// same name (so the same `mac_for` MAC) — one lease per incarnation, each
+    /// with its own client id, none released by `delete vm`.
+    #[test]
+    fn a_recreated_vm_never_reports_the_previous_incarnations_lease() {
+        let mac = "52:54:00:d5:15:98";
+        let before_boot = "\
+ Expiry Time           MAC address         Protocol   IP address           Hostname          Client ID or DUID
+-------------------------------------------------------------------------------------------------------------------------------------------------------
+ 2026-09-15 21:53:05   52:54:00:d5:15:98   ipv4       192.168.122.223/24   -                 ff:56:50:4d:98:00:02:00:00:ab:11:66:6c:2c:6a:54:f1:70:e4
+ 2026-09-15 22:08:07   52:54:00:83:78:cb   ipv4       192.168.122.81/24    nrcni             ff:56:50:4d:98:00:02:00:00:ab:11:8d:4c:f5:42:eb:1a:77:f4";
+        let floor = leases_max_expiry(before_boot, mac);
+        assert_eq!(floor.as_deref(), Some("2026-09-15 21:53:05"));
+
+        // The new guest has not asked for an address yet: the only lease is the
+        // dead VM's. This is what `vm create --wait` announced as the new IP.
+        assert_eq!(
+            pick_lease_ip(before_boot, mac, None),
+            LeasePick::Current("192.168.122.223".into()),
+            "without a floor the stale lease is indistinguishable — the bug"
+        );
+        assert_eq!(
+            pick_lease_ip(before_boot, mac, floor.as_deref()),
+            LeasePick::OnlyStale
+        );
+
+        // The new guest leases `.224`: reported, and the stale row still ignored.
+        let after_lease = format!(
+            "{before_boot}\n 2026-09-15 22:01:37   52:54:00:d5:15:98   ipv4       192.168.122.224/24   -                 ff:56:50:4d:98:00:02:00:00:ab:11:ab:5f:89:ae:2a:5f:bb:ea"
+        );
+        assert_eq!(
+            pick_lease_ip(&after_lease, mac, floor.as_deref()),
+            LeasePick::Current("192.168.122.224".into())
+        );
+        // Another VM's leases are never borrowed.
+        assert_eq!(
+            pick_lease_ip(before_boot, "52:54:00:aa:bb:cc", floor.as_deref()),
+            LeasePick::NoLease
+        );
+    }
+
+    /// `vm stop` + `vm start`: the guest keeps its address and renews it. The
+    /// renewal carries a new expiry, above the floor, so it is reported.
+    #[test]
+    fn a_restarted_vm_that_renews_the_same_address_is_still_reported() {
+        let mac = "52:54:00:d5:15:98";
+        let old = "2026-09-15 21:53:05 52:54:00:d5:15:98 ipv4 192.168.122.223/24 host -";
+        let floor = leases_max_expiry(old, mac);
+        let renewed = "2026-09-15 22:40:11 52:54:00:d5:15:98 ipv4 192.168.122.223/24 host -";
+        assert_eq!(
+            pick_lease_ip(old, mac, floor.as_deref()),
+            LeasePick::OnlyStale
+        );
+        assert_eq!(
+            pick_lease_ip(renewed, mac, floor.as_deref()),
+            LeasePick::Current("192.168.122.223".into())
+        );
     }
 
     #[test]
@@ -6730,6 +6872,7 @@ Format specific information:
                     mac: String::new(),
                     api_socket: "remoto:novo".into(),
                     ip: None,
+                    lease_floor: None,
                 })
             }
             fn resume(&self, _: &Path, vm: &Vm) -> Result<Option<Boot>> {
@@ -6740,6 +6883,7 @@ Format specific information:
                     mac: String::new(),
                     api_socket: vm.api_socket.clone(),
                     ip: None,
+                    lease_floor: None,
                 }))
             }
             fn is_running(&self, _: &Vm) -> bool {
