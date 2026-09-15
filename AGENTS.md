@@ -6195,6 +6195,40 @@ Portanto o `oom_kill` tem de ser capturado **ao vivo** por quem já vive tanto q
 — o candidato natural é o shim de logs, que é o único processo por-container que existe neste
 modelo — e persistido no registo. Não tentar lê-lo depois: a informação já não está lá.
 
+**FECHADO (2026-09-15) — e o candidato natural era outro.** Medido a 20 ms: `oom_kill 2` no
+`memory.events`, e o directório desaparecido 20 ms depois **com o registo já `Crashed`** antes de
+qualquer comando nosso correr. Quem apaga o cgroup é o **supervisor** que o `run -d` sempre faz
+fork (`wait_and_record`), e o `waitpid` em primeiro plano do `create_with` faz o mesmo. São os
+únicos que vêem a morte com autoridade, por isso é lá que se lê: o caminho do cgroup e a linha
+de base do contador ANTES do `waitpid` (o `live_cgroup` lê `/proc/<pid>/cgroup`, que o reap
+leva), e o contador outra vez DEPOIS, antes do `remove_container_cgroup`.
+
+- **Uma SUBIDA do contador, nunca `> 0`**: um leaf que sobreviveu (um `rmdir` falhado, o leaf de
+  um nó Kind reutilizado de propósito) traz a contagem antiga, e `> 0` chamaria OOM a um
+  `kill -9`. E só para `Crashed`/`Failed` — um filho morto por OOM debaixo de um init que saiu 0
+  não é uma morte por OOM.
+- **`memory.events.local` primeiro**: o `memory.events` é hierárquico, e o leaf de um nó Kind
+  contém uma árvore systemd inteira — o OOM de um pod lá dentro leria como o NÓ ter sido morto.
+- **Não por cima de um `stop` pedido**: aí a causa é o operador, faça o contador o que fizer.
+- A razão chega aos consumidores: `container ls`/`describe` mostram `Dead (OOMKilled)` (um `Dead`
+  sozinho lê-se igual para um OOM e para um `kill -9`, e os remédios são opostos), e o CRI
+  responde `reason: OOMKilled`, a string que o kubelet e o `kubectl describe` já conhecem.
+
+**E o CRI não aplicava limite nenhum, por isso o `OOMKilled` do CRI nunca podia acontecer.**
+A primeira prova pelo `crictl` deu `Error`/exit 1, e o registo do motor explicou porquê:
+`memory_max: 6646M`, o default do motor, para um pedido de 48 MiB. O `linux.resources` do
+`CreateContainer` não era lido por ninguém — os `resources.limits` de memória e CPU de um pod
+nunca chegavam ao container, sem um aviso, e o scheduler julgava-o limitado. O
+`CriResources` guarda-os no registo e o `start_argv` traduz: `-m`, `--cpus` (quota/período),
+`--cpu-weight` (shares pelo mapa linear do runc/crun) e `--cpuset`. Validado com o `crictl`
+a sério: `memory_max: 50331648`, e depois `exitCode 137`, `reason OOMKilled`.
+
+**Por decidir, e é política, não código**: um pod SEM limites continua a herdar os defaults do
+motor (um quarto da memória, no máximo 1 core), porque o motor recusa por desenho um container
+sem tecto de CPU (`--cpus` não aceita `max`). Para o Kubernetes «sem limite» é sem limite, e um
+etcd preso a 1 core é o mesmo estrangulamento silencioso. O `UpdateContainerResources` também
+continua `todo`.
+
 ## `HYPERVISOR` no VMfile + `vm convert` + `vm default-backend` (v0.45.x)
 
 Três lacunas fechadas na pilha de imagens VM já existente (`vm build`/`vm create`), pedidas
