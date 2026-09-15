@@ -1,0 +1,12 @@
+volume create v1                               rc=0   v1 
+run c1 -v v1:/data                             rc=0   pulling alpine… 72e4b1203342b96f 
+data present                                   rc=0   precious 
+volume rm v1 while in use                      rc=1   error invalid argument: volume 'v1' is in use by container(s): c1 (running) — stop/remove them first, or pass --force to destroy the data anyway 
+data after refused rm                          rc=0   precious 
+backup create container c1                     rc=0   /tmp/dxs-bk/container-c1-20260915-204430.tar.gz (1.2 KiB)   volumes: v1 
+archive=/tmp/dxs-bk/container-c1-20260915-204430.tar.gz size=1203
+restore over running, no --force               rc=1     container c1, taken 20260915-204430 on kaeso-sys-01 error invalid argument: restore: 'c1' is running — stop it first, or pass --force to have this command stop and restart it 
+inspect truncated archive                      rc=0   Volumes:   v1 
+restore TRUNCATED --force                      rc=1     container c1, taken 20260915-204430 on kaeso-sys-01 error invalid argument: restore: /tmp/dxs-bk/trunc.tar.gz: failed to unpack `/tmp/dxs/tmp/backup-979956-0/config/container.json` 
+data after failed restore                      rc=0   newer-than-backup 
+container state after failed restore           rc=0   CONTAINER ID   IMAGE    COMMAND       CREATED                  STATUS        RESTARTS   NAMES 72e4b1203342   alpine   "sleep 600"   Less than a second ago   Up 1 second   0          c1 

@@ -1,0 +1,7 @@
+== inj shim=1 nft=/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/shim/nft
+network create rc=0
+run rc=0
+container ip=10.235.51.2
+NO ANTISPOOF RULE IN fwdeny
+[2m2026-09-15T16:50:56.565079Z[0m [32m INFO[0m [2mdelonix_image::registry[0m[2m:[0m pulling library/alpine:latest from registry-1.docker.io [3mrepo[0m[2m=[0mlibrary/alpine [3mreference[0m[2m=[0mlatest [3mhost[0m[2m=[0mregistry-1.docker.io
+[2m2026-09-15T16:50:57.560150Z[0m [32m INFO[0m [2mdelonix_image::registry[0m[2m:[0m platform selected: linux/amd64 [3march[0m[2m=[0mamd64

@@ -1,0 +1,56 @@
+Docker Engine API coverage — delonix 3.1.0: 14 served, 12 refused with a reason.
+
+METHOD     PATH                       MAPS TO
+GET|HEAD   /_ping                     liveness
+GET        /version                   engine version
+GET        /info                      engine state
+GET        /containers/json           container ps
+GET        /images/json               image ls
+POST       /containers/create         container run -d (creates AND starts; HostConfig.RestartPolicy is REFUSED)
+POST       /containers/{id}/start     idempotent 304 if already running
+POST       /containers/{id}/stop      container stop
+POST       /containers/{id}/kill      container kill
+POST       /containers/{id}/wait      container wait
+POST       /containers/{id}/restart   container restart
+POST       /containers/{id}/rename    container rename
+DELETE     /containers/{id}           container rm
+GET        /containers/{id}/json      container inspect
+
+NOT implemented (a 404 names the route, never a silent success):
+METHOD            PATH                      WHY
+POST              /containers/{id}/exec     needs HTTP hijacking (a raw bidirectional stream over the upgraded connection); use `delonix container exec`
+POST              /containers/{id}/attach   same hijacking requirement, and this engine keeps no live stdin conduit to an already-started detached container
+GET               /containers/{id}/logs     not written yet; `delonix container logs` covers it
+GET               /events                   not written yet; `delonix system events` covers it
+POST              /build                    not written yet; `delonix build` covers it
+GET|POST|DELETE   /networks                 not written yet; `delonix network` covers it
+POST              /networks/create          not written yet; `delonix network create` covers it
+GET               /networks/{id}            not written yet; `delonix network inspect` covers it
+POST              /images/create            not written yet — this is the pull, and most tools call it first; `delonix image pull` covers it from the CLI
+GET               /images/{name}/json       not written yet; `delonix image describe` covers it
+GET               /containers/{id}/stats    not written yet — it is a live metric stream, and this engine exposes those over Prometheus (`/metrics`) instead; `delonix dash` covers the interactive case
+GET|POST|DELETE   /volumes                  not written yet; `delonix volume` covers it
+
+What real tooling calls, and where each was observed — every row here is in one of the two tables above, and a test enforces that:
+METHOD   PATH                       STATE     SEEN IN
+GET      /_ping                     served    compose, kind — the first call any client makes
+GET      /version                   served    compose, kind
+GET      /info                      served    kind — `info --format {{json .}}`
+GET      /containers/json           served    kind — `ps -a --filter label=...`
+POST     /containers/create         served    kind, compose — `run`
+POST     /containers/{id}/start     served    compose
+POST     /containers/{id}/stop      served    compose
+POST     /containers/{id}/kill      served    compose
+POST     /containers/{id}/wait      served    compose
+POST     /containers/{id}/restart   served    compose
+POST     /containers/{id}/rename    served    compose
+DELETE   /containers/{id}           served    kind — `rm -f -v <n>`
+GET      /containers/{id}/json      served    kind — four distinct `inspect --format`
+GET      /containers/{id}/logs      refused   kind — `logs -f <n>`
+POST     /containers/{id}/exec      refused   kind — `exec --privileged [-i] <n> <cmd>`
+POST     /images/create             refused   kind — `pull <ref>`
+GET      /images/{name}/json        refused   kind — `inspect --type=image <ref>`
+GET      /networks                  refused   kind — `network ls --filter=name=^kind$`
+POST     /networks/create           refused   kind — `network create -d=bridge …`
+GET      /networks/{id}             refused   kind — `network inspect bridge -f …`
+GET      /containers/{id}/stats     refused   Testcontainers, Dev Containers, GitLab Runner — per AGENTS.md, not captured here

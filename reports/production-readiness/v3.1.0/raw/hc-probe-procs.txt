@@ -1,0 +1,5 @@
+353225 ppid=353224 wchan=hrtimer_nanosleep etime=     58 cmd=sleep 300 
+354499 ppid=353224 wchan=do_wait etime=      0 cmd=/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/796b5e1f-8974-461e-ae99-8ea71e6be20a/scratchpad/target/debug/delonix container run -d --name tz --net none --health-cmd true --health-interval 1 --health-timeout 1 alpine sleep 300 
+354500 ppid=354499 wchan=sigsuspend etime=      0 cmd=/bin/sh -c true & __p=$!; ( trap 'kill -9 $__z 2>/dev/null; wait $__z 2>/dev/null; exit 0' TERM; sleep 1 & __z=$!; wait $__z; kill -9 $__p 2>/dev/null ) & __w=$!; wait $__p; __rc=$?; kill $__w 2>/dev/null; wait $__w 2>/dev/null; exit $__rc 
+354502 ppid=354500 wchan=sigsuspend etime=      0 cmd=/bin/sh -c true & __p=$!; ( trap 'kill -9 $__z 2>/dev/null; wait $__z 2>/dev/null; exit 0' TERM; sleep 1 & __z=$!; wait $__z; kill -9 $__p 2>/dev/null ) & __w=$!; wait $__p; __rc=$?; kill $__w 2>/dev/null; wait $__w 2>/dev/null; exit $__rc 
+354503 ppid=354502 wchan=hrtimer_nanosleep etime=      0 cmd=sleep 1 

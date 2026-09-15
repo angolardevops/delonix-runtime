@@ -1,0 +1,7 @@
+# compose project: compose
+service web:
+  container: compose-web
+  image: nginx
+  network: compose_default
+  ports: []
+  volumes: ["/tmp:/data"]

@@ -1,0 +1,106 @@
+   Compiling ring v0.17.14
+   Compiling zstd-sys v2.0.16+zstd.1.5.7
+   Compiling zstd-safe v7.2.4
+   Compiling zstd v0.13.3
+   Compiling rustls-webpki v0.103.15
+   Compiling rustls v0.23.45
+   Compiling tokio-rustls v0.26.4
+   Compiling hyper-rustls v0.27.9
+   Compiling reqwest v0.12.28
+   Compiling delonix-image v3.1.0 (/tmp/wt-prodready/crates/delonix-image)
+   Compiling delonix-truenas v3.1.0 (/tmp/wt-prodready/crates/delonix-truenas)
+   Compiling delonix-proxmox v3.1.0 (/tmp/wt-prodready/crates/delonix-proxmox)
+   Compiling delonix-scan v3.1.0 (/tmp/wt-prodready/crates/delonix-scan)
+   Compiling delonix-cri v3.1.0 (/tmp/wt-prodready/crates/delonix-cri)
+   Compiling delonix-mgmt v0.1.0 (/tmp/wt-prodready/crates/delonix-mgmt)
+   Compiling delonix-mcp v3.1.0 (/tmp/wt-prodready/crates/delonix-mcp)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 19.59s
+   Doc-tests delonix_cri
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests delonix_image
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests delonix_mcp
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests delonix_mgmt
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests delonix_net
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests delonix_net_rules
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests delonix_proxmox
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests delonix_runtime
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests delonix_runtime_core
+
+running 4 tests
+test crates/delonix-runtime-core/src/typestate.rs - typestate (line 36) - compile fail ... ok
+test crates/delonix-runtime-core/src/typestate.rs - typestate (line 24) - compile fail ... ok
+test crates/delonix-runtime-core/src/typestate.rs - typestate (line 30) - compile fail ... ok
+test crates/delonix-runtime-core/src/typestate.rs - typestate (line 9) ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
+
+   Doc-tests delonix_scan
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests delonix_security_runtime
+
+running 1 test
+test crates/delonix-security-runtime/src/lib.rs - (line 11) ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+
+   Doc-tests delonix_truenas
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests delonix_vm
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests delonix_volume
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

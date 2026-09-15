@@ -1,0 +1,4 @@
+pulling alpine…
+[2m2026-09-15T16:35:14.611965Z[0m [32m INFO[0m [2mdelonix_image::registry[0m[2m:[0m pulling library/alpine:latest from registry-1.docker.io [3mrepo[0m[2m=[0mlibrary/alpine [3mreference[0m[2m=[0mlatest [3mhost[0m[2m=[0mregistry-1.docker.io
+[2m2026-09-15T16:35:15.793996Z[0m [32m INFO[0m [2mdelonix_image::registry[0m[2m:[0m platform selected: linux/amd64 [3march[0m[2m=[0mamd64
+a5a8fe61bf831238
