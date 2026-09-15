@@ -1898,6 +1898,9 @@ fn setup_rootfs(
 /// (can cause host panic/reboot) and `kcore` (kernel memory). Wires them to
 /// `/dev/null`/read-only. Best-effort: runs before seccomp, with caps still
 /// present. (Replicates Docker's *masked paths*.)
+///
+/// `/proc/sys` is made read-only only when [`proc_sys_read_only`] says so —
+/// see there for why a privileged container keeps it writable.
 fn mask_proc_paths(privileged: bool) {
     // bind /dev/null over sysrq-trigger -> writes go to the void.
     let _ = mount(
@@ -1915,20 +1918,10 @@ fn mask_proc_paths(privileged: bool) {
         MsFlags::MS_BIND,
         None::<&str>,
     );
-    // /proc/sys read-only (prevents changing host sysctls) — except under
-    // `--privileged`, whose whole meaning is «no such protection» (Docker/runc
-    // leave it writable too).
-    //
-    // Unconditional before, and it undid the CRI's fix for kube-proxy (#237):
-    // the CRI stopped sending `/proc/sys` as a read-only path and passed
-    // `--privileged`, but this remount put it back regardless. Measured
-    // 2026-09-15 on a kubeadm node: `--privileged --net host` still showed
-    // `proc /proc/sys proc ro`, and kube-proxy died on `open
-    // /proc/sys/net/netfilter/nf_conntrack_max: read-only file system` — no
-    // ClusterIP, so no CoreDNS.
-    if privileged {
+    if !proc_sys_read_only(privileged) {
         return;
     }
+    // /proc/sys read-only (prevents changing host sysctls).
     let _ = mount(
         Some("/proc/sys"),
         "/proc/sys",
@@ -1943,6 +1936,25 @@ fn mask_proc_paths(privileged: bool) {
         MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY,
         None::<&str>,
     );
+}
+
+/// Whether the engine itself remounts `/proc/sys` read-only.
+///
+/// Not for a privileged container. This remount is a SECOND mechanism, apart
+/// from `readonly_paths`: the CRI stopped forwarding the kubelet's
+/// `readonly_paths` for `privileged: true` (issue #237), and the CLI never
+/// applies the defaults with `--privileged`, yet `/proc/sys` stayed read-only
+/// because this one fired regardless. Measured on a kubeadm node (k8s 1.36.4,
+/// `delonix-cri` as root): `kube-proxy` died in CrashLoopBackOff with
+/// `open /proc/sys/net/netfilter/nf_conntrack_max: read-only file system`,
+/// and `mountinfo` inside a `--privileged --net host` container showed exactly
+/// one `ro` bind on `/proc/sys` (two without `--privileged`).
+///
+/// Writable `/proc/sys` is what `--privileged` means in Docker and runc. It
+/// does not widen what an unprivileged user can do: in a user namespace the
+/// kernel still refuses writes to sysctls owned by the initial namespace.
+fn proc_sys_read_only(privileged: bool) -> bool {
+    !privileged
 }
 
 /// Base and size of the UID mapping for the user namespace: the container's
@@ -3355,8 +3367,8 @@ pub const DEFAULT_MASKED_PATHS: &[&str] = &[
     "/sys/firmware",
 ];
 
-/// The paths runc keeps read-only by default. `/proc/sys` is already remounted
-/// read-only wholesale by `mask_proc_paths`; these are the remaining `/proc`
+/// The paths runc keeps read-only by default. For a non-privileged container
+/// `/proc/sys` is also remounted read-only by `mask_proc_paths`; these are the remaining `/proc`
 /// subtrees where a write is a host-level effect (`/proc/irq` steers interrupt
 /// affinity, `/proc/bus` reaches PCI config space).
 pub const DEFAULT_READONLY_PATHS: &[&str] = &[
@@ -7734,6 +7746,16 @@ mod tests {
                 "{p} tem de ser read-only por omissão"
             );
         }
+    }
+
+    /// kube-proxy writes `nf_conntrack_max` at start-up; with `/proc/sys`
+    /// read-only in a privileged container it crash-looped on every kubeadm
+    /// node. The non-privileged container keeps both read-only mechanisms.
+    #[test]
+    fn privileged_keeps_proc_sys_writable_unprivileged_does_not() {
+        assert!(!super::proc_sys_read_only(true));
+        assert!(super::proc_sys_read_only(false));
+        assert!(super::DEFAULT_READONLY_PATHS.contains(&"/proc/sys"));
     }
 
     #[test]
