@@ -1,8 +1,12 @@
 //! **Local management API of the Delonix Runtime** (HTTP+JSON over a unix socket).
 //!
-//! This is the surface that an external control-plane (the `delonix-paas`, via its
-//! `RemoteRuntime`) consumes to operate the engine **without a direct link to the
-//! crates** — it speaks only HTTP with this socket on the same host. It complements
+//! A local process on the same host drives the engine through this socket
+//! **without a direct link to the crates** — it speaks only HTTP. No external
+//! consumer of it exists today: an earlier version of this doc named a
+//! `RemoteRuntime` in `delonix-paas`, and that type never existed there (measured
+//! 2026-09-15, `git log --all -S RemoteRuntime`). The control plane's node agent is
+//! the consumer being designed, against the local node contract of ADR-0040/0041
+//! (both Proposed), not against these routes. It complements
 //! the CRI (`delonix-cri`, which serves the kubelet): this serves the product's
 //! *management* (volumes/containers/…).
 //!
@@ -36,9 +40,9 @@ struct AppState {
     /// (rm/stop/start/…) must reuse the engine's REAL path — kill the process,
     /// clean up cgroups/namespaces, unpublish ports, disconnect networks — which
     /// lives in the CLI. Calling the CLI itself guarantees full parity, rather than
-    /// reimplementing that cleanup here. It is the same decision the PaaS's
-    /// `InProcessRuntime` already took; the Runtime-as-a-service architecture only
-    /// MOVES that shell-out here.
+    /// reimplementing that cleanup here. The shell-out is debt, not design: it
+    /// exists because that logic lives in a crate with no `[lib]` target, and
+    /// ADR-0041 (Proposed) plans moving these mutations onto library calls.
     bin: PathBuf,
 }
 
@@ -259,8 +263,9 @@ fn router(state: AppState) -> Router {
         // `ContainerUpdateSpec` has but the runtime does NOT (memory/cpus/restart/
         // dns/hosts) are rejected on the PaaS side and never reach here.
         .route("/v1/containers/:id/reconfig", post(reconfig_container))
-        // VMs (delonix-vm subsystem): ONLY stop/rm (the runtime has no `vm run`/
-        // `vm start`; `vm create` is another model). See the note in the PaaS.
+        // VMs (delonix-vm subsystem): ONLY stop/rm. `vm create`/`vm start` exist
+        // (`delonix_vm::create`/`start`) but are not routed here; ADR-0041 (Proposed)
+        // proposes adding them to the node contract instead of to these routes.
         .route("/v1/vms/:name/action", post(vm_action_ep))
         .with_state(state)
 }
@@ -583,7 +588,7 @@ async fn container_logs_ep(State(s): State<AppState>, Path(id): Path<String>) ->
         return err_response(Error::Invalid("invalid container id".to_string()));
     }
     // `logs` request/response (not streaming); the output comes as-is, even if the
-    // container does not exist (the client ignores the `ok`, like the InProcessRuntime).
+    // container does not exist (a client is expected to ignore the `ok` here).
     match run_cli(
         s.bin,
         s.base,
@@ -655,9 +660,9 @@ struct RunSpecBody {
 }
 
 /// Rebuilds the `delonix container run -d …` args from the spec — a PURE function
-/// (testable without a kernel). The filters are the SAME the PaaS's `InProcessRuntime`
-/// already used; the only flag-name difference is deliberate: the runtime binary
-/// uses `--net` (the PaaS one, with the docker shim, used `--network`).
+/// (testable without a kernel). The filters were copied from the PaaS's CLI
+/// adapter (a type that no longer exists under that name there); the runtime
+/// binary uses `--net`, where that adapter, over the docker shim, used `--network`.
 fn build_run_args(spec: RunSpecBody) -> Vec<String> {
     let mut args: Vec<String> = vec!["container".into(), "run".into(), "-d".into()];
     if !spec.name.is_empty() {
@@ -1483,8 +1488,8 @@ async fn reconfig_container(
     }
 }
 
-/// Body of `POST /v1/vms/:name/action`. Only `stop`/`rm` (the runtime has no
-/// `vm start`; `vm run`/`vm create` are another subsystem — refused in the PaaS).
+/// Body of `POST /v1/vms/:name/action`. Only `stop`/`rm` — `delonix_vm::start`
+/// exists but is not routed (see the router note).
 #[derive(serde::Deserialize)]
 struct VmActionBody {
     action: String,
