@@ -1586,6 +1586,33 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["network node key", "network create", "network describe"],
     },
     Entry {
+        path: "network ipam",
+        group: "Advanced",
+        examples: &[
+            ("see every lease this node holds, and which ones have no live owner", "delonix network ipam ls"),
+            ("reclaim the leases network diagnose already flags as orphaned", "delonix network ipam prune"),
+        ],
+        see_also: &["network diagnose", "network create", "system prune"],
+    },
+    Entry {
+        path: "network ipam ls",
+        group: "Inspect",
+        examples: &[
+            ("every lease on this node, with its owner or `<orphaned>`", "delonix network ipam ls"),
+            ("only the leases of one network", "delonix network ipam ls mynet"),
+        ],
+        see_also: &["network ipam prune", "network diagnose", "network inspect"],
+    },
+    Entry {
+        path: "network ipam prune",
+        group: "Maintenance",
+        examples: &[
+            ("preview what would be reclaimed, without touching the registry", "delonix network ipam prune --dry-run"),
+            ("reclaim leases with no live container, past the grace window", "delonix network ipam prune"),
+        ],
+        see_also: &["network ipam ls", "network diagnose", "system prune"],
+    },
+    Entry {
         path: "pod",
         group: "Workloads",
         examples: &[

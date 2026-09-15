@@ -4347,6 +4347,51 @@ Enquanto não existir, o tecto é largo (um `/16` dá 65 mil endereços por rede
 é invisível — mas é monótono, e hoje não há um único comando que o mostre. O
 `network ipam ls` (só leitura) é o passo que vem antes de qualquer ceifa.
 
+**FECHADO (2026-09-15): `network ipam ls` + `network ipam prune`**, e o `system prune`
+varre-o também (um timer `--auto` fecha a fuga sem um segundo agendamento). O ceifador
+(`ipam::reap_orphan_leases`) corre sob o `IpamLock`, e um lease visto órfão pela primeira
+vez é só CANDIDATO: é reclamado numa corrida POSTERIOR que ainda o encontre órfão além do
+MESMO `REF_MARKER_GRACE` (a constante é partilhada, para as duas janelas não divergirem).
+O relógio vive num ficheiro à parte (`ipam/reap-candidates`, **sem** `.json`, para o
+`all_leases` o saltar como salta o `lock`).
+
+**O rascunho tinha o defeito que esta secção previa, e só a leitura dos chamadores o
+apanhou**: julgava vivo «há container com este id». Mas um lease é chaveado pelo id que
+se passou ao `attach_container`, e um POD aluga como `pod-<nome>` (a netns), o
+`netns attach` com um nome à escolha, o CRI com o id do sandbox. Quinze segundos depois
+da primeira passagem, o `prune` entregava o IP de um pod A CORRER ao container seguinte.
+A vivacidade passou a sair de UMA função, `prune::lease_owners`, partilhada pelo `ls`,
+pelo `prune` e pelo `system prune`: todos os registos de container (parados incluídos — um
+`start` devolve o mesmo IP), o `pod` de cada membro, e todo o marcador de ref ligado. As
+duas últimas erram para o lado de GUARDAR: um marcador órfão segura o seu lease uma
+passagem a mais, e isso recupera-se; um IP duplicado não.
+
+**E falha FECHADO**: um store ilegível é `Err` (exit 77), nunca um conjunto vazio — vazio
+lê-se como «nada vive» e reclamaria tudo na passagem seguinte, o contra-exemplo do
+`reap_orphan_hostfwds` citado acima. Validado ao vivo com roots isolados (pod + container
++ um órfão real): o órfão sai à 2.ª passagem, o pod e o container ficam, pelos dois
+caminhos; com `containers/` a `chmod 000` o comando recusa sem escrever candidato nenhum.
+
+**Uma fonte da fuga, FECHADA na origem**: o `attach_container` fazia o `allocate` ANTES do
+`acquire`/linha de controlo, e nenhum caminho de erro devolvia o lease — um attach que
+falha (medido: um `DELONIX_NET_RUNTIME_DIR` longo demais para o `SUN_LEN`) deixava-o para
+trás sem container nenhum. Os três attaches (`attach_container`, `_on_ip`, `_extra`) passam
+por `restore_lease`, que repõe o registo no estado de ANTES da chamada e não simplesmente
+liberta: num re-attach (o `start` de um parado, a netns de um pod recriada) o lease já lá
+estava, e libertá-lo por uma falha transitória mudava o IP do container à tentativa
+seguinte. Medido na mesma falha: binário antigo deixou o lease, binário novo deixou `{}`.
+
+**O MESMO defeito vivia no ceifador de REFS, e era pior — medido ao vivo**: o conjunto de
+vivos do `system prune` eram ids de container + `cri-*` + `vm-*`. O marcador de um pod é
+`pod-<nome>`, e caía como órfão. Um pod sozinho num nó, `system prune --force` depois da
+janela de graça: o marcador foi ceifado, o conjunto ficou vazio, o `teardown_locked`
+desmontou a infra, e o pod A CORRER ficou sem `eth0` e com `Network unreachable`. Uma
+limpeza de rotina derrubava a rede de um nó só com pods. `prune::live_ref_owners` junta a
+netns de todo o pod com pelo menos um membro vivo; um pod todo parado continua ceifável.
+Validado: o mesmo cenário com o binário novo deixa `ingress UP · refcount 1` e o pod com
+IP e ping. **A lição repete a desta secção**: um lease e um marcador são chaveados pelo id
+passado ao attach, e esse id NÃO é sempre um id de container.
+
 Ver [docs/RELATORIO-PRE-PRODUCAO.md](docs/RELATORIO-PRE-PRODUCAO.md) para a bateria E2E completa
 (139 PASS / 1 FAIL) e a lista de gaps.
 

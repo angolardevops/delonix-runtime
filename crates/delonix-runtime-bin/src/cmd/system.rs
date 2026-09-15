@@ -688,6 +688,26 @@ fn cmd_prune(all: bool, force: bool, auto: bool, threshold: u8, dry_run: bool) -
     }
     let i = super::prune::sweep_images(&images, &store, all)?;
     let rmn = super::prune::sweep_networks(&store)?;
+    // The IPAM leak this repo measured (391 leases, 47 with a live container —
+    // 88% orphaned) has its own reaper (`network ipam prune`) — swept here too
+    // so a scheduled `system prune --auto` closes it without a second timer.
+    // Safe under the same grace-window rule as `infra::reap_orphan_refs`: a
+    // lease first seen orphaned is only a candidate, never reclaimed on sight.
+    // Liveness is `prune::lease_owners`, NOT the container ids alone: a pod
+    // leases under `pod-<name>`, and a set without it hands a running pod's
+    // address to the next container.
+    let live_ids: std::collections::HashSet<String> =
+        super::prune::lease_owners(&store)?.into_keys().collect();
+    let leases_freed = delonix_net::ipam::reap_orphan_leases(&live_ids);
+    if leases_freed > 0 {
+        println!(
+            "{}",
+            super::po::tf(
+                "net: {n} orphan IPAM lease(s) reaped",
+                &[("n", &leases_freed.to_string())]
+            )
+        );
+    }
 
     let mut total = c.freed;
     total.add(i.freed);
