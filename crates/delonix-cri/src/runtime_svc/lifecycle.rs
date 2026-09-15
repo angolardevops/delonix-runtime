@@ -79,6 +79,75 @@ fn sandbox_state(r: &SandboxRec) -> i32 {
     }
 }
 
+/// The CRI's `LinuxContainerResources`, kept field by field so `start_argv` can
+/// turn them into `container run` flags. `0`/empty means «not specified», the
+/// CRI's own convention.
+#[derive(Serialize, Deserialize, Clone, Default, Debug, PartialEq)]
+struct CriResources {
+    #[serde(default)]
+    memory_limit_in_bytes: i64,
+    #[serde(default)]
+    cpu_quota: i64,
+    #[serde(default)]
+    cpu_period: i64,
+    #[serde(default)]
+    cpu_shares: i64,
+    #[serde(default)]
+    cpuset_cpus: String,
+}
+
+impl CriResources {
+    fn from_cri(r: Option<&LinuxContainerResources>) -> Self {
+        r.map(|r| CriResources {
+            memory_limit_in_bytes: r.memory_limit_in_bytes,
+            cpu_quota: r.cpu_quota,
+            cpu_period: r.cpu_period,
+            cpu_shares: r.cpu_shares,
+            cpuset_cpus: r.cpuset_cpus.clone(),
+        })
+        .unwrap_or_default()
+    }
+}
+
+/// `cpu.shares` (cgroup v1, what the kubelet sends: 2..262144) → `cpu.weight`
+/// (cgroup v2, 1..10000). The same linear map runc and crun use, so a pod gets
+/// the same relative weight here as on any other runtime.
+fn shares_to_weight(shares: i64) -> i64 {
+    (1 + ((shares.clamp(2, 262_144) - 2) * 9999) / 262_142).clamp(1, 10_000)
+}
+
+/// The resource flags for `container run`, from what the kubelet asked.
+///
+/// This did not exist: `linux.resources` was read by nobody, so a pod's
+/// `resources.limits` never reached the container. Measured (2026-09-15,
+/// `crictl` with `memory_limit_in_bytes: 50331648`): the engine record said
+/// `memory_max: 6646M` — the engine's default — and a memory hog exited on its
+/// own instead of being OOM-killed. The scheduler believed the pod was capped.
+///
+/// Only what was specified: an unspecified field keeps the engine's default,
+/// exactly as `container run` without the flag does.
+fn resource_argv(r: &CriResources) -> Vec<String> {
+    let mut args = Vec::new();
+    if r.memory_limit_in_bytes > 0 {
+        args.push("-m".to_string());
+        args.push(r.memory_limit_in_bytes.to_string());
+    }
+    if r.cpu_quota > 0 && r.cpu_period > 0 {
+        let cores = r.cpu_quota as f64 / r.cpu_period as f64;
+        args.push("--cpus".to_string());
+        args.push(format!("{cores:.3}"));
+    }
+    if r.cpu_shares > 0 {
+        args.push("--cpu-weight".to_string());
+        args.push(shares_to_weight(r.cpu_shares).to_string());
+    }
+    if !r.cpuset_cpus.is_empty() {
+        args.push("--cpuset".to_string());
+        args.push(r.cpuset_cpus.clone());
+    }
+    args
+}
+
 #[derive(Serialize, Deserialize, Clone, Default)]
 struct ContainerRec {
     id: String,
@@ -108,6 +177,9 @@ struct ContainerRec {
     /// log_path) — where the kubelet/crictl expect to read stdout/stderr (CRI format).
     #[serde(default)]
     log_path: String,
+    /// The pod's `linux.resources` — see [`resource_argv`].
+    #[serde(default)]
+    resources: CriResources,
     labels: HashMap<String, String>,
     annotations: HashMap<String, String>,
     // --- security context (CRI) translated to `delonix run` flags ---
@@ -388,6 +460,25 @@ fn delonix_exit(base: &Path, cri_id: &str) -> Option<i32> {
         S::Stopped => Some(0),
         S::Crashed => Some(137),
         _ => None,
+    }
+}
+
+/// Whether the kernel's OOM killer took this CRI container down (the engine
+/// records it on the cgroup before removing it — see `delonix_runtime::OOM_KILLED`).
+fn delonix_oom_killed(base: &Path, cri_id: &str) -> bool {
+    load_reconciled(base, cri_id)
+        .is_some_and(|c| c.crash_reason.as_deref() == Some(delonix_runtime::OOM_KILLED))
+}
+
+/// The CRI `reason` for an exited container. `OOMKilled` is the string the
+/// kubelet and `kubectl describe` already know; before it existed an OOM came
+/// back as `Error` with exit 137, indistinguishable from an external SIGKILL.
+fn exit_reason(exit: Option<i32>, oom_killed: bool) -> String {
+    match exit {
+        None => String::new(),
+        Some(_) if oom_killed => "OOMKilled".into(),
+        Some(0) => "Completed".into(),
+        Some(_) => "Error".into(),
     }
 }
 
@@ -824,6 +915,7 @@ pub fn create_container(
         started_at: 0,
         finished_at: 0,
         log_path: full_log_path,
+        resources: CriResources::from_cri(cfg.linux.as_ref().and_then(|l| l.resources.as_ref())),
         labels: cfg.labels,
         annotations: cfg.annotations,
         readonly_rootfs,
@@ -946,6 +1038,7 @@ fn start_argv(
         "--name".into(),
         format!("cri-{id}"),
     ];
+    args.extend(resource_argv(&rec.resources));
     // Logs in the path/format the kubelet/crictl expect (CRI), if any.
     if !rec.log_path.is_empty() {
         args.push("--log-file".into());
@@ -1325,11 +1418,7 @@ pub fn container_status(
         }),
         image_ref: r.image.clone(),
         log_path: r.log_path.clone(),
-        reason: match exit {
-            Some(0) => "Completed".into(),
-            Some(_) => "Error".into(),
-            None => String::new(),
-        },
+        reason: exit_reason(exit, delonix_oom_killed(base, &r.id)),
         // Preserve the CreateContainer attributes — the conformance spec
         // `preserving container attributes` requires labels/annotations to come
         // back exactly as they were set; with `..Default::default()` they came empty.
@@ -1995,6 +2084,72 @@ fn cri_port_specs(mappings: &[PortMapping]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A pod's limits reach `container run` — they used to be read by nobody.
+    #[test]
+    fn pod_limits_become_run_flags() {
+        let r = CriResources {
+            memory_limit_in_bytes: 50_331_648,
+            cpu_quota: 50_000,
+            cpu_period: 100_000,
+            cpu_shares: 512,
+            cpuset_cpus: "0-1".into(),
+        };
+        assert_eq!(
+            resource_argv(&r),
+            vec![
+                "-m",
+                "50331648",
+                "--cpus",
+                "0.500",
+                "--cpu-weight",
+                "20",
+                "--cpuset",
+                "0-1"
+            ]
+        );
+        let rec = ContainerRec {
+            resources: r,
+            ..Default::default()
+        };
+        let argv = start_argv(&rec, None, crate::CapCeiling::default(), "abc");
+        let m = argv
+            .iter()
+            .position(|a| a == "-m")
+            .expect("start_argv lost the memory limit");
+        assert_eq!(argv[m + 1], "50331648");
+    }
+
+    /// Nothing specified: no flag, the engine default applies as before.
+    #[test]
+    fn unspecified_resources_add_no_flags() {
+        assert!(resource_argv(&CriResources::default()).is_empty());
+        // A quota without a period cannot be turned into cores.
+        let half = CriResources {
+            cpu_quota: 50_000,
+            ..Default::default()
+        };
+        assert!(resource_argv(&half).is_empty());
+    }
+
+    /// The runc/crun map: the kubelet's floor (2) and ceiling (262144) land on
+    /// cpu.weight's own bounds, and the default 1024 shares lands on 39.
+    #[test]
+    fn shares_map_onto_cpu_weight_like_runc() {
+        assert_eq!(shares_to_weight(2), 1);
+        assert_eq!(shares_to_weight(1024), 39);
+        assert_eq!(shares_to_weight(262_144), 10_000);
+        assert_eq!(shares_to_weight(1), 1);
+    }
+
+    /// An OOM is `OOMKilled`, not the `Error` an external SIGKILL also gets.
+    #[test]
+    fn an_oom_death_is_reported_as_oomkilled() {
+        assert_eq!(exit_reason(Some(137), true), "OOMKilled");
+        assert_eq!(exit_reason(Some(137), false), "Error");
+        assert_eq!(exit_reason(Some(0), false), "Completed");
+        assert_eq!(exit_reason(None, true), "", "still running: no reason yet");
+    }
 
     /// A `CreateContainerRequest` carrying the given capability security context.
     fn req_with_caps(add: &[&str], privileged: bool) -> CreateContainerRequest {

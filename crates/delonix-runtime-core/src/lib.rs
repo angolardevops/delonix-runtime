@@ -905,9 +905,12 @@ pub struct Container {
     /// `run_as_group`). `None` = uses the UID's primary group. Persisted.
     #[serde(default)]
     pub run_gid: Option<u32>,
-    /// Short, stable reason code set by `reconcile_status` when `status` flips to
-    /// `Crashed`: `"process_gone"` (the init pid no longer exists) or `"pid_reused"`
-    /// (the kernel recycled the pid for an unrelated process before we noticed).
+    /// Short, stable reason code set when `status` flips to `Crashed`/`Failed`:
+    /// `"oom_killed"` (the kernel's OOM killer — read off the cgroup's
+    /// `memory.events` by whoever waited on the init, before the cgroup is
+    /// removed), or, from `reconcile_status`, `"process_gone"` (the init pid no
+    /// longer exists) or `"pid_reused"` (the kernel recycled the pid for an
+    /// unrelated process before we noticed).
     /// The engine is never this process's real parent (it's reparented away at
     /// creation — see ARCHITECTURE), so this is best-effort diagnosis from polling
     /// `/proc`, not a captured exit code/signal. Cleared on the next successful start.
