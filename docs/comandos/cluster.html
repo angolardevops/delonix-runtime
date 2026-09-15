@@ -165,7 +165,10 @@ for SSH, and runs the SAME bootstrap — one command, from zero to a cluster run
 
 Commands:
   create      Create a local Kubernetes cluster **without a manifest and without Docker**
+  destroy     Remove a kind-mode cluster entirely — nodes, network, kubeconfig, `~/.kube/config` entry
   kubeadm     Provision VMs (golden VM image) + `kubeadm` bootstrap
+  start       Start every node of a stopped kind-mode cluster back up
+  stop        Stop every node of a kind-mode cluster at once — no rebuild, no state lost
   upgrade     Upgrade a `mode: ssh` cluster to a newer Kubernetes version, kubeadm-style
   init        Initialize a project with the cluster manifests (kind/vm/ssh)
   drain       Cordon a node and evict its pods
@@ -187,7 +190,7 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 COMMAND MAP:
-  Lifecycle    create · kubeadm · upgrade
+  Lifecycle    stop · start · destroy · create · kubeadm · upgrade
   Create       init
   Interact     ls · load · kubeconfig · health · drain · uncordon
   Declarative  kube · apply
