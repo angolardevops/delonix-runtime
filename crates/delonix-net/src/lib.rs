@@ -482,6 +482,45 @@ pub fn can_bind_host_port(addr: &str, port: u16) -> bool {
     }
 }
 
+/// Is `port` already held on `addr` — right now, by SOME process — with no privilege
+/// question involved? This is the diagnosis `can_bind_host_port`'s doc-comment
+/// promises exists ("a busy port has its own diagnosis, with its own error that
+/// names the owner") but that, until this function, only ever ran against
+/// `port_owner` — which only knows about THIS engine's own containers. A host
+/// process delonix never heard of (another user's server, a stray `nc`, a sibling
+/// tool) passed both the privilege probe (`can_bind_host_port` deliberately answers
+/// `true` for `EADDRINUSE`, on purpose — see above) and `port_owner` (`None`, it
+/// isn't one of ours) silently, and the conflict only surfaced deep inside the
+/// slirp handshake — for `container run`/`stack apply`/compose/the Docker API,
+/// AFTER a real container had already been created for it.
+///
+/// A REAL bind, not a `/proc/net/tcp` scan: only the kernel knows for sure, and a
+/// scan would miss a listener bound to a DIFFERENT address on the same port (e.g.
+/// `0.0.0.0` vs `127.0.0.1`) that would still collide with this exact bind.
+pub fn host_port_busy(addr: &str, port: u16) -> bool {
+    use std::net::{Ipv4Addr, SocketAddrV4, TcpListener};
+    let ip: Ipv4Addr = addr.parse().unwrap_or(Ipv4Addr::LOCALHOST);
+    matches!(
+        TcpListener::bind(SocketAddrV4::new(ip, port)),
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse
+    )
+}
+
+/// Best-effort name of whatever holds `port` on the host right now (any protocol,
+/// any address) — used to make [`host_port_busy`]'s error name the owner instead of
+/// leaving the operator to go find it themselves. Reads the CALLER's own netns
+/// (`/proc/self/net/{tcp,tcp6,udp,udp6}`, host-visible from here since this runs
+/// before the container's own netns exists) via the same reader `discover` uses for
+/// a workload's ports. Resolution to a process name needs matching `/proc/<pid>/fd`
+/// access (same-uid processes only, same as `discover`) — `None` when it can't be
+/// resolved, never a reason to fail the check itself.
+pub fn host_port_owner_process(port: u16) -> Option<String> {
+    discover::discover_ports(std::process::id() as i32)
+        .into_iter()
+        .find(|d| d.port == port)
+        .and_then(|d| d.process)
+}
+
 /// Specification of a container's network bandwidth limit.
 /// `rate_bit` is the throughput in bits/second; `burst_bytes` is the (token) bucket
 /// of the TBF/police, in bytes.
@@ -1940,6 +1979,17 @@ pub fn slirp_add_hostfwd(
                              net.ipv4.ip_unprivileged_port_start); publish on a higher \
                              port instead, e.g. -p 8080:{guest_port}"
                         ),
+                        // The callers that land here WITHOUT the `container run`
+                        // preflight (ingress hot-publish, `container update
+                        // --publish-add`) never ruled out a host process delonix
+                        // doesn't track holding the port — name it if we can,
+                        // same as the preflight does.
+                        Ok(p) if host_port_busy(&host_addr, p) => format!(
+                            " — port {p} is already in use on the host by {} \
+                             (not a delonix container); publish on another port instead",
+                            host_port_owner_process(p)
+                                .unwrap_or_else(|| "another process".to_string())
+                        ),
                         _ => String::new(),
                     };
                     return Err(Error::Runtime {
@@ -2691,6 +2741,39 @@ mod tests {
         if !root && low > 80 {
             assert!(!can_bind_host_port("127.0.0.1", 80));
         }
+    }
+
+    /// REGRESSION: this is the diagnosis the comment above promises exists —
+    /// `can_bind_host_port` answers `true` for a busy port ON PURPOSE, and
+    /// `host_port_busy` is the check that has to catch it instead. Before this
+    /// function existed, a host port held by a process the engine doesn't track
+    /// (not in `port_owner`'s store) passed every preflight silently and only
+    /// blew up deep inside the slirp handshake.
+    #[test]
+    fn host_port_busy_flags_eaddrinuse_only() {
+        use super::host_port_busy;
+        use std::net::TcpListener;
+        let held = TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port");
+        let busy = held.local_addr().unwrap().port();
+        assert!(host_port_busy("127.0.0.1", busy));
+        drop(held);
+        assert!(!host_port_busy("127.0.0.1", busy));
+    }
+
+    /// Best-effort resolution: while WE hold the port ourselves (this test
+    /// process), the owner lookup has to find something — it reads the CALLER's
+    /// own netns, and the listener above lives right here.
+    #[test]
+    fn host_port_owner_process_resolves_the_holder() {
+        use super::host_port_owner_process;
+        use std::net::TcpListener;
+        let held = TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port");
+        let busy = held.local_addr().unwrap().port();
+        let who = host_port_owner_process(busy);
+        assert!(
+            who.as_deref().is_some_and(|s| !s.is_empty()),
+            "expected a process name for a port this very test process holds, got {who:?}"
+        );
     }
 
     /// REGRESSION: the prefix of ANY network name has to fall within the ingress
