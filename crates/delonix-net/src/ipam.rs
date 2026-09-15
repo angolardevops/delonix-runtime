@@ -20,7 +20,7 @@
 //! creates a file). Allocation always runs on the HOST side (before talking to the
 //! holder), so the registry lives in the host's `base_root`, like the `NetDef`s.
 
-use crate::infra::base_root;
+use crate::infra::{base_root, REF_MARKER_GRACE};
 use delonix_runtime_core::{Error, Result};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -348,6 +348,117 @@ pub fn all_leases() -> Vec<(String, String, String)> {
     out
 }
 
+/// Candidate reap markers file (`<base_root>/ipam/reap-candidates`):
+/// `"<prefix>/<id>" -> unix seconds of the first time it was seen orphaned`.
+///
+/// A lease has no per-entry timestamp of its own (`allocate`/`release` only
+/// ever touch the `id -> ip` map), so — unlike `infra::refs_dir`, where each
+/// marker is its own file with its own `mtime` — this module has to keep the
+/// grace clock in a side file instead of reading one off the lease itself.
+fn reap_candidates_file() -> PathBuf {
+    ipam_dir().join("reap-candidates") // no `.json`: `all_leases`/the reaper skip it like the `lock` file
+}
+
+fn load_reap_candidates() -> BTreeMap<String, u64> {
+    std::fs::read(reap_candidates_file())
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+fn store_reap_candidates(candidates: &BTreeMap<String, u64>) {
+    if candidates.is_empty() {
+        let _ = std::fs::remove_file(reap_candidates_file());
+        return;
+    }
+    if let Ok(json) = serde_json::to_vec_pretty(candidates) {
+        let _ = delonix_runtime_core::write_atomic(&reap_candidates_file(), &json);
+    }
+}
+
+/// Reclaims leases whose id is not among the `live` ones — the IPAM's own
+/// version of `infra::reap_orphan_refs`, closing the leak this repo has
+/// measured (391 leases, 47 with a live container — 88% orphaned).
+///
+/// **Two-pass, under the SAME [`crate::infra::REF_MARKER_GRACE`] window**: a
+/// lease is written on `allocate`, before the container's own Store record is
+/// saved (the address has to exist before the container does) — the exact
+/// TOCTOU `reap_orphan_refs`'s grace period already exists to survive. A lease
+/// first seen orphaned is only a CANDIDATE; it is reclaimed on a LATER call
+/// that still finds it orphaned after the grace window, never on the pass
+/// that first notices it. Reclaiming on sight would race a container that is
+/// mid-creation and hand its just-allocated address to someone else.
+///
+/// A candidate reappearing in `live` (the container showed up after all) is
+/// dropped from the candidate list without being touched — never reclaimed on
+/// a stale sighting.
+///
+/// Under the allocator's own lock, so it can never race an `allocate`/
+/// `release`/`reserve` into losing a write. Returns how many leases it freed.
+pub fn reap_orphan_leases(live: &std::collections::HashSet<String>) -> usize {
+    let Some(_lock) = IpamLock::acquire() else {
+        tracing::error!("{}", IpamLock::unavailable());
+        return 0;
+    };
+    let now = std::time::SystemTime::now();
+    let now_secs = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let candidates = load_reap_candidates();
+    let mut freed = 0usize;
+
+    let Ok(rd) = std::fs::read_dir(ipam_dir()) else {
+        return 0;
+    };
+    let prefixes: Vec<String> = rd
+        .flatten()
+        .filter_map(|e| {
+            e.path()
+                .file_name()
+                .and_then(|n| n.to_str())
+                .and_then(|n| n.strip_suffix(".json"))
+                .map(str::to_string)
+        })
+        .collect();
+
+    let mut still_candidate: BTreeMap<String, u64> = BTreeMap::new();
+    for prefix in prefixes {
+        let Some(mut map) = load(&prefix) else {
+            continue;
+        };
+        let mut changed = false;
+        for id in map.keys().cloned().collect::<Vec<_>>() {
+            let key = format!("{prefix}/{id}");
+            if live.contains(&id) {
+                continue; // still alive — never a candidate, never reaped
+            }
+            match candidates.get(&key) {
+                None => {
+                    // First sighting: start the clock, don't reclaim yet.
+                    still_candidate.insert(key, now_secs);
+                }
+                Some(&first_seen) => {
+                    let age = now_secs.saturating_sub(first_seen);
+                    if age >= REF_MARKER_GRACE.as_secs() {
+                        map.remove(&id);
+                        changed = true;
+                        freed += 1;
+                        // dropped from `still_candidate` — reclaimed, not carried forward
+                    } else {
+                        still_candidate.insert(key, first_seen);
+                    }
+                }
+            }
+        }
+        if changed {
+            let _ = store(&prefix, &map);
+        }
+    }
+    store_reap_candidates(&still_candidate);
+    freed
+}
+
 pub fn prefix_of(ip: &str) -> String {
     let o: Vec<&str> = ip.split('.').collect();
     if o.len() == 4 {
@@ -624,5 +735,106 @@ mod tests {
     fn prefix_of_extrai_o_16() {
         assert_eq!(prefix_of("10.88.3.7"), "10.88");
         assert_eq!(prefix_of("10.200.255.254"), "10.200");
+    }
+
+    /// The first sighting of an orphaned lease is NEVER reclaimed on the same
+    /// call — it only starts the grace-period clock. Reclaiming on sight
+    /// would repeat exactly the race `infra::reap_orphan_refs` already exists
+    /// to survive: a container mid-creation has no Store record yet.
+    #[test]
+    fn primeira_observacao_orfa_nunca_e_reclamada_de_imediato() {
+        with_root("reap-first", || {
+            let ip = allocate("10.88", "orfao0001").unwrap();
+            let live = std::collections::HashSet::new();
+            let freed = reap_orphan_leases(&live);
+            assert_eq!(freed, 0, "the 1st sighting must not reclaim anything");
+            assert_eq!(
+                lookup("10.88", "orfao0001").as_deref(),
+                Some(ip.as_str()),
+                "the lease must still be alive after the 1st sighting"
+            );
+        });
+    }
+
+    /// A lease still orphaned AFTER the grace period is reclaimed — simulated
+    /// without a real sleep: the 1st call records the candidate, and its
+    /// timestamp is aged past the window by hand before the 2nd call.
+    #[test]
+    fn lease_orfao_alem_da_graca_e_reclamado_na_segunda_chamada() {
+        with_root("reap-second", || {
+            allocate("10.88", "orfao0002").unwrap();
+            let live = std::collections::HashSet::new();
+            assert_eq!(reap_orphan_leases(&live), 0);
+
+            // Age the candidate's clock past the grace window without a real
+            // sleep — the same trick the rest of the suite uses to stay fast.
+            let mut candidates = load_reap_candidates();
+            let key = "10.88/orfao0002".to_string();
+            assert!(
+                candidates.contains_key(&key),
+                "the 1st call should have recorded the candidate: {candidates:?}"
+            );
+            let aged = candidates[&key].saturating_sub(REF_MARKER_GRACE.as_secs() + 1);
+            candidates.insert(key, aged);
+            store_reap_candidates(&candidates);
+
+            let freed = reap_orphan_leases(&live);
+            assert_eq!(freed, 1, "should have reclaimed the past-grace lease");
+            assert_eq!(lookup("10.88", "orfao0002"), None);
+        });
+    }
+
+    /// A candidate that comes back ALIVE between two calls is never reclaimed
+    /// — even having been seen orphaned before, and even if its clock (were
+    /// it consulted) had already crossed the window.
+    #[test]
+    fn candidato_que_reaparece_vivo_nunca_e_reclamado() {
+        with_root("reap-revive", || {
+            let ip = allocate("10.88", "revive0001").unwrap();
+            let empty = std::collections::HashSet::new();
+            assert_eq!(reap_orphan_leases(&empty), 0);
+
+            // Age the candidate past grace, same trick as above — if the next
+            // call ignored `live`, this would reclaim it.
+            let mut candidates = load_reap_candidates();
+            let key = "10.88/revive0001".to_string();
+            let aged = candidates[&key].saturating_sub(REF_MARKER_GRACE.as_secs() + 1);
+            candidates.insert(key, aged);
+            store_reap_candidates(&candidates);
+
+            let mut live = std::collections::HashSet::new();
+            live.insert("revive0001".to_string());
+            let freed = reap_orphan_leases(&live);
+            assert_eq!(freed, 0, "a live id can never be reclaimed");
+            assert_eq!(lookup("10.88", "revive0001").as_deref(), Some(ip.as_str()));
+
+            // And the candidate cannot have survived hidden: if it comes back
+            // orphaned again, its clock restarts from zero instead of already
+            // being "old" from an earlier sighting.
+            let freed_again = reap_orphan_leases(&empty);
+            assert_eq!(
+                freed_again, 0,
+                "a fresh orphan sighting starts the grace period from zero"
+            );
+            assert_eq!(lookup("10.88", "revive0001").as_deref(), Some(ip.as_str()));
+        });
+    }
+
+    /// A live lease never enters the candidate list, call after call.
+    #[test]
+    fn lease_vivo_nunca_e_tocado() {
+        with_root("reap-alive", || {
+            let ip = allocate("10.88", "vivo0001").unwrap();
+            let mut live = std::collections::HashSet::new();
+            live.insert("vivo0001".to_string());
+            for _ in 0..3 {
+                assert_eq!(reap_orphan_leases(&live), 0);
+            }
+            assert_eq!(lookup("10.88", "vivo0001").as_deref(), Some(ip.as_str()));
+            assert!(
+                load_reap_candidates().is_empty(),
+                "um id vivo nunca deve aparecer como candidato"
+            );
+        });
     }
 }

@@ -198,6 +198,82 @@ pub(crate) fn note_partial(r: Reclaimed) {
     }
 }
 
+/// Who still owns an IPAM lease: `lease id -> human label`. The ONE answer
+/// `network ipam ls`, `network ipam prune` and `system prune` share, so the
+/// reaper and the listing can never disagree about what is orphaned.
+///
+/// A lease is keyed by whatever id was handed to `infra::attach_container`,
+/// and that is NOT always a container id: a pod leases under its netns name
+/// (`pod-<name>`), `netns attach` under an operator-chosen name, and a CRI
+/// sandbox under its own id. Judging liveness by the container store alone
+/// reclaimed a RUNNING pod's address after the grace window and handed it to
+/// the next container — one IP, two workloads.
+///
+/// Three sources, and the last two deliberately err towards KEEPING:
+/// every container record (running or not — a stopped container gets the
+/// same address back on `start`), the pod netns of every member, and every
+/// attached ingress ref marker (each `attach_container` writes one and each
+/// detach removes it). An orphaned marker keeps its lease alive one prune
+/// longer — `system prune` reaps the marker first, and the lease follows on
+/// a later run. Wasting an address is recoverable; a duplicate one is not.
+///
+/// **Fails closed**: an unreadable store is an `Err`, never an empty set — an
+/// empty set reads as "nothing is alive" and would reclaim every lease on the
+/// next pass (the `reap_orphan_hostfwds` trap).
+pub(crate) fn lease_owners(store: &Store) -> Result<std::collections::HashMap<String, String>> {
+    let containers: Vec<(String, String, Option<String>)> = store
+        .list()?
+        .into_iter()
+        .map(|c| (c.id, c.name, c.pod))
+        .collect();
+    Ok(lease_owners_from(
+        &containers,
+        &delonix_net::infra::attached_refs(),
+    ))
+}
+
+/// Ref markers a live workload still holds: every live container id, PLUS the
+/// pod netns (`pod-<name>`) of every pod with at least one live member.
+///
+/// A pod's marker is written under its netns name, never under a member id —
+/// so a set of container ids alone called it orphaned. Measured live
+/// (2026-09-15): a pod alone on a node, `system prune --force`, and the reaper
+/// took `pod-<name>`, found the marker set empty, and tore the ingress infra
+/// down — the running pod left with no `eth0` and `Network unreachable`.
+fn live_ref_owners(containers: &[(String, Option<String>, bool)]) -> HashSet<String> {
+    let mut live = HashSet::new();
+    for (id, pod, is_live) in containers {
+        if !is_live {
+            continue;
+        }
+        live.insert(id.clone());
+        if let Some(pod) = pod {
+            live.insert(pod.clone());
+        }
+    }
+    live
+}
+
+/// Pure core of [`lease_owners`] — takes what was read, touches nothing.
+fn lease_owners_from(
+    containers: &[(String, String, Option<String>)],
+    refs: &[String],
+) -> std::collections::HashMap<String, String> {
+    let mut owners = std::collections::HashMap::new();
+    for id in refs {
+        owners.insert(id.clone(), format!("ref:{id}"));
+    }
+    for (_, _, pod) in containers {
+        if let Some(pod) = pod {
+            owners.insert(pod.clone(), pod.clone());
+        }
+    }
+    for (id, name, _) in containers {
+        owners.insert(id.clone(), name.clone());
+    }
+    owners
+}
+
 /// The names of the containers a prune would remove — the preview that turns a
 /// blind `[y/N]` into an informed one.
 pub(crate) fn doomed_containers(store: &Store) -> Result<Vec<String>> {
@@ -301,12 +377,13 @@ pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<Con
     //    pods (`cri-*`) and VMs (`vm-*`), which belong to other stores and are
     //    never reaped here. The reaper frees only markers with no live owner,
     //    and tears the infra down if it ends up empty; it NEVER touches a live id.
-    let mut live_refs: HashSet<String> = store
-        .list()?
-        .iter()
-        .filter(|c| c.is_live())
-        .map(|c| c.id.clone())
-        .collect();
+    let listed = store.list()?;
+    let mut live_refs: HashSet<String> = live_ref_owners(
+        &listed
+            .iter()
+            .map(|c| (c.id.clone(), c.pod.clone(), c.is_live()))
+            .collect::<Vec<_>>(),
+    );
     for id in delonix_net::infra::attached_refs() {
         // A `vm-<name>` ref is checked against the VM store instead of being
         // assumed alive. Assuming made it IMMORTAL: nothing on the system ever
@@ -1354,6 +1431,64 @@ mod tests {
         ));
     }
     use super::*;
+
+    /// A running pod's ingress ref is `pod-<name>`, and it must survive a
+    /// prune — reaping it tore the whole node's network down under the pod.
+    #[test]
+    fn a_running_pod_keeps_its_ingress_ref() {
+        let live = live_ref_owners(&[
+            ("m1".to_string(), Some("pod-web".to_string()), true),
+            ("m2".to_string(), Some("pod-web".to_string()), false),
+        ]);
+        assert!(live.contains("pod-web"), "{live:?}");
+        assert!(live.contains("m1"));
+        assert!(
+            !live.contains("m2"),
+            "a stopped member holds no ref of its own"
+        );
+    }
+
+    /// A pod whose members are ALL stopped holds nothing — its marker is a
+    /// genuine orphan and stays reapable, exactly as before.
+    #[test]
+    fn a_fully_stopped_pod_releases_its_ref() {
+        let live = live_ref_owners(&[("m1".to_string(), Some("pod-old".to_string()), false)]);
+        assert!(live.is_empty(), "{live:?}");
+    }
+
+    /// A pod leases under its netns name, not under any container id — a
+    /// liveness set built from container ids alone reclaimed a running pod's
+    /// address and handed it to the next container.
+    #[test]
+    fn a_pod_lease_is_owned_by_its_members() {
+        let containers = vec![(
+            "abc123".to_string(),
+            "web-c0".to_string(),
+            Some("pod-web".to_string()),
+        )];
+        let owners = lease_owners_from(&containers, &[]);
+        assert!(owners.contains_key("pod-web"), "{owners:?}");
+        assert_eq!(owners["abc123"], "web-c0");
+    }
+
+    /// Anything still attached to the ingress (a `netns attach` name, a CRI
+    /// sandbox) keeps its lease even with no container record behind it.
+    #[test]
+    fn an_attached_ref_keeps_its_lease() {
+        let owners = lease_owners_from(&[], &["cri-sandbox1".to_string(), "manual".to_string()]);
+        assert!(owners.contains_key("cri-sandbox1"));
+        assert!(owners.contains_key("manual"));
+        assert!(!owners.contains_key("gone"));
+    }
+
+    /// A container id that also has a ref marker is labelled by its NAME, not
+    /// by the marker — the listing is for a human.
+    #[test]
+    fn a_container_name_wins_over_the_ref_label() {
+        let containers = vec![("abc123".to_string(), "api".to_string(), None)];
+        let owners = lease_owners_from(&containers, &["abc123".to_string()]);
+        assert_eq!(owners["abc123"], "api");
+    }
 
     fn v(name: &str, mount: &str) -> VolumeFacts {
         VolumeFacts {

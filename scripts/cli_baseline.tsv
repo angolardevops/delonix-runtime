@@ -144,6 +144,8 @@
 ~	network diagnose
 =	network disconnect
 ~	network inspect
+~	network ipam ls
+~	network ipam prune
 ~	network ls
 ~	network node init
 ~	network node key
