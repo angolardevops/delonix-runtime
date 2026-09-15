@@ -391,6 +391,8 @@ shortnames, apiVersion, and the FORM of each Kind (``primary``, ``sugar → X``,
      - Serve a protocol endpoint on a unix socket, grouped: ``cri`` (Kubernetes ``runtime.v1``), ``api`` (management API, HTTP+JSON, plus Prometheus ``/metrics``), ``docker-api`` (a slice of the Docker Engine API, full container lifecycle).
    * - ``mcp``
      - Model Context Protocol server — a LOCAL, tenancy-free AI control surface: ``serve``, ``capabilities`` (the tool risk table), ``doctor``.
+   * - ``compatibility``
+     - What this engine covers of another tool's surface — served, refused with a reason, never in silence. ``docker`` today (the same table ``serve docker-api --matrix`` publishes, plus ``-o json``); ``compose``/``cri``/``oci`` are future work.
    * - ``system``
      - The engine itself: events, info, features, doctor, resources, metrics, df, prune (GC), backup/restore of the whole node, boot (systemd persistence across reboots), namespace, monitor, thermal, regulate, virt, setup.
    * - ``dashboard``

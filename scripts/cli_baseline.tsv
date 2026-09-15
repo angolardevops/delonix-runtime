@@ -23,6 +23,7 @@
 =	cluster stop
 ~	cluster uncordon
 ~	cluster upgrade
+=	compatibility docker
 ~	completion editor
 ~	completion shell
 =	compose config
