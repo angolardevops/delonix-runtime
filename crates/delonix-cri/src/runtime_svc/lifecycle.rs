@@ -372,14 +372,6 @@ fn delonix(base: &Path, args: &[&str]) -> Result<std::process::Output, Status> {
         .map_err(st)
 }
 
-/// Like [`delonix`], but with stdio to `/dev/null` — MANDATORY for `run -d`: the
-/// daemonized container inherits and HOLDS the stdout/stderr *pipes*; with
-/// `.output()` the `wait` would block until the container exits (the "run -d |
-/// tail hangs" bug).
-fn delonix_detached(base: &Path, args: &[&str]) -> Result<bool, Status> {
-    Ok(delonix_detached_why(base, args)?.is_none())
-}
-
 /// Runs a `delonix` subcommand and, on failure, returns WHY.
 ///
 /// This used to send stderr to `/dev/null` and return a bare bool, so every
@@ -389,24 +381,41 @@ fn delonix_detached(base: &Path, args: &[&str]) -> Result<bool, Status> {
 /// `unrecognized subcommand 'netns'` all along: the v0.30.0 CLI reorganisation
 /// moved `netns` under `net` with a deliberate clean break, and this call site
 /// was never updated. A visible stderr would have said so on the first pod.
+///
+/// **stderr goes to a FILE, never a pipe.** A `run -d` daemonizes, and the
+/// detached container inherits and HOLDS whatever stdout/stderr it was given: a
+/// pipe read with `.output()` would not reach EOF until the container exits, so
+/// `StartContainer` would hang for the pod's whole life (the "run -d | tail
+/// hangs" bug). A file has no EOF to wait for — the command's exit status is
+/// what we wait on, and the file is read afterwards.
 fn delonix_detached_why(base: &Path, args: &[&str]) -> Result<Option<String>, Status> {
     use std::process::Stdio;
-    let out = Command::new(delonix_bin())
+    let err_dir = base.join("cri").join("tmp");
+    std::fs::create_dir_all(&err_dir).map_err(st)?;
+    let err_path = err_dir.join(format!(
+        "delonix-{}-{}.err",
+        std::process::id(),
+        delonix_runtime_core::generate_id()
+    ));
+    let err_file = std::fs::File::create(&err_path).map_err(st)?;
+    let status = Command::new(delonix_bin())
         .env("DELONIX_ROOT", base)
         .env("DELONIX_INTERNAL", "1")
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(st)?;
-    if out.status.success() {
+        .stderr(Stdio::from(err_file))
+        .status();
+    let stderr = std::fs::read(&err_path).unwrap_or_default();
+    let _ = std::fs::remove_file(&err_path);
+    let status = status.map_err(st)?;
+    if status.success() {
         return Ok(None);
     }
-    let why = String::from_utf8_lossy(&out.stderr);
+    let why = String::from_utf8_lossy(&stderr);
     let why = why.trim();
     Ok(Some(if why.is_empty() {
-        format!("`delonix {}` exited {}", args.join(" "), out.status)
+        format!("`delonix {}` exited {}", args.join(" "), status)
     } else {
         // First line only: clap appends usage text, and a kubelet event that
         // carries a whole help screen is unreadable where it actually shows up.
@@ -1237,8 +1246,14 @@ pub fn start_container(
     }
     let args = start_argv(&rec, sandbox.as_ref(), ceiling, &id);
     let argv: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    if !delonix_detached(base, &argv)? {
-        return Err(Status::internal(format!("failed to start container {id}")));
+    // WITH the engine's reason. The bare "failed to start container <id>" hid
+    // a refusal that named its own fix, and it took reproducing the argv by
+    // hand on the node to read it (2026-09-15) — the same trap
+    // `delonix_detached_why` already documents for sandboxes.
+    if let Some(why) = delonix_detached_why(base, &argv)? {
+        return Err(Status::internal(format!(
+            "failed to start container {id}: {why}"
+        )));
     }
     rec.started = true;
     rec.started_at = now_ns();
