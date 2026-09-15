@@ -6229,6 +6229,35 @@ sem tecto de CPU (`--cpus` não aceita `max`). Para o Kubernetes «sem limite» 
 etcd preso a 1 core é o mesmo estrangulamento silencioso. O `UpdateContainerResources` também
 continua `todo`.
 
+**A combinação #307 + #309 deixou um nó root NOVO sem arrancar pods, e só um kubelet real o
+mostrou** (2026-09-15, VM da `delonix-vm-k8s:1.36`, k8s 1.36.4). O #307 recusa `-m`/`--cpus`/
+`--cpu-weight` quando o `cgroup_limits_apply()` diz «sem delegação»; o #309 passou a enviar
+`--cpu-weight` para todo o pod com requests de CPU — os static pods do control-plane incluídos.
+No modo root a sonda era um `create_dir` de `delonix.slice/.delonix-probe-<pid>`, e o slice só
+nasce com o primeiro container: num nó onde ainda nada correu dava ENOENT → «sem delegação» →
+todo o pod limitado recusado → o slice nunca nascia. **477 `StartContainer` falhados** e o
+`kubeadm init` morto em `wait-control-plane`, num nó com `cpuset cpu io memory pids` todos
+delegados. Destravou no instante em que um container SEM limites criou o slice à mão — a prova
+de causa. `root_slice_writable` cria o slice como o `setup_cgroup` o criaria; no mesmo nó
+reposto, zero falhas e o init concluído.
+
+- **O kubelet via só «failed to start container <id>»**: o `start_container` usava a variante
+  que deita fora o stderr, ao lado de um `delonix_detached_why` que já documentava a MESMA
+  armadilha para os sandboxes. Passa a levar a razão do motor.
+- **E o stderr vai para um FICHEIRO, nunca um pipe**: um `run -d` segura os descritores que
+  herdou, e um pipe lido com `.output()` penduraria o `StartContainer` durante a vida do pod.
+  Medido depois: nenhum processo segura um `.err` apagado.
+- **Controlo com o kubelet, e o controlo certo** (apontado pelo utilizador): não a v0.66.0 que
+  vem na imagem, mas a v3.1.0 imediatamente antes dos merges (`fa8c6297`) — as duas builds dizem
+  `3.1.0`, só o commit as distingue. O mesmo script num nó reposto: v3.1.0 → init ok, apiserver
+  2/24 amostras, 20 `StopContainer`; `main`+correcção → init ok, 0/24, 19. Uma corrida de cada:
+  indistinguíveis. **O control-plane de nó único nesta imagem entra em crash-loop desde antes
+  desta série** — o kubelet pára o etcd (SIGTERM) em ciclo — e isso fica por investigar à parte.
+- **Dois achados do kubelet real, também por fazer**: o eviction manager falha a obter as
+  estatísticas («stat failed on /var/lib/delonix/containers/cri-<id>: no such file») — o nó fica
+  sem a protecção de pressão de memória/disco que o Kubernetes espera; e o nó fica `NotReady`
+  por `BridgeMissing` (`delonix0`) com uma CNI de bridge configurada.
+
 ## `HYPERVISOR` no VMfile + `vm convert` + `vm default-backend` (v0.45.x)
 
 Três lacunas fechadas na pilha de imagens VM já existente (`vm build`/`vm create`), pedidas
