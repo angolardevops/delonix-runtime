@@ -57,6 +57,33 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["get", "cluster load", "delete", "cluster kubeadm"],
     },
     Entry {
+        path: "cluster stop",
+        group: "Lifecycle",
+        examples: &[
+            ("every node of the one cluster you have, no rebuild — workers first, control-plane last", "delonix cluster stop"),
+            ("say which cluster, when more than one is up", "delonix cluster stop lab"),
+        ],
+        see_also: &["cluster start", "cluster ls", "container stop"],
+    },
+    Entry {
+        path: "cluster start",
+        group: "Lifecycle",
+        examples: &[
+            ("bring a stopped cluster back up — control-plane first, so workers find an apiserver waiting", "delonix cluster start"),
+            ("say which cluster, when more than one is up", "delonix cluster start lab"),
+        ],
+        see_also: &["cluster stop", "cluster ls", "container start"],
+    },
+    Entry {
+        path: "cluster destroy",
+        group: "Lifecycle",
+        examples: &[
+            ("nodes, network, cached kubeconfig and the ~/.kube/config entry — volumes untouched", "delonix cluster destroy lab"),
+            ("in CI, where there is no terminal to confirm at", "delonix cluster destroy lab -f"),
+        ],
+        see_also: &["delete", "cluster prune", "cluster create"],
+    },
+    Entry {
         path: "cluster prune",
         group: "Maintenance",
         examples: &[

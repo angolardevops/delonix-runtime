@@ -1902,11 +1902,35 @@ msgstr "Lista os clusters desta máquina — em modo kind E baseados em VM.\n\nM
 msgid "Also show clusters whose every node is stopped"
 msgstr "Mostra também os clusters cujos nós estão todos parados"
 
+msgid "Stop every node of a kind-mode cluster at once — no rebuild, no state lost"
+msgstr "Pára todos os nós de um cluster kind-mode de uma vez — sem reconstruir, sem perder estado"
+
+msgid "Stop every node of a kind-mode cluster at once — no rebuild, no state lost.\n\nThe container-level `container stop` already exists per node; this is the cluster-wide convenience `container`'s own multi-id form doesn't give you (it takes explicit ids, never a label). `cluster ls -A` is where a fully-stopped cluster shows up afterwards."
+msgstr "Pára todos os nós de um cluster kind-mode de uma vez — sem reconstruir, sem perder estado.\n\nO `container stop` ao nível de container já existe por nó; isto é a conveniência de-cluster que a forma multi-id do próprio `container` não dá (recebe ids explícitos, nunca uma label). `cluster ls -A` é onde um cluster totalmente parado aparece depois."
+
+msgid "Start every node of a stopped kind-mode cluster back up"
+msgstr "Arranca de novo todos os nós de um cluster kind-mode parado"
+
+msgid "Remove a kind-mode cluster entirely — nodes, network, kubeconfig, `~/.kube/config` entry"
+msgstr "Remove um cluster kind-mode por inteiro — nós, rede, kubeconfig, entrada em `~/.kube/config`"
+
+msgid "Remove a kind-mode cluster entirely — nodes, network, kubeconfig, `~/.kube/config` entry.\n\nVolumes are left alone, on purpose, same as `docker`. The same removal `delonix delete clusters <name>` already does (the generic kubectl-style verb this engine gives every Kind) — this is just the more discoverable spelling inside `cluster --help`, with a confirmation prompt `delete` does not have."
+msgstr "Remove um cluster kind-mode por inteiro — nós, rede, kubeconfig, entrada em `~/.kube/config`.\n\nOs volumes ficam intocados, de propósito, tal como no `docker`. É a mesma remoção que `delonix delete clusters <nome>` já faz (o verbo genérico ao estilo kubectl que este motor dá a todo Kind) — isto é só a grafia mais descobrível dentro de `cluster --help`, com uma confirmação que o `delete` não tem."
+
 msgid "the clusters that are up, kind-mode and VM alike"
 msgstr "os clusters de pé, tanto em modo kind como em VM"
 
 msgid "plus the ones whose every node is stopped"
 msgstr "mais aqueles cujos nós estão todos parados"
+
+msgid "every node of the one cluster you have, no rebuild — workers first, control-plane last"
+msgstr "todos os nós do único cluster que tem, sem reconstruir — workers primeiro, control-plane por último"
+
+msgid "bring a stopped cluster back up — control-plane first, so workers find an apiserver waiting"
+msgstr "arranca de novo um cluster parado — control-plane primeiro, para os workers encontrarem um apiserver à espera"
+
+msgid "nodes, network, cached kubeconfig and the ~/.kube/config entry — volumes untouched"
+msgstr "nós, rede, kubeconfig em cache e a entrada em ~/.kube/config — volumes intocados"
 
 msgid "Provision VMs (golden VM image) + `kubeadm` bootstrap — from zero to a working cluster, without writing a manifest by hand."
 msgstr "Provisiona VMs (imagem VM dourada) + bootstrap `kubeadm` — do zero a um cluster a funcionar, sem escrever um manifesto à mão."

@@ -2681,12 +2681,55 @@ fn setup_node_cgroup_ns(cid: &str) {
                 let _ = std::fs::write(format!("{scope}/cgroup.subtree_control"), ctrl);
             }
             let leaf = format!("{scope}/dlx-{cid}");
-            if std::fs::create_dir_all(&leaf).is_ok() {
+            // Same id → same leaf path, on purpose: a `container start` after a
+            // `stop` (or `stack apply`/anything that re-spawns the SAME container
+            // id) reuses it. `remove_container_cgroup` (below) is what is
+            // SUPPOSED to leave this leaf gone-or-empty on the way out — but a
+            // container created before that fix existed, or a `stop` that got
+            // killed mid-cleanup, can still hand us a DIRTY leaf: the previous
+            // boot's systemd already wrote its OWN `cgroup.subtree_control` here
+            // (delegating to `init.scope`/`system.slice`/`kubelet.slice`/…) before
+            // it died, and cgroup v2 refuses a MEMBER process in a cgroup that
+            // has controllers delegated to children — "no internal processes",
+            // the exact same rule the comment above already fights for `scope`.
+            //
+            // Measured live, reproduced deterministically: `create_dir_all`
+            // succeeds (the leaf already exists), and the very next
+            // `cgroup.procs` write fails silently with EBUSY — the cgroup-ns
+            // root then anchors on the WRONG (outer, populated) cgroup instead,
+            // and the guest's own kubelet never gets the delegated `cpu`
+            // controller it demands. The node comes up, `run`/`start` both
+            // report success, and only minutes later does `kubelet.service`
+            // reveal it via `activating (auto-restart)` forever — nothing
+            // between here and there had anything left to fail loudly on.
+            //
+            // Self-heal: on a first-attempt failure, tear the leaf down to
+            // nothing and retry ONCE. A leaf that is genuinely fresh never
+            // takes this branch (the plain write below just succeeds).
+            if std::fs::create_dir_all(&leaf).is_ok()
+                && std::fs::write(
+                    format!("{leaf}/cgroup.procs"),
+                    std::process::id().to_string(),
+                )
+                .is_err()
+            {
+                remove_cgroup_tree(&leaf);
+                let _ = std::fs::create_dir_all(&leaf);
                 let _ = std::fs::write(
                     format!("{leaf}/cgroup.procs"),
                     std::process::id().to_string(),
                 );
             }
+            // Record the leaf's real path for `remove_container_cgroup` to find
+            // deterministically later — from a DIFFERENT process, possibly a
+            // different session entirely, which cannot recompute `scope` the way
+            // this function just did (that requires being INSIDE the leaf at the
+            // moment of creation). Same convention as `slirp_container_sock`:
+            // a small marker file in the temp dir, keyed by id, read once and
+            // discarded. Best-effort — a write failure just means the OLD
+            // 3-candidate guess in `remove_container_cgroup` is all that is left,
+            // same as before this existed.
+            let _ = std::fs::write(node_cgroup_leaf_marker(cid), &leaf);
         }
     }
     // 3) Anchor the cgroup-ns root at the CURRENT cgroup (the leaf, if the move worked).
@@ -6917,18 +6960,75 @@ fn remove_cgroup(cgroup: &str) {
     }
 }
 
+/// [`remove_cgroup`], but children first — a plain `remove_dir` is a SINGLE
+/// level and silently no-ops (best-effort) the moment the cgroup has ANY
+/// subdirectory left inside it, which for a KIND node's leaf
+/// (`setup_node_cgroup_ns`'s `dlx-<id>`) is the normal case, not the
+/// exception: systemd (this node's PID 1) builds a full
+/// `init.scope`/`system.slice`/`kubelet.slice`/… tree under "/" while
+/// booting, and the kernel only empties `cgroup.procs` when those processes
+/// exit — it never rmdir's the now-empty directories on its own. Nothing
+/// else ever did either, so the leaf silently survived every `container
+/// stop` full of the previous boot's leftover slices.
+///
+/// Measured live: a `cluster stop` + `cluster start` of a kind-mode node
+/// reused that same leaf (keyed by container id, on purpose, for exactly
+/// this reuse) still full of the FIRST boot's cgroup tree — the second
+/// systemd never got the empty `cgroup-ns` root it needs, and
+/// `kubelet.service`'s own cgroup-v2 setup script (which requires `/`'s
+/// `cgroup.procs` to read back empty) never got past `activating`. No
+/// error anywhere an operator would see — the node just never became
+/// `Ready` again.
+fn remove_cgroup_tree(cgroup: &str) {
+    if let Ok(entries) = std::fs::read_dir(cgroup) {
+        for entry in entries.flatten() {
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                remove_cgroup_tree(&entry.path().to_string_lossy());
+            }
+        }
+    }
+    remove_cgroup(cgroup);
+}
+
+/// Path of the marker [`setup_node_cgroup_ns`] leaves behind recording the
+/// EXACT leaf it created for a Kind node — `<temp>/delonix-node-cgroup-<id>`,
+/// same convention as `delonix_net::slirp_container_sock` (a small file keyed
+/// by id, for a LATER, possibly different process to read once). See
+/// `remove_container_cgroup` for why guessing the path instead does not work.
+fn node_cgroup_leaf_marker(cid: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("delonix-node-cgroup-{cid}"))
+}
+
 /// Removes the container's cgroup in ALL possible locations: the
 /// root-mode path (`Container::cgroup()`) and the rootless delegated leaves — the
 /// current base (dedicated scope) and the escape-base `dlx-containers` under the `user@`.
-/// Best-effort; only removes empty dirs (the `remove_cgroup` retries).
+/// Best-effort; only removes empty dirs (the `remove_cgroup` retries) — recursively,
+/// see [`remove_cgroup_tree`].
+///
+/// A KIND node's leaf is a FOURTH location, and the only one read precisely
+/// instead of guessed: `setup_node_cgroup_ns` places it at `<scope>/dlx-<id>`,
+/// where `<scope>` is the parent of whatever cgroup the CREATING process
+/// happened to be in at fork time (typically a transient `systemd-run --scope`
+/// unit under `app.slice`) — a path that has no fixed relationship to the
+/// cgroup THIS process (the one calling `stop`/`destroy`, often a different
+/// invocation entirely) is currently in. Measured live: none of the three
+/// guessed candidates above ever matched a real kind node's leaf
+/// (`app.slice/dlx-<id>`), so it was NEVER removed by `stop` or `destroy` —
+/// confirmed reproducible in 5/5 clusters. Reading the marker `setup_node_cgroup_ns`
+/// left behind removes the guess entirely for this case.
 fn remove_container_cgroup(container: &Container) {
-    remove_cgroup(&container.cgroup());
+    remove_cgroup_tree(&container.cgroup());
     if let Some(cur) = current_cgroup_v2() {
-        remove_cgroup(&format!("{cur}/dlx-{}", container.id));
+        remove_cgroup_tree(&format!("{cur}/dlx-{}", container.id));
         if let Some(base) = user_service_base(&cur) {
-            remove_cgroup(&format!("{base}/dlx-{}", container.id));
+            remove_cgroup_tree(&format!("{base}/dlx-{}", container.id));
         }
     }
+    let marker = node_cgroup_leaf_marker(&container.id);
+    if let Ok(leaf) = std::fs::read_to_string(&marker) {
+        remove_cgroup_tree(leaf.trim());
+    }
+    let _ = std::fs::remove_file(&marker);
 }
 
 /// The container's REAL cgroup v2 (read from the init's `/proc/<pid>/cgroup`) — covers
@@ -7270,6 +7370,94 @@ mod limit_update_tests {
 
 #[cfg(test)]
 mod tests {
+    /// REGRESSION: a kind node's cgroup leaf isn't a flat directory — systemd
+    /// (its PID 1) builds a real tree under it (`init.scope`, `system.slice`,
+    /// `kubelet.slice`, deeper still once pods land). A single-level
+    /// `remove_dir` silently no-ops the moment ANY of that exists — which is
+    /// the normal case, not the exception — leaving the whole tree behind
+    /// for the next `container start` to boot a second systemd into. This
+    /// builds exactly that shape with plain directories (cgroup semantics
+    /// aside, `remove_cgroup_tree` only cares about the directory tree) and
+    /// asserts nothing survives.
+    #[test]
+    fn remove_cgroup_tree_catches_a_tree_with_several_levels() {
+        let root = std::env::temp_dir().join(format!("delonix-cgtree-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("system.slice/some.service")).unwrap();
+        std::fs::create_dir_all(root.join("kubelet.slice/kubelet.service")).unwrap();
+        std::fs::create_dir_all(root.join("init.scope")).unwrap();
+        // A real cgroupfs directory also carries virtual control files
+        // (cgroup.procs, cgroup.controllers, …) alongside subdirectories,
+        // but the KERNEL never counts those as blocking `rmdir` — only
+        // child CGROUP directories do. Plain files on a real filesystem
+        // (this test's tmpfs) are not equivalent (they DO block a plain
+        // `remove_dir`), so this test models only what actually gates
+        // removal: the directory tree.
+
+        super::remove_cgroup_tree(&root.to_string_lossy());
+
+        assert!(
+            !root.exists(),
+            "a árvore inteira tem de desaparecer, não só o nível de topo"
+        );
+    }
+
+    /// A leaf that never existed (the common case — most containers are not
+    /// kind nodes and never get one) must be a silent no-op, not a panic.
+    #[test]
+    fn remove_cgroup_tree_tolerates_a_path_that_does_not_exist() {
+        let missing =
+            std::env::temp_dir().join(format!("delonix-cgtree-missing-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&missing);
+        super::remove_cgroup_tree(&missing.to_string_lossy()); // must not panic
+    }
+
+    /// REGRESSION: a kind node's real leaf (`<scope>/dlx-<id>`) has no fixed
+    /// relationship to the REMOVER's own current cgroup — `remove_container_cgroup`'s
+    /// three guessed candidates (root-mode path, current-cgroup-relative,
+    /// `user_service_base`-relative) never matched a real one, measured live
+    /// (5/5 clusters left their leaf behind after `stop`/`destroy`). The marker
+    /// `setup_node_cgroup_ns` leaves behind is what actually finds it.
+    #[test]
+    fn remove_container_cgroup_uses_the_marker_when_the_guesses_would_miss() {
+        let cid = format!("cgmarker-{}", std::process::id());
+        let leaf = std::env::temp_dir().join(format!("delonix-cgleaf-{cid}"));
+        let _ = std::fs::remove_dir_all(&leaf);
+        // Shape a real kind node's leftover tree: nested, non-empty — exactly
+        // what a single-level `remove_dir` (the pre-`remove_cgroup_tree` bug)
+        // and a wrong-path guess (this bug) both fail to clear.
+        std::fs::create_dir_all(leaf.join("kubelet.slice/kubelet.service")).unwrap();
+
+        // Simulates what `setup_node_cgroup_ns` writes — a path nothing in
+        // `remove_container_cgroup`'s own three guesses could derive, by
+        // construction (it lives directly under the OS temp dir, not under
+        // any `/sys/fs/cgroup/...` ancestor `current_cgroup_v2()`/
+        // `user_service_base()` could compute).
+        std::fs::write(
+            super::node_cgroup_leaf_marker(&cid),
+            leaf.to_string_lossy().as_bytes(),
+        )
+        .unwrap();
+
+        let c = Container::new(
+            cid.clone(),
+            "n".into(),
+            "kindest/node:v1.34.0".into(),
+            vec![],
+            "max".into(),
+        );
+        super::remove_container_cgroup(&c);
+
+        assert!(
+            !leaf.exists(),
+            "the marker's leaf must be gone — the three blind guesses alone would have left it untouched"
+        );
+        assert!(
+            !super::node_cgroup_leaf_marker(&cid).exists(),
+            "the marker itself is consumed, not left behind for the next container reusing this id"
+        );
+    }
+
     /// The derived ceilings must COMPOSE: four workloads without declared limits
     /// fill the engine's budget exactly and no more. This is the whole point of
     /// taking a quarter of the SLICE rather than a quarter of the host — with the
