@@ -2914,6 +2914,32 @@ vivo neste host: mascaramento dentro de containers reais (musl E glibc), `docker
 com concorrência, `net flow` (degrada para contadores de veth sem CAP_BPF, e já não cria o caminho
 fixo nem deixa restos), e o `container run` normal sem regressão.
 
+## CRI num nó kubeadm: eviction sem estatísticas e `kubeadm reset` com órfãos (2026-09-15)
+
+Os dois defeitos foram medidos contra um kubelet real (VM da `delonix-vm-k8s:1.36`, k8s 1.36.4)
+com o mesmo script de aceitação, antes e depois da correcção.
+
+**Eviction manager sem estatísticas.** O `writable_layer` do `ContainerStats` anunciava
+`<root>/containers/cri-<id>`. Isso é o NOME do container; o motor guarda o directório pelo seu
+próprio id (`<root>/containers/<id>/upper`). Cada `stat` do kubelet falhava («failed to get device
+for dir … no such file or directory»), o eviction manager ficava sem summary stats e a protecção
+de pressão de nó estava desligada. Passa a apontar para o directório real e a medir blocos e
+inodes; um container que o motor já não conhece devolve a raiz (que existe) com uso zero.
+Antes: 6 falhas por minuto e nenhum pod com `ephemeral-storage`. Depois: 0 falhas e 4 pods.
+
+**`kubeadm reset` com órfãos.** O `StopPodSandbox` chamava `container stop` sem `-t` (o prazo
+longo do motor), em série, e ignorava o resultado. O kubeadm dá 2 s a cada chamada: 9
+`DeadlineExceeded`, e ficavam 1 container no motor, 1 sandbox e 1 registo de container que
+nada voltava a remover. Passa a forçar a paragem (`-t 0`, o que o contrato CRI pede, porque o
+grace já foi dado pelo kubelet) e a devolver erro se algo continuar vivo. O `RemovePodSandbox`
+apagava o registo mesmo quando o `rm -f` falhava — a origem dos containers do motor sem registo
+CRI, invisíveis ao kubelet. Segue agora a regra do `RemoveContainer`. Depois: 0 órfãos e 0
+`DeadlineExceeded`. As duas operações passam a registar-se no journal: um reset bem-sucedido
+não deixava uma única linha do lado do CRI.
+
+Armadilha: **não há teste unitário para o `rm` falhado**. Simulá-lo exige mudar `DELONIX_BIN`,
+que é global ao processo e é lida pelos outros testes em paralelo. A prova é a medição no nó.
+
 ## Tecto de capabilities no CRI (`DELONIX_CRI_CAP_CEILING`, v0.47.0)
 
 Um limite MÁXIMO, definido no nó, para as capabilities de qualquer container criado através do CRI
