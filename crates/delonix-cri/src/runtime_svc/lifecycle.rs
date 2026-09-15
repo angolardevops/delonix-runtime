@@ -599,15 +599,43 @@ pub fn stop_pod_sandbox(
     base: &Path,
     id: String,
 ) -> Result<Response<StopPodSandboxResponse>, Status> {
-    // stop the sandbox's containers and mark it NotReady.
+    // The CRI contract: «if there are any running containers in the sandbox, they
+    // must be forcibly terminated». The graceful stop is the kubelet's, and it
+    // already happened (`StopContainer` with the pod's grace) before it gets here.
+    //
+    // This used to call `container stop` WITHOUT `-t`, i.e. with the engine's own
+    // long grace, one container after the other, and ignore the result. `kubeadm
+    // reset` gives `StopPodSandbox` a 2 s deadline: measured 2026-09-15 (k8s
+    // 1.36.4), every call ended `DeadlineExceeded`, kubeadm gave up after its
+    // retries, and the node was left with 2 engine containers, 1 sandbox and 2
+    // container records that nothing would ever remove.
+    let mut still_running = Vec::new();
     for c in list_recs::<ContainerRec>(&ct_dir(base)) {
-        if c.sandbox_id == id {
-            let _ = delonix(base, &["container", "stop", &format!("cri-{}", c.id)]);
+        if c.sandbox_id != id {
+            continue;
         }
+        let name = format!("cri-{}", c.id);
+        let _ = delonix(base, &["container", "stop", "-t", "0", &name])?;
+        // Judged by the reconciled state, not by the exit status: stopping an
+        // already-exited container is success, and a "stopped" process that is
+        // still alive is not.
+        if load_reconciled(base, &c.id).is_some_and(|k| {
+            matches!(k.status, delonix_runtime_core::Status::Running) && k.is_live()
+        }) {
+            still_running.push(name);
+        }
+    }
+    // Only a sandbox whose containers are really down is NotReady: an error makes
+    // the kubelet (or kubeadm) retry, instead of believing a live pod is gone.
+    if !still_running.is_empty() {
+        return Err(Status::internal(format!(
+            "sandbox {id}: still running after a forced stop: {}",
+            still_running.join(", ")
+        )));
     }
     if let Ok(mut r) = read_rec::<SandboxRec>(&sb_dir(base), &id) {
         r.stopped = true;
-        let _ = write_rec(&sb_dir(base), &id, &r);
+        write_rec(&sb_dir(base), &id, &r)?;
     }
     Ok(Response::new(StopPodSandboxResponse {}))
 }
@@ -616,11 +644,25 @@ pub fn remove_pod_sandbox(
     base: &Path,
     id: String,
 ) -> Result<Response<RemovePodSandboxResponse>, Status> {
+    // Same rule as `remove_container`: the record goes only AFTER the engine
+    // removed the container. Dropping it on a failed `rm -f` is how a node ends up
+    // with an engine container that no CRI record points at — invisible to the
+    // kubelet, so never retried and never reclaimed (measured after a `kubeadm
+    // reset`, 2026-09-15). And the forced stop first: `RemovePodSandbox` must
+    // succeed on a sandbox whose containers are still running.
     for c in list_recs::<ContainerRec>(&ct_dir(base)) {
-        if c.sandbox_id == id {
-            let _ = delonix(base, &["container", "rm", "-f", &format!("cri-{}", c.id)]);
-            remove_rec(&ct_dir(base), &c.id);
+        if c.sandbox_id != id {
+            continue;
         }
+        let name = format!("cri-{}", c.id);
+        let out = delonix(base, &["container", "rm", "-f", &name])?;
+        if !(out.status.success() || stderr_not_found(&out.stderr)) {
+            return Err(Status::internal(format!(
+                "sandbox {id}: removal of '{name}' failed (records preserved for retry): {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            )));
+        }
+        remove_rec(&ct_dir(base), &c.id);
     }
     // Remove the real Delonix pod (infra container + netns), if it existed.
     if let Ok(sb) = read_rec::<SandboxRec>(&sb_dir(base), &id) {
