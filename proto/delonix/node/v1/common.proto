@@ -1,0 +1,121 @@
+// Delonix node API — shared messages.
+//
+// Status: DRAFT contract for ADR-0040. Nothing serves or consumes it yet; it is published
+// so the control plane's node agent and this engine can agree on the shape BEFORE code
+// moves. `buf lint` + `buf breaking` gate it from phase P1 on.
+//
+// Two rules every message in this package follows, and a review rejects a change that
+// breaks either:
+//   1. No notion of tenant, account, plan, quota or billing (guardrail #2). `namespace`
+//      is the ENGINE's isolation namespace — the agent maps a tenant onto it, the engine
+//      never learns what a tenant is.
+//   2. No provider name in a field the caller writes. Provider-specific knobs travel in
+//      `ProviderExtensions`, keyed by provider id, and a provider REJECTS keys it does not
+//      know (guardrail #6: never accept-and-ignore).
+syntax = "proto3";
+
+package delonix.node.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/angolardevops/delonix-runtime/gen/go/delonix/node/v1;nodev1";
+
+// Identity and bookkeeping common to every resource the engine manages.
+message ResourceMeta {
+  // Name, unique per (kind, namespace). Immutable.
+  string name = 1;
+  // Engine isolation namespace. Empty means "default".
+  string namespace = 2;
+  // Engine-assigned id. Immutable, never reused.
+  string uid = 3;
+  map<string, string> labels = 4;
+  map<string, string> annotations = 5;
+  google.protobuf.Timestamp create_time = 6;
+  google.protobuf.Timestamp update_time = 7;
+  // Opaque version for optimistic concurrency. Send it back on update/delete; a stale
+  // etag is FAILED_PRECONDITION, never a silent overwrite.
+  string etag = 8;
+}
+
+// Kubernetes-style condition: the observed state, with the reason machine-readable.
+message Condition {
+  string type = 1; // e.g. "Ready", "Realized", "Mounted"
+  ConditionStatus status = 2;
+  string reason = 3; // CamelCase, stable — scripts branch on it
+  string message = 4; // human text, translated at the edge, never parsed
+  google.protobuf.Timestamp last_transition_time = 5;
+}
+
+enum ConditionStatus {
+  CONDITION_STATUS_UNSPECIFIED = 0;
+  CONDITION_STATUS_TRUE = 1;
+  CONDITION_STATUS_FALSE = 2;
+  // The question could not be asked (e.g. the network holder is down). Never collapsed
+  // into FALSE: "unknown" and "no" have opposite remedies.
+  CONDITION_STATUS_UNKNOWN = 3;
+}
+
+// Provider-specific options, namespaced by provider id ("libvirt", "proxmox", …).
+// The contract never names a provider; a provider validates its own entry against its
+// own schema and fails closed on unknown keys.
+message ProviderExtensions {
+  map<string, google.protobuf.Struct> by_provider = 1;
+}
+
+// A named optional capability a provider declares (topology §6: discovery, not the
+// lowest common denominator). A request needing a capability the selected provider lacks
+// is FAILED_PRECONDITION with ErrorDetail.reason = "CapabilityNotSupported".
+message Capability {
+  string name = 1; // e.g. "vm.snapshot.memory", "vm.live-migration", "net.overlay.encrypted"
+  bool supported = 2;
+  string detail = 3;
+}
+
+message ProviderInfo {
+  string id = 1;
+  string kind = 2; // "compute" | "network" | "storage" | "image"
+  bool available = 3;
+  repeated Capability capabilities = 4;
+  Condition health = 5;
+}
+
+message PageRequest {
+  int32 page_size = 1; // 0 = server default; capped server-side
+  string page_token = 2;
+}
+
+message PageResponse {
+  string next_page_token = 1; // empty = last page
+}
+
+// Common list filter. `label_selector` uses the Kubernetes equality grammar
+// ("app=web,tier!=db").
+message ListFilter {
+  string namespace = 1; // empty = default; "*" = all namespaces
+  string label_selector = 2;
+}
+
+// Attached to every non-OK gRPC status (as a binary detail) and every non-2xx REST body.
+// `reason` is the stable DX_* code the CLI already exits with (cmd/exitcode.rs), so a
+// script, the CLI and an API client classify a failure the same way.
+message ErrorDetail {
+  string reason = 1; // DX_NOT_FOUND, DX_CONFLICT, DX_INVALID, DX_UNAVAILABLE, …
+  string resource = 2; // "Container/web"
+  map<string, string> metadata = 3;
+  // True only when retrying the SAME request can succeed (transport, lock contention).
+  bool retryable = 4;
+  google.protobuf.Duration retry_after = 5;
+}
+
+// Resource quantities in base units — bytes and millicores — never "1G" strings on the
+// wire. Parsing human sizes is an edge concern (CLI, manifest), not a contract concern.
+message Resources {
+  int64 memory_limit_bytes = 1; // 0 = unset
+  int64 memory_reservation_bytes = 2;
+  int64 cpu_limit_millis = 3;
+  int64 cpu_weight = 4; // cgroup v2 cpu.weight, 1..10000; 0 = unset
+  string cpuset = 5;
+  int64 pids_limit = 6;
+}
