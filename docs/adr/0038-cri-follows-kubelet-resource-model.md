@@ -1,6 +1,6 @@
 # ADR 0038 — On the CRI path, the kubelet owns resource policy; the engine is the mechanism
 
-**Status:** Proposed
+**Status:** Accepted 2026-09-15 — implementation gated on the placement spike (Decision, «Order»)
 
 ## Context
 
