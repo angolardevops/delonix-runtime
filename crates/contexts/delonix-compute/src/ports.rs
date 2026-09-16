@@ -8,7 +8,7 @@
 //! An implementation owns its terminal manners (a progress line, a translated
 //! message); the use case only sees data and errors.
 
-use delonix_runtime_core::{Mount, Result};
+use delonix_runtime_core::{Container, ContainerFw, Mount, Result};
 
 use crate::Notice;
 
@@ -87,4 +87,32 @@ pub trait RunHost {
     fn check_secret(&self, name: &str) -> Result<()>;
     /// Where a detached container's log goes when `--log-file` is not given.
     fn default_log_path(&self, id: &str) -> String;
+}
+
+/// The node's network: custom networks, published ports, per-container firewall
+/// and shaping, and the L7 proxy's routes. Its home is the networking context
+/// (ADR-0040); it lives here until that context exists.
+pub trait NetworkProvider {
+    /// Refuses a network that does not exist.
+    fn check_network(&self, name: &str) -> Result<()>;
+    /// Attaches container `id` to `network` in `namespace` — at `fixed_ip` when
+    /// given — and returns the named network namespace and the address.
+    fn attach(
+        &self,
+        id: &str,
+        network: &str,
+        namespace: &str,
+        fixed_ip: Option<&str>,
+    ) -> Result<(String, String)>;
+    /// Undoes an attach; best effort, used on the way out of a failure.
+    fn detach(&self, id: &str, ip: &str);
+    /// Publishes one `-p` specification on a container's address.
+    fn publish(&self, ip: &str, spec: &str) -> Result<()>;
+    /// Unpublishes everything the record says is published; best effort.
+    fn unpublish(&self, container: &Container);
+    fn apply_firewall(&self, id: &str, ip: &str, fw: &ContainerFw) -> Result<()>;
+    /// Limits the container's bandwidth (`--net-bps`, `--net-burst`).
+    fn shape(&self, id: &str, bps: &str, burst: Option<&str>) -> Result<()>;
+    /// Registers a `--expose` route in the L7 proxy.
+    fn register_expose(&self, name: &str, namespace: &str, ip: &str, port: u16) -> Result<()>;
 }

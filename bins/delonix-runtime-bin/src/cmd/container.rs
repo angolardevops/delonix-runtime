@@ -2488,6 +2488,59 @@ impl delonix_compute::ports::DeviceResolver for CliRunPorts<'_> {
     }
 }
 
+impl delonix_compute::ports::NetworkProvider for CliRunPorts<'_> {
+    fn check_network(&self, name: &str) -> Result<()> {
+        delonix_net::NetworkStore::open(super::util::state_root())?
+            .get(name)
+            .map(|_| ())
+    }
+
+    fn attach(
+        &self,
+        id: &str,
+        network: &str,
+        namespace: &str,
+        fixed_ip: Option<&str>,
+    ) -> Result<(String, String)> {
+        let attached = match fixed_ip {
+            Some(fixed) => infra::attach_container_on_ip(id, network, fixed, namespace)?,
+            None => infra::attach_container(id, network, namespace)?,
+        };
+        warn_if_namespace_isolation_inert(namespace);
+        Ok(attached)
+    }
+
+    fn detach(&self, id: &str, ip: &str) {
+        infra::detach_container(id, ip);
+    }
+
+    fn publish(&self, ip: &str, spec: &str) -> Result<()> {
+        publish_with_retry(ip, spec)
+    }
+
+    fn unpublish(&self, container: &Container) {
+        unpublish_ports(container, None);
+    }
+
+    fn apply_firewall(
+        &self,
+        id: &str,
+        ip: &str,
+        fw: &delonix_runtime_core::ContainerFw,
+    ) -> Result<()> {
+        infra::apply_firewall(id, ip, fw)
+    }
+
+    fn shape(&self, id: &str, bps: &str, burst: Option<&str>) -> Result<()> {
+        let rate = delonix_net::parse_net_rate(bps, burst)?;
+        infra::set_net_rate(id, rate.rate_bit, rate.burst_bytes)
+    }
+
+    fn register_expose(&self, name: &str, namespace: &str, ip: &str, port: u16) -> Result<()> {
+        super::ingress_proxy::auto_register(name, namespace, ip, port)
+    }
+}
+
 impl delonix_compute::ports::RunHost for CliRunPorts<'_> {
     fn read_file(&self, path: &str) -> std::io::Result<String> {
         std::fs::read_to_string(path)
@@ -2585,7 +2638,6 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         name,
         net,
         namespace,
-        expose,
         ports,
         rm,
         restart,
@@ -2595,14 +2647,11 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         selinux,
         host_pid,
         host_ipc,
-        ip,
         wait_healthy,
         wait_timeout,
         health,
         pod,
         pod_infra_pid,
-        net_bps,
-        net_burst,
         log_cri,
         ..
     } = opts;
@@ -2786,62 +2835,24 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     let log_path = c.log_path.clone();
 
     let custom_net = custom_net_name(&net);
-    // `--ip`: `infra::attach_container_on_ip` reserves the address in the SAME
-    // per-prefix IPAM registry that `attach_container`'s `allocate` reads
-    // (`ipam::reserve`, restored after `Net::attach_on_ip` left the engine) —
-    // it had ZERO callers before this, the same "public, dead, latent bug"
-    // pattern this repo has paid for several times over (see AGENTS.md). The
-    // combination check (`--ip` without a custom network) is refused up front by
-    // `delonix_compute::preflight::check_run_opts`, before anything is created.
-    // `--expose` needs an IP on the SDN (custom network) — the proxy reaches the backend
-    // via that IP. With `--net host/none` there's no IP → warn instead of silently ignoring.
-    if expose.is_some() && custom_net.is_none() {
-        eprintln!(
-            "{} {}",
-            super::po::t("warning:"),
-            super::po::t("--expose requires `--net <network>` (the proxy reaches the container via its SDN IP) — ignored")
-        );
-    }
     let mut attached_ip = None;
     if let Some(n) = &custom_net {
         if reexec {
-            // 2nd pass: we're already running INSIDE the holder's userns+netns (the
-            // `ip netns exec` of `join_argv` put us there). The netns already exists and is ours.
             attached_ip = std::env::var("DELONIX_REEXEC_IP").ok();
         } else {
-            // 1st pass: creates the netns on the holder's side and RE-EXECUTES itself inside it.
-            delonix_net::NetworkStore::open(super::util::state_root())?.get(n)?;
-            let (netns, ip) = match &ip {
-                Some(fixed) => infra::attach_container_on_ip(&id, n, fixed, &namespace)?,
-                None => infra::attach_container(&id, n, &namespace)?,
-            };
-            warn_if_namespace_isolation_inert(&namespace);
-            // `--expose`: auto-register in the L7 proxy HERE, on the HOST side — the
-            // proxy spawn is via `nsenter` into the holder, which fails from the
-            // already-reexec'd process (inside the container's netns). `c.expose` is
-            // persisted later, in the custom_net block of the reexec pass.
-            if let Some(port) = expose {
-                if let Err(e) = super::ingress_proxy::auto_register(&c.name, &namespace, &ip, port)
-                {
-                    eprintln!(
-                        "{}",
-                        super::po::tf(
-                            "warning: --expose of '{name}' not registered in the proxy: {e}",
-                            &[("name", &c.name), ("e", &e.to_string())],
-                        )
-                    );
-                }
-            }
+            let mut notices = Vec::new();
+            let attached = delonix_compute::network::attach_custom_network(
+                &opts_copy,
+                &c,
+                n,
+                &read_ports,
+                &mut notices,
+            );
+            print_notices(&notices);
+            let (netns, ip) = attached?;
             return reexec_into_netns(&id, &netns, &ip, &opts_copy, true);
         }
     }
-    // `--pod <name>`: joins the pod sandbox's SHARED netns ("pause" model),
-    // used by the CRI server (`delonix-cri`). The pod's netns already exists (the CRI
-    // created it with `netns attach cri-<pod>`); each container of the pod joins THAT
-    // netns (shared IP/ports) instead of creating its own. Same re-exec mechanism as
-    // `--net <custom>`, but ENTERING the POD's netns (not one named after this
-    // container). It does NOT detach the netns on failure — it belongs to the pod, not to
-    // this container (the pod's other containers share it).
     if let Some(pn) = &pod {
         // PERSIST THE MEMBERSHIP, and do it BEFORE the branch — the fourth time
         // this exact trap has been paid for in this repo (`-v` never persisted,
@@ -2893,22 +2904,19 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         }
     }
     c.ports = ports.clone();
-
-    // `-p` with a custom network: publishes via the INGRESS (hostfwd on the single
-    // slirp + nft DNAT), BEFORE startup — the rules point at the assigned IP, which
-    // is already known; this is also the path that allows hot (un)publish with the
-    // container running. Cleanup in stop/rm (`unpublish_ports`).
-    if let Some(ip) = &attached_ip {
-        for spec in &ports {
-            if let Err(e) = publish_with_retry(ip, spec) {
-                // Custom-network path: cleanup is in the ingress, there's no own
-                // slirp to reap (and the container hasn't even started yet).
-                unpublish_ports(&c, None);
-                infra::detach_container(&id, ip);
-                return Err(e);
-            }
-        }
-    }
+    // Ports, and what a custom network carries (isolation, `--expose`, shaping),
+    // before the workload starts — see `delonix_compute::network`.
+    let mut notices = Vec::new();
+    let wired = delonix_compute::network::wire_network(
+        &opts_copy,
+        &mut c,
+        custom_net.as_deref(),
+        attached_ip.as_deref(),
+        &read_ports,
+        &mut notices,
+    );
+    print_notices(&notices);
+    wired?;
 
     // `-p` without a custom network (`--net host`, the default): the container
     // stops sharing the host's network and gets its own netns with slirp4netns +
@@ -3010,70 +3018,6 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // Both values are already known here — the attach happened above — so
     // recording them BEFORE the branch fixes the supervised path and leaves the
     // normal one byte-for-byte unchanged (it assigns the same values again).
-    if let Some(n) = &custom_net {
-        c.network = Some(n.clone());
-        c.ip = attached_ip.clone();
-        // SECURITY REGRESSION FIXED HERE (mine, shipped in v0.39.0).
-        //
-        // Namespace isolation was applied only in the block BELOW, which sits
-        // after the supervisor's early return. That was harmless while the
-        // supervisor was gated on `--restart`; once it took every detached
-        // container, isolation stopped being applied to any of them — silently,
-        // because nothing fails when a firewall is simply never installed.
-        //
-        // Measured, same scenario on both binaries:
-        //   v0.38.2 (no universal supervisor): teamA → teamB  blocked
-        //   v0.39.0 (universal supervisor):    teamA → teamB  REACHABLE
-        //
-        // It is applied here, before the branch, so both paths get it. The
-        // block below is now a no-op repeat for the unsupervised path rather
-        // than the only place it happens.
-        if c.namespace != "default" {
-            if let Some(ip) = c.ip.clone() {
-                let mut fw = c.firewall.clone().unwrap_or_default();
-                fw.enabled = true;
-                fw.namespace = c.namespace.clone();
-                match infra::apply_firewall(&c.id, &ip, &fw) {
-                    Ok(()) => c.firewall = Some(fw),
-                    Err(e) => eprintln!(
-                        "{}",
-                        super::po::tf(
-                            "warning: namespace isolation '{namespace}' not applied: {e}",
-                            &[("namespace", &c.namespace), ("e", &e.to_string())],
-                        )
-                    ),
-                }
-            }
-        }
-        // `--expose` and `--net-bps` had the same defect as the isolation above,
-        // and survived its fix: both lived only in the block after the
-        // supervisor's early return, so no detached container got them. Measured:
-        // `run -d --net <n> --net-bps 1mbit` exited 0, the record said
-        // `net_bps: "1mbit"`, and the holder had no qdisc on the veth at all —
-        // while `container update --net-rate` put a `tbf` on the same veth.
-        //
-        // `--expose <port>`: persisted in the record (to re-register on `start`
-        // and de-register on `rm`); the proxy registration itself already
-        // happened in the 1st pass, on the host.
-        if let Some(port) = expose {
-            c.expose = Some(port);
-        }
-        // `--net-bps`: the shaping lives on the holder's end of the veth, which
-        // the attach above already created. Applied before the workload starts,
-        // so a refusal undoes the attach instead of leaving a running container
-        // behind an error.
-        if let Some(bps) = &net_bps {
-            let shaped = delonix_net::parse_net_rate(bps, net_burst.as_deref())
-                .and_then(|rate| infra::set_net_rate(&c.id, rate.rate_bit, rate.burst_bytes));
-            if let Err(e) = shaped {
-                unpublish_ports(&c, None);
-                if let Some(ip) = &c.ip {
-                    infra::detach_container(&id, ip);
-                }
-                return Err(e);
-            }
-        }
-    }
     c.health = health.clone();
     if should_supervise(&restart, detach, !no_supervisor) {
         if policy_supervised(&restart) {
