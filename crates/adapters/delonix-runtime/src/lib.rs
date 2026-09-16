@@ -6049,13 +6049,30 @@ fn spawn(
     if wait_for_mounts(ready.0, &container.name) == MountWait::InitExited && detach {
         let code = waitpid(pid, None).map(wait_to_code).unwrap_or(-1);
         remove_container_cgroup(container);
+        // The init's own words: a detached init writes to the log file, and no record
+        // will exist for `container logs` to find — so the reason travels in the error.
+        let said = spec
+            .log_path
+            .as_deref()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .map(|s| {
+                s.lines()
+                    .rev()
+                    .take(3)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            })
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "it printed nothing".to_string());
         return Err(Error::Runtime {
             context: "container start",
             message: format!(
                 "{}: the container's init exited with code {code} before its root filesystem \
-                 was ready — the container is not running (its own error is printed above, or \
-                 in `delonix container logs {}`)",
-                container.name, container.name
+                 was ready, so the container is not running: {said}",
+                container.name
             ),
         });
     }
