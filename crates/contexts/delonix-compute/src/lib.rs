@@ -5,6 +5,7 @@
 
 mod notice;
 pub mod pod;
+pub mod ports;
 pub mod preflight;
 pub mod run;
 mod run_opts;

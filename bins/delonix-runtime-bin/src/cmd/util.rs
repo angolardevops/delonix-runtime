@@ -112,13 +112,7 @@ pub(crate) fn compose_command(
     cmd: &[String],
     user: &[String],
 ) -> Vec<String> {
-    let mut v = entrypoint.to_vec();
-    if user.is_empty() {
-        v.extend(cmd.iter().cloned());
-    } else {
-        v.extend(user.iter().cloned());
-    }
-    v
+    delonix_compute::run::compose_command(entrypoint, cmd, user)
 }
 
 /// Like [`compose_command`], but from the image's config.
