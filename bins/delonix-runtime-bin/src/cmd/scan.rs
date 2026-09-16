@@ -27,12 +27,7 @@ struct Provenance {
     placeholder: bool,
 }
 
-fn now_unix() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
+use delonix_runtime_core::now_unix;
 
 /// Loads the advisory database: the synced one (`<root>/advisories.json`) takes
 /// precedence; otherwise `$DELONIX_ADVISORIES`; otherwise the embedded placeholder.

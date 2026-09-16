@@ -7,7 +7,6 @@ use std::fs::OpenOptions;
 use std::io::Write as _;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -75,12 +74,7 @@ impl AuditLog {
     }
 }
 
-pub fn now_unix() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
+pub use delonix_runtime_core::now_unix;
 
 /// Digest of the call's arguments, for audit correlation — never the arguments
 /// themselves, so a secret accidentally passed as a tool argument cannot leak

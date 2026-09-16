@@ -23,6 +23,17 @@ pub use error::{Error, Result};
 pub use secret::{Secret, SecretStore};
 pub use store::{write_atomic, write_atomic_mode, write_private_temp, JsonStore, Store};
 
+/// Seconds since the Unix epoch, `0` if the clock is before it.
+///
+/// The one definition: it was copied, identical, into ten modules across six
+/// crates, each with its own `SystemTime` imports.
+pub fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 /// Are we in the INITIAL user namespace — i.e. is uid 0 here the host's root?
 ///
 /// **`geteuid() == 0` does not answer this**, and the difference matters

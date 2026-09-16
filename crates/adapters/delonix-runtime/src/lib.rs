@@ -140,12 +140,7 @@ fn died_of_oom(status: &Status, before: Option<u64>, after: Option<u64>) -> bool
     }
 }
 
-fn now_unix() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
+use delonix_runtime_core::now_unix;
 
 fn wait_to_code(status: WaitStatus) -> i32 {
     match status {

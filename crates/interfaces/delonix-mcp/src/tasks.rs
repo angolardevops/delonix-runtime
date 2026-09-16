@@ -5,7 +5,6 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -53,12 +52,7 @@ pub struct TaskRegistry {
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
-fn now_unix() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
+use delonix_runtime_core::now_unix;
 
 impl TaskRegistry {
     /// Runs `work` on a blocking thread and tracks it under a new task id.
