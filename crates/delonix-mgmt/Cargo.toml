@@ -14,16 +14,16 @@ delonix-image = { path = "../delonix-image" }
 delonix-scan = { path = "../delonix-scan" }
 delonix-vm = { path = "../delonix-vm" }
 delonix-net = { path = "../delonix-net" }
-axum = "0.7"
-tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync"] }
+axum = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "macros", "sync"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-hyper = { version = "1", features = ["server", "http1"] }
-hyper-util = { version = "0.1", features = ["tokio", "server"] }
-tower = { version = "0.5", features = ["util"] }
+hyper = { workspace = true, features = ["server", "http1"] }
+hyper-util = { workspace = true, features = ["tokio", "server"] }
+tower = { workspace = true, features = ["util"] }
 libc = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3"
-tower = { version = "0.5", features = ["util"] }
-http-body-util = "0.1"
+tempfile = { workspace = true }
+tower = { workspace = true, features = ["util"] }
+http-body-util = { workspace = true }

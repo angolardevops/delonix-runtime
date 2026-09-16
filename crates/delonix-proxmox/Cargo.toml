@@ -14,8 +14,4 @@ serde_json = { workspace = true }
 # The same client, features and TLS stack as `delonix-image` and
 # `delonix-truenas`. It lives HERE and not in `delonix-vm`: that crate has four
 # dependencies and a motor crate does not grow an HTTP client (ADR-0008).
-reqwest = { version = "0.12", default-features = false, features = [
-    "blocking",
-    "rustls-tls-webpki-roots",
-    "json",
-] }
+reqwest = { workspace = true, features = ["blocking", "rustls-tls-webpki-roots", "json"] }

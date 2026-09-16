@@ -61,6 +61,49 @@ opentelemetry-otlp = { version = "0.32", default-features = false, features = [
 ] }
 tracing-opentelemetry = { version = "0.33", default-features = false }
 
+# ADR-0040, P0: every version lives HERE, once. A member names only the features it
+# needs (`{ workspace = true, features = [...] }`); a crate cannot re-enable
+# default features the workspace turned off, so `default-features = false` is set
+# here and nowhere else. `scripts/arch_fitness.py` fails on an inline version.
+# Async runtime and HTTP (CRI, management API, L7 proxy, MCP)
+tokio = "1"
+tokio-stream = "0.1"
+futures-util = { version = "0.3", default-features = false }
+hyper = "1"
+hyper-util = "0.1"
+http-body-util = "0.1"
+bytes = "1"
+axum = "0.7"
+tower = "0.5"
+tokio-rustls = { version = "0.26", default-features = false }
+rustls-pemfile = "2"
+rcgen = { version = "0.13", default-features = false }
+reqwest = { version = "0.12", default-features = false }
+# gRPC (CRI)
+tonic = "0.12"
+tonic-build = "0.12"
+prost = "0.13"
+# Crypto, encoding, compression
+chacha20poly1305 = "0.10"
+getrandom = "0.2"
+ring = "0.17"
+base64 = "0.22"
+zstd = "0.13"
+# Kernel interfaces
+rustix = "1.1"
+# CLI, manifests, schema
+clap_complete = "4.6"
+serde_yaml = "0.9"
+schemars = "1.2.2"
+ratatui = "0.29"
+# Telemetry and MCP
+prometheus-client = "0.25"
+rmcp = { version = "3", default-features = false }
+# Tests and benchmarks
+proptest = "1"
+tempfile = "3"
+criterion = "0.5"
+
 # Perfil de release dos binários publicados: LTO thin + 1 codegen unit dão
 # um binário mais pequeno e mais rápido (inlining entre crates — o caminho
 # quente hash/serde/parsing beneficia) por custo só em tempo de build no CI.
