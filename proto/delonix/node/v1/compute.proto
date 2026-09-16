@@ -11,6 +11,7 @@ package delonix.node.v1;
 
 import "delonix/node/v1/common.proto";
 import "delonix/node/v1/operations.proto";
+import "google/api/annotations.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/field_mask.proto";
 
@@ -19,21 +20,61 @@ option go_package = "github.com/angolardevops/delonix-runtime/gen/go/delonix/nod
 // ---------------------------------------------------------------------------- containers
 
 service ContainerService {
-  rpc CreateContainer(CreateContainerRequest) returns (Operation);
-  rpc GetContainer(GetResourceRequest) returns (Container);
-  rpc ListContainers(ListResourcesRequest) returns (ListContainersResponse);
+  rpc CreateContainer(CreateContainerRequest) returns (Operation) {
+    option (google.api.http) = {
+      post: "/v1/namespaces/{namespace}/containers"
+      body: "*"
+    };
+  }
+  rpc GetContainer(GetContainerRequest) returns (Container) {
+    option (google.api.http) = {get: "/v1/namespaces/{namespace}/containers/{name}"};
+  }
+  rpc ListContainers(ListContainersRequest) returns (ListContainersResponse) {
+    option (google.api.http) = {get: "/v1/namespaces/{namespace}/containers"};
+  }
   // Hot reconfiguration without changing the PID (ports, volumes, networks, limits) —
   // the engine's differentiator; fields outside the mask are untouched.
-  rpc UpdateContainer(UpdateContainerRequest) returns (Container);
-  rpc DeleteContainer(DeleteResourceRequest) returns (Operation);
-  rpc StartContainer(ContainerActionRequest) returns (Container);
-  rpc StopContainer(StopContainerRequest) returns (Container);
-  rpc KillContainer(KillContainerRequest) returns (Container);
-  rpc WaitContainer(ContainerActionRequest) returns (WaitContainerResponse);
+  rpc UpdateContainer(UpdateContainerRequest) returns (Container) {
+    option (google.api.http) = {
+      patch: "/v1/namespaces/{namespace}/containers/{name}"
+      body: "container"
+    };
+  }
+  rpc DeleteContainer(DeleteContainerRequest) returns (Operation) {
+    option (google.api.http) = {delete: "/v1/namespaces/{namespace}/containers/{name}"};
+  }
+  rpc StartContainer(StartContainerRequest) returns (Container) {
+    option (google.api.http) = {
+      post: "/v1/namespaces/{namespace}/containers/{name}:start"
+      body: "*"
+    };
+  }
+  rpc StopContainer(StopContainerRequest) returns (Container) {
+    option (google.api.http) = {
+      post: "/v1/namespaces/{namespace}/containers/{name}:stop"
+      body: "*"
+    };
+  }
+  rpc KillContainer(KillContainerRequest) returns (Container) {
+    option (google.api.http) = {
+      post: "/v1/namespaces/{namespace}/containers/{name}:kill"
+      body: "*"
+    };
+  }
+  rpc WaitContainer(WaitContainerRequest) returns (WaitContainerResponse) {
+    option (google.api.http) = {
+      post: "/v1/namespaces/{namespace}/containers/{name}:wait"
+      body: "*"
+    };
+  }
   // Bidirectional: stdin frames in, stdout/stderr frames out, exit code last.
-  rpc Exec(stream ExecFrame) returns (stream ExecFrame);
-  rpc Logs(LogsRequest) returns (stream LogChunk);
-  rpc Stats(ContainerActionRequest) returns (ContainerStats);
+  rpc Exec(stream ExecRequest) returns (stream ExecResponse);
+  rpc Logs(LogsRequest) returns (stream LogChunk) {
+    option (google.api.http) = {get: "/v1/namespaces/{namespace}/containers/{container}/logs"};
+  }
+  rpc Stats(StatsRequest) returns (ContainerStats) {
+    option (google.api.http) = {get: "/v1/namespaces/{namespace}/containers/{name}/stats"};
+  }
 }
 
 message ContainerSpec {
@@ -163,22 +204,77 @@ enum ContainerPhase {
 }
 
 message CreateContainerRequest {
-  ResourceMeta meta = 1; // name/namespace/labels; server-owned fields ignored
-  ContainerSpec spec = 2;
+  // Identity comes from the request — the same `namespace`/`name` the path carries — and
+  // never from a ResourceMeta whose server-owned fields the engine would have to ignore.
+  string namespace = 1; // empty = default
+  string name = 2;
+  map<string, string> labels = 3;
+  map<string, string> annotations = 4;
+  ContainerSpec spec = 5;
   // Idempotency key: the same request_id within the retention window returns the SAME
   // Operation instead of creating a second container.
-  string request_id = 3;
-  bool start = 4; // default create-and-start is explicit, not implied
+  string request_id = 6;
+  bool start = 7; // default create-and-start is explicit, not implied
 }
 
-message GetResourceRequest {
+message GetContainerRequest {
   string name = 1;
   string namespace = 2;
 }
 
-message ListResourcesRequest {
-  ListFilter filter = 1;
-  PageRequest page = 2;
+message GetNetworkRequest {
+  string name = 1;
+  string namespace = 2;
+}
+
+message GetPodRequest {
+  string name = 1;
+  string namespace = 2;
+}
+
+message GetVirtualMachineRequest {
+  string name = 1;
+  string namespace = 2;
+}
+
+message GetVolumeRequest {
+  string name = 1;
+  string namespace = 2;
+}
+
+message ListContainersRequest {
+  string namespace = 1; // empty = default; "*" = all namespaces
+  // Kubernetes equality grammar ("app=web,tier!=db").
+  string label_selector = 2;
+  PageRequest page = 3;
+}
+
+message ListNetworksRequest {
+  string namespace = 1; // empty = default; "*" = all namespaces
+  // Kubernetes equality grammar ("app=web,tier!=db").
+  string label_selector = 2;
+  PageRequest page = 3;
+}
+
+message ListPodsRequest {
+  string namespace = 1; // empty = default; "*" = all namespaces
+  // Kubernetes equality grammar ("app=web,tier!=db").
+  string label_selector = 2;
+  PageRequest page = 3;
+}
+
+message ListVirtualMachinesRequest {
+  string namespace = 1; // empty = default; "*" = all namespaces
+  // Kubernetes equality grammar ("app=web,tier!=db").
+  string label_selector = 2;
+  PageRequest page = 3;
+}
+
+message ListVolumesRequest {
+  string namespace = 1; // empty = default; "*" = all namespaces
+  // Kubernetes equality grammar ("app=web,tier!=db").
+  string label_selector = 2;
+  PageRequest page = 3;
 }
 
 message ListContainersResponse {
@@ -187,11 +283,15 @@ message ListContainersResponse {
 }
 
 message UpdateContainerRequest {
-  Container container = 1; // meta.name/namespace + meta.etag identify it
-  google.protobuf.FieldMask update_mask = 2; // required; empty mask = INVALID_ARGUMENT
+  // The container is identified by the path. `container.meta.name`/`namespace` are empty
+  // or equal to these — a mismatch is INVALID_ARGUMENT, never a rename.
+  string namespace = 1;
+  string name = 2;
+  Container container = 3; // `container.meta.etag` carries the optimistic-concurrency check
+  google.protobuf.FieldMask update_mask = 4; // required; empty mask = INVALID_ARGUMENT
 }
 
-message DeleteResourceRequest {
+message DeleteContainerRequest {
   string name = 1;
   string namespace = 2;
   string etag = 3;
@@ -199,7 +299,41 @@ message DeleteResourceRequest {
   string request_id = 5;
 }
 
-message ContainerActionRequest {
+message DeleteNetworkRequest {
+  string name = 1;
+  string namespace = 2;
+  string etag = 3;
+  bool force = 4; // stop a running resource first
+  string request_id = 5;
+}
+
+message DeletePodRequest {
+  string name = 1;
+  string namespace = 2;
+  string etag = 3;
+  bool force = 4; // stop a running resource first
+  string request_id = 5;
+}
+
+message DeleteVirtualMachineRequest {
+  string name = 1;
+  string namespace = 2;
+  string etag = 3;
+  bool force = 4; // stop a running resource first
+  string request_id = 5;
+}
+
+message StartContainerRequest {
+  string name = 1;
+  string namespace = 2;
+}
+
+message StatsRequest {
+  string name = 1;
+  string namespace = 2;
+}
+
+message WaitContainerRequest {
   string name = 1;
   string namespace = 2;
 }
@@ -221,14 +355,22 @@ message WaitContainerResponse {
   string reason = 2;
 }
 
-message ExecFrame {
+// Client → engine. Split from the server frames so a client cannot send `stdout` and the
+// engine cannot send `stdin`: the type says which side speaks.
+message ExecRequest {
   oneof frame {
-    ExecStart start = 1; // first client frame
+    ExecStart start = 1; // first frame, exactly once
     bytes stdin = 2;
+    TerminalSize resize = 5;
+  }
+}
+
+// Engine → client.
+message ExecResponse {
+  oneof frame {
     bytes stdout = 3;
     bytes stderr = 4;
-    TerminalSize resize = 5;
-    int32 exit_code = 6; // last server frame
+    int32 exit_code = 6; // last frame
   }
 }
 
@@ -283,10 +425,21 @@ message ContainerStats {
 // ---------------------------------------------------------------------------------- pods
 
 service PodService {
-  rpc CreatePod(CreatePodRequest) returns (Operation);
-  rpc GetPod(GetResourceRequest) returns (Pod);
-  rpc ListPods(ListResourcesRequest) returns (ListPodsResponse);
-  rpc DeletePod(DeleteResourceRequest) returns (Operation);
+  rpc CreatePod(CreatePodRequest) returns (Operation) {
+    option (google.api.http) = {
+      post: "/v1/namespaces/{namespace}/pods"
+      body: "*"
+    };
+  }
+  rpc GetPod(GetPodRequest) returns (Pod) {
+    option (google.api.http) = {get: "/v1/namespaces/{namespace}/pods/{name}"};
+  }
+  rpc ListPods(ListPodsRequest) returns (ListPodsResponse) {
+    option (google.api.http) = {get: "/v1/namespaces/{namespace}/pods"};
+  }
+  rpc DeletePod(DeletePodRequest) returns (Operation) {
+    option (google.api.http) = {delete: "/v1/namespaces/{namespace}/pods/{name}"};
+  }
 }
 
 message PodSpec {
@@ -309,9 +462,14 @@ message Pod {
 }
 
 message CreatePodRequest {
-  ResourceMeta meta = 1;
-  PodSpec spec = 2;
-  string request_id = 3;
+  // Identity comes from the request — the same `namespace`/`name` the path carries — and
+  // never from a ResourceMeta whose server-owned fields the engine would have to ignore.
+  string namespace = 1; // empty = default
+  string name = 2;
+  map<string, string> labels = 3;
+  map<string, string> annotations = 4;
+  PodSpec spec = 5;
+  string request_id = 6;
 }
 
 message ListPodsResponse {
@@ -322,22 +480,67 @@ message ListPodsResponse {
 // ------------------------------------------------------------------------ virtual machines
 
 service VirtualMachineService {
-  rpc CreateVirtualMachine(CreateVirtualMachineRequest) returns (Operation);
-  rpc GetVirtualMachine(GetResourceRequest) returns (VirtualMachine);
-  rpc ListVirtualMachines(ListResourcesRequest) returns (ListVirtualMachinesResponse);
-  rpc DeleteVirtualMachine(DeleteResourceRequest) returns (Operation);
-  rpc StartVirtualMachine(VirtualMachineActionRequest) returns (Operation);
+  rpc CreateVirtualMachine(CreateVirtualMachineRequest) returns (Operation) {
+    option (google.api.http) = {
+      post: "/v1/namespaces/{namespace}/virtualmachines"
+      body: "*"
+    };
+  }
+  rpc GetVirtualMachine(GetVirtualMachineRequest) returns (VirtualMachine) {
+    option (google.api.http) = {get: "/v1/namespaces/{namespace}/virtualmachines/{name}"};
+  }
+  rpc ListVirtualMachines(ListVirtualMachinesRequest) returns (ListVirtualMachinesResponse) {
+    option (google.api.http) = {get: "/v1/namespaces/{namespace}/virtualmachines"};
+  }
+  rpc DeleteVirtualMachine(DeleteVirtualMachineRequest) returns (Operation) {
+    option (google.api.http) = {delete: "/v1/namespaces/{namespace}/virtualmachines/{name}"};
+  }
+  rpc StartVirtualMachine(StartVirtualMachineRequest) returns (Operation) {
+    option (google.api.http) = {
+      post: "/v1/namespaces/{namespace}/virtualmachines/{name}:start"
+      body: "*"
+    };
+  }
   // Stop keeps the disk. Destroy (DeleteVirtualMachine) releases it. On a remote provider
   // these are different calls, and conflating them deletes a customer's data.
-  rpc StopVirtualMachine(VirtualMachineActionRequest) returns (Operation);
-  rpc PauseVirtualMachine(VirtualMachineActionRequest) returns (VirtualMachine);
-  rpc ResumeVirtualMachine(VirtualMachineActionRequest) returns (VirtualMachine);
-  rpc CreateSnapshot(SnapshotRequest) returns (Operation);
-  rpc ListSnapshots(VirtualMachineActionRequest) returns (ListSnapshotsResponse);
-  rpc RestoreSnapshot(SnapshotRequest) returns (Operation);
-  rpc DeleteSnapshot(SnapshotRequest) returns (Operation);
+  rpc StopVirtualMachine(StopVirtualMachineRequest) returns (Operation) {
+    option (google.api.http) = {
+      post: "/v1/namespaces/{namespace}/virtualmachines/{name}:stop"
+      body: "*"
+    };
+  }
+  rpc PauseVirtualMachine(PauseVirtualMachineRequest) returns (VirtualMachine) {
+    option (google.api.http) = {
+      post: "/v1/namespaces/{namespace}/virtualmachines/{name}:pause"
+      body: "*"
+    };
+  }
+  rpc ResumeVirtualMachine(ResumeVirtualMachineRequest) returns (VirtualMachine) {
+    option (google.api.http) = {
+      post: "/v1/namespaces/{namespace}/virtualmachines/{name}:resume"
+      body: "*"
+    };
+  }
+  rpc CreateSnapshot(CreateSnapshotRequest) returns (Operation) {
+    option (google.api.http) = {
+      post: "/v1/namespaces/{namespace}/virtualmachines/{virtual_machine}/snapshots"
+      body: "*"
+    };
+  }
+  rpc ListSnapshots(ListSnapshotsRequest) returns (ListSnapshotsResponse) {
+    option (google.api.http) = {get: "/v1/namespaces/{namespace}/virtualmachines/{virtual_machine}/snapshots"};
+  }
+  rpc RestoreSnapshot(RestoreSnapshotRequest) returns (Operation) {
+    option (google.api.http) = {
+      post: "/v1/namespaces/{namespace}/virtualmachines/{virtual_machine}/snapshots/{snapshot}:restore"
+      body: "*"
+    };
+  }
+  rpc DeleteSnapshot(DeleteSnapshotRequest) returns (Operation) {
+    option (google.api.http) = {delete: "/v1/namespaces/{namespace}/virtualmachines/{virtual_machine}/snapshots/{snapshot}"};
+  }
   // Serial console, bidirectional bytes.
-  rpc Console(stream ConsoleFrame) returns (stream ConsoleFrame);
+  rpc Console(stream ConsoleRequest) returns (stream ConsoleResponse);
 }
 
 message VirtualMachineSpec {
@@ -389,10 +592,15 @@ enum VirtualMachinePhase {
 }
 
 message CreateVirtualMachineRequest {
-  ResourceMeta meta = 1;
-  VirtualMachineSpec spec = 2;
-  string request_id = 3;
-  bool wait_until_reachable = 4;
+  // Identity comes from the request — the same `namespace`/`name` the path carries — and
+  // never from a ResourceMeta whose server-owned fields the engine would have to ignore.
+  string namespace = 1; // empty = default
+  string name = 2;
+  map<string, string> labels = 3;
+  map<string, string> annotations = 4;
+  VirtualMachineSpec spec = 5;
+  string request_id = 6;
+  bool wait_until_reachable = 7;
 }
 
 message ListVirtualMachinesResponse {
@@ -400,13 +608,50 @@ message ListVirtualMachinesResponse {
   PageResponse page = 2;
 }
 
-message VirtualMachineActionRequest {
+message ListSnapshotsRequest {
+  string namespace = 1;
+  string virtual_machine = 2;
+}
+
+message PauseVirtualMachineRequest {
   string name = 1;
   string namespace = 2;
   string request_id = 3;
 }
 
-message SnapshotRequest {
+message ResumeVirtualMachineRequest {
+  string name = 1;
+  string namespace = 2;
+  string request_id = 3;
+}
+
+message StartVirtualMachineRequest {
+  string name = 1;
+  string namespace = 2;
+  string request_id = 3;
+}
+
+message StopVirtualMachineRequest {
+  string name = 1;
+  string namespace = 2;
+  string request_id = 3;
+}
+
+message CreateSnapshotRequest {
+  string virtual_machine = 1;
+  string namespace = 2;
+  string snapshot = 3;
+  string request_id = 4;
+}
+
+message DeleteSnapshotRequest {
+  string virtual_machine = 1;
+  string namespace = 2;
+  string snapshot = 3;
+  string request_id = 4;
+}
+
+message RestoreSnapshotRequest {
   string virtual_machine = 1;
   string namespace = 2;
   string snapshot = 3;
@@ -423,9 +668,18 @@ message ListSnapshotsResponse {
   repeated Snapshot snapshots = 1;
 }
 
-message ConsoleFrame {
+message ConsoleRequest {
   oneof frame {
-    VirtualMachineActionRequest open = 1;
+    ConsoleOpen open = 1; // first frame, exactly once
     bytes data = 2;
   }
+}
+
+message ConsoleOpen {
+  string name = 1;
+  string namespace = 2;
+}
+
+message ConsoleResponse {
+  bytes data = 1;
 }

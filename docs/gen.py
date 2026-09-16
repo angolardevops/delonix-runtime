@@ -50,7 +50,7 @@ def group_argv(name):
 
 
 # The 9 category labels `delonix --help`'s COMMAND MAP prints for the ROOT
-# groups (`crates/delonix-runtime-bin/src/cmd/manual.rs::ROOT_GROUP_ORDER`) —
+# groups (`bins/delonix-runtime-bin/src/cmd/manual.rs::ROOT_GROUP_ORDER`) —
 # mirrored here only for the PT translation, since `pt.po` already carries
 # the exact string and re-deriving it from the binary would need `--l18n=pt`
 # runs this script doesn't otherwise make.
@@ -217,7 +217,7 @@ SOURCE_FILES = {
 }
 SOURCE_BASE_URL = (
     "https://github.com/angolardevops/delonix-runtime/blob/main/"
-    "crates/delonix-runtime-bin/src/cmd/"
+    "bins/delonix-runtime-bin/src/cmd/"
 )
 
 
@@ -3046,7 +3046,7 @@ function esc(s){return s.replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&
 
 function tokBash(line){
   var out='',last=0,m;
-  var re=/(#.*$)|("(?:[^"\\\\]|\\\\.)*")|('(?:[^'\\\\]|\\\\.)*')|(--?[A-Za-z][\\w-]*)|\\b(delonix|delonixctl|dlx)\\b/g;
+  var re=/(#.*$)|("(?:[^"\\\\]|\\\\.)*")|('(?:[^'\\\\]|\\\\.)*')|(--?[A-Za-z][\\w-]*)|\\b(delonix|dlx)\\b/g;
   while((m=re.exec(line))){
     out+=esc(line.slice(last,m.index));
     if(m[1])out+='<span class="tok-comment">'+esc(m[1])+'</span>';
@@ -3102,7 +3102,7 @@ function highlightAll(){
     var isHelp=pre.parentElement&&pre.parentElement.classList.contains('help');
     if(isHelp)html=highlightHelp(text);
     else if(/^apiVersion:|\\nkind:\\s/.test(text))html=highlightYaml(text);
-    else if(pre.closest('.ex')||/^(delonix|delonixctl|dlx)\\b/.test(text.trim()))html=highlightBash(text);
+    else if(pre.closest('.ex')||/^(delonix|dlx)\\b/.test(text.trim()))html=highlightBash(text);
     else return;
     code.innerHTML=html;
   });

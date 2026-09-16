@@ -36,6 +36,59 @@ jobs:
       - name: Identifiers, comments and user-facing messages still in Portuguese
         run: python3 scripts/lang_ratchet.py
 
+  # ---- The dependency direction of ADR-0040, enforced while the move happens ----
+  # Phase P0: the rails go in BEFORE any crate moves, so the restructuring cannot
+  # regress while it is under way. The rules (layer direction, purity of the
+  # foundation, one interface per binary) fail immediately unless declared as an
+  # exception naming the phase that removes it; the two numbers (self-exec sites,
+  # library prints) are ratchets with the same semantics as `lang_ratchet.py`.
+  arch:
+    name: arch fitness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instala toolchain fixada
+        run: rustup show
+      - name: Layer direction, foundation purity and the debt ratchets
+        run: python3 scripts/arch_fitness.py
+
+  # ---- The node contract: format, lint, compatibility and the generated OpenAPI ----
+  # ADR-0040 P1. Tool versions are pinned — a newer buf or generator changing its output
+  # would read as a contract change nobody made.
+  contract:
+    name: contract gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Instala protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: buf and protoc-gen-openapi (pinned)
+        run: |
+          go install github.com/bufbuild/buf/cmd/buf@v1.73.0
+          go install github.com/google/gnostic/cmd/protoc-gen-openapi@v0.7.1
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Contract gate
+        run: python3 scripts/contract_gate.py
+
+  # ---- The version stays aligned with the published tags ----
+  # Equal to the newest tag the commit contains, or above it only in the release
+  # commit (with its notes); and a branch that predates the newest release fails
+  # until origin/main is merged in. Needs every tag, hence fetch-depth: 0.
+  version:
+    name: version gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Workspace version vs. tags
+        run: python3 scripts/version_gate.py
+
   # ---- The CLI surface does not grow without someone deciding the destination ----
   # Phase CLI-0 (docs/discovery/51_CLI_INVENTARIO.md) classified the 233 leaves of
   # the public tree. A command added without entering the baseline fails here,

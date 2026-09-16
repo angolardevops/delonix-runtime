@@ -414,7 +414,7 @@ Languages
 The CLI speaks **English by default**. ``--l18n=pt`` (or ``DELONIX_L18N=pt``)
 switches everything — including ``--help`` — to Portuguese, served from a
 standard gettext catalog embedded in the binary
-(`data/pt.po <crates/delonix-runtime-bin/data/pt.po>`_). Adding a language is
+(`data/pt.po <bins/delonix-runtime-bin/data/pt.po>`_). Adding a language is
 adding a ``.po`` file; no code changes. Containers started without ``--name``
 get readable names drawn from Angolan kings, queens and places
 (``njinga-benguela-07``) — the project's naming identity.

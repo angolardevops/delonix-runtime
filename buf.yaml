@@ -1,0 +1,26 @@
+# The node contract (ADR-0040 P1). One module — the engine's own `proto/` — and the
+# vendored googleapis as a second, unlinted module: `buf` lints what we write, never
+# what we copy.
+version: v2
+modules:
+  - path: proto
+  - path: third_party/googleapis
+lint:
+  use:
+    - STANDARD
+  # Responses follow the resource-API convention (Google AIP, and Kubernetes in
+  # practice): a Get/Update/action returns the RESOURCE, a long-running mutation returns
+  # an `Operation`. Naming a wrapper per RPC would add a message that carries nothing.
+  # Requests stay one per RPC — RPC_REQUEST_STANDARD_NAME is ON, and a type can be named
+  # after one RPC only, so a shared request (a field meant for one method leaking into
+  # five) cannot come back even with the uniqueness rule off.
+  except:
+    - RPC_RESPONSE_STANDARD_NAME
+    - RPC_REQUEST_RESPONSE_UNIQUE
+  ignore:
+    - third_party/googleapis
+breaking:
+  use:
+    - FILE
+  ignore:
+    - third_party/googleapis

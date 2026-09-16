@@ -32,7 +32,7 @@
 ### 0.1 A linha de base do prompt já está desactualizada
 
 O prompt declara `0.35.1` e a fonte da especificação `0.32.2`. O `main` está em
-**`0.37.0`**. Entre `v0.32.2` e HEAD há **6 commits** a tocar `crates/delonix-net/`,
+**`0.37.0`**. Entre `v0.32.2` e HEAD há **6 commits** a tocar `crates/adapters/delonix-net/`,
 dois deles substanciais:
 
 | Commit | O que fez |
@@ -94,13 +94,13 @@ table ip dlxing
 Confirmado ao vivo: `nft list tables` dentro do holder devolve **exactamente**
 `table ip dlxing`. Nada mais.
 
-**Excepção encontrada**: `crates/delonix-runtime-bin/src/cmd/vmbridge.rs:116-119,161-164`
+**Excepção encontrada**: `bins/delonix-runtime-bin/src/cmd/vmbridge.rs:116-119,161-164`
 escreve `iptables -I FORWARD` na tabela **do host**. É o comando `vm bridge`
 (privilegiado, opt-in, root). Viola a restrição 5 da secção 5 do prompt.
 
 ### 1.2 Ponto de aplicação da política no ciclo de vida
 
-`cmd_start` (`crates/delonix-runtime-bin/src/cmd/container.rs`):
+`cmd_start` (`bins/delonix-runtime-bin/src/cmd/container.rs`):
 
 | Linha | Instrução |
 |---|---|

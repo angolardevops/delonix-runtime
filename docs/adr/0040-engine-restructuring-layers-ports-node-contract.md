@@ -7,6 +7,14 @@
   ADR-0038 (CRI follows the kubelet resource model); the `delonix-paas` restructuring plan
   «Saneamento do Control Plane» (2026-09-15), requests R1–R5; `proto/delonix/node/v1/`.
 
+> **Amendment — the engine knows no consumer (owner, 2026-09-16).** The canonical rule is
+> «Identidade e fronteira do motor» in `AGENTS.md`. Where this ADR describes the node
+> contract through one consumer (a control-plane agent, a platform plan and its requests),
+> read it as the origin of a requirement, not as its shape: the contract serves **any local
+> client** and names none (D4 below), phases are ordered by the engine's own capability
+> coverage, and nothing in `crates/`, `bins/` or `proto/` may name a consumer — enforced by
+> `scripts/arch_fitness.py` from P0 on. The decisions D1–D7 are unchanged.
+
 ## Context
 
 The engine is going to be driven by three kinds of consumer at once: a human through the
@@ -219,7 +227,7 @@ The layer is readable from the path, and the D7 fitness test uses it: a crate un
 
 #### D2.6 Where the 80 CLI modules go
 
-| Destination | Modules today (`crates/delonix-runtime-bin/src/cmd/`) |
+| Destination | Modules today (`bins/delonix-runtime-bin/src/cmd/`) |
 |---|---|
 | `delonix-model` | `names` (generated names, used by compute and cluster) |
 | `delonix-compute` | `container`, `pod`, `workload`, `vm` (use cases), `cdi` |
@@ -382,7 +390,7 @@ crates.
 | Phase | Work | Gate (measured, in CI) |
 |---|---|---|
 | **P0 rails** | D7 fitness tests and ratchets at today's numbers; `[workspace.lints]` (`undocumented_unsafe_blocks = deny`); workspace-level dependency versions; the `crates/{foundation,contexts,adapters,providers,interfaces}` + `bins/` directories with the current crates moved into their layer **without renaming** | CI red on any new layer violation, new subprocess call or new library `println!`; `cargo build --workspace` and the e2e battery unchanged after the move |
-| **P1 contract** | Vendor `google/api/http.proto`, add REST annotations; `delonix-node-proto` crate; generated OpenAPI in `docs/api/`; `buf` in CI | contract compiles, lint clean, breaking-check wired; OpenAPI regenerated = committed |
+| **P1 contract** | Vendor `google/api/http.proto`, add REST annotations; generated OpenAPI in `docs/api/`; `buf` in CI. **The `delonix-node-proto` crate moves to P5**, where the server is its first consumer: a crate of generated code nobody calls is the dead scaffolding the engine refuses — the risk that the contract does not compile under `prost`/`tonic` is recorded and closed there | contract compiles, lint clean, breaking-check wired; OpenAPI regenerated = committed |
 | **P1b launcher spike** | GO/NO-GO (guardrail #5): a `delonix-launcher` executable spawning a rootless container and an overlay hold, on the golden `delonix-vm-base:ubuntu-24.04` with `kernel.apparmor_restrict_unprivileged_userns=1`, with the AppArmor profile naming the launcher and the holder but not the CLI; plus an in-place upgrade where a holder started as `delonix netns pin` is recognised by the new `delonix-netns-holder` | both measured on the golden; a written NO-GO keeps the re-execs inside each binary and amends D2.4 |
 | **P2 extract** | `delonix-model` and `delonix-stack` first (already nearly pure), then the one run specification in `delonix-compute` replacing the four translators, then `networking`, `storage`, `artifact`, `gateway`, `cluster`, `security`, `node` — one context per PR, no behaviour change; `delonix-cli` becomes a library and `bins/delonix` its `main.rs` | CLI crate lines ratchet down each PR; e2e battery unchanged; each migrated use case has zero subprocess paths in CRI/mgmt/mcp |
 | **P3 adapters** | rename and split: `delonix-linux`, `delonix-sdn`, `delonix-oci`, `delonix-scanner`, `delonix-state`, `delonix-telemetry`, `delonix-l7proxy`, `delonix-ssh`, `delonix-guestfs`; errors per crate mapped to `DX_*`; the `vm → net::infra` calls moved behind `NetworkProvider`; the servers become their own binaries and `delonix serve`/`delonix mcp` are removed | fitness test green; `delonix-runtime-core` gone; no binary links another interface's server |
@@ -390,6 +398,20 @@ crates.
 | **P5 node API** | `delonix-node-api` serving gRPC + REST on the socket, socket activation, persisted operations, `WatchEvents`, health, capacity | contract conformance suite against the generated client; `delonix-mgmt` routes all mapped, then removed |
 | **P6 CRI** | in-process CRI over `delonix-compute`; stats/eviction, events, `UpdateContainerResources`, record locking, digests, RuntimeConfig | critest ≥ current in rootless **and** a root run published; real-kubelet e2e on a node |
 | **P7 observability** | D6 in full: semantic conventions, propagation, metric renames, JSON logs | one trace spans kubelet → CRI → launcher in a recorded run; zero library `println!` |
+
+**P1b result (2026-09-16) — GO, with one condition.** Measured on the golden
+`ubuntu-24.04` with `apparmor_restrict_unprivileged_userns=1`
+(`docs/discovery/53_P1B_LAUNCHER_SPIKE.md`, raw output alongside): the same binary under a
+launcher path with an `unconfined + userns` profile runs `run`, `run -d`, `exec`, and the
+`__ovlhold`/`__rmtree` re-execs, while the unprofiled CLI path is refused — D2.4's split
+works. **The netns holder does not, as written:** it starts the pin through
+`/usr/bin/unshare`, so the namespace is created by `unshare(1)` under the restricted
+`unprivileged_userns` profile, and a profile naming the holder never applies. D2.4 is
+amended: **`delonix-netns-holder` creates its user, net and mount namespaces in-process**
+(`unshare(2)` + `newuidmap`, as `reexec_mapped` already does), never through `unshare(1)`
+— granting `userns` to `/usr/bin/unshare` would open it to every user and defeat the
+restriction. In-place upgrade stays safe: the pin is recognised by its argv pair and
+environment, never by the binary name (`argv_matches`, with the pre-split precedent).
 
 P0 and P1 do not move code and can start immediately. P2 unlocks the node agent's
 parity work on the PaaS side (their F3) and is the long pole.

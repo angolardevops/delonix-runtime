@@ -4,7 +4,7 @@
 - **Date:** 2026-09-06
 - **Deciders:** Walter (owner)
 - **Related:** `docs/runtime/runtime-architecture.md` §"Plugin Engine" (dynamic loading flagged as
-  "large security & supply-chain surface... its own ADR + spike"), `crates/delonix-runtime/src/
+  "large security & supply-chain surface... its own ADR + spike"), `crates/adapters/delonix-runtime/src/
   lib.rs` (`StartedHook`, the CDI `ldconfig -r` comment that first named this gap), ADR-0003
   (tenancy-free capability model — same "wait for a real consumer" discipline), the kind/
   `--privileged` GO/NO-GO spike precedent.

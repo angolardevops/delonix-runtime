@@ -46,10 +46,10 @@ Measured before proposing anything:
 - **No TrueNAS API code exists** anywhere in the workspace (same grep as
   ADR-0008).
 - **`delonix-volume` has three dependencies**: `delonix-runtime-core`, `serde`,
-  `serde_json` (`crates/delonix-volume/Cargo.toml`). Adding an HTTP client
+  `serde_json` (`crates/adapters/delonix-volume/Cargo.toml`). Adding an HTTP client
   there has the same cost as in ADR-0008, for the same reason.
 - **A quota field already exists** — `Volume::quota_bytes`
-  (`crates/delonix-volume/src/lib.rs:37`), with a documented overflow trap
+  (`crates/adapters/delonix-volume/src/lib.rs:37`), with a documented overflow trap
   already fixed. It is enforced locally where privilege allows; a ZFS dataset
   quota is the natural remote counterpart, and the field does not need
   inventing.

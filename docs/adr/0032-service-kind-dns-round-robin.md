@@ -20,7 +20,7 @@ repo's own Rule 0 (discover, map, classify, compare, plan — before building).
 
 **A selector mechanism is already designed, just not built.** `ADR-0024` (accepted, still
 unimplemented as of this writing — confirmed: no `selector`/`matchLabels` field exists in
-`crates/delonix-runtime-bin/src/cmd/firewall.rs`'s `FwDocSpec` today) worked through the hard
+`bins/delonix-runtime-bin/src/cmd/firewall.rs`'s `FwDocSpec` today) worked through the hard
 parts of "select a SET of workloads by label" for `FirewallPolicy`: `matchLabels` over
 `Container.labels` (already a persisted `BTreeMap<String, String>`, nothing new to store), an
 empty match warns and succeeds rather than erroring, and matching is NOT retroactive to a

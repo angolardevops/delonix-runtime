@@ -1,0 +1,26 @@
+   delonix-launcher
+   delonix-netns-holder
+=== CLI sem userns: /opt/p1b/delonix
+image load                         rc=0   
+container run --net none           rc=126 delonix: failed to prepare the rootfs: EPERM: Operation not permitted
+container run -d (supervisor)      rc=0   
+container exec                     rc=3   error container is not running: e54a3a3528c6
+container stop                     rc=0   
+container cp (stopped: __ovlhold)  rc=1   delonix: system call `__ovlhold unshare` failed: Operation not permitted (os error 1)
+container rm (__rmtree)            rc=0   
+net netns up (pin)                 rc=1   error system call `ingress holder` failed: timeout waiting for the netns holder
+net netns down                     rc=0   
+=== launcher com userns: /opt/p1b/delonix-launcher
+image load                         rc=0   
+container run --net none           rc=0   
+container run -d (supervisor)      rc=0   
+container exec                     rc=0   delonix: warning: this exec is NOT in the container's cgroup (/sys/fs/cgroup/user.slice/us
+container stop                     rc=0   
+container cp (stopped: __ovlhold)  rc=0   
+container rm (__rmtree)            rc=0   
+net netns up (pin)                 rc=1   error system call `ingress control` failed: system call `control socket` failed: No such f
+net netns down                     rc=0   
+=== holder com userns: /opt/p1b/delonix-netns-holder (só a rede)
+error system call `ingress control` failed: system call `control socket` failed: No such file or directory (os error 2)
+netns up rc=0
+ingress DOWN — infra netns torn down.

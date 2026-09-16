@@ -5,7 +5,7 @@
 - **Deciders:** Walter (owner)
 - **Related:** ADR-0010 (remote management API, **Rejected**), ADR-0003 (tenancy-free capability
   model, Proposed), ADR-0025 (local MCP control surface, Accepted), `docs/adr/README.md`
-  guardrails, `crates/delonix-runtime-bin/src/cmd/policy.rs`, `crates/delonix-net/src/bpf.rs`.
+  guardrails, `bins/delonix-runtime-bin/src/cmd/policy.rs`, `crates/adapters/delonix-net/src/bpf.rs`.
 
 ## Context
 

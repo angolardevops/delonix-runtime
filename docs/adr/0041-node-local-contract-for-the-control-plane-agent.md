@@ -14,6 +14,25 @@
 - **Requested by:** `delonix-paas` ADR 0037 (accepted 2026-09-15, branch
   `arch/adr-0037-control-plane`, PR angolardevops/delonix-paas#493), requests R1–R4.
 
+> **Amendment — the engine knows no consumer (owner, 2026-09-16).** This ADR was written
+> for one consumer, and that framing does not stand. The canonical rule is «Identidade e
+> fronteira do motor» in `AGENTS.md`: the engine is an abstraction over containers and
+> microVMs, with its own Kinds and provider ports, and it is shaped around no client.
+> What changes when this ADR is decided:
+>
+> - **Coverage (D2) is ordered by the engine's capabilities, not by a consumer's migration
+>   order.** A wave closes when its surface serves what the engine's own CLI already does
+>   for those resources, tested against a real engine — not when one client's port can cut
+>   over. The measured gap matrix and the three states (served / refused with a reason /
+>   missing) stand.
+> - **Every promise is to a local client.** «The agent» below reads as «a local client»:
+>   same-euid authentication, reconnect with the last event offset, tolerance of the
+>   server exiting (daemonless), no tenant or identity in the contract.
+> - **Nothing is added for one client.** A request becomes the capability it is, in the
+>   engine's vocabulary, and enters only if it makes sense for any client.
+>
+> The measurements, the promise tiers (D3) and the lifetime model (D4) are unchanged.
+
 ## Context
 
 The control plane fixed this chain in its ADR 0037:
@@ -46,7 +65,7 @@ connected client**, and **authorization at the socket** (ADR-0003 is not mention
 
 ### The current local surfaces, as they are
 
-- **`delonix-mgmt`**: 40 route handlers (`crates/delonix-mgmt/src/lib.rs:185-264`). **12
+- **`delonix-mgmt`**: 40 route handlers (`crates/interfaces/delonix-mgmt/src/lib.rs:185-264`). **12
   shell out** to the `delonix` binary through one spawn site, `run_cli`
   (`lib.rs:490-509`, `bin = current_exe()` at `:50`): `delete_container`,
   `container_action_ep`, `container_logs_ep`, `container_exec_ep`, `run_container`,
@@ -55,7 +74,7 @@ connected client**, and **authorization at the socket** (ADR-0003 is not mention
   container/image reads, SBOM, every `delonix_net::infra` route, `/metrics`, `/v1/dash`).
   Mutations return `{ok, output}` — the CLI's stdout.
 - **`delonix-mcp`**: stdio (ADR-0025); its one mutation and `logs.query` shell out via
-  `run_cli_blocking` (`crates/delonix-mcp/src/lib.rs:822-835`).
+  `run_cli_blocking` (`crates/interfaces/delonix-mcp/src/lib.rs:822-835`).
 - **`delonix-cri`**: every pod/container lifecycle call forks the CLI
   (`Command::new(delonix_bin())`, `runtime_svc/lifecycle.rs:367`, `:401`), including
   `ExecSync` (`:1517-1535`) and the streaming exec/attach (`streaming.rs:395`, `:517`;
@@ -82,7 +101,7 @@ connected client**, and **authorization at the socket** (ADR-0003 is not mention
 ### R2 — the coverage matrix
 
 Legend: **LIB** = callable from a library crate · **CLI** = only in
-`crates/delonix-runtime-bin` (no `[lib]`, `Cargo.toml:10-12`) · **API** = a local server
+`bins/delonix-runtime-bin` (no `[lib]`, `Cargo.toml:10-12`) · **API** = a local server
 exposes it, and whether by library call or shell-out · **—** = nowhere. «0040 proto» =
 the draft on `integra/adr-0040`.
 
@@ -207,7 +226,7 @@ Two rules apply to every wave:
   the agent needs is added to the node contract, not to these routes — widening them
   would build exactly the translation layer ADR-0040 removes. It is removed when the agent
   has migrated (ADR-0040 D4).
-- **The binary name `delonix` is the engine's** (`crates/delonix-runtime-bin/Cargo.toml:11`).
+- **The binary name `delonix` is the engine's** (`bins/delonix-runtime-bin/Cargo.toml:11`).
   The control plane stops producing an executable of that name (its ADR 0038). Recorded
   in `docs/cli-stability.md` in this PR.
 
@@ -292,10 +311,10 @@ the existing one, gated by ADR-0003 in W1; spike in D5 before code ✅ · #6
 
 ## What changed in this PR besides the ADR (R4)
 
-- `crates/delonix-mgmt/src/lib.rs`: the module doc no longer names `RemoteRuntime`; the
+- `crates/interfaces/delonix-mgmt/src/lib.rs`: the module doc no longer names `RemoteRuntime`; the
   three `InProcessRuntime` references are replaced by what is true; the stale «the runtime
   has no `vm start`» comments now point at `delonix_vm::start`. Comments only.
-- `crates/delonix-security-runtime/src/lib.rs:43`: same `RemoteRuntime` reference.
+- `crates/contexts/delonix-security-runtime/src/lib.rs:43`: same `RemoteRuntime` reference.
 - ADR-0010 and ADR-0025 keep their text (accepted ADRs are not rewritten); this ADR is the
   record that the consumer they named did not exist.
 - `docs/cli-stability.md`: the `serve api` bullet records the freeze and that `delonix` is
