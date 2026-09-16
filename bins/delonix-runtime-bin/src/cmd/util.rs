@@ -107,13 +107,7 @@ pub(crate) fn resolve_or_pull_platform(
 /// Effective command (pure function): ENTRYPOINT + (the user's args, otherwise the
 /// image's CMD) — the same semantics as Docker/OCI (`run <cmd>` replaces the CMD, not
 /// the ENTRYPOINT).
-pub(crate) fn compose_command(
-    entrypoint: &[String],
-    cmd: &[String],
-    user: &[String],
-) -> Vec<String> {
-    delonix_compute::run::compose_command(entrypoint, cmd, user)
-}
+pub(crate) use delonix_compute::run::compose_command;
 
 /// Like [`compose_command`], but from the image's config.
 pub(crate) fn effective_command(img: &Image, user: &[String]) -> Vec<String> {

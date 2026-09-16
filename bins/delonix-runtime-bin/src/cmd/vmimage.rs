@@ -14,7 +14,6 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::Subcommand;
 use delonix_runtime_core::{Error, Result};
@@ -4017,12 +4016,7 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-pub(crate) fn now_unix() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
+pub(crate) use delonix_runtime_core::now_unix;
 
 // ---------------------------------------------------------------------------
 // Resolution of the `delonix-cri` binary to install in the guest

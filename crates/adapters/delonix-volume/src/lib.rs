@@ -14,7 +14,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Metadata of a named volume.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -1197,12 +1196,7 @@ fn quota_state_of(used: u64, quota_bytes: Option<u64>, alert_pct: Option<u8>) ->
     }
 }
 
-fn now_unix() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
+use delonix_runtime_core::now_unix;
 
 /// Safe snapshot name: `[A-Za-z0-9._-]+`, no path traversal.
 pub fn safe_snapshot_name(s: &str) -> bool {
@@ -1567,8 +1561,8 @@ mod tests {
     fn store() -> (VolumeStore, PathBuf) {
         let base = std::env::temp_dir().join(format!(
             "delonix-vol-{}",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
         ));

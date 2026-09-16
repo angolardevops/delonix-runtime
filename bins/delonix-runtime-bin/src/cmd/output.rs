@@ -530,12 +530,7 @@ pub fn fmt_local(unix: u64) -> String {
     )
 }
 
-pub fn now_unix() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
+pub use delonix_runtime_core::now_unix;
 
 /// Relative age in `docker ps` style — "About a minute ago", "3 hours ago".
 /// Pure function on `secs` so it's testable without a clock.

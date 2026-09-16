@@ -5,7 +5,6 @@ use delonix_runtime_core::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The subset of the OCI config that Delonix uses (Cmd/Env) + Delonix extensions
 /// (resource limits embedded in the image — something Docker does not have).
@@ -307,9 +306,4 @@ pub fn normalise_tag(name: &str) -> String {
 }
 
 /// The current instant in Unix seconds.
-pub fn now_unix() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
+pub use delonix_runtime_core::now_unix;
