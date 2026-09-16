@@ -872,31 +872,53 @@ fn read_refcount() -> i64 {
 
 /// Exclusive file lock (`flock`) around the ref-count operations, so that
 /// concurrent `acquire`/`release` (several `run` in parallel) don't run on
-/// top of each other. Returns the fd; `Drop` releases it.
-struct FileLock(i32);
-impl FileLock {
-    fn acquire() -> FileLock {
-        let _ = std::fs::create_dir_all(ingress_dir());
-        let path = lock_path();
-        let c = std::ffi::CString::new(path.as_os_str().to_string_lossy().as_bytes().to_vec())
-            .unwrap_or_else(|_| std::ffi::CString::new("/tmp/dlxlock").unwrap());
-        // SAFETY: open/flock with a valid path; -1 on failure is handled next.
-        let fd = unsafe { libc::open(c.as_ptr(), libc::O_CREAT | libc::O_RDWR, 0o600) };
-        if fd >= 0 {
-            // SAFETY: `fd` was just returned by `open` and checked; `flock` takes plain
-            // integers.
-            unsafe { libc::flock(fd, libc::LOCK_EX) };
-        }
-        FileLock(fd)
-    }
+/// top of each other. Closing the file (on `Drop`) releases the lock.
+///
+/// **Acquires or FAILS — never "proceeds unlocked".** It used to return a lock
+/// holding fd `-1` when `open` failed and to ignore `flock`'s result, so a caller
+/// ran its critical section with no lock and no word about it. The critical
+/// sections here are not bookkeeping: `release` and `teardown` tear the network
+/// infra DOWN, and doing that unlocked while a concurrent `acquire` is bringing a
+/// container up takes the network away from a running workload. Same defect, and
+/// same fix, as the state store's `FileLock` in `delonix-runtime-core`. A path that
+/// could not be a C string used to fall back to a lock at `/tmp/dlxlock`, shared by
+/// every user of the host; that fallback is gone too.
+struct FileLock {
+    /// Held only to keep the lock: the kernel releases a `flock` when its last fd closes.
+    _file: std::fs::File,
 }
-impl Drop for FileLock {
-    fn drop(&mut self) {
-        if self.0 >= 0 {
-            // SAFETY: own fd, opened in acquire().
-            unsafe {
-                libc::flock(self.0, libc::LOCK_UN);
-                libc::close(self.0);
+impl FileLock {
+    fn acquire() -> Result<FileLock> {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::fs::OpenOptionsExt;
+        let path = lock_path();
+        let lock_err = |what: String| Error::Runtime {
+            context: "network lock",
+            message: format!(
+                "{what} ({}) — refusing to change the network infra without the lock, \
+                 which could tear it down under a container that is starting",
+                path.display()
+            ),
+        };
+        std::fs::create_dir_all(ingress_dir())
+            .map_err(|e| lock_err(format!("cannot create {}: {e}", ingress_dir().display())))?;
+        let f = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .mode(0o600)
+            .open(&path)
+            .map_err(|e| lock_err(format!("cannot open the lock file: {e}")))?;
+        loop {
+            // SAFETY: `f` is an open file this function owns; `flock` takes its fd
+            // and an integer operation, and touches no memory of ours.
+            if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) } == 0 {
+                return Ok(FileLock { _file: f });
+            }
+            let e = std::io::Error::last_os_error();
+            if e.kind() != std::io::ErrorKind::Interrupted {
+                return Err(lock_err(format!("flock failed: {e}")));
             }
         }
     }
@@ -907,7 +929,7 @@ impl Drop for FileLock {
 /// container/pod's id — the SAME key that `release`/the reaper use to cross it with the
 /// Store; idempotent (attaching the same id twice doesn't count double).
 pub fn acquire(id: &str) -> Result<()> {
-    let _lock = FileLock::acquire();
+    let _lock = FileLock::acquire()?;
     // `_locked`: we are already inside the critical section — see `ensure_up_locked`.
     ensure_up_locked()?; // idempotent — robust even with stale markers
     ref_add_in(&refs_dir(), id);
@@ -918,7 +940,16 @@ pub fn acquire(id: &str) -> Result<()> {
 /// the infra when the LAST user leaves. Safe on any exit path:
 /// `stop` and then `rm` of the same container don't tear down the infra twice.
 pub fn release(id: &str) {
-    let _lock = FileLock::acquire();
+    // No lock, no teardown: the marker stays, and the next `release` or the reaper
+    // removes it. Leaving one extra marker costs a network that stays up a little
+    // longer; tearing down unlocked can cut the network of a container that is starting.
+    let _lock = match FileLock::acquire() {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::warn!("release({id}) skipped: {e}");
+            return;
+        }
+    };
     ref_remove_in(&refs_dir(), id);
     if refs_in(&refs_dir()).is_empty() {
         teardown_locked();
@@ -963,7 +994,14 @@ fn marker_within_grace(
 }
 
 pub fn reap_orphan_refs(live: &std::collections::HashSet<String>) -> usize {
-    let _lock = FileLock::acquire();
+    // A reaper that cannot lock reaps nothing — it runs again on the next sweep.
+    let _lock = match FileLock::acquire() {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::warn!("reap_orphan_refs skipped: {e}");
+            return 0;
+        }
+    };
     let dir = refs_dir();
     let now = std::time::SystemTime::now();
     let candidates = orphan_refs(&refs_in(&dir), live);
@@ -1047,7 +1085,7 @@ pub fn ensure_up() -> Result<()> {
     // too, so a root's sockets are no longer reachable by anybody else's teardown.
     // Before that change a per-root lock could not have helped — two roots take two
     // different lock files and exclude nothing.
-    let _lock = FileLock::acquire();
+    let _lock = FileLock::acquire()?;
     ensure_up_locked()
 }
 
@@ -1280,9 +1318,14 @@ fn start_control(pin: i32) -> Result<i32> {
 
 /// Tears down the infra: kills the slirp and the holder (which frees the netns) and cleans up the
 /// artifacts. Best-effort and idempotent.
-pub fn teardown() {
-    let _lock = FileLock::acquire();
+///
+/// Returns `Err` when the lock cannot be taken, and then tears down NOTHING: this is
+/// the operator's recovery command (`delonix net netns down`), and answering «DOWN»
+/// for a teardown that never ran would send them to debug a network that is still up.
+pub fn teardown() -> Result<()> {
+    let _lock = FileLock::acquire()?;
     teardown_locked();
+    Ok(())
 }
 
 /// [`teardown`]'s body, for callers that ALREADY hold [`FileLock`].
@@ -7744,6 +7787,39 @@ pub fn dhcp_ip6_for_mac(_net: &str, mac: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    /// The network lock fails CLOSED. Forced deterministically — as any uid, root
+    /// included — by putting a FILE where the `ingress/` directory must be: the lock
+    /// cannot be created, and then nothing may change the infra. Before, `acquire`
+    /// returned a lock holding fd -1 and every caller carried on unlocked, and
+    /// `delonix net netns down` printed «DOWN» for a teardown it had not locked.
+    #[test]
+    fn without_the_network_lock_nothing_changes_the_infra() {
+        let mut env = crate::testenv::lock();
+        let root = std::env::temp_dir().join(format!("dlx-netlock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("temp root");
+        std::fs::write(root.join("ingress"), b"not a directory").expect("blocker file");
+        env.set("DELONIX_ROOT", &root);
+
+        let e = teardown().expect_err("teardown must refuse without the lock");
+        assert!(e.to_string().contains("network lock"), "{e}");
+        let e = acquire("dlx-test").expect_err("acquire must refuse without the lock");
+        assert!(e.to_string().contains("network lock"), "{e}");
+        let live = std::collections::HashSet::new();
+        assert_eq!(
+            reap_orphan_refs(&live),
+            0,
+            "a reaper without the lock reaps nothing"
+        );
+        // `release` has no error to return; what it must not do is create state.
+        release("dlx-test");
+        assert!(
+            root.join("ingress").is_file(),
+            "the blocker must be untouched"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     /// **Um `accept` NÃO é terminal entre base chains**, e esquecê-lo partiu o
     /// tráfego dentro da própria rede.
