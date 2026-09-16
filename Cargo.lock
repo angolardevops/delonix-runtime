@@ -830,6 +830,10 @@ dependencies = [
 [[package]]
 name = "delonix-model"
 version = "3.1.0"
+dependencies = [
+ "delonix-runtime-core",
+ "serde_json",
+]
 
 [[package]]
 name = "delonix-net"

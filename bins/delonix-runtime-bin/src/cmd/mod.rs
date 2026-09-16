@@ -16,7 +16,7 @@ pub mod dependency;
 pub mod diff;
 pub mod dockerapi;
 pub mod etcd;
-pub mod exitcode;
+pub use delonix_model::exitcode;
 pub mod features;
 pub mod firewall;
 pub mod flow;
