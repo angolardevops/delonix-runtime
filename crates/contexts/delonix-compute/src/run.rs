@@ -53,6 +53,15 @@ pub struct ResolvedRun {
     pub default_readonly_paths: Vec<String>,
     /// Whether the engine runs without privileges.
     pub rootless: bool,
+    /// `unconfined`, `detect`, or none (the engine's default filter).
+    pub seccomp: Option<String>,
+    /// The JSON of a `--security-opt seccomp=<file>` profile.
+    pub seccomp_profile: Option<String>,
+    /// The AppArmor profile recorded on the container (`unconfined` is not recorded).
+    pub apparmor: Option<String>,
+    pub no_new_privs: Option<bool>,
+    /// The container's log file, if it has one.
+    pub log_path: Option<String>,
 }
 
 /// What [`resolve_run`] hands back: the inputs of [`build_record`], and what the
@@ -66,6 +75,8 @@ pub struct Resolved {
     pub mounts: Vec<Mount>,
     /// Warnings for the operator, in the order they arose.
     pub notices: Vec<Notice>,
+    /// The AppArmor profile the spawn applies, `unconfined` included.
+    pub apparmor_profile: Option<String>,
 }
 
 /// Resolves, through the read ports, everything [`build_record`] needs.
@@ -110,6 +121,42 @@ where
         None => None,
     };
 
+    let mut notices = edits.notices;
+    let security = parse_security_opts(&o.security_opt)?;
+    let mut seccomp = security
+        .seccomp_unconfined
+        .then(|| "unconfined".to_string());
+    let mut seccomp_profile = None;
+    for path in &security.seccomp_profiles {
+        let (json, unknown) = host
+            .load_seccomp_profile(path)
+            .map_err(|e| Error::Invalid(format!("--security-opt seccomp={path}: {e}")))?;
+        for u in &unknown {
+            notices.push(Notice::new(
+                "delonix: warning — seccomp profile names '{u}', which this architecture does not have",
+                &[("u", u)],
+            ));
+        }
+        seccomp_profile = Some(json);
+    }
+    if o.detect && seccomp.is_none() {
+        seccomp = Some("detect".to_string());
+    }
+    // `--security-opt apparmor=` wins over `--apparmor`, as the last word given.
+    let apparmor_profile = security.apparmor.clone().or_else(|| o.apparmor.clone());
+    if let Some(p) = &apparmor_profile {
+        host.ensure_apparmor(p)?;
+    }
+    // Only the NAMES are recorded; the values are resolved at spawn time. A name
+    // that does not exist must fail now, not start a container without it.
+    for name in &o.secret {
+        host.check_secret(name)?;
+    }
+    let log_path = o
+        .log_file
+        .clone()
+        .or_else(|| o.detach.then(|| host.default_log_path(&id)));
+
     let image_command = compose_command(&config.entrypoint, &config.cmd, &o.command);
     Ok(Resolved {
         record: ResolvedRun {
@@ -129,11 +176,55 @@ where
             default_masked_paths: host.default_masked_paths(),
             default_readonly_paths: host.default_readonly_paths(),
             rootless: host.rootless(),
+            seccomp,
+            seccomp_profile,
+            apparmor: apparmor_profile.clone().filter(|p| p != "unconfined"),
+            no_new_privs: security.no_new_privs,
+            log_path,
         },
         rootfs,
         mounts,
-        notices: edits.notices,
+        notices,
+        apparmor_profile,
     })
+}
+
+/// `--security-opt`, parsed. The files it names are read by [`resolve_run`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SecurityOpts {
+    pub seccomp_unconfined: bool,
+    /// Every `seccomp=<file>`, in order; the last one is the profile applied.
+    pub seccomp_profiles: Vec<String>,
+    pub apparmor: Option<String>,
+    pub no_new_privs: Option<bool>,
+}
+
+/// Parses `--security-opt` (docker-style). PURE.
+pub fn parse_security_opts(opts: &[String]) -> Result<SecurityOpts> {
+    let mut out = SecurityOpts::default();
+    for opt in opts {
+        match opt.split_once('=') {
+            Some(("seccomp", "unconfined")) => out.seccomp_unconfined = true,
+            Some(("seccomp", v)) => out.seccomp_profiles.push(v.to_string()),
+            Some(("apparmor", v)) => out.apparmor = Some(v.to_string()),
+            Some(("no-new-privileges", v)) => match v {
+                "true" | "1" => out.no_new_privs = Some(true),
+                "false" | "0" => out.no_new_privs = Some(false),
+                _ => {
+                    return Err(Error::Invalid(format!(
+                        "invalid --security-opt no-new-privileges='{v}': expected true or false"
+                    )))
+                }
+            },
+            None if opt == "no-new-privileges" => out.no_new_privs = Some(true),
+            _ => {
+                return Err(Error::Invalid(format!(
+                    "invalid --security-opt: '{opt}' (seccomp=unconfined|<profile.json> | apparmor=… | no-new-privileges[=true|false])"
+                )))
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// The image's ENTRYPOINT followed by the user's command, or by the image's CMD
@@ -264,6 +355,15 @@ pub fn build_record(o: &RunOpts, r: ResolvedRun) -> Result<Container> {
         ));
     }
     c.userns = (r.rootless || o.userns) && !o.no_userns;
+    c.seccomp = r.seccomp;
+    c.seccomp_profile = r.seccomp_profile;
+    c.apparmor = r.apparmor;
+    c.no_new_privs = r.no_new_privs;
+    if !o.secret.is_empty() {
+        c.secrets = o.secret.clone();
+        c.secret_files = o.secret_files;
+    }
+    c.log_path = r.log_path;
     c.selinux = o.selinux.clone();
     c.host_pid = o.host_pid;
     c.host_ipc = o.host_ipc;
@@ -536,6 +636,29 @@ mod tests {
         fn rootless(&self) -> bool {
             true
         }
+        fn load_seccomp_profile(
+            &self,
+            path: &str,
+        ) -> std::result::Result<(String, Vec<String>), String> {
+            self.log(format!("seccomp {path}"));
+            match path {
+                "p.json" => Ok(("{}".into(), vec!["nosuchcall".into()])),
+                _ => Err("No such file".into()),
+            }
+        }
+        fn ensure_apparmor(&self, profile: &str) -> Result<()> {
+            self.log(format!("apparmor {profile}"));
+            Ok(())
+        }
+        fn check_secret(&self, name: &str) -> Result<()> {
+            match name {
+                "db" => Ok(()),
+                _ => Err(Error::NotFound(format!("secret {name}"))),
+            }
+        }
+        fn default_log_path(&self, id: &str) -> String {
+            format!("/logs/{id}")
+        }
     }
 
     fn run(o: &RunOpts, f: &Fake, second_pass: bool) -> Result<Resolved> {
@@ -594,5 +717,54 @@ mod tests {
         o.env_file = vec!["gone.env".into()];
         let err = run(&o, &Fake::new(), false).unwrap_err().to_string();
         assert!(err.contains("--env-file gone.env"), "{err}");
+    }
+
+    #[test]
+    fn security_opts_parse_like_docker() {
+        let o = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let s = parse_security_opts(&o(&[
+            "seccomp=unconfined",
+            "apparmor=myprof",
+            "no-new-privileges",
+        ]))
+        .unwrap();
+        assert!(s.seccomp_unconfined);
+        assert_eq!(s.apparmor.as_deref(), Some("myprof"));
+        assert_eq!(s.no_new_privs, Some(true));
+        assert!(parse_security_opts(&o(&["no-new-privileges=talvez"])).is_err());
+        assert!(parse_security_opts(&o(&["label=disable"])).is_err());
+    }
+
+    #[test]
+    fn resolve_run_reads_profiles_checks_secrets_and_places_the_log() {
+        let f = Fake::new();
+        let mut o = opts();
+        o.detach = true;
+        o.security_opt = vec!["seccomp=p.json".into(), "apparmor=unconfined".into()];
+        o.secret = vec!["db".into()];
+        let r = run(&o, &f, false).unwrap();
+        assert_eq!(r.apparmor_profile.as_deref(), Some("unconfined"));
+        assert!(r.notices.iter().any(|n| n.render().contains("nosuchcall")));
+        let c = build_record(&o, r.record).unwrap();
+        assert_eq!(c.seccomp_profile.as_deref(), Some("{}"));
+        assert_eq!(c.apparmor, None, "unconfined is applied, not recorded");
+        assert_eq!(c.secrets, ["db"]);
+        assert_eq!(c.log_path.as_deref(), Some("/logs/id1"));
+
+        let mut o = opts();
+        o.secret = vec!["missing".into()];
+        assert!(run(&o, &Fake::new(), false).is_err());
+        let mut o = opts();
+        o.security_opt = vec!["seccomp=gone.json".into()];
+        let err = run(&o, &Fake::new(), false).unwrap_err().to_string();
+        assert!(
+            err.contains("--security-opt seccomp=gone.json: No such file"),
+            "{err}"
+        );
+        let mut o = opts();
+        o.detect = true;
+        let c = build_record(&o, run(&o, &Fake::new(), false).unwrap().record).unwrap();
+        assert_eq!(c.seccomp.as_deref(), Some("detect"));
+        assert_eq!(c.log_path, None);
     }
 }
