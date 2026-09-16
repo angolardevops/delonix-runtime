@@ -672,6 +672,16 @@ fn main() {
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
+    // The PIN: owns the userns/netns/mountns and does nothing else, for the whole
+    // life of the infra. The CONTROL runs inside it and is restartable — that
+    // split is what stops a control-plane restart from destroying every wire on
+    // the node (see `infra::pin_main`). Intercepted before the telemetry is set
+    // up: the pin creates its user namespace itself, and `unshare(CLONE_NEWUSER)`
+    // refuses a process that already has a second thread (an OTLP exporter).
+    let raw: Vec<String> = std::env::args().collect();
+    if raw.len() == 3 && raw[1] == "netns" && raw[2] == "pin" {
+        delonix_net::infra::pin_main(); // never returns
+    }
     delonix_runtime_core::telemetry::init();
     // Hidden re-exec of the netns holder (`delonix netns holder`, invoked by
     // `delonix-net::infra::start_holder` itself via `unshare` — never by the
@@ -679,14 +689,6 @@ fn main() {
     // subcommand) — without this, `--net <custom-network>` always fails with
     // "timeout waiting for the netns holder" (the re-exec falls into the normal
     // parser and is rejected as an unknown subcommand).
-    let raw: Vec<String> = std::env::args().collect();
-    // The PIN: owns the userns/netns/mountns and does nothing else, for the whole
-    // life of the infra. The CONTROL runs inside it and is restartable — that
-    // split is what stops a control-plane restart from destroying every wire on
-    // the node (see `infra::pin_main`).
-    if raw.len() == 3 && raw[1] == "netns" && raw[2] == "pin" {
-        delonix_net::infra::pin_main(); // never returns
-    }
     if raw.len() == 3 && raw[1] == "netns" && raw[2] == "control" {
         delonix_net::infra::control_main(); // never returns
     }

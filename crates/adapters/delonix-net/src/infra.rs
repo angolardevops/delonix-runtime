@@ -1387,30 +1387,24 @@ fn start_pin() -> Result<i32> {
         message: e.to_string(),
     })?;
     let _ = std::fs::remove_file(status_path());
-    // `--map-auto` maps the user's ENTIRE subuid/subgid range (/etc/subuid),
-    // not just root: real images (nginx uid 101, postgres, …) need chown
-    // to uids != 0 INSIDE the container, which thus become mappable. `--map-root-user`
-    // maps the userns's uid 0 → the user's uid on the host.
-    // `--map-auto` needs `newuidmap`, which validates the requested range
-    // against `/etc/subuid` for the REAL uid — and inside a NESTED user
-    // namespace that check fails ("uid range not allowed") however the outer
-    // namespace was set up. The holder then never came up and the caller got
-    // `timeout waiting for the netns holder`: a symptom five seconds and one
-    // layer away from the cause.
+    // The pin creates its own user, network and mount namespaces, and this
+    // process — still outside them — writes the id maps: see `pin_userns` for why
+    // this is no longer `unshare(1)` (an AppArmor profile is attached by the path
+    // of the executable that creates the namespace, and that was never ours).
     //
-    // Nested → map only uid 0. Containers that need a non-root uid INSIDE
-    // (nginx's 101, postgres) lose that there, which is a real reduction — but
-    // a documented one, and strictly better than an engine that hangs.
-    let nested = !delonix_runtime_core::in_initial_userns();
-    let mut unshare_args: Vec<&str> = vec!["--user"];
-    if !nested {
-        unshare_args.push("--map-auto");
-    }
-    unshare_args.extend(["--map-root-user", "--net", "--mount", "--"]);
-    let child = Command::new("unshare")
-        .args(&unshare_args)
-        .arg(&exe)
-        .args(["netns", "pin"])
+    // The maps are the ones `unshare --map-auto --map-root-user` wrote: uid 0 →
+    // our uid, and the user's WHOLE subuid/subgid range from 1, because real
+    // images (nginx uid 101, postgres, …) chown to uids != 0 INSIDE the container.
+    // Inside a NESTED user namespace `newuidmap` refuses any range, so there only
+    // uid 0 is mapped — a documented reduction, strictly better than an engine
+    // that hangs.
+    use std::os::fd::AsRawFd;
+    use std::os::unix::process::CommandExt;
+    let pipes = crate::pin_userns::SyncPipes::new()?;
+    let child_fds = [pipes.child_read.as_raw_fd(), pipes.child_write.as_raw_fd()];
+    let mut cmd = Command::new(&exe);
+    cmd.args(["netns", "pin"])
+        .env(crate::pin_userns::SYNC_ENV, pipes.env_value())
         // the holder runs with uid->0 in the userns; forces the paths to the real base.
         .env("DELONIX_ROOT", base_root())
         // same reason, same fix: forces the SHORT socket dir too (see `runtime_dir_env`).
@@ -1444,13 +1438,39 @@ fn start_pin() -> Result<i32> {
                 .open(pin_log_path())
                 .map(Stdio::from)
                 .unwrap_or_else(|_| Stdio::null()),
-        )
-        .spawn()
-        .map_err(|e| Error::Runtime {
-            context: "spawn unshare",
-            message: e.to_string(),
-        })?;
+        );
+    // SAFETY: the closure runs in the forked child before `exec`, and only clears
+    // `FD_CLOEXEC` on the two descriptors the pin must inherit — a raw `fcntl`,
+    // async-signal-safe, no allocation.
+    unsafe {
+        cmd.pre_exec(move || {
+            for fd in child_fds {
+                crate::pin_userns::make_inheritable(fd)?;
+            }
+            Ok(())
+        });
+    }
+    let mut child = cmd.spawn().map_err(|e| Error::Runtime {
+        context: "spawn netns pin",
+        message: e.to_string(),
+    })?;
     let pid = child.id() as i32;
+    if let Err(e) = crate::pin_userns::handshake(pipes, pid, 5000) {
+        let _ = child.kill();
+        let _ = child.wait();
+        // The pin writes WHY it could not create its namespaces to the status
+        // file; that reason beats the handshake's own "exited early".
+        let reason = std::fs::read_to_string(status_path())
+            .ok()
+            .and_then(|s| s.trim().strip_prefix("err:").map(|m| m.trim().to_string()));
+        return Err(match reason {
+            Some(message) => Error::Runtime {
+                context: "ingress holder",
+                message,
+            },
+            None => e,
+        });
+    }
     let _ = std::fs::write(holder_pid_path(), pid.to_string());
     // the holder stays alive for the entire life of the infra — we don't wait on it.
     std::mem::forget(child);
@@ -1740,6 +1760,12 @@ fn start_slirp(holder_pid: i32) -> Result<()> {
 /// newer one is safe by construction (see `stale_holder_message` for what that
 /// used to cost).
 pub fn pin_main() -> ! {
+    if let Some(sync) = std::env::var_os(crate::pin_userns::SYNC_ENV) {
+        if let Err(reason) = crate::pin_userns::enter_namespaces(&sync.to_string_lossy()) {
+            write_status(&format!("err: {reason}"));
+            std::process::exit(1);
+        }
+    }
     write_status("pinned");
     // Nothing to serve, nothing to poll — just stay alive holding the namespaces.
     loop {
