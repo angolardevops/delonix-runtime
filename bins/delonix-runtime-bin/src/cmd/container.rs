@@ -1098,6 +1098,10 @@ pub(crate) struct PodContainer {
     /// k8s `args` — overrides the image CMD.
     #[serde(default)]
     args: Vec<String>,
+    /// k8s `workingDir` — the directory the process starts in (same as
+    /// `container run -w`). Omitted: the image's own working directory, or `/`.
+    // It used to be accepted, warned about as "not applied yet" and dropped, long
+    // after `RunOpts.workdir` existed and compose used it.
     #[serde(default, rename = "workingDir")]
     working_dir: Option<String>,
     #[serde(default)]
@@ -1359,12 +1363,6 @@ pub(crate) fn container_to_run_opts(
     expose: Option<u16>,
     detach: bool,
 ) -> Result<RunOpts> {
-    if c.working_dir.is_some() {
-        output::warn(super::po::t(
-            "kind: Container: `workingDir` is not applied yet (ignored)",
-        ));
-    }
-
     // command (k8s) → entrypoint + leading args; args (k8s) → trailing args.
     let (entrypoint, command) = if c.command.is_empty() {
         (None, c.args)
@@ -1509,6 +1507,7 @@ pub(crate) fn container_to_run_opts(
         cap_add,
         cap_drop,
         tmpfs,
+        workdir: c.working_dir,
         ..Default::default()
     })
 }
@@ -8638,6 +8637,7 @@ containers:
     image: nginx:latest
     command: ["/bin/sh", "-c"]
     args: ["nginx -g 'daemon off;'"]
+    workingDir: /srv/app
     ports:
       - containerPort: 80
         hostPort: 8080
@@ -8676,6 +8676,7 @@ restartPolicy: OnFailure
         assert_eq!(opts.image, "nginx:latest");
         assert_eq!(opts.entrypoint.as_deref(), Some("/bin/sh"));
         assert_eq!(opts.command, vec!["-c", "nginx -g 'daemon off;'"]);
+        assert_eq!(opts.workdir.as_deref(), Some("/srv/app"));
         assert_eq!(opts.ports, vec!["8080:80/tcp"]);
         assert_eq!(opts.env, vec!["FOO=bar"]);
         assert!(opts.volumes.contains(&"/srv/data:/data:ro".to_string()));
