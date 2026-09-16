@@ -469,12 +469,7 @@ fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn now_unix() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
+use delonix_runtime_core::now_unix;
 
 /// Splits `KEY=value` (at the FIRST `=`; the value may contain `=`).
 fn parse_kv(s: &str) -> Option<(String, String)> {

@@ -207,12 +207,7 @@ fn truncate_on_boundary(s: &str, max: usize) -> (&str, bool) {
     (&s[..end], true)
 }
 
-fn now_unix() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
+use delonix_runtime_core::now_unix;
 
 /// Every rule this crate can emit an event for. Exists so a test can prove the
 /// set is complete, and so an operator can build an alert list without reading

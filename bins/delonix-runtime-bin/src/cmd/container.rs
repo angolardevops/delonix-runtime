@@ -3182,32 +3182,6 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             return Err(e);
         }
     };
-    if let Some(n) = &custom_net {
-        c.network = Some(n.clone());
-        c.ip = attached_ip;
-        // Namespace isolation: a container outside `default` gets the namespace
-        // firewall (fw_chain_body emits same-ns accept + cross-ns `ct new` drop).
-        // In `default` nothing applies — open SDN, unchanged behavior.
-        if c.namespace != "default" {
-            if let Some(ip) = c.ip.clone() {
-                let mut fw = c.firewall.clone().unwrap_or_default();
-                fw.enabled = true;
-                fw.namespace = c.namespace.clone();
-                match infra::apply_firewall(&c.id, &ip, &fw) {
-                    Ok(()) => c.firewall = Some(fw),
-                    Err(e) => eprintln!(
-                        "{}",
-                        super::po::tf(
-                            "warning: namespace isolation '{namespace}' not applied: {e}",
-                            &[("namespace", &c.namespace), ("e", &e.to_string())],
-                        )
-                    ),
-                }
-            }
-        }
-        // `expose` and the shaping were applied before the supervisor branch.
-        let _ = store.save(&c);
-    }
     if rm {
         if detach {
             spawn_rm_watcher(images, store, &c.id);
