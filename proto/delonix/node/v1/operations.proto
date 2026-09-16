@@ -13,18 +13,30 @@ syntax = "proto3";
 package delonix.node.v1;
 
 import "delonix/node/v1/common.proto";
+import "google/api/annotations.proto";
 import "google/protobuf/any.proto";
 import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/angolardevops/delonix-runtime/gen/go/delonix/node/v1;nodev1";
 
 service OperationService {
-  rpc GetOperation(GetOperationRequest) returns (Operation);
-  rpc ListOperations(ListOperationsRequest) returns (ListOperationsResponse);
+  rpc GetOperation(GetOperationRequest) returns (Operation) {
+    option (google.api.http) = {get: "/v1/operations/{id}"};
+  }
+  rpc ListOperations(ListOperationsRequest) returns (ListOperationsResponse) {
+    option (google.api.http) = {get: "/v1/operations"};
+  }
   // Streams state changes until the operation is done, then closes.
-  rpc WatchOperation(GetOperationRequest) returns (stream Operation);
+  rpc WatchOperation(WatchOperationRequest) returns (stream Operation) {
+    option (google.api.http) = {get: "/v1/operations/{id}:watch"};
+  }
   // Best effort: an operation past its point of no return reports FAILED_PRECONDITION.
-  rpc CancelOperation(CancelOperationRequest) returns (Operation);
+  rpc CancelOperation(CancelOperationRequest) returns (Operation) {
+    option (google.api.http) = {
+      post: "/v1/operations/{id}:cancel"
+      body: "*"
+    };
+  }
 }
 
 message Operation {
@@ -58,6 +70,10 @@ enum OperationState {
 }
 
 message GetOperationRequest {
+  string id = 1;
+}
+
+message WatchOperationRequest {
   string id = 1;
 }
 

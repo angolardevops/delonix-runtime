@@ -20,8 +20,34 @@ Three rules a review enforces on every change:
    client. A requirement that came from one consumer is written as the capability it
    is, in the engine's own vocabulary (its Kinds and resources).
 
-Check locally:
+## Encodings
+
+- **gRPC** — the services as written.
+- **HTTP/JSON** — from the `google.api.http` option on each RPC, resource-oriented in the
+  engine's own vocabulary:
+  - namespaced resources: `/v1/namespaces/{namespace}/{containers|pods|virtualmachines|networks|volumes}[/{name}]`;
+  - actions as custom verbs: `…/{name}:start`, `:stop`, `:connect`; updates are `PATCH`
+    with an `update_mask`;
+  - node and operations: `/v1/node`, `/v1/node/health`, `/v1/providers`, `/v1/operations/{id}`;
+    watches and logs are server-streamed `GET`s;
+  - images are addressed by QUERY (`/v1/images:get?reference=…`), never by path: a
+    reference such as `alpine:3.20` contains `:`, which a path would read as a verb;
+  - `Exec` and `Console` stream from both sides and have no HTTP mapping: REST serves
+    them over WebSocket (ADR-0040 D4).
+- **OpenAPI 3** — `docs/api/openapi.yaml`, GENERATED from these files; never edited by hand.
+
+Every RPC has its own `<Rpc>Request`; responses are the resource or an `Operation`
+(the written exceptions in `buf.yaml`). The vendored `google/api` protos live in
+`third_party/googleapis/` — see its README for the source commit.
+
+## Check locally
+
+Needs `protoc`, `buf` (v1.73.0) and `protoc-gen-openapi` (gnostic v0.7.1) — the CI job
+`contract` pins the same versions:
 
 ```bash
-protoc -I proto -I ~/.local/include --descriptor_set_out=/dev/null proto/delonix/node/v1/*.proto
+go install github.com/bufbuild/buf/cmd/buf@v1.73.0
+go install github.com/google/gnostic/cmd/protoc-gen-openapi@v0.7.1
+python3 scripts/contract_gate.py            # format, lint, breaking, mapping, OpenAPI
+python3 scripts/contract_gate.py --update   # regenerate docs/api/openapi.yaml
 ```
