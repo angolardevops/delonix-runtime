@@ -684,6 +684,11 @@ pub enum VmCmd {
         /// column — the probe does live network I/O, off by default).
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: super::output::OutputFormat,
+        /// Also list the VMs that are not running.
+        ///
+        /// Without it `ls` shows what is UP, the same cut `docker ps` makes.
+        #[arg(short = 'A', long)]
+        all: bool,
         /// Show only the VMs of this isolation namespace (see `vm create
         /// --namespace`). Omit to list every namespace.
         ///
@@ -2021,16 +2026,24 @@ pub fn run(action: VmCmd) -> Result<()> {
         VmCmd::Ls {
             ports,
             output,
+            all,
             namespace,
         } => {
             let output = super::config::resolve_output(&base, output);
             // One filter, applied once, before either renderer sees a row —
             // table and JSON cannot disagree about what `--namespace` means.
             let filter = |vms: Vec<delonix_runtime_core::Vm>| -> Vec<delonix_runtime_core::Vm> {
-                match namespace.as_deref() {
-                    None => vms,
-                    Some(ns) => vms.into_iter().filter(|vm| vm.namespace == ns).collect(),
-                }
+                vms.into_iter()
+                    .filter(|vm| match namespace.as_deref() {
+                        None => true,
+                        Some(ns) => vm.namespace == ns,
+                    })
+                    // `-A` here and not in the renderers, for the reason the
+                    // comment above already gives: one filter, applied once, so
+                    // the table and the JSON cannot disagree about what this
+                    // listing contains.
+                    .filter(|vm| all || matches!(vm.status, delonix_runtime_core::Status::Running))
+                    .collect()
             };
             if output == super::output::OutputFormat::Json {
                 let rows: Vec<VmLsRow> = filter(delonix_vm::list(&base)?)
