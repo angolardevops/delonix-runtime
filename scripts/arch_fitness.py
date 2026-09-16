@@ -53,6 +53,8 @@ FOUNDATION, CONTEXT, ADAPTER, PROVIDER, INTERFACE, BIN = (
 # gate keeps working during the move instead of after it.
 LAYERS = {
     "delonix-runtime-core": FOUNDATION,  # → delonix-model + delonix-state + delonix-telemetry (P3)
+    "delonix-model": FOUNDATION,
+    "delonix-stack": CONTEXT,
     "delonix-net-rules": FOUNDATION,  # → delonix-networking/domain (P2)
     "delonix-security-runtime": CONTEXT,  # → delonix-security (P2)
     "delonix-runtime": ADAPTER,  # → delonix-linux (P3)

@@ -17,38 +17,7 @@
 use super::kinds as k;
 use super::manifest::ManifestDoc;
 
-/// A condition of a resource — `ok=false` is what matters (the missing
-/// prerequisite). `reason` is a short stable code; `message` is actionable.
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
-pub struct Condition {
-    pub kind: &'static str,
-    pub ok: bool,
-    pub reason: &'static str,
-    pub message: String,
-}
-
-impl Condition {
-    fn ok(kind: &'static str) -> Self {
-        Condition {
-            kind,
-            ok: true,
-            reason: "",
-            message: String::new(),
-        }
-    }
-    pub(crate) fn bad(
-        kind: &'static str,
-        reason: &'static str,
-        message: impl Into<String>,
-    ) -> Self {
-        Condition {
-            kind,
-            ok: false,
-            reason,
-            message: message.into(),
-        }
-    }
-}
+pub use delonix_stack::condition::Condition;
 
 /// Probed host environment (best-effort). Explicit fields = `conditions_for`
 /// pure and testable without touching the real host.
