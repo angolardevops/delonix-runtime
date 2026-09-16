@@ -8,3 +8,6 @@ license.workspace = true
 # lados da fronteira (o motor e o control-plane) sem arrastar o mecanismo atrás.
 # Uma dependência aqui seria uma dependência que o PaaS passaria a ter.
 [dependencies]
+
+[lints]
+workspace = true

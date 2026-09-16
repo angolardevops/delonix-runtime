@@ -38,3 +38,6 @@ tonic-build = { workspace = true }
 # de um conector para socket unix, que o tonic não traz por si.
 tower = { workspace = true, features = ["util"] }
 hyper-util = { workspace = true, features = ["tokio"] }
+
+[lints]
+workspace = true

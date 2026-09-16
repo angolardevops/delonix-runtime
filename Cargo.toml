@@ -104,6 +104,12 @@ proptest = "1"
 tempfile = "3"
 criterion = "0.5"
 
+# ADR-0040, P0: lints every crate inherits (`[lints] workspace = true`). An
+# `unsafe` block states WHY it is sound, next to it — a justification three lines
+# up, above an unrelated statement, is how a false one survives review.
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny"
+
 # Perfil de release dos binários publicados: LTO thin + 1 codegen unit dão
 # um binário mais pequeno e mais rápido (inlining entre crates — o caminho
 # quente hash/serde/parsing beneficia) por custo só em tempo de build no CI.

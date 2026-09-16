@@ -15,3 +15,6 @@ serde_json = { workspace = true }
 [dev-dependencies]
 # Property-based testing dos invariantes de alocação de IP (S5).
 proptest = { workspace = true }
+
+[lints]
+workspace = true

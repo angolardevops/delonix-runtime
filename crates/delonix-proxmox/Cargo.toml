@@ -15,3 +15,6 @@ serde_json = { workspace = true }
 # `delonix-truenas`. It lives HERE and not in `delonix-vm`: that crate has four
 # dependencies and a motor crate does not grow an HTTP client (ADR-0008).
 reqwest = { workspace = true, features = ["blocking", "rustls-tls-webpki-roots", "json"] }
+
+[lints]
+workspace = true

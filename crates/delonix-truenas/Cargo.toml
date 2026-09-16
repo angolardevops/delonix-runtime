@@ -14,3 +14,6 @@ serde_json = { workspace = true }
 # HERE and not in `delonix-volume` on purpose: that crate has three
 # dependencies and a motor crate does not grow an HTTP client (ADR-0009).
 reqwest = { workspace = true, features = ["blocking", "rustls-tls-webpki-roots", "json"] }
+
+[lints]
+workspace = true

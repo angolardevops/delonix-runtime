@@ -27,3 +27,6 @@ libc = { workspace = true }
 tempfile = { workspace = true }
 tower = { workspace = true, features = ["util"] }
 http-body-util = { workspace = true }
+
+[lints]
+workspace = true
