@@ -2387,6 +2387,7 @@ mod resource_limits_preflight_tests {
 /// ran inline before, unchanged — progress line and messages included.
 struct CliRunPorts<'a> {
     images: &'a ImageStore,
+    store: &'a Store,
 }
 
 impl delonix_compute::ports::ImageStore for CliRunPorts<'_> {
@@ -2541,6 +2542,92 @@ impl delonix_compute::ports::NetworkProvider for CliRunPorts<'_> {
     }
 }
 
+impl CliRunPorts<'_> {
+    /// The engine's spawn specification for a [`delonix_compute::launch::Launch`].
+    fn run_spec<'h>(
+        c: &Container,
+        l: &delonix_compute::launch::Launch,
+        slirp_hook: &'h runtime::StartedHook<'h>,
+    ) -> RunSpec<'h> {
+        // DNS for /etc/resolv.conf: on a custom network it's the holder's own address
+        // on the bridge (where the internal resolver answers); with `-p` (slirp) it's
+        // the slirp's DNS; on `--net host` it's `None` (the runtime copies the host's
+        // resolv.conf).
+        //
+        // `bridge_addr` and NOT `default_route`: a network with a DECLARED gateway
+        // sends its workloads out through an appliance, and that appliance does not
+        // run this engine's resolver. Taking one string for both questions is what
+        // made `<name>.<ns>.delonix.internal` stop resolving on such a network — with
+        // no error, because a resolver that is simply not there just times out.
+        let dns = match &l.custom_net {
+            Some(n) => infra::resolve_net(n).ok().map(|p| p.bridge_addr),
+            // A POD member is on delonix0 like any custom-network container, so the
+            // resolver is the holder's DNS on the infra gateway. Without this nothing
+            // resolved by name in a pod: the re-exec runs in the holder's mount-ns,
+            // where the host's `/etc/resolv.conf` does not exist.
+            None if l.pod => Some(infra::INFRA_GATEWAY.to_string()),
+            None if !l.slirp_ports.is_empty() => Some(delonix_net::SLIRP_DNS.to_string()),
+            None => None,
+        };
+        RunSpec {
+            dns_config: dns_config_of(c),
+            detach: l.detach,
+            new_netns: l.new_netns(),
+            pod_infra_pid: l.pod_infra_pid(),
+            userns: l.userns(c),
+            inherit_userns: l.inherit_userns(),
+            log_path: l.log_path.clone(),
+            mounts: l.mounts.clone(),
+            on_started: if l.slirp_ports.is_empty() {
+                None
+            } else {
+                Some(slirp_hook)
+            },
+            // /etc/hosts: the custom network's IP, or the slirp's when `-p` without a network.
+            hosts_ip: l
+                .attached_ip
+                .clone()
+                .or_else(|| (!l.slirp_ports.is_empty()).then(|| delonix_net::SLIRP_IP.to_string())),
+            dns,
+            host_pid: c.host_pid,
+            host_ipc: c.host_ipc,
+            apparmor: l.apparmor.clone(),
+            selinux: c.selinux.clone(),
+            log_cri: c.log_cri,
+            run_uid: c.run_uid,
+            run_gid: c.run_gid,
+        }
+    }
+}
+
+impl delonix_compute::launch::WorkloadRuntime for CliRunPorts<'_> {
+    fn create(
+        &self,
+        c: &mut Container,
+        l: &delonix_compute::launch::Launch,
+    ) -> Result<delonix_runtime_core::Status> {
+        let hook = |pid: i32| -> Result<()> { delonix_net::slirp_attach(pid, &l.slirp_ports) };
+        let spec = Self::run_spec(c, l, &hook);
+        runtime::create_with(self.store, c, &l.rootfs, &spec)
+    }
+
+    fn supervise(
+        &self,
+        c: &mut Container,
+        l: &delonix_compute::launch::Launch,
+        policy: &str,
+    ) -> Result<()> {
+        let hook = |pid: i32| -> Result<()> { delonix_net::slirp_attach(pid, &l.slirp_ports) };
+        let spec = Self::run_spec(c, l, &hook);
+        let id = c.id.clone();
+        run_supervised(self.store, c, &l.rootfs, &spec, policy, &id)
+    }
+
+    fn discard_unstarted(&self, id: &str) {
+        discard_unstarted(self.images, self.store, id);
+    }
+}
+
 impl delonix_compute::ports::RunHost for CliRunPorts<'_> {
     fn read_file(&self, path: &str) -> std::io::Result<String> {
         std::fs::read_to_string(path)
@@ -2640,19 +2727,12 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         namespace,
         ports,
         rm,
-        restart,
         image,
         quiet,
-        no_supervisor,
-        selinux,
-        host_pid,
-        host_ipc,
         wait_healthy,
         wait_timeout,
-        health,
         pod,
         pod_infra_pid,
-        log_cri,
         ..
     } = opts;
     // Isolation namespace (default `default`). It goes into an nft set name (via
@@ -2815,7 +2895,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // `--env-file`: read here, parsed by the builder (each file before `-e`).
     // Volumes, devices, image, rootfs, `--env-file`, `--user` — resolved through the
     // read ports (`delonix_compute::ports`), then the record is built from them.
-    let read_ports = CliRunPorts { images };
+    let read_ports = CliRunPorts { images, store };
     let resolved = delonix_compute::run::resolve_run(
         &opts_copy,
         id.clone(),
@@ -2832,7 +2912,6 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     let mounts = resolved.mounts;
     let apparmor_profile = resolved.apparmor_profile;
     let mut c = delonix_compute::run::build_record(&opts_copy, resolved.record)?;
-    let log_path = c.log_path.clone();
 
     let custom_net = custom_net_name(&net);
     let mut attached_ip = None;
@@ -2922,71 +3001,23 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // stops sharing the host's network and gets its own netns with slirp4netns +
     // the requested hostfwds — the behavior of `docker run -p` (NAT network by
     // default), in podman's rootless model. The slirp dies with the netns.
-    // A POD MEMBER is excluded as well, and that omission was a live bug: its
-    // netns belongs to the pod, not to it. Taking this path spawned a SECOND
-    // slirp against the shared netns while `publish_with_retry` above had
-    // already published the same host port through the ingress — two things
-    // claiming one port, and the traffic reaching neither. Measured: the DNAT
-    // `10.0.2.100:12345 -> 10.200.0.2:80` was correct, nginx answered 200 from
-    // inside the holder, and `curl 127.0.0.1:12345` from the host still hung.
-    let slirp_ports = if custom_net.is_none() && pod.is_none() {
-        ports.clone()
-    } else {
-        Vec::new()
-    };
-    let slirp_hook = |pid: i32| -> Result<()> { delonix_net::slirp_attach(pid, &slirp_ports) };
-    // DNS for /etc/resolv.conf: on a custom network it's the holder's own address
-    // on the bridge (where the internal resolver answers); with `-p` (slirp) it's
-    // the slirp's DNS; on `--net host` it's `None` (the runtime copies the host's
-    // resolv.conf).
-    //
-    // `bridge_addr` and NOT `default_route`: a network with a DECLARED gateway
-    // sends its workloads out through an appliance, and that appliance does not
-    // run this engine's resolver. Taking one string for both questions is what
-    // made `<name>.<ns>.delonix.internal` stop resolving on such a network — with
-    // no error, because a resolver that is simply not there just times out.
-    let dns = match &custom_net {
-        Some(n) => infra::resolve_net(n).ok().map(|p| p.bridge_addr),
-        // POD container (`--pod`): it's on delonix0 like any custom-network container
-        // → the resolver is the holder's DNS on the infra gateway. Without this the
-        // `/etc/resolv.conf` was left unwritten (the re-exec runs in the holder's mount-ns,
-        // where the host's `/etc/resolv.conf` doesn't exist) and NOTHING resolved by name in the pod.
-        None if pod.is_some() => Some(infra::INFRA_GATEWAY.to_string()),
-        None if !slirp_ports.is_empty() => Some(delonix_net::SLIRP_DNS.to_string()),
-        None => None,
-    };
-    let spec = RunSpec {
-        dns_config: dns_config_of(&c),
-        detach,
-        // On re-exec we're already in the right netns: DON'T create another (nor join
-        // anything — the `ip netns exec` handled that).
-        new_netns: !reexec && (net == "none" || !slirp_ports.is_empty()),
-        // Pod IPC/UTS sharing: a pod app container (`--pod-infra-pid`) joins the
-        // infra's IPC + UTS in `spawn`/`container_init`. Only meaningful in the
-        // re-exec pass (already in the holder's userns, where `setns` has privilege).
-        pod_infra_pid: if reexec { pod_infra_pid } else { None },
-        userns: c.userns && !reexec,
-        // Inherits the holder's user+network namespace instead of creating its own.
-        inherit_userns: reexec,
-        log_path,
+    let launch = delonix_compute::launch::Launch {
+        slirp_ports: delonix_compute::launch::slirp_ports(
+            custom_net.is_some(),
+            pod.is_some(),
+            &ports,
+        ),
+        rootfs,
         mounts,
-        on_started: if slirp_ports.is_empty() {
-            None
-        } else {
-            Some(&slirp_hook)
-        },
-        // /etc/hosts: the custom network's IP, or the slirp's when `-p` without a network.
-        hosts_ip: attached_ip
-            .clone()
-            .or_else(|| (!slirp_ports.is_empty()).then(|| delonix_net::SLIRP_IP.to_string())),
-        dns,
-        host_pid,
-        host_ipc,
-        apparmor: apparmor_profile.clone(),
-        selinux: selinux.clone(),
-        log_cri,
-        run_uid: c.run_uid,
-        run_gid: c.run_gid,
+        detach,
+        second_pass: reexec,
+        net_none: net == "none",
+        custom_net: custom_net.clone(),
+        pod: pod.is_some(),
+        attached_ip: attached_ip.clone(),
+        pod_infra_pid,
+        apparmor: apparmor_profile,
+        log_path: c.log_path.clone(),
     };
     // BEFORE the supervised branch (which returns): otherwise containers with
     // `--restart` would never emit `create`.
@@ -2998,50 +3029,20 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         &c.name,
         Some(&image),
     );
-    // `--restart`: instead of the CLI creating the container and exiting (leaving
-    // it orphaned from `init`, with the exit code lost), a detached SUPERVISOR
-    // creates it and becomes its parent — see `run_supervised`.
-    // BUG FIXED HERE (pre-existing, and found by the chaos harness rather than
-    // by any test): the block further down that persists `network`/`ip` lives
-    // AFTER the supervisor's early return, so the supervised path never reached
-    // it. Measured on a container started with `--restart always --net <rede>`,
-    // BEFORE this session touched the supervisor at all:
-    //
-    //     ip persistido: None   network: None
-    //
-    // …while the container had a working address on the wire. The consequences
-    // are the same family as the documented `-v`-not-persisted bug: `container
-    // start` after a stop cannot re-attach a network it has no record of, the
-    // internal DNS has no address to answer with, the firewall has no IP to
-    // govern, and `describe` reports a container with no network at all.
-    //
-    // Both values are already known here — the attach happened above — so
-    // recording them BEFORE the branch fixes the supervised path and leaves the
-    // normal one byte-for-byte unchanged (it assigns the same values again).
-    c.health = health.clone();
-    if should_supervise(&restart, detach, !no_supervisor) {
-        if policy_supervised(&restart) {
-            c.restart_policy = Some(restart.clone());
-        }
-        if let Err(e) = run_supervised(store, &mut c, &rootfs, &spec, &restart, &id) {
-            discard_unstarted(images, store, &c.id);
-            return Err(e);
-        }
-        // O supervisor tomou TODO o caminho detached (não só o `--restart`),
-        // por isso é aqui que a maioria dos `-d` termina — e era aqui que o
-        // `--wait` estava a ser silenciosamente ignorado.
-        if wait_healthy {
-            wait_until_healthy(images, store, &id, wait_timeout)?;
-        }
-        return Ok(());
-    }
-    let final_status = match runtime::create_with(store, &mut c, &rootfs, &spec) {
-        Ok(s) => s,
-        Err(e) => {
-            discard_unstarted(images, store, &c.id);
-            return Err(e);
-        }
-    };
+    // A detached start gets a SUPERVISOR that becomes the container's parent, so the
+    // exit code is not lost; see `delonix_compute::launch::start`.
+    let final_status =
+        match delonix_compute::launch::start(&opts_copy, &mut c, &launch, &read_ports)? {
+            delonix_compute::launch::Started::Supervised => {
+                // The supervisor takes the whole detached path, so this is where most
+                // `-d` runs end — and where `--wait` used to be silently ignored.
+                if wait_healthy {
+                    wait_until_healthy(images, store, &id, wait_timeout)?;
+                }
+                return Ok(());
+            }
+            delonix_compute::launch::Started::Created(status) => status,
+        };
     if rm {
         if detach {
             spawn_rm_watcher(images, store, &c.id);
@@ -3931,47 +3932,37 @@ pub(crate) fn parse_restart_policy(s: &str) -> std::result::Result<String, Strin
     }
 }
 
-pub(crate) fn policy_supervised(policy: &str) -> bool {
-    matches!(
-        policy.split(':').next().unwrap_or(""),
-        "always" | "unless-stopped" | "on-failure"
-    )
-}
+pub(crate) use delonix_compute::launch::policy_supervised;
 
-/// Should this `run` fork a supervisor?
-///
-/// **This is what makes a detached container's exit code knowable at all.**
-/// `waitpid` is the only source of a real exit status and the kernel grants it
-/// to the PARENT alone. A plain `run -d` had no lasting parent: the CLI exited,
-/// the container was reparented to `init`, and the status died with it — so
-/// `ps -a` could only ever say `Exited (unknown)` and `wait` had to refuse. Any
-/// CI job, migration, backup or health probe driven through that path could not
-/// tell success from failure.
-///
-/// The supervisor already existed; it was simply gated on a restart policy. With
-/// no policy `should_restart` returns `false`, so it does exactly one useful
-/// thing — `wait_and_record` the true code, emit `die`, exit — and costs one
-/// short-lived process that goes away with the container.
-///
-/// **This does not cross the daemonless line, despite appearances.** Daemonless
-/// here means *no central daemon* — no `dockerd` that owns every container and
-/// takes them all down with it. A supervisor per container is the standard
-/// daemonless design: Podman is daemonless and runs a `conmon` per container for
-/// this precise reason. This engine already keeps persistent per-node processes
-/// (the netns holder, slirp) and already forked this very supervisor for
-/// `--restart`.
-///
-/// `forkable` is the one real constraint. `run_supervised` does a bare `fork()`
-/// of a process it assumes is single-threaded; that holds for the CLI and NOT
-/// for the `serve docker-api` server, which is why that path already refuses
-/// `--restart`. It keeps the old behaviour rather than risking a fork from a
-/// multi-threaded process — an honest, documented gap instead of a crash.
-pub(crate) fn should_supervise(_policy: &str, detach: bool, forkable: bool) -> bool {
-    // The policy is no longer part of the decision — it only decides what the
-    // supervisor DOES once the container dies (`should_restart`). The parameter
-    // stays so the call sites read as the question they are asking.
-    detach && forkable
-}
+// Should this `run` fork a supervisor?
+//
+// **This is what makes a detached container's exit code knowable at all.**
+// `waitpid` is the only source of a real exit status and the kernel grants it
+// to the PARENT alone. A plain `run -d` had no lasting parent: the CLI exited,
+// the container was reparented to `init`, and the status died with it — so
+// `ps -a` could only ever say `Exited (unknown)` and `wait` had to refuse. Any
+// CI job, migration, backup or health probe driven through that path could not
+// tell success from failure.
+//
+// The supervisor already existed; it was simply gated on a restart policy. With
+// no policy `should_restart` returns `false`, so it does exactly one useful
+// thing — `wait_and_record` the true code, emit `die`, exit — and costs one
+// short-lived process that goes away with the container.
+//
+// **This does not cross the daemonless line, despite appearances.** Daemonless
+// here means *no central daemon* — no `dockerd` that owns every container and
+// takes them all down with it. A supervisor per container is the standard
+// daemonless design: Podman is daemonless and runs a `conmon` per container for
+// this precise reason. This engine already keeps persistent per-node processes
+// (the netns holder, slirp) and already forked this very supervisor for
+// `--restart`.
+//
+// `forkable` is the one real constraint. `run_supervised` does a bare `fork()`
+// of a process it assumes is single-threaded; that holds for the CLI and NOT
+// for the `serve docker-api` server, which is why that path already refuses
+// `--restart`. It keeps the old behaviour rather than risking a fork from a
+// multi-threaded process — an honest, documented gap instead of a crash.
+pub(crate) use delonix_compute::launch::should_supervise;
 
 /// **Closes the known limitation of `--net <network>` in rootless.**
 ///
@@ -4412,107 +4403,41 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
             .into_owned()
     };
 
-    let slirp_ports = if c.network.is_none() {
-        c.ports.clone()
-    } else {
-        Vec::new()
-    };
-    let slirp_hook = |pid: i32| -> Result<()> { delonix_net::slirp_attach(pid, &slirp_ports) };
-    // resolv.conf: the custom network's gateway (the ingress resolver), the slirp's DNS
-    // with `-p`, or the host's (`--net host`) — see `run`.
-    let dns = match &c.network {
-        // Same choice as `cmd_run` above: the resolver's address, never the
-        // declared gateway.
-        Some(n) => infra::resolve_net(n).ok().map(|p| p.bridge_addr),
-        // Mirrors `cmd_run`'s pod arm. A pod member sits on `delonix0` like any
-        // custom-network container, so its resolver is the ingress gateway —
-        // without this arm a restarted member came back resolving nothing by name.
-        None if c.pod.is_some() => Some(infra::INFRA_GATEWAY.to_string()),
-        None if !slirp_ports.is_empty() => Some(delonix_net::SLIRP_DNS.to_string()),
-        None => None,
-    };
-
-    let log_path = images
+    // The same launch and the same spawn specification as `run` — one builder.
+    // Two literals of `RunSpec` diverged SIX times (`-v`, `-p` on a custom network,
+    // extra networks, pod membership, DNS, confinement), and a seventh was found
+    // while unifying them: `start` ignored `--net none` (a container created with
+    // no network came back with the HOST's, measured: 1 interface after `run`, 27
+    // after `stop`+`start`) and `--log-file` (the new output went to the default
+    // log while the record pointed at the requested one).
+    let default_log = images
         .root()
         .join("containers")
         .join(&c.id)
         .join("log")
         .to_string_lossy()
         .into_owned();
-    let spec = RunSpec {
-        detach: true,
-        new_netns: !reexec && !slirp_ports.is_empty(),
-        pod_infra_pid: None,
-        userns: c.userns && !reexec,
-        inherit_userns: reexec,
-        log_path: Some(log_path),
+    let launch = delonix_compute::launch::Launch {
+        slirp_ports: delonix_compute::launch::slirp_ports(
+            c.network.is_some(),
+            c.pod.is_some(),
+            &c.ports,
+        ),
+        rootfs,
         mounts: c.mounts.clone(),
-        on_started: if slirp_ports.is_empty() {
-            None
-        } else {
-            Some(&slirp_hook)
-        },
-        hosts_ip: c
-            .ip
-            .clone()
-            .or_else(|| (!slirp_ports.is_empty()).then(|| delonix_net::SLIRP_IP.to_string())),
-        dns,
-        // The EXPLICIT resolver the container was created with (`--dns`,
-        // `--dns-search`, `--dns-option`). `dns` above is the resolver of its
-        // NETWORK; this is what the user asked for, and it wins.
-        //
-        // BUG FIXED HERE, measured on a running container: `dns_config_of`'s own
-        // doc-comment says it is «shared by `cmd_run` and `cmd_start` on purpose»
-        // and listed the four times this family of fields was lost on a restart —
-        // and `cmd_start` never called it. A container created with
-        // `--dns 1.1.1.1` resolved through 1.1.1.1 until the first `stop`+`start`,
-        // and then silently through the host's resolver. Fifth occurrence of the
-        // same trap, and the first where the comment promised what the code did
-        // not do.
-        dns_config: dns_config_of(&c),
-        // Reproduces the original `run`'s `--user` (the `--hostname` comes from
-        // `c.hostname`, read by the engine). Without this, a `start` ran as root.
-        run_uid: c.run_uid,
-        run_gid: c.run_gid,
-        // **Os cinco que o `..Default::default()` calava.** Sexta ocorrência da
-        // armadilha do estado-não-reconstruído, e a de pior consequência: o
-        // `apparmor` já ESTAVA persistido e mesmo assim não era lido aqui, por isso
-        // um `stop`+`start` — ou a recuperação automática pós-respawn do holder,
-        // que corre sem ninguém pedir — devolvia o container **sem confinamento**.
-        // O `run` recusa-se a arrancar unconfined quando o perfil falha
-        // (`ensure_apparmor`), o que diz qual era a intenção; o `start` fazia
-        // precisamente o que o `run` proíbe. Os outros quatro nem campo tinham.
+        detach: true,
+        second_pass: reexec,
+        net_none: c.net_mode.as_deref() == Some("none"),
+        custom_net: c.network.clone(),
+        pod: c.pod.is_some(),
+        attached_ip: c.ip.clone(),
+        pod_infra_pid: None,
         apparmor: c.apparmor.clone(),
-        selinux: c.selinux.clone(),
-        host_pid: c.host_pid,
-        host_ipc: c.host_ipc,
-        log_cri: c.log_cri,
-        // O `..Default::default()` que aqui estava deixou de ter efeito quando os
-        // cinco campos passaram a ser preenchidos — e o `clippy` do CI falha em
-        // QUALQUER aviso. Tirá-lo é também o que mantém a lição de pé: um campo
-        // novo no `RunSpec` volta a partir a compilação aqui, em vez de ser
-        // calado por um default.
+        log_path: Some(c.log_path.clone().unwrap_or(default_log)),
     };
-    // Re-enter supervision on `start`, same as `run -d --restart`: a container with a
-    // supervised policy that crashed (or whose earlier supervisor died with it — host
-    // reboot, `kill -9` on the supervisor) came back here with NO ONE watching it —
-    // `create_with` alone would restore it Running but as an unsupervised orphan again,
-    // silently dropping the policy the user asked for. See `run_supervised`'s doc comment
-    // for why only the container's real parent can enforce it.
+    let ports = CliRunPorts { images, store };
     let policy = c.restart_policy.clone().unwrap_or_default();
-    // `should_supervise` and not `policy_supervised` — the SAME question `run -d`
-    // asks. The two drifted apart when the policy stopped being part of that
-    // decision on the `run` side: from then on a `run -d` always forked a
-    // supervisor (that is what makes a detached container's exit code knowable),
-    // while `start`/`restart` re-created the process with nobody watching unless
-    // a restart policy happened to be set. Measured on this engine, 2026-09-10,
-    // with `run -d ... sh -c 'sleep 1; exit 7'`: `wait` gave the real `7`, and
-    // after a plain `container start` of the SAME container it refused —
-    // `exit code ... was not captured`, pointing at `--restart` as the fix when
-    // the container had just lost the supervisor it already had. `ps -a` showed
-    // `Exited (unknown)` for the same reason.
     if should_supervise(&policy, true, true) {
-        let start_id = c.id.clone();
         delonix_runtime_core::events::emit(
             &super::util::state_root(),
             "container",
@@ -4521,9 +4446,11 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
             &c.name,
             None,
         );
-        return run_supervised(store, &mut c, &rootfs, &spec, &policy, &start_id);
+        return delonix_compute::launch::WorkloadRuntime::supervise(
+            &ports, &mut c, &launch, &policy,
+        );
     }
-    runtime::create_with(store, &mut c, &rootfs, &spec)?;
+    delonix_compute::launch::WorkloadRuntime::create(&ports, &mut c, &launch)?;
     delonix_runtime_core::events::emit(
         &super::util::state_root(),
         "container",
@@ -6799,103 +6726,25 @@ mod unconverged_container_tests {
 }
 
 #[cfg(test)]
-mod runspec_parity_tests {
-    /// **O gate que fecha a classe inteira, e lê o CÓDIGO-FONTE para o fazer.**
+mod runspec_single_builder_tests {
+    /// **One builder of the engine's spawn specification, and this keeps it one.**
     ///
-    /// Seis vezes já — `-v`, `-p` em rede custom, redes extra, `Container.pod`,
-    /// `dns_config`, e agora AppArmor/SELinux/`--host-pid`/`--host-ipc`/
-    /// `--log-cri` — um campo foi preenchido no `RunSpec` do `cmd_run` e esquecido
-    /// no do `cmd_start`. O sintoma é sempre o mesmo e nunca dá erro: o container
-    /// arranca, parece igual, e perdeu alguma coisa no caminho. Da última vez o
-    /// que se perdia era o CONFINAMENTO, num caminho (a recuperação pós-respawn do
-    /// holder) que corre sem ninguém pedir.
-    ///
-    /// Um teste de comportamento não apanha isto: os dois `RunSpec` nascem dentro
-    /// de funções que fazem I/O, resolvem imagens e falam com o holder, e um campo
-    /// em falta não muda o resultado de nenhuma asserção fácil de escrever. Por
-    /// isso o teste faz o que a matriz da Docker API já faz neste repo — **lê o
-    /// próprio ficheiro** e compara os dois literais campo a campo.
-    ///
-    /// A regra é a PRESENÇA do campo, não o valor: `detach`, `new_netns` e
-    /// `userns` têm valores legitimamente diferentes nos dois sítios. O que não
-    /// pode acontecer é um campo existir num literal e o outro cair no
-    /// `..Default::default()` sem que alguém tenha decidido isso.
-    ///
-    /// Para acrescentar um campo só a um dos lados, põe-lo na `SO_NO_RUN` com a
-    /// razão escrita. Uma allowlist com justificação é uma decisão; um
-    /// `..Default::default()` silencioso é um bug à espera da sexta ocorrência.
+    /// `run` and `start` each had their own `RunSpec` literal, and a field filled
+    /// in one and forgotten in the other was lost on a restart six times — the
+    /// sixth time it was the container's confinement. The gate that replaced this
+    /// one compared the two literals field by field; unifying them on
+    /// `CliRunPorts::run_spec` found a seventh (`--net none` and `--log-file`
+    /// ignored by `start`). With one builder the parity is structural, and this
+    /// test only refuses a second one appearing in this module.
     #[test]
-    fn runspec_do_start_reproduz_o_do_run() {
+    fn container_has_one_runspec_builder() {
         let src = include_str!("container.rs");
-
-        // Extrai os nomes de campo do n-ésimo literal `let spec = RunSpec {`.
-        // Só o primeiro nível conta (8 espaços de indentação): um campo aninhado
-        // não é um campo do RunSpec.
-        fn campos(src: &str, ocorrencia: usize) -> Vec<String> {
-            let mut restante = src;
-            for _ in 0..=ocorrencia {
-                let i = restante
-                    .find("let spec = RunSpec {")
-                    .expect("literal `let spec = RunSpec {` não encontrado");
-                restante = &restante[i + "let spec = RunSpec {".len()..];
-            }
-            let mut out = Vec::new();
-            for linha in restante.lines() {
-                if linha.starts_with("    };") {
-                    break;
-                }
-                let Some(resto) = linha.strip_prefix("        ") else {
-                    continue;
-                };
-                if resto.starts_with(' ') || resto.starts_with("//") {
-                    continue; // aninhado, ou comentário
-                }
-                // **As DUAS formas, e esquecer a segunda quase deixou este gate
-                // decorativo.** `dns,` (abreviada) e `dns: x` (explícita) são o
-                // mesmo campo, e a primeira é a que o `cmd_run` mais usa — a versão
-                // inicial deste parser só via a que tem `:` e, com a correcção
-                // revertida, acusou 2 dos 5 campos em falta. Um gate que vê metade
-                // dá verde sobre a outra metade.
-                let nome = resto
-                    .split_once(':')
-                    .map(|(n, _)| n)
-                    .unwrap_or_else(|| resto.trim_end_matches(','));
-                if !nome.is_empty() && nome.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                    out.push(nome.to_string());
-                }
-            }
-            out
-        }
-
-        // Campos que o `start` deliberadamente NÃO reproduz, cada um com a razão.
-        // Mexer nesta lista é uma decisão consciente — que é exactamente o ponto.
-        const SO_NO_RUN: &[(&str, &str)] = &[(
-            "pod_infra_pid",
-            "o `start` reentra numa netns de pod JÁ criada; o infra-pid é do momento \
-             da criação do pod e não se reconstrói a partir do registo",
-        )];
-
-        let do_run = campos(src, 0);
-        let do_start = campos(src, 1);
-        assert!(
-            do_run.len() > 10 && do_start.len() > 10,
-            "a extracção falhou (run={}, start={}) — o formato do literal mudou e este \
-             gate deixou de ver o que devia",
-            do_run.len(),
-            do_start.len()
-        );
-
-        let em_falta: Vec<&String> = do_run
-            .iter()
-            .filter(|f| !do_start.contains(f))
-            .filter(|f| !SO_NO_RUN.iter().any(|(n, _)| *n == f.as_str()))
-            .collect();
-        assert!(
-            em_falta.is_empty(),
-            "o `RunSpec` do `cmd_start` não reproduz {em_falta:?} do `cmd_run` — um \
-             `stop`+`start` (e a recuperação pós-respawn do holder) perde esse estado \
-             em silêncio. Ou preenche-o no `cmd_start`, ou declara-o em `SO_NO_RUN` \
-             com a razão."
+        let needle = concat!("RunSpec", " {");
+        let builders = src.matches(needle).count();
+        assert_eq!(
+            builders, 1,
+            "container.rs builds the spawn specification in {builders} places — \
+             build every start from a `Launch` through `CliRunPorts::run_spec`"
         );
     }
 }
@@ -8052,15 +7901,18 @@ containers:
         // silencio.
         //
         // O teste e sobre o CODIGO e nao sobre um container porque a alternativa
-        // exige um host: o que se exige e que ambos os construtores de `RunSpec`
-        // passem o campo.
+        // exige um host. Desde que `run` e `start` constroem o `RunSpec` num so
+        // sitio (`CliRunPorts::run_spec`, guardado por
+        // `container_has_one_runspec_builder`), basta esse construtor passar o
+        // campo para os dois caminhos o terem.
         let src = include_str!("container.rs");
-        let chamadas = src.matches("dns_config: dns_config_of(&c)").count();
-        assert!(
-            chamadas >= 2,
-            "`dns_config_of` tem de ser passado no `cmd_run` E no `cmd_start` \
-             (encontradas {chamadas} chamadas) — um caminho sem ele perde o \
-             `--dns` no primeiro restart"
+        let chamadas = src
+            .matches(concat!("dns_config: ", "dns_config_of("))
+            .count();
+        assert_eq!(
+            chamadas, 1,
+            "o construtor unico do `RunSpec` tem de passar `dns_config_of` \
+             (encontradas {chamadas} chamadas) — sem ele, `run` e `start` perdem o `--dns`"
         );
     }
 
