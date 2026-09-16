@@ -18,6 +18,7 @@ members = [
     "crates/interfaces/delonix-mcp",
     "crates/foundation/delonix-model",
     "crates/contexts/delonix-stack",
+    "crates/contexts/delonix-compute",
 ]
 
 [workspace.package]
@@ -48,6 +49,7 @@ delonix-proxmox = { path = "crates/providers/delonix-proxmox" }
 delonix-mcp = { path = "crates/interfaces/delonix-mcp" }
 delonix-model = { path = "crates/foundation/delonix-model" }
 delonix-stack = { path = "crates/contexts/delonix-stack" }
+delonix-compute = { path = "crates/contexts/delonix-compute" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
