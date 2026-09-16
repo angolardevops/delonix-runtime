@@ -49,7 +49,7 @@ const KEEP: usize = 20;
 /// Deliberately small and flat — this is read by `history` to render a table, so
 /// every field here is a column someone asked for.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct Revision {
+pub struct Revision {
     /// Sequential, starting at 1.
     pub number: u32,
     /// Unix instant (seconds).
@@ -112,7 +112,7 @@ fn now() -> u64 {
 /// where clippy draws its line and where a caller starts passing two booleans in
 /// the wrong order without the compiler noticing. Every field here is named at
 /// the call site.
-pub(crate) struct Outcome<'a> {
+pub struct Outcome<'a> {
     /// The manifest path as given, for a human to recognise the apply.
     pub manifest_path: &'a str,
     /// Whether the apply succeeded.
@@ -132,7 +132,7 @@ pub(crate) struct Outcome<'a> {
 /// is read-only is worse. Same rule the ownership stamp and `events::emit`
 /// already follow, and the one an implementer is most likely to get wrong by
 /// making this `?`-propagate.
-pub(crate) fn record(root: &Path, stack: &str, rendered: &str, what: Outcome<'_>) {
+pub fn record(root: &Path, stack: &str, rendered: &str, what: Outcome<'_>) {
     let Outcome {
         manifest_path,
         ok,
@@ -237,7 +237,7 @@ fn read_nums(d: &Path) -> Vec<u32> {
 /// Every revision of a stack, oldest first. Never fails: no history and an
 /// unreadable directory both read as «nothing recorded», which is what a
 /// listing should say rather than refusing.
-pub(crate) fn list(root: &Path, stack: &str) -> Vec<Revision> {
+pub fn list(root: &Path, stack: &str) -> Vec<Revision> {
     let d = dir(root, stack);
     let mut nums = read_nums(&d);
     nums.sort_unstable();
@@ -250,7 +250,7 @@ pub(crate) fn list(root: &Path, stack: &str) -> Vec<Revision> {
 }
 
 /// The rendered manifest of one revision.
-pub(crate) fn manifest_of(root: &Path, stack: &str, number: u32) -> Result<String> {
+pub fn manifest_of(root: &Path, stack: &str, number: u32) -> Result<String> {
     let p = dir(root, stack).join(format!("{number:04}.yaml"));
     std::fs::read_to_string(&p).map_err(|e| {
         delonix_runtime_core::Error::not_found_or_io(e, || {

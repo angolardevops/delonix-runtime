@@ -7,7 +7,7 @@
 //! `dlx-a1fef9d5` doesn't.
 
 /// Kings/queens of Angola — Ndongo, Kongo, Matamba, Bailundo.
-pub(crate) const REIS: &[&str] = &[
+pub const REIS: &[&str] = &[
     "njinga",
     "mandume",
     "ekuikui",
@@ -25,7 +25,7 @@ pub(crate) const REIS: &[&str] = &[
 ];
 
 /// Provinces, municipalities, and communes of Angola.
-pub(crate) const LUGARES: &[&str] = &[
+pub const LUGARES: &[&str] = &[
     "luanda",
     "benguela",
     "huambo",
@@ -72,7 +72,7 @@ pub(crate) const LUGARES: &[&str] = &[
 /// at the SAME name without carrying it externally — the id already travels in
 /// `DELONIX_REEXEC_ID`, the name derives from it. FNV-1a seeds, an LCG iterates; ~50k
 /// combinations and 50 attempts against the existing names are more than enough.
-pub(crate) fn derived_name<F: Fn(&str) -> bool>(seed: &str, taken: F) -> Option<String> {
+pub fn derived_name<F: Fn(&str) -> bool>(seed: &str, taken: F) -> Option<String> {
     let mut h: u64 = 0xcbf29ce484222325;
     for b in seed.bytes() {
         h ^= b as u64;
@@ -103,7 +103,7 @@ pub(crate) fn derived_name<F: Fn(&str) -> bool>(seed: &str, taken: F) -> Option<
 /// kubeadm` (see `cmd::kindmode::random_cluster_name`/
 /// `cmd::cluster::random_kubeadm_cluster_name`) so every kind of
 /// auto-generated cluster name reads the same way as an auto-named container.
-pub(crate) fn random_name<F: Fn(&str) -> bool>(taken: F) -> Option<String> {
+pub fn random_name<F: Fn(&str) -> bool>(taken: F) -> Option<String> {
     let mut seed = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.subsec_nanos() as u64)

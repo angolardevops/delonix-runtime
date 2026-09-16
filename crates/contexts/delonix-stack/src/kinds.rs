@@ -52,41 +52,41 @@
 ///
 /// One line here, one alias arm in `manifest::canonical_kind`, and one row in
 /// the test that keeps old spellings loading. Not a sweep.
-pub(crate) const SECRET: &str = "Secret";
-pub(crate) const NETWORK: &str = "Network";
-pub(crate) const NETWORK_ROUTE: &str = "NetworkRoute";
-pub(crate) const VOLUME: &str = "Volume";
-pub(crate) const IMAGE: &str = "Image";
-pub(crate) const APP: &str = "App";
-pub(crate) const VM: &str = "VirtualMachine";
-pub(crate) const CONTAINER: &str = "Container";
-pub(crate) const POD: &str = "Pod";
-pub(crate) const INGRESS: &str = "Ingress";
-pub(crate) const FIREWALL_POLICY: &str = "NetworkPolicy";
-pub(crate) const NETWORK_ACCESS_RULE: &str = "NetworkAccessRule";
-pub(crate) const HTTP_ROUTE: &str = "HTTPRoute";
-pub(crate) const GATEWAY: &str = "Gateway";
-pub(crate) const SERVICE: &str = "Service";
-pub(crate) const WORKLOAD: &str = "Workload";
-pub(crate) const DEPENDENCY: &str = "Dependency";
-pub(crate) const SHARE_VOLUME: &str = "ShareVolume";
-pub(crate) const STORAGE: &str = "Storage";
-pub(crate) const EGRESS: &str = "Egress";
-pub(crate) const STACK: &str = "Stack";
+pub const SECRET: &str = "Secret";
+pub const NETWORK: &str = "Network";
+pub const NETWORK_ROUTE: &str = "NetworkRoute";
+pub const VOLUME: &str = "Volume";
+pub const IMAGE: &str = "Image";
+pub const APP: &str = "App";
+pub const VM: &str = "VirtualMachine";
+pub const CONTAINER: &str = "Container";
+pub const POD: &str = "Pod";
+pub const INGRESS: &str = "Ingress";
+pub const FIREWALL_POLICY: &str = "NetworkPolicy";
+pub const NETWORK_ACCESS_RULE: &str = "NetworkAccessRule";
+pub const HTTP_ROUTE: &str = "HTTPRoute";
+pub const GATEWAY: &str = "Gateway";
+pub const SERVICE: &str = "Service";
+pub const WORKLOAD: &str = "Workload";
+pub const DEPENDENCY: &str = "Dependency";
+pub const SHARE_VOLUME: &str = "ShareVolume";
+pub const STORAGE: &str = "Storage";
+pub const EGRESS: &str = "Egress";
+pub const STACK: &str = "Stack";
 /// The three Kinds a `Workload` becomes, in the slash spelling `lowers_to`
 /// splits on. A `const` and not a literal for the same reason as the names it
 /// joins: it stopped being true the moment `Vm` was renamed, and only a test
 /// noticed.
-pub(crate) const WORKLOAD_LOWERS_TO: &str = "Container/Pod/VirtualMachine";
+pub const WORKLOAD_LOWERS_TO: &str = "Container/Pod/VirtualMachine";
 
-pub(crate) const CLUSTER: &str = "KubernetesCluster";
+pub const CLUSTER: &str = "KubernetesCluster";
 
 /// The area a Kind acts on. Printed as a column, so the names are short and the
 /// three network ones are split: they answer different questions and a single
 /// `network` label would hide that `NetworkRoute` opens a PATH while
 /// `FirewallPolicy` decides whether traffic is ALLOWED along it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Domain {
+pub enum Domain {
     /// Runs code: containers, pods, VMs.
     Compute,
     /// Holds bytes: volumes and shares.
@@ -108,7 +108,7 @@ impl Domain {
     /// like the Kind names beside them in the same table. The words that ARE
     /// prose (`primary`/`declarative`/…) go through `po::t` at the point of
     /// printing.
-    pub(crate) fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             Domain::Compute => "compute",
             Domain::Storage => "storage",
@@ -123,7 +123,7 @@ impl Domain {
 
 /// What a document of this Kind becomes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Form {
+pub enum Form {
     /// Has its own apply and survives the `load`.
     Primary,
     /// Rewritten into another Kind at load time as a convenience, not because it
@@ -161,7 +161,7 @@ impl Form {
     /// The Kind this one hands over to, whether by lowering or by announcement.
     /// Used by the gate that keeps a target from naming a Kind that never
     /// existed.
-    pub(crate) fn successor(self) -> Option<&'static str> {
+    pub fn successor(self) -> Option<&'static str> {
         match self {
             Form::Sunset(k) => Some(k),
             other => other.lowers_to(),
@@ -169,7 +169,7 @@ impl Form {
     }
 
     /// The Kind a document of this one ends up as, if it is not itself.
-    pub(crate) fn lowers_to(self) -> Option<&'static str> {
+    pub fn lowers_to(self) -> Option<&'static str> {
         match self {
             Form::Sugar(k) | Form::Compat(k) => Some(k),
             // `Sunset` is deliberately not here: it does not lower, it is
@@ -182,7 +182,7 @@ impl Form {
 
 /// How `stack ls`/`wait` can tell whether the resource is there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Presence {
+pub enum Presence {
     /// A store of its own answers yes/no.
     Registry,
     /// Derived from something else — a Pod is its labelled members.
@@ -205,7 +205,7 @@ pub(crate) enum Presence {
 /// effect» on a share, whose namespace decides which directory its data lives
 /// in — a warning that is not merely useless but wrong.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Namespaced {
+pub enum Namespaced {
     /// Never — the resource is global to the node.
     Never,
     /// Always.
@@ -217,7 +217,7 @@ pub(crate) enum Namespaced {
 
 /// Everything the rest of the code asks about a Kind.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct KindFacts {
+pub struct KindFacts {
     pub kind: &'static str,
     /// The lowercase plural a caller types (`delonix get pods`). Its own field
     /// and not derived by appending `s`: `Dependency`→`dependencies` and
@@ -543,38 +543,38 @@ const FACTS: &[KindFacts] = &[
 
 /// Facts for a CANONICAL kind name (`canonical_kind` has already run at the call
 /// site), or `None` for a name this engine does not know.
-pub(crate) fn facts(kind: &str) -> Option<&'static KindFacts> {
+pub fn facts(kind: &str) -> Option<&'static KindFacts> {
     FACTS.iter().find(|f| f.kind == kind)
 }
 
 /// Every Kind in the table, in the order it is written.
-pub(crate) fn all() -> impl Iterator<Item = &'static KindFacts> {
+pub fn all() -> impl Iterator<Item = &'static KindFacts> {
     FACTS.iter()
 }
 
 /// The Kinds `stack apply` handles, **in apply order**. Was the `KINDS`
 /// constant.
-pub(crate) fn stack_kinds() -> impl DoubleEndedIterator<Item = &'static str> {
+pub fn stack_kinds() -> impl DoubleEndedIterator<Item = &'static str> {
     FACTS.iter().filter(|f| f.in_stack).map(|f| f.kind)
 }
 
 /// Whether the Kind belongs to the stack cycle at all.
-pub(crate) fn in_stack(kind: &str) -> bool {
+pub fn in_stack(kind: &str) -> bool {
     facts(kind).is_some_and(|f| f.in_stack)
 }
 
 /// Whether a changed field is really applied. Was `CONVERGING_KINDS.contains`.
-pub(crate) fn converges(kind: &str) -> bool {
+pub fn converges(kind: &str) -> bool {
     facts(kind).is_some_and(|f| f.converges)
 }
 
 /// Whether `destroy_one` removes it. Was `TEARDOWN_KINDS.contains`.
-pub(crate) fn has_teardown(kind: &str) -> bool {
+pub fn has_teardown(kind: &str) -> bool {
     facts(kind).is_some_and(|f| f.teardown)
 }
 
 /// Whether `metadata.namespace` does anything here.
-pub(crate) fn honors_namespace(kind: &str) -> bool {
+pub fn honors_namespace(kind: &str) -> bool {
     facts(kind).is_some_and(|f| f.namespaced != Namespaced::Never)
 }
 
@@ -592,7 +592,7 @@ pub(crate) fn honors_namespace(kind: &str) -> bool {
 /// rewritten into `Volume` at load time, so naming both would advertise a
 /// spelling we are retiring. Sugar and aggregates stay — `Workload` and `Stack`
 /// are things a person legitimately writes.
-pub(crate) fn namespaced_kinds() -> Vec<&'static str> {
+pub fn namespaced_kinds() -> Vec<&'static str> {
     let mut out: Vec<&'static str> = all()
         .filter(|f| f.namespaced != Namespaced::Never)
         .filter(|f| !matches!(f.form, Form::Sunset(_)))
@@ -611,7 +611,7 @@ pub(crate) fn namespaced_kinds() -> Vec<&'static str> {
 
 /// The domain label for display, or `-` for a Kind this engine does not know
 /// (`stack ls` prints what the manifest says, including a typo).
-pub(crate) fn domain_label(kind: &str) -> &'static str {
+pub fn domain_label(kind: &str) -> &'static str {
     facts(kind).map(|f| f.domain.label()).unwrap_or("-")
 }
 
