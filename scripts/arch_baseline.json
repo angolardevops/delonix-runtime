@@ -1,4 +1,5 @@
 {
   "self_exec_sites": 32,
-  "library_prints": 93
+  "library_prints": 93,
+  "env_writes": 23
 }

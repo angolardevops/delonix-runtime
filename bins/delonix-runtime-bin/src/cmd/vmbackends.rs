@@ -46,10 +46,17 @@ pub fn register_configured() {
 
 /// `Ok(())` with nothing done when no Proxmox target is configured.
 fn register_proxmox() -> Result<()> {
-    let Some(url) = env_nonempty("DELONIX_PROXMOX_URL") else {
+    register_proxmox_with(&|key| nonempty(std::env::var(key).ok()))
+}
+
+/// [`register_proxmox`] with the configuration read through `lookup`, so a test can
+/// hand it a map instead of writing the PROCESS environment — tests run on parallel
+/// threads, and a `set_var` there races every other reader of the environment.
+fn register_proxmox_with(lookup: &dyn Fn(&str) -> Option<String>) -> Result<()> {
+    let Some(url) = lookup("DELONIX_PROXMOX_URL") else {
         return Ok(());
     };
-    let node = env_nonempty("DELONIX_PROXMOX_NODE").ok_or_else(|| {
+    let node = lookup("DELONIX_PROXMOX_NODE").ok_or_else(|| {
         Error::Invalid(
             po::t(
                 "DELONIX_PROXMOX_URL is set but DELONIX_PROXMOX_NODE is not — this backend \
@@ -59,19 +66,19 @@ fn register_proxmox() -> Result<()> {
             .into(),
         )
     })?;
-    let auth = proxmox_auth()?;
+    let auth = proxmox_auth(lookup)?;
     // Opt-in, never a fallback after a TLS error: a stock Proxmox serves a
     // self-signed certificate, but skipping the check also removes what stops
     // another machine answering in the node's name — with the credential.
-    let insecure_tls = env_nonempty("DELONIX_PROXMOX_INSECURE_TLS")
+    let insecure_tls = lookup("DELONIX_PROXMOX_INSECURE_TLS")
         .map(|v| matches!(v.trim(), "1" | "true" | "yes"))
         .unwrap_or(false);
 
     // How this node is cabled, not a property of any VM — which is why it is
     // configured with the target and not in a manifest. A per-VM `bridge:`
     // still wins over this default.
-    let bridge = env_nonempty("DELONIX_PROXMOX_BRIDGE");
-    let vlan = env_nonempty("DELONIX_PROXMOX_VLAN")
+    let bridge = lookup("DELONIX_PROXMOX_BRIDGE");
+    let vlan = lookup("DELONIX_PROXMOX_VLAN")
         .map(|v| parse_vlan(&v))
         .transpose()?;
 
@@ -90,10 +97,10 @@ fn register_proxmox() -> Result<()> {
 /// A token is revocable on the node without touching an account, and it does
 /// not expire the way a password ticket does. The password form is accepted
 /// because a freshly installed node has an account before it has any token.
-fn proxmox_auth() -> Result<delonix_proxmox::Auth> {
+fn proxmox_auth(lookup: &dyn Fn(&str) -> Option<String>) -> Result<delonix_proxmox::Auth> {
     // A `kind: Secret` first: a token on the command line lands in the shell
     // history and in `ps`.
-    if let Some(name) = env_nonempty("DELONIX_PROXMOX_SECRET") {
+    if let Some(name) = lookup("DELONIX_PROXMOX_SECRET") {
         let s = delonix_runtime_core::SecretStore::open(state_root())?.load(&name)?;
         let get = |k: &str| s.data.get(k).cloned();
         if let (Some(id), Some(secret)) = (
@@ -111,14 +118,14 @@ fn proxmox_auth() -> Result<delonix_proxmox::Auth> {
         )));
     }
     if let (Some(id), Some(secret)) = (
-        env_nonempty("DELONIX_PROXMOX_TOKEN_ID"),
-        env_nonempty("DELONIX_PROXMOX_TOKEN"),
+        lookup("DELONIX_PROXMOX_TOKEN_ID"),
+        lookup("DELONIX_PROXMOX_TOKEN"),
     ) {
         return Ok(delonix_proxmox::Auth::ApiToken { id, secret });
     }
     if let (Some(username), Some(password)) = (
-        env_nonempty("DELONIX_PROXMOX_USER"),
-        env_nonempty("DELONIX_PROXMOX_PASSWORD"),
+        lookup("DELONIX_PROXMOX_USER"),
+        lookup("DELONIX_PROXMOX_PASSWORD"),
     ) {
         return Ok(delonix_proxmox::Auth::Password { username, password });
     }
@@ -155,11 +162,11 @@ fn parse_vlan(v: &str) -> Result<u16> {
 /// `Some("")` is what an exported-but-empty variable gives, and treating that
 /// as configured turns a shell typo into "url has no scheme" at the wrong
 /// moment.
-fn env_nonempty(key: &str) -> Option<String> {
-    std::env::var(key)
-        .ok()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
+///
+/// Takes the raw value and not the key, so the rule is testable without writing the
+/// process environment.
+fn nonempty(raw: Option<String>) -> Option<String> {
+    raw.map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
 }
 
 #[cfg(test)]
@@ -171,7 +178,7 @@ mod tests {
     #[test]
     fn sem_configuracao_nao_regista_nada_e_nao_se_queixa() {
         // No env var of ours is set in a plain `cargo test` run.
-        if env_nonempty("DELONIX_PROXMOX_URL").is_some() {
+        if nonempty(std::env::var("DELONIX_PROXMOX_URL").ok()).is_some() {
             eprintln!("SKIP: DELONIX_PROXMOX_URL esta definido neste ambiente");
             return;
         }
@@ -186,23 +193,21 @@ mod tests {
     /// guessing that is exactly what guardrail #2 keeps out of this repo.
     #[test]
     fn um_alvo_incompleto_diz_o_que_falta() {
-        if env_nonempty("DELONIX_PROXMOX_URL").is_some() {
+        if nonempty(std::env::var("DELONIX_PROXMOX_URL").ok()).is_some() {
             eprintln!("SKIP: DELONIX_PROXMOX_URL esta definido neste ambiente");
             return;
         }
-        // SAFETY: single-threaded assertion on process env; the test restores it.
-        std::env::set_var("DELONIX_PROXMOX_URL", "https://pve.local:8006");
-        let e = register_proxmox().unwrap_err().to_string();
-        std::env::remove_var("DELONIX_PROXMOX_URL");
+        let only_url = |key: &str| {
+            (key == "DELONIX_PROXMOX_URL").then(|| "https://pve.local:8006".to_string())
+        };
+        let e = register_proxmox_with(&only_url).unwrap_err().to_string();
         assert!(e.contains("DELONIX_PROXMOX_NODE"), "{e}");
     }
 
     #[test]
     fn uma_variavel_exportada_mas_vazia_nao_conta_como_configurada() {
-        std::env::set_var("DELONIX_TESTE_VAZIA", "   ");
-        assert!(env_nonempty("DELONIX_TESTE_VAZIA").is_none());
-        std::env::set_var("DELONIX_TESTE_VAZIA", " pve ");
-        assert_eq!(env_nonempty("DELONIX_TESTE_VAZIA").as_deref(), Some("pve"));
-        std::env::remove_var("DELONIX_TESTE_VAZIA");
+        assert!(nonempty(Some("   ".to_string())).is_none());
+        assert!(nonempty(None).is_none());
+        assert_eq!(nonempty(Some(" pve ".to_string())).as_deref(), Some("pve"));
     }
 }

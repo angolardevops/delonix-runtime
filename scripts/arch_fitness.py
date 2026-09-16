@@ -146,6 +146,12 @@ EXCEPTIONS = {
 # becomes a call into a use case, or a typed spec handed to delonix-launcher.
 SELF_EXEC = re.compile(r"current_exe\(\)|\bcli_bin\(\)|\bdelonix_bin\(\)")
 PRINTS = re.compile(r"\b(?:e?println!|print!)\s*[(\[]")
+# Writes to the PROCESS environment. Tests run on parallel threads, and a write
+# there races every reader of the environment (libc's `getenv` takes no Rust lock);
+# in the engine's own code a write is only sound in a single-threaded child. The
+# remaining sites are the `delonix-net` test guard, the container init, and tests
+# not yet moved to injected values — this number only goes down.
+ENV_WRITES = re.compile(r"\benv::(?:set_var|remove_var)\s*\(")
 
 
 def crates() -> dict[str, Path]:
@@ -330,7 +336,8 @@ def main() -> int:
 
     self_exec, self_where = count(SELF_EXEC)
     prints, print_where = count(PRINTS)
-    current = {"self_exec_sites": self_exec, "library_prints": prints}
+    env_writes, env_where = count(ENV_WRITES, skip_bin=False)
+    current = {"self_exec_sites": self_exec, "library_prints": prints, "env_writes": env_writes}
 
     if args.list:
         print("self-exec sites (a library crate re-running the engine's own binary):")
@@ -338,6 +345,9 @@ def main() -> int:
             print(f"  {w}")
         print("\nlibrary prints (stdout/stderr instead of tracing):")
         for w in print_where:
+            print(f"  {w}")
+        print("\nprocess-environment writes (set_var/remove_var):")
+        for w in env_where:
             print(f"  {w}")
         print("\nexceptions still standing:")
         for (kind, a, b), (phase, reason) in sorted(EXCEPTIONS.items()):
