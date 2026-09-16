@@ -819,6 +819,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "delonix-model"
+version = "3.1.0"
+
+[[package]]
 name = "delonix-net"
 version = "3.1.0"
 dependencies = [
@@ -870,12 +874,14 @@ dependencies = [
  "delonix-image",
  "delonix-mcp",
  "delonix-mgmt",
+ "delonix-model",
  "delonix-net",
  "delonix-proxmox",
  "delonix-runtime",
  "delonix-runtime-core",
  "delonix-scan",
  "delonix-security-runtime",
+ "delonix-stack",
  "delonix-truenas",
  "delonix-vm",
  "delonix-volume",
@@ -932,6 +938,15 @@ dependencies = [
 
 [[package]]
 name = "delonix-security-runtime"
+version = "3.1.0"
+dependencies = [
+ "delonix-runtime-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "delonix-stack"
 version = "3.1.0"
 dependencies = [
  "delonix-runtime-core",

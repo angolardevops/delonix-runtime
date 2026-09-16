@@ -19,11 +19,7 @@ impl Condition {
             message: String::new(),
         }
     }
-    pub fn bad(
-        kind: &'static str,
-        reason: &'static str,
-        message: impl Into<String>,
-    ) -> Self {
+    pub fn bad(kind: &'static str, reason: &'static str, message: impl Into<String>) -> Self {
         Condition {
             kind,
             ok: false,
