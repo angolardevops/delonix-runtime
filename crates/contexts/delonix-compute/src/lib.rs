@@ -6,6 +6,7 @@
 mod notice;
 pub mod pod;
 pub mod preflight;
+pub mod run;
 mod run_opts;
 
 pub use notice::Notice;

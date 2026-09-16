@@ -2384,45 +2384,6 @@ mod resource_limits_preflight_tests {
     }
 }
 
-/// The limits a container gets when the operator did not specify them. PURE.
-///
-/// Under the kubelet's cgroup hierarchy (ADR 0038) «not specified» is no limit — `max` —
-/// because the kubelet protects the node there (Node Allocatable, QoS, eviction), and a
-/// runtime default in its place measurably throttled the control plane (etcd at 0.85 cores
-/// on a 4-vCPU node). Everywhere else the house ceiling stays: standing alone, nothing else
-/// stops one unlimited container from taking the host.
-fn kube_default_limits(
-    memory: Option<String>,
-    cpus: Option<String>,
-    under_kubelet: bool,
-) -> (Option<String>, Option<String>) {
-    if !under_kubelet {
-        return (memory, cpus);
-    }
-    (
-        memory.or_else(|| Some("max".to_string())),
-        cpus.or_else(|| Some(String::new())),
-    )
-}
-
-#[cfg(test)]
-mod kube_default_limits_tests {
-    use super::kube_default_limits;
-
-    #[test]
-    fn only_the_kubelets_hierarchy_lifts_the_house_ceiling() {
-        assert_eq!(kube_default_limits(None, None, false), (None, None));
-        assert_eq!(
-            kube_default_limits(None, None, true),
-            (Some("max".to_string()), Some(String::new()))
-        );
-        assert_eq!(
-            kube_default_limits(Some("64M".into()), Some("0.5".into()), true),
-            (Some("64M".into()), Some("0.5".into()))
-        );
-    }
-}
-
 pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Result<()> {
     // The node's runtime policy, BEFORE anything is created or pulled. Same
     // placement reason as the capability ceiling in the CRI: everything reaching
@@ -2457,72 +2418,40 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     let RunOpts {
         detach,
         name,
-        hostname,
         user,
         net,
         namespace,
         expose,
         volumes,
         ports,
-        privileged,
-        entrypoint,
-        workdir,
         rm,
         restart,
         mut devices,
-        env,
-        labels,
         image,
         command,
         quiet,
-        memory,
-        cpus,
-        cpu_weight,
-        cpuset,
-        cgroup_parent,
-        kube_cgroup_parent,
-        io_weight,
-        io_max,
         no_supervisor,
-        read_only,
-        cap_add,
-        cap_drop,
         security_opt,
         apparmor,
         selinux,
-        userns,
-        no_userns,
         host_pid,
         host_ipc,
         detect,
         secret,
         secret_files,
         env_file,
-        tmpfs,
-        ulimit,
-        dns,
-        dns_search,
-        dns_option,
-        group_add,
-        masked_path,
-        readonly_path,
-        sysctl,
         gpus,
         ip,
-        network_alias,
-        add_host,
         wait_healthy,
         wait_timeout,
         health,
-        knows,
-        knows_none,
         pod,
         pod_infra_pid,
         net_bps,
         net_burst,
-        log_driver,
         log_file,
         log_cri,
+        ..
     } = opts;
     // Isolation namespace (default `default`). It goes into an nft set name (via
     // `dlxns_set`, which HASHES it → safe) and into a control-line token (which
@@ -2716,20 +2645,8 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // `--entrypoint X` replaces the image's ENTRYPOINT (COMMAND becomes its
     // arguments, without inheriting the image's CMD — docker semantics);
     // `--entrypoint ""` clears it and runs just the user's COMMAND.
-    let cmd = match entrypoint.as_deref() {
-        Some("") => command.clone(),
-        Some(e) => {
-            let mut v = vec![e.to_string()];
-            v.extend(command.iter().cloned());
-            v
-        }
-        None => effective_command(&img, &command),
-    };
-    if cmd.is_empty() {
-        return Err(Error::Invalid(
-            "no command (the image defines no ENTRYPOINT/CMD)".into(),
-        ));
-    }
+    // The name, and its uniqueness in the namespace, need the store; everything
+    // the record says after that is decided by `delonix_compute::run::build_record`.
     // Default name in the Angolan pattern (king + place, like the kind-mode
     // clusters and the VMs) — derived from the `id` so the TWO re-exec passes arrive
     // at the same name (the id travels in DELONIX_REEXEC_ID; see `names::derived_name`).
@@ -2784,111 +2701,48 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             ],
         )));
     }
-    // HOUSE RULE: a workload started without `-m` gets a QUARTER of the engine's
-    // budget, not `"max"`. It used to get `"max"` — cgroup-v2 for no ceiling at
-    // all — which let one leaking container consume everything the slice had,
-    // while the engine only PRINTED a warning saying so. Under k8s the pod
-    // cgroup caps it anyway, so the derived ceiling costs that path nothing.
-    // The kubelet's hierarchy (ADR 0038): validated here, at the CLI boundary, so a bad
-    // value never reaches the engine; and its presence is the ONE thing that lifts the
-    // house ceiling — see `kube_default_limits`.
-    let kube_cgroup = kube_cgroup_parent
-        .as_deref()
-        .map(delonix_runtime_core::KubeCgroupParent::parse)
-        .transpose()
-        .map_err(Error::Invalid)?;
-    let (memory, cpus) = kube_default_limits(memory, cpus, kube_cgroup.is_some());
-    let eff_memory = memory.unwrap_or_else(runtime::default_memory_max);
-    let mut c = Container::new(id.clone(), cname, image.clone(), cmd, eff_memory);
-    c.namespace = namespace.clone();
-    c.env = img.config.env.clone();
-    // `--env-file`: each `.env` file (KEY=VAL per line) BEFORE `-e`, so an
-    // explicit `-e` can override a value from the file.
+    // ---- what the record needs from files, the image and this node ----
+    // `--env-file`: read here, parsed by the builder (each file before `-e`).
+    let mut env_files = Vec::with_capacity(env_file.len());
     for f in &env_file {
-        let content = std::fs::read_to_string(f)
-            .map_err(|e| Error::Invalid(format!("--env-file {f}: {e}")))?;
-        for (k, v) in delonix_runtime_core::secret::parse_env_file(&content) {
-            c.env.push(format!("{k}={v}"));
-        }
+        env_files.push(
+            std::fs::read_to_string(f)
+                .map_err(|e| Error::Invalid(format!("--env-file {f}: {e}")))?,
+        );
     }
-    c.env.extend(env);
-    c.env.extend(cdi_edits.env);
-    if !img.config.working_dir.is_empty() {
-        c.workdir = Some(img.config.working_dir.clone());
-    }
-    if let Some(w) = workdir {
-        c.workdir = Some(w);
-    }
-    // `--gpus`/CDI-qualified `--device`s were already resolved (CDI devices/
-    // mounts merged in) and `--gpus dri`'s raw glob already appended, above —
-    // `devices` here is the final list.
-    c.devices = devices;
-    // BUG FOUND live: the resolved `-v` mounts went ONLY into `RunSpec` (applied at
-    // spawn) and were never written to the record — while `cmd_start` rebuilds its
-    // `RunSpec` from `c.mounts`, a field that was therefore always empty. A `container
-    // start` of anything created with `-v` came back RUNNING with no bind mounts and no
-    // named volumes: writes that should land in the volume silently went to the
-    // container's rootfs instead. It also broke kind-mode clusters — a restarted node
-    // lost `/kind/delonix`, the bind mount `cluster create`/`cluster load` exchange files
-    // through. Same family as the `-p`-on-a-custom-network regression: state needed to
-    // RECONSTRUCT the container has to be persisted, not just used once at creation.
-    // Includes the CDI mounts merged above on purpose: `start` never re-resolves a CDI
-    // spec, so leaving them out would silently drop GPU access on the first restart.
-    c.mounts = mounts.clone();
-    c.privileged = privileged;
-    for l in &labels {
-        if let Some((k, v)) = l.split_once('=') {
-            c.labels.insert(k.to_string(), v.to_string());
-        }
-    }
-    // `--hostname`: overrides the container name in the UTS namespace (the engine reads
-    // `c.hostname`). Empty = use the name (historical).
-    c.hostname = hostname.filter(|h| !h.trim().is_empty());
-    // `--user <uid[:gid]|name[:group]>`: resolves against the image's
-    // `/etc/passwd`/`/etc/group` (names) or uses the numbers; the engine switches to
-    // the uid/gid before `execve` (`RunSpec.run_uid`/`run_gid`). It's the thread of the
-    // CRI `RunAsUser`/`RunAsGroup`/`RunAsUserName`.
-    if let Some(u) = &user {
-        let (uid, gid) = resolve_run_user(&rootfs, u)?;
-        c.run_uid = Some(uid);
-        c.run_gid = gid;
-    }
-
-    // ---- resources (cgroup v2) ----
-    // Always resolved, never left to `Container::new`'s `"1.0"`: that literal is
-    // the right fallback for DESERIALISING an old record, and the wrong policy
-    // for a new container — 1 core is 3% of a 32-thread host and 50% of a 2-vCPU
-    // node, so the same default under- and over-protects on different machines.
-    c.cpus = cpus.unwrap_or_else(runtime::default_cpus);
-    c.cpu_weight = cpu_weight;
-    c.cpuset = cpuset;
-    c.cgroup_parent = cgroup_parent;
-    c.kube_cgroup = kube_cgroup;
-    c.io_weight = io_weight;
-    c.io_max = io_max;
-
-    // ---- security ----
-    c.read_only = read_only;
-    c.cap_add = cap_add;
-    c.cap_drop = cap_drop;
-    // userns: on by default in rootless; `--no-userns` disables it; `--userns`
-    // forces it (useful if it ever stops being the default in rootless).
-    //
-    // In ROOTLESS the flag is refused rather than obeyed, and this is not
-    // paternalism: without privileges the user namespace is what GRANTS the
-    // capabilities every other namespace needs, so turning it off cannot produce
-    // a container — it produces `clone failed: EPERM`, which is what this used to
-    // answer (measured). An errno is a true statement about the syscall and a
-    // useless one about the flag the operator typed.
-    if no_userns && rootless {
-        return Err(Error::Invalid(super::po::t(
-            "--no-userns cannot work without privileges: in rootless mode the user namespace is \
-             what grants the privileges the other namespaces need, so disabling it can only fail \
-             with EPERM. Drop the flag, or run the engine as root",
-        )
-        .to_string()));
-    }
-    c.userns = (rootless || userns) && !no_userns;
+    // `--user <uid[:gid]|name[:group]>`: resolved against the image's
+    // `/etc/passwd`/`/etc/group`; the engine switches before `execve`.
+    let run_user = match &user {
+        Some(u) => Some(resolve_run_user(&rootfs, u)?),
+        None => None,
+    };
+    let mut c = delonix_compute::run::build_record(
+        &opts_copy,
+        delonix_compute::run::ResolvedRun {
+            id: id.clone(),
+            name: cname,
+            namespace: namespace.clone(),
+            image_command: effective_command(&img, &command),
+            image_env: img.config.env.clone(),
+            image_workdir: img.config.working_dir.clone(),
+            env_files,
+            cdi_env: cdi_edits.env,
+            devices,
+            mounts: mounts.clone(),
+            run_user,
+            default_memory: runtime::default_memory_max(),
+            default_cpus: runtime::default_cpus(),
+            default_masked_paths: delonix_runtime::DEFAULT_MASKED_PATHS
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            default_readonly_paths: delonix_runtime::DEFAULT_READONLY_PATHS
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            rootless,
+        },
+    )?;
     // `--security-opt seccomp=unconfined` / `apparmor=<profile>` (docker-style).
     let mut apparmor_profile = apparmor;
     for opt in &security_opt {
@@ -2954,10 +2808,6 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // guardado (para o `exec` confinar quem entra depois) e mesmo assim o `start`
     // não o lia — ver `runspec_do_start_reproduz_o_do_run`, que é o gate que
     // impede a classe inteira de voltar.
-    c.selinux = selinux.clone();
-    c.host_pid = host_pid;
-    c.host_ipc = host_ipc;
-    c.log_cri = log_cri;
 
     // ---- secrets ----
     //
@@ -2978,98 +2828,6 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         c.secrets = secret.clone();
         c.secret_files = secret_files;
     }
-
-    // ---- fs & limits ----
-    // PERSISTIDO, não só usado no spawn: `/etc/hosts` é reescrito do zero em
-    // cada arranque (`write_etc_files`), portanto sem isto as entradas
-    // desapareciam no primeiro `stop`/`start` — em silêncio, e com o sintoma
-    // ("connection refused" a um nome que funcionava) longe da causa. É a
-    // MESMA armadilha já paga pelo `-v`, pelo `-p` em rede custom e pela
-    // pertença a pod: estado necessário para RECONSTRUIR tem de ser guardado.
-    // Validado na FRONTEIRA: uma entrada má falha aqui, antes de existir
-    // contentor, em vez de ser descartada em silêncio no arranque.
-    c.extra_hosts = {
-        let mut out = Vec::with_capacity(add_host.len());
-        for entry in &add_host {
-            let (name, ip) = parse_add_host(entry).map_err(Error::Invalid)?;
-            out.push(format!("{name}:{ip}"));
-        }
-        out
-    };
-    // A INTENÇÃO, ao lado do resultado — ver `Container::net_mode`.
-    c.net_mode = Some(net.clone());
-    c.tmpfs = tmpfs;
-    c.ulimits = ulimit;
-    // Parsed at the boundary, not inside the container: a bad gid here is a typo
-    // the user fixes, and finding out from a `setgroups` failure buried in the
-    // init's stderr is the worst possible place to learn it.
-    c.group_add = {
-        let mut out = Vec::new();
-        for g in &group_add {
-            match g.trim().parse::<u32>() {
-                Ok(v) => out.push(v),
-                Err(_) => {
-                    return Err(Error::Invalid(format!(
-                        "--group-add '{g}': expected a numeric gid"
-                    )))
-                }
-            }
-        }
-        out
-    };
-    c.dns_servers = dns;
-    c.dns_searches = dns_search;
-    c.dns_options = dns_option;
-    // Without an explicit list, apply runc's default masked/readonly paths. The
-    // engine masks `/proc/sysrq-trigger` and `/proc/kcore` unconditionally (host
-    // CONTROL), but the rest of runc's list — `/proc/timer_list`,
-    // `/proc/sched_debug`, `/proc/interrupts`, `/sys/firmware` — was only ever
-    // applied when the caller named the paths itself. The CRI path was fine (the
-    // kubelet always sends its own list); a plain `container run` leaked host
-    // kernel pointers and timing side-channels that Docker has masked by default
-    // for years. Explicit flags stay authoritative, and `--privileged` opts out
-    // wholesale, both matching Docker/runc semantics.
-    c.masked_paths = if masked_path.is_empty() && !privileged {
-        delonix_runtime::DEFAULT_MASKED_PATHS
-            .iter()
-            .map(|s| s.to_string())
-            .collect()
-    } else {
-        masked_path
-    };
-    c.readonly_paths = if readonly_path.is_empty() && !privileged {
-        delonix_runtime::DEFAULT_READONLY_PATHS
-            .iter()
-            .map(|s| s.to_string())
-            .collect()
-    } else {
-        readonly_path
-    };
-    c.sysctls = sysctl;
-
-    // ---- network ----
-    // `--network-alias` IS resolved by the internal DNS (see
-    // `delonix-net::infra`'s DNS index, which reads `net_aliases`) — this used
-    // to warn that it was recorded-but-ignored, which stopped being true once
-    // that index started consulting it and nobody removed the warning. Left
-    // here as documentation of where to look if that ever regresses, not as
-    // a live check.
-    c.net_aliases = network_alias;
-    if knows_none {
-        c.dns_knows = Some(Vec::new());
-    } else if !knows.is_empty() {
-        c.dns_knows = Some(knows);
-    }
-    c.net_bps = net_bps.clone();
-    c.net_burst = net_burst.clone();
-    // `--pod`: accepted for flag parity, but its `join_netns` isn't wired into
-    // the `run` path yet (unrelated engine gap, tracked separately). `--ip`
-    // used to be refused here too ("the holder assigns the IP, it does not
-    // accept a fixed one") — that's fixed below, once `custom_net` is known
-    // (a fixed address only makes sense on the SDN).
-
-    // ---- logs ----
-    c.log_driver = log_driver;
 
     // `--log-file` overrides the default path (`<root>/containers/<id>/log`).
     let log_path = if let Some(lf) = &log_file {
