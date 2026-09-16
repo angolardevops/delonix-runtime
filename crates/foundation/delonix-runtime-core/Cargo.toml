@@ -3,7 +3,7 @@ name = "delonix-runtime-core"
 version.workspace = true
 edition.workspace = true
 license = "Apache-2.0"
-description = "Tipos partilhados do motor Delonix Runtime (Container/Vm/Status, Secret Manager, Store) — sem qualquer dependência de tenant/licença/billing do PaaS."
+description = "Tipos partilhados do motor Delonix Runtime (Container/Vm/Status, Secret Manager, Store) — sem qualquer noção de tenant, licença ou billing."
 
 [dependencies]
 serde = { workspace = true }

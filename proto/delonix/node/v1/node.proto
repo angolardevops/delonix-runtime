@@ -1,4 +1,4 @@
-// Delonix node API — node identity, health, capacity and events (the PaaS request R5).
+// Delonix node API — node identity, health, capacity and events.
 //
 // Status: DRAFT contract for ADR-0040.
 syntax = "proto3";
@@ -18,7 +18,7 @@ service NodeService {
   rpc GetCapacity(GetCapacityRequest) returns (Capacity);
   rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse);
   // Server-streamed engine events (the same records as `delonix system events`).
-  // `since` replays from the persisted event log first, so a reconnecting agent does not
+  // `since` replays from the persisted event log first, so a reconnecting client does not
   // miss what happened while it was away — within the log's retention, which the first
   // message states.
   rpc WatchEvents(WatchEventsRequest) returns (stream Event);

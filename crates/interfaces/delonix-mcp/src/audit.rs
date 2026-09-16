@@ -1,6 +1,6 @@
 //! Local append-only audit log (ADR-0025 §8) — one JSON line per tool call under
 //! `$DELONIX_ROOT/mcp/audit.log`, `0600`. No central Delonix audit pipeline exists
-//! in this repo (that is a `delonix-paas`/platform concept); this is a record, not
+//! in this engine (that belongs to whatever platform consumes it); this is a record, not
 //! a source of truth, in the same spirit as the stack revision history (ADR-0019).
 
 use std::fs::OpenOptions;

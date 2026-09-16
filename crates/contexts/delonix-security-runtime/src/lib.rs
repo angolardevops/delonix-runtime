@@ -38,10 +38,10 @@
 //!
 //! No `tenant`, `project` or `environment` field appears anywhere in this
 //! crate. ADR-0010 (Rejected, 2026-08-10) and ADR-0025 (Accepted, 2026-08-29)
-//! both place tenancy, identity and approval in `delonix-paas`. The layer that
-//! has tenants consumes this one and adds them on its own side of the line —
-//! the way the control plane's node agent is to consume the engine's local
-//! contract without linking its crates (ADR-0041, Proposed). See ADR-0026.
+//! both keep tenancy, identity and approval outside the engine. A layer that
+//! has tenants consumes this one and adds them on its own side of the line,
+//! through the engine's local contracts and without linking its crates.
+//! See ADR-0026.
 //!
 //! # Modules
 //!

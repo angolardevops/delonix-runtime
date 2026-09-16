@@ -15,7 +15,7 @@
 //! # What it deliberately does not have
 //!
 //! No `RequireApproval` decision. Approval needs an approver, an approver needs
-//! an identity, and identity + tenancy live in `delonix-paas` by ADR-0010
+//! an identity, and identity and tenancy are outside the engine by ADR-0010
 //! (Rejected, 2026-08-10) and ADR-0025 (Accepted, 2026-08-29). A variant this
 //! repo cannot produce would be a promise in a type signature — the class of
 //! dishonesty the engine refuses everywhere else. The layer that HAS approvers

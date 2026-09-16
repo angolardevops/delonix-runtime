@@ -232,6 +232,41 @@ def misplaced(pkgs: dict[str, dict]) -> list[str]:
             bad.append(f"{name}: lives in {rel}, but its layer ({layer}) lives in {want}")
     return bad
 
+# The engine knows NO consumer (AGENTS.md, «Identidade e fronteira do motor»). It is
+# an abstraction over containers and microVMs with its own Kinds and its own provider
+# ports; whoever consumes it adapts to its contracts. A consumer's name in the code,
+# a comment or the contract is the first step of shaping the engine around that
+# consumer — so it fails here, comments included. History that needs the name lives
+# in docs/, never in crates/, bins/ or proto/.
+CONSUMER_NAMES = re.compile(
+    r"delonix[-_](?:paas|api|core|orchestrator|console)\b|ngc[-_](?:agent|api)\b"
+    r"|\bdelonixctl\b|\bngolacloud\b|\bpaas\b",
+    re.IGNORECASE,
+)
+BOUNDARY_ROOTS = ("crates", "bins", "proto")
+BOUNDARY_FILES = ("Cargo.toml", "Makefile")
+TEXT_SUFFIXES = {".rs", ".proto", ".toml", ".md", ".c", ".h", ".sh", ".py", ".json", ".yaml", ".yml"}
+
+
+def consumer_mentions() -> list[str]:
+    """Every place under the engine's code and contract that names a consumer."""
+    files = [ROOT / f for f in BOUNDARY_FILES]
+    for root in BOUNDARY_ROOTS:
+        files += [
+            f for f in sorted((ROOT / root).rglob("*"))
+            if f.is_file() and f.suffix in TEXT_SUFFIXES and "target" not in f.parts
+        ]
+    bad: list[str] = []
+    for f in files:
+        if not f.is_file():
+            continue
+        for n, line in enumerate(f.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            m = CONSUMER_NAMES.search(line)
+            if m:
+                rel = f.relative_to(ROOT).as_posix()
+                bad.append(f"{rel}:{n}: names a consumer ({m.group(0)!r}) — the engine knows none")
+    return bad
+
 DEP_TABLES = ("dependencies", "dev-dependencies", "build-dependencies")
 
 
@@ -281,6 +316,7 @@ def main() -> int:
     bad, used = rule_failures(pkgs)
     bad += inline_versions(pkgs)
     bad += misplaced(pkgs)
+    bad += consumer_mentions()
 
     # An exception with no phase is worse than the violation it covers.
     for key, (phase, reason) in EXCEPTIONS.items():

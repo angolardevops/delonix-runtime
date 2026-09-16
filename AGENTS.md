@@ -1,8 +1,49 @@
 # Delonix Runtime — guia do projeto (AGENTS.md)
 
 Motor de **containers e microVMs daemonless, rootless-first, kernel-native, em Rust**.
-Repositório **público** (`angolardevops/delonix-runtime`, Apache-2.0) — extraído do monorepo
-privado `delonix-paas` (ver [README.md](README.md) para a arquitectura dos 15 crates).
+Repositório **público** (`angolardevops/delonix-runtime`, Apache-2.0) — ver
+[README.md](README.md) para a arquitectura dos 15 crates.
+
+## Identidade e fronteira do motor (ler primeiro)
+
+Esta secção é a fonte canónica: agentes, skills, ADRs e revisões remetem para aqui, e uma
+proposta que a contrarie é recusada na revisão.
+
+**O que o motor é.** Uma camada de abstracção de execução num nó: corre **containers e
+microVMs** e governa a rede e o armazenamento de que eles precisam. É declarativo, com
+**Kinds próprios** nos grupos publicados (`core`, `compute`, `networking`, `gateway`,
+`storage`, `artifact`, `infrastructure` — `delonix api-resources`). Fala com **providers**
+só pela interface de gestão de cada um, atrás de portas: o kernel Linux (namespaces,
+cgroups, nftables), libvirt e Cloud Hypervisor, Proxmox VE, OpenStack (ADR-0039) e a API
+do Kubernetes (o CRI que serve o kubelet, o bootstrap de clusters com kubeadm e kind). Um
+provider novo entra como implementação de uma porta, nunca como um `if provider == …`
+espalhado pelo código.
+
+**Princípios, e o que cada um proíbe:**
+
+1. **Cloud native** — declarativo e convergente (plano, apply, deriva), API-first (a CLI,
+   a API de nó, o CRI e o MCP expõem as mesmas operações), observável por padrões abertos
+   (OpenTelemetry, Prometheus), sem estado escondido num processo.
+2. **Daemonless** — nenhum processo residente por omissão. O que precisa de persistir é do
+   systemd (unit, timer, socket activation) ou de um processo por workload com dono claro
+   (o supervisor de um container, o holder de rede). Um daemon novo exige um ADR com a
+   evidência do que a alternativa não resolveu.
+3. **Rootless-first** — o caminho normal corre sem root. Privilégio é opt-in explícito,
+   dito ao operador, nunca um default silencioso.
+
+**O que o motor não conhece: nenhum consumidor.** O motor não sabe quem o usa. Não conhece
+plataformas, control planes, consolas nem agentes — nem os seus repositórios e crates —,
+nem inquilino, conta, plano, quota ou faturação. Vale para dependências, código,
+comentários, mensagens e o contrato em `proto/`. Quem consome adapta-se aos contratos do
+motor; **o motor não se molda a um consumidor**. Um requisito que venha de um consumidor
+escreve-se como a capacidade que é, no vocabulário do motor (os seus Kinds e recursos), e
+só entra se fizer sentido para qualquer cliente. E o motor valida o seu próprio contrato:
+nunca confia num chamador para recusar o que ele próprio não faz.
+
+**Como se impõe.** O `scripts/arch_fitness.py` falha com o nome de um consumidor em
+`crates/`, `bins/`, `proto/` ou nos manifestos (comentários incluídos), com uma dependência
+contra a direcção das camadas, e com um crate fora do directório da sua camada. A história
+que precisa de nomes de fora vive em `docs/`, nunca no código.
 
 ## Comandos
 
@@ -6232,22 +6273,22 @@ check da janela continua verde. É isso que prova que cobrem metades diferentes,
 coisa duas vezes.
 
 
-## Regra de ouro: fronteira com o PaaS
+## Regra de ouro: o motor compila e responde sozinho
 
-Este código **não pode depender de nada privado**. Antes de qualquer commit:
+A fronteira está em «Identidade e fronteira do motor», no topo. As consequências práticas,
+antes de qualquer commit:
 
-1. **Nunca** adicionar uma dependência a `delonix-core`, `delonix-api`, `delonix-orchestrator`,
-   ou qualquer outro crate do monorepo `delonix-paas` — este repo tem de compilar sozinho,
-   sem acesso a nada privado. `cargo tree -e normal` não deve mostrar nenhum crate `delonix-*`
-   que não esteja listado no `Cargo.toml` raiz.
-2. **Sem noção de tenant/licença/billing/Console.** Se uma mudança precisar de saber "quem é
-   o cliente" ou "que plano tem", essa lógica pertence ao `delonix-paas`, não aqui.
+1. **Nenhuma dependência de fora do workspace** que não venha do crates.io: este repo tem de
+   compilar sozinho, sem acesso a nada privado. `cargo tree -e normal` não mostra nenhum
+   crate `delonix-*` que não esteja listado no `Cargo.toml` raiz.
+2. **Sem noção de tenant, licença, faturação ou consola.** Se uma mudança precisar de saber
+   «quem é o cliente» ou «que plano tem», essa lógica pertence a quem consome o motor.
 3. **`Secret`/`SecretStore`/`CredVault`** (`delonix-runtime-core::secret`/`cred_vault`) são o
-   Secret Manager do runtime (`--secret`/`--secret-files`, Docker-style) — não confundir com
-   nenhum cofre de credenciais de plataforma/SSO/DNS que o PaaS privado tenha por cima.
-4. **`delonix-net` inclui WireGuard** (`wg.rs`) — cifra o transporte VXLAN entre nós, é SDN
-   genuína (fica aqui). O broker de control-plane que decide QUANDO publicar portas
-   (`Router`, multi-tenant) ficou no lado privado (`delonix-overlay`, em `delonix-paas`).
+   gestor de segredos do motor (`--secret`/`--secret-files`, ao estilo Docker) — não um cofre
+   de credenciais de plataforma.
+4. **`delonix-net` inclui WireGuard** (`wg.rs`): cifra o transporte VXLAN entre nós, é SDN
+   genuína. Decidir QUANDO e PARA QUEM publicar portas numa frota multi-inquilino não é do
+   motor.
 
 ## Arquitetura (15 crates)
 

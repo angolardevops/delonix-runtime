@@ -12,9 +12,8 @@
 //!
 //! Each candidate comes from a LOCAL on-disk Store (`$DELONIX_ROOT/…`), read
 //! directly. There is no daemon to contact nor network in between, so a TAB
-//! costs one directory read. (A PaaS HTTP client could not do the same
-//! without a network call per TAB — which is why `delonixctl`
-//! deliberately does not complete names.)
+//! costs one directory read. (A remote HTTP client could not do the same
+//! without a network call per TAB.)
 //!
 //! # Rule: fail SILENTLY
 //!

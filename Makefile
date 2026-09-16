@@ -1,6 +1,6 @@
 # Makefile — delonix-runtime (motor público, Apache-2.0).
 #
-# Contrato de imagens do monorepo NgolaCloud (ver ../Makefile). O ARTEFACTO
+# O ARTEFACTO
 # PRIMÁRIO do runtime são os BINÁRIOS de host (`make binaries` → releases ghcr);
 # a imagem CLI (`make image`) é secundária (CI / builder do DKS). Como o runtime
 # não corre como workload k8s, `kind-load` é um no-op deliberado.

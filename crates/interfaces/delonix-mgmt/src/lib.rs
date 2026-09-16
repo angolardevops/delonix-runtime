@@ -1,12 +1,11 @@
 //! **Local management API of the Delonix Runtime** (HTTP+JSON over a unix socket).
 //!
 //! A local process on the same host drives the engine through this socket
-//! **without a direct link to the crates** — it speaks only HTTP. No external
-//! consumer of it exists today: an earlier version of this doc named a
-//! `RemoteRuntime` in `delonix-paas`, and that type never existed there (measured
-//! 2026-09-15, `git log --all -S RemoteRuntime`). The control plane's node agent is
-//! the consumer being designed, against the local node contract of ADR-0040/0041
-//! (both Proposed), not against these routes. It complements
+//! **without a direct link to the crates** — it speaks only HTTP. The engine
+//! names no consumer of it: an earlier version of this doc named a type in
+//! another repository that never existed there (measured 2026-09-15). New local
+//! clients belong on the node contract of ADR-0040/0041 (both Proposed), not on
+//! these routes. It complements
 //! the CRI (`delonix-cri`, which serves the kubelet): this serves the product's
 //! *management* (volumes/containers/…).
 //!
@@ -219,7 +218,7 @@ fn router(state: AppState) -> Router {
         .route("/v1/images/scan", get(scan_image))
         .route("/v1/images/sbom", get(sbom_image))
         // Networks: create/rm (network lifecycle) — shell-out to the CLI. publish/
-        // unpublish (DNAT) do NOT go here — `Net::`/`infra::` debt in the PaaS.
+        // unpublish (DNAT) are separate routes below, over the library.
         .route("/v1/networks", get(list_networks).post(create_network))
         .route(
             "/v1/networks/:name",
@@ -228,10 +227,9 @@ fn router(state: AppState) -> Router {
         .route("/v1/net/status", get(net_status))
         // Publicação de portos (DNAT + hostfwd do slirp). Ao contrário do
         // create/rm de redes, NÃO passa pelo binário: o `publish_port` recebe o
-        // IP do container, e a CLI recebe o NOME — quem chama esta API (o
-        // control-plane) tem o IP e não tem forma de resolver o nome do lado de
-        // cá sem uma segunda volta. Chamar a biblioteca é o caminho curto e o
-        // honesto.
+        // IP do container, e a CLI recebe o NOME — quem chama esta API tem o IP
+        // e não tem forma de resolver o nome do lado de cá sem uma segunda
+        // volta. Chamar a biblioteca é o caminho curto e o honesto.
         .route("/v1/net/publish", post(publish_port))
         .route(
             "/v1/net/publish/:host_port",
@@ -247,8 +245,8 @@ fn router(state: AppState) -> Router {
         .route("/v1/net/egress", put(set_egress_global))
         .route("/v1/net/egress/:bridge", put(set_egress_net))
         .route("/v1/containers/:id/rate", put(set_net_rate))
-        // Endereços e ligação a redes: as perguntas que o control-plane faz
-        // antes de publicar um porto ou escrever uma regra.
+        // Endereços e ligação a redes: as perguntas que um cliente faz antes de
+        // publicar um porto ou escrever uma regra.
         .route("/v1/net/dhcp/:net/:mac", get(dhcp_ip))
         .route("/v1/net/dhcp6/:net/:mac", get(dhcp_ip6))
         .route("/v1/net/container-ip/:id", get(container_ip))
@@ -259,9 +257,8 @@ fn router(state: AppState) -> Router {
         )
         .route("/v1/net/attach/:id/:ip", axum::routing::delete(detach))
         // Hot reconfig of a container: ONLY the subset that the runtime's `container
-        // update` supports (publish-add/publish-rm). The fields the PaaS's
-        // `ContainerUpdateSpec` has but the runtime does NOT (memory/cpus/restart/
-        // dns/hosts) are rejected on the PaaS side and never reach here.
+        // update` supports (publish-add/publish-rm). Any other field is refused here
+        // (`ReconfigBody` denies unknown fields) — never silently ignored.
         .route("/v1/containers/:id/reconfig", post(reconfig_container))
         // VMs (delonix-vm subsystem): ONLY stop/rm. `vm create`/`vm start` exist
         // (`delonix_vm::create`/`start`) but are not routed here; ADR-0041 (Proposed)
@@ -632,8 +629,8 @@ async fn container_exec_ep(
     }
 }
 
-/// Body of `POST /v1/containers` (run). Mirrors the PaaS's `ContainerRunSpec` — the
-/// contract is the field names (the PaaS serializes its spec, this deserializes it).
+/// Body of `POST /v1/containers` (run). The contract is the field names: a client
+/// serializes this shape and the engine deserializes it.
 #[derive(serde::Deserialize)]
 struct RunSpecBody {
     image: String,
@@ -660,9 +657,8 @@ struct RunSpecBody {
 }
 
 /// Rebuilds the `delonix container run -d …` args from the spec — a PURE function
-/// (testable without a kernel). The filters were copied from the PaaS's CLI
-/// adapter (a type that no longer exists under that name there); the runtime
-/// binary uses `--net`, where that adapter, over the docker shim, used `--network`.
+/// (testable without a kernel). The runtime binary spells the network flag `--net`;
+/// a client coming from the Docker vocabulary would write `--network`.
 fn build_run_args(spec: RunSpecBody) -> Vec<String> {
     let mut args: Vec<String> = vec!["container".into(), "run".into(), "-d".into()];
     if !spec.name.is_empty() {
@@ -979,10 +975,10 @@ async fn dhcp_ip6(Path((net, mac)): Path<(String, String)>) -> Response {
 
 /// `GET /v1/net/container-ip/:id` — o IP que um container tem na rede por omissão.
 ///
-/// Derivado do id, sem tocar em estado: é a pergunta que o control-plane faz
-/// antes de publicar um porto ou de escrever uma regra, e fazê-la por HTTP evita
-/// que ele reimplemente a fórmula — que teria de dar exactamente o mesmo
-/// resultado que esta, sempre.
+/// Derivado do id, sem tocar em estado: é a pergunta que um cliente faz antes de
+/// publicar um porto ou de escrever uma regra, e fazê-la por HTTP evita que ele
+/// reimplemente a fórmula — que teria de dar exactamente o mesmo resultado que
+/// esta, sempre.
 async fn container_ip(Path(id): Path<String>) -> Response {
     if !valid_arg(&id) {
         return err_response(Error::Invalid("invalid container id".to_string()));
@@ -1226,10 +1222,8 @@ struct PublishBody {
 
 /// `POST /v1/net/publish` — publica um porto através do ingress.
 ///
-/// Fecha a maior divida da fronteira: `publish_port`/`unpublish_port` eram 13 dos
-/// ~153 sítios em que o control-plane chamava o `delonix-net` directamente, e o
-/// comentário por cima das rotas de rede já os nomeava como tal («publish/
-/// unpublish (DNAT) do NOT go here — `Net::`/`infra::` debt in the PaaS»).
+/// Existe para que um cliente local publique um porto sem ligar os crates do
+/// motor: é a mesma operação do `delonix-net`, atrás de HTTP.
 ///
 /// O `container_ip` é validado antes de chegar ao mecanismo: é o que acaba numa
 /// regra de DNAT, e uma string arbitrária ali é uma regra arbitrária.
@@ -1408,8 +1402,8 @@ async fn get_network(Path(name): Path<String>) -> Response {
 /// `GET /v1/net/status` — o estado da infra de rede REALIZADA neste nó.
 ///
 /// A contraparte do `list_networks`: aquele diz o que está declarado, este diz
-/// o que está de pé (holder, slirp, bridge, ref-count). Um control-plane que só
-/// leia o primeiro conclui que a rede existe quando ainda não existe.
+/// o que está de pé (holder, slirp, bridge, ref-count). Um cliente que só leia o
+/// primeiro conclui que a rede existe quando ainda não existe.
 async fn net_status() -> Response {
     match tokio::task::spawn_blocking(delonix_net::infra::status).await {
         Ok(st) => Json(st).into_response(),
@@ -1447,8 +1441,15 @@ async fn delete_network(State(s): State<AppState>, Path(name): Path<String>) -> 
 }
 
 /// Body of `POST /v1/containers/:id/reconfig`. Only the subset that the runtime's
-/// `container update` supports — the PaaS refuses the remaining fields before calling.
+/// `container update` supports.
+///
+/// `deny_unknown_fields` because the ENGINE refuses what it does not do. This used
+/// to say another program rejected the rest before calling — so `{"memory": "1G"}`
+/// sent by any other client was accepted, ignored and answered with success: a field
+/// the client wrote and the engine dropped. An engine that relies on its caller to
+/// validate its own contract has no contract.
 #[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ReconfigBody {
     #[serde(default)]
     publish_add: Vec<String>,
@@ -1516,6 +1517,19 @@ async fn vm_action_ep(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reconfig_refuses_a_field_the_engine_does_not_apply() {
+        // Accepted-and-ignored is the failure this guards: the client believes the
+        // limit changed.
+        let err = serde_json::from_str::<super::ReconfigBody>(r#"{"memory":"1G"}"#);
+        assert!(
+            err.is_err(),
+            "an unknown field must be refused, not dropped"
+        );
+        let ok = serde_json::from_str::<super::ReconfigBody>(r#"{"publish_add":["8080:80"]}"#);
+        assert!(ok.is_ok());
+    }
+
     /// Serialises the two tests below, which both write the PROCESS-GLOBAL
     /// `DELONIX_ROOT` while cargo runs them on parallel threads.
     ///

@@ -235,7 +235,7 @@ pub fn write_atomic_mode(path: &Path, bytes: &[u8], mode: Option<u32>) -> Result
 /// preserving uppercase). Blocks path traversal (`../`, `/etc/passwd`,
 /// separators) by mapping any character outside that allowlist to `-`.
 /// Shared by [`Store`] and [`JsonStore`] — **every** id/key coming from outside
-/// (e.g.: `Path<String>` of axum handlers in `delonix-api`) must pass through
+/// (e.g.: a `Path<String>` of an HTTP handler) must pass through
 /// here before entering a `PathBuf::join`.
 pub(crate) fn safe_key(key: &str) -> String {
     key.chars()

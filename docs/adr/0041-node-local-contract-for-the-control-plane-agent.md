@@ -14,6 +14,25 @@
 - **Requested by:** `delonix-paas` ADR 0037 (accepted 2026-09-15, branch
   `arch/adr-0037-control-plane`, PR angolardevops/delonix-paas#493), requests R1–R4.
 
+> **Amendment — the engine knows no consumer (owner, 2026-09-16).** This ADR was written
+> for one consumer, and that framing does not stand. The canonical rule is «Identidade e
+> fronteira do motor» in `AGENTS.md`: the engine is an abstraction over containers and
+> microVMs, with its own Kinds and provider ports, and it is shaped around no client.
+> What changes when this ADR is decided:
+>
+> - **Coverage (D2) is ordered by the engine's capabilities, not by a consumer's migration
+>   order.** A wave closes when its surface serves what the engine's own CLI already does
+>   for those resources, tested against a real engine — not when one client's port can cut
+>   over. The measured gap matrix and the three states (served / refused with a reason /
+>   missing) stand.
+> - **Every promise is to a local client.** «The agent» below reads as «a local client»:
+>   same-euid authentication, reconnect with the last event offset, tolerance of the
+>   server exiting (daemonless), no tenant or identity in the contract.
+> - **Nothing is added for one client.** A request becomes the capability it is, in the
+>   engine's vocabulary, and enters only if it makes sense for any client.
+>
+> The measurements, the promise tiers (D3) and the lifetime model (D4) are unchanged.
+
 ## Context
 
 The control plane fixed this chain in its ADR 0037:

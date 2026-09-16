@@ -1187,8 +1187,8 @@ pub(crate) const DEFAULT_K8S_VERSION: &str = "1.36";
 /// apiserver não o alcançava e o `kubeadm init` ficava preso em
 /// `wait-control-plane`.
 ///
-/// O `DKS_DELIVERY_LOG` do `delonix-paas` já dizia que o nó precisa de ≥20G, e
-/// dava isso por fechado com «a golden já vem dimensionada». Não vinha.
+/// A delivery log elsewhere already said a node needs ≥20G, and marked it
+/// closed with "the golden image comes sized". It did not.
 ///
 /// Custa ZERO ao artefacto publicado: o qcow2 é esparso, e a imagem
 /// redimensionada continua a ocupar ~690 MiB em disco e a viajar igual no

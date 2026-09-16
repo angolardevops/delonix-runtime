@@ -5,8 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 # O `delonix` — CLI opensource completa deste motor (container/image/build/vm/
-# volumes/network), agrupada em comandos semânticos. Sem a API/Console/tenant
-# do PaaS privado (isso é `delonix-cli`/`delonix-paas`, outro repo).
+# volumes/network), agrupada em comandos semânticos. Sem noção de consola,
+# inquilino, conta ou plano: isso é de quem consome o motor, nunca do motor.
 [[bin]]
 name = "delonix"
 path = "src/main.rs"

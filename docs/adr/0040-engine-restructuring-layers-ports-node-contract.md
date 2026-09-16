@@ -7,6 +7,14 @@
   ADR-0038 (CRI follows the kubelet resource model); the `delonix-paas` restructuring plan
   «Saneamento do Control Plane» (2026-09-15), requests R1–R5; `proto/delonix/node/v1/`.
 
+> **Amendment — the engine knows no consumer (owner, 2026-09-16).** The canonical rule is
+> «Identidade e fronteira do motor» in `AGENTS.md`. Where this ADR describes the node
+> contract through one consumer (a control-plane agent, a platform plan and its requests),
+> read it as the origin of a requirement, not as its shape: the contract serves **any local
+> client** and names none (D4 below), phases are ordered by the engine's own capability
+> coverage, and nothing in `crates/`, `bins/` or `proto/` may name a consumer — enforced by
+> `scripts/arch_fitness.py` from P0 on. The decisions D1–D7 are unchanged.
+
 ## Context
 
 The engine is going to be driven by three kinds of consumer at once: a human through the

@@ -1908,8 +1908,8 @@ fn note_unswept_owners(scope: &super::prune::Scope, owners: &[String]) {
 ///   `USED 0 B` — silent, total, multi-tenant data loss from one command.
 ///
 /// So the reference check is the default and `--force` is the explicit override,
-/// which is also what makes the operation predictable in a PaaS control plane:
-/// a plain `rm` can never take a tenant's live data with it.
+/// which is also what makes the operation predictable for any caller:
+/// a plain `rm` can never take someone's live data with it.
 ///
 /// It also passes `remove_tree_mapped` down as the tree remover: in rootless the
 /// data belongs to a SUBUID, and without the hook the removal failed with a bare

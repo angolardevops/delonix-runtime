@@ -1,22 +1,18 @@
-//! Regras de rede PURAS — o que se pode calcular sem tocar no kernel.
+//! PURE network rules — what can be computed without touching the kernel.
 //!
-//! `delonix-net-RULES`, e não `-model`: o `delonix-paas` já tem um crate com
-//! esse nome, e é outra coisa — o modelo de domínio tipado de uma rede
-//! (`Network`, `Subnet`, `Port`, IPAM, reconciliação). Dois crates com o mesmo
-//! nome, em repositórios que dependem um do outro, colidem no dia em que o
-//! segundo consumir o primeiro. Este são REGRAS: funções e um tipo de valor.
+//! `delonix-net-RULES`, not `-model`: these are RULES — functions and one value
+//! type — not a typed domain model of a network.
 //!
-//! Existe por causa da migração do PaaS para falar com o motor por API. Ao
-//! contar o que o control-plane chamava do `delonix-net` (153 sítios), uma parte
-//! não era mecanismo nenhum: derivar o nome de uma bridge, atribuir um IP dentro
-//! de um prefixo, ler `10mbit` como bits/segundo, decidir se um IP cabe numa
-//! sub-rede. São funções determinísticas, sem I/O, sem privilégio.
+//! Part of what `delonix-net` was called for was no mechanism at all: deriving
+//! the name of a bridge, assigning an IP inside a prefix, reading `10mbit` as
+//! bits per second, deciding whether an IP fits in a subnet. They are
+//! deterministic functions, with no I/O and no privilege.
 //!
-//! Pôr isso atrás de um endpoint HTTP seria pagar um salto de rede — e um modo
-//! de falha novo — para calcular o que ambos os lados sabem calcular. Pior: a
-//! resposta TEM de ser idêntica dos dois lados (o nome da bridge que o PaaS
-//! espera é o que o motor cria), e duas implementações que têm de concordar são
-//! duas implementações que um dia não concordam.
+//! Putting that behind an HTTP endpoint would cost a network hop — and a new
+//! failure mode — to compute what a client can compute itself. Worse: the answer
+//! MUST be identical on both sides (the bridge a client expects is the one the
+//! engine creates), and two implementations that must agree are two
+//! implementations that one day will not.
 //!
 //! Por isso não é uma API: é um crate partilhado, SEM DEPENDÊNCIAS, que os dois
 //! lados compilam. O `delonix-net` re-exporta tudo o que está aqui, portanto
@@ -374,7 +370,7 @@ pub fn parse_iptables_save(texto: &str) -> IptablesSummary {
 /// passar pelo caminho que o balanceia, e um endereço dentro da subrede seria
 /// entregue directamente ao container.
 ///
-/// Puro e determinístico — o control-plane precisa de calcular o mesmo VIP que o
+/// Puro e determinístico — um cliente precisa de calcular o mesmo VIP que o
 /// motor, e é por isso que vive aqui e não atrás de uma API. Os extremos `.0`,
 /// `.1` e `.255` são evitados: o primeiro não é um endereço de host, o segundo é
 /// por convenção o gateway, e o último é o broadcast.
@@ -419,8 +415,8 @@ pub fn matches_labels(
 mod tests {
     use super::*;
 
-    /// O nome da bridge é um CONTRATO entre o motor e o control-plane: o
-    /// dispositivo que o PaaS espera tem de ser o que o motor cria. Estes valores
+    /// O nome da bridge é um CONTRATO entre o motor e quem o consome: o
+    /// dispositivo que um cliente espera tem de ser o que o motor cria. Estes valores
     /// estão aqui fixados de propósito — mudá-los é mudar o contrato, e o teste
     /// obriga a que isso seja uma decisão e não um acidente de refactor.
     #[test]
@@ -493,7 +489,7 @@ mod tests {
     #[test]
     fn ip_derivado_cai_dentro_da_rede_e_e_estavel() {
         // Determinístico: o mesmo id dá sempre o mesmo IP — é o que permite ao
-        // control-plane prever o endereço sem perguntar ao motor.
+        // cliente prever o endereço sem perguntar ao motor.
         let a = derive_ip_in("10.220", "deadbeef");
         assert_eq!(a, derive_ip_in("10.220", "deadbeef"));
         assert!(valid_ip_in_subnet("10.220", &a), "{a} fora de 10.220/16");
@@ -550,7 +546,7 @@ COMMIT
     fn ficheiro_vazio_nao_rebenta() {
         assert_eq!(parse_iptables_save(""), IptablesSummary::default());
     }
-    /// O VIP é um CONTRATO: o control-plane calcula-o para escrever regras e o
+    /// O VIP é um CONTRATO: um cliente calcula-o para escrever regras e o
     /// motor para as aplicar. Se divergirem, o tráfego vai para um endereço que
     /// ninguém está a escutar.
     #[test]
