@@ -6242,9 +6242,19 @@ espera pela prova de que o mount está de pé, pela mesma «resposta-vazia-em-si
 - **Tecto de 60s com aviso alto**, nunca uma espera sem fim: um mount que pendura (um bind sobre
   um NFS que não responde) não pode pendurar o `run`, porque antes disto não pendurava. E o
   aviso é dito, porque é exactamente aí que o `exec` seguinte pode aterrar no host.
-- **O que NÃO mudou, de propósito**: um `run -d` cujo init morre a montar continua a reportar o
-  que reportava. Mudar o relato de erro é uma segunda decisão, com as suas próprias medições, e
-  misturá-la com a correcção de uma corrida é como se mete uma mudança por rever.
+- **O que NÃO mudou nesse momento, de propósito — e mudou depois, com as suas medições
+  (2026-09-16)**: um `run -d` cujo init morre a montar respondia **rc=0** sobre um container
+  morto. Medido na P1b (Ubuntu 24.04 com a restrição de userns, binário sem perfil AppArmor):
+  `run -d` rc=0, e o `exec` seguinte dizia «not running». Agora a espera distingue três
+  desfechos (`MountWait`: byte, EOF, tecto), e um **EOF num arranque destacado é erro**: o
+  `spawn` colhe o init (é o pai), devolve o código real e **cita o log do init** (`failed to
+  prepare the rootfs: EPERM`), sem publicar registo. O tecto nunca conta como falha. Em primeiro
+  plano nada muda — o `waitpid` já devolvia o 126.
+  **A correcção abriu uma fuga, apanhada ao validar**: sem registo, o directório do container
+  (overlay e log) ficava órfão a cada tentativa, porque o `rm` e o `prune` encontram containers
+  pelo registo. O `discard_unstarted` (`cmd/container.rs`) remove-o quando o arranque falha E
+  não existe registo — com registo não toca em nada. Validado na mesma VM: três falhas deixam
+  zero registos, zero directórios e zero processos, e o caminho com perfil continua a arrancar.
 
 **Medido, mesma sonda, mesma máquina**: antes 5 em 54 corridas fora do container; depois 0 em 54,
 e 0 em 36 mais com carga. Latência do `run -d`: mediana 102 → 95 ms — indistinguível do ruído,
