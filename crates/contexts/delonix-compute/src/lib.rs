@@ -3,6 +3,9 @@
 //! entry points translate into; the use cases that execute it follow in later P2
 //! slices.
 
+mod notice;
+pub mod pod;
 mod run_opts;
 
+pub use notice::Notice;
 pub use run_opts::RunOpts;
