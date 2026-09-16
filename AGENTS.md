@@ -67,6 +67,40 @@ Acrescentar uma palavra ao léxico **sobe** a contagem e faz o gate falhar. Est�
 certo: significa que se descobriu dívida que já lá estava. Baixa a linha de base
 no mesmo commit em que acrescentas a palavra.
 
+## A direcção das dependências é um portão (ADR-0040, fase P0)
+
+`scripts/arch_fitness.py` impõe a estrutura que o ADR-0040 decidiu, e entrou
+**antes** de qualquer crate mudar de sítio — uma reestruturação sem carris
+regride enquanto acontece, e ninguém dá por isso até ao fim.
+
+Cada crate tem uma **camada** declarada na tabela `LAYERS` (pelo nome de HOJE; a
+tabela muda na fase que renomeia cada um), e a direcção permitida está num sítio
+só, o `ALLOWED`: a fundação só depende da fundação, um contexto não depende de
+adaptadores, um adaptador não depende de interfaces, e **um binário compõe UMA
+interface** — é esta última que impede o `delonix` de voltar a carregar quatro
+servidores enquanto os servidores lhe voltam a chamar por subprocesso.
+
+**Uma excepção tem de nomear a fase que a remove.** Uma excepção sem fase falha o
+portão, e uma excepção que já não se aplica também — é assim que uma tolerância
+temporária deixa de ser permanente. Hoje são dez, e cada uma diz a sua fase (o
+`--list` mostra-as).
+
+Dois números são **ratchet**, com a mesma semântica do `lang_ratchet.py` (falha
+se SOBE e falha se DESCE sem a linha de base baixar no mesmo commit):
+
+- **`self_exec_sites`** — quantas vezes uma biblioteca volta a correr o binário
+  do motor em vez de chamar uma função. É o ciclo escondido atrás de um
+  processo: o `-bin` liga o CRI, a `mgmt` e o MCP, e os três voltam a executar o
+  `-bin`. Cada sítio destes vira uma chamada a um caso de uso, ou um spec tipado
+  entregue ao lançador.
+- **`library_prints`** — `println!`/`eprintln!` em crates de biblioteca. Uma
+  biblioteca não escreve para o terminal; emite `tracing`, e quem imprime é a
+  interface.
+
+O `Command::new` **não** é contado: um adaptador existe precisamente para chamar
+o `ip`, o `nft`, o `qemu-img` ou o `ssh`. O que se conta é o motor a re-executar
+o SEU próprio binário.
+
 ## Método: um worktree por sessão (ler ANTES de editar)
 
 **Várias sessões escrevem neste clone ao mesmo tempo.** Não é hipótese: medido a
