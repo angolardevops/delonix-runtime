@@ -913,28 +913,7 @@ pub(crate) fn net_mode_display(c: &delonix_runtime_core::Container) -> String {
 
 pub(crate) use delonix_compute::pod::parse_add_host;
 
-fn custom_net_name(net: &str) -> Option<String> {
-    (net != "host" && net != "none").then(|| net.to_string())
-}
-
-/// `--ip` only makes sense with `--net <network>` — with `--net host/none`
-/// there is no SDN address to fix in the first place, and accepting the flag
-/// there would silently do nothing (the exact failure this engine refuses by
-/// policy elsewhere). Pure, so the combination is unit-testable without a
-/// live holder — the holder-side half (reserving the address, rejecting one
-/// outside the network's subnet) is `infra::attach_container_on_ip`, already
-/// covered by its own test in `delonix-net`.
-fn fixed_ip_needs_custom_net(has_ip: bool, custom_net: &Option<String>) -> Result<()> {
-    if has_ip && custom_net.is_none() {
-        return Err(Error::Invalid(
-            super::po::t(
-                "--ip requires --net <network> — a fixed address only makes sense on the SDN, not with --net host/none",
-            )
-            .into(),
-        ));
-    }
-    Ok(())
-}
+use delonix_compute::preflight::custom_net_name;
 
 /// Whitelist for a container's name: alnum + `-`/`_`, non-empty, doesn't
 /// start with `-`. Deliberately excludes `.` (unlike `delonix_vm::
@@ -2469,6 +2448,10 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // Same reasoning, same place as the policy check above: refuse before
     // anything is created, not after. See `preflight_resource_limits`.
     preflight_resource_limits(&opts)?;
+    // The combinations of flags that cannot mean anything, refused before any
+    // side effect — see `delonix_compute::preflight` for the two that used to be
+    // checked only after the workload had run, or never.
+    delonix_compute::preflight::check_run_opts(&opts)?;
     // Intact copy for the re-exec (the destructuring below consumes opts).
     let opts_copy = opts.clone();
     let RunOpts {
@@ -2547,11 +2530,6 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     let namespace = namespace
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "default".into());
-    if net_burst.is_some() && net_bps.is_none() {
-        return Err(Error::Invalid(
-            "--net-burst only makes sense together with --net-bps".into(),
-        ));
-    }
     // Port RANGES (`-p 8000-8002:9000-9002`, Docker syntax) expand into one spec per
     // port here, at the boundary — everything downstream (ownership, unpublish, the
     // stored `ports`) is keyed on a single port and stays that way.
@@ -3123,9 +3101,8 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // (`ipam::reserve`, restored after `Net::attach_on_ip` left the engine) —
     // it had ZERO callers before this, the same "public, dead, latent bug"
     // pattern this repo has paid for several times over (see AGENTS.md). The
-    // combination check is a pure helper (`fixed_ip_needs_custom_net`) purely
-    // so it is unit-testable without a live holder.
-    fixed_ip_needs_custom_net(ip.is_some(), &custom_net)?;
+    // combination check (`--ip` without a custom network) is refused up front by
+    // `delonix_compute::preflight::check_run_opts`, before anything is created.
     // `--expose` needs an IP on the SDN (custom network) — the proxy reaches the backend
     // via that IP. With `--net host/none` there's no IP → warn instead of silently ignoring.
     if expose.is_some() && custom_net.is_none() {
@@ -3378,6 +3355,34 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
                 }
             }
         }
+        // `--expose` and `--net-bps` had the same defect as the isolation above,
+        // and survived its fix: both lived only in the block after the
+        // supervisor's early return, so no detached container got them. Measured:
+        // `run -d --net <n> --net-bps 1mbit` exited 0, the record said
+        // `net_bps: "1mbit"`, and the holder had no qdisc on the veth at all —
+        // while `container update --net-rate` put a `tbf` on the same veth.
+        //
+        // `--expose <port>`: persisted in the record (to re-register on `start`
+        // and de-register on `rm`); the proxy registration itself already
+        // happened in the 1st pass, on the host.
+        if let Some(port) = expose {
+            c.expose = Some(port);
+        }
+        // `--net-bps`: the shaping lives on the holder's end of the veth, which
+        // the attach above already created. Applied before the workload starts,
+        // so a refusal undoes the attach instead of leaving a running container
+        // behind an error.
+        if let Some(bps) = &net_bps {
+            let shaped = delonix_net::parse_net_rate(bps, net_burst.as_deref())
+                .and_then(|rate| infra::set_net_rate(&c.id, rate.rate_bit, rate.burst_bytes));
+            if let Err(e) = shaped {
+                unpublish_ports(&c, None);
+                if let Some(ip) = &c.ip {
+                    infra::detach_container(&id, ip);
+                }
+                return Err(e);
+            }
+        }
     }
     c.health = health.clone();
     if should_supervise(&restart, detach, !no_supervisor) {
@@ -3426,24 +3431,8 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
                 }
             }
         }
-        // `--expose <port>`: persists in the record (to re-register on `start` and
-        // de-register on `rm`). The proxy auto-register was ALREADY done in the 1st
-        // pass (host), because the nsenter spawn doesn't run from the reexec.
-        if let Some(port) = expose {
-            c.expose = Some(port);
-        }
+        // `expose` and the shaping were applied before the supervisor branch.
         let _ = store.save(&c);
-        // `--net-bps`: the shaping lives on the veth on the holder's side, which only
-        // exists on the custom-network path. Applied now (the field is already
-        // persisted; a later `container update --net-rate` would redo it the same way).
-        if let Some(bps) = &net_bps {
-            let rate = delonix_net::parse_net_rate(bps, net_burst.as_deref())?;
-            infra::set_net_rate(&c.id, rate.rate_bit, rate.burst_bytes)?;
-        }
-    } else if net_bps.is_some() {
-        return Err(Error::Invalid(
-            "--net-bps only applies with `--net <network>` (shaping is on the ingress veth)".into(),
-        ));
     }
     if rm {
         if detach {
@@ -7983,24 +7972,6 @@ mod tests {
         assert!(valid_container_name("njinga-benguela-07"));
         assert!(valid_container_name("web"));
         assert!(valid_container_name("my_app-2"));
-    }
-
-    #[test]
-    fn custom_net_distinguishes_host_none_from_a_network() {
-        assert_eq!(super::custom_net_name("host"), None);
-        assert_eq!(super::custom_net_name("none"), None);
-        assert_eq!(super::custom_net_name("pnet"), Some("pnet".to_string()));
-    }
-
-    /// `--ip` is refused only when it would silently do nothing (no SDN
-    /// network to fix an address on); with one, or without `--ip` at all, it
-    /// is a no-op check.
-    #[test]
-    fn fixed_ip_only_needs_a_custom_net_when_an_ip_was_asked_for() {
-        assert!(super::fixed_ip_needs_custom_net(true, &None).is_err());
-        assert!(super::fixed_ip_needs_custom_net(true, &Some("pnet".to_string())).is_ok());
-        assert!(super::fixed_ip_needs_custom_net(false, &None).is_ok());
-        assert!(super::fixed_ip_needs_custom_net(false, &Some("pnet".to_string())).is_ok());
     }
 
     #[test]
