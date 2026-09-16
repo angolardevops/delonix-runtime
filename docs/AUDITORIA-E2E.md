@@ -70,7 +70,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 1. 🟠 HIGH — Path traversal in OCI whiteout handling deletes arbitrary files outside the rootfs
 
-- **Local:** `crates/delonix-image/src/overlay.rs:81`
+- **Local:** `crates/adapters/delonix-image/src/overlay.rs:81`
 - **Categoria:** bug · confiança do finder: high
 
 **Descrição.** In `apply_layer_flat`, non-whiteout entries are extracted safely via `entry.unpack_in(dest)` (tar 0.4.46 guards `..`/absolute escapes) and pre-created parents go through `safe_rel`. But the OCI whiteout branch (lines 62-84) takes the RAW `entry.path()` from the tar header — never passed through `safe_rel` — and joins it directly into `std::fs::remove_dir_all`/`remove_file`. `path.parent()` may contain `..` components, and `dest.join(<..-path>)` does NOT normalize (PathBuf::join appends literally); the OS resolves `..` at unlink time, escaping `dest`. The regular whiteout deletes `parent/<target>`; the opaque marker (`.wh..wh..opq`) does `read_dir(parent)` then `remove_dir_all` on every child. It also follows symlinks planted by an earlier layer (CVE-2019-14271 class). Reachable on the DEFAULT rootless path: `prepare_rootfs` (cmd/util.rs:83) -> `export_rootfs` (overlay.rs:162) -> `apply_layer_flat` runs on every rootless `container run`, plus `image export` (cmd/image.rs:632) and rootless `build`. Not covered by the documented `safe_rel`/`safe_join` mitigations (those cover file writes and Dockerfile COPY, not whiteout unlinks). Impact reaches critical (wiping the invoking user's home dir); rated high because it is deletion/integrity, not code execution.
@@ -83,7 +83,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 2. 🟠 HIGH — Path traversal via unvalidated CRI container/pod IDs → arbitrary *.json deletion and file reads
 
-- **Local:** `crates/delonix-cri/src/runtime_svc/lifecycle.rs:745`
+- **Local:** `crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs:745`
 - **Categoria:** bug · confiança do finder: high
 
 **Descrição.** Incoming `container_id`/`pod_sandbox_id` from CRI requests (StopContainer/RemoveContainer/ContainerStatus/RemovePodSandbox/PodSandboxStatus/CreateContainer) are used verbatim to build filesystem paths without any validation. `read_rec`/`write_rec`/the raw `remove_file` calls do `dir.join(format!("{id}.json"))` (lines 151, 157, 745, 390) and `read_rec(&sb_dir, &req.pod_sandbox_id)` (line 551). An `id` containing `../` escapes `<base>/cri/{containers,sandboxes}`. Only server-generated ids are safe (generate_id → hex), but the lifecycle mutation/read paths accept the id straight from the request. Note the inconsistency: `log_path` IS explicitly checked for `..`/absolute (line 546), but the id — which also becomes a path — is not. This is the same class as the ALTO VM-name traversal already fixed in delonix-vm (valid_vm_name), but the CRI store paths were never hardened.
@@ -96,7 +96,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 3. 🟠 HIGH — VM name path-traversal bypasses the valid_vm_name fix: generate_seed_iso writes seed files outside the state dir before create() rejects the name
 
-- **Local:** `crates/delonix-runtime-bin/src/cmd/vm.rs:1043`
+- **Local:** `bins/delonix-runtime-bin/src/cmd/vm.rs:1043`
 - **Categoria:** bug · confiança do finder: high
 
 **Descrição.** The documented audit-#2 fix placed valid_vm_name at the ENGINE boundary (delonix_vm::create, lib.rs:1120) on the claim that "qualquer consumidor da API herda". But the bin's generate_seed_iso() is NOT an API consumer that goes through create() first — it runs BEFORE it and builds filesystem paths straight from the raw VM name: work_dir = state_root().join("vms").join(vm_name) followed by std::fs::create_dir_all(&work_dir) and fs::write of user-data / meta-data / network-config / seed.iso (vm.rs:1043-1099). Neither call site validates the name first: the CLI path calls generate_seed_iso(&name, ...) at vm.rs:492 (name is the raw positional arg) and the manifest apply path calls generate_seed_iso(name=&doc.metadata.name, ...) at vm.rs:384, both strictly BEFORE delonix_vm::create() (vm.rs:523 / 412). The manifest layer performs no name validation either (manifest.rs of_kind/spec_of do not check metadata.name). So a name containing '../' traverses out of the state directory: create_dir_all fabricates arbitrary directory trees and four fixed-basename files (including user-data/seed.iso whose content is fully attacker-controlled via --user-data, copied verbatim at vm.rs:1049) are written wherever the invoking user can write. create() then rejects the name, but the side-effecting writes have already happened. This is the SAME arbitrary-file-write class the project itself rated ALTO in audit #2 ("escrevia/sobrescrevia ficheiros FORA do directório de estado") — the fix is incomplete because it guards create()/remove() but not the seed-generation pre-step in the bin.
@@ -109,7 +109,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 4. 🟠 HIGH — kubeconfig cluster-admin exposto em /tmp com modo 0644 e caminho previsível no host remoto
 
-- **Local:** `crates/delonix-runtime-bin/src/cmd/cluster.rs:1115`
+- **Local:** `bins/delonix-runtime-bin/src/cmd/cluster.rs:1115`
 - **Categoria:** bug · confiança do finder: high
 
 **Descrição.** fetch_kubeconfig corre no host de control-plane, como root via `sudo -n bash -c`: `cp /etc/kubernetes/admin.conf /tmp/delonix-admin.conf && chmod 644 /tmp/delonix-admin.conf`. O admin.conf contém as credenciais cluster-admin embutidas (client-certificate-data + client-key-data). É copiado para um caminho FIXO e PREVISÍVEL (`/tmp/delonix-admin.conf`) e tornado world-readable (0644) durante a janela do scp. O `rm -f` de limpeza é `let _ = ...` (erro ignorado), pelo que uma falha deixa o ficheiro. Este é exactamente o mesmo padrão do achado MÉDIO já corrigido noutro sítio (ensure_libvirt_network → OpenOptions::create_new O_EXCL + mode(0o600)), mas aqui não foi aplicado e o conteúdo é MUITO mais sensível (admin do cluster inteiro).
@@ -122,7 +122,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 5. 🟠 HIGH — safe_join in COPY is purely lexical — symlinks bypass it, re-opening the arbitrary host file read/write it was added to close
 
-- **Local:** `crates/delonix-runtime-bin/src/cmd/build.rs:282`
+- **Local:** `bins/delonix-runtime-bin/src/cmd/build.rs:282`
 - **Categoria:** bug · confiança do finder: high
 
 **Descrição.** safe_join (build.rs:258) rejects only lexical `..`/absolute/prefix components; it never resolves symlinks, and copy_into_rootfs then uses raw std::fs::copy / std::fs::create_dir_all (lines 282, 292, 301-311) which FOLLOW symlinks. The security-audit fix documented in AGENTS.md ('COPY ../../../etc/passwd read arbitrary host files; a dst with .. wrote outside the rootfs') is therefore incomplete: a symlink achieves the exact same escape that the lexical `..` check blocks. Confirmed there is zero canonicalize/symlink_metadata/is_symlink handling in build.rs. copy_dir_all (line 316) uses DirEntry::file_type() (does not follow the link) so a symlink entry falls to the else branch and std::fs::copy follows it, copying the target's contents. This affects both the src side (read host file into image) and the dst side (write host file), and build_from_spec is also reachable via `delonix image apply` (kind: Image, spec.build) from a manifest.
@@ -135,7 +135,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 6. 🟠 HIGH — Management API unix socket has no peer authentication and no restrictive file mode — full control-plane (incl. container exec) exposed to any local process, gated only by ambient umask
 
-- **Local:** `crates/delonix-mgmt/src/lib.rs:63`
+- **Local:** `crates/interfaces/delonix-mgmt/src/lib.rs:63`
 - **Categoria:** design · confiança do finder: high
 
 **Descrição.** `serve_blocking`/`serve_over_uds` bind the management socket (default `unix:///run/delonix-mgmt.sock`, see delonix-runtime-bin/src/main.rs:266-267) with `UnixListener::bind` and NEVER (a) `set_permissions`/chmod the socket, nor (b) check the peer credential (SO_PEERCRED) on accept. The `router()` (lib.rs:102-150) installs no auth/tower middleware — every route (`/v1/containers/:id/exec`, `run`, `rm`, `/v1/images/build`, `network create`, `vm rm`, ...) is served to anyone who can `connect()`. `container_exec_ep` (lib.rs:439-462) runs `container exec <id> sh -c <cmd>` = arbitrary code execution inside any container (often running as root inside its userns). This is the HIGHEST-privilege surface in the runtime, yet it is the ONLY unix-socket server in the repo with zero auth: the holder control socket deliberately sets BOTH `from_mode(0o600)` AND validates `peer_uid() == own_uid` via SO_PEERCRED (delonix-net/src/infra.rs:545-616, `control_loop`), precisely to stop a non-privileged local user from driving the engine. The mgmt socket falls below that bar. Whether another local UID can actually open the socket is left entirely to the ambient umask at bind time (default 022 -> mode 0755 -> connect denied for other users, but a daemon launched with a permissive umask, e.g. systemd `UMask=000`, or a world-traversable `/run` placement, yields mode 0777 -> any local user obtains full control-plane RCE). The same gap exists in delonix-cri/src/lib.rs:283, though that socket is kubelet-facing.
@@ -148,7 +148,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 7. 🟡 MEDIUM — Unbounded blob buffering with attacker-controlled Content-Length aborts/OOMs the pull
 
-- **Local:** `crates/delonix-image/src/registry.rs:242`
+- **Local:** `crates/adapters/delonix-image/src/registry.rs:242`
 - **Categoria:** recurso · confiança do finder: high
 
 **Descrição.** `blob_with_progress` does `Vec::with_capacity(total.unwrap_or(0) as usize)` where `total = resp.content_length()` is the registry's raw HTTP Content-Length (untrusted). A malicious or MITM registry returning a huge Content-Length (e.g. near u64::MAX) makes `Vec::with_capacity` attempt a giant reservation, which aborts the process on allocation failure (non-recoverable). Independently, the read loop (245-257) accumulates the entire blob into `buf` with no size cap, and the digest verification for OCI artifacts happens only AFTER full buffering (pull_oci_artifact:899), so it cannot prevent exhaustion. A multi-GB (or lie-then-stream) blob OOM-kills the CLI. Same buffering pattern is used by `pull_from_registry_with_creds`, `pull_oci_artifact`, and `RegistryClient::get_blob`, i.e. every `image pull` / `vm pull`.
@@ -161,7 +161,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 8. 🟡 MEDIUM — exec/attach child process and threads leaked when the streaming client disconnects (no kill on stream close)
 
-- **Local:** `crates/delonix-cri/src/spdy.rs:762`
+- **Local:** `crates/interfaces/delonix-cri/src/spdy.rs:762`
 - **Categoria:** recurso · confiança do finder: high
 
 **Descrição.** The SPDY (`run_exec`, line 762 `input.close()`) and WebSocket (`streaming.rs` exec_tty line 453 / exec_pipes line 564) streaming handlers never kill the spawned `delonix exec`/`delonix logs -f` child when the connection drops. On disconnect the read loop ends and `input.close()` only closes the pty master (Tty branch); the Pipe branch closes nothing, and the child handle is owned by a detached `child.wait()` thread with no kill path. For attach the child is `delonix container logs -f`, which never exits on its own — the ONLY termination is client disconnect, which does not stop it.
@@ -174,7 +174,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 9. 🟡 MEDIUM — ContainerStatus reports a fabricated finished_at = now() on every poll for exited containers
 
-- **Local:** `crates/delonix-cri/src/runtime_svc/lifecycle.rs:795`
+- **Local:** `crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs:795`
 - **Categoria:** bug · confiança do finder: medium
 
 **Descrição.** `container_status` sets `finished_at: if exit.is_some() { now_ns() } else { 0 }` — the real death time is not stored, so the CRI FinishedAt timestamp is recomputed to the current time on each ContainerStatus call. `started_at` is likewise fabricated as `created_at` (line 794) rather than the real start time. The kubelet uses FinishedAt for restart back-off and container age.
@@ -187,7 +187,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 10. 🟡 MEDIUM — SecretStore/CredVault path lookups don't sanitize the name → traversal on read/delete
 
-- **Local:** `crates/delonix-runtime-core/src/secret.rs:78`
+- **Local:** `crates/foundation/delonix-runtime-core/src/secret.rs:78`
 - **Categoria:** bug · confiança do finder: medium
 
 **Descrição.** SecretStore::path() builds `<root>/secrets/{name}.json` via a raw format! with no sanitization. Only save() enforces valid_name(); load(), remove(), resolve_env() and materialize() accept an arbitrary name. This is inconsistent with the rest of the tree, which routes every externally-influenced key through safe_key (Store/JsonStore, store.rs:67), VolumeStore::valid_name (lib.rs:113) or safe_snapshot_name (lib.rs:572). CredVault has the identical gap: cred_path() (cred_vault.rs:102) is only guarded on put(), while get()/remove()/exists() take the name unchecked. The secret name flows in unvalidated from `container run --secret <name>` (container.rs:1346 → resolve_env) and from manifest `spec.secrets` under `stack apply -f <untrusted.yaml>` — the same untrusted-manifest surface the project already treats as hostile (cf. the VM `metadata.name` traversal finding in AGENTS.md). resolve_env reads `<root>/secrets/../<path>.json` and injects any Secret-JSON-shaped file's `data` map as container env (bounded exfil); `secret rm <name>` / `secret unset --all <name>` reach remove() and unlink `<root>/secrets/../../<path>.json` if it ends in .json (arbitrary file delete within the invoking user's privileges).
@@ -200,7 +200,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 11. 🟡 MEDIUM — SecretStore::save uses a fixed temp file and holds no lock → torn encrypted blob + lost updates
 
-- **Local:** `crates/delonix-runtime-core/src/secret.rs:103`
+- **Local:** `crates/foundation/delonix-runtime-core/src/secret.rs:103`
 - **Categoria:** concorrência
 
 **Descrição.** SecretStore::save() writes to a per-name-fixed temp `.{name}.tmp` and renames it over the final file, with no flock anywhere in SecretStore. This is exactly the two failure modes Store deliberately engineered against: Store::save uses a per-writer temp `.{id}.{pid}.{seq}.tmp` (store.rs:140-143) precisely because "two processes writing the SAME container would write over each other in the same temp and the rename would publish an interleaved JSON", and Store::update wraps read-modify-write in FileLock/flock (store.rs:166-182) to prevent lost updates in this daemonless, concurrent-by-design runtime. SecretStore has neither. Two concurrent writers of the same secret name (e.g. two `delonix secret set` invocations, or `stack apply` racing an automation) both fs::write (O_TRUNC) the same `.{name}.tmp` and rename — the published file can contain interleaved/truncated bytes. Because the blob is XChaCha20-Poly1305 AEAD, any corruption makes decode() (secret.rs:82) fail permanently → the secret becomes undecryptable (data loss / DoS), not merely stale. Separately, the load-modify-save in `secret set`/`unset` (secret.rs:247-259, 271-278) has no lock, so concurrent edits silently drop keys (classic lost update). CredVault::write_0600 (cred_vault.rs:55-61) shares the fixed-temp issue via path.with_extension("tmp").
@@ -213,7 +213,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 12. 🟡 MEDIUM — kubeadm join concatena `:6443` a um endpoint que pode já conter porta → comando malformado no caminho HA
 
-- **Local:** `crates/delonix-runtime-bin/src/cmd/cluster.rs:1090`
+- **Local:** `bins/delonix-runtime-bin/src/cmd/cluster.rs:1090`
 - **Categoria:** bug · confiança do finder: high
 
 **Descrição.** valid_endpoint aceita explicitamente `host:port` (o teste `valid_endpoint("10.0.0.10:6443")` passa; doc-comment diz `host[:port]`). kubeadm_init interpola o endpoint CRU em `--control-plane-endpoint={endpoint}` (kubeadm aceita host:port aí). Mas kubeadm_join faz `format!("kubeadm join {endpoint}:6443 ...")`, anexando `:6443` incondicionalmente. Tratamento inconsistente da porta entre init e join.
@@ -226,7 +226,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 13. 🟡 MEDIUM — pick_route path-prefix match ignores segment boundary → route confusion to wrong backend
 
-- **Local:** `crates/delonix-runtime-bin/src/cmd/ingress_proxy.rs:149`
+- **Local:** `bins/delonix-runtime-bin/src/cmd/ingress_proxy.rs:149`
 - **Categoria:** bug · confiança do finder: high
 
 **Descrição.** The request-time matcher uses a raw `path.starts_with(&r.path)` with no path-segment boundary check. The docstring and AGENTS.md explicitly align the HTTPRoute semantics to the Kubernetes Gateway API, whose PathPrefix match of `/foo` matches `/foo` and `/foo/bar` but NOT `/foobar`. Here `/foobar` DOES match the route `/foo` because it is a plain string prefix. `valid_path_prefix` in httproute.rs only sanitizes config-time paths; it does nothing about how request paths are matched. Combined with the longest-prefix tie-break (`max_by_key` on `r.path.len()`), a request for an unrelated sibling path is silently dispatched to a more-specific backend it was never meant to reach.
@@ -239,7 +239,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 14. 🟡 MEDIUM — Composed proxy config (config.json) is built outside the flock → concurrent --expose auto-route silently dropped from the live proxy
 
-- **Local:** `crates/delonix-runtime-bin/src/cmd/ingress_proxy.rs:666`
+- **Local:** `bins/delonix-runtime-bin/src/cmd/ingress_proxy.rs:666`
 - **Categoria:** concorrência · confiança do finder: high
 
 **Descrição.** AGENTS.md states the `--expose` auto-registration uses a flock read-modify-write on auto.json to prevent lost updates. `with_auto_locked` does correctly serialize writes to auto.json. But the subsequent `rebuild()` (read manual+auto → compose → `ensure_running` writes config.json → SIGHUP) is called OUTSIDE that lock, in both auto_register (line 666) and auto_deregister (line 674), and rebuild re-reads auto.json unlocked (line 587) then writes config.json via non-atomic `std::fs::write`. The proxy serves config.json (via SIGHUP reload), NOT auto.json — so a stale composed config becomes the live state even though auto.json is correct. The flock guarantee therefore does not extend to the config the proxy actually serves.
@@ -252,7 +252,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 15. 🟡 MEDIUM — Admission gate (DELONIX_SCAN_ON_PULL) fails OPEN on an unrecognized threshold — a typo silently disables the fail-closed CVE gate
 
-- **Local:** `crates/delonix-runtime-bin/src/cmd/scan.rs:338`
+- **Local:** `bins/delonix-runtime-bin/src/cmd/scan.rs:338`
 - **Categoria:** gap · confiança do finder: high
 
 **Descrição.** admission_scan_on_pull is documented as a 'fail-closed GATE'. But an invalid (non-empty, non-'warn', non-severity) policy value is not rejected: admission_rejects (line 303) does Severity::parse(policy) → None → returns false, so the image is admitted (line 338 not taken). Only afterward, at line 345, a warning is printed to stderr. There is no early validation of the policy string, so a misconfiguration silently downgrades a security control from enforcing to advisory. In automated CI the stderr warning is easily lost while the pull succeeds.
@@ -265,10 +265,10 @@ correr uma imagem/manifesto de terceiros.
 
 ### 16. 🟡 MEDIUM — CIFS/SMB password embedded in world-readable mount argv (defeats --password-secret vault)
 
-- **Local:** `crates/delonix-runtime-bin/src/cmd/storage.rs:163`
+- **Local:** `bins/delonix-runtime-bin/src/cmd/storage.rs:163`
 - **Categoria:** bug · confiança do finder: high
 
-**Descrição.** build_mount() for the cifs/smb driver pushes the resolved password inline into the mount options string as `password=<secret>` (storage.rs:158-165). That string is later handed to `delonix-volume::VolumeStore::ensure_mounted`, which invokes `Command::new("mount").args(["-t","cifs",device,mountpoint,"-o",options])` (crates/delonix-volume/src/lib.rs:202-213). The password thus appears as a plain process argument. Mounting CIFS requires CAP_SYS_ADMIN, so in the supported/privileged path `mount.cifs` runs as root and its `/proc/<pid>/cmdline` is world-readable — any unprivileged local user can read the NAS credential while the mount runs. This directly undermines the documented purpose of `--password-secret`/`kind: Secret` (AGENTS.md and storage.rs:47-49 claim the vault path avoids exposing the password). mount.cifs(8) explicitly warns against `password=` on the command line and provides `credentials=<file>` for exactly this reason; that safer path is not used.
+**Descrição.** build_mount() for the cifs/smb driver pushes the resolved password inline into the mount options string as `password=<secret>` (storage.rs:158-165). That string is later handed to `delonix-volume::VolumeStore::ensure_mounted`, which invokes `Command::new("mount").args(["-t","cifs",device,mountpoint,"-o",options])` (crates/adapters/delonix-volume/src/lib.rs:202-213). The password thus appears as a plain process argument. Mounting CIFS requires CAP_SYS_ADMIN, so in the supported/privileged path `mount.cifs` runs as root and its `/proc/<pid>/cmdline` is world-readable — any unprivileged local user can read the NAS credential while the mount runs. This directly undermines the documented purpose of `--password-secret`/`kind: Secret` (AGENTS.md and storage.rs:47-49 claim the vault path avoids exposing the password). mount.cifs(8) explicitly warns against `password=` on the command line and provides `credentials=<file>` for exactly this reason; that safer path is not used.
 
 **Cenário de falha.** Admin stores the NAS password in the vault and runs `delonix storage create nas --type cifs --server nas --share media --username alice --password-secret nascreds` (or `stack apply` with a Storage referencing passwordSecret). During the mount, an unprivileged local attacker runs `grep -a password= /proc/*/cmdline` (or `ps aux`) and reads `//nas/media -o username=alice,password=<cleartext>`, capturing the secret the vault was supposed to protect.
 
@@ -278,7 +278,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 17. 🟡 MEDIUM — CIFS credentials/options are comma-joined without escaping — commas in a password inject/break mount options
 
-- **Local:** `crates/delonix-runtime-bin/src/cmd/storage.rs:177`
+- **Local:** `bins/delonix-runtime-bin/src/cmd/storage.rs:177`
 - **Categoria:** bug · confiança do finder: high
 
 **Descrição.** build_mount() assembles the cifs option list by pushing `username={u}`, `password={p}`, `ro`, and the user's `extra` string, then joins them with ',' (storage.rs:157-178). CIFS mount options are delimited by commas and there is no escaping. A perfectly legitimate password (or username) that contains a comma is split by mount.cifs: everything after the comma is reinterpreted as further mount options. This both breaks correct credentials (a password like `a,b3!` fails to authenticate or the mount errors on an unknown option) and, when the value is attacker-influenced through an untrusted `stack apply -f` manifest Secret, lets the trailing text act as injected CIFS mount options (e.g. `uid=0,file_mode=0777,dir_mode=0777`). mount.cifs has no way to escape a comma inside `-o`; the canonical fix is a credentials file.
@@ -291,7 +291,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 18. 🟡 MEDIUM — Node DNS resolver does a full O(n) scan of every container+VM record on every A query, single-threaded and serialized behind blocking upstream forwards
 
-- **Local:** `crates/delonix-net/src/infra.rs:3206`
+- **Local:** `crates/adapters/delonix-net/src/infra.rs:3206`
 - **Categoria:** performance · confiança do finder: high
 
 **Descrição.** The holder's service-discovery DNS server (`dns_server_main`, infra.rs:3087) is a single std::thread with one blocking `recv_from` loop: it handles exactly one query at a time and only reads the next datagram after the current one is fully answered. Two costs compound on that serial path:
@@ -308,7 +308,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 19. ⚪ LOW — valid_version aceita versão patch (1.31.2) mas k8s_repo_version constrói um path pkgs.k8s.io inexistente
 
-- **Local:** `crates/delonix-runtime-bin/src/cmd/k8s_recipes.rs:37`
+- **Local:** `bins/delonix-runtime-bin/src/cmd/k8s_recipes.rs:37`
 - **Categoria:** gap · confiança do finder: medium
 
 **Descrição.** k8s_repo_version faz `format!("stable:/v{v}")` com a versão CRUA. O repositório pkgs.k8s.io só publica directórios ao nível minor (`stable:/v1.31/deb/`), não patch. Porém valid_version (cluster.rs) aceita e o seu doc-comment afirma explicitamente que `1.31` OU `1.31.2` são válidos. Assim uma versão patch passa a validação mas gera uma URL de repositório 404.
@@ -321,7 +321,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 20. ⚪ LOW — Concurrent first-time ensure_running double-spawns two proxies → orphaned proxy with no pidfile
 
-- **Local:** `crates/delonix-runtime-bin/src/cmd/ingress_proxy.rs:720`
+- **Local:** `bins/delonix-runtime-bin/src/cmd/ingress_proxy.rs:720`
 - **Categoria:** concorrência · confiança do finder: medium
 
 **Descrição.** ensure_running checks running_pid() and, if None, calls spawn_proxy() + publish_listeners() with no lock. When the proxy does not yet exist and two callers (e.g. an httproute apply and a container run --expose, or two --expose launches) run concurrently, both observe running_pid()==None and both spawn a proxy. Both proxies try to bind the same listener port(s) inside the holder netns; one wins, the other crashes at bind. The pidfile is overwritten by whichever spawn writes last (line 807). If the crashed proxy's pid was written last, running_pid() later cleans it as dead while the surviving proxy has no pidfile recorded — it becomes an orphan that can no longer be targeted by SIGHUP (reload) or SIGTERM (stop).
@@ -334,7 +334,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 21. ⚪ LOW — kube generate emits YAML with unescaped quoting — command args break or inject YAML
 
-- **Local:** `crates/delonix-runtime-bin/src/cmd/kube.rs:79`
+- **Local:** `bins/delonix-runtime-bin/src/cmd/kube.rs:79`
 - **Categoria:** bug · confiança do finder: high
 
 **Descrição.** pod_manifest() serializes container command/args by wrapping each token with `quote()` = `format!("\"{s}\"")` (kube.rs:59-63, 78-80), which does not escape embedded double-quotes, backslashes, or newlines. A container whose command contains a `"` yields a token like `"echo "x""`, which is invalid YAML; a token containing a newline injects raw line breaks into the document. Since the whole point of `kube generate` is to pipe the output into `kubectl apply -f -`, a container created with a quote/newline in its command produces a manifest that either fails to parse or is structurally altered (extra keys after a newline-carrying value).
@@ -347,7 +347,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 22. ⚪ LOW — Dashboard reconciles every VM twice per 1s refresh, doubling virsh subprocess spawns
 
-- **Local:** `crates/delonix-runtime-bin/src/cmd/dash.rs:112`
+- **Local:** `bins/delonix-runtime-bin/src/cmd/dash.rs:112`
 - **Categoria:** performance · confiança do finder: high
 
 **Descrição.** `DashData::collect` (called every 1s in the TUI loop, dash.rs:429-430) builds the VM list as `delonix_vm::list(&root).into_iter().map(|v| delonix_vm::status(&root, &v.name)...)`. But `delonix_vm::list` (delonix-vm/src/lib.rs:1367-1374) ALREADY reconciles each VM by calling `status(base, &vm.name)` per entry. The `.map(status)` in dash therefore reconciles every VM a second time. For the libvirt backend each `status` is not cheap: `is_running`→`libvirt_domain_uri` probes up to two URIs via `virsh domstate` (infra.rs:664-668) plus another `domstate`/`domifaddr` for the IP — several `virsh` process spawns per VM. So every dashboard tick forks roughly twice as many `virsh` processes as needed.
@@ -360,7 +360,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 23. ⚪ LOW — Image pull buffers each layer fully in RAM before writing to CAS
 
-- **Local:** `crates/delonix-image/src/registry.rs:662`
+- **Local:** `crates/adapters/delonix-image/src/registry.rs:662`
 - **Categoria:** memória · confiança do finder: high
 
 **Descrição.** During pull, each layer is fetched by `blob_with_progress` (registry.rs:227-259) which reads in 64KB chunks but accumulates the whole blob into a single `Vec<u8>` (`buf` pre-sized to Content-Length), then `store.cas().write(&data)` (cas.rs:50) takes `&[u8]` and writes it out — no streaming to disk. Peak resident memory equals the size of the largest layer. The chunked read exists only for progress reporting, not to bound memory.
@@ -373,7 +373,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 24. ⚪ LOW — Management (and CRI) accept loop terminates the entire server on any transient accept() error, permanently downing the control-plane
 
-- **Local:** `crates/delonix-mgmt/src/lib.rs:80`
+- **Local:** `crates/interfaces/delonix-mgmt/src/lib.rs:80`
 - **Categoria:** recurso · confiança do finder: high
 
 **Descrição.** In `serve_over_uds` the accept loop does `let (socket, _) = uds.accept().await.map_err(|e| Error::Runtime{...})?;` — the `?` propagates ANY accept error out of `serve_over_uds`, which returns from `serve_blocking`, which exits the `delonix api` process. `accept()` can fail with recoverable, per-connection errors — most importantly EMFILE/ENFILE (per-process/system fd exhaustion) and ECONNABORTED. Because each accepted connection is `tokio::spawn`ed with no concurrency/fd limit, a burst of connections (each holding an fd until its handler finishes; long ops like `image build`/`pull` hold them for minutes) can drive the process to its fd ceiling; the next `accept()` returns EMFILE and the whole management API dies permanently instead of shedding load and recovering. The identical pattern exists in delonix-cri/src/lib.rs (its accept path), so a single recoverable condition takes down the kubelet-facing runtime endpoint too.
@@ -390,7 +390,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 1. 🟠 HIGH — `container run --rm` leaks the entire rootfs directory in rootless mode (both foreground and watcher paths)
 
-- **Local:** `crates/delonix-runtime-bin/src/cmd/container.rs:1597`
+- **Local:** `bins/delonix-runtime-bin/src/cmd/container.rs:1597`
 - **Categoria:** recurso · confiança do finder: high
 
 **Descrição.** The two `--rm` auto-removal paths — the foreground branch (lines 1592-1598) and the detached `spawn_rm_watcher` (lines 1651-1666) — both do `runtime::remove` + `unpublish_ports` + `images.unmount_rootfs(&c.id)`, but NEITHER calls `images.remove_container_dir(&c.id)`. In rootless mode (the product's default/primary mode) the container's rootfs is a FLAT copy at `containers/<id>/rootfs`, and `unmount_rootfs` DELIBERATELY preserves that directory (overlay.rs:263-273: `if base.join("rootfs").exists()` it only removes merged/upper/work and keeps `rootfs/`). `runtime::remove` (lib.rs:4288-4303) only removes the cgroup and the store JSON record — it never touches the container directory. So every `--rm` container in rootless leaves its full rootfs behind forever. This is exactly the leak documented as fixed in `cmd_rm` (container.rs:2369-2375 — '49 directories (45 GiB) piled up ... kubelet marked disk-pressure'), where the fix WAS to add `remove_container_dir`; the fix was applied only to the explicit `rm` path, not to the `--rm` auto-remove paths that share the same intent. `delonix system prune` is the only backstop, but `--rm`'s entire contract is automatic full cleanup (as in Docker, which removes the container filesystem).
@@ -401,7 +401,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 2. 🟠 HIGH — Global `egress` command silently deletes all per-network egress restrictions (fail-open)
 
-- **Local:** `crates/delonix-net/src/infra.rs:1531`
+- **Local:** `crates/adapters/delonix-net/src/infra.rs:1531`
 - **Categoria:** design · confiança do finder: high
 
 **Descrição.** `do_egress` (the GLOBAL egress policy, reached from `set_egress_policy`/`delonix ... egress deny|allow`) begins by deleting EVERY rule in the `fwdeny` chain whose listing line contains both `oifname "tap0"` and `drop`. Its intent is to remove only the single global blanket rule `oifname "tap0" drop`, but the substring match is too broad: the PER-NETWORK egress restrictions installed by `apply_egress_from_state`/`egress_specs` (infra.rs:2179-2203) are of the form `iifname "<bridge>" oifname "tap0" ... drop` — they also contain `oifname "tap0"` and `drop`, so they are deleted too. Once the per-network terminal `drop` is gone, egress falls through `fwdeny` into the `forward` chain, which unconditionally accepts `oifname "tap0"` (infra.rs:152), so the affected network regains full unrestricted Internet egress. The interaction is asymmetric: `do_egress_net` scopes its own cleanup to `iifname "<bridge>"` and never touches the global rule, so only the global command corrupts per-network state, and it does so silently.
@@ -412,7 +412,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 3. 🟡 MEDIUM — VFIO PCI address interpolated into libvirt domain XML without hex-validation or xml_escape (manifest-reachable)
 
-- **Local:** `crates/delonix-vm/src/lib.rs:862`
+- **Local:** `crates/adapters/delonix-vm/src/lib.rs:862`
 - **Categoria:** bug · confiança do finder: high
 
 **Descrição.** In libvirt_domain_xml, every user-influenced value (name, overlay, seed, mac, net, bridge, cpuset) is passed through xml_escape() — except the PCI passthrough address. parse_pci_addr (lib.rs:914) merely splits the device string on '/', '.', ':' and returns the four raw substrings with NO validation that they are hexadecimal; libvirt_domain_xml then interpolates them directly into <address domain='0x{dom}' bus='0x{bus}' slot='0x{slot}' function='0x{func}'/> (lib.rs:862-864) with no escaping. cfg.devices is attacker-influenced: the manifest spec.devices list is passed through untouched (vm.rs:405 devices: spec.devices) and applies() reaches libvirt_domain_xml via create(). Because the first-colon token (dom) may contain any character except ':' '.' '/', a value like `0' foo='bar:00:00.0` yields dom=`0' foo='bar` and produces `<address domain='0x0' foo='bar' bus='0x00' .../>` — an injected XML attribute; a value like `a':00:00.0` yields a stray quote that makes the XML malformed so `virsh define` fails. Full new-element injection is blocked because closing tags need '/' (consumed by rsplit('/')), which caps the impact at attribute injection / define-time DoS rather than arbitrary XML, but the missing escape+validation is a real gap that breaks the module's own escaping discipline and is exactly the 'endereço' validation the VFIO lens asks about.
@@ -423,7 +423,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 4. 🟡 MEDIUM — Re-exec spec file written world-readable with plaintext `-e` secrets, persisting for the whole foreground container lifetime
 
-- **Local:** `crates/delonix-runtime-bin/src/cmd/container.rs:1993`
+- **Local:** `bins/delonix-runtime-bin/src/cmd/container.rs:1993`
 - **Categoria:** recurso · confiança do finder: medium
 
 **Descrição.** `reexec_into_netns` (used by every `--net <custom>` and `--pod` run) serializes the full `RunOpts` to `state_root()/.reexec-<id>.json` via `std::fs::write` (line 1991-1993). `std::fs::write` creates the file with mode 0666 & ~umask (typically 0644 = world-readable), unlike the rest of the project's security-sensitive writes which use `OpenOptions::create_new().mode(0o600)` (the fix applied to the libvirt XML temp file per Audit #2). `RunOpts.env` carries the raw `-e KEY=VALUE` pairs the user passed on the command line — commonly credentials (`-e DB_PASSWORD=...`, `-e API_TOKEN=...`). The spawn uses `.status()` which BLOCKS until the child exits; for a FOREGROUND container the child's `cmd_run` blocks in `create_with` until the container's process terminates, so the world-readable JSON containing plaintext secrets lives in the state root (rootless: `$XDG_DATA_HOME/delonix` or `$HOME/.local/share/delonix`, which are often 0755) for the container's entire lifetime, only removed at line 2003 after exit.
@@ -434,7 +434,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 5. 🟡 MEDIUM — DNS external-domain hijack via dotted container name (unenforced anti-hijack assumption)
 
-- **Local:** `crates/delonix-net/src/infra.rs:3199`
+- **Local:** `crates/adapters/delonix-net/src/infra.rs:3199`
 - **Categoria:** bug · confiança do finder: high
 
 **Descrição.** parse_internal_name (infra.rs:3179) maps any name that is NOT suffixed .delonix.internal/.delonix.io to a whole-name match with no namespace: `api.github.com` -> ("api.github.com", None) (infra.rs:3199-3203, and the test at 3780 asserts exactly this). dns_resolve (infra.rs:3206) then iterates ALL container records in <base>/containers/*.json and returns the container's `ip` whenever v["name"].to_lowercase() == the queried name (infra.rs:3217-3229), short-circuiting BEFORE forward_dns (handle_dns, infra.rs:3132-3148). The documented and unit-tested anti-hijack guarantee (AGENTS.md 'DNS interno'; test parse_internal_name_handles_all_schemes comment: 'matches no container foo.com -> forwards') is load-bearing on the claim that container names contain no dots. That claim is NOT enforced anywhere: `--name`/manifest `metadata.name` flows raw into Container.name (cmd/container.rs:1228-1248, cmd/container.rs:787) with no character validation (no valid_name in delonix-runtime-core for containers; sanitize() is only applied to netns/device paths, never to the stored name). A container literally named `api.github.com` therefore matches, and because the whole-name/legacy path resolves in ANY namespace, the hijack crosses the namespace boundary that AGENTS.md presents as a security guarantee ('isolation also in DNS'). This EXTENDS the documented guarantee: the docs assert the hijack is impossible; the missing name validation makes it possible. The DNS server is always spawned in the holder (infra.rs:560) and serves every container/VM on the SDN.
@@ -445,7 +445,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 6. 🟡 MEDIUM — Bind-mount target não é resolvido com securejoin — symlink na imagem escapa o rootfs (mkdir/create de ficheiro no host como root)
 
-- **Local:** `crates/delonix-runtime/src/lib.rs:967`
+- **Local:** `crates/adapters/delonix-runtime/src/lib.rs:967`
 - **Categoria:** bug · confiança do finder: medium
 
 **Descrição.** `bind_volume` (chamado por `setup_rootfs` no laço `for m in mounts` a lib.rs:1193, ANTES do `pivot_root`) constrói o destino por concatenação crua `dst = format!("{rootfs}{}", m.target)` e a seguir faz `std::fs::create_dir_all(&dst)` / `OpenOptions...open(&dst)` (branch de ficheiro) e finalmente `mount(source, dst)`. O `mount_target_safe` só rejeita `..`/relativos no path LÓGICO — NÃO confina a resolução de symlinks que existam DENTRO do rootfs da imagem. Como estas operações correm antes do pivot, `/` ainda é o filesystem do host, partilhado (o `MS_PRIVATE` só isola propagação de mounts, não os inodes). No modo ROOT (motor com sudo, sem userns — `userns=false`), `setup_rootfs`/`bind_volume` correm como root REAL do host. O mesmo padrão aplica-se a `apply_tmpfs` (create_dir_all do alvo) e aos mount points criados noutros helpers. A auditoria de path-traversal documentada no AGENTS.md cobre `mount_target_safe` (só `..`), o COPY do `build` e o nome da VM — mas NÃO cobre a resolução de symlinks do alvo de bind no rootfs, logo é um vector novo. runc/Docker usam securejoin (resolução confinada com O_NOFOLLOW por componente) exactamente para fechar isto.
@@ -456,7 +456,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 7. 🟡 MEDIUM — Blocking `read` after a failed `poll` defeats the 10s guard and can hang `run` forever
 
-- **Local:** `crates/delonix-net/src/infra.rs:508`
+- **Local:** `crates/adapters/delonix-net/src/infra.rs:508`
 - **Categoria:** concorrência · confiança do finder: high
 
 **Descrição.** `start_slirp` guards the slirp ready-fd with `wait_readable(rd, 10_000)` (a `poll`), whose entire documented purpose is to avoid a bare blocking `read` that hangs forever when the child never signals and never closes the write end (a grandchild inheriting `wr` — created by `libc::pipe` WITHOUT O_CLOEXEC — is enough to prevent EOF). However, when `wait_readable` returns `false` (10s timeout: the fd is neither readable nor hung-up), the code only logs a warning and then unconditionally executes `libc::read(rd, ...)` on the still-blocking fd (lines 511-516). Since there is no data and no EOF, that `read` blocks indefinitely, reintroducing the exact deadlock the poll was added to prevent — and because `slirp_attach` now runs before the container entrypoint is released, this hangs the whole `run` with no log and no exit. The sibling per-container path `slirp_attach` (lib.rs:2232) has an even barer version: a blocking `read` with no poll guard at all.
@@ -467,7 +467,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 8. 🟡 MEDIUM — `system prune` can tear down the entire ingress infra mid-`run` (ref-marker TOCTOU)
 
-- **Local:** `crates/delonix-net/src/infra.rs:304`
+- **Local:** `crates/adapters/delonix-net/src/infra.rs:304`
 - **Categoria:** concorrência · confiança do finder: medium
 
 **Descrição.** `attach_container` writes a container's ingress ref-marker via `acquire(id)` (container.rs:1429) well before the container record is persisted to the Store (container.rs:1575). `reap_orphan_refs` (infra.rs:296-306), invoked by `system prune` (system.rs:239), builds its `live` set exclusively from the Store (running containers) plus `cri-*`/`vm-*` prefixed markers. A marker written by an in-flight `run` whose record is not yet saved is therefore classified as an orphan, removed, and — if it is the only remaining marker — triggers `teardown()`, which SIGTERMs the holder and slirp and destroys the shared netns. This is under `FileLock`, so it is not a data race, but the reaper's view of "live" is stale relative to the acquire-before-save window, and teardown destroys networking for the racing container (and drops all veths/nft state of any others, since the holder netns is shared).
@@ -478,7 +478,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 9. ⚪ LOW — `find` silently resolves an ambiguous id prefix to the newest container instead of erroring
 
-- **Local:** `crates/delonix-runtime-bin/src/cmd/util.rs:72`
+- **Local:** `bins/delonix-runtime-bin/src/cmd/util.rs:72`
 - **Categoria:** design · confiança do finder: high
 
 **Descrição.** `find` matches with `c.id == q || c.id.starts_with(q) || c.name == q` and returns the FIRST hit from `store.list()`, which is sorted by `created_unix` descending (store.rs:211). When a short id prefix matches more than one container, `find` silently picks the most-recently-created one rather than reporting ambiguity. Docker/Podman refuse an ambiguous prefix (`multiple ... found`). This drives destructive verbs — `container stop`/`rm` all resolve via `find` — so an ambiguous prefix can act on an unintended container without warning. Also, an id prefix match takes precedence position-wise over a container whose exact NAME equals `q` only by list ordering, so `q` intended as a name could resolve to a different container whose id happens to start with `q`.
@@ -489,7 +489,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 10. ⚪ LOW — `exec` fuga os fds das namespaces do container no processo-pai (namespaces ficam pinned após o container morrer)
 
-- **Local:** `crates/delonix-runtime/src/lib.rs:3591`
+- **Local:** `crates/adapters/delonix-runtime/src/lib.rs:3591`
 - **Categoria:** recurso · confiança do finder: high
 
 **Descrição.** Em `exec`, os fds `/proc/<pid>/ns/{user,uts,net,pid,mnt}` são abertos como i32 CRUS no pai (lib.rs:3585-3591) e guardados em `fds: Vec<(&str,i32)>`. Só o FILHO do 1.º fork os fecha (via `OwnedFd::from_raw_fd(*fd)` que fecha no drop após o setns, 3624-3631). No braço `ForkResult::Parent` (3734-3763) os fds NUNCA são fechados; o `Vec<(&str,i32)>` ao ser dropado não fecha i32 crus, e o `O_CLOEXEC` só ajuda num `execve` do próprio pai (que não acontece num chamador persistente). Contrasta com `mount_live`/`unmount_live`, que usam `OwnedFd` (via `open_container_ns`) e por isso fecham correctamente no braço do pai — a assimetria confirma o bug. Não há UAF/double-free, é fuga pura. Impacto real hoje é baixo (os chamadores — CLI e o subprocess `delonix exec` do CRI — são de vida curta e saem logo); mas `delonix_runtime::exec` é API pública e um supervisor in-process que faça exec repetidos esgota fds E, pior, cada fd de ns MANTÉM viva a namespace (mnt/net/pid/user) mesmo depois de o container morrer, impedindo a libertação dos recursos associados.
@@ -500,7 +500,7 @@ correr uma imagem/manifesto de terceiros.
 
 ### 11. ⚪ LOW — `apply_sysctls` escreve sysctls `net.*` no netns do HOST quando o container usa `--net host`
 
-- **Local:** `crates/delonix-runtime/src/lib.rs:1728`
+- **Local:** `crates/adapters/delonix-runtime/src/lib.rs:1728`
 - **Categoria:** design · confiança do finder: high
 
 **Descrição.** `sysctl_namespaced` (lib.rs:1728) devolve `true` para todos os `net.*`, partindo do princípio de que sysctls de rede são sempre namespaced e portanto seguros para o container mudar. Isso só é verdade se o container tiver a SUA PRÓPRIA netns (`CLONE_NEWNET`). Num container `--net host` (sem `CLONE_NEWNET`, ver `spawn` lib.rs:3062 — a flag NEWNET não é adicionada), `/proc/sys/net` reflecte a netns do HOST. `apply_sysctls` corre em `setup_rootfs` (chamado a lib.rs:1227) ANTES de `/proc/sys` ficar read-only (`mask_proc_paths`) e ainda com todas as caps, escrevendo directamente em `/proc/sys/net/...`. Faltando a validação cruzada que o Docker faz (o Docker recusa `--sysctl net.*` combinado com host networking exactamente por isto), o valor é aplicado ao host. É input do operador (não do container), por isso baixo; ainda assim é uma falha silenciosa de contenção (o operador julga estar a afinar o container).
@@ -511,7 +511,7 @@ correr uma imagem/manifesto de terceiros.
 
 ## Refutados na verificação
 
-- ~~write_rec is not atomic for concurrent writes to the same record id (temp name only per-process)~~ (`crates/delonix-cri/src/runtime_svc/lifecycle.rs:152`) — abatido pelos céticos.
+- ~~write_rec is not atomic for concurrent writes to the same record id (temp name only per-process)~~ (`crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs:152`) — abatido pelos céticos.
 
 ## Crítico de completude (próximo passo)
 

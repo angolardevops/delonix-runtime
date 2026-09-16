@@ -38,7 +38,7 @@ import urllib.error
 import urllib.request
 
 FIXTURES = pathlib.Path(__file__).resolve().parents[1] / (
-    "crates/delonix-runtime/tests/fixtures/advisor"
+    "crates/adapters/delonix-runtime/tests/fixtures/advisor"
 )
 
 SYSTEM = """You read the resource state of one Linux host running the Delonix

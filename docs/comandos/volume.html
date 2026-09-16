@@ -162,7 +162,7 @@ Two shapes of <code>create</code>: a driver with its options (<code>--driver</co
 Docker's own <code>docker volume create</code> idiom — local by default, or NFS/CIFS/SMB/WebDAV with
 vault credentials), or an isolated, quota'd slice carved out of an already-existing volume
 (<code>--parent</code>).</p>
-<p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/volume.rs"><code>cmd/volume.rs</code></a></p>
+<p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/volume.rs"><code>cmd/volume.rs</code></a></p>
 <div class='help'><pre><code>Usage: delonix volume [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
@@ -551,7 +551,7 @@ function esc(s){return s.replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&
 
 function tokBash(line){
   var out='',last=0,m;
-  var re=/(#.*$)|("(?:[^"\\]|\\.)*")|('(?:[^'\\]|\\.)*')|(--?[A-Za-z][\w-]*)|\b(delonix|delonixctl|dlx)\b/g;
+  var re=/(#.*$)|("(?:[^"\\]|\\.)*")|('(?:[^'\\]|\\.)*')|(--?[A-Za-z][\w-]*)|\b(delonix|dlx)\b/g;
   while((m=re.exec(line))){
     out+=esc(line.slice(last,m.index));
     if(m[1])out+='<span class="tok-comment">'+esc(m[1])+'</span>';
@@ -607,7 +607,7 @@ function highlightAll(){
     var isHelp=pre.parentElement&&pre.parentElement.classList.contains('help');
     if(isHelp)html=highlightHelp(text);
     else if(/^apiVersion:|\nkind:\s/.test(text))html=highlightYaml(text);
-    else if(pre.closest('.ex')||/^(delonix|delonixctl|dlx)\b/.test(text.trim()))html=highlightBash(text);
+    else if(pre.closest('.ex')||/^(delonix|dlx)\b/.test(text.trim()))html=highlightBash(text);
     else return;
     code.innerHTML=html;
   });

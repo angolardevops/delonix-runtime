@@ -3,8 +3,8 @@
 - **Status:** **Accepted** (2026-08-11)
 - **Date:** 2026-08-11
 - **Deciders:** Walter (owner)
-- **Related:** `crates/delonix-net/src/infra.rs` (`dns_*`),
-  `crates/delonix-runtime-bin/src/cmd/{container,util,stack}.rs`,
+- **Related:** `crates/adapters/delonix-net/src/infra.rs` (`dns_*`),
+  `bins/delonix-runtime-bin/src/cmd/{container,util,stack}.rs`,
   `docs/discovery/48_REVISAO_REDE_DNS.md` (§A3, §A6, §A7, §A8, §A9),
   ADR-0003 (capability model — same "the node enforces locally" reasoning)
 

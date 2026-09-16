@@ -37,7 +37,7 @@ ligar o facto a nós.
 
 ## Decisão
 
-Um `ChildHandle` (`crates/delonix-cri/src/child_handle.rs`) envolve
+Um `ChildHandle` (`crates/interfaces/delonix-cri/src/child_handle.rs`) envolve
 `pidfd_open(2)` e `pidfd_send_signal(2)`. Um pidfd refere-se ao **processo**, não
 ao número: o sinal chega àquele processo ou falha com `ESRCH`, nunca a outro.
 

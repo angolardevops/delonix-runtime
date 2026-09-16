@@ -3,8 +3,8 @@
 - **Status:** Proposed (GO/NO-GO spike closed; the decision to BUILD is the owner's)
 - **Date:** 2026-08-29
 - **Deciders:** Walter (owner)
-- **Related:** ADR-0026 (the security runtime is a decision crate), `crates/delonix-net/src/bpf.rs`,
-  `crates/delonix-runtime/src/seccomp_profile.rs`, `crates/delonix-runtime/src/lib.rs::log_shim`,
+- **Related:** ADR-0026 (the security runtime is a decision crate), `crates/adapters/delonix-net/src/bpf.rs`,
+  `crates/adapters/delonix-runtime/src/seccomp_profile.rs`, `crates/adapters/delonix-runtime/src/lib.rs::log_shim`,
   `docs/adr/README.md` guardrails #1 (daemonless) and #5 (spike before a new privilege boundary).
 
 ## Context
@@ -74,7 +74,7 @@ candidate, and file integrity is a partial GO with a stated blind spot.**
    for every container, so the workload side is one flag (`SECCOMP_FILTER_FLAG_NEW_LISTENER`).
 3. **It does NOT need a daemon, which is what makes it admissible under guardrail #1.** The
    listener must be held by a process that outlives the command — and one already exists per
-   container: `log_shim` (`crates/delonix-runtime/src/lib.rs`), which already survives `run -d` to
+   container: `log_shim` (`crates/adapters/delonix-runtime/src/lib.rs`), which already survives `run -d` to
    read the container's stdout/stderr. This is one more responsibility for a process the engine
    already spawns, not a new resident service. A design that instead proposes a host-wide daemon
    is a different decision and needs its own ADR.

@@ -9,7 +9,7 @@ idea of what "create a VM" means.
 ## Why a shared contract
 
 Delonix's VM layer already routes through a single backend trait
-(`VmBackend` in `crates/delonix-vm`) — the whole point of that abstraction
+(`VmBackend` in `crates/adapters/delonix-vm`) — the whole point of that abstraction
 is that `delonix vm create` means the same thing regardless of which
 provider is configured underneath. An E2E suite that tests each provider
 with a different set of assertions would let that abstraction silently leak
@@ -44,7 +44,7 @@ labeled as such rather than silently assumed universal:
   namespace), VNC/console access.
 - **Proxmox** — whatever Proxmox-specific resource model exists on top of
   the shared contract (storage pools, node placement) — verify against the
-  actual crate (`crates/delonix-proxmox`) rather than assumed Proxmox API
+  actual crate (`crates/providers/delonix-proxmox`) rather than assumed Proxmox API
   behavior, since the contract Delonix presents may differ from raw Proxmox
   semantics by design.
 - **OpenStack** — only test what's actually implemented; do not assume

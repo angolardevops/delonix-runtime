@@ -1,21 +1,24 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/delonix-runtime-core",
-    "crates/delonix-runtime",
-    "crates/delonix-runtime-bin",
-    "crates/delonix-image",
-    "crates/delonix-net",
-    "crates/delonix-net-rules",
-    "crates/delonix-vm",
-    "crates/delonix-volume",
-    "crates/delonix-cri",
-    "crates/delonix-mgmt",
-    "crates/delonix-scan",
-    "crates/delonix-security-runtime",
-    "crates/delonix-truenas",
-    "crates/delonix-proxmox",
-    "crates/delonix-mcp",
+    "crates/foundation/delonix-runtime-core",
+    "crates/adapters/delonix-runtime",
+    "bins/delonix-runtime-bin",
+    "crates/adapters/delonix-image",
+    "crates/adapters/delonix-net",
+    "crates/foundation/delonix-net-rules",
+    "crates/adapters/delonix-vm",
+    "crates/adapters/delonix-volume",
+    "crates/interfaces/delonix-cri",
+    "crates/interfaces/delonix-mgmt",
+    "crates/adapters/delonix-scan",
+    "crates/contexts/delonix-security-runtime",
+    "crates/providers/delonix-truenas",
+    "crates/providers/delonix-proxmox",
+    "crates/interfaces/delonix-mcp",
+    "crates/foundation/delonix-model",
+    "crates/contexts/delonix-stack",
+    "crates/contexts/delonix-compute",
 ]
 
 [workspace.package]
@@ -25,6 +28,29 @@ license = "Apache-2.0"
 repository = "https://github.com/angolardevops/delonix-runtime"
 
 [workspace.dependencies]
+# The engine's own crates, by path. ADR-0040 P0: the path of every crate is written
+# HERE and nowhere else, so a move or a rename (phases P2-P4) edits one line and not
+# every manifest that depends on it. The directory is the crate's LAYER, and
+# `scripts/arch_fitness.py` fails when the two disagree.
+delonix-runtime-core = { path = "crates/foundation/delonix-runtime-core" }
+delonix-runtime = { path = "crates/adapters/delonix-runtime" }
+delonix-runtime-bin = { path = "bins/delonix-runtime-bin" }
+delonix-image = { path = "crates/adapters/delonix-image" }
+delonix-net = { path = "crates/adapters/delonix-net" }
+delonix-net-rules = { path = "crates/foundation/delonix-net-rules" }
+delonix-vm = { path = "crates/adapters/delonix-vm" }
+delonix-volume = { path = "crates/adapters/delonix-volume" }
+delonix-cri = { path = "crates/interfaces/delonix-cri" }
+delonix-mgmt = { path = "crates/interfaces/delonix-mgmt" }
+delonix-scan = { path = "crates/adapters/delonix-scan" }
+delonix-security-runtime = { path = "crates/contexts/delonix-security-runtime" }
+delonix-truenas = { path = "crates/providers/delonix-truenas" }
+delonix-proxmox = { path = "crates/providers/delonix-proxmox" }
+delonix-mcp = { path = "crates/interfaces/delonix-mcp" }
+delonix-model = { path = "crates/foundation/delonix-model" }
+delonix-stack = { path = "crates/contexts/delonix-stack" }
+delonix-compute = { path = "crates/contexts/delonix-compute" }
+
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -60,6 +86,55 @@ opentelemetry-otlp = { version = "0.32", default-features = false, features = [
     "reqwest-blocking-client",
 ] }
 tracing-opentelemetry = { version = "0.33", default-features = false }
+
+# ADR-0040, P0: every version lives HERE, once. A member names only the features it
+# needs (`{ workspace = true, features = [...] }`); a crate cannot re-enable
+# default features the workspace turned off, so `default-features = false` is set
+# here and nowhere else. `scripts/arch_fitness.py` fails on an inline version.
+# Async runtime and HTTP (CRI, management API, L7 proxy, MCP)
+tokio = "1"
+tokio-stream = "0.1"
+futures-util = { version = "0.3", default-features = false }
+hyper = "1"
+hyper-util = "0.1"
+http-body-util = "0.1"
+bytes = "1"
+axum = "0.7"
+tower = "0.5"
+tokio-rustls = { version = "0.26", default-features = false }
+rustls-pemfile = "2"
+rcgen = { version = "0.13", default-features = false }
+reqwest = { version = "0.12", default-features = false }
+# gRPC (CRI)
+tonic = "0.12"
+tonic-build = "0.12"
+prost = "0.13"
+# Crypto, encoding, compression
+chacha20poly1305 = "0.10"
+getrandom = "0.2"
+ring = "0.17"
+base64 = "0.22"
+zstd = "0.13"
+# Kernel interfaces
+rustix = "1.1"
+# CLI, manifests, schema
+clap_complete = "4.6"
+serde_yaml = "0.9"
+schemars = "1.2.2"
+ratatui = "0.29"
+# Telemetry and MCP
+prometheus-client = "0.25"
+rmcp = { version = "3", default-features = false }
+# Tests and benchmarks
+proptest = "1"
+tempfile = "3"
+criterion = "0.5"
+
+# ADR-0040, P0: lints every crate inherits (`[lints] workspace = true`). An
+# `unsafe` block states WHY it is sound, next to it — a justification three lines
+# up, above an unrelated statement, is how a false one survives review.
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny"
 
 # Perfil de release dos binários publicados: LTO thin + 1 codegen unit dão
 # um binário mais pequeno e mais rápido (inlining entre crates — o caminho

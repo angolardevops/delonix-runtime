@@ -389,7 +389,7 @@ de texto traduzível, que é o anti-padrão que o `-o json` da ADR-0005 existe p
 
 1. **A API de gestão não está documentada em lado nenhum.** Nem uma página, nem uma
    lista de rotas, nem um exemplo de `curl`. Quem quiser automatizar via API tem de ler
-   `crates/delonix-mgmt/src/lib.rs`. Isto é o oposto do objectivo declarado.
+   `crates/interfaces/delonix-mgmt/src/lib.rs`. Isto é o oposto do objectivo declarado.
 2. **Não há referência de campos gerada a partir do código.** `kinds.html` é escrito à
    mão; os structs são a verdade. Enquanto forem duas fontes, divergem — e o repo já
    tem historial disso. O remédio é geração (um `delonix explain`, ou um JSON-Schema

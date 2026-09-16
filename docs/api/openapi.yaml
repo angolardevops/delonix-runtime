@@ -1,0 +1,3070 @@
+# Generated with protoc-gen-openapi
+# https://github.com/google/gnostic/tree/master/cmd/protoc-gen-openapi
+
+openapi: 3.0.3
+info:
+    title: Delonix node API
+    description: Local contract of the Delonix Runtime node (delonix.node.v1) generated from proto/ and served on a local unix socket. Not a remote API.
+    version: v1
+paths:
+    /v1/events:watch:
+        get:
+            tags:
+                - NodeService
+            description: |-
+                Server-streamed engine events (the same records as `delonix system events`).
+                 `since` replays from the persisted event log first, so a reconnecting client does not
+                 miss what happened while it was away — within the log's retention, which the first
+                 message states.
+            operationId: NodeService_WatchEvents
+            parameters:
+                - name: since
+                  in: query
+                  schema:
+                    type: string
+                    format: date-time
+                - name: kinds
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        type: string
+                - name: namespace
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Event'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/images:
+        get:
+            tags:
+                - ImageService
+            operationId: ImageService_ListImages
+            parameters:
+                - name: page.page_size
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: page.page_token
+                  in: query
+                  schema:
+                    type: string
+                - name: reference_prefix
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.ListImagesResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/images:build:
+        post:
+            tags:
+                - ImageService
+            operationId: ImageService_BuildImage
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.BuildImageRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Operation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/images:delete:
+        post:
+            tags:
+                - ImageService
+            operationId: ImageService_DeleteImage
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.DeleteImageRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Operation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/images:get:
+        get:
+            tags:
+                - ImageService
+            operationId: ImageService_GetImage
+            parameters:
+                - name: reference
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Image'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/images:pull:
+        post:
+            tags:
+                - ImageService
+            operationId: ImageService_PullImage
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.PullImageRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Operation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/images:push:
+        post:
+            tags:
+                - ImageService
+            operationId: ImageService_PushImage
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.PushImageRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Operation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/images:scan:
+        post:
+            tags:
+                - ImageService
+            operationId: ImageService_ScanImage
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.ScanImageRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Operation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/namespaces/{namespace}/containers:
+        get:
+            tags:
+                - ContainerService
+            operationId: ContainerService_ListContainers
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: label_selector
+                  in: query
+                  description: Kubernetes equality grammar ("app=web,tier!=db").
+                  schema:
+                    type: string
+                - name: page.page_size
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: page.page_token
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.ListContainersResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+        post:
+            tags:
+                - ContainerService
+            operationId: ContainerService_CreateContainer
+            parameters:
+                - name: namespace
+                  in: path
+                  description: |-
+                    Identity comes from the request — the same `namespace`/`name` the path carries — and
+                     never from a ResourceMeta whose server-owned fields the engine would have to ignore.
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.CreateContainerRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Operation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/namespaces/{namespace}/containers/{container}/logs:
+        get:
+            tags:
+                - ContainerService
+            operationId: ContainerService_Logs
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: container
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: follow
+                  in: query
+                  schema:
+                    type: boolean
+                - name: tail_lines
+                  in: query
+                  schema:
+                    type: string
+                - name: since
+                  in: query
+                  schema:
+                    pattern: ^-?(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,9})?s$
+                    type: string
+                    description: Represents a a duration between -315,576,000,000s and 315,576,000,000s (around 10000 years). Precision is in nanoseconds. 1 nanosecond is represented as 0.000000001s
+                - name: timestamps
+                  in: query
+                  schema:
+                    type: boolean
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.LogChunk'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/namespaces/{namespace}/containers/{name}:
+        get:
+            tags:
+                - ContainerService
+            operationId: ContainerService_GetContainer
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: name
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Container'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+        delete:
+            tags:
+                - ContainerService
+            operationId: ContainerService_DeleteContainer
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: name
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: etag
+                  in: query
+                  schema:
+                    type: string
+                - name: force
+                  in: query
+                  schema:
+                    type: boolean
+                - name: request_id
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Operation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+        patch:
+            tags:
+                - ContainerService
+            description: |-
+                Hot reconfiguration without changing the PID (ports, volumes, networks, limits) —
+                 the engine's differentiator; fields outside the mask are untouched.
+            operationId: ContainerService_UpdateContainer
+            parameters:
+                - name: namespace
+                  in: path
+                  description: |-
+                    The container is identified by the path. `container.meta.name`/`namespace` are empty
+                     or equal to these — a mismatch is INVALID_ARGUMENT, never a rename.
+                  required: true
+                  schema:
+                    type: string
+                - name: name
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: update_mask
+                  in: query
+                  schema:
+                    type: string
+                    format: field-mask
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.Container'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Container'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/namespaces/{namespace}/containers/{name}/stats:
+        get:
+            tags:
+                - ContainerService
+            operationId: ContainerService_Stats
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: name
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.ContainerStats'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/namespaces/{namespace}/containers/{name}:kill:
+        post:
+            tags:
+                - ContainerService
+            operationId: ContainerService_KillContainer
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: name
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.KillContainerRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Container'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/namespaces/{namespace}/containers/{name}:start:
+        post:
+            tags:
+                - ContainerService
+            operationId: ContainerService_StartContainer
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: name
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.StartContainerRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Container'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/namespaces/{namespace}/containers/{name}:stop:
+        post:
+            tags:
+                - ContainerService
+            operationId: ContainerService_StopContainer
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: name
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.StopContainerRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Container'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/namespaces/{namespace}/containers/{name}:wait:
+        post:
+            tags:
+                - ContainerService
+            operationId: ContainerService_WaitContainer
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: name
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.WaitContainerRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.WaitContainerResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/namespaces/{namespace}/networks:
+        get:
+            tags:
+                - NetworkService
+            operationId: NetworkService_ListNetworks
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: label_selector
+                  in: query
+                  description: Kubernetes equality grammar ("app=web,tier!=db").
+                  schema:
+                    type: string
+                - name: page.page_size
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: page.page_token
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.ListNetworksResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+        post:
+            tags:
+                - NetworkService
+            operationId: NetworkService_CreateNetwork
+            parameters:
+                - name: namespace
+                  in: path
+                  description: |-
+                    Identity comes from the request — the same `namespace`/`name` the path carries — and
+                     never from a ResourceMeta whose server-owned fields the engine would have to ignore.
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.CreateNetworkRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Operation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/namespaces/{namespace}/networks/{name}:
+        get:
+            tags:
+                - NetworkService
+            operationId: NetworkService_GetNetwork
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: name
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Network'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+        delete:
+            tags:
+                - NetworkService
+            operationId: NetworkService_DeleteNetwork
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: name
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: etag
+                  in: query
+                  schema:
+                    type: string
+                - name: force
+                  in: query
+                  schema:
+                    type: boolean
+                - name: request_id
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Operation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/namespaces/{namespace}/networks/{network}:connect:
+        post:
+            tags:
+                - NetworkService
+            operationId: NetworkService_ConnectContainer
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: network
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.ConnectContainerRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Container'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/namespaces/{namespace}/networks/{network}:disconnect:
+        post:
+            tags:
+                - NetworkService
+            operationId: NetworkService_DisconnectContainer
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: network
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.DisconnectContainerRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Container'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/namespaces/{namespace}/pods:
+        get:
+            tags:
+                - PodService
+            operationId: PodService_ListPods
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: label_selector
+                  in: query
+                  description: Kubernetes equality grammar ("app=web,tier!=db").
+                  schema:
+                    type: string
+                - name: page.page_size
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: page.page_token
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.ListPodsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+        post:
+            tags:
+                - PodService
+            operationId: PodService_CreatePod
+            parameters:
+                - name: namespace
+                  in: path
+                  description: |-
+                    Identity comes from the request — the same `namespace`/`name` the path carries — and
+                     never from a ResourceMeta whose server-owned fields the engine would have to ignore.
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.CreatePodRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Operation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/namespaces/{namespace}/pods/{name}:
+        get:
+            tags:
+                - PodService
+            operationId: PodService_GetPod
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: name
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Pod'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+        delete:
+            tags:
+                - PodService
+            operationId: PodService_DeletePod
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: name
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: etag
+                  in: query
+                  schema:
+                    type: string
+                - name: force
+                  in: query
+                  schema:
+                    type: boolean
+                - name: request_id
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Operation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/namespaces/{namespace}/virtualmachines:
+        get:
+            tags:
+                - VirtualMachineService
+            operationId: VirtualMachineService_ListVirtualMachines
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: label_selector
+                  in: query
+                  description: Kubernetes equality grammar ("app=web,tier!=db").
+                  schema:
+                    type: string
+                - name: page.page_size
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: page.page_token
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.ListVirtualMachinesResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+        post:
+            tags:
+                - VirtualMachineService
+            operationId: VirtualMachineService_CreateVirtualMachine
+            parameters:
+                - name: namespace
+                  in: path
+                  description: |-
+                    Identity comes from the request — the same `namespace`/`name` the path carries — and
+                     never from a ResourceMeta whose server-owned fields the engine would have to ignore.
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.CreateVirtualMachineRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Operation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/namespaces/{namespace}/virtualmachines/{name}:
+        get:
+            tags:
+                - VirtualMachineService
+            operationId: VirtualMachineService_GetVirtualMachine
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: name
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.VirtualMachine'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+        delete:
+            tags:
+                - VirtualMachineService
+            operationId: VirtualMachineService_DeleteVirtualMachine
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: name
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: etag
+                  in: query
+                  schema:
+                    type: string
+                - name: force
+                  in: query
+                  schema:
+                    type: boolean
+                - name: request_id
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Operation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/namespaces/{namespace}/virtualmachines/{name}:pause:
+        post:
+            tags:
+                - VirtualMachineService
+            operationId: VirtualMachineService_PauseVirtualMachine
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: name
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.PauseVirtualMachineRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.VirtualMachine'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/namespaces/{namespace}/virtualmachines/{name}:resume:
+        post:
+            tags:
+                - VirtualMachineService
+            operationId: VirtualMachineService_ResumeVirtualMachine
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: name
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.ResumeVirtualMachineRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.VirtualMachine'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/namespaces/{namespace}/virtualmachines/{name}:start:
+        post:
+            tags:
+                - VirtualMachineService
+            operationId: VirtualMachineService_StartVirtualMachine
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: name
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.StartVirtualMachineRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Operation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/namespaces/{namespace}/virtualmachines/{name}:stop:
+        post:
+            tags:
+                - VirtualMachineService
+            description: |-
+                Stop keeps the disk. Destroy (DeleteVirtualMachine) releases it. On a remote provider
+                 these are different calls, and conflating them deletes a customer's data.
+            operationId: VirtualMachineService_StopVirtualMachine
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: name
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.StopVirtualMachineRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Operation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/namespaces/{namespace}/virtualmachines/{virtual_machine}/snapshots:
+        get:
+            tags:
+                - VirtualMachineService
+            operationId: VirtualMachineService_ListSnapshots
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: virtual_machine
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.ListSnapshotsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+        post:
+            tags:
+                - VirtualMachineService
+            operationId: VirtualMachineService_CreateSnapshot
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: virtual_machine
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.CreateSnapshotRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Operation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/namespaces/{namespace}/virtualmachines/{virtual_machine}/snapshots/{snapshot}:
+        delete:
+            tags:
+                - VirtualMachineService
+            operationId: VirtualMachineService_DeleteSnapshot
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: virtual_machine
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: snapshot
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: request_id
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Operation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/namespaces/{namespace}/virtualmachines/{virtual_machine}/snapshots/{snapshot}:restore:
+        post:
+            tags:
+                - VirtualMachineService
+            operationId: VirtualMachineService_RestoreSnapshot
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: virtual_machine
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: snapshot
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.RestoreSnapshotRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Operation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/namespaces/{namespace}/volumes:
+        get:
+            tags:
+                - VolumeService
+            operationId: VolumeService_ListVolumes
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: label_selector
+                  in: query
+                  description: Kubernetes equality grammar ("app=web,tier!=db").
+                  schema:
+                    type: string
+                - name: page.page_size
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: page.page_token
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.ListVolumesResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+        post:
+            tags:
+                - VolumeService
+            operationId: VolumeService_CreateVolume
+            parameters:
+                - name: namespace
+                  in: path
+                  description: |-
+                    Identity comes from the request — the same `namespace`/`name` the path carries — and
+                     never from a ResourceMeta whose server-owned fields the engine would have to ignore.
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.CreateVolumeRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Operation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/namespaces/{namespace}/volumes/{name}:
+        get:
+            tags:
+                - VolumeService
+            operationId: VolumeService_GetVolume
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: name
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Volume'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+        delete:
+            tags:
+                - VolumeService
+            operationId: VolumeService_DeleteVolume
+            parameters:
+                - name: namespace
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: name
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: etag
+                  in: query
+                  schema:
+                    type: string
+                - name: force
+                  in: query
+                  schema:
+                    type: boolean
+                - name: request_id
+                  in: query
+                  schema:
+                    type: string
+                - name: destroy_remote
+                  in: query
+                  description: |-
+                    Also destroy data the engine provisioned remotely. Refused for a volume the engine
+                     did not provision.
+                  schema:
+                    type: boolean
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Operation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/node:
+        get:
+            tags:
+                - NodeService
+            operationId: NodeService_GetNodeInfo
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.NodeInfo'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/node/capacity:
+        get:
+            tags:
+                - NodeService
+            operationId: NodeService_GetCapacity
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Capacity'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/node/health:
+        get:
+            tags:
+                - NodeService
+            description: |-
+                Liveness of the engine AND of what it depends on, one condition each. A consumer
+                 must not read "the socket answered" as "the node can run workloads".
+            operationId: NodeService_GetHealth
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Health'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/operations:
+        get:
+            tags:
+                - OperationService
+            operationId: OperationService_ListOperations
+            parameters:
+                - name: page.page_size
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: page.page_token
+                  in: query
+                  schema:
+                    type: string
+                - name: active_only
+                  in: query
+                  description: Only unfinished operations when true.
+                  schema:
+                    type: boolean
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.ListOperationsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/operations/{id}:
+        get:
+            tags:
+                - OperationService
+            operationId: OperationService_GetOperation
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Operation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/operations/{id}:cancel:
+        post:
+            tags:
+                - OperationService
+            description: 'Best effort: an operation past its point of no return reports FAILED_PRECONDITION.'
+            operationId: OperationService_CancelOperation
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.CancelOperationRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Operation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/operations/{id}:watch:
+        get:
+            tags:
+                - OperationService
+            description: Streams state changes until the operation is done, then closes.
+            operationId: OperationService_WatchOperation
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Operation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/providers:
+        get:
+            tags:
+                - NodeService
+            operationId: NodeService_ListProviders
+            parameters:
+                - name: kind
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.ListProvidersResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/stacks/{stack}:apply:
+        post:
+            tags:
+                - StackService
+            operationId: StackService_ApplyStack
+            parameters:
+                - name: stack
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.ApplyStackRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Operation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/stacks/{stack}:destroy:
+        post:
+            tags:
+                - StackService
+            operationId: StackService_DestroyStack
+            parameters:
+                - name: stack
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.DestroyStackRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.Operation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+    /v1/stacks/{stack}:plan:
+        post:
+            tags:
+                - StackService
+            description: 'Pure: computes the plan, changes nothing. Same answer as `delonix stack plan`.'
+            operationId: StackService_PlanStack
+            parameters:
+                - name: stack
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/delonix.node.v1.PlanStackRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/delonix.node.v1.StackPlan'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/google.rpc.Status'
+components:
+    schemas:
+        delonix.node.v1.ApplyStackRequest:
+            type: object
+            properties:
+                stack:
+                    type: string
+                manifest:
+                    type: string
+                    format: bytes
+                prune:
+                    type: boolean
+                replace:
+                    type: array
+                    items:
+                        type: string
+                request_id:
+                    type: string
+        delonix.node.v1.BuildImageRequest:
+            type: object
+            properties:
+                context_path:
+                    type: string
+                    description: |-
+                        Build context as a path on this node. Uploading a context over the socket is a
+                         later addition, deliberately not in v1.
+                file:
+                    type: string
+                tags:
+                    type: array
+                    items:
+                        type: string
+                target_stage:
+                    type: string
+                platform:
+                    type: string
+                build_args:
+                    type: object
+                    additionalProperties:
+                        type: string
+                secret_refs:
+                    type: array
+                    items:
+                        type: string
+                no_cache:
+                    type: boolean
+                request_id:
+                    type: string
+        delonix.node.v1.CancelOperationRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+        delonix.node.v1.Capability:
+            type: object
+            properties:
+                name:
+                    type: string
+                supported:
+                    type: boolean
+                detail:
+                    type: string
+            description: |-
+                A named optional capability a provider declares (topology §6: discovery, not the
+                 lowest common denominator). A request needing a capability the selected provider lacks
+                 is FAILED_PRECONDITION with ErrorDetail.reason = "CapabilityNotSupported".
+        delonix.node.v1.Capacity:
+            type: object
+            properties:
+                cpu_millis_total:
+                    type: string
+                cpu_millis_allocatable:
+                    type: string
+                memory_bytes_total:
+                    type: string
+                memory_bytes_allocatable:
+                    type: string
+                pids_allocatable:
+                    type: string
+                filesystems:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.FilesystemCapacity'
+                containers_running:
+                    type: integer
+                    format: int32
+                vms_running:
+                    type: integer
+                    format: int32
+                unmeasured:
+                    type: array
+                    items:
+                        type: string
+                    description: |-
+                        Fields that could not be measured are listed here instead of being reported as 0.
+                         A zero that comes from a failed measurement is not a zero.
+        delonix.node.v1.CloudInit:
+            type: object
+            properties:
+                hostname:
+                    type: string
+                ssh_authorized_keys:
+                    type: array
+                    items:
+                        type: string
+                user_data:
+                    type: string
+        delonix.node.v1.Condition:
+            type: object
+            properties:
+                type:
+                    type: string
+                status:
+                    type: integer
+                    format: enum
+                reason:
+                    type: string
+                message:
+                    type: string
+                last_transition_time:
+                    type: string
+                    format: date-time
+            description: 'Kubernetes-style condition: the observed state, with the reason machine-readable.'
+        delonix.node.v1.ConnectContainerRequest:
+            type: object
+            properties:
+                network:
+                    type: string
+                container:
+                    type: string
+                namespace:
+                    type: string
+                ipv4_address:
+                    type: string
+        delonix.node.v1.Container:
+            type: object
+            properties:
+                meta:
+                    $ref: '#/components/schemas/delonix.node.v1.ResourceMeta'
+                spec:
+                    $ref: '#/components/schemas/delonix.node.v1.ContainerSpec'
+                status:
+                    $ref: '#/components/schemas/delonix.node.v1.ContainerStatus'
+        delonix.node.v1.ContainerSpec:
+            type: object
+            properties:
+                image:
+                    type: string
+                entrypoint:
+                    type: array
+                    items:
+                        type: string
+                command:
+                    type: array
+                    items:
+                        type: string
+                env:
+                    type: object
+                    additionalProperties:
+                        type: string
+                secrets:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.SecretRef'
+                    description: Secret references, resolved at spawn and never persisted as plaintext.
+                workdir:
+                    type: string
+                user:
+                    type: string
+                hostname:
+                    type: string
+                resources:
+                    $ref: '#/components/schemas/delonix.node.v1.Resources'
+                mounts:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.Mount'
+                networks:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.NetworkAttachment'
+                ports:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.PortMapping'
+                security:
+                    $ref: '#/components/schemas/delonix.node.v1.SecurityContext'
+                restart:
+                    $ref: '#/components/schemas/delonix.node.v1.RestartPolicy'
+                health_check:
+                    $ref: '#/components/schemas/delonix.node.v1.HealthCheck'
+                pod:
+                    type: string
+                    description: The pod this container joins (shares net/ipc/uts). Empty = standalone.
+                devices:
+                    type: array
+                    items:
+                        type: string
+                tmpfs:
+                    type: array
+                    items:
+                        type: string
+                read_only_rootfs:
+                    type: boolean
+                sysctls:
+                    type: object
+                    additionalProperties:
+                        type: string
+                log_format:
+                    type: string
+        delonix.node.v1.ContainerStats:
+            type: object
+            properties:
+                cpu_usage_nanos:
+                    type: string
+                memory_working_set_bytes:
+                    type: string
+                memory_limit_bytes:
+                    type: string
+                pids:
+                    type: string
+                network_rx_bytes:
+                    type: string
+                network_tx_bytes:
+                    type: string
+                writable_layer_bytes:
+                    type: string
+                unmeasured:
+                    type: array
+                    items:
+                        type: string
+        delonix.node.v1.ContainerStatus:
+            type: object
+            properties:
+                phase:
+                    type: integer
+                    format: enum
+                pid:
+                    type: integer
+                    format: int32
+                exit_code:
+                    type: integer
+                    description: |-
+                        Set once the container has exited AND the code was actually observed. Absent means
+                         "not captured" — never a fabricated 137.
+                    format: int32
+                reason:
+                    type: string
+                    description: 'Machine-readable termination reason: "OOMKilled", "Error", "Completed", "StoppedByUser".'
+                ip_addresses:
+                    type: array
+                    items:
+                        type: string
+                conditions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.Condition'
+                image_digest:
+                    type: string
+        delonix.node.v1.CreateContainerRequest:
+            type: object
+            properties:
+                namespace:
+                    type: string
+                    description: |-
+                        Identity comes from the request — the same `namespace`/`name` the path carries — and
+                         never from a ResourceMeta whose server-owned fields the engine would have to ignore.
+                name:
+                    type: string
+                labels:
+                    type: object
+                    additionalProperties:
+                        type: string
+                annotations:
+                    type: object
+                    additionalProperties:
+                        type: string
+                spec:
+                    $ref: '#/components/schemas/delonix.node.v1.ContainerSpec'
+                request_id:
+                    type: string
+                    description: |-
+                        Idempotency key: the same request_id within the retention window returns the SAME
+                         Operation instead of creating a second container.
+                start:
+                    type: boolean
+        delonix.node.v1.CreateNetworkRequest:
+            type: object
+            properties:
+                namespace:
+                    type: string
+                    description: |-
+                        Identity comes from the request — the same `namespace`/`name` the path carries — and
+                         never from a ResourceMeta whose server-owned fields the engine would have to ignore.
+                name:
+                    type: string
+                labels:
+                    type: object
+                    additionalProperties:
+                        type: string
+                annotations:
+                    type: object
+                    additionalProperties:
+                        type: string
+                spec:
+                    $ref: '#/components/schemas/delonix.node.v1.NetworkSpec'
+                request_id:
+                    type: string
+        delonix.node.v1.CreatePodRequest:
+            type: object
+            properties:
+                namespace:
+                    type: string
+                    description: |-
+                        Identity comes from the request — the same `namespace`/`name` the path carries — and
+                         never from a ResourceMeta whose server-owned fields the engine would have to ignore.
+                name:
+                    type: string
+                labels:
+                    type: object
+                    additionalProperties:
+                        type: string
+                annotations:
+                    type: object
+                    additionalProperties:
+                        type: string
+                spec:
+                    $ref: '#/components/schemas/delonix.node.v1.PodSpec'
+                request_id:
+                    type: string
+        delonix.node.v1.CreateSnapshotRequest:
+            type: object
+            properties:
+                virtual_machine:
+                    type: string
+                namespace:
+                    type: string
+                snapshot:
+                    type: string
+                request_id:
+                    type: string
+        delonix.node.v1.CreateVirtualMachineRequest:
+            type: object
+            properties:
+                namespace:
+                    type: string
+                    description: |-
+                        Identity comes from the request — the same `namespace`/`name` the path carries — and
+                         never from a ResourceMeta whose server-owned fields the engine would have to ignore.
+                name:
+                    type: string
+                labels:
+                    type: object
+                    additionalProperties:
+                        type: string
+                annotations:
+                    type: object
+                    additionalProperties:
+                        type: string
+                spec:
+                    $ref: '#/components/schemas/delonix.node.v1.VirtualMachineSpec'
+                request_id:
+                    type: string
+                wait_until_reachable:
+                    type: boolean
+        delonix.node.v1.CreateVolumeRequest:
+            type: object
+            properties:
+                namespace:
+                    type: string
+                    description: |-
+                        Identity comes from the request — the same `namespace`/`name` the path carries — and
+                         never from a ResourceMeta whose server-owned fields the engine would have to ignore.
+                name:
+                    type: string
+                labels:
+                    type: object
+                    additionalProperties:
+                        type: string
+                annotations:
+                    type: object
+                    additionalProperties:
+                        type: string
+                spec:
+                    $ref: '#/components/schemas/delonix.node.v1.VolumeSpec'
+                request_id:
+                    type: string
+        delonix.node.v1.DeleteImageRequest:
+            type: object
+            properties:
+                reference:
+                    type: string
+        delonix.node.v1.DestroyStackRequest:
+            type: object
+            properties:
+                stack:
+                    type: string
+                manifest:
+                    type: string
+                    format: bytes
+                request_id:
+                    type: string
+        delonix.node.v1.DisconnectContainerRequest:
+            type: object
+            properties:
+                network:
+                    type: string
+                container:
+                    type: string
+                namespace:
+                    type: string
+                ipv4_address:
+                    type: string
+        delonix.node.v1.ErrorDetail:
+            type: object
+            properties:
+                reason:
+                    type: string
+                resource:
+                    type: string
+                metadata:
+                    type: object
+                    additionalProperties:
+                        type: string
+                retryable:
+                    type: boolean
+                    description: True only when retrying the SAME request can succeed (transport, lock contention).
+                retry_after:
+                    pattern: ^-?(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,9})?s$
+                    type: string
+            description: |-
+                Attached to every non-OK gRPC status (as a binary detail) and every non-2xx REST body.
+                 `reason` is the stable DX_* code the CLI already exits with (cmd/exitcode.rs), so a
+                 script, the CLI and an API client classify a failure the same way.
+        delonix.node.v1.Event:
+            type: object
+            properties:
+                time:
+                    type: string
+                    format: date-time
+                kind:
+                    type: string
+                action:
+                    type: string
+                target:
+                    type: string
+                namespace:
+                    type: string
+                attributes:
+                    type: object
+                    additionalProperties:
+                        type: string
+                trace_id:
+                    type: string
+        delonix.node.v1.FilesystemCapacity:
+            type: object
+            properties:
+                role:
+                    type: string
+                mountpoint:
+                    type: string
+                bytes_total:
+                    type: string
+                bytes_available:
+                    type: string
+                inodes_total:
+                    type: string
+                inodes_available:
+                    type: string
+        delonix.node.v1.Health:
+            type: object
+            properties:
+                overall:
+                    type: integer
+                    description: |-
+                        Overall = worst of the parts. Each part is a Condition with a stable reason:
+                         "NetworkReady", "StoreWritable", "CgroupDelegated", "ProvidersAvailable".
+                    format: enum
+                conditions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.Condition'
+        delonix.node.v1.HealthCheck:
+            type: object
+            properties:
+                command:
+                    type: array
+                    items:
+                        type: string
+                interval:
+                    pattern: ^-?(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,9})?s$
+                    type: string
+                timeout:
+                    pattern: ^-?(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,9})?s$
+                    type: string
+                retries:
+                    type: integer
+                    format: int32
+                start_period:
+                    pattern: ^-?(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,9})?s$
+                    type: string
+        delonix.node.v1.Image:
+            type: object
+            properties:
+                reference:
+                    type: string
+                digest:
+                    type: string
+                repo_digests:
+                    type: array
+                    items:
+                        type: string
+                size_bytes:
+                    type: string
+                os:
+                    type: string
+                architecture:
+                    type: string
+                labels:
+                    type: object
+                    additionalProperties:
+                        type: string
+        delonix.node.v1.KillContainerRequest:
+            type: object
+            properties:
+                name:
+                    type: string
+                namespace:
+                    type: string
+                signal:
+                    type: string
+        delonix.node.v1.ListContainersResponse:
+            type: object
+            properties:
+                containers:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.Container'
+                page:
+                    $ref: '#/components/schemas/delonix.node.v1.PageResponse'
+        delonix.node.v1.ListImagesResponse:
+            type: object
+            properties:
+                images:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.Image'
+                page:
+                    $ref: '#/components/schemas/delonix.node.v1.PageResponse'
+        delonix.node.v1.ListNetworksResponse:
+            type: object
+            properties:
+                networks:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.Network'
+                page:
+                    $ref: '#/components/schemas/delonix.node.v1.PageResponse'
+        delonix.node.v1.ListOperationsResponse:
+            type: object
+            properties:
+                operations:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.Operation'
+                page:
+                    $ref: '#/components/schemas/delonix.node.v1.PageResponse'
+        delonix.node.v1.ListPodsResponse:
+            type: object
+            properties:
+                pods:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.Pod'
+                page:
+                    $ref: '#/components/schemas/delonix.node.v1.PageResponse'
+        delonix.node.v1.ListProvidersResponse:
+            type: object
+            properties:
+                providers:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.ProviderInfo'
+        delonix.node.v1.ListSnapshotsResponse:
+            type: object
+            properties:
+                snapshots:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.Snapshot'
+        delonix.node.v1.ListVirtualMachinesResponse:
+            type: object
+            properties:
+                virtual_machines:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.VirtualMachine'
+                page:
+                    $ref: '#/components/schemas/delonix.node.v1.PageResponse'
+        delonix.node.v1.ListVolumesResponse:
+            type: object
+            properties:
+                volumes:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.Volume'
+                page:
+                    $ref: '#/components/schemas/delonix.node.v1.PageResponse'
+        delonix.node.v1.LocalVolume:
+            type: object
+            properties: {}
+        delonix.node.v1.LogChunk:
+            type: object
+            properties:
+                stream:
+                    type: integer
+                    format: enum
+                data:
+                    type: string
+                    format: bytes
+                timestamp_unix_nanos:
+                    type: string
+        delonix.node.v1.Mount:
+            type: object
+            properties:
+                volume:
+                    type: string
+                host_path:
+                    type: string
+                target:
+                    type: string
+                read_only:
+                    type: boolean
+        delonix.node.v1.NamedContainer:
+            type: object
+            properties:
+                name:
+                    type: string
+                spec:
+                    $ref: '#/components/schemas/delonix.node.v1.ContainerSpec'
+        delonix.node.v1.Network:
+            type: object
+            properties:
+                meta:
+                    $ref: '#/components/schemas/delonix.node.v1.ResourceMeta'
+                spec:
+                    $ref: '#/components/schemas/delonix.node.v1.NetworkSpec'
+                conditions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.Condition'
+        delonix.node.v1.NetworkAttachment:
+            type: object
+            properties:
+                network:
+                    type: string
+                ipv4_address:
+                    type: string
+                aliases:
+                    type: array
+                    items:
+                        type: string
+        delonix.node.v1.NetworkSpec:
+            type: object
+            properties:
+                topology:
+                    type: integer
+                    description: |-
+                        Topology, not implementation: "bridge" (single-node L2) or "overlay" (multi-node).
+                         WHICH dataplane realizes it is the network provider's choice; the implementation
+                         name never appears in a field the caller writes.
+                    format: enum
+                ipv4_cidr:
+                    type: string
+                overlay:
+                    $ref: '#/components/schemas/delonix.node.v1.OverlaySpec'
+                extensions:
+                    $ref: '#/components/schemas/delonix.node.v1.ProviderExtensions'
+        delonix.node.v1.NodeInfo:
+            type: object
+            properties:
+                engine_version:
+                    type: string
+                engine_commit:
+                    type: string
+                api_version:
+                    type: string
+                hostname:
+                    type: string
+                kernel:
+                    type: string
+                arch:
+                    type: string
+                rootless:
+                    type: boolean
+                cgroup_driver:
+                    type: string
+                cgroup_delegated:
+                    type: boolean
+                supported_workload_types:
+                    type: array
+                    items:
+                        type: string
+        delonix.node.v1.Operation:
+            type: object
+            properties:
+                id:
+                    type: string
+                state:
+                    type: integer
+                    format: enum
+                target:
+                    type: string
+                    description: '"Container/web", "Stack/shop" — what the operation acts on.'
+                verb:
+                    type: string
+                progress_message:
+                    type: string
+                    description: Human progress line, and a 0..100 figure when the operation can measure one (-1 if not).
+                progress_percent:
+                    type: integer
+                    format: int32
+                create_time:
+                    type: string
+                    format: date-time
+                end_time:
+                    type: string
+                    format: date-time
+                result:
+                    allOf:
+                        - $ref: '#/components/schemas/google.protobuf.Any'
+                    description: 'Set when state = SUCCEEDED: the typed result (e.g. a Container).'
+                error:
+                    allOf:
+                        - $ref: '#/components/schemas/delonix.node.v1.ErrorDetail'
+                    description: Set when state = FAILED.
+                request_id:
+                    type: string
+                    description: The caller's request_id this operation answered, for idempotent retries.
+                trace_id:
+                    type: string
+                    description: W3C trace id of the request that started it, so an operation and its spans join up.
+        delonix.node.v1.OverlayPeer:
+            type: object
+            properties:
+                node_ip:
+                    type: string
+                public_key:
+                    type: string
+                tunnel_ip:
+                    type: string
+        delonix.node.v1.OverlaySpec:
+            type: object
+            properties:
+                vni:
+                    type: integer
+                    format: uint32
+                encrypted:
+                    type: boolean
+                peers:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.OverlayPeer'
+        delonix.node.v1.PageResponse:
+            type: object
+            properties:
+                next_page_token:
+                    type: string
+        delonix.node.v1.PauseVirtualMachineRequest:
+            type: object
+            properties:
+                name:
+                    type: string
+                namespace:
+                    type: string
+                request_id:
+                    type: string
+        delonix.node.v1.PlanStackRequest:
+            type: object
+            properties:
+                stack:
+                    type: string
+                manifest:
+                    type: string
+                    description: Multi-document manifest (YAML or JSON), validated against docs/schema/v1/delonix.json.
+                    format: bytes
+                prune:
+                    type: boolean
+        delonix.node.v1.PlannedChange:
+            type: object
+            properties:
+                target:
+                    type: string
+                action:
+                    type: integer
+                    format: enum
+                fields:
+                    type: array
+                    items:
+                        type: string
+                reason:
+                    type: string
+        delonix.node.v1.Pod:
+            type: object
+            properties:
+                meta:
+                    $ref: '#/components/schemas/delonix.node.v1.ResourceMeta'
+                spec:
+                    $ref: '#/components/schemas/delonix.node.v1.PodSpec'
+                members:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.Container'
+                conditions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.Condition'
+        delonix.node.v1.PodSpec:
+            type: object
+            properties:
+                containers:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.NamedContainer'
+                share_process_namespace:
+                    type: boolean
+                networks:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.NetworkAttachment'
+                ports:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.PortMapping'
+        delonix.node.v1.PortMapping:
+            type: object
+            properties:
+                host_ip:
+                    type: string
+                host_port:
+                    type: integer
+                    format: int32
+                container_port:
+                    type: integer
+                    format: int32
+                protocol:
+                    type: integer
+                    format: enum
+        delonix.node.v1.ProviderExtensions:
+            type: object
+            properties:
+                by_provider:
+                    type: object
+                    additionalProperties:
+                        type: object
+            description: |-
+                Provider-specific options, namespaced by provider id ("libvirt", "proxmox", …).
+                 The contract never names a provider; a provider validates its own entry against its
+                 own schema and fails closed on unknown keys.
+        delonix.node.v1.ProviderInfo:
+            type: object
+            properties:
+                id:
+                    type: string
+                kind:
+                    type: string
+                available:
+                    type: boolean
+                capabilities:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.Capability'
+                health:
+                    $ref: '#/components/schemas/delonix.node.v1.Condition'
+        delonix.node.v1.ProvisionRequest:
+            type: object
+            properties:
+                provider:
+                    type: string
+                extensions:
+                    $ref: '#/components/schemas/delonix.node.v1.ProviderExtensions'
+        delonix.node.v1.PullImageRequest:
+            type: object
+            properties:
+                reference:
+                    type: string
+                platform:
+                    type: string
+                credentials_secret:
+                    type: string
+                request_id:
+                    type: string
+        delonix.node.v1.PushImageRequest:
+            type: object
+            properties:
+                reference:
+                    type: string
+                destination:
+                    type: string
+                credentials_secret:
+                    type: string
+                request_id:
+                    type: string
+        delonix.node.v1.RemoteShare:
+            type: object
+            properties:
+                protocol:
+                    type: integer
+                    format: enum
+                server:
+                    type: string
+                share:
+                    type: string
+                credentials_secret:
+                    type: string
+                read_only:
+                    type: boolean
+        delonix.node.v1.ResourceMeta:
+            type: object
+            properties:
+                name:
+                    type: string
+                    description: Name, unique per (kind, namespace). Immutable.
+                namespace:
+                    type: string
+                    description: Engine isolation namespace. Empty means "default".
+                uid:
+                    type: string
+                    description: Engine-assigned id. Immutable, never reused.
+                labels:
+                    type: object
+                    additionalProperties:
+                        type: string
+                annotations:
+                    type: object
+                    additionalProperties:
+                        type: string
+                create_time:
+                    type: string
+                    format: date-time
+                update_time:
+                    type: string
+                    format: date-time
+                etag:
+                    type: string
+                    description: |-
+                        Opaque version for optimistic concurrency. Send it back on update/delete; a stale
+                         etag is FAILED_PRECONDITION, never a silent overwrite.
+            description: Identity and bookkeeping common to every resource the engine manages.
+        delonix.node.v1.Resources:
+            type: object
+            properties:
+                memory_limit_bytes:
+                    type: string
+                memory_reservation_bytes:
+                    type: string
+                cpu_limit_millis:
+                    type: string
+                cpu_weight:
+                    type: string
+                cpuset:
+                    type: string
+                pids_limit:
+                    type: string
+            description: |-
+                Resource quantities in base units — bytes and millicores — never "1G" strings on the
+                 wire. Parsing human sizes is an edge concern (CLI, manifest), not a contract concern.
+        delonix.node.v1.RestartPolicy:
+            type: object
+            properties:
+                mode:
+                    type: integer
+                    format: enum
+                max_retries:
+                    type: integer
+                    format: int32
+        delonix.node.v1.RestoreSnapshotRequest:
+            type: object
+            properties:
+                virtual_machine:
+                    type: string
+                namespace:
+                    type: string
+                snapshot:
+                    type: string
+                request_id:
+                    type: string
+        delonix.node.v1.ResumeVirtualMachineRequest:
+            type: object
+            properties:
+                name:
+                    type: string
+                namespace:
+                    type: string
+                request_id:
+                    type: string
+        delonix.node.v1.ScanImageRequest:
+            type: object
+            properties:
+                reference:
+                    type: string
+        delonix.node.v1.SecretRef:
+            type: object
+            properties:
+                secret:
+                    type: string
+                key:
+                    type: string
+                delivery:
+                    type: integer
+                    format: enum
+        delonix.node.v1.SecurityContext:
+            type: object
+            properties:
+                privileged:
+                    type: boolean
+                cap_add:
+                    type: array
+                    items:
+                        type: string
+                cap_drop:
+                    type: array
+                    items:
+                        type: string
+                seccomp_profile:
+                    type: string
+                apparmor_profile:
+                    type: string
+                no_new_privileges:
+                    type: boolean
+                masked_paths:
+                    type: array
+                    items:
+                        type: string
+                readonly_paths:
+                    type: array
+                    items:
+                        type: string
+        delonix.node.v1.ShareOf:
+            type: object
+            properties:
+                parent_volume:
+                    type: string
+        delonix.node.v1.Snapshot:
+            type: object
+            properties:
+                name:
+                    type: string
+                includes_memory:
+                    type: boolean
+                state:
+                    type: string
+        delonix.node.v1.StackPlan:
+            type: object
+            properties:
+                changes:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.PlannedChange'
+                has_changes:
+                    type: boolean
+        delonix.node.v1.StartContainerRequest:
+            type: object
+            properties:
+                name:
+                    type: string
+                namespace:
+                    type: string
+        delonix.node.v1.StartVirtualMachineRequest:
+            type: object
+            properties:
+                name:
+                    type: string
+                namespace:
+                    type: string
+                request_id:
+                    type: string
+        delonix.node.v1.StopContainerRequest:
+            type: object
+            properties:
+                name:
+                    type: string
+                namespace:
+                    type: string
+                grace_period:
+                    pattern: ^-?(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,9})?s$
+                    type: string
+        delonix.node.v1.StopVirtualMachineRequest:
+            type: object
+            properties:
+                name:
+                    type: string
+                namespace:
+                    type: string
+                request_id:
+                    type: string
+        delonix.node.v1.VirtualMachine:
+            type: object
+            properties:
+                meta:
+                    $ref: '#/components/schemas/delonix.node.v1.ResourceMeta'
+                spec:
+                    $ref: '#/components/schemas/delonix.node.v1.VirtualMachineSpec'
+                status:
+                    $ref: '#/components/schemas/delonix.node.v1.VirtualMachineStatus'
+        delonix.node.v1.VirtualMachineSpec:
+            type: object
+            properties:
+                image:
+                    type: string
+                    description: |-
+                        Image store reference or path. Resolved by the engine the same way for every
+                         entry point (the CLI and the manifest diverged on this once).
+                vcpus:
+                    type: integer
+                    format: int32
+                memory_bytes:
+                    type: string
+                disk_bytes:
+                    type: string
+                networks:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.NetworkAttachment'
+                cloud_init:
+                    $ref: '#/components/schemas/delonix.node.v1.CloudInit'
+                provider:
+                    type: string
+                    description: |-
+                        Provider selection is a REQUIREMENT, not a name: the engine picks a provider that
+                         supports every listed capability, or honours `provider` when set explicitly.
+                required_capabilities:
+                    type: array
+                    items:
+                        type: string
+                extensions:
+                    $ref: '#/components/schemas/delonix.node.v1.ProviderExtensions'
+                restart:
+                    type: integer
+                    format: enum
+        delonix.node.v1.VirtualMachineStatus:
+            type: object
+            properties:
+                phase:
+                    type: integer
+                    format: enum
+                provider:
+                    type: string
+                ip_addresses:
+                    type: array
+                    items:
+                        type: string
+                ip_predicted:
+                    type: boolean
+                    description: |-
+                        True when the address is computed (e.g. derived from the MAC) rather than observed
+                         from the guest. "Has an IP" is only "is up" when this is false.
+                conditions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.Condition'
+        delonix.node.v1.Volume:
+            type: object
+            properties:
+                meta:
+                    $ref: '#/components/schemas/delonix.node.v1.ResourceMeta'
+                spec:
+                    $ref: '#/components/schemas/delonix.node.v1.VolumeSpec'
+                used_bytes:
+                    type: string
+                    description: |-
+                        Absent when usage could not be measured (e.g. unreadable subuid-owned data) —
+                         unknown is not zero.
+                conditions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/delonix.node.v1.Condition'
+        delonix.node.v1.VolumeSpec:
+            type: object
+            properties:
+                local:
+                    $ref: '#/components/schemas/delonix.node.v1.LocalVolume'
+                remote:
+                    $ref: '#/components/schemas/delonix.node.v1.RemoteShare'
+                share_of:
+                    $ref: '#/components/schemas/delonix.node.v1.ShareOf'
+                quota_bytes:
+                    type: string
+                alert_percent:
+                    type: integer
+                    format: int32
+                provision:
+                    allOf:
+                        - $ref: '#/components/schemas/delonix.node.v1.ProvisionRequest'
+                    description: |-
+                        Ask a storage provider to CREATE the backing share (dataset, quota, export) before
+                         mounting it. Absent = the share must already exist.
+        delonix.node.v1.WaitContainerRequest:
+            type: object
+            properties:
+                name:
+                    type: string
+                namespace:
+                    type: string
+        delonix.node.v1.WaitContainerResponse:
+            type: object
+            properties:
+                exit_code:
+                    type: integer
+                    format: int32
+                reason:
+                    type: string
+        google.protobuf.Any:
+            type: object
+            properties:
+                '@type':
+                    type: string
+                    description: The type of the serialized message.
+            additionalProperties: true
+            description: Contains an arbitrary serialized message along with a @type that describes the type of the serialized message.
+        google.rpc.Status:
+            type: object
+            properties:
+                code:
+                    type: integer
+                    description: The status code, which should be an enum value of [google.rpc.Code][google.rpc.Code].
+                    format: int32
+                message:
+                    type: string
+                    description: A developer-facing error message, which should be in English. Any user-facing error message should be localized and sent in the [google.rpc.Status.details][google.rpc.Status.details] field, or localized by the client.
+                details:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/google.protobuf.Any'
+                    description: A list of messages that carry the error details.  There is a common set of message types for APIs to use.
+            description: 'The `Status` type defines a logical error model that is suitable for different programming environments, including REST APIs and RPC APIs. It is used by [gRPC](https://github.com/grpc). Each `Status` message contains three pieces of data: error code, error message, and error details. You can find out more about this error model and how to work with it in the [API Design Guide](https://cloud.google.com/apis/design/errors).'
+tags:
+    - name: ContainerService
+    - name: ImageService
+    - name: NetworkService
+    - name: NodeService
+    - name: OperationService
+    - name: PodService
+    - name: StackService
+    - name: VirtualMachineService
+    - name: VolumeService

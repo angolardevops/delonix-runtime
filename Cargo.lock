@@ -730,6 +730,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 
 [[package]]
+name = "delonix-compute"
+version = "3.1.0"
+dependencies = [
+ "delonix-runtime-core",
+ "serde",
+]
+
+[[package]]
 name = "delonix-cri"
 version = "3.1.0"
 dependencies = [
@@ -819,6 +827,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "delonix-model"
+version = "3.1.0"
+
+[[package]]
 name = "delonix-net"
 version = "3.1.0"
 dependencies = [
@@ -866,16 +878,19 @@ dependencies = [
  "bytes",
  "clap",
  "clap_complete",
+ "delonix-compute",
  "delonix-cri",
  "delonix-image",
  "delonix-mcp",
  "delonix-mgmt",
+ "delonix-model",
  "delonix-net",
  "delonix-proxmox",
  "delonix-runtime",
  "delonix-runtime-core",
  "delonix-scan",
  "delonix-security-runtime",
+ "delonix-stack",
  "delonix-truenas",
  "delonix-vm",
  "delonix-volume",
@@ -932,6 +947,15 @@ dependencies = [
 
 [[package]]
 name = "delonix-security-runtime"
+version = "3.1.0"
+dependencies = [
+ "delonix-runtime-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "delonix-stack"
 version = "3.1.0"
 dependencies = [
  "delonix-runtime-core",

@@ -15,7 +15,7 @@
 - [ ] `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`,
       `cargo fmt --all --check`, and `cargo test --workspace` are all clean
 - [ ] New user-facing strings are English in the source, wrapped in `po::t`/`po::tf`, with a
-      Portuguese entry added to `crates/delonix-runtime-bin/data/pt.po` (not applicable if this PR
+      Portuguese entry added to `bins/delonix-runtime-bin/data/pt.po` (not applicable if this PR
       doesn't touch CLI output)
 - [ ] If this adds/changes a command with multiple entry points (see CONTRIBUTING.md), all of them
       are wired consistently

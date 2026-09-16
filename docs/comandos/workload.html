@@ -158,7 +158,7 @@ or the VM engine, so you can manage both as one thing. <strong>Creation stays de
 — a <code>kind: Workload</code> in a manifest (<code>spec.type: container|vm|pod|microvm</code>)
 lowers to the matching Kind in <code>manifest::load</code>; see
 <a href="../kinds.html">Kinds</a> and <code>examples/workload.yaml</code>.</p>
-<p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/workload.rs"><code>cmd/workload.rs</code></a></p>
+<p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/workload.rs"><code>cmd/workload.rs</code></a></p>
 <div class='help'><pre><code>Usage: delonix workload [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
@@ -335,7 +335,7 @@ function esc(s){return s.replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&
 
 function tokBash(line){
   var out='',last=0,m;
-  var re=/(#.*$)|("(?:[^"\\]|\\.)*")|('(?:[^'\\]|\\.)*')|(--?[A-Za-z][\w-]*)|\b(delonix|delonixctl|dlx)\b/g;
+  var re=/(#.*$)|("(?:[^"\\]|\\.)*")|('(?:[^'\\]|\\.)*')|(--?[A-Za-z][\w-]*)|\b(delonix|dlx)\b/g;
   while((m=re.exec(line))){
     out+=esc(line.slice(last,m.index));
     if(m[1])out+='<span class="tok-comment">'+esc(m[1])+'</span>';
@@ -391,7 +391,7 @@ function highlightAll(){
     var isHelp=pre.parentElement&&pre.parentElement.classList.contains('help');
     if(isHelp)html=highlightHelp(text);
     else if(/^apiVersion:|\nkind:\s/.test(text))html=highlightYaml(text);
-    else if(pre.closest('.ex')||/^(delonix|delonixctl|dlx)\b/.test(text.trim()))html=highlightBash(text);
+    else if(pre.closest('.ex')||/^(delonix|dlx)\b/.test(text.trim()))html=highlightBash(text);
     else return;
     code.innerHTML=html;
   });

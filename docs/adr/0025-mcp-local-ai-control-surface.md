@@ -4,7 +4,7 @@
 - **Date:** 2026-08-29
 - **Deciders:** Walter (owner)
 - **Related:** ADR-0010 (remote management API, Rejected), ADR-0003 (tenancy-free capability
-  model, Proposed), `crates/delonix-mgmt/src/lib.rs` (the existing local control socket),
+  model, Proposed), `crates/interfaces/delonix-mgmt/src/lib.rs` (the existing local control socket),
   `docs/adr/README.md` guardrails.
 
 ## Context
@@ -44,7 +44,7 @@ dependency (`rmcp`) and `tokio`.
    invocation, not a persistent daemon. This does not trip guardrail #1.
 2. **No tenant, no OAuth/OIDC, no IAM scopes.** The single principal is "the local uid running
    `delonix mcp serve`" — the same trust boundary `delonix-mgmt` already uses for its unix socket
-   (`SO_PEERCRED` uid-equality, `crates/delonix-mgmt/src/lib.rs`). A `tenant`/`project`/
+   (`SO_PEERCRED` uid-equality, `crates/interfaces/delonix-mgmt/src/lib.rs`). A `tenant`/`project`/
    `environment` field would put a notion of tenant in this repo, which guardrail #2 forbids.
 3. **A remote, multi-tenant, OAuth-authenticated HTTP variant is explicitly out of scope for this
    repo.** If that surface is ever needed, it is a `delonix-paas` concern layered on top of this
