@@ -74,4 +74,17 @@ pub trait RunHost {
     fn default_masked_paths(&self) -> Vec<String>;
     fn default_readonly_paths(&self) -> Vec<String>;
     fn rootless(&self) -> bool;
+    /// A seccomp profile file: its JSON, and the syscalls it names that this
+    /// architecture does not have. `Err` is the reason, shown after the flag.
+    fn load_seccomp_profile(
+        &self,
+        path: &str,
+    ) -> std::result::Result<(String, Vec<String>), String>;
+    /// Makes sure an AppArmor profile is usable on this host (loading the
+    /// engine's own profile when that is the one named).
+    fn ensure_apparmor(&self, profile: &str) -> Result<()>;
+    /// Refuses a `--secret` naming a secret that does not exist.
+    fn check_secret(&self, name: &str) -> Result<()>;
+    /// Where a detached container's log goes when `--log-file` is not given.
+    fn default_log_path(&self, id: &str) -> String;
 }

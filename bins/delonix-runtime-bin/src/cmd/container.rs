@@ -2518,6 +2518,35 @@ impl delonix_compute::ports::RunHost for CliRunPorts<'_> {
     fn rootless(&self) -> bool {
         runtime::is_rootless()
     }
+
+    fn load_seccomp_profile(
+        &self,
+        path: &str,
+    ) -> std::result::Result<(String, Vec<String>), String> {
+        let json = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+        let (_, unknown) = runtime::seccomp_profile::parse(&json).map_err(|e| e.to_string())?;
+        Ok((json, unknown))
+    }
+
+    fn ensure_apparmor(&self, profile: &str) -> Result<()> {
+        ensure_apparmor(profile)
+    }
+
+    fn check_secret(&self, name: &str) -> Result<()> {
+        delonix_runtime_core::SecretStore::open(super::util::state_root())?
+            .load(name)
+            .map(|_| ())
+    }
+
+    fn default_log_path(&self, id: &str) -> String {
+        self.images
+            .root()
+            .join("containers")
+            .join(id)
+            .join("log")
+            .to_string_lossy()
+            .into_owned()
+    }
 }
 
 pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Result<()> {
@@ -2563,14 +2592,9 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         image,
         quiet,
         no_supervisor,
-        security_opt,
-        apparmor,
         selinux,
         host_pid,
         host_ipc,
-        detect,
-        secret,
-        secret_files,
         ip,
         wait_healthy,
         wait_timeout,
@@ -2579,7 +2603,6 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         pod_infra_pid,
         net_bps,
         net_burst,
-        log_file,
         log_cri,
         ..
     } = opts;
@@ -2758,117 +2781,10 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     print_notices(&resolved.notices);
     let rootfs = resolved.rootfs;
     let mounts = resolved.mounts;
+    let apparmor_profile = resolved.apparmor_profile;
     let mut c = delonix_compute::run::build_record(&opts_copy, resolved.record)?;
-    // `--security-opt seccomp=unconfined` / `apparmor=<profile>` (docker-style).
-    let mut apparmor_profile = apparmor;
-    for opt in &security_opt {
-        match opt.split_once('=') {
-            // Only `unconfined` (off) and `detect` (log mode) are supported; a
-            // custom PROFILE (`seccomp=/x.json`) used to be ACCEPTED and then IGNORED —
-            // the container ran with the built-in profile while the user
-            // thought theirs was active. Fail-closed: explicit error (a finding from
-            // the Docker/Podman analysis; invariant "no silent failure").
-            Some(("seccomp", "unconfined")) => c.seccomp = Some("unconfined".into()),
-            // A custom OCI profile: `seccomp=/path/to/profile.json`. Read HERE,
-            // at the boundary, and stored as content — the container's init runs
-            // after `pivot_root`, where a host path means nothing. Parsed here
-            // too, so a broken profile is a clear error at `run` instead of a
-            // container that exits 126 with the reason buried in its log.
-            Some(("seccomp", v)) => {
-                let json = std::fs::read_to_string(v).map_err(|e| {
-                    Error::Invalid(format!("--security-opt seccomp={v}: {e}"))
-                })?;
-                let (_, unknown) = runtime::seccomp_profile::parse(&json)
-                    .map_err(|e| Error::Invalid(format!("--security-opt seccomp={v}: {e}")))?;
-                for u in &unknown {
-                    eprintln!(
-                        "delonix: warning — seccomp profile names '{u}', which this architecture does not have"
-                    );
-                }
-                c.seccomp_profile = Some(json);
-            }
-            Some(("apparmor", v)) => apparmor_profile = Some(v.to_string()),
-            // `no-new-privileges` — docker's spelling, and docker's value-less
-            // form (`--security-opt no-new-privileges`) means TRUE. The engine
-            // already defaults to true, so the useful form here is `=false`,
-            // which is how the CRI's own `no_new_privs: false` reaches us.
-            Some(("no-new-privileges", v)) => match v {
-                "true" | "1" => c.no_new_privs = Some(true),
-                "false" | "0" => c.no_new_privs = Some(false),
-                _ => {
-                    return Err(Error::Invalid(format!(
-                        "invalid --security-opt no-new-privileges='{v}': expected true or false"
-                    )))
-                }
-            },
-            None if opt == "no-new-privileges" => c.no_new_privs = Some(true),
-            _ => {
-                return Err(Error::Invalid(format!(
-                    "invalid --security-opt: '{opt}' (seccomp=unconfined|<profile.json> | apparmor=… | no-new-privileges[=true|false])"
-                )))
-            }
-        }
-    }
-    // `--detect`: seccomp in log mode (doesn't block) — to discover syscalls.
-    // Doesn't override an explicit `seccomp=` from `--security-opt`.
-    if detect && c.seccomp.is_none() {
-        c.seccomp = Some("detect".to_string());
-    }
-    if let Some(p) = &apparmor_profile {
-        ensure_apparmor(p)?;
-        if p != "unconfined" {
-            c.apparmor = Some(p.clone());
-        }
-    }
-    // Persistir o que o `start` tem de reconstruir. O `apparmor` acima já era
-    // guardado (para o `exec` confinar quem entra depois) e mesmo assim o `start`
-    // não o lia — ver `runspec_do_start_reproduz_o_do_run`, que é o gate que
-    // impede a classe inteira de voltar.
+    let log_path = c.log_path.clone();
 
-    // ---- secrets ----
-    //
-    // Only the NAMES are recorded. The values are resolved by the engine at spawn
-    // time for BOTH modes (env and `--secret-files`) — see the `env` binding in
-    // `runtime::spawn`. This used to `c.env.extend(resolve_env(...))` right here,
-    // which persisted every decrypted value in cleartext in the container record
-    // and exposed it through `container inspect`/`describe`, defeating the whole
-    // encrypted-at-rest vault the moment a secret was consumed.
-    //
-    // The existence check stays: a `--secret` naming something absent must fail
-    // NOW, loudly, and not start a container missing the credential it asked for.
-    if !secret.is_empty() {
-        let sstore = delonix_runtime_core::SecretStore::open(super::util::state_root())?;
-        for name in &secret {
-            sstore.load(name)?;
-        }
-        c.secrets = secret.clone();
-        c.secret_files = secret_files;
-    }
-
-    // `--log-file` overrides the default path (`<root>/containers/<id>/log`).
-    let log_path = if let Some(lf) = &log_file {
-        Some(lf.clone())
-    } else if detach {
-        Some(
-            images
-                .root()
-                .join("containers")
-                .join(&id)
-                .join("log")
-                .to_string_lossy()
-                .into_owned(),
-        )
-    } else {
-        None
-    };
-    c.log_path = log_path.clone();
-
-    // `--net`: host (default, no own netns) | none (isolated netns, no
-    // connectivity) | <name> (joins the NAMED netns that the holder creates in
-    // `infra::attach_container` — which creates the netns via `ip netns add` on the
-    // holder's SIDE, independent of the container's process; so the container has
-    // to JOIN it via `RunSpec.join_netns`, not create its own with `new_netns` —
-    // that was the wrong approach, tried and corrected here).
     let custom_net = custom_net_name(&net);
     // `--ip`: `infra::attach_container_on_ip` reserves the address in the SAME
     // per-prefix IPAM registry that `attach_container`'s `allocate` reads
