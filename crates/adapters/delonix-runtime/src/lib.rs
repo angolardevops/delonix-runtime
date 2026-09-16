@@ -5371,18 +5371,17 @@ unsafe fn close_range_raw(first: u32, last: u32) {
 /// * the byte arrives — the normal case, and it is already there by the time we
 ///   get here on every path with a user namespace (the child was released long
 ///   before);
-/// * EOF — the init died before mounting, or reached `execvp` without writing
-///   (the fd is CLOEXEC). Nothing to wait for; the status reconciles the same
-///   way it always did. Deliberately NOT turned into an error here: changing
-///   what `run -d` reports for a container that fails to mount is a separate
-///   decision, with its own measurements, and mixing it into a race fix is how
-///   one lands unreviewed;
+/// * EOF — the init exited before its root filesystem was ready. It cannot mean
+///   anything else: every path that reaches `execvp` passes the write first, so
+///   a successful start ALWAYS sends the byte. [`spawn`] turns this into an error
+///   for a detached start (see there); in the foreground the `waitpid` that
+///   follows already hands the real exit code to the caller;
 /// * the ceiling — a mount that hangs (a bind onto an unresponsive NFS server is
 ///   the real case) must not hang `run` forever, because before this change it
 ///   did not. It is said out loud rather than swallowed: the caller has to know
 ///   the guarantee did not hold, because that is exactly when an `exec` next can
 ///   land on the host.
-fn wait_for_mounts(ready_r: i32, name: &str) {
+fn wait_for_mounts(ready_r: i32, name: &str) -> MountWait {
     // Generous by design: real mounts take milliseconds, so anything near this
     // is already pathological, and a tight ceiling would reintroduce the race on
     // a loaded machine — which is precisely when it was measured to bite.
@@ -5390,9 +5389,21 @@ fn wait_for_mounts(ready_r: i32, name: &str) {
     wait_for_mounts_with(ready_r, name, CEILING_MS)
 }
 
+/// How the wait for the init's «mounted» byte ended.
+#[derive(Debug, PartialEq, Eq)]
+enum MountWait {
+    /// The byte arrived: the mount namespace is final.
+    Ready,
+    /// EOF with no byte: the init exited before its root filesystem was ready.
+    InitExited,
+    /// The ceiling passed, or the pipe could not be read. The container may still be
+    /// mounting; never read as a failure, because it may not be one.
+    Unknown,
+}
+
 /// [`wait_for_mounts`] with the ceiling as an argument, so a test can exercise
 /// the three exits in milliseconds instead of a minute.
-fn wait_for_mounts_with(ready_r: i32, name: &str, ceiling_ms: i32) {
+fn wait_for_mounts_with(ready_r: i32, name: &str, ceiling_ms: i32) -> MountWait {
     let mut pfd = libc::pollfd {
         fd: ready_r,
         events: libc::POLLIN,
@@ -5400,6 +5411,7 @@ fn wait_for_mounts_with(ready_r: i32, name: &str, ceiling_ms: i32) {
     };
     // SAFETY: single valid fd we own; poll writes only into `pfd.revents`.
     let n = unsafe { libc::poll(&mut pfd, 1, ceiling_ms) };
+    let mut outcome = MountWait::Unknown;
     if n == 0 {
         eprintln!(
             "delonix: warning: {name} did not finish mounting within {}ms — it is running, but a \
@@ -5409,14 +5421,18 @@ fn wait_for_mounts_with(ready_r: i32, name: &str, ceiling_ms: i32) {
         );
     } else if n > 0 {
         // Drain the byte (or observe the EOF) so the fd is closed in a known state.
-        // SAFETY: valid fd, buffer we own.
-        unsafe {
-            let mut b = [0u8; 1];
-            let _ = libc::read(ready_r, b.as_mut_ptr() as *mut libc::c_void, 1);
-        }
+        let mut b = [0u8; 1];
+        // SAFETY: valid fd, and `b` is a live 1-byte buffer we own.
+        let got = unsafe { libc::read(ready_r, b.as_mut_ptr() as *mut libc::c_void, 1) };
+        outcome = match got {
+            1 => MountWait::Ready,
+            0 => MountWait::InitExited,
+            _ => MountWait::Unknown,
+        };
     }
     // SAFETY: ours, and unused from here on.
     unsafe { libc::close(ready_r) };
+    outcome
 }
 
 fn spawn(
@@ -6023,7 +6039,26 @@ fn spawn(
     // the console `recv_fd` and the log shim have an order the comments above
     // call CRITICAL, and this wait needs none of it — it only has to be the LAST
     // thing before the caller gets control.
-    wait_for_mounts(ready.0, &container.name);
+    // A DETACHED start whose init exited before mounting is a failed start, and says
+    // so. It used to return `Ok`, publish the record and let `run -d` exit 0 over a
+    // dead container — measured 2026-09-16 on Ubuntu 24.04 with the userns
+    // restriction on: `run -d` rc=0, and the next `exec` said «not running». A script
+    // or a CI job reads that 0 as success. We are the parent, so the real exit code is
+    // one `waitpid` away, and the record is never published. The foreground path needs
+    // nothing: its `waitpid` below already returns the code to the caller.
+    if wait_for_mounts(ready.0, &container.name) == MountWait::InitExited && detach {
+        let code = waitpid(pid, None).map(wait_to_code).unwrap_or(-1);
+        remove_container_cgroup(container);
+        return Err(Error::Runtime {
+            context: "container start",
+            message: format!(
+                "{}: the container's init exited with code {code} before its root filesystem \
+                 was ready — the container is not running (its own error is printed above, or \
+                 in `delonix container logs {}`)",
+                container.name, container.name
+            ),
+        });
+    }
 
     // The record is published AFTER the wait, and that ordering is the whole
     // point. `pid` + `Running` in the store is what a THIRD process reads to
@@ -9538,7 +9573,10 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
             libc::close(fds[1]);
         }
         let t = Instant::now();
-        wait_for_mounts_with(fds[0], "byte", 5_000);
+        assert_eq!(
+            wait_for_mounts_with(fds[0], "byte", 5_000),
+            MountWait::Ready
+        );
         assert!(
             t.elapsed().as_millis() < 1_000,
             "com o byte escrito devia devolver de imediato, demorou {:?}",
@@ -9555,7 +9593,12 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
         // SAFETY: `fds[1]` is the write end just created, closed once.
         unsafe { libc::close(fds[1]) };
         let t = Instant::now();
-        wait_for_mounts_with(fds[0], "eof", 5_000);
+        // EOF with no byte is an init that exited before mounting — the case a detached
+        // start now reports as a failure instead of `Ok`.
+        assert_eq!(
+            wait_for_mounts_with(fds[0], "eof", 5_000),
+            MountWait::InitExited
+        );
         assert!(
             t.elapsed().as_millis() < 1_000,
             "com EOF devia devolver de imediato, demorou {:?}",
@@ -9570,7 +9613,11 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
         // into.
         assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
         let t = Instant::now();
-        wait_for_mounts_with(fds[0], "tecto", 120);
+        // The ceiling is never read as a failure: the container may still be mounting.
+        assert_eq!(
+            wait_for_mounts_with(fds[0], "tecto", 120),
+            MountWait::Unknown
+        );
         let waited = t.elapsed();
         assert!(
             waited.as_millis() >= 100 && waited.as_millis() < 5_000,
