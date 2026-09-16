@@ -323,7 +323,7 @@ pub fn run(action: NetnsCmd) -> Result<()> {
             Ok(())
         }
         NetnsCmd::Down => {
-            infra::teardown();
+            infra::teardown()?;
             println!("ingress DOWN — infra netns torn down.");
             Ok(())
         }
