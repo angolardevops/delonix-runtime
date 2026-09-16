@@ -184,15 +184,16 @@ diferença. Ao lado, o `git worktree list` tinha **oito** worktrees vivos, vári
 muito fechadas. Por isso:
 
 1. **Criar o worktree antes da primeira edição**, em
-   `~/workspace/worktrees/delonix-runtime/<tarefa>` e **nunca em `/tmp`**:
-   `git worktree add -b <branch> ~/workspace/worktrees/delonix-runtime/<tarefa> origin/main`,
+   `<workspace>/.worktrees/delonix-runtime/<tarefa>` (a convenção da `CLAUDE.md` da raiz
+   do workspace, #53 do harness) e **nunca em `/tmp`**:
+   `git worktree add -b <branch> ~/workspace/ngolacloud/.worktrees/delonix-runtime/<tarefa> origin/main`,
    com `CARGO_TARGET_DIR=<repo>/target` para reaproveitar o cache de build.
-   O `/tmp` é limpo no arranque, e esta máquina reinicia: a 2026-09-16 um reinício levou
-   cinco worktrees de integração a meio de uma pilha de PRs. Não se perdeu trabalho só
-   porque todas as branches já estavam empurradas. O `~/workspace/ngolacloud/` não serve:
-   é ele próprio um repositório git, e os worktrees apareceriam lá como lixo por versionar.
-   **Trabalho longo: commit e push da branch cedo e a cada passo com valor** — um worktree
-   persistente protege contra o reinício, uma branch empurrada protege contra tudo o resto.
+   O `/tmp` é esvaziado a cada arranque, e esta máquina reinicia: a 2026-09-16 um reinício
+   levou cinco worktrees de integração a meio de uma pilha de PRs; nada se perdeu só porque
+   as branches já estavam empurradas. O `.worktrees/` fica fora deste repo e já é ignorado
+   pelo `.gitignore` do harness. **Trabalho longo: commit e push da branch cedo e a cada
+   passo com valor**, e logs de builds longos fora do `/tmp` — um worktree persistente
+   protege contra o reinício, uma branch empurrada protege contra tudo o resto.
 2. **No fim**: commitar no worktree → `git cherry-pick <sha>` na `main` → **correr os gates
    OUTRA VEZ na `main`** → push → remover. Um cherry-pick limpo **não** prova que compila: a
    base mudou desde que o worktree partiu, e é aí que a `main` cresceu quatro commits alheios.
