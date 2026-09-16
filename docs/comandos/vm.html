@@ -894,6 +894,11 @@ Options:
           [default: table]
           [possible values: table, json]
 
+  -A, --all
+          Also list the VMs that are not running.
+          
+          Without it `ls` shows what is UP, the same cut `docker ps` makes.
+
       --namespace &lt;NAMESPACE&gt;
           Show only the VMs of this isolation namespace (see `vm create --namespace`). Omit to list every namespace.
           
