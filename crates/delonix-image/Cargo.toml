@@ -33,3 +33,6 @@ criterion = { workspace = true }
 [[bench]]
 name = "parse_reference"
 harness = false
+
+[lints]
+workspace = true

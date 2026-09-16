@@ -67,3 +67,6 @@ libc = { workspace = true }
 ratatui = { workspace = true }
 oci-spec = { workspace = true, features = ["runtime"] }
 schemars = { workspace = true, features = ["derive"] }
+
+[lints]
+workspace = true
