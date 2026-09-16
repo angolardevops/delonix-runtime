@@ -4070,7 +4070,10 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         if policy_supervised(&restart) {
             c.restart_policy = Some(restart.clone());
         }
-        run_supervised(store, &mut c, &rootfs, &spec, &restart, &id)?;
+        if let Err(e) = run_supervised(store, &mut c, &rootfs, &spec, &restart, &id) {
+            discard_unstarted(images, store, &c.id);
+            return Err(e);
+        }
         // O supervisor tomou TODO o caminho detached (não só o `--restart`),
         // por isso é aqui que a maioria dos `-d` termina — e era aqui que o
         // `--wait` estava a ser silenciosamente ignorado.
@@ -4079,7 +4082,13 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         }
         return Ok(());
     }
-    let final_status = runtime::create_with(store, &mut c, &rootfs, &spec)?;
+    let final_status = match runtime::create_with(store, &mut c, &rootfs, &spec) {
+        Ok(s) => s,
+        Err(e) => {
+            discard_unstarted(images, store, &c.id);
+            return Err(e);
+        }
+    };
     if let Some(n) = &custom_net {
         c.network = Some(n.clone());
         c.ip = attached_ip;
@@ -7622,6 +7631,21 @@ pub(crate) fn apply_probe(
         last_exit: exit,
         checked_unix: now_unix,
     }
+}
+
+/// Removes the on-disk state of a container whose start FAILED before any record was
+/// published — the overlay (`merged`/`upper`/`work`) and the log of an init that died.
+///
+/// Nothing else would: `container rm` and `system prune` find containers through their
+/// records, and a start that failed never wrote one, so the directory was orphaned on
+/// every failed `run -d` (measured 2026-09-16: one per attempt). Guarded by the record:
+/// if one exists, this is a real container and its state is left alone.
+fn discard_unstarted(images: &ImageStore, store: &Store, id: &str) {
+    if store.load(id).is_ok() {
+        return;
+    }
+    let _ = images.unmount_rootfs(id);
+    let _ = images.remove_container_dir(id);
 }
 
 /// Starts the health monitor as a CHILD PROCESS of the supervisor, not a thread.
