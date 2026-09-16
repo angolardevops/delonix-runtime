@@ -419,7 +419,7 @@ fn long_version_text() -> &'static str {
         format!(
             "{v}\n\
          {tag}\n\
-         commit: {hash} · built: {date} · {lic}\n\
+         commit: {hash}{since} · built: {date} · {lic}\n\
          \n\
          {try_}:\n\
          \x20 delonix container run -d -p 8080:80 nginx   # {c1}\n\
@@ -432,6 +432,13 @@ fn long_version_text() -> &'static str {
             v = env!("CARGO_PKG_VERSION"),
             tag = t("daemonless, rootless-first container & microVM engine (kernel-native, Rust)"),
             hash = env!("DELONIX_GIT_HASH"),
+            since = match env!("DELONIX_GIT_SINCE").split_once('|') {
+                Some((n, tag)) => format!(
+                    " ({})",
+                    cmd::po::tf("+{n} commits since {tag}", &[("n", n), ("tag", tag)])
+                ),
+                None => String::new(),
+            },
             date = env!("DELONIX_BUILD_DATE"),
             lic = "Apache-2.0",
             try_ = t("get started"),

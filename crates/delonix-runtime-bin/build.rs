@@ -94,10 +94,35 @@ fn main() {
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_else(|| "unknown".into());
+    // Distance from the newest tag this commit contains. The workspace version
+    // stays EQUAL to that tag between releases (scripts/version_gate.py), so on
+    // its own the number cannot tell a release build from one 45 commits later —
+    // measured: a build from main answered `delonix 3.1.0` while carrying work
+    // no release had shipped. Empty at the tag itself and without git.
+    let since = std::process::Command::new("git")
+        .args(["describe", "--tags", "--long", "--match", "v[0-9]*"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .and_then(|d| {
+            // `v3.1.0-45-g45219046`: the tag may itself contain `-`, so split
+            // from the right.
+            let mut parts = d.rsplitn(3, '-');
+            let _hash = parts.next()?;
+            let count = parts.next()?;
+            let tag = parts.next()?;
+            (count != "0").then(|| format!("{count}|{tag}"))
+        })
+        .unwrap_or_default();
     println!("cargo:rustc-env=DELONIX_GIT_HASH={hash}");
+    println!("cargo:rustc-env=DELONIX_GIT_SINCE={since}");
     println!("cargo:rustc-env=DELONIX_BUILD_DATE={date}");
     // Re-corre quando o HEAD muda — sem isto o hash fossiliza entre commits.
     println!("cargo::rerun-if-changed=../../.git/HEAD");
+    // A new tag changes the distance without moving HEAD.
+    println!("cargo::rerun-if-changed=../../.git/refs/tags");
+    println!("cargo::rerun-if-changed=../../.git/packed-refs");
 }
 
 /// Collect `(relative-path, absolute-path)` of every file under `dir`.
