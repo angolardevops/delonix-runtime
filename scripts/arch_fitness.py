@@ -55,6 +55,7 @@ LAYERS = {
     "delonix-runtime-core": FOUNDATION,  # → delonix-model + delonix-state + delonix-telemetry (P3)
     "delonix-model": FOUNDATION,
     "delonix-stack": CONTEXT,
+    "delonix-compute": CONTEXT,
     "delonix-net-rules": FOUNDATION,  # → delonix-networking/domain (P2)
     "delonix-security-runtime": CONTEXT,  # → delonix-security (P2)
     "delonix-runtime": ADAPTER,  # → delonix-linux (P3)

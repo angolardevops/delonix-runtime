@@ -1,0 +1,12 @@
+[package]
+name = "delonix-compute"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+delonix-runtime-core = { workspace = true }
+serde = { workspace = true }
+
+[lints]
+workspace = true

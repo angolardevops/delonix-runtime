@@ -2,7 +2,7 @@
 
 Motor de **containers e microVMs daemonless, rootless-first, kernel-native, em Rust**.
 Repositório **público** (`angolardevops/delonix-runtime`, Apache-2.0) — ver
-[README.md](README.md) para a arquitectura dos 17 crates.
+[README.md](README.md) para a arquitectura dos 18 crates.
 
 ## Identidade e fronteira do motor (ler primeiro)
 
@@ -6317,7 +6317,7 @@ antes de qualquer commit:
    genuína. Decidir QUANDO e PARA QUEM publicar portas numa frota multi-inquilino não é do
    motor.
 
-## Arquitetura (17 crates)
+## Arquitetura (18 crates)
 
 | Crate | Responsabilidade |
 |---|---|
@@ -6325,6 +6325,7 @@ antes de qualquer commit:
 | `delonix-runtime` / `delonix-runtime-bin` | runtime de containers (clone/namespaces/cgroups, create/stop/exec, reconcile_status) + a CLI `delonix` completa (container/image/build/vm/volumes/network — ver secção "CLI" acima) |
 | `delonix-model` | fundação PURA do ADR-0040: o que qualquer camada nomeia sem depender de mecanismo. Hoje só os nomes gerados (`names`); os ids, o `ResourceMeta` e os `DX_*` entram nas fatias seguintes da P2 |
 | `delonix-stack` | contexto Stack (`core.delonix.io`, ADR-0040): a tabela de Kinds (`kinds`), o reconciliador de 3 vias (`reconcile`), o tipo `Condition` e o histórico de revisões (`revision`). Planear é puro; o `-bin` re-exporta os módulos com os nomes antigos (`cmd::kinds`…), por isso nenhum chamador mudou. `manifest`/`stack`/`schema`/`compose` continuam no `-bin`: cada um depende de 20 a 30 módulos de lá |
+| `delonix-compute` | contexto Compute (`compute.delonix.io`, ADR-0040): a especificação de execução única, `RunOpts`, que a CLI, os documentos `Container`/`Pod`, o compose, a Docker API, o kind e o `App` produzem antes de um só caminho a executar. Os casos de uso (`cmd_run` e os tradutores) continuam no `-bin` — os tradutores dependem dos tipos de schema, que derivam `schemars` |
 | `delonix-net` | SDN rootless: holder netns + bridge + slirp único, DNAT/firewall nft, compat CNI, overlay WireGuard inter-nó |
 | `delonix-net-rules` | regras de rede PURAS, **zero dependências** — `Cidr`, nome de bridge, IPAM dentro de um prefixo, leitura de taxas. Existe para o control-plane do `delonix-paas` calcular o MESMO que o motor sem um salto de rede pelo meio; o `delonix-net` re-exporta tudo, por isso nenhum consumidor teve de mudar |
 | `delonix-image` | imagens OCI: pull/registry/build, buildpacks CNB, registo interno, verificação de assinatura |
