@@ -679,6 +679,9 @@ msgstr "motor de containers e microVMs daemonless, rootless-first (kernel-native
 msgid "get started"
 msgstr "por onde começar"
 
+msgid "+{n} commits since {tag}"
+msgstr "+{n} commits desde {tag}"
+
 msgid "a web service in seconds"
 msgstr "um serviço web em segundos"
 

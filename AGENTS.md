@@ -13,6 +13,55 @@ cargo build -p delonix-runtime-bin    # a CLI `delonix` (ver secção "CLI" abai
 python3 scripts/lang_ratchet.py       # gate de língua (ver "Língua do código")
 ```
 
+## Âmbito: uma sessão aberta aqui trabalha SÓ no `delonix-runtime`
+
+Decisão do dono (2026-09-16). Uma sessão cujo trabalho é este repositório não
+edita, não propõe PRs e não corre builds noutros repos do workspace
+(`delonix-paas`, `delonix-deploy`, `delonix-portal`, `delonix-meet`, …), mesmo
+quando a `CLAUDE.md` da raiz do workspace encaminha o assunto para uma skill de
+outro domínio. O que for achado e pertencer a outro repo **reporta-se** (no PR ou
+ao dono) e não se corrige daqui.
+
+Duas consequências práticas:
+
+- **Um consumidor não trava uma mudança daqui.** O `delonix-paas` usa este repo
+  por `git` + `tag`; o Cargo encontra um crate pelo NOME dentro do repositório,
+  não pelo caminho, por isso mover ou renomear directórios não parte o pin dele.
+  Renomear um CRATE parte — isso é assunto do ADR que o renomeia, não um motivo
+  para ir editar o outro repo.
+- **Antes de uma mudança larga, confirma que és a única sessão aqui.** Sessões
+  activas (as ferramentas de sessões/agentes), `git worktree list`, branches com
+  commits recentes, PRs abertos e processos com cwd nesta árvore. Uma mudança que
+  mova código com outra sessão a editar é um conflito garantido.
+
+## A versão está sempre alinhada com a tag publicada (`scripts/version_gate.py`)
+
+A `version` do `Cargo.toml` raiz não é decoração: escolhe de que release o
+`delonix-cri` é descarregado, é o `ServerVersion` da API Docker, fica gravada em
+cada backup e é o que o workflow de release compara com o binário. Por isso só
+pode ser uma de duas coisas, e o job `version` da CI recusa o resto:
+
+1. **Igual à tag mais recente que o commit contém** — o trabalho normal entre
+   releases. Não se usa sufixo `-dev`: partiria o download do `delonix-cri`, que
+   procuraria uma release que não existe.
+2. **Maior só no commit de release**, e com `docs/releases/v<versão>.md`.
+
+Falha também **um ramo que não contém a tag mais recente**: começou antes dessa
+release e fundi-lo tal como está desfaz o que ela publicou. Faz merge da
+`origin/main` no ramo primeiro.
+
+Como o número fica igual entre releases, o `--version` diz a distância:
+`commit: a3aa776fa (+51 commits since v3.1.0)`. Medido antes: um build da `main`
+respondia `delonix 3.1.0` com 45 commits que nenhuma release publicou — a
+armadilha «duas builds com a mesma versão não são a mesma build».
+
+**Evitar regressões e conflito com o passado, no início de cada tarefa**:
+`git fetch --tags origin`, partir da `origin/main`, saber qual é a última tag e
+quantos commits a `main` tem depois dela, e ler o histórico da área que se vai
+mexer (`git log -- <caminho>`, e a secção deste ficheiro que a descreve) antes de
+propor. O que já foi decidido, corrigido ou removido não se refaz por
+desconhecimento.
+
 ## Língua do código: inglês (LANG-01)
 
 **Identificadores, comentários e mensagens escrevem-se em inglês.** O português

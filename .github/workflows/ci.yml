@@ -52,6 +52,20 @@ jobs:
       - name: Layer direction, foundation purity and the debt ratchets
         run: python3 scripts/arch_fitness.py
 
+  # ---- The version stays aligned with the published tags ----
+  # Equal to the newest tag the commit contains, or above it only in the release
+  # commit (with its notes); and a branch that predates the newest release fails
+  # until origin/main is merged in. Needs every tag, hence fetch-depth: 0.
+  version:
+    name: version gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Workspace version vs. tags
+        run: python3 scripts/version_gate.py
+
   # ---- The CLI surface does not grow without someone deciding the destination ----
   # Phase CLI-0 (docs/discovery/51_CLI_INVENTARIO.md) classified the 233 leaves of
   # the public tree. A command added without entering the baseline fails here,
