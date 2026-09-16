@@ -22,6 +22,7 @@
 use crate::child_handle::ChildHandle;
 use std::collections::HashMap;
 use std::io::Read;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
@@ -363,7 +364,7 @@ async fn exec_tty(
     attach: bool,
 ) {
     let (master, slave) = match open_pty() {
-        Some(p) => p,
+        Some((m, s)) => (Arc::new(m), s),
         None => {
             let _ = socket
                 .send(err_frame("delonix-cri: failed to allocate pty"))
@@ -379,7 +380,7 @@ async fn exec_tty(
         match tokio::time::timeout(Duration::from_millis(250), socket.recv()).await {
             Ok(Some(Ok(Message::Binary(b)))) if !b.is_empty() => match b[0] {
                 4 => {
-                    apply_resize(master, &b[1..]);
+                    apply_resize(master.as_raw_fd(), &b[1..]);
                     break;
                 }
                 0 => pending_stdin.push(b[1..].to_vec()),
@@ -396,16 +397,21 @@ async fn exec_tty(
         .env("DELONIX_ROOT", &base)
         .env("DELONIX_INTERNAL", "1")
         .args(subprocess_args(attach, &cmd, &name, true));
-    let child = pty_stdio(slave).and_then(|(i, o, e)| command.stdin(i).stdout(o).stderr(e).spawn());
-    // SAFETY: `slave` was returned by `open_pty`; the child got its own duplicates, so ours is
-    // closed once.
-    unsafe { libc::close(slave) };
+    let child =
+        pty_stdio(&slave).and_then(|(i, o, e)| command.stdin(i).stdout(o).stderr(e).spawn());
+    // The child holds its own duplicates of the slave; ours is not needed any more
+    // — and neither is `command`, which KEEPS the three it was handed until it is
+    // dropped. While any copy of the slave is open in this process the master never
+    // reads EOF, so the reader below never ends, the session loop waits for it
+    // forever, and the client hangs after the process has already exited.
+    // Measured on origin/main before this: `crictl exec -r websocket -it` printed
+    // the output and never returned (SPDY did, because `spdy.rs` drops its
+    // `Command` at the end of its block).
+    drop(command);
+    drop(slave);
     let mut child = match child {
         Ok(c) => c,
         Err(e) => {
-            // SAFETY: `master` was returned by `open_pty` and nothing else holds it on this
-            // failure path; closed once.
-            unsafe { libc::close(master) };
             let _ = socket
                 .send(err_frame(&format!("delonix-cri: exec failed: {e}")))
                 .await;
@@ -419,19 +425,21 @@ async fn exec_tty(
 
     // Resend the stdin that arrived before the spawn.
     for chunk in &pending_stdin {
-        write_all(master, chunk);
+        write_all(master.as_raw_fd(), chunk);
     }
 
     let (mut ws_tx, mut ws_rx) = socket.split();
 
     // Thread: master → mpsc channel (stdout). EOF when the child closes the pty.
     let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
-    let m_read = master;
+    let m_read = Arc::clone(&master);
     let reader = std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
         loop {
-            // SAFETY: `buf` is a live local and its exact length is passed.
-            let n = unsafe { libc::read(m_read, buf.as_mut_ptr() as *mut _, buf.len()) };
+            // SAFETY: `buf` is a live local and its exact length is passed; `m_read`
+            // keeps the master open for as long as this thread can read it.
+            let n =
+                unsafe { libc::read(m_read.as_raw_fd(), buf.as_mut_ptr() as *mut _, buf.len()) };
             if n <= 0 {
                 break;
             }
@@ -455,8 +463,8 @@ async fn exec_tty(
             biased;
             msg = ws_rx.next() => match msg {
                 Some(Ok(Message::Binary(b))) if !b.is_empty() => match b[0] {
-                    0 => write_all(master, &b[1..]),
-                    4 => apply_resize(master, &b[1..]),
+                    0 => write_all(master.as_raw_fd(), &b[1..]),
+                    4 => apply_resize(master.as_raw_fd(), &b[1..]),
                     255 => { /* close stdin: the pty doesn't half-close; ignore */ }
                     _ => {}
                 },
@@ -496,9 +504,12 @@ async fn exec_tty(
     };
     let _ = ws_tx.send(status_frame(code)).await;
     let _ = ws_tx.send(Message::Close(None)).await;
-    // SAFETY: `master` was returned by `open_pty` and is closed once here.
-    unsafe { libc::close(master) };
-    let _ = reader.join();
+    // Our reference only. The descriptor closes when the reader thread, which
+    // holds the other one, returns — never while it may still read the number.
+    drop(master);
+    // Joined off the async runtime: a blocking `join` here parks a runtime worker
+    // for as long as the reader lives.
+    let _ = tokio::task::spawn_blocking(move || reader.join()).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -623,8 +634,14 @@ async fn exec_pipes(
 // Low-level helpers (pty, resize, write).
 // ---------------------------------------------------------------------------
 
-/// Allocates an external pty (80x24 by default). Returns raw `(master, slave)`.
-pub(crate) fn open_pty() -> Option<(i32, i32)> {
+/// Allocates an external pty (80x24 by default). Returns `(master, slave)`.
+///
+/// OWNED descriptors, not raw numbers. The master is read by a thread while the
+/// session that owns it may decide to close it; with a raw `i32` the close
+/// freed the number under a thread still reading it, and the next descriptor
+/// the server opened — another session's pty — could get that number. Shared
+/// as `Arc<OwnedFd>`, the descriptor closes only when its LAST holder lets go.
+pub(crate) fn open_pty() -> Option<(OwnedFd, OwnedFd)> {
     let mut master: i32 = -1;
     let mut slave: i32 = -1;
     // SAFETY: `winsize` is a C struct of four integers; all-zero is a valid value.
@@ -642,7 +659,9 @@ pub(crate) fn open_pty() -> Option<(i32, i32)> {
         )
     };
     if r == 0 {
-        Some((master, slave))
+        // SAFETY: `openpty` returned 0, so both are fresh descriptors that nothing
+        // else owns; each `OwnedFd` closes its own exactly once.
+        Some(unsafe { (OwnedFd::from_raw_fd(master), OwnedFd::from_raw_fd(slave)) })
     } else {
         None
     }
@@ -653,16 +672,13 @@ pub(crate) fn open_pty() -> Option<(i32, i32)> {
 /// `dup` can fail — `EMFILE` when the server is out of descriptors, which is
 /// exactly when many exec sessions are open — and a `-1` handed to
 /// `Stdio::from_raw_fd` is not an error: it is an `OwnedFd` holding an invalid
-/// descriptor, which is undefined behaviour. `try_clone_to_owned` turns the same
+/// descriptor, which is undefined behaviour. `OwnedFd::try_clone` turns the same
 /// failure into an `io::Error` the caller reports as a failed exec.
-pub(crate) fn pty_stdio(slave: i32) -> std::io::Result<(Stdio, Stdio, Stdio)> {
-    // SAFETY: `slave` was returned by `open_pty`, is not -1, and stays open for the
-    // whole call — the caller closes it only after the child has been spawned.
-    let fd = unsafe { std::os::fd::BorrowedFd::borrow_raw(slave) };
+pub(crate) fn pty_stdio(slave: &OwnedFd) -> std::io::Result<(Stdio, Stdio, Stdio)> {
     Ok((
-        fd.try_clone_to_owned()?.into(),
-        fd.try_clone_to_owned()?.into(),
-        fd.try_clone_to_owned()?.into(),
+        slave.try_clone()?.into(),
+        slave.try_clone()?.into(),
+        slave.try_clone()?.into(),
     ))
 }
 

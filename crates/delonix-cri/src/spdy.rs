@@ -15,8 +15,10 @@
 
 use crate::child_handle::ChildHandle;
 use std::collections::{HashMap, VecDeque};
+use std::os::fd::{AsRawFd, OwnedFd};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{header, StatusCode};
@@ -470,14 +472,14 @@ async fn writer_task<W: AsyncWrite + Unpin>(mut wr: W, mut rx: UnboundedReceiver
 
 enum Input {
     None,
-    Tty(i32, ChildHandle),
+    Tty(Arc<OwnedFd>, ChildHandle),
     Pipe(Option<std::process::ChildStdin>, ChildHandle),
 }
 
 impl Input {
     fn write_stdin(&mut self, data: &[u8]) {
         match self {
-            Input::Tty(m, _) => write_fd(*m, data),
+            Input::Tty(m, _) => write_fd(m.as_raw_fd(), data),
             Input::Pipe(Some(si), _) => {
                 use std::io::Write;
                 let _ = si.write_all(data);
@@ -493,7 +495,7 @@ impl Input {
     }
     fn resize(&mut self, data: &[u8]) {
         if let Input::Tty(m, _) = self {
-            apply_resize(*m, data);
+            apply_resize(m.as_raw_fd(), data);
         }
     }
     /// Called when the client goes away (SPDY connection closed/GOAWAY). Bug
@@ -513,10 +515,12 @@ impl Input {
         match self {
             Input::Tty(m, h) => {
                 h.kill();
-                // SAFETY: the pty master this `Input` has owned since
-                // `spawn_and_pump` handed it over; `close` consumes `self`, so
-                // nothing can reach the fd after this.
-                unsafe { libc::close(m) };
+                // Drops this `Input`'s reference. The reader thread in
+                // `spawn_and_pump` holds the other one, so the descriptor closes
+                // only when that thread stops reading — closing the raw number
+                // here used to free it under a thread still blocked in `read`,
+                // for the next pty the server opened to inherit.
+                drop(m);
             }
             Input::Pipe(_, h) => {
                 h.kill();
@@ -538,7 +542,7 @@ fn spawn_and_pump(
     error_sid: u32,
 ) -> Input {
     if p.tty {
-        let Some((master, slave)) = open_pty() else {
+        let Some((master, slave)) = open_pty().map(|(m, s)| (Arc::new(m), s)) else {
             finish(&out_tx, error_sid, -1);
             return Input::None;
         };
@@ -548,17 +552,13 @@ fn spawn_and_pump(
             .args(crate::streaming::subprocess_args(
                 p.attach, &p.cmd, name, true,
             ));
-        let spawned = crate::streaming::pty_stdio(slave)
+        let spawned = crate::streaming::pty_stdio(&slave)
             .and_then(|(i, o, e)| cmd.stdin(i).stdout(o).stderr(e).spawn());
-        // SAFETY: `slave` was returned by `open_pty`; the child got its own duplicates, so ours
-        // is closed once.
-        unsafe { libc::close(slave) };
+        // The child holds its own duplicates; ours is not needed any more.
+        drop(slave);
         let mut child = match spawned {
             Ok(c) => c,
             Err(_) => {
-                // SAFETY: `master` was returned by `open_pty` and nothing else holds it on this
-                // failure path; closed once.
-                unsafe { libc::close(master) };
                 finish(&out_tx, error_sid, -1);
                 return Input::None;
             }
@@ -567,11 +567,15 @@ fn spawn_and_pump(
         // pidfd taken after the reap would be as unreliable as the raw number.
         let handle = ChildHandle::open(child.id() as i32);
         let tx = out_tx.clone();
+        let m_read = Arc::clone(&master);
         let reader = std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
             loop {
-                // SAFETY: `buf` is a live local and its exact length is passed.
-                let n = unsafe { libc::read(master, buf.as_mut_ptr() as *mut _, buf.len()) };
+                // SAFETY: `buf` is a live local and its exact length is passed; `m_read`
+                // keeps the master open for as long as this thread can read it.
+                let n = unsafe {
+                    libc::read(m_read.as_raw_fd(), buf.as_mut_ptr() as *mut _, buf.len())
+                };
                 if n <= 0 {
                     break;
                 }
