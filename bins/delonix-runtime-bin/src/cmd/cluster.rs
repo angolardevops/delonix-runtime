@@ -922,14 +922,24 @@ pub fn run(action: ClusterCmd) -> Result<()> {
     }
 }
 
-/// Cluster names with a cached kubeconfig, sorted. Covers BOTH cluster types —
-/// kind-mode (`kindmode::kubeconfig_path`) and kubeadm/SSH
-/// (`fetch_kubeconfig`'s `dest`) write to the identical
+/// Cluster names with a cached kubeconfig under the state root, sorted.
+/// Covers BOTH cluster types — kind-mode (`kindmode::kubeconfig_path`) and
+/// kubeadm/SSH (`fetch_kubeconfig`'s `dest`) write to the identical
 /// `<root>/clusters/<name>-kubeconfig.yaml`, unlike `complete::clusters()`,
 /// which only sees kind-mode's container labels. Best-effort: a missing or
 /// unreadable directory is "none cached", not an error.
+///
+/// ONLY the state root, never `$HOME`: this is what `cluster kubeconfig`
+/// resolves an omitted name against and then reads, so a name from
+/// `~/.kube/config-<name>` would be picked (or counted) and then not found.
+/// Mixing them made an empty `DELONIX_ROOT` report "2 cluster kubeconfigs
+/// cached" on a host with real clusters.
 fn cached_kubeconfig_names() -> Vec<String> {
-    let dir = state_root().join("clusters");
+    cached_kubeconfig_names_in(&state_root())
+}
+
+fn cached_kubeconfig_names_in(root: &Path) -> Vec<String> {
+    let dir = root.join("clusters");
     let mut names: Vec<String> = std::fs::read_dir(&dir)
         .into_iter()
         .flatten()
@@ -941,14 +951,22 @@ fn cached_kubeconfig_names() -> Vec<String> {
                 .map(String::from)
         })
         .collect();
-    // The kubeconfigs `delonix-deploy` writes, named after `cluster.name` — the
-    // same second place `kubeconfig_path_or_hint` reads. Listing only the cache
-    // made this hint LIE: it said `delonix-dev` was unavailable on a machine
-    // where `delonix cluster <name> get nodes` worked for that very name, because
-    // that cluster is provisioned by Ansible and never enters the engine's cache.
-    if let Some(home) = std::env::var_os("HOME") {
+    names.sort();
+    names
+}
+
+/// Every name `kubeconfig_path_or_hint` can find credentials for: the cache
+/// plus the kubeconfigs `delonix-deploy` writes, named after `cluster.name` —
+/// the same second place that function reads. Listing only the cache made its
+/// hint LIE: it said `delonix-dev` was unavailable on a machine where
+/// `delonix cluster <name> get nodes` worked for that very name, because that
+/// cluster is provisioned by Ansible and never enters the engine's cache.
+/// Used for that hint only — never to resolve an omitted name.
+fn reachable_kubeconfig_names_in(root: &Path, home: Option<&Path>) -> Vec<String> {
+    let mut names = cached_kubeconfig_names_in(root);
+    if let Some(home) = home {
         names.extend(
-            std::fs::read_dir(PathBuf::from(home).join(".kube"))
+            std::fs::read_dir(home.join(".kube"))
                 .into_iter()
                 .flatten()
                 .flatten()
@@ -969,10 +987,14 @@ fn cached_kubeconfig_names() -> Vec<String> {
 /// is actually read); omitted, this is the same "0/1/many, list the names,
 /// never guess" rule `resolve_vm_image` already uses for VM images.
 fn resolve_kubeconfig_name(explicit: Option<String>) -> Result<String> {
+    resolve_kubeconfig_name_in(explicit, &state_root())
+}
+
+fn resolve_kubeconfig_name_in(explicit: Option<String>, root: &Path) -> Result<String> {
     if let Some(n) = explicit {
         return Ok(n);
     }
-    let mut names = cached_kubeconfig_names();
+    let mut names = cached_kubeconfig_names_in(root);
     match names.len() {
         0 => Err(Error::Invalid(
             super::po::t(
@@ -1091,7 +1113,7 @@ fn kubeconfig_path_or_hint(name: &str) -> Result<PathBuf> {
         return Ok(p.clone());
     }
     let cache = candidatos[0].clone();
-    let names = cached_kubeconfig_names();
+    let names = reachable_kubeconfig_names_in(&state_root(), home.as_deref());
     let hint = if names.is_empty() {
         super::po::t("run `cluster create`/`cluster apply`/`cluster kubeadm` first").into()
     } else {
@@ -2807,6 +2829,82 @@ fn cmd_init(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A state root and a `$HOME` under `temp_dir`, each with its own files —
+    /// the shape of the defect: an isolated `DELONIX_ROOT` on a host whose
+    /// `~/.kube` holds real clusters.
+    fn kubeconfig_fixture(tag: &str, cached: &[&str], home_kube: &[&str]) -> (PathBuf, PathBuf) {
+        let base = std::env::temp_dir().join(format!(
+            "delonix-kc-{tag}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        let root = base.join("root");
+        let home = base.join("home");
+        std::fs::create_dir_all(root.join("clusters")).unwrap();
+        std::fs::create_dir_all(home.join(".kube")).unwrap();
+        for n in cached {
+            std::fs::write(
+                root.join("clusters").join(format!("{n}-kubeconfig.yaml")),
+                "",
+            )
+            .unwrap();
+        }
+        for n in home_kube {
+            std::fs::write(home.join(".kube").join(format!("config-{n}")), "").unwrap();
+        }
+        std::fs::write(home.join(".kube").join("config"), "").unwrap();
+        (root, home)
+    }
+
+    /// The defect of 2026-09-16: with an EMPTY `DELONIX_ROOT`, `cluster
+    /// kubeconfig` said "2 cluster kubeconfigs cached … delonix-dev, dev" —
+    /// names read from `~/.kube/config-*`, outside the state root. Resolving an
+    /// omitted name looks at the state root and nothing else.
+    #[test]
+    fn kubeconfig_without_a_name_only_sees_the_state_root() {
+        let (root, home) = kubeconfig_fixture("empty", &[], &["delonix-dev", "dev"]);
+        assert!(cached_kubeconfig_names_in(&root).is_empty());
+        let err = resolve_kubeconfig_name_in(None, &root)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no cluster kubeconfig cached"), "{err}");
+        assert!(!err.contains("dev"), "read outside the state root: {err}");
+
+        let (one, _) = kubeconfig_fixture("one", &["ck1"], &["delonix-dev", "dev"]);
+        assert_eq!(resolve_kubeconfig_name_in(None, &one).unwrap(), "ck1");
+        let _ = std::fs::remove_dir_all(one.parent().unwrap());
+
+        let (root, _) = kubeconfig_fixture("two", &["ck2", "ck1"], &["delonix-dev"]);
+        let err = resolve_kubeconfig_name_in(None, &root)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("2 cluster kubeconfigs cached"), "{err}");
+        assert!(
+            err.contains("ck1, ck2") && !err.contains("delonix-dev"),
+            "{err}"
+        );
+
+        // An explicit name is still passed through untouched.
+        assert_eq!(
+            resolve_kubeconfig_name_in(Some("x".into()), &root).unwrap(),
+            "x"
+        );
+
+        // The `cluster <name> <kubectl…>` hint keeps naming what it CAN read,
+        // `~/.kube/config-<name>` included — and not `~/.kube/config` itself.
+        assert_eq!(
+            reachable_kubeconfig_names_in(&root, Some(&home)),
+            vec!["ck1", "ck2", "delonix-dev", "dev"]
+        );
+        assert_eq!(
+            reachable_kubeconfig_names_in(&root, None),
+            vec!["ck1", "ck2"]
+        );
+        let _ = std::fs::remove_dir_all(root.parent().unwrap());
+        let _ = std::fs::remove_dir_all(home.parent().unwrap());
+    }
 
     /// Gap closed: host prep now runs in parallel (`std::thread::scope`) instead of
     /// one SSH round-trip at a time. Unlike the old fail-fast loop, ALL hosts are
