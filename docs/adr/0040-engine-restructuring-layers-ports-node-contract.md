@@ -404,11 +404,15 @@ crates.
 (`docs/discovery/53_P1B_LAUNCHER_SPIKE.md`, raw output alongside): the same binary under a
 launcher path with an `unconfined + userns` profile runs `run`, `run -d`, `exec`, and the
 `__ovlhold`/`__rmtree` re-execs, while the unprofiled CLI path is refused — D2.4's split
-works. **The netns holder does not, as written:** it starts the pin through
-`/usr/bin/unshare`, so the namespace is created by `unshare(1)` under the restricted
-`unprivileged_userns` profile, and a profile naming the holder never applies. D2.4 is
-amended: **`delonix-netns-holder` creates its user, net and mount namespaces in-process**
-(`unshare(2)` + `newuidmap`, as `reexec_mapped` already does), never through `unshare(1)`
+works. **The netns holder does not, under that split:** it starts the pin through
+`/usr/bin/unshare`, and a profile flagged `unconfined` is inherited across `exec` — so
+`unshare(1)` passes when its caller carries the profile (today's single binary) and is moved
+into `unprivileged_userns`, with its `mount` denied, when the caller does not (the CLI in
+D2.4). The spike first attributed its own pin failure to this; that run actually failed on
+a runtime dir under `/run`, which the control plane hides behind its tmpfs — corrected and
+re-measured in the same document. D2.4 is amended: **`delonix-netns-holder` creates its
+user, net and mount namespaces in-process** (`unshare(2)` + `newuidmap`, as
+`reexec_mapped` already does), never through `unshare(1)`
 — granting `userns` to `/usr/bin/unshare` would open it to every user and defeat the
 restriction. In-place upgrade stays safe: the pin is recognised by its argv pair and
 environment, never by the binary name (`argv_matches`, with the pre-split precedent).
