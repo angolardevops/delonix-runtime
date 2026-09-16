@@ -33,6 +33,7 @@ import json
 import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -206,6 +207,30 @@ def rule_failures(pkgs: dict[str, dict]) -> tuple[list[str], set[tuple]]:
     return bad, used
 
 
+DEP_TABLES = ("dependencies", "dev-dependencies", "build-dependencies")
+
+
+def inline_versions(pkgs: dict[str, dict]) -> list[str]:
+    """A version written in a member manifest instead of `[workspace.dependencies]`.
+
+    ADR-0040 P0 puts every version in ONE place. Two crates writing their own
+    version of the same library is how the same dependency ends up resolved twice,
+    and how `default-features = false` in one crate is silently undone by another.
+    """
+    bad: list[str] = []
+    for name, pkg in sorted(pkgs.items()):
+        manifest = tomllib.loads(Path(pkg["manifest_path"]).read_text(encoding="utf-8"))
+        tables = [(t, manifest.get(t, {})) for t in DEP_TABLES]
+        for target, spec in manifest.get("target", {}).items():
+            tables += [(f"target.{target}.{t}", spec.get(t, {})) for t in DEP_TABLES]
+        for table, deps in tables:
+            for dep, value in deps.items():
+                if isinstance(value, dict) and (value.get("workspace") or "path" in value):
+                    continue
+                bad.append(f"{name}: [{table}] {dep} has its own version — move it to [workspace.dependencies]")
+    return bad
+
+
 def count(pattern: re.Pattern[str], skip_bin: bool = True) -> tuple[int, list[str]]:
     total = 0
     where: list[str] = []
@@ -228,6 +253,7 @@ def main() -> int:
 
     pkgs = crates()
     bad, used = rule_failures(pkgs)
+    bad += inline_versions(pkgs)
 
     # An exception with no phase is worse than the violation it covers.
     for key, (phase, reason) in EXCEPTIONS.items():

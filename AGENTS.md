@@ -85,6 +85,13 @@ portão, e uma excepção que já não se aplica também — é assim que uma to
 temporária deixa de ser permanente. Hoje são dez, e cada uma diz a sua fase (o
 `--list` mostra-as).
 
+**As versões das dependências vivem só na raiz** (`[workspace.dependencies]`). Um
+crate membro escreve `{ workspace = true, features = [...] }` e nada mais; o
+`default-features = false` fica na raiz porque um membro não o consegue desligar
+se a raiz o ligar. O portão recusa uma versão escrita num membro. Medido ao
+mover as 32 que estavam espalhadas: `Cargo.lock` byte a byte igual e a árvore de
+features resolvida (`cargo tree -e features,normal,dev,build`) idêntica.
+
 Dois números são **ratchet**, com a mesma semântica do `lang_ratchet.py` (falha
 se SOBE e falha se DESCE sem a linha de base baixar no mesmo commit):
 
