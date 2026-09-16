@@ -511,6 +511,8 @@ pub fn fmt_size(bytes: u64) -> String {
 /// the raw value.
 pub fn fmt_local(unix: u64) -> String {
     let t = unix as libc::time_t;
+    // SAFETY: `libc::tm` is a plain C struct of integers (and one pointer, which may be null);
+    // all-zero bytes is a valid value.
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
     // SAFETY: `t` is valid; `localtime_r` writes into `tm` (our buffer, of the
     // right size) and returns NULL only on error — which we handle below.

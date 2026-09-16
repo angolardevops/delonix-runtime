@@ -15,7 +15,6 @@
 
 use crate::child_handle::ChildHandle;
 use std::collections::{HashMap, VecDeque};
-use std::os::fd::FromRawFd;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -549,16 +548,16 @@ fn spawn_and_pump(
             .args(crate::streaming::subprocess_args(
                 p.attach, &p.cmd, name, true,
             ));
-        unsafe {
-            cmd.stdin(Stdio::from_raw_fd(libc::dup(slave)))
-                .stdout(Stdio::from_raw_fd(libc::dup(slave)))
-                .stderr(Stdio::from_raw_fd(libc::dup(slave)));
-        }
-        let spawned = cmd.spawn();
+        let spawned = crate::streaming::pty_stdio(slave)
+            .and_then(|(i, o, e)| cmd.stdin(i).stdout(o).stderr(e).spawn());
+        // SAFETY: `slave` was returned by `open_pty`; the child got its own duplicates, so ours
+        // is closed once.
         unsafe { libc::close(slave) };
         let mut child = match spawned {
             Ok(c) => c,
             Err(_) => {
+                // SAFETY: `master` was returned by `open_pty` and nothing else holds it on this
+                // failure path; closed once.
                 unsafe { libc::close(master) };
                 finish(&out_tx, error_sid, -1);
                 return Input::None;
@@ -571,6 +570,7 @@ fn spawn_and_pump(
         let reader = std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
             loop {
+                // SAFETY: `buf` is a live local and its exact length is passed.
                 let n = unsafe { libc::read(master, buf.as_mut_ptr() as *mut _, buf.len()) };
                 if n <= 0 {
                     break;

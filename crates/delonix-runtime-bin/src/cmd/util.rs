@@ -396,6 +396,8 @@ pub(crate) fn migrate_flat_to_overlay(images: &ImageStore, id: &str, image: &str
 /// spawns; a `Progress` spinner thread is joined when its step closes). The
 /// value is read by re-exec'd CHILD processes, not by another thread here.
 pub fn silence_cgroup_warning() {
+    // SAFETY: see the function's doc: the callers are single-threaded here, and the value is
+    // read by re-exec'd child processes, not by another thread of this one.
     unsafe {
         std::env::set_var("DELONIX_NO_CGROUP_WARN", "1");
     }

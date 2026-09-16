@@ -1278,6 +1278,7 @@ fn install_timer(kind: Kind, name: &str, calendar: &str, dir: &Path, keep: usize
 
 fn lingering_enabled() -> bool {
     std::process::Command::new("loginctl")
+        // SAFETY: `getuid` takes no arguments and has no preconditions.
         .args(["show-user", &format!("{}", unsafe { libc::getuid() })])
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).contains("Linger=yes"))

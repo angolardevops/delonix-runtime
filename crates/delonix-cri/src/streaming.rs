@@ -22,7 +22,6 @@
 use crate::child_handle::ChildHandle;
 use std::collections::HashMap;
 use std::io::Read;
-use std::os::fd::FromRawFd;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
@@ -397,18 +396,15 @@ async fn exec_tty(
         .env("DELONIX_ROOT", &base)
         .env("DELONIX_INTERNAL", "1")
         .args(subprocess_args(attach, &cmd, &name, true));
-    // SAFETY: dup of the slave; each Stdio owns its fd and closes it.
-    unsafe {
-        command
-            .stdin(Stdio::from_raw_fd(libc::dup(slave)))
-            .stdout(Stdio::from_raw_fd(libc::dup(slave)))
-            .stderr(Stdio::from_raw_fd(libc::dup(slave)));
-    }
-    let child = command.spawn();
+    let child = pty_stdio(slave).and_then(|(i, o, e)| command.stdin(i).stdout(o).stderr(e).spawn());
+    // SAFETY: `slave` was returned by `open_pty`; the child got its own duplicates, so ours is
+    // closed once.
     unsafe { libc::close(slave) };
     let mut child = match child {
         Ok(c) => c,
         Err(e) => {
+            // SAFETY: `master` was returned by `open_pty` and nothing else holds it on this
+            // failure path; closed once.
             unsafe { libc::close(master) };
             let _ = socket
                 .send(err_frame(&format!("delonix-cri: exec failed: {e}")))
@@ -434,6 +430,7 @@ async fn exec_tty(
     let reader = std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
         loop {
+            // SAFETY: `buf` is a live local and its exact length is passed.
             let n = unsafe { libc::read(m_read, buf.as_mut_ptr() as *mut _, buf.len()) };
             if n <= 0 {
                 break;
@@ -499,6 +496,7 @@ async fn exec_tty(
     };
     let _ = ws_tx.send(status_frame(code)).await;
     let _ = ws_tx.send(Message::Close(None)).await;
+    // SAFETY: `master` was returned by `open_pty` and is closed once here.
     unsafe { libc::close(master) };
     let _ = reader.join();
 }
@@ -629,6 +627,7 @@ async fn exec_pipes(
 pub(crate) fn open_pty() -> Option<(i32, i32)> {
     let mut master: i32 = -1;
     let mut slave: i32 = -1;
+    // SAFETY: `winsize` is a C struct of four integers; all-zero is a valid value.
     let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
     ws.ws_row = 24;
     ws.ws_col = 80;
@@ -649,6 +648,24 @@ pub(crate) fn open_pty() -> Option<(i32, i32)> {
     }
 }
 
+/// Three owned duplicates of a pty slave, for a child's stdin, stdout and stderr.
+///
+/// `dup` can fail — `EMFILE` when the server is out of descriptors, which is
+/// exactly when many exec sessions are open — and a `-1` handed to
+/// `Stdio::from_raw_fd` is not an error: it is an `OwnedFd` holding an invalid
+/// descriptor, which is undefined behaviour. `try_clone_to_owned` turns the same
+/// failure into an `io::Error` the caller reports as a failed exec.
+pub(crate) fn pty_stdio(slave: i32) -> std::io::Result<(Stdio, Stdio, Stdio)> {
+    // SAFETY: `slave` was returned by `open_pty`, is not -1, and stays open for the
+    // whole call — the caller closes it only after the child has been spawned.
+    let fd = unsafe { std::os::fd::BorrowedFd::borrow_raw(slave) };
+    Ok((
+        fd.try_clone_to_owned()?.into(),
+        fd.try_clone_to_owned()?.into(),
+        fd.try_clone_to_owned()?.into(),
+    ))
+}
+
 /// Applies a `resize` (JSON `{"Width":w,"Height":h}`) to the master via TIOCSWINSZ.
 pub(crate) fn apply_resize(master: i32, payload: &[u8]) {
     let Ok(v) = serde_json::from_slice::<serde_json::Value>(payload) else {
@@ -656,6 +673,7 @@ pub(crate) fn apply_resize(master: i32, payload: &[u8]) {
     };
     let cols = v.get("Width").and_then(|x| x.as_u64()).unwrap_or(80) as u16;
     let rows = v.get("Height").and_then(|x| x.as_u64()).unwrap_or(24) as u16;
+    // SAFETY: `winsize` is a C struct of four integers; all-zero is a valid value.
     let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
     ws.ws_row = rows;
     ws.ws_col = cols;
@@ -668,6 +686,7 @@ pub(crate) fn apply_resize(master: i32, payload: &[u8]) {
 /// Writes everything to a raw fd (the pty master), tolerating partial writes.
 pub(crate) fn write_all(fd: i32, mut data: &[u8]) {
     while !data.is_empty() {
+        // SAFETY: `data` is a live slice and its exact length is passed.
         let n = unsafe { libc::write(fd, data.as_ptr() as *const _, data.len()) };
         if n <= 0 {
             break;

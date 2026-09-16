@@ -883,6 +883,8 @@ impl FileLock {
         // SAFETY: open/flock with a valid path; -1 on failure is handled next.
         let fd = unsafe { libc::open(c.as_ptr(), libc::O_CREAT | libc::O_RDWR, 0o600) };
         if fd >= 0 {
+            // SAFETY: `fd` was just returned by `open` and checked; `flock` takes plain
+            // integers.
             unsafe { libc::flock(fd, libc::LOCK_EX) };
         }
         FileLock(fd)
@@ -8041,6 +8043,7 @@ Inter-|   Receive                                                |  Transmit
         // SAFETY: getpid()/gettid() have no preconditions.
         let uniq = format!(
             "delonix-refs-{tag}-{}-{}",
+            // SAFETY: `getpid` takes no arguments and has no preconditions.
             unsafe { libc::getpid() },
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -9079,6 +9082,7 @@ Inter-|   Receive                                                |  Transmit
         // that root as well (`root_suffix`). This assertion used to demand the
         // bare uid-scoped path for EVERY root, which is precisely the sharing
         // that let one root's `teardown()` delete another's sockets.
+        // SAFETY: `geteuid` takes no arguments and has no preconditions.
         let uid = unsafe { libc::geteuid() };
         let com_root = runtime_dir();
         assert_ne!(

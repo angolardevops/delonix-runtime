@@ -516,14 +516,15 @@ pub fn ovlhold(dir: &Path) -> Result<()> {
     use std::io::Write;
     // Our own mount namespace, with propagation severed: the overlay must never
     // show up on the host, and must disappear with this process.
+    // SAFETY: `unshare` takes an integer flag word and no pointers.
     if unsafe { libc::unshare(libc::CLONE_NEWNS) } != 0 {
         return Err(io_err("__ovlhold unshare")(std::io::Error::last_os_error()));
     }
     // `libc` and not `nix`: this crate does not depend on `nix`, and a new
     // dependency in a container runtime is not worth one `mount(2)` call.
+    let slash = c"/";
     // SAFETY: three well-formed C strings and a flag word; `/` is always a valid
     // target, and we are root in our own user namespace with a private mount ns.
-    let slash = c"/";
     let rc = unsafe {
         libc::mount(
             std::ptr::null(),
@@ -551,6 +552,7 @@ pub fn ovlhold(dir: &Path) -> Result<()> {
     // signals us. `pause` returns only on a signal, so this costs nothing while
     // it waits.
     loop {
+        // SAFETY: `pause` takes no arguments and only returns on a signal.
         unsafe { libc::pause() };
     }
 }

@@ -311,6 +311,7 @@ fn write_file(path: &Path, content: &str, force: bool) -> Result<bool> {
 
 /// Is stdin an interactive terminal? (menu/questions only make sense on a TTY).
 fn stdin_is_tty() -> bool {
+    // SAFETY: `isatty` takes an integer fd and has no preconditions.
     unsafe { libc::isatty(0) == 1 }
 }
 

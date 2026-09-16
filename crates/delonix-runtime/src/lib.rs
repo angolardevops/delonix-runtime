@@ -281,6 +281,8 @@ fn apply_seccomp(unconfined: bool, detect: bool, keep_privs: bool, profile: Opti
         Ok(a) => a,
         Err(_) => {
             eprintln!("delonix: architecture without seccomp support; aborting the container");
+            // SAFETY: `_exit` never returns and takes a plain integer; this is the container's
+            // init, where skipping destructors and atexit handlers is the point.
             unsafe { libc::_exit(126) };
         }
     };
@@ -331,6 +333,8 @@ fn apply_seccomp(unconfined: bool, detect: bool, keep_privs: bool, profile: Opti
         Ok(p) => p,
         Err(e) => {
             eprintln!("delonix: failed to build the seccomp filter: {e}; aborting");
+            // SAFETY: `_exit` never returns and takes a plain integer; this is the container's
+            // init, where skipping destructors and atexit handlers is the point.
             unsafe { libc::_exit(126) };
         }
     };
@@ -359,11 +363,16 @@ applying the filter WITH NO_NEW_PRIVS instead"
             );
             if let Err(e2) = apply_filter(&prog) {
                 eprintln!("delonix: failed to apply seccomp: {e2}; aborting the container");
+                // SAFETY: `_exit` never returns and takes a plain integer; this is the
+                // container's init, where skipping destructors and atexit handlers is the
+                // point.
                 unsafe { libc::_exit(126) };
             }
         }
     } else if let Err(e) = apply_filter(&prog) {
         eprintln!("delonix: failed to apply seccomp: {e}; aborting the container");
+        // SAFETY: `_exit` never returns and takes a plain integer; this is the container's
+        // init, where skipping destructors and atexit handlers is the point.
         unsafe { libc::_exit(126) };
     }
 }
@@ -1177,6 +1186,8 @@ fn log_shim_syslog(read_fd: i32, tag: String) -> ! {
     }
     if !line.is_empty() {
         if let Ok(c) = std::ffi::CString::new(line) {
+            // SAFETY: `fmt` is the static C string `%s` and `c` a NUL-terminated `CString`
+            // alive for the call; the log line is passed as the argument, never as the format.
             unsafe { libc::syslog(libc::LOG_INFO, fmt.as_ptr(), c.as_ptr()) };
         }
     }
@@ -2103,6 +2114,8 @@ pub fn reexec_mapped(args: &[&str]) -> Option<bool> {
     argv.extend(cargs.iter().map(|c| c.as_ptr()));
     argv.push(std::ptr::null());
     let mut fds = [0i32; 2];
+    // SAFETY: `fds` is an owned `[c_int; 2]`, exactly the buffer `pipe(2)` writes both fds
+    // into.
     if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
         return Some(false);
     }
@@ -2110,6 +2123,9 @@ pub fn reexec_mapped(args: &[&str]) -> Option<bool> {
     // SAFETY: fork; the child only does close/unshare/read/setuid/execv (async-signal-safe;
     // the CStrings/argv were built above, before the fork).
     match unsafe { libc::fork() } {
+        // SAFETY: in the forked child. Only raw syscalls on fds this function created and on
+        // the CStrings/argv built BEFORE the fork (close, dup2, unshare, read, setgid, setuid,
+        // execv); `execv` or `_exit` ends the process, so no destructor runs twice.
         0 => unsafe {
             libc::close(w);
             if libc::unshare(libc::CLONE_NEWUSER) != 0 {
@@ -2124,10 +2140,15 @@ pub fn reexec_mapped(args: &[&str]) -> Option<bool> {
             libc::_exit(127);
         },
         pid if pid > 0 => {
+            // SAFETY: parent side: `r` is the read end created above; only the child reads it,
+            // so our copy is closed once here and never used.
             unsafe { libc::close(r) };
             // small wait for the child to unshare before we map.
             std::thread::sleep(std::time::Duration::from_millis(20));
             let _ = write_userns_maps(pid, true);
+            // SAFETY: `w` is the write end created above, written once from a live 1-byte
+            // buffer and closed once; `st` is an owned int that `waitpid` fills for our own
+            // child `pid`.
             let ok = unsafe {
                 let go = [1u8; 1];
                 let _ = libc::write(w, go.as_ptr() as *const libc::c_void, 1);
@@ -2139,6 +2160,8 @@ pub fn reexec_mapped(args: &[&str]) -> Option<bool> {
             Some(ok)
         }
         _ => {
+            // SAFETY: `fork` failed, so both pipe ends are still only ours; each is closed
+            // once.
             unsafe {
                 libc::close(r);
                 libc::close(w);
@@ -2190,10 +2213,16 @@ pub fn reexec_mapped_hold(args: &[&str]) -> Option<HeldChild> {
     argv.push(std::ptr::null());
     let mut sync = [0i32; 2];
     let mut out = [0i32; 2];
+    // SAFETY: `sync` is an owned `[c_int; 2]`, exactly the buffer `pipe(2)` writes both fds
+    // into.
     if unsafe { libc::pipe(sync.as_mut_ptr()) } != 0 {
         return None;
     }
+    // SAFETY: `out` is an owned `[c_int; 2]`, exactly the buffer `pipe(2)` writes both fds
+    // into.
     if unsafe { libc::pipe(out.as_mut_ptr()) } != 0 {
+        // SAFETY: `pipe(out)` failed, so the two `sync` ends are still only ours; each is
+        // closed once.
         unsafe {
             libc::close(sync[0]);
             libc::close(sync[1]);
@@ -2203,6 +2232,9 @@ pub fn reexec_mapped_hold(args: &[&str]) -> Option<HeldChild> {
     // SAFETY: fork; the child only does close/dup2/unshare/read/setuid/execv —
     // all async-signal-safe, with the CStrings and argv built above.
     match unsafe { libc::fork() } {
+        // SAFETY: in the forked child. Only raw syscalls on fds this function created and on
+        // the CStrings/argv built BEFORE the fork (close, dup2, unshare, read, setgid, setuid,
+        // execv); `execv` or `_exit` ends the process, so no destructor runs twice.
         0 => unsafe {
             libc::close(sync[1]);
             libc::close(out[0]);
@@ -2222,6 +2254,8 @@ pub fn reexec_mapped_hold(args: &[&str]) -> Option<HeldChild> {
             libc::_exit(127);
         },
         pid if pid > 0 => {
+            // SAFETY: parent side: the child holds its own copies of `sync[0]` and `out[1]`;
+            // ours are closed once and never used again.
             unsafe {
                 libc::close(sync[0]);
                 libc::close(out[1]);
@@ -2230,6 +2264,8 @@ pub fn reexec_mapped_hold(args: &[&str]) -> Option<HeldChild> {
             // before `/proc/<pid>/uid_map` means anything.
             std::thread::sleep(std::time::Duration::from_millis(20));
             let _ = write_userns_maps(pid, true);
+            // SAFETY: `sync[1]` is ours: written once from a live 1-byte buffer, then closed
+            // once.
             unsafe {
                 let go = [1u8; 1];
                 let _ = libc::write(sync[1], go.as_ptr() as *const libc::c_void, 1);
@@ -2248,6 +2284,8 @@ pub fn reexec_mapped_hold(args: &[&str]) -> Option<HeldChild> {
             Some(held)
         }
         _ => {
+            // SAFETY: `fork` failed, so all four pipe ends are still only ours; each is closed
+            // once.
             unsafe {
                 libc::close(sync[0]);
                 libc::close(sync[1]);
@@ -2321,6 +2359,8 @@ pub fn remove_tree_mapped(path: &std::path::Path) {
     };
     let argv = [prog.as_ptr(), a1.as_ptr(), a2.as_ptr(), std::ptr::null()];
     let mut fds = [0i32; 2];
+    // SAFETY: `fds` is an owned `[c_int; 2]`, exactly the buffer `pipe(2)` writes both fds
+    // into.
     if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
         let _ = std::fs::remove_dir_all(path);
         return;
@@ -2329,6 +2369,9 @@ pub fn remove_tree_mapped(path: &std::path::Path) {
     // SAFETY: fork; the child only does close/unshare/read/setuid/execv (async-signal-safe,
     // without allocation — the CStrings/argv were created above, before the fork).
     match unsafe { libc::fork() } {
+        // SAFETY: in the forked child. Only raw syscalls on fds this function created and on
+        // the CStrings/argv built BEFORE the fork (close, dup2, unshare, read, setgid, setuid,
+        // execv); `execv` or `_exit` ends the process, so no destructor runs twice.
         0 => unsafe {
             libc::close(w);
             if libc::unshare(libc::CLONE_NEWUSER) != 0 {
@@ -2343,10 +2386,15 @@ pub fn remove_tree_mapped(path: &std::path::Path) {
             libc::_exit(127);
         },
         pid if pid > 0 => {
+            // SAFETY: parent side: `r` is the read end created above; only the child reads it,
+            // so our copy is closed once here and never used.
             unsafe { libc::close(r) };
             // small wait for the child to unshare before we map.
             std::thread::sleep(std::time::Duration::from_millis(20));
             let _ = write_userns_maps(pid, true);
+            // SAFETY: `w` is the write end created above, written once from a live 1-byte
+            // buffer and closed once; `st` is an owned int that `waitpid` fills for our own
+            // child `pid`.
             let ok = unsafe {
                 let go = [1u8; 1];
                 let _ = libc::write(w, go.as_ptr() as *const libc::c_void, 1);
@@ -2367,6 +2415,8 @@ pub fn remove_tree_mapped(path: &std::path::Path) {
             }
         }
         _ => {
+            // SAFETY: `fork` failed, so both pipe ends are still only ours; each is closed
+            // once.
             unsafe {
                 libc::close(r);
                 libc::close(w);
@@ -3563,6 +3613,8 @@ fn attach_device_filter(cgroup: &str) -> bool {
     // SAFETY: opens the cgroup directory as an fd for the attach.
     let cg_fd = unsafe { libc::open(cg.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY) };
     if cg_fd < 0 {
+        // SAFETY: `prog_fd` came from the successful `BPF_PROG_LOAD` above and is closed once
+        // on this early return.
         unsafe { libc::close(prog_fd as i32) };
         return false;
     }
@@ -3573,6 +3625,8 @@ fn attach_device_filter(cgroup: &str) -> bool {
     at[8..12].copy_from_slice(&BPF_CGROUP_DEVICE.to_ne_bytes()); // attach_type
                                                                  // SAFETY: bpf(PROG_ATTACH) attaches the program to the cgroup.
     let r = unsafe { libc::syscall(libc::SYS_bpf, BPF_PROG_ATTACH, at.as_ptr(), at.len()) };
+    // SAFETY: both fds were opened above in this function and are closed exactly once; the
+    // kernel keeps its own reference to the attached program.
     unsafe {
         libc::close(prog_fd as i32);
         libc::close(cg_fd);
@@ -3665,9 +3719,15 @@ pub fn host_mem_bytes() -> u64 {
 /// environment cannot silently disable the ceiling — the failure mode this
 /// whole function exists to remove.
 fn default_workload_pct() -> u64 {
-    std::env::var("DELONIX_DEFAULT_PCT")
-        .ok()
-        .and_then(|s| s.parse().ok())
+    workload_pct_from(std::env::var("DELONIX_DEFAULT_PCT").ok().as_deref())
+}
+
+/// The rule behind [`default_workload_pct`], apart from the environment read so
+/// it can be tested without `set_var`: tests run on parallel threads, and
+/// mutating the environment while another thread reads it is undefined
+/// behaviour in glibc, whatever a comment above the call says.
+fn workload_pct_from(raw: Option<&str>) -> u64 {
+    raw.and_then(|s| s.parse().ok())
         .filter(|p| (1..=100).contains(p))
         .unwrap_or(25)
 }
@@ -5723,6 +5783,8 @@ fn spawn(
         // ingress containers (they inherit the holder's userns).
         let want_range = run_uid.map(|u| u != 0).unwrap_or(false) || have_subid_helpers();
         if let Err(e) = write_userns_maps(pid.as_raw(), want_range) {
+            // SAFETY: `w` is the write end of the userns sync pipe, closed once; the child is
+            // killed right after, so nothing writes to it later.
             unsafe {
                 libc::close(w);
             }
@@ -5790,6 +5852,8 @@ fn spawn(
         // holds the socketpair end, the `recvmsg` would block FOREVER — the
         // `run` would hang without log nor exit. With SO_RCVTIMEO, after 10s
         // it gives up (None → no log, but the container proceeds and the status reconciles).
+        // SAFETY: `csp` is our end of the console socketpair; `tv` is a live `timeval` and the
+        // length passed is its exact size.
         unsafe {
             let tv = libc::timeval {
                 tv_sec: 10,
@@ -5804,6 +5868,8 @@ fn spawn(
             );
         }
         let m = recv_fd(csp);
+        // SAFETY: `csp` is ours and closed once, after `recv_fd` returned; the received master
+        // is a separate fd.
         unsafe { libc::close(csp) };
         m // None if the init could not allocate the pty (falls through without log, without blocking)
     } else {
@@ -5820,9 +5886,15 @@ fn spawn(
         if let Ok(ForkResult::Child) = unsafe { fork() } {
             // Drops the WRITE end of the pipe (if it exists) — only the container keeps it.
             if let Some((_, logw)) = log_pipe {
+                // SAFETY: in the forked shim child: `logw` is the write end of a pipe created
+                // by this function; the child's copy is closed once so that only the container
+                // keeps it open.
                 unsafe { libc::close(logw) };
             }
             if let Some((_, errw)) = log_err_pipe {
+                // SAFETY: in the forked shim child: `errw` is the write end of a pipe created
+                // by this function; the child's copy is closed once so that only the container
+                // keeps it open.
                 unsafe { libc::close(errw) };
             }
             // This shim never execs — it just loops copying `src` to the log file for as
@@ -5842,6 +5914,9 @@ fn spawn(
                 keep.push(r as u32);
             }
             keep.sort_unstable();
+            // SAFETY: in the forked shim child, which never returns (it ends in `log_shim`,
+            // then `_exit`): no Rust object here owns the fds being closed, so none is closed
+            // twice by a destructor; `keep` is excluded from every range.
             unsafe {
                 let mut lo = 3u32;
                 for k in &keep {
@@ -5857,6 +5932,8 @@ fn spawn(
             // the stdout of `run -d` (the Docker shim, `$(...)`, CI/scripts) stays
             // blocked waiting for EOF until the container dies. setsid + /dev/null
             // detach it completely; the shim writes to its own log file.
+            // SAFETY: in the forked shim child: `setsid` has no preconditions, `/dev/null` is a
+            // static C string, and the fd is checked before `dup2` onto 0/1/2 and closed once.
             unsafe {
                 libc::setsid();
                 let null = libc::open(c"/dev/null".as_ptr(), libc::O_RDWR);
@@ -5881,14 +5958,20 @@ fn spawn(
         }
         // The parent drops the ends: only the container (the source, via fd 1/2 or the pty
         // slave) and the shim (src) keep them. When the container dies, the shim sees EOF/EIO.
+        // SAFETY: parent side: the shim and the container hold their own copies; ours is closed
+        // once and never used again.
         unsafe { libc::close(src) };
         if let Some((_, logw)) = log_pipe {
+            // SAFETY: parent side: the shim and the container hold their own copies; ours is
+            // closed once and never used again.
             unsafe { libc::close(logw) };
         }
         // Both ends of the stderr pipe: the read one belongs to the shim now, the
         // write one to the container. A copy left open here would keep the shim
         // from ever seeing EOF, so it would outlive the container forever.
         if let Some((r, w)) = log_err_pipe {
+            // SAFETY: parent side: the shim owns its copy of the read end and the container its
+            // copy of the write end; ours are closed once.
             unsafe {
                 libc::close(r);
                 libc::close(w);
@@ -6065,6 +6148,9 @@ pub fn wait_and_record(store: &Store, container: &mut Container) -> Result<Statu
 /// Docker. Returns `(master, slave, slave_path)`; the master is sent to the parent
 /// by SCM_RIGHTS and the `path` (`/dev/pts/N`) serves for the `/dev/console` bind.
 fn open_pty_in_container() -> Option<(i32, i32, String)> {
+    // SAFETY: static C string path; every fd returned is checked, and closed on each failure
+    // path before returning; `ptsname_r` is given `buf`'s real length, so `CStr::from_ptr`
+    // reads a NUL-terminated string inside `buf`.
     unsafe {
         let m = libc::open(c"/dev/ptmx".as_ptr(), libc::O_RDWR | libc::O_NOCTTY);
         if m < 0 {
@@ -6104,6 +6190,8 @@ fn setup_console(console_sock: (i32, i32)) {
     // SAFETY: the init does not use the parent's end of the socketpair.
     unsafe { libc::close(sp) };
     let Some((m, s, path)) = open_pty_in_container() else {
+        // SAFETY: `sc` is the init's end of the console socketpair, closed once on this failure
+        // path (the success path closes it below instead).
         unsafe { libc::close(sc) };
         return;
     };
@@ -6143,6 +6231,10 @@ fn setup_console(console_sock: (i32, i32)) {
 /// Sends an fd over a Unix socket (SCM_RIGHTS). The grandchild allocates the pty in the container's
 /// devpts and passes the `master` to the parent through here (runc *console socket* model).
 fn send_fd(sock: i32, fd: i32) -> bool {
+    // SAFETY: every pointer placed in `msg` (`iov`, `dummy`, `cmsgbuf`) points at a local that
+    // outlives `sendmsg`; `cmsgbuf` (64 bytes) is larger than `CMSG_SPACE(sizeof(c_int))`, so
+    // `CMSG_FIRSTHDR` is non-null and `CMSG_DATA` has room for one `c_int`. `msghdr` is a C
+    // struct for which all-zero is valid.
     unsafe {
         let mut dummy: u8 = 0;
         let mut iov = libc::iovec {
@@ -6167,6 +6259,9 @@ fn send_fd(sock: i32, fd: i32) -> bool {
 
 /// Receives an fd sent by SCM_RIGHTS (the parent receives the grandchild's pty master).
 fn recv_fd(sock: i32) -> Option<i32> {
+    // SAFETY: same buffers as `send_fd`, all locals alive across `recvmsg`; the header is
+    // null-checked and its level and type verified before `CMSG_DATA` is read as one `c_int`,
+    // which stays inside the 64-byte `cmsgbuf`.
     unsafe {
         let mut dummy: u8 = 0;
         let mut iov = libc::iovec {
@@ -6203,12 +6298,16 @@ fn recv_fd(sock: i32) -> Option<i32> {
 fn pump_fd(from: i32, to: i32) {
     let mut buf = [0u8; 4096];
     loop {
+        // SAFETY: `buf` is a live local and its exact length is passed; `from` stays open for
+        // the duration of the pump (the caller owns it).
         let n = unsafe { libc::read(from, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
         if n <= 0 {
             break;
         }
         let mut off = 0isize;
         while off < n {
+            // SAFETY: `0 <= off < n <= buf.len()`, so the pointer and the remaining length stay
+            // inside `buf`.
             let w = unsafe {
                 libc::write(
                     to,
@@ -6250,6 +6349,9 @@ static TTY_ORIGINAL: std::sync::atomic::AtomicPtr<libc::termios> =
 /// (`128+15`) to whatever is waiting on it. Swallowing the signal to exit
 /// cleanly would trade a broken terminal for a lie about how the process ended.
 extern "C" fn restore_tty_on_signal(sig: libc::c_int) {
+    // SAFETY: signal handler: only an atomic load and `tcsetattr`, `signal`, `raise`, which are
+    // async-signal-safe. The pointer is never freed once published (see `restore_mode`), so a
+    // handler running on another thread cannot read freed memory.
     unsafe {
         let p = TTY_ORIGINAL.load(std::sync::atomic::Ordering::Acquire);
         if !p.is_null() {
@@ -6267,6 +6369,9 @@ extern "C" fn restore_tty_on_signal(sig: libc::c_int) {
 /// every caller of the interactive path inherits it. Same reason `missing_wg`
 /// was fixed at the module boundary rather than in one command.
 fn set_raw_mode() -> Option<libc::termios> {
+    // SAFETY: fd 0 is checked to be a terminal first; `t` is a zeroed `termios` (a C struct for
+    // which all-zero is valid) filled by `tcgetattr`; the handler has the `extern "C"
+    // fn(c_int)` ABI that `signal` expects.
     unsafe {
         if libc::isatty(0) == 0 {
             return None;
@@ -6283,13 +6388,13 @@ fn set_raw_mode() -> Option<libc::termios> {
             Box::into_raw(Box::new(saved)),
             std::sync::atomic::Ordering::AcqRel,
         );
-        if !prev.is_null() {
-            // A nested interactive session: the OUTER state is the one worth
-            // keeping, so put it back and drop the inner copy we just replaced.
-            // (Not reachable today — one process runs one session — and cheap
-            // enough that «not reachable» does not have to stay true.)
-            drop(Box::from_raw(prev));
-        }
+        // A nested interactive session would leave `prev` non-null. It is NOT
+        // freed: a signal handler on another thread (the pty pumps are threads)
+        // may have loaded it a moment ago, and freeing it would hand that handler
+        // a dangling pointer. One `termios` per session, in a process that ends
+        // with the session, is the price of never having a use-after-free in a
+        // signal handler.
+        let _ = prev;
         for sig in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP, libc::SIGQUIT] {
             libc::signal(
                 sig,
@@ -6305,6 +6410,7 @@ fn set_raw_mode() -> Option<libc::termios> {
 
 fn restore_mode(saved: Option<libc::termios>) {
     if let Some(t) = saved {
+        // SAFETY: `t` was filled by `tcgetattr` on the same fd 0.
         unsafe {
             libc::tcsetattr(0, libc::TCSANOW, &t);
         }
@@ -6313,9 +6419,11 @@ fn restore_mode(saved: Option<libc::termios>) {
     // would make a later, unrelated `SIGINT` run `tcsetattr` on whatever fd 0
     // happens to be by then.
     let p = TTY_ORIGINAL.swap(std::ptr::null_mut(), std::sync::atomic::Ordering::AcqRel);
+    // `p` is deliberately leaked, never freed: see `set_raw_mode` — a handler on
+    // another thread may still be reading it.
     if !p.is_null() {
+        // SAFETY: setting a signal back to `SIG_DFL` has no preconditions.
         unsafe {
-            drop(Box::from_raw(p));
             for sig in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP, libc::SIGQUIT] {
                 libc::signal(sig, libc::SIG_DFL);
             }
@@ -6433,6 +6541,12 @@ pub fn exec_with(
     // The container's cgroup, resolved in the PARENT while `/proc/<pid>/cgroup`
     // is still readable in the host context.
     let exec_cgroup = live_cgroup(container);
+    // SAFETY: `fork` from a process that is NOT always single-threaded: besides the CLI, `exec`
+    // is called from the health-monitor THREAD of a `run -d` supervisor (`cmd/container.rs`).
+    // glibc's `fork` resets malloc's locks, but not the std locks (stderr, environment) another
+    // thread may hold; the child's `eprintln!`/`format!` can then deadlock. Known, and removed
+    // by ADR-0040 D5 (`ProcessLauncher`); the child otherwise only makes syscalls on fds opened
+    // by this function.
     match unsafe { fork() }.map_err(syserr("fork"))? {
         ForkResult::Child => {
             // JOIN THE CONTAINER'S CGROUP, before the setns — while this process
@@ -6470,6 +6584,8 @@ pub fn exec_with(
                 let owned = unsafe { OwnedFd::from_raw_fd(*fd) };
                 if let Err(e) = setns(owned, CloneFlags::empty()) {
                     eprintln!("delonix: setns({ns}) failed: {e}");
+                    // SAFETY: `_exit` in the forked child: it must not run the parent's
+                    // destructors or atexit handlers, and it never returns.
                     unsafe { libc::_exit(125) };
                 }
             }
@@ -6477,6 +6593,8 @@ pub fn exec_with(
             // (same as the container's init).
             // SAFETY: after setns(user) we have CAP_SETUID in the container's user ns.
             if joined_userns {
+                // SAFETY: integer syscalls; after `setns(user)` this process holds
+                // CAP_SETUID/CAP_SETGID in the container's user namespace.
                 unsafe {
                     libc::setgid(0);
                     libc::setuid(0);
@@ -6495,9 +6613,15 @@ pub fn exec_with(
                     // pty: allocates in the container's devpts, sends the master to the parent, and
                     // uses the slave as stdio (new session + controlling terminal).
                     if let Some((sp, sc)) = pty_sock {
+                        // SAFETY: `sp` is the parent's end of the pty socketpair; the
+                        // grandchild's copy is closed once and never used.
                         unsafe { libc::close(sp) }; // the grandchild only uses its own side
                         if let Some((m, s, _path)) = open_pty_in_container() {
                             send_fd(sc, m);
+                            // SAFETY: `m`, `s` were just returned by `open_pty_in_container`
+                            // and `sc` is the grandchild's socketpair end; each is closed once
+                            // (`s` only when it is not already one of 0/1/2); `setsid`,
+                            // `TIOCSCTTY` and `dup2` take plain integers.
                             unsafe {
                                 libc::close(m);
                                 libc::close(sc);
@@ -6511,6 +6635,8 @@ pub fn exec_with(
                                 }
                             }
                         } else {
+                            // SAFETY: `sc` is the grandchild's socketpair end, closed once on
+                            // this failure path.
                             unsafe { libc::close(sc) };
                         }
                     }
@@ -6566,6 +6692,8 @@ pub fn exec_with(
                         // `false` here would check a claim this process never made.
                         if let Err(e) = verify_confinement(!exec_unconf, exec_keep, true) {
                             eprintln!("delonix: exec confinement NOT verified ({e}); aborting");
+                            // SAFETY: `_exit` in the forked child: it must not run the parent's
+                            // destructors or atexit handlers, and it never returns.
                             unsafe { libc::_exit(126) };
                         }
                     }
@@ -6633,19 +6761,27 @@ pub fn exec_with(
                         }
                     }
                     let _ = execvp(&cargv[0], &cargv);
+                    // SAFETY: `_exit` in the forked child: it must not run the parent's
+                    // destructors or atexit handlers, and it never returns.
                     unsafe { libc::_exit(127) };
                 }
                 Ok(ForkResult::Parent { child }) => {
                     // the middle does not hold the pty/socket (otherwise the master never gives EOF).
                     if let Some((sp, sc)) = pty_sock {
+                        // SAFETY: the middle process holds copies of both socketpair ends it
+                        // never uses; each is closed once so the master can reach EOF.
                         unsafe {
                             libc::close(sp);
                             libc::close(sc);
                         }
                     }
                     let code = waitpid(child, None).map(wait_to_code).unwrap_or(-1);
+                    // SAFETY: `_exit` in the forked child: it must not run the parent's
+                    // destructors or atexit handlers, and it never returns.
                     unsafe { libc::_exit((code & 0xff) as i32) };
                 }
+                // SAFETY: `_exit` in the forked child: it must not run the parent's destructors
+                // or atexit handlers, and it never returns.
                 Err(_) => unsafe { libc::_exit(126) },
             }
         }
@@ -6662,14 +6798,21 @@ pub fn exec_with(
             // Symmetric with `mount_live`/`unmount_live`, which already get
             // this right via `OwnedFd` (through `open_container_ns`).
             for (_, fd) in &fds {
+                // SAFETY: the parent's copies of the namespace fds opened above; the child
+                // closes its own through `OwnedFd`, the parent closes these exactly once.
                 unsafe { libc::close(*fd) };
             }
             if let Some((sp, sc)) = pty_sock {
+                // SAFETY: `sc` is the child's end; the parent's copy is closed once.
                 unsafe { libc::close(sc) }; // the parent receives on its side
                 let master = recv_fd(sp);
+                // SAFETY: `sp` is ours and closed once, after `recv_fd` returned; the received
+                // master is a separate fd.
                 unsafe { libc::close(sp) };
                 if let Some(m) = master {
                     // adjusts the pty to the client terminal's size.
+                    // SAFETY: `ws` is a zeroed `winsize` (all-integer C struct) that
+                    // `TIOCGWINSZ` fills; `m` is the master just received.
                     unsafe {
                         let mut ws: libc::winsize = std::mem::zeroed();
                         if libc::ioctl(0, libc::TIOCGWINSZ, &mut ws) == 0 {
@@ -6682,6 +6825,8 @@ pub fn exec_with(
                     std::thread::spawn(move || pump_fd(0, m)); // stdin -> master
                     let status = waitpid(child, None).map_err(syserr("waitpid"));
                     restore_mode(saved);
+                    // SAFETY: `m` is the received master, closed once after both pump threads'
+                    // child has exited.
                     unsafe { libc::close(m) };
                     return Ok(wait_to_code(status?));
                 }
@@ -6857,6 +7002,8 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
         ForkResult::Child => {
             let fail = |code: i32, msg: &str| -> ! {
                 eprintln!("delonix: mount_live: {msg}");
+                // SAFETY: `_exit` in the forked child: it must not run the parent's destructors
+                // or atexit handlers, and it never returns.
                 unsafe { libc::_exit(code) }
             };
             // 1) enter the container's userns (gain CAP_SYS_ADMIN there).
@@ -6902,6 +7049,8 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
             if move_mount_to(dfd.as_raw_fd(), &target).is_err() {
                 fail(120, "move_mount");
             }
+            // SAFETY: `_exit` in the forked child: it must not run the parent's destructors or
+            // atexit handlers, and it never returns.
             unsafe { libc::_exit(0) }
         }
         ForkResult::Parent { child } => {
@@ -6941,18 +7090,28 @@ pub fn unmount_live(container: &Container, target: &str) -> Result<()> {
         ForkResult::Child => {
             if let Some(u) = user_fd {
                 if setns(u, CloneFlags::empty()).is_err() {
+                    // SAFETY: `_exit` in the forked child: it must not run the parent's
+                    // destructors or atexit handlers, and it never returns.
                     unsafe { libc::_exit(125) };
                 }
+                // SAFETY: integer syscalls; after `setns(user)` this process holds
+                // CAP_SETUID/CAP_SETGID in the container's user namespace.
                 unsafe {
                     libc::setgid(0);
                     libc::setuid(0);
                 }
             }
             if setns(mnt_fd, CloneFlags::CLONE_NEWNS).is_err() {
+                // SAFETY: `_exit` in the forked child: it must not run the parent's destructors
+                // or atexit handlers, and it never returns.
                 unsafe { libc::_exit(121) };
             }
             match umount2(target.as_str(), MntFlags::MNT_DETACH) {
+                // SAFETY: `_exit` in the forked child: it must not run the parent's destructors
+                // or atexit handlers, and it never returns.
                 Ok(()) => unsafe { libc::_exit(0) },
+                // SAFETY: `_exit` in the forked child: it must not run the parent's destructors
+                // or atexit handlers, and it never returns.
                 Err(_) => unsafe { libc::_exit(119) },
             }
         }
@@ -8126,15 +8285,14 @@ mod tests {
     #[test]
     fn percentagem_invalida_cai_no_default_e_nao_desliga_o_tecto() {
         for bad in ["0", "101", "-5", "vinte e cinco", ""] {
-            // SAFETY: single-threaded test, restored before returning.
-            unsafe { std::env::set_var("DELONIX_DEFAULT_PCT", bad) };
             assert_eq!(
-                super::default_workload_pct(),
+                super::workload_pct_from(Some(bad)),
                 25,
                 "{bad:?} devia ter caído no default"
             );
         }
-        unsafe { std::env::remove_var("DELONIX_DEFAULT_PCT") };
+        assert_eq!(super::workload_pct_from(None), 25);
+        assert_eq!(super::workload_pct_from(Some("40")), 40);
     }
 
     /// Achado de auditoria (MÉDIO): a lista default de masked/readonly paths era
@@ -8763,6 +8921,7 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
             // Root ignora os bits de permissão — declara-o em vez de passar por
             // acaso.
             assert!(
+                // SAFETY: `geteuid` takes no arguments and has no preconditions.
                 unsafe { libc::geteuid() } == 0,
                 "a delegação devia ter falhado numa base só-leitura"
             );
@@ -9368,7 +9527,11 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
 
         // 1) The byte arrives: returns at once, well inside the ceiling.
         let mut fds = [0i32; 2];
+        // SAFETY: `fds` is an owned `[c_int; 2]`, exactly the buffer `pipe(2)` writes both fds
+        // into.
         assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+        // SAFETY: `fds[1]` is the write end just created: written once from a live 1-byte
+        // buffer and closed once.
         unsafe {
             let b = [1u8; 1];
             assert_eq!(libc::write(fds[1], b.as_ptr() as *const libc::c_void, 1), 1);
@@ -9386,7 +9549,10 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
         // This is the case that would deadlock a naive blocking read if the
         // parent had kept its own copy of the write end.
         let mut fds = [0i32; 2];
+        // SAFETY: `fds` is an owned `[c_int; 2]`, exactly the buffer `pipe(2)` writes both fds
+        // into.
         assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+        // SAFETY: `fds[1]` is the write end just created, closed once.
         unsafe { libc::close(fds[1]) };
         let t = Instant::now();
         wait_for_mounts_with(fds[0], "eof", 5_000);
@@ -9400,6 +9566,8 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
         // container. `run` used not to wait at all, so hanging forever here
         // would be a worse regression than the race being fixed.
         let mut fds = [0i32; 2];
+        // SAFETY: `fds` is an owned `[c_int; 2]`, exactly the buffer `pipe(2)` writes both fds
+        // into.
         assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
         let t = Instant::now();
         wait_for_mounts_with(fds[0], "tecto", 120);
@@ -9408,6 +9576,7 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
             waited.as_millis() >= 100 && waited.as_millis() < 5_000,
             "devia ter esperado ~120ms e desistido, esperou {waited:?}"
         );
+        // SAFETY: `fds[1]` is the write end just created, closed once.
         unsafe { libc::close(fds[1]) };
     }
 }

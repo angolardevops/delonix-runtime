@@ -2733,6 +2733,7 @@ mod tests {
         // A privileged port is only refused when we really lack the privilege — as
         // root (or with the sysctl lowered) the answer legitimately flips, so the
         // assertion is conditioned on what the kernel actually allows here.
+        // SAFETY: `geteuid` takes no arguments and has no preconditions.
         let root = unsafe { libc::geteuid() } == 0;
         let low = std::fs::read_to_string("/proc/sys/net/ipv4/ip_unprivileged_port_start")
             .ok()

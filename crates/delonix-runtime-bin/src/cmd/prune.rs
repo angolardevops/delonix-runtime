@@ -129,9 +129,10 @@ pub(crate) fn used_pct(blocks: u64, bfree: u64, bavail: u64) -> u8 {
 /// disk is has no business deciding it is full enough to start deleting.
 pub(crate) fn filesystem_used_pct(path: &std::path::Path) -> Option<u8> {
     let c_path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).ok()?;
+    // SAFETY: `statvfs` is a C struct of integers; all-zero is a valid value.
+    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
     // SAFETY: `c_path` is a valid NUL-terminated string that outlives the call,
     // and `stat` is a fully-owned, correctly-sized destination.
-    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
     if unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) } != 0 {
         return None;
     }
@@ -161,6 +162,7 @@ pub(crate) fn confirm(
     if force {
         return Ok(true);
     }
+    // SAFETY: `isatty` takes an integer fd and has no preconditions.
     let tty = unsafe { libc::isatty(libc::STDIN_FILENO) } == 1;
     if !tty {
         return Err(delonix_runtime_core::Error::Invalid(
@@ -1794,6 +1796,7 @@ mod tests {
         // SAFETY: getpid() has no preconditions.
         let uniq = format!(
             "delonix-prune-{tag}-{}-{}",
+            // SAFETY: `getpid` takes no arguments and has no preconditions.
             unsafe { libc::getpid() },
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

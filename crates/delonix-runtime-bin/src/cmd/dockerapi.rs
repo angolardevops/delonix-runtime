@@ -212,6 +212,8 @@ fn run_from_spec_file_inner(path: &std::path::Path) -> Result<()> {
 /// alone for its owner to wait on, exactly as before the reaper existed.
 fn spawn_zombie_reaper() {
     std::thread::spawn(|| loop {
+        // SAFETY: `siginfo_t` is a C struct for which all-zero is a valid value; `waitid` fills
+        // it below.
         let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
         // SAFETY: `waitid` with a zeroed `siginfo_t` out-param. `WNOWAIT` leaves
         // the child in its zombie state so the owner (if any) can still wait on
