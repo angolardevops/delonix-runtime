@@ -22,18 +22,13 @@ delonix-mgmt = { path = "../delonix-mgmt" }
 # graph through `delonix-mgmt`; named directly because it is used directly.
 delonix-runtime = { path = "../delonix-runtime" }
 
-rmcp = { version = "3", default-features = false, features = [
-    "server",
-    "transport-io",
-    "macros",
-    "schemars",
-] }
-schemars = { version = "1.2.2", features = ["derive"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "io-util", "sync", "time"] }
+rmcp = { workspace = true, features = ["server", "transport-io", "macros", "schemars"] }
+schemars = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-std", "io-util", "sync", "time"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 libc = { workspace = true }
 sha2 = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3"
+tempfile = { workspace = true }
