@@ -2549,6 +2549,12 @@ if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
     # contava como vivo, e a guarda do Paused está no ramo «vivo». O rc do
     # pause não prova nada: o que se lê é o REGISTO, e duas vezes, porque é a
     # reconciliação de um `ls` que o estragava.
+    #
+    # `-A`, e não é enfeite: desde o #326 o `vm ls` sem ele mostra SÓ o que está
+    # `Running` (o mesmo corte do `docker ps`). Sem o `-A` uma VM Paused ou
+    # Stopped nunca aparece na lista, e os três checks abaixo que perguntam por
+    # esses estados chumbavam SEMPRE, com a saída vazia — um vermelho fixo desde
+    # 2026-09-16 (#326) que se lia como intermitente por estar ao lado da secção CH.
     vm_status_is() {
       "$BIN" vm ls -A -o json | python3 -c "import json,sys; sys.exit(0 if any(v['name']==sys.argv[1] and v['status']==sys.argv[2] for v in json.load(sys.stdin)) else 1)" "$1" "$2"
     }
@@ -2633,8 +2639,67 @@ elif command -v cloud-hypervisor >/dev/null; then
   CVM="chsnap-$PFX"; CDISK="$OUT/$CVM.qcow2"
   qemu-img create -f qcow2 "$CDISK" 64M >/dev/null 2>&1
   if "$BIN" vm create "$CVM" --disk "$CDISK" --backend cloud-hypervisor --memory 256M >/dev/null 2>&1; then
-    check "CH: create com a VM a correr RECUSA" fail "$BIN" vm snapshot create "$CVM" s1
-    check "CH: e a recusa diz o que fazer" ok bash -c \
+    # A PRÉ-CONDIÇÃO dos checks «com a VM a correr», verificada e não presumida.
+    #
+    # Medido 2026-09-16: dentro da bateria completa esta secção chumbava 2 a 4
+    # checks em CASCATA — «rm com a VM a correr RECUSA» com rc=0, e um «create
+    # com a VM parada» a dar 5 porque o `s1` já tinha sido criado pelo check
+    # «e a recusa diz o que fazer», que corre o MESMO `snapshot create` e o viu
+    # passar. Nas duas pontas a recusa não disparou porque não havia VMM: o
+    # `qemu-img` conseguiu o lock de escrita do qcow2, e só consegue com o
+    # processo morto. Sozinha, com o mesmo binário, a secção dava 12/12.
+    #
+    # NÃO é o disco vazio, e isto foi medido porque era a suspeita óbvia: o
+    # `CLOUDHV.fd` sobre um qcow2 vazio não sai — fica em `BdsDxe: No bootable
+    # option or device was found` (120 s cronometrados, processo vivo), 25 de 25
+    # VMs criadas em laço a load 41 estavam vivas 3 s depois, e duas baterias
+    # completas (debug e release) com um poller a 20 ms viram o VMM em `S` até
+    # cada `vm stop`, sem uma morte. A causa da morte ficou POR MEDIR — não se
+    # reproduziu à ordem — e é por isso que a guarda abaixo, quando dispara,
+    # despeja o log do VMM em vez de só dizer que ele não está lá.
+    #
+    # O que o check prova é «a recusa acontece com a VM VIVA». Contra uma VM
+    # morta não prova nada — e pior, muda o disco e envenena os checks
+    # seguintes, que é exactamente como um VMM ausente virava quatro vermelhos
+    # que se liam como defeitos do `snapshot`. Por isso cada check que depende
+    # de o VMM estar vivo é emoldurado por `ch_live`:
+    #
+    #   - ANTES: há um processo `cloud-hypervisor` com o api-socket DESTA VM (a
+    #     testemunha independente do motor) E o `vm ls` do motor diz Running.
+    #     Se não, o check NÃO corre — não mexe no disco — e o que chumba é a
+    #     pré-condição, com nome próprio e a cauda do log do VMM, que é onde
+    #     está a razão da morte.
+    #   - DEPOIS: o VMM continua lá. Um processo que morre A MEIO do check
+    #     deixa a recusa por provar, e isso também chumba com nome próprio.
+    #
+    # Não enfraquece nada: a recusa continua a ser exercida contra um VMM vivo,
+    # e agora isso é afirmado dos dois lados em vez de assumido.
+    ch_vmm_up() {
+      local sock="$SROOT/vms/$CVM.sock" why=""
+      pgrep -f -- "^(\S*/)?cloud-hypervisor .*--api-socket $sock( |\$)" >/dev/null \
+        || why="nenhum processo cloud-hypervisor com --api-socket $sock"
+      if [[ -z "$why" ]] && ! "$BIN" vm ls -o json | python3 -c \
+          "import json,sys; sys.exit(0 if any(v['name']==sys.argv[1] and v['status']=='Running' for v in json.load(sys.stdin)) else 1)" "$CVM"; then
+        why="o processo existe mas o vm ls não diz Running"
+      fi
+      [[ -z "$why" ]] && return 0
+      echo "VMM de '$CVM' em baixo: $why"
+      echo "--- cauda de $SROOT/vms/$CVM.log:"
+      grep -v DEPRECATION "$SROOT/vms/$CVM.log" 2>/dev/null | tail -6
+      return 1
+    }
+    ch_live() {
+      local name="$1"; shift
+      if ! ch_vmm_up >/dev/null 2>&1; then
+        check "$name — pré-condição: VMM vivo ANTES (o check não correu)" ok ch_vmm_up
+        return
+      fi
+      check "$name" "$@"
+      ch_vmm_up >/dev/null 2>&1 \
+        || check "$name — pré-condição: VMM vivo DEPOIS (o VMM morreu a meio)" ok ch_vmm_up
+    }
+    ch_live "CH: create com a VM a correr RECUSA" fail "$BIN" vm snapshot create "$CVM" s1
+    ch_live "CH: e a recusa diz o que fazer" ok bash -c \
       "'$BIN' vm snapshot create '$CVM' s1 2>&1 | grep -q 'vm stop'"
     check "CH: vm stop" ok "$BIN" vm stop "$CVM"
     check "CH: create com a VM parada" ok "$BIN" vm snapshot create "$CVM" s1
@@ -2645,9 +2710,9 @@ elif command -v cloud-hypervisor >/dev/null; then
     check "CH: vm start" ok "$BIN" vm start "$CVM"
     # O snapshot vive no disco, por isso sobrevive por construção — e o `ls`
     # tem de responder mesmo com o vmm a segurar o ficheiro (`qemu-img info -U`).
-    check "CH: o ls responde com a VM a correr" ok bash -c \
+    ch_live "CH: o ls responde com a VM a correr" ok bash -c \
       "'$BIN' vm snapshot ls '$CVM' | grep -qx s1"
-    check "CH: rm com a VM a correr RECUSA" fail "$BIN" vm snapshot rm "$CVM" s1
+    ch_live "CH: rm com a VM a correr RECUSA" fail "$BIN" vm snapshot rm "$CVM" s1
     "$BIN" vm stop "$CVM" >/dev/null 2>&1
     # ESPERA PELA CONDIÇÃO, e a condição é o lock do qcow2 — não o `stop`.
     #
@@ -2666,9 +2731,13 @@ elif command -v cloud-hypervisor >/dev/null; then
     # APAGA o snapshot; se o `stop` é síncrono é outra pergunta, e misturá-las
     # dava um vermelho intermitente que se lê como defeito do `snapshot rm`.
     # O `qemu-img snapshot -l` SEM `-U` pede o mesmo lock que o `rm` vai pedir,
-    # por isso é a condição exacta e não um proxy dela.
+    # por isso é a condição exacta e não um proxy dela — DESDE QUE seja no
+    # overlay. Até 2026-09-16 perguntava ao `$CDISK`, o disco base que se passou
+    # ao `create`, e esse o VMM nunca tranca: medido com um CH vivo, o base dá
+    # rc=0 e o overlay `Failed to lock byte 100`. O ciclo saía à primeira e não
+    # esperava por nada; o lock que o `rm` pede é o de `$SROOT/vms/$CVM.qcow2`.
     for _ in $(seq 50); do
-      qemu-img snapshot -l "$CDISK" >/dev/null 2>&1 && break
+      qemu-img snapshot -l "$SROOT/vms/$CVM.qcow2" >/dev/null 2>&1 && break
       sleep 0.2
     done
     check "CH: rm com a VM parada" ok "$BIN" vm snapshot rm "$CVM" s1
