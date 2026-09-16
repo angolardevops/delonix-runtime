@@ -84,11 +84,11 @@ impl ChildHandle {
     /// a reaped child is NOT reachable through the handle.
     pub fn kill(&self) -> bool {
         match self.fd {
-            // SAFETY: `pidfd_send_signal` takes the descriptor, the signal and
-            // two by-value arguments; the null `siginfo_t` pointer is the
-            // documented "let the kernel fill it in" form, and the flags are
-            // required to be 0. Nothing of ours is read or written.
             Some(fd) => {
+                // SAFETY: `pidfd_send_signal` takes the descriptor, the signal and
+                // two by-value arguments; the null `siginfo_t` pointer is the
+                // documented "let the kernel fill it in" form, and the flags are
+                // required to be 0. Nothing of ours is read or written.
                 let r = unsafe {
                     libc::syscall(
                         libc::SYS_pidfd_send_signal,

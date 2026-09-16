@@ -4411,6 +4411,8 @@ fn record_crash_forensics(c: &Container) {
 fn spawn_rm_watcher(images: &ImageStore, store: &Store, id: &str) {
     // SAFETY: fork of a single-threaded process (CLI); the child only polls and exits.
     if unsafe { libc::fork() } == 0 {
+        // SAFETY: in the forked watcher child: `setsid` has no preconditions, `/dev/null` is a
+        // static C string, and the fd is checked before `dup2` onto 0/1/2 and closed once.
         unsafe {
             libc::setsid();
             let null = libc::open(c"/dev/null".as_ptr(), libc::O_RDWR);
@@ -4794,6 +4796,9 @@ fn run_supervised(
     // SAFETY: fork of a single-threaded process (CLI).
     if unsafe { libc::fork() } == 0 {
         // ---- supervisor ----
+        // SAFETY: in the forked supervisor: `rd` is the read end of the handshake pipe created
+        // above, which only the parent reads; our copy is closed once. `setsid` has no
+        // preconditions.
         unsafe {
             libc::close(rd);
             libc::setsid(); // survives the terminal/CLI closing
@@ -4907,6 +4912,8 @@ fn run_supervised(
             }
             reason.extend_from_slice(&buf[..k as usize]);
         }
+        // SAFETY: `rd` is the read end created above; the parent closes its copy once on this
+        // path.
         unsafe { libc::close(rd) };
         let reason = String::from_utf8_lossy(&reason).trim().to_string();
         return Err(Error::Runtime {
@@ -4921,6 +4928,7 @@ fn run_supervised(
             },
         });
     }
+    // SAFETY: `rd` is the read end created above; the parent closes its copy once on this path.
     unsafe { libc::close(rd) };
     println!("{id}");
     Ok(())

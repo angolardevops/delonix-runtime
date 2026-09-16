@@ -591,9 +591,10 @@ fn fs_avail_bytes(path: &std::path::Path) -> u64 {
     let Ok(c_path) = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()) else {
         return 0;
     };
+    // SAFETY: `statvfs` is a C struct of integers; all-zero is a valid value.
+    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
     // SAFETY: `c_path` is a valid NUL-terminated string that outlives the call,
     // and `stat` is a fully-owned, correctly-sized destination.
-    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
     if unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) } != 0 {
         return 0;
     }

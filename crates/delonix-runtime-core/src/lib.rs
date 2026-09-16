@@ -75,6 +75,8 @@ pub fn is_rootless() -> bool {
 /// Uses `localtime_r` (honors /etc/localtime|TZ); on failure, returns the raw value.
 pub fn fmt_local_ts(unix: u64) -> String {
     let t = unix as libc::time_t;
+    // SAFETY: `libc::tm` is a plain C struct of integers (and one pointer, which may be null);
+    // all-zero bytes is a valid value.
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
     // SAFETY: `t` is valid; `localtime_r` writes into `tm` (our buffer, of the
     // right size) and returns NULL only on error — handled below.

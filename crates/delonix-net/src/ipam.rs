@@ -722,6 +722,7 @@ mod tests {
             // the test pass for the wrong reason.
             Ok(ip) => {
                 assert!(
+                    // SAFETY: `geteuid` takes no arguments and has no preconditions.
                     unsafe { libc::geteuid() } == 0,
                     "allocate devolveu {ip} sem conseguir trancar o registo — é este o bug"
                 );

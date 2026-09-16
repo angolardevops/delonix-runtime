@@ -57,6 +57,7 @@ fn tool_exists(bin: &str) -> bool {
 
 /// Effective root, or `CAP_BPF` (bit 39) set in the effective capability set.
 fn has_cap_bpf() -> bool {
+    // SAFETY: `geteuid` takes no arguments and has no preconditions.
     if unsafe { libc::geteuid() } == 0 {
         return true;
     }

@@ -1467,6 +1467,8 @@ fn default_snap_name() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0) as libc::time_t;
+    // SAFETY: `libc::tm` is a plain C struct of integers (and one pointer, which may be null);
+    // all-zero bytes is a valid value.
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
     // SAFETY: `t` is valid; `gmtime_r` writes into `tm` (our buffer).
     unsafe { libc::gmtime_r(&t, &mut tm) };

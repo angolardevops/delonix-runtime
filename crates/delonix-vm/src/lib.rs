@@ -3126,6 +3126,7 @@ impl VmBackend for LibvirtBackend {
         // a rootless-owned disk boot under system libvirt (needed for NAT/bridge,
         // the only modes with a host-reachable IP).
         if uri == "qemu:///system" && is_rootless() {
+            // SAFETY: `getuid` and `getgid` take no arguments and have no preconditions.
             let (uid, gid) = unsafe { (libc::getuid(), libc::getgid()) };
             let sec = format!(
                 "  <seclabel type='static' model='dac' relabel='no'>\n    <label>+{uid}:+{gid}</label>\n  </seclabel>\n"

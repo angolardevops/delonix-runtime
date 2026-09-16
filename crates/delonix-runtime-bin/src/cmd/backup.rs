@@ -411,6 +411,8 @@ fn walk(root: &Path, dir: &Path, scope: &Scope, p: &mut Plan) -> Result<()> {
 /// `gmtime_r` the volume snapshots already use).
 pub fn timestamp(secs: u64) -> String {
     let t = secs as libc::time_t;
+    // SAFETY: `libc::tm` is a plain C struct of integers (and one pointer, which may be null);
+    // all-zero bytes is a valid value.
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
     // SAFETY: `t` is valid and `tm` is our own buffer.
     unsafe { libc::gmtime_r(&t, &mut tm) };
