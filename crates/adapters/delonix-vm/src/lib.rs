@@ -413,14 +413,26 @@ fn host_mem_available_mib() -> Option<u64> {
 /// refused naturally. Reserve tunable via `DELONIX_VM_RESERVE_MIB`
 /// (default 2048). Best-effort: if `/proc/meminfo` is unreadable, it does not block.
 fn vm_admission_check(cfg: &VmConfig) -> Result<()> {
-    let avail = match host_mem_available_mib() {
+    admission_verdict(
+        cfg,
+        host_mem_available_mib(),
+        std::env::var("DELONIX_VM_RESERVE_MIB").ok().as_deref(),
+    )
+}
+
+/// The admission rule, with the host's available memory and the reserve passed in —
+/// testable without reading `/proc/meminfo` (which made the old test depend on the
+/// machine) or writing the process environment (which raced parallel tests).
+fn admission_verdict(
+    cfg: &VmConfig,
+    available_mib: Option<u64>,
+    reserve_raw: Option<&str>,
+) -> Result<()> {
+    let avail = match available_mib {
         Some(a) => a,
         None => return Ok(()),
     };
-    let reserve = std::env::var("DELONIX_VM_RESERVE_MIB")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(2048u64);
+    let reserve = reserve_raw.and_then(|v| v.parse().ok()).unwrap_or(2048u64);
     let want = mem_mib(&cfg.memory);
     if want.saturating_add(reserve) > avail {
         return Err(Error::Runtime {
@@ -5513,19 +5525,21 @@ Format specific information:
 
     #[test]
     fn vm_admission_recusa_quando_nao_cabe() {
-        std::env::set_var("DELONIX_VM_RESERVE_MIB", "0");
-        // Only validates if the host has a readable MemAvailable (otherwise it is a best-effort no-op).
-        if host_mem_available_mib().is_some() {
-            assert!(
-                vm_admission_check(&test_vm_cfg("1000000G")).is_err(), // 1 PB — never fits
-                "giant VM must be refused"
-            );
-        }
+        // 8 GiB available, no reserve: a 1 PB VM never fits, a 1 MiB VM always does —
+        // on any machine, because the numbers are the test's and not the host's.
         assert!(
-            vm_admission_check(&test_vm_cfg("1M")).is_ok(), // tiny — always fits
+            admission_verdict(&test_vm_cfg("1000000G"), Some(8192), Some("0")).is_err(),
+            "giant VM must be refused"
+        );
+        assert!(
+            admission_verdict(&test_vm_cfg("1M"), Some(8192), Some("0")).is_ok(),
             "tiny VM must be admitted"
         );
-        std::env::remove_var("DELONIX_VM_RESERVE_MIB");
+        // The default reserve (2 GiB) applies when the variable is absent or garbage.
+        assert!(admission_verdict(&test_vm_cfg("7G"), Some(8192), None).is_err());
+        assert!(admission_verdict(&test_vm_cfg("7G"), Some(8192), Some("não")).is_err());
+        // No readable MemAvailable: best-effort no-op, as before.
+        assert!(admission_verdict(&test_vm_cfg("1000000G"), None, None).is_ok());
     }
 
     #[test]
