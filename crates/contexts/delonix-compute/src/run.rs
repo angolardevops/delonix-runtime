@@ -12,7 +12,8 @@
 //! everything after the record exists (network attach, spawn).
 
 use crate::pod::parse_add_host;
-use crate::RunOpts;
+use crate::ports::{DeviceResolver, ImageStore, RunHost, StorageProvider};
+use crate::{Notice, RunOpts};
 use delonix_runtime_core::{Container, Error, KubeCgroupParent, Mount, Result};
 
 /// What the use case resolved before building the record.
@@ -52,6 +53,99 @@ pub struct ResolvedRun {
     pub default_readonly_paths: Vec<String>,
     /// Whether the engine runs without privileges.
     pub rootless: bool,
+}
+
+/// What [`resolve_run`] hands back: the inputs of [`build_record`], and what the
+/// spawn needs that the record does not carry.
+#[derive(Debug)]
+pub struct Resolved {
+    pub record: ResolvedRun,
+    /// The prepared root filesystem.
+    pub rootfs: String,
+    /// The final mounts (volumes and device mounts), also inside `record`.
+    pub mounts: Vec<Mount>,
+    /// Warnings for the operator, in the order they arose.
+    pub notices: Vec<Notice>,
+}
+
+/// Resolves, through the read ports, everything [`build_record`] needs.
+///
+/// The caller has already chosen the id (a re-exec's second pass reuses the
+/// first's), the name and the namespace. The order is the one `container run`
+/// has always had: volumes, devices, image, rootfs, `--env-file`, `--user`.
+#[allow(clippy::too_many_arguments)]
+pub fn resolve_run<I, S, D, H>(
+    o: &RunOpts,
+    id: String,
+    name: String,
+    namespace: String,
+    second_pass: bool,
+    images: &I,
+    storage: &S,
+    devices: &D,
+    host: &H,
+) -> Result<Resolved>
+where
+    I: ImageStore,
+    S: StorageProvider,
+    D: DeviceResolver,
+    H: RunHost,
+{
+    let mut mounts = storage.resolve_mounts(&o.volumes, &namespace)?;
+    let edits = devices.resolve(o.gpus.as_deref(), &o.devices)?;
+    mounts.extend(edits.mounts);
+    let image = images.resolve(&o.image)?;
+    let config = images.config(&image);
+    let rootfs = images.prepare_rootfs(&image, &id, second_pass)?;
+
+    let mut env_files = Vec::with_capacity(o.env_file.len());
+    for f in &o.env_file {
+        env_files.push(
+            host.read_file(f)
+                .map_err(|e| Error::Invalid(format!("--env-file {f}: {e}")))?,
+        );
+    }
+    let run_user = match &o.user {
+        Some(u) => Some(images.resolve_user(&rootfs, u)?),
+        None => None,
+    };
+
+    let image_command = compose_command(&config.entrypoint, &config.cmd, &o.command);
+    Ok(Resolved {
+        record: ResolvedRun {
+            id,
+            name,
+            namespace,
+            image_command,
+            image_env: config.env,
+            image_workdir: config.working_dir,
+            env_files,
+            cdi_env: edits.env,
+            devices: edits.devices,
+            mounts: mounts.clone(),
+            run_user,
+            default_memory: host.default_memory(),
+            default_cpus: host.default_cpus(),
+            default_masked_paths: host.default_masked_paths(),
+            default_readonly_paths: host.default_readonly_paths(),
+            rootless: host.rootless(),
+        },
+        rootfs,
+        mounts,
+        notices: edits.notices,
+    })
+}
+
+/// The image's ENTRYPOINT followed by the user's command, or by the image's CMD
+/// when the user gave none. PURE.
+pub fn compose_command(entrypoint: &[String], cmd: &[String], user: &[String]) -> Vec<String> {
+    let mut v = entrypoint.to_vec();
+    if user.is_empty() {
+        v.extend(cmd.iter().cloned());
+    } else {
+        v.extend(user.iter().cloned());
+    }
+    v
 }
 
 /// Under the kubelet's hierarchy (ADR 0038) an unspecified limit means NO limit
@@ -355,5 +449,150 @@ mod tests {
         let mut o = opts();
         o.group_add = vec!["wheel".into()];
         assert!(build_record(&o, resolved()).is_err());
+    }
+
+    // ---- resolve_run over fake ports: the use case runs without the CLI ----
+
+    use crate::ports::{DeviceEdits, ImageConfig};
+    use std::cell::RefCell;
+
+    struct Fake {
+        calls: RefCell<Vec<String>>,
+    }
+
+    impl Fake {
+        fn new() -> Self {
+            Fake {
+                calls: RefCell::new(Vec::new()),
+            }
+        }
+        fn log(&self, s: impl Into<String>) {
+            self.calls.borrow_mut().push(s.into());
+        }
+    }
+
+    impl ImageStore for Fake {
+        type Image = String;
+        fn resolve(&self, reference: &str) -> Result<String> {
+            self.log(format!("resolve {reference}"));
+            Ok(reference.to_string())
+        }
+        fn config(&self, _: &String) -> ImageConfig {
+            ImageConfig {
+                entrypoint: vec!["/entry".into()],
+                cmd: vec!["serve".into()],
+                env: vec!["PATH=/bin".into()],
+                working_dir: "/app".into(),
+            }
+        }
+        fn prepare_rootfs(&self, _: &String, id: &str, second_pass: bool) -> Result<String> {
+            self.log(format!("rootfs {id} second_pass={second_pass}"));
+            Ok(format!("/roots/{id}"))
+        }
+        fn resolve_user(&self, rootfs: &str, spec: &str) -> Result<(u32, Option<u32>)> {
+            self.log(format!("user {spec} in {rootfs}"));
+            Ok((101, Some(101)))
+        }
+    }
+
+    impl StorageProvider for Fake {
+        fn resolve_mounts(&self, volumes: &[String], namespace: &str) -> Result<Vec<Mount>> {
+            self.log(format!("mounts {} in {namespace}", volumes.len()));
+            Ok(Vec::new())
+        }
+    }
+
+    impl DeviceResolver for Fake {
+        fn resolve(&self, gpus: Option<&str>, devices: &[String]) -> Result<DeviceEdits> {
+            self.log(format!("devices {gpus:?} {}", devices.len()));
+            Ok(DeviceEdits {
+                devices: devices.to_vec(),
+                env: vec!["GPU=1".into()],
+                notices: vec![Notice::new("hooks not executed", &[])],
+                ..Default::default()
+            })
+        }
+    }
+
+    impl RunHost for Fake {
+        fn read_file(&self, path: &str) -> std::io::Result<String> {
+            match path {
+                "ok.env" => Ok("A=1\n".into()),
+                _ => Err(std::io::Error::new(std::io::ErrorKind::NotFound, "missing")),
+            }
+        }
+        fn default_memory(&self) -> String {
+            "256M".into()
+        }
+        fn default_cpus(&self) -> String {
+            "1.0".into()
+        }
+        fn default_masked_paths(&self) -> Vec<String> {
+            Vec::new()
+        }
+        fn default_readonly_paths(&self) -> Vec<String> {
+            Vec::new()
+        }
+        fn rootless(&self) -> bool {
+            true
+        }
+    }
+
+    fn run(o: &RunOpts, f: &Fake, second_pass: bool) -> Result<Resolved> {
+        resolve_run(
+            o,
+            "id1".into(),
+            "web".into(),
+            "default".into(),
+            second_pass,
+            f,
+            f,
+            f,
+            f,
+        )
+    }
+
+    #[test]
+    fn resolve_run_keeps_the_historical_order_and_builds_a_record() {
+        let f = Fake::new();
+        let mut o = opts();
+        o.user = Some("nginx".into());
+        o.env_file = vec!["ok.env".into()];
+        let r = run(&o, &f, false).unwrap();
+        assert_eq!(
+            *f.calls.borrow(),
+            [
+                "mounts 0 in default",
+                "devices None 0",
+                "resolve alpine:3.20",
+                "rootfs id1 second_pass=false",
+                "user nginx in /roots/id1",
+            ]
+        );
+        assert_eq!(r.rootfs, "/roots/id1");
+        assert_eq!(r.notices.len(), 1);
+        let c = build_record(&o, r.record).unwrap();
+        assert_eq!(c.command, ["/entry", "serve"]);
+        assert_eq!(c.env, ["PATH=/bin", "A=1", "GPU=1"]);
+        assert_eq!(c.workdir.as_deref(), Some("/app"));
+        assert_eq!((c.run_uid, c.run_gid), (Some(101), Some(101)));
+        assert_eq!(c.memory_max, "256M");
+        assert!(c.userns);
+    }
+
+    #[test]
+    fn resolve_run_passes_the_second_pass_and_names_a_missing_env_file() {
+        let f = Fake::new();
+        let o = opts();
+        run(&o, &f, true).unwrap();
+        assert!(f
+            .calls
+            .borrow()
+            .contains(&"rootfs id1 second_pass=true".to_string()));
+
+        let mut o = opts();
+        o.env_file = vec!["gone.env".into()];
+        let err = run(&o, &Fake::new(), false).unwrap_err().to_string();
+        assert!(err.contains("--env-file gone.env"), "{err}");
     }
 }

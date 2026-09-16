@@ -17,9 +17,7 @@ use serde::{Deserialize, Serialize};
 use super::cdi;
 use super::manifest::{self, ManifestDoc};
 use super::output;
-use super::util::{
-    container_writable_dir, effective_command, find, open_stores, prepare_rootfs, resolve_or_pull,
-};
+use super::util::{container_writable_dir, find, open_stores, prepare_rootfs, resolve_or_pull};
 
 /// `spec` for `kind: Container` — mirrors `ContainerCmd::Run` (minus `name`,
 /// which comes from `metadata.name`). **`detach` defaults to `true`** (unlike the
@@ -2384,6 +2382,144 @@ mod resource_limits_preflight_tests {
     }
 }
 
+/// The `container run` read ports over this CLI's image store and host helpers
+/// (`docs/discovery/54_P2_COMPUTE_RUN.md`). Each method is the code `cmd_run`
+/// ran inline before, unchanged — progress line and messages included.
+struct CliRunPorts<'a> {
+    images: &'a ImageStore,
+}
+
+impl delonix_compute::ports::ImageStore for CliRunPorts<'_> {
+    type Image = delonix_image::Image;
+
+    fn resolve(&self, reference: &str) -> Result<delonix_image::Image> {
+        resolve_or_pull(self.images, reference)
+    }
+
+    fn config(&self, img: &delonix_image::Image) -> delonix_compute::ports::ImageConfig {
+        delonix_compute::ports::ImageConfig {
+            entrypoint: img.config.entrypoint.clone(),
+            cmd: img.config.cmd.clone(),
+            env: img.config.env.clone(),
+            working_dir: img.config.working_dir.clone(),
+        }
+    }
+
+    fn prepare_rootfs(
+        &self,
+        img: &delonix_image::Image,
+        id: &str,
+        second_pass: bool,
+    ) -> Result<String> {
+        // The re-exec's second pass reuses the rootfs the first pass prepared: a
+        // full extraction again over a populated tree costs full price (measured).
+        if second_pass && runtime::is_rootless() {
+            return match super::util::existing_rootfs_path(self.images, id) {
+                Some(p) => Ok(p.to_string_lossy().into_owned()),
+                None => prepare_rootfs(self.images, img, id),
+            };
+        }
+        let mut prog = super::output::Progress::new();
+        prog.step_after(
+            super::po::t("unpacking the image"),
+            "📦",
+            std::time::Duration::from_millis(800),
+        );
+        let r = prepare_rootfs(self.images, img, id)?;
+        prog.ok();
+        Ok(r)
+    }
+
+    fn resolve_user(&self, rootfs: &str, spec: &str) -> Result<(u32, Option<u32>)> {
+        resolve_run_user(rootfs, spec)
+    }
+}
+
+impl delonix_compute::ports::StorageProvider for CliRunPorts<'_> {
+    fn resolve_mounts(
+        &self,
+        volumes: &[String],
+        namespace: &str,
+    ) -> Result<Vec<delonix_runtime_core::Mount>> {
+        resolve_mounts(volumes, namespace)
+    }
+}
+
+impl delonix_compute::ports::DeviceResolver for CliRunPorts<'_> {
+    fn resolve(
+        &self,
+        gpus: Option<&str>,
+        devices: &[String],
+    ) -> Result<delonix_compute::ports::DeviceEdits> {
+        // `--gpus nvidia|all` and `--device vendor.com/class=name` resolve via CDI
+        // before anything is created; `--gpus dri` stays the raw `/dev/dri/*` glob.
+        let mut devices = devices.to_vec();
+        let mut cdi_edits = cdi::CdiEdits::default();
+        if let Some(g) = gpus {
+            if g == "all" || g.contains("nvidia") {
+                cdi::ensure_cdi_available()?;
+                cdi::resolve_cdi_device("nvidia.com/gpu=all", &mut cdi_edits)?;
+            }
+            if g == "all" || g.contains("dri") {
+                devices.extend(expand_gpu_devices("dri"));
+            }
+        }
+        for d in devices.iter().filter(|d| cdi::is_cdi_qualified(d)) {
+            cdi::ensure_cdi_available()?;
+            cdi::resolve_cdi_device(d, &mut cdi_edits)?;
+        }
+        devices.retain(|d| !cdi::is_cdi_qualified(d));
+        devices.extend(cdi_edits.devices);
+        let mut notices = Vec::new();
+        if cdi_edits.had_unexecuted_hooks {
+            notices.push(delonix_compute::Notice::new(
+                "warning: the CDI spec declares hooks that this engine does not execute (uses \
+                 `ldconfig -r` instead) — if something does not load at runtime, manually check \
+                 the hook steps",
+                &[],
+            ));
+        }
+        Ok(delonix_compute::ports::DeviceEdits {
+            devices,
+            mounts: cdi_edits.mounts,
+            env: cdi_edits.env,
+            notices,
+        })
+    }
+}
+
+impl delonix_compute::ports::RunHost for CliRunPorts<'_> {
+    fn read_file(&self, path: &str) -> std::io::Result<String> {
+        std::fs::read_to_string(path)
+    }
+
+    fn default_memory(&self) -> String {
+        runtime::default_memory_max()
+    }
+
+    fn default_cpus(&self) -> String {
+        runtime::default_cpus()
+    }
+
+    fn default_masked_paths(&self) -> Vec<String> {
+        delonix_runtime::DEFAULT_MASKED_PATHS
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    }
+
+    fn default_readonly_paths(&self) -> Vec<String> {
+        delonix_runtime::DEFAULT_READONLY_PATHS
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
+    }
+
+    fn rootless(&self) -> bool {
+        runtime::is_rootless()
+    }
+}
+
 pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Result<()> {
     // The node's runtime policy, BEFORE anything is created or pulled. Same
     // placement reason as the capability ceiling in the CRI: everything reaching
@@ -2418,17 +2554,13 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     let RunOpts {
         detach,
         name,
-        user,
         net,
         namespace,
         expose,
-        volumes,
         ports,
         rm,
         restart,
-        mut devices,
         image,
-        command,
         quiet,
         no_supervisor,
         security_opt,
@@ -2439,8 +2571,6 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         detect,
         secret,
         secret_files,
-        env_file,
-        gpus,
         ip,
         wait_healthy,
         wait_timeout,
@@ -2554,103 +2684,11 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
             }
         }
     }
-    let mut mounts = resolve_mounts(&volumes, &namespace)?;
-    // `--gpus nvidia|all` (upgraded) and `--device vendor.com/class=name`:
-    // resolve via CDI BEFORE creating anything — same "fail fast, no
-    // leftovers" pattern as the port checks above. `--gpus dri` stays the
-    // raw `/dev/dri/*` glob (Mesa/VAAPI is open-source and normally already
-    // ships inside the image — not the gap this closes).
-    let mut cdi_edits = cdi::CdiEdits::default();
-    if let Some(g) = &gpus {
-        if g == "all" || g.contains("nvidia") {
-            cdi::ensure_cdi_available()?;
-            cdi::resolve_cdi_device("nvidia.com/gpu=all", &mut cdi_edits)?;
-        }
-        if g == "all" || g.contains("dri") {
-            devices.extend(expand_gpu_devices("dri"));
-        }
-    }
-    for d in devices.iter().filter(|d| cdi::is_cdi_qualified(d)) {
-        cdi::ensure_cdi_available()?;
-        cdi::resolve_cdi_device(d, &mut cdi_edits)?;
-    }
-    devices.retain(|d| !cdi::is_cdi_qualified(d));
-    devices.extend(cdi_edits.devices);
-    mounts.extend(cdi_edits.mounts);
-    if cdi_edits.had_unexecuted_hooks {
-        eprintln!(
-            "{}",
-            super::po::t(
-                "warning: the CDI spec declares hooks that this engine does not execute (uses \
-                 `ldconfig -r` instead) — if something does not load at runtime, manually check \
-                 the hook steps",
-            )
-        );
-    }
-    let img = resolve_or_pull(images, &image)?;
-    // On the 2nd re-exec pass (see `reexec_into_netns`) the id MUST be the same:
-    // the named netns was already created with it on the holder's side.
     let id = std::env::var("DELONIX_REEXEC_ID").unwrap_or_else(|_| generate_id());
     let reexec = std::env::var("DELONIX_REEXEC_ID").is_ok();
-    let rootless = runtime::is_rootless();
-    // The 2nd pass of the `--net <custom>`/`--pod` re-exec must NOT extract the image
-    // again. The 1st pass already did it, to the same path (same container id), and then
-    // re-exec'd — so the work was being done twice, in full.
-    //
-    // Measured before/after on this host (`pgvector/pgvector:pg16`, 10 296 entries,
-    // 431 MB): `--net none` 1 526 ms vs `--net <custom>` 3 143 ms. The 1 617 ms delta is
-    // exactly ONE extraction (1 666 ms measured on its own via `image export`), and
-    // re-extracting over an already-populated tree costs full price — there is no
-    // accidental saving. `strace` agrees: 2 060 canonicalizations of the destination,
-    // exactly 2 × the 1 030 of a single pass.
-    //
-    // Rootless ONLY, deliberately. Under root `prepare_rootfs` MOUNTS an overlay on the
-    // host, and a mount made by the 1st pass is not necessarily visible in the namespace
-    // the re-exec lands in — skipping it there would trade a slow container for a broken
-    // one. Rootless is safe for the opposite reason: what the 1st pass left behind is
-    // inert on-disk state (the extracted layers, the write layer, the `overlay-lowers`
-    // marker), and the mount itself is done by the container's own init, inside whichever
-    // namespace this pass ends up in. Nothing is inherited across the re-exec.
-    let rootfs = if reexec && rootless {
-        // A 2nd pass with nothing prepared would be a bug in the re-exec, not a user
-        // error; preparing again is cheap (the layers are already extracted and cached)
-        // and is strictly better than starting the container against a path that does
-        // not exist. Never silently empty — an empty rootfs string would `pivot_root`
-        // into the caller's own cwd.
-        match super::util::existing_rootfs_path(images, &id) {
-            Some(p) => p.to_string_lossy().into_owned(),
-            None => prepare_rootfs(images, &img, &id)?,
-        }
-    } else {
-        // The one genuinely silent phase of a `run`: on the FIRST use of an
-        // image, `prepare_rootfs` → `ensure_layers` extracts every layer with no
-        // output at all — tens of seconds on a big image, with the terminal
-        // showing nothing. Measured on the cached path it is 0.43s end to end,
-        // which is why the spinner is DELAYED: under the threshold nothing is
-        // drawn, so the fast path keeps the output it always had.
-        let mut prog = super::output::Progress::new();
-        prog.step_after(
-            super::po::t("unpacking the image"),
-            "📦",
-            // 800ms, not 400: the cached path measures 0.43s end to end in
-            // release, and a threshold that close to it would flash a spinner on
-            // the ordinary run — the chrome this delay exists to avoid.
-            std::time::Duration::from_millis(800),
-        );
-        let r = prepare_rootfs(images, &img, &id)?;
-        prog.ok();
-        r
-    };
 
-    // `--entrypoint X` replaces the image's ENTRYPOINT (COMMAND becomes its
-    // arguments, without inheriting the image's CMD — docker semantics);
-    // `--entrypoint ""` clears it and runs just the user's COMMAND.
-    // The name, and its uniqueness in the namespace, need the store; everything
-    // the record says after that is decided by `delonix_compute::run::build_record`.
-    // Default name in the Angolan pattern (king + place, like the kind-mode
-    // clusters and the VMs) — derived from the `id` so the TWO re-exec passes arrive
-    // at the same name (the id travels in DELONIX_REEXEC_ID; see `names::derived_name`).
-    // `dlx-<id>` is only a last resort if the 50 attempts all collide.
+    // The name, and its uniqueness in the namespace, need the store and a
+    // translated refusal; everything after that goes through the Compute use case.
     let cname = match name {
         Some(n) => n,
         None => {
@@ -2703,46 +2741,24 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     }
     // ---- what the record needs from files, the image and this node ----
     // `--env-file`: read here, parsed by the builder (each file before `-e`).
-    let mut env_files = Vec::with_capacity(env_file.len());
-    for f in &env_file {
-        env_files.push(
-            std::fs::read_to_string(f)
-                .map_err(|e| Error::Invalid(format!("--env-file {f}: {e}")))?,
-        );
-    }
-    // `--user <uid[:gid]|name[:group]>`: resolved against the image's
-    // `/etc/passwd`/`/etc/group`; the engine switches before `execve`.
-    let run_user = match &user {
-        Some(u) => Some(resolve_run_user(&rootfs, u)?),
-        None => None,
-    };
-    let mut c = delonix_compute::run::build_record(
+    // Volumes, devices, image, rootfs, `--env-file`, `--user` — resolved through the
+    // read ports (`delonix_compute::ports`), then the record is built from them.
+    let read_ports = CliRunPorts { images };
+    let resolved = delonix_compute::run::resolve_run(
         &opts_copy,
-        delonix_compute::run::ResolvedRun {
-            id: id.clone(),
-            name: cname,
-            namespace: namespace.clone(),
-            image_command: effective_command(&img, &command),
-            image_env: img.config.env.clone(),
-            image_workdir: img.config.working_dir.clone(),
-            env_files,
-            cdi_env: cdi_edits.env,
-            devices,
-            mounts: mounts.clone(),
-            run_user,
-            default_memory: runtime::default_memory_max(),
-            default_cpus: runtime::default_cpus(),
-            default_masked_paths: delonix_runtime::DEFAULT_MASKED_PATHS
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
-            default_readonly_paths: delonix_runtime::DEFAULT_READONLY_PATHS
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
-            rootless,
-        },
+        id.clone(),
+        cname,
+        namespace.clone(),
+        reexec,
+        &read_ports,
+        &read_ports,
+        &read_ports,
+        &read_ports,
     )?;
+    print_notices(&resolved.notices);
+    let rootfs = resolved.rootfs;
+    let mounts = resolved.mounts;
+    let mut c = delonix_compute::run::build_record(&opts_copy, resolved.record)?;
     // `--security-opt seccomp=unconfined` / `apparmor=<profile>` (docker-style).
     let mut apparmor_profile = apparmor;
     for opt in &security_opt {
