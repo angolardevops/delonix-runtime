@@ -4850,8 +4850,7 @@ fn run_supervised(
                 // it, an `eprintln!` from a failing probe would land on the
                 // user's terminal interleaved with the real startup error.
                 if let Some(cfg) = health.clone() {
-                    let cid = c.id.clone();
-                    std::thread::spawn(move || health_monitor_loop(cid, cfg));
+                    spawn_health_monitor(c.id.clone(), cfg);
                 }
             }
             if started.is_err() {
@@ -7603,6 +7602,42 @@ pub(crate) fn apply_probe(
         failing_streak: streak,
         last_exit: exit,
         checked_unix: now_unix,
+    }
+}
+
+/// Starts the health monitor as a CHILD PROCESS of the supervisor, not a thread.
+///
+/// It used to be a thread, and that made two forks unsafe at once: every probe runs
+/// `runtime::exec`, which `fork`s and then allocates and prints in the child, and every
+/// restart has the supervisor itself `clone()` the container again — both from a process
+/// with a second thread alive. glibc's `fork` resets malloc's locks but not the locks the
+/// Rust standard library holds (stderr, the environment), so a probe landing while the
+/// other thread held one could hang the child for good. As a separate process forked
+/// while the supervisor is still single-threaded, BOTH processes stay single-threaded.
+///
+/// `PR_SET_PDEATHSIG` ties the monitor to the supervisor: a thread died with it for
+/// free, a process has to be told. The `getppid` check closes the window where the
+/// supervisor died between the `fork` and the `prctl`.
+fn spawn_health_monitor(id: String, cfg: HealthConfig) {
+    // SAFETY: called by the supervisor, which is single-threaded at this point; the
+    // child runs only the monitor loop and leaves through `_exit`.
+    let supervisor = unsafe { libc::getpid() };
+    // Monitoring is an addition to the container, never a condition for it: a failed
+    // fork (-1) leaves the container running with no health column, and the parent
+    // (> 0) has nothing to do — the monitor lives on its own.
+    // SAFETY: as above — a fork from a single-threaded process.
+    if unsafe { libc::fork() } == 0 {
+        // SAFETY: `prctl` with integer arguments; `getppid`/`_exit` have no
+        // preconditions.
+        unsafe {
+            libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+            if libc::getppid() != supervisor {
+                libc::_exit(0);
+            }
+        }
+        health_monitor_loop(id, cfg);
+        // SAFETY: leaves the monitor without running the supervisor's destructors.
+        unsafe { libc::_exit(0) };
     }
 }
 
