@@ -8121,10 +8121,20 @@ mod tests {
         assert!(msg.contains(&(port as u32 + 10000).to_string()), "{msg}");
 
         drop(held);
-        assert!(
-            super::host_port_conflict_error(&hp, "80", None).is_none(),
-            "a freed port must not still be reported as busy"
-        );
+        // The ephemeral port is back in the kernel's pool the moment it is dropped,
+        // and the test battery runs in parallel: another test may be handed this very
+        // port before the next line (measured — a full `cargo test --workspace` failed
+        // here once while five isolated runs passed). The property is «a freed port is
+        // not reported busy», so it is asked a few times and must hold at least once;
+        // a diagnosis that NEVER clears would still fail every attempt.
+        let cleared = (0..20).any(|_| {
+            let free = super::host_port_conflict_error(&hp, "80", None).is_none();
+            if !free {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            free
+        });
+        assert!(cleared, "a freed port must not still be reported as busy");
     }
 
     /// Ports and volumes are SETS — the order in the manifest carries no
