@@ -42,25 +42,25 @@ pub(crate) const POD_LABEL: &str = "delonix.io/pod";
 /// as [`POD_LABEL`]: derived state, no new store.
 pub(crate) const POD_IP_LABEL: &str = "delonix.io/pod-ip";
 
-/// The member's position in `spec.containers`, recorded at create time.
-///
-/// «The pod's first member» was a promise with nothing behind it. Membership is derived
-/// from [`POD_LABEL`] over `Store::list`, and that list is sorted by
-/// `Reverse(created_unix)` — in SECONDS. Two members of the same pod are created inside
-/// the same second, so they TIE, `sort_by_key` is stable, and the tie-break fell through
-/// to the order `read_dir` happened to return: filesystem order. Not the declared order,
-/// and not even stable between two roots.
-///
-/// Measured 2026-09-09 on a two-member pod (`a`, `b`), ACH-011: on a pristine root the
-/// default landed on `a`; on the root of the full e2e battery it landed on `b` — same
-/// binary, same manifest. `pod exec`/`logs`/`cp`/`attach` all resolve through
-/// [`resolve_target`], so all four inherited it, and `describe`/`ls`/`actual` read the
-/// namespace, the owner and the last-applied off whichever member came out first.
-///
-/// The manifest's order is the only thing a user can point at, and the container record
-/// did not carry it — only the `<pod>-<member>` name. So it is recorded here, same idiom
-/// as [`POD_IP_LABEL`]: a label on each member, derived state, no new store.
-pub(crate) const POD_INDEX_LABEL: &str = "delonix.io/pod-index";
+// The member's position in `spec.containers`, recorded at create time.
+//
+// «The pod's first member» was a promise with nothing behind it. Membership is derived
+// from [`POD_LABEL`] over `Store::list`, and that list is sorted by
+// `Reverse(created_unix)` — in SECONDS. Two members of the same pod are created inside
+// the same second, so they TIE, `sort_by_key` is stable, and the tie-break fell through
+// to the order `read_dir` happened to return: filesystem order. Not the declared order,
+// and not even stable between two roots.
+//
+// Measured 2026-09-09 on a two-member pod (`a`, `b`), ACH-011: on a pristine root the
+// default landed on `a`; on the root of the full e2e battery it landed on `b` — same
+// binary, same manifest. `pod exec`/`logs`/`cp`/`attach` all resolve through
+// [`resolve_target`], so all four inherited it, and `describe`/`ls`/`actual` read the
+// namespace, the owner and the last-applied off whichever member came out first.
+//
+// The manifest's order is the only thing a user can point at, and the container record
+// did not carry it — only the `<pod>-<member>` name. So it is recorded here, same idiom
+// as [`POD_IP_LABEL`]: a label on each member, derived state, no new store.
+pub(crate) use delonix_compute::pod::POD_INDEX_LABEL;
 
 /// Sort key for a pod's members: the declared order, then the name.
 ///
