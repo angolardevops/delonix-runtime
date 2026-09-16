@@ -60,8 +60,8 @@ description (command run, expected vs. actual behavior).
 
 **If you add or change a CLI command:**
 - New user-facing strings are authored in English in the source and wrapped in
-  `po::t(...)`/`po::tf(...)` (see `crates/delonix-runtime-bin/src/cmd/po.rs`); the Portuguese
-  translation goes in `crates/delonix-runtime-bin/data/pt.po`, never inline in the code. This is
+  `po::t(...)`/`po::tf(...)` (see `bins/delonix-runtime-bin/src/cmd/po.rs`); the Portuguese
+  translation goes in `bins/delonix-runtime-bin/data/pt.po`, never inline in the code. This is
   enforced by review, not by a lint — a string that shows up in Portuguese when running with the
   default (English) language is a bug.
 - If the command has multiple entry points that should behave the same way (a common pattern in
@@ -84,7 +84,7 @@ disclosing privately instead of a normal PR.
   does are removed in review.
 - Don't add abstractions, config flags, or error handling for cases that can't happen. This
   codebase prefers direct, readable code over defensive scaffolding — see the existing modules in
-  `crates/delonix-runtime-bin/src/cmd/` for the house style.
+  `bins/delonix-runtime-bin/src/cmd/` for the house style.
 
 ## Commit messages and PRs
 

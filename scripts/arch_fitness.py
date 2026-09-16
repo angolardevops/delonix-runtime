@@ -66,7 +66,7 @@ LAYERS = {
     "delonix-cri": INTERFACE,
     "delonix-mgmt": INTERFACE,  # replaced by delonix-node-api (P5)
     "delonix-mcp": INTERFACE,
-    "delonix-runtime-bin": BIN,  # → delonix-cli + bins/delonix (P2)
+    "delonix-runtime-bin": BIN,  # → delonix-cli (interfaces) + bins/delonix (P2)
 }
 
 # Which layers each layer may depend on. The direction, in one place.
@@ -207,6 +207,31 @@ def rule_failures(pkgs: dict[str, dict]) -> tuple[list[str], set[tuple]]:
     return bad, used
 
 
+# Where each layer lives on disk (ADR-0040 D2.5). The layer is readable from the
+# path, so a crate in the wrong directory is a crate whose layer nobody can trust.
+LAYER_DIR = {
+    FOUNDATION: "crates/foundation",
+    CONTEXT: "crates/contexts",
+    ADAPTER: "crates/adapters",
+    PROVIDER: "crates/providers",
+    INTERFACE: "crates/interfaces",
+    BIN: "bins",
+}
+
+
+def misplaced(pkgs: dict[str, dict]) -> list[str]:
+    """A crate whose directory is not the one its declared layer lives in."""
+    bad: list[str] = []
+    for name, pkg in sorted(pkgs.items()):
+        layer = LAYERS.get(name)
+        if layer is None:
+            continue  # already reported by rule_failures
+        rel = Path(pkg["manifest_path"]).parent.relative_to(ROOT).as_posix()
+        want = f"{LAYER_DIR[layer]}/{name}"
+        if rel != want:
+            bad.append(f"{name}: lives in {rel}, but its layer ({layer}) lives in {want}")
+    return bad
+
 DEP_TABLES = ("dependencies", "dev-dependencies", "build-dependencies")
 
 
@@ -234,9 +259,10 @@ def inline_versions(pkgs: dict[str, dict]) -> list[str]:
 def count(pattern: re.Pattern[str], skip_bin: bool = True) -> tuple[int, list[str]]:
     total = 0
     where: list[str] = []
-    for f in sorted((ROOT / "crates").rglob("*.rs")):
+    files = sorted((ROOT / "crates").rglob("*.rs")) + sorted((ROOT / "bins").rglob("*.rs"))
+    for f in files:
         rel = f.relative_to(ROOT).as_posix()
-        if skip_bin and rel.startswith("crates/delonix-runtime-bin/"):
+        if skip_bin and rel.startswith("bins/"):
             continue
         n = len(pattern.findall(f.read_text(encoding="utf-8", errors="replace")))
         if n:
@@ -254,6 +280,7 @@ def main() -> int:
     pkgs = crates()
     bad, used = rule_failures(pkgs)
     bad += inline_versions(pkgs)
+    bad += misplaced(pkgs)
 
     # An exception with no phase is worse than the violation it covers.
     for key, (phase, reason) in EXCEPTIONS.items():

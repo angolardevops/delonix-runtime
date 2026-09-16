@@ -23,9 +23,9 @@
 ```
 $ /usr/local/bin/delonix --version   → 0.44.0 (663c9b6)   ← arrancou o pin/controlo vivos
 $ grep version Cargo.toml            → 0.46.0
-$ git diff --numstat v0.44.0..HEAD -- crates/delonix-net
-21   7   crates/delonix-net/src/bpf.rs
-172  41  crates/delonix-net/src/infra.rs
+$ git diff --numstat v0.44.0..HEAD -- crates/adapters/delonix-net
+21   7   crates/adapters/delonix-net/src/bpf.rs
+172  41  crates/adapters/delonix-net/src/infra.rs
 ```
 
 O dataplane **mudou** entre o holder vivo e o `main`. Os dois commits são `d5d6553`
@@ -376,8 +376,8 @@ Superfície real, lida do código:
 
 ```
 $ grep -rln 'pub namespace' crates/*/src/*.rs
-crates/delonix-runtime-core/src/lib.rs      (Container)
-crates/delonix-vm/src/lib.rs                (Vm)
+crates/foundation/delonix-runtime-core/src/lib.rs      (Container)
+crates/adapters/delonix-vm/src/lib.rs                (Vm)
 ```
 
 **Só `Container` e `Vm` têm namespace.** `Network`, `Volume`, `Storage`, `ShareVolume`,

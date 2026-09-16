@@ -48,10 +48,10 @@ Measured before proposing anything:
   over `crates/` for `/api2/json`, `pve.?api`, `proxmox.*api`: no hits). This is
   greenfield, not a wiring job.
 - **`delonix-vm` has four dependencies**: `delonix-runtime-core`,
-  `delonix-net`, `tracing`, `libc` (`crates/delonix-vm/Cargo.toml`). It is one
+  `delonix-net`, `tracing`, `libc` (`crates/adapters/delonix-vm/Cargo.toml`). It is one
   of the cleanest crates in the tree.
 - **`VmBackend` is public and implementable from outside**
-  (`crates/delonix-vm/src/lib.rs:499`), but **backend selection is not**:
+  (`crates/adapters/delonix-vm/src/lib.rs:499`), but **backend selection is not**:
   `fn backend_for(vm: &Vm) -> Box<dyn VmBackend>` (line 644) is a private
   `match` over two string literals with `_ => CloudHypervisorBackend`. Nothing
   outside the crate can add a third.

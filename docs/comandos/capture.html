@@ -159,7 +159,7 @@ uses to enter one, no new privilege. Containers only in this version: a pod memb
 netns and is refused, pointing at the pod's name. A clear preflight runs before any
 <code>nsenter</code> if <code>tcpdump</code> isn't installed on this host (<code>install.sh</code>
 already brings it as an optional dependency).</p>
-<p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/capture.rs"><code>cmd/capture.rs</code></a></p>
+<p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/capture.rs"><code>cmd/capture.rs</code></a></p>
 <div class='help'><pre><code>Usage: delonix net capture [OPTIONS] --write &lt;WRITE&gt; &lt;CONTAINER&gt;
 
 Arguments:

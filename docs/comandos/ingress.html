@@ -158,7 +158,7 @@ the ingress chain. <code>ingress</code> governs INBOUND traffic: allow/deny rule
 <code>[proto/]port</code> and CIDR, the default policy, and DNAT <em>publishes</em>. Only acts on
 containers on a custom network (they have an IP on <code>delonix0</code>); <code>--net host</code>
 is refused.</p>
-<p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/firewall.rs"><code>cmd/firewall.rs</code></a></p>
+<p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/firewall.rs"><code>cmd/firewall.rs</code></a></p>
 <div class='help'><pre><code>Usage: delonix net ingress [OPTIONS] &lt;COMMAND&gt;
 
 Commands:

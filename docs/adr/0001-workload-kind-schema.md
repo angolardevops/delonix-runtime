@@ -75,7 +75,7 @@ Rules:
    `type: pod not yet supported — use kind: Pod`); never silently ignored, never defaulted.
 4. **A Workload block must match its type.** `type: container` with a `vm:` block present (or the
    `container:` block absent) is an error, not a best-effort guess.
-5. All changes live in `crates/delonix-runtime-bin` (`cmd/manifest.rs` + a small `cmd/workload.rs`
+5. All changes live in `bins/delonix-runtime-bin` (`cmd/manifest.rs` + a small `cmd/workload.rs`
    for the lowering + validation). No engine crate is touched; `serde_yaml` is already a `-bin`
    dependency. `apiVersion` stays `delonix.io/v1`.
 

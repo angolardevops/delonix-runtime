@@ -13,7 +13,7 @@ leaves in favor of authoring `NetworkAccessRule` manifests is a net UX improveme
 own measurement, not an assumption that 'declarative exists now, so imperative should go.'"
 
 This ADR is that measurement, done leaf by leaf against the current code
-(`crates/delonix-runtime-bin/src/cmd/firewall.rs`), not against the plan document's
+(`bins/delonix-runtime-bin/src/cmd/firewall.rs`), not against the plan document's
 seven-week-old estimate.
 
 ## The measurement

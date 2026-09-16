@@ -50,7 +50,7 @@ def group_argv(name):
 
 
 # The 9 category labels `delonix --help`'s COMMAND MAP prints for the ROOT
-# groups (`crates/delonix-runtime-bin/src/cmd/manual.rs::ROOT_GROUP_ORDER`) —
+# groups (`bins/delonix-runtime-bin/src/cmd/manual.rs::ROOT_GROUP_ORDER`) —
 # mirrored here only for the PT translation, since `pt.po` already carries
 # the exact string and re-deriving it from the binary would need `--l18n=pt`
 # runs this script doesn't otherwise make.
@@ -217,7 +217,7 @@ SOURCE_FILES = {
 }
 SOURCE_BASE_URL = (
     "https://github.com/angolardevops/delonix-runtime/blob/main/"
-    "crates/delonix-runtime-bin/src/cmd/"
+    "bins/delonix-runtime-bin/src/cmd/"
 )
 
 
