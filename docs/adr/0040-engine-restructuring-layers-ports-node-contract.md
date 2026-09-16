@@ -399,6 +399,20 @@ crates.
 | **P6 CRI** | in-process CRI over `delonix-compute`; stats/eviction, events, `UpdateContainerResources`, record locking, digests, RuntimeConfig | critest ≥ current in rootless **and** a root run published; real-kubelet e2e on a node |
 | **P7 observability** | D6 in full: semantic conventions, propagation, metric renames, JSON logs | one trace spans kubelet → CRI → launcher in a recorded run; zero library `println!` |
 
+**P1b result (2026-09-16) — GO, with one condition.** Measured on the golden
+`ubuntu-24.04` with `apparmor_restrict_unprivileged_userns=1`
+(`docs/discovery/53_P1B_LAUNCHER_SPIKE.md`, raw output alongside): the same binary under a
+launcher path with an `unconfined + userns` profile runs `run`, `run -d`, `exec`, and the
+`__ovlhold`/`__rmtree` re-execs, while the unprofiled CLI path is refused — D2.4's split
+works. **The netns holder does not, as written:** it starts the pin through
+`/usr/bin/unshare`, so the namespace is created by `unshare(1)` under the restricted
+`unprivileged_userns` profile, and a profile naming the holder never applies. D2.4 is
+amended: **`delonix-netns-holder` creates its user, net and mount namespaces in-process**
+(`unshare(2)` + `newuidmap`, as `reexec_mapped` already does), never through `unshare(1)`
+— granting `userns` to `/usr/bin/unshare` would open it to every user and defeat the
+restriction. In-place upgrade stays safe: the pin is recognised by its argv pair and
+environment, never by the binary name (`argv_matches`, with the pre-split precedent).
+
 P0 and P1 do not move code and can start immediately. P2 unlocks the node agent's
 parity work on the PaaS side (their F3) and is the long pole.
 
