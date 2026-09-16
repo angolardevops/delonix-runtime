@@ -90,13 +90,6 @@ message PageResponse {
   string next_page_token = 1; // empty = last page
 }
 
-// Common list filter. `label_selector` uses the Kubernetes equality grammar
-// ("app=web,tier!=db").
-message ListFilter {
-  string namespace = 1; // empty = default; "*" = all namespaces
-  string label_selector = 2;
-}
-
 // Attached to every non-OK gRPC status (as a binary detail) and every non-2xx REST body.
 // `reason` is the stable DX_* code the CLI already exits with (cmd/exitcode.rs), so a
 // script, the CLI and an API client classify a failure the same way.

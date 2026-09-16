@@ -6,22 +6,33 @@ syntax = "proto3";
 package delonix.node.v1;
 
 import "delonix/node/v1/common.proto";
+import "google/api/annotations.proto";
 import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/angolardevops/delonix-runtime/gen/go/delonix/node/v1;nodev1";
 
 service NodeService {
-  rpc GetNodeInfo(GetNodeInfoRequest) returns (NodeInfo);
+  rpc GetNodeInfo(GetNodeInfoRequest) returns (NodeInfo) {
+    option (google.api.http) = {get: "/v1/node"};
+  }
   // Liveness of the engine AND of what it depends on, one condition each. A consumer
   // must not read "the socket answered" as "the node can run workloads".
-  rpc GetHealth(GetHealthRequest) returns (Health);
-  rpc GetCapacity(GetCapacityRequest) returns (Capacity);
-  rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse);
+  rpc GetHealth(GetHealthRequest) returns (Health) {
+    option (google.api.http) = {get: "/v1/node/health"};
+  }
+  rpc GetCapacity(GetCapacityRequest) returns (Capacity) {
+    option (google.api.http) = {get: "/v1/node/capacity"};
+  }
+  rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse) {
+    option (google.api.http) = {get: "/v1/providers"};
+  }
   // Server-streamed engine events (the same records as `delonix system events`).
   // `since` replays from the persisted event log first, so a reconnecting client does not
   // miss what happened while it was away — within the log's retention, which the first
   // message states.
-  rpc WatchEvents(WatchEventsRequest) returns (stream Event);
+  rpc WatchEvents(WatchEventsRequest) returns (stream Event) {
+    option (google.api.http) = {get: "/v1/events:watch"};
+  }
 }
 
 message GetNodeInfoRequest {}

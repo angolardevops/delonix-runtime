@@ -8,18 +8,40 @@ package delonix.node.v1;
 import "delonix/node/v1/common.proto";
 import "delonix/node/v1/compute.proto";
 import "delonix/node/v1/operations.proto";
+import "google/api/annotations.proto";
 
 option go_package = "github.com/angolardevops/delonix-runtime/gen/go/delonix/node/v1;nodev1";
 
 // ------------------------------------------------------------------------------ networks
 
 service NetworkService {
-  rpc CreateNetwork(CreateNetworkRequest) returns (Operation);
-  rpc GetNetwork(GetResourceRequest) returns (Network);
-  rpc ListNetworks(ListResourcesRequest) returns (ListNetworksResponse);
-  rpc DeleteNetwork(DeleteResourceRequest) returns (Operation);
-  rpc ConnectContainer(NetworkMembershipRequest) returns (Container);
-  rpc DisconnectContainer(NetworkMembershipRequest) returns (Container);
+  rpc CreateNetwork(CreateNetworkRequest) returns (Operation) {
+    option (google.api.http) = {
+      post: "/v1/namespaces/{namespace}/networks"
+      body: "*"
+    };
+  }
+  rpc GetNetwork(GetNetworkRequest) returns (Network) {
+    option (google.api.http) = {get: "/v1/namespaces/{namespace}/networks/{name}"};
+  }
+  rpc ListNetworks(ListNetworksRequest) returns (ListNetworksResponse) {
+    option (google.api.http) = {get: "/v1/namespaces/{namespace}/networks"};
+  }
+  rpc DeleteNetwork(DeleteNetworkRequest) returns (Operation) {
+    option (google.api.http) = {delete: "/v1/namespaces/{namespace}/networks/{name}"};
+  }
+  rpc ConnectContainer(ConnectContainerRequest) returns (Container) {
+    option (google.api.http) = {
+      post: "/v1/namespaces/{namespace}/networks/{network}:connect"
+      body: "*"
+    };
+  }
+  rpc DisconnectContainer(DisconnectContainerRequest) returns (Container) {
+    option (google.api.http) = {
+      post: "/v1/namespaces/{namespace}/networks/{network}:disconnect"
+      body: "*"
+    };
+  }
 }
 
 message NetworkSpec {
@@ -57,9 +79,14 @@ message Network {
 }
 
 message CreateNetworkRequest {
-  ResourceMeta meta = 1;
-  NetworkSpec spec = 2;
-  string request_id = 3;
+  // Identity comes from the request — the same `namespace`/`name` the path carries — and
+  // never from a ResourceMeta whose server-owned fields the engine would have to ignore.
+  string namespace = 1; // empty = default
+  string name = 2;
+  map<string, string> labels = 3;
+  map<string, string> annotations = 4;
+  NetworkSpec spec = 5;
+  string request_id = 6;
 }
 
 message ListNetworksResponse {
@@ -67,7 +94,14 @@ message ListNetworksResponse {
   PageResponse page = 2;
 }
 
-message NetworkMembershipRequest {
+message ConnectContainerRequest {
+  string network = 1;
+  string container = 2;
+  string namespace = 3;
+  string ipv4_address = 4;
+}
+
+message DisconnectContainerRequest {
   string network = 1;
   string container = 2;
   string namespace = 3;
@@ -77,10 +111,21 @@ message NetworkMembershipRequest {
 // ------------------------------------------------------------------------------- volumes
 
 service VolumeService {
-  rpc CreateVolume(CreateVolumeRequest) returns (Operation);
-  rpc GetVolume(GetResourceRequest) returns (Volume);
-  rpc ListVolumes(ListResourcesRequest) returns (ListVolumesResponse);
-  rpc DeleteVolume(DeleteVolumeRequest) returns (Operation);
+  rpc CreateVolume(CreateVolumeRequest) returns (Operation) {
+    option (google.api.http) = {
+      post: "/v1/namespaces/{namespace}/volumes"
+      body: "*"
+    };
+  }
+  rpc GetVolume(GetVolumeRequest) returns (Volume) {
+    option (google.api.http) = {get: "/v1/namespaces/{namespace}/volumes/{name}"};
+  }
+  rpc ListVolumes(ListVolumesRequest) returns (ListVolumesResponse) {
+    option (google.api.http) = {get: "/v1/namespaces/{namespace}/volumes"};
+  }
+  rpc DeleteVolume(DeleteVolumeRequest) returns (Operation) {
+    option (google.api.http) = {delete: "/v1/namespaces/{namespace}/volumes/{name}"};
+  }
 }
 
 message VolumeSpec {
@@ -132,9 +177,14 @@ message Volume {
 }
 
 message CreateVolumeRequest {
-  ResourceMeta meta = 1;
-  VolumeSpec spec = 2;
-  string request_id = 3;
+  // Identity comes from the request — the same `namespace`/`name` the path carries — and
+  // never from a ResourceMeta whose server-owned fields the engine would have to ignore.
+  string namespace = 1; // empty = default
+  string name = 2;
+  map<string, string> labels = 3;
+  map<string, string> annotations = 4;
+  VolumeSpec spec = 5;
+  string request_id = 6;
 }
 
 message ListVolumesResponse {
@@ -143,22 +193,55 @@ message ListVolumesResponse {
 }
 
 message DeleteVolumeRequest {
-  DeleteResourceRequest target = 1;
+  string namespace = 1;
+  string name = 2;
+  string etag = 3;
+  bool force = 4;
+  string request_id = 5;
   // Also destroy data the engine provisioned remotely. Refused for a volume the engine
   // did not provision.
-  bool destroy_remote = 2;
+  bool destroy_remote = 6;
 }
 
 // -------------------------------------------------------------------------------- images
 
 service ImageService {
-  rpc PullImage(PullImageRequest) returns (Operation);
-  rpc GetImage(GetImageRequest) returns (Image);
-  rpc ListImages(ListImagesRequest) returns (ListImagesResponse);
-  rpc DeleteImage(GetImageRequest) returns (Operation);
-  rpc PushImage(PushImageRequest) returns (Operation);
-  rpc BuildImage(BuildImageRequest) returns (Operation);
-  rpc ScanImage(GetImageRequest) returns (Operation);
+  rpc PullImage(PullImageRequest) returns (Operation) {
+    option (google.api.http) = {
+      post: "/v1/images:pull"
+      body: "*"
+    };
+  }
+  rpc GetImage(GetImageRequest) returns (Image) {
+    option (google.api.http) = {get: "/v1/images:get"};
+  }
+  rpc ListImages(ListImagesRequest) returns (ListImagesResponse) {
+    option (google.api.http) = {get: "/v1/images"};
+  }
+  rpc DeleteImage(DeleteImageRequest) returns (Operation) {
+    option (google.api.http) = {
+      post: "/v1/images:delete"
+      body: "*"
+    };
+  }
+  rpc PushImage(PushImageRequest) returns (Operation) {
+    option (google.api.http) = {
+      post: "/v1/images:push"
+      body: "*"
+    };
+  }
+  rpc BuildImage(BuildImageRequest) returns (Operation) {
+    option (google.api.http) = {
+      post: "/v1/images:build"
+      body: "*"
+    };
+  }
+  rpc ScanImage(ScanImageRequest) returns (Operation) {
+    option (google.api.http) = {
+      post: "/v1/images:scan"
+      body: "*"
+    };
+  }
 }
 
 message Image {
@@ -179,6 +262,14 @@ message PullImageRequest {
 }
 
 message GetImageRequest {
+  string reference = 1;
+}
+
+message DeleteImageRequest {
+  string reference = 1;
+}
+
+message ScanImageRequest {
   string reference = 1;
 }
 
@@ -217,9 +308,24 @@ message BuildImageRequest {
 
 service StackService {
   // Pure: computes the plan, changes nothing. Same answer as `delonix stack plan`.
-  rpc PlanStack(PlanStackRequest) returns (StackPlan);
-  rpc ApplyStack(ApplyStackRequest) returns (Operation);
-  rpc DestroyStack(DestroyStackRequest) returns (Operation);
+  rpc PlanStack(PlanStackRequest) returns (StackPlan) {
+    option (google.api.http) = {
+      post: "/v1/stacks/{stack}:plan"
+      body: "*"
+    };
+  }
+  rpc ApplyStack(ApplyStackRequest) returns (Operation) {
+    option (google.api.http) = {
+      post: "/v1/stacks/{stack}:apply"
+      body: "*"
+    };
+  }
+  rpc DestroyStack(DestroyStackRequest) returns (Operation) {
+    option (google.api.http) = {
+      post: "/v1/stacks/{stack}:destroy"
+      body: "*"
+    };
+  }
 }
 
 message PlanStackRequest {

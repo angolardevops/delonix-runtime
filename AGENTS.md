@@ -75,6 +75,23 @@ Duas consequências práticas:
   commits recentes, PRs abertos e processos com cwd nesta árvore. Uma mudança que
   mova código com outra sessão a editar é um conflito garantido.
 
+## O contrato de nó é um portão (`scripts/contract_gate.py`, ADR-0040 P1)
+
+O `proto/delonix/node/v1` é a fonte de verdade de duas codificações (gRPC e HTTP/JSON no
+mesmo socket local), e o `docs/api/openapi.yaml` é GERADO a partir dele — nunca editado à
+mão. O job `contract` da CI (ferramentas fixadas: `buf` v1.73.0, gnostic v0.7.1) falha
+com: formato fora do `buf format`; `buf lint` (as excepções escritas estão no `buf.yaml`);
+quebra de compatibilidade face à última tag que já tenha `proto/` (até lá diz que não há
+base, em vez de passar calado); um RPC sem mapeamento HTTP, ou um stream do cliente com
+ele; o OpenAPI diferente do gerado; e dois caminhos que sejam o mesmo URL com nomes de
+variável diferentes. Verificado a falhar em cada um destes casos.
+
+Três decisões que o portão protege: **um pedido por RPC** (`<Rpc>Request`), porque um
+pedido partilhado faz um campo pensado para um método aparecer em cinco; **identidade
+explícita no pedido** (`namespace`/`name`), nunca um `ResourceMeta` com campos que o
+motor ignoraria; e **imagens endereçadas por query**, porque `alpine:3.20` num caminho lê
+o `:` como verbo.
+
 ## A versão está sempre alinhada com a tag publicada (`scripts/version_gate.py`)
 
 A `version` do `Cargo.toml` raiz não é decoração: escolhe de que release o
