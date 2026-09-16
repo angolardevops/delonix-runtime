@@ -1064,6 +1064,18 @@ else
 fi
 
 ########################################
+section "container: combinações de flags recusadas antes de criar"
+########################################
+# Antes, o `--net-bps` sem rede custom só era verificado depois do workload: em
+# primeiro plano o processo corria até ao fim e o comando saía 1; com `-d` era
+# aceite em silêncio. Agora é recusado antes de existir o que quer que seja.
+check "run --net-bps sem rede custom recusa" 1 "$BIN" container run --name "nb-$PFX" --net none --net-bps 1mbit "$IMG" true
+check "run --net-bps recusado não deixa container" 4 "$BIN" container inspect "nb-$PFX"
+check "run -d --net-bps sem rede custom recusa" 1 "$BIN" container run -d --name "nbd-$PFX" --net-bps 1mbit "$IMG" sleep 5
+check "run -d --net-bps recusado não deixa container" 4 "$BIN" container inspect "nbd-$PFX"
+check "run --ip sem rede custom recusa" 1 "$BIN" container run -d --name "nip-$PFX" --ip 10.1.1.1 "$IMG" true
+
+########################################
 section "container em rede custom: hot reconfig pelo ingress"
 ########################################
 CN="cn-$PFX"
@@ -1080,6 +1092,18 @@ if "$BIN" network create "$NET2" --subnet 10.252.0.0/16 >/dev/null 2>&1 && \
   check "network disconnect de rede não ligada recusa" fail "$BIN" network disconnect "$NET2" "$CN"
   check "container update --net-connect deixou de existir (corte limpo)" 2 "$BIN" container update "$CN" --net-connect "$NET2"
   "$BIN" container rm -f "$CN" >/dev/null 2>&1
+  # `--net-bps` no `run -d` era aceite e ignorado: o registo dizia a taxa e o veth
+  # não tinha qdisc nenhuma (o shaping só corria depois do retorno do supervisor).
+  # Prova-se no dataplane, dentro do holder — o registo é exactamente o que mentia.
+  CB="cb-$PFX"
+  if "$BIN" container run -d --name "$CB" --net "$NET" --net-bps 1mbit "$IMG" sleep 120 >/dev/null 2>&1; then
+    PIN=$("$BIN" net netns status 2>/dev/null | grep -oE 'pin [0-9]+' | grep -oE '[0-9]+')
+    check "run -d --net-bps aplica o shaping no veth" ok bash -c \
+      "nsenter -t '$PIN' -U -n --preserve-credentials tc qdisc show | grep -q 'tbf .*rate 1Mbit'"
+    "$BIN" container rm -f "$CB" >/dev/null 2>&1
+  else
+    check "run -d --net-bps numa rede custom" ok false
+  fi
 else
   skip "hot reconfig em rede custom" "não foi possível criar rede/container em rede custom"
 fi
