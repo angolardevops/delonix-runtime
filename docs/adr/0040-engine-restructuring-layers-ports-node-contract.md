@@ -219,7 +219,7 @@ The layer is readable from the path, and the D7 fitness test uses it: a crate un
 
 #### D2.6 Where the 80 CLI modules go
 
-| Destination | Modules today (`crates/delonix-runtime-bin/src/cmd/`) |
+| Destination | Modules today (`bins/delonix-runtime-bin/src/cmd/`) |
 |---|---|
 | `delonix-model` | `names` (generated names, used by compute and cluster) |
 | `delonix-compute` | `container`, `pod`, `workload`, `vm` (use cases), `cdi` |

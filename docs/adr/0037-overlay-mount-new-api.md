@@ -2,7 +2,7 @@
 
 - **Status:** Accepted, implemented and validated live 2026-09-06
 - **Deciders:** Walter (owner)
-- **Related:** ADR-0035 (`kind: App`) — where this was found; `crates/delonix-runtime/src/lib.rs::mount_overlay_if_marked`/`fsopen_overlay`; `crates/delonix-image/src/overlay.rs::prepare_overlay` (writes the `overlay-lowers` marker this reads).
+- **Related:** ADR-0035 (`kind: App`) — where this was found; `crates/adapters/delonix-runtime/src/lib.rs::mount_overlay_if_marked`/`fsopen_overlay`; `crates/adapters/delonix-image/src/overlay.rs::prepare_overlay` (writes the `overlay-lowers` marker this reads).
 
 ## Context
 
@@ -106,7 +106,7 @@ Three levels of evidence, in order of how close each is to the real bug:
 
 ## Consequences
 
-- `crates/delonix-runtime/Cargo.toml` gains a direct `rustix` dependency
+- `crates/adapters/delonix-runtime/Cargo.toml` gains a direct `rustix` dependency
   (`mount`+`fs` features) — see "Decision" above for why this is not new
   supply-chain surface.
 - `mount_overlay_if_marked`'s public signature (`fn(&str) -> nix::Result<()>`)

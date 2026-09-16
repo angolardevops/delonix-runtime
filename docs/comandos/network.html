@@ -162,7 +162,7 @@ rootless physical plane together — <code>bridge</code> inside the holder's net
 achievable without host privilege. <code>macvlan</code>/<code>ipvlan</code> only get recorded in
 the store — <code>create</code> WARNS loudly that the network wasn't physically realized (they
 need <code>CAP_NET_ADMIN</code> in the host's init-netns, outside the rootless model).</p>
-<p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/network.rs"><code>cmd/network.rs</code></a></p>
+<p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/network.rs"><code>cmd/network.rs</code></a></p>
 <div class='help'><pre><code>Usage: delonix network [OPTIONS] &lt;COMMAND&gt;
 
 Commands:

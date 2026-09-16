@@ -160,7 +160,7 @@ idempotent <em>with no state file</em> (every step has a <code>check</code> and 
 <code>cluster kubeadm</code> goes further: it provisions the VMs from the golden VM image, waits
 for SSH, and runs the SAME bootstrap — one command, from zero to a cluster running
 <code>delonix-cri</code> as its runtime (no containerd).</p>
-<p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/delonix-runtime-bin/src/cmd/cluster.rs"><code>cmd/cluster.rs</code></a></p>
+<p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/cluster.rs"><code>cmd/cluster.rs</code></a></p>
 <div class='help'><pre><code>Usage: delonix cluster [OPTIONS] &lt;COMMAND&gt;
 
 Commands:

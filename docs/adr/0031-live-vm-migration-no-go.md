@@ -39,7 +39,7 @@ destination and mirrors guest writes to it, and `virsh migrate --copy-storage-al
 transparently. But it requires **libvirtd-to-libvirtd network connectivity** — a
 persistently-listening management port on both hosts (16509 plain / 16514 TLS, via
 `virtproxyd-tcp`) plus an NBD data port from the migration range (49152–49215/tcp) opened
-automatically on the destination. This engine's `LibvirtBackend` (`crates/delonix-vm/src/
+automatically on the destination. This engine's `LibvirtBackend` (`crates/adapters/delonix-vm/src/
 lib.rs`) only ever talks to **local** libvirt today — `qemu:///session` (rootless, lazily
 local) or `qemu:///system` (root, still local-only, used only for NAT/bridge networking).
 Standing up `virtproxyd-tcp` on both ends would be a new, always-listening, privileged
@@ -85,7 +85,7 @@ without new upstream Cloud Hypervisor plumbing this engine does not control.
 - `AGENTS.md`'s VM migration section states plainly that live migration needs one of the two
   preconditions above, so the next person who asks "why not?" has the answer without
   re-running this spike.
-- Nothing in `crates/delonix-vm` changes as a result of this ADR.
+- Nothing in `crates/adapters/delonix-vm` changes as a result of this ADR.
 
 ## Not done here, and why
 

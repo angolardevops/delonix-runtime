@@ -3,7 +3,7 @@
 - **Status:** Accepted, implemented and validated live 2026-09-06
 - **Date:** 2026-09-06
 - **Deciders:** Walter (owner)
-- **Related:** `crates/delonix-image/src/{buildpack,detect,internal_registry}.rs` (the existing,
+- **Related:** `crates/adapters/delonix-image/src/{buildpack,detect,internal_registry}.rs` (the existing,
   disconnected scaffolding this ADR wires up), `cmd/build.rs` (`resolve_or_pull_platform`/
   `prepare_rootfs_flat`/`ensure_container`/`runtime::exec` — the Dockerfile-build machinery this
   reuses), ADR-0001 (`kind: Workload`, the precedent for a thin lowering-layer Kind), ADR-0007
@@ -11,7 +11,7 @@
 
 ## Context
 
-`crates/delonix-image` already carries three pure, unit-tested, **zero-caller** modules for Cloud
+`crates/adapters/delonix-image` already carries three pure, unit-tested, **zero-caller** modules for Cloud
 Native Buildpacks — confirmed by exhaustive `git grep` against `origin/main`, not assumed from the
 module doc-comments alone:
 
@@ -182,7 +182,7 @@ builder-jammy-base` has 91 layers, and this engine's overlay-mount option string
 syscall's `data` argument can carry, which silently truncates rather than erroring, and the
 truncated last lower path then fails to resolve (`ENOENT`, the exact symptom, reproduced with a
 plain `container run paketobuildpacks/builder-jammy-base sleep 5` — no App-kind code involved).
-This is a limitation of `delonix-runtime`'s `mount_overlay_if_marked` (`crates/delonix-runtime/src/
+This is a limitation of `delonix-runtime`'s `mount_overlay_if_marked` (`crates/adapters/delonix-runtime/src/
 lib.rs`) for ANY image with enough layers, affecting every container/App build that resolves to
 that specific builder image, not something `kind: App` introduced or can fix from `cmd/app.rs`.
 Properly fixing it means moving that one mount to the newer `fsopen`/`fsconfig`/`fsmount` API

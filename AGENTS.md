@@ -134,6 +134,24 @@ portão, e uma excepção que já não se aplica também — é assim que uma to
 temporária deixa de ser permanente. Hoje são dez, e cada uma diz a sua fase (o
 `--list` mostra-as).
 
+**O directório é a camada** (fecho da P0, ADR-0040 D2.5):
+
+```
+crates/foundation/   delonix-runtime-core, delonix-net-rules
+crates/contexts/     delonix-security-runtime
+crates/adapters/     delonix-runtime, delonix-net, delonix-image, delonix-scan, delonix-volume, delonix-vm
+crates/providers/    delonix-proxmox, delonix-truenas
+crates/interfaces/   delonix-cri, delonix-mgmt, delonix-mcp
+bins/                delonix-runtime-bin
+```
+
+Os crates mudaram de sítio **sem mudar de nome** (as renomeações são das fases P2–P4).
+O caminho de cada crate está escrito uma vez, em `[workspace.dependencies]` na raiz, e
+cada crate depende dos outros por `{ workspace = true }` — mover ou renomear é uma linha.
+O portão recusa um crate cujo directório não seja o da camada declarada em `LAYERS`, nos
+dois sentidos: mudar a camada sem mover, ou mover sem mudar a camada. Um crate novo
+entra na tabela `LAYERS` e no directório dessa camada no mesmo commit.
+
 **As versões das dependências vivem só na raiz** (`[workspace.dependencies]`). Um
 crate membro escreve `{ workspace = true, features = [...] }` e nada mais; o
 `default-features = false` fica na raiz porque um membro não o consegue desligar
@@ -192,7 +210,7 @@ linear e não leva merge commits.
 O binário `delonix` (crate `delonix-runtime-bin`) é a CLI opensource completa deste motor —
 homóloga ao Docker, distinta do `delonix`/`delonixctl` privados do `delonix-paas` (outro
 repo/branch/remote, não afectados por nada aqui). Comandos agrupados semanticamente em vez de
-uma lista plana, um módulo por grupo em `crates/delonix-runtime-bin/src/cmd/`:
+uma lista plana, um módulo por grupo em `bins/delonix-runtime-bin/src/cmd/`:
 
 - `delonix init` (v0.47.0) — o passo ANTES do `stack init`/`vm init`: olha para o directório,
   decide qual dos dois chamar e com qual dos onze templates, e **delega** (não gera nada de seu).
@@ -800,7 +818,7 @@ alimentar Grafana/outras ferramentas SRE. Tudo isto partilha UM único
 colector (`delonix-mgmt::dashstats::collect`), para o TUI, o `--json`, e o
 scrape Prometheus nunca divergirem na aritmética.
 
-- **Novo módulo `delonix-mgmt::dashstats`** (`crates/delonix-mgmt/src/
+- **Novo módulo `delonix-mgmt::dashstats`** (`crates/interfaces/delonix-mgmt/src/
   dashstats.rs`): `pub fn collect(root, include_network, include_storage) ->
   DashSummary` — contagens de containers/VMs/redes/volumes/imagens/segredos,
   `memory.current`/`memory.max` do slice cgroup inteiro (`delonix_runtime::
@@ -1138,7 +1156,7 @@ Esta secção estava em falta neste ficheiro — encontrada a auditar `cmd/kinds
 `Gateway`, `KubernetesCluster` e o nome canónico `VirtualMachine` não apareciam em lado nenhum do
 AGENTS.md, apesar de o resto do ficheiro documentar com o mesmo detalhe renomeações muito mais
 pequenas (uma única flag). Reconstruído por `git log -p`/`git show` de
-`crates/delonix-runtime-bin/src/cmd/kinds.rs` e `cmd/manifest.rs`, contra `docs/releases/v0.64.0.md`
+`bins/delonix-runtime-bin/src/cmd/kinds.rs` e `cmd/manifest.rs`, contra `docs/releases/v0.64.0.md`
 (o registo público já escrito) e confirmado ao vivo — não é hipótese, é o que o binário desta
 sessão (`93ec5842`, v3.1.0, construído com `CARGO_TARGET_DIR` isolado) responde.
 
@@ -1333,7 +1351,7 @@ Ingress(k8s)/Egress/FirewallPolicy/Container (flat E Pod-shape, via `pod_spec_wi
   de build). `kind: Container`'s `spec.detach` tem **default `true`** (diferente do CLI `run`,
   onde é `false`) — um `apply` em primeiro plano bloquearia à espera do processo terminar.
 - Exemplo completo de manifesto e o mapeamento spec↔CLI: ver o doc-comment de
-  `crates/delonix-runtime-bin/src/cmd/manifest.rs` e o plano desta sessão
+  `bins/delonix-runtime-bin/src/cmd/manifest.rs` e o plano desta sessão
   (`/home/walter/plans/mellow-cuddling-canyon.md`, mantido para referência histórica).
 
 ## Reverse-proxy L7 (`kind: HTTPRoute`)
@@ -1721,7 +1739,7 @@ indistinguível de outra forma. Arnês: 17/17.
 
 `delonix image --vm ls|pull|push|build` gere imagens VM à parte das imagens de container
 (`ImageStore`) — um `.qcow2` solto + `.json` de metadados por imagem, em `<root>/vm-images/`
-(`crates/delonix-runtime-bin/src/cmd/vmimage.rs`, `VmImageStore`). Prepara o terreno para
+(`bins/delonix-runtime-bin/src/cmd/vmimage.rs`, `VmImageStore`). Prepara o terreno para
 `delonix cluster kubeadm` (secção "Cluster kubeadm" abaixo — já implementado): a imagem já vem
 com `kubeadm`/`kubelet`/`kubectl` e o `delonix-cri` a correr como serviço systemd — **arrancar um
 nó não faz nenhuma instalação**, só `kubeadm init`/`kubeadm join`.
@@ -1918,7 +1936,7 @@ nó não faz nenhuma instalação**, só `kubeadm init`/`kubeadm join`.
     **NÃO validado em CI por mim**: disparar o workflow publica imagens e é decisão do dono.
 - **`push`/`pull`**: publicam/obtêm a imagem como artefacto OCI de blob único (config vazio + 1
   layer, padrão ORAS/Helm) via `delonix_image::registry::{push_oci_artifact,pull_oci_artifact}`
-  (`crates/delonix-image/src/registry.rs`) — generaliza o `Client`/auth/upload já usado por
+  (`crates/adapters/delonix-image/src/registry.rs`) — generaliza o `Client`/auth/upload já usado por
   `push_to_registry` (imagens de container), sem duplicar a lógica. **PUBLICADA E VALIDADA
   (2026-07-20) via CI** — `ghcr.io/angolardevops/delonix-vm-k8s:1.34` (678.8 MiB, golden
   optimizada), PÚBLICA, com `delonix vm pull` (sem argumento) a descarregá-la de ponta a ponta.
@@ -1993,7 +2011,7 @@ claro (i18n) — *voltar ao host: Ctrl+]* — e corre `virsh console` como FILHO
 stderr + bloco "Próximos passos", com o output cru de `qemu-img`/`virsh` capturado (`run_quiet`);
 stdout continua a ser só o nome da VM (scriptável).
 
-`delonix-cri` (`crates/delonix-cri`) ganhou o seu primeiro `[[bin]]` (`src/bin/delonix-cri.rs`)
+`delonix-cri` (`crates/interfaces/delonix-cri`) ganhou o seu primeiro `[[bin]]` (`src/bin/delonix-cri.rs`)
 — antes só existia como library, chamado por ninguém no workspace. Corre `serve_blocking` num
 socket unix (`$DELONIX_CRI_ADDR`, default `/run/delonix-cri.sock`) — é o endpoint que o kubelet
 fala via `--container-runtime-endpoint`, substituindo containerd/CRI-O.
@@ -2331,7 +2349,7 @@ em 2026-07-27, 1 ainda aberto**:
   `sleep` a meio da janela de corrida que `update_concorrente_nao_perde_escritas` já usava para o
   `Store<Container>` irmão) — sem lock perderia escritas, com lock as 24 tiveram de bater certo.
   Validado ao vivo: `vm ls` (que chama `status()` para cada VM) continua a funcionar identicamente.
-- **`spawn()` (`crates/delonix-runtime/src/lib.rs`) é uma função de ~405 linhas** — ainda aberto,
+- **`spawn()` (`crates/adapters/delonix-runtime/src/lib.rs`) é uma função de ~405 linhas** — ainda aberto,
   cobrindo
   preparação de hostname/argv, setup de pty/socketpair, cálculo de flags de clone, o próprio
   `clone()`, um handshake de userns cuja correcção depende de uma ordem só documentada em
@@ -2369,7 +2387,7 @@ da publicação (não só ler código) apanhou 3 problemas que a revisão estát
 
 O achado nº2 acima (`manifest.rs`) era só a ponta: uma varredura completa (agentes em paralelo +
 2ª passagem manual) encontrou a MESMA classe de bug — texto português hardcoded, visível mesmo em
-EN por omissão — em `crates/delonix-runtime-bin/src/cmd/{build,cluster,conditions,container,
+EN por omissão — em `bins/delonix-runtime-bin/src/cmd/{build,cluster,conditions,container,
 dependency,etcd,firewall,httproute,image,ingress_proxy,kindmode,kube,lb,manifest,mapped,network,
 scaffold,scan,secret,sharevolume,stack,storage,system,tunnel,vm,vmimage,volume}.rs` — 380 strings
 ao todo, movidas para `po::t`/`po::tf` + `pt.po` (352+ entradas novas). Duas armadilhas de
@@ -2441,7 +2459,7 @@ exec bash || exec sh`, que só testa a presença do binário. Validado ao vivo n
 container `alpine` (sem bash) cai para `sh`; um comando explícito continua a funcionar
 inalterado.
 
-Escopo isolado a `crates/delonix-runtime-bin/src/cmd/container.rs` + `manual_entries.rs` +
+Escopo isolado a `bins/delonix-runtime-bin/src/cmd/container.rs` + `manual_entries.rs` +
 `docs/gen.py` + `scripts/cli_baseline.tsv`/`cli-tree.sh` (a folha `container ssh`, classe `→`
 desde a Fase CLI-0, sai da linha de base no mesmo commit que a remove do binário). `vm ssh`
 intocado.
@@ -2842,7 +2860,7 @@ porque o utilizador julga estar protegido. Três corrigidos para fail-closed
    Passa a AVISO no `run` (implementar a resolução por alias é follow-up).
 
 4. **`cpuset`/`cpu.weight`/`io.weight` no cgroup rootless-delegado** — `try_delegated_base`
-   (`crates/delonix-runtime/src/lib.rs`) já activava `+cpuset`/`+io` no
+   (`crates/adapters/delonix-runtime/src/lib.rs`) já activava `+cpuset`/`+io` no
    `subtree_control` da base delegada, mas nunca ESCREVIA `cpuset.cpus`/
    `cpu.weight`/`io.weight` na leaf — só `memory.max`/`pids.max`/`cpu.max`. O
    caminho não-delegado (root) já aplicava os três correctamente; o delegado
@@ -3033,7 +3051,7 @@ que é global ao processo e é lida pelos outros testes em paralelo. A prova é 
 ## Tecto de capabilities no CRI (`DELONIX_CRI_CAP_CEILING`, v0.47.0)
 
 Um limite MÁXIMO, definido no nó, para as capabilities de qualquer container criado através do CRI
-— seja o que for que o kubelet peça, incluindo `privileged: true`. `crates/delonix-cri/src/
+— seja o que for que o kubelet peça, incluindo `privileged: true`. `crates/interfaces/delonix-cri/src/
 cap_ceiling.rs` (`CapCeiling`), configurado por `DELONIX_CRI_CAP_CEILING` / `..._MODE` ou por
 `delonix serve cri --cap-ceiling/--cap-ceiling-mode` (flag > env, mesma precedência do `--addr`).
 
@@ -3089,7 +3107,7 @@ static pod que nunca passou pelo API server.
   porque não há `crictl` e o `build_client(false)` não gerava stubs de cliente — e concluía que «a
   camada tonic são três linhas de `blocking(...)`». Isso é uma razão para ACHAR que funciona, não
   uma medição. O cliente passou a ser gerado (custo medido antes de decidir: **3,5 s** de build no
-  crate) e `crates/delonix-cri/tests/grpc_status.rs` faz o round-trip a sério — sobe o servidor num
+  crate) e `crates/interfaces/delonix-cri/tests/grpc_status.rs` faz o round-trip a sério — sobe o servidor num
   socket unix, chama `Version` e `Status` pelo cliente gerado, e exige as duas condições que o
   kubelet lê. Verificado que apanha regressão: com o `Status` a devolver condições vazias, chumba
   em «faltou RuntimeReady: []».
@@ -3391,7 +3409,7 @@ arrancá-la era `delonix vm create dev` de novo, que É idempotente/auto-heal
 (reaproveita o overlay), mas **exige as MESMAS flags** (`--vcpus`/`--memory`/
 `--disk`/etc.) — sem elas, o "auto-heal" arrancaria com os defaults do clap
 (1 vCPU, 1G), silenciosamente diferente da VM original. `vm start`/`vm
-restart` (`delonix_vm::{start,restart}`, `crates/delonix-vm/src/lib.rs`)
+restart` (`delonix_vm::{start,restart}`, `crates/adapters/delonix-vm/src/lib.rs`)
 resolvem isto: reconstroem a `VmConfig` a partir do PRÓPRIO registo persistido
 (`config_from`) — disco base, vcpus, memória, rede, backend, `restart_policy`,
 `devices`, e (só libvirt) o net mode, que `LibvirtBackend::boot` já guardava
@@ -3953,7 +3971,7 @@ pela simplificação anterior — só nunca tinham sido alcançados por um teste
 
 ## `kind: App` — Cloud Native Buildpacks ligadas a um caminho de build real (ADR-0035)
 
-`crates/delonix-image` já trazia três módulos puros e testados para CNB
+`crates/adapters/delonix-image` já trazia três módulos puros e testados para CNB
 (`buildpack.rs`, `detect.rs`, `internal_registry.rs`) — **sem UM único
 chamador fora dos seus próprios testes**, confirmado por `git grep`
 exaustivo antes de escrever qualquer código. O único problema real que os
@@ -4244,7 +4262,7 @@ com.docker.network.bridge.enable_ip_masquerade=true -o com.docker.network.driver
 Templates Go usados pelo `kind` são um conjunto **finito e conhecido** (capturado acima) — a fase
 do shim pode emular por **correspondência exacta das strings**, sem motor de templates Go em Rust.
 
-### 2 bugs corrigidos em `delonix image pull` (`crates/delonix-image/src/registry.rs`)
+### 2 bugs corrigidos em `delonix image pull` (`crates/adapters/delonix-image/src/registry.rs`)
 
 1. **`parse_reference` não tratava `repo:tag@digest`** (formato combinado, usado pela própria
    referência `kindest/node:v1.34.0@sha256:...`) — o ramo `@` cortava a referência sem primeiro
@@ -4261,10 +4279,10 @@ em ~2min (antes falhava sempre, nos dois bugs).
 ### Spike GO/NO-GO: `container run --privileged` — resultado: **NO-GO nesta v1**
 
 Achado inesperado antes mesmo do spike: o motor **já tem** lógica dedicada de delegação de
-cgroup2 para nodes Kind (`setup_node_cgroup_ns` em `crates/delonix-runtime/src/lib.rs`), activada
+cgroup2 para nodes Kind (`setup_node_cgroup_ns` em `crates/adapters/delonix-runtime/src/lib.rs`), activada
 quando `--privileged` + uma label `io.x-k8s.kind.*` está presente — trabalho não documentado
 antes desta sessão. Para a poder exercitar, adicionou-se uma flag `--label KEY=VAL` (repetível) a
-`delonix container run` (`crates/delonix-runtime-bin/src/cmd/container.rs`) — não existia
+`delonix container run` (`bins/delonix-runtime-bin/src/cmd/container.rs`) — não existia
 nenhuma forma de definir labels via CLI, só internamente. Ficou como funcionalidade permanente
 (expõe um campo já existente em `Container`, não é específico de Kind).
 
@@ -4546,7 +4564,7 @@ existe neste host (nem serviria — precisa de um provider Docker/Podman, que es
 desenho). `delonix cluster load <IMAGEM>... [--name <cluster>]` fecha o buraco: empacota a imagem
 do store LOCAL e importa-a no containerd de CADA nó a correr.
 
-- **`delonix_image::write_oci_archive`** (`crates/delonix-image/src/save.rs`, o inverso do
+- **`delonix_image::write_oci_archive`** (`crates/adapters/delonix-image/src/save.rs`, o inverso do
   `load_docker_archive` já existente): escreve um **OCI image layout** (tar) reaproveitando o
   MESMO manifesto que `registry::build_manifest` publica num registo — os blobs do store vão
   verbatim, nada é recomprimido nem re-hashado, e os digests que o nó fica a ter são idênticos aos
@@ -4628,7 +4646,7 @@ uma reescrita: implementa-se por cima do que já existe, não a substituir.
 
 ### O que já existe e serve de base (não inventar do zero)
 
-- **`VmBackend`** (`crates/delonix-vm/src/lib.rs:438`) já É o padrão `ComputeDriver` pedido —
+- **`VmBackend`** (`crates/adapters/delonix-vm/src/lib.rs:438`) já É o padrão `ComputeDriver` pedido —
   `id()`/`available()`/`boot()` por trás de `CloudHypervisorBackend`/`LibvirtBackend`. Adicionar um
   backend novo (Firecracker, KVM nativo mais fino) é implementar este trait, não desenhar um novo.
 - **`delonix-cri`** já dá a perna de "Container Runtime" da unificação (serve `kubelet` via
@@ -4818,7 +4836,7 @@ volta a contar**.
 ## i18n (fonte EN + catálogo pt.po embutido) — `cmd/po.rs`
 
 Desde a v0.5.0, **a fonte de strings de utilizador é 100% EN** e as traduções vivem
-num catálogo gettext embutido (`crates/delonix-runtime-bin/data/pt.po`, 171 msgids),
+num catálogo gettext embutido (`bins/delonix-runtime-bin/data/pt.po`, 171 msgids),
 activado por `--l18n=pt`/`DELONIX_L18N=pt`. Regras para não regredir:
 
 - **String nova de UI = EN no código + entrada no `pt.po`.** Nunca voltar aos pares

@@ -4,7 +4,7 @@
   answer, not a deferral
 - **Date:** 2026-08-10
 - **Deciders:** Walter (owner)
-- **Related:** `crates/delonix-mgmt/src/lib.rs`, `docs/cli-stability.md`
+- **Related:** `crates/interfaces/delonix-mgmt/src/lib.rs`, `docs/cli-stability.md`
   (`serve api` declared not stable), `docs/discovery/47_IAC_REVISAO.md` §F4/§F5,
   ADR-0008 (a *VM backend* that talks to a remote host — a different question,
   see below).
