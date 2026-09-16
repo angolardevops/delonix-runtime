@@ -3,6 +3,7 @@
 //! entry points translate into; the use cases that execute it follow in later P2
 //! slices.
 
+pub mod launch;
 pub mod network;
 mod notice;
 pub mod pod;
