@@ -7,6 +7,10 @@ license.workspace = true
 [dependencies]
 delonix-runtime-core = { workspace = true }
 serde = { workspace = true }
+# The spec types derive their JSON Schema next to their definition, so the
+# published schema cannot drift from the types (ADR-0040: the generated schema
+# belongs to the contexts, not to the CLI).
+schemars = { workspace = true, features = ["derive"] }
 
 [lints]
 workspace = true
