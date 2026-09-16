@@ -24,9 +24,8 @@ use delonix_runtime_core::{
 };
 
 /// RFC3339 with nanosecond precision, for the *logging shim* (timestamped
-/// container stdout). Deliberate local copy: `delonix-runtime` does not
-/// depend on `delonix-core` (PaaS) — this helper is purely time formatting,
-/// with no audit/tenant semantics.
+/// container stdout). Deliberate local copy, to keep this crate's dependency
+/// tree minimal — this helper is purely time formatting.
 fn now_rfc3339_nano() -> String {
     fn rfc3339(secs: u64) -> String {
         let days = (secs / 86_400) as i64;
@@ -2835,7 +2834,8 @@ fn setup_node_cgroup_ns(cid: &str) {
     }
     // 2) Move us to a SIBLING leaf of the `kind` cgroup, under the parent SCOPE, and delegate
     //    the scope's controllers to the leaf. `kind` (and the helpers) run in
-    //    `<scope>/kind` (see `paas.rs`), freeing the `<scope>` root; this way the
+    //    `<scope>/kind` — a PRECONDITION on whoever launches `kind`, which this engine
+    //    does not enforce — freeing the `<scope>` root; this way the
     //    leaf `<scope>/dlx-<id>` gets cpu delegated (the node entrypoint requires it)
     //    AND as the cgroup-ns root it has 0 direct processes (the kubelet requires it).
     if let Some(base) = std::fs::read_to_string("/proc/self/cgroup")
@@ -2856,8 +2856,8 @@ fn setup_node_cgroup_ns(cid: &str) {
             // RACE-CLOSE (deterministic): delegating `subtree_control` with DIRECT
             // processes in the scope is rejected (no-internal-processes) → the `+cpu` did not
             // engage and the node did not become Ready (part of the ~50% flakiness, masked
-            // by the retry). Wait (briefly) for the scope root to become EMPTY — `paas.rs`
-            // moves `kind` to `<scope>/kind`, but we close any window here.
+            // by the retry). Wait (briefly) for the scope root to become EMPTY — the
+            // launcher is expected to move `kind` to `<scope>/kind`; we close any window here.
             for _ in 0..30 {
                 let empty = std::fs::read_to_string(format!("{scope}/cgroup.procs"))
                     .map(|s| s.trim().is_empty())
@@ -5067,7 +5067,7 @@ pub struct RunSpec<'a> {
     pub log_cri: bool,
     /// Creates a *user namespace* (`CLONE_NEWUSER`): the container's root stops
     /// being the host's root. Requires the write layer to be `chown`ed
-    /// to [`USERNS_UID_BASE`] (the `delonix-cli` handles that).
+    /// to [`USERNS_UID_BASE`] (the caller that prepares the rootfs handles that).
     pub userns: bool,
     /// AppArmor profile to apply on the `execve` (must be loaded on the host).
     pub apparmor: Option<String>,

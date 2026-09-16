@@ -693,8 +693,8 @@ impl VolumeStore {
     /// observed result: `rm` reported `Permission denied`, the volume vanished
     /// from `ls`/`inspect`/`system df`, and every byte stayed on disk. A later
     /// `create` of the SAME name then succeeded, reported `usage: 0 bytes`, and
-    /// handed the previous owner's data to whoever mounted it — in a PaaS where
-    /// volume names derive from app/addon names, tenant B silently inherits
+    /// handed the previous owner's data to whoever mounted it — where volume names
+    /// derive from app or addon names, tenant B silently inherits
     /// tenant A's database. Three orphans in exactly this state were found on a
     /// live host.
     ///

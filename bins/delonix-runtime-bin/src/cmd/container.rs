@@ -2786,7 +2786,7 @@ fn with_env_file0(files: &[String], env: Vec<String>) -> Result<Vec<String>> {
 /// the `too_many_arguments` threshold long ago.
 ///
 /// **`Default` + `#[serde(default)]` on everything new**: the new fields (parity
-/// with the PaaS `run`) were added all at once; internal callers that only want
+/// with a full `run` specification) were added all at once; internal callers that only want
 /// the essentials (`stack apply`, `cluster create`) use `..Default::default()`
 /// and don't have to enumerate them all.
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -2826,7 +2826,7 @@ pub(crate) struct RunOpts {
     /// kind-style progress — the IDs in the middle were noise).
     #[serde(default)]
     pub(crate) quiet: bool,
-    // ---- parity with the PaaS `run` (all #[serde(default)]) ----
+    // ---- parity with a full `run` specification (all #[serde(default)]) ----
     #[serde(default)]
     pub(crate) memory: Option<String>,
     #[serde(default)]
@@ -4276,7 +4276,7 @@ pub(crate) fn exit_code_of(status: &Status) -> i32 {
 /// `Ok(())` no matter how the workload ended: `exit 42`, `exit 1` and a failed
 /// `execve` of the entrypoint all produced `$? = 0`, and so did a container that
 /// never started at all (`failed to prepare the rootfs`, which the child reports
-/// as 126). Every orchestrator, CI job and PaaS deploy step reading that exit
+/// as 126). Every orchestrator, CI job and deploy step reading that exit
 /// code was told "success" — a failed schema migration or a failed backup looked
 /// fine until restore time.
 ///
@@ -6193,7 +6193,7 @@ fn cmd_freeze(store: &Store, id: &str, frozen: bool) -> Result<()> {
 /// rootfs is packaged with `commit_flat_rootfs`; in root there's an overlay and
 /// `commit_upper` takes just the diff layer, which is much cheaper.
 ///
-/// The version that was in the PaaS only did the overlay path and, in rootless,
+/// An earlier version elsewhere only did the overlay path and, in rootless,
 /// blew up with "failed to package the diff: No such file or directory" — the
 /// upperdir doesn't exist. Porting without this would be porting the bug.
 fn cmd_commit(images: &ImageStore, store: &Store, id: &str, tag: &str) -> Result<()> {
@@ -6279,7 +6279,7 @@ fn cmd_top(store: &Store, id: &str) -> Result<()> {
     // (`<slice>/delonix-<id>`); in rootless without delegation the container isn't
     // there. We read init's REAL cgroup from `/proc/<pid>/cgroup` — the same
     // technique as the `cgroup_metric` that `stats` already uses, and which works
-    // whatever the delegated base is. The PaaS version used the guessed path and
+    // whatever the delegated base is. An earlier version used the guessed path and
     // gave "cgroup.procs: No such file or directory" on any host without delegation.
     let pid = c
         .pid

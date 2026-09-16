@@ -1,9 +1,8 @@
 //! `delonix-runtime-core` — shared types, state and errors of the **engine**
 //! (Container/Vm/Status), independent of any notion of tenant, plan,
 //! license or console. It is the foundation of the Delonix Runtime — meant to live in
-//! its own opensource repository, without any dependency on the PaaS side
-//! (`delonix-core`, which handles tenants/licensing/billing, DEPENDS on this
-//! crate and re-exports it — never the other way around).
+//! its own opensource repository. Anything that handles tenants, licensing or
+//! billing may depend on this crate — never the other way around.
 
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -405,7 +404,7 @@ impl KubeCgroupParent {
 /// Validates a cgroup group name as a SINGLE, safe path segment. PURE.
 ///
 /// This is a privilege boundary, not tidiness. The name reaches this engine from
-/// outside (a PaaS derives it from a tenant name, which a customer chose). Interpolated
+/// outside (a caller may derive it from a name a customer chose). Interpolated
 /// unchecked into `<base>/{name}/dlx-<id>`, a `..` walks OUT of the delegated base and
 /// a leading `/` leaves it entirely — either one puts the caller's containers in a
 /// cgroup it was never granted, ceiling included. Rejects anything that is not
@@ -749,13 +748,13 @@ pub struct Container {
     ///
     /// Why the engine has this and still knows nothing about tenants: a per-container
     /// limit cannot bound a GROUP of containers. Ten containers of 1 GiB each are ten
-    /// valid containers and 10 GiB of pressure. Whoever groups them — a PaaS billing a
-    /// tenant, a CI runner fencing a job, an operator carving a box — needs the kernel
+    /// valid containers and 10 GiB of pressure. Whoever groups them — a platform billing
+    /// a customer, a CI runner fencing a job, an operator carving a box — needs the kernel
     /// to hold the aggregate, and only an intermediate cgroup does that.
     ///
     /// The engine deliberately does NOT learn what the group MEANS. It takes an opaque
-    /// name, nests under it and applies the ceiling. `delonix-core` maps its own notion
-    /// of tenant onto this; the engine stays independent of tenants, plans and billing
+    /// name, nests under it and applies the ceiling. A consumer maps whatever grouping it
+    /// has onto this; the engine stays independent of tenants, plans and billing
     /// (see this module's header).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cgroup_parent: Option<CgroupParent>,
@@ -948,7 +947,7 @@ pub struct Container {
     /// Consumed by the `delonix container run -d --restart` supervisor (a
     /// detached process per container, which becomes the PARENT of the container and therefore
     /// captures the real exit code); also used by the generated `systemd` unit and
-    /// by the stack supervisor on the PaaS side.
+    /// by a supervisor a consumer may run.
     #[serde(default)]
     pub restart_policy: Option<String>,
     /// **Desired state**: the user explicitly requested `stop`. The

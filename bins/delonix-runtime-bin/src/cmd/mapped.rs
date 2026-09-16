@@ -13,7 +13,7 @@
 //!
 //! **The contract was half-implemented in the public repo**: the library
 //! (`delonix_runtime::{remove_tree_mapped, reexec_mapped}`) did the re-exec, but
-//! the subcommands only existed in `delonix-paas`'s PRIVATE CLI. A user of the
+//! the subcommands only existed in another program's CLI. A user of the
 //! public `delonix` caught the child dying with "unrecognized subcommand
 //! '__rmtree'" (rc=2) — and since `remove_tree_mapped` did not even look at the
 //! exit status, the tree was left unremoved **silently**. Verified running:

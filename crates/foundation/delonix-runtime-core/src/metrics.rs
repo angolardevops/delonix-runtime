@@ -1,7 +1,7 @@
 //! SHARED Prometheus metrics of the runtime (C1, slice 2). A single definition
 //! per metric lives here; the servers expose them where they are needed — the
 //! `delonix-cri` on a dedicated HTTP `/metrics` (runtime scrape on the k8s node, like
-//! containerd/CRI-O), and optionally the `delonix-mgmt` (control-plane). Avoids
+//! containerd/CRI-O), and optionally the `delonix-mgmt` management API. Avoids
 //! duplicating metric definitions across surfaces.
 //!
 //! Consumers do NOT touch `prometheus-client`: they increment via the

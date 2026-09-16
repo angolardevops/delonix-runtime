@@ -32,9 +32,8 @@ use crate::severity::Severity;
 
 /// What the node does with a request that violates the policy.
 ///
-/// Mirrors the vocabulary `delonix-paas`'s operator-facing policy store already
-/// uses (`mode: "enforce" | "warn"`), so the two layers describe the same idea
-/// with the same word rather than each inventing one.
+/// The common vocabulary for this idea (`mode: "enforce" | "warn"`, as admission
+/// controllers use it), so a policy written elsewhere maps onto it word for word.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Mode {

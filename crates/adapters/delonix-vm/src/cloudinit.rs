@@ -15,8 +15,8 @@
 //! the local backends, `--ciuser`/`--sshkeys` on the node for Proxmox. `seed`
 //! stays as the escape hatch for whoever brings their own.
 //!
-//! The move also takes `cloud-localds` out of the private PaaS: it was calling
-//! this exact sequence in its own copy, which is two sources of truth for a
+//! The move also takes `cloud-localds` out of every caller: each was calling
+//! this exact sequence in its own copy, which is several sources of truth for a
 //! format the guest has to agree with.
 
 use crate::{mac_for, valid_vm_name, VmVolume};

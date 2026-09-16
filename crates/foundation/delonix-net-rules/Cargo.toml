@@ -5,8 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 # SEM dependências, e é o ponto: este crate existe para poder ser usado dos dois
-# lados da fronteira (o motor e o control-plane) sem arrastar o mecanismo atrás.
-# Uma dependência aqui seria uma dependência que o PaaS passaria a ter.
+# lados da fronteira (o motor e quem o consome) sem arrastar o mecanismo atrás.
+# Uma dependência aqui seria uma dependência imposta a todos os clientes.
 [dependencies]
 
 [lints]

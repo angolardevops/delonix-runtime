@@ -1,14 +1,14 @@
 // Delonix node API — shared messages.
 //
-// Status: DRAFT contract for ADR-0040. Nothing serves or consumes it yet; it is published
-// so the control plane's node agent and this engine can agree on the shape BEFORE code
-// moves. `buf lint` + `buf breaking` gate it from phase P1 on.
+// Status: DRAFT contract for ADR-0040. Nothing serves it yet; it is published so the shape
+// is fixed BEFORE code moves. `buf lint` + `buf breaking` gate it from phase P1 on. It is
+// the engine's contract with any local client, and names none.
 //
-// Two rules every message in this package follows, and a review rejects a change that
-// breaks either:
+// Rules every message in this package follows, and a review rejects a change that
+// breaks one:
 //   1. No notion of tenant, account, plan, quota or billing (guardrail #2). `namespace`
-//      is the ENGINE's isolation namespace — the agent maps a tenant onto it, the engine
-//      never learns what a tenant is.
+//      is the ENGINE's isolation namespace — a client may map its own grouping onto it,
+//      the engine never learns what that grouping is.
 //   2. No provider name in a field the caller writes. Provider-specific knobs travel in
 //      `ProviderExtensions`, keyed by provider id, and a provider REJECTS keys it does not
 //      know (guardrail #6: never accept-and-ignore).

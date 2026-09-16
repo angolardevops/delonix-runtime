@@ -67,7 +67,7 @@ pub struct VmConfig {
     ///
     /// Existe porque sem ele **todo o nó herdava o tamanho da golden**, e não
     /// havia como dimensionar um nó pelo armazenamento que o inquilino paga —
-    /// a quota (`TenantQuota.storage_gb` no PaaS) conta-se sobre o
+    /// uma quota de armazenamento, de quem a tiver, conta-se sobre o
     /// PROVISIONADO, logo é aqui que ela se aplica.
     ///
     /// O overlay é fino: pedir 40 GiB não escreve 40 GiB: cresce à medida do
@@ -1734,7 +1734,7 @@ pub fn console_socket(base: &Path, name: &str) -> std::path::PathBuf {
 /// Where a capture-mode VM's serial console is written (`<base>/vms/<name>.serial`).
 ///
 /// THE formula, with one owner. It used to be spelled out separately in `boot_ch`
-/// and in the DKS reader over in the PaaS, which is exactly how the two came to
+/// and in a reader in another program, which is exactly how the two came to
 /// disagree: the interactive console moved the writer to a socket and the reader
 /// went on opening a file nobody wrote. Same discipline as `fw_rule_tail` — the
 /// writer and the reader share the format or they drift.
@@ -3860,8 +3860,8 @@ libvirt+qemu"
     // `--sshkeys`), which is the entire reason these fields exist.
     //
     // This used to be the CALLER's job, and that is what kept cloud-init local:
-    // every consumer built its own ISO — the CLI, `cluster kubeadm`, and the
-    // private PaaS in a copy of its own — so a remote backend could only ever
+    // every consumer built its own ISO — the CLI, `cluster kubeadm`, and other
+    // programs in copies of their own — so a remote backend could only ever
     // receive a path it could not open.
     //
     // An explicit `seed` always wins: someone who built their own is not asking

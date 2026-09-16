@@ -11,7 +11,7 @@
 //!
 //! There is no `tenant`, `project` or `environment` field here, and there will
 //! not be one. ADR-0010 (Rejected, 2026-08-10) and ADR-0025 (Accepted,
-//! 2026-08-29) put tenancy in `delonix-paas`; a layer that has tenants wraps
+//! 2026-08-29) keep tenancy outside the engine; a layer that has tenants wraps
 //! this event and adds them on its side of the boundary.
 //!
 //! # What this log is NOT
@@ -21,7 +21,7 @@
 //! lifecycle events and it is a real limitation for security ones: this log
 //! detects nothing about its own gaps, and an attacker with write access to the
 //! state root can edit it. The tamper-evident trail is the hash-chained audit
-//! log with the Ed25519 anchor, which lives in `delonix-paas`. This is
+//! log with a signed anchor, which is not this engine's job. This is
 //! operational signal, not evidence — and calling it evidence would be the
 //! kind of overclaim the engine refuses elsewhere.
 

@@ -1,7 +1,7 @@
 //! `delonix` — the open-source CLI of the Delonix Runtime: a daemonless,
 //! rootless-first, kernel-native container and microVM engine. Homologous to
-//! Docker; distinct from the private `delonix`/`delonixctl` of `delonix-paas`
-//! (another repo, another dependency tree — see `AGENTS.md`).
+//! Docker. It knows no consumer: see «Identidade e fronteira do motor» in
+//! `AGENTS.md`.
 //!
 //! Commands grouped semantically (instead of a flat list): `container`
 //! (run/ps/stop/rm/exec/logs), `image` (pull/ls/remove/export), `build`
@@ -710,8 +710,8 @@ fn main() {
     // see `delonix_runtime::{remove_tree_mapped, reexec_mapped}`), so we are the
     // effective owners of the files the container wrote.
     //
-    // **These halves were missing in this binary** and only existed in the
-    // private CLI of `delonix-paas`: the PUBLIC library re-executed
+    // **These halves were missing in this binary** and only existed in
+    // another program's CLI: the library re-executed
     // `delonix __rmtree` and the public `delonix` replied "unrecognized
     // subcommand" (rc=2) — with `remove_tree_mapped` not even looking at the
     // exit status, the tree stayed undeleted in SILENCE. The public engine has

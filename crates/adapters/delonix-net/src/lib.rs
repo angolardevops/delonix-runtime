@@ -26,10 +26,10 @@ use delonix_runtime_core::{Error, Result};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-// Re-exportadas do `delonix-net-rules`, que é onde vivem agora: são regras
-// PURAS, e o control-plane precisa de calcular exactamente o mesmo (o nome da
-// bridge que ele espera tem de ser o que este motor cria). Re-exportar em vez de
-// mudar os consumidores: nenhum call-site deste crate teve de mexer.
+// Re-exported from `delonix-net-rules`, where they live: they are PURE rules,
+// and a client computing the same value (the name of the bridge this engine
+// creates) must get exactly the same answer. Re-exported rather than moving the
+// callers: no call site in this crate had to change.
 pub(crate) use delonix_net_rules::fnv32;
 pub use delonix_net_rules::{
     bridge_name, derive_ip_in, matches_labels, parse_overlay_peer, service_vip, valid_ip_in_subnet,
@@ -1595,9 +1595,10 @@ impl NetworkStore {
     }
 }
 
-/// CANONICAL types of the per-container L4 firewall, defined in `delonix-core`
-/// (where they are also persisted in the `Container` record). Re-exported here so that
-/// `apply_container_firewall` and the API keep using `delonix_net::ContainerFw`.
+/// CANONICAL types of the per-container L4 firewall, defined in
+/// `delonix-runtime-core` (where they are also persisted in the `Container` record).
+/// Re-exported here so that `apply_container_firewall` and the management API keep
+/// using `delonix_net::ContainerFw`.
 pub use delonix_runtime_core::{ContainerFw, FwRule};
 
 /// Default slirp4netns IP/gateway/DNS (rootless network).

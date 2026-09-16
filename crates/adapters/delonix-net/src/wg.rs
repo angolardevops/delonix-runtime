@@ -117,7 +117,7 @@ fn write_0600(p: &Path, data: &str) -> Result<()> {
 }
 
 /// Node key, persisted 0600 at `$DELONIX_ROOT/wg/node.key` (generated on first use).
-/// The public one goes to `node.pub` (readable) for publishing to the control-plane.
+/// The public one goes to `node.pub` (readable), for whoever joins nodes into an overlay.
 pub fn ensure_node_key() -> Result<WgKey> {
     let dir = wg_dir();
     std::fs::create_dir_all(&dir).map_err(|e| rt("wg dir", e))?;

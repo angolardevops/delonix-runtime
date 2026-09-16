@@ -2,7 +2,7 @@
 //!
 //! **One node, named explicitly.** No inventory, no scheduling, no choosing a
 //! node on the user's behalf: a decision that needs to know *who the customer
-//! is* belongs to the control plane, not to a node runtime (guardrail #2).
+//! is* belongs to whoever consumes the engine, not to a node runtime (guardrail #2).
 //!
 //! # What the spike measured, and why the code looks like this
 //!

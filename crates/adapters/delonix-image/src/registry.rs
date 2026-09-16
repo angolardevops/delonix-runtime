@@ -40,9 +40,9 @@ fn reg_err(e: reqwest::Error) -> Error {
 /// A transport failure against `https://<host>` where the host was NOT declared
 /// insecure is, in practice, almost always a registry that speaks plain HTTP —
 /// and the bare `error sending request for url (https://…)` sends the reader
-/// looking for a network problem that is not there. Measured on the NgolaCloud
-/// production cluster (2026-08-19): the platform could not pull from its own
-/// registry, and the message named neither the cause nor the knob.
+/// looking for a network problem that is not there. Measured on a production
+/// cluster (2026-08-19): images could not be pulled from its own registry, and
+/// the message named neither the cause nor the knob.
 ///
 /// The hint is only added when it can be true: loopback and already-declared
 /// hosts get the message unchanged, so it never invites an operator to open up
@@ -129,8 +129,8 @@ fn extract(header: &str, key: &str) -> Option<String> {
 /// Same knob as `--insecure-registry` (Docker) and `certs.d` (containerd), and
 /// it exists for the same reason: a private registry on a trusted network
 /// frequently serves HTTP, and a client that cannot be told so simply cannot
-/// pull from it. Measured 2026-08-19 on the NgolaCloud production cluster —
-/// the platform could not pull a single image from its OWN registry, because
+/// pull from it. Measured 2026-08-19 on a production cluster — not a single
+/// image could be pulled from its OWN registry, because
 /// the registry serves HTTP and this client insisted on HTTPS; the API
 /// answered `registry error: error sending request` and the image store stayed
 /// empty. A knob nobody can reach is not a security boundary, it is a wall.
