@@ -631,7 +631,13 @@ async fn container_exec_ep(
 
 /// Body of `POST /v1/containers` (run). The contract is the field names: a client
 /// serializes this shape and the engine deserializes it.
+///
+/// `deny_unknown_fields`, like `ReconfigBody`: a client that sends `cpus`, `user` or a
+/// misspelled `volume` gets a 422 naming the field, instead of a container that runs
+/// WITHOUT what it asked for and an `ok: true` to go with it. A new field enters this
+/// struct and `build_run_args` together, never the body alone.
 #[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RunSpecBody {
     image: String,
     #[serde(default)]
@@ -1517,6 +1523,27 @@ async fn vm_action_ep(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn run_refuses_a_field_the_engine_does_not_apply() {
+        // The shape that failed silently: a sensible-looking field the run path never
+        // reads. Before, this deserialized, the container ran without a CPU limit, and
+        // the answer was `ok: true`.
+        let err = serde_json::from_str::<super::RunSpecBody>(r#"{"image":"alpine","cpus":"2"}"#);
+        assert!(
+            err.is_err(),
+            "an unknown field must be refused, not dropped"
+        );
+        let msg = err.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(
+            msg.contains("cpus"),
+            "the refusal must name the field: {msg}"
+        );
+        let ok = serde_json::from_str::<super::RunSpecBody>(
+            r#"{"image":"alpine","name":"web","ports":["8080:80"],"knows_none":true}"#,
+        );
+        assert!(ok.is_ok());
+    }
+
     #[test]
     fn reconfig_refuses_a_field_the_engine_does_not_apply() {
         // Accepted-and-ignored is the failure this guards: the client believes the
