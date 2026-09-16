@@ -1396,6 +1396,9 @@ impl VmBackend for CloudHypervisorBackend {
                 cfg.name
             )));
         }
+        // Before the network is touched: a socket path the kernel will refuse
+        // kills the VMM at startup, so it is a clear error here instead.
+        ch_socket_paths_fit(vmdir, cfg)?;
         // Own private network when named (≠ shared ingress): ensures its
         // isolated bridge + DHCP before the attach. The VMs' SDN lives here.
         on(CreateStage::Network);
@@ -1763,43 +1766,7 @@ pub fn serial_log_path(base: &Path, name: &str) -> std::path::PathBuf {
 /// `UnixStream`, the same primitive `delonix-net`'s `slirp_api` already uses
 /// for a different (line-delimited JSON) protocol.
 fn ch_api_put(sock: &str, path: &str) -> Result<()> {
-    use std::io::{Read, Write};
-    use std::os::unix::net::UnixStream;
-    let mut s = UnixStream::connect(sock).map_err(|e| Error::Runtime {
-        context: "vm",
-        message: format!("cloud-hypervisor api socket: {e}"),
-    })?;
-    let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(10)));
-    let req = format!("PUT {path} HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n");
-    s.write_all(req.as_bytes()).map_err(|e| Error::Runtime {
-        context: "vm",
-        message: format!("cloud-hypervisor api write: {e}"),
-    })?;
-    // Read only up to the end of the response HEADERS. Waiting for EOF
-    // instead would hang on a keep-alive connection the server never
-    // closes — and both verbs this calls answer with no body to wait for
-    // beyond that point.
-    let mut buf = Vec::new();
-    let mut chunk = [0u8; 512];
-    loop {
-        let n = s.read(&mut chunk).map_err(|e| Error::Runtime {
-            context: "vm",
-            message: format!("cloud-hypervisor api read: {e}"),
-        })?;
-        if n == 0 || buf.len() > 8192 {
-            break;
-        }
-        buf.extend_from_slice(&chunk[..n]);
-        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
-            break;
-        }
-    }
-    let status_line = String::from_utf8_lossy(&buf)
-        .lines()
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .to_string();
+    let (status_line, _) = ch_api_call(sock, "PUT", path, Duration::from_secs(10))?;
     if http_status_is_2xx(&status_line) {
         Ok(())
     } else {
@@ -1815,6 +1782,78 @@ fn ch_api_put(sock: &str, path: &str) -> Result<()> {
             ),
         })
     }
+}
+
+/// One request with no body over the api-socket; returns the status line and
+/// the response body (read up to `Content-Length`, which Cloud Hypervisor
+/// always sends on a body it has).
+///
+/// Waiting for EOF instead would hang on a keep-alive connection the server
+/// never closes, so the read stops at the end of the headers when there is no
+/// `Content-Length`, and at the end of the declared body when there is.
+fn ch_api_call(
+    sock: &str,
+    method: &str,
+    path: &str,
+    timeout: Duration,
+) -> Result<(String, Vec<u8>)> {
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+    let mut s = UnixStream::connect(sock).map_err(|e| Error::Runtime {
+        context: "vm",
+        message: format!("cloud-hypervisor api socket: {e}"),
+    })?;
+    let _ = s.set_read_timeout(Some(timeout));
+    let _ = s.set_write_timeout(Some(timeout));
+    let req = format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n");
+    s.write_all(req.as_bytes()).map_err(|e| Error::Runtime {
+        context: "vm",
+        message: format!("cloud-hypervisor api write: {e}"),
+    })?;
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 512];
+    let mut want: Option<usize> = None;
+    loop {
+        if let Some(total) = want {
+            if buf.len() >= total {
+                break;
+            }
+        } else if let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+            let len = http_content_length(&String::from_utf8_lossy(&buf[..end])).unwrap_or(0);
+            want = Some(end + 4 + len);
+            continue;
+        }
+        if buf.len() > 65536 {
+            break;
+        }
+        let n = s.read(&mut chunk).map_err(|e| Error::Runtime {
+            context: "vm",
+            message: format!("cloud-hypervisor api read: {e}"),
+        })?;
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&chunk[..n]);
+    }
+    let text = String::from_utf8_lossy(&buf);
+    let status_line = text.lines().next().unwrap_or_default().trim().to_string();
+    let body = buf
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .map(|end| buf[end + 4..].to_vec())
+        .unwrap_or_default();
+    Ok((status_line, body))
+}
+
+/// Pure: the `Content-Length` of a response header block, if it declares one.
+fn http_content_length(headers: &str) -> Option<usize> {
+    headers.lines().find_map(|l| {
+        let (k, v) = l.split_once(':')?;
+        k.trim()
+            .eq_ignore_ascii_case("content-length")
+            .then(|| v.trim().parse().ok())
+            .flatten()
+    })
 }
 
 /// Pure: `true` for any HTTP status line in the 2xx range. Tested against the
@@ -1935,9 +1974,40 @@ fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) ->
         pid = shq(&pidfile.to_string_lossy())
     );
 
+    launch_vmm(&join, &script, &pidfile, &sock, &log, VMM_READY_GRACE)
+}
+
+/// How long `boot_ch` waits for a freshly launched VMM to report its VM as
+/// `Running`. Measured on this host (CH v53.0, 2026-09-16): a good boot answers
+/// on the first poll and a failed one is gone in under 50 ms, so this only
+/// bounds a VMM that is alive and silent.
+const VMM_READY_GRACE: Duration = Duration::from_secs(10);
+
+/// Runs the launch `script` behind `join`, reads the pid it writes, and
+/// returns it **only once the VMM confirms its VM is running**.
+///
+/// Returning on the pidfile alone was the defect: the `sh` backgrounds the VMM
+/// and exits 0 whether the VMM comes up or dies a millisecond later, so `vm
+/// create` recorded `Running` for a process that had already exited (measured
+/// 2026-09-16: an api-socket path past `SUN_LEN` exits at 0.0005 s, an invalid
+/// firmware at 0.044 s — both with `vm create` at rc=0). And `is_running` is
+/// `kill(pid, 0)`, true for a zombie, so the first check after boot could
+/// still agree and the next one not.
+///
+/// Split out of `boot_ch` (with `join` as a parameter) so a test can run it
+/// with a no-op join and a fake VMM; that test fails if the confirmation is
+/// dropped from this path.
+fn launch_vmm(
+    join: &[String],
+    script: &str,
+    pidfile: &Path,
+    sock: &Path,
+    log: &Path,
+    ready: Duration,
+) -> Result<i32> {
     let st = Command::new(&join[0])
         .args(&join[1..])
-        .args(["sh", "-c", &script])
+        .args(["sh", "-c", script])
         .env("DELONIX_INTERNAL", "1")
         .status()
         .map_err(|e| Error::Runtime {
@@ -1957,17 +2027,125 @@ fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) ->
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
-    let pid = std::fs::read_to_string(&pidfile)
+    let pid = std::fs::read_to_string(pidfile)
         .ok()
         .and_then(|s| s.trim().parse::<i32>().ok())
         .unwrap_or(0);
     if pid <= 0 {
         return Err(Error::Runtime {
             context: "vm",
-            message: "cloud-hypervisor did not report a PID (check the VM log)".into(),
+            message: format!(
+                "cloud-hypervisor did not report a PID{}",
+                log_tail_suffix(log)
+            ),
         });
     }
+    wait_vmm_ready(pid, sock, log, ready)?;
     Ok(pid)
+}
+
+/// Waits until the VMM at `pid` answers `GET /api/v1/vm.info` with the VM in
+/// state `Running`. Errors — with the tail of the VM log — if the process
+/// leaves (a zombie counts, see [`vmm_left`]) or the grace runs out; in the
+/// second case the silent VMM is terminated so no orphan holds the disk.
+///
+/// **Why `vm.info` and not `vmm.ping`:** measured against CH v53.0 with an
+/// invalid firmware, `vmm.ping` ANSWERS (500, and 200 is possible in the same
+/// window) while the boot is failing, and the process is gone 44 ms later. The
+/// VMM's own statement that the VM is `Running` only exists after the kernel
+/// or firmware was loaded and the vCPUs started — which is what `vm create`
+/// reports.
+fn wait_vmm_ready(pid: i32, sock: &Path, log: &Path, ready: Duration) -> Result<()> {
+    let starttime = proc_starttime(pid);
+    let sock = sock.to_string_lossy();
+    let deadline = Instant::now() + ready;
+    loop {
+        if starttime.is_none() || vmm_left(pid, starttime) {
+            return Err(Error::Runtime {
+                context: "vm",
+                message: format!(
+                    "cloud-hypervisor exited during startup{}",
+                    log_tail_suffix(log)
+                ),
+            });
+        }
+        if let Ok((status, body)) =
+            ch_api_call(&sock, "GET", "/api/v1/vm.info", Duration::from_secs(1))
+        {
+            if http_status_is_2xx(&status) && vm_info_says_running(&body) {
+                // Re-checked AFTER the answer: the answer and the exit can
+                // cross, and a dead VMM must not be returned as up.
+                if !vmm_left(pid, starttime) {
+                    return Ok(());
+                }
+                continue;
+            }
+        }
+        if Instant::now() >= deadline {
+            let _ = terminate_vmm(pid, starttime, VMM_KILL_GRACE, VMM_KILL_GRACE);
+            return Err(Error::Runtime {
+                context: "vm",
+                message: format!(
+                    "cloud-hypervisor did not report the VM running within {}s (terminated){}",
+                    ready.as_secs(),
+                    log_tail_suffix(log)
+                ),
+            });
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Pure: does a `vm.info` body say `"state": "Running"`? Tolerates the
+/// whitespace a pretty-printer would add; no JSON parser needed for one field.
+fn vm_info_says_running(body: &[u8]) -> bool {
+    let compact: String = String::from_utf8_lossy(body)
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    compact.contains("\"state\":\"Running\"")
+}
+
+/// `" — VM log: <last lines>"`, or `""` when the log is empty/unreadable, so
+/// the cause (e.g. `path must be shorter than SUN_LEN`) reaches the user
+/// instead of staying in a file they were never told about.
+fn log_tail_suffix(log: &Path) -> String {
+    let Ok(raw) = std::fs::read(log) else {
+        return String::new();
+    };
+    let text = String::from_utf8_lossy(&raw);
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    if lines.is_empty() {
+        return String::new();
+    }
+    let tail = lines[lines.len().saturating_sub(8)..].join("\n  ");
+    format!(" — {}:\n  {tail}", log.display())
+}
+
+/// The largest path a UNIX socket can bind: `sun_path` is 108 bytes on Linux
+/// and the kernel wants the terminating NUL inside it.
+const SUN_PATH_MAX: usize = 107;
+
+/// Pure: refuses up front a Cloud Hypervisor VM whose api-socket (always) or
+/// console socket (when interactive) would not fit in `sun_path`. Without this
+/// the VMM dies at 0.0005 s with `path must be shorter than SUN_LEN` — measured
+/// with a `DELONIX_ROOT` deep enough that `<root>/vms/<name>.sock` is 108 bytes.
+fn ch_socket_paths_fit(vmdir: &Path, cfg: &VmConfig) -> Result<()> {
+    let mut socks = vec![vmdir.join(format!("{}.sock", cfg.name))];
+    if !cfg.serial_capture {
+        socks.push(console_socket(vmdir.parent().unwrap_or(vmdir), &cfg.name));
+    }
+    for s in socks {
+        let len = s.as_os_str().len();
+        if len > SUN_PATH_MAX {
+            return Err(Error::Invalid(format!(
+                "VM '{}': socket path {} is {len} bytes, and a UNIX socket path is limited to {SUN_PATH_MAX} — use a shorter VM name or a shorter DELONIX_ROOT",
+                cfg.name,
+                s.display()
+            )));
+        }
+    }
+    Ok(())
 }
 
 // ===========================================================================
@@ -7273,5 +7451,209 @@ mod tests_the_stop_waits_for_the_vmm {
             "this very process has to read as running"
         );
         assert_eq!(proc_state(-1), None, "a pid with no /proc reads as None");
+    }
+}
+
+#[cfg(test)]
+mod tests_boot_confirms_the_vmm {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixListener;
+
+    /// A short, per-test directory: the api-socket inside it has to fit in
+    /// `sun_path`, which is the very limit under test elsewhere.
+    fn dir(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("dlxboot-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// The same shape `boot_ch` writes, around a fake VMM `cmd`.
+    fn script(cmd: &str, log: &Path, pidfile: &Path) -> String {
+        format!(
+            "{cmd} </dev/null >>{log} 2>&1 & echo $! > {pid}",
+            log = shq(&log.to_string_lossy()),
+            pid = shq(&pidfile.to_string_lossy())
+        )
+    }
+
+    /// A no-op `join`: `env sh -c …` runs the script in this namespace.
+    fn no_join() -> Vec<String> {
+        vec!["env".into()]
+    }
+
+    /// Serves `vm.info` on `sock` with `state` for every connection, keeping
+    /// each connection open after the answer (keep-alive, as CH does) so a
+    /// client that waits for EOF would hang.
+    fn fake_api(sock: &Path, state: &'static str) {
+        let l = UnixListener::bind(sock).unwrap();
+        std::thread::spawn(move || {
+            let mut held = Vec::new();
+            for mut c in l.incoming().flatten() {
+                let mut b = [0u8; 1024];
+                let _ = c.read(&mut b);
+                let body = format!("{{\"config\":{{}},\"state\":\"{state}\"}}");
+                let _ = c.write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                );
+                held.push(c);
+            }
+        });
+    }
+
+    fn kill(pid: i32) {
+        // SAFETY: our own subject.
+        unsafe {
+            libc::kill(pid, libc::SIGKILL);
+        }
+    }
+
+    /// THE defect: a VMM that dies right after launch used to come back as a
+    /// pid, and `vm create` recorded it `Running`. It has to be an error, and
+    /// the error has to carry the cause from the VM log.
+    #[test]
+    fn a_vmm_that_dies_at_startup_is_an_error_with_the_log() {
+        let d = dir("dies");
+        let (log, pid, sock) = (d.join("v.log"), d.join("v.pid"), d.join("v.sock"));
+        let s = script(
+            "sh -c 'echo \"Fatal error: path must be shorter than SUN_LEN\" >&2; exit 1'",
+            &log,
+            &pid,
+        );
+        let began = Instant::now();
+        let r = launch_vmm(&no_join(), &s, &pid, &sock, &log, Duration::from_secs(5));
+        let err = r
+            .expect_err("a VMM that exited at startup was reported as started")
+            .to_string();
+        assert!(err.contains("exited during startup"), "{err}");
+        assert!(err.contains("SUN_LEN"), "the log tail is missing: {err}");
+        assert!(
+            began.elapsed() < Duration::from_secs(4),
+            "the exit was not noticed; it waited for the grace instead"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// The answer of an api that is up is not enough when the process is not:
+    /// the api answered and the VMM left — a zombie included.
+    #[test]
+    fn an_answering_api_does_not_rescue_a_dead_vmm() {
+        let d = dir("zombie");
+        let (log, sock) = (d.join("v.log"), d.join("v.sock"));
+        fake_api(&sock, "Running");
+        let mut child = Command::new("sh").arg("-c").arg("exit 0").spawn().unwrap();
+        let pid = child.id() as i32;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while proc_state(pid) != Some('Z') && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(proc_state(pid), Some('Z'), "the subject has to be a zombie");
+        assert!(wait_vmm_ready(pid, &sock, &log, Duration::from_secs(2)).is_err());
+        let _ = child.wait();
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_vmm_whose_vm_is_running_is_returned() {
+        let d = dir("ok");
+        let (log, pidf, sock) = (d.join("v.log"), d.join("v.pid"), d.join("v.sock"));
+        fake_api(&sock, "Running");
+        let s = script("sleep 30", &log, &pidf);
+        let pid = launch_vmm(&no_join(), &s, &pidf, &sock, &log, Duration::from_secs(5))
+            .expect("a live VMM reporting Running has to be accepted");
+        assert!(matches!(proc_state(pid), Some(st) if st != 'Z'));
+        kill(pid);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Alive but never `Running` (a silent or stuck VMM): an error once the
+    /// grace is up, and the process does not stay behind holding the disk.
+    #[test]
+    fn a_vmm_that_never_reports_running_is_terminated() {
+        let d = dir("silent");
+        let (log, pidf, sock) = (d.join("v.log"), d.join("v.pid"), d.join("v.sock"));
+        fake_api(&sock, "Created");
+        let s = script("sleep 30", &log, &pidf);
+        let r = launch_vmm(
+            &no_join(),
+            &s,
+            &pidf,
+            &sock,
+            &log,
+            Duration::from_millis(400),
+        );
+        let err = r
+            .expect_err("a VM that never ran was reported as started")
+            .to_string();
+        assert!(err.contains("did not report the VM running"), "{err}");
+        let pid: i32 = std::fs::read_to_string(&pidf)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert!(
+            wait_vmm_left(pid, None, Duration::from_secs(3)),
+            "the silent VMM was left running"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn socket_paths_past_sun_path_are_refused_up_front() {
+        let fits = |root_len: usize, capture: bool| {
+            // `<vmdir>/<name>.sock` with name "vmx": vmdir + 9 bytes.
+            let vmdir = std::path::PathBuf::from(format!("/{}", "p".repeat(root_len - 1)));
+            let cfg = VmConfig {
+                name: "vmx".into(),
+                serial_capture: capture,
+                ..Default::default()
+            };
+            ch_socket_paths_fit(&vmdir, &cfg)
+        };
+        assert!(fits(98, true).is_ok(), "107 bytes fits");
+        let err = fits(99, true)
+            .expect_err("108 bytes does not fit")
+            .to_string();
+        assert!(err.contains("108 bytes") && err.contains("107"), "{err}");
+        // The console socket (`<base>/vms/<name>.console`) only exists when
+        // the serial is interactive, and it is the longer of the two.
+        let cfg = VmConfig {
+            name: "vmx".into(),
+            serial_capture: false,
+            ..Default::default()
+        };
+        let vmdir = std::path::PathBuf::from(format!("/{}/vms", "p".repeat(91)));
+        assert_eq!(
+            console_socket(vmdir.parent().unwrap(), "vmx")
+                .as_os_str()
+                .len(),
+            108
+        );
+        assert!(ch_socket_paths_fit(&vmdir, &cfg).is_err());
+        let cfg = VmConfig {
+            serial_capture: true,
+            ..cfg
+        };
+        assert!(ch_socket_paths_fit(&vmdir, &cfg).is_ok());
+    }
+
+    #[test]
+    fn vm_info_state_and_content_length_are_read_from_the_real_shapes() {
+        assert!(vm_info_says_running(
+            br#"{"config":{},"state":"Running","memory_actual_size":0}"#
+        ));
+        assert!(vm_info_says_running(b"{\n  \"state\": \"Running\"\n}"));
+        assert!(!vm_info_says_running(br#"{"state":"Created"}"#));
+        assert!(!vm_info_says_running(b""));
+        assert_eq!(
+            http_content_length("HTTP/1.1 200 OK\r\ncontent-length: 42"),
+            Some(42)
+        );
+        assert_eq!(http_content_length("HTTP/1.1 204 No Content"), None);
     }
 }
