@@ -1455,6 +1455,7 @@
         },
         "workingDir": {
           "default": null,
+          "description": "k8s `workingDir` — the directory the process starts in (same as\n`container run -w`). Omitted: the image's own working directory, or `/`.",
           "type": [
             "string",
             "null"
