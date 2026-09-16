@@ -1,0 +1,10 @@
+1
+/opt/p1b/prof/base     tmp     456ms  ingress UP — pin pid 2408 · control pid 2411 · slirp pid 2430 · bridge delonix0 (10.200.0.1)
+/opt/p1b/prof/base     run     135ms  error system call `ingress control` failed: system call `control socket` failed: No such file or directory (os error 2)
+/opt/p1b/prof/delonix  tmp     393ms  ingress UP — pin pid 2485 · control pid 2488 · slirp pid 2507 · bridge delonix0 (10.200.0.1)
+/opt/p1b/prof/delonix  run     220ms  error system call `ingress control` failed: system call `control socket` failed: No such file or directory (os error 2)
+/opt/p1b/noprof/base   tmp    5047ms  error system call `ingress holder` failed: timeout waiting for the netns holder
+/opt/p1b/noprof/base   run    5065ms  error system call `ingress holder` failed: timeout waiting for the netns holder
+/opt/p1b/noprof/delonix tmp     174ms  error system call `ingress holder` failed: making / private in the new mount namespace: Permission denied (os error 13)
+/opt/p1b/noprof/delonix run     246ms  error system call `ingress holder` failed: making / private in the new mount namespace: Permission denied (os error 13)
+clean
