@@ -7535,17 +7535,36 @@ pub(crate) fn health_opts(
 /// in under three hours at the default 30s. A health check is a thing operators
 /// add to be safe; this made it a slow fuse.
 ///
-/// So the watchdog now traps `TERM`, kills AND reaps its own `sleep`, and the
-/// caller waits for the watchdog itself. Validated against the real binary in
-/// all three shells a probe can land in (busybox `ash`, `dash`, `bash`): five
-/// probes leave `pids.current` exactly where it started, and a probe that
-/// genuinely exceeds its timeout still dies at the deadline with 137.
+/// That fix trapped `TERM` in the watchdog so it could kill and reap its own
+/// `sleep`, and it had a race of its own, measured 2026-09-16: when the probe ends
+/// FAST (`true`, a `pg_isready` that answers at once) the parent's `kill` reaches
+/// the watchdog before its `trap` is installed, the signal is lost, and the probe
+/// waits out the WHOLE timeout — every probe of a healthy container took
+/// `--health-timeout` (30s by default), in `dash` and busybox `ash` alike. A delay
+/// before the `kill` only moves the race, and a `kill -9` of the watchdog orphans
+/// its `sleep` onto the container's PID 1, which is exactly the zombie above.
+///
+/// So there is no watchdog and no signal between shells any more. The shell that
+/// started the probe polls it itself: the probe's `/proc/<pid>/stat` disappears (the
+/// shell already collected it) or shows `Z`, and the loop ends; past the deadline it
+/// is killed. Every process is a DIRECT child of that shell and is reaped by it —
+/// the `sleep` of each tick runs in the foreground, the probe by the final `wait` —
+/// so nothing is orphaned and nothing is left to a PID 1 that reaps nothing. The
+/// tick is 0.1s where `sleep` takes fractions and 1s where it does not; the deadline
+/// is counted in tenths either way. The exit code survives, and a killed probe comes
+/// back as 137 (128+SIGKILL).
 pub(crate) fn health_probe_argv(cmd: &str, timeout_secs: u64) -> Vec<String> {
+    let deadline_tenths = timeout_secs.saturating_mul(10);
     let script = format!(
         "{cmd} & __p=$!; \
-         ( trap 'kill -9 $__z 2>/dev/null; wait $__z 2>/dev/null; exit 0' TERM; \
-           sleep {timeout_secs} & __z=$!; wait $__z; kill -9 $__p 2>/dev/null ) & __w=$!; \
-         wait $__p; __rc=$?; kill $__w 2>/dev/null; wait $__w 2>/dev/null; exit $__rc"
+         __d=1; sleep 0.01 2>/dev/null || __d=10; __i=0; \
+         while {{ read -r __s < /proc/$__p/stat; }} 2>/dev/null; do \
+           case \"$__s\" in *') Z '*) break ;; esac; \
+           if [ $__i -ge {deadline_tenths} ]; then kill -9 $__p 2>/dev/null; break; fi; \
+           if [ $__d = 1 ]; then sleep 0.1; else sleep 1; fi; \
+           __i=$((__i + __d)); \
+         done; \
+         wait $__p"
     );
     vec!["/bin/sh".to_string(), "-c".to_string(), script]
 }
@@ -9024,30 +9043,50 @@ containers:
         let a = health_probe_argv("curl -f localhost", 7);
         assert_eq!(a[0], "/bin/sh");
         assert_eq!(a[1], "-c");
-        // O comando corre em background e um watchdog mata-o: sem isto, um
-        // probe pendurado ficava dentro do container a cada intervalo, para
-        // sempre — e o motor não tem como o alcançar de fora (o `exec` bloqueia
-        // num intermediário, e matar esse deixa o neto vivo no pid-ns).
         assert!(a[2].contains("curl -f localhost &"));
-        assert!(a[2].contains("sleep 7"));
+        // Deadline in tenths of a second, whatever the tick turns out to be.
+        assert!(a[2].contains("-ge 70"), "{}", a[2]);
         assert!(a[2].contains("kill -9 $__p"));
-        // O código de saída do probe sobrevive ao wrapper.
-        assert!(a[2].contains("exit $__rc"));
-        // And the watchdog is REAPED — both halves, because neither is enough on
-        // its own. Without `wait $__w` the subshell stays a zombie; without the
-        // trap that kills AND waits for its `sleep`, that one is orphaned onto
-        // the container's PID 1 (the workload, which reaps nothing). Measured
-        // before this fix: +8 zombies every 10s at `--health-interval 2`, until
-        // the cgroup's `pids.max` is reached.
+        // The probe is reaped by the shell that started it, and its code is the
+        // wrapper's code — `wait $__p` last, nothing after it.
+        assert!(a[2].trim_end().ends_with("wait $__p"), "{}", a[2]);
+        // No watchdog subshell and no trap: the signal between two shells is what
+        // got lost when the probe finished fast.
+        assert!(!a[2].contains("trap"), "{}", a[2]);
+    }
+
+    /// Runs the wrapper for real, in the host's `/bin/sh`. What the string test
+    /// above cannot see and the E2E run measured: a probe that ends at once must
+    /// return at once — it used to wait out the whole timeout — its exit code must
+    /// survive, and one that overruns must be killed near the deadline.
+    #[test]
+    fn health_probe_wrapper_returns_fast_keeps_the_code_and_kills_at_the_deadline() {
+        use std::time::{Duration, Instant};
+        let run = |cmd: &str, timeout: u64| {
+            let a = health_probe_argv(cmd, timeout);
+            let t = Instant::now();
+            let st = std::process::Command::new(&a[0])
+                .arg(&a[1])
+                .arg(&a[2])
+                .status()
+                .expect("/bin/sh runs");
+            (st, t.elapsed())
+        };
+        for _ in 0..5 {
+            let (st, took) = run("true", 5);
+            assert!(st.success());
+            assert!(
+                took < Duration::from_secs(2),
+                "a fast probe waited {took:?}"
+            );
+        }
+        let (st, _) = run("exit 7", 5);
+        assert_eq!(st.code(), Some(7));
+        let (st, took) = run("sleep 30", 1);
+        assert!(!st.success(), "an overrunning probe must fail");
         assert!(
-            a[2].contains("wait $__w"),
-            "the wrapper must reap the watchdog: {}",
-            a[2]
-        );
-        assert!(
-            a[2].contains("trap") && a[2].contains("wait $__z"),
-            "the watchdog must kill AND reap its own sleep: {}",
-            a[2]
+            took >= Duration::from_millis(900) && took < Duration::from_secs(4),
+            "killed at {took:?}, not near the 1s deadline"
         );
     }
 
