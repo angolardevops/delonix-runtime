@@ -1893,6 +1893,12 @@ msgstr "Remove um cluster do modo kind (pára e apaga os nós + kubeconfig)."
 msgid "Apply the `kind: KubernetesCluster` document(s) of a manifest."
 msgstr "Aplica o(s) documento(s) `kind: KubernetesCluster` de um manifesto."
 
+msgid "Also list the VMs that are not running"
+msgstr "Lista também as VMs que não estão a correr"
+
+msgid "Also list the VMs that are not running.\n\nWithout it `ls` shows what is UP, the same cut `docker ps` makes."
+msgstr "Lista também as VMs que não estão a correr.\n\nSem ela, o `ls` mostra o que está de pé — o mesmo corte que o `docker ps` faz."
+
 msgid "List this host's clusters — kind-mode AND VM-based"
 msgstr "Lista os clusters desta máquina — em modo kind E baseados em VM"
 
