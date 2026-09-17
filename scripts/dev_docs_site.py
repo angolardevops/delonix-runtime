@@ -218,6 +218,32 @@ def restore_fences(body: str, blocks: dict[str, str]) -> str:
     return body
 
 
+HEADING_ID = re.compile(r'<h([1-3]) id="([^"]*)">')
+
+
+def english_heading_ids(english: Path) -> list[str]:
+    stashed, _ = stash_fences(english.read_text())
+    return [m.group(2) for m in HEADING_ID.finditer(markdown.markdown(stashed, extensions=["tables", "toc", "sane_lists", "attr_list"]))]
+
+
+def align_anchors(body: str, toc: str, english_ids: list[str]) -> tuple[str, str]:
+    """Give a translated page the English heading ids.
+
+    Anchors are slugs of the headings, so translating a heading would break every
+    `page.md#anchor` link written in any language, and the language switcher could
+    not keep the reader's position. Translations keep the English heading structure,
+    so ids are matched by position; when the counts differ nothing is changed, and
+    `--status` reports the page as structurally out of step."""
+    ids = [m.group(2) for m in HEADING_ID.finditer(body)]
+    if len(ids) != len(english_ids) or ids == english_ids:
+        return body, toc
+    counter = iter(english_ids)
+    body = HEADING_ID.sub(lambda m: f'<h{m.group(1)} id="{next(counter)}">', body)
+    mapping = dict(zip(ids, english_ids))
+    toc = re.sub(r'href="#([^"]*)"', lambda m: f'href="#{mapping.get(m.group(1), m.group(1))}"', toc)
+    return body, toc
+
+
 def post_process(body: str) -> str:
     body = re.sub(
         r'<pre><code class="language-mermaid">(.*?)</code></pre>',
@@ -411,6 +437,9 @@ def render_site(out: Path) -> None:
             stashed, blocks = stash_fences(text)
             body = md.convert(stashed)
             body = restore_fences(post_process(rewrite_links(body, src.parent)), blocks)
+            toc = md.toc
+            if src != page:
+                body, toc = align_anchors(body, toc, english_heading_ids(page))
             body = link_sources(body, crates).replace("{SOURCE}", html.escape(ui["source"]))
             url = out_name(page.name)
             index_records += sections(body, title, url)
@@ -449,7 +478,7 @@ def render_site(out: Path) -> None:
 <main>{notice}{body}
 <div class="pager">{prev_link}{next_link}</div>
 <p class="foot"><a href="{REPO}/blob/main/{rel_src}" target="_blank" rel="noopener">{html.escape(ui["edit"])}</a> · <code>{rel_src}</code></p></main>
-<aside class="toc"><h5>{html.escape(ui["on_page"])}</h5>{md.toc}</aside></div>
+<aside class="toc"><h5>{html.escape(ui["on_page"])}</h5>{toc}</aside></div>
 <div id="search" hidden><div class="sbox" role="dialog" aria-label="{html.escape(ui["search"])}">
 <input type="search" placeholder="{html.escape(ui["search_ph"])}" autocomplete="off"><ul class="sres"></ul>
 <div class="shelp"><span><kbd>↑</kbd> <kbd>↓</kbd></span><span><kbd>Enter</kbd></span><span><kbd>Esc</kbd></span></div></div></div>
@@ -478,6 +507,9 @@ def status() -> int:
             if state != "current":
                 behind += 1
                 print(f"{lang:6} {state:8} {page.name}")
+            elif len(english_heading_ids(dev_docs.lang_dir(lang) / page.name)) != len(english_heading_ids(page)):
+                behind += 1
+                print(f"{lang:6} headings {page.name} (heading structure differs from English: anchors cannot be aligned)")
     print(f"dev_docs_site: {behind} translation(s) missing or behind" if behind else "dev_docs_site: all translations current")
     return 0
 
