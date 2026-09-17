@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="fr-FR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Commencer ici · Delonix Runtime — Guide du contributeur</title>
+<script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<style>
+:root{
+  /* The NgolaCloud design system (delonix-web packages/ui/src/tokens.css):
+     light theme by default, dark as the secondary theme. */
+  --bg:#fcfaf8;--surface:#f5f3f1;--surface-2:#eeeae8;--card:#ffffff;--ink:#191513;--ink-2:#524b49;--muted:#675e59;
+  --line:#e1ddda;--line-soft:#ece8e5;
+  --accent:#cc2823;--accent-ink:#b70000;--accent-soft:#ffe2dc;--focus:#cc2823;
+  --code-bg:#1a1614;--code-ink:#ede7e3;--code-line:#2e2825;--code-label:#a39993;
+  --warn-bg:rgba(239,168,49,.16);--warn-line:#c9820f;--warn-ink:#6b4400;
+  --topbar:rgba(255,255,255,.82);
+  --shadow:0 4px 12px rgba(38,28,22,.08),0 1px 3px rgba(38,28,22,.06);
+  --f-display:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
+  --f-body:var(--f-display);
+  --f-mono:"JetBrains Mono",ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
+  --r-sm:4px;--r:6px;--r-lg:8px;
+  --header:60px;color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0b0b0c;--surface:#131315;--surface-2:#19191c;--card:#161618;--ink:#ededee;--ink-2:#b6b6ba;--muted:#87878c;
+  --line:#262629;--line-soft:#1d1d20;
+  --accent:#ee5a24;--accent-ink:#ff6c39;--accent-soft:rgba(238,90,36,.18);--focus:#ee5a24;
+  --code-bg:#101012;--code-ink:#dedee2;--code-line:#26262a;--code-label:#87878c;
+  --warn-bg:rgba(226,161,58,.12);--warn-line:#8a6a2a;--warn-ink:#e2c07a;
+  --topbar:rgba(11,11,12,.82);
+  --shadow:0 8px 24px rgba(0,0,0,.5),0 1px 4px rgba(0,0,0,.4);color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0b0b0c;--surface:#131315;--surface-2:#19191c;--card:#161618;--ink:#ededee;--ink-2:#b6b6ba;--muted:#87878c;
+  --line:#262629;--line-soft:#1d1d20;
+  --accent:#ee5a24;--accent-ink:#ff6c39;--accent-soft:rgba(238,90,36,.18);--focus:#ee5a24;
+  --code-bg:#101012;--code-ink:#dedee2;--code-line:#26262a;--code-label:#87878c;
+  --warn-bg:rgba(226,161,58,.12);--warn-line:#8a6a2a;--warn-ink:#e2c07a;
+  --topbar:rgba(11,11,12,.82);
+  --shadow:0 8px 24px rgba(0,0,0,.5),0 1px 4px rgba(0,0,0,.4);color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-padding-top:calc(var(--header) + 16px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.7 var(--f-body);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+a{color:var(--accent-ink);text-decoration:none}
+a:hover{text-decoration:underline;text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion: reduce){*{scroll-behavior:auto!important;transition:none!important}}
+
+/* Header */
+.top{position:sticky;top:0;z-index:30;height:var(--header);display:flex;align-items:center;gap:16px;
+  padding-inline:20px;background:var(--topbar);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px;color:var(--ink);font:700 16px/1 var(--f-display);white-space:nowrap}
+.brand:hover{text-decoration:none}
+.brand .mark{width:26px;height:26px;border-radius:var(--r);background:var(--accent);display:grid;place-items:center;color:#fff;font:800 13px/1 var(--f-display)}
+.brand .sub{font:500 14px/1 var(--f-body);color:var(--muted)}
+.brand .sep{width:1px;height:18px;background:var(--line)}
+.searchbtn{flex:1;max-width:460px;margin-inline:auto;display:flex;align-items:center;gap:10px;height:38px;padding-inline:12px;
+  border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--muted);font:15px var(--f-body);cursor:pointer;min-width:0}
+.searchbtn:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.searchbtn svg{flex:none}
+.searchbtn .label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.searchbtn kbd{margin-left:auto}
+kbd{font:600 11px/1 var(--f-mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:3px 6px;background:var(--bg);color:var(--muted);white-space:nowrap}
+.actions{display:flex;align-items:center;gap:6px}
+select.lang{height:36px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink);font:14px var(--f-body);padding-inline:8px}
+.iconbtn{height:36px;width:36px;display:grid;place-items:center;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink-2);cursor:pointer}
+.iconbtn:hover{color:var(--accent-ink);border-color:color-mix(in srgb,var(--accent) 45%,var(--line));text-decoration:none}
+.menubtn{display:none}
+
+/* Frame */
+.frame{display:grid;grid-template-columns:280px minmax(0,1fr) 240px}
+nav.side{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:24px 16px 48px 20px;border-right:1px solid var(--line)}
+nav.side,aside.toc,.sres{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+nav.side .group{margin-bottom:18px}
+nav.side .gtitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);padding:0 10px 8px}
+nav.side a{display:flex;gap:10px;align-items:baseline;padding:6px 10px;border-radius:8px;color:var(--ink-2);font-size:15px;line-height:1.35}
+nav.side a:hover{background:var(--surface);text-decoration:none;color:var(--ink)}
+nav.side a .n{flex:none;width:18px;font:500 12px/1.35 var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+nav.side a.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
+nav.side a.on .n{color:var(--accent-ink)}
+main{min-width:0;padding:40px clamp(20px,3.5vw,56px) 80px}
+.content{max-width:1120px;margin-inline:auto}
+
+aside.toc{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:40px 20px 40px 8px;font-size:13.5px}
+aside.toc .ttitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+aside.toc ul{list-style:none;margin:0;padding:0}
+aside.toc ul ul{padding-left:12px}
+aside.toc li{margin:0}
+aside.toc a{display:block;padding:4px 0 4px 12px;border-left:2px solid var(--line);color:var(--muted);line-height:1.4}
+aside.toc a:hover{color:var(--ink);text-decoration:none}
+aside.toc a.active{color:var(--accent-ink);border-left-color:var(--accent);font-weight:600}
+
+/* Type */
+.kicker{font:700 12px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--accent-ink);margin:0 0 12px}
+h1,h2,h3,h4{font-family:var(--f-display);color:var(--ink);text-wrap:balance;letter-spacing:-.01em}
+h1{font-size:2.35rem;line-height:1.15;font-weight:800;margin:0 0 20px}
+h2{font-size:1.55rem;line-height:1.25;font-weight:700;margin:56px 0 14px}
+h3{font-size:1.18rem;line-height:1.3;font-weight:700;margin:36px 0 10px}
+h4{font-size:1rem;margin:28px 0 8px}
+h2 code,h3 code{font-size:.9em}
+.hanchor{margin-left:8px;color:var(--muted);opacity:0;font-weight:500;text-decoration:none}
+h2:hover .hanchor,h3:hover .hanchor,.hanchor:focus-visible{opacity:1}
+p,ul,ol{margin:0 0 16px}
+li{margin:4px 0}li>p{margin:0 0 8px}
+strong{font-weight:650;color:var(--ink)}
+hr{border:0;height:1px;background:var(--line);margin:40px 0}
+code{font:.86em/1.5 var(--f-mono);background:var(--surface-2);border:1px solid var(--line);padding:.08em .38em;border-radius:6px;overflow-wrap:break-word}
+a code{color:inherit}
+a.src code{border-color:color-mix(in srgb,var(--accent) 30%,var(--line));background:var(--accent-soft)}
+a.src:hover{text-decoration:none}a.src:hover code{border-color:var(--accent)}
+.crate-src{margin-left:10px;vertical-align:middle;font:600 11px/1 var(--f-display);letter-spacing:.04em;text-transform:uppercase;
+  border:1px solid var(--line);border-radius:999px;padding:5px 9px;color:var(--muted)}
+.crate-src:hover{color:var(--accent-ink);border-color:var(--accent);text-decoration:none}
+
+/* Blocks */
+blockquote{margin:20px 0;padding:2px 0 2px 18px;border-left:3px solid var(--line);color:var(--ink-2)}
+blockquote p:last-child{margin-bottom:0}
+blockquote.say{border:1px solid var(--line-soft);padding:14px 18px;border-radius:var(--r-lg);background:var(--card);margin:18px 0}
+blockquote.say .speaker{display:inline-block;margin-right:8px;font:700 11px/1 var(--f-display);letter-spacing:.08em;text-transform:uppercase;
+  padding:5px 8px;border-radius:999px;vertical-align:1px}
+blockquote.say-interviewer .speaker{background:var(--surface-2);color:var(--muted);border:1px solid var(--line)}
+blockquote.say-candidate{background:var(--accent-soft)}
+blockquote.say-candidate .speaker{background:var(--accent);color:#fff}
+.notice{display:flex;gap:10px;align-items:baseline;background:var(--warn-bg);border:1px solid var(--warn-line);color:var(--warn-ink);
+  border-radius:12px;padding:12px 16px;margin:0 0 28px;font-size:15px}
+.notice a{color:inherit;font-weight:600;text-decoration:underline}
+.code{margin:18px 0 22px;border-radius:var(--r-lg);background:var(--code-bg);border:1px solid var(--code-line);overflow:hidden}
+.code-head{display:flex;align-items:center;justify-content:space-between;gap:8px;height:36px;padding:0 8px 0 14px;border-bottom:1px solid var(--code-line)}
+.code-head .lang{font:600 11px/1 var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--code-label)}
+.copy{display:flex;align-items:center;gap:6px;height:26px;padding:0 9px;border:1px solid var(--code-line);border-radius:7px;background:transparent;
+  color:var(--code-label);font:600 12px var(--f-body);cursor:pointer}
+.copy:hover{color:#fff;border-color:#3a4555}
+.copy.done{color:#7ee2a8;border-color:#2f5d45}
+.code pre{margin:0;padding:14px 16px 22px;overflow-x:auto;color:var(--code-ink);font:13.5px/1.6 var(--f-mono);
+  scrollbar-width:thin;scrollbar-color:#3a4555 transparent;color-scheme:dark}
+.code pre::-webkit-scrollbar{height:8px}.code pre::-webkit-scrollbar-thumb{background:#3a4555;border-radius:8px}
+.code pre code{background:none;border:0;padding:0;font:inherit;color:inherit;overflow-wrap:normal}
+.code pre code.hljs{background:none;padding:0}
+pre.mermaid{margin:22px 0;padding:18px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--card);text-align:center;overflow-x:auto;font-family:var(--f-body)}
+.tablewrap{margin:18px 0 24px;overflow-x:auto;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:14.5px;line-height:1.5}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+th{background:var(--surface);font:700 12.5px/1.3 var(--f-display);letter-spacing:.02em;color:var(--ink-2);white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:color-mix(in srgb,var(--surface) 60%,transparent)}
+td code{font-size:.82em;overflow-wrap:normal}
+/* A table's first column names the thing (a variable, a crate, a flag): never break it. */
+td:first-child code{white-space:nowrap}
+th:first-child,td:first-child{white-space:nowrap}
+
+/* Pager + footer */
+.pager{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:64px}
+.pager a{display:block;padding:14px 16px;border:1px solid var(--line);border-radius:12px;color:var(--ink);font:600 15px/1.35 var(--f-display)}
+.pager a:hover{border-color:var(--accent);text-decoration:none}
+.pager a span{display:block;font:500 12px/1 var(--f-body);color:var(--muted);margin-bottom:6px}
+.pager .next{text-align:right;grid-column:2}
+.foot{margin-top:28px;padding-top:18px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:8px 16px;font-size:13.5px;color:var(--muted)}
+
+/* Search */
+#search{position:fixed;inset:0;z-index:60;background:rgba(10,13,18,.45);display:flex;align-items:flex-start;justify-content:center;padding:12vh 16px 16px}
+#search[hidden]{display:none}
+.sbox{width:min(680px,100%);background:var(--bg);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
+.sfield{display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--line);color:var(--muted)}
+.sfield input{flex:1;height:56px;border:0;outline:0;background:transparent;color:var(--ink);font:17px var(--f-body)}
+.sres{list-style:none;margin:0;padding:8px;max-height:56vh;overflow-y:auto}
+.sres a{display:block;padding:10px 12px;border-radius:10px;color:var(--ink)}
+.sres a:hover,.sres a.sel{background:var(--accent-soft);text-decoration:none}
+.sres .sp{display:block;font:600 11px/1 var(--f-display);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+.sres .sh{font:600 15px/1.35 var(--f-display)}
+.sres .st{display:block;margin-top:3px;font-size:13.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sres mark{background:none;color:var(--accent-ink);font-weight:700}
+.sempty{padding:18px;color:var(--muted)}
+.shelp{display:flex;gap:16px;padding:10px 16px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+
+/* Narrow screens */
+@media (max-width:1280px){.frame{grid-template-columns:256px minmax(0,1fr)}aside.toc{display:none}}
+@media (max-width:860px){
+  .frame{display:block}.menubtn{display:grid}.brand .sub,.brand .sep{display:none}
+  nav.side{position:fixed;top:var(--header);left:0;bottom:0;width:min(300px,86vw);height:auto;z-index:40;background:var(--bg);
+    transform:translateX(-102%);transition:transform .2s ease;box-shadow:var(--shadow)}
+  body.nav-open nav.side{transform:none}
+  main{padding:28px 16px 64px}
+  h1{font-size:1.9rem}h2{font-size:1.35rem}
+  .searchbtn kbd,.searchbtn .label{display:none}.searchbtn{flex:none;width:38px;justify-content:center;margin-inline:auto 0;padding:0}
+  .pager{grid-template-columns:1fr}.pager .next{grid-column:1}
+  .top{gap:8px;padding-inline:12px}
+  .brand{font-size:15px;min-width:0}
+  select.lang{width:78px;padding-inline:4px;text-overflow:ellipsis}
+}
+@media (max-width:480px){
+  .actions .ghbtn{display:none}
+  .brand .word{display:none}
+}
+</style></head>
+<body>
+<header class="top">
+  <button class="iconbtn menubtn" type="button" aria-label="Menu"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  <a class="brand" href="index.html" aria-label="Accueil du guide"><span class="mark">D</span><span class="word">Delonix Runtime</span><span class="sep"></span><span class="sub">Guide du contributeur</span></a>
+  <button class="searchbtn" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span class="label">Rechercher dans le guide…</span><kbd>Ctrl K</kbd></button>
+  <div class="actions">
+    <select class="lang" id="lang" aria-label="Language"><option value="../en/start-here.html">EN · English</option><option value="../pt-AO/start-here.html">PT-AO · Português (Angola)</option><option value="../fr-FR/start-here.html" selected>FR-FR · Français</option><option value="../zh-CN/start-here.html">ZH-CN · 简体中文</option></select>
+    <button class="iconbtn themebtn" type="button" aria-label="Changer le thème de couleur" title="Changer le thème de couleur"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
+    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+  </div>
+</header>
+<div class="frame">
+<nav class="side" aria-label="Guide du contributeur"><div class="group"><div class="gtitle">Vue d&#x27;ensemble</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manuel du contributeur</span></a></div><div class="group"><div class="gtitle">Démarrer</div><a class="on" aria-current="page" href="start-here.html"><span class="n">01</span><span>Commencer ici</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS et cloud native — où s’inscrit le moteur</span></a></div><div class="group"><div class="gtitle">Fondamentaux</div><a href="linux-foundations.html"><span class="n">03</span><span>Fondations Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Initiation au cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Initiation à Rust pour cette base de code</span></a></div><div class="group"><div class="gtitle">Préparer et compiler</div><a href="environment.html"><span class="n">06</span><span>Préparer votre environnement</span></a><a href="build-and-test.html"><span class="n">07</span><span>Cloner, compiler et tester</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="project-structure.html"><span class="n">08</span><span>Structure du projet</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>Les crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>Entretien de conception de système — le Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images et microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile et VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construire des microVMs</span></a></div><div class="group"><div class="gtitle">Exploiter et diagnostiquer</div><a href="troubleshooting.html"><span class="n">14</span><span>Dépannage</span></a></div><div class="group"><div class="gtitle">Contribuer</div><a href="coding-conventions.html"><span class="n">15</span><span>Conventions de code</span></a><a href="adding-a-kind.html"><span class="n">16</span><span>Ajouter un Kind</span></a><a href="contributing-workflow.html"><span class="n">17</span><span>Flux de contribution</span></a><a href="releases-and-stability.html"><span class="n">18</span><span>Releases et stabilité</span></a><a href="publishing-docs.html"><span class="n">19</span><span>Publier la documentation</span></a></div><div class="group"><div class="gtitle">Référence</div><a href="cloud-native-standards.html"><span class="n">20</span><span>Standards cloud native, couche par couche</span></a><a href="environment-variables.html"><span class="n">21</span><span>Variables d’environnement (DELONIX_*)</span></a><a href="glossary.html"><span class="n">22</span><span>Glossaire</span></a></div></nav>
+<main><div class="content">
+<p class="kicker">Démarrer</p>
+<h1 id="start-here">Commencer ici</h1>
+<p>Cette page vous mène de « je viens de cloner le dépôt » à « ma première pull request est en cours de revue »,
+une étape à la fois. Après elle, vous aurez un checkout qui compile, un binaire que vous pouvez
+exécuter contre un état isolé, et une carte de l’endroit où va votre modification et des règles
+qu’elle doit respecter. Chaque étape dit quoi faire, ce que vous devriez voir, et quelle page explique les
+détails. Chaque règle de cette page renvoie à l’endroit où elle est écrite — si une règle n’a pas de lien, ce
+n’est pas une règle.</p>
+<p>Si un mot vous est inconnu, cherchez-le dans le <a href="glossary.html">glossaire</a>.</p>
+<h2 id="day-0-in-30-minutes">Jour 0 en 30 minutes<a class="hanchor" href="#day-0-in-30-minutes" aria-label="#">#</a></h2>
+<p>Le jour 0 suit l’ordre du manuel, mais ne prend de chaque partie que ce dont vous avez besoin
+aujourd’hui : l’idée du moteur (<a href="iaas-and-cloud-native.html">IaaS et cloud native</a>), l’hôte dont il a
+besoin (<a href="environment.html">Préparer votre environnement</a>, qui s’appuie sur les primitives dans
+<a href="linux-foundations.html">Fondations Linux</a>), une compilation et une exécution isolée
+(<a href="build-and-test.html">Cloner, compiler et tester</a>, avec chaque variable dans
+<a href="environment-variables.html">Variables d’environnement</a>), et où se trouvent les choses
+(<a href="project-structure.html">Structure du projet</a>). Revenez aux pages complètes quand une étape vous y
+renvoie.</p>
+<h3 id="what-delonix-is-5-minutes">Ce qu’est Delonix (5 minutes)<a class="hanchor" href="#what-delonix-is-5-minutes" aria-label="#">#</a></h3>
+<p>Delonix Runtime est un moteur qui exécute des <strong>containers et des microVMs sur un nœud</strong>, avec le
+réseau et le stockage dont ils ont besoin. Il est :</p>
+<ul>
+<li><strong>déclaratif</strong> — vous décrivez les ressources avec ses propres Kinds (<code>delonix api-resources</code> les liste)
+  et le moteur planifie et applique la différence ;</li>
+<li><strong>daemonless</strong> — aucun service en arrière-plan n’est nécessaire ; chaque commande est un processus qui fait son travail
+  et se termine ;</li>
+<li><strong>rootless-first</strong> — le chemin normal s’exécute sous votre propre utilisateur non privilégié.</li>
+</ul>
+<p>Il ne sait <strong>pas</strong> qui l’utilise : aucune notion de plateforme, de locataire, de compte ou de facturation n’existe dans le
+code. Lisez <a href="iaas-and-cloud-native.html#where-delonix-runtime-fits-and-where-it-deliberately-stops">IaaS et cloud native</a>
+pour savoir quelle place cela donne au moteur dans un cloud, et <a href="architecture.html#engine-identity-and-boundaries">Architecture</a>
+pour la façon dont la frontière est imposée ; pour l’instant, ces quatre phrases suffisent.</p>
+<h3 id="what-you-need-10-minutes">Ce dont vous avez besoin (10 minutes)<a class="hanchor" href="#what-you-need-10-minutes" aria-label="#">#</a></h3>
+<p>Un hôte Linux avec cgroup v2 et les user namespaces non privilégiés, la toolchain Rust épinglée dans
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a>, et <code>protoc</code> dans votre <code>PATH</code>. La liste complète, et les pièges de l’hôte qui ressemblent à
+des bugs du moteur, se trouvent dans <a href="environment.html">Préparer votre environnement</a>. Lisez au moins sa section
+<a href="environment.html#known-host-traps">Pièges connus de l’hôte</a> avant l’étape 5 ci-dessous. Si
+« user namespace » ou « délégation de cgroup » sont des mots nouveaux pour vous, l’explication en pratique se trouve
+dans <a href="linux-foundations.html">Fondations Linux</a> — vous n’en avez pas besoin pour terminer le jour 0, mais vous en
+aurez besoin la première fois qu’une limite ne s’appliquera pas.</p>
+<h3 id="five-commands-that-prove-your-setup-works-15-minutes">Cinq commandes qui prouvent que votre configuration fonctionne (15 minutes)<a class="hanchor" href="#five-commands-that-prove-your-setup-works-15-minutes" aria-label="#">#</a></h3>
+<p>Exécutez-les depuis la racine de votre checkout. Si l’une d’elles ne donne pas la forme indiquée, arrêtez-vous et
+corrigez le problème avant d’aller plus loin — chaque étape suivante en dépend.</p>
+<p><strong>1. Clonez, avec les tags.</strong></p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">git clone https://github.com/angolardevops/delonix-runtime.git
+cd delonix-runtime
+git fetch --tags origin
+git describe --tags --abbrev=0        # prints the newest release, e.g. vX.Y.Z
+</code></pre></div>
+<p>Les tags comptent : le gate (contrôle CI) de version et le gate de contrat comparent votre branch avec eux
+(<a href="build-and-test.html#clone">Cloner, compiler et tester</a>).</p>
+<p><strong>2. Compilez la CLI.</strong></p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">cargo build -p delonix-runtime-bin
+</code></pre></div>
+<p>Attendu : <code>Finished</code> sur la dernière ligne et un binaire dans <code>target/debug/delonix</code>. S’il s’arrête avec un
+message au sujet de <code>protoc</code>, installez-le (<a href="environment.html#protoc-required-to-build">Préparer votre environnement</a>).</p>
+<p><strong>3. Exécutez les tests d’un petit crate pur.</strong></p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">cargo test -p delonix-net-rules
+</code></pre></div>
+<p><code>delonix-net-rules</code> n’a aucune dépendance (voir son <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>), donc cela prouve seulement que
+votre toolchain compile et exécute des tests — rien sur l’hôte. Attendu : une ligne de la forme
+<code>test result: ok. N passed; 0 failed</code>.</p>
+<p><strong>4. Exécutez le binaire que vous venez de compiler.</strong></p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">./target/debug/delonix --version
+./target/debug/delonix --help
+</code></pre></div>
+<p>Attendu : <code>--version</code> affiche <code>delonix &lt;version&gt;</code> sur la première ligne, une description du
+moteur en une ligne sur la deuxième, puis une ligne de la forme <code>commit: &lt;sha&gt; · built: &lt;date&gt; · &lt;licence&gt;</code> ;
+entre deux releases, la partie <code>commit:</code> indique aussi à quelle distance le build se trouve du dernier tag
+(<code>+N commits since vX.Y.Z</code>). Un court bloc <code>get started:</code> suit. <code>--help</code> affiche
+<code>Usage: delonix [OPTIONS] &lt;COMMAND&gt;</code>, une liste <code>Commands:</code> et une <code>COMMAND MAP</code>.</p>
+<p>Utilisez toujours <code>./target/debug/delonix</code>, jamais un <code>delonix</code> trouvé dans votre <code>PATH</code> — celui-là est une
+release installée et est généralement plus ancien (<a href="environment.html#a-stale-delonix-on-your-path">Préparer votre environnement</a>).</p>
+<p><strong>5. Exécutez une vraie commande, entièrement isolée.</strong></p>
+<p>Tout ce qui va au-delà de <code>--help</code> lit et écrit l’état du moteur. Faites d’abord pointer <strong>les deux</strong> variables d’état vers des
+répertoires de travail jetables — une demi-isolation est pire que pas d’isolation du tout
+(<a href="build-and-test.html#isolating-the-engines-state">Cloner, compiler et tester</a> ; ce que fait chaque variable
+se trouve dans <a href="environment-variables.html#isolating-a-development-run">Variables d’environnement</a>) :</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">export DELONIX_ROOT=$HOME/scratch/dlx/root
+export DELONIX_NET_RUNTIME_DIR=/tmp/dlx-run      # keep it short: it holds unix sockets
+mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
+
+./target/debug/delonix system info
+./target/debug/delonix volume create hello
+./target/debug/delonix volume ls
+./target/debug/delonix volume inspect does-not-exist; echo &quot;exit=$?&quot;
+./target/debug/delonix volume rm hello
+</code></pre></div>
+<p>Formes attendues :</p>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-text">$ delonix system info
+Delonix Engine &lt;version&gt;
+  state root:         &lt;your $DELONIX_ROOT&gt;
+  mode:               rootless (daemonless)
+  cgroup2 delegated:  yes | no
+  network infra:      down (comes up on demand)
+  containers:         0 (0 running)
+  events:             0
+
+$ delonix volume ls
+NAME    DRIVER   MOUNTPOINT                              SIZE
+hello   local    &lt;your $DELONIX_ROOT&gt;/volumes/hello/_data   0 B
+
+$ delonix volume inspect does-not-exist; echo &quot;exit=$?&quot;
+error no such volume does-not-exist
+exit=4
+</code></pre></div>
+<p>Ce que cela prouve : la ligne <code>state root:</code> est <strong>votre répertoire jetable</strong> (vous ne touchez donc pas à l’état
+réel), le moteur s’exécute en rootless, et les erreurs portent une classe dans le code de sortie (4 = introuvable — voir
+<a href="rust-primer.html#32-errors-one-error-and-exit-codes-derived-from-its-type">Initiation à Rust pour cette base de code</a>). Si
+<code>cgroup2 delegated:</code> indique <code>no</code>, <code>container run</code> refuse <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> dans cette
+session (sortie 69) et <code>--cpuset</code>/<code>--io-weight</code> n’ont aucun effet ; il s’agit d’un réglage de l’hôte, expliqué dans
+<a href="environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">Préparer votre environnement</a>.</p>
+<p>Lorsque vous aurez fini d’expérimenter avec le réseau plus tard, démontez l’infrastructure réseau isolée avec
+les deux mêmes variables exportées : <code>./target/debug/delonix net netns down</code>.</p>
+<h2 id="your-first-contribution-end-to-end">Votre première contribution, de bout en bout<a class="hanchor" href="#your-first-contribution-end-to-end" aria-label="#">#</a></h2>
+<h3 id="1-pick-something">1. Choisissez un sujet<a class="hanchor" href="#1-pick-something" aria-label="#">#</a></h3>
+<ul>
+<li>Consultez les issues ouvertes portant l’étiquette <strong><code>good first issue</code></strong> ou <strong><code>documentation</code></strong> sur GitHub. Commentez
+  l’issue avant de commencer, pour que deux personnes ne fassent pas le même travail.</li>
+<li>Pour tout ce qui n’est pas trivial — une nouvelle commande, un nouveau Kind de manifeste, une modification de la configuration des namespaces ou des
+  cgroups, un nouveau backend — ouvrez d’abord une issue et mettez-vous d’accord sur l’approche
+  (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a>, <a href="contributing-workflow.html">Flux de contribution</a>).</li>
+<li>Vérifiez les pull requests ouvertes pour ne pas dupliquer un travail déjà en cours.</li>
+</ul>
+<p>Bons premiers domaines, parce que ce sont du code pur avec des tests unitaires et sans privilèges sur l’hôte : un parseur ou
+un validateur dans le crate de la CLI, un message d’erreur qui ne dit pas quoi faire, une entrée portugaise
+manquante dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/data/pt.po" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/data/pt.po</code></a>, ou une page de ce manuel qui est fausse.</p>
+<h3 id="2-open-a-worktree-from-originmain">2. Ouvrez un worktree à partir de <code>origin/main</code><a class="hanchor" href="#2-open-a-worktree-from-originmain" aria-label="#">#</a></h3>
+<p>Une tâche, un worktree, une branch — ne modifiez jamais un checkout partagé, ne placez jamais le worktree dans <code>/tmp</code>
+(<a href="contributing-workflow.html#one-worktree-per-task">Un worktree par tâche</a>) :</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">git fetch --tags origin
+git worktree add -b &lt;topic&gt;/&lt;task&gt; ../.worktrees/delonix-runtime/&lt;task&gt; origin/main
+cd ../.worktrees/delonix-runtime/&lt;task&gt;
+git log --oneline -- &lt;path you will touch&gt;      # what was already decided or fixed there
+</code></pre></div>
+<p>Lire d’abord l’historique de la zone fait partie du travail : une grande partie de ce code consigne des choses qui
+ont été essayées, mesurées et modifiées (<a href="contributing-workflow.html#start-from-the-latest-tag-not-from-memory">Partez du dernier tag</a>).</p>
+<h3 id="3-find-where-the-change-goes">3. Trouvez où va la modification<a class="hanchor" href="#3-find-where-the-change-goes" aria-label="#">#</a></h3>
+<p>Utilisez l’arbre de décision de <a href="#where-does-my-change-go">Où va ma modification ?</a> ci-dessous, puis lisez la
+section de <a href="crates.html">Les crates</a> consacrée à ce crate. Si un chemin de la table ne vous dit encore rien,
+<a href="project-structure.html">Structure du projet</a> explique chaque répertoire de premier niveau, et pourquoi le
+répertoire d’un crate est sa couche.</p>
+<h3 id="4-write-the-test-first">4. Écrivez le test d’abord<a class="hanchor" href="#4-write-the-test-first" aria-label="#">#</a></h3>
+<ul>
+<li>Une nouvelle fonction pure (parseur, validateur, constructeur d’arguments, plan) reçoit un test unitaire dans le même fichier,
+  sous <code>#[cfg(test)] mod tests</code>. Un test ne touche jamais la racine d’état réelle : passez-lui un
+  répertoire temporaire — voir <a href="rust-primer.html#39-tests">Tests</a>.</li>
+<li>Une correction de bug reçoit un test qui <strong>échoue sans la correction</strong>. Annulez votre correction une fois, exécutez le test, voyez-le
+  échouer, puis rétablissez la correction. Un test qui passe dans les deux cas ne prouve rien.</li>
+<li>Une modification des namespaces, des cgroups, du holder réseau ou du démarrage des VM nécessite aussi une exécution <strong>réelle</strong> avec
+  l’état isolé, parce que les tests unitaires n’atteignent pas ces chemins
+  (<a href="build-and-test.html#run-the-tests">Exécuter les tests</a>).</li>
+</ul>
+<h3 id="5-run-the-local-gates">5. Exécutez les gates locaux<a class="hanchor" href="#5-run-the-local-gates" aria-label="#">#</a></h3>
+<p>Chaque job de CI a une commande locale, listée dans
+<a href="build-and-test.html#the-gates-ci-runs">Les gates exécutés par la CI</a>. Au minimum, avant de demander une
+revue :</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked --no-fail-fast
+python3 scripts/lang_ratchet.py
+python3 scripts/arch_fitness.py
+python3 scripts/dev_docs.py --check
+python3 scripts/version_gate.py
+</code></pre></div>
+<p>Ajoutez ceux qui correspondent à ce que vous avez touché (les gates de surface de la CLI si vous avez ajouté une commande, le gate de
+contrat si vous avez touché <code>proto/</code>, le générateur de documentation si le texte d’aide a changé) — le tableau de
+<a href="build-and-test.html#the-gates-ci-runs">Les gates exécutés par la CI</a> indique lesquels.</p>
+<h3 id="6-write-the-pull-request">6. Rédigez la pull request<a class="hanchor" href="#6-write-the-pull-request" aria-label="#">#</a></h3>
+<p>Ouvrez-la contre <code>main</code> et remplissez chaque section de
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/PULL_REQUEST_TEMPLATE.md" target="_blank" rel="noopener"><code>.github/PULL_REQUEST_TEMPLATE.md</code></a>. Le modèle comporte quatre
+parties, et les relecteurs les lisent toutes :</p>
+<ul>
+<li><strong>What does this change do, and why?</strong> — le <em>pourquoi</em> ; le diff montre déjà le <em>quoi</em>.</li>
+<li><strong>How was this tested?</strong> — les gates que vous avez exécutés et, pour le code du runtime, des namespaces, des cgroups ou du réseau, la
+  commande que vous avez exécutée <strong>en réel</strong> et sa sortie.</li>
+<li><strong>Checklist</strong> — build/clippy/fmt/test propres ; nouvelles chaînes visibles par l’utilisateur en anglais, enveloppées dans
+  <code>po::t</code>/<code>po::tf</code> avec une entrée portugaise dans <code>pt.po</code> ; chaque point d’entrée d’une commande câblé ; tests unitaires
+  pour les nouvelles fonctions pures ; frontières de privilège signalées.</li>
+<li><strong>Does this cross a privilege or namespace boundary?</strong> — mappage de user namespace, le netns du holder,
+  le socket de contrôle, <code>setns</code>/<code>unshare</code>, ou un traitement de chemins piloté par une entrée de l’utilisateur ou du manifeste. Si vous
+  n’êtes pas sûr, dites-le.</li>
+</ul>
+<p>Dites ce qui a été prouvé <strong>et</strong> ce qui n’a pas été validé, et pourquoi
+(<a href="contributing-workflow.html#commits-and-pull-requests">Commits et pull requests</a>).</p>
+<h3 id="7-what-reviewers-check">7. Ce que vérifient les relecteurs<a class="hanchor" href="#7-what-reviewers-check" aria-label="#">#</a></h3>
+<p>Les propriétaires du code listés dans <a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/CODEOWNERS" target="_blank" rel="noopener"><code>.github/CODEOWNERS</code></a> relisent chaque modification. La
+liste de contrôle de la revue se trouve dans <a href="coding-conventions.html">Conventions de code</a> ; les standards cloud native à l’aune
+desquels une modification est mesurée se trouvent dans <a href="cloud-native-standards.html">Standards cloud native</a>. Lisez
+les deux avant d’ouvrir la PR, pas après la première série de commentaires.</p>
+<h3 id="8-after-the-merge">8. Après le merge<a class="hanchor" href="#8-after-the-merge" aria-label="#">#</a></h3>
+<p>Supprimez le worktree <strong>et</strong> la branch — la branch survit à <code>worktree remove</code> :</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">cd ../../../delonix-runtime    # from the worktree of step 2 back to the clone
+git worktree remove ../.worktrees/delonix-runtime/&lt;task&gt;
+git branch -D &lt;topic&gt;/&lt;task&gt;
+</code></pre></div>
+<h2 id="where-does-my-change-go">Où va ma modification ?<a class="hanchor" href="#where-does-my-change-go" aria-label="#">#</a></h2>
+<pre class="mermaid">flowchart TD
+    Q{What are you changing?}
+    Q --&gt;|a boundary: new daemon, new privilege,&lt;br/&gt;new provider or port, layer structure,&lt;br/&gt;node contract, schema stability| ADR[Write an ADR first&lt;br/&gt;docs/adr/]
+    Q --&gt;|a CLI flag or subcommand| CLI[bins/delonix-runtime-bin/src/cmd/GROUP.rs]
+    Q --&gt;|a manifest Kind or field| KIND[delonix-stack kinds.rs&lt;br/&gt;+ cmd/KIND.rs + schema.rs]
+    Q --&gt;|network behaviour| NET{pure rule or dataplane?}
+    NET --&gt;|pure: CIDR, bridge name, IPAM math| NR[delonix-net-rules]
+    NET --&gt;|dataplane: holder, nftables, IPAM leases, CNI| SDN[delonix-sdn]
+    Q --&gt;|images, registry, build| OCI[delonix-oci&lt;br/&gt;+ cmd/build.rs, cmd/image.rs]
+    Q --&gt;|VMs| VM{local or remote?}
+    VM --&gt;|Cloud Hypervisor / libvirt / cloud-init| DVM[delonix-vm]
+    VM --&gt;|a remote management API| PROV[crates/providers/NAME&lt;br/&gt;implements VmBackend]
+    Q --&gt;|what the kubelet sees| CRI[delonix-cri]
+    Q --&gt;|a new crate| CRATE[LAYERS in arch_fitness.py&lt;br/&gt;+ crates/LAYER/ + root Cargo.toml]
+    PROV --&gt; ADR
+</pre>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Modification</th>
+<th>Où elle va (vérifié dans l’arborescence)</th>
+<th>À lire</th>
+<th>Règle et sa source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Nouvelle option ou sous-commande de la CLI</strong></td>
+<td><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>&lt;group&gt;.<wbr>rs</code> (un module par groupe) ; chaînes via <code>cmd/po.rs</code> avec le portugais dans <code>data/pt.po</code> ; texte du manuel dans <code>cmd/manual_entries.rs</code> ; liste des feuilles dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli_baseline.tsv" target="_blank" rel="noopener"><code>scripts/<wbr>cli_baseline.<wbr>tsv</code></a> (<code>scripts/<wbr>cli-tree.<wbr>sh --update</code>). La validation pure d’une exécution appartient à <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/preflight.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>preflight.<wbr>rs</code></a></td>
+<td><a href="contributing-workflow.html#adding-or-changing-a-cli-command">Ajouter ou modifier une commande de la CLI</a>, <a href="rust-primer.html#36-the-cli-clap-derive-and-translated-output">La CLI</a></td>
+<td>LANG-01 (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a>) ; gate de surface de la CLI (<code>scripts/<wbr>cli-tree.<wbr>sh --gate</code>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/docs_cli_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>docs_cli_gate.<wbr>py</code></a>) ; câbler chaque point d’entrée (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a>)</td>
+</tr>
+<tr>
+<td><strong>Nouveau Kind, ou un champ d’un Kind</strong></td>
+<td>Les faits du Kind : <code>FACTS</code> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-stack/<wbr>src/<wbr>kinds.<wbr>rs</code></a>. Son type de spec et son apply : <code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>&lt;kind&gt;.<wbr>rs</code>. Champs modifiables à chaud : <code>hot_fields</code> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-stack/<wbr>src/<wbr>reconcile.<wbr>rs</code></a>. Le schéma : <code>TYPED_KINDS</code> dans <code>cmd/schema.rs</code>, et le <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/schema/v1/delonix.json" target="_blank" rel="noopener"><code>docs/<wbr>schema/<wbr>v1/<wbr>delonix.<wbr>json</code></a> publié (<code>delonix manifest schema</code>)</td>
+<td><a href="cloud-native-primer.html#48-declarative-reconciliation">Réconciliation déclarative</a>, <a href="crates.html#delonix-stack"><code>delonix-stack</code></a></td>
+<td>Ouvrir d’abord une issue (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a>) ; le schéma est généré à partir du code (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener">ADR-0007</a>) ; les tests de <code>kinds.rs</code> et <code>schema.rs</code> échouent lorsqu’une table est oubliée</td>
+</tr>
+<tr>
+<td><strong>Comportement réseau</strong></td>
+<td>Règles pures sans I/O : <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-net-rules/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-net-rules/<wbr>src/<wbr>lib.<wbr>rs</code></a>. Dataplane (holder, socket de contrôle, nftables, IPAM, CNI) : <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-sdn/src" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr></code></a> (<code>infra.rs</code>, <code>ipam.rs</code>, <code>cni.rs</code>). L’étape réseau de <code>container run</code> : <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/network.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>network.<wbr>rs</code></a>. CLI : <code>cmd/network.rs</code>, <code>cmd/net.rs</code>, <code>cmd/firewall.rs</code></td>
+<td><a href="cloud-native-primer.html#45-container-networking">Réseau des containers</a>, <a href="crates.html#delonix-sdn"><code>delonix-sdn</code></a></td>
+<td>Rootless-first et pas d’échec silencieux (<a href="contributing-workflow.html#architecture-rules-the-gates-enforce">Règles d’architecture</a>) ; signaler la frontière de privilège dans la PR (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>)</td>
+</tr>
+<tr>
+<td><strong>Images, registre, build</strong></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci/src" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci/<wbr>src/<wbr></code></a> (<code>registry.rs</code>, <code>build.rs</code>, <code>cas.rs</code>, <code>overlay.rs</code>) ; CLI dans <code>cmd/build.rs</code>, <code>cmd/image.rs</code></td>
+<td><a href="delonixfile-and-vmfile.html">Delonixfile et VMfile</a>, <a href="crates.html#delonix-oci"><code>delonix-oci</code></a></td>
+<td>Les téléchargements sont vérifiés par digest (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>, périmètre supply chain)</td>
+</tr>
+<tr>
+<td><strong>État persisté : un champ d’enregistrement, un store, le verrouillage de fichiers, les secrets au repos</strong></td>
+<td>Types d’enregistrement (<code>Container</code>, <code>Vm</code>) : <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>record.<wbr>rs</code></a> ; les parties de données simples (<code>Status</code>, <code>ContainerFw</code>) : <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/records.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-model/<wbr>src/<wbr>records.<wbr>rs</code></a>. Comment ils sont stockés et verrouillés (<code>Store</code>, <code>JsonStore</code>, <code>write_atomic*</code>, <code>SecretStore</code>, <code>CredVault</code>) : <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-state/src" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-state/<wbr>src/<wbr></code></a> (<code>store.rs</code>, <code>secret.rs</code>, <code>cred_vault.rs</code>)</td>
+<td><a href="crates.html#delonix-state"><code>delonix-state</code></a>, <a href="architecture.html#state-on-disk">L’état sur disque</a>, <a href="rust-primer.html#38-concurrency-and-shared-state">Concurrence</a></td>
+<td>Les nouveaux champs d’enregistrement prennent <code>#[serde(default)]</code> ; la lecture-modification-écriture passe par <code>update</code> (<a href="coding-conventions.html#8-state-and-concurrency">État et concurrence</a>)</td>
+</tr>
+<tr>
+<td><strong>Comportement des VM sur ce nœud</strong></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs</code></a> (le trait <code>VmBackend</code> et le registre de backends), <code>cloudinit.rs</code> ; CLI dans <code>cmd/vm.rs</code>, <code>cmd/vmimage.rs</code>, <code>cmd/vmfile.rs</code></td>
+<td><a href="microvm-setup.html">Construire des microVMs</a>, <a href="rust-primer.html#33-traits-as-ports-vmbackend-and-the-backend-registry">Les traits comme ports</a></td>
+<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a> (les backends sont enregistrables)</td>
+</tr>
+<tr>
+<td><strong>Un nouveau backend de VM ou provider de stockage derrière une API distante</strong></td>
+<td>Un nouveau crate sous <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>, qui implémente un port ; enregistré à la racine de composition (<code>cmd/vmbackends.rs</code>)</td>
+<td><a href="crates.html#providers">Providers</a>, <a href="architecture.html#layers-and-the-allowed-direction">Les couches</a></td>
+<td>ADR d’abord (<a href="contributing-workflow.html#when-to-write-an-adr">Quand écrire un ADR</a>) ; <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a></td>
+</tr>
+<tr>
+<td><strong>CRI (ce à quoi parle le kubelet)</strong></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-cri/src" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr></code></a> (<code>runtime_svc.rs</code>, <code>runtime_svc/<wbr>lifecycle.<wbr>rs</code>, <code>streaming.rs</code>)</td>
+<td><a href="cloud-native-primer.html#46-kubernetes-cri-kubelet-kubeadm-and-kind">Kubernetes</a>, <a href="crates.html#delonix-cri"><code>delonix-cri</code></a></td>
+<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a></td>
+</tr>
+<tr>
+<td><strong>Un nouveau crate</strong></td>
+<td>Une entrée dans <code>LAYERS</code> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, un répertoire sous <code>crates/&lt;layer&gt;/</code>, et son chemin dans <code>[workspace.<wbr>dependencies]</code> du <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> racine — le tout dans le même commit</td>
+<td><a href="architecture.html#layers-and-the-allowed-direction">Les couches</a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (répertoire = couche, versions uniquement à la racine)</td>
+</tr>
+<tr>
+<td><strong>Une décision qui déplace une frontière</strong></td>
+<td><code>docs/adr/NNNN-title.md</code>, avant le code</td>
+<td><a href="contributing-workflow.html#when-to-write-an-adr">Quand écrire un ADR</a></td>
+<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a> ; les ADR acceptés sont remplacés par un successeur, jamais réécrits</td>
+</tr>
+</tbody>
+</table></div>
+<p>Si votre modification ne correspond à aucune ligne, posez la question dans l’issue avant d’écrire du code (voir
+<a href="#when-you-are-stuck">Quand vous êtes bloqué</a>).</p>
+<h2 id="rules-you-must-not-break">Les règles à ne pas enfreindre<a class="hanchor" href="#rules-you-must-not-break" aria-label="#">#</a></h2>
+<p>Chaque règle est imposée par un gate, par une revue, ou par les deux. Le lien indique où elle est écrite.</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Règle</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Le moteur ne connaît aucun consommateur.</strong> Aucun produit, plateforme, control plane, console ou agent qui utilise le moteur n’est nommé dans <code>crates/</code>, <code>bins/</code>, <code>proto/</code> ou les manifestes, commentaires compris ; aucune notion de locataire, de compte, d’offre ou de facturation.</td>
+<td><em>«Identidade e fronteira do motor»</em> en tête de <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>. Les consommateurs nommés sont imposés par <code>CONSUMER_NAMES</code> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (une liste fixe de noms, recherchés par expression régulière) ; l’interdiction des notions de locataire, de compte, d’offre et de facturation n’est vérifiée par aucun gate et est contrôlée en revue</td>
+</tr>
+<tr>
+<td><strong>Daemonless.</strong> Aucun processus résident par défaut ; un nouveau exige un ADR avec la preuve de ce que systemd ne pouvait pas faire.</td>
+<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> (même section) ; <a href="contributing-workflow.html#architecture-rules-the-gates-enforce">Règles d’architecture</a></td>
+</tr>
+<tr>
+<td><strong>Rootless-first.</strong> Le chemin normal s’exécute sans privilège ; le privilège est un opt-in explicite et annoncé. Une nouvelle frontière de privilège exige un spike GO/NO-GO et un ADR.</td>
+<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> ; <a href="contributing-workflow.html#when-to-write-an-adr">Quand écrire un ADR</a></td>
+</tr>
+<tr>
+<td><strong>Les dépendances pointent vers l’intérieur, le répertoire est la couche, les versions ne vivent qu’à la racine.</strong></td>
+<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a> ; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a></td>
+</tr>
+<tr>
+<td><strong>LANG-01 : le code est en anglais.</strong> Identifiants, commentaires et messages en anglais ; le portugais uniquement via <code>pt.po</code>.</td>
+<td><a href="contributing-workflow.html#language-english-in-the-code-lang-01">Langue</a> ; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a></td>
+</tr>
+<tr>
+<td><strong>Alignement de version.</strong> Ne modifiez pas <code>version</code> dans le <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> racine dans une PR de fonctionnalité ; votre branch doit contenir le tag le plus récent.</td>
+<td><a href="contributing-workflow.html#version-alignment">Alignement de version</a> ; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/version_gate.py" target="_blank" rel="noopener"><code>scripts/version_gate.py</code></a></td>
+</tr>
+<tr>
+<td><strong>Un worktree par tâche</strong>, en dehors de <code>/tmp</code>, ajoutez les fichiers par nom, supprimez le worktree et la branch à la fin.</td>
+<td><a href="contributing-workflow.html#one-worktree-per-task">Un worktree par tâche</a></td>
+</tr>
+<tr>
+<td><strong>N’exécutez jamais le moteur, la batterie E2E ou le harnais de chaos contre l’état réel.</strong> Exportez à la fois <code>DELONIX_ROOT</code> et <code>DELONIX_NET_RUNTIME_DIR</code> ; ne définissez pas <code>E2E_SHARED_STATE=1</code> sauf si vous diagnostiquez votre propre hôte.</td>
+<td><a href="build-and-test.html#isolating-the-engines-state">Isoler l’état du moteur</a>, <a href="build-and-test.html#end-to-end-battery-scriptse2esh">E2E</a>, <a href="build-and-test.html#chaos-harness-scriptschaossh">chaos</a></td>
+</tr>
+<tr>
+<td><strong>Les modifications sensibles pour la sécurité sont signalées</strong>, et les vulnérabilités sont signalées en privé, jamais dans une issue ou une PR publique.</td>
+<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a> ; <a href="contributing-workflow.html#security-sensitive-changes">Modifications sensibles pour la sécurité</a></td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="when-you-are-stuck">Quand vous êtes bloqué<a class="hanchor" href="#when-you-are-stuck" aria-label="#">#</a></h2>
+<p>Cherchez dans cet ordre — chaque étape coûte moins cher que la suivante :</p>
+<ol>
+<li><strong>Ce manuel.</strong> Le <a href="index.html">README</a> contient la liste des pages ; le <a href="glossary.html">glossaire</a>
+   explique le vocabulaire.</li>
+<li><strong><a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a></strong>, organisé par domaine. Il est long et en partie historique (et
+   en partie en portugais) : utilisez-le pour savoir <em>où</em> chercher, puis confirmez dans le code.</li>
+<li><strong>L’index des ADR</strong>, <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a> — la décision derrière une structure,
+   et ce qui a été rejeté.</li>
+<li><strong>L’historique du fichier</strong> : <code>git log --oneline -- &lt;path&gt;</code> et <code>git log -p -S '&lt;symbol&gt;'</code>. Ici, les messages
+   de commit expliquent le pourquoi.</li>
+</ol>
+<p>Si vous êtes toujours bloqué, <strong>demandez</strong> sur GitHub :</p>
+<ul>
+<li>Commentez l’issue sur laquelle vous travaillez, ou ouvrez-en une nouvelle avec
+  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/ISSUE_TEMPLATE/feature_request.md" target="_blank" rel="noopener">le modèle de demande de fonctionnalité</a> (pour les questions
+  sur une approche) ou <a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/ISSUE_TEMPLATE/bug_report.md" target="_blank" rel="noopener">le modèle de rapport de bug</a>.</li>
+<li>Un problème de sécurité passe par le <a href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener">signalement privé de vulnérabilités</a>, pas par une issue.</li>
+</ul>
+<p>Le modèle de rapport de bug demande :</p>
+<ul>
+<li>la sortie de <code>delonix --version</code> ;</li>
+<li>la distribution et la version du noyau, rootless ou root, et si vous avez installé avec <code>install.sh</code>,
+  téléchargé un binaire, ou compilé depuis les sources ;</li>
+<li>la commande ou le manifeste exact qui le déclenche ;</li>
+<li>ce que vous attendiez, et la sortie <strong>complète, non tronquée</strong> de ce qui s’est réellement passé ;</li>
+<li>s’il se reproduit à chaque fois, parfois, ou une seule fois ;</li>
+<li>tout autre élément qui pourrait être pertinent.</li>
+</ul>
+<p>Ce manuel recommande en plus deux choses que le modèle ne demande pas, parce qu’elles évitent un
+aller-retour :</p>
+<ul>
+<li>la sortie <strong>complète</strong> de <code>--version</code> du binaire que vous avez exécuté, y compris la ligne <code>commit:</code> (entre
+  deux releases, chaque build annonce le même numéro de version, et seul le commit permet de les distinguer) ;</li>
+<li>si <code>DELONIX_ROOT</code>/<code>DELONIX_NET_RUNTIME_DIR</code> étaient définies, et ce que vous avez déjà lu et essayé
+  (la page, la section de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, l’ADR).</li>
+</ul>
+<h2 id="progress-checklist">Liste de progression<a class="hanchor" href="#progress-checklist" aria-label="#">#</a></h2>
+<ul>
+<li>[ ] J’ai lu ce qu’est Delonix et les quatre principes (<a href="architecture.html#engine-identity-and-boundaries">Architecture</a>).</li>
+<li>[ ] Mon hôte satisfait <a href="environment.html">Préparer votre environnement</a>, et j’ai lu les pièges connus de l’hôte.</li>
+<li>[ ] <code>cargo build -p delonix-runtime-bin</code> se termine.</li>
+<li>[ ] <code>cargo test -p delonix-net-rules</code> affiche <code>test result: ok</code>.</li>
+<li>[ ] <code>./target/debug/delonix --help</code> fonctionne, et j’ai cessé d’utiliser le <code>delonix</code> de mon <code>PATH</code>.</li>
+<li>[ ] <code>delonix system info</code> affiche mon <code>DELONIX_ROOT</code> jetable comme racine d’état.</li>
+<li>[ ] J’ai choisi une issue et je l’ai commentée (ou j’en ai ouvert une pour une modification non triviale).</li>
+<li>[ ] Je travaille dans mon propre worktree créé à partir de <code>origin/main</code>.</li>
+<li>[ ] J’ai trouvé où va la modification et lu la section de ce crate dans <a href="crates.html">Les crates</a>.</li>
+<li>[ ] J’ai écrit un test qui échoue sans ma modification.</li>
+<li>[ ] Les gates locaux de <a href="build-and-test.html#the-gates-ci-runs">Cloner, compiler et tester</a> passent.</li>
+<li>[ ] J’ai lu <a href="coding-conventions.html">Conventions de code</a> et <a href="cloud-native-standards.html">Standards cloud native, couche par couche</a>.</li>
+<li>[ ] Ma PR remplit chaque section du modèle, y compris ce qui n’a <em>pas</em> été validé.</li>
+<li>[ ] Après le merge, j’ai supprimé mon worktree et ma branch.</li>
+</ul>
+<hr />
+<p><strong>Suivant :</strong> <a href="iaas-and-cloud-native.html">IaaS et cloud native — où s’inscrit le moteur</a> — le modèle mental d’une IaaS, quelle couche est ce moteur, et comment les principes cloud native apparaissent dans ses fichiers.</p>
+<nav class="pager"><a href="index.html"><span>← Précédent</span>Delonix Runtime — Manuel du contributeur</a><a class="next" href="iaas-and-cloud-native.html"><span>Suivant →</span>IaaS et cloud native — où s’inscrit le moteur</a></nav>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/fr-FR/start-here.md" target="_blank" rel="noopener">Modifier cette page</a><code>docs/dev/fr-FR/start-here.md</code></footer>
+</div></main>
+<aside class="toc"><p class="ttitle">Sur cette page</p><div class="toc">
+<ul>
+<li><a href="#day-0-in-30-minutes">Jour 0 en 30 minutes</a><ul>
+<li><a href="#what-delonix-is-5-minutes">Ce qu’est Delonix (5 minutes)</a></li>
+<li><a href="#what-you-need-10-minutes">Ce dont vous avez besoin (10 minutes)</a></li>
+<li><a href="#five-commands-that-prove-your-setup-works-15-minutes">Cinq commandes qui prouvent que votre configuration fonctionne (15 minutes)</a></li>
+</ul>
+</li>
+<li><a href="#your-first-contribution-end-to-end">Votre première contribution, de bout en bout</a><ul>
+<li><a href="#1-pick-something">1. Choisissez un sujet</a></li>
+<li><a href="#2-open-a-worktree-from-originmain">2. Ouvrez un worktree à partir de origin/main</a></li>
+<li><a href="#3-find-where-the-change-goes">3. Trouvez où va la modification</a></li>
+<li><a href="#4-write-the-test-first">4. Écrivez le test d’abord</a></li>
+<li><a href="#5-run-the-local-gates">5. Exécutez les gates locaux</a></li>
+<li><a href="#6-write-the-pull-request">6. Rédigez la pull request</a></li>
+<li><a href="#7-what-reviewers-check">7. Ce que vérifient les relecteurs</a></li>
+<li><a href="#8-after-the-merge">8. Après le merge</a></li>
+</ul>
+</li>
+<li><a href="#where-does-my-change-go">Où va ma modification ?</a></li>
+<li><a href="#rules-you-must-not-break">Les règles à ne pas enfreindre</a></li>
+<li><a href="#when-you-are-stuck">Quand vous êtes bloqué</a></li>
+<li><a href="#progress-checklist">Liste de progression</a></li>
+</ul>
+</div>
+</aside>
+</div>
+<div id="search" hidden><div class="sbox" role="dialog" aria-modal="true" aria-label="Rechercher">
+<div class="sfield"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="search-input" type="search" placeholder="Rechercher dans le guide…" autocomplete="off"><kbd>Esc</kbd></div>
+<ul class="sres"></ul>
+<div class="shelp"><span><kbd>↑</kbd> <kbd>↓</kbd></span><span><kbd>Enter</kbd></span></div></div></div>
+<script>window.HANDBOOK_UI={"copy": "Copier", "copied": "Copié", "no_results": "Aucun résultat"};</script>
+<script src="search-index.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/ini.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/dockerfile.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/protobuf.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/diff.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/makefile.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/xml.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>
+(function(){
+  const ui = window.HANDBOOK_UI;
+  const root = document.documentElement;
+
+  // Theme: system by default; the toggle cycles light/dark and remembers the choice.
+  function effectiveDark(){ const t = root.getAttribute('data-theme'); return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; }
+  document.querySelectorAll('.themebtn').forEach(function(b){
+    b.addEventListener('click', function(){
+      const next = effectiveDark() ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('delonix-handbook-theme', next); } catch (e) {}
+      renderMermaid();
+    });
+  });
+
+  // Mobile navigation drawer.
+  document.querySelectorAll('.menubtn').forEach(function(b){
+    b.addEventListener('click', function(){ document.body.classList.toggle('nav-open'); });
+  });
+  document.querySelectorAll('nav.side a').forEach(function(a){ a.addEventListener('click', function(){ document.body.classList.remove('nav-open'); }); });
+
+  // Copy buttons live in each code block's header; shell blocks drop a leading "$ ".
+  document.querySelectorAll('.code').forEach(function(box){
+    const btn = box.querySelector('.copy'); if (!btn) return;
+    btn.addEventListener('click', function(){
+      let text = box.querySelector('pre code').innerText;
+      if (box.hasAttribute('data-shell')) text = text.split('\n').map(function(l){ return l.replace(/^\$ /, ''); }).join('\n');
+      navigator.clipboard.writeText(text.replace(/\n$/, '')).then(function(){
+        btn.lastChild.textContent = ui.copied; btn.classList.add('done');
+        setTimeout(function(){ btn.lastChild.textContent = ui.copy; btn.classList.remove('done'); }, 1500);
+      });
+    });
+  });
+  if (window.hljs) document.querySelectorAll('.code pre code:not(.nohighlight)').forEach(function(el){ hljs.highlightElement(el); });
+
+  // Mermaid follows the effective theme, and re-renders when it changes.
+  const diagrams = Array.prototype.slice.call(document.querySelectorAll('pre.mermaid'));
+  diagrams.forEach(function(d){ d.setAttribute('data-src', d.textContent); });
+  function renderMermaid(){
+    if (!window.mermaid || !diagrams.length) return;
+    diagrams.forEach(function(d){ d.removeAttribute('data-processed'); d.textContent = d.getAttribute('data-src'); });
+    mermaid.initialize({startOnLoad:false, securityLevel:'strict', theme: effectiveDark() ? 'dark' : 'neutral',
+      fontFamily:getComputedStyle(document.body).fontFamily,
+      themeVariables:{fontSize:'17px'},
+      flowchart:{useMaxWidth:true, nodeSpacing:28, rankSpacing:44, padding:10},
+      sequence:{useMaxWidth:true}});
+    mermaid.run({nodes: diagrams});
+  }
+  renderMermaid();
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(){ if (!root.getAttribute('data-theme')) renderMermaid(); });
+
+  // "On this page": highlight the section being read.
+  const tocLinks = Array.prototype.slice.call(document.querySelectorAll('aside.toc a'));
+  const byId = {}; tocLinks.forEach(function(a){ byId[decodeURIComponent(a.getAttribute('href').slice(1))] = a; });
+  const heads = Array.prototype.slice.call(document.querySelectorAll('.content h2[id], .content h3[id]')).filter(function(h){ return byId[h.id]; });
+  function spy(){
+    let current = heads.length ? heads[0] : null;
+    const line = 120;
+    heads.forEach(function(h){ if (h.getBoundingClientRect().top <= line) current = h; });
+    tocLinks.forEach(function(a){ a.classList.remove('active'); });
+    if (current) byId[current.id].classList.add('active');
+  }
+  if (heads.length){ document.addEventListener('scroll', spy, {passive:true}); spy(); }
+
+  // Search (Ctrl+K / Cmd+K / "/"): a static index of this language, scored in the browser.
+  const modal = document.getElementById('search'), input = modal.querySelector('input'), list = modal.querySelector('.sres');
+  let selected = 0;
+  function norm(s){ return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+  const index = (window.HANDBOOK_INDEX || []).map(function(r){ return Object.assign({nh: norm(r.h), np: norm(r.p), nt: norm(r.t)}, r); });
+  function esc(s){ return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function mark(s, terms){ let out = esc(s); terms.forEach(function(t){ if (t.length > 1) out = out.replace(new RegExp('(' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig'), '<mark>$1</mark>'); }); return out; }
+  function snippet(r, terms){ const i = terms.length ? r.nt.indexOf(terms[0]) : -1; const start = Math.max(0, i - 50); return (start ? '…' : '') + r.t.slice(start, start + 170); }
+  function run(){
+    const terms = norm(input.value).split(/\s+/).filter(Boolean);
+    if (!terms.length){ list.innerHTML = ''; return; }
+    const hits = [];
+    index.forEach(function(r){
+      let score = 0;
+      for (const t of terms){ const s = (r.nh.includes(t) ? 10 : 0) + (r.np.includes(t) ? 3 : 0) + (r.nt.includes(t) ? 1 : 0); if (!s) return; score += s; }
+      hits.push([score, r]);
+    });
+    hits.sort(function(a, b){ return b[0] - a[0]; });
+    selected = 0;
+    list.innerHTML = hits.length ? hits.slice(0, 30).map(function(h, i){
+      const r = h[1];
+      return '<li><a href="' + esc(r.u) + '"' + (i === 0 ? ' class="sel"' : '') + '><span class="sp">' + esc(r.p) + '</span>' +
+        '<span class="sh">' + mark(r.h, terms) + '</span><span class="st">' + mark(snippet(r, terms), terms) + '</span></a></li>';
+    }).join('') : '<li class="sempty">' + esc(ui.no_results) + '</li>';
+  }
+  function open(){ modal.hidden = false; input.value = ''; list.innerHTML = ''; input.focus(); }
+  function close(){ modal.hidden = true; }
+  document.querySelectorAll('.searchbtn').forEach(function(b){ b.addEventListener('click', open); });
+  modal.addEventListener('click', function(e){ if (e.target === modal) close(); });
+  input.addEventListener('input', run);
+  input.addEventListener('keydown', function(e){
+    const links = list.querySelectorAll('a');
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+      e.preventDefault(); if (!links.length) return;
+      links[selected].classList.remove('sel');
+      selected = (selected + (e.key === 'ArrowDown' ? 1 : links.length - 1)) % links.length;
+      links[selected].classList.add('sel'); links[selected].scrollIntoView({block:'nearest'});
+    } else if (e.key === 'Enter' && links.length){ e.preventDefault(); close(); location.href = links[selected].getAttribute('href'); }
+  });
+  document.addEventListener('keydown', function(e){
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k'){ e.preventDefault(); modal.hidden ? open() : close(); }
+    else if (e.key === 'Escape'){ if (!modal.hidden) close(); document.body.classList.remove('nav-open'); }
+    else if (e.key === '/' && modal.hidden && !/input|textarea|select/i.test(document.activeElement.tagName)){ e.preventDefault(); open(); }
+  });
+  document.querySelectorAll('select.lang').forEach(function(s){ s.addEventListener('change', function(){ location.href = s.value + location.hash; }); });
+})();
+</script>
+</body></html>

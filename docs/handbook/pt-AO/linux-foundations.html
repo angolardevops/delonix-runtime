@@ -1,0 +1,1167 @@
+<!doctype html>
+<html lang="pt-AO"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fundações de Linux · Delonix Runtime — Manual do contribuidor</title>
+<script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<style>
+:root{
+  /* The NgolaCloud design system (delonix-web packages/ui/src/tokens.css):
+     light theme by default, dark as the secondary theme. */
+  --bg:#fcfaf8;--surface:#f5f3f1;--surface-2:#eeeae8;--card:#ffffff;--ink:#191513;--ink-2:#524b49;--muted:#675e59;
+  --line:#e1ddda;--line-soft:#ece8e5;
+  --accent:#cc2823;--accent-ink:#b70000;--accent-soft:#ffe2dc;--focus:#cc2823;
+  --code-bg:#1a1614;--code-ink:#ede7e3;--code-line:#2e2825;--code-label:#a39993;
+  --warn-bg:rgba(239,168,49,.16);--warn-line:#c9820f;--warn-ink:#6b4400;
+  --topbar:rgba(255,255,255,.82);
+  --shadow:0 4px 12px rgba(38,28,22,.08),0 1px 3px rgba(38,28,22,.06);
+  --f-display:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
+  --f-body:var(--f-display);
+  --f-mono:"JetBrains Mono",ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
+  --r-sm:4px;--r:6px;--r-lg:8px;
+  --header:60px;color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0b0b0c;--surface:#131315;--surface-2:#19191c;--card:#161618;--ink:#ededee;--ink-2:#b6b6ba;--muted:#87878c;
+  --line:#262629;--line-soft:#1d1d20;
+  --accent:#ee5a24;--accent-ink:#ff6c39;--accent-soft:rgba(238,90,36,.18);--focus:#ee5a24;
+  --code-bg:#101012;--code-ink:#dedee2;--code-line:#26262a;--code-label:#87878c;
+  --warn-bg:rgba(226,161,58,.12);--warn-line:#8a6a2a;--warn-ink:#e2c07a;
+  --topbar:rgba(11,11,12,.82);
+  --shadow:0 8px 24px rgba(0,0,0,.5),0 1px 4px rgba(0,0,0,.4);color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0b0b0c;--surface:#131315;--surface-2:#19191c;--card:#161618;--ink:#ededee;--ink-2:#b6b6ba;--muted:#87878c;
+  --line:#262629;--line-soft:#1d1d20;
+  --accent:#ee5a24;--accent-ink:#ff6c39;--accent-soft:rgba(238,90,36,.18);--focus:#ee5a24;
+  --code-bg:#101012;--code-ink:#dedee2;--code-line:#26262a;--code-label:#87878c;
+  --warn-bg:rgba(226,161,58,.12);--warn-line:#8a6a2a;--warn-ink:#e2c07a;
+  --topbar:rgba(11,11,12,.82);
+  --shadow:0 8px 24px rgba(0,0,0,.5),0 1px 4px rgba(0,0,0,.4);color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-padding-top:calc(var(--header) + 16px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.7 var(--f-body);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+a{color:var(--accent-ink);text-decoration:none}
+a:hover{text-decoration:underline;text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion: reduce){*{scroll-behavior:auto!important;transition:none!important}}
+
+/* Header */
+.top{position:sticky;top:0;z-index:30;height:var(--header);display:flex;align-items:center;gap:16px;
+  padding-inline:20px;background:var(--topbar);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px;color:var(--ink);font:700 16px/1 var(--f-display);white-space:nowrap}
+.brand:hover{text-decoration:none}
+.brand .mark{width:26px;height:26px;border-radius:var(--r);background:var(--accent);display:grid;place-items:center;color:#fff;font:800 13px/1 var(--f-display)}
+.brand .sub{font:500 14px/1 var(--f-body);color:var(--muted)}
+.brand .sep{width:1px;height:18px;background:var(--line)}
+.searchbtn{flex:1;max-width:460px;margin-inline:auto;display:flex;align-items:center;gap:10px;height:38px;padding-inline:12px;
+  border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--muted);font:15px var(--f-body);cursor:pointer;min-width:0}
+.searchbtn:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.searchbtn svg{flex:none}
+.searchbtn .label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.searchbtn kbd{margin-left:auto}
+kbd{font:600 11px/1 var(--f-mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:3px 6px;background:var(--bg);color:var(--muted);white-space:nowrap}
+.actions{display:flex;align-items:center;gap:6px}
+select.lang{height:36px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink);font:14px var(--f-body);padding-inline:8px}
+.iconbtn{height:36px;width:36px;display:grid;place-items:center;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink-2);cursor:pointer}
+.iconbtn:hover{color:var(--accent-ink);border-color:color-mix(in srgb,var(--accent) 45%,var(--line));text-decoration:none}
+.menubtn{display:none}
+
+/* Frame */
+.frame{display:grid;grid-template-columns:280px minmax(0,1fr) 240px}
+nav.side{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:24px 16px 48px 20px;border-right:1px solid var(--line)}
+nav.side,aside.toc,.sres{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+nav.side .group{margin-bottom:18px}
+nav.side .gtitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);padding:0 10px 8px}
+nav.side a{display:flex;gap:10px;align-items:baseline;padding:6px 10px;border-radius:8px;color:var(--ink-2);font-size:15px;line-height:1.35}
+nav.side a:hover{background:var(--surface);text-decoration:none;color:var(--ink)}
+nav.side a .n{flex:none;width:18px;font:500 12px/1.35 var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+nav.side a.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
+nav.side a.on .n{color:var(--accent-ink)}
+main{min-width:0;padding:40px clamp(20px,3.5vw,56px) 80px}
+.content{max-width:1120px;margin-inline:auto}
+
+aside.toc{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:40px 20px 40px 8px;font-size:13.5px}
+aside.toc .ttitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+aside.toc ul{list-style:none;margin:0;padding:0}
+aside.toc ul ul{padding-left:12px}
+aside.toc li{margin:0}
+aside.toc a{display:block;padding:4px 0 4px 12px;border-left:2px solid var(--line);color:var(--muted);line-height:1.4}
+aside.toc a:hover{color:var(--ink);text-decoration:none}
+aside.toc a.active{color:var(--accent-ink);border-left-color:var(--accent);font-weight:600}
+
+/* Type */
+.kicker{font:700 12px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--accent-ink);margin:0 0 12px}
+h1,h2,h3,h4{font-family:var(--f-display);color:var(--ink);text-wrap:balance;letter-spacing:-.01em}
+h1{font-size:2.35rem;line-height:1.15;font-weight:800;margin:0 0 20px}
+h2{font-size:1.55rem;line-height:1.25;font-weight:700;margin:56px 0 14px}
+h3{font-size:1.18rem;line-height:1.3;font-weight:700;margin:36px 0 10px}
+h4{font-size:1rem;margin:28px 0 8px}
+h2 code,h3 code{font-size:.9em}
+.hanchor{margin-left:8px;color:var(--muted);opacity:0;font-weight:500;text-decoration:none}
+h2:hover .hanchor,h3:hover .hanchor,.hanchor:focus-visible{opacity:1}
+p,ul,ol{margin:0 0 16px}
+li{margin:4px 0}li>p{margin:0 0 8px}
+strong{font-weight:650;color:var(--ink)}
+hr{border:0;height:1px;background:var(--line);margin:40px 0}
+code{font:.86em/1.5 var(--f-mono);background:var(--surface-2);border:1px solid var(--line);padding:.08em .38em;border-radius:6px;overflow-wrap:break-word}
+a code{color:inherit}
+a.src code{border-color:color-mix(in srgb,var(--accent) 30%,var(--line));background:var(--accent-soft)}
+a.src:hover{text-decoration:none}a.src:hover code{border-color:var(--accent)}
+.crate-src{margin-left:10px;vertical-align:middle;font:600 11px/1 var(--f-display);letter-spacing:.04em;text-transform:uppercase;
+  border:1px solid var(--line);border-radius:999px;padding:5px 9px;color:var(--muted)}
+.crate-src:hover{color:var(--accent-ink);border-color:var(--accent);text-decoration:none}
+
+/* Blocks */
+blockquote{margin:20px 0;padding:2px 0 2px 18px;border-left:3px solid var(--line);color:var(--ink-2)}
+blockquote p:last-child{margin-bottom:0}
+blockquote.say{border:1px solid var(--line-soft);padding:14px 18px;border-radius:var(--r-lg);background:var(--card);margin:18px 0}
+blockquote.say .speaker{display:inline-block;margin-right:8px;font:700 11px/1 var(--f-display);letter-spacing:.08em;text-transform:uppercase;
+  padding:5px 8px;border-radius:999px;vertical-align:1px}
+blockquote.say-interviewer .speaker{background:var(--surface-2);color:var(--muted);border:1px solid var(--line)}
+blockquote.say-candidate{background:var(--accent-soft)}
+blockquote.say-candidate .speaker{background:var(--accent);color:#fff}
+.notice{display:flex;gap:10px;align-items:baseline;background:var(--warn-bg);border:1px solid var(--warn-line);color:var(--warn-ink);
+  border-radius:12px;padding:12px 16px;margin:0 0 28px;font-size:15px}
+.notice a{color:inherit;font-weight:600;text-decoration:underline}
+.code{margin:18px 0 22px;border-radius:var(--r-lg);background:var(--code-bg);border:1px solid var(--code-line);overflow:hidden}
+.code-head{display:flex;align-items:center;justify-content:space-between;gap:8px;height:36px;padding:0 8px 0 14px;border-bottom:1px solid var(--code-line)}
+.code-head .lang{font:600 11px/1 var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--code-label)}
+.copy{display:flex;align-items:center;gap:6px;height:26px;padding:0 9px;border:1px solid var(--code-line);border-radius:7px;background:transparent;
+  color:var(--code-label);font:600 12px var(--f-body);cursor:pointer}
+.copy:hover{color:#fff;border-color:#3a4555}
+.copy.done{color:#7ee2a8;border-color:#2f5d45}
+.code pre{margin:0;padding:14px 16px 22px;overflow-x:auto;color:var(--code-ink);font:13.5px/1.6 var(--f-mono);
+  scrollbar-width:thin;scrollbar-color:#3a4555 transparent;color-scheme:dark}
+.code pre::-webkit-scrollbar{height:8px}.code pre::-webkit-scrollbar-thumb{background:#3a4555;border-radius:8px}
+.code pre code{background:none;border:0;padding:0;font:inherit;color:inherit;overflow-wrap:normal}
+.code pre code.hljs{background:none;padding:0}
+pre.mermaid{margin:22px 0;padding:18px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--card);text-align:center;overflow-x:auto;font-family:var(--f-body)}
+.tablewrap{margin:18px 0 24px;overflow-x:auto;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:14.5px;line-height:1.5}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+th{background:var(--surface);font:700 12.5px/1.3 var(--f-display);letter-spacing:.02em;color:var(--ink-2);white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:color-mix(in srgb,var(--surface) 60%,transparent)}
+td code{font-size:.82em;overflow-wrap:normal}
+/* A table's first column names the thing (a variable, a crate, a flag): never break it. */
+td:first-child code{white-space:nowrap}
+th:first-child,td:first-child{white-space:nowrap}
+
+/* Pager + footer */
+.pager{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:64px}
+.pager a{display:block;padding:14px 16px;border:1px solid var(--line);border-radius:12px;color:var(--ink);font:600 15px/1.35 var(--f-display)}
+.pager a:hover{border-color:var(--accent);text-decoration:none}
+.pager a span{display:block;font:500 12px/1 var(--f-body);color:var(--muted);margin-bottom:6px}
+.pager .next{text-align:right;grid-column:2}
+.foot{margin-top:28px;padding-top:18px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:8px 16px;font-size:13.5px;color:var(--muted)}
+
+/* Search */
+#search{position:fixed;inset:0;z-index:60;background:rgba(10,13,18,.45);display:flex;align-items:flex-start;justify-content:center;padding:12vh 16px 16px}
+#search[hidden]{display:none}
+.sbox{width:min(680px,100%);background:var(--bg);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
+.sfield{display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--line);color:var(--muted)}
+.sfield input{flex:1;height:56px;border:0;outline:0;background:transparent;color:var(--ink);font:17px var(--f-body)}
+.sres{list-style:none;margin:0;padding:8px;max-height:56vh;overflow-y:auto}
+.sres a{display:block;padding:10px 12px;border-radius:10px;color:var(--ink)}
+.sres a:hover,.sres a.sel{background:var(--accent-soft);text-decoration:none}
+.sres .sp{display:block;font:600 11px/1 var(--f-display);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+.sres .sh{font:600 15px/1.35 var(--f-display)}
+.sres .st{display:block;margin-top:3px;font-size:13.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sres mark{background:none;color:var(--accent-ink);font-weight:700}
+.sempty{padding:18px;color:var(--muted)}
+.shelp{display:flex;gap:16px;padding:10px 16px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+
+/* Narrow screens */
+@media (max-width:1280px){.frame{grid-template-columns:256px minmax(0,1fr)}aside.toc{display:none}}
+@media (max-width:860px){
+  .frame{display:block}.menubtn{display:grid}.brand .sub,.brand .sep{display:none}
+  nav.side{position:fixed;top:var(--header);left:0;bottom:0;width:min(300px,86vw);height:auto;z-index:40;background:var(--bg);
+    transform:translateX(-102%);transition:transform .2s ease;box-shadow:var(--shadow)}
+  body.nav-open nav.side{transform:none}
+  main{padding:28px 16px 64px}
+  h1{font-size:1.9rem}h2{font-size:1.35rem}
+  .searchbtn kbd,.searchbtn .label{display:none}.searchbtn{flex:none;width:38px;justify-content:center;margin-inline:auto 0;padding:0}
+  .pager{grid-template-columns:1fr}.pager .next{grid-column:1}
+  .top{gap:8px;padding-inline:12px}
+  .brand{font-size:15px;min-width:0}
+  select.lang{width:78px;padding-inline:4px;text-overflow:ellipsis}
+}
+@media (max-width:480px){
+  .actions .ghbtn{display:none}
+  .brand .word{display:none}
+}
+</style></head>
+<body>
+<header class="top">
+  <button class="iconbtn menubtn" type="button" aria-label="Menu"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  <a class="brand" href="index.html" aria-label="Início do manual"><span class="mark">D</span><span class="word">Delonix Runtime</span><span class="sep"></span><span class="sub">Manual do contribuidor</span></a>
+  <button class="searchbtn" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span class="label">Pesquisar no manual…</span><kbd>Ctrl K</kbd></button>
+  <div class="actions">
+    <select class="lang" id="lang" aria-label="Language"><option value="../en/linux-foundations.html">EN · English</option><option value="../pt-AO/linux-foundations.html" selected>PT-AO · Português (Angola)</option><option value="../fr-FR/linux-foundations.html">FR-FR · Français</option><option value="../zh-CN/linux-foundations.html">ZH-CN · 简体中文</option></select>
+    <button class="iconbtn themebtn" type="button" aria-label="Alternar tema de cor" title="Alternar tema de cor"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
+    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+  </div>
+</header>
+<div class="frame">
+<nav class="side" aria-label="Manual do contribuidor"><div class="group"><div class="gtitle">Visão geral</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manual do Contribuidor</span></a></div><div class="group"><div class="gtitle">Começar</div><a href="start-here.html"><span class="n">01</span><span>Começa aqui</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS e cloud native — onde o motor encaixa</span></a></div><div class="group"><div class="gtitle">Fundamentos</div><a class="on" aria-current="page" href="linux-foundations.html"><span class="n">03</span><span>Fundações de Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Introdução ao cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Introdução ao Rust para esta base de código</span></a></div><div class="group"><div class="gtitle">Preparar e compilar</div><a href="environment.html"><span class="n">06</span><span>Preparar o teu ambiente</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clonar, compilar e testar</span></a></div><div class="group"><div class="gtitle">Arquitectura</div><a href="project-structure.html"><span class="n">08</span><span>Estrutura do projecto</span></a><a href="architecture.html"><span class="n">09</span><span>Arquitectura</span></a><a href="crates.html"><span class="n">10</span><span>Os crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — o Delonix Engine</span></a></div><div class="group"><div class="gtitle">Imagens e microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile e VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construir microVMs</span></a></div><div class="group"><div class="gtitle">Operar e diagnosticar</div><a href="troubleshooting.html"><span class="n">14</span><span>Diagnóstico de problemas</span></a></div><div class="group"><div class="gtitle">Contribuir</div><a href="coding-conventions.html"><span class="n">15</span><span>Convenções de código</span></a><a href="adding-a-kind.html"><span class="n">16</span><span>Acrescentar um Kind</span></a><a href="contributing-workflow.html"><span class="n">17</span><span>Fluxo de contribuição</span></a><a href="releases-and-stability.html"><span class="n">18</span><span>Releases e estabilidade</span></a><a href="publishing-docs.html"><span class="n">19</span><span>Publicar a documentação</span></a></div><div class="group"><div class="gtitle">Referência</div><a href="cloud-native-standards.html"><span class="n">20</span><span>Padrões cloud native, camada a camada</span></a><a href="environment-variables.html"><span class="n">21</span><span>Variáveis de ambiente (DELONIX_*)</span></a><a href="glossary.html"><span class="n">22</span><span>Glossário</span></a></div></nav>
+<main><div class="content">
+<p class="kicker">Fundamentos</p>
+<h1 id="linux-foundations">Fundações de Linux</h1>
+<p><strong>Antes de leres:</strong> <a href="iaas-and-cloud-native.html">IaaS e cloud native</a>, para saberes porque é que um motor de nó precisa destes primitivos. Só precisas de uma shell Linux, nada mais.</p>
+<p>Toda página depois desta assume que consegues responder, com um comando, a perguntas como «em que
+network namespace está este processo?», «porque é que este limite não se aplicou?» ou «quem ainda
+segura este pipe aberto?». Esta página ensina esses primitivos à mão, do ponto de vista de alguém
+que escreve código de sistema Linux <em>e</em> tem de o operar às 3 da manhã. No fim vais conseguir
+responder a cada uma dessas perguntas a partir de uma shell, e prever as falhas que as páginas
+seguintes descrevem no vocabulário do motor (um limite que não se aplica, um pipe que nunca chega a
+EOF, um PID que nomeia outro processo).</p>
+<p>Não explica como o motor os usa — esse mapeamento, com ficheiros e símbolos, é a
+<a href="cloud-native-primer.html">Introdução ao cloud native</a>. Cada secção aqui termina com um apontador
+para a parte correspondente dela.</p>
+<p><strong>Como usar esta página.</strong> Abre um terminal e escreve ao mesmo tempo. Todo comando marcado <em>sem
+privilégio</em> foi corrido como utilizador comum num host Ubuntu com um kernel 7.0, util-linux 2.39 e
+systemd, e a saída mostrada é o que ele imprimiu (cortada, com caminhos específicos do host
+substituídos por placeholders). Comandos marcados <strong>exige root — corre numa VM descartável</strong> <em>não
+foram executados</em> para esta página: mudam estado de todo o host, e nunca os devias tentar numa
+máquina que corre algo com que te importas. <a href="microvm-setup.html">Configuração de microVMs</a> mostra
+como obter uma VM descartável a partir do próprio motor.</p>
+<p>Trabalha num directório de rascunho para nada do que crias aterrar no repositório:</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">mkdir -p ~/scratch/linux-lab &amp;&amp; cd ~/scratch/linux-lab
+</code></pre></div>
+<hr />
+<h2 id="processes-the-kernel-and-proc">Processos, o kernel e /proc<a class="hanchor" href="#processes-the-kernel-and-proc" aria-label="#">#</a></h2>
+<p>Um <strong>processo</strong> é um programa a correr com o seu próprio espaço de endereçamento, um <strong>PID</strong>
+numérico, um pai (o seu <strong>PPID</strong>) e um conjunto de atributos pertencentes ao kernel: credenciais,
+namespaces, pertença a um cgroup, descritores de ficheiro abertos, disposições de sinal e limites de
+recurso. Todo processo excepto o PID 1 tem um pai; quando um pai morre primeiro, o órfão é
+re-adoptado pelo <em>subreaper</em> mais próximo ou pelo PID 1.</p>
+<ul>
+<li>O <strong><code>fork</code></strong> duplica o processo que o chama. O filho recebe uma cópia do espaço de endereçamento
+  (copy-on-write) e uma cópia da <strong>tabela de descritores de ficheiro</strong> — os mesmos ficheiros
+  abertos, partilhados, não reabertos. Só a <em>thread</em> que chamou é copiada, o que é a razão pela
+  qual fazer fork de um programa multi-thread e depois fazer algo não trivial antes do <code>exec</code> é
+  perigoso (um lock segurado por outra thread fica segurado para sempre no filho).</li>
+<li>O <strong><code>execve</code></strong> substitui o programa a correr num processo: mesmo PID, mesmo pai, mesmos
+  namespaces e cgroup, código novo. Os descritores de ficheiro sobrevivem ao <code>exec</code> <em>a não ser</em>
+  que estejam marcados close-on-exec — mais sobre isto em
+  <a href="#file-descriptors">Descritores de ficheiro</a>.</li>
+<li>O <strong><code>clone</code></strong> é a forma geral por trás tanto do <code>fork</code> como da criação de threads. As suas flags
+  escolhem o que o filho partilha com o pai e, crucialmente aqui, em que <strong>namespaces novos</strong>
+  arranca (<code>CLONE_NEWUSER</code>, <code>CLONE_NEWNS</code>, <code>CLONE_NEWPID</code>, <code>CLONE_NEWNET</code>, …). Um container nasce
+  de um <code>clone</code> com essas flags.</li>
+</ul>
+<p>O kernel expõe cada processo como um directório debaixo de <code>/proc</code>. Os ficheiros que vais usar
+mais:</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Caminho</th>
+<th>O que te diz</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/<wbr>proc/<wbr>&lt;pid&gt;/<wbr>status</code></td>
+<td>nome, estado, PPid, uid/gid, <code>NSpid</code> (o PID em cada namespace de PID aninhado), conjuntos de capabilities, threads</td>
+</tr>
+<tr>
+<td><code>/<wbr>proc/<wbr>&lt;pid&gt;/<wbr>cmdline</code></td>
+<td>o argv, separado por NUL</td>
+</tr>
+<tr>
+<td><code>/proc/&lt;pid&gt;/ns/</code></td>
+<td>um symlink por namespace; o número de inode é a identidade do namespace</td>
+</tr>
+<tr>
+<td><code>/<wbr>proc/<wbr>&lt;pid&gt;/<wbr>cgroup</code></td>
+<td>o caminho de cgroup v2 (<code>0::/…</code>)</td>
+</tr>
+<tr>
+<td><code>/proc/&lt;pid&gt;/fd/</code>, <code>/<wbr>proc/<wbr>&lt;pid&gt;/<wbr>fdinfo/<wbr></code></td>
+<td>descritores de ficheiro abertos e o seu offset/flags</td>
+</tr>
+<tr>
+<td><code>/proc/&lt;pid&gt;/stat</code></td>
+<td>o campo 22 é a hora de arranque, que distingue um processo de um posterior que reutilizou o seu PID</td>
+</tr>
+</tbody>
+</table></div>
+<p>Experimenta na tua própria shell (<em>sem privilégio</em>):</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">grep -E &#x27;^(State|PPid|Threads|NSpid|CapEff)&#x27; /proc/$$/status
+tr &#x27;\0&#x27; &#x27; &#x27; &lt; /proc/$$/cmdline; echo
+cat /proc/self/cgroup
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">State:	S (sleeping)
+PPid:	4033620
+NSpid:	953496
+Threads:	1
+CapEff:	0000000000000000
+0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-….scope
+</code></pre></div>
+<p>Repara que <code>$$</code> é a tua shell, enquanto <code>self</code> é qualquer processo que abrir o ficheiro — para
+<code>cat /proc/self/cgroup</code> esse é o <code>cat</code>. Repara também que <strong>um PID é um número, não um nome</strong>: uma
+vez colhido um processo, o kernel pode dar o mesmo número a um processo sem relação nenhuma. Código
+que guarda um PID e o sinaliza mais tarde tem de verificar a hora de arranque, ou melhor, segurar um
+<em>pidfd</em> (ver abaixo).</p>
+<p><strong>Porque é que o motor lê <code>/proc</code>.</strong> É a única vista autoritativa e sem lock de um processo vivo: o
+cgroup real de um container a correr, se um PID registado ainda nomeia o mesmo processo, que
+namespaces juntar para um <code>exec</code>. → <a href="cloud-native-primer.html#41-linux-namespaces-and-rootless-operation">Como o Delonix usa isto: namespaces e funcionamento
+rootless</a>.</p>
+<p><strong>Ler mais:</strong> <a href="https://man7.org/linux/man-pages/man5/proc.5.html"><code>proc(5)</code></a>,
+<a href="https://man7.org/linux/man-pages/man2/fork.2.html"><code>fork(2)</code></a>,
+<a href="https://man7.org/linux/man-pages/man2/execve.2.html"><code>execve(2)</code></a>,
+<a href="https://man7.org/linux/man-pages/man2/clone.2.html"><code>clone(2)</code></a>.</p>
+<hr />
+<h2 id="namespaces">Namespaces<a class="hanchor" href="#namespaces" aria-label="#">#</a></h2>
+<p>Um <strong>namespace</strong> envolve um tipo de recurso global para que os processos lá dentro vejam a sua
+própria instância. O Linux tem oito:</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Namespace</th>
+<th>Flag</th>
+<th>Isola</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>mount</td>
+<td><code>CLONE_NEWNS</code></td>
+<td>a tabela de mounts: o que está montado onde</td>
+</tr>
+<tr>
+<td>UTS</td>
+<td><code>CLONE_NEWUTS</code></td>
+<td>o hostname e o nome de domínio NIS</td>
+</tr>
+<tr>
+<td>IPC</td>
+<td><code>CLONE_NEWIPC</code></td>
+<td>objectos IPC do System V e filas de mensagens POSIX</td>
+</tr>
+<tr>
+<td>PID</td>
+<td><code>CLONE_NEWPID</code></td>
+<td>a numeração de processos; o primeiro processo lá dentro é o PID 1</td>
+</tr>
+<tr>
+<td>network</td>
+<td><code>CLONE_NEWNET</code></td>
+<td>interfaces, endereços, rotas, tabelas de firewall, sockets, <code>/proc/sys/net</code></td>
+</tr>
+<tr>
+<td>user</td>
+<td><code>CLONE_NEWUSER</code></td>
+<td>uids/gids e capabilities; o dono de todos os outros namespaces</td>
+</tr>
+<tr>
+<td>cgroup</td>
+<td><code>CLONE_NEWCGROUP</code></td>
+<td>a vista da árvore de cgroups (o processo vê o seu cgroup como <code>/</code>)</td>
+</tr>
+<tr>
+<td>time</td>
+<td><code>CLONE_NEWTIME</code></td>
+<td>os offsets de <code>CLOCK_MONOTONIC</code> e <code>CLOCK_BOOTTIME</code></td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="identity-the-inode-behind-procns">Identidade: o inode por trás de /proc/<pid>/ns<a class="hanchor" href="#identity-the-inode-behind-procns" aria-label="#">#</a></h3>
+<p>Cada entrada em <code>/proc/&lt;pid&gt;/ns</code> é um symlink cujo alvo codifica o tipo do namespace e um número de
+inode. <strong>Dois processos estão no mesmo namespace exactamente quando esses inodes são iguais</strong> — é
+assim que se compara, não pelos nomes (<em>sem privilégio</em>):</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">ls -l /proc/self/ns
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">lrwxrwxrwx 1 you you 0 … cgroup -&gt; cgroup:[4026531835]
+lrwxrwxrwx 1 you you 0 … ipc -&gt; ipc:[4026531839]
+lrwxrwxrwx 1 you you 0 … mnt -&gt; mnt:[4026531832]
+lrwxrwxrwx 1 you you 0 … net -&gt; net:[4026531833]
+lrwxrwxrwx 1 you you 0 … pid -&gt; pid:[4026531836]
+lrwxrwxrwx 1 you you 0 … pid_for_children -&gt; pid:[4026531836]
+lrwxrwxrwx 1 you you 0 … time -&gt; time:[4026531834]
+lrwxrwxrwx 1 you you 0 … time_for_children -&gt; time:[4026531834]
+lrwxrwxrwx 1 you you 0 … user -&gt; user:[4026531837]
+lrwxrwxrwx 1 you you 0 … uts -&gt; uts:[4026531838]
+</code></pre></div>
+<p>O <code>pid_for_children</code> e o <code>time_for_children</code> existem porque um processo nunca muda o seu próprio
+namespace de PID ou de tempo: <code>unshare</code>/<code>setns</code> nesses afecta só os filhos que criar a seguir.</p>
+<p>O <code>lsns</code> lista namespaces em todo o sistema. No host usado para esta página, o <strong>util-linux 2.39.3
+num kernel 7.0 falha</strong> com <code>lsns: Unsupported ioctl NS_GET_USERNS</code> e não imprime nada. Se o teu
+fizer o mesmo, compara os inodes directamente: <code>readlink /proc/&lt;pid&gt;/ns/net</code> para os processos que
+te interessam.</p>
+<h3 id="hands-on-a-user-mount-uts-network-namespace-without-root">À mão: um namespace de user + mount + UTS + network, sem root<a class="hanchor" href="#hands-on-a-user-mount-uts-network-namespace-without-root" aria-label="#">#</a></h3>
+<p>Um utilizador sem privilégio não consegue criar a maioria dos namespaces sozinho…</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">unshare --net true
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">unshare: unshare failed: Operation not permitted
+</code></pre></div>
+<p>…mas consegue criar um <strong>user namespace</strong>, e lá dentro torna-se root <em>sobre os namespaces que esse
+user namespace possui</em>. O <code>--map-root-user</code> (<code>-r</code>) mapeia o teu uid para 0 lá dentro
+(<em>sem privilégio</em>):</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">unshare --user --map-root-user --mount --uts --net sh -c &#x27;
+  hostname lab; hostname; id
+  cat /proc/self/uid_map
+  ip link
+  readlink /proc/self/ns/net&#x27;
+hostname; readlink /proc/self/ns/net     # back outside
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">lab
+uid=0(root) gid=0(root) groups=0(root),65534(nogroup)
+         0       1000          1
+1: lo: &lt;LOOPBACK&gt; mtu 65536 qdisc noop state DOWN mode DEFAULT group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+net:[4026534483]
+&lt;your-host&gt;
+net:[4026531833]
+</code></pre></div>
+<p>Três coisas a ver: o hostname mudou só lá dentro; o network namespace novo tem <strong>só <code>lo</code>, e está
+down</strong>; e o inode do namespace difere do do host. O grupo <code>65534(nogroup)</code> é um grupo do host sem
+mapeamento lá dentro — ids não mapeados aparecem sempre como o id de overflow.</p>
+<p>Um mount namespace funciona da mesma forma: mounts feitos lá dentro são invisíveis fora
+(<em>sem privilégio</em>):</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">mkdir -p mnt
+unshare -r -m sh -c &quot;mount -t tmpfs scratch $PWD/mnt &amp;&amp; findmnt -n -o SOURCE,FSTYPE $PWD/mnt &amp;&amp; touch $PWD/mnt/only-here &amp;&amp; ls $PWD/mnt&quot;
+ls mnt; findmnt -n mnt; echo &quot;findmnt rc=$?&quot;
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">scratch tmpfs
+only-here
+findmnt rc=1
+</code></pre></div>
+<p>Um namespace de PID precisa de <code>--fork</code>, porque o próprio chamador fica no seu namespace de PID
+antigo; só o seu filho se torna PID 1. O <code>--mount-proc</code> volta a montar o <code>/proc</code> para ferramentas
+como <code>ps</code> verem a numeração nova (<em>sem privilégio</em>):</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">unshare -r --pid --fork --mount-proc sh -c &#x27;echo $$; ps -o pid,ppid,comm&#x27;
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">1
+    PID    PPID COMMAND
+      1       0 sh
+      2       1 ps
+</code></pre></div>
+<p>Visto de fora, o mesmo processo tem dois PIDs — o <code>NSpid</code> lista-os do namespace mais externo para
+dentro (<em>sem privilégio</em>):</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">unshare -r -p -f sleep 3 &amp; U=$!; sleep 0.4
+grep -E &#x27;^(Name|NSpid)&#x27; /proc/$(pgrep -P $U)/status; wait
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">Name:	sleep
+NSpid:	953619	1
+</code></pre></div>
+<p>Os namespaces de cgroup e de tempo podem ser experimentados da mesma forma (<code>unshare -r --cgroup
+cat /proc/self/cgroup</code> imprime <code>0::/</code>).</p>
+<h3 id="user-namespaces-and-uid-mapping">User namespaces e mapeamento de uid<a class="hanchor" href="#user-namespaces-and-uid-mapping" aria-label="#">#</a></h3>
+<p>O mapeamento vive em <code>/proc/&lt;pid&gt;/uid_map</code> e <code>gid_map</code>, uma linha por intervalo:
+<code>&lt;primeiro id lá dentro&gt; &lt;primeiro id fora&gt; &lt;contagem&gt;</code>. As regras que moldam os containers
+rootless:</p>
+<ul>
+<li>Os mapas são escritos <strong>uma vez</strong>, por um processo com o privilégio certo sobre o namespace
+  novo — normalmente o pai, enquanto o filho espera.</li>
+<li>Um utilizador sem privilégio pode escrever um <strong>mapa de uma linha do seu próprio uid</strong> (o que o
+  <code>-r</code> fez acima: <code>0 1000 1</code>). Um container cuja imagem corre como uid 101 ou muda a dona de
+  ficheiros para uids de serviço precisa de um <em>intervalo</em>.</li>
+<li>Os intervalos vêm de <code>/etc/subuid</code> e <code>/etc/subgid</code> e são escritos pelos helpers setuid
+  <strong><code>newuidmap</code>/<code>newgidmap</code></strong>, que verificam que o intervalo te pertence.</li>
+</ul>
+<p><em>Sem privilégio</em> (precisa de uma entrada para o teu utilizador em <code>/etc/subuid</code>/<code>/etc/subgid</code>):</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">grep &quot;^$(id -un):&quot; /etc/subuid /etc/subgid
+unshare --user --map-auto --map-root-user cat /proc/self/uid_map
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">/etc/subgid:you:100000:65536
+/etc/subuid:you:100000:65536
+         0       1000          1
+         1     100000      65536
+</code></pre></div>
+<p>O uid 0 lá dentro és tu; os uids 1–65536 lá dentro são os uids do host 100000–165535, que não
+pertencem a ninguém no host. Esse último ponto é a razão pela qual um ficheiro escrito por um
+container como uid 999 não pode ser removido por ti de fora — ver a nota sobre a leitura desses
+ficheiros em <a href="environment.html">Ambiente</a>.</p>
+<p>No Ubuntu 23.10 e posteriores, o <code>kernel.apparmor_restrict_unprivileged_userns=1</code> pode recusar user
+namespaces a binários sem perfil AppArmor. O <code>/usr/bin/unshare</code> tem um; um binário acabado de
+construir num directório arbitrário pode não ter. O sintoma é <code>EPERM</code> no primeiro <code>unshare</code>, que
+parece um bug do programa. O <a href="environment.html">Ambiente</a> cobre a correcção.</p>
+<h3 id="creating-versus-joining-keeping-a-namespace-alive">Criar versus juntar; manter um namespace vivo<a class="hanchor" href="#creating-versus-joining-keeping-a-namespace-alive" aria-label="#">#</a></h3>
+<ul>
+<li><strong>Criar</strong>: <code>unshare(2)</code> (o processo actual move-se para namespaces novos) ou <code>clone(2)</code> com
+  <code>CLONE_NEW*</code> (o filho arranca lá dentro).</li>
+<li><strong>Juntar</strong>: <code>setns(2)</code> sobre um descritor de ficheiro aberto a partir de
+  <code>/proc/&lt;pid&gt;/ns/&lt;tipo&gt;</code>. A ferramenta <code>nsenter(1)</code> embrulha-o.</li>
+</ul>
+<p><strong>Um namespace vive enquanto algo o referenciar</strong>: um processo lá dentro, um descritor de ficheiro
+aberto para o seu ficheiro <code>/proc/&lt;pid&gt;/ns/*</code>, ou um bind mount desse ficheiro (que é o que o
+<code>ip netns add</code> cria debaixo de <code>/run/netns</code>). Quando a última referência desaparece, um network
+namespace e toda interface lá dentro desaparecem.</p>
+<p>Por isso o padrão rootless é um <strong>holder</strong>: um processo pequeno que dorme dentro do namespace para
+o manter vivo, e a que outros se juntam. Consegues fazer isto sem root, porque possuis o user
+namespace que o holder criou (<em>sem privilégio</em>):</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">unshare --user --map-root-user --net sleep 60 &amp;   # the holder; unshare execs sleep
+H=$!; sleep 0.5
+nsenter --target $H --user --net --preserve-credentials sh -c &#x27;ip link add dummy0 type dummy; ip -br link&#x27;
+nsenter --target $H --user --net --preserve-credentials ip -br link    # a second visitor sees it
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">lo               DOWN           00:00:00:00:00:00 &lt;LOOPBACK&gt;
+dummy0           DOWN           ae:1a:b3:4b:88:4c &lt;BROADCAST,NOARP&gt;
+lo               DOWN           00:00:00:00:00:00 &lt;LOOPBACK&gt;
+dummy0           DOWN           ae:1a:b3:4b:88:4c &lt;BROADCAST,NOARP&gt;
+</code></pre></div>
+<p>Quando o <code>sleep</code> termina, o namespace e o <code>dummy0</code> vão com ele.</p>
+<p>Os equivalentes privilegiados, <strong>exige root — corre numa VM descartável</strong> (não executados nesta
+revisão):</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">ip netns add lab                 # a named netns, pinned by a bind mount in /run/netns
+ip netns exec lab ip link        # run a command in it
+nsenter --target &lt;pid&gt; --net --mount ip addr   # join another user&#x27;s process&#x27;s namespaces
+ip netns del lab
+</code></pre></div>
+<h3 id="best-practices">Boas práticas<a class="hanchor" href="#best-practices" aria-label="#">#</a></h3>
+<ul>
+<li><strong>Em rootless, empareja sempre o network namespace com um user namespace.</strong> Sem ele não tens
+  <code>CAP_NET_ADMIN</code> sobre o namespace novo; com ele tens, e nada vaza para o host.</li>
+<li><strong>Cria o user namespace primeiro</strong> (ou no mesmo <code>clone</code>): todo outro namespace pertence ao user
+  namespace em que foi criado, e essa posse decide quem o pode configurar.</li>
+<li><strong>Mantém um holder</strong> para tudo o que tenha de sobreviver a um comando, e trata o holder como um
+  processo com dono e pidfile, não como um acidente.</li>
+<li><strong>Junta-te, não recries.</strong> Recriar um namespace que ainda tem membros vivos corta-os fora.</li>
+<li><strong>Compara inodes, nunca nomes ou PIDs</strong>, para decidires «o mesmo namespace».</li>
+<li><strong>Limpa</strong> o que nomeares: <code>ip netns del</code>, desmonta bind mounts, e deixa os holders sair.</li>
+</ul>
+<p>→ <a href="cloud-native-primer.html#41-linux-namespaces-and-rootless-operation">Como o Delonix usa isto: namespaces do Linux e funcionamento
+rootless</a> e <a href="cloud-native-primer.html#45-container-networking">Rede de
+containers</a>.</p>
+<p><strong>Ler mais:</strong> <a href="https://man7.org/linux/man-pages/man7/namespaces.7.html"><code>namespaces(7)</code></a>,
+<a href="https://man7.org/linux/man-pages/man7/user_namespaces.7.html"><code>user_namespaces(7)</code></a>,
+<a href="https://man7.org/linux/man-pages/man7/pid_namespaces.7.html"><code>pid_namespaces(7)</code></a>,
+<a href="https://man7.org/linux/man-pages/man7/network_namespaces.7.html"><code>network_namespaces(7)</code></a>,
+<a href="https://man7.org/linux/man-pages/man1/unshare.1.html"><code>unshare(1)</code></a>,
+<a href="https://man7.org/linux/man-pages/man1/nsenter.1.html"><code>nsenter(1)</code></a>,
+<a href="https://man7.org/linux/man-pages/man2/setns.2.html"><code>setns(2)</code></a>,
+<a href="https://man7.org/linux/man-pages/man1/newuidmap.1.html"><code>newuidmap(1)</code></a>,
+<a href="https://man7.org/linux/man-pages/man5/subuid.5.html"><code>subuid(5)</code></a>.</p>
+<hr />
+<h2 id="cgroups-v2">cgroups v2<a class="hanchor" href="#cgroups-v2" aria-label="#">#</a></h2>
+<p>Um <strong>control group</strong> é um conjunto de processos ao qual se aplicam limites de recurso e
+contabilidade. O cgroup v2 é <strong>uma árvore unificada</strong> montada em <code>/sys/fs/cgroup</code>: um directório é
+um cgroup, um processo pertence a exactamente um, e os ficheiros no directório são a interface.</p>
+<ul>
+<li><code>cgroup.controllers</code> — os controladores <strong>disponíveis</strong> neste cgroup (concedidos pelo pai).</li>
+<li><code>cgroup.subtree_control</code> — os controladores <strong>activados para os filhos</strong> deste cgroup. Escrever
+  <code>+memory</code> lá cria ficheiros <code>memory.*</code> em cada filho.</li>
+<li><code>cgroup.procs</code> — os PIDs neste cgroup. Escrever um PID move esse processo (só esse processo; os
+  seus filhos existentes ficam onde estão).</li>
+<li>Ficheiros de controlador: <code>memory.max</code>, <code>memory.high</code>, <code>memory.events</code>, <code>memory.peak</code>, <code>cpu.max</code>
+  (<code>&lt;quota&gt; &lt;período&gt;</code> em microsegundos, ou <code>max</code>), <code>cpu.weight</code>, <code>cpu.stat</code>, <code>pids.max</code>, e os
+  ficheiros de pressão <code>cpu.pressure</code>, <code>memory.pressure</code>, <code>io.pressure</code> (PSI).</li>
+</ul>
+<h3 id="the-no-internal-processes-rule">A regra «sem processos internos»<a class="hanchor" href="#the-no-internal-processes-rule" aria-label="#">#</a></h3>
+<p>Um cgroup que <strong>tem processos</strong> não pode activar controladores para os seus filhos, e um cgroup que
+distribui recursos a filhos mantém os seus processos em folhas. Na prática: os processos vivem em
+<strong>folhas</strong>, e um gestor que queira criar filhos para os seus próprios processos tem primeiro de se
+mover para uma folha. O kernel reporta uma violação como <code>EBUSY</code>.</p>
+<h3 id="delegation-to-users">Delegação a utilizadores<a class="hanchor" href="#delegation-to-users" aria-label="#">#</a></h3>
+<p>Só o root consegue escrever na árvore de cgroups por omissão. O systemd <strong>delega</strong> uma subárvore a
+um utilizador ao mudar o dono dela: na maioria dos hosts o <code>user@&lt;uid&gt;.service</code> pertence-te e
+delega alguns controladores. Olha primeiro para a tua própria posição (<em>sem privilégio</em>):</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">CG=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup); echo &quot;$CG&quot;
+cat &quot;$CG/cgroup.controllers&quot;
+U=/sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service
+stat -c &#x27;%U %n&#x27; &quot;$U/cgroup.subtree_control&quot;; cat &quot;$U/cgroup.subtree_control&quot;
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/app-….scope
+memory pids
+you /sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/cgroup.subtree_control
+cpu memory pids
+</code></pre></div>
+<p>Dois factos que vale a pena reparar neste host: o scope da shell não tem controlador <code>cpu</code> (por
+isso <code>cpu.max</code> não existe lá), e o <code>cpuset</code>/<code>io</code> não são delegados ao utilizador de todo — o slice
+raiz não os passa para baixo.</p>
+<p><strong>Porque é que uma sessão SSH não consegue definir limites.</strong> Um login por SSH aterra em
+<code>session-&lt;n&gt;.scope</code>, que é um <em>irmão</em> de <code>user@&lt;uid&gt;.service</code>, não um filho. Mover um PID entre
+dois cgroups exige acesso de escrita ao <code>cgroup.procs</code> do seu <strong>antepassado comum</strong>; aqui isso é
+<code>user-&lt;uid&gt;.slice</code>, propriedade do root. Por isso um programa arrancado por SSH não se consegue pôr
+debaixo da subárvore delegada, e os limites que tenta definir não têm para onde ir. A correcção é
+pedir ao systemd um scope delegado.</p>
+<h3 id="hands-on-a-limited-command-in-a-user-scope">À mão: um comando limitado num scope de utilizador<a class="hanchor" href="#hands-on-a-limited-command-in-a-user-scope" aria-label="#">#</a></h3>
+<p>O <code>systemd-run --user --scope</code> corre um comando num scope transitório novo debaixo do teu gestor de
+utilizador, com propriedades de controlo de recurso aplicadas (<em>sem privilégio</em>):</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">systemd-run --user --scope -q -p MemoryMax=64M -p CPUQuota=20% sh -c &#x27;
+  C=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup); echo &quot;$C&quot;
+  cat &quot;$C/memory.max&quot; &quot;$C/cpu.max&quot;
+  cat &quot;$C/cpu.pressure&quot;
+  head -3 &quot;$C/cpu.stat&quot;&#x27;
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/run-r4b0….scope
+67108864
+20000 100000
+some avg10=0.00 avg60=0.00 avg300=0.00 total=35
+full avg10=0.00 avg60=0.00 avg300=0.00 total=35
+usage_usec 6398
+user_usec 1066
+system_usec 5331
+</code></pre></div>
+<p>O <code>CPUQuota=20%</code> tornou-se <code>cpu.max = 20000 100000</code>: 20 ms de CPU por período de 100 ms.</p>
+<p>Agora provoca um OOM kill e lê a evidência <strong>antes de o cgroup desaparecer</strong>. Um scope transitório é
+removido assim que o seu último processo sai, por isso a leitura tem de acontecer de dentro dele.
+Dois detalhes importam: <code>MemorySwapMax=0</code> (senão a alocação simplesmente vai para swap), e
+<code>OOMPolicy=continue</code> (a omissão do systemd para um scope é parar o scope <em>inteiro</em> quando um
+processo é morto por OOM — o leitor também morreria; sem isto este comando só imprimia
+<code>Terminated</code>) (<em>sem privilégio</em>):</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">systemd-run --user --scope -q -p MemoryMax=32M -p MemorySwapMax=0 -p OOMPolicy=continue sh -c &#x27;
+  python3 -c &quot;b = bytearray(128 * 1024 * 1024)&quot;; echo &quot;python exit=$?&quot;
+  C=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup); cat &quot;$C/memory.events&quot;&#x27;
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">Killed
+python exit=137
+low 0
+high 0
+max 51
+oom 1
+oom_kill 1
+oom_group_kill 0
+sock_throttled 0
+</code></pre></div>
+<p>O código de saída 137 é 128 + 9 (SIGKILL). O <strong>único</strong> sítio que diz «isto foi um OOM kill e não um
+<code>kill -9</code>» é o <code>oom_kill</code> em <code>memory.events</code> — e desaparece assim que o cgroup é removido.</p>
+<p>Por fim, vê a regra «sem processos internos» e a delegação de uma só vez, dentro de um scope que o
+systemd te delega (<code>Delegate=yes</code>) (<em>sem privilégio</em>):</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">systemd-run --user --scope -q -p Delegate=yes sh -c &#x27;
+  C=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)
+  mkdir &quot;$C/leaf&quot;
+  env printf &quot;+memory&quot; &gt; &quot;$C/cgroup.subtree_control&quot; || echo &quot;refused: this cgroup still has processes&quot;
+  echo $$ &gt; &quot;$C/leaf/cgroup.procs&quot; &amp;&amp; echo &quot;moved self into leaf&quot;
+  echo &quot;+memory +pids&quot; &gt; &quot;$C/cgroup.subtree_control&quot; &amp;&amp; echo &quot;controllers enabled for children&quot;
+  echo 16M &gt; &quot;$C/leaf/memory.max&quot;; cat &quot;$C/leaf/memory.max&quot;&#x27;
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">printf: write error: Device or resource busy
+refused: this cgroup still has processes
+moved self into leaf
+controllers enabled for children
+16777216
+</code></pre></div>
+<p>Os mesmos passos sem systemd, <strong>exige root — corre numa VM descartável</strong> (não executados nesta
+revisão):</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">mkdir /sys/fs/cgroup/lab
+echo &quot;+memory +pids&quot; &gt; /sys/fs/cgroup/cgroup.subtree_control   # usually already enabled at the root
+mkdir /sys/fs/cgroup/lab/work
+echo 64M &gt; /sys/fs/cgroup/lab/work/memory.max
+echo &lt;pid&gt; &gt; /sys/fs/cgroup/lab/work/cgroup.procs
+cat /sys/fs/cgroup/lab/work/memory.events
+# cleanup: the cgroup must be empty before rmdir
+echo &lt;pid&gt; &gt; /sys/fs/cgroup/cgroup.procs; rmdir /sys/fs/cgroup/lab/work /sys/fs/cgroup/lab
+</code></pre></div>
+<h3 id="best-practices_1">Boas práticas<a class="hanchor" href="#best-practices_1" aria-label="#">#</a></h3>
+<ul>
+<li><strong>Uma folha por workload.</strong> Os limites, a contabilidade e a evidência de OOM pertencem então a
+  exactamente uma coisa.</li>
+<li><strong>Define os limites e move o processo para dentro <em>antes</em> de ele começar a correr o seu
+  programa.</strong> Uma migração move um processo, nunca os seus descendentes; qualquer coisa que tenha
+  feito fork antes da mudança fica fora do limite para sempre.</li>
+<li><strong>Lê o <code>memory.events</code> para OOM</strong>, e lê-o enquanto o cgroup ainda existe — a partir do processo
+  que espera pelo workload, não depois.</li>
+<li><strong>Não escrevas em controladores ou cgroups que não possuis.</strong> Um cgroup delegado a ti é teu; o
+  seu pai não é. Num host partilhado, nunca toques em <code>/sys/fs/cgroup</code> fora da tua própria
+  subárvore.</li>
+<li><strong>Verifica o dono do <code>cgroup.subtree_control</code></strong>, não a presença de um nome de controlador, para
+  saberes se tens mesmo delegação.</li>
+<li><strong>Usa o PSI (<code>*.pressure</code>)</strong> para ver contenção antes de se tornar um OOM ou um incidente de
+  latência.</li>
+</ul>
+<p>→ <a href="cloud-native-primer.html#42-cgroups-v2-and-delegation">Como o Delonix usa isto: cgroups v2 e delegação</a>.</p>
+<p><strong>Ler mais:</strong> <a href="https://www.kernel.org/doc/Documentation/admin-guide/cgroup-v2.rst">kernel.org — Control Group v2
+(<code>cgroup-v2.rst</code>)</a>,
+<a href="https://man7.org/linux/man-pages/man7/cgroups.7.html"><code>cgroups(7)</code></a>,
+<a href="https://man7.org/linux/man-pages/man5/systemd.resource-control.5.html"><code>systemd.resource-control(5)</code></a>,
+<a href="https://man7.org/linux/man-pages/man1/systemd-run.1.html"><code>systemd-run(1)</code></a>,
+<a href="https://systemd.io/CGROUP_DELEGATION/">systemd — Control Group APIs and Delegation</a>,
+<a href="https://docs.kernel.org/accounting/psi.html">kernel — PSI</a>.</p>
+<hr />
+<h2 id="file-descriptors">Descritores de ficheiro<a class="hanchor" href="#file-descriptors" aria-label="#">#</a></h2>
+<p>Um <strong>descritor de ficheiro</strong> é um pequeno inteiro que indexa uma <strong>tabela por-processo</strong>. Cada
+entrada aponta para uma <strong>descrição de ficheiro aberto</strong> no kernel — que guarda o offset do
+ficheiro e as flags de estado (<code>O_APPEND</code>, <code>O_NONBLOCK</code>, …) — e essa descrição aponta para o objecto
+subjacente: um inode para um ficheiro normal, ou um pipe, um socket, um contador de eventos, um
+processo.</p>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="nohighlight">process fd table          kernel                         object
+  3 ─────────────┐
+                 ├──► open file description ──────────► inode / pipe / socket / …
+  7 (dup of 3) ──┘     (offset, O_APPEND, …)
+</code></pre></div>
+<p>Consequências que mordem em código real:</p>
+<ul>
+<li><strong><code>dup</code>/<code>dup2</code> e <code>fork</code> partilham a descrição de ficheiro aberto</strong>: dois fds (ou dois processos)
+  movem o mesmo offset. Abrir o mesmo caminho duas vezes dá duas descrições com offsets
+  independentes.</li>
+<li>A flag <strong>close-on-exec</strong> (<code>FD_CLOEXEC</code>) é por <em>descritor</em>, não por descrição: vive na entrada da
+  tabela e define-se com <code>O_CLOEXEC</code> no <code>open</code>, <code>SOCK_CLOEXEC</code> no <code>socket</code>, <code>pipe2(…,
+  O_CLOEXEC)</code>, ou <code>fcntl(fd, F_SETFD, FD_CLOEXEC)</code> depois. A janela entre <code>open</code> e <code>fcntl</code> é uma
+  corrida num programa multi-thread; usa a flag atómica.</li>
+<li>Os fds <strong>0, 1, 2</strong> são stdin, stdout e stderr só por convenção; são herdados como qualquer outro
+  fd.</li>
+<li>Tudo com que um processo fala é um fd: ficheiros, <strong>pipes</strong> (<code>pipe2</code>), <strong>sockets</strong> incluindo
+  <strong>sockets unix</strong>, <strong>pidfds</strong> (uma referência estável a um processo, <code>pidfd_open</code>), <strong>memfds</strong>
+  (memória anónima com uma interface de ficheiro, <code>memfd_create</code>), <strong>eventfds</strong> (um contador para
+  wakeups), instâncias epoll, referências de namespace abertas de <code>/proc/&lt;pid&gt;/ns</code>.</li>
+<li><strong>Um pipe só chega a EOF quando toda cópia da sua ponta de escrita estiver fechada</strong>, em todo
+  processo. Uma cópia esquecida num filho de vida longa e o leitor bloqueia para sempre.</li>
+</ul>
+<h3 id="hands-on-in-bash">À mão em bash<a class="hanchor" href="#hands-on-in-bash" aria-label="#">#</a></h3>
+<p>Abre, escreve, inspecciona e fecha um descritor (<em>sem privilégio</em>):</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">bash -c &#x27;
+exec 3&lt;&gt;notes.txt          # open read-write as fd 3
+echo hello &gt;&amp;3
+ls -l /proc/$$/fd | tail -n +2
+cat /proc/$$/fdinfo/3
+exec 3&gt;&amp;-                  # close fd 3
+ls /proc/$$/fd
+cat notes.txt&#x27;
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">lrwx------ 1 you you 64 … 0 -&gt; socket:[464860423]
+l-wx------ 1 you you 64 … 1 -&gt; …
+l-wx------ 1 you you 64 … 2 -&gt; …
+lrwx------ 1 you you 64 … 3 -&gt; /home/you/scratch/linux-lab/notes.txt
+pos:	6
+flags:	0100002
+mnt_id:	34
+ino:	21761577
+0
+1
+2
+hello
+</code></pre></div>
+<p><code>flags</code> está em octal: <code>02</code> é <code>O_RDWR</code>, <code>0100000</code> é <code>O_LARGEFILE</code>. Não há <code>02000000</code>
+(<code>O_CLOEXEC</code>): <strong>os fds abertos pela shell são herdados</strong> por todo comando que ela corre. Consegues
+vê-lo (<em>sem privilégio</em>):</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">bash -c &#x27;exec 3&gt;inherited.txt; ls -l /proc/self/fd | awk &quot;NR&gt;1{print \$9,\$10,\$11}&quot;&#x27;
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">0 -&gt; socket:[464878621]
+1 -&gt; pipe:[464854925]
+2 -&gt; …
+3 -&gt; /home/you/scratch/linux-lab/inherited.txt
+4 -&gt; /proc/953134/fd
+</code></pre></div>
+<p>O <code>ls</code> recebeu o fd 3 da shell sem o pedir (o fd 4 é o directório que o próprio <code>ls</code> abriu).</p>
+<p><strong>A ordem do redirecionamento importa</strong>, porque cada redirecionamento é um <code>dup2</code> aplicado da
+esquerda para a direita (<em>sem privilégio</em>):</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">( echo out; echo err &gt;&amp;2 ) &gt;both.log 2&gt;&amp;1      # stdout → file, then stderr → where stdout is now
+cat both.log
+( echo out; echo err &gt;&amp;2 ) 2&gt;&amp;1 &gt;only-out.log  # stderr → where stdout is NOW (the terminal), then stdout → file
+cat only-out.log
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">out
+err
+err
+out
+</code></pre></div>
+<p>A primeira forma põe as duas linhas no ficheiro. Na segunda, o <code>err</code> foi para o terminal (a linha
+solitária <code>err</code>) e só o <code>out</code> chegou ao ficheiro.</p>
+<p><strong>Um pipe como um fd numerado</strong>, usando substituição de processo e um número de fd escolhido
+automaticamente (<em>sem privilégio</em>):</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">bash -c &#x27;
+exec {fd}&lt; &lt;(printf &quot;line1\nline2\n&quot;)
+echo &quot;fd=$fd&quot;; readlink /proc/$$/fd/$fd
+read -r first &lt;&amp;$fd; echo &quot;$first&quot;
+exec {fd}&lt;&amp;-&#x27;
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">fd=10
+pipe:[464865935]
+line1
+</code></pre></div>
+<p><strong>Named pipes e sockets unix</strong> a partir da linha de comandos (<em>sem privilégio</em>; o <code>nc</code> aqui é o
+netcat do OpenBSD, onde <code>-U</code> significa socket unix e <code>-N</code> fecha a ligação no fim do input):</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">mkfifo pipe.fifo
+( echo &quot;through the fifo&quot; &gt; pipe.fifo &amp; ); cat pipe.fifo; rm pipe.fifo
+
+nc -lU s.sock &gt; got.txt &amp; sleep 0.3
+printf &#x27;ping\n&#x27; | nc -NU s.sock; wait; cat got.txt; rm -f s.sock got.txt
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">through the fifo
+ping
+</code></pre></div>
+<p>O <code>socat</code> oferece o mesmo e mais (<code>socat - UNIX-CONNECT:s.sock</code>); não estava instalado no host
+usado para esta página, por isso essa forma não é verificada aqui.</p>
+<p><strong>Os outros tipos de fd, e close-on-exec por omissão.</strong> O Python abre tudo com <code>O_CLOEXEC</code> a não
+ser que lhe digam o contrário, o que o torna um laboratório conveniente (<em>sem privilégio</em>):</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">python3 - &lt;&lt;&#x27;EOF&#x27;
+import os, subprocess
+a = os.open(&quot;cloexec.txt&quot;, os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC, 0o600)
+b = os.open(&quot;inherit.txt&quot;, os.O_WRONLY | os.O_CREAT, 0o600); os.set_inheritable(b, True)
+print(&quot;parent:&quot;, a, &quot;cloexec.txt |&quot;, b, &quot;inherit.txt&quot;)
+print(subprocess.run([&quot;sh&quot;, &quot;-c&quot;, &quot;ls -l /proc/$$/fd | awk &#x27;NR&gt;1{print $9, $11}&#x27;&quot;],
+                     capture_output=True, text=True, close_fds=False).stdout)
+for name, fd in [(&quot;pidfd&quot;, os.pidfd_open(os.getpid())), (&quot;memfd&quot;, os.memfd_create(&quot;scratch&quot;)),
+                 (&quot;eventfd&quot;, os.eventfd(0))]:
+    print(name, &quot;-&gt;&quot;, os.readlink(f&quot;/proc/self/fd/{fd}&quot;))
+EOF
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">parent: 3 cloexec.txt | 4 inherit.txt
+0 pipe:[464869577]
+1 pipe:[464879797]
+2 pipe:[464879798]
+4 …/inherit.txt
+
+pidfd -&gt; anon_inode:[pidfd]
+memfd -&gt; /memfd:scratch (deleted)
+eventfd -&gt; anon_inode:[eventfd]
+</code></pre></div>
+<p>O shell filho recebeu o fd 4 e <strong>não</strong> o fd 3: o close-on-exec fez o seu trabalho no <code>execve</code>.</p>
+<p>Para inspeccionar os descritores de outro processo, usa <code>/proc/&lt;pid&gt;/fd</code> e
+<code>/proc/&lt;pid&gt;/fdinfo/&lt;fd&gt;</code>, ou <code>lsof -p &lt;pid&gt;</code> (<em>sem privilégio</em>, para os teus próprios processos):</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">lsof -p $$ | head -4
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">COMMAND    PID   USER   FD   TYPE             DEVICE SIZE/OFF      NODE NAME
+bash    953131   you     0u  unix 0x0000000000000000      0t0 464878621 type=STREAM (CONNECTED)
+bash    953131   you     1w   REG              259,4      827  21672530 …
+bash    953131   you     2w   REG              259,4      827  21672530 …
+</code></pre></div>
+<p>Rastrear que fds um programa abre e fecha é <code>strace -f -e trace=openat,close,dup2,pipe2,execve
+&lt;cmd&gt;</code> (não exercitado para esta página).</p>
+<h3 id="limits">Limites<a class="hanchor" href="#limits" aria-label="#">#</a></h3>
+<p>(<em>sem privilégio</em>)</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">ulimit -n; ulimit -Hn
+cat /proc/sys/fs/file-nr /proc/sys/fs/file-max /proc/sys/fs/nr_open
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">1048576
+1048576
+66730	0	9223372036854775807
+9223372036854775807
+1048576
+</code></pre></div>
+<ul>
+<li>O <code>ulimit -n</code> é o <code>RLIMIT_NOFILE</code> para <em>este</em> processo: o brando, depois o duro. É herdado
+  através de <code>fork</code>/<code>exec</code>; as units do systemd definem-no com <code>LimitNOFILE=</code>. Muitos hosts têm o
+  limite brando por omissão a 1024 — este não, por isso não assumas que os teus números coincidem.</li>
+<li>O <code>fs.nr_open</code> é o tecto até onde o limite duro de qualquer processo pode ser subido.</li>
+<li>O <code>file-nr</code> é <em>handles alocados, não usados, máximo</em> de todo o sistema.</li>
+<li><code>EMFILE</code> significa que o teu processo esgotou; <code>ENFILE</code> significa que o sistema esgotou.</li>
+</ul>
+<h3 id="best-practices-for-engine-code">Boas práticas para código do motor<a class="hanchor" href="#best-practices-for-engine-code" aria-label="#">#</a></h3>
+<ul>
+<li><strong>CLOEXEC em todo o lado.</strong> Abre com <code>O_CLOEXEC</code>, cria pipes com <code>pipe2(…, O_CLOEXEC)</code>, sockets
+  com <code>SOCK_CLOEXEC</code>. A biblioteca padrão do Rust já o faz para o que abre; chamadas <code>libc</code> cruas
+  não. No motor, vê os pipes de prontidão e de exec no <code>spawn</code>
+  (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>), cujo comentário explica que o <code>O_CLOEXEC</code> na
+  ponta de escrita é o que transforma «o filho morreu, ou fez exec sem escrever» num EOF a que o
+  pai consegue reagir; o mesmo <code>pipe2(…, O_CLOEXEC)</code> aparece no <code>pipe</code> em
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/pin_userns.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/pin_userns.rs</code></a>, e o <code>OFlag::O_CLOEXEC</code> no <code>exec_with</code> e no
+  <code>open_container_ns</code> no <code>delonix-linux</code>.</li>
+<li><strong>Um filho que faz fork mas nunca exec tem de fechar o que herdou.</strong> O CLOEXEC só actua no
+  <code>execve</code>. O shim de logs do motor é exactamente esse filho: fecha tudo excepto os fds de que
+  precisa com <code>close_range</code> logo a seguir ao fork — ver <code>close_range_raw</code> e o seu ponto de chamada
+  no <code>spawn</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>). O <code>close_range_raw</code> chama a syscall
+  pelo número porque o wrapper <code>libc</code> só existe para alvos glibc.</li>
+<li><strong>Nunca deixes vazar um pipe ou o stdio do chamador para um filho de vida longa.</strong> Dois
+  incidentes reais estão registados no <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>: o shim de logs a segurar
+  outras ligações HTTP de um servidor de longa duração abertas (secção <em>«CLI (<code>delonix</code>)»</em>, a
+  entrada <code>delonix serve docker-api</code>), e o pin de rede (o processo holder de vida longa do
+  network namespace rootless do motor — o padrão holder mostrado em
+  <a href="#creating-versus-joining-keeping-a-namespace-alive">Namespaces</a>) a herdar o stderr do chamador,
+  por isso <code>out=$(delonix …)</code> nunca via EOF — corrigido escrevendo para <code>pin.log</code> (secção «A
+  classe «X não é Y» — varredura de 2026-08-05»; código: <code>start_pin</code> e <code>pin_log_path</code> em
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>).</li>
+<li><strong>Sinaliza um processo através de um pidfd, não de um PID.</strong> Um PID colhido pode ser reutilizado;
+  um pidfd refere-se a um processo durante toda a sua vida. Ver
+  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0027-pidfd-for-killing-exec-children.md" target="_blank" rel="noopener">ADR-0027</a> e <code>ChildHandle</code> (<code>open</code>, <code>kill</code>) em
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/child_handle.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/child_handle.rs</code></a>. Onde só existe um PID guardado, compara
+  primeiro a hora de arranque: <code>safe_to_signal</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/host.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-node/src/host.rs</code></a>.</li>
+<li><strong>Limita os fds sob carga.</strong> Um servidor que abre um descritor por pedido tem de o fechar em
+  todo caminho, incluindo erros e timeouts, e tem de tratar <code>EMFILE</code> como contra-pressão, não como
+  um crash.</li>
+<li><strong>Depois de um <code>fork</code> num processo multi-thread, só trabalho async-signal-safe</strong> (fechar fds,
+  <code>dup2</code>, <code>execve</code>, <code>_exit</code>) — nada de alocação, nada de locks.</li>
+</ul>
+<p>→ <a href="cloud-native-primer.html#43-capabilities-seccomp-apparmor-masked-paths">Como o Delonix usa isto: Capabilities, seccomp, AppArmor, caminhos
+mascarados</a> (a lista do
+filtro de syscalls inclui <code>close_range</code>, <code>memfd_create</code> e <code>eventfd2</code>), e <a href="cloud-native-primer.html#410-daemonless-in-one-paragraph">Daemonless, num
+parágrafo</a> para porque é que os processos
+por-workload não podem segurar o que não possuem.</p>
+<p><strong>Ler mais:</strong> <a href="https://man7.org/linux/man-pages/man2/open.2.html"><code>open(2)</code></a>,
+<a href="https://man7.org/linux/man-pages/man2/fcntl.2.html"><code>fcntl(2)</code></a>,
+<a href="https://man7.org/linux/man-pages/man2/dup.2.html"><code>dup(2)</code></a>,
+<a href="https://man7.org/linux/man-pages/man2/pipe.2.html"><code>pipe(2)</code></a>,
+<a href="https://man7.org/linux/man-pages/man2/close_range.2.html"><code>close_range(2)</code></a>,
+<a href="https://man7.org/linux/man-pages/man2/pidfd_open.2.html"><code>pidfd_open(2)</code></a>,
+<a href="https://man7.org/linux/man-pages/man2/memfd_create.2.html"><code>memfd_create(2)</code></a>,
+<a href="https://man7.org/linux/man-pages/man2/eventfd.2.html"><code>eventfd(2)</code></a>,
+<a href="https://man7.org/linux/man-pages/man7/unix.7.html"><code>unix(7)</code></a>,
+<a href="https://man7.org/linux/man-pages/man2/getrlimit.2.html"><code>getrlimit(2)</code></a>,
+<a href="https://www.gnu.org/software/bash/manual/html_node/Redirections.html">manual do bash — Redirecionamentos</a>.</p>
+<hr />
+<h2 id="signals-and-process-lifetime">Sinais e o tempo de vida de um processo<a class="hanchor" href="#signals-and-process-lifetime" aria-label="#">#</a></h2>
+<ul>
+<li>O <strong><code>SIGTERM</code></strong> pede a um processo para sair; pode ser apanhado, e um serviço bem-comportado
+  limpa-se. O <strong><code>SIGKILL</code></strong> não pode ser apanhado nem ignorado. Uma paragem graciosa é «<code>SIGTERM</code>,
+  espera um tempo limitado, depois <code>SIGKILL</code>» — o <code>stop</code> em
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> faz exactamente isso.</li>
+<li><strong>O PID 1 num namespace de PID é especial</strong>: sinais enviados a ele de <em>dentro</em> do seu namespace
+  são ignorados a não ser que ele tenha instalado um handler, e até um <code>SIGKILL</code> de dentro não faz
+  nada (<em>sem privilégio</em>):</li>
+</ul>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">unshare -r -p -f --mount-proc sh -c &#x27;kill -TERM 1; kill -KILL 1; echo &quot;pid $$ survived its own SIGTERM and SIGKILL&quot;&#x27;
+sh -c &#x27;kill -TERM $$; echo not reached&#x27;; echo &quot;rc=$?&quot;
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">pid 1 survived its own SIGTERM and SIGKILL
+Terminated
+rc=143
+</code></pre></div>
+<p>Por isso um container cujo PID 1 não tem handler de <code>SIGTERM</code> não pára com <code>SIGTERM</code>, e a
+  paragem acaba em <code>SIGKILL</code>. Quando o PID 1 de um namespace sai, o kernel mata todo outro
+  processo lá dentro.
+- <strong>Zombies.</strong> Um filho que saiu fica como zombie até o seu pai colher o estado com
+  <code>wait</code>/<code>waitpid</code>/<code>waitid</code>. Um pai que nunca espera acumula zombies (<em>sem privilégio</em>):</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">sh -c &#x27;sleep 0.2 &amp; exec sleep 2&#x27; &amp; P=$!; sleep 1
+ps -o pid,ppid,stat,comm --ppid $P; wait
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">    PID    PPID STAT COMMAND
+ 953503  953501 Z    sleep
+</code></pre></div>
+<p>A shell fez fork de um <code>sleep</code>, depois fez <code>exec</code> para outro <code>sleep</code> que nunca espera: o filho
+  fica no estado <code>Z</code> até o seu pai sair.
+- <strong>Só o pai consegue esperar.</strong> É por isso que um motor sem daemon continua a precisar de um
+  pequeno <strong>supervisor</strong> por workload destacado: o processo que fez fork do workload é o único
+  que consegue ler o seu estado de saída real e, para OOM, ler o <code>memory.events</code> antes de o
+  cgroup ser removido. Ver <code>run_supervised</code> em
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/supervise.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/supervise.rs</code></a> e <code>wait_and_record</code> em
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>.
+- <strong>Um servidor de longa duração tem de colher os seus filhos</strong>, e não pode colher filhos que
+  outra coisa esteja à espera. O reaper do shim da API Docker espreita com <code>WNOWAIT</code> por essa
+  razão (<code>spawn_zombie_reaper</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/dockerapi.rs</code></a>); o histórico
+  está no <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, secções <em>«CLI (<code>delonix</code>)»</em> e <em>«Auditoria de segurança
+  #3 (2026-08-10)»</em>.</p>
+<p><strong>Ler mais:</strong> <a href="https://man7.org/linux/man-pages/man7/signal.7.html"><code>signal(7)</code></a>,
+<a href="https://man7.org/linux/man-pages/man7/pid_namespaces.7.html"><code>pid_namespaces(7)</code></a>,
+<a href="https://man7.org/linux/man-pages/man2/wait.2.html"><code>wait(2)</code></a>,
+<a href="https://man7.org/linux/man-pages/man2/pidfd_send_signal.2.html"><code>pidfd_send_signal(2)</code></a>.</p>
+<hr />
+<h2 id="putting-it-together">Juntando tudo<a class="hanchor" href="#putting-it-together" aria-label="#">#</a></h2>
+<p>Um container rootless é os primitivos acima, aplicados numa ordem estrita. A sequência abaixo
+segue o <code>spawn</code> e o <code>container_init</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>; a ordem não é
+cosmética, e os comentários lá explicam a corrida que cada passo fecha.</p>
+<blockquote>
+<p><strong>Legenda</strong> — os participantes são processos (e o kernel); as setas sólidas são chamadas de
+sistema ou escritas; as setas tracejadas são respostas ou eventos de pipe; as notas marcam
+estado que se torna verdadeiro nesse ponto.</p>
+</blockquote>
+<p>A figura mostra que o pai configura a identidade, o cgroup e a rede <strong>enquanto o filho está
+bloqueado</strong>, e que o filho só reporta «pronto» depois de o seu sistema de ficheiros estar final.</p>
+<pre class="mermaid">sequenceDiagram
+    participant P as delonix (parent, spawn)
+    participant K as Linux kernel
+    participant C as container init (container_init)
+    P-&gt;&gt;K: pipe2(O_CLOEXEC) x2 (readiness, exec) + sync pipe
+    P-&gt;&gt;K: clone(CLONE_NEWUSER | NEWNS | NEWPID | NEWNET | NEWUTS | NEWIPC ...)
+    K--&gt;&gt;C: child starts in new namespaces, blocked on sync pipe
+    P-&gt;&gt;K: write_userns_maps: uid_map/gid_map (newuidmap for a subuid range)
+    P-&gt;&gt;K: setup_cgroup: create leaf, set limits, write pid to cgroup.procs
+    Note over P,C: limits apply before any program code runs
+    P-&gt;&gt;C: network hook, then &quot;GO&quot; byte on sync pipe
+    C-&gt;&gt;K: setup_rootfs: overlay mount, binds, pivot_root
+    C--&gt;&gt;P: readiness byte (mounts are final)
+    C-&gt;&gt;K: drop capabilities, seccomp filter
+    C-&gt;&gt;K: execvp(entrypoint), CLOEXEC fds close
+    K--&gt;&gt;P: EOF on exec pipe = program started
+</pre>
+<p>Passo a passo, no vocabulário desta página:</p>
+<ol>
+<li><strong>Descritores de ficheiro primeiro.</strong> Os pipes que coordenam pai e filho são criados
+   close-on-exec, por isso as cópias do filho desaparecem no <code>execvp</code> e um filho morto lê-se como
+   EOF, nunca como um bloqueio.</li>
+<li><strong>User namespace</strong>, criado no mesmo <code>clone</code> que os outros, para o possuir.</li>
+<li><strong>Mapas de uid/gid</strong>, escritos pelo pai enquanto o filho espera (um processo não se consegue
+   mapear a si próprio com utilidade).</li>
+<li><strong>Folha de cgroup</strong> com limites, e o PID movido para dentro <em>antes</em> de o programa correr — uma
+   mudança posterior deixaria os filhos iniciais fora do limite.</li>
+<li><strong>Mount namespace → <code>pivot_root</code></strong>: o filho constrói a sua raiz e troca-a, depois sinaliza
+   prontidão, para nada conseguir fazer <code>setns</code> para dentro de um sistema de ficheiros a meio
+   construir.</li>
+<li><strong>Privilégios largados, depois <code>exec</code></strong>, sem nenhum descritor herdado excepto o stdio.</li>
+</ol>
+<p>→ Ver <a href="architecture.html#level-2-containers-executables-and-processes">Arquitectura — Nível 2: executáveis e
+processos</a>, <a href="architecture.html#level-4-two-flows-as-sequences">Arquitectura — Nível 4:
+dois fluxos, como sequências</a>, e o crate
+<a href="crates.html#delonix-linux"><code>delonix-linux</code></a>.</p>
+<hr />
+<h2 id="self-check-exercises">Exercícios de auto-verificação<a class="hanchor" href="#self-check-exercises" aria-label="#">#</a></h2>
+<p>Faz estes no teu directório de rascunho, como o teu utilizador normal.</p>
+<ol>
+<li><strong>Igual ou diferente?</strong> Arranca <code>unshare -r -n sleep 30 &amp;</code>, depois compara <code>readlink
+   /proc/$!/ns/net</code> com <code>readlink /proc/self/ns/net</code>, e <code>…/ns/mnt</code> para os dois. <em>Esperado:</em> os
+   inodes de <code>net</code> diferem; os inodes de <code>mnt</code> são iguais (não pediste um mount namespace).</li>
+<li><strong>Junta-te ao holder.</strong> Com o mesmo <code>sleep</code> a correr, corre <code>nsenter --target $! --user --net
+   --preserve-credentials ip -br link</code>. <em>Esperado:</em> só <code>lo</code>, <code>DOWN</code>. Depois de o <code>sleep</code> sair, o
+   mesmo <code>nsenter</code> falha porque o processo, e com ele o namespace, desapareceu.</li>
+<li><strong>Para onde foi o limite?</strong> Corre <code>systemd-run --user --scope -q -p MemoryMax=48M sh -c 'cat
+   /sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)/memory.max'</code>, depois <code>cat
+   /sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)/memory.max</code> na tua shell normal. <em>Esperado:</em>
+   <code>50331648</code> dentro do scope; fora, <code>max</code> (ou "No such file" se o teu cgroup não tiver
+   controlador de memória).</li>
+<li><strong>Herança em bash.</strong> Corre <code>bash -c 'exec 5&gt;five.txt; ls /proc/self/fd'</code>, depois <code>bash -c
+   'exec 5&gt;five.txt; exec 5&gt;&amp;-; ls /proc/self/fd'</code>. <em>Esperado:</em> o <code>5</code> aparece na primeira listagem
+   (herdado pelo <code>ls</code>, porque a shell não define close-on-exec) e não na segunda; o <code>3</code> nos dois
+   é o directório que o próprio <code>ls</code> abriu.</li>
+<li><strong>Quem segura a ponta de escrita?</strong> Compara os dois comandos e os seus tempos:</li>
+</ol>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">bash -c &#x27;exec {w}&gt; &gt;(cat &gt;/dev/null; echo &quot;reader got EOF at ${SECONDS}s&quot; &gt;&amp;2)
+         sleep 3 &amp; exec {w}&gt;&amp;-; echo &quot;writer closed at ${SECONDS}s&quot;; wait&#x27;
+bash -c &#x27;exec {w}&gt; &gt;(cat &gt;/dev/null; echo &quot;reader got EOF at ${SECONDS}s&quot; &gt;&amp;2)
+         { exec {w}&gt;&amp;-; sleep 3; } &amp; exec {w}&gt;&amp;-; echo &quot;writer closed at ${SECONDS}s&quot;; wait&#x27;
+</code></pre></div>
+<p><em>Esperado:</em> no primeiro, <code>writer closed at 0s</code> e <code>reader got EOF at 3s</code> — o <code>sleep</code> em segundo
+   plano herdou uma cópia da ponta de escrita do pipe, por isso o EOF espera por ele; no segundo,
+   o filho fecha a sua cópia primeiro e o leitor recebe o EOF em <code>0s</code>. É a mesma forma do
+   incidente do pin/stderr. (Não tires o <code>exec {w}&gt;&amp;-</code> no pai: o <code>wait</code> também espera pelo leitor,
+   e um leitor que nunca vê EOF faz o comando pendurar.)</p>
+<hr />
+<p><strong>Seguinte:</strong> <a href="cloud-native-primer.html">Introdução ao cloud native</a> — onde o motor usa cada um destes primitivos, e as especificações abertas (OCI, CNI, CRI, KVM) construídas por cima deles.</p>
+<nav class="pager"><a href="iaas-and-cloud-native.html"><span>← Anterior</span>IaaS e cloud native — onde o motor encaixa</a><a class="next" href="cloud-native-primer.html"><span>Seguinte →</span>Introdução ao cloud native</a></nav>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/pt-AO/linux-foundations.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/linux-foundations.md</code></footer>
+</div></main>
+<aside class="toc"><p class="ttitle">Nesta página</p><div class="toc">
+<ul>
+<li><a href="#processes-the-kernel-and-proc">Processos, o kernel e /proc</a></li>
+<li><a href="#namespaces">Namespaces</a><ul>
+<li><a href="#identity-the-inode-behind-procns">Identidade: o inode por trás de /proc//ns</a></li>
+<li><a href="#hands-on-a-user-mount-uts-network-namespace-without-root">À mão: um namespace de user + mount + UTS + network, sem root</a></li>
+<li><a href="#user-namespaces-and-uid-mapping">User namespaces e mapeamento de uid</a></li>
+<li><a href="#creating-versus-joining-keeping-a-namespace-alive">Criar versus juntar; manter um namespace vivo</a></li>
+<li><a href="#best-practices">Boas práticas</a></li>
+</ul>
+</li>
+<li><a href="#cgroups-v2">cgroups v2</a><ul>
+<li><a href="#the-no-internal-processes-rule">A regra «sem processos internos»</a></li>
+<li><a href="#delegation-to-users">Delegação a utilizadores</a></li>
+<li><a href="#hands-on-a-limited-command-in-a-user-scope">À mão: um comando limitado num scope de utilizador</a></li>
+<li><a href="#best-practices_1">Boas práticas</a></li>
+</ul>
+</li>
+<li><a href="#file-descriptors">Descritores de ficheiro</a><ul>
+<li><a href="#hands-on-in-bash">À mão em bash</a></li>
+<li><a href="#limits">Limites</a></li>
+<li><a href="#best-practices-for-engine-code">Boas práticas para código do motor</a></li>
+</ul>
+</li>
+<li><a href="#signals-and-process-lifetime">Sinais e o tempo de vida de um processo</a></li>
+<li><a href="#putting-it-together">Juntando tudo</a></li>
+<li><a href="#self-check-exercises">Exercícios de auto-verificação</a></li>
+</ul>
+</div>
+</aside>
+</div>
+<div id="search" hidden><div class="sbox" role="dialog" aria-modal="true" aria-label="Pesquisar">
+<div class="sfield"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="search-input" type="search" placeholder="Pesquisar no manual…" autocomplete="off"><kbd>Esc</kbd></div>
+<ul class="sres"></ul>
+<div class="shelp"><span><kbd>↑</kbd> <kbd>↓</kbd></span><span><kbd>Enter</kbd></span></div></div></div>
+<script>window.HANDBOOK_UI={"copy": "Copiar", "copied": "Copiado", "no_results": "Sem resultados"};</script>
+<script src="search-index.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/ini.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/dockerfile.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/protobuf.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/diff.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/makefile.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/xml.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>
+(function(){
+  const ui = window.HANDBOOK_UI;
+  const root = document.documentElement;
+
+  // Theme: system by default; the toggle cycles light/dark and remembers the choice.
+  function effectiveDark(){ const t = root.getAttribute('data-theme'); return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; }
+  document.querySelectorAll('.themebtn').forEach(function(b){
+    b.addEventListener('click', function(){
+      const next = effectiveDark() ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('delonix-handbook-theme', next); } catch (e) {}
+      renderMermaid();
+    });
+  });
+
+  // Mobile navigation drawer.
+  document.querySelectorAll('.menubtn').forEach(function(b){
+    b.addEventListener('click', function(){ document.body.classList.toggle('nav-open'); });
+  });
+  document.querySelectorAll('nav.side a').forEach(function(a){ a.addEventListener('click', function(){ document.body.classList.remove('nav-open'); }); });
+
+  // Copy buttons live in each code block's header; shell blocks drop a leading "$ ".
+  document.querySelectorAll('.code').forEach(function(box){
+    const btn = box.querySelector('.copy'); if (!btn) return;
+    btn.addEventListener('click', function(){
+      let text = box.querySelector('pre code').innerText;
+      if (box.hasAttribute('data-shell')) text = text.split('\n').map(function(l){ return l.replace(/^\$ /, ''); }).join('\n');
+      navigator.clipboard.writeText(text.replace(/\n$/, '')).then(function(){
+        btn.lastChild.textContent = ui.copied; btn.classList.add('done');
+        setTimeout(function(){ btn.lastChild.textContent = ui.copy; btn.classList.remove('done'); }, 1500);
+      });
+    });
+  });
+  if (window.hljs) document.querySelectorAll('.code pre code:not(.nohighlight)').forEach(function(el){ hljs.highlightElement(el); });
+
+  // Mermaid follows the effective theme, and re-renders when it changes.
+  const diagrams = Array.prototype.slice.call(document.querySelectorAll('pre.mermaid'));
+  diagrams.forEach(function(d){ d.setAttribute('data-src', d.textContent); });
+  function renderMermaid(){
+    if (!window.mermaid || !diagrams.length) return;
+    diagrams.forEach(function(d){ d.removeAttribute('data-processed'); d.textContent = d.getAttribute('data-src'); });
+    mermaid.initialize({startOnLoad:false, securityLevel:'strict', theme: effectiveDark() ? 'dark' : 'neutral',
+      fontFamily:getComputedStyle(document.body).fontFamily,
+      themeVariables:{fontSize:'17px'},
+      flowchart:{useMaxWidth:true, nodeSpacing:28, rankSpacing:44, padding:10},
+      sequence:{useMaxWidth:true}});
+    mermaid.run({nodes: diagrams});
+  }
+  renderMermaid();
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(){ if (!root.getAttribute('data-theme')) renderMermaid(); });
+
+  // "On this page": highlight the section being read.
+  const tocLinks = Array.prototype.slice.call(document.querySelectorAll('aside.toc a'));
+  const byId = {}; tocLinks.forEach(function(a){ byId[decodeURIComponent(a.getAttribute('href').slice(1))] = a; });
+  const heads = Array.prototype.slice.call(document.querySelectorAll('.content h2[id], .content h3[id]')).filter(function(h){ return byId[h.id]; });
+  function spy(){
+    let current = heads.length ? heads[0] : null;
+    const line = 120;
+    heads.forEach(function(h){ if (h.getBoundingClientRect().top <= line) current = h; });
+    tocLinks.forEach(function(a){ a.classList.remove('active'); });
+    if (current) byId[current.id].classList.add('active');
+  }
+  if (heads.length){ document.addEventListener('scroll', spy, {passive:true}); spy(); }
+
+  // Search (Ctrl+K / Cmd+K / "/"): a static index of this language, scored in the browser.
+  const modal = document.getElementById('search'), input = modal.querySelector('input'), list = modal.querySelector('.sres');
+  let selected = 0;
+  function norm(s){ return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+  const index = (window.HANDBOOK_INDEX || []).map(function(r){ return Object.assign({nh: norm(r.h), np: norm(r.p), nt: norm(r.t)}, r); });
+  function esc(s){ return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function mark(s, terms){ let out = esc(s); terms.forEach(function(t){ if (t.length > 1) out = out.replace(new RegExp('(' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig'), '<mark>$1</mark>'); }); return out; }
+  function snippet(r, terms){ const i = terms.length ? r.nt.indexOf(terms[0]) : -1; const start = Math.max(0, i - 50); return (start ? '…' : '') + r.t.slice(start, start + 170); }
+  function run(){
+    const terms = norm(input.value).split(/\s+/).filter(Boolean);
+    if (!terms.length){ list.innerHTML = ''; return; }
+    const hits = [];
+    index.forEach(function(r){
+      let score = 0;
+      for (const t of terms){ const s = (r.nh.includes(t) ? 10 : 0) + (r.np.includes(t) ? 3 : 0) + (r.nt.includes(t) ? 1 : 0); if (!s) return; score += s; }
+      hits.push([score, r]);
+    });
+    hits.sort(function(a, b){ return b[0] - a[0]; });
+    selected = 0;
+    list.innerHTML = hits.length ? hits.slice(0, 30).map(function(h, i){
+      const r = h[1];
+      return '<li><a href="' + esc(r.u) + '"' + (i === 0 ? ' class="sel"' : '') + '><span class="sp">' + esc(r.p) + '</span>' +
+        '<span class="sh">' + mark(r.h, terms) + '</span><span class="st">' + mark(snippet(r, terms), terms) + '</span></a></li>';
+    }).join('') : '<li class="sempty">' + esc(ui.no_results) + '</li>';
+  }
+  function open(){ modal.hidden = false; input.value = ''; list.innerHTML = ''; input.focus(); }
+  function close(){ modal.hidden = true; }
+  document.querySelectorAll('.searchbtn').forEach(function(b){ b.addEventListener('click', open); });
+  modal.addEventListener('click', function(e){ if (e.target === modal) close(); });
+  input.addEventListener('input', run);
+  input.addEventListener('keydown', function(e){
+    const links = list.querySelectorAll('a');
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+      e.preventDefault(); if (!links.length) return;
+      links[selected].classList.remove('sel');
+      selected = (selected + (e.key === 'ArrowDown' ? 1 : links.length - 1)) % links.length;
+      links[selected].classList.add('sel'); links[selected].scrollIntoView({block:'nearest'});
+    } else if (e.key === 'Enter' && links.length){ e.preventDefault(); close(); location.href = links[selected].getAttribute('href'); }
+  });
+  document.addEventListener('keydown', function(e){
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k'){ e.preventDefault(); modal.hidden ? open() : close(); }
+    else if (e.key === 'Escape'){ if (!modal.hidden) close(); document.body.classList.remove('nav-open'); }
+    else if (e.key === '/' && modal.hidden && !/input|textarea|select/i.test(document.activeElement.tagName)){ e.preventDefault(); open(); }
+  });
+  document.querySelectorAll('select.lang').forEach(function(s){ s.addEventListener('change', function(){ location.href = s.value + location.hash; }); });
+})();
+</script>
+</body></html>

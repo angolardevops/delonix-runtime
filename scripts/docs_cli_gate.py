@@ -69,6 +69,10 @@ TARGETS = (
     "docs/*.md",
     "docs/roadmap/*.md",
     "docs/runtime/*.md",
+    # The contributor handbook: a stale command there teaches every new
+    # contributor the wrong CLI on day one.
+    "docs/dev/*.md",
+    "CONTRIBUTING.md",
     "examples/*.md",
     "examples/*.yaml",
     "examples/**/*.yaml",

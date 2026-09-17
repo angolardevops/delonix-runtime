@@ -33,6 +33,12 @@ SKIP_DIRS = {".git", "target", "node_modules", ".claude", "vendor", "dist", "bui
 # documentação do script está em PT como o resto das notas da casa.
 SKIP_FILES = {"scripts/lang_ratchet.py", "scripts/lang_pt_lexicon.txt"}
 
+# The contributor handbook site is GENERATED (scripts/dev_docs_site.py) and has a
+# pt-AO translation on purpose: its search index is Portuguese because the page is.
+# LANG-01 is about the code; counting a translation as debt would make the gate
+# fail for doing exactly what the handbook is for.
+SKIP_PREFIXES = ("docs/handbook/",)
+
 # Declarações que introduzem um nome, por linguagem.
 DECL = {
     ".rs": re.compile(
@@ -108,7 +114,7 @@ def walk(root: Path):
         rel = path.relative_to(root)
         if any(part in SKIP_DIRS for part in rel.parts):
             continue
-        if rel.as_posix() in SKIP_FILES:
+        if rel.as_posix() in SKIP_FILES or rel.as_posix().startswith(SKIP_PREFIXES):
             continue
         if path.suffix in DECL or path.suffix in COMMENT:
             yield path

@@ -26,6 +26,7 @@ container **and** VM engine — build, run, network, firewall, store, and
 bootstrap Kubernetes clusters, from one binary.
 
 :Docs: https://angolardevops.github.io/delonix-runtime/
+:Contributor handbook: https://angolardevops.github.io/delonix-runtime/handbook/ (English, Português de Angola, Français)
 :Repo: https://github.com/angolardevops/delonix-runtime
 
 Why it's different
@@ -598,7 +599,9 @@ published on GitHub Releases).
 Community
 =========
 
-`CONTRIBUTING.md <CONTRIBUTING.md>`_ for how to send a change,
+`CONTRIBUTING.md <CONTRIBUTING.md>`_ for how to send a change (and the
+`contributor handbook <https://angolardevops.github.io/delonix-runtime/handbook/>`_
+for everything behind it — environment, build, architecture, crates, conventions),
 `GOVERNANCE.md <GOVERNANCE.md>`_ for how decisions get made and by whom,
 `MAINTAINERS.md <MAINTAINERS.md>`_ for who that is today,
 `CODE_OF_CONDUCT.md <CODE_OF_CONDUCT.md>`_ for how we expect people to treat
