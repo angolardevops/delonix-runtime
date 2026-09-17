@@ -3303,7 +3303,8 @@ impl VmBackend for LibvirtBackend {
                 return Err(Error::InvalidStaticIp(format!(
                     "VM '{}': invalid static IP '{ip}'",
                     cfg.name
-                )).into());
+                ))
+                .into());
             }
         }
         let mac = mac_for(&cfg.name);

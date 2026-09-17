@@ -309,7 +309,9 @@ mod tests {
             ),
             Error::SocketPathTooLong("VM 'x': socket path ... is 120 bytes".into()),
             Error::InvalidName("invalid VM name 'x'".into()),
-            Error::NamespaceUnsupported("namespace 'a' is not enforceable on the 'x' backend".into()),
+            Error::NamespaceUnsupported(
+                "namespace 'a' is not enforceable on the 'x' backend".into(),
+            ),
             Error::DiskTooSmall("--disk-size 1G é menor que a imagem base (2 GiB)".into()),
             Error::InvalidSnapshotName("invalid snapshot name: ../x".into()),
             Error::StaticIpRequiresNat("VM 'x': --ip requires the libvirt `nat` mode".into()),
@@ -320,22 +322,32 @@ mod tests {
             Error::LiveBackupNeedsLibvirt(
                 "live disk backup needs the libvirt backend (this VM runs on x)".into(),
             ),
-            Error::NotRunningForOp("VM 'x' is not running (status: Stopped) — nothing to pause".into()),
+            Error::NotRunningForOp(
+                "VM 'x' is not running (status: Stopped) — nothing to pause".into(),
+            ),
             Error::VmNotFound("dev".into()),
             Error::SnapshotNotFound("snapshot of VM 'x': s1".into()),
-            Error::RecordConflict("a VM 'x' created by `vm run` (direct-QEMU) already exists".into()),
+            Error::RecordConflict(
+                "a VM 'x' created by `vm run` (direct-QEMU) already exists".into(),
+            ),
             Error::SnapshotTaken("VM 'x' already has a snapshot named 's1'".into()),
-            Error::BackendNotConfigured("VM backend 'proxmox' is not available in this build: y".into()),
+            Error::BackendNotConfigured(
+                "VM backend 'proxmox' is not available in this build: y".into(),
+            ),
             Error::NoBackendAvailable(
                 "no VM backend available: install 'cloud-hypervisor' or 'libvirt'+'qemu'".into(),
             ),
-            Error::NoFirmware("VM without 'kernel' or 'firmware' and no rust-hypervisor-fw found".into()),
+            Error::NoFirmware(
+                "VM without 'kernel' or 'firmware' and no rust-hypervisor-fw found".into(),
+            ),
             Error::Command {
                 context: "vm-tool",
                 message: "qemu-img: boom".into(),
             },
             Error::CloudHypervisorApi("cloud-hypervisor api socket: connection refused".into()),
-            Error::DiskCorrupted("VM 'x' stopped, but `qemu-img check` now finds its disk corrupted".into()),
+            Error::DiskCorrupted(
+                "VM 'x' stopped, but `qemu-img check` now finds its disk corrupted".into(),
+            ),
             Error::SnapshotNeedsStopped(
                 "cloud-hypervisor cannot take a snapshot of a RUNNING VM".into(),
             ),
@@ -378,7 +390,10 @@ mod tests {
                 Error::InvalidName("invalid VM name 'x'".into()),
                 "invalid argument: invalid VM name 'x'",
             ),
-            (Error::VmNotFound("dev".into()), "no such VM: dev (see `delonix vm ls`)"),
+            (
+                Error::VmNotFound("dev".into()),
+                "no such VM: dev (see `delonix vm ls`)",
+            ),
             (
                 Error::SnapshotNotFound("snapshot of VM 'x': s1".into()),
                 "no such snapshot of VM 'x': s1",
