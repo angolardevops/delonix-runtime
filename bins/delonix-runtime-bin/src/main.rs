@@ -685,7 +685,7 @@ fn main() {
     if raw.len() == 3 && raw[1] == "netns" && raw[2] == "pin" {
         delonix_net::infra::pin_main(); // never returns
     }
-    delonix_runtime_core::telemetry::init();
+    delonix_telemetry::telemetry::init();
     // Hidden re-exec of the netns holder (`delonix netns holder`, invoked by
     // `delonix-net::infra::start_holder` itself via `unshare` — never by the
     // user). It has to be intercepted BEFORE clap parses (it's not a public

@@ -16,6 +16,7 @@ delonix-model = { workspace = true }
 delonix-stack = { workspace = true }
 delonix-compute = { workspace = true }
 delonix-runtime-core = { workspace = true }
+delonix-telemetry = { workspace = true }
 delonix-runtime = { workspace = true }
 delonix-image = { workspace = true }
 delonix-vm = { workspace = true }

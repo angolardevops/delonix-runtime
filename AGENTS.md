@@ -2,7 +2,7 @@
 
 Motor de **containers e microVMs daemonless, rootless-first, kernel-native, em Rust**.
 Repositório **público** (`angolardevops/delonix-runtime`, Apache-2.0) — ver
-[README.md](README.md) para a arquitectura dos 18 crates.
+[README.md](README.md) para a arquitectura dos 19 crates.
 
 ## Identidade e fronteira do motor (ler primeiro)
 
@@ -197,7 +197,7 @@ temporária deixa de ser permanente. Hoje são dez, e cada uma diz a sua fase (o
 ```
 crates/foundation/   delonix-runtime-core, delonix-net-rules
 crates/contexts/     delonix-security-runtime
-crates/adapters/     delonix-runtime, delonix-net, delonix-image, delonix-scan, delonix-volume, delonix-vm
+crates/adapters/     delonix-runtime, delonix-net, delonix-image, delonix-scan, delonix-volume, delonix-vm, delonix-telemetry
 crates/providers/    delonix-proxmox, delonix-truenas
 crates/interfaces/   delonix-cri, delonix-mgmt, delonix-mcp
 bins/                delonix-runtime-bin
@@ -6319,11 +6319,12 @@ antes de qualquer commit:
    genuína. Decidir QUANDO e PARA QUEM publicar portas numa frota multi-inquilino não é do
    motor.
 
-## Arquitetura (18 crates)
+## Arquitetura (19 crates)
 
 | Crate | Responsabilidade |
 |---|---|
 | `delonix-runtime-core` | tipos partilhados: `Container`, `Vm`, `Status` (6 estados), `Store`/`JsonStore`, typestate, deteção de virtualização, Secret Manager |
+| `delonix-telemetry` | observabilidade: logging estruturado (`tracing`), spans OpenTelemetry/OTLP e as métricas Prometheus partilhadas pelo CRI e pela `mgmt`. Saiu do `delonix-runtime-core` na P3 do ADR-0040: a fundação não carrega um exportador, e todo o crate que só precisava de um `Container` compilava um cliente OTLP |
 | `delonix-runtime` / `delonix-runtime-bin` | runtime de containers (clone/namespaces/cgroups, create/stop/exec, reconcile_status) + a CLI `delonix` completa (container/image/build/vm/volumes/network — ver secção "CLI" acima) |
 | `delonix-model` | fundação PURA do ADR-0040: o que qualquer camada nomeia sem depender de mecanismo. Tem os nomes gerados (`names`) e as classes de saída (`exitcode`: `Error` → código de saída e `DX_*`); os ids e o `ResourceMeta` entram nas fatias seguintes da P2 |
 | `delonix-stack` | contexto Stack (`core.delonix.io`, ADR-0040): a tabela de Kinds (`kinds`), o reconciliador de 3 vias (`reconcile`), o tipo `Condition` e o histórico de revisões (`revision`). Planear é puro; o `-bin` re-exporta os módulos com os nomes antigos (`cmd::kinds`…), por isso nenhum chamador mudou. `manifest`/`stack`/`schema`/`compose` continuam no `-bin`: cada um depende de 20 a 30 módulos de lá |

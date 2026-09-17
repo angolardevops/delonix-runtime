@@ -212,7 +212,7 @@ impl RuntimeService for DelonixRuntime {
 
     // --- pod/container lifecycle: instrumented with `tracing` spans.
     // Each handler opens a span (exported over OTLP when `DELONIX_OTLP_ENDPOINT`
-    // is set — see `delonix_runtime_core::telemetry`) with the resource id.
+    // is set — see `delonix_telemetry::telemetry`) with the resource id.
     // The fields are read from `r.get_ref()` (evaluated on span ENTRY, before
     // `into_inner()` consumes the request); `skip_all` avoids dumping the whole
     // `Request` (non-`Debug`/verbose) and `self`.

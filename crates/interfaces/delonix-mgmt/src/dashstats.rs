@@ -357,17 +357,17 @@ pub fn collect_container_net_with_timeout(
 }
 
 /// Pushes a [`DashSummary`] into the shared Prometheus registry
-/// (`delonix_runtime_core::metrics`). Fields collected as `None` (an
+/// (`delonix_telemetry::metrics`). Fields collected as `None` (an
 /// `include_network`/`include_storage` opt-out) simply leave that gauge at
 /// its last-published value — callers are expected to publish the cheap
 /// fields often and the expensive ones from a slower background refresh
 /// (see `collect`'s doc comment), so a gauge is stale, never wrong-and-zero.
 pub fn publish_to_metrics(s: &DashSummary) {
-    delonix_runtime_core::metrics::set_containers(s.containers_running, s.containers_total);
-    delonix_runtime_core::metrics::set_vms(s.vms_running, s.vms_total);
-    delonix_runtime_core::metrics::set_memory(s.memory_bytes_used, s.memory_bytes_limit);
+    delonix_telemetry::metrics::set_containers(s.containers_running, s.containers_total);
+    delonix_telemetry::metrics::set_vms(s.vms_running, s.vms_total);
+    delonix_telemetry::metrics::set_memory(s.memory_bytes_used, s.memory_bytes_limit);
     if let (Some(rx), Some(tx)) = (s.network_rx_bytes, s.network_tx_bytes) {
-        delonix_runtime_core::metrics::set_network(rx, tx, s.network_unmeasured_containers);
+        delonix_telemetry::metrics::set_network(rx, tx, s.network_unmeasured_containers);
     }
     if let (Some(images), Some(volumes), Some(vm_images), Some(containers)) = (
         s.storage_bytes_images,
@@ -375,7 +375,7 @@ pub fn publish_to_metrics(s: &DashSummary) {
         s.storage_bytes_vm_images,
         s.storage_bytes_containers,
     ) {
-        delonix_runtime_core::metrics::set_storage(images, volumes, vm_images, containers);
+        delonix_telemetry::metrics::set_storage(images, volumes, vm_images, containers);
     }
 }
 
