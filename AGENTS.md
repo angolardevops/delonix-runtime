@@ -758,9 +758,11 @@ uma lista plana, um módulo por grupo em `bins/delonix-runtime-bin/src/cmd/`:
   `create` já arranca de imediato (sem estado "created" dormente) — `start` numa já-a-correr devolve
   o **304** idempotente que o docker real também devolve, o que mantém o par `create`→`start` que o
   `docker compose up` usa a funcionar. **`exec`/attach interactivo (HTTP hijacking) fica fora de
-  escopo**; `--restart` (política que precisa do supervisor `run_supervised`, um `fork()` cru) é
-  **recusado com erro claro** em vez de arriscar um fork de um processo multi-thread (o supervisor
-  assume um chamador single-threaded, verdade só para o CLI).
+  escopo**. `HostConfig.RestartPolicy` **é servido** (2026-09-17): esteve recusado porque o
+  supervisor faz um `fork()` cru que assume um chamador single-threaded, e o arranque corria no
+  próprio servidor multi-thread; desde o re-exec `__apirun` o arranque corre num processo novo, e
+  o argumento deixou de valer. O valor passa pelo `parse_restart_policy` da CLI, por isso um nome
+  errado continua a ser recusado.
   **2 bugs reais encontrados e corrigidos ao validar contra um `docker` CLI real**: (1) um container
   desanexado morto ficava **zombie para sempre** (`ps` mostrava `<defunct>`, `docker inspect`
   continuava a dizer `Running`) — `spawn()` só devolve sem `waitpid` quando `detach: true`,
