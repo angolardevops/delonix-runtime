@@ -4,9 +4,8 @@
 //! **The messages are a contract with what was there before.** Each variant
 //! converts into the [`delonix_model::Error`] class these call sites used to build
 //! by hand, carrying the same text, so the CLI prints byte for byte what it
-//! printed before this type existed. The conversion is where a class is decided;
-//! [`Error::code`] asks the conversion instead of repeating it, so the two cannot
-//! drift apart.
+//! printed before this type existed — now with its own dictionary number
+//! (`DX-14NN`), which the carrier checks against the class.
 
 use thiserror::Error;
 
@@ -59,33 +58,36 @@ impl From<std::io::Error> for Error {
 /// The shared class each scanner failure belongs to.
 type Dx = delonix_model::Error;
 
-impl From<Error> for Dx {
-    fn from(e: Error) -> Self {
-        match e {
-            e @ (Error::EmptySbom
-            | Error::AdvisoryDb(_)
-            | Error::OsvNotJson(_)
-            | Error::OsvShape
-            | Error::NotAModule(_)
-            | Error::NoModule) => Dx::Invalid(e.to_string()),
-            Error::ModuleScan(io) => Dx::Runtime {
-                context: "module scan",
-                message: io.to_string(),
-            },
-            Error::Engine(e) => e,
+impl Error {
+    /// The dictionary number of this failure (ADR-0043): `DX-14NN` for a wrong
+    /// input to the scanner, `DX-9402` for a module tree that could not be read.
+    /// A failure of the layers underneath keeps its own.
+    pub fn number(&self) -> u16 {
+        match self {
+            Error::EmptySbom => 1401,
+            Error::AdvisoryDb(_) => 1402,
+            Error::OsvNotJson(_) => 1403,
+            Error::OsvShape => 1404,
+            Error::NotAModule(_) => 1405,
+            Error::NoModule => 1406,
+            Error::ModuleScan(_) => 9402,
+            Error::Engine(e) => e.number(),
         }
     }
 }
 
-impl Error {
-    /// The `DX_*` code of this failure — the one the CLI exits with and the API
-    /// reports. Decided by the conversion above, never a second table.
-    pub fn code(&self) -> &'static str {
-        match self {
-            Error::Engine(e) => e.code(),
-            Error::ModuleScan(_) => "DX_SYSCALL_FAILED",
-            _ => "DX_INVALID_ARGUMENT",
-        }
+impl From<Error> for Dx {
+    fn from(e: Error) -> Self {
+        let number = e.number();
+        let class = match e {
+            Error::ModuleScan(io) => Dx::Runtime {
+                context: "module scan",
+                message: io.to_string(),
+            },
+            Error::Engine(e) => return e,
+            e => Dx::Invalid(e.to_string()),
+        };
+        Dx::coded(number, class)
     }
 }
 
@@ -107,13 +109,19 @@ mod tests {
         ]
     }
 
+    /// Every variant converts into a class its number belongs to (the carrier
+    /// panics otherwise), keeps that number, and has an entry in the dictionary.
     #[test]
-    fn the_code_is_the_code_of_the_class_it_converts_into() {
+    fn every_failure_keeps_its_number_through_the_conversion() {
         for e in every_variant() {
-            let code = e.code();
+            let number = e.number();
             let shown = e.to_string();
-            let class = delonix_model::Error::from(e);
-            assert_eq!(code, class.code(), "{shown}");
+            let converted = delonix_model::Error::from(e);
+            assert_eq!(converted.number(), number, "{shown}");
+            assert!(
+                delonix_model::codes::lookup(number).is_some(),
+                "DX-{number:04} ({shown}) has no dictionary entry"
+            );
         }
     }
 
