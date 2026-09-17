@@ -406,9 +406,10 @@ reconcile: `delonix_runtime::reconcile_status` checks the pid together with its 
    (`delonix-net`), `newuidmap`/`newgidmap` (`delonix-runtime`, `pin_userns`), `qemu-img`,
    `virsh`, `cloud-localds` (`delonix-vm`), `busctl` for systemd transient scopes
    (`delonix-runtime`), `ssh`/`scp` (`cmd/remote.rs`).
-6. **HTTP clients live only in providers.** `delonix-proxmox` and `delonix-truenas` depend on
-   `reqwest`; no adapter or context does. The OCI registry client in `delonix-image/src/registry.rs`
-   is the engine's own protocol client.
+6. **HTTP to a remote management system lives only in providers.** `delonix-proxmox` and
+   `delonix-truenas` depend on `reqwest` for that. Two adapters also speak HTTP, for other reasons:
+   `delonix-image` has its own OCI registry client (`src/registry.rs`, `reqwest` in its
+   `Cargo.toml`), and `delonix-telemetry` exports OTLP over HTTP. No context crate does.
 
 ## Two flows, as sequences
 

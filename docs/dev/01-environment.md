@@ -145,9 +145,13 @@ default, `~/.local/bin/delonix` with `--user`). A binary you just built at
 
 Options, from least to most invasive:
 
-1. Install your build to the profiled path (`sudo install -m 0755 target/debug/delonix /usr/local/bin/`).
-2. Add a second profile for your development path, following the same shape as the one the
-   installer writes, and load it with `sudo apparmor_parser -r <file>`.
+1. Add a second profile for your development path (for example your worktree's
+   `target/debug/delonix`), following the same shape as the one the installer writes, and load it
+   with `sudo apparmor_parser -r <file>`. This touches nothing that is already running.
+2. Install your build to the profiled path (`sudo install -m 0755 target/debug/delonix /usr/local/bin/`)
+   — **only on a machine where no Delonix workload is in use**. The installed binary is what boot
+   units (`ExecStart=<exe> container start …`) and the servers re-execute, so on a host with live
+   workloads a debug build would silently become the production engine.
 3. Set `kernel.apparmor_restrict_unprivileged_userns=0` — this lowers a host-wide boundary; only
    on a machine you own.
 

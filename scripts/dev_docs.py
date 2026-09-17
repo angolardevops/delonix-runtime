@@ -70,9 +70,17 @@ def workspace_crates() -> list[dict]:
     for member in root["workspace"]["members"]:
         manifest = tomllib.loads((ROOT / member / "Cargo.toml").read_text())
         name = manifest["package"]["name"]
-        bins = [b["name"] for b in manifest.get("bin", [])]
+        package = manifest["package"]
+        # A `[[bin]]` without `name` is named after the package, and so is the binary
+        # Cargo discovers on its own from `src/main.rs`; missing either would make the
+        # binary count read lower than the truth with the gate still green.
+        bins = [b.get("name", name) for b in manifest.get("bin", [])]
+        autobins = package.get("autobins", True)
+        claimed = {b.get("path", "src/main.rs" if b.get("name", name) == name else "") for b in manifest.get("bin", [])}
+        if autobins and (ROOT / member / "src" / "main.rs").is_file() and "src/main.rs" not in claimed and name not in bins:
+            bins.append(name)
         bin_dir = ROOT / member / "src" / "bin"
-        if bin_dir.is_dir():
+        if autobins and bin_dir.is_dir():
             bins += sorted(p.stem for p in bin_dir.glob("*.rs") if p.stem not in bins)
         crates.append(
             {
@@ -162,12 +170,27 @@ def render_crates_graph(arch, crates: list[dict]) -> str:
 
 def ci_jobs() -> list[tuple[str, str]]:
     """Job id and display name, read without a YAML library: the runner that checks
-    this has no PyYAML, and the two fields needed have a fixed shape in ci.yml."""
-    text = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
-    jobs_block = text.split("\njobs:\n", 1)[1]
-    jobs = []
-    for match in re.finditer(r"^  ([A-Za-z0-9_-]+):\n(?:    .*\n|\s*\n|    #.*\n)*?    name: (.+)$", jobs_block, re.M):
-        jobs.append((match.group(1), match.group(2).strip().strip("'\"")))
+    this has no PyYAML. Every job is listed — one without `name:` shows its id — and a
+    file whose shape this parser does not recognise fails loudly instead of yielding a
+    shorter table."""
+    lines = (ROOT / ".github" / "workflows" / "ci.yml").read_text().splitlines()
+    try:
+        start = next(i for i, line in enumerate(lines) if re.match(r"^jobs:\s*(#.*)?$", line))
+    except StopIteration:
+        sys.exit("dev_docs: no top-level `jobs:` in .github/workflows/ci.yml")
+    jobs: list[tuple[str, str]] = []
+    for line in lines[start + 1 :]:
+        if line and not line.startswith((" ", "#")):
+            break  # the next top-level key ends the jobs block
+        job = re.match(r"^  ([A-Za-z0-9_-]+):\s*(#.*)?$", line)
+        if job:
+            jobs.append((job.group(1), job.group(1)))
+            continue
+        name = re.match(r"^    name:\s*(.+?)\s*$", line)
+        if name and jobs and jobs[-1][0] == jobs[-1][1]:
+            jobs[-1] = (jobs[-1][0], name.group(1).strip("'\""))
+    if not jobs:
+        sys.exit("dev_docs: found `jobs:` in ci.yml but no job under it")
     return jobs
 
 
