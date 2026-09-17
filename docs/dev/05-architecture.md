@@ -52,12 +52,13 @@ These are not conventions; `scripts/arch_fitness.py` enforces the structural hal
 | Ratchets that may only go down (listed below) — e.g. library crates re-running the engine's own binary, `println!` in libraries, process-environment writes, adapters importing the shared `Error` as their own | the ratchet patterns (`SELF_EXEC`, `PRINTS`, `ENV_WRITES`, `SHARED_ERROR`, …), baseline in `scripts/arch_baseline.json` |
 
 <!-- dev-docs:begin ratchets -->
-`scripts/arch_fitness.py` keeps **4 debt ratchets** (baseline in `scripts/arch_baseline.json`):
+`scripts/arch_fitness.py` keeps **5 debt ratchets** (baseline in `scripts/arch_baseline.json`):
 
 - `self_exec_sites`
 - `library_prints`
 - `env_writes`
 - `shared_error_imports`
+- `raw_error_variant_matches`
 <!-- dev-docs:end ratchets -->
 
 `python3 scripts/arch_fitness.py --list` shows what each ratchet counts today, file by file.

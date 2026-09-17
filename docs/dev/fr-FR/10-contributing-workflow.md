@@ -136,12 +136,13 @@ cela implique pour une modification :
   liste actuelle est générée :
 
 <!-- dev-docs:begin ratchets -->
-`scripts/arch_fitness.py` maintient **4 cliquets de dette** (référence dans `scripts/arch_baseline.json`) :
+`scripts/arch_fitness.py` maintient **5 cliquets de dette** (référence dans `scripts/arch_baseline.json`) :
 
 - `self_exec_sites`
 - `library_prints`
 - `env_writes`
 - `shared_error_imports`
+- `raw_error_variant_matches`
 <!-- dev-docs:end ratchets -->
 Même sémantique que le ratchet de langue (`--list`, `--update`).
 

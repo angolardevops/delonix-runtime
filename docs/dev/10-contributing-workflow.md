@@ -124,12 +124,13 @@ a change:
   crate error that converts into it). The current list is generated:
 
 <!-- dev-docs:begin ratchets -->
-`scripts/arch_fitness.py` keeps **4 debt ratchets** (baseline in `scripts/arch_baseline.json`):
+`scripts/arch_fitness.py` keeps **5 debt ratchets** (baseline in `scripts/arch_baseline.json`):
 
 - `self_exec_sites`
 - `library_prints`
 - `env_writes`
 - `shared_error_imports`
+- `raw_error_variant_matches`
 <!-- dev-docs:end ratchets -->
 Same semantics as the language ratchet (`--list`, `--update`).
 

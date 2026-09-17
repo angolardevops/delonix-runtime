@@ -1,4 +1,4 @@
-<!-- translated-from: 12-coding-conventions.md sha256:cd072f5c57cff65d9fc369b38e233017db3f3d4f4521f05f069229517fcd9262 -->
+<!-- translated-from: 12-coding-conventions.md sha256:f30fdfe39037814e7d3cb5ab1de684b3fbeafb30b15fa30a586d64130f69fcb3 -->
 # 12. Convenções de código
 
 Esta página diz-te como escrever código que passa a revisão neste repositório, para não teres de
@@ -36,10 +36,10 @@ o que cada crate contém em [06 — Crates](06-crates.md), os idiomas de Rust em
 | **`[workspace.lints]`** | O `Cargo.toml` raiz declara exactamente um lint de workspace: `[workspace.lints.clippy] undocumented_unsafe_blocks = "deny"`. Todo o manifesto de membro tem `[lints] workspace = true`. | **Imposto (gate)**: clippy. Foi introduzido pela fase P0 do ADR-0040 («`[workspace.lints]` (`undocumented_unsafe_blocks = deny`)»), um ADR que ainda está **Proposto**; o gate vale na mesma. |
 | **cargo-deny** | Avisos RUSTSEC e crates retirados (yanked), só licenças permissivas (sem GPL/AGPL), crates.io como único registo, sem fontes git. A secção `[bans]` do `deny.toml` (versões duplicadas e wildcards, em modo aviso) **não** é avaliada na CI. | **Imposto (gate)**: o job de CI `deny` corre `check advisories licenses sources` com o `deny.toml`. **Convenção (observada)**: todo o aviso ignorado no `deny.toml` leva um comentário com a sua razão — nenhum gate verifica que o comentário existe. |
 | **`scripts/lang_ratchet.py`** | Português em identificadores, comentários e strings visíveis ao utilizador (LANG-01, vê [§2](#2-language-of-the-code)). | **Imposto (gate)**: job de CI `lang`, linha de base em `scripts/lang_baseline.json`. |
-| **`scripts/arch_fitness.py`** | Direcção das camadas, directório do crate = camada, versões só na raiz, nomes de consumidores, e quatro ratchets de dívida (vê [§4](#4-structure-where-code-goes) e [§5](#5-internal-api-and-boundaries)). | **Imposto (gate)**: job de CI `arch`, linha de base em `scripts/arch_baseline.json`. |
+| **`scripts/arch_fitness.py`** | Direcção das camadas, directório do crate = camada, versões só na raiz, nomes de consumidores, e os ratchets de dívida listados em [05](05-architecture.md#layers-and-the-allowed-direction) (vê [§4](#4-structure-where-code-goes) e [§5](#5-internal-api-and-boundaries)). | **Imposto (gate)**: job de CI `arch`, linha de base em `scripts/arch_baseline.json`. |
 | **`scripts/contract_gate.py`** | O contrato de nó em `proto/delonix/node/v1` (vê [§5.4](#54-the-node-contract)). | **Imposto (gate)**: job de CI `contract`. |
 
-Tem presente uma mecânica dos **ratchets** (`lang_ratchet.py` e os quatro números do
+Tem presente uma mecânica dos **ratchets** (`lang_ratchet.py` e os números do
 `arch_fitness.py`). Um ratchet falha quando o seu número **sobe**, e **também** falha quando o
 número desce sem a linha de base ser baixada no mesmo commit (o `arch_fitness.py` imprime «debt was
 paid; lower the baseline in the same commit (--update)»). Se pagares dívida, corre `--update` e faz
@@ -463,6 +463,15 @@ crates que descrevem já existam.
   (`the_code_is_the_code_of_the_class_it_converts_into`) mantém os dois em sintonia. A mensagem
   convertida também se mantém byte a byte idêntica ao que a CLI imprimia antes
   (`the_converted_message_is_the_one_printed_before`).
+- **Pergunta ao erro a sua classe; não faças match numa variante do erro partilhado.** Fora da
+  fundação, escreve `e.is_not_found()` ou `e.class()`, ou faz match em `e.root()` quando precisas
+  do conteúdo — nunca `Err(Error::NotFound(_))` nem `matches!(…, Error::NotFound(_))`. O erro
+  próprio de um crate viaja dentro da classe partilhada com o seu código, por isso um match numa
+  variante deixa de o apanhar sem uma palavra do compilador. **Decidido**: ADR-0043 D4 (Accepted).
+  **Imposto (gate)**: o ratchet `raw_error_variant_matches` do `arch_fitness.py`
+  (`RAW_VARIANT_MATCH`, que salta `crates/foundation/delonix-model/`), com linha de base 0 —
+  qualquer match novo deste tipo faz falhar o CI. Os métodos estão em
+  `crates/foundation/delonix-model/src/codes.rs`.
 
 ### 5.3 Visibilidade
 

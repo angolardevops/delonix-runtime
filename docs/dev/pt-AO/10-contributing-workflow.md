@@ -130,12 +130,13 @@ significa para uma mudança:
   partilhado como seu, em vez de um erro do crate que se converta nele). A lista actual é gerada:
 
 <!-- dev-docs:begin ratchets -->
-O `scripts/arch_fitness.py` mantém **4 ratchets de dívida** (linha de base em `scripts/arch_baseline.json`):
+O `scripts/arch_fitness.py` mantém **5 ratchets de dívida** (linha de base em `scripts/arch_baseline.json`):
 
 - `self_exec_sites`
 - `library_prints`
 - `env_writes`
 - `shared_error_imports`
+- `raw_error_variant_matches`
 <!-- dev-docs:end ratchets -->
 A mesma semântica do ratchet de língua (`--list`, `--update`).
 

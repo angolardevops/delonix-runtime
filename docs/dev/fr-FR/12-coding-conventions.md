@@ -1,4 +1,4 @@
-<!-- translated-from: 12-coding-conventions.md sha256:cd072f5c57cff65d9fc369b38e233017db3f3d4f4521f05f069229517fcd9262 -->
+<!-- translated-from: 12-coding-conventions.md sha256:f30fdfe39037814e7d3cb5ab1de684b3fbeafb30b15fa30a586d64130f69fcb3 -->
 # 12. Conventions de code
 
 Cette page vous indique comment écrire du code qui passe la revue dans ce dépôt, afin que vous
@@ -37,10 +37,10 @@ ce que contient chaque crate dans [06 — Crates](06-crates.md), les idiomes Rus
 | **`[workspace.lints]`** | Le `Cargo.toml` racine déclare exactement un lint de workspace : `[workspace.lints.clippy] undocumented_unsafe_blocks = "deny"`. Chaque manifeste membre contient `[lints] workspace = true`. | **Imposé (gate)** : clippy. Il a été introduit par la phase P0 de l'ADR-0040 (« `[workspace.lints]` (`undocumented_unsafe_blocks = deny`) »), un ADR encore **Proposed** ; le gate s'applique quoi qu'il en soit. |
 | **cargo-deny** | Les avis RUSTSEC et les crates retirés (yanked), uniquement des licences permissives (ni GPL ni AGPL), crates.io comme seul registre, aucune source git. La section `[bans]` de `deny.toml` (versions dupliquées et jokers, réglée sur avertissement) n'est **pas** évaluée en CI. | **Imposé (gate)** : le job de CI `deny` exécute `check advisories licenses sources` avec `deny.toml`. **Convention (observée)** : chaque avis ignoré dans `deny.toml` porte un commentaire donnant sa raison — aucun gate ne vérifie que ce commentaire existe. |
 | **`scripts/lang_ratchet.py`** | Le portugais dans les identifiants, les commentaires et les chaînes visibles par l'utilisateur (LANG-01, voir [§2](#2-language-of-the-code)). | **Imposé (gate)** : job de CI `lang`, base de référence dans `scripts/lang_baseline.json`. |
-| **`scripts/arch_fitness.py`** | La direction des couches, répertoire du crate = couche, les versions uniquement à la racine, les noms de consommateurs, et quatre ratchets de dette (voir [§4](#4-structure-where-code-goes) et [§5](#5-internal-api-and-boundaries)). | **Imposé (gate)** : job de CI `arch`, base de référence dans `scripts/arch_baseline.json`. |
+| **`scripts/arch_fitness.py`** | La direction des couches, répertoire du crate = couche, les versions uniquement à la racine, les noms de consommateurs, et les ratchets de dette listés dans [05](05-architecture.md#layers-and-the-allowed-direction) (voir [§4](#4-structure-where-code-goes) et [§5](#5-internal-api-and-boundaries)). | **Imposé (gate)** : job de CI `arch`, base de référence dans `scripts/arch_baseline.json`. |
 | **`scripts/contract_gate.py`** | Le contrat de nœud sous `proto/delonix/node/v1` (voir [§5.4](#54-the-node-contract)). | **Imposé (gate)** : job de CI `contract`. |
 
-Gardez en tête un mécanisme pour les **ratchets (cliquets)** (`lang_ratchet.py` et les quatre nombres
+Gardez en tête un mécanisme pour les **ratchets (cliquets)** (`lang_ratchet.py` et les nombres
 de `arch_fitness.py`). Un ratchet échoue lorsque son nombre **augmente**, et il échoue **aussi**
 lorsque le nombre diminue sans que la base de référence soit abaissée dans le même commit
 (`arch_fitness.py` affiche « debt was paid; lower the baseline in the same commit (--update) »). Si
@@ -468,6 +468,15 @@ Proposed, même si les crates qu'ils décrivent existent déjà.
   (`the_code_is_the_code_of_the_class_it_converts_into`) maintient les deux en phase. Le message
   converti est aussi conservé identique, octet pour octet, à ce que la CLI affichait auparavant
   (`the_converted_message_is_the_one_printed_before`).
+- **Demandez sa classe à l'erreur ; ne faites pas de `match` sur une variante de l'erreur partagée.**
+  Hors de la fondation, écrivez `e.is_not_found()` ou `e.class()`, ou faites un `match` sur `e.root()`
+  lorsque vous avez besoin du contenu — jamais `Err(Error::NotFound(_))` ni `matches!(…, Error::NotFound(_))`.
+  L'erreur propre d'un crate voyage dans la classe partagée avec son code : un `match` sur une
+  variante cesse de la reconnaître sans que le compilateur ne dise rien. **Décidé** : ADR-0043 D4 (Accepted).
+  **Imposé (gate)** : le ratchet `raw_error_variant_matches` de `arch_fitness.py`
+  (`RAW_VARIANT_MATCH`, qui ignore `crates/foundation/delonix-model/`), dont la base de référence est 0 —
+  tout nouveau `match` de ce type fait échouer la CI. Les méthodes se trouvent dans
+  `crates/foundation/delonix-model/src/codes.rs`.
 
 ### 5.3 Visibilité
 
