@@ -1,9 +1,13 @@
-<!-- translated-from: rust-primer.md sha256:d2605cd548346247408cbcaa88492cc0987f515dfe45c1abecc59aa84b09f403 -->
+<!-- translated-from: rust-primer.md sha256:1816db1c294bfdfdb88795ccb366f48135a04bbd7d7d37815302e6d006a262c8 -->
 # Initiation à Rust pour cette base de code
+
+**Avant de lire :** [Initiation au cloud native](cloud-native-primer.md), dont les exemples utilisent le vocabulaire, et des bases de Rust ([The Rust Programming Language](https://doc.rust-lang.org/book/), chapitres 1 à 10).
 
 Ce n’est pas un tutoriel Rust. C’est le sous-ensemble de Rust dont vous avez besoin pour *lire ce dépôt*,
 chaque idée étant rattachée à un fichier que vous pouvez ouvrir. Si un concept est nouveau pour vous, les liens « En savoir plus »
-mènent à la source officielle ; revenez ici pour voir comment le moteur l’utilise.
+mènent à la source officielle ; revenez ici pour voir comment le moteur l’utilise. Ensuite, vous pourrez
+ouvrir n’importe quel crate du workspace et suivre ses types d’erreur, ses traits, ses blocs `unsafe`
+et ses tests sans buter sur le langage.
 
 Les chemins sont relatifs à la racine du dépôt. Les symboles sont nommés pour que vous puissiez les chercher avec `grep` —
 les numéros de ligne sont volontairement omis, car ils bougent à chaque PR.
@@ -23,10 +27,12 @@ et un `Cargo.toml` par crate. Trois conventions comptent ici :
    crate tiers (par `version`). Un membre n’écrit jamais de version ; il écrit :
 
    ```toml
-   # crates/foundation/delonix-runtime-core/Cargo.toml
+   # crates/contexts/delonix-node/Cargo.toml
    [dependencies]
+   delonix-model = { workspace = true }
    serde = { workspace = true }
-   thiserror = { workspace = true }
+   serde_json = { workspace = true }
+   libc = { workspace = true }
    ```
 
    Un membre peut ajouter `features = [...]`, et c’est tout. `default-features = false` vit à
@@ -37,8 +43,9 @@ et un `Cargo.toml` par crate. Trois conventions comptent ici :
 2. **Le répertoire est la couche.** Les crates vivent dans `crates/foundation/`, `crates/contexts/`,
    `crates/adapters/`, `crates/providers/`, `crates/interfaces/` et les binaires dans `bins/`
    (ADR-0040). `scripts/arch_fitness.py` refuse un crate dont le répertoire ne correspond pas à sa
-   couche déclarée, ainsi qu’une dépendance qui va à l’encontre de la direction autorisée. Voir
-   [Architecture](architecture.md) pour les règles des couches.
+   couche déclarée, ainsi qu’une dépendance qui va à l’encontre de la direction autorisée. Les
+   règles de couche sont enseignées plus loin dans le parcours, dans
+   [Architecture — Les couches et la direction autorisée](architecture.md#layers-and-the-allowed-direction).
 
 3. **Les lints sont hérités.** La racine déclare `[workspace.lints.clippy]` avec
    `undocumented_unsafe_blocks = "deny"`, et chaque membre y adhère avec `[lints] workspace = true`.
@@ -46,7 +53,8 @@ et un `Cargo.toml` par crate. Trois conventions comptent ici :
 
 La racine définit aussi `[workspace.package]` (la `version`, l’`edition` et la `license` partagées), que
 les membres consomment sous la forme `version.workspace = true`. La version n’est pas décorative : voir
-[Compiler et tester](build-and-test.md) pour le gate de version.
+[Alignement de version](contributing-workflow.md#version-alignment) pour la règle et
+[Les gates exécutés par la CI](build-and-test.md#the-gates-ci-runs) pour le gate de version.
 
 **En savoir plus :** Cargo Book —
 [Workspaces](https://doc.rust-lang.org/cargo/reference/workspaces.html),
@@ -58,11 +66,11 @@ les membres consomment sous la forme `version.workspace = true`. La version n’
 
 ## 3.2 Erreurs : une seule `Error`, et des codes de sortie dérivés de son type
 
-Presque chaque fonction faillible du moteur renvoie `delonix_runtime_core::Result<T>`, un alias
-sur l’enum partagé défini dans `crates/foundation/delonix-model/src/error.rs`. L’enum vit dans le
-crate de fondation pur `delonix-model` ; `delonix-runtime-core` réexporte `Error` et `Result`
-(`pub use delonix_model::{Error, Result};`), de sorte que le chemin `delonix_runtime_core::` qu’utilisent la plupart des sites d’appel
-fonctionne toujours. Il est construit avec
+Presque chaque fonction faillible du moteur renvoie `delonix_model::Result<T>`, un alias sur
+l’enum partagé défini dans `crates/foundation/delonix-model/src/error.rs`. L’enum vit dans le crate
+de fondation pur `delonix-model`, dont peut dépendre n’importe quel autre crate du moteur. Certains
+adapters définissent leur propre erreur et la convertissent en celle-ci (§5.2 des
+[Conventions de code](coding-conventions.md)). Il est construit avec
 [`thiserror`](https://docs.rs/thiserror) : `#[derive(Error)]` génère `Display` à partir de
 l’attribut `#[error("...")]`, et `#[from]` génère des impls `From` afin que `?` convertisse automatiquement une erreur
 de plus bas niveau :
@@ -169,14 +177,14 @@ Un moteur de containers, ce sont surtout des appels système. Ce dépôt atteint
 | Crate | Utilisé pour | Exemple dans ce dépôt |
 |---|---|---|
 | [`nix`](https://docs.rs/nix) | Enveloppes plus ou moins sûres : `clone`, `setns`, `unshare`, `pivot_root`, `fork`, `mount`, signaux | `use nix::sched::{clone, setns, unshare, CloneFlags};` dans `crates/adapters/delonix-linux/src/lib.rs` |
-| [`libc`](https://docs.rs/libc) | Appels bruts que `nix` n’enveloppe pas, ou lorsque la structure exacte compte | `libc::getsockopt(.., SO_PEERCRED, ..)` dans `crates/foundation/delonix-runtime-core/src/peer_cred.rs` (`peer_uid`) ; `libc::flock` dans `crates/adapters/delonix-state/src/store.rs` |
+| [`libc`](https://docs.rs/libc) | Appels bruts que `nix` n’enveloppe pas, ou lorsque la structure exacte compte | `libc::getsockopt(.., SO_PEERCRED, ..)` dans `crates/contexts/delonix-node/src/peer_cred.rs` (`peer_uid`) ; `libc::flock` dans `crates/adapters/delonix-state/src/store.rs` |
 | [`rustix`](https://docs.rs/rustix) | La nouvelle API de montage (`fsopen`/`fsconfig`/`fsmount`/`move_mount`) | `fsopen_overlay` dans `crates/adapters/delonix-linux/src/lib.rs` |
 
 **Chaque bloc `unsafe` indique pourquoi il est correct**, juste à côté (le lint du workspace impose la
 présence du commentaire ; les relecteurs imposent sa véracité) :
 
 ```rust
-// crates/foundation/delonix-runtime-core/src/peer_cred.rs
+// crates/contexts/delonix-node/src/peer_cred.rs
 // SAFETY: getsockopt on SO_PEERCRED with a correctly-sized ucred buffer.
 let r = unsafe { libc::getsockopt(stream.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, ...) };
 ```
@@ -252,8 +260,10 @@ pub cloud_init: Option<bool>,
 
 Ici, `None` (chaque enregistrement écrit avant que le champ n’existe) est lu comme « oui » ; un simple `bool`
 aurait valu `false` par défaut et aurait silencieusement changé le comportement des anciennes images. Vous verrez le
-même raisonnement sur `Mount::propagation` et `Mount::optional` dans
-`crates/foundation/delonix-runtime-core/src/lib.rs` (`#[serde(default, skip_serializing_if = "Option::is_none")]`).
+même raisonnement dans `crates/contexts/delonix-compute/src/record.rs` : `Mount::propagation` est une
+`Option` (`#[serde(default, skip_serializing_if = "Option::is_none")]`), et `Mount::optional` est un
+simple `bool` avec `#[serde(default)]`, parce que `false` est ce que signifiait tout enregistrement plus
+ancien.
 
 **Manifestes.** `bins/delonix-runtime-bin/src/cmd/manifest.rs` analyse le YAML multi-document avec
 `serde_yaml::Deserializer::from_str(text)` vers `ManifestDoc`, dont le `spec` reste une
@@ -362,7 +372,7 @@ en découlent :
 (`SharedRoutes` dans `cmd/ingress_proxy.rs`), et le tableau de bord partage son échantillon lent au moyen d’un
 `Arc<Mutex<...>>` (`cmd/dash.rs`).
 
-Une idée apparentée que vous rencontrerez dans `crates/foundation/delonix-runtime-core/src/typestate.rs` : le
+Une idée apparentée que vous rencontrerez dans `crates/foundation/delonix-model/src/typestate.rs` : le
 motif **typestate**, où les états du cycle de vie sont des types et où les transitions illégales ne compilent pas
 (ses tests de documentation incluent des exemples `compile_fail`).
 
@@ -417,3 +427,7 @@ La liste complète et la façon d’exécuter chacun localement se trouvent dans
 **En savoir plus :** [Clippy](https://doc.rust-lang.org/clippy/),
 [rustfmt](https://rust-lang.github.io/rustfmt/),
 [cargo-deny](https://embarkstudios.github.io/cargo-deny/).
+
+---
+
+**Suivant :** [Préparer votre environnement](environment.md) — un hôte capable de compiler l’arborescence et d’exécuter les chemins réels, et les pièges de l’hôte qui ressemblent à des bugs du moteur.
