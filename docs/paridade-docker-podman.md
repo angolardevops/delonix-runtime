@@ -21,7 +21,7 @@ sintoma, sem ir ver.
 
 O mesmo se passou com a resolução de nomes. Concluí que "não funcionava"
 porque tive de fixar IPs. Existe um servidor DNS embutido
-(`delonix-net/src/infra.rs`), a escutar UDP `:53` em todas as bridges,
+(`delonix-sdn/src/infra.rs`), a escutar UDP `:53` em todas as bridges,
 funcionalmente equivalente ao dnsmasq — que não corre rootless — e já com uma
 correcção de um bug em que uma query lenta bloqueava o node inteiro.
 

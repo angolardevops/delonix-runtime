@@ -532,11 +532,11 @@ Ten crates, one binary, no residing process:
      - Responsibility
    * - ``delonix-runtime-core``
      - Shared types: ``Container``, ``Vm``, ``Status`` (6-state), ``Store``, the secret vault.
-   * - ``delonix-runtime`` / ``-bin``
+   * - ``delonix-linux`` / ``delonix-runtime-bin``
      - The runtime (clone/namespaces/cgroups, create/stop/exec, reconcile) + the ``delonix`` CLI.
-   * - ``delonix-net``
+   * - ``delonix-sdn``
      - Rootless SDN: holder netns + bridge + single slirp, nft DNAT/firewall, internal DNS, WireGuard overlay, and the eBPF flow datapath.
-   * - ``delonix-image``
+   * - ``delonix-oci``
      - OCI images: pull (digest-verified), build, export, buildpacks, signatures, internal registry.
    * - ``delonix-vm``
      - Declarative microVMs (``VmBackend``: Cloud Hypervisor / libvirt), cloud-init.
@@ -546,7 +546,7 @@ Ten crates, one binary, no residing process:
      - CRI ``runtime.v1`` server — the kubelet talks to Delonix.
    * - ``delonix-mgmt``
      - Management API (HTTP+JSON over a unix socket) for external control-planes, plus the shared Prometheus registry and OpenTelemetry spans.
-   * - ``delonix-scan``
+   * - ``delonix-scanner``
      - SBOM + CVE scanning (``image scan`` and scan-on-pull enforcement).
 
 See the `architecture page

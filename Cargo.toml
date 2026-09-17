@@ -2,16 +2,16 @@
 resolver = "2"
 members = [
     "crates/foundation/delonix-runtime-core",
-    "crates/adapters/delonix-runtime",
+    "crates/adapters/delonix-linux",
     "bins/delonix-runtime-bin",
-    "crates/adapters/delonix-image",
-    "crates/adapters/delonix-net",
+    "crates/adapters/delonix-oci",
+    "crates/adapters/delonix-sdn",
     "crates/foundation/delonix-net-rules",
     "crates/adapters/delonix-vm",
     "crates/adapters/delonix-volume",
     "crates/interfaces/delonix-cri",
     "crates/interfaces/delonix-mgmt",
-    "crates/adapters/delonix-scan",
+    "crates/adapters/delonix-scanner",
     "crates/contexts/delonix-security-runtime",
     "crates/providers/delonix-truenas",
     "crates/providers/delonix-proxmox",
@@ -36,17 +36,17 @@ repository = "https://github.com/angolardevops/delonix-runtime"
 # every manifest that depends on it. The directory is the crate's LAYER, and
 # `scripts/arch_fitness.py` fails when the two disagree.
 delonix-runtime-core = { path = "crates/foundation/delonix-runtime-core" }
-delonix-runtime = { path = "crates/adapters/delonix-runtime" }
+delonix-linux = { path = "crates/adapters/delonix-linux" }
 delonix-runtime-bin = { path = "bins/delonix-runtime-bin" }
-delonix-image = { path = "crates/adapters/delonix-image" }
-delonix-net = { path = "crates/adapters/delonix-net" }
+delonix-oci = { path = "crates/adapters/delonix-oci" }
+delonix-sdn = { path = "crates/adapters/delonix-sdn" }
 delonix-net-rules = { path = "crates/foundation/delonix-net-rules" }
 delonix-telemetry = { path = "crates/adapters/delonix-telemetry" }
 delonix-vm = { path = "crates/adapters/delonix-vm" }
 delonix-volume = { path = "crates/adapters/delonix-volume" }
 delonix-cri = { path = "crates/interfaces/delonix-cri" }
 delonix-mgmt = { path = "crates/interfaces/delonix-mgmt" }
-delonix-scan = { path = "crates/adapters/delonix-scan" }
+delonix-scanner = { path = "crates/adapters/delonix-scanner" }
 delonix-security-runtime = { path = "crates/contexts/delonix-security-runtime" }
 delonix-truenas = { path = "crates/providers/delonix-truenas" }
 delonix-proxmox = { path = "crates/providers/delonix-proxmox" }

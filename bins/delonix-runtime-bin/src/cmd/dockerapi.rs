@@ -41,7 +41,7 @@ use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use serde_json::json;
 
-use delonix_image::ImageStore;
+use delonix_oci::ImageStore;
 use delonix_runtime_core::peer_cred::peer_uid;
 use delonix_runtime_core::{Container, Error, Result, Status, Store};
 
@@ -243,7 +243,7 @@ fn run_from_spec_file_inner(path: &std::path::Path) -> Result<()> {
 /// Reaps zombie children of THIS process for as long as it runs.
 ///
 /// A detached container's init process is a **direct child of whoever called
-/// `spawn()`** (`delonix_runtime::spawn` just returns without `waitpid` when
+/// `spawn()`** (`delonix_linux::spawn` just returns without `waitpid` when
 /// `detach: true`) — harmless for the plain CLI, which exits moments later so
 /// the child gets reparented to the host's real `init` (which reaps it). This
 /// server never exits, so it IS the real parent for the container's entire
@@ -1076,7 +1076,7 @@ fn handle_inspect(state: &Arc<AppState>, id: &str) -> (StatusCode, Vec<u8>) {
         Ok(c) => c,
         Err(e) => return err_response(&e),
     };
-    let _ = delonix_runtime::reconcile_status(&mut c);
+    let _ = delonix_linux::reconcile_status(&mut c);
     ok_json(json!({
         "Id": c.id,
         "Name": format!("/{}", c.name),

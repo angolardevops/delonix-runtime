@@ -17,8 +17,8 @@ delonix-stack = { workspace = true }
 delonix-compute = { workspace = true }
 delonix-runtime-core = { workspace = true }
 delonix-telemetry = { workspace = true }
-delonix-runtime = { workspace = true }
-delonix-image = { workspace = true }
+delonix-linux = { workspace = true }
+delonix-oci = { workspace = true }
 delonix-vm = { workspace = true }
 delonix-volume = { workspace = true }
 # Provisioning on a NAS (ADR-0009). Only the bin depends on it — a motor crate
@@ -28,7 +28,7 @@ delonix-truenas = { workspace = true }
 # and the bin is where its target (endpoint, node, credential) is known — so
 # this is the process that registers it.
 delonix-proxmox = { workspace = true }
-delonix-scan = { workspace = true }
+delonix-scanner = { workspace = true }
 # The node's security decisions (ADR-0026). Pure: three dependencies, no daemon,
 # no privileges — see the crate doc for what it deliberately does NOT do.
 delonix-security-runtime = { workspace = true }
@@ -54,7 +54,7 @@ rcgen = { workspace = true, features = ["ring", "pem"] }
 # nao acrescenta nada a arvore de dependencias do repo publico.
 tar = { workspace = true }
 flate2 = { workspace = true }
-delonix-net = { workspace = true }
+delonix-sdn = { workspace = true }
 clap = { workspace = true }
 clap_complete = { workspace = true, features = ["unstable-dynamic"] }
 serde = { workspace = true }

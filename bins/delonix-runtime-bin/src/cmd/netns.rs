@@ -8,8 +8,8 @@
 //! here — only the operational subcommands do.
 
 use clap::Subcommand;
-use delonix_net::infra;
 use delonix_runtime_core::{ContainerFw, Error, Result};
+use delonix_sdn::infra;
 
 #[derive(Subcommand)]
 pub enum NetnsCmd {
@@ -95,7 +95,7 @@ pub enum NetnsCmd {
 /// before the pin/control split does both jobs in one process and has no control
 /// pidfile, while serving the socket perfectly. Only "no pid AND unreachable" is
 /// a control plane that is actually gone.
-fn fmt_control(st: &delonix_net::infra::InfraStatus) -> String {
+fn fmt_control(st: &delonix_sdn::infra::InfraStatus) -> String {
     match (st.control_pid, st.control_reachable) {
         (Some(p), _) => p.to_string(),
         (None, true) => "in-pin".to_string(),
@@ -174,7 +174,7 @@ fn reconcile_after_respawn() -> Result<(usize, usize)> {
     // container, whose netns is its own, snapshot and live are equivalent.
     let mut candidates = Vec::new();
     for mut c in store.list()? {
-        delonix_runtime::reconcile_status(&mut c);
+        delonix_linux::reconcile_status(&mut c);
         if is_reattach_candidate(&c.status, c.network.as_deref(), c.pid, c.pod.as_deref()) {
             candidates.push(c);
         }
@@ -207,8 +207,7 @@ fn reconcile_after_respawn() -> Result<(usize, usize)> {
             failed += 1;
             continue;
         }
-        let images = match delonix_image::ImageStore::open(delonix_image::ImageStore::default_root())
-        {
+        let images = match delonix_oci::ImageStore::open(delonix_oci::ImageStore::default_root()) {
             Ok(i) => i,
             Err(e) => {
                 eprintln!(
@@ -233,7 +232,7 @@ fn reconcile_after_respawn() -> Result<(usize, usize)> {
 pub fn run(action: NetnsCmd) -> Result<()> {
     match action {
         NetnsCmd::Up => {
-            if !delonix_runtime::is_rootless() {
+            if !delonix_linux::is_rootless() {
                 println!("ingress: in root mode the single ingress already exists (nft DNAT on the host); the infra netns is rootless-only.");
                 return Ok(());
             }

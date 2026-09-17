@@ -25,8 +25,8 @@
 //! said — see [`isolation_state`].
 
 use clap::Subcommand;
-use delonix_net::infra;
 use delonix_runtime_core::Result;
+use delonix_sdn::infra;
 use serde::Serialize;
 
 use super::output;

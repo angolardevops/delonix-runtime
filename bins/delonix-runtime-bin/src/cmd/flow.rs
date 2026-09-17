@@ -10,8 +10,8 @@
 use std::net::Ipv4Addr;
 use std::process::Command;
 
-use delonix_net::{bpf, infra};
 use delonix_runtime_core::Result;
+use delonix_sdn::{bpf, infra};
 
 use super::output;
 use super::util::open_stores;

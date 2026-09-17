@@ -5,18 +5,18 @@ use std::path::PathBuf;
 
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
-use delonix_image::ImageStore;
-use delonix_net::infra;
-use delonix_runtime::{self as runtime};
+use delonix_linux::{self as runtime};
+use delonix_oci::ImageStore;
 use delonix_runtime_core::{
     generate_id, Container, Error, Health, HealthConfig, HealthState, Result, Status, Store,
 };
+use delonix_sdn::infra;
 use serde::{Deserialize, Serialize};
 
 use super::manifest::{self, ManifestDoc};
 use super::output;
 use super::util::{container_writable_dir, find, open_stores, resolve_or_pull};
-use delonix_net::run_network::{publish_with_retry, unpublish_ports};
+use delonix_sdn::run_network::{publish_with_retry, unpublish_ports};
 
 /// `spec` for `kind: Container` — mirrors `ContainerCmd::Run` (minus `name`,
 /// which comes from `metadata.name`). **`detach` defaults to `true`** (unlike the
@@ -344,7 +344,7 @@ pub(crate) fn desired_container_fields(
     let ports: Vec<String> = spec
         .ports
         .iter()
-        .flat_map(|p| delonix_net::expand_publish_range(p).unwrap_or_else(|_| vec![p.clone()]))
+        .flat_map(|p| delonix_sdn::expand_publish_range(p).unwrap_or_else(|_| vec![p.clone()]))
         .collect();
     f.insert("ports".into(), list_key(ports));
     f.insert(
@@ -395,7 +395,7 @@ fn desired_fields_from_run_opts(o: &RunOpts) -> std::collections::BTreeMap<Strin
     let ports: Vec<String> = o
         .ports
         .iter()
-        .flat_map(|p| delonix_net::expand_publish_range(p).unwrap_or_else(|_| vec![p.clone()]))
+        .flat_map(|p| delonix_sdn::expand_publish_range(p).unwrap_or_else(|_| vec![p.clone()]))
         .collect();
     f.insert("ports".into(), list_key(ports));
     f.insert(
@@ -1968,15 +1968,15 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
 }
 
 /// `--user <uid[:gid]|name[:group]>` resolved against the image rootfs
-/// ([`delonix_image::rootfs_user`]), worded for the terminal.
+/// ([`delonix_oci::rootfs_user`]), worded for the terminal.
 fn resolve_run_user(rootfs: &str, spec: &str) -> Result<(u32, Option<u32>)> {
-    delonix_image::rootfs_user::resolve_user(std::path::Path::new(rootfs), spec)
+    delonix_oci::rootfs_user::resolve_user(std::path::Path::new(rootfs), spec)
         .map_err(user_lookup_error)
 }
 
 /// A `--user` the image cannot satisfy, in the operator's language.
-fn user_lookup_error(e: delonix_image::rootfs_user::UserLookupError) -> Error {
-    use delonix_image::rootfs_user::UserLookupError;
+fn user_lookup_error(e: delonix_oci::rootfs_user::UserLookupError) -> Error {
+    use delonix_oci::rootfs_user::UserLookupError;
     Error::Invalid(match e {
         UserLookupError::EmptyUser => super::po::t("--user: empty user").into(),
         UserLookupError::NoSuchUser(user) => super::po::tf(
@@ -2046,7 +2046,7 @@ pub(crate) fn parse_io_rate(spec: &str, is_bytes: bool) -> std::result::Result<u
 /// `io.max` line (`rbps=… wbps=… riops=… wiops=…`). `None` when none was given.
 ///
 /// The engine prepends the store device's `major:minor` — see
-/// `delonix_runtime`'s `slice_io_device`.
+/// `delonix_linux`'s `slice_io_device`.
 pub(crate) fn compose_io_max(
     read_bps: Option<&str>,
     write_bps: Option<&str>,
@@ -2215,7 +2215,7 @@ mod resource_limits_preflight_tests {
 }
 
 /// Runs `f` with the host as the `container run` use case's `WorkloadRuntime`
-/// (`delonix_runtime::workload::HostWorkload`), composed with what this CLI owns:
+/// (`delonix_linux::workload::HostWorkload`), composed with what this CLI owns:
 /// the network's answers, the health monitor, the printed id and the removal of
 /// what a refused start left behind.
 pub(crate) fn with_host_workload<R>(
@@ -2224,10 +2224,10 @@ pub(crate) fn with_host_workload<R>(
     f: impl FnOnce(&runtime::workload::HostWorkload<'_>) -> R,
 ) -> R {
     let addresses = |l: &delonix_compute::launch::Launch| {
-        let a = delonix_net::run_network::launch_addresses(l);
+        let a = delonix_sdn::run_network::launch_addresses(l);
         (a.dns, a.hosts_ip)
     };
-    let attach_slirp = |pid: i32, ports: &[String]| delonix_net::slirp_attach(pid, ports);
+    let attach_slirp = |pid: i32, ports: &[String]| delonix_sdn::slirp_attach(pid, ports);
     let on_first_start = |c: &Container| {
         if let Some(cfg) = c.health.clone() {
             spawn_health_monitor(c.id.clone(), cfg);
@@ -2307,19 +2307,19 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // stored `ports`) is keyed on a single port and stays that way.
     let ports: Vec<String> = ports
         .iter()
-        .map(|s| delonix_net::expand_publish_range(s))
+        .map(|s| delonix_sdn::expand_publish_range(s))
         .collect::<Result<Vec<_>>>()?
         .concat();
     // Validate the `-p`s BEFORE creating anything (clear error, no leftovers).
     for spec in &ports {
-        let (addr, hp, cp, _) = delonix_net::parse_publish_addr(spec)?;
+        let (addr, hp, cp, _) = delonix_sdn::parse_publish_addr(spec)?;
         // A host port below 1024 is bound by the slirp as THIS unprivileged user, so
         // it fails with the slirp's opaque `add_hostfwd` JSON — after the container is
         // already up. Same treatment as the port-conflict error below: state the fact,
         // then the ways out as ready-to-copy commands.
-        let bind = delonix_net::publish_bind_addr(addr.as_deref());
+        let bind = delonix_sdn::publish_bind_addr(addr.as_deref());
         match hp.parse::<u16>() {
-            Ok(p) if !delonix_net::can_bind_host_port(&bind, p) => {
+            Ok(p) if !delonix_sdn::can_bind_host_port(&bind, p) => {
                 return Err(Error::Invalid(super::po::tf(
                     "host port {hp} needs privilege to bind — rootless cannot publish \
                      ports below net.ipv4.ip_unprivileged_port_start\n\
@@ -2360,7 +2360,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // itself isn't in the store yet) — checking here would give a false conflict.
     if std::env::var("DELONIX_REEXEC_ID").is_err() {
         for spec in &ports {
-            let (addr, hp, cp, _) = delonix_net::parse_publish_addr(spec)?;
+            let (addr, hp, cp, _) = delonix_sdn::parse_publish_addr(spec)?;
             if let Some(owner) = port_owner(store, &hp)? {
                 // Structured like the `cluster apply` recipes: the fact first,
                 // then the possible ways out as ready-to-copy commands — whoever
@@ -2413,7 +2413,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // BUG FIXED HERE (HIGH, found live by adversarial review): no code path
     // anywhere ever validated a container's name — unlike VM/Secret/Volume,
     // which all got a `valid_*_name` boundary check in earlier audits. The
-    // internal DNS resolver (`delonix-net::infra::parse_internal_name`)
+    // internal DNS resolver (`delonix-sdn::infra::parse_internal_name`)
     // treats any name WITHOUT a `.delonix.internal`/`.delonix.io` suffix as a
     // whole-name match resolvable from ANY namespace — an ordinary
     // `container run --name registry.npmjs.org` (no manifest, no privilege)
@@ -2478,7 +2478,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         prog.ok();
         Ok(path)
     };
-    let host_network = delonix_net::run_network::HostNetwork {
+    let host_network = delonix_sdn::run_network::HostNetwork {
         state_root: super::util::state_root(),
         on_attached: &on_attached,
         register_expose: &register_expose,
@@ -2499,7 +2499,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         cname,
         namespace.clone(),
         reexec,
-        &delonix_image::run_images::HostImages {
+        &delonix_oci::run_images::HostImages {
             store: images,
             announce_pull: &super::util::announce_pull,
             unpacking: &unpacking,
@@ -2508,8 +2508,8 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         &delonix_volume::HostVolumes {
             root: super::util::state_root(),
         },
-        &delonix_runtime::cdi::HostDevices,
-        &delonix_runtime::run_host::HostRuntime {
+        &delonix_linux::cdi::HostDevices,
+        &delonix_linux::run_host::HostRuntime {
             state_root: super::util::state_root(),
             apparmor_disabled: &apparmor_disabled,
         },
@@ -3035,7 +3035,7 @@ fn fmt_status_of(c: &Container, uptime: Option<u64>) -> String {
     // The column an operator reads to find out why a container is down. «Dead»
     // alone reads the same for an OOM and for an external `kill -9`, and those
     // two have opposite fixes (raise `-m`, or find who sent the signal).
-    if c.crash_reason.as_deref() == Some(delonix_runtime::OOM_KILLED)
+    if c.crash_reason.as_deref() == Some(delonix_linux::OOM_KILLED)
         && matches!(c.status, Status::Crashed | Status::Failed(_))
     {
         return format!("{} (OOMKilled)", fmt_status(&c.status, uptime));
@@ -3073,7 +3073,7 @@ fn fmt_ports(ports: &[String]) -> String {
             // formas antigas, e a razão de ele cobrir o caso aborrecido também.
             let sem_proto = p.split_once('/').map(|(s, _)| s).unwrap_or(p.as_str());
             if sem_proto.contains(':') {
-                if let Ok((addr, hp, cp, proto)) = delonix_net::parse_publish_addr(p) {
+                if let Ok((addr, hp, cp, proto)) = delonix_sdn::parse_publish_addr(p) {
                     return match addr {
                         // Com endereço explícito imprime-se a forma do docker
                         // (`127.0.0.1:8080->80/tcp`): aqui o endereço é FACTO, veio
@@ -3380,7 +3380,7 @@ pub(crate) use delonix_compute::launch::should_supervise;
 /// Neither is solvable from inside `container_init`: you have to ENTER the
 /// holder's userns+mountns BEFORE the container exists.
 ///
-/// The solution (the one `delonix-net`'s doc already pointed to, with nobody
+/// The solution (the one `delonix-sdn`'s doc already pointed to, with nobody
 /// wiring it up): re-execute the binary itself through `infra::join_argv` —
 /// `nsenter -t <holder> -U -m -n --preserve-credentials -- ip netns exec <netns>`
 /// — and run the SAME command there. The 2nd pass is born inside the right
@@ -3515,7 +3515,7 @@ pub(crate) fn port_owner(store: &Store, host_port: &str) -> Result<Option<String
             continue;
         }
         for p in &c.ports {
-            if let Ok((hp, _, _)) = delonix_net::parse_publish(p) {
+            if let Ok((hp, _, _)) = delonix_sdn::parse_publish(p) {
                 if hp == host_port {
                     return Ok(Some(c.name));
                 }
@@ -3533,12 +3533,12 @@ pub(crate) fn port_owner(store: &Store, host_port: &str) -> Result<Option<String
 /// the fact first, then ready-to-copy ways out.
 fn host_port_conflict_error(hp: &str, cp: &str, addr: Option<&str>) -> Option<Error> {
     let p = hp.parse::<u16>().ok()?;
-    let bind = delonix_net::publish_bind_addr(addr);
-    if !delonix_net::host_port_busy(&bind, p) {
+    let bind = delonix_sdn::publish_bind_addr(addr);
+    if !delonix_sdn::host_port_busy(&bind, p) {
         return None;
     }
     let who =
-        delonix_net::host_port_owner_process(p).unwrap_or_else(|| "another process".to_string());
+        delonix_sdn::host_port_owner_process(p).unwrap_or_else(|| "another process".to_string());
     let alt = p as u32 + 10000;
     Some(Error::Invalid(super::po::tf(
         "port {hp} is already in use on the host by {who} — not a delonix container\n\
@@ -4073,7 +4073,7 @@ pub(crate) fn cmd_rename(store: &Store, id: &str, new_name: &str) -> Result<()> 
 /// between the `run` and this command would make it stale — a narrower gap than
 /// a constant that is wrong by default.
 pub(crate) fn published_addr_for_display(spec_addr: Option<String>) -> String {
-    delonix_net::publish_bind_addr(spec_addr.as_deref())
+    delonix_sdn::publish_bind_addr(spec_addr.as_deref())
 }
 
 pub(crate) fn cmd_port(store: &Store, id: &str) -> Result<()> {
@@ -4086,7 +4086,7 @@ pub(crate) fn cmd_port(store: &Store, id: &str) -> Result<()> {
         // de só enganadora: com `127.0.0.1:19555:80` o `split_once(':')` dava
         // `host_part = "127.0.0.1"` e imprimia-se **`19555:80/tcp -> 0.0.0.0:127.0.0.1`**
         // — um endereço que não existe, sobre um serviço restrito a loopback.
-        if let Ok((addr, hp, cp, proto)) = delonix_net::parse_publish_addr(spec) {
+        if let Ok((addr, hp, cp, proto)) = delonix_sdn::parse_publish_addr(spec) {
             println!("{cp}/{proto} -> {}:{hp}", published_addr_for_display(addr));
         } else {
             println!("{spec}");
@@ -4593,7 +4593,7 @@ fn container_fs_root(images: &ImageStore, c: &Container) -> Result<FsRoot> {
     //
     // Returning the empty `merged/` would be the worst possible answer: `cp`
     // would copy nothing and report success.
-    if dir.join(delonix_image::ImageStore::LOWERS_FILE).exists() {
+    if dir.join(delonix_oci::ImageStore::LOWERS_FILE).exists() {
         let hold = runtime::reexec_mapped_hold(&["__ovlhold", &dir.to_string_lossy()])
             .ok_or_else(|| {
                 Error::Invalid(super::po::tf(
@@ -5071,7 +5071,7 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
     // exactly like the same range on `run` — a flag that works in one place and not
     // the other is worse than one that exists nowhere.
     for spec in &o.publish_add {
-        for one in delonix_net::expand_publish_range(spec)? {
+        for one in delonix_sdn::expand_publish_range(spec)? {
             publish_live(store, &mut c, &one)?;
         }
     }
@@ -5130,7 +5130,7 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
         // the same flag written the same way programmed a different bucket
         // depending on which command applied it. It also accepted a burst of
         // zero, which `run` refuses. One flag, one meaning.
-        let parsed = delonix_net::parse_net_rate(rate, o.net_burst.as_deref())?;
+        let parsed = delonix_sdn::parse_net_rate(rate, o.net_burst.as_deref())?;
         infra::set_net_rate(&c.id, parsed.rate_bit, parsed.burst_bytes)?;
         // Persist what the OPERATOR wrote, and `None` when they wrote nothing —
         // symmetric with `run`. Storing the computed number instead made the two
@@ -5256,9 +5256,9 @@ fn ingress_address(c: &Container) -> Result<String> {
 
 /// Publish a port on a LIVE container, by the right path for its network.
 pub(crate) fn publish_live(store: &Store, c: &mut Container, spec: &str) -> Result<()> {
-    let (host_addr, hp, cp, proto) = delonix_net::parse_publish_addr(spec)?;
+    let (host_addr, hp, cp, proto) = delonix_sdn::parse_publish_addr(spec)?;
     if c.ports.iter().any(|p| {
-        delonix_net::parse_publish(p)
+        delonix_sdn::parse_publish(p)
             .map(|(h, _, _)| h == hp)
             .unwrap_or(false)
     }) {
@@ -5282,7 +5282,7 @@ pub(crate) fn publish_live(store: &Store, c: &mut Container, spec: &str) -> Resu
         // Per-container slirp path: requests the hostfwd from ITS slirp.
         false => {
             let pid = c.pid.ok_or_else(|| Error::NotRunning(c.name.clone()))?;
-            let sock = delonix_net::slirp_container_sock(pid);
+            let sock = delonix_sdn::slirp_container_sock(pid);
             if !sock.exists() {
                 // The slirp's api-socket is only opened when `run` carries `-p`
                 // (see `slirp_attach`): a container created without ports has no
@@ -5296,7 +5296,7 @@ pub(crate) fn publish_live(store: &Store, c: &mut Container, spec: &str) -> Resu
                     &[("name", &c.name)],
                 )));
             }
-            delonix_net::slirp_add_hostfwd(&sock, &hp, &cp, &proto, host_addr.as_deref())?;
+            delonix_sdn::slirp_add_hostfwd(&sock, &hp, &cp, &proto, host_addr.as_deref())?;
         }
     }
     let s = spec.to_string();
@@ -5317,7 +5317,7 @@ pub(crate) fn unpublish_live(store: &Store, c: &mut Container, host_port: &str) 
         .ports
         .iter()
         .filter(|p| {
-            delonix_net::parse_publish(p)
+            delonix_sdn::parse_publish(p)
                 .map(|(h, _, _)| h == host_port)
                 .unwrap_or(false)
         })
@@ -5330,7 +5330,7 @@ pub(crate) fn unpublish_live(store: &Store, c: &mut Container, host_port: &str) 
         )));
     }
     for spec in &hits {
-        let proto = delonix_net::parse_publish(spec).map(|(_, _, pr)| pr).ok();
+        let proto = delonix_sdn::parse_publish(spec).map(|(_, _, pr)| pr).ok();
         match on_ingress(c) {
             true => infra::unpublish_port_proto(host_port, proto.as_deref()),
             false => {
@@ -5339,7 +5339,7 @@ pub(crate) fn unpublish_live(store: &Store, c: &mut Container, host_port: &str) 
                 // only the record (before: an error "container is not running" and the publish
                 // stayed stuck in the record forever — a real bug report).
                 if let Some(pid) = c.pid.filter(|_| c.is_live()) {
-                    let sock = delonix_net::slirp_container_sock(pid);
+                    let sock = delonix_sdn::slirp_container_sock(pid);
                     if sock.exists() {
                         infra::slirp_remove_hostfwd_proto(&sock, host_port, proto.as_deref())?;
                     }
@@ -5468,7 +5468,7 @@ fn cmd_stats(store: &Store, ids: &[String]) -> Result<()> {
 }
 
 /// Splits one CRI-format log line (`<rfc3339nano> stdout F <line>` — the
-/// format `--log-cri` writes, see `delonix_runtime::log_shim`) into
+/// format `--log-cri` writes, see `delonix_linux::log_shim`) into
 /// `(timestamp, body)`. `None` for anything that doesn't match — a raw
 /// (non-CRI) log, or an odd malformed record.
 fn parse_cri_log_line(line: &str) -> Option<(&str, &str)> {
@@ -5487,7 +5487,7 @@ fn parse_cri_log_line(line: &str) -> Option<(&str, &str)> {
 /// timestamp starts with — RFC3339 UTC timestamps compare lexicographically in
 /// the same order as chronologically, so `--since` just needs this string
 /// prefix, not a full parse back into a comparable integer. Small hand-written
-/// civil-calendar conversion (mirrors `delonix_runtime`'s own private
+/// civil-calendar conversion (mirrors `delonix_linux`'s own private
 /// `rfc3339` helper) rather than a `chrono` dependency, matching this
 /// project's supply-chain-minimalism rule (see AGENTS.md's "Output" section).
 fn unix_secs_to_rfc3339_prefix(secs: u64) -> String {
@@ -6134,7 +6134,7 @@ mod runspec_single_builder_tests {
     #[test]
     fn container_has_one_runspec_builder() {
         // The spawn specification is built in ONE place,
-        // `delonix_runtime::launch_spec::run_spec`, from a `Launch`; `run` and
+        // `delonix_linux::launch_spec::run_spec`, from a `Launch`; `run` and
         // `start` both go through it. A literal here would be a second builder.
         let src = include_str!("container.rs");
         let needle = concat!("RunSpec", " {");
@@ -7102,7 +7102,7 @@ restartPolicy: OnFailure
         assert!(super::on_ingress(&c));
         assert_eq!(
             super::ingress_address(&c).unwrap(),
-            delonix_net::infra::container_ip("pod-p")
+            delonix_sdn::infra::container_ip("pod-p")
         );
     }
 

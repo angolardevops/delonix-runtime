@@ -23,7 +23,7 @@ use crate::{Error, Result};
 /// Exclusive file lock (`flock`) sequencing [`SecretStore::update`]'s
 /// read-modify-write BETWEEN PROCESSES. Same pattern as `Store`'s own
 /// (module-private there, so duplicated here rather than shared — matches
-/// `delonix-net::infra` also keeping its own copy of the same idiom).
+/// `delonix-sdn::infra` also keeping its own copy of the same idiom).
 struct FileLock(fs::File);
 
 impl FileLock {

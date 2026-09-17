@@ -1,10 +1,10 @@
 //! `delonix network` — ls/create/rm/inspect.
 //!
 //! **Note (two stores in parallel, deliberate, not a bug):** `NetworkStore`
-//! (`delonix_net::NetworkStore`) is the "rich" declarative registry (drivers
+//! (`delonix_sdn::NetworkStore`) is the "rich" declarative registry (drivers
 //! bridge/macvlan/ipvlan/overlay, VNI, WireGuard peers), persisted in
 //! `<root>/networks/<name>`. `infra::{network_create_with,network_remove}`
-//! (`delonix_net::infra`) is the PHYSICAL plane tied to the rootless holder netns
+//! (`delonix_sdn::infra`) is the PHYSICAL plane tied to the rootless holder netns
 //! (real bridge + prefix), persisted separately in
 //! `<ingress_dir>/networks/<name>.json` — it is what `container run --net <name>`
 //! and `vm create --network <name>` actually use to attach. For the `bridge`
@@ -23,8 +23,8 @@
 use super::kinds as k;
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
-use delonix_net::{infra, Network, NetworkStore};
 use delonix_runtime_core::{Error, Result};
+use delonix_sdn::{infra, Network, NetworkStore};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -89,7 +89,7 @@ fn normalized_gateway(gateway: &str, subnet: Option<&str>) -> Option<String> {
         return None;
     }
     let derived = subnet
-        .and_then(delonix_net::Cidr::parse)
+        .and_then(delonix_sdn::Cidr::parse)
         .and_then(|c| c.gateway());
     if derived.as_deref() == Some(gateway) {
         return None;
@@ -233,7 +233,7 @@ fn reseed_overlay_fdb(store: &NetworkStore, name: &str) -> Result<()> {
     let dsts: Vec<String> = net
         .peers
         .iter()
-        .map(|p| peer_fdb_dst(&delonix_net::parse_overlay_peer(p)))
+        .map(|p| peer_fdb_dst(&delonix_sdn::parse_overlay_peer(p)))
         .collect();
     // `bridge_addr`: the uplink's bridge is a normal holder bridge, and this token
     // only reaches `ensure_net_bridge` as its fallback address — never a route.
@@ -268,7 +268,7 @@ fn reseed_overlay_fdb(store: &NetworkStore, name: &str) -> Result<()> {
 /// facts.
 fn remove_peer_everywhere(store: &NetworkStore, name: &str, peer: &str) -> Result<()> {
     let net = store.get(name)?;
-    let parsed = delonix_net::parse_overlay_peer(peer);
+    let parsed = delonix_sdn::parse_overlay_peer(peer);
     // `vxlan_dev()` and not a second `format!`: the name is hex-encoded
     // (`dlxvx0042`, not `dlxvx66`), and a private copy of the formula would send
     // the deletion to a device that does not exist — reporting success while the
@@ -574,7 +574,7 @@ pub fn run(action: NetworkCmd) -> Result<()> {
                     .into(),
             )),
             (Some(from), Some(to)) => {
-                delonix_net::infra::network_route(&from, &to, !rm)?;
+                delonix_sdn::infra::network_route(&from, &to, !rm)?;
                 println!(
                     "{}",
                     super::po::tf(
@@ -887,7 +887,7 @@ fn cmd_diagnose(store: &NetworkStore, format: output::OutputFormat) -> Result<()
     // 3. The address registry against its owners. A lease is held BEFORE the
     //    container has a record, so "no record" is not proof the lease is dead —
     //    which is precisely why this SHOWS and never reclaims.
-    let leases = delonix_net::ipam::all_leases();
+    let leases = delonix_sdn::ipam::all_leases();
     let live: std::collections::HashSet<String> = super::util::open_stores()
         .ok()
         .and_then(|(_, s)| s.list().ok())
@@ -1016,7 +1016,7 @@ fn declared_gateway(gateway: &str, subnet: &str) -> Result<Option<String>> {
     let Some(g) = normalized_gateway(gateway, Some(subnet)) else {
         return Ok(None);
     };
-    let cidr = delonix_net::Cidr::parse(subnet).ok_or_else(|| {
+    let cidr = delonix_sdn::Cidr::parse(subnet).ok_or_else(|| {
         delonix_runtime_core::Error::Invalid(super::po::tf(
             "cannot validate --gateway against subnet {subnet}",
             &[("subnet", subnet)],
@@ -1182,7 +1182,7 @@ pub(crate) fn create_network(
 ///     VXLAN transport between nodes (the FDB then points to the `wg_ip` instead of
 ///     the `node_ip`).
 ///
-/// Mirrors `delonix_net::Net::ensure_vxlan`/`ensure_overlay_wg` (the old
+/// Mirrors `delonix_sdn::Net::ensure_vxlan`/`ensure_overlay_wg` (the old
 /// root/host-netns path), but driven through the holder's control socket — the only
 /// one with CAP_NET_ADMIN in the infra netns. Idempotent. Requires the holder up
 /// (`ensure_up`). It only makes sense to call when `net.driver == "overlay"`.
@@ -1198,7 +1198,7 @@ fn realize_overlay(net: &Network) -> Result<()> {
     // silently blackholed. An actionable error instead of an overlay that pretends
     // to be up.
     let encrypted = net.wg_ip.is_some();
-    if encrypted && !delonix_net::wg::available() {
+    if encrypted && !delonix_sdn::wg::available() {
         return Err(delonix_runtime_core::Error::Invalid(
             super::po::t(
                 "encrypted overlay (wg_ip) but 'wg' is unavailable on the host — install \
@@ -1212,7 +1212,7 @@ fn realize_overlay(net: &Network) -> Result<()> {
     let parsed: Vec<(String, Option<(String, String)>)> = net
         .peers
         .iter()
-        .map(|p| delonix_net::parse_overlay_peer(p))
+        .map(|p| delonix_sdn::parse_overlay_peer(p))
         .collect();
     // Holder up (without incrementing the ref-count — the uplink is persistent
     // infra, not a workload; it dies with `network rm` → `netdel`, not with a
@@ -1229,7 +1229,7 @@ fn realize_overlay(net: &Network) -> Result<()> {
     // WireGuard only in the ENCRYPTED overlay (availability was already ensured
     // above).
     if let Some(my_wg_ip) = net.wg_ip.as_deref() {
-        let key = delonix_net::wg::ensure_node_key()?;
+        let key = delonix_sdn::wg::ensure_node_key()?;
         let iface = wg_iface_name(vni);
         infra::set_wg_iface(&iface, &key.private, WG_PORT, &format!("{my_wg_ip}/24"))?;
         for (node_ip, wg) in &parsed {
@@ -1504,7 +1504,7 @@ fn live_lease_owners() -> Result<std::collections::HashMap<String, String>> {
 /// by name and by prefix never disagree.
 fn ipam_prefix_of_network(store: &NetworkStore, network: &str) -> Result<String> {
     let n = store.get(network)?;
-    Ok(delonix_net::ipam::registry_key(&n.prefix))
+    Ok(delonix_sdn::ipam::registry_key(&n.prefix))
 }
 
 fn cmd_ipam_ls(network: Option<String>, output: output::OutputFormat) -> Result<()> {
@@ -1516,7 +1516,7 @@ fn cmd_ipam_ls(network: Option<String>, output: output::OutputFormat) -> Result<
             Some(ipam_prefix_of_network(&store, name)?)
         }
     };
-    let leases: Vec<_> = delonix_net::ipam::all_leases()
+    let leases: Vec<_> = delonix_sdn::ipam::all_leases()
         .into_iter()
         .filter(|(prefix, _, _)| filter_prefix.as_deref().is_none_or(|p| p == prefix))
         .collect();
@@ -1563,7 +1563,7 @@ fn cmd_ipam_ls(network: Option<String>, output: output::OutputFormat) -> Result<
 fn cmd_ipam_prune(dry_run: bool) -> Result<()> {
     let live: std::collections::HashSet<String> = live_lease_owners()?.into_keys().collect();
     if dry_run {
-        let candidates: Vec<_> = delonix_net::ipam::all_leases()
+        let candidates: Vec<_> = delonix_sdn::ipam::all_leases()
             .into_iter()
             .filter(|(_, id, _)| !live.contains(id))
             .collect();
@@ -1587,7 +1587,7 @@ fn cmd_ipam_prune(dry_run: bool) -> Result<()> {
         }
         return Ok(());
     }
-    let freed = delonix_net::ipam::reap_orphan_leases(&live);
+    let freed = delonix_sdn::ipam::reap_orphan_leases(&live);
     println!(
         "{}",
         super::po::tf(
@@ -1613,7 +1613,7 @@ pub enum NodeCmd {
 /// `network node` — `ensure_node_key` is idempotent: generates on the first time,
 /// then reads the one that already exists.
 fn cmd_node(action: NodeCmd) -> Result<()> {
-    let key = delonix_net::wg::ensure_node_key()?;
+    let key = delonix_sdn::wg::ensure_node_key()?;
     match action {
         NodeCmd::Init => {
             println!(
@@ -1757,7 +1757,7 @@ mod tests {
         assert_eq!(super::peer_fdb_dst(&claro), "10.0.0.8");
         // E o que a função devolve é o que o `parse_overlay_peer` produz a partir
         // da string do registo — o elo que fecha o ciclo add→remove.
-        let do_registo = delonix_net::parse_overlay_peer("10.0.0.7=chave=10.9.0.7");
+        let do_registo = delonix_sdn::parse_overlay_peer("10.0.0.7=chave=10.9.0.7");
         assert_eq!(super::peer_fdb_dst(&do_registo), "10.9.0.7");
     }
 
@@ -1771,7 +1771,7 @@ mod tests {
     fn o_nome_do_device_vxlan_e_o_do_motor() {
         let tmp = std::env::temp_dir().join(format!("dlx-vxdev-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
-        let store = delonix_net::NetworkStore::open(&tmp).unwrap();
+        let store = delonix_sdn::NetworkStore::open(&tmp).unwrap();
         let net = store.create_overlay("m", 42, &[], None).unwrap();
         assert_eq!(net.vxlan_dev().as_deref(), Some("dlxvx002a"));
         assert_ne!(net.vxlan_dev().as_deref(), Some("dlxvx42"));

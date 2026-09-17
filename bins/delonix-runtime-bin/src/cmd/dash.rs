@@ -187,7 +187,7 @@ type ContainerRow = (
     String,
     Option<u64>,
     String,
-    delonix_runtime::ContainerUsage,
+    delonix_linux::ContainerUsage,
     Option<(u64, u64)>,
 );
 
@@ -238,8 +238,8 @@ impl DashData {
         let mut containers: Vec<ContainerRow> = Vec::new();
         if let Ok((_img, store)) = super::util::open_stores() {
             for mut c in store.list().unwrap_or_default() {
-                delonix_runtime::reconcile_status(&mut c);
-                let usage = delonix_runtime::container_usage(&c);
+                delonix_linux::reconcile_status(&mut c);
+                let usage = delonix_linux::container_usage(&c);
                 let net = per_container_net.get(&c.id).copied();
                 containers.push((
                     c.name.clone(),
@@ -269,13 +269,13 @@ impl DashData {
         let vm_running = vms.iter().filter(|v| v.status == Status::Running).count();
 
         // --- networks / volumes / images / secrets ---
-        let networks = delonix_net::NetworkStore::open(root)
+        let networks = delonix_sdn::NetworkStore::open(root)
             .and_then(|s| s.list())
             .unwrap_or_default();
         let volumes = delonix_volume::VolumeStore::open(root)
             .and_then(|s| s.list())
             .unwrap_or_default();
-        let images = delonix_image::ImageStore::open(root)
+        let images = delonix_oci::ImageStore::open(root)
             .and_then(|s| s.list())
             .unwrap_or_default();
         let secrets = delonix_runtime_core::SecretStore::open(root)
@@ -527,7 +527,7 @@ impl DashData {
             activity: c_running as u64,
             mem_bytes: summary.memory_bytes_used,
             mem_bytes_limit: summary.memory_bytes_limit,
-            cpu_usage_usec: delonix_runtime::slice_cpu_usage_usec(),
+            cpu_usage_usec: delonix_linux::slice_cpu_usage_usec(),
         })
     }
 }

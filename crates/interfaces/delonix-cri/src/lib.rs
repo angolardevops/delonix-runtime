@@ -40,8 +40,8 @@ fn st<E: std::fmt::Display>(e: E) -> Status {
 }
 
 /// Opens the image store at the given root.
-fn images(base: &PathBuf) -> Result<delonix_image::ImageStore, Status> {
-    delonix_image::ImageStore::open(base).map_err(st)
+fn images(base: &PathBuf) -> Result<delonix_oci::ImageStore, Status> {
+    delonix_oci::ImageStore::open(base).map_err(st)
 }
 
 // ---------------------------------------------------------------------------
@@ -138,7 +138,7 @@ impl ImageService for DelonixImage {
         let base = self.base.clone();
         let img = tokio::task::spawn_blocking(move || {
             let store = images(&base)?;
-            delonix_image::pull_from_registry_with_creds(&store, &name, creds).map_err(st)
+            delonix_oci::pull_from_registry_with_creds(&store, &name, creds).map_err(st)
         })
         .await
         .map_err(st)??;
@@ -216,7 +216,7 @@ fn image_user(user: &str) -> (Option<Int64Value>, String) {
     }
 }
 
-fn layer_size(img: &delonix_image::Image) -> u64 {
+fn layer_size(img: &delonix_oci::Image) -> u64 {
     let mut total = 0u64;
     for l in &img.layers {
         let hex = l.strip_prefix("sha256:").unwrap_or(l);
@@ -228,8 +228,8 @@ fn layer_size(img: &delonix_image::Image) -> u64 {
     total
 }
 
-fn blob_path(_img: &delonix_image::Image, hex: &str) -> PathBuf {
-    delonix_image::ImageStore::default_root()
+fn blob_path(_img: &delonix_oci::Image, hex: &str) -> PathBuf {
+    delonix_oci::ImageStore::default_root()
         .join("blobs")
         .join("sha256")
         .join(hex)

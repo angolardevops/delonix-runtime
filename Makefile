@@ -45,7 +45,7 @@ image-tag: ## Imprime a tag versionada calculada
 	@echo $(TAG)
 
 bench: ## Corre os micro-benchmarks criterion (dev-only, stable)
-	PROTOC=$$(command -v protoc) cargo bench -p delonix-image
+	PROTOC=$$(command -v protoc) cargo bench -p delonix-oci
 
 coverage: ## Cobertura de testes do workspace (precisa de cargo-llvm-cov) — ./scripts/coverage.sh [--html|--lcov]
 	./scripts/coverage.sh $(ARGS)

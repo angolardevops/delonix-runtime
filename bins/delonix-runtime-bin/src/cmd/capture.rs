@@ -86,8 +86,8 @@ pub fn run(
             "'{container}' has no netns of its own (`--net host`/`none`) — nothing to capture on"
         )));
     }
-    let netns = delonix_net::infra::sanitize(&target.id);
-    let prefix = delonix_net::infra::join_argv(&netns).ok_or_else(|| Error::Runtime {
+    let netns = delonix_sdn::infra::sanitize(&target.id);
+    let prefix = delonix_sdn::infra::join_argv(&netns).ok_or_else(|| Error::Runtime {
         context: "join_argv",
         message: super::po::t("ingress infra is down — no holder to enter").into(),
     })?;

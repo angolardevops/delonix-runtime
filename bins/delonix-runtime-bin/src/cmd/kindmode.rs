@@ -31,7 +31,7 @@
 
 use std::time::{Duration, Instant};
 
-use delonix_image::ImageStore;
+use delonix_oci::ImageStore;
 use delonix_runtime_core::{Container, Error, Result, Store};
 
 use super::container::{self, RunOpts};
@@ -155,7 +155,7 @@ const NODE_SHARED: &str = "/kind/delonix";
 /// [`node_exec_capture`].
 fn node_exec(c: &Container, script: &str) -> Result<i32> {
     let argv = vec!["/bin/sh".to_string(), "-c".to_string(), script.to_string()];
-    delonix_runtime::exec(c, &argv, false)
+    delonix_linux::exec(c, &argv, false)
 }
 
 /// Like [`node_exec`], but **captures** the output instead of dumping it to the terminal.
@@ -163,7 +163,7 @@ fn node_exec(c: &Container, script: &str) -> Result<i32> {
 ///
 /// # Why this way, and not with an `exec` that captures
 ///
-/// `delonix_runtime::exec` inherits the parent process's stdio and has no capture
+/// `delonix_linux::exec` inherits the parent process's stdio and has no capture
 /// variant. Instead of touching a central engine API just for this,
 /// it redirects INSIDE the node to a file in the shared directory (which is
 /// a bind mount, see `cluster_dir`) and reads it from the host. Zero changes to the engine.
@@ -496,10 +496,10 @@ fn boot_node(
 /// delegated` — a message the operator never sees, because the failure surfaces
 /// as a timeout on a different service.
 fn preflight_cgroup_controllers() -> Result<()> {
-    if !delonix_runtime::is_rootless() {
+    if !delonix_linux::is_rootless() {
         return Ok(()); // real root owns the whole tree
     }
-    let Some(cur) = delonix_runtime::current_cgroup_v2() else {
+    let Some(cur) = delonix_linux::current_cgroup_v2() else {
         return Ok(()); // cannot tell — do not block on a guess
     };
     let have: Vec<String> = std::fs::read_to_string(format!("{cur}/cgroup.controllers"))
@@ -628,7 +628,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     // 4× in a 4-node cluster, in the middle of the progress. It is warned ONCE here (with the
     // same test the engine does, `cgroup_limits_apply`) and ALL the
     // nodes are silenced via env — inherited by the whole re-exec chain.
-    if !delonix_runtime::cgroup_limits_apply() {
+    if !delonix_linux::cgroup_limits_apply() {
         super::output::warn(
             super::po::t("rootless without cgroup delegation: the nodes' CPU/memory/PIDs limits are not enforced \
                  (namespace/seccomp isolation still holds). For limits, run under \
@@ -645,7 +645,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     std::fs::create_dir_all(cluster_dir(&cfg.name))?;
     // The cluster network: the nodes must all be born on it.
     let net = cluster_net(&cfg.name);
-    let nstore = delonix_net::NetworkStore::open(super::util::state_root())?;
+    let nstore = delonix_sdn::NetworkStore::open(super::util::state_root())?;
     if nstore.get(&net).is_err() {
         // `create_network` (and not `infra::network_create`) because there are TWO
         // coordinated stores: the declarative registry + the holder's physical plan, with the
@@ -1129,7 +1129,7 @@ fn cluster_nodes(store: &Store, name: Option<&str>) -> Result<(String, Vec<Conta
         let Some(n) = c.labels.get("io.x-k8s.kind.cluster").cloned() else {
             continue;
         };
-        delonix_runtime::reconcile_status(&mut c);
+        delonix_linux::reconcile_status(&mut c);
         by_cluster.entry(n).or_default().push(c);
     }
     match name {
@@ -1190,7 +1190,7 @@ fn node_snapshotter(c: &Container) -> Option<String> {
 /// (a first segment with a `.` or `:`, or `localhost`) is left ALONE — rewriting
 /// `10.232.67.14:5000/app:1` would point the node at the wrong place entirely.
 fn containerd_ref(reference: &str) -> String {
-    let tagged = delonix_image::image::normalise_tag(reference);
+    let tagged = delonix_oci::image::normalise_tag(reference);
     let first = tagged.split('/').next().unwrap_or("");
     let has_registry = tagged.contains('/')
         && (first.contains('.') || first.contains(':') || first == "localhost");
@@ -1228,7 +1228,7 @@ fn node_ctr_supports_local(c: &Container) -> bool {
 /// # Why this is the right shape for this engine
 ///
 /// The real `kind load` shells out to `docker save` and pipes it into the node.
-/// Here both halves are already ours: [`delonix_image::write_oci_archive`] packs
+/// Here both halves are already ours: [`delonix_oci::write_oci_archive`] packs
 /// the store's blobs verbatim, and the nodes already bind-mount
 /// [`cluster_dir`] at [`NODE_SHARED`] (the channel `cluster create` uses for
 /// `kubeadm.conf`/`kubeconfig`) — so the archive crosses into the node as a plain
@@ -1282,7 +1282,7 @@ pub(crate) fn load(
         let ref_name = containerd_ref(r);
         p.step(&format!("{} {ref_name}", super::po::t("Packing")), "📦");
         let tar = dir.join(format!(".load-{}.tar", image.short_id()));
-        delonix_image::write_oci_archive(images, &image, &ref_name, &tar)?;
+        delonix_oci::write_oci_archive(images, &image, &ref_name, &tar)?;
         p.ok();
 
         for node in &running {
@@ -1388,10 +1388,10 @@ pub(crate) fn prune(store: &Store) -> Result<usize> {
         let _ = std::fs::remove_file(kubeconfig_path(&name));
         let _ = std::fs::remove_dir_all(cluster_dir(&name));
         let net = cluster_net(&name);
-        if let Ok(nstore) = delonix_net::NetworkStore::open(super::util::state_root()) {
+        if let Ok(nstore) = delonix_sdn::NetworkStore::open(super::util::state_root()) {
             if nstore.get(&net).is_ok() {
                 let _ = nstore.remove(&net);
-                delonix_net::infra::network_remove(&net);
+                delonix_sdn::infra::network_remove(&net);
             }
         }
         if let Err(e) = remove_kubecontext(&name) {
@@ -1434,14 +1434,14 @@ pub(crate) fn delete(images: &ImageStore, store: &Store, name: &str) -> Result<(
     // This way the subnet/bridge become free to reuse. Volumes are NOT touched:
     // they are explicit, like in docker.
     let net = cluster_net(name);
-    if let Ok(nstore) = delonix_net::NetworkStore::open(super::util::state_root()) {
+    if let Ok(nstore) = delonix_sdn::NetworkStore::open(super::util::state_root()) {
         if nstore.get(&net).is_ok() {
             p.step(
                 &format!("{} '{net}'", super::po::t("Freeing network")),
                 "🌐",
             );
             let _ = nstore.remove(&net);
-            delonix_net::infra::network_remove(&net);
+            delonix_sdn::infra::network_remove(&net);
             p.ok();
         }
     }
@@ -1617,8 +1617,8 @@ pub(crate) fn list(store: &Store, all: bool) -> Result<()> {
         let Some(name) = c.labels.get("io.x-k8s.kind.cluster").cloned() else {
             continue;
         };
-        if delonix_runtime::reconcile_status(&mut c) {
-            let _ = store.update(&c.id, delonix_runtime::reconcile_status);
+        if delonix_linux::reconcile_status(&mut c) {
+            let _ = store.update(&c.id, delonix_linux::reconcile_status);
         }
         clusters.entry(name).or_default().push(c);
     }
@@ -1708,7 +1708,7 @@ pub(crate) fn list(store: &Store, all: bool) -> Result<()> {
         let api = cp
             .first()
             .and_then(|c| c.ports.first())
-            .and_then(|p| delonix_net::parse_publish(p).ok())
+            .and_then(|p| delonix_sdn::parse_publish(p).ok())
             .map(|(hp, _, _)| hp)
             .unwrap_or_else(|| "-".into());
 
@@ -1903,7 +1903,7 @@ pub(crate) fn describe(store: &Store, name: &str) -> Result<()> {
     let api = cp
         .first()
         .and_then(|c| c.ports.first())
-        .and_then(|p| delonix_net::parse_publish(p).ok())
+        .and_then(|p| delonix_sdn::parse_publish(p).ok())
         .map(|(hp, _, _)| hp)
         .unwrap_or_else(|| "-".into());
     let uptime = cp
