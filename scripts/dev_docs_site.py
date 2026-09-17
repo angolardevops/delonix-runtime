@@ -183,6 +183,41 @@ def rewrite_links(body: str, page_dir: Path) -> str:
     return re.sub(r'href="([^"]+)"', fix, body)
 
 
+FENCE = re.compile(r"^(?P<indent>[ \t]*)(?P<fence>```+|~~~+)[ \t]*(?P<lang>[A-Za-z0-9_+-]*)[^\n]*\n(?P<code>.*?)^(?P=indent)(?P=fence)[ \t]*$", re.M | re.S)
+
+
+def stash_fences(text: str) -> tuple[str, dict[str, str]]:
+    """Take every fenced block out before Markdown sees it, and leave a placeholder.
+
+    Python-Markdown's `fenced_code` ignores a fence nested in a list item (GitHub
+    renders it), which silently turned the code examples of whole pages into prose.
+    Rendering the blocks here makes both behave the same wherever the fence sits.
+    """
+    blocks: dict[str, str] = {}
+
+    def take(m: re.Match) -> str:
+        indent = m.group("indent")
+        code = "".join(line[len(indent):] if line.startswith(indent) else line
+                       for line in m.group("code").splitlines(keepends=True))
+        key = f"DLXFENCE{len(blocks)}X"
+        lang = m.group("lang").lower()
+        if lang == "mermaid":
+            blocks[key] = f'<pre class="mermaid">{html.escape(code)}</pre>'
+        else:
+            cls = f' class="language-{"bash" if lang in SHELL_LANGS else lang}"' if lang else ' class="nohighlight"'
+            shell = " data-shell" if lang in SHELL_LANGS else ""
+            blocks[key] = f'<div class="code"{shell}><pre><code{cls}>{html.escape(code)}</code></pre></div>'
+        return f"{indent}{key}\n"
+
+    return FENCE.sub(take, text), blocks
+
+
+def restore_fences(body: str, blocks: dict[str, str]) -> str:
+    for key, block in blocks.items():
+        body = re.sub(rf"<p>{key}</p>|{key}", lambda _m, b=block: b, body, count=1)
+    return body
+
+
 def post_process(body: str) -> str:
     body = re.sub(
         r'<pre><code class="language-mermaid">(.*?)</code></pre>',
@@ -373,8 +408,9 @@ def render_site(out: Path) -> None:
                 extensions=["tables", "fenced_code", "toc", "sane_lists", "attr_list"],
                 extension_configs={"toc": {"toc_depth": "2-3"}},
             )
-            body = md.convert(text)
-            body = post_process(rewrite_links(body, src.parent))
+            stashed, blocks = stash_fences(text)
+            body = md.convert(stashed)
+            body = restore_fences(post_process(rewrite_links(body, src.parent)), blocks)
             body = link_sources(body, crates).replace("{SOURCE}", html.escape(ui["source"]))
             url = out_name(page.name)
             index_records += sections(body, title, url)
