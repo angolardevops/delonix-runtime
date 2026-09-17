@@ -71,6 +71,7 @@ LAYERS = {
     "delonix-mgmt": INTERFACE,  # replaced by delonix-node-api (P5)
     "delonix-mcp": INTERFACE,
     "delonix-runtime-bin": BIN,  # → delonix-cli (interfaces) + bins/delonix (P2)
+    "delonix-mcp-bin": BIN,  # `delonix-mcp`, run by `delonix mcp` (ADR-0040 D2.4 amended)
 }
 
 # Which layers each layer may depend on. The direction, in one place.
@@ -115,12 +116,6 @@ EXCEPTIONS = {
         "P4",
         "the scanner reads layers through the OCI adapter instead of through an "
         "ImageStore port",
-    ),
-    ("roles", "delonix-runtime-bin", "2 interfaces"): (
-        "P3",
-        "one executable holds the CLI, the management API and the MCP server; each "
-        "becomes its own binary, which `delonix` runs (the CRI already is: "
-        "`delonix serve cri` runs `delonix-cri`)",
     ),
     ("dep", "delonix-mcp", "delonix-mgmt"): (
         "P5",

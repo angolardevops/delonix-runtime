@@ -106,7 +106,7 @@ pub fn run(action: ServeCmd) -> Result<()> {
 /// flags also travel as the environment variables it does read. The state root
 /// is passed explicitly, because the server's own default (`/var/lib/delonix`)
 /// is not this user's.
-fn exec_server(
+pub(crate) fn exec_server(
     name: &str,
     args: &[String],
     env: &[(&str, String)],
@@ -122,6 +122,9 @@ fn exec_server(
         .args(args)
         .envs(env.iter().map(|(k, v)| (*k, v.as_str())))
         .env("DELONIX_ROOT", super::util::state_root())
+        // The CLI a server runs back: THIS executable, not whichever `delonix`
+        // the `PATH` finds first.
+        .envs(std::env::current_exe().ok().map(|p| ("DELONIX_BIN", p)))
         .env("DELONIX_DISPATCH_VERSION", env!("CARGO_PKG_VERSION"))
         .exec();
     if err.kind() == std::io::ErrorKind::NotFound {
