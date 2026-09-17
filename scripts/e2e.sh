@@ -2899,6 +2899,13 @@ check "docker-api: um nome já em uso responde 409" ok bash -c \
   "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --unix-socket '$DSOCK' --max-time 60 -X POST -H 'Content-Type: application/json' -d '{\"Image\":\"$IMG\",\"Cmd\":[\"true\"],\"HostConfig\":{\"NetworkMode\":\"none\"}}' 'http://localhost/containers/create?name=drest-$PFX')\" = 409 ]"
 check "docker-api: um argumento inválido responde 400" ok bash -c \
   "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --unix-socket '$DSOCK' --max-time 30 -X POST -H 'Content-Type: application/json' -d '{\"Image\":\"$IMG\",\"Cmd\":[\"true\"],\"HostConfig\":{\"RestartPolicy\":{\"Name\":\"alwayz\"}}}' 'http://localhost/containers/create?name=dbad2-$PFX')\" = 400 ]"
+# Uma imagem que não existe é «não existe» (404 / classe 4), e não uma avaria do
+# registo. O Docker Hub responde 401 a um repositório inexistente e o ghcr 403 no
+# token — os dois saíam como `registry error`, 500 e código 1.
+check "image pull de um repositório inexistente sai com a classe 4" 4 \
+  "$BIN" image pull "nao-existe-$PFX-777:1"
+check "docker-api: create com uma imagem inexistente responde 404" ok bash -c \
+  "[ \"\$(curl -s -o /dev/null -w '%{http_code}' --unix-socket '$DSOCK' --max-time 120 -X POST -H 'Content-Type: application/json' -d '{\"Image\":\"nao-existe-$PFX-777:1\",\"Cmd\":[\"true\"],\"HostConfig\":{\"NetworkMode\":\"none\"}}' 'http://localhost/containers/create?name=dnoimg-$PFX')\" = 404 ]"
 check "container run com um nome em uso sai com a classe de conflito" 5 \
   "$BIN" container run -d --net none --name "drest-$PFX" "$IMG" true
 curl -s --unix-socket "$DSOCK" --max-time 30 -X DELETE "http://localhost/containers/$RID?force=1" >/dev/null 2>&1
