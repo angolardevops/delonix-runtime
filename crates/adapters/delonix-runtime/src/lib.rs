@@ -6249,48 +6249,11 @@ pub fn wait_and_record(store: &Store, container: &mut Container) -> Result<Statu
     let oom = died_of_oom(&status, oom_before, oom_kill_count(&cgroup));
     // `update` (flock) and not `save`: the CRI/CLI may be reconciling the
     // same container right now — see `Store::update`.
-    let final_status = status.clone();
     let waited_starttime = container.pid_starttime;
+    let mut ours = true;
     let _ = store.update(&container.id, |c| {
-        // Only the incarnation this supervisor waited on is its to bury. A
-        // `stop` followed at once by a `start` brings up a new process and saves
-        // its pid BEFORE this wait returns; writing `pid = None` over it lost the
-        // new process from the record — measured on the first `stop -t 0` +
-        // `start`: the record said no pid while the container ran, `stop` could
-        // not reach it, every later `start` launched another one, and it survived
-        // `rm -f`.
-        if !describes_incarnation(c, pid, waited_starttime) {
-            return false;
-        }
-        // **A requested stop is never a crash**, and this is where that promise
-        // was being broken. [`stop`] already writes `Stopped` "even if SIGKILL
-        // was needed"; the supervisor then waited on the same process, saw
-        // `Signaled`, and wrote `Crashed` over it. Whoever wrote last won.
-        //
-        // It is not an edge case: a PID 1 with no SIGTERM handler does not die
-        // on SIGTERM at all (the kernel only delivers it to PID 1 if a handler
-        // is installed), so `stop` reaches its SIGKILL for the most ordinary
-        // container there is. Measured, 2026-09-10, `run -d alpine sleep 600`
-        // followed by `stop`: `ps -a` said `Dead`, `dash` counted it under
-        // PROBLEMS as "killed by signal (crash)", and `wait` answered 137 — for
-        // a container the operator had just asked to stop.
-        //
-        // The RETURNED status stays the real one: the `die` event keeps the true
-        // exit code, and the restart policy keeps deciding on what actually
-        // happened to the process. Only what a reader sees is corrected.
-        c.status = if c.stopped_by_user && matches!(final_status, Status::Crashed) {
-            Status::Stopped
-        } else {
-            final_status.clone()
-        };
-        c.pid = None;
-        // Not over a requested stop: the operator's `stop` is the cause there,
-        // whatever the counter did meanwhile.
-        if oom && !c.stopped_by_user {
-            c.crash_reason = Some(OOM_KILLED.to_string());
-            c.crashed_at = Some(now_unix());
-        }
-        true
+        ours = record_exit(c, pid, waited_starttime, &status, oom);
+        ours
     });
     container.status = status.clone();
     container.pid = None;
@@ -6298,8 +6261,64 @@ pub fn wait_and_record(store: &Store, container: &mut Container) -> Result<Statu
         container.crash_reason = Some(OOM_KILLED.to_string());
         container.crashed_at = Some(now_unix());
     }
-    remove_container_cgroup(container);
+    // The cgroup is keyed by the container id, so a NEWER incarnation lives in the
+    // very same leaf: removing it from here would pull it out from under a running
+    // process (or, between its `mkdir` and its join, out from under its start).
+    if ours {
+        remove_container_cgroup(container);
+    }
     Ok(status)
+}
+
+/// Writes the end of the incarnation `(pid, starttime)` into the record `c`, and
+/// says whether the record still belonged to it. PURE — the decision is tested
+/// without a single process.
+///
+/// **A record that already names ANOTHER live incarnation is left untouched**
+/// ([`describes_incarnation`], the same guard `persist_stop` uses). A `stop`
+/// followed at once by a `start` brings up a new process and saves its pid
+/// BEFORE this wait returns; writing `pid = None` over it lost the new process
+/// from the record — it survived `rm -f` (measured, #377; and on a pod member, a
+/// `stop -t 0` + `start` left it `Crashed` in 7 of 10 runs, #357).
+///
+/// **A requested stop is never a crash**, either. [`stop`] already writes
+/// `Stopped` "even if SIGKILL was needed"; the supervisor then waited on the same
+/// process, saw `Signaled`, and wrote `Crashed` over it. It is not an edge case: a
+/// PID 1 with no SIGTERM handler does not die on SIGTERM at all, so `stop` reaches
+/// its SIGKILL for the most ordinary container there is (measured 2026-09-10,
+/// `run -d alpine sleep 600` + `stop` read `Dead`). The flag alone did not hold:
+/// `start` clears `stopped_by_user` before it launches, so a stop that `start`
+/// followed quickly was still turned into a crash. A record `Stopped` with no pid
+/// is `stop`'s own write, and it stands.
+///
+/// The RETURNED status of [`wait_and_record`] stays the real one: the `die` event
+/// keeps the true exit code, and the restart policy keeps deciding on what
+/// actually happened to the process. Only what a reader sees is corrected.
+fn record_exit(
+    c: &mut Container,
+    pid: i32,
+    starttime: Option<u64>,
+    status: &Status,
+    oom: bool,
+) -> bool {
+    if !describes_incarnation(c, pid, starttime) {
+        return false;
+    }
+    let stop_recorded = c.pid.is_none() && matches!(c.status, Status::Stopped);
+    let stopped = c.stopped_by_user || stop_recorded;
+    c.status = if stopped && matches!(status, Status::Crashed) {
+        Status::Stopped
+    } else {
+        status.clone()
+    };
+    c.pid = None;
+    // Not over a requested stop: the operator's `stop` is the cause there,
+    // whatever the counter did meanwhile.
+    if oom && !stopped {
+        c.crash_reason = Some(OOM_KILLED.to_string());
+        c.crashed_at = Some(now_unix());
+    }
+    true
 }
 
 // ----------------------------------------------------------------------------
@@ -7381,6 +7400,27 @@ pub fn set_priority(container: &Container, nice: i32) -> Result<(usize, usize)> 
 // ----------------------------------------------------------------------------
 
 /// Stops a container: `SIGTERM`, waits up to `timeout_secs`, then `SIGKILL`.
+/// How long [`stop`] waits, in 100 ms ticks, for a SIGKILLed process to actually
+/// exit before it records the stop anyway.
+const KILL_EXIT_WAIT_TICKS: u64 = 300;
+
+/// `true` once `pid` is no longer this container's process: gone, recycled by
+/// another process, or a zombie. A zombie has finished exiting — all that is left
+/// is its parent's `waitpid`, and waiting on it from here could last as long as
+/// that parent does.
+fn process_gone(pid: i32, starttime: Option<u64>) -> bool {
+    if !safe_to_signal(pid, starttime) {
+        return true;
+    }
+    std::fs::read_to_string(format!("/proc/{pid}/stat"))
+        .ok()
+        .and_then(|s| {
+            s.rfind(')')
+                .and_then(|i| s[i + 1..].split_whitespace().next().map(|f| f == "Z"))
+        })
+        .unwrap_or(true)
+}
+
 pub fn stop(store: &Store, container: &mut Container, timeout_secs: u64) -> Result<()> {
     let pid = container
         .pid
@@ -7399,12 +7439,24 @@ pub fn stop(store: &Store, container: &mut Container, timeout_secs: u64) -> Resu
 
     let _ = kill(target, Signal::SIGTERM);
     let mut waited = 0u64;
-    while safe_to_signal(pid, st) && waited < timeout_secs * 10 {
+    while !process_gone(pid, st) && waited < timeout_secs * 10 {
         std::thread::sleep(Duration::from_millis(100));
         waited += 1;
     }
-    if safe_to_signal(pid, st) {
+    if !process_gone(pid, st) {
         let _ = kill(target, Signal::SIGKILL);
+        // SIGKILL is delivered at once; the EXIT is not. `stop` returning while
+        // the process still exists is what let a `start` run a second incarnation
+        // next to a dying first one (measured 2026-09-17, pod member `sh` +
+        // `nc -l`: the child in `D`, `wb_wait_for_completion`, for 1.5 to 6.8 s
+        // after the SIGKILL). Docker's `stop` also returns only once the container
+        // is gone. Bounded, so a process stuck in the kernel for good cannot hang
+        // the CLI; the record's guard in `record_exit` still holds past it.
+        let mut waited = 0u64;
+        while !process_gone(pid, st) && waited < KILL_EXIT_WAIT_TICKS {
+            std::thread::sleep(Duration::from_millis(100));
+            waited += 1;
+        }
     }
     // INTENTIONAL stop (by the user) → always Stopped, even if SIGKILL was
     // needed (it is not a crash: it was a requested stop).
@@ -8256,6 +8308,79 @@ pub fn remove(store: &Store, container: &Container, force: bool) -> Result<()> {
     remove_container_cgroup(container);
     store.remove(&container.id)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod record_exit_tests {
+    use super::*;
+
+    fn running(pid: i32, starttime: u64) -> Container {
+        let mut c = Container::new(
+            "b".repeat(16),
+            "inc".into(),
+            "/tmp/nonexistent".into(),
+            vec!["/bin/true".into()],
+            "64M".into(),
+        );
+        c.pid = Some(pid);
+        c.pid_starttime = Some(starttime);
+        c.status = Status::Running;
+        c
+    }
+
+    /// **The end of one incarnation is never written over the next one.**
+    ///
+    /// The defect measured on 2026-09-17: `stop -t 0` + `start` of a pod member
+    /// left it `Crashed` with `pid: null` in 7 of 10 runs, because the old
+    /// supervisor only finished its `waitpid` after `start` had saved the new process.
+    #[test]
+    fn a_record_of_another_incarnation_is_left_untouched() {
+        let mut c = running(200, 7);
+        assert!(!record_exit(&mut c, 100, Some(5), &Status::Crashed, false));
+        assert_eq!(c.status, Status::Running);
+        assert_eq!(c.pid, Some(200));
+    }
+
+    /// The same pid number, recycled by the new incarnation, is not the old one.
+    #[test]
+    fn a_recycled_pid_is_not_the_same_incarnation() {
+        let mut c = running(100, 9);
+        assert!(!record_exit(&mut c, 100, Some(5), &Status::Crashed, true));
+        assert_eq!(c.status, Status::Running);
+        assert_eq!(c.crash_reason, None);
+    }
+
+    /// The death of the incarnation that was waited on is still recorded, as it was.
+    #[test]
+    fn the_own_incarnation_records_the_real_status() {
+        let mut c = running(100, 5);
+        assert!(record_exit(&mut c, 100, Some(5), &Status::Failed(3), false));
+        assert_eq!(c.status, Status::Failed(3));
+        assert_eq!(c.pid, None);
+    }
+
+    /// A `stop` already recorded wins over the SIGKILL, even when the `start` that
+    /// followed has already cleared `stopped_by_user` — the window in which the
+    /// flag alone let a requested stop read as a crash.
+    #[test]
+    fn a_recorded_stop_does_not_become_a_crash() {
+        let mut c = running(100, 5);
+        c.pid = None;
+        c.status = Status::Stopped;
+        c.stopped_by_user = false;
+        assert!(record_exit(&mut c, 100, Some(5), &Status::Crashed, true));
+        assert_eq!(c.status, Status::Stopped);
+        assert_eq!(c.crash_reason, None, "a requested stop is not an OOM");
+    }
+
+    /// With no stop at all, a SIGKILL is a crash — the guard must not hide it.
+    #[test]
+    fn a_crash_without_a_stop_is_still_a_crash() {
+        let mut c = running(100, 5);
+        assert!(record_exit(&mut c, 100, Some(5), &Status::Crashed, true));
+        assert_eq!(c.status, Status::Crashed);
+        assert_eq!(c.crash_reason.as_deref(), Some(OOM_KILLED));
+    }
 }
 
 #[cfg(test)]
