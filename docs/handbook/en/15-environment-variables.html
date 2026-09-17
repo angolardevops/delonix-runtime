@@ -205,7 +205,7 @@ matches what you are doing, not the whole page.</p>
 </ul>
 <p>Most variables are read by the process that needs them, <strong>not</strong> passed on automatically. A few are
 set by the engine itself on the processes it starts; those are in
-<a href="#set-by-the-engine-itself--internal">Set by the engine itself</a> and you should not set them.</p>
+<a href="#set-by-the-engine-itself-internal">Set by the engine itself</a> and you should not set them.</p>
 <p><strong>This table is checked by CI in both directions.</strong> <code>python3 scripts/dev_docs.py --check</code>
 (function <code>env_var_problems</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a>) extracts every <code>DELONIX_*</code> name from Rust
 string literals under <code>crates/</code> and <code>bins/</code> (including <code>build.rs</code> and <code>env!()</code>) and from
