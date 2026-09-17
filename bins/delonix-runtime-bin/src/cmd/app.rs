@@ -387,7 +387,8 @@ fn apply_one(images: &ImageStore, store: &Store, doc: &ManifestDoc) -> Result<()
         }
         Err(e) => Err(Error::Invalid(format!(
             "app '{name}': the build reported success but the image could not be pulled back \
-             from the ephemeral registry: {e}"
+             from the ephemeral registry: {}",
+            Error::from(e)
         ))),
     }
 }
