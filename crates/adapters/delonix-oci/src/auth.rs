@@ -2,9 +2,9 @@
 //! Podman's `~/.docker/config.json` / `auth.json`: `{ "auths": { "<host>":
 //! { "auth": "base64(user:password)" } } }`. Stored in `<root>/auth.json`.
 
+use crate::Result;
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
-use delonix_model::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

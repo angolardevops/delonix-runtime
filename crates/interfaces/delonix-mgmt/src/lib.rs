@@ -743,11 +743,11 @@ async fn run_container(State(s): State<AppState>, Json(spec): Json<RunSpecBody>)
 async fn with_image_store<T, F>(base: PathBuf, f: F) -> Result<T, Error>
 where
     T: Send + 'static,
-    F: FnOnce(&ImageStore) -> Result<T, Error> + Send + 'static,
+    F: FnOnce(&ImageStore) -> Result<T, delonix_oci::Error> + Send + 'static,
 {
-    tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || -> Result<T, Error> {
         let store = ImageStore::open(&base)?;
-        f(&store)
+        Ok(f(&store)?)
     })
     .await
     .map_err(|e| Error::Runtime {

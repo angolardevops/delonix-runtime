@@ -3,7 +3,7 @@
 
 use crate::cas::strip;
 use crate::image::{Image, ImageStore};
-use delonix_model::{Error, Result};
+use crate::{Error, Result};
 use nix::mount::{mount, umount2, MntFlags, MsFlags};
 use std::path::{Path, PathBuf};
 
@@ -30,12 +30,12 @@ fn extract_layer(data: &[u8], dest: &Path) -> Result<()> {
         tar::Archive::new(gz).unpack(dest)
     } else if is_zstd {
         let zd = zstd::stream::read::Decoder::new(data)
-            .map_err(|e| Error::Invalid(format!("failed to open zstd: {e}")))?;
+            .map_err(|e| Error::Layer(format!("failed to open zstd: {e}")))?;
         tar::Archive::new(zd).unpack(dest)
     } else {
         tar::Archive::new(data).unpack(dest)
     };
-    result.map_err(|e| Error::Invalid(format!("failed to extract layer: {e}")))
+    result.map_err(|e| Error::Layer(format!("failed to extract layer: {e}")))
 }
 
 /// Applies a *layer* to a FLAT destination (not overlay), handling the OCI
@@ -47,7 +47,7 @@ fn apply_layer_flat(data: &[u8], dest: &Path) -> Result<()> {
     } else if data.starts_with(&[0x28, 0xb5, 0x2f, 0xfd]) {
         Box::new(
             zstd::stream::read::Decoder::new(data)
-                .map_err(|e| Error::Invalid(format!("zstd: {e}")))?,
+                .map_err(|e| Error::Layer(format!("zstd: {e}")))?,
         )
     } else {
         Box::new(data)
@@ -57,12 +57,12 @@ fn apply_layer_flat(data: &[u8], dest: &Path) -> Result<()> {
     ar.set_overwrite(true);
     for entry in ar
         .entries()
-        .map_err(|e| Error::Invalid(format!("tar: {e}")))?
+        .map_err(|e| Error::Layer(format!("tar: {e}")))?
     {
-        let mut entry = entry.map_err(|e| Error::Invalid(format!("tar entry: {e}")))?;
+        let mut entry = entry.map_err(|e| Error::Layer(format!("tar entry: {e}")))?;
         let path = entry
             .path()
-            .map_err(|e| Error::Invalid(format!("tar path: {e}")))?
+            .map_err(|e| Error::Layer(format!("tar path: {e}")))?
             .into_owned();
         let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
         if let Some(target) = name.strip_prefix(".wh.") {
@@ -280,7 +280,7 @@ impl ImageStore {
     pub fn mount_rootfs(&self, image: &Image, container_id: &str) -> Result<PathBuf> {
         let lowers = self.ensure_layers(image)?;
         if lowers.is_empty() {
-            return Err(Error::Invalid("image has no layers".into()));
+            return Err(Error::NoLayers);
         }
         let base = self.container_dir(container_id);
         let upper = base.join("upper");
@@ -309,10 +309,7 @@ impl ImageStore {
             MsFlags::empty(),
             Some(opts.as_str()),
         )
-        .map_err(|e| Error::Runtime {
-            context: "mount overlay",
-            message: e.to_string(),
-        })?;
+        .map_err(|e| Error::OverlayMount(e.to_string()))?;
 
         Ok(merged)
     }
@@ -361,14 +358,14 @@ impl ImageStore {
     pub fn prepare_overlay(&self, image: &Image, container_id: &str) -> Result<PathBuf> {
         let lowers = self.ensure_layers(image)?;
         if lowers.is_empty() {
-            return Err(Error::Invalid("image has no layers".into()));
+            return Err(Error::NoLayers);
         }
         // A `:` would split the mount option into two lowerdirs and silently
         // point the overlay at a path that does not exist. Our own layer
         // directories are hex digests and cannot contain one, but the state root
         // is user-supplied (`DELONIX_ROOT`), so refuse instead of assuming.
         if let Some(bad) = lowers.iter().find(|p| p.to_string_lossy().contains(':')) {
-            return Err(Error::Invalid(format!(
+            return Err(Error::UnusableStateRoot(format!(
                 "state root path contains ':' and cannot back an overlay: {}",
                 bad.display()
             )));

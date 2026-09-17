@@ -27,7 +27,12 @@ impl delonix_compute::ports::ImageStore for HostImages<'_> {
     type Image = Image;
 
     fn resolve(&self, reference: &str) -> Result<Image> {
-        crate::registry::resolve_or_pull(self.store, reference, None, self.announce_pull)
+        Ok(crate::registry::resolve_or_pull(
+            self.store,
+            reference,
+            None,
+            self.announce_pull,
+        )?)
     }
 
     fn config(&self, img: &Image) -> ImageConfig {
@@ -42,7 +47,7 @@ impl delonix_compute::ports::ImageStore for HostImages<'_> {
     fn prepare_rootfs(&self, img: &Image, id: &str, second_pass: bool) -> Result<String> {
         // The re-exec's second pass reuses the rootfs the first pass prepared: a
         // full extraction again over a populated tree costs full price (measured).
-        let prepare = || self.store.prepare_container_rootfs(img, id);
+        let prepare = || Ok(self.store.prepare_container_rootfs(img, id)?);
         let path = if second_pass && delonix_node::is_rootless() {
             match self.store.existing_rootfs_path(id) {
                 Some(p) => p,

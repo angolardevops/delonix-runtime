@@ -39,9 +39,15 @@ fn st<E: std::fmt::Display>(e: E) -> Status {
     Status::internal(e.to_string())
 }
 
+/// An image-store error → gRPC `Status`, worded as the engine's shared class so
+/// the text the kubelet sees does not depend on which crate raised it.
+fn st_oci(e: delonix_oci::Error) -> Status {
+    st(delonix_model::Error::from(e))
+}
+
 /// Opens the image store at the given root.
 fn images(base: &PathBuf) -> Result<delonix_oci::ImageStore, Status> {
-    delonix_oci::ImageStore::open(base).map_err(st)
+    delonix_oci::ImageStore::open(base).map_err(st_oci)
 }
 
 // ---------------------------------------------------------------------------
@@ -59,7 +65,7 @@ impl ImageService for DelonixImage {
         _req: Request<ListImagesRequest>,
     ) -> Result<Response<ListImagesResponse>, Status> {
         let base = self.base.clone();
-        let list = tokio::task::spawn_blocking(move || images(&base)?.list().map_err(st))
+        let list = tokio::task::spawn_blocking(move || images(&base)?.list().map_err(st_oci))
             .await
             .map_err(st)??;
         let images = list
@@ -138,7 +144,7 @@ impl ImageService for DelonixImage {
         let base = self.base.clone();
         let img = tokio::task::spawn_blocking(move || {
             let store = images(&base)?;
-            delonix_oci::pull_from_registry_with_creds(&store, &name, creds).map_err(st)
+            delonix_oci::pull_from_registry_with_creds(&store, &name, creds).map_err(st_oci)
         })
         .await
         .map_err(st)??;

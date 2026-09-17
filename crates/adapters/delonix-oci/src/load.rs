@@ -2,7 +2,7 @@
 
 use crate::cas::sha256_hex;
 use crate::image::{now_unix, Image, ImageConfig, ImageStore};
-use delonix_model::{Error, Result};
+use crate::{Error, Result};
 use oci_spec::image::ImageConfiguration;
 use serde::Deserialize;
 use std::io::Read;
@@ -50,7 +50,7 @@ pub fn load_docker_archive(store: &ImageStore, tar_path: &Path) -> Result<Image>
             let digest = store.cas().write(&buf)?;
             let expected = path_to_digest(&name);
             if digest != expected {
-                return Err(Error::Invalid(format!(
+                return Err(Error::Archive(format!(
                     "corrupted blob: {name} has sha256 {digest}"
                 )));
             }
@@ -58,17 +58,17 @@ pub fn load_docker_archive(store: &ImageStore, tar_path: &Path) -> Result<Image>
     }
 
     let manifest_bytes = manifest_bytes
-        .ok_or_else(|| Error::Invalid("manifest.json missing from the archive".into()))?;
+        .ok_or_else(|| Error::Archive("manifest.json missing from the archive".into()))?;
     let manifests: Vec<DockerManifest> = serde_json::from_slice(&manifest_bytes)?;
     let manifest = manifests
         .into_iter()
         .next()
-        .ok_or_else(|| Error::Invalid("empty manifest.json".into()))?;
+        .ok_or_else(|| Error::Archive("empty manifest.json".into()))?;
 
     let config_digest = path_to_digest(&manifest.config);
     let config_bytes = store.cas().read(&config_digest)?;
     if sha256_hex(&config_bytes) != crate::cas::strip(&config_digest) {
-        return Err(Error::Invalid("config digest mismatch".into()));
+        return Err(Error::Archive("config digest mismatch".into()));
     }
     // Read the runtime config from the OCI config blob (`ImageConfiguration`).
     let oci_config: ImageConfiguration = serde_json::from_slice(&config_bytes)?;

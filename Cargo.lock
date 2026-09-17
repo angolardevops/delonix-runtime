@@ -900,6 +900,7 @@ dependencies = [
  "sha2",
  "tar",
  "tempfile",
+ "thiserror 2.0.19",
  "tracing",
  "zstd",
 ]
