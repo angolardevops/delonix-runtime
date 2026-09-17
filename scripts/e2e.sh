@@ -1075,6 +1075,14 @@ check "run -d --net-bps sem rede custom recusa" 1 "$BIN" container run -d --name
 check "run -d --net-bps recusado não deixa container" 4 "$BIN" container inspect "nbd-$PFX"
 check "run --ip sem rede custom recusa" 1 "$BIN" container run -d --name "nip-$PFX" --ip 10.1.1.1 "$IMG" true
 
+# Os reinícios que a política faz contam no RESTARTS. O supervisor só registava o
+# `die` de cada execução e nunca o `start`, e o `container ls` conta starts: um
+# `on-failure:2` que correu três vezes aparecia com RESTARTS 0.
+check "run -d --restart on-failure:2 arranca" ok "$BIN" container run -d --net none --restart on-failure:2 --name "rc-$PFX" "$IMG" sh -c 'exit 3'
+check "os reinícios da política contam no RESTARTS" ok bash -c \
+  "for _ in \$(seq 1 30); do '$BIN' container ls -a -o json | python3 -c \"import json,sys; sys.exit(0 if any(c.get('names',c.get('name'))=='rc-$PFX' and c.get('restarts')==2 for c in json.load(sys.stdin)) else 1)\" && exit 0; sleep 1; done; exit 1"
+"$BIN" container rm -f "rc-$PFX" >/dev/null 2>&1
+
 # Um perfil seccomp que permite tudo e não nomeia syscalls (ou só repete a acção
 # por omissão) é válido para o Docker e o Podman, e abortava o container com 126:
 # o seccompiler recusa um filtro cujas duas acções são iguais. Uma regra que
