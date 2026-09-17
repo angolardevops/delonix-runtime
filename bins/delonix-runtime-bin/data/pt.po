@@ -11574,3 +11574,137 @@ msgstr "O kernel não forneceu bytes aleatórios, de que a cifra e os valores ge
 msgid "Check getrandom(2) works on this host (a very old kernel or a restricted seccomp profile)."
 msgstr "Confirma que o getrandom(2) funciona neste host (um kernel muito antigo ou um perfil seccomp restritivo)."
 
+
+# dicionário: entradas do delonix-oci (ADR-0043)
+msgid "invalid Dockerfile"
+msgstr "Dockerfile inválido"
+
+msgid "The build file does not parse, or asks for an instruction or flag this engine does not support. The message names the line."
+msgstr "O ficheiro de build não se lê, ou pede uma instrução ou flag que este motor não suporta. A mensagem diz a linha."
+
+msgid "Fix the line the message names; `delonix build --help` lists what is supported."
+msgstr "Corrige a linha que a mensagem nomeia; o `delonix build --help` lista o que é suportado."
+
+msgid "invalid image archive"
+msgstr "arquivo de imagem inválido"
+
+msgid "The archive being loaded is incomplete or corrupt: a missing manifest, or a blob that does not hash to its name."
+msgstr "O arquivo a carregar está incompleto ou corrompido: falta o manifesto, ou um blob não corresponde ao seu hash."
+
+msgid "Export the archive again from its source and load the new file."
+msgstr "Exporta o arquivo outra vez a partir da origem e carrega o ficheiro novo."
+
+msgid "a layer could not be packed or unpacked"
+msgstr "não foi possível empacotar ou desempacotar uma layer"
+
+msgid "Reading, compressing or extracting a layer or a root filesystem failed. The message carries the underlying error."
+msgstr "A leitura, compressão ou extracção de uma layer ou de um rootfs falhou. A mensagem traz o erro de origem."
+
+msgid "Read the error in the message; check free space in the state root (`delonix system df`) and try again."
+msgstr "Lê o erro na mensagem; verifica o espaço livre do state root (`delonix system df`) e tenta outra vez."
+
+msgid "The image record has no layers to mount as a root filesystem."
+msgstr "O registo da imagem não tem layers para montar como rootfs."
+
+msgid "Pull or build the image again."
+msgstr "Descarrega ou constrói a imagem outra vez."
+
+msgid "the state root cannot back an overlay"
+msgstr "o state root não pode suportar um overlay"
+
+msgid "The state root path contains a character (':') that the overlay mount options cannot express."
+msgstr "O caminho do state root contém um carácter (':') que as opções de montagem do overlay não conseguem exprimir."
+
+msgid "Move the state root to a path without ':' (DELONIX_ROOT)."
+msgstr "Muda o state root para um caminho sem ':' (DELONIX_ROOT)."
+
+msgid "invalid signing key"
+msgstr "chave de assinatura inválida"
+
+msgid "A signing or verification key is not a valid P-256 key in PEM, or could not be generated."
+msgstr "Uma chave de assinatura ou verificação não é uma chave P-256 válida em PEM, ou não pôde ser gerada."
+
+msgid "Pass a cosign-compatible ECDSA P-256 key in PEM."
+msgstr "Indica uma chave ECDSA P-256 em PEM compatível com o cosign."
+
+msgid "image not signed"
+msgstr "imagem não assinada"
+
+msgid "The registry has no cosign signature for the image's digest."
+msgstr "O registo não tem assinatura cosign para o digest da imagem."
+
+msgid "Sign it with `delonix image sign`, or pull a signed image."
+msgstr "Assina-a com `delonix image sign`, ou descarrega uma imagem assinada."
+
+msgid "invalid signature"
+msgstr "assinatura inválida"
+
+msgid "A signature exists but does not verify against the given key, or its manifest or payload is malformed."
+msgstr "Existe uma assinatura, mas não verifica com a chave indicada, ou o seu manifesto ou conteúdo está malformado."
+
+msgid "Check the key is the one the image was signed with; do not run an image whose signature fails."
+msgstr "Confirma que a chave é aquela com que a imagem foi assinada; não corras uma imagem cuja assinatura falha."
+
+msgid "signature state unknown"
+msgstr "estado da assinatura desconhecido"
+
+msgid "The registry did not answer the signature lookup, so whether the image is signed could not be decided. This is not a verdict."
+msgstr "O registo não respondeu à consulta da assinatura, por isso não foi possível decidir se a imagem está assinada. Não é um veredicto."
+
+msgid "Retry when the registry is reachable; the message carries the registry's error."
+msgstr "Tenta outra vez quando o registo estiver acessível; a mensagem traz o erro do registo."
+
+msgid "image already signed"
+msgstr "imagem já assinada"
+
+msgid "A signature for this digest already exists."
+msgstr "Já existe uma assinatura para este digest."
+
+msgid "Pass --force to sign it again."
+msgstr "Usa --force para a assinar outra vez."
+
+msgid "could not sign"
+msgstr "não foi possível assinar"
+
+msgid "Producing or uploading the signature failed."
+msgstr "A produção ou o envio da assinatura falhou."
+
+msgid "Read the error in the message and check the registry login (`delonix image login`)."
+msgstr "Lê o erro na mensagem e verifica o login no registo (`delonix image login`)."
+
+msgid "no such image"
+msgstr "essa imagem não existe"
+
+msgid "The image is not in the local store and the registry has no such tag."
+msgstr "A imagem não está no store local e o registo não tem essa tag."
+
+msgid "Check the reference, or pull it first (`delonix image pull`)."
+msgstr "Confirma a referência, ou descarrega-a primeiro (`delonix image pull`)."
+
+msgid "image or repository not visible"
+msgstr "imagem ou repositório não visível"
+
+msgid "The registry does not show the repository or image to these credentials: it does not exist, or it is private."
+msgstr "O registo não mostra o repositório ou a imagem a estas credenciais: não existe, ou é privado."
+
+msgid "Log in with credentials that can see it (`delonix image login <registry>`)."
+msgstr "Faz login com credenciais que o possam ver (`delonix image login <registo>`)."
+
+msgid "content digest mismatch"
+msgstr "digest do conteúdo divergente"
+
+msgid "What the registry served does not hash to the digest that was pinned or declared. The content was refused."
+msgstr "O que o registo serviu não corresponde ao digest fixado ou declarado. O conteúdo foi recusado."
+
+msgid "Do not work around it: the registry, a mirror or the network may be tampering. Pull again from a trusted source."
+msgstr "Não contornes isto: o registo, um mirror ou a rede podem estar a adulterar. Descarrega outra vez de uma fonte de confiança."
+
+msgid "overlay mount failed"
+msgstr "a montagem do overlay falhou"
+
+msgid "Mounting the image's overlay root filesystem failed."
+msgstr "A montagem do rootfs overlay da imagem falhou."
+
+msgid "Read the errno in the message; rootless overlay needs a kernel with unprivileged overlayfs (`delonix system info`)."
+msgstr "Lê o errno na mensagem; o overlay rootless exige um kernel com overlayfs sem privilégio (`delonix system info`)."
+

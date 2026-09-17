@@ -212,8 +212,9 @@ fn reconcile_after_respawn() -> Result<(usize, usize)> {
             Ok(i) => i,
             Err(e) => {
                 eprintln!(
-                    "delonix: could not open the image store to recover '{}': {e}",
-                    c.name
+                    "delonix: could not open the image store to recover '{}': {}",
+                    c.name,
+                    delonix_model::Error::from(e)
                 );
                 failed += 1;
                 continue;

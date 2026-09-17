@@ -9,6 +9,7 @@ pub mod build;
 pub mod buildpack;
 pub mod cas;
 pub mod detect;
+mod error;
 pub mod image;
 pub mod internal_registry;
 pub mod load;
@@ -22,6 +23,7 @@ pub mod sign;
 pub use buildpack::CnbPlan;
 pub use cas::{sha256_hex, Cas};
 pub use detect::{detect, Detected};
+pub use error::{Error, Result};
 pub use image::{Image, ImageConfig, ImageStore};
 pub use load::load_docker_archive;
 pub use registry::{

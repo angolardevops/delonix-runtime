@@ -116,7 +116,7 @@ pub fn cmd_scan(image: &str, sbom: bool, fail_on: Option<&str>) -> Result<()> {
             );
             resolve_or_pull(&images, image)?
         }
-        Err(e) => return Err(e),
+        Err(e) => return Err(e.into()),
     };
     if sbom {
         let pkgs = delonix_scanner::extract_sbom(&images, &img)?;

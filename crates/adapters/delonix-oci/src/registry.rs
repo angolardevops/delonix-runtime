@@ -8,7 +8,7 @@
 
 use crate::cas::sha256_hex;
 use crate::image::{now_unix, Image, ImageConfig, ImageStore};
-use delonix_model::{Error, Result};
+use crate::{Error, Result};
 // Canonical OCI types (crate `oci-spec`, feature `image`) — replace the hand-rolled
 // structs of the OCI/distribution schema that used to be here (C3-IMG).
 use oci_spec::image::{
@@ -340,14 +340,14 @@ impl Client {
             // reader who has just pushed there needs to know that "not found"
             // may mean "not visible to you".
             if url.ends_with("/tags/list") {
-                Err(Error::NotFound(format!(
+                Err(Error::NotVisible(format!(
                     "repository {} — it does not exist, or it is private and these \
                      credentials cannot see it (`delonix image login <registry>`)",
                     self.repo
                 )))
             } else {
-                Err(Error::NotFound(format!(
-                    "image {}:{}",
+                Err(Error::NoSuchImage(format!(
+                    "{}:{}",
                     self.repo,
                     url.rsplit('/').next().unwrap_or("")
                 )))
@@ -363,7 +363,7 @@ impl Client {
 
     /// The honest answer to a read the registry refuses to authorise.
     fn not_visible(&self) -> Error {
-        Error::NotFound(format!(
+        Error::NotVisible(format!(
             "image {} — it does not exist, or it is private and these credentials \
              cannot see it (`delonix image login <registry>`)",
             self.repo
@@ -549,7 +549,7 @@ impl Client {
                     if from.is_none() || e.is_not_found() {
                         return Err(e);
                     }
-                    last_err = e.to_string();
+                    last_err = delonix_model::Error::from(e).to_string();
                     continue;
                 }
             };
@@ -958,7 +958,7 @@ fn verify_manifest_digest(reference: &str, manifest_bytes: &[u8]) -> Result<()> 
     if let Some(want) = reference.strip_prefix("sha256:") {
         let got = sha256_hex(manifest_bytes);
         if !got.eq_ignore_ascii_case(want) {
-            return Err(Error::Registry(format!(
+            return Err(Error::DigestMismatch(format!(
                 "manifest digest mismatch: reference pins sha256:{want} but the registry \
                  served a manifest hashing to sha256:{got} — refusing (possible compromised \
                  registry or MITM)"
@@ -1058,7 +1058,7 @@ pub fn pull_from_registry_with_creds_full(
     if !store.cas().has(&config_digest_str) {
         let config_bytes = c.blob(&config_digest_str)?;
         if sha256_hex(&config_bytes) != manifest.config().digest().digest() {
-            return Err(Error::Registry("config digest mismatch".into()));
+            return Err(Error::DigestMismatch("config digest mismatch".into()));
         }
         store.cas().write(&config_bytes)?;
     }
@@ -1156,7 +1156,10 @@ pub fn pull_from_registry_with_creds_full(
                             .lock()
                             .unwrap()
                             .push(format!("corrupted layer: {dg}")),
-                        Err(e) => errors.lock().unwrap().push(format!("layer {dg}: {e}")),
+                        Err(e) => errors
+                            .lock()
+                            .unwrap()
+                            .push(format!("layer {dg}: {}", delonix_model::Error::from(e))),
                     }
                 });
             }
@@ -1585,7 +1588,7 @@ pub fn pull_oci_artifact_with_meta(
     // announced digest without detection. See AGENTS.md.
     let got = format!("sha256:{}", sha256_hex(&data));
     if got != layer_digest {
-        return Err(Error::Registry(format!(
+        return Err(Error::DigestMismatch(format!(
             "artifact corrupted or tampered: expected digest {layer_digest}, got {got}"
         )));
     }
@@ -2009,7 +2012,7 @@ mod tests {
                 .expect_err("the token was not granted");
         let _ = handle.join();
         let _ = std::fs::remove_dir_all(&tmp);
-        err
+        err.into()
     }
 
     /// A registry refusing the token for a read (ghcr answers 403 for a repository
