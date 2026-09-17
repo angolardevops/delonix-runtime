@@ -273,7 +273,7 @@ fn random_token() -> std::io::Result<String> {
 }
 
 fn delonix_bin() -> PathBuf {
-    crate::cli_bin()
+    delonix_runtime_core::dispatch::cli_bin()
 }
 
 // ---------------------------------------------------------------------------

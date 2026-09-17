@@ -39,28 +39,6 @@ fn st<E: std::fmt::Display>(e: E) -> Status {
     Status::internal(e.to_string())
 }
 
-/// Resolves the `delonix` CLI binary (the one the CRI delegates the lifecycle to
-/// — single-threaded). NEVER `current_exe()`, which is `delonix-cri` itself:
-/// reinvoking it would fall back into [`serve_blocking`], which does
-/// `remove_file`+`bind` on the socket and STEALS it from the server (the client
-/// sees "malformed header: missing HTTP content-type"). Order: (1) explicit
-/// `DELONIX_BIN`; (2) a `delonix` sibling of the executable (the golden image
-/// installs both in `/usr/local/bin`; a dev build has both in
-/// `target/<profile>/`); (3) `delonix` on the PATH.
-pub(crate) fn cli_bin() -> PathBuf {
-    if let Some(p) = std::env::var_os("DELONIX_BIN") {
-        return PathBuf::from(p);
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(sib) = exe.parent().map(|d| d.join("delonix")) {
-            if sib.is_file() {
-                return sib;
-            }
-        }
-    }
-    PathBuf::from("delonix")
-}
-
 /// Opens the image store at the given root.
 fn images(base: &PathBuf) -> Result<delonix_image::ImageStore, Status> {
     delonix_image::ImageStore::open(base).map_err(st)

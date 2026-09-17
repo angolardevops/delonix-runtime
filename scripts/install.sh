@@ -354,7 +354,7 @@ if [ "$WITH_BINARY" = 1 ]; then
   # MITM) para o que era só uma transferência que falhou. Corrigido com
   # `|| return 1` explícito em cada `curl` que tem de ser fatal — controlo de
   # fluxo explícito não depende do estado (in)consistente do `errexit`.
-  fetch_asset() { # $1 nome-base (delonix|delonix-cri) → devolve o nome descarregado, ou falha
+  fetch_asset() { # $1 nome-base (delonix|delonix-cri|delonix-mcp) → devolve o nome descarregado, ou falha
     local base="$1" asset="$1-x86_64${CPU_VARIANT}-linux"
     if [ -n "$CPU_VARIANT" ]; then
       if curl -fsSL -o "$TMP/$asset" "$BASE_URL/$asset" 2>/dev/null; then
@@ -453,6 +453,19 @@ if [ "$WITH_BINARY" = 1 ]; then
     $BIN_SUDO install -m 0755 "$TMP/$CRI_ASSET" "$BIN_DIR/delonix-cri" \
       || die "could not install delonix-cri to $BIN_DIR — sudo failed or the destination isn't writable"
     stepok binary "delonix-cri -> $BIN_DIR/delonix-cri"
+  fi
+  # `delonix mcp` runs the `delonix-mcp` next to `delonix` (ADR-0040 D2.4 as
+  # amended): installed by default, so the command works after a plain install.
+  # A release from before the split has no such asset — a warning, not a failure.
+  dl_mcp() { fetch_asset delonix-mcp > "$TMP/.asset-mcp"; }
+  if spin binary delonix-mcp "downloading..." dl_mcp; then
+    MCP_ASSET=$(cat "$TMP/.asset-mcp")
+    verify_asset "$MCP_ASSET"
+    $BIN_SUDO install -m 0755 "$TMP/$MCP_ASSET" "$BIN_DIR/delonix-mcp" \
+      || die "could not install delonix-mcp to $BIN_DIR — sudo failed or the destination isn't writable"
+    stepok binary "delonix-mcp -> $BIN_DIR/delonix-mcp"
+  else
+    warn "delonix-mcp is not published for $VERSION — \`delonix mcp\` will not work with this release"
   fi
   case ":$PATH:" in *":$BIN_DIR:"*) ;; *) warn "$BIN_DIR is not in your PATH" ;; esac
   # Um delonix ANTIGO mais à frente no PATH faz sombra ao acabado de instalar

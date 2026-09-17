@@ -20,6 +20,7 @@ members = [
     "crates/contexts/delonix-stack",
     "crates/contexts/delonix-compute",
     "crates/adapters/delonix-telemetry",
+    "bins/delonix-mcp-bin",
 ]
 
 [workspace.package]

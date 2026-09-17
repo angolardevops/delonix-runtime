@@ -2,7 +2,7 @@
 
 Modelo C4 (Contexto → Contentores → Componentes) e system design funcional do
 **Delonix Engine**: motor de containers e microVMs **daemonless, rootless-first,
-kernel-native**, em Rust (19 crates, workspace `crates/`). Este documento é canónico
+kernel-native**, em Rust (20 crates, workspace `crates/`). Este documento é canónico
 e mantido contra o código — cada afirmação estrutural tem a referência do
 crate/ficheiro onde foi confirmada. Onde há limites, eles aparecem nos diagramas,
 não escondidos em rodapés.
@@ -129,7 +129,7 @@ de PID) e reclassifica `Running`→`Crashed`/`Paused`. O CRI chama-o em
 
 ---
 
-## C4 — Nível 3: Componentes (os 19 crates)
+## C4 — Nível 3: Componentes (os 20 crates)
 
 Setas = dependências **reais**, confirmadas nos `Cargo.toml` de `crates/*/` e nos
 `use delonix_*` dos `src/`. Não há ciclos; `delonix-runtime-core` é a raiz comum.
@@ -154,6 +154,7 @@ graph TB
     MODEL["delonix-model<br>modelo partilhado PURO (foundation, ADR-0040) —<br>hoje os nomes gerados de containers e clusters"]
     STACK["delonix-stack<br>contexto Stack (ADR-0040): tabela de Kinds,<br>reconciliador de 3 vias, Condition, revisões"]
     COMPUTE["delonix-compute<br>contexto Compute (ADR-0040): a especificacao<br>de execucao unica (RunOpts) que as entradas traduzem"]
+    MCPBIN["delonix-mcp-bin<br>o executavel delonix-mcp, que `delonix mcp` executa (P3l)"]
     MCP["delonix-mcp<br>servidor MCP (ADR-0025) — superficie de IA LOCAL, sem inquilino<br>stdio-only; tools chamam Store/dominio, nunca shell arbitrario"]
 
     BIN --> RT
@@ -168,7 +169,7 @@ graph TB
     BIN --> SEC
     BIN --> PVE
     BIN --> NAS
-    BIN --> MCP
+    MCPBIN --> MCP
     BIN --> MODEL
     BIN --> STACK
     BIN --> COMPUTE

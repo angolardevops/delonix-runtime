@@ -11,11 +11,6 @@
 
 use std::path::PathBuf;
 
-/// Set by `delonix` when it runs this binary: the version it expects. A
-/// `delonix-cri` from another release left on the `PATH` would otherwise serve a
-/// kubelet with a server the user never installed alongside their `delonix`.
-const DISPATCH_VERSION_ENV: &str = "DELONIX_DISPATCH_VERSION";
-
 /// Ends the process with `code`, saying why on stderr and in the log. The one
 /// place this binary writes to the terminal.
 fn exit_with(code: i32, message: &str) -> ! {
@@ -48,14 +43,10 @@ fn flag(args: &[String], name: &str) -> Option<String> {
 fn main() {
     delonix_telemetry::telemetry::init();
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if let Ok(expected) = std::env::var(DISPATCH_VERSION_ENV) {
-        let mine = env!("CARGO_PKG_VERSION");
-        if expected != mine {
-            fail(&format!(
-                "this delonix-cri is version {mine} but delonix is {expected} — install the \
-                 delonix-cri of the same release next to delonix"
-            ));
-        }
+    if let Err(e) =
+        delonix_runtime_core::dispatch::check_version("delonix-cri", env!("CARGO_PKG_VERSION"))
+    {
+        fail(&e);
     }
     for a in &args {
         let name = a.split('=').next().unwrap_or(a);

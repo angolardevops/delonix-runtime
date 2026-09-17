@@ -1,10 +1,10 @@
 //! `delonix mcp` — the Model Context Protocol server (ADR-0025): a LOCAL,
-//! tenancy-free AI control surface. Wiring only; the server itself lives in
-//! `delonix-mcp` (kept out of this crate's dependents, same pattern as
-//! `cmd::serve` wrapping `delonix-mgmt`/`delonix-cri`).
+//! tenancy-free AI control surface. The server is its own executable,
+//! `delonix-mcp`, which this command runs (ADR-0040 D2.4 as amended): a user and
+//! an AI client's configuration only ever name `delonix`.
 
 use clap::Subcommand;
-use delonix_runtime_core::{Error, Result};
+use delonix_runtime_core::Result;
 
 #[derive(Subcommand)]
 pub enum McpCmd {
@@ -27,50 +27,10 @@ pub enum McpCmd {
 }
 
 pub fn run(action: McpCmd) -> Result<()> {
-    match action {
-        McpCmd::Serve { transport } => {
-            if transport != "stdio" {
-                return Err(Error::Invalid(format!(
-                    "unsupported MCP transport '{transport}' — only 'stdio' is implemented (ADR-0025 defers loopback HTTP)"
-                )));
-            }
-            let base = delonix_mcp::state_root();
-            let rt = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .map_err(|e| Error::Runtime {
-                    context: "mcp runtime",
-                    message: e.to_string(),
-                })?;
-            rt.block_on(delonix_mcp::serve_stdio(base))
-                .map_err(|message| Error::Runtime {
-                    context: "mcp serve",
-                    message,
-                })
-        }
-        McpCmd::Doctor => {
-            let base = delonix_mcp::state_root();
-            let checks = delonix_mcp::doctor_checks(&base);
-            let mut all_ok = true;
-            for (name, ok, detail) in &checks {
-                all_ok &= ok;
-                println!("{} {name}: {detail}", if *ok { "✓" } else { "✗" });
-            }
-            if all_ok {
-                Ok(())
-            } else {
-                Err(Error::Invalid(
-                    "one or more MCP doctor checks failed (see above)".to_string(),
-                ))
-            }
-        }
-        McpCmd::Capabilities => {
-            let table = delonix_mcp::capabilities_table();
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&table).unwrap_or_default()
-            );
-            Ok(())
-        }
-    }
+    let args: Vec<String> = match action {
+        McpCmd::Serve { transport } => vec!["serve".into(), "--transport".into(), transport],
+        McpCmd::Doctor => vec!["doctor".into()],
+        McpCmd::Capabilities => vec!["capabilities".into()],
+    };
+    super::serve::exec_server("delonix-mcp", &args, &[], "install.sh")
 }

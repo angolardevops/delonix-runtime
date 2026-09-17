@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod cred_vault;
+pub mod dispatch;
 mod error;
 pub mod events;
 pub mod peer_cred;
