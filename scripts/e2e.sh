@@ -461,6 +461,17 @@ check "inexistente: lote de ids mantém a classe" 4 \
 # A classe não pode depender da língua — é essa a razão de existir do número.
 check "inexistente em PT continua a dizer 4" 4 \
   "$BIN" --l18n=pt container inspect naoexiste-$PFX
+# O número do dicionário (ADR-0043) na LINHA de erro, e na língua do operador: é
+# o que um log, um ticket ou um screenshot levam. Um teste unitário do rótulo passa
+# na mesma com o `main` a imprimir a mensagem sem ele.
+check "a linha de erro traz o número do dicionário" ok \
+  bash -c "\"$BIN\" --l18n=pt vm stop naoexiste-$PFX 2>&1 | grep -q '\[DX-4501\]'"
+check "o lote de ids traz o número por id" ok \
+  bash -c "\"$BIN\" container rm naoexiste1-$PFX naoexiste2-$PFX 2>&1 | grep -c '\[DX-4000\]' | grep -qx 2"
+check "explain de um código responde" ok "$BIN" explain DX-4501
+check "explain de um código que não existe diz 4" 4 "$BIN" explain DX-4299
+check "explain codes --json é JSON" ok \
+  bash -c "\"$BIN\" explain codes --json | python3 -c 'import json,sys; assert len(json.load(sys.stdin)) > 10'"
 # --- as duas classes novas ---
 # As duas só entraram porque tinham PRODUTORES reais mal classificados: as duas
 # respondiam `1`, o mesmo número de um apply rebentado. E a ligação só se prova

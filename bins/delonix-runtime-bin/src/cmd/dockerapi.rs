@@ -204,7 +204,11 @@ fn last_error_line(stderr: &str) -> Option<String> {
     }
     let line = plain.lines().map(str::trim).rfind(|l| !l.is_empty())?;
     let line = line.strip_prefix("delonix: ").unwrap_or(line);
-    let line = line.strip_prefix("error ").unwrap_or(line);
+    // `error[DX-4501] …` since ADR-0043; the bare `error ` of older binaries too.
+    let line = match line.strip_prefix("error[") {
+        Some(rest) => rest.split_once("] ").map(|(_, msg)| msg).unwrap_or(line),
+        None => line.strip_prefix("error ").unwrap_or(line),
+    };
     Some(line.to_string())
 }
 
@@ -1845,6 +1849,29 @@ mod error_tests {
                 message: "file not found".into()
             }),
             StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+}
+
+#[cfg(test)]
+mod last_error_line_tests {
+    use super::last_error_line;
+
+    /// The child's message reaches the HTTP answer without the label, coded or not.
+    #[test]
+    fn the_label_is_stripped_with_or_without_a_code() {
+        let coded = "\x1b[31merror[DX-4000]\x1b[0m no such container: web\n";
+        assert_eq!(
+            last_error_line(coded).as_deref(),
+            Some("no such container: web")
+        );
+        assert_eq!(
+            last_error_line("error no such container: web").as_deref(),
+            Some("no such container: web")
+        );
+        assert_eq!(
+            last_error_line("delonix: conflict: x").as_deref(),
+            Some("conflict: x")
         );
     }
 }

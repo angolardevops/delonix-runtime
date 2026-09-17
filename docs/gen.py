@@ -13,6 +13,7 @@ O conteúdo editorial (introduções, exemplos, notas) vive nos dicts abaixo.
 
 import functools
 import html
+import json
 import os
 import re
 import subprocess
@@ -2958,6 +2959,7 @@ def sidebar(active, depth=0):
         ]),
         ("Referência", "Reference", [
             ("estabilidade.html", "Promessa de estabilidade", "Stability promise"),
+            ("codigos.html", "Dicionário de códigos", "Code dictionary"),
             ("comparacao.html", "Delonix vs Docker vs Podman", "Delonix vs Docker vs Podman"),
         ]),
     ]
@@ -5258,6 +5260,51 @@ delonix vm create heavy --backend libvirt          # default when CH isn't insta
 """
 
 
+def codes_page():
+    """The dictionary of numbered codes (ADR-0043), read from the BINARY with
+    `explain codes --json` in each language — the same table the CLI prints, so
+    the page cannot say a code means something the engine does not."""
+    def load(lang):
+        env = dict(os.environ, DELONIX_L18N=lang)
+        out = subprocess.run([BIN, "explain", "codes", "--json"], capture_output=True, text=True, env=env)
+        if out.returncode != 0:
+            raise SystemExit(f"explain codes --json falhou: {out.stderr}")
+        return json.loads(out.stdout)
+
+    def table(entries, heads):
+        rows = "".join(
+            "<tr>"
+            f"<td><code>{html.escape(e['code'])}</code></td>"
+            f"<td>{html.escape(e['class'])}</td>"
+            f"<td>{html.escape(e['domain'])}</td>"
+            f"<td>{e['exit']}</td>"
+            f"<td><strong>{html.escape(e['message'])}</strong><br>{html.escape(e['meaning'])}"
+            f"<br><em>{html.escape(e['remedy'])}</em></td>"
+            "</tr>"
+            for e in entries
+        )
+        th = "".join(f"<th>{h}</th>" for h in heads)
+        return f"<table><thead><tr>{th}</tr></thead><tbody>{rows}</tbody></table>"
+
+    intro = bi(
+        "div",
+        "<p>Cada falha tem um número <code>DX-CDNN</code> que não muda de significado: o milhar é a "
+        "<strong>classe</strong> (o que fazer a seguir), a centena o <strong>domínio</strong> (onde "
+        "aconteceu), e os dois últimos a falha; <code>00</code> é a própria classe. A CLI imprime-o na "
+        "linha de erro — <code>error[DX-4501] no such VM: dev</code> — e "
+        "<code>delonix explain DX-4501</code> diz o resto. Decidido no ADR-0043.</p>",
+        "<p>Every failure has a <code>DX-CDNN</code> number that never changes meaning: the thousands "
+        "digit is the <strong>class</strong> (what to do next), the hundreds the <strong>domain</strong> "
+        "(where it happened), and the last two the failure; <code>00</code> is the class itself. The CLI "
+        "prints it on the error line — <code>error[DX-4501] no such VM: dev</code> — and "
+        "<code>delonix explain DX-4501</code> says the rest. Decided in ADR-0043.</p>",
+    )
+    pt = table(load("pt"), ["Código", "Classe", "Domínio", "Saída", "Mensagem, significado, o que fazer"])
+    en = table(load("en"), ["Code", "Class", "Domain", "Exit", "Message, meaning, what to do"])
+    page("codigos.html", "Dicionário de códigos", f"<h1>{bi('span', 'Dicionário de códigos', 'Code dictionary')}</h1>"
+         + intro + bi("div", pt, en))
+
+
 def kinds_page():
     # O `bi(...)` sai da f-string de propósito. Uma expressão que se espalha por
     # VÁRIAS LINHAS dentro de `{...}` só é válida a partir do Python 3.12
@@ -5660,6 +5707,7 @@ def main():
     md_page("gitops.md", "gitops.html", "GitOps e CI")
     md_page("estrutura.md", "estrutura.html", "Estrutura de recursos")
     md_page("cli-stability.md", "estabilidade.html", "Promessa de estabilidade")
+    codes_page()
     # O guia de VMs é escrito à mão em Markdown (legível no GitHub) e publicado
     # daqui — a MESMA fonte, nunca uma segunda cópia do texto.
     md_page("guia-vm-lab.md", "guia-vm.html", "Guia de VMs e laboratório de rede")

@@ -477,14 +477,19 @@ pub fn run(action: SchemaCmd) -> Result<()> {
 ///
 /// Resolves `$ref`s as it walks, so a nested type reads like the YAML the user
 /// is going to write rather than like the JSON Schema it comes from.
-pub fn explain(path: &str) -> Result<()> {
+pub fn explain(path: &str, json: bool) -> Result<()> {
     // A numbered code (ADR-0043) never parses as a Kind — no Kind is four digits —,
     // so one verb answers both «what is this field» and «what is this code».
     if let Some(number) = delonix_model::codes::parse(path) {
-        return super::codes::explain(number);
+        return super::codes::explain(number, json);
     }
     if path == "codes" {
-        return super::codes::list();
+        return super::codes::list(json);
+    }
+    if json {
+        return Err(Error::Invalid(
+            super::po::t("--json applies to a code or to `codes`, not to a Kind").to_string(),
+        ));
     }
     let (kind, rest) = match path.split_once('.') {
         Some((k, r)) => (k, Some(r)),
@@ -706,8 +711,8 @@ mod tests {
             e.contains("kind: Volume"),
             "sem a alternativa dirigida: {e}"
         );
-        assert!(explain("Storage").is_err());
-        assert!(explain("Container.naoexiste").is_err());
+        assert!(explain("Storage", false).is_err());
+        assert!(explain("Container.naoexiste", false).is_err());
     }
 
     /// O inverso do teste acima, e é o que faltava: aquele prova que o `Storage`
@@ -921,15 +926,15 @@ mod tests {
         );
         // E a forma que o `anyOf` REALMENTE descreve — duas grafias do spec de
         // um `kind: Container` — continua a ser atravessada.
-        assert!(explain("Container.ports").is_ok());
+        assert!(explain("Container.ports", false).is_ok());
     }
 
     /// Walking into a list steps THROUGH the item type: the user thinks
     /// `containers.image`, not `containers.items.image`.
     #[test]
     fn explain_atravessa_uma_lista_sem_obrigar_a_escrever_items() {
-        assert!(explain("Pod.containers").is_ok());
-        assert!(explain("Pod.containers.image").is_ok());
+        assert!(explain("Pod.containers", false).is_ok());
+        assert!(explain("Pod.containers.image", false).is_ok());
     }
 
     #[test]
@@ -1013,9 +1018,9 @@ mod tests {
     /// mesmo trabalho, quando o `kind: Container` ganhou a grafia-Pod.
     #[test]
     fn explain_atravessa_um_anyof_pela_forma_canonica() {
-        assert!(explain("Container").is_ok());
-        assert!(explain("Container.ports").is_ok());
-        assert!(explain("Container.image").is_ok());
+        assert!(explain("Container", false).is_ok());
+        assert!(explain("Container.ports", false).is_ok());
+        assert!(explain("Container.image", false).is_ok());
     }
 
     /// Atravessar uma lista só faz sentido quando há mais caminho a percorrer.

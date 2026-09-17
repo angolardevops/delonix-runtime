@@ -130,6 +130,26 @@ pub fn error(msg: &str) {
     eprintln!("{} {msg}", paint(color::RED, label_error()));
 }
 
+/// An engine failure: the label carries its dictionary code (ADR-0043), so the
+/// number survives whatever language the message was printed in —
+/// `error[DX-4501] no such VM: dev`. `delonix explain DX-4501` says the rest.
+pub fn engine_error(e: &delonix_runtime_core::Error) {
+    eprintln!(
+        "{} {}",
+        paint(color::RED, &coded_label(e)),
+        super::po::t_dyn(&e.to_string())
+    );
+}
+
+/// `error[DX-4501]` — the label [`engine_error`] prints, without colour.
+pub fn coded_label(e: &delonix_runtime_core::Error) -> String {
+    format!(
+        "{}[{}]",
+        label_error(),
+        delonix_model::codes::label(e.number())
+    )
+}
+
 /// Secondary text (gray) — for details that shouldn't compete with the message.
 pub fn dim(s: &str) -> String {
     paint(color::GRAY, s)

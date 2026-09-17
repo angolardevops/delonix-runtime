@@ -11283,3 +11283,9 @@ msgstr "o que significa um código numerado num erro, e o que fazer"
 msgid "the whole dictionary of codes"
 msgstr "o dicionário completo de códigos"
 
+msgid "With a code or `codes`: print JSON, in the chosen language."
+msgstr "Com um código ou `codes`: imprime JSON, na língua escolhida."
+
+msgid "--json applies to a code or to `codes`, not to a Kind"
+msgstr "o --json aplica-se a um código ou a `codes`, não a um Kind"
+
