@@ -1,4 +1,4 @@
-<!-- translated-from: 06-crates.md sha256:635eb1d57434183514729891b985858c5cd3b04d2b7e76312c55d9e0b22f3ea3 -->
+<!-- translated-from: 06-crates.md sha256:915f9e167b22c72618cdbaa9dfa81d6b01ac5c0a9eaeac68ec80aa7a169be044 -->
 # 6. Os crates
 
 Esta página é o mapa que tens aberto enquanto lês o código. A tabela abaixo é
@@ -62,29 +62,33 @@ Duas convenções que vais encontrar em todo o lado:
 ## Fundação
 
 Os crates de fundação não carregam mecanismo: tipos, regras puras e o formato do
-estado em disco. Só podem depender de outros crates de fundação.
+estado em disco. Só podem depender de outros crates de fundação. Os ficheiros que guardam esses
+registos não estão aqui: são lidos e escritos pelo adapter `delonix-state`.
 
 ### `delonix-runtime-core`
 
 **Propósito.** O vocabulário partilhado do motor: os registos persistidos
-(`Container`, `Vm`), o seu `Status`, o tipo de erro que cada crate devolve (definido em
-`delonix-model` e re-exportado aqui com o mesmo caminho), e os stores de ficheiros
-JSON com escritas atómicas. Guarda também as pequenas peças transversais de que mais
-do que um crate precisa e que de outra forma seriam copiadas: a verificação
-`SO_PEERCRED` para sockets locais, o registo de eventos só de acrescento, o store de
-segredos cifrado, e a regra que um binário de servidor segue quando o `delonix` o
-corre. **Não** cria processos, não monta, nem configura a rede, e não tem noção de
-inquilino, plano ou faturação (o doc do crate di-lo, e o resto do workspace conta com
-isso).
+(`Container`, `Vm`), o seu `Status`, e o tipo de erro que cada crate devolve (definido em
+`delonix-model` e re-exportado aqui com o mesmo caminho). Guarda também as pequenas
+peças transversais de que mais do que um crate precisa e que de outra forma seriam
+copiadas: a verificação `SO_PEERCRED` para sockets locais, o registo de eventos só de
+acrescento, e a regra que um binário de servidor segue quando o `delonix` o corre.
+**Não** cria processos, não monta, nem configura a rede, e não tem noção de inquilino,
+plano ou faturação (o doc do crate di-lo, e o resto do workspace conta com isso).
+
+Os stores (`Store`, `JsonStore<T>`), os auxiliares de escrita atómica e o store de
+segredos cifrado (`SecretStore`, `CredVault`) **saíram deste crate** para o `delonix-state`
+(ADR-0040 P3); o modelo puro de segredos (`Secret`, `valid_name`, `valid_env_key`,
+`parse_env_file`) foi para o `delonix-model`. Nada disso é re-exportado aqui:
+o `src/lib.rs` re-exporta apenas `delonix_model::{Error, Result}`, por isso um sítio de
+chamada que usava `delonix_runtime_core::Store` importa agora `delonix_state::Store`.
 
 **Módulos principais**
 
 | Módulo | Responsabilidade |
 |---|---|
 | `lib.rs` | `Container`, `Vm`, `Status`, `Mount`, `ContainerFw`/`FwRule`, config de saúde, análise do cgroup-parent, `generate_id`, auxiliares de vivacidade de pid |
-| `store` | `Store` (um ficheiro JSON por container) e `JsonStore<T>`; auxiliares de escrita atómica |
 | `events` | registo de eventos `events.jsonl` só de acrescento (`emit`, `read`) |
-| `secret`, `cred_vault` | segredos nomeados cifrados em repouso (XChaCha20-Poly1305) |
 | `dispatch` | verificação de versão e resolução da CLI para binários de servidor corridos pelo `delonix` |
 | `peer_cred` | `peer_uid` a partir de `SO_PEERCRED` |
 | `typestate` | fases do ciclo de vida em tempo de compilação (`Phase<Created/Running/Stopped>`) |
@@ -98,27 +102,22 @@ isso).
 | `Container` | o registo de container que tudo lê e escreve | `crates/foundation/delonix-runtime-core/src/lib.rs:Container` |
 | `Vm` | o registo de VM | `crates/foundation/delonix-runtime-core/src/lib.rs:Vm` |
 | `Status` | estado do ciclo de vida de uma carga | `crates/foundation/delonix-runtime-core/src/lib.rs:Status` |
-| `Store` | store de containers; `load`/`save`/`list`, e `update` para ler-modificar-escrever | `crates/foundation/delonix-runtime-core/src/store.rs:Store` |
-| `JsonStore<T>` | o mesmo padrão para outros registos (VMs, …), com `update` | `crates/foundation/delonix-runtime-core/src/store.rs:JsonStore` |
-| `write_atomic`, `write_atomic_mode`, `write_private_temp` | escritas por ficheiro temporário + rename; um ficheiro temporário privado para entregar conteúdo a uma ferramenta | `crates/foundation/delonix-runtime-core/src/store.rs` |
 | `Error`, `Result` | o erro que cada crate do motor devolve, re-exportado de `delonix-model` | `crates/foundation/delonix-runtime-core/src/lib.rs` (`pub use delonix_model::{Error, Result}`) |
 | `events::emit` | acrescenta uma linha de evento | `crates/foundation/delonix-runtime-core/src/events.rs:emit` |
-| `SecretStore`, `CredVault` | segredos e credenciais cifrados | `crates/foundation/delonix-runtime-core/src/secret.rs:SecretStore` |
 | `dispatch::check_version`, `dispatch::cli_bin` | como o `delonix-cri`/`-mgmt`/`-mcp` recusam uma release que não bate certo e encontram a CLI `delonix` para voltar a correr | `crates/foundation/delonix-runtime-core/src/dispatch.rs` |
 | `is_alive`, `proc_starttime`, `safe_to_signal` | verificações de pid que sobrevivem à reciclagem de pids | `crates/foundation/delonix-runtime-core/src/lib.rs` |
 
 **Fala com.** Só `delonix-model`, pelo `Error`/`Result` que re-exporta. Sem
 subprocessos: a detecção lê `/sys` e `/proc` directamente.
 
-**Dependências externas relevantes.** `serde`/`serde_json` (registos em disco),
-`thiserror`, `libc`, `chacha20poly1305` + `getrandom` (o comentário do Cargo.toml:
-cifra em repouso para o gestor de segredos, Rust puro para compilar em musl/aarch64),
-`tracing`.
+**Dependências externas relevantes.** `serde`/`serde_json` (os tipos de registo
+derivam-nos), `thiserror`, `libc`. As dependências de cifra (`chacha20poly1305`,
+`getrandom`) mudaram-se com o store de segredos para o `delonix-state`.
 
 **Testes.** Módulos `#[cfg(test)]` inline nos ficheiros-fonte; sem directório `tests/`.
 
 **Começa a ler em.** `src/lib.rs` (as structs `Container` e `Vm`), depois
-`src/store.rs`, depois `src/dispatch.rs`.
+`src/dispatch.rs`. Para a forma como os registos são guardados, vê o `delonix-state`.
 
 **Armadilhas.**
 
@@ -132,6 +131,10 @@ cifra em repouso para o gestor de segredos, Rust puro para compilar em musl/aarc
   mais (ver o doc comment de `NetPlan` em `crates/adapters/delonix-sdn/src/infra.rs` e
   `apply_firewall_all`, que existe porque aplicar a firewall só ao IP primário era
   contornável).
+- A descrição do crate no `Cargo.toml` ainda diz que ele guarda o "Secret Manager"
+  e o "Store", e o doc do crate em `src/lib.rs` ainda diz "shared types,
+  state and errors". Ambos são anteriores à mudança para o `delonix-state`; a lista de
+  módulos é a referência.
 - `Container::cgroup()` é o caminho estático do modo root. Para um container rootless
   a correr, o cgroup real é lido de `/proc/<pid>/cgroup` por
   `delonix_linux::live_cgroup`.
@@ -141,8 +144,10 @@ cifra em repouso para o gestor de segredos, Rust puro para compilar em musl/aarc
 **Propósito.** A parte do modelo que qualquer camada pode nomear sem depender de um
 mecanismo: o tipo `Error` partilhado do motor com o código `DX_*` estável de cada
 variante, os nomes de carga gerados, e o mapeamento de um `Error` para um código de
-saída de processo. Puro — sem I/O, sem estado de processo (doc do crate). Não guarda
-registos; esses estão em `delonix-runtime-core`.
+saída de processo, o dicionário de códigos numerados `DX-CDNN`, e o modelo de segredos (o que
+é um segredo e como são um nome e uma chave válidos). Puro — sem I/O, sem estado de processo
+(doc do crate). Não guarda registos; esses estão em `delonix-runtime-core`, e os
+ficheiros que os guardam estão em `delonix-state`.
 
 **Módulos principais**
 
@@ -151,6 +156,8 @@ registos; esses estão em `delonix-runtime-core`.
 | `error` | `Error`, `Result`, e `Error::code` (a string `DX_*` de cada variante) |
 | `exitcode` | classes de códigos de saída (`NOT_RUNNING`, `NOT_FOUND`, `CONFLICT`, …) e `for_error` |
 | `names` | nomes por omissão (`derived_name`, `random_name`) |
+| `codes` | o dicionário de códigos numerados `DX-CDNN` (ADR-0043): dígito de classe, dígito de domínio, número |
+| `secret` | `Secret` e as regras puras `valid_name`, `valid_env_key`, `parse_env_file`; o store cifrado é o `delonix-state` |
 
 **API pública principal**
 
@@ -160,6 +167,7 @@ registos; esses estão em `delonix-runtime-core`.
 | `exitcode::for_error` | o único sítio onde um `Error` se torna um código de saída | `crates/foundation/delonix-model/src/exitcode.rs:for_error` |
 | `exitcode::merge` | o código para um lote de resultados | `crates/foundation/delonix-model/src/exitcode.rs:merge` |
 | `names::derived_name` | nome determinístico a partir de um id | `crates/foundation/delonix-model/src/names.rs:derived_name` |
+| `secret::Secret`, `secret::parse_env_file` | o registo de segredo e o parser de ficheiros `KEY=value`, usados pelo `delonix-compute` sem depender de um adapter | `crates/foundation/delonix-model/src/secret.rs` |
 
 **Fala com.** Nenhum outro crate do motor: é agora uma raiz do grafo, e o
 `delonix-runtime-core` depende dele (a dependência apontava antes no sentido
@@ -167,8 +175,9 @@ contrário). A CLI re-exporta os dois módulos como `cmd::exitcode` e `cmd::name
 (`bins/delonix-runtime-bin/src/cmd/mod.rs`), por isso os sítios de chamada mais
 antigos não mudaram.
 
-**Dependências externas relevantes.** `thiserror` (o derive do `Error`) e
-`serde_json` (a variante `Error::Json` envolve `serde_json::Error`).
+**Dependências externas relevantes.** `thiserror` (o derive do `Error`), `serde_json`
+(a variante `Error::Json` envolve `serde_json::Error`) e `serde` (o derive do
+`Secret`).
 
 **Testes.** Testes unitários inline.
 
@@ -412,7 +421,8 @@ da CLI nem configura a rede; os efeitos de rede chegam como hooks vindos do cham
 | `supervise::run_supervised` | supervisor destacado | `crates/adapters/delonix-linux/src/supervise.rs:run_supervised` |
 | `workload::HostWorkload` | adaptador de `WorkloadRuntime` | `crates/adapters/delonix-linux/src/workload.rs:HostWorkload` |
 
-**Fala com.** `delonix-runtime-core` e `delonix-compute`, por chamada directa.
+**Fala com.** `delonix-runtime-core`, `delonix-compute` e `delonix-state` (`Store`,
+`SecretStore`, `write_private_temp`; uma excepção de camadas declarada, removida na P4 do ADR-0040), por chamada directa.
 Syscalls através de `nix`, `libc` e `rustix`. Ferramentas do host que corre: `busctl`
 (scopes do systemd para o cgroup parent do kubelet), `apparmor_parser`, `ldconfig`,
 `nvidia-smi`. O slirp para `-p` não é arrancado aqui: o `HostWorkload` recebe um hook
@@ -480,8 +490,9 @@ CLI.
 | `Cas` | store de blobs | `crates/adapters/delonix-oci/src/cas.rs:Cas` |
 | `verify_signature` | verificação ao estilo cosign | `crates/adapters/delonix-oci/src/sign.rs:verify_signature` |
 
-**Fala com.** `delonix-runtime-core`, e `delonix-compute` (implementa a porta
-`ImageStore`). Registos por HTTPS com um cliente `reqwest` bloqueante. Nenhum
+**Fala com.** `delonix-runtime-core`, `delonix-compute` (implementa a porta
+`ImageStore`), e `delonix-state` (`write_atomic_mode`; uma excepção de camadas
+declarada, removida na P4 do ADR-0040). Registos por HTTPS com um cliente `reqwest` bloqueante. Nenhum
 subprocesso do host no seu código-fonte.
 
 **Dependências externas relevantes.** `reqwest` (bloqueante, rustls), `oci-spec`
@@ -541,7 +552,8 @@ Não lança containers.
 | `run_network::HostNetwork` | adaptador de `NetworkProvider` | `crates/adapters/delonix-sdn/src/run_network.rs:HostNetwork` |
 
 **Fala com.** `delonix-runtime-core`, `delonix-net-rules`, `delonix-compute`
-(portas). Ferramentas do host: `ip`, `nft`, `nsenter`, `slirp4netns`, `conntrack`, `wg`,
+(portas), `delonix-state` (`write_atomic`, `write_private_temp`; uma excepção de camadas
+declarada, removida na P4 do ADR-0040). Ferramentas do host: `ip`, `nft`, `nsenter`, `slirp4netns`, `conntrack`, `wg`,
 binários de plugins CNI. O holder é arrancado re-executando o binário do motor
 (`netns pin`, `netns control`, interceptados no `main` da CLI antes da análise de
 argumentos — `bins/delonix-runtime-bin/src/main.rs`). Tudo o que tem de acontecer
@@ -603,7 +615,8 @@ credenciais de provider.
 | `valid_vm_name` | validação do nome na fronteira do motor | `crates/adapters/delonix-vm/src/lib.rs:valid_vm_name` |
 
 **Fala com.** `delonix-runtime-core`, `delonix-compute` (a porta `VmNetwork`),
-`delonix-net-rules`. Ferramentas do host: `cloud-hypervisor` (e a sua API HTTP num
+`delonix-net-rules`, `delonix-state` (`JsonStore<Vm>`, `write_atomic`; uma excepção de
+camadas declarada, removida na P4 do ADR-0040). Ferramentas do host: `cloud-hypervisor` (e a sua API HTTP num
 socket unix, p. ex. `PUT /api/v1/vm.pause`), `virsh`, `qemu-img`, `cloud-localds`, `sh`.
 A rede só é alcançada através do `VmNetwork` registado; a CLI regista
 `delonix_sdn::vm_network::HostVmNetwork` no arranque
@@ -646,7 +659,8 @@ NAS (isso é o `delonix-truenas`).
 | `measure`, `Usage` | uso de disco com um contador de ilegíveis | `crates/adapters/delonix-volume/src/lib.rs` |
 | `HostVolumes` | adaptador de `StorageProvider` | `crates/adapters/delonix-volume/src/lib.rs:HostVolumes` |
 
-**Fala com.** `delonix-runtime-core`, `delonix-compute`. Ferramentas do host: `mount`,
+**Fala com.** `delonix-runtime-core`, `delonix-compute`, `delonix-model`, `delonix-state`
+(`write_atomic`; uma excepção de camadas declarada, removida na P4 do ADR-0040). Ferramentas do host: `mount`,
 `umount`, `losetup`. A remoção de árvores cujo dono são uids mapeados é injectada pelo
 chamador (`remove_with` recebe uma closure `rmtree`; a CLI passa
 `delonix_linux::remove_tree_mapped`).
@@ -734,6 +748,82 @@ configurada.
 **Armadilhas.** O exportador OTLP agrupa em lotes. A CLI `delonix`, de vida curta, não
 faz flush à saída, por isso os spans de uma invocação rápida da CLI podem perder-se; os
 servidores de vida longa entregam de forma fiável (doc do módulo `telemetry.rs`).
+
+### `delonix-state`
+
+**Propósito.** O estado persistido do motor (doc do crate, ADR-0040 D2.3): um ficheiro JSON
+por registo atrás de um `flock` exclusivo, os auxiliares de escrita atómica que cada adapter usa
+para os seus próprios ficheiros, e o cofre de segredos cifrado em repouso. Saiu do
+`delonix-runtime-core`: os **tipos** de registo (`Container`, `Vm`) ficam na
+fundação, os ficheiros que os guardam vivem aqui. Não decide nada sobre uma
+carga; carrega, guarda e tranca.
+
+**Módulos principais**
+
+| Módulo | Responsabilidade |
+|---|---|
+| `store` (privado, re-exportado) | `Store` (containers, `<root>/containers/<id>.json`), `JsonStore<T>` (qualquer outro tipo de registo), o `flock` por chave (`FileLock`), `safe_key`, `write_atomic`, `write_atomic_mode`, `write_private_temp` |
+| `secret` | `SecretStore`: segredos nomeados em `<root>/secrets/<name>.json`, selados com a chave mestra do host; re-exporta o modelo puro de `delonix_model::secret` |
+| `cred_vault` | `CredVault`: credenciais XChaCha20-Poly1305 em `<root>/tunnels/cred/`, chave mestra `<root>/tunnels/keyring.key` (0600), rotação de chave; `random_bytes`, `valid_cred_name` |
+| `error` (privado, re-exportado) | o `Error` próprio do crate, cada variante com o seu número do dicionário (ADR-0043), e a sua conversão em `delonix_model::Error` |
+
+**API pública principal**
+
+| Item | O que é | Onde |
+|---|---|---|
+| `Store` | registos de container: `open`, `default_root`, `base`, `load` (id exacto, prefixo de id, nome, ou `<namespace>/<name>`), `save`, `list` (os mais recentes primeiro), `remove`, e `update` para ler-modificar-escrever | `crates/adapters/delonix-state/src/store.rs:Store` |
+| `JsonStore<T>` | o mesmo padrão, com chave de string, para outros registos (VMs, registos de túnel, …): `open`, `load`, `save`, `exists`, `list`, `remove`, `update` | `crates/adapters/delonix-state/src/store.rs:JsonStore` |
+| `write_atomic`, `write_atomic_mode` | ficheiro temporário único por escritor + `fsync` + `rename` + `fsync` do directório em best-effort; o `write_atomic_mode` define o modo do ficheiro na criação | `crates/adapters/delonix-state/src/store.rs` |
+| `write_private_temp` | um ficheiro novo `O_EXCL`, 0600, no directório temporário do sistema, para entregar conteúdo a uma ferramenta | `crates/adapters/delonix-state/src/store.rs:write_private_temp` |
+| `SecretStore` | `open`, `save`, `update`, `load`, `list`, `remove`, `resolve_env`, `materialize`, `rotate_key` | `crates/adapters/delonix-state/src/secret.rs:SecretStore` |
+| `CredVault` | `seal`/`unseal`, `put`/`get`/`exists`/`list`/`remove`, `rotate_key` | `crates/adapters/delonix-state/src/cred_vault.rs:CredVault` |
+| `Error`, `Result` | `NoSuchContainer`, `AmbiguousContainer`, `NoSuchRecord`, `NoSuchSecret`, `InvalidSecretName`, `InvalidEnvKey`, `InvalidCredentialName`, `CorruptMasterKey`, `Vault`, `Lock`, `Entropy`, e `Engine` a envolver um `delonix_model::Error`; `number`, `is_not_found`, `is_invalid_argument`, `into_root` | `crates/adapters/delonix-state/src/error.rs` |
+
+**Fala com.** `delonix-runtime-core` (o tipo `Container` que o `Store` guarda, e
+`default_namespace`) e `delonix-model` (a classe de erro em que os seus erros se convertem,
+e o modelo de segredos). Sem subprocessos e sem rede: só o sistema de ficheiros.
+Chamadores, todos por chamada directa: `delonix-linux` (`Store`, `SecretStore`,
+`write_private_temp`), `delonix-vm` (`JsonStore`, `write_atomic`), `delonix-sdn`
+(`write_atomic`, `write_private_temp`), `delonix-oci` (`write_atomic_mode`),
+`delonix-volume` (`write_atomic`), `delonix-cri`, `delonix-mgmt` e `delonix-mcp`
+(`Store`), e a CLI. As cinco dependências de adapters são excepções de camadas
+declaradas em `scripts/arch_fitness.py`, removidas na P4 do ADR-0040 por uma
+porta `StateRepository` (ver [05](05-architecture.md)).
+
+**Dependências externas relevantes.** `serde`/`serde_json`, `thiserror`, `libc`
+(`flock`), `chacha20poly1305` e `getrandom` (o comentário do `Cargo.toml`: AEAD em Rust
+puro, sem C, compila em musl/aarch64).
+
+**Testes.** Testes unitários inline em `store.rs`, `secret.rs`, `cred_vault.rs` e
+`error.rs`; sem directório `tests/`.
+
+**Começa a ler em.** `src/lib.rs` (o doc do crate e as re-exportações), depois
+`src/store.rs` a partir de `FileLock::acquire` e `Store::update`, depois `src/secret.rs`.
+
+**Armadilhas.**
+
+- **As mensagens são um contrato.** Cada variante de `Error` converte-se na classe
+  de `delonix_model::Error` que os sítios de chamada construíam à mão, com o mesmo
+  texto, envolvida com o seu número, para que a CLI imprima o que imprimia antes e saia
+  com o mesmo código (doc do módulo `error.rs`). `NoSuchRecord` é `4000`, a própria entrada
+  da classe, e converte-se sem um invólucro com código.
+- **O `Store::update` e o `JsonStore::update` recusam correr sem o lock**
+  (`FileLock::acquire` devolve `Error::Lock`); o doc comment explica porque é que uma
+  leitura-modificação-escrita silenciosa sem lock é pior do que um erro. **O `SecretStore::update`
+  não**: o seu próprio `FileLock::acquire` devolve `Option` e avança sem lock
+  quando o ficheiro de lock não pode ser aberto.
+- **Os ficheiros de lock nunca são apagados** (`.<key>.lock` ao lado do registo): apagar um
+  abre uma janela em que dois processos trancam inodes diferentes (doc comment de
+  `Store::lock_path`).
+- **Um nome simples que existe em vários namespaces é recusado**
+  (`AmbiguousContainer`), enquanto um **prefixo** de id ambíguo continua a resolver para o
+  container mais recente (doc comment de `Store::load`).
+- **Cada chave vinda de fora passa por `safe_key`** antes de um `PathBuf::join`;
+  o `SecretStore` verifica também `valid_name` em `load`/`remove`, depois de um bug de
+  path traversal que o doc comment de `SecretStore::load` regista.
+- O `CredVault` protege contra leituras casuais do disco, backups e fugas, **não**
+  contra alguém com os privilégios do utilizador do motor, que consegue ler a chave mestra
+  (doc do módulo `cred_vault.rs`).
 
 ## Providers
 
@@ -854,7 +944,7 @@ e de container em `<root>/cri/` e **não** arranca containers no próprio proces
   de `crates/interfaces/delonix-cri/proto/api.proto`.
 - Imagens: `delonix-oci` no próprio processo (`pull_from_registry_with_creds`,
   `ImageStore`).
-- Estado: lê o `delonix_runtime_core::Store` directamente e chama
+- Estado: lê o `delonix_state::Store` directamente e chama
   `delonix_linux::reconcile_status`.
 - Arrancar, parar e remover: corre a CLI `delonix` (`dispatch::cli_bin`) com
   `DELONIX_ROOT` e `DELONIX_INTERNAL=1`. O `start_container` escreve o `RunOpts` como um
@@ -908,7 +998,8 @@ ADR-0040/0041 e não a estas rotas.
 | `serve_blocking` | corre o servidor | `crates/interfaces/delonix-mgmt/src/lib.rs:serve_blocking` |
 | `dashstats::collect` | resumo partilhado pelo `delonix dashboard` e por `/metrics` | `crates/interfaces/delonix-mgmt/src/dashstats.rs:collect` |
 
-**Fala com.** Chamadas directas a `delonix-runtime-core` (`Store`), `delonix-volume`,
+**Fala com.** Chamadas directas a `delonix-state` (`Store`, `SecretStore`),
+`delonix-runtime-core`, `delonix-volume`,
 `delonix-oci`, `delonix-scanner`, `delonix-vm`, `delonix-sdn` (`infra`, `NetworkStore`),
 `delonix-linux`, `delonix-telemetry`. Mutações: a CLI `delonix` como subprocesso
 (`run_cli`).
@@ -948,7 +1039,7 @@ no próprio processo.
 | `DelonixMcp` | o handler das tools | `crates/interfaces/delonix-mcp/src/lib.rs:DelonixMcp` |
 | `capabilities_table`, `doctor_checks` | `delonix mcp capabilities` / `doctor` | `crates/interfaces/delonix-mcp/src/lib.rs` |
 
-**Fala com.** Chamadas directas para leituras: `delonix-runtime-core`, `delonix-vm`,
+**Fala com.** Chamadas directas para leituras: `delonix-state` (`Store`), `delonix-runtime-core`, `delonix-vm`,
 `delonix-volume`, `delonix-sdn`, `delonix-linux` (`resource_advice`), e `delonix-mgmt`
 (`dashstats`, uma excepção de camadas declarada). As mutações correm a CLI `delonix`
 (`run_cli_blocking`, via `dispatch::cli_bin`).
@@ -1134,7 +1225,7 @@ sequenceDiagram
   participant Img as delonix-oci
   participant NetC as delonix-sdn (cni / infra)
   participant CLI as delonix CLI (subprocess)
-  participant Store as delonix-runtime-core Store
+  participant Store as delonix-state Store
   K->>CRI: PullImage (gRPC over unix socket)
   CRI->>Img: pull_from_registry_with_creds
   K->>CRI: RunPodSandbox

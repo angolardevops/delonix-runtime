@@ -61,7 +61,7 @@ select.lang{height:36px;border:1px solid var(--line);border-radius:9px;backgroun
 .menubtn{display:none}
 
 /* Frame */
-.frame{display:grid;grid-template-columns:272px minmax(0,1fr) 232px;max-width:1440px;margin-inline:auto}
+.frame{display:grid;grid-template-columns:280px minmax(0,1fr) 240px}
 nav.side{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:24px 16px 48px 20px;border-right:1px solid var(--line)}
 nav.side,aside.toc,.sres{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
 nav.side .group{margin-bottom:18px}
@@ -71,8 +71,10 @@ nav.side a:hover{background:var(--surface);text-decoration:none;color:var(--ink)
 nav.side a .n{flex:none;width:18px;font:500 12px/1.35 var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums}
 nav.side a.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
 nav.side a.on .n{color:var(--accent-ink)}
-main{min-width:0;padding:40px 56px 80px}
-.content{max-width:760px;margin-inline:auto}
+main{min-width:0;padding:40px clamp(20px,3.5vw,56px) 80px}
+.content{max-width:1180px;margin-inline:auto}
+/* Prose keeps a reading measure; tables, code and diagrams take the whole column. */
+.content>p,.content>ul,.content>ol,.content>h1,.content>h2,.content>h3,.content>h4,.content>blockquote,.content>.notice,.content>.kicker{max-width:76ch}
 aside.toc{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:40px 20px 40px 8px;font-size:13.5px}
 aside.toc .ttitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
 aside.toc ul{list-style:none;margin:0;padding:0}
@@ -96,7 +98,7 @@ p,ul,ol{margin:0 0 16px}
 li{margin:4px 0}li>p{margin:0 0 8px}
 strong{font-weight:650;color:var(--ink)}
 hr{border:0;height:1px;background:var(--line);margin:40px 0}
-code{font:.86em/1.5 var(--f-mono);background:var(--surface-2);border:1px solid var(--line);padding:.08em .38em;border-radius:6px;overflow-wrap:anywhere}
+code{font:.86em/1.5 var(--f-mono);background:var(--surface-2);border:1px solid var(--line);padding:.08em .38em;border-radius:6px;overflow-wrap:break-word}
 a code{color:inherit}
 a.src code{border-color:color-mix(in srgb,var(--accent) 30%,var(--line));background:var(--accent-soft)}
 a.src:hover{text-decoration:none}a.src:hover code{border-color:var(--accent)}
@@ -135,7 +137,10 @@ th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px sol
 th{background:var(--surface);font:700 12.5px/1.3 var(--f-display);letter-spacing:.02em;color:var(--ink-2);white-space:nowrap}
 tbody tr:last-child td{border-bottom:0}
 tbody tr:hover td{background:color-mix(in srgb,var(--surface) 60%,transparent)}
-td code{font-size:.82em}
+td code{font-size:.82em;overflow-wrap:normal}
+/* A table's first column names the thing (a variable, a crate, a flag): never break it. */
+td:first-child code{white-space:nowrap}
+th:first-child,td:first-child{white-space:nowrap}
 
 /* Pager + footer */
 .pager{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:64px}
@@ -162,7 +167,7 @@ td code{font-size:.82em}
 .shelp{display:flex;gap:16px;padding:10px 16px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
 
 /* Narrow screens */
-@media (max-width:1200px){.frame{grid-template-columns:256px minmax(0,1fr)}aside.toc{display:none}main{padding:36px 40px 72px}}
+@media (max-width:1280px){.frame{grid-template-columns:256px minmax(0,1fr)}aside.toc{display:none}}
 @media (max-width:860px){
   .frame{display:block}.menubtn{display:grid}.brand .sub,.brand .sep{display:none}
   nav.side{position:fixed;top:var(--header);left:0;bottom:0;width:min(300px,86vw);height:auto;z-index:40;background:var(--bg);
@@ -293,7 +298,7 @@ sem lhe mudarem o dono.</p>
 <tr>
 <td><code>cloud-localds</code></td>
 <td><code>cloud-image-utils</code> / <code>cloud-utils</code></td>
-<td>ISO de seed NoCloud — gerado em <strong>cada</strong> <code>vm create</code> de uma imagem cloud-init, a menos que seja dado <code>--seed</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/cloudinit.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/cloudinit.rs</code></a>)</td>
+<td>ISO de seed NoCloud — gerado em <strong>cada</strong> <code>vm create</code> de uma imagem cloud-init, a menos que seja dado <code>--seed</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/cloudinit.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>cloudinit.<wbr>rs</code></a>)</td>
 </tr>
 <tr>
 <td><code>virsh</code></td>
@@ -431,7 +436,7 @@ comandos sem relação):</p>
 <tbody>
 <tr>
 <td><code>DELONIX_PROXMOX_URL</code></td>
-<td>URL base da API, p. ex. <code>https://pve.example:8006</code>. Não definida = backend não registado.</td>
+<td>URL base da API, p. ex. <code>https:/<wbr>/<wbr>pve.<wbr>example:8006</code>. Não definida = backend não registado.</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_NODE</code></td>
@@ -487,17 +492,17 @@ mais um registo JSON de metadados (<code>VmImage</code>) por imagem. O <code>del
 <tbody>
 <tr>
 <td><code>k8s</code></td>
-<td><code>ghcr.io/angolardevops/delonix-vm-k8s</code></td>
+<td><code>ghcr.<wbr>io/<wbr>angolardevops/<wbr>delonix-vm-k8s</code></td>
 <td>nó Kubernetes (kubeadm/kubelet/kubectl + <code>delonix-cri</code>)</td>
 </tr>
 <tr>
 <td><code>base</code></td>
-<td><code>ghcr.io/angolardevops/delonix-vm-base</code></td>
+<td><code>ghcr.<wbr>io/<wbr>angolardevops/<wbr>delonix-vm-base</code></td>
 <td>SO base com o motor <code>delonix</code>, sem Kubernetes (p. ex. <code>ubuntu-24.04</code>)</td>
 </tr>
 <tr>
 <td><code>appliances</code></td>
-<td><code>ghcr.io/angolardevops/delonix-vm-appliances</code></td>
+<td><code>ghcr.<wbr>io/<wbr>angolardevops/<wbr>delonix-vm-appliances</code></td>
 <td>appliances de fabricantes, sem cloud-init</td>
 </tr>
 </tbody>
@@ -590,7 +595,7 @@ ver porquê.</p>
 </tr>
 <tr>
 <td><code>delonix vm console &lt;name&gt; [-e ^X]</code></td>
-<td>consola série; desliga com <code>Ctrl-]</code> por omissão (<code>$DELONIX_CONSOLE_ESCAPE</code>). libvirt: <code>virsh console</code> como processo filho; CH: o socket de consola <code>&lt;root&gt;/vms/&lt;name&gt;.console</code></td>
+<td>consola série; desliga com <code>Ctrl-]</code> por omissão (<code>$DELONIX_CONSOLE_ESCAPE</code>). libvirt: <code>virsh console</code> como processo filho; CH: o socket de consola <code>&lt;root&gt;/<wbr>vms/<wbr>&lt;name&gt;.<wbr>console</code></td>
 </tr>
 <tr>
 <td><code>delonix vm ssh &lt;name|ip&gt; [-l user] [-i key] [-- cmd]</code></td>
@@ -750,7 +755,7 @@ dry-run sem <code>--apply</code>). É a única excepção deliberada ao rootless
 <tr>
 <td>VM CH «a correr» mas nunca responde; o overlay fica minúsculo</td>
 <td>o firmware não consegue arrancar a imagem (p. ex. só o <code>hypervisor-fw</code> instalado)</td>
-<td>instala o EDK2 <code>CLOUDHV.fd</code> em <code>/usr/local/share/delonix/</code>, ou define <code>DELONIX_HYPERVISOR_FW</code>, ou usa <code>--backend libvirt</code></td>
+<td>instala o EDK2 <code>CLOUDHV.fd</code> em <code>/<wbr>usr/<wbr>local/<wbr>share/<wbr>delonix/<wbr></code>, ou define <code>DELONIX_HYPERVISOR_FW</code>, ou usa <code>--backend libvirt</code></td>
 </tr>
 <tr>
 <td><code>vm ls</code> não mostra IP numa VM libvirt</td>
@@ -758,7 +763,7 @@ dry-run sem <code>--apply</code>). É a única excepção deliberada ao rootless
 <td>entra no grupo <code>libvirt</code> e volta a fazer login, ou <code>--net-mode nat</code></td>
 </tr>
 <tr>
-<td><code>warning: cannot reach qemu:///system for NAT networking</code></td>
+<td><code>warning: cannot reach qemu:/<wbr>/<wbr>/<wbr>system for NAT networking</code></td>
 <td>não está no grupo <code>libvirt</code></td>
 <td><code>sudo usermod -aG libvirt $USER</code>, sessão nova</td>
 </tr>
@@ -769,7 +774,7 @@ dry-run sem <code>--apply</code>). É a única excepção deliberada ao rootless
 </tr>
 <tr>
 <td>VM CH recusada antes do boot a mencionar o caminho do socket</td>
-<td><code>&lt;root&gt;/vms/&lt;name&gt;.sock</code> excede 108 bytes</td>
+<td><code>&lt;root&gt;/<wbr>vms/<wbr>&lt;name&gt;.<wbr>sock</code> excede 108 bytes</td>
 <td><code>DELONIX_ROOT</code> ou nome da VM mais curtos</td>
 </tr>
 <tr>
@@ -793,14 +798,14 @@ dry-run sem <code>--apply</code>). É a única excepção deliberada ao rootless
 <td>instala-o (necessário para cada <code>vm create</code> com cloud-init)</td>
 </tr>
 <tr>
-<td><code>image vm build</code>: <code>cp: cannot open '/boot/vmlinuz-…'</code></td>
+<td><code>image vm build</code>: <code>cp: cannot open '/<wbr>boot/<wbr>vmlinuz-…'</code></td>
 <td>o kernel do host está a 0600</td>
-<td><code>install.sh --with-image-build</code>, ou <code>sudo chmod 0644 /boot/vmlinuz-*</code> (baixa uma fronteira)</td>
+<td><code>install.<wbr>sh --with-image-build</code>, ou <code>sudo chmod 0644 /<wbr>boot/<wbr>vmlinuz-*</code> (baixa uma fronteira)</td>
 </tr>
 <tr>
 <td><code>image vm build</code>: <code>Temporary failure resolving …</code></td>
 <td>o appliance não tem rede: falta o cliente DHCP do host, ou o passt</td>
-<td>instala <code>isc-dhcp-client</code>; para <code>--network</code> usa <code>XDG_RUNTIME_DIR=/tmp/delonix-run</code> e um passt actual primeiro no <code>PATH</code>; ou constrói com <code>--offline</code></td>
+<td>instala <code>isc-dhcp-client</code>; para <code>--network</code> usa <code>XDG_RUNTIME_DIR=/<wbr>tmp/<wbr>delonix-run</code> e um passt actual primeiro no <code>PATH</code>; ou constrói com <code>--offline</code></td>
 </tr>
 <tr>
 <td>um passo pára ~300 s e depois as instalações de pacotes falham</td>
@@ -842,39 +847,39 @@ dry-run sem <code>--apply</code>). É a única excepção deliberada ao rootless
 <tbody>
 <tr>
 <td>Porta, registo, backends CH e libvirt, <code>create_with</code>, snapshots, procura de firmware</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td>Geração do seed NoCloud</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/cloudinit.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/cloudinit.rs</code></a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/cloudinit.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>cloudinit.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td>Backend Proxmox</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-proxmox" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/</code></a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-proxmox" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr></code></a></td>
 </tr>
 <tr>
 <td>CLI <code>vm</code>, <code>kind: VirtualMachine</code>, <code>vm reach</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vm.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vm.rs</code></a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vm.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vm.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td>Store de imagens, receita dourada, pull/push/import/convert, dicas de falha</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmimage.rs</code></a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmimage.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td>VMfile</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmfile.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmfile.rs</code></a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmfile.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmfile.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td>Registo de backends a partir do ambiente</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs</code></a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmbackends.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td><code>vm bridge</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbridge.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbridge.rs</code></a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbridge.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmbridge.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td>Redução do <code>kind: Workload</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/workload.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/workload.rs</code></a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/workload.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>workload.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td>Builds de appliances</td>

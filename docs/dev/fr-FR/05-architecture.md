@@ -1,4 +1,4 @@
-<!-- translated-from: 05-architecture.md sha256:09b0e7a6de683cf35f3aa20754770fa16bab45f97752a1ac9e2e26bb01f0dcae -->
+<!-- translated-from: 05-architecture.md sha256:05a0aa1580d9cfa7b93c91eaa8110b052ae3062d1cabfe938018363c70c5b33e -->
 # 5. Architecture
 
 Cette page est la carte dont un contributeur a besoin avant de toucher au backend : ce qu’est le moteur, comment
@@ -128,8 +128,12 @@ binaires → P4 providers → P5 API de nœud → P6 CRI → P7 observabilité).
   travers le port `VmNetwork`, et les serveurs CRI, API de gestion et MCP sont devenus leurs propres
   exécutables. Quatre adaptateurs portent leur nom de l’ADR-0040 : `delonix-scanner` (anciennement `delonix-scan`),
   `delonix-oci` (anciennement `delonix-image`), `delonix-sdn` (anciennement `delonix-net`) et `delonix-linux` (anciennement
-  `delonix-runtime`, le crate du moteur de containers). `delonix-runtime-core` existe toujours et contient
-  toujours les stores, mais l’`Error` partagée est descendue dans `delonix-model` et est réexportée.
+  `delonix-runtime`, le crate du moteur de containers). `delonix-runtime-core` existe toujours, mais
+  l’`Error` partagée est descendue dans `delonix-model` (réexportée), et les stores, les écritures atomiques et
+  le store de secrets chiffré sont partis dans l’adaptateur `delonix-state` (le modèle pur des secrets
+  est allé dans `delonix-model`). Les adaptateurs qui ouvrent des enregistrements ou écrivent des fichiers par son intermédiaire
+  (`delonix-linux`, `delonix-vm`, `delonix-sdn`, `delonix-oci`, `delonix-volume`) sont des exceptions déclarées
+  jusqu’à ce que P4 leur donne un port `StateRepository` (`scripts/arch_fitness.py`).
 - **P4–P7 n’ont pas commencé.** Les exceptions restantes dans le tableau ci-dessus nomment ces phases.
 
 Le graphe des crates, tel que `Cargo.toml` le déclare :
@@ -375,13 +379,14 @@ Il n’y a pas de base de données. L’état est constitué de fichiers sous un
 
 | Chemin sous la racine | Quoi | Code |
 |---|---|---|
-| `containers/<id>.json` | un enregistrement JSON par container | `delonix_runtime_core::Store` (`store.rs`) |
+| `containers/<id>.json` | un enregistrement JSON par container | `delonix_state::Store` (`delonix-state/src/store.rs`) |
 | `containers/<id>/{upper,work,merged}` + `overlay-lowers` | la couche inscriptible du container et la liste des couches d’image partagées qu’il monte | `ImageStore::prepare_overlay` (`delonix-oci/src/overlay.rs`) |
 | `images/<id>.json`, `layers/<hex>/`, `blobs/sha256/<hex>` | métadonnées d’image, couches décompressées partagées par tous les containers, blobs adressés par contenu | `ImageStore::open` (`image.rs`), `Cas` (`cas.rs`) |
 | `volumes/<name>/_data`, `volumes/.ns/<ns>/` | volumes nommés, volumes limités à un namespace | `VolumeStore` (`delonix-volume/src/lib.rs`) |
 | `vms/` | enregistrements de VM (`JsonStore`) et fichiers par VM | `delonix-vm` |
 | `vm-images/` | images de VM (`.qcow2` + `.json`) | `cmd/vmimage.rs::VmImageStore` |
-| `secrets/` | secrets chiffrés | `SecretStore` (`delonix-runtime-core/src/secret.rs`) |
+| `secrets/` | secrets chiffrés | `SecretStore` (`delonix-state/src/secret.rs`) |
+| `tunnels/keyring.key`, `tunnels/cred/` | la clé maîtresse de l’hôte et les identifiants chiffrés | `CredVault` (`delonix-state/src/cred_vault.rs`) |
 | `ingress/` | pidfiles (`holder.pid` est le pin), marqueurs `refs/`, définitions de réseaux et de routes, logs | `delonix-sdn/src/infra.rs` |
 | `ipam/` | baux d’adresses par préfixe | `delonix-sdn/src/ipam.rs` |
 | `cri/{sandboxes,containers}/` | les enregistrements propres au CRI | `delonix-cri/src/runtime_svc/lifecycle.rs` (`sb_dir`, `ct_dir`) |
@@ -390,8 +395,10 @@ Il n’y a pas de base de données. L’état est constitué de fichiers sous un
 
 La concurrence est gérée par le système de fichiers, car plusieurs processus (la CLI, le serveur CRI,
 un superviseur) modifient les mêmes enregistrements : les écritures sont atomiques (fichier temporaire + `rename`,
-`store.rs::write_atomic`), et la lecture-modification-écriture passe par `Store::update` /
-`JsonStore::update`, qui prennent un `flock` exclusif et **refusent** de continuer sans lui. L’infrastructure
+`delonix_state::write_atomic`), et la lecture-modification-écriture passe par `Store::update` /
+`JsonStore::update`, qui prennent un `flock` exclusif et **refusent** de continuer sans lui. Tout
+cela vit dans l’adaptateur `delonix-state` ; les types d’enregistrement qu’il stocke restent dans
+`delonix-runtime-core`. L’infrastructure
 réseau a son propre `FileLock` autour de `ensure_up`, `teardown`, `acquire`, `release` et des
 fonctions de récupération.
 

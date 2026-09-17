@@ -61,7 +61,7 @@ select.lang{height:36px;border:1px solid var(--line);border-radius:9px;backgroun
 .menubtn{display:none}
 
 /* Frame */
-.frame{display:grid;grid-template-columns:272px minmax(0,1fr) 232px;max-width:1440px;margin-inline:auto}
+.frame{display:grid;grid-template-columns:280px minmax(0,1fr) 240px}
 nav.side{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:24px 16px 48px 20px;border-right:1px solid var(--line)}
 nav.side,aside.toc,.sres{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
 nav.side .group{margin-bottom:18px}
@@ -71,8 +71,10 @@ nav.side a:hover{background:var(--surface);text-decoration:none;color:var(--ink)
 nav.side a .n{flex:none;width:18px;font:500 12px/1.35 var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums}
 nav.side a.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
 nav.side a.on .n{color:var(--accent-ink)}
-main{min-width:0;padding:40px 56px 80px}
-.content{max-width:760px;margin-inline:auto}
+main{min-width:0;padding:40px clamp(20px,3.5vw,56px) 80px}
+.content{max-width:1180px;margin-inline:auto}
+/* Prose keeps a reading measure; tables, code and diagrams take the whole column. */
+.content>p,.content>ul,.content>ol,.content>h1,.content>h2,.content>h3,.content>h4,.content>blockquote,.content>.notice,.content>.kicker{max-width:76ch}
 aside.toc{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:40px 20px 40px 8px;font-size:13.5px}
 aside.toc .ttitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
 aside.toc ul{list-style:none;margin:0;padding:0}
@@ -96,7 +98,7 @@ p,ul,ol{margin:0 0 16px}
 li{margin:4px 0}li>p{margin:0 0 8px}
 strong{font-weight:650;color:var(--ink)}
 hr{border:0;height:1px;background:var(--line);margin:40px 0}
-code{font:.86em/1.5 var(--f-mono);background:var(--surface-2);border:1px solid var(--line);padding:.08em .38em;border-radius:6px;overflow-wrap:anywhere}
+code{font:.86em/1.5 var(--f-mono);background:var(--surface-2);border:1px solid var(--line);padding:.08em .38em;border-radius:6px;overflow-wrap:break-word}
 a code{color:inherit}
 a.src code{border-color:color-mix(in srgb,var(--accent) 30%,var(--line));background:var(--accent-soft)}
 a.src:hover{text-decoration:none}a.src:hover code{border-color:var(--accent)}
@@ -135,7 +137,10 @@ th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px sol
 th{background:var(--surface);font:700 12.5px/1.3 var(--f-display);letter-spacing:.02em;color:var(--ink-2);white-space:nowrap}
 tbody tr:last-child td{border-bottom:0}
 tbody tr:hover td{background:color-mix(in srgb,var(--surface) 60%,transparent)}
-td code{font-size:.82em}
+td code{font-size:.82em;overflow-wrap:normal}
+/* A table's first column names the thing (a variable, a crate, a flag): never break it. */
+td:first-child code{white-space:nowrap}
+th:first-child,td:first-child{white-space:nowrap}
 
 /* Pager + footer */
 .pager{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:64px}
@@ -162,7 +167,7 @@ td code{font-size:.82em}
 .shelp{display:flex;gap:16px;padding:10px 16px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
 
 /* Narrow screens */
-@media (max-width:1200px){.frame{grid-template-columns:256px minmax(0,1fr)}aside.toc{display:none}main{padding:36px 40px 72px}}
+@media (max-width:1280px){.frame{grid-template-columns:256px minmax(0,1fr)}aside.toc{display:none}}
 @media (max-width:860px){
   .frame{display:block}.menubtn{display:grid}.brand .sub,.brand .sep{display:none}
   nav.side{position:fixed;top:var(--header);left:0;bottom:0;width:min(300px,86vw);height:auto;z-index:40;background:var(--bg);
@@ -409,31 +414,37 @@ git branch -D &lt;topic&gt;/&lt;task&gt;
 <tbody>
 <tr>
 <td><strong>Flag ou subcomando novo da CLI</strong></td>
-<td><code>bins/delonix-runtime-bin/src/cmd/&lt;group&gt;.rs</code> (um módulo por grupo); strings através de <code>cmd/po.rs</code>, com o português em <code>data/pt.po</code>; texto do manual em <code>cmd/manual_entries.rs</code>; lista de folhas em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli_baseline.tsv" target="_blank" rel="noopener"><code>scripts/cli_baseline.tsv</code></a> (<code>scripts/cli-tree.sh --update</code>). A validação pura de uma execução pertence a <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/preflight.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/preflight.rs</code></a></td>
+<td><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>&lt;group&gt;.<wbr>rs</code> (um módulo por grupo); strings através de <code>cmd/po.rs</code>, com o português em <code>data/pt.po</code>; texto do manual em <code>cmd/manual_entries.rs</code>; lista de folhas em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli_baseline.tsv" target="_blank" rel="noopener"><code>scripts/<wbr>cli_baseline.<wbr>tsv</code></a> (<code>scripts/<wbr>cli-tree.<wbr>sh --update</code>). A validação pura de uma execução pertence a <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/preflight.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>preflight.<wbr>rs</code></a></td>
 <td><a href="10-contributing-workflow.html#adding-or-changing-a-cli-command">10 — Acrescentar ou mudar um comando da CLI</a>, <a href="03-rust-primer.html#36-the-cli-clap-derive-and-translated-output">03 — A CLI</a></td>
-<td>LANG-01 (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a>); gate da superfície da CLI (<code>scripts/cli-tree.sh --gate</code>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/docs_cli_gate.py" target="_blank" rel="noopener"><code>scripts/docs_cli_gate.py</code></a>); ligar todos os pontos de entrada (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a>)</td>
+<td>LANG-01 (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a>); gate da superfície da CLI (<code>scripts/<wbr>cli-tree.<wbr>sh --gate</code>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/docs_cli_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>docs_cli_gate.<wbr>py</code></a>); ligar todos os pontos de entrada (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a>)</td>
 </tr>
 <tr>
 <td><strong>Kind novo, ou um campo de um Kind</strong></td>
-<td>Os factos do Kind: <code>FACTS</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a>. O seu tipo de spec e o apply: <code>bins/delonix-runtime-bin/src/cmd/&lt;kind&gt;.rs</code>. Campos actualizáveis a quente: <code>hot_fields</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs</code></a>. O schema: <code>TYPED_KINDS</code> em <code>cmd/schema.rs</code>, e o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/schema/v1/delonix.json" target="_blank" rel="noopener"><code>docs/schema/v1/delonix.json</code></a> publicado (<code>delonix manifest schema</code>)</td>
+<td>Os factos do Kind: <code>FACTS</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-stack/<wbr>src/<wbr>kinds.<wbr>rs</code></a>. O seu tipo de spec e o apply: <code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>&lt;kind&gt;.<wbr>rs</code>. Campos actualizáveis a quente: <code>hot_fields</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-stack/<wbr>src/<wbr>reconcile.<wbr>rs</code></a>. O schema: <code>TYPED_KINDS</code> em <code>cmd/schema.rs</code>, e o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/schema/v1/delonix.json" target="_blank" rel="noopener"><code>docs/<wbr>schema/<wbr>v1/<wbr>delonix.<wbr>json</code></a> publicado (<code>delonix manifest schema</code>)</td>
 <td><a href="04-cloud-native-primer.html#48-declarative-reconciliation">04 — Reconciliação declarativa</a>, <a href="06-crates.html#delonix-stack">06 — <code>delonix-stack</code></a></td>
 <td>Abre primeiro uma issue (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a>); o schema é gerado a partir do código (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener">ADR-0007</a>); os testes em <code>kinds.rs</code> e <code>schema.rs</code> falham quando uma tabela fica esquecida</td>
 </tr>
 <tr>
 <td><strong>Comportamento de rede</strong></td>
-<td>Regras puras sem I/O: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-net-rules/src/lib.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-net-rules/src/lib.rs</code></a>. Dataplane (holder, socket de controlo, nftables, IPAM, CNI): <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-sdn/src" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/</code></a> (<code>infra.rs</code>, <code>ipam.rs</code>, <code>cni.rs</code>). O passo de rede do <code>container run</code>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/network.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/network.rs</code></a>. CLI: <code>cmd/network.rs</code>, <code>cmd/net.rs</code>, <code>cmd/firewall.rs</code></td>
+<td>Regras puras sem I/O: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-net-rules/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-net-rules/<wbr>src/<wbr>lib.<wbr>rs</code></a>. Dataplane (holder, socket de controlo, nftables, IPAM, CNI): <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-sdn/src" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr></code></a> (<code>infra.rs</code>, <code>ipam.rs</code>, <code>cni.rs</code>). O passo de rede do <code>container run</code>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/network.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>network.<wbr>rs</code></a>. CLI: <code>cmd/network.rs</code>, <code>cmd/net.rs</code>, <code>cmd/firewall.rs</code></td>
 <td><a href="04-cloud-native-primer.html#45-container-networking">04 — Rede de containers</a>, <a href="06-crates.html#delonix-sdn">06 — <code>delonix-sdn</code></a></td>
 <td>Rootless-first e nenhuma falha silenciosa (<a href="10-contributing-workflow.html#architecture-rules-the-gates-enforce">10 — Regras de arquitectura</a>); assinala a fronteira de privilégio no PR (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>)</td>
 </tr>
 <tr>
 <td><strong>Imagens, registo, build</strong></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci/src" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/</code></a> (<code>registry.rs</code>, <code>build.rs</code>, <code>cas.rs</code>, <code>overlay.rs</code>); CLI em <code>cmd/build.rs</code>, <code>cmd/image.rs</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci/src" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci/<wbr>src/<wbr></code></a> (<code>registry.rs</code>, <code>build.rs</code>, <code>cas.rs</code>, <code>overlay.rs</code>); CLI em <code>cmd/build.rs</code>, <code>cmd/image.rs</code></td>
 <td><a href="08-delonixfile-and-vmfile.html">08 — Delonixfile e VMfile</a>, <a href="06-crates.html#delonix-oci">06 — <code>delonix-oci</code></a></td>
 <td>Os downloads são verificados por digest (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>, âmbito da cadeia de fornecimento)</td>
 </tr>
 <tr>
+<td><strong>Estado persistido: um campo de registo, um store, locks de ficheiro, segredos em repouso</strong></td>
+<td>Tipos de registo (<code>Container</code>, <code>Vm</code>): <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>lib.<wbr>rs</code></a>. Como são guardados e trancados (<code>Store</code>, <code>JsonStore</code>, <code>write_atomic*</code>, <code>SecretStore</code>, <code>CredVault</code>): <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-state/src" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-state/<wbr>src/<wbr></code></a> (<code>store.rs</code>, <code>secret.rs</code>, <code>cred_vault.rs</code>)</td>
+<td><a href="06-crates.html#delonix-state">06 — <code>delonix-state</code></a>, <a href="05-architecture.html#state-on-disk">05 — Estado em disco</a>, <a href="03-rust-primer.html#38-concurrency-and-shared-state">03 — Concorrência</a></td>
+<td>Os campos novos de um registo levam <code>#[serde(default)]</code>; o read-modify-write passa pelo <code>update</code> (<a href="12-coding-conventions.html#8-state-and-concurrency">12 — Estado e concorrência</a>)</td>
+</tr>
+<tr>
 <td><strong>Comportamento de VMs neste nó</strong></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> (o trait <code>VmBackend</code> e o registo de backends), <code>cloudinit.rs</code>; CLI em <code>cmd/vm.rs</code>, <code>cmd/vmimage.rs</code>, <code>cmd/vmfile.rs</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs</code></a> (o trait <code>VmBackend</code> e o registo de backends), <code>cloudinit.rs</code>; CLI em <code>cmd/vm.rs</code>, <code>cmd/vmimage.rs</code>, <code>cmd/vmfile.rs</code></td>
 <td><a href="09-microvm-setup.html">09 — Construir microVMs</a>, <a href="03-rust-primer.html#33-traits-as-ports-vmbackend-and-the-backend-registry">03 — Traits como portas</a></td>
 <td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a> (os backends são registáveis)</td>
 </tr>
@@ -445,13 +456,13 @@ git branch -D &lt;topic&gt;/&lt;task&gt;
 </tr>
 <tr>
 <td><strong>CRI (aquilo com que o kubelet fala)</strong></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-cri/src" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/</code></a> (<code>runtime_svc.rs</code>, <code>runtime_svc/lifecycle.rs</code>, <code>streaming.rs</code>)</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-cri/src" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr></code></a> (<code>runtime_svc.rs</code>, <code>runtime_svc/<wbr>lifecycle.<wbr>rs</code>, <code>streaming.rs</code>)</td>
 <td><a href="04-cloud-native-primer.html#46-kubernetes-cri-kubelet-kubeadm-and-kind">04 — Kubernetes</a>, <a href="06-crates.html#delonix-cri">06 — <code>delonix-cri</code></a></td>
 <td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a></td>
 </tr>
 <tr>
 <td><strong>Um crate novo</strong></td>
-<td>Uma entrada em <code>LAYERS</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, um directório em <code>crates/&lt;layer&gt;/</code>, e o seu caminho no <code>[workspace.dependencies]</code> do <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> raiz — tudo no mesmo commit</td>
+<td>Uma entrada em <code>LAYERS</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, um directório em <code>crates/&lt;layer&gt;/</code>, e o seu caminho no <code>[workspace.<wbr>dependencies]</code> do <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> raiz — tudo no mesmo commit</td>
 <td><a href="05-architecture.html#layers-and-the-allowed-direction">05 — Camadas</a></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (directório = camada, versões só na raiz)</td>
 </tr>
