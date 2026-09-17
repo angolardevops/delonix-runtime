@@ -20,6 +20,7 @@ pub mod resource_advice;
 pub mod run_host;
 pub mod seccomp_profile;
 pub mod supervise;
+pub mod workload;
 pub mod workload_view;
 
 use capabilities::{all_caps_mask, resolve_cap_keep};
