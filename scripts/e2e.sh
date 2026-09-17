@@ -3033,8 +3033,22 @@ check "mcp sem o delonix-mcp instalado sai com 69" 69 \
   env PATH=/usr/bin:/bin "$LONE/delonix" mcp capabilities
 rm -rf "$LONE"
 
+# `delonix serve api` executa o `delonix-mgmt` (P3m), e as rotas que correm a CLI de
+# volta chegam ao `delonix`, não ao próprio servidor.
+APISOCK="/tmp/dlx-srv-api2-$PFX.sock"
+APIPID="$(e2e_serve_up api "$APISOCK")"
+check "serve api corre o executável delonix-mgmt" ok bash -c \
+  "[ -n '$APIPID' ] && [ \"\$(basename \"\$(readlink /proc/$APIPID/exe)\")\" = delonix-mgmt ]"
+[ -n "$APIPID" ] && kill "$APIPID" 2>/dev/null
+for i in $(seq 1 40); do kill -0 "$APIPID" 2>/dev/null || break; sleep 0.2; done
+rm -f "$APISOCK"
+LONE="$OUT/lone-api-$PFX"; mkdir -p "$LONE"; cp "$BIN" "$LONE/delonix"
+check "serve api sem o delonix-mgmt instalado sai com 69" 69 \
+  env PATH=/usr/bin:/bin "$LONE/delonix" serve api --addr "unix:///tmp/dlx-lone-api-$PFX.sock"
+rm -rf "$LONE"
+
 check "nenhum servidor desta corrida ficou para trás" ok bash -c \
-  "! pgrep -f '(serve (cri|api|docker-api)|delonix-cri) --addr unix:///tmp/dlx-srv-.*$PFX' >/dev/null"
+  "! pgrep -f '(serve (cri|api|docker-api)|delonix-cri|delonix-mgmt) --addr unix:///tmp/dlx-srv-.*$PFX' >/dev/null"
 
 section "compose — o que é recusado, e se a recusa dispara"
 

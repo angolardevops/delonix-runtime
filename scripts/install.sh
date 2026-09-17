@@ -354,7 +354,7 @@ if [ "$WITH_BINARY" = 1 ]; then
   # MITM) para o que era só uma transferência que falhou. Corrigido com
   # `|| return 1` explícito em cada `curl` que tem de ser fatal — controlo de
   # fluxo explícito não depende do estado (in)consistente do `errexit`.
-  fetch_asset() { # $1 nome-base (delonix|delonix-cri|delonix-mcp) → devolve o nome descarregado, ou falha
+  fetch_asset() { # $1 nome-base (delonix|delonix-cri|delonix-mcp|delonix-mgmt) → devolve o nome descarregado, ou falha
     local base="$1" asset="$1-x86_64${CPU_VARIANT}-linux"
     if [ -n "$CPU_VARIANT" ]; then
       if curl -fsSL -o "$TMP/$asset" "$BASE_URL/$asset" 2>/dev/null; then
@@ -454,19 +454,23 @@ if [ "$WITH_BINARY" = 1 ]; then
       || die "could not install delonix-cri to $BIN_DIR — sudo failed or the destination isn't writable"
     stepok binary "delonix-cri -> $BIN_DIR/delonix-cri"
   fi
-  # `delonix mcp` runs the `delonix-mcp` next to `delonix` (ADR-0040 D2.4 as
-  # amended): installed by default, so the command works after a plain install.
-  # A release from before the split has no such asset — a warning, not a failure.
-  dl_mcp() { fetch_asset delonix-mcp > "$TMP/.asset-mcp"; }
-  if spin binary delonix-mcp "downloading..." dl_mcp; then
-    MCP_ASSET=$(cat "$TMP/.asset-mcp")
-    verify_asset "$MCP_ASSET"
-    $BIN_SUDO install -m 0755 "$TMP/$MCP_ASSET" "$BIN_DIR/delonix-mcp" \
-      || die "could not install delonix-mcp to $BIN_DIR — sudo failed or the destination isn't writable"
-    stepok binary "delonix-mcp -> $BIN_DIR/delonix-mcp"
-  else
-    warn "delonix-mcp is not published for $VERSION — \`delonix mcp\` will not work with this release"
-  fi
+  # `delonix mcp` and `delonix serve api` run the `delonix-mcp` and `delonix-mgmt`
+  # next to `delonix` (ADR-0040 D2.4 as amended): installed by default, so the
+  # commands work after a plain install. A release from before the split has no
+  # such asset — a warning, not a failure.
+  for SERVER in delonix-mcp:mcp delonix-mgmt:"serve api"; do
+    SNAME=${SERVER%%:*}; SCMD=${SERVER#*:}
+    dl_server() { fetch_asset "$SNAME" > "$TMP/.asset-$SNAME"; }
+    if spin binary "$SNAME" "downloading..." dl_server; then
+      SASSET=$(cat "$TMP/.asset-$SNAME")
+      verify_asset "$SASSET"
+      $BIN_SUDO install -m 0755 "$TMP/$SASSET" "$BIN_DIR/$SNAME" \
+        || die "could not install $SNAME to $BIN_DIR — sudo failed or the destination isn't writable"
+      stepok binary "$SNAME -> $BIN_DIR/$SNAME"
+    else
+      warn "$SNAME is not published for $VERSION — \`delonix $SCMD\` will not work with this release"
+    fi
+  done
   case ":$PATH:" in *":$BIN_DIR:"*) ;; *) warn "$BIN_DIR is not in your PATH" ;; esac
   # Um delonix ANTIGO mais à frente no PATH faz sombra ao acabado de instalar
   # (caso real: um build 0.3.0 em ~/.local/bin escondia o 0.4.2 e ressuscitava

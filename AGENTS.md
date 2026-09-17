@@ -2,7 +2,7 @@
 
 Motor de **containers e microVMs daemonless, rootless-first, kernel-native, em Rust**.
 Repositório **público** (`angolardevops/delonix-runtime`, Apache-2.0) — ver
-[README.md](README.md) para a arquitectura dos 20 crates.
+[README.md](README.md) para a arquitectura dos 21 crates.
 
 ## Identidade e fronteira do motor (ler primeiro)
 
@@ -200,7 +200,7 @@ crates/contexts/     delonix-security-runtime
 crates/adapters/     delonix-runtime, delonix-net, delonix-image, delonix-scan, delonix-volume, delonix-vm, delonix-telemetry
 crates/providers/    delonix-proxmox, delonix-truenas
 crates/interfaces/   delonix-cri, delonix-mgmt, delonix-mcp
-bins/                delonix-runtime-bin, delonix-mcp-bin
+bins/                delonix-runtime-bin, delonix-mcp-bin, delonix-mgmt-bin
 ```
 
 Os crates mudaram de sítio **sem mudar de nome** (as renomeações são das fases P2–P4).
@@ -800,7 +800,8 @@ como se fosse um comando principal por engano. Pedido explícito: agrupamento **
   `PATH`), com o `DELONIX_ROOT` do utilizador e a versão esperada. O utilizador só conhece
   `delonix`; um `delonix-cri` de outra release recusa arrancar; sem ele instalado a saída é
   69 e diz `install.sh --with-cri`. **O `delonix mcp` seguiu na P3l** (`delonix-mcp`,
-  instalado por omissão); `api` e `docker-api` seguem o mesmo caminho em fatias próprias. Um
+  instalado por omissão), e o `serve api` na P3m (`delonix-mgmt`); o `docker-api` vive no
+  próprio binário (`cmd/dockerapi.rs`) e sai quando a CLI for biblioteca. Um
   servidor que corre a CLI de volta (as mutações do MCP, o ciclo de vida do CRI) usa
   `delonix_runtime_core::dispatch::cli_bin` e NUNCA o próprio executável: o `delonix` passa
   `DELONIX_BIN` com o seu caminho.
@@ -6328,7 +6329,7 @@ antes de qualquer commit:
    genuína. Decidir QUANDO e PARA QUEM publicar portas numa frota multi-inquilino não é do
    motor.
 
-## Arquitetura (20 crates)
+## Arquitetura (21 crates)
 
 | Crate | Responsabilidade |
 |---|---|
@@ -6350,6 +6351,7 @@ antes de qualquer commit:
 | `delonix-scan` | SBOM + varredura de CVE (`image scan`, e a imposição de scan-on-pull) |
 | `delonix-mcp` | servidor Model Context Protocol (ADR-0025) — superfície de controlo de IA LOCAL e sem inquilino, `stdio`-only nesta fase; as tools chamam a `Store`/os crates de domínio, nunca constroem shell arbitrário |
 | `delonix-mcp-bin` | o executável `delonix-mcp` (P3l, ADR-0040 D2.4 emendado): `delonix mcp` faz `exec` dele, e o utilizador e a configuração de um cliente de IA só nomeiam `delonix`. Compõe uma só interface, o `delonix-mcp` |
+| `delonix-mgmt-bin` | o executável `delonix-mgmt` (P3m): `delonix serve api` faz `exec` dele. O `delonix` continua a ligar o crate `delonix-mgmt`, mas só pelo coleccionador `dashstats` (usado pelo `dash` e pelo `system`), que sai para a camada de aplicação na P5 |
 | `delonix-security-runtime` | as decisões de segurança do nó: a política (`policy.json`), o **único** ponto de admissão — container **e** VM —, o `SecurityEvent`, o score explicável e a redacção de segredos. Puro: três dependências, sem sensores, sem daemon e **sem noção de inquilino** (guarda-rio #2, imposto por teste) — ver ADR-0026 |
 
 ## Histórico

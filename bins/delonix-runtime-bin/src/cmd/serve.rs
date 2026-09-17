@@ -76,10 +76,14 @@ pub fn run(action: ServeCmd) -> Result<()> {
             exec_server("delonix-cri", &args, &env, "install.sh --with-cri")
         }
         ServeCmd::Api { addr } => {
-            let addr = addr
-                .or_else(|| std::env::var("DELONIX_API_ADDR").ok())
-                .unwrap_or_else(|| "unix:///run/delonix-mgmt.sock".to_string());
-            delonix_mgmt::serve_blocking(super::util::state_root(), &addr)
+            // The flag also travels as the variable, for the same reason as the CRI.
+            let args: Vec<String> = addr
+                .iter()
+                .flat_map(|a| ["--addr".into(), a.clone()])
+                .collect();
+            let env: Vec<(&str, String)> =
+                addr.into_iter().map(|a| ("DELONIX_API_ADDR", a)).collect();
+            exec_server("delonix-mgmt", &args, &env, "install.sh")
         }
         ServeCmd::DockerApi { addr, matrix } => {
             if matrix {
