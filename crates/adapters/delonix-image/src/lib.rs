@@ -25,8 +25,7 @@ pub use detect::{detect, Detected};
 pub use image::{Image, ImageConfig, ImageStore};
 pub use load::load_docker_archive;
 pub use registry::{
-    build_manifest, http_get, http_get_auth, http_post_json, http_post_stream, pull_from_registry,
-    pull_from_registry_with_creds, push_to_registry,
+    build_manifest, http_get, pull_from_registry, pull_from_registry_with_creds, push_to_registry,
 };
 pub use save::write_oci_archive;
 pub use sign::verify_signature;
