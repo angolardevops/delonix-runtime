@@ -12,7 +12,7 @@
 //!    "Critical/High block" (signed decision no. 2).
 
 use crate::Severity;
-use delonix_runtime_core::{Error, Result};
+use crate::{Error, Result};
 use serde::Serialize;
 use std::path::Path;
 
@@ -209,11 +209,7 @@ pub fn scan_module_dir(dir: &Path) -> Result<ModuleReport> {
         .to_string();
     let manifest_text = std::fs::read_to_string(dir.join("__manifest__.py"))
         .or_else(|_| std::fs::read_to_string(dir.join("__openerp__.py")))
-        .map_err(|_| {
-            Error::Invalid(format!(
-                "'{module}' is not an Odoo module (no __manifest__.py)"
-            ))
-        })?;
+        .map_err(|_| Error::NotAModule(module.to_string()))?;
     let manifest = parse_odoo_manifest(&manifest_text);
     let mut deps = Vec::new();
     if let Ok(req) = std::fs::read_to_string(dir.join("requirements.txt")) {
@@ -241,22 +237,14 @@ pub fn scan_modules_root(dir: &Path) -> Result<Vec<ModuleReport>> {
         return Ok(vec![scan_module_dir(dir)?]);
     }
     let mut out = Vec::new();
-    for e in std::fs::read_dir(dir)
-        .map_err(|e| Error::Runtime {
-            context: "module scan",
-            message: e.to_string(),
-        })?
-        .flatten()
-    {
+    for e in std::fs::read_dir(dir).map_err(Error::ModuleScan)?.flatten() {
         let p = e.path();
         if p.is_dir() && is_odoo_module(&p) {
             out.push(scan_module_dir(&p)?);
         }
     }
     if out.is_empty() {
-        return Err(Error::Invalid(
-            "no Odoo module found (directories with __manifest__.py)".into(),
-        ));
+        return Err(Error::NoModule);
     }
     out.sort_by(|a, b| a.module.cmp(&b.module));
     Ok(out)
@@ -265,13 +253,7 @@ pub fn scan_modules_root(dir: &Path) -> Result<Vec<ModuleReport>> {
 /// Walks the `.py` files of a tree, calling `f(relative_path, text)`.
 /// Symlinks are NOT followed (a module shouldn't have symlinks pointing outside).
 fn walk_py(root: &Path, dir: &Path, f: &mut impl FnMut(&str, &str)) -> Result<()> {
-    for e in std::fs::read_dir(dir)
-        .map_err(|e| Error::Runtime {
-            context: "module scan",
-            message: e.to_string(),
-        })?
-        .flatten()
-    {
+    for e in std::fs::read_dir(dir).map_err(Error::ModuleScan)?.flatten() {
         let p = e.path();
         if p.is_symlink() {
             continue;
