@@ -27,7 +27,7 @@
 //! that needs its own ADR with a proven need, not a module added quietly.
 //!
 //! There is also a measured reason, not only a doctrinal one. The engine's
-//! primary mode is rootless. `delonix-net`'s existing eBPF loader documents
+//! primary mode is rootless. `delonix-sdn`'s existing eBPF loader documents
 //! that loading a program needs `CAP_BPF` + `CAP_NET_ADMIN` in the init
 //! namespace, which a rootless runtime does not have — so it no-ops. A sensor
 //! layer built on the same footing would be inert exactly where this engine

@@ -75,7 +75,7 @@ fn read_doc(name: &str) -> String {
 /// layout would break on an edit that improved the prose without touching the
 /// property under test.
 ///
-/// The one trap this has to dodge is prefixes: `delonix-net` is a substring of
+/// The one trap this has to dodge is prefixes: `delonix-sdn` is a substring of
 /// `delonix-net-rules`, so a document naming only the longer one would falsely
 /// count as naming the shorter. The check therefore requires the match to end
 /// at a non-name character.

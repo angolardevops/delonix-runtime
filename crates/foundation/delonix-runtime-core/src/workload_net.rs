@@ -1,5 +1,5 @@
 //! IPv4 address space of the Ingress **workloads** (`10.200.0.0` to
-//! `10.254.255.255`) — shared between `delonix-net` (the real owner of the boundary:
+//! `10.254.255.255`) — shared between `delonix-sdn` (the real owner of the boundary:
 //! DNAT/firewall in the infra netns) and `delonix-tunnel` (the "no-bypass" guard: a
 //! tunnel can never forward directly to a workload IP, bypassing the
 //! Ingress firewall).
@@ -19,7 +19,7 @@ pub const WORKLOAD_IPV4_HI: Ipv4Addr = Ipv4Addr::new(10, 254, 255, 255);
 /// `true` if `ip` falls in the workload address space (networks `10.200/16`
 /// to `10.254/16` inclusive) — pure numeric range comparison, without
 /// network/broadcast address exceptions (whoever needs those exceptions,
-/// e.g. `delonix-net::infra::is_ingress_ip`, applies them on top of this base).
+/// e.g. `delonix-sdn::infra::is_ingress_ip`, applies them on top of this base).
 pub fn is_workload_ipv4(ip: Ipv4Addr) -> bool {
     let n = u32::from(ip);
     n >= u32::from(WORKLOAD_IPV4_LO) && n <= u32::from(WORKLOAD_IPV4_HI)

@@ -205,7 +205,7 @@ pub enum SystemCmd {
         ///
         /// The three network reapers (orphan slirps, ingress refs, host ports)
         /// are NOT previewed — they compute and act in one call inside
-        /// `delonix-net`. None of them frees a byte of disk, so everything that
+        /// `delonix-sdn`. None of them frees a byte of disk, so everything that
         /// reclaims space is in the report.
         #[arg(long = "dry-run")]
         dry_run: bool,
@@ -397,7 +397,7 @@ pub fn run(action: SystemCmd) -> Result<()> {
 
 /// `system monitor` — active network connections per container, via conntrack.
 ///
-/// Reads the host conntrack (`delonix_net::list_connections`), mapping each IP
+/// Reads the host conntrack (`delonix_sdn::list_connections`), mapping each IP
 /// to the name of the container that owns it, and classifies each connection: from
 /// outside into a container (someone accessing), from a container to the outside (egress), or
 /// between containers. Refreshes continuously unless `--no-stream`.
@@ -410,7 +410,7 @@ fn cmd_monitor(interval: u64, no_stream: bool) -> Result<()> {
             .filter(|c| c.is_live())
             .filter_map(|c| c.ip.clone().map(|ip| (ip, c.name.clone())))
             .collect();
-        let conns = delonix_net::list_connections(&ip2name);
+        let conns = delonix_sdn::list_connections(&ip2name);
         if !no_stream {
             print!("\x1b[2J\x1b[H"); // clear the screen
         }
@@ -427,11 +427,11 @@ fn cmd_monitor(interval: u64, no_stream: bool) -> Result<()> {
                 super::output::dim(super::po::t("(no running containers with a network)"))
             );
         }
-        let mut ext_in: Vec<&delonix_net::Connection> =
+        let mut ext_in: Vec<&delonix_sdn::Connection> =
             conns.iter().filter(|c| c.kind == "external_in").collect();
-        let mut egress: Vec<&delonix_net::Connection> =
+        let mut egress: Vec<&delonix_sdn::Connection> =
             conns.iter().filter(|c| c.kind == "egress").collect();
-        let internal: Vec<&delonix_net::Connection> =
+        let internal: Vec<&delonix_sdn::Connection> =
             conns.iter().filter(|c| c.kind == "internal").collect();
         ext_in.sort_by(|a, b| a.container.cmp(&b.container));
         egress.sort_by(|a, b| a.container.cmp(&b.container));
@@ -698,7 +698,7 @@ fn cmd_prune(all: bool, force: bool, auto: bool, threshold: u8, dry_run: bool) -
     // address to the next container.
     let live_ids: std::collections::HashSet<String> =
         super::prune::lease_owners(&store)?.into_keys().collect();
-    let leases_freed = delonix_net::ipam::reap_orphan_leases(&live_ids);
+    let leases_freed = delonix_sdn::ipam::reap_orphan_leases(&live_ids);
     if leases_freed > 0 {
         println!(
             "{}",
@@ -2279,7 +2279,7 @@ fn cmd_info() -> Result<()> {
             super::po::t("no — memory/cpu/pids are NOT enforced (run under systemd-run --user --scope -p Delegate=yes)")
         }
     );
-    let infra = delonix_net::infra::status();
+    let infra = delonix_sdn::infra::status();
     println!(
         "  {:<19} {}",
         super::po::t("network infra:"),

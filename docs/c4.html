@@ -156,7 +156,7 @@ não escondidos em rodapés.</p>
 <p>Convenção de nomes: <code>delonix</code> é o binário CLI (crate <code>delonix-runtime-bin</code>);
 <code>delonix-cri</code> é o binário servidor CRI (crate <code>delonix-cri</code>); "holder" é o processo
 que detém o network namespace de infra-estrutura do ingress rootless
-(<code>crates/adapters/delonix-net/src/infra.rs</code>).</p>
+(<code>crates/adapters/delonix-sdn/src/infra.rs</code>).</p>
 <hr />
 <h2>C4 — Nível 1: Contexto</h2>
 <p>O Delonix Engine é usado por um <strong>operador humano</strong> (via CLI), por um <strong>kubelet</strong>
@@ -258,7 +258,7 @@ JSON, não um socket de daemon.</p>
 </tr>
 <tr>
 <td>holder netns</td>
-<td><code>infra::start_holder</code> (<code>crates/adapters/delonix-net/src/infra.rs</code>): <code>unshare --user --map-auto --map-root-user --net --mount -- &lt;self&gt; netns holder</code>; o re-exec é apanhado em <code>main.rs</code> antes do parser clap</td>
+<td><code>infra::start_holder</code> (<code>crates/adapters/delonix-sdn/src/infra.rs</code>): <code>unshare --user --map-auto --map-root-user --net --mount -- &lt;self&gt; netns holder</code>; o re-exec é apanhado em <code>main.rs</code> antes do parser clap</td>
 <td>vida da infra do ingress, gerida por ref-count em ficheiro (<code>infra::acquire</code>/<code>release</code>)</td>
 </tr>
 <tr>
@@ -268,7 +268,7 @@ JSON, não um socket de daemon.</p>
 </tr>
 <tr>
 <td>slirp4netns por container</td>
-<td><code>delonix_net::slirp_attach</code> (<code>crates/adapters/delonix-net/src/lib.rs</code>) — chamado como hook <code>on_started</code> do <code>RunSpec</code></td>
+<td><code>delonix_sdn::slirp_attach</code> (<code>crates/adapters/delonix-sdn/src/lib.rs</code>) — chamado como hook <code>on_started</code> do <code>RunSpec</code></td>
 <td>vida do container (morre com o netns); órfãos limpos por <code>reap_orphan_slirp</code></td>
 </tr>
 <tr>
@@ -308,7 +308,7 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     BIN[&quot;delonix-runtime-bin&lt;br&gt;CLI delonix — um modulo por grupo em src/cmd&lt;br&gt;manifesto e apply, cluster kubeadm, imagens VM douradas&quot;]
     CRI[&quot;delonix-cri&lt;br&gt;servidor CRI runtime.v1 — ImageService e RuntimeService&lt;br&gt;modulos: runtime_svc, lifecycle, streaming, spdy&quot;]
     RT[&quot;delonix-runtime&lt;br&gt;motor de containers: clone e namespaces, setup_rootfs,&lt;br&gt;cgroups v2, seccomp, caps, exec, log shim, reconcile_status&quot;]
-    NET[&quot;delonix-net&lt;br&gt;SDN rootless: modulo infra — holder netns, slirp unico,&lt;br&gt;publish e DNAT, DNS e DHCP; cni, wg WireGuard, discover&quot;]
+    NET[&quot;delonix-sdn&lt;br&gt;SDN rootless: modulo infra — holder netns, slirp unico,&lt;br&gt;publish e DNAT, DNS e DHCP; cni, wg WireGuard, discover&quot;]
     IMG[&quot;delonix-oci&lt;br&gt;imagens OCI: registry pull e push, cas, overlay,&lt;br&gt;build Dockerfile, buildpack CNB, sign, internal_registry&quot;]
     VM2[&quot;delonix-vm&lt;br&gt;microVMs declarativas: trait VmBackend —&lt;br&gt;Cloud Hypervisor ou libvirt&quot;]
     VOL[&quot;delonix-volume&lt;br&gt;volumes nomeados e bind mounts, sintaxe -v Docker,&lt;br&gt;driver local ou nfs&quot;]
@@ -386,17 +386,17 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
   <code>-bin</code>, e é local por desenho: socket unix, <code>SO_PEERCRED</code>, só o próprio uid (ADR-0010).</li>
 <li><strong><code>delonix-runtime</code> só depende de <code>core</code></strong> — o motor de containers não conhece
   rede: a integração faz-se por inversão de controlo, com o hook <code>on_started</code> do
-  <code>RunSpec</code> (a CLI passa closures que chamam <code>delonix-net</code>).</li>
-<li><strong><code>delonix-vm</code> → <code>delonix-net</code></strong> existe porque o backend Cloud Hypervisor liga o
+  <code>RunSpec</code> (a CLI passa closures que chamam <code>delonix-sdn</code>).</li>
+<li><strong><code>delonix-vm</code> → <code>delonix-sdn</code></strong> existe porque o backend Cloud Hypervisor liga o
   <code>tap</code> da VM à bridge do ingress (<code>infra::vm_attach</code>, doc-comment de
   <code>crates/adapters/delonix-vm/src/lib.rs</code>).</li>
 <li><strong><code>delonix-net-rules</code> não tem UMA dependência</strong> — nem interna nem externa, e é isso
-  que o torna atravessável: é o que o <code>delonix-net</code> e o control-plane do <code>delonix-paas</code>
+  que o torna atravessável: é o que o <code>delonix-sdn</code> e o control-plane do <code>delonix-paas</code>
   compilam os dois para responderem o MESMO nome de bridge, o mesmo IP dentro de um
   prefixo, a mesma leitura de <code>10mbit</code>. Pôr isso atrás de um endpoint HTTP pagaria um
   salto de rede — e um modo de falha novo — para calcular o que os dois lados já sabem
   calcular; e duas implementações que TÊM de concordar são duas que um dia não
-  concordam. O <code>delonix-net</code> re-exporta tudo, portanto nenhum consumidor mudou.</li>
+  concordam. O <code>delonix-sdn</code> re-exporta tudo, portanto nenhum consumidor mudou.</li>
 <li><strong><code>delonix-proxmox</code> e <code>delonix-truenas</code> estão fora dos crates de motor de propósito, e
   pela mesma razão escrita nos dois <code>Cargo.toml</code></strong>: trazem um cliente HTTP (<code>reqwest</code>),
   e um crate de motor não cresce um. O <code>delonix-vm</code> tem quatro dependências e o
@@ -417,11 +417,11 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
   — a variante remota/multi-tenant do desenho original ficou recusada por ADR-0010 e
   pertence ao <code>delonix-paas</code>, não aqui.</li>
 <li>Módulos internos que importam ao desenho:</li>
-<li><code>delonix-net::infra</code> — todo o plano rootless (holder, slirp único, publish/DNAT,
+<li><code>delonix-sdn::infra</code> — todo o plano rootless (holder, slirp único, publish/DNAT,
     DNS/DHCP/RA, firewall por container, egress policy, <code>attach_container</code>);</li>
-<li><code>delonix-net::wg</code> — WireGuard entre nós (cifra o overlay; o holder cria a
+<li><code>delonix-sdn::wg</code> — WireGuard entre nós (cifra o overlay; o holder cria a
     interface no netns de infra);</li>
-<li><code>delonix-net::cni</code> — compatibilidade com plugins CNI reais (opt-in
+<li><code>delonix-sdn::cni</code> — compatibilidade com plugins CNI reais (opt-in
     <code>DELONIX_CNI=1</code>, <code>cni::enabled_conf</code>);</li>
 <li><code>delonix-oci::overlay</code> — <code>mount_rootfs</code> (overlayfs) e <code>export_rootfs</code>
     (achatamento, o caminho rootless);</li>
@@ -440,7 +440,7 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
 netns próprio servido por um <code>slirp4netns</code> dedicado — o comportamento do
 <code>docker run -p</code> no modelo rootless do Podman (<code>cmd_run</code> em
 <code>bins/delonix-runtime-bin/src/cmd/container.rs</code>; <code>spawn</code> em
-<code>crates/adapters/delonix-runtime/src/lib.rs</code>; <code>slirp_attach</code> em <code>crates/adapters/delonix-net/src/lib.rs</code>).</p>
+<code>crates/adapters/delonix-runtime/src/lib.rs</code>; <code>slirp_attach</code> em <code>crates/adapters/delonix-sdn/src/lib.rs</code>).</p>
 <pre class="mermaid">sequenceDiagram
     participant U as operador
     participant CLI as delonix run
@@ -478,7 +478,7 @@ crash do container não tem quem limpe na hora.</p>
 <p>Com rede custom, não há slirp por container: o container junta-se a uma netns criada
 pelo holder e a porta publica-se com <strong>um <code>add_hostfwd</code> no slirp único + um DNAT na
 tabela nft dentro do netns de infra</strong> (<code>infra::attach_container</code>,
-<code>infra::publish_port</code>, <code>do_publish</code> — <code>crates/adapters/delonix-net/src/infra.rs</code>).</p>
+<code>infra::publish_port</code>, <code>do_publish</code> — <code>crates/adapters/delonix-sdn/src/infra.rs</code>).</p>
 <pre class="mermaid">sequenceDiagram
     participant CLI as delonix run --net web -p 8080:80
     participant H as holder netns
@@ -507,7 +507,7 @@ suporta firewall por container (<code>fw_chain_body</code>, despachada em O(1) p
 <p>Restringir uma porta publicada por CIDR de origem <strong>funciona</strong> (<code>net ingress allow &lt;c&gt;
 &lt;porta&gt; --from &lt;cidr&gt;</code>): o endereço do cliente sobrevive ao hostfwd para qualquer origem
 roteável. A excepção é o cliente no loopback do próprio host, que chega como o gateway
-do slirp (<code>delonix_net::SLIRP_GW</code>) porque a libslirp não tem rota de volta para
+do slirp (<code>delonix_sdn::SLIRP_GW</code>) porque a libslirp não tem rota de volta para
 <code>127.0.0.1</code> — testar uma regra dessas com <code>curl localhost</code> falha por essa razão, não
 por causa da regra.</p>
 <h3>(c) Pod CRI — sandbox e <code>join_netns</code></h3>
@@ -599,7 +599,7 @@ diagramas acima.</p>
    seguido doutro <code>FROM</code> é recusado com erro claro (<code>cmd/build.rs</code>); multi-stage
    precisa de desenhar a passagem de rootfs entre estágios.</li>
 <li><strong><code>macvlan</code>/<code>ipvlan</code>/<code>overlay</code> não têm attach de containers.</strong> <code>network create</code>
-   regista-os no <code>NetworkStore</code> declarativo (<code>crates/adapters/delonix-net/src/lib.rs</code>), mas o
+   regista-os no <code>NetworkStore</code> declarativo (<code>crates/adapters/delonix-sdn/src/lib.rs</code>), mas o
    plano físico do holder (<code>infra::network_create_with</code>) só é orquestrado para o
    driver <code>bridge</code> — o único a que containers se ligam hoje.</li>
 <li><strong><code>Container.restart_policy</code> não é consumida.</strong> O campo existe em
@@ -666,7 +666,7 @@ sistema.</p>
 <p><strong>Decisão.</strong> Coexistem dois modelos: <code>-p</code> sem rede custom usa um <code>slirp4netns</code> por
 container (simples, morre com ele); redes custom usam o <strong>ingress partilhado</strong> — um
 holder netns com a bridge <code>delonix0</code>, UM slirp como ponte host↔infra e DNAT nft lá
-dentro (<code>crates/adapters/delonix-net/src/infra.rs</code>, doc do módulo: "substitui, a prazo, o
+dentro (<code>crates/adapters/delonix-sdn/src/infra.rs</code>, doc do módulo: "substitui, a prazo, o
 modelo 1 slirp por container").
 <strong>Porquê.</strong> O ingress dá rede entre containers (bridge comum, DNS/DHCP internos),
 firewall/egress/rate-limit por container e — porque publish/unpublish são estado do

@@ -10,7 +10,7 @@
 //!    straight into [`collect`] instead of re-implementing the aggregation.
 //!
 //! Lives here (not in `delonix-runtime-core`) because it needs the store/
-//! cgroup/netns access of `delonix-runtime`/`delonix-vm`/`delonix-net`/
+//! cgroup/netns access of `delonix-runtime`/`delonix-vm`/`delonix-sdn`/
 //! `delonix-oci`/`delonix-volume` — `runtime-core` is a shared-types leaf
 //! crate none of the higher-level crates depend on for this.
 
@@ -85,7 +85,7 @@ fn dir_size(p: &Path) -> u64 {
 ///
 /// `include_network`: per-container network totals require entering EACH
 /// running container's netns to read `/proc/net/dev`
-/// (`delonix_net::infra::container_net_bytes`, one `nsenter`+`cat` per
+/// (`delonix_sdn::infra::container_net_bytes`, one `nsenter`+`cat` per
 /// container) — real cost with many containers.
 ///
 /// `include_storage`: a full recursive walk of `blobs`/`layers`/`volumes`/
@@ -120,7 +120,7 @@ pub fn collect(root: &Path, include_network: bool, include_storage: bool) -> Das
     let vms_running = vms.iter().filter(|v| v.status == Status::Running).count() as u64;
     let vms_total = vms.len() as u64;
 
-    let networks_total = delonix_net::NetworkStore::open(root)
+    let networks_total = delonix_sdn::NetworkStore::open(root)
         .and_then(|s| s.list())
         .map(|l| l.len() as u64)
         .unwrap_or(0);
@@ -143,7 +143,7 @@ pub fn collect(root: &Path, include_network: bool, include_storage: bool) -> Das
         let mut tx = 0u64;
         let mut unmeasured = 0u64;
         for id in &running_ids {
-            match delonix_net::infra::container_net_bytes(id) {
+            match delonix_sdn::infra::container_net_bytes(id) {
                 Some((r, t)) => {
                     rx += r;
                     tx += t;
@@ -209,7 +209,7 @@ pub fn collect_container_net(root: &Path) -> std::collections::HashMap<String, (
             for mut c in list {
                 delonix_runtime::reconcile_status(&mut c);
                 if c.status == Status::Running {
-                    if let Some(bytes) = delonix_net::infra::container_net_bytes(&c.id) {
+                    if let Some(bytes) = delonix_sdn::infra::container_net_bytes(&c.id) {
                         out.insert(c.id.clone(), bytes);
                     }
                 }

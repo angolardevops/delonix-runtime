@@ -269,7 +269,7 @@ impl DashData {
         let vm_running = vms.iter().filter(|v| v.status == Status::Running).count();
 
         // --- networks / volumes / images / secrets ---
-        let networks = delonix_net::NetworkStore::open(root)
+        let networks = delonix_sdn::NetworkStore::open(root)
             .and_then(|s| s.list())
             .unwrap_or_default();
         let volumes = delonix_volume::VolumeStore::open(root)

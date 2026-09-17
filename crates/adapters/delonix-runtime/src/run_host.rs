@@ -84,7 +84,7 @@ fn ensure_apparmor(profile: &str, disabled: &dyn Fn(&str) -> Error) -> Result<()
         // `/tmp`: this file is handed to `apparmor_parser`, which loads a KERNEL
         // security policy from it. Whoever pre-creates the predictable path owns
         // the file and can rewrite it between our write and that read. Exactly
-        // the class already fixed in `delonix-net::bpf` for the BPF object, and
+        // the class already fixed in `delonix-sdn::bpf` for the BPF object, and
         // the reason `write_private_temp` exists.
         let path =
             delonix_runtime_core::write_private_temp("delonix-default.aa", PROFILE.as_bytes())?;

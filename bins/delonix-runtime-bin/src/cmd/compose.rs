@@ -97,10 +97,10 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use clap::Subcommand;
-use delonix_net::NetworkStore;
 use delonix_oci::ImageStore;
 use delonix_runtime::{self as runtime};
 use delonix_runtime_core::{Container, Error, Result, Status, Store};
+use delonix_sdn::NetworkStore;
 use delonix_volume::VolumeStore;
 use serde::{Deserialize, Serialize};
 
@@ -1972,7 +1972,7 @@ fn resolve_ports(ports: &[ComposePort], service: &str) -> Result<Vec<String>> {
                 }
                 // `host_ip:host_port:container_port` (`127.0.0.1:9000:80`) passa
                 // VERBATIM para o motor, que o entende desde que o `parse_publish_addr`
-                // existe (`delonix-net`, forma `[hostIp:]hostPort:contPort[/proto]`).
+                // existe (`delonix-sdn`, forma `[hostIp:]hostPort:contPort[/proto]`).
                 //
                 // **Isto já foi um descarte silencioso e depois uma recusa, e as duas
                 // estavam erradas de maneiras opostas.** Primeiro a forma de 3 partes

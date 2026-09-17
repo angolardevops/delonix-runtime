@@ -13,7 +13,7 @@ license.workspace = true
 delonix-runtime-core = { workspace = true }
 delonix-vm = { workspace = true }
 delonix-volume = { workspace = true }
-delonix-net = { workspace = true }
+delonix-sdn = { workspace = true }
 # Reused for its Prometheus-shaped runtime summary (`dashstats::collect`) so
 # `runtime.info`/`metrics.query` do not re-derive the same counts a second way.
 delonix-mgmt = { workspace = true }

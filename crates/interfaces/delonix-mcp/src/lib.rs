@@ -548,7 +548,7 @@ impl DelonixMcp {
         annotations(read_only_hint = true)
     )]
     fn network_inspect(&self) -> String {
-        let status = delonix_net::infra::status();
+        let status = delonix_sdn::infra::status();
         self.log("network.inspect", "ok", &json!({}), None, None, None);
         pretty(status)
     }

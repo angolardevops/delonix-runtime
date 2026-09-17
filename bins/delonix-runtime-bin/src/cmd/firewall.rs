@@ -11,10 +11,10 @@
 use super::kinds as k;
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
-use delonix_net::infra;
 use delonix_runtime_core::{
     fw_port_ok, fw_proto_ok, fw_src_ok, Container, Error, FwRule, Result, Store,
 };
+use delonix_sdn::infra;
 use serde::{Deserialize, Serialize};
 
 use super::manifest::{self, ManifestDoc};
@@ -699,7 +699,7 @@ fn set_policy(store: &Store, name: &str, dir: &str, policy: Action) -> Result<()
     if dir == "in" && policy == Action::Deny {
         let fw = c.firewall.clone().unwrap_or_default();
         for p in &c.ports {
-            let Ok((_, cont_port, proto)) = delonix_net::parse_publish(p) else {
+            let Ok((_, cont_port, proto)) = delonix_sdn::parse_publish(p) else {
                 continue;
             };
             match published_reach(&fw, &cont_port, &proto) {
@@ -964,9 +964,9 @@ pub(crate) fn list_rules(store: &Store, name: &str, dir: &str) -> Result<()> {
     let counters =
         c.ip.as_deref()
             .filter(|s| !s.is_empty())
-            .map(delonix_net::infra::fw_counters)
+            .map(delonix_sdn::infra::fw_counters)
             .unwrap_or_default();
-    let hits = |r: &FwRule| match delonix_net::infra::fw_rule_tail(r) {
+    let hits = |r: &FwRule| match delonix_sdn::infra::fw_rule_tail(r) {
         Some(tail) => match counters.get(&tail) {
             Some((packets, bytes)) => (packets.to_string(), output::fmt_size(*bytes)),
             None => ("-".into(), "-".into()),
@@ -1001,7 +1001,7 @@ pub(crate) fn list_rules(store: &Store, name: &str, dir: &str) -> Result<()> {
         // here. Saying `allow` would claim a policy that does not exist.
         let governed = c.ip.as_deref().map(|s| !s.is_empty()).unwrap_or(false);
         for p in &c.ports {
-            let (cont_port, proto) = delonix_net::parse_publish(p)
+            let (cont_port, proto) = delonix_sdn::parse_publish(p)
                 .map(|(_, cp, pr)| (cp, pr))
                 .unwrap_or_else(|_| (String::new(), "tcp".into()));
             let reach = if governed {
@@ -1095,7 +1095,7 @@ fn port_covers(rule_port: &str, port: &str) -> bool {
 /// blocked, and calling it `BLOCKED` (which this used to do) is wrong in the most
 /// useful configuration there is: expose a port to exactly one network. Source
 /// filtering does work on published ports, because the client address survives the
-/// hop for every non-loopback client — see [`delonix_net::SLIRP_GW`].
+/// hop for every non-loopback client — see [`delonix_sdn::SLIRP_GW`].
 enum PublishReach {
     /// Reachable from anywhere the bind address allows.
     Open,

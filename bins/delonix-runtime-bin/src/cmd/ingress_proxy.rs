@@ -831,7 +831,7 @@ pub fn auto_deregister(name: &str) {
 /// `ingress-proxy` also stops being a substring of the whole blob and becomes an
 /// argv element of its own: a path or an image name that merely spells it must
 /// not let a process pose as the proxy. Same rule, and same reason, as the
-/// `argv[0]`-only test for `slirp4netns` in `delonix_net::infra`.
+/// `argv[0]`-only test for `slirp4netns` in `delonix_sdn::infra`.
 fn proxy_argv_is_ours(cmdline: &[u8], cfg: &std::path::Path) -> bool {
     let argv: Vec<String> = cmdline
         .split(|b| *b == 0)
@@ -992,8 +992,8 @@ fn prev_listener_ports() -> Option<std::collections::BTreeSet<u16>> {
 fn spawn_proxy() -> Result<()> {
     use std::os::unix::process::CommandExt;
     // Ensures the holder is up (the proxy lives in its netns).
-    delonix_net::infra::ensure_up()?;
-    let join = delonix_net::infra::infra_join_argv().ok_or_else(|| Error::Runtime {
+    delonix_sdn::infra::ensure_up()?;
+    let join = delonix_sdn::infra::infra_join_argv().ok_or_else(|| Error::Runtime {
         context: "holder",
         message: super::po::t("ingress holder is down").into(),
     })?;
@@ -1071,7 +1071,7 @@ fn spawn_proxy() -> Result<()> {
 /// on `0.0.0.0:<port>` in the holder's netns and catches the traffic delivered to
 /// `SLIRP_IP`. (No DNAT — the holder has no `input` chain filtering local deliveries.)
 fn publish_listeners(cfg: &ProxyConfig) -> Result<()> {
-    let sock = delonix_net::infra::slirp_sock_path();
+    let sock = delonix_sdn::infra::slirp_sock_path();
     for l in &cfg.listeners {
         let p = l.port.to_string();
         // Best-effort/idempotent: if the port ALREADY has a hostfwd (a previous proxy
@@ -1079,7 +1079,7 @@ fn publish_listeners(cfg: &ProxyConfig) -> Result<()> {
         // fatal, the desired state (port published) is already there. Only warns on other errors.
         // No per-listener host address: an HTTPRoute listener has no `-p`-style spec,
         // so it keeps the `DELONIX_PUBLISH_ADDR`/`127.0.0.1` fallback of `publish_bind_addr`.
-        if let Err(e) = delonix_net::slirp_add_hostfwd(&sock, &p, &p, "tcp", None) {
+        if let Err(e) = delonix_sdn::slirp_add_hostfwd(&sock, &p, &p, "tcp", None) {
             let msg = e.to_string();
             if msg.contains("already") || msg.to_lowercase().contains("exist") {
                 eprintln!(
@@ -1109,9 +1109,9 @@ pub fn stop() -> Result<()> {
     // Unpublishes the known ports (from the config, if it still exists).
     if let Ok(bytes) = std::fs::read(config_path()) {
         if let Ok(cfg) = serde_json::from_slice::<ProxyConfig>(&bytes) {
-            let sock = delonix_net::infra::slirp_sock_path();
+            let sock = delonix_sdn::infra::slirp_sock_path();
             for l in &cfg.listeners {
-                let _ = delonix_net::infra::slirp_remove_hostfwd(&sock, &l.port.to_string());
+                let _ = delonix_sdn::infra::slirp_remove_hostfwd(&sock, &l.port.to_string());
             }
         }
     }
@@ -1144,9 +1144,9 @@ pub fn stop() -> Result<()> {
 /// on the host with nothing behind it.
 pub(crate) fn stop_keeping_sources() -> Result<()> {
     if let Some(cfg) = live_config() {
-        let sock = delonix_net::infra::slirp_sock_path();
+        let sock = delonix_sdn::infra::slirp_sock_path();
         for l in &cfg.listeners {
-            let _ = delonix_net::infra::slirp_remove_hostfwd(&sock, &l.port.to_string());
+            let _ = delonix_sdn::infra::slirp_remove_hostfwd(&sock, &l.port.to_string());
         }
     }
     if let Some(pid) = running_pid() {

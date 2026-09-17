@@ -8,8 +8,8 @@
 //! here — only the operational subcommands do.
 
 use clap::Subcommand;
-use delonix_net::infra;
 use delonix_runtime_core::{ContainerFw, Error, Result};
+use delonix_sdn::infra;
 
 #[derive(Subcommand)]
 pub enum NetnsCmd {
@@ -95,7 +95,7 @@ pub enum NetnsCmd {
 /// before the pin/control split does both jobs in one process and has no control
 /// pidfile, while serving the socket perfectly. Only "no pid AND unreachable" is
 /// a control plane that is actually gone.
-fn fmt_control(st: &delonix_net::infra::InfraStatus) -> String {
+fn fmt_control(st: &delonix_sdn::infra::InfraStatus) -> String {
     match (st.control_pid, st.control_reachable) {
         (Some(p), _) => p.to_string(),
         (None, true) => "in-pin".to_string(),

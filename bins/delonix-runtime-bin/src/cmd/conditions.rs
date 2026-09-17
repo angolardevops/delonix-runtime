@@ -63,8 +63,8 @@ impl Env {
             // The SAME function `realize_overlay` gates on, not a `which("wg")`
             // lookalike: a condition that disagrees with the realizer is worse
             // than no condition at all.
-            wg: delonix_net::wg::available(),
-            realized_networks: delonix_net::infra::network_list()
+            wg: delonix_sdn::wg::available(),
+            realized_networks: delonix_sdn::infra::network_list()
                 .into_iter()
                 .map(|d| d.name)
                 .collect(),

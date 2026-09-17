@@ -197,7 +197,7 @@ temporária deixa de ser permanente. Hoje são dez, e cada uma diz a sua fase (o
 ```
 crates/foundation/   delonix-runtime-core, delonix-net-rules
 crates/contexts/     delonix-security-runtime
-crates/adapters/     delonix-runtime, delonix-net, delonix-oci, delonix-scanner, delonix-volume, delonix-vm, delonix-telemetry
+crates/adapters/     delonix-runtime, delonix-sdn, delonix-oci, delonix-scanner, delonix-volume, delonix-vm, delonix-telemetry
 crates/providers/    delonix-proxmox, delonix-truenas
 crates/interfaces/   delonix-cri, delonix-mgmt, delonix-mcp
 bins/                delonix-runtime-bin, delonix-mcp-bin, delonix-mgmt-bin
@@ -481,7 +481,7 @@ uma lista plana, um módulo por grupo em `bins/delonix-runtime-bin/src/cmd/`:
 - `delonix network` — ls/create/rm/inspect. **Dois stores em paralelo, deliberado**:
   `NetworkStore` (registo declarativo rico — drivers bridge/macvlan/ipvlan/overlay) e
   `infra::{network_create_with,network_remove}` (plano físico do holder netns rootless).
-  **O nome da bridge tem UMA fórmula, `delonix_net::bridge_name`, e o plano físico é a
+  **O nome da bridge tem UMA fórmula, `delonix_sdn::bridge_name`, e o plano físico é a
   autoridade** — é o `NetDef` que nomeia o dispositivo que o holder cria, e o `NetworkStore` só o
   RELATA (`ls`/`inspect`/`describe`). Tinha a sua própria (`dlxn{base:02x}{hash:04x}` contra
   `dlxn{hash:08x}`) e imprimia um dispositivo que não existe no host — medido em `lab-net`:
@@ -637,7 +637,7 @@ uma lista plana, um módulo por grupo em `bins/delonix-runtime-bin/src/cmd/`:
   adiado de propósito para não mexer na rede de produção deste host, decisão
   já tomada para este item. Cobertura: o guard puro `fixed_ip_needs_custom_net`
   (CLI), a fusão `ipv4_address` → `RunOpts.ip` (compose), e o teste
-  pré-existente de recusa por-subnet em `delonix-net` (continua verde).
+  pré-existente de recusa por-subnet em `delonix-sdn` (continua verde).
   **FEITO**: `extends:` — `service:` de um serviço IRMÃO no MESMO ficheiro herda os campos que
   o próprio serviço não declara (`resolve_extends`/`merge_service`, puros e testados), pela ordem
   do Compose Spec: `image`/`build`/`command`/`entrypoint`/`working_dir`/`user`/`restart`/
@@ -902,7 +902,7 @@ scrape Prometheus nunca divergirem na aritmética.
   DashSummary` — contagens de containers/VMs/redes/volumes/imagens/segredos,
   `memory.current`/`memory.max` do slice cgroup inteiro (`delonix_runtime::
   slice_budget`), soma de bytes rx/tx por-container
-  (`delonix_net::infra::container_net_bytes`, um `nsenter`+`cat` por
+  (`delonix_sdn::infra::container_net_bytes`, um `nsenter`+`cat` por
   container a correr) e uso de disco por área (`blobs+layers`/`volumes`/
   `vm-images`/`containers`, `dir_size` recursivo estilo `du`, o mesmo padrão
   de `cmd/system.rs::dir_size`/`cmd_df` — duplicado ali de propósito: um
@@ -952,7 +952,7 @@ scrape Prometheus nunca divergirem na aritmética.
   desaparecer entre scrapes (encolhendo a soma) — a API de `Counter` só
   permite `inc`/`inc_by`, que não serve para isso.
 - **`delonix-mgmt` ganhou `GET /v1/dash`** (JSON do mesmo `DashSummary`) e
-  passou a depender de `delonix-runtime`/`delonix-vm`/`delonix-net` (antes só
+  passou a depender de `delonix-runtime`/`delonix-vm`/`delonix-sdn` (antes só
   `delonix-volume`/`delonix-oci`/`delonix-scanner`) — mesma expansão que o
   `delonix-cri` já tinha feito por uma razão análoga (visibilidade completa
   do motor), sem dependência circular nenhuma.
@@ -2392,7 +2392,7 @@ achados de arquitectura ficam registados nesta secção.
    ele próprio falhar) — todos os 6 pontos de mutação agora passam pelo `flock`. Validado ao vivo
    (allow→deny→rm→policy→clear, ponta-a-ponta, estado persistido confere com o `nft` real).
 6. **`peer_uid()` (extracção `SO_PEERCRED`) duplicado verbatim em 4 sítios** — `delonix-cri`,
-   `delonix-mgmt`, `delonix-net::infra`, `cmd/dockerapi.rs`, os quatro já dependem de
+   `delonix-mgmt`, `delonix-sdn::infra`, `cmd/dockerapi.rs`, os quatro já dependem de
    `delonix-runtime-core`, sem razão de fronteira de crate para a duplicação (ao contrário do
    `dir_size`, que genuinamente não pode ser partilhado sem dependência circular). Consolidado em
    `delonix_runtime_core::peer_cred::peer_uid` — um só sítio a partir de agora.
@@ -3076,7 +3076,7 @@ porque `bpf.rs` não estava na superfície que lhes foi atribuída (**lição de
 por PADRÃO, feita depois dos finders por-subsistema, apanha o que a divisão por ficheiros deixa
 cair).
 
-- **`delonix-net::bpf::stage_object` — escalada de privilégio local.** Escrevia o objecto BPF no
+- **`delonix-sdn::bpf::stage_object` — escalada de privilégio local.** Escrevia o objecto BPF no
   caminho **FIXO** `/tmp/delonix_flow.bpf.o` com `fs::write`, e esse ficheiro é entregue a
   `bpftool prog loadall` por um processo com **CAP_BPF/root**. `/tmp` é world-writable, `fs::write`
   segue symlinks, e — o pior — quem pré-criasse o caminho ficava **DONO** do ficheiro: num `/tmp`
@@ -3295,7 +3295,7 @@ ampla (`infra.rs:1531`, `is_global_egress_drop_line` já exclui linhas com
 
 Pedida uma revisão completa (bugs/gaps/design/arquitectura, não só segurança).
 Além de re-verificar os 35 achados acima, 3 auditorias frescas: `delonix-runtime/
-lib.rs` (104 `unsafe`, NUNCA antes auditado), `delonix-net/infra.rs` (holder/
+lib.rs` (104 `unsafe`, NUNCA antes auditado), `delonix-sdn/infra.rs` (holder/
 control-socket), e todo o código desta MESMA sessão anterior (Tunnel, ShareVolume,
 `cluster.rs`, specs agrupados) — código com zero revisão prévia. 2 CRITICAL + 3
 HIGH, **todos já em produção no v0.10.0**, corrigidos de imediato (ver
@@ -3635,7 +3635,7 @@ estava ao lado. Os quatro problemas partilham a mesma raiz conceptual: **`-p` (p
 dataplane nem no que a CLI dizia ao utilizador.
 
 1. **CRÍTICO (segurança) — a PORTA era silenciosamente ignorada quando o proto era `any`.**
-   `fw_chain_body` (`delonix-net/src/infra.rs`) só emitia o `dport` DENTRO do ramo
+   `fw_chain_body` (`delonix-sdn/src/infra.rs`) só emitia o `dport` DENTRO do ramo
    `proto != "any"`. Como `parse_port_spec` faz `proto` cair em `any` sempre que o utilizador
    escreve uma porta nua (`allow <c> 9999`, a forma esmagadoramente comum), a regra gerada era
    `ip daddr <ip> accept` — **o container inteiro**, não a porta pedida. Consequência medida ao
@@ -3700,7 +3700,7 @@ recebia JSON opaco **depois** do container já estar criado.
 - **Preflight no `cmd_run`**, ao lado do erro de porta ocupada e no mesmo formato (facto primeiro,
   depois os comandos prontos a copiar: `-p 8080:80`, ou `sysctl -w ip_unprivileged_port_start=80`).
   Falha antes de criar seja o que for.
-- **`delonix_net::can_bind_host_port`** decide por um **bind real**, não por comparação com o
+- **`delonix_sdn::can_bind_host_port`** decide por um **bind real**, não por comparação com o
   sysctl: o sysctl não é a regra toda (um binário com `CAP_NET_BIND_SERVICE` liga a 80 com ele
   intocado). `EADDRINUSE` **não** conta como falha — porta ocupada é outro diagnóstico, com erro
   próprio que nomeia o dono, e este check não lho pode roubar (coberto por teste).
@@ -3854,7 +3854,7 @@ novo sem derrubar nada, ao contrário das sessões anteriores).
    levou três vezes (`mount_live`, `set_net_rate`, `update_limits`): pública, morta, a mutar estado
    partilhado, com o bug latente à espera do primeiro chamador.
 
-**`delonix_net::SLIRP_GW` (`10.0.2.2`) — e a correcção de uma conclusão larga demais.** A primeira
+**`delonix_sdn::SLIRP_GW` (`10.0.2.2`) — e a correcção de uma conclusão larga demais.** A primeira
 medição desta sessão (cliente em `127.0.0.1`) viu `10.0.2.2` no log do nginx e daí concluiu-se que
 o IP de origem NUNCA sobrevive ao hostfwd. **Errado, e corrigido no mesmo dia com três clientes em
 vez de um**: `127.0.0.1` → `10.0.2.2`, mas `172.16.31.103` (LAN) e `192.168.122.1` (gateway
@@ -4161,7 +4161,7 @@ uma regra de firewall INCREMENTAL por documento. Medido antes de escrever
 código: o motor JÁ resolve o mecanismo todo — `add_rule` (a semântica «o
 último comando ganha» do `net ingress`/`net egress`) é uma mutação Rust pura
 sobre `Vec<FwRule>`, seguida de um `nft -f` que reconstrói a chain inteira do
-zero (`delonix-net/src/infra.rs::do_firewall`). Não há primitivo nft por
+zero (`delonix-sdn/src/infra.rs::do_firewall`). Não há primitivo nft por
 regra a construir — a única coisa que faltava era CONTABILIDADE: nada deixava
 um documento aplicado e removido de forma independente retirar só a SUA
 contribuição de uma lista partilhada. A única Kind que já acumulava,
@@ -4505,12 +4505,12 @@ engines CONGELADOS → hostfwd criado a t=0,00s · PERSISTE os 30s todos
 É o **`delonix-engine` (delonix-paas, produto PRIVADO)** a reapar portas que não são dele:
 `crates/delonix-api/src/ui.rs:12937` chama `reap_orphan_hostfwds(&live)` com um `live` que só tem os
 containers DELE — logo tudo o que a CLI do runtime publica é, para ele, um órfão. Agravante:
-`crates/delonix-api/Cargo.toml:15` fixa `delonix-net` na **tag v0.1.0**, a versão ANTIGA do reaper
+`crates/delonix-api/Cargo.toml:15` fixa `delonix-sdn` na **tag v0.1.0**, a versão ANTIGA do reaper
 (a do fail-open: lista vazia ⇒ "nada em uso" ⇒ apaga tudo). Por isso é que remover o chamador AQUI
 (`9bbbd11`) não mudou nada: a cópia que corre é a do PaaS.
 
 **A correcção NÃO é neste repo** (regra de isolamento) — é no `delonix-paas`: o engine não pode
-reapar hostfwds que não criou, e o pin de `delonix-net` tem de subir. Do lado de cá, o que faz
+reapar hostfwds que não criou, e o pin de `delonix-sdn` tem de subir. Do lado de cá, o que faz
 sentido é defesa em profundidade: **`reap_orphan_hostfwds` é código morto (zero chamadores) e é uma
 armadilha para consumidores** — uma função pública que apaga estado partilhado e falha ABERTO com
 lista vazia. Apagar, ou pôr a fail-closed.
@@ -4730,7 +4730,7 @@ uma reescrita: implementa-se por cima do que já existe, não a substituir.
   backend novo (Firecracker, KVM nativo mais fino) é implementar este trait, não desenhar um novo.
 - **`delonix-cri`** já dá a perna de "Container Runtime" da unificação (serve `kubelet` via
   `runtime.v1`) — não precisa de um `ContainerController` novo, só de ligação ao mesmo `Workload`.
-- **`delonix-net`** (SDN rootless + overlay WireGuard entre nós) já cobre boa parte do "Network
+- **`delonix-sdn`** (SDN rootless + overlay WireGuard entre nós) já cobre boa parte do "Network
   Engine" do pedido original — falta é NAT/floating-IP/ACL por *tenant*, que é uma noção proibida
   aqui (ver "Regra de ouro" abaixo).
 - **`delonix-oci`** (pull/registry/CNB/verificação de assinatura) já é o Image Service.
@@ -5375,7 +5375,7 @@ checklist para quem mexer aqui do que como lista de correcções:
 - **o argv de um processo não é a prova de que ele é NOSSO** — e esta apareceu TRÊS vezes em
   crates diferentes antes de alguém lhe dar nome. Todo o `DELONIX_ROOT` do mesmo uid corre
   processos com argv idêntico, por isso perguntar «é este um processo do TIPO certo» nunca
-  responde «é este processo MEU». As três: o `read_pid_verified` do `delonix-net` validava o pin
+  responde «é este processo MEU». As três: o `read_pid_verified` do `delonix-sdn` validava o pin
   e o slirp pelo argv (ACH-016, #273 — havia CINCO pins vivos neste host, de cinco roots); o
   `running_pid` do `ingress_proxy` procurava `ingress-proxy` no cmdline (ACH-017, #274); e o
   `is_alive` do `cmd/tunnel.rs` perguntava se o cmdline CONTINHA `"ssh"` (ACH-018, #275).
@@ -6024,7 +6024,7 @@ Estão os dois no `tool_failure_hint`, e foram ambos precisos nesta sessão:
    medido, o libguestfs usa o stub como helper real e morre nele; ausente cai no slirp do qemu,
    presente-e-partido não.
 
-## `delonix_net::Net` foi APAGADO — e é breaking para quem usa a biblioteca
+## `delonix_sdn::Net` foi APAGADO — e é breaking para quem usa a biblioteca
 
 O `pub struct Net` («The Delonix network manager») foi removido: 22 métodos
 públicos, 986 linhas, **zero chamadores no workspace**. Não era descuido, era
@@ -6035,7 +6035,7 @@ rootless não podia funcionar; com privilégio mexia na rede do HOST, fora do
 isolamento. Mesma conclusão, e mesmo destino, que o `publish_port_allow`.
 
 **Zero chamadores no workspace não é o critério todo, e isto é a nota que
-interessa a quem vier a seguir**: o `delonix-net` é uma BIBLIOTECA, e o
+interessa a quem vier a seguir**: o `delonix-sdn` é uma BIBLIOTECA, e o
 `delonix-paas` (privado) consome-a por tag de git em vários crates — usando
 precisamente o que foi apagado (`Net.apply_container_firewall`,
 `Net.firewall_summary`). Nada parte hoje, porque o pin é uma tag. O que muda é
@@ -6325,7 +6325,7 @@ antes de qualquer commit:
 3. **`Secret`/`SecretStore`/`CredVault`** (`delonix-runtime-core::secret`/`cred_vault`) são o
    gestor de segredos do motor (`--secret`/`--secret-files`, ao estilo Docker) — não um cofre
    de credenciais de plataforma.
-4. **`delonix-net` inclui WireGuard** (`wg.rs`): cifra o transporte VXLAN entre nós, é SDN
+4. **`delonix-sdn` inclui WireGuard** (`wg.rs`): cifra o transporte VXLAN entre nós, é SDN
    genuína. Decidir QUANDO e PARA QUEM publicar portas numa frota multi-inquilino não é do
    motor.
 
@@ -6339,8 +6339,8 @@ antes de qualquer commit:
 | `delonix-model` | fundação PURA do ADR-0040: o que qualquer camada nomeia sem depender de mecanismo. Tem os nomes gerados (`names`) e as classes de saída (`exitcode`: `Error` → código de saída e `DX_*`); os ids e o `ResourceMeta` entram nas fatias seguintes da P2 |
 | `delonix-stack` | contexto Stack (`core.delonix.io`, ADR-0040): a tabela de Kinds (`kinds`), o reconciliador de 3 vias (`reconcile`), o tipo `Condition` e o histórico de revisões (`revision`). Planear é puro; o `-bin` re-exporta os módulos com os nomes antigos (`cmd::kinds`…), por isso nenhum chamador mudou. `manifest`/`stack`/`schema`/`compose` continuam no `-bin`: cada um depende de 20 a 30 módulos de lá |
 | `delonix-compute` | contexto Compute (`compute.delonix.io`, ADR-0040): a especificação de execução única, `RunOpts`, que a CLI, os documentos `Container`/`Pod`, o compose, a Docker API, o kind e o `App` produzem antes de um só caminho a executar. Tem também os tipos da forma de Pod (`pod`: `PodSpec`, `PodContainer`…) e os seus tradutores para `RunOpts`, que devolvem os avisos como `Notice` em vez de os imprimir — o `-bin` mostra-os com o catálogo de tradução, com o mesmo texto. E a validação pura da especificação (`preflight::check_run_opts`), que o `cmd_run` chama antes de qualquer efeito. Continuam no `-bin` o resto do `cmd_run`, a forma plana `ContainerSpec` (normalizada a partir de YAML cru) e os tradutores do compose e da Docker API |
-| `delonix-net` | SDN rootless: holder netns + bridge + slirp único, DNAT/firewall nft, compat CNI, overlay WireGuard inter-nó |
-| `delonix-net-rules` | regras de rede PURAS, **zero dependências** — `Cidr`, nome de bridge, IPAM dentro de um prefixo, leitura de taxas. Existe para o control-plane do `delonix-paas` calcular o MESMO que o motor sem um salto de rede pelo meio; o `delonix-net` re-exporta tudo, por isso nenhum consumidor teve de mudar |
+| `delonix-sdn` | SDN rootless: holder netns + bridge + slirp único, DNAT/firewall nft, compat CNI, overlay WireGuard inter-nó |
+| `delonix-net-rules` | regras de rede PURAS, **zero dependências** — `Cidr`, nome de bridge, IPAM dentro de um prefixo, leitura de taxas. Existe para o control-plane do `delonix-paas` calcular o MESMO que o motor sem um salto de rede pelo meio; o `delonix-sdn` re-exporta tudo, por isso nenhum consumidor teve de mudar |
 | `delonix-oci` | imagens OCI: pull/registry/build, buildpacks CNB, registo interno, verificação de assinatura |
 | `delonix-vm` | microVMs declarativas — trait `VmBackend` + o **registo** de backends (Cloud Hypervisor e libvirt vêm semeados; um terceiro entra por `register_backend`) |
 | `delonix-proxmox` | backend `VmBackend` remoto contra a API de UM nó Proxmox VE (ADR-0008). Fora do `delonix-vm` porque um cliente HTTP não entra num crate de motor; registado pelo `-bin`, que é quem conhece o alvo |
@@ -6717,7 +6717,7 @@ nomeia a ferramenta, não diz o pacote, e a frase manda procurar um caminho quan
 binário. É a classe já catalogada («o ENOENT de um `Command::status()` não é um ficheiro em
 falta»), que a v0.45.0 corrigira no `vmimage::tool_package` e **reapareceu noutro sítio** — e o
 remédio estava a duas funções de distância (`cmd::network` já recusava o overlay cifrado a nomear
-`wireguard-tools`). Corrigido **na origem** (`delonix-net::wg`, o `map_err` dos dois spawns), para
+`wireguard-tools`). Corrigido **na origem** (`delonix-sdn::wg`, o `map_err` dos dois spawns), para
 qualquer chamador herdar, em vez de o repetir no `cmd_node`.
 
 **Achado 2 — `network create --driver overlay --wg-ip` reportava SUCESSO sobre uma rede por
