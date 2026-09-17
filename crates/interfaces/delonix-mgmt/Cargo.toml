@@ -9,12 +9,12 @@ repository = "https://github.com/angolardevops/delonix-runtime"
 [dependencies]
 delonix-runtime-core = { workspace = true }
 delonix-telemetry = { workspace = true }
-delonix-runtime = { workspace = true }
+delonix-linux = { workspace = true }
 delonix-volume = { workspace = true }
-delonix-image = { workspace = true }
-delonix-scan = { workspace = true }
+delonix-oci = { workspace = true }
+delonix-scanner = { workspace = true }
 delonix-vm = { workspace = true }
-delonix-net = { workspace = true }
+delonix-sdn = { workspace = true }
 axum = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "net", "macros", "sync"] }
 serde = { workspace = true }

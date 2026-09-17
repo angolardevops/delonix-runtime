@@ -1,0 +1,27 @@
+[package]
+name = "delonix-linux"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+delonix-runtime-core = { workspace = true }
+delonix-compute = { workspace = true }
+nix = { workspace = true }
+libc = { workspace = true }
+seccompiler = { workspace = true }
+# Already in the tree at 1.1.4 (pulled transitively by `tempfile`, used
+# elsewhere in the workspace) — enabling `mount`/`fs` unlocks code already
+# vendored from an already-trusted crate, not a new supply-chain dependency.
+# `nix` has no wrapper for the new mount API (fsopen/fsconfig/fsmount/
+# move_mount, Linux 5.2+) that `mount_overlay_if_marked` needs to avoid the
+# classic `mount(2)` syscall's page-size ceiling on its `data` argument.
+rustix = { workspace = true, features = ["mount", "fs"] }
+# Already in the tree (the Store uses it) — no new supply-chain surface.
+serde_json = { workspace = true }
+# CDI specs (`cdi` module): JSON or YAML, both already in the tree.
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+
+[lints]
+workspace = true

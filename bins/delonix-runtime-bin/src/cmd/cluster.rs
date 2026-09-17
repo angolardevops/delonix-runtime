@@ -1960,7 +1960,7 @@ fn pull_official(store: &VmImageStore, tag: &str) -> Result<()> {
         Ok(()) => Ok(()),
         Err(e) => {
             let repo = source.rsplit_once(':').map(|(r, _)| r).unwrap_or(&source);
-            let choices = delonix_image::registry::list_remote_tags(&state_root(), repo)
+            let choices = delonix_oci::registry::list_remote_tags(&state_root(), repo)
                 .map(|t| t.join(", "))
                 .unwrap_or_default();
             if choices.is_empty() {

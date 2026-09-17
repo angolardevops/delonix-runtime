@@ -1,0 +1,21 @@
+[package]
+name = "delonix-sdn"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+delonix-net-rules = { workspace = true }
+delonix-runtime-core = { workspace = true }
+delonix-compute = { workspace = true }
+tracing = { workspace = true }
+libc = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# Property-based testing dos invariantes de alocação de IP (S5).
+proptest = { workspace = true }
+
+[lints]
+workspace = true

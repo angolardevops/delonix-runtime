@@ -24,7 +24,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
-use delonix_image::ImageStore;
+use delonix_oci::ImageStore;
 use delonix_runtime_core::peer_cred::peer_uid;
 use delonix_runtime_core::{Error, Store};
 use delonix_volume::VolumeStore;
@@ -75,7 +75,7 @@ pub fn serve_blocking_with(base: PathBuf, bin: PathBuf, addr: &str) -> Result<()
         // route (including `/v1/containers/:id/exec`, arbitrary code execution
         // inside any container) was reachable by ANY local process, gated only by
         // the ambient umask at bind time. Mirror the holder's control socket
-        // (`delonix-net::infra::holder_main`): 0600 file mode + `SO_PEERCRED` on
+        // (`delonix-sdn::infra::holder_main`): 0600 file mode + `SO_PEERCRED` on
         // every accepted connection, checked in `serve_over_uds` below.
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
@@ -919,7 +919,7 @@ async fn sbom_image(State(s): State<AppState>, Query(q): Query<RefQuery>) -> Res
         let img = store.resolve(&q.reference)?;
         // `extract` fails → the image exists but has no readable package manager (empty
         // list), just as the old handler distinguished it from "not found".
-        Ok(delonix_scan::extract_sbom(store, &img).unwrap_or_default())
+        Ok(delonix_scanner::extract_sbom(store, &img).unwrap_or_default())
     })
     .await;
     match out {
@@ -948,7 +948,7 @@ async fn dhcp_ip(Path((net, mac)): Path<(String, String)>) -> Response {
     if !valid_arg(&net) || !valid_mac(&mac) {
         return err_response(Error::Invalid("invalid network or MAC".to_string()));
     }
-    match tokio::task::spawn_blocking(move || delonix_net::infra::dhcp_ip_for_mac(&net, &mac)).await
+    match tokio::task::spawn_blocking(move || delonix_sdn::infra::dhcp_ip_for_mac(&net, &mac)).await
     {
         Ok(Some(ip)) => Json(serde_json::json!({ "ip": ip })).into_response(),
         Ok(None) => err_response(Error::NotFound("network".to_string())),
@@ -968,7 +968,7 @@ async fn dhcp_ip6(Path((net, mac)): Path<(String, String)>) -> Response {
     if !valid_arg(&net) || !valid_mac(&mac) {
         return err_response(Error::Invalid("invalid network or MAC".to_string()));
     }
-    match tokio::task::spawn_blocking(move || delonix_net::infra::dhcp_ip6_for_mac(&net, &mac))
+    match tokio::task::spawn_blocking(move || delonix_sdn::infra::dhcp_ip6_for_mac(&net, &mac))
         .await
     {
         Ok(Some(ip)) => Json(serde_json::json!({ "ip": ip })).into_response(),
@@ -990,7 +990,7 @@ async fn container_ip(Path(id): Path<String>) -> Response {
     if !valid_arg(&id) {
         return err_response(Error::Invalid("invalid container id".to_string()));
     }
-    match tokio::task::spawn_blocking(move || delonix_net::infra::container_ip(&id)).await {
+    match tokio::task::spawn_blocking(move || delonix_sdn::infra::container_ip(&id)).await {
         Ok(ip) => Json(serde_json::json!({ "ip": ip })).into_response(),
         Err(e) => err_response(Error::Runtime {
             context: "join",
@@ -1026,7 +1026,7 @@ async fn attach_extra(Json(b): Json<AttachExtraBody>) -> Response {
         return err_response(Error::Invalid("invalid namespace".to_string()));
     }
     let r = tokio::task::spawn_blocking(move || {
-        delonix_net::infra::attach_extra_container(&b.id, b.idx, &b.net, &b.namespace)
+        delonix_sdn::infra::attach_extra_container(&b.id, b.idx, &b.net, &b.namespace)
     })
     .await;
     match r {
@@ -1045,11 +1045,11 @@ async fn attach_extra(Json(b): Json<AttachExtraBody>) -> Response {
 ///
 /// Best-effort, como os outros `detach`: o mecanismo não devolve resultado.
 async fn detach_extra(Path((id, idx, ip)): Path<(String, u32, String)>) -> Response {
-    if !valid_arg(&id) || delonix_net::Cidr::parse_addr(&ip).is_none() {
+    if !valid_arg(&id) || delonix_sdn::Cidr::parse_addr(&ip).is_none() {
         return err_response(Error::Invalid("invalid container id or IP".to_string()));
     }
     match tokio::task::spawn_blocking(move || {
-        delonix_net::infra::detach_extra_container(&id, idx, &ip)
+        delonix_sdn::infra::detach_extra_container(&id, idx, &ip)
     })
     .await
     {
@@ -1063,10 +1063,10 @@ async fn detach_extra(Path((id, idx, ip)): Path<(String, u32, String)>) -> Respo
 
 /// `DELETE /v1/net/attach/:id/:ip` — desliga um container da rede primária.
 async fn detach(Path((id, ip)): Path<(String, String)>) -> Response {
-    if !valid_arg(&id) || delonix_net::Cidr::parse_addr(&ip).is_none() {
+    if !valid_arg(&id) || delonix_sdn::Cidr::parse_addr(&ip).is_none() {
         return err_response(Error::Invalid("invalid container id or IP".to_string()));
     }
-    match tokio::task::spawn_blocking(move || delonix_net::infra::detach_container(&id, &ip)).await
+    match tokio::task::spawn_blocking(move || delonix_sdn::infra::detach_container(&id, &ip)).await
     {
         Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
         Err(e) => err_response(Error::Runtime {
@@ -1106,14 +1106,14 @@ struct FirewallBody {
 /// deltas sobre uma cadeia que é reescrita de cada vez daria a ilusão de somar
 /// e o efeito de substituir.
 async fn apply_firewall(Path(ip): Path<String>, Json(b): Json<FirewallBody>) -> Response {
-    if delonix_net::Cidr::parse_addr(&ip).is_none() {
+    if delonix_sdn::Cidr::parse_addr(&ip).is_none() {
         return err_response(Error::Invalid(format!("invalid IP: '{ip}'")));
     }
     if !valid_arg(&b.id) {
         return err_response(Error::Invalid("invalid container id".to_string()));
     }
     let r =
-        tokio::task::spawn_blocking(move || delonix_net::infra::apply_firewall(&b.id, &ip, &b.fw))
+        tokio::task::spawn_blocking(move || delonix_sdn::infra::apply_firewall(&b.id, &ip, &b.fw))
             .await;
     match r {
         Ok(Ok(())) => Json(serde_json::json!({ "ok": true })).into_response(),
@@ -1130,10 +1130,10 @@ async fn apply_firewall(Path(ip): Path<String>, Json(b): Json<FirewallBody>) -> 
 /// Best-effort, como o `unpublish`: o `clear_firewall` não devolve resultado. Um
 /// 200 diz que a operação correu, não que havia cadeia para remover.
 async fn clear_firewall(Path(ip): Path<String>) -> Response {
-    if delonix_net::Cidr::parse_addr(&ip).is_none() {
+    if delonix_sdn::Cidr::parse_addr(&ip).is_none() {
         return err_response(Error::Invalid(format!("invalid IP: '{ip}'")));
     }
-    match tokio::task::spawn_blocking(move || delonix_net::infra::clear_firewall(&ip)).await {
+    match tokio::task::spawn_blocking(move || delonix_sdn::infra::clear_firewall(&ip)).await {
         Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
         Err(e) => err_response(Error::Runtime {
             context: "join",
@@ -1156,7 +1156,7 @@ struct EgressBody {
 /// «cortar a saída de uma rede» e «cortar a saída do nó inteiro» distarem um
 /// campo esquecido. O raio de dano é diferente de mais para depender disso.
 async fn set_egress_global(Json(b): Json<EgressBody>) -> Response {
-    match tokio::task::spawn_blocking(move || delonix_net::infra::set_egress_policy(b.deny)).await {
+    match tokio::task::spawn_blocking(move || delonix_sdn::infra::set_egress_policy(b.deny)).await {
         Ok(Ok(())) => Json(serde_json::json!({ "ok": true, "deny": b.deny })).into_response(),
         Ok(Err(e)) => err_response(e),
         Err(e) => err_response(Error::Runtime {
@@ -1173,7 +1173,7 @@ async fn set_egress_net(Path(bridge): Path<String>, Json(b): Json<EgressBody>) -
     }
     let deny = b.deny;
     let r = tokio::task::spawn_blocking(move || {
-        delonix_net::infra::set_egress_policy_net(&bridge, deny)
+        delonix_sdn::infra::set_egress_policy_net(&bridge, deny)
     })
     .await;
     match r {
@@ -1205,7 +1205,7 @@ async fn set_net_rate(Path(id): Path<String>, Json(b): Json<RateBody>) -> Respon
         return err_response(Error::Invalid("invalid container id".to_string()));
     }
     let r = tokio::task::spawn_blocking(move || {
-        delonix_net::infra::set_net_rate(&id, b.rate_bit, b.burst_bytes)
+        delonix_sdn::infra::set_net_rate(&id, b.rate_bit, b.burst_bytes)
     })
     .await;
     match r {
@@ -1230,12 +1230,12 @@ struct PublishBody {
 /// `POST /v1/net/publish` — publica um porto através do ingress.
 ///
 /// Existe para que um cliente local publique um porto sem ligar os crates do
-/// motor: é a mesma operação do `delonix-net`, atrás de HTTP.
+/// motor: é a mesma operação do `delonix-sdn`, atrás de HTTP.
 ///
 /// O `container_ip` é validado antes de chegar ao mecanismo: é o que acaba numa
 /// regra de DNAT, e uma string arbitrária ali é uma regra arbitrária.
 async fn publish_port(State(s): State<AppState>, Json(b): Json<PublishBody>) -> Response {
-    if delonix_net::Cidr::parse_addr(&b.container_ip).is_none() {
+    if delonix_sdn::Cidr::parse_addr(&b.container_ip).is_none() {
         return err_response(Error::Invalid(format!(
             "invalid container IP: '{}'",
             b.container_ip
@@ -1268,7 +1268,7 @@ async fn publish_port(State(s): State<AppState>, Json(b): Json<PublishBody>) -> 
         return err_response(e);
     }
     let r = tokio::task::spawn_blocking(move || {
-        delonix_net::infra::publish_port(&b.container_ip, &b.spec)
+        delonix_sdn::infra::publish_port(&b.container_ip, &b.spec)
     })
     .await;
     match r {
@@ -1320,7 +1320,7 @@ async fn forget_published_port(
     spec_or_port: String,
 ) -> Result<(), Error> {
     with_container_store(base, move |store| {
-        let wanted_port = delonix_net::parse_publish(&spec_or_port)
+        let wanted_port = delonix_sdn::parse_publish(&spec_or_port)
             .map(|(hp, _, _)| hp)
             .unwrap_or_else(|_| spec_or_port.clone());
         for mut c in store.list()? {
@@ -1329,7 +1329,7 @@ async fn forget_published_port(
             }
             let before = c.ports.len();
             c.ports.retain(|s| {
-                delonix_net::parse_publish(s)
+                delonix_sdn::parse_publish(s)
                     .map(|(hp, _, _)| hp != wanted_port)
                     .unwrap_or(true)
             });
@@ -1357,7 +1357,7 @@ async fn unpublish_port(State(s): State<AppState>, Path(host_port): Path<String>
     // would faithfully republish a port the operator has just asked to remove.
     let _ = forget_published_port(s.base, None, host_port.clone()).await;
     let r =
-        tokio::task::spawn_blocking(move || delonix_net::infra::unpublish_port(&host_port)).await;
+        tokio::task::spawn_blocking(move || delonix_sdn::infra::unpublish_port(&host_port)).await;
     match r {
         Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
         Err(e) => err_response(Error::Runtime {
@@ -1377,7 +1377,7 @@ async fn unpublish_port(State(s): State<AppState>, Path(host_port): Path<String>
 /// attach — ver `/v1/net/status` para saber o que está de pé. A distinção é do
 /// modelo, não desta rota, e esconde-la aqui seria fazer a API mentir sobre ela.
 async fn list_networks() -> Response {
-    match tokio::task::spawn_blocking(delonix_net::infra::network_list).await {
+    match tokio::task::spawn_blocking(delonix_sdn::infra::network_list).await {
         Ok(v) => Json(v).into_response(),
         Err(e) => err_response(Error::Runtime {
             context: "join",
@@ -1395,7 +1395,7 @@ async fn get_network(Path(name): Path<String>) -> Response {
     if !valid_arg(&name) {
         return err_response(Error::Invalid("invalid network name".to_string()));
     }
-    let achada = tokio::task::spawn_blocking(move || delonix_net::infra::network_get(&name)).await;
+    let achada = tokio::task::spawn_blocking(move || delonix_sdn::infra::network_get(&name)).await;
     match achada {
         Ok(Some(def)) => Json(def).into_response(),
         Ok(None) => err_response(Error::NotFound("network".to_string())),
@@ -1412,7 +1412,7 @@ async fn get_network(Path(name): Path<String>) -> Response {
 /// o que está de pé (holder, slirp, bridge, ref-count). Um cliente que só leia o
 /// primeiro conclui que a rede existe quando ainda não existe.
 async fn net_status() -> Response {
-    match tokio::task::spawn_blocking(delonix_net::infra::status).await {
+    match tokio::task::spawn_blocking(delonix_sdn::infra::status).await {
         Ok(st) => Json(st).into_response(),
         Err(e) => err_response(Error::Runtime {
             context: "join",
@@ -1938,7 +1938,7 @@ mod tests {
 
     #[tokio::test]
     async fn imagens_list_e_rmi() {
-        use delonix_image::{Image, ImageConfig, ImageStore};
+        use delonix_oci::{Image, ImageConfig, ImageStore};
         let (st, dir) = test_state();
         let store = ImageStore::open(dir.path()).unwrap();
         store
@@ -2272,7 +2272,7 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 
         // Declara uma rede pela biblioteca e confirma que as duas rotas a veem.
-        let def = delonix_net::infra::network_create("api-teste").expect("criar rede");
+        let def = delonix_sdn::infra::network_create("api-teste").expect("criar rede");
         let resp = app
             .clone()
             .oneshot(

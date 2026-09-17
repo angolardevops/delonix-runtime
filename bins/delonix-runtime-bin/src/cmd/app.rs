@@ -1,5 +1,5 @@
 //! `kind: App` — connects the existing Cloud Native Buildpacks scaffolding
-//! (`delonix_image::{buildpack, detect, internal_registry}`) to a real build
+//! (`delonix_oci::{buildpack, detect, internal_registry}`) to a real build
 //! path (ADR-0035).
 //!
 //! The one problem that scaffolding never solved: the CNB `creator` exports
@@ -27,10 +27,10 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use delonix_image::{buildpack::CnbPlan, detect, ImageStore};
-use delonix_net::NetworkStore;
-use delonix_runtime::{self as runtime};
+use delonix_linux::{self as runtime};
+use delonix_oci::{buildpack::CnbPlan, detect, ImageStore};
 use delonix_runtime_core::{Error, Result, Store};
+use delonix_sdn::NetworkStore;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -103,11 +103,11 @@ impl ResolvedBuilder {
 fn resolve_builder(spec: &AppSpec) -> Result<ResolvedBuilder> {
     match spec.builder.as_str() {
         "auto" => {
-            let (b, r) = delonix_image::buildpack::builder_images("auto");
+            let (b, r) = delonix_oci::buildpack::builder_images("auto");
             Ok(ResolvedBuilder::Known(b, r))
         }
         "heroku" => {
-            let (b, r) = delonix_image::buildpack::builder_images("heroku");
+            let (b, r) = delonix_oci::buildpack::builder_images("heroku");
             Ok(ResolvedBuilder::Known(b, r))
         }
         other => match &spec.run_image {
@@ -375,7 +375,7 @@ fn apply_one(images: &ImageStore, store: &Store, doc: &ManifestDoc) -> Result<()
     // under the name the manifest asked for, the same path `resolve_or_pull`
     // already uses for any other registry.
     let remote_ref = format!("127.0.0.1:{host_port}/{name}");
-    let pulled = delonix_image::pull_from_registry(images, &remote_ref);
+    let pulled = delonix_oci::pull_from_registry(images, &remote_ref);
     teardown_build_resources(images, store, name);
     let _ = std::fs::remove_dir_all(state_root().join("volumes").join(&cache_volume));
     match pulled {

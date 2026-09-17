@@ -1171,7 +1171,7 @@ fn presence(
         k::CONTAINER => match containers.iter().find(|c| c.name == name) {
             Some(c) => {
                 let mut c = c.clone();
-                delonix_runtime::reconcile_status(&mut c);
+                delonix_linux::reconcile_status(&mut c);
                 ("yes".into(), c.status.to_string())
             }
             None => ("no".into(), "-".into()),
@@ -1214,12 +1214,12 @@ fn presence(
                 Err(e) => ("?".into(), e.to_string()),
             }
         }
-        k::NETWORK => match delonix_net::NetworkStore::open(&root).and_then(|s| s.list()) {
+        k::NETWORK => match delonix_sdn::NetworkStore::open(&root).and_then(|s| s.list()) {
             Ok(ns) => yes_no(ns.iter().any(|n| n.name == name)),
             Err(e) => ("?".into(), e.to_string()),
         },
         // An image's identity is its REF, never the document name.
-        k::IMAGE => match delonix_image::ImageStore::open(&root) {
+        k::IMAGE => match delonix_oci::ImageStore::open(&root) {
             Ok(s) => yes_no(
                 s.resolve(super::image::image_ref(doc).as_deref().unwrap_or(name))
                     .is_ok(),
@@ -1227,7 +1227,7 @@ fn presence(
             Err(e) => ("?".into(), e.to_string()),
         },
         // An App's identity is its OUTPUT image's ref, same reasoning as Image.
-        k::APP => match delonix_image::ImageStore::open(&root) {
+        k::APP => match delonix_oci::ImageStore::open(&root) {
             Ok(s) => yes_no(
                 s.resolve(super::app::image_ref(doc).as_deref().unwrap_or(name))
                     .is_ok(),
@@ -2439,7 +2439,7 @@ fn validate_graph(docs: &[manifest::ManifestDoc]) -> Vec<String> {
     // Resources already present on the machine count as resolved (a manifest may
     // reference a network created in a previous apply). Best-effort: if a store does
     // not open, we proceed with only what the manifest declares.
-    let existing_networks: Vec<String> = delonix_net::NetworkStore::open(&root)
+    let existing_networks: Vec<String> = delonix_sdn::NetworkStore::open(&root)
         .and_then(|s| s.list())
         .map(|ns| ns.into_iter().map(|n| n.name).collect())
         .unwrap_or_default();

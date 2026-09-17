@@ -9,7 +9,7 @@
 ## 1. Shape at a glance
 
 - **10 crates** (the `AGENTS.md` "8 crates" table undercounts — it omits `delonix-mgmt`
-  and `delonix-scan`, which are real workspace members).
+  and `delonix-scanner`, which are real workspace members).
 - **~71 000 LOC** of Rust under `crates/*/src`.
 - **2 binaries**: `delonix` (the CLI, in `delonix-runtime-bin`) and `delonix-cri` (the
   kubelet-facing CRI server, in `delonix-cri`).
@@ -25,15 +25,15 @@
 | Crate | LOC | Bin | Role (confirmed in code) |
 |---|---:|---|---|
 | `delonix-runtime-core` | 3 663 | — | Shared types (`Container`, `Vm`, `Status`), `Store`/`JsonStore`, typestate, virt detection, Secret Manager (`secret`/`cred_vault`), **and the cross-cutting foundations below** (`events`, `telemetry`, `metrics`, `peer_cred`, `workload_net`). The dependency **sink** — depends on nothing internal. |
-| `delonix-runtime` | 4 974 | — | Container engine: `clone`/namespaces/cgroups, create/stop/exec, `reconcile_status`. Contains `spawn()` (~405 lines, flagged as maintenance risk). |
+| `delonix-linux` | 4 974 | — | Container engine: `clone`/namespaces/cgroups, create/stop/exec, `reconcile_status`. Contains `spawn()` (~405 lines, flagged as maintenance risk). |
 | `delonix-runtime-bin` | **38 050** | `delonix` | The full CLI (44 `cmd/*` modules). Dominant crate by far — effectively the product surface. |
-| `delonix-net` | 9 660 | — | Rootless SDN: holder netns + bridge + single slirp, DNAT/firewall (nft), CNI compat, IPAM, WireGuard overlay, eBPF device-cgroup. |
-| `delonix-image` | 4 503 | — | OCI: pull/registry/build, CNB buildpacks, internal registry, CAS, overlay, OCI-archive save, signature verification. |
+| `delonix-sdn` | 9 660 | — | Rootless SDN: holder netns + bridge + single slirp, DNAT/firewall (nft), CNI compat, IPAM, WireGuard overlay, eBPF device-cgroup. |
+| `delonix-oci` | 4 503 | — | OCI: pull/registry/build, CNB buildpacks, internal registry, CAS, overlay, OCI-archive save, signature verification. |
 | `delonix-cri` | 3 842 | `delonix-cri` | CRI (`runtime.v1`) server for a kubelet. Full method surface (§5). |
 | `delonix-vm` | 2 437 | — | microVMs: the `VmBackend` trait (Cloud Hypervisor / libvirt). |
 | `delonix-mgmt` | 1 792 | — | Management HTTP server: `/metrics` (Prometheus) + `/v1/*` (dash, volumes, containers). |
 | `delonix-volume` | 1 227 | — | Named volumes and bind mounts. |
-| `delonix-scan` | 939 | — | Image/filesystem scanning (`pytree` language detection). |
+| `delonix-scanner` | 939 | — | Image/filesystem scanning (`pytree` language detection). |
 
 ## 3. What the runtime does today (confirmed)
 
@@ -77,7 +77,7 @@ and are wired, built in the **daemonless idiom** (file/registry, not a backgroun
   `--secret-files`. (This is the *runtime's* secret store — **not** a platform/SSO vault, per
   the Regra de ouro.)
 - **Workload IP space — `core/workload_net.rs`.** A single shared constant for the ingress
-  workload address range (`10.200–10.254`), owned by core so `delonix-net` and the tunnel guard
+  workload address range (`10.200–10.254`), owned by core so `delonix-sdn` and the tunnel guard
   can't drift apart. A hint of the future `Workload` abstraction, but today just an address range.
 
 ## 5. CRI surface (kubelet-facing)
@@ -102,7 +102,7 @@ daemon that must be alive for the CLI to work**. Reality:
 - The `delonix` CLI is **ephemeral** — born per command, does its work, dies.
 - Three processes are **long-running but on-demand / scoped**, started only when needed:
   `delonix-cri serve` (kubelet endpoint), `delonix-mgmt serve` (control-plane scrape), and the
-  **network holder** (`delonix-net/infra.rs:control_loop` — `!` return, holds the SDN netns,
+  **network holder** (`delonix-sdn/infra.rs:control_loop` — `!` return, holds the SDN netns,
   authenticated by `SO_PEERCRED` + 0600). These are infrastructure, not a product daemon.
 
 Any proposal that adds a *permanent* daemon (`delonixd`, an always-on event/plugin/recovery
@@ -131,5 +131,5 @@ static `select_backend` match); a **generic compute driver trait** (only `VmBack
 Object-Storage** drivers; **OVS/SR-IOV** dataplane; VM **snapshot/clone/suspend/resume/live-
 migrate** as first-class engine operations (some exist only as CLI-flag surface); a **multi-node
 scheduler** (out of scope by design); `criterion`/`cargo-fuzz`/`cargo-bench` **infra** (only
-`proptest`, in `delonix-net`); any **eBPF observability** (the one `bpf.rs` is device-cgroup, not
+`proptest`, in `delonix-sdn`); any **eBPF observability** (the one `bpf.rs` is device-cgroup, not
 telemetry); a permanent **daemon**.

@@ -22,8 +22,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use clap::Subcommand;
-use delonix_net::infra;
 use delonix_runtime_core::{Container, Error, Result, Status};
+use delonix_sdn::infra;
 
 use super::container::{self, PodSpec};
 use super::manifest::{self, ManifestDoc};
@@ -652,7 +652,7 @@ pub(crate) fn ls(format: output::OutputFormat, namespace: Option<&str>) -> Resul
     for (pod, mut members) in pods {
         let mut running = 0;
         for c in members.iter_mut() {
-            let _ = delonix_runtime::reconcile_status(c);
+            let _ = delonix_linux::reconcile_status(c);
             if matches!(c.status, Status::Running | Status::Paused) {
                 running += 1;
             }
@@ -727,7 +727,7 @@ pub(crate) fn describe(names: &[String]) -> Result<()> {
         let mut t = output::Table::new(&["CONTAINER", "IMAGE", "STATUS"]);
         let prefix = format!("{name}-");
         for c in members.iter_mut() {
-            let _ = delonix_runtime::reconcile_status(c);
+            let _ = delonix_linux::reconcile_status(c);
             let short = c.name.strip_prefix(prefix.as_str()).unwrap_or(&c.name);
             t.row(vec![
                 short.to_string(),

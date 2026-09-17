@@ -8,7 +8,7 @@
 //! are properties of the ENGINE, not of one resource group.
 
 use clap::Subcommand;
-use delonix_runtime::{self as runtime};
+use delonix_linux::{self as runtime};
 use delonix_runtime_core::{events, Error, Result, Store};
 
 use super::util::{open_stores, state_root};
@@ -205,7 +205,7 @@ pub enum SystemCmd {
         ///
         /// The three network reapers (orphan slirps, ingress refs, host ports)
         /// are NOT previewed — they compute and act in one call inside
-        /// `delonix-net`. None of them frees a byte of disk, so everything that
+        /// `delonix-sdn`. None of them frees a byte of disk, so everything that
         /// reclaims space is in the report.
         #[arg(long = "dry-run")]
         dry_run: bool,
@@ -397,7 +397,7 @@ pub fn run(action: SystemCmd) -> Result<()> {
 
 /// `system monitor` — active network connections per container, via conntrack.
 ///
-/// Reads the host conntrack (`delonix_net::list_connections`), mapping each IP
+/// Reads the host conntrack (`delonix_sdn::list_connections`), mapping each IP
 /// to the name of the container that owns it, and classifies each connection: from
 /// outside into a container (someone accessing), from a container to the outside (egress), or
 /// between containers. Refreshes continuously unless `--no-stream`.
@@ -410,7 +410,7 @@ fn cmd_monitor(interval: u64, no_stream: bool) -> Result<()> {
             .filter(|c| c.is_live())
             .filter_map(|c| c.ip.clone().map(|ip| (ip, c.name.clone())))
             .collect();
-        let conns = delonix_net::list_connections(&ip2name);
+        let conns = delonix_sdn::list_connections(&ip2name);
         if !no_stream {
             print!("\x1b[2J\x1b[H"); // clear the screen
         }
@@ -427,11 +427,11 @@ fn cmd_monitor(interval: u64, no_stream: bool) -> Result<()> {
                 super::output::dim(super::po::t("(no running containers with a network)"))
             );
         }
-        let mut ext_in: Vec<&delonix_net::Connection> =
+        let mut ext_in: Vec<&delonix_sdn::Connection> =
             conns.iter().filter(|c| c.kind == "external_in").collect();
-        let mut egress: Vec<&delonix_net::Connection> =
+        let mut egress: Vec<&delonix_sdn::Connection> =
             conns.iter().filter(|c| c.kind == "egress").collect();
-        let internal: Vec<&delonix_net::Connection> =
+        let internal: Vec<&delonix_sdn::Connection> =
             conns.iter().filter(|c| c.kind == "internal").collect();
         ext_in.sort_by(|a, b| a.container.cmp(&b.container));
         egress.sort_by(|a, b| a.container.cmp(&b.container));
@@ -698,7 +698,7 @@ fn cmd_prune(all: bool, force: bool, auto: bool, threshold: u8, dry_run: bool) -
     // address to the next container.
     let live_ids: std::collections::HashSet<String> =
         super::prune::lease_owners(&store)?.into_keys().collect();
-    let leases_freed = delonix_net::ipam::reap_orphan_leases(&live_ids);
+    let leases_freed = delonix_sdn::ipam::reap_orphan_leases(&live_ids);
     if leases_freed > 0 {
         println!(
             "{}",
@@ -860,7 +860,7 @@ fn cmd_virt(tune: bool) -> Result<()> {
 
 /// `system thermal` — thermal governor over Delonix's cgroup slice.
 fn cmd_thermal(high: u64, low: u64, floor: u64, interval: u64, once: bool) -> Result<()> {
-    use delonix_runtime::{self as runtime};
+    use delonix_linux::{self as runtime};
     if high <= low {
         return Err(delonix_runtime_core::Error::Invalid(
             super::po::t("--high must be greater than --low").into(),
@@ -1153,7 +1153,7 @@ fn cmd_regulate_timer(install: bool, interval: u64, floor: u64) -> Result<()> {
 
 /// `system regulate` — the deterministic half of resource management.
 ///
-/// The decision lives in `delonix_runtime::regulate` and is pure; this reads
+/// The decision lives in `delonix_linux::regulate` and is pure; this reads
 /// the host, prints, and (with `--apply`) writes. Same split as `resources`,
 /// and for the same reason: a rule inside a `println!` cannot be tested and
 /// cannot be reused by anything else.
@@ -1165,7 +1165,7 @@ fn cmd_regulate(
     output: super::output::OutputFormat,
 ) -> Result<()> {
     let output = super::config::resolve_output(&state_root(), output);
-    use delonix_runtime::regulate;
+    use delonix_linux::regulate;
 
     let root = state_root();
     let json = output == super::output::OutputFormat::Json;
@@ -1350,7 +1350,7 @@ fn cmd_regulate(
 /// The engine hands over a template and its holes precisely so this can come out
 /// in Portuguese without the engine crate knowing that Portuguese exists. Shared
 /// by `resources` and `doctor`, which print the same findings.
-fn say(m: &delonix_runtime::resource_advice::Message) -> String {
+fn say(m: &delonix_linux::resource_advice::Message) -> String {
     let args: Vec<(&str, &str)> = m.args.iter().map(|(k, v)| (*k, v.as_str())).collect();
     super::po::tf(m.template, &args)
 }
@@ -1367,7 +1367,7 @@ fn say(m: &delonix_runtime::resource_advice::Message) -> String {
 /// findings, with the same stable ids, have to reach an MCP client and a fleet
 /// gate, and a rule that lives inside a `println!` reaches neither.
 fn cmd_resources(output: super::output::OutputFormat, strict: bool) -> Result<()> {
-    use delonix_runtime::resource_advice as advice;
+    use delonix_linux::resource_advice as advice;
 
     let root = state_root();
     let output = super::config::resolve_output(&root, output);
@@ -1385,7 +1385,7 @@ fn cmd_resources(output: super::output::OutputFormat, strict: bool) -> Result<()
         .map(|cs| {
             cs.into_iter()
                 .filter(|c| c.pid.is_some())
-                .map(|c| delonix_runtime::workload_view::view(&c))
+                .map(|c| delonix_linux::workload_view::view(&c))
                 .collect()
         })
         .unwrap_or_default();
@@ -2203,7 +2203,7 @@ fn cmd_doctor(strict: bool) -> Result<()> {
     // `doctor` answers «is this host able to do what the engine promises», and
     // this minute's CPU pressure is not an answer to that.
     let resource_findings: Vec<_> = {
-        use delonix_runtime::resource_advice as advice;
+        use delonix_linux::resource_advice as advice;
         advice::advise(&advice::collect(&state_root()))
             .into_iter()
             .filter(|f| f.class.gates())
@@ -2246,7 +2246,7 @@ fn cmd_info() -> Result<()> {
         super::po::t("state root:"),
         state_root().display()
     );
-    let rootless = delonix_runtime::is_rootless();
+    let rootless = delonix_linux::is_rootless();
     println!(
         "  {:<19} {}",
         super::po::t("mode:"),
@@ -2269,7 +2269,7 @@ fn cmd_info() -> Result<()> {
     //
     // `cgroup_limits_apply` asks the engine's own question, about the base
     // `spawn` would actually use.
-    let delegated = delonix_runtime::cgroup_limits_apply();
+    let delegated = delonix_linux::cgroup_limits_apply();
     println!(
         "  {:<19} {}",
         super::po::t("cgroup2 delegated:"),
@@ -2279,7 +2279,7 @@ fn cmd_info() -> Result<()> {
             super::po::t("no — memory/cpu/pids are NOT enforced (run under systemd-run --user --scope -p Delegate=yes)")
         }
     );
-    let infra = delonix_net::infra::status();
+    let infra = delonix_sdn::infra::status();
     println!(
         "  {:<19} {}",
         super::po::t("network infra:"),

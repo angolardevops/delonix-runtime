@@ -8903,7 +8903,7 @@ msgstr "--apparmor {p}: o AppArmor não está activo neste host, logo nada confi
 msgid "the container did not start, and the supervisor died before saying why"
 msgstr "o container não arrancou, e o supervisor morreu antes de dizer porquê"
 
-# `wg` ausente no host — mensagem do MOTOR (delonix-net::wg), traduzida por t_dyn.
+# `wg` ausente no host — mensagem do MOTOR (delonix-sdn::wg), traduzida por t_dyn.
 # Substitui o errno cru («No such file or directory») que o `network node init/key`
 # devolvia: o ENOENT de um spawn não é um ficheiro em falta, é a ferramenta.
 msgid "'wg' is not available on this host — install wireguard-tools (Debian/Ubuntu: `apt install wireguard-tools`; Fedora/RHEL: `dnf install wireguard-tools`; Arch: `pacman -S wireguard-tools`). It is only needed for WireGuard node keys and encrypted overlay networks"
@@ -9498,7 +9498,7 @@ msgid ""
 "\n"
 "Combines with `--auto`: it then also says whether the threshold gate would let the sweep run at all right now.\n"
 "\n"
-"The three network reapers (orphan slirps, ingress refs, host ports) are NOT previewed — they compute and act in one call inside `delonix-net`. None of them frees a byte of disk, so everything that reclaims space is in the report."
+"The three network reapers (orphan slirps, ingress refs, host ports) are NOT previewed — they compute and act in one call inside `delonix-sdn`. None of them frees a byte of disk, so everything that reclaims space is in the report."
 msgstr ""
 "Imprime o que esta varredura LEVARIA, separado por categoria, e não leva nada.\n"
 "\n"
@@ -9506,7 +9506,7 @@ msgstr ""
 "\n"
 "Combina com o `--auto`: passa também a dizer se o portão do limiar deixaria a varredura correr agora.\n"
 "\n"
-"Os três ceifeiros de rede (slirps órfãos, refs de ingress, portas do host) NÃO são pré-visualizados — calculam e agem na mesma chamada dentro do `delonix-net`. Nenhum deles liberta um byte de disco, portanto tudo o que recupera espaço está no relatório."
+"Os três ceifeiros de rede (slirps órfãos, refs de ingress, portas do host) NÃO são pré-visualizados — calculam e agem na mesma chamada dentro do `delonix-sdn`. Nenhum deles liberta um byte de disco, portanto tudo o que recupera espaço está no relatório."
 
 msgid "--auto: the threshold gate WOULD let this run now"
 msgstr "--auto: o portão do limiar DEIXARIA isto correr agora"

@@ -91,7 +91,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
 /// the `@netpair` lives in the holder's ephemeral netns, so planning against it
 /// would report drift forever on an idle node.
 pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
-    Ok(delonix_net::infra::route_list()
+    Ok(delonix_sdn::infra::route_list()
         .into_iter()
         .map(|r| super::reconcile::Actual {
             kind: k::NETWORK_ROUTE.into(),
@@ -123,7 +123,7 @@ pub(crate) fn stamp(
     fields: &std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
     let (from, to) = split_route_name(name)?;
-    delonix_net::infra::route_set_metadata(
+    delonix_sdn::infra::route_set_metadata(
         from,
         to,
         &[
@@ -147,7 +147,7 @@ pub(crate) fn stamp(
 /// absence was the defect: a route removed from the manifest stayed open.
 pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
     let (from, to) = split_route_name(name)?;
-    delonix_net::infra::network_route(from, to, false)
+    delonix_sdn::infra::network_route(from, to, false)
 }
 
 /// What the dataplane is doing about a route that IS declared.
@@ -178,7 +178,7 @@ pub(crate) enum LiveState {
 /// short. Asking once per route would turn a listing of N routes into N trips
 /// through that queue for an answer that does not change between them.
 pub(crate) fn live_snapshot() -> Option<Vec<(String, String, u64, u64)>> {
-    delonix_net::infra::network_routes_live_counted().ok()
+    delonix_sdn::infra::network_routes_live_counted().ok()
 }
 
 /// Resolves one route against a snapshot taken by [`live_snapshot`].
@@ -240,7 +240,7 @@ struct RouteLsRow {
 /// and a listing that showed only one of them would be the dishonest half.
 pub(crate) fn cmd_ls(format: super::output::OutputFormat) -> Result<()> {
     let format = super::config::resolve_output(&super::util::state_root(), format);
-    let mut routes = delonix_net::infra::route_list();
+    let mut routes = delonix_sdn::infra::route_list();
     // The pair IS the identity of a route (there is no name someone chose), so
     // it is also the only stable sort key.
     routes.sort_by(|a, b| (&a.from, &a.to).cmp(&(&b.from, &b.to)));
@@ -303,7 +303,7 @@ pub(crate) fn cmd_ls(format: super::output::OutputFormat) -> Result<()> {
 pub(crate) fn cmd_describe(names: &[String]) -> Result<()> {
     for name in names {
         let (from, to) = split_route_name(name)?;
-        let Some(def) = delonix_net::infra::route_get(from, to) else {
+        let Some(def) = delonix_sdn::infra::route_get(from, to) else {
             return Err(delonix_runtime_core::Error::NotFound(format!(
                 "no such route: {name}"
             )));
@@ -335,7 +335,7 @@ pub(crate) fn presence_of(doc: &ManifestDoc) -> (String, String) {
     let Ok(spec) = manifest::spec_of::<NetworkRouteSpec>(doc) else {
         return ("?".into(), super::po::t("invalid spec").into());
     };
-    if delonix_net::infra::route_get(&spec.from, &spec.to).is_none() {
+    if delonix_sdn::infra::route_get(&spec.from, &spec.to).is_none() {
         return ("no".into(), "-".into());
     }
     // The wording lives in `live_label`, shared with `network route`. Two
@@ -360,7 +360,7 @@ pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     for doc in manifest::of_kind(docs, k::NETWORK_ROUTE) {
         let spec: NetworkRouteSpec = manifest::spec_of(doc)?;
-        delonix_net::infra::network_route(&spec.from, &spec.to, true)?;
+        delonix_sdn::infra::network_route(&spec.from, &spec.to, true)?;
         println!(
             "{}",
             super::po::tf(

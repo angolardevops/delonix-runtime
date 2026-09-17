@@ -4,8 +4,8 @@
 
 use std::path::{Path, PathBuf};
 
-use delonix_image::{Image, ImageStore};
-use delonix_runtime::{self as runtime};
+use delonix_linux::{self as runtime};
+use delonix_oci::{Image, ImageStore};
 use delonix_runtime_core::{Container, Error, Result, Store};
 
 /// The runtime's state root: `$DELONIX_ROOT` or the `ImageStore` default.
@@ -44,7 +44,7 @@ pub(crate) fn resolve_or_pull_with_creds(
     reference: &str,
     creds: Option<(String, String)>,
 ) -> Result<Image> {
-    delonix_image::registry::resolve_or_pull(images, reference, creds, &announce_pull)
+    delonix_oci::registry::resolve_or_pull(images, reference, creds, &announce_pull)
 }
 
 /// The line a pull prints before it starts. English in the source, Portuguese
@@ -87,7 +87,7 @@ pub(crate) fn resolve_or_pull_platform(
             &[("reference", reference), ("arch", arch)],
         )
     );
-    delonix_image::registry::pull_from_registry_with_creds_platform(
+    delonix_oci::registry::pull_from_registry_with_creds_platform(
         images,
         reference,
         None,
@@ -107,11 +107,11 @@ pub(crate) fn effective_command(img: &Image, user: &[String]) -> Vec<String> {
 
 /// `chown -R <uid>:<uid>` of a FLAT rootfs (rootless): without this, the files
 /// belong to the host's uid 0, which ends up unmapped inside the user namespace.
-/// Delegates to `delonix_runtime::lchown_tree` (uses `lchown`, never follows symlinks —
+/// Delegates to `delonix_linux::lchown_tree` (uses `lchown`, never follows symlinks —
 /// see the security note there; don't reimplement this locally with
 /// `std::os::unix::fs::chown`, which follows symlinks).
 pub(crate) fn chown_tree(path: &Path, uid: u32) -> Result<()> {
-    delonix_runtime::lchown_tree(path, uid, uid);
+    delonix_linux::lchown_tree(path, uid, uid);
     Ok(())
 }
 
@@ -286,7 +286,7 @@ pub(crate) fn migrate_flat_to_overlay(images: &ImageStore, id: &str, image: &str
         return;
     }
     let d = dir.to_string_lossy().into_owned();
-    if delonix_runtime::reexec_mapped(&["__ovlmigrate", &d]) != Some(true) {
+    if delonix_linux::reexec_mapped(&["__ovlmigrate", &d]) != Some(true) {
         // The helper reverts its own half; this only clears the marker it read,
         // so a later start finds the same clean starting point.
         let _ = std::fs::remove_file(&pending);

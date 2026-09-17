@@ -126,8 +126,8 @@ impl RuntimeService for DelonixRuntime {
         // `Ready` in K8s even without working networking. Now it actually checks,
         // in BOTH modes (rootless: holder+slirp alive via pidfiles; root: the
         // CNI chain the sandboxes are networked with — reads and stats only).
-        let network_ready = if delonix_runtime::is_rootless() {
-            let st = delonix_net::infra::status();
+        let network_ready = if delonix_linux::is_rootless() {
+            let st = delonix_sdn::infra::status();
             // DOWN-AND-UNUSED IS NOT BROKEN, and conflating the two deadlocks
             // the node. This engine is daemonless: the infra netns starts on
             // DEMAND, when the first workload needs it. Reporting `NetworkReady:
@@ -185,7 +185,7 @@ impl RuntimeService for DelonixRuntime {
             // `/sys/class/net`. Measured 2026-09-15 on a kubeadm node (VM,
             // k8s 1.36.4) with `/etc/cni/net.d/10-bridge.conflist`: node
             // `NotReady` with `BridgeMissing` forever, CoreDNS `Pending`.
-            let dirs = delonix_net::cni::plugin_dirs();
+            let dirs = delonix_sdn::cni::plugin_dirs();
             let r = root_cni_readiness(&dirs);
             match r.not_ready(&dirs) {
                 None => cond("NetworkReady", true, "", ""),
@@ -453,7 +453,7 @@ impl RuntimeService for DelonixRuntime {
     ///   plugin chain — Calico, Flannel, Cilium — whose own config already
     ///   carries the subnet. Ignoring the CIDR here is exactly what containerd
     ///   and CRI-O do, and it is correct.
-    /// * **On the native SDN** the addresses come from `delonix-net`'s IPAM, so
+    /// * **On the native SDN** the addresses come from `delonix-sdn`'s IPAM, so
     ///   a CIDR the kubelet believes in is NOT the one the pods get. That is a
     ///   real divergence, and it now says so out loud instead of returning
     ///   success over it.
@@ -472,8 +472,8 @@ impl RuntimeService for DelonixRuntime {
             .and_then(|c| c.network_config)
             .map(|n| n.pod_cidr)
             .unwrap_or_default();
-        let cni = if delonix_runtime::is_rootless() {
-            delonix_net::cni::enabled_conf().is_some()
+        let cni = if delonix_linux::is_rootless() {
+            delonix_sdn::cni::enabled_conf().is_some()
         } else {
             // Root networks every pod through CNI (see `run_pod_sandbox`).
             true
@@ -487,7 +487,7 @@ impl RuntimeService for DelonixRuntime {
             PodCidrVerdict::NotHonoured => tracing::warn!(
                 pod_cidr = %cidr,
                 "cri: pod CIDR IGNORED — this node runs the native SDN and allocates \
-                 from delonix-net's IPAM, so pod addresses will not come from this \
+                 from delonix-sdn's IPAM, so pod addresses will not come from this \
                  range; set DELONIX_CNI=1 with a conflist to use the cluster's"
             ),
         }
@@ -565,9 +565,9 @@ pub mod lifecycle;
 ///
 /// One function behind `status` (`NetworkReady`) and `run_pod_sandbox`, so the
 /// condition the kubelet reads is the same fact the sandbox path acts on.
-fn root_cni_readiness(dirs: &[std::path::PathBuf]) -> delonix_net::cni::Readiness {
-    delonix_net::cni::readiness(
-        std::path::Path::new(delonix_net::cni::DEFAULT_CONF_DIR),
+fn root_cni_readiness(dirs: &[std::path::PathBuf]) -> delonix_sdn::cni::Readiness {
+    delonix_sdn::cni::readiness(
+        std::path::Path::new(delonix_sdn::cni::DEFAULT_CONF_DIR),
         dirs,
     )
 }
@@ -597,7 +597,7 @@ fn live_attached_refs(base: &std::path::Path) -> Option<i64> {
     // host com marcadores reais, tocava e dava 0 por subtracção. Um teste que
     // passa por acidente é pior que nenhum — foi apagado, e a assimetria que
     // ele expôs está agora corrigida em vez de só documentada.
-    let attached = delonix_net::infra::attached_refs_in(base);
+    let attached = delonix_sdn::infra::attached_refs_in(base);
     if attached.is_empty() {
         return Some(0);
     }
@@ -609,7 +609,7 @@ fn live_attached_refs(base: &std::path::Path) -> Option<i64> {
         .filter(|c| c.is_live())
         .map(|c| c.id)
         .collect();
-    let orfaos = delonix_net::infra::orphan_refs(&attached, &live).len();
+    let orfaos = delonix_sdn::infra::orphan_refs(&attached, &live).len();
     Some((attached.len() - orfaos) as i64)
 }
 
@@ -624,11 +624,11 @@ mod tests {
     /// back `true`, masking exactly this scenario).
     #[tokio::test]
     async fn network_ready_reflecte_infra_rootless_real_nao_fabricada() {
-        if !delonix_runtime::is_rootless() {
+        if !delonix_linux::is_rootless() {
             eprintln!("SKIP: teste assume ambiente rootless (uid != 0)");
             return;
         }
-        // `status()` probes the GLOBAL rootless infra (`delonix_net::infra::status()`
+        // `status()` probes the GLOBAL rootless infra (`delonix_sdn::infra::status()`
         // reads `<base_root>/ingress/holder.pid`, resolved by `DELONIX_ROOT`/
         // `XDG_DATA_HOME`, NOT by this test's temporary `base`). If the operator
         // has REAL infra running (e.g. a holder from earlier sessions on this
@@ -641,7 +641,7 @@ mod tests {
         // valor fixo. O `status()` sonda a infra GLOBAL (ver o comentário acima),
         // logo o resultado certo depende da máquina onde o teste corre, e um
         // literal aqui só pode estar certo por acaso.
-        let st = delonix_net::infra::status();
+        let st = delonix_sdn::infra::status();
         let base = std::env::temp_dir().join(format!(
             "delonix-cri-status-test-{}-{}",
             std::process::id(),

@@ -1,0 +1,41 @@
+[package]
+name = "delonix-oci"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+delonix-runtime-core = { workspace = true }
+# Implements the compute context's ImageStore port (ADR-0040).
+delonix-compute = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tar = { workspace = true }
+flate2 = { workspace = true }
+nix = { workspace = true }
+# Tipos OCI canónicos do schema image (manifesto/config/index/descritor).
+oci-spec = { workspace = true, features = ["image"] }
+reqwest = { workspace = true, features = ["blocking", "rustls-tls-webpki-roots", "json"] }
+zstd = { workspace = true }
+base64 = { workspace = true }
+# Verificação de assinaturas cosign/sigstore (B8): ECDSA P-256.
+ring = { workspace = true }
+
+[dev-dependencies]
+# Property-based robustness ("fuzz on stable"): the repo pins to stable Rust, so
+# `cargo-fuzz` (nightly + libfuzzer) is out — `proptest` throws structured/arbitrary
+# input at the pure parsers and asserts they never panic. Dev-only: never in the
+# release tree (`cargo tree -e normal` stays clean). See the `delonix-testing` skill.
+proptest = { workspace = true }
+# Micro-benchmarks (dev-only, stable). Pre-blessed in dependency-map.md §4.
+criterion = { workspace = true }
+tempfile = { workspace = true }
+
+[[bench]]
+name = "parse_reference"
+harness = false
+
+[lints]
+workspace = true

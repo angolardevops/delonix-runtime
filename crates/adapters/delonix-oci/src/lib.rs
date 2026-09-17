@@ -1,0 +1,153 @@
+//! `delonix-oci` — Delonix Engine OCI images.
+//!
+//! Ties together the four pieces of Month 5 (Part B): **CAS** ([`cas`]), **model +
+//! store** ([`image`]), **load** ([`load`]), **overlay2** ([`overlay`]) and
+//! **build** ([`build`]).
+
+pub mod auth;
+pub mod build;
+pub mod buildpack;
+pub mod cas;
+pub mod detect;
+pub mod image;
+pub mod internal_registry;
+pub mod load;
+pub mod overlay;
+pub mod registry;
+pub mod rootfs_user;
+pub mod run_images;
+pub mod save;
+pub mod sign;
+
+pub use buildpack::CnbPlan;
+pub use cas::{sha256_hex, Cas};
+pub use detect::{detect, Detected};
+pub use image::{Image, ImageConfig, ImageStore};
+pub use load::load_docker_archive;
+pub use registry::{
+    build_manifest, http_get, pull_from_registry, pull_from_registry_with_creds, push_to_registry,
+};
+pub use save::write_oci_archive;
+pub use sign::verify_signature;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sha256_known_vectors() {
+        assert_eq!(
+            sha256_hex(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[test]
+    fn cas_write_read_dedup_verify() {
+        let dir = std::env::temp_dir().join(format!("delonix-cas-{}", sha256_hex(b"t")));
+        let cas = Cas::open(&dir).unwrap();
+        let d1 = cas.write(b"layer-data").unwrap();
+        let d2 = cas.write(b"layer-data").unwrap();
+        assert_eq!(d1, d2);
+        assert!(d1.starts_with("sha256:"));
+        assert_eq!(cas.read(&d1).unwrap(), b"layer-data");
+        assert!(cas.verify(&d1).unwrap());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn dockerfile_parses_from_run_cmd() {
+        let df = build::parse_dockerfile(
+            "# comment\nFROM alpine:3.19\nRUN echo hi > /a.txt\nCMD [\"/bin/sh\"]\n",
+        )
+        .unwrap();
+        assert_eq!(df.from, "alpine:3.19");
+        assert_eq!(df.steps.len(), 1);
+        assert!(matches!(&df.steps[0], build::Step::Run(c) if c.cmdline == "echo hi > /a.txt"));
+        assert_eq!(df.cmd, vec!["/bin/sh"]);
+    }
+
+    #[test]
+    fn dockerfile_rejects_unknown_instruction() {
+        assert!(build::parse_dockerfile("FROM x\nWEIRD y").is_err());
+        assert!(build::parse_dockerfile("RUN nothing").is_err());
+    }
+
+    #[test]
+    fn normalise_tag_adds_latest() {
+        assert_eq!(image::normalise_tag("alpine"), "alpine:latest");
+        assert_eq!(image::normalise_tag("alpine:3.19"), "alpine:3.19");
+    }
+
+    #[test]
+    fn retag_move_a_tag_e_nao_a_duplica() {
+        use image::{Image, ImageConfig, ImageStore};
+        let root = std::env::temp_dir().join(format!("delonix-tagtest-{}", std::process::id()));
+        std::fs::remove_dir_all(&root).ok();
+        let store = ImageStore::open(&root).unwrap();
+        let mk = |id: &str, tag: &str| Image {
+            id: format!("sha256:{id}"),
+            repo_tags: vec![tag.to_string()],
+            layers: vec![],
+            config: ImageConfig::default(),
+            created_unix: 1,
+        };
+        let a = mk(&"a".repeat(64), "app:latest");
+        let b = mk(&"b".repeat(64), "other:latest");
+        store.save(&a).unwrap();
+        store.save(&b).unwrap();
+        // re-tag B with A's tag: it must MOVE (A loses it; B gains it).
+        store.tag("other:latest", "app:latest").unwrap();
+        let resolved = store.resolve("app:latest").unwrap();
+        assert_eq!(resolved.id, b.id, "app:latest devia agora apontar para B");
+        // only ONE image has app:latest.
+        let holders = store
+            .list()
+            .unwrap()
+            .into_iter()
+            .filter(|i| i.repo_tags.iter().any(|t| t == "app:latest"))
+            .count();
+        assert_eq!(holders, 1, "a tag não pode apontar para duas imagens");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// Loading an archive must never DROP a name the same image already had.
+    ///
+    /// `image load` stored the archive's `repo_tags` verbatim, and `save` writes
+    /// the whole record — so an archive of an image already present replaced its
+    /// name list instead of adding to it. Measured 2026-09-10 against the real
+    /// binary: a store holding `alpine:3.20` and `mirror/app:v1` (same id), plus
+    /// `image load` of a `save` of `mirror/app:v1`, kept only the latter. On an
+    /// offline node that is a manifest whose image name stops resolving.
+    #[test]
+    fn loading_an_archive_keeps_the_images_other_names() {
+        use image::{Image, ImageConfig, ImageStore};
+        let root = std::env::temp_dir().join(format!("delonix-loadtags-{}", std::process::id()));
+        std::fs::remove_dir_all(&root).ok();
+        let store = ImageStore::open(&root).unwrap();
+        let id = format!("sha256:{}", "c".repeat(64));
+        store
+            .save(&Image {
+                id: id.clone(),
+                repo_tags: vec!["alpine:3.20".into(), "mirror/app:v1".into()],
+                layers: vec![],
+                config: ImageConfig::default(),
+                created_unix: 1,
+            })
+            .unwrap();
+        // What `load` now computes for the same id, from an archive that names
+        // only ONE of the two.
+        let merged = store.merged_tags_all(&id, &["mirror/app:v1".to_string()]);
+        assert!(
+            merged.contains(&"alpine:3.20".to_string()),
+            "the SAME image's other name must survive the load: {merged:?}"
+        );
+        assert!(merged.contains(&"mirror/app:v1".to_string()));
+        assert_eq!(merged.len(), 2, "and no name may end up duplicated");
+        std::fs::remove_dir_all(&root).ok();
+    }
+}

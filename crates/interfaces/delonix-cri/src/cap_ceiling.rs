@@ -35,7 +35,7 @@
 //! |---|---|
 //! | unset / empty / `all` | **no ceiling** — byte-for-byte the previous behavior |
 //! | `none` | no capabilities at all, for anyone |
-//! | `default` | exactly the engine's default kept set ([`delonix_runtime::capabilities::KEPT_CAPS`]) |
+//! | `default` | exactly the engine's default kept set ([`delonix_linux::capabilities::KEPT_CAPS`]) |
 //! | `default,NET_ADMIN,…` | the default set plus the named ones |
 //! | `CHOWN,NET_BIND_SERVICE,…` | exactly the named ones (`CAP_` prefix optional, case-insensitive) |
 //!
@@ -62,7 +62,7 @@
 //! A malformed value makes the server REFUSE TO START. A typo that quietly
 //! resolved to "no ceiling" is the exact failure this module exists to prevent.
 
-use delonix_runtime::capabilities::{
+use delonix_linux::capabilities::{
     all_caps_mask, cap_num, default_kept_mask, names_from_mask, resolve_cap_keep,
 };
 
@@ -234,7 +234,7 @@ impl CapCeiling {
     /// implementation of the same rules: whatever the engine would have granted,
     /// intersected with the ceiling. `--cap-drop ALL` + explicit adds resolves
     /// back to precisely that mask (there is a round-trip test for it in
-    /// `delonix_runtime::capabilities`), so the clamp cannot drift from the
+    /// `delonix_linux::capabilities`), so the clamp cannot drift from the
     /// engine's semantics as `--cap-add`/`--cap-drop` handling evolves.
     pub fn cap_args(
         &self,

@@ -55,7 +55,7 @@ pub fn containers() -> Vec<CompletionCandidate> {
 /// is a tag — see `output::display_ref`; a 71-char digest is not completed with
 /// TAB, you type it).
 pub fn images() -> Vec<CompletionCandidate> {
-    let Ok(store) = delonix_image::ImageStore::open(state_root()) else {
+    let Ok(store) = delonix_oci::ImageStore::open(state_root()) else {
         return Vec::new();
     };
     cands(
@@ -76,7 +76,7 @@ pub fn volumes() -> Vec<CompletionCandidate> {
 }
 
 pub fn networks() -> Vec<CompletionCandidate> {
-    let Ok(store) = delonix_net::NetworkStore::open(state_root()) else {
+    let Ok(store) = delonix_sdn::NetworkStore::open(state_root()) else {
         return Vec::new();
     };
     cands(store.list().unwrap_or_default().into_iter().map(|n| n.name))
@@ -273,12 +273,12 @@ fn ns_from_vms(root: &std::path::Path) -> Vec<String> {
 /// A tenant whose only declared resource is a `kind: Service` was otherwise
 /// invisible to the TAB, same as the share-volume-only tenant `ns_from_volumes`
 /// exists for. `service_list` reads `DELONIX_ROOT`/the default root directly
-/// (`delonix_net::infra::base_root`) rather than the `root` argument this
+/// (`delonix_sdn::infra::base_root`) rather than the `root` argument this
 /// function ignores — in every real caller the two already agree, since both
 /// come from the same process environment; only a test that deliberately
 /// diverges them would notice, and none here does.
 fn ns_from_services(_root: &std::path::Path) -> Vec<String> {
-    delonix_net::infra::service_list()
+    delonix_sdn::infra::service_list()
         .into_iter()
         .map(|d| d.namespace)
         .collect()
@@ -405,7 +405,7 @@ pub fn man_commands() -> Vec<CompletionCandidate> {
 /// Registries this node is logged in to (`<root>/auth.json`) — the only ones
 /// `image logout` has anything to remove.
 pub fn registries() -> Vec<CompletionCandidate> {
-    cands(delonix_image::auth::hosts(&state_root()))
+    cands(delonix_oci::auth::hosts(&state_root()))
 }
 
 #[cfg(test)]

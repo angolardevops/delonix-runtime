@@ -10,8 +10,8 @@
 //!    straight into [`collect`] instead of re-implementing the aggregation.
 //!
 //! Lives here (not in `delonix-runtime-core`) because it needs the store/
-//! cgroup/netns access of `delonix-runtime`/`delonix-vm`/`delonix-net`/
-//! `delonix-image`/`delonix-volume` — `runtime-core` is a shared-types leaf
+//! cgroup/netns access of `delonix-linux`/`delonix-vm`/`delonix-sdn`/
+//! `delonix-oci`/`delonix-volume` — `runtime-core` is a shared-types leaf
 //! crate none of the higher-level crates depend on for this.
 
 use std::path::Path;
@@ -85,7 +85,7 @@ fn dir_size(p: &Path) -> u64 {
 ///
 /// `include_network`: per-container network totals require entering EACH
 /// running container's netns to read `/proc/net/dev`
-/// (`delonix_net::infra::container_net_bytes`, one `nsenter`+`cat` per
+/// (`delonix_sdn::infra::container_net_bytes`, one `nsenter`+`cat` per
 /// container) — real cost with many containers.
 ///
 /// `include_storage`: a full recursive walk of `blobs`/`layers`/`volumes`/
@@ -107,7 +107,7 @@ pub fn collect(root: &Path, include_network: bool, include_storage: bool) -> Das
         if let Ok(list) = store.list() {
             containers_total = list.len() as u64;
             for mut c in list {
-                delonix_runtime::reconcile_status(&mut c);
+                delonix_linux::reconcile_status(&mut c);
                 if c.status == Status::Running {
                     containers_running += 1;
                     running_ids.push(c.id.clone());
@@ -120,7 +120,7 @@ pub fn collect(root: &Path, include_network: bool, include_storage: bool) -> Das
     let vms_running = vms.iter().filter(|v| v.status == Status::Running).count() as u64;
     let vms_total = vms.len() as u64;
 
-    let networks_total = delonix_net::NetworkStore::open(root)
+    let networks_total = delonix_sdn::NetworkStore::open(root)
         .and_then(|s| s.list())
         .map(|l| l.len() as u64)
         .unwrap_or(0);
@@ -128,7 +128,7 @@ pub fn collect(root: &Path, include_network: bool, include_storage: bool) -> Das
         .and_then(|s| s.list())
         .map(|l| l.len() as u64)
         .unwrap_or(0);
-    let images_total = delonix_image::ImageStore::open(root)
+    let images_total = delonix_oci::ImageStore::open(root)
         .and_then(|s| s.list())
         .map(|l| l.len() as u64)
         .unwrap_or(0);
@@ -136,14 +136,14 @@ pub fn collect(root: &Path, include_network: bool, include_storage: bool) -> Das
         .map(|s| s.list().len() as u64)
         .unwrap_or(0);
 
-    let (memory_bytes_limit, memory_bytes_used, ..) = delonix_runtime::slice_budget();
+    let (memory_bytes_limit, memory_bytes_used, ..) = delonix_linux::slice_budget();
 
     let (network_rx_bytes, network_tx_bytes, network_unmeasured_containers) = if include_network {
         let mut rx = 0u64;
         let mut tx = 0u64;
         let mut unmeasured = 0u64;
         for id in &running_ids {
-            match delonix_net::infra::container_net_bytes(id) {
+            match delonix_sdn::infra::container_net_bytes(id) {
                 Some((r, t)) => {
                     rx += r;
                     tx += t;
@@ -207,9 +207,9 @@ pub fn collect_container_net(root: &Path) -> std::collections::HashMap<String, (
     if let Ok(store) = delonix_runtime_core::Store::open(root.join("containers")) {
         if let Ok(list) = store.list() {
             for mut c in list {
-                delonix_runtime::reconcile_status(&mut c);
+                delonix_linux::reconcile_status(&mut c);
                 if c.status == Status::Running {
-                    if let Some(bytes) = delonix_net::infra::container_net_bytes(&c.id) {
+                    if let Some(bytes) = delonix_sdn::infra::container_net_bytes(&c.id) {
                         out.insert(c.id.clone(), bytes);
                     }
                 }

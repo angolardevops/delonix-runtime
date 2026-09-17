@@ -818,7 +818,7 @@ scen_posse_destrutiva() {
   # não exercitava nada: o conflito de porta é apanhado por um preflight ANTES
   # de chegar ao publish, logo o reaper nunca corre.
   #
-  # A posse está fixada onde falha mesmo: `tests_posse_do_slirp` (delonix-net),
+  # A posse está fixada onde falha mesmo: `tests_posse_do_slirp` (delonix-sdn),
   # sete testes, dos quais dois chumbam se a metade da posse for retirada —
   # verificado. Um cenário de caos que passa com o defeito lá dentro é pior que
   # nenhum, porque dá por travado o que não está.
@@ -849,7 +849,7 @@ scen_posse_destrutiva() {
   # 2026-09-09, quatro corridas seguidas, e o segundo root subiu nas quatro — é
   # o que o bloco 5 abaixo passa a usar. O que se mantém é a escolha de fixar
   # este invariante onde ele é DETERMINÍSTICO: o teste unitário
-  # `base_root_e_runtime_dir_honram_env_vars_explicitas` (delonix-net) exige que
+  # `base_root_e_runtime_dir_honram_env_vars_explicitas` (delonix-sdn) exige que
   # um root alternativo resolva uma pasta DIFERENTE da do root por omissão, que
   # o root por omissão mantenha o nome nu byte a byte, e que o caminho do socket
   # fique abaixo dos 108 bytes do `sun_path`. É puro, corre sempre, e falha se o

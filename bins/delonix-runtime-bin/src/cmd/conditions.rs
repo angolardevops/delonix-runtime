@@ -51,11 +51,11 @@ pub struct Env {
 }
 
 impl Env {
-    /// Probes the host for real. Reuses `delonix_runtime::is_rootless` (the
+    /// Probes the host for real. Reuses `delonix_linux::is_rootless` (the
     /// canonical privilege helper, the same one the rest of the runtime uses).
     pub fn probe() -> Env {
         Env {
-            rootless: delonix_runtime::is_rootless(),
+            rootless: delonix_linux::is_rootless(),
             mount_nfs: which("mount.nfs"),
             mount_cifs: which("mount.cifs"),
             mount_davfs: which("mount.davfs"),
@@ -63,8 +63,8 @@ impl Env {
             // The SAME function `realize_overlay` gates on, not a `which("wg")`
             // lookalike: a condition that disagrees with the realizer is worse
             // than no condition at all.
-            wg: delonix_net::wg::available(),
-            realized_networks: delonix_net::infra::network_list()
+            wg: delonix_sdn::wg::available(),
+            realized_networks: delonix_sdn::infra::network_list()
                 .into_iter()
                 .map(|d| d.name)
                 .collect(),

@@ -59,10 +59,10 @@ LAYERS = {
     "delonix-compute": CONTEXT,
     "delonix-net-rules": FOUNDATION,  # → delonix-networking/domain (P2)
     "delonix-security-runtime": CONTEXT,  # → delonix-security (P2)
-    "delonix-runtime": ADAPTER,  # → delonix-linux (P3)
-    "delonix-net": ADAPTER,  # → delonix-sdn (P3)
-    "delonix-image": ADAPTER,  # → delonix-oci (P3)
-    "delonix-scan": ADAPTER,  # → delonix-scanner (P3)
+    "delonix-linux": ADAPTER,
+    "delonix-sdn": ADAPTER,
+    "delonix-oci": ADAPTER,
+    "delonix-scanner": ADAPTER,
     "delonix-volume": ADAPTER,  # → delonix-provider-mount (P4)
     "delonix-vm": ADAPTER,  # splits into the VmProvider port (context) + provider crates (P4)
     "delonix-proxmox": PROVIDER,  # → delonix-provider-proxmox (P4)
@@ -113,7 +113,7 @@ EXCEPTIONS = {
         "libvirt adapters; P4 moves the port into the compute context and each "
         "backend into its own provider crate",
     ),
-    ("dep", "delonix-scan", "delonix-image"): (
+    ("dep", "delonix-scanner", "delonix-oci"): (
         "P4",
         "the scanner reads layers through the OCI adapter instead of through an "
         "ImageStore port",
@@ -134,7 +134,7 @@ PRINTS = re.compile(r"\b(?:e?println!|print!)\s*[(\[]")
 # Writes to the PROCESS environment. Tests run on parallel threads, and a write
 # there races every reader of the environment (libc's `getenv` takes no Rust lock);
 # in the engine's own code a write is only sound in a single-threaded child. The
-# remaining sites are the `delonix-net` test guard, the container init, and tests
+# remaining sites are the `delonix-sdn` test guard, the container init, and tests
 # not yet moved to injected values — this number only goes down.
 ENV_WRITES = re.compile(r"\benv::(?:set_var|remove_var)\s*\(")
 
