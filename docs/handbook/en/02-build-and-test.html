@@ -186,7 +186,7 @@ td code{font-size:.82em}
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="Contributor handbook"><div class="group"><div class="gtitle">Overview</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">Get started</div><a href="00-start-here.html"><span class="n">00</span><span>Start here</span></a><a href="01-environment.html"><span class="n">01</span><span>Preparing your environment</span></a><a class="on" aria-current="page" href="02-build-and-test.html"><span class="n">02</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">Foundations</div><a href="03-rust-primer.html"><span class="n">03</span><span>Rust primer for this codebase</span></a><a href="04-cloud-native-primer.html"><span class="n">04</span><span>Cloud native primer</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="05-architecture.html"><span class="n">05</span><span>Architecture</span></a><a href="06-crates.html"><span class="n">06</span><span>The crates</span></a><a href="07-system-design-interview.html"><span class="n">07</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images &amp; microVMs</div><a href="08-delonixfile-and-vmfile.html"><span class="n">08</span><span>Delonixfile and VMfile</span></a><a href="09-microvm-setup.html"><span class="n">09</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">Contributing</div><a href="10-contributing-workflow.html"><span class="n">10</span><span>Contribution workflow</span></a><a href="11-publishing-docs.html"><span class="n">11</span><span>Publishing the documentation</span></a><a href="12-coding-conventions.html"><span class="n">12</span><span>Coding conventions</span></a></div><div class="group"><div class="gtitle">Reference</div><a href="13-cloud-native-standards.html"><span class="n">13</span><span>Cloud native standards, layer by layer</span></a><a href="14-glossary.html"><span class="n">14</span><span>Glossary</span></a></div></nav>
+<nav class="side" aria-label="Contributor handbook"><div class="group"><div class="gtitle">Overview</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">Get started</div><a href="00-start-here.html"><span class="n">00</span><span>Start here</span></a><a href="01-environment.html"><span class="n">01</span><span>Preparing your environment</span></a><a class="on" aria-current="page" href="02-build-and-test.html"><span class="n">02</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">Foundations</div><a href="03-rust-primer.html"><span class="n">03</span><span>Rust primer for this codebase</span></a><a href="04-cloud-native-primer.html"><span class="n">04</span><span>Cloud native primer</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="05-architecture.html"><span class="n">05</span><span>Architecture</span></a><a href="06-crates.html"><span class="n">06</span><span>The crates</span></a><a href="07-system-design-interview.html"><span class="n">07</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images &amp; microVMs</div><a href="08-delonixfile-and-vmfile.html"><span class="n">08</span><span>Delonixfile and VMfile</span></a><a href="09-microvm-setup.html"><span class="n">09</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">Contributing</div><a href="10-contributing-workflow.html"><span class="n">10</span><span>Contribution workflow</span></a><a href="11-publishing-docs.html"><span class="n">11</span><span>Publishing the documentation</span></a><a href="12-coding-conventions.html"><span class="n">12</span><span>Coding conventions</span></a></div><div class="group"><div class="gtitle">Reference</div><a href="13-cloud-native-standards.html"><span class="n">13</span><span>Cloud native standards, layer by layer</span></a><a href="14-glossary.html"><span class="n">14</span><span>Glossary</span></a><a href="15-environment-variables.html"><span class="n">15</span><span>Environment variables (DELONIX_*)</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Get started</p>
 <h1 id="2-clone-build-and-test">2. Clone, build and test</h1>
@@ -246,6 +246,185 @@ land there instead of <code>target/</code>.</p>
   other's artefacts. A target directory per worktree is slower the first time and predictable
   afterwards.</li>
 </ul>
+<h2 id="installing-your-build-locally">Installing your build locally<a class="hanchor" href="#installing-your-build-locally" aria-label="#">#</a></h2>
+<p>Most changes never need an installed build: run <code>./target/debug/delonix</code> from your worktree. Install
+only when you need a stable path — a systemd unit, a script on another shell, a kubelet talking to
+<code>delonix-cri</code>. Before and after installing, confirm <strong>which build</strong> you are running:</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">./target/debug/delonix --version    # commit: &lt;hash&gt; (+N commits since vX.Y.Z) · built: &lt;date&gt;
+command -v delonix                  # which `delonix` your shell would run instead
+</code></pre></div>
+<p>The <code>commit:</code> line comes from <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/build.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/build.rs</code></a> (<code>DELONIX_GIT_HASH</code>,
+<code>DELONIX_GIT_SINCE</code>). Between releases every build carries the same version number, so the commit
+is the only way to tell your build from the released one.</p>
+<h3 id="how-delonix-finds-its-server-binaries">How <code>delonix</code> finds its server binaries<a class="hanchor" href="#how-delonix-finds-its-server-binaries" aria-label="#">#</a></h3>
+<p><code>delonix serve cri</code>, <code>delonix serve api</code> and <code>delonix mcp</code> do not contain the servers: they <code>exec</code>
+<code>delonix-cri</code>, <code>delonix-mgmt</code> and <code>delonix-mcp</code> (<code>exec_server</code> in
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/serve.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/serve.rs</code></a>). The lookup is:</p>
+<ol>
+<li>the file of that name <strong>next to the running <code>delonix</code></strong>;</li>
+<li>otherwise the name on <code>PATH</code>.</li>
+</ol>
+<p><code>delonix</code> passes the server its own version in <code>DELONIX_DISPATCH_VERSION</code>, and a server from a
+different release refuses to start. It also passes itself in <code>DELONIX_BIN</code>, so the server calls back
+the same CLI. A server started directly (for example by a unit) finds the CLI through
+<code>DELONIX_BIN</code>, then a <code>delonix</code> next to itself, then <code>PATH</code> (<code>cli_bin</code> in
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/dispatch.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-runtime-core/src/dispatch.rs</code></a>). <strong>Keep the four binaries of one build
+together</strong>; a mix of your build and a release is refused, or runs code you did not mean to test.</p>
+<p><code>delonix cluster kubeadm</code> and <code>delonix image vm build</code> look for <code>delonix-cri</code> in their own order
+(<code>resolve_cri_bin</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmimage.rs</code></a>): <code>--cri-bin</code>, then next to
+<code>delonix</code>, then a <code>cargo build --release -p delonix-cri</code> if the current directory is inside a
+source checkout, and only then a download of the released asset.</p>
+<p>Build the four before installing them:</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">cargo build --release -p delonix-runtime-bin -p delonix-cri -p delonix-mgmt-bin -p delonix-mcp-bin
+</code></pre></div>
+<h3 id="option-a-run-it-from-the-worktree-safest">Option A — run it from the worktree (safest)<a class="hanchor" href="#option-a-run-it-from-the-worktree-safest" aria-label="#">#</a></h3>
+<p>Nothing is copied, so nothing outside your checkout can pick it up by accident:</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">alias delonix-dev=&quot;$PWD/target/release/delonix&quot;
+delonix-dev --version
+</code></pre></div>
+<p>The servers are found because they sit next to it in <code>target/release/</code>. On Ubuntu 23.10+ this path
+needs its own AppArmor profile (see
+<a href="01-environment.html#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary">01 — AppArmor</a>).</p>
+<h3 id="option-b-install-for-your-user-in-localbin">Option B — install for your user in <code>~/.local/bin</code><a class="hanchor" href="#option-b-install-for-your-user-in-localbin" aria-label="#">#</a></h3>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">install -d ~/.local/bin
+install -m 0755 target/release/delonix target/release/delonix-cri \
+  target/release/delonix-mgmt target/release/delonix-mcp ~/.local/bin/
+hash -r                              # forget the path your shell cached
+command -v delonix &amp;&amp; delonix --version
+</code></pre></div>
+<p>If a release is also installed in <code>/usr/local/bin</code>, whichever directory comes first on <code>PATH</code> wins.</p>
+<p><strong>AppArmor.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> writes one profile, <code>/etc/apparmor.d/delonix</code>, bound to
+<code>&lt;install dir&gt;/delonix</code>, and only on hosts with
+<code>kernel.apparmor_restrict_unprivileged_userns=1</code>. A binary you copied to a new path is not covered.
+Do not re-run the installer to "move" that profile on a machine that also uses a released
+installation: the profile file is rewritten, and the released binary loses it. Add a second profile
+with a different name instead — the same shape the installer writes, so it replaces nothing:</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">printf &#x27;abi &lt;abi/4.0&gt;,\ninclude &lt;tunables/global&gt;\nprofile delonix-dev %s flags=(unconfined) {\n  userns,\n}\n&#x27; \
+  &quot;$HOME/.local/bin/delonix&quot; | sudo tee /etc/apparmor.d/delonix-dev &gt;/dev/null
+sudo apparmor_parser -r /etc/apparmor.d/delonix-dev
+</code></pre></div>
+<p><em>Unverified here:</em> this command mirrors <code>install.sh</code> (the AppArmor block) with a different profile
+name and file; it was not loaded on a host with the restriction active while writing this page.</p>
+<p>The installer also adds shell completion, man pages and editor syntax files, but only in its binary
+phase. For your own build, generate them from the binary if you want them:</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">mkdir -p ~/.local/share/bash-completion/completions
+delonix completion shell bash &gt; ~/.local/share/bash-completion/completions/delonix
+delonix man --dir ~/.local/share/man
+</code></pre></div>
+<h3 id="option-c-system-install-in-usrlocalbin">Option C — system install in <code>/usr/local/bin</code><a class="hanchor" href="#option-c-system-install-in-usrlocalbin" aria-label="#">#</a></h3>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">sudo install -m 0755 target/release/delonix target/release/delonix-cri \
+  target/release/delonix-mgmt target/release/delonix-mcp /usr/local/bin/
+</code></pre></div>
+<p><strong>Only on a machine where no Delonix workload is in use.</strong> The installed binary is not just a
+command:</p>
+<ul>
+<li>boot units written by <code>delonix system boot enable</code> start <code>ExecStart=&lt;exe&gt; container start &lt;name&gt;</code>,
+  where <code>&lt;exe&gt;</code> is the path of the binary that ran <code>enable</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/boot.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/boot.rs</code></a>,
+  unit prefix <code>delonix-boot-</code>); replacing that file changes what comes up after the next reboot;</li>
+<li><code>dist/delonix-cri.service</code> runs <code>/usr/local/bin/delonix-cri</code>, so on a Kubernetes node the kubelet
+  gets your build at the next restart of that unit;</li>
+<li>long-lived processes started earlier (the network pin and control process, container supervisors)
+  keep running the code they started with, so for a while two builds run side by side.</li>
+</ul>
+<p>Check first:</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">delonix container ls -a; delonix vm ls
+ls ~/.config/systemd/user/delonix-boot-* /etc/systemd/system/delonix-* 2&gt;/dev/null
+pgrep -a delonix
+</code></pre></div>
+<h3 id="preparing-the-host">Preparing the host<a class="hanchor" href="#preparing-the-host" aria-label="#">#</a></h3>
+<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> does two separate jobs. Only the first one is about the binary:</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Part</th>
+<th>What it does</th>
+<th>Flag that skips or enables it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Binary</td>
+<td>downloads a release, verifies the minisign signature and sha256, installs <code>delonix</code> (plus <code>delonix-mcp</code>, <code>delonix-mgmt</code>, and <code>delonix-cri</code> with <code>--with-cri</code>), then completion, man pages, editor syntax and the editor extension</td>
+<td>skipped with <code>--no-binary</code>; <code>--user</code> picks <code>~/.local/bin</code></td>
+</tr>
+<tr>
+<td>Host packages</td>
+<td><code>slirp4netns</code>, <code>uidmap</code>, <code>nftables</code>, <code>iproute2</code>, <code>conntrack</code></td>
+<td>always</td>
+</tr>
+<tr>
+<td>Rootless identity</td>
+<td><code>/etc/subuid</code> and <code>/etc/subgid</code> ranges for your user</td>
+<td>always</td>
+</tr>
+<tr>
+<td>AppArmor</td>
+<td>profile for <code>&lt;dir&gt;/delonix</code> when the userns restriction is active</td>
+<td>always (when the restriction is on)</td>
+</tr>
+<tr>
+<td>Old Debian</td>
+<td><code>kernel.unprivileged_userns_clone=1</code> when it is <code>0</code></td>
+<td>always (when needed)</td>
+</tr>
+<tr>
+<td>VM dependencies</td>
+<td>libvirt, qemu, cloud-init tooling; Cloud Hypervisor and its firmware downloaded from upstream</td>
+<td>skipped with <code>--no-vm</code></td>
+</tr>
+<tr>
+<td>Kernel tuning</td>
+<td><code>/etc/modules-load.d/delonix.conf</code>, <code>/etc/sysctl.d/99-delonix.conf</code></td>
+<td>skipped with <code>--no-tune</code></td>
+</tr>
+<tr>
+<td>cgroup delegation</td>
+<td><code>user@.service</code> drop-in, only if not already delegated</td>
+<td>skipped with <code>--no-delegate</code></td>
+</tr>
+<tr>
+<td>Accelerators</td>
+<td>NVIDIA CDI and <code>render</code> group, only when a GPU is present</td>
+<td>skipped with <code>--no-gpu</code></td>
+</tr>
+<tr>
+<td>Opt-ins</td>
+<td>ports below 1024 (<code>--low-ports</code>), VM image building (<code>--with-image-build</code>), scale tuning (<code>--production</code>)</td>
+<td>off by default</td>
+</tr>
+</tbody>
+</table></div>
+<p>To prepare a host for your own build <strong>without downloading any Delonix release</strong>, run the installer
+from your checkout with <code>--no-binary</code>:</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">bash scripts/install.sh --no-binary            # add --no-vm if you do not need VM dependencies
+bash scripts/install.sh --help                 # the full flag list, from the script header
+</code></pre></div>
+<p>With <code>--no-binary</code> the AppArmor profile is written for the directory of the <code>delonix</code> that
+<code>command -v delonix</code> finds (or <code>/usr/local/bin</code> if none) — the same caution as above applies on a
+machine with a released installation. The script uses <code>sudo</code> for the host steps.</p>
+<p>Then ask the binary whether the host is ready (read-only):</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">delonix system doctor     # every prerequisite, and how to fix each; --strict exits non-zero on a failure
+delonix system info       # state root, rootless, cgroup delegation, network infra
+</code></pre></div>
+<p>See <a href="01-environment.html#diagnosing-the-host">01 — Diagnosing the host</a> for what each check means.</p>
+<h3 id="use-an-isolated-state-root">Use an isolated state root<a class="hanchor" href="#use-an-isolated-state-root" aria-label="#">#</a></h3>
+<p>An installed build uses your <strong>real</strong> state root by default: the same containers, networks and
+volumes as the release. Export <code>DELONIX_ROOT</code> and <code>DELONIX_NET_RUNTIME_DIR</code> first (see
+<a href="#isolating-the-engines-state">Isolating the engine's state</a>), and see
+<a href="15-environment-variables.html">15 — Environment variables</a> for every other variable your build reads.</p>
+<h3 id="uninstall-and-roll-back">Uninstall and roll back<a class="hanchor" href="#uninstall-and-roll-back" aria-label="#">#</a></h3>
+<p>There is no uninstall flag in <code>install.sh</code>. Remove what you copied:</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">rm -f ~/.local/bin/delonix ~/.local/bin/delonix-cri ~/.local/bin/delonix-mgmt ~/.local/bin/delonix-mcp
+hash -r
+sudo apparmor_parser -R /etc/apparmor.d/delonix-dev &amp;&amp; sudo rm /etc/apparmor.d/delonix-dev   # if you added it
+</code></pre></div>
+<p>To go back to a released binary, run the installer again; it replaces the binaries in its install
+directory with the release you name:</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/download/install.sh | bash -s -- --user
+curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/download/install.sh | bash -s -- --version vX.Y.Z
+</code></pre></div>
+<p>Completion files and man pages you generated by hand are not removed by either step. Finish with
+<code>delonix --version</code> to confirm the commit you are back on.</p>
 <h2 id="run-the-tests">Run the tests<a class="hanchor" href="#run-the-tests" aria-label="#">#</a></h2>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">cargo test --workspace                       # the whole suite
 cargo test -p delonix-sdn                    # one crate
@@ -475,6 +654,16 @@ not — see <a href="10-contributing-workflow.html#one-worktree-per-task">10</a>
 <ul>
 <li><a href="#clone">Clone</a></li>
 <li><a href="#build">Build</a></li>
+<li><a href="#installing-your-build-locally">Installing your build locally</a><ul>
+<li><a href="#how-delonix-finds-its-server-binaries">How delonix finds its server binaries</a></li>
+<li><a href="#option-a-run-it-from-the-worktree-safest">Option A — run it from the worktree (safest)</a></li>
+<li><a href="#option-b-install-for-your-user-in-localbin">Option B — install for your user in ~/.local/bin</a></li>
+<li><a href="#option-c-system-install-in-usrlocalbin">Option C — system install in /usr/local/bin</a></li>
+<li><a href="#preparing-the-host">Preparing the host</a></li>
+<li><a href="#use-an-isolated-state-root">Use an isolated state root</a></li>
+<li><a href="#uninstall-and-roll-back">Uninstall and roll back</a></li>
+</ul>
+</li>
 <li><a href="#run-the-tests">Run the tests</a></li>
 <li><a href="#the-gates-ci-runs">The gates CI runs</a></li>
 <li><a href="#isolating-the-engines-state">Isolating the engine's state</a></li>

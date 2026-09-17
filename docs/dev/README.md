@@ -48,10 +48,11 @@ Pages in this handbook mix two kinds of content:
 | If you want to… | Read, in order |
 |---|---|
 | **Start from zero, with no one to ask** | [00](00-start-here.md) (keep [14](14-glossary.md) open) → the path below that matches your change |
-| **Send a first PR** (a CLI fix, a docs fix, a small feature) | [00](00-start-here.md) → [01](01-environment.md) → [02](02-build-and-test.md) → [10](10-contributing-workflow.md) → [12](12-coding-conventions.md) → [06](06-crates.md) for the crate you touch |
+| **Send a first PR** (a CLI fix, a docs fix, a small feature) | [00](00-start-here.md) → [01](01-environment.md) → [02](02-build-and-test.md) (keep [15](15-environment-variables.md) at hand) → [10](10-contributing-workflow.md) → [12](12-coding-conventions.md) → [06](06-crates.md) for the crate you touch |
 | **Understand the engine in depth** | [03](03-rust-primer.md) → [04](04-cloud-native-primer.md) → [13](13-cloud-native-standards.md) → [05](05-architecture.md) → [06](06-crates.md) → [07](07-system-design-interview.md) |
-| **Work on VMs or VM images** | [01](01-environment.md) → [02](02-build-and-test.md) → [08](08-delonixfile-and-vmfile.md) → [09](09-microvm-setup.md) → the `delonix-vm` section of [06](06-crates.md) |
+| **Work on VMs or VM images** | [01](01-environment.md) → [02](02-build-and-test.md) → [08](08-delonixfile-and-vmfile.md) → [09](09-microvm-setup.md) → the `delonix-vm` section of [06](06-crates.md) → the VM tuning section of [15](15-environment-variables.md) |
 | **Change how documentation is produced** | [11](11-publishing-docs.md) |
+| **Configure, isolate or tune a run** (state roots, logging, escape hatches, providers) | [02 — Isolating the engine's state](02-build-and-test.md#isolating-the-engines-state) → [15](15-environment-variables.md) |
 
 ## Pages
 
@@ -72,6 +73,7 @@ Pages in this handbook mix two kinds of content:
 | 12 | [Coding conventions](12-coding-conventions.md) | How code in this repository is written, and the checklist reviewers apply |
 | 13 | [Cloud native standards](13-cloud-native-standards.md) | The cloud-native standards a change is measured against |
 | 14 | [Glossary](14-glossary.md) | The engine and cloud-native terms you meet here, with their Delonix meaning and where to read more |
+| 15 | [Environment variables](15-environment-variables.md) | Every `DELONIX_*` variable the code reads: who reads it, what it changes, its default, and which ones lower a boundary |
 
 Other references you will be pointed to: [`ARCHITECTURE.md`](../../ARCHITECTURE.md) (C4 diagrams),
 [`docs/adr/`](../adr/README.md) (architecture decisions), [`SECURITY.md`](../../SECURITY.md)
