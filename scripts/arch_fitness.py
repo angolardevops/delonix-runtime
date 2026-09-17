@@ -52,7 +52,8 @@ FOUNDATION, CONTEXT, ADAPTER, PROVIDER, INTERFACE, BIN = (
 # these become; this table is updated in the phase that renames each one, so the
 # gate keeps working during the move instead of after it.
 LAYERS = {
-    "delonix-runtime-core": FOUNDATION,  # → delonix-model + delonix-state + delonix-telemetry (P3)
+    "delonix-runtime-core": FOUNDATION,  # → delonix-model + delonix-state (P3)
+    "delonix-telemetry": ADAPTER,
     "delonix-model": FOUNDATION,
     "delonix-stack": CONTEXT,
     "delonix-compute": CONTEXT,
@@ -124,17 +125,6 @@ EXCEPTIONS = {
         "P5",
         "the MCP server reuses the management API's collector; both move onto the "
         "application layer",
-    ),
-    ("heavy", "delonix-runtime-core", "opentelemetry"): (
-        "P3",
-        "telemetry leaves the foundation crate for delonix-telemetry",
-    ),
-    ("heavy", "delonix-runtime-core", "opentelemetry_sdk"): ("P3", "idem"),
-    ("heavy", "delonix-runtime-core", "opentelemetry-otlp"): ("P3", "idem"),
-    ("heavy", "delonix-runtime-core", "tracing-opentelemetry"): ("P3", "idem"),
-    ("heavy", "delonix-runtime-core", "prometheus-client"): (
-        "P3",
-        "the metric registry leaves the foundation crate for delonix-telemetry",
     ),
 }
 

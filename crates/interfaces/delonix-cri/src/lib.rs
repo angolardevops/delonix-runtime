@@ -164,7 +164,7 @@ impl ImageService for DelonixImage {
         })
         .await
         .map_err(st)??;
-        delonix_runtime_core::metrics::inc_image_pulled();
+        delonix_telemetry::metrics::inc_image_pulled();
         Ok(Response::new(PullImageResponse { image_ref: img.id }))
     }
 
@@ -271,7 +271,7 @@ async fn metrics_handler() -> impl axum::response::IntoResponse {
             axum::http::header::CONTENT_TYPE,
             "application/openmetrics-text; version=1.0.0; charset=utf-8",
         )],
-        delonix_runtime_core::metrics::encode(),
+        delonix_telemetry::metrics::encode(),
     )
 }
 

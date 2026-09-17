@@ -788,7 +788,7 @@ pub fn run_pod_sandbox(
         cni_conf,
     };
     write_rec(&sb_dir(base), &id, &rec)?;
-    delonix_runtime_core::metrics::inc_pod_sandbox_created();
+    delonix_telemetry::metrics::inc_pod_sandbox_created();
     Ok(Response::new(RunPodSandboxResponse { pod_sandbox_id: id }))
 }
 
@@ -1224,7 +1224,7 @@ pub fn create_container(
         env_file0,
     };
     write_rec(&ct_dir(base), &id, &rec)?;
-    delonix_runtime_core::metrics::inc_container_created();
+    delonix_telemetry::metrics::inc_container_created();
     Ok(Response::new(CreateContainerResponse { container_id: id }))
 }
 

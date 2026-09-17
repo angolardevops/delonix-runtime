@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 
 fn main() {
-    delonix_runtime_core::telemetry::init();
+    delonix_telemetry::telemetry::init();
     let base = std::env::var_os("DELONIX_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/var/lib/delonix"));

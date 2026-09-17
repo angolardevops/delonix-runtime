@@ -19,6 +19,7 @@ members = [
     "crates/foundation/delonix-model",
     "crates/contexts/delonix-stack",
     "crates/contexts/delonix-compute",
+    "crates/adapters/delonix-telemetry",
 ]
 
 [workspace.package]
@@ -38,6 +39,7 @@ delonix-runtime-bin = { path = "bins/delonix-runtime-bin" }
 delonix-image = { path = "crates/adapters/delonix-image" }
 delonix-net = { path = "crates/adapters/delonix-net" }
 delonix-net-rules = { path = "crates/foundation/delonix-net-rules" }
+delonix-telemetry = { path = "crates/adapters/delonix-telemetry" }
 delonix-vm = { path = "crates/adapters/delonix-vm" }
 delonix-volume = { path = "crates/adapters/delonix-volume" }
 delonix-cri = { path = "crates/interfaces/delonix-cri" }
