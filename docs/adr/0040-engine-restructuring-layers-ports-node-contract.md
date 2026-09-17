@@ -220,7 +220,9 @@ exists twice. The CLI links the servers and the servers exec the CLI back.
   `exec`, not a child process: the server takes the pid, so units, signals and `kill`
   reach it. Units may keep calling the binary directly. First slice: `delonix serve cri`
   → `delonix-cri` (which already existed as a duplicate `[[bin]]`). Second: `delonix mcp`
-  → `delonix-mcp` (`bins/delonix-mcp-bin`, installed by default). A server that runs the
+  → `delonix-mcp` (`bins/delonix-mcp-bin`, installed by default). Third: `delonix serve api`
+  → `delonix-mgmt` (`bins/delonix-mgmt-bin`); `delonix` still links the `delonix-mgmt` crate
+  for its `dashstats` collector only, which moves to the application layer in P5. A server that runs the
   CLI back resolves it through `delonix_runtime_core::dispatch::cli_bin` —
   `DELONIX_BIN`, which `delonix` sets to itself, then the sibling, then the `PATH` —
   never its own executable, which is the server.

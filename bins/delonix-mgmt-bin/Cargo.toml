@@ -1,0 +1,19 @@
+[package]
+name = "delonix-mgmt-bin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# `delonix-mgmt` — the local management API's own executable (ADR-0040 D2.4 as
+# amended). People reach it as `delonix serve api`, which runs this binary.
+[[bin]]
+name = "delonix-mgmt"
+path = "src/main.rs"
+
+[dependencies]
+delonix-mgmt = { workspace = true }
+delonix-runtime-core = { workspace = true }
+delonix-telemetry = { workspace = true }
+
+[lints]
+workspace = true

@@ -48,9 +48,10 @@ struct AppState {
 /// Starts the management API listening on a unix socket (blocking). `addr` accepts
 /// a path or `unix:///path`. Same pattern as `delonix-cri::serve_blocking`.
 pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), Error> {
-    // The binary for the mutations is the executable ITSELF (this process IS the
-    // `delonix api`); fall back to "delonix" in PATH if `current_exe` fails.
-    let bin = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("delonix"));
+    // The CLI the mutations run: never this process's own executable, which is the
+    // API server (`delonix serve api` runs `delonix-mgmt`) and would serve again
+    // instead of running the command.
+    let bin = delonix_runtime_core::dispatch::cli_bin();
     serve_blocking_with(base, bin, addr)
 }
 
