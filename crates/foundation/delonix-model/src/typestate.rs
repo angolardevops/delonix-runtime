@@ -1,14 +1,14 @@
 //! Typestate of a container's lifecycle (Sprint 5 — Damas: *correctness by
 //! construction*). The states are **types**, and the illegal transitions **do not
 //! compile** — instead of being caught (or not) at runtime by a `match` over
-//! a [`Status`](crate::Status).
+//! a [`Status`].
 //!
 //! The model: `Created → Running → Stopped → (restart) Created`. Each transition
 //! **consumes** the previous phase, so an obsolete phase cannot be reused.
 //!
 //! ```
-//! use delonix_runtime_core::typestate::Phase;
-//! use delonix_runtime_core::Status;
+//! use delonix_model::typestate::Phase;
+//! use delonix_model::records::Status;
 //!
 //! let created = Phase::new("abc123");            // Phase<Created>
 //! assert_eq!(created.status(), Status::Created);
@@ -22,25 +22,25 @@
 //! The invalid transitions are **compilation errors**, not runtime bugs:
 //!
 //! ```compile_fail
-//! use delonix_runtime_core::typestate::Phase;
+//! use delonix_model::typestate::Phase;
 //! let created = Phase::new("abc123"); // Phase<Created>
 //! created.stop(0);                    // ERROR: `stop` only exists on Phase<Running>
 //! ```
 //!
 //! ```compile_fail
-//! use delonix_runtime_core::typestate::Phase;
+//! use delonix_model::typestate::Phase;
 //! let running = Phase::new("abc123").start(1); // Phase<Running>
 //! running.start(2);                            // ERROR: `start` only exists on Phase<Created>
 //! ```
 //!
 //! ```compile_fail
-//! use delonix_runtime_core::typestate::Phase;
+//! use delonix_model::typestate::Phase;
 //! let created = Phase::new("abc123");
 //! let _running = created.start(1);
 //! created.start(2);                  // ERROR: `created` was consumed by the 1st transition
 //! ```
 
-use crate::Status;
+use crate::records::Status;
 use std::marker::PhantomData;
 
 /// State: created, still without a `pid`.
@@ -85,7 +85,7 @@ impl Phase<Created> {
             _state: PhantomData,
         }
     }
-    /// The corresponding [`Status`](crate::Status).
+    /// The corresponding [`Status`].
     pub fn status(&self) -> Status {
         Status::Created
     }
@@ -105,7 +105,7 @@ impl Phase<Running> {
             _state: PhantomData,
         }
     }
-    /// The corresponding [`Status`](crate::Status).
+    /// The corresponding [`Status`].
     pub fn status(&self) -> Status {
         Status::Running
     }
@@ -125,7 +125,7 @@ impl Phase<Stopped> {
             _state: PhantomData,
         }
     }
-    /// The corresponding [`Status`](crate::Status): code 0 → Stopped, ≠0 → Failed.
+    /// The corresponding [`Status`]: code 0 → Stopped, ≠0 → Failed.
     pub fn status(&self) -> Status {
         match self.code.unwrap_or(0) {
             0 => Status::Stopped,

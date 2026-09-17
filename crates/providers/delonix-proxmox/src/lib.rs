@@ -1566,9 +1566,13 @@ mod tests {
     #[test]
     fn lock_contention_has_a_ceiling() {
         let mut n = 0;
+        // A ceiling of 40 backoffs, not 6: with 30ms against 5ms a parallel test
+        // run could spend the whole budget in the first attempt and never retry —
+        // the assertion below then failed intermittently for a reason that has
+        // nothing to do with the retry logic.
         let r: Result<()> = retry_on_lock(
             "stop",
-            Duration::from_millis(30),
+            Duration::from_millis(200),
             Duration::from_millis(5),
             || {
                 n += 1;
