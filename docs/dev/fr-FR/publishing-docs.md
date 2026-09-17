@@ -1,10 +1,12 @@
-<!-- translated-from: publishing-docs.md sha256:e316defd623bc513315abb1d853f15bf4c8e89b7109b08426173bf6d6561e222 -->
+<!-- translated-from: publishing-docs.md sha256:45aa3ffa5c56ae32f97e6b5e14411d079130649b52c07c87bac2a7ad5ecab6f2 -->
 # Publier la documentation
+
+**Avant de lire :** [Flux de contribution](contributing-workflow.md), [Releases et stabilité](releases-and-stability.md) (ce que fait un tag poussé — la section *Ce qui se passe au moment de la release* de cette page en est la moitié documentation) et la [table généré vs écrit à la main](project-structure.md#generated-vs-hand-written) dans Structure du projet.
 
 La documentation de ce dépôt est soit **générée à partir du code** (puis vérifiée par un gate
 (contrôle CI)), soit **écrite à la main** (puis relue). Cette page explique ce qui relève de quoi,
 comment chaque partie est publiée, et ce que vous devez faire lorsque votre modification touche la
-documentation.
+documentation. Après elle, vous savez, pour toute modification, quel générateur exécuter et quels fichiers commiter avec lui.
 
 ## Où elle est publiée
 
@@ -144,3 +146,7 @@ résultat de cette relecture est « rien à mettre à jour », énoncé explic
 | Une décision structurelle | un ADR dans `docs/adr/` (voir [Flux de contribution](contributing-workflow.md#when-to-write-an-adr)) |
 | Une fonctionnalité visible par l'utilisateur | décrivez-la dans la PR afin qu'elle puisse figurer dans les prochaines notes de release |
 | La manière dont les contributeurs construisent, testent ou travaillent | la page concernée de ce manuel |
+
+---
+
+**Suivant :** [Normes cloud native, couche par couche](cloud-native-standards.md) — la partie référence : chaque norme cloud native, ce qu'elle exige, et la conformité du moteur avec ses dates.

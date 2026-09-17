@@ -1,9 +1,12 @@
-<!-- translated-from: publishing-docs.md sha256:e316defd623bc513315abb1d853f15bf4c8e89b7109b08426173bf6d6561e222 -->
+<!-- translated-from: publishing-docs.md sha256:45aa3ffa5c56ae32f97e6b5e14411d079130649b52c07c87bac2a7ad5ecab6f2 -->
 # Publicar a documentação
+
+**Antes de leres:** [Fluxo de contribuição](contributing-workflow.md), [Releases e estabilidade](releases-and-stability.md) (o que uma tag empurrada faz — a secção *O que acontece na altura da release* desta página é a sua metade de documentação) e a [tabela gerado vs escrito à mão](project-structure.md#generated-vs-hand-written) em Estrutura do projecto.
 
 A documentação deste repositório ou é **gerada a partir do código** (e depois verificada por um
 gate) ou é **escrita à mão** (e depois revista). Esta página explica qual é qual, como cada uma é
-publicada, e o que tens de fazer quando a tua mudança afecta a documentação.
+publicada, e o que tens de fazer quando a tua mudança afecta a documentação. Depois dela sabes,
+para qualquer mudança, que gerador correr e que ficheiros fazer commit com ele.
 
 ## Onde é publicada
 
@@ -142,3 +145,7 @@ resultado dessa revisão é «nada a actualizar», dito explicitamente.
 | Uma decisão estrutural | um ADR em `docs/adr/` (ver [Fluxo de contribuição](contributing-workflow.md#when-to-write-an-adr)) |
 | Uma funcionalidade visível ao utilizador | descreve-a no PR para que possa entrar nas próximas notas de release |
 | Como os contribuidores constroem, testam ou trabalham | a página relevante deste manual |
+
+---
+
+**Seguinte:** [Normativos cloud native, camada a camada](cloud-native-standards.md) — a parte de referência: cada normativo cloud native, o que exige, e a conformidade do motor com datas.
