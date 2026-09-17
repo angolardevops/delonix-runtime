@@ -15,6 +15,29 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
+/// The compute context's `StorageProvider` port, backed by the volume store under
+/// `root`: each `-v` specification becomes a mount.
+pub struct HostVolumes {
+    /// The state root the volume store lives under.
+    pub root: PathBuf,
+}
+
+impl delonix_compute::ports::StorageProvider for HostVolumes {
+    fn resolve_mounts(&self, volumes: &[String], namespace: &str) -> Result<Vec<Mount>> {
+        // No store is opened (or created) for a container without volumes.
+        if volumes.is_empty() {
+            return Ok(Vec::new());
+        }
+        let store = VolumeStore::open(&self.root)?;
+        // Namespace-aware: a share declared in this workload's namespace wins over a
+        // global volume of the same name, and a name in BOTH is refused, not guessed.
+        volumes
+            .iter()
+            .map(|spec| store.resolve_spec_in(spec, namespace))
+            .collect()
+    }
+}
+
 /// Metadata of a named volume.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Volume {

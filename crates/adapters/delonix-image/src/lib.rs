@@ -14,6 +14,7 @@ pub mod internal_registry;
 pub mod load;
 pub mod overlay;
 pub mod registry;
+pub mod rootfs_user;
 pub mod save;
 pub mod sign;
 

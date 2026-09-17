@@ -11,7 +11,6 @@ use delonix_runtime::{self as runtime, RunSpec};
 use delonix_runtime_core::{
     generate_id, Container, Error, Health, HealthConfig, HealthState, Result, Status, Store,
 };
-use delonix_volume::VolumeStore;
 use serde::{Deserialize, Serialize};
 
 use super::manifest::{self, ManifestDoc};
@@ -2007,92 +2006,23 @@ fn ensure_apparmor(profile: &str) -> Result<()> {
     Ok(())
 }
 
-/// Resolve the `-v` mounts (the CLI never builds `Mount` by hand — it delegates
-/// to `VolumeStore`, which already knows how to tell a named volume from a bind
-/// mount from `:ro`).
-fn resolve_mounts(volumes: &[String], namespace: &str) -> Result<Vec<delonix_runtime_core::Mount>> {
-    if volumes.is_empty() {
-        return Ok(Vec::new());
-    }
-    let vstore = VolumeStore::open(super::util::state_root())?;
-    // Namespace-aware: a `ShareVolume` declared in this workload's namespace wins over a
-    // global volume of the same name, and a name that exists in BOTH is refused rather
-    // than guessed (`VolumeStore::resolve_spec_in`).
-    volumes
-        .iter()
-        .map(|spec| vstore.resolve_spec_in(spec, namespace))
-        .collect()
-}
-
-/// Resolve `--user <uid[:gid]|name[:group]>` into `(uid, Option<gid>)`.
-///
-/// The user part is a number (used verbatim) or a name looked up in the image's
-/// `/etc/passwd` — returning its uid AND its primary gid, which becomes the gid
-/// when no `:group` is given (like docker/`RunAsUsername`, where the runtime MUST
-/// resolve the user in the image). The optional group part is a number or a name
-/// looked up in `/etc/group`. A name that doesn't exist in the image is an error
-/// (never invented) — the CRI `RunAsUserName` contract requires it.
+/// `--user <uid[:gid]|name[:group]>` resolved against the image rootfs
+/// ([`delonix_image::rootfs_user`]), worded for the terminal.
 fn resolve_run_user(rootfs: &str, spec: &str) -> Result<(u32, Option<u32>)> {
-    let (user_part, group_part) = match spec.split_once(':') {
-        Some((u, g)) => (u, Some(g)),
-        None => (spec, None),
-    };
-    if user_part.is_empty() {
-        return Err(Error::Invalid(super::po::t("--user: empty user").into()));
-    }
-    let (uid, primary_gid) = if let Ok(n) = user_part.parse::<u32>() {
-        (n, None)
-    } else {
-        let (uid, gid) = passwd_lookup(rootfs, user_part).ok_or_else(|| {
-            Error::Invalid(super::po::tf(
+    use delonix_image::rootfs_user::{resolve_user, UserLookupError};
+    resolve_user(std::path::Path::new(rootfs), spec).map_err(|e| {
+        Error::Invalid(match e {
+            UserLookupError::EmptyUser => super::po::t("--user: empty user").into(),
+            UserLookupError::NoSuchUser(user) => super::po::tf(
                 "--user: user '{user}' does not exist in the image (/etc/passwd)",
-                &[("user", user_part)],
-            ))
-        })?;
-        (uid, Some(gid))
-    };
-    let gid = match group_part {
-        Some(g) if !g.is_empty() => Some(if let Ok(n) = g.parse::<u32>() {
-            n
-        } else {
-            group_lookup(rootfs, g).ok_or_else(|| {
-                Error::Invalid(super::po::tf(
-                    "--user: group '{group}' does not exist in the image (/etc/group)",
-                    &[("group", g)],
-                ))
-            })?
-        }),
-        _ => primary_gid,
-    };
-    Ok((uid, gid))
-}
-
-/// Look up `name` in `<rootfs>/etc/passwd`, returning `(uid, primary_gid)`.
-/// Format: `name:passwd:uid:gid:gecos:home:shell`.
-fn passwd_lookup(rootfs: &str, name: &str) -> Option<(u32, u32)> {
-    let content = std::fs::read_to_string(format!("{rootfs}/etc/passwd")).ok()?;
-    for line in content.lines() {
-        let mut f = line.split(':');
-        if f.next() == Some(name) {
-            let uid = f.nth(1)?.parse().ok()?; // skip passwd field, then uid
-            let gid = f.next()?.parse().ok()?;
-            return Some((uid, gid));
-        }
-    }
-    None
-}
-
-/// Look up `name` in `<rootfs>/etc/group`, returning its gid.
-/// Format: `name:passwd:gid:members`.
-fn group_lookup(rootfs: &str, name: &str) -> Option<u32> {
-    let content = std::fs::read_to_string(format!("{rootfs}/etc/group")).ok()?;
-    for line in content.lines() {
-        let mut f = line.split(':');
-        if f.next() == Some(name) {
-            return f.nth(1)?.parse().ok(); // skip passwd field, then gid
-        }
-    }
-    None
+                &[("user", &user)],
+            ),
+            UserLookupError::NoSuchGroup(group) => super::po::tf(
+                "--user: group '{group}' does not exist in the image (/etc/group)",
+                &[("group", &group)],
+            ),
+        })
+    })
 }
 
 /// Parses one `--device-*-bps`/`--device-*-iops` value into a plain number.
@@ -2392,16 +2322,6 @@ impl delonix_compute::ports::ImageStore for CliRunPorts<'_> {
 
     fn resolve_user(&self, rootfs: &str, spec: &str) -> Result<(u32, Option<u32>)> {
         resolve_run_user(rootfs, spec)
-    }
-}
-
-impl delonix_compute::ports::StorageProvider for CliRunPorts<'_> {
-    fn resolve_mounts(
-        &self,
-        volumes: &[String],
-        namespace: &str,
-    ) -> Result<Vec<delonix_runtime_core::Mount>> {
-        resolve_mounts(volumes, namespace)
     }
 }
 
@@ -2775,7 +2695,9 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         namespace.clone(),
         reexec,
         &read_ports,
-        &read_ports,
+        &delonix_volume::HostVolumes {
+            root: super::util::state_root(),
+        },
         &delonix_runtime::cdi::HostDevices,
         &read_ports,
     )?;
@@ -5532,7 +5454,13 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
         }
     }
     for spec in &o.volume_add {
-        let mounts = resolve_mounts(std::slice::from_ref(spec), &c.namespace)?;
+        let mounts = delonix_compute::ports::StorageProvider::resolve_mounts(
+            &delonix_volume::HostVolumes {
+                root: super::util::state_root(),
+            },
+            std::slice::from_ref(spec),
+            &c.namespace,
+        )?;
         for m in mounts {
             if c.mounts.iter().any(|x| x.target == m.target) {
                 return Err(Error::Invalid(format!(
