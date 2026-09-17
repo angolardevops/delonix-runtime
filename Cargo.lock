@@ -743,6 +743,7 @@ name = "delonix-cri"
 version = "3.1.0"
 dependencies = [
  "axum",
+ "delonix-compute",
  "delonix-image",
  "delonix-net",
  "delonix-runtime",
