@@ -204,7 +204,7 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 The `exec` is `cmd/serve.rs::exec_server` (and `cmd/mcp.rs`); the run-back is the CRI's
 `delonix()` helper and `write_run_spec` in `crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs`,
 `run_cli` in `delonix-mgmt` and `run_cli_blocking` in `delonix-mcp`, all resolving the CLI through
-`delonix_runtime_core::dispatch::cli_bin`. The CRI also writes its own records under
+`delonix_node::dispatch::cli_bin`. The CRI also writes its own records under
 `cri/` — see [State on disk](#state-on-disk).
 
 ### One detached container
@@ -385,8 +385,8 @@ flowchart TB
   IF["Interfaces<br/><small>crates/interfaces/ — CRI, management API, MCP</small>"]
   AD["Adapters<br/><small>crates/adapters/ — kernel, SDN, OCI, VMs, state</small>"]
   PR["Providers<br/><small>crates/providers/ — one remote management API each</small>"]
-  CX["Contexts<br/><small>crates/contexts/ — use cases and ports</small>"]
-  FD["Foundation<br/><small>crates/foundation/ — model, records, pure rules</small>"]
+  CX["Contexts<br/><small>crates/contexts/ — use cases, ports, workload records</small>"]
+  FD["Foundation<br/><small>crates/foundation/ — errors, plain-data records, pure rules</small>"]
   BIN -->|"composes one interface"| IF
   BIN -->|"wires adapters to ports"| AD
   IF -->|"calls use cases"| CX
@@ -405,7 +405,10 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 
 - **Foundation** (`crates/foundation/`) — shared, pure-ish types every layer may name.
 - **Contexts** (`crates/contexts/`) — one crate per bounded context, named after the published
-  API groups: use cases and the **ports** they need. No kernel, no HTTP, no provider.
+  API groups: use cases and the **ports** they need. No HTTP, no provider, and no mounts,
+  processes or network configuration. `delonix-node` is the one context that reads the host
+  directly — `/proc`, `/sys`, `kill(pid, 0)`, `SO_PEERCRED` — because those questions are what it
+  exists to answer once.
 - **Adapters** (`crates/adapters/`) and **providers** (`crates/providers/`) — implement ports:
   kernel, SDN, OCI store, VM backends, persisted state; providers bring an HTTP client for one
   remote target.
@@ -461,45 +464,51 @@ binaries → P4 providers → P5 node API → P6 CRI → P7 observability). What
   through the `VmNetwork` port, and the CRI, management API and MCP servers became their own
   executables. Four adapters carry their ADR-0040 names: `delonix-scanner` (was `delonix-scan`),
   `delonix-oci` (was `delonix-image`), `delonix-sdn` (was `delonix-net`) and `delonix-linux` (was
-  `delonix-runtime`, the container engine crate). `delonix-runtime-core` is shrinking in two
-  directions: **#404** moved the stores, atomic writes and the encrypted secret store out to the
-  `delonix-state` adapter, and **#405** moved the plain-data records down to `delonix-model`,
-  which `delonix-runtime-core` re-exports under the old paths (so no consumer changed). What stays
-  in `delonix-runtime-core` is the `Container` and `Vm` records, `Mount`, health and cgroup-parent
-  types, pid liveness (`is_alive`, `safe_to_signal`), `generate_id`, and the `events`,
-  `dispatch`, `peer_cred`, `virt` and `workload_net` modules. The adapters that open records or
+  `delonix-runtime`, the container engine crate). **#406 removed `delonix-runtime-core`**, the
+  foundation crate that used to hold everything shared, in steps: **#404** moved the stores,
+  atomic writes and the encrypted secret store to the `delonix-state` adapter; **#405** moved the
+  plain-data records (`Status`, `ContainerFw`/`FwRule`, `typestate`) down to `delonix-model`; and
+  **#406** moved the `Container` and `Vm` records (with `Mount`, health and cgroup-parent types,
+  `DELONIX_SLICE` and `workload_net`) to `delonix-compute`, and the event log, `virt`,
+  `peer_cred`, `dispatch` and the host/process helpers (`now_unix`, `is_alive`,
+  `safe_to_signal`, `generate_id`, …) to a new context, `delonix-node`. No re-exports were left
+  behind. The adapters that open records or
   write files through `delonix-state` (`delonix-linux`, `delonix-vm`, `delonix-sdn`,
   `delonix-oci`, `delonix-volume`) are declared exceptions until P4 gives them a
   `StateRepository` port (`scripts/arch_fitness.py`).
 - **P4–P7 have not started.** The remaining exceptions in the table above name those phases.
 
-### The foundation and persisted state, after #404 and #405
+### Records, node helpers and persisted state, after #406
 
 > **Legend** — white box with red border: engine crate (or group of crates) · cylinder, blue:
 > files under the state root · solid arrow: *uses*, with what is used.
 
-Types live in the foundation, the files that hold them live in one adapter, and every other
-adapter reaches those files through that adapter.
+Plain-data types live in the foundation, the workload records in the Compute context, the node's
+own helpers in the Node context, and the files that hold records in one adapter that every other
+adapter reaches those files through.
 
 ```mermaid
 flowchart TB
-  CX["contexts<br/><small>delonix-compute, -stack, -security-runtime</small>"]
+  CX["other contexts<br/><small>delonix-stack, -security-runtime</small>"]
   AD["other adapters<br/><small>delonix-linux, -oci, -sdn, -vm, -volume</small>"]
   STATE["delonix-state<br/><small>adapter: Store, JsonStore, write_atomic, SecretStore, CredVault</small>"]
-  CORE["delonix-runtime-core<br/><small>Container, Vm, Mount, events, dispatch, peer_cred</small>"]
+  COMPUTE["delonix-compute<br/><small>context: Container, Vm, Mount, DELONIX_SLICE, workload_net</small>"]
+  NODE["delonix-node<br/><small>context: events, dispatch, peer_cred, virt, safe_to_signal</small>"]
   MODEL["delonix-model<br/><small>Error and DX codes, exit classes, secret model, Status, FwRule, typestate</small>"]
   NR["delonix-net-rules<br/><small>Cidr, bridge_name — zero dependencies</small>"]
   FILES[("state root files<br/><small>containers/, vms/, secrets/, tunnels/</small>")]
-  CX -->|"Container, events, now_unix"| CORE
-  CX -->|"Secret, parse_env_file"| MODEL
+  CX -->|"events, now_unix"| NODE
+  CX -->|"Error, Result"| MODEL
   AD -->|"Store, JsonStore, write_atomic — declared exceptions until P4"| STATE
-  AD -->|"records and pid checks"| CORE
+  AD -->|"Container, Vm, ports, workload_net"| COMPUTE
+  AD -->|"pid checks, events, in_initial_userns"| NODE
   AD -->|"Cidr, bridge_name"| NR
-  STATE -->|"stores Container"| CORE
+  STATE -->|"stores Container"| COMPUTE
   STATE -->|"errors convert into Error; re-exports the secret model"| MODEL
-  CORE -->|"re-exports Error, Status, FwRule, typestate"| MODEL
+  COMPUTE -->|"safe_to_signal"| NODE
+  COMPUTE -->|"Status, ContainerFw, parse_env_file"| MODEL
   STATE -->|"flock, temp file + rename"| FILES
-  class CX,AD,STATE,CORE,MODEL,NR block
+  class CX,AD,STATE,COMPUTE,NODE,MODEL,NR block
   class FILES store
 classDef person fill:#191513,stroke:#191513,color:#ffffff
 classDef engine fill:#cc2823,stroke:#8f1b17,color:#ffffff
@@ -508,10 +517,11 @@ classDef external fill:#e1ddda,stroke:#8a817c,color:#191513
 classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 ```
 
-Checked against: `crates/foundation/delonix-runtime-core/src/lib.rs` (`pub use
-delonix_model::records::{…}` and `pub use delonix_model::{typestate, Error, Result}`);
+Checked against: `crates/contexts/delonix-compute/src/record.rs` (`use
+delonix_model::records::{…}`, `use delonix_node::safe_to_signal`) and `src/lib.rs` (`pub use
+record::*`); `crates/contexts/delonix-node/src/lib.rs` and `host.rs`;
 `crates/foundation/delonix-model/src/records.rs` and `typestate.rs`;
-`crates/adapters/delonix-state/src/store.rs` (`use delonix_runtime_core::Container`), `secret.rs`,
+`crates/adapters/delonix-state/src/store.rs` (`use delonix_compute::Container`), `secret.rs`,
 `cred_vault.rs`, `error.rs`. `delonix-net-rules` is used by `delonix-sdn` and `delonix-vm` only;
 `delonix-volume` and `delonix-scanner` also name `delonix-model` directly (the generated graph
 below has every edge).
@@ -618,10 +628,10 @@ flowchart TB
   subgraph foundation["Foundation"]
     delonix_model["delonix-model"]
     delonix_net_rules["delonix-net-rules"]
-    delonix_runtime_core["delonix-runtime-core"]
   end
   subgraph context["Contexts"]
     delonix_compute["delonix-compute"]
+    delonix_node["delonix-node"]
     delonix_security_runtime["delonix-security-runtime"]
     delonix_stack["delonix-stack"]
   end
@@ -650,30 +660,36 @@ flowchart TB
     delonix_runtime_bin["delonix-runtime-bin"]
   end
   delonix_compute --> delonix_model
-  delonix_compute --> delonix_runtime_core
+  delonix_compute --> delonix_node
   delonix_cri --> delonix_compute
   delonix_cri --> delonix_linux
+  delonix_cri --> delonix_model
+  delonix_cri --> delonix_node
   delonix_cri --> delonix_oci
-  delonix_cri --> delonix_runtime_core
   delonix_cri --> delonix_sdn
   delonix_cri --> delonix_state
   delonix_cri --> delonix_telemetry
   delonix_linux --> delonix_compute
-  delonix_linux --> delonix_runtime_core
+  delonix_linux --> delonix_model
+  delonix_linux --> delonix_node
   delonix_linux --> delonix_state
+  delonix_mcp --> delonix_compute
   delonix_mcp --> delonix_linux
   delonix_mcp --> delonix_mgmt
-  delonix_mcp --> delonix_runtime_core
+  delonix_mcp --> delonix_model
+  delonix_mcp --> delonix_node
   delonix_mcp --> delonix_sdn
   delonix_mcp --> delonix_state
   delonix_mcp --> delonix_vm
   delonix_mcp --> delonix_volume
   delonix_mcp_bin --> delonix_mcp
-  delonix_mcp_bin --> delonix_runtime_core
+  delonix_mcp_bin --> delonix_node
   delonix_mcp_bin --> delonix_telemetry
+  delonix_mgmt --> delonix_compute
   delonix_mgmt --> delonix_linux
+  delonix_mgmt --> delonix_model
+  delonix_mgmt --> delonix_node
   delonix_mgmt --> delonix_oci
-  delonix_mgmt --> delonix_runtime_core
   delonix_mgmt --> delonix_scanner
   delonix_mgmt --> delonix_sdn
   delonix_mgmt --> delonix_state
@@ -681,20 +697,23 @@ flowchart TB
   delonix_mgmt --> delonix_vm
   delonix_mgmt --> delonix_volume
   delonix_mgmt_bin --> delonix_mgmt
-  delonix_mgmt_bin --> delonix_runtime_core
+  delonix_mgmt_bin --> delonix_node
   delonix_mgmt_bin --> delonix_telemetry
+  delonix_node --> delonix_model
   delonix_oci --> delonix_compute
-  delonix_oci --> delonix_runtime_core
+  delonix_oci --> delonix_model
+  delonix_oci --> delonix_node
   delonix_oci --> delonix_state
-  delonix_proxmox --> delonix_runtime_core
+  delonix_proxmox --> delonix_compute
+  delonix_proxmox --> delonix_model
   delonix_proxmox --> delonix_vm
   delonix_runtime_bin --> delonix_compute
   delonix_runtime_bin --> delonix_linux
   delonix_runtime_bin --> delonix_mgmt
   delonix_runtime_bin --> delonix_model
+  delonix_runtime_bin --> delonix_node
   delonix_runtime_bin --> delonix_oci
   delonix_runtime_bin --> delonix_proxmox
-  delonix_runtime_bin --> delonix_runtime_core
   delonix_runtime_bin --> delonix_scanner
   delonix_runtime_bin --> delonix_sdn
   delonix_runtime_bin --> delonix_security_runtime
@@ -704,25 +723,28 @@ flowchart TB
   delonix_runtime_bin --> delonix_truenas
   delonix_runtime_bin --> delonix_vm
   delonix_runtime_bin --> delonix_volume
-  delonix_runtime_core --> delonix_model
   delonix_scanner --> delonix_model
   delonix_scanner --> delonix_oci
   delonix_sdn --> delonix_compute
+  delonix_sdn --> delonix_model
   delonix_sdn --> delonix_net_rules
-  delonix_sdn --> delonix_runtime_core
+  delonix_sdn --> delonix_node
   delonix_sdn --> delonix_state
-  delonix_security_runtime --> delonix_runtime_core
-  delonix_stack --> delonix_runtime_core
+  delonix_security_runtime --> delonix_model
+  delonix_security_runtime --> delonix_node
+  delonix_stack --> delonix_model
+  delonix_state --> delonix_compute
   delonix_state --> delonix_model
-  delonix_state --> delonix_runtime_core
-  delonix_truenas --> delonix_runtime_core
+  delonix_state --> delonix_node
+  delonix_truenas --> delonix_model
   delonix_vm --> delonix_compute
+  delonix_vm --> delonix_model
   delonix_vm --> delonix_net_rules
-  delonix_vm --> delonix_runtime_core
+  delonix_vm --> delonix_node
   delonix_vm --> delonix_state
   delonix_volume --> delonix_compute
   delonix_volume --> delonix_model
-  delonix_volume --> delonix_runtime_core
+  delonix_volume --> delonix_node
   delonix_volume --> delonix_state
   class delonix_compute block
   class delonix_cri iface
@@ -733,10 +755,10 @@ flowchart TB
   class delonix_mgmt_bin engine
   class delonix_model store
   class delonix_net_rules store
+  class delonix_node block
   class delonix_oci block
   class delonix_proxmox external
   class delonix_runtime_bin engine
-  class delonix_runtime_core store
   class delonix_scanner block
   class delonix_sdn block
   class delonix_security_runtime block
@@ -781,7 +803,7 @@ flowchart TB
      `__rmtree`/`__ovlhold`/… entry points).
    - The servers still build some CLI invocations (`delonix-mgmt`, `delonix-mcp`'s
      `run_cli_blocking`, the CRI's `delonix()` helper), resolving the CLI through
-     `delonix_runtime_core::dispatch::cli_bin` (`DELONIX_BIN`, then the sibling `delonix`, then
+     `delonix_node::dispatch::cli_bin` (`DELONIX_BIN`, then the sibling `delonix`, then
      the `PATH`) — never their own executable.
    ADR-0040 D2.4/D5 plans a `delonix-launcher` executable receiving a typed spec, so these become
    use-case calls plus one spawn.
@@ -826,20 +848,20 @@ There is no database. State is files under one **state root**:
 | `ipam/` | per-prefix address leases | `delonix-sdn/src/ipam.rs` |
 | `cri/{sandboxes,containers}/` | the CRI's own records | `delonix-cri/src/runtime_svc/lifecycle.rs` (`sb_dir`, `ct_dir`) |
 | `clusters/` | kubeconfigs, keys and PKI of clusters | `cmd/cluster.rs` |
-| `events.jsonl` | append-only event log | `delonix_runtime_core::events` |
+| `events.jsonl` | append-only event log | `delonix_node::events` |
 
 Concurrency is handled by the file system, because several processes (the CLI, the CRI server,
 a supervisor) mutate the same records: writes are atomic (temporary file + `rename`,
 `delonix_state::write_atomic`), and read-modify-write goes through `Store::update` /
 `JsonStore::update`, which take an exclusive `flock` and **refuse** to proceed without it. All
-of that lives in the `delonix-state` adapter. The record types it stores are foundation types:
-`Container` and `Vm` in `delonix-runtime-core`, and the plain-data parts of a record (`Status`,
-`ContainerFw`/`FwRule`) in `delonix-model`, re-exported by `delonix-runtime-core`. The network
+of that lives in the `delonix-state` adapter. The record types it stores are defined elsewhere:
+`Container` and `Vm` in the `delonix-compute` context, and the plain-data parts of a record
+(`Status`, `ContainerFw`/`FwRule`) in the `delonix-model` foundation crate. The network
 infra has its own `FileLock` around `ensure_up`, `teardown`, `acquire`, `release` and the reapers.
 
 Because nothing resident watches processes, a record saying `Running` can be stale. Readers
 reconcile: `delonix_linux::reconcile_status` checks the pid together with its start time
-(`delonix_runtime_core::safe_to_signal`) so a recycled pid is never mistaken for the container.
+(`delonix_node::safe_to_signal`) so a recycled pid is never mistaken for the container.
 
 ## Level 4 — Two flows, as sequences
 
@@ -988,7 +1010,7 @@ sequenceDiagram
 | Images | `delonix-oci/src/{registry,cas,image,overlay,build}.rs` |
 | VMs | `delonix-vm/src/lib.rs` (`VmBackend`, `builtin_backends`, `register_backend`, `select_backend`), `cloudinit.rs`; `cmd/vm.rs`, `cmd/vmimage.rs` |
 | Declarative apply | `delonix-stack/src/{kinds,reconcile}.rs`; `cmd/stack.rs`, `cmd/manifest.rs` |
-| Records, errors, persisted state | `delonix-runtime-core/src/lib.rs` (`Container`, `Vm`), `delonix-model/src/{records,error,exitcode}.rs`, `delonix-state/src/{store,secret}.rs` |
+| Records, errors, persisted state | `delonix-compute/src/record.rs` (`Container`, `Vm`), `delonix-model/src/{records,error,exitcode}.rs`, `delonix-state/src/{store,secret}.rs` |
 | CRI | `delonix-cri/src/lib.rs::serve_blocking`, `runtime_svc.rs`, `runtime_svc/lifecycle.rs` |
 | Management API / MCP | `delonix-mgmt/src/lib.rs`, `delonix-mcp/src/lib.rs` |
 | Node contract | `proto/delonix/node/v1/`, `scripts/contract_gate.py`, `docs/api/openapi.yaml` |

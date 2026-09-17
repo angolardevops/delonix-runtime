@@ -115,7 +115,8 @@ Honest status: no crate references `delonix.node.v1` yet; local programs use the
 > **Legend** — white box with red border: engine building block · outlined region: a layer ·
 > cylinder, blue: state on disk · solid arrow: call or data flow, labelled.
 
-The domain's rules never import the kernel, and one adapter owns every file under the state root.
+The domain's rules never mount, spawn or configure the network, and one adapter owns every file
+under the state root.
 
 ```mermaid
 flowchart TB
@@ -125,9 +126,10 @@ flowchart TB
     API["local API server<br/><small>delonix-mgmt</small>"]
     MCP["MCP server<br/><small>delonix-mcp</small>"]
   end
-  subgraph CX["contexts — use cases and ports, no kernel"]
-    COMPUTE["compute<br/><small>RunOpts, resolve_run, launch, ports</small>"]
+  subgraph CX["contexts — use cases, ports and records"]
+    COMPUTE["compute<br/><small>Container, Vm, RunOpts, resolve_run, launch, ports</small>"]
     STACK["stack<br/><small>Kind table, 3-way plan</small>"]
+    NODE["node<br/><small>event log, pid and host checks, server dispatch</small>"]
   end
   subgraph AD["adapters and providers — implement ports"]
     LINUX["kernel<br/><small>clone, mounts, cgroups, seccomp</small>"]
@@ -141,7 +143,7 @@ flowchart TB
   AD -->|"implement ports"| CX
   IF -->|"call directly, today"| AD
   STA -->|"flock, temp file + rename"| FILES
-  class CLI,CRI,API,MCP,COMPUTE,STACK,LINUX,SDN,OCI,VMS,STA block
+  class CLI,CRI,API,MCP,COMPUTE,STACK,NODE,LINUX,SDN,OCI,VMS,STA block
   class FILES store
 classDef person fill:#191513,stroke:#191513,color:#ffffff
 classDef engine fill:#cc2823,stroke:#8f1b17,color:#ffffff
@@ -154,8 +156,8 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
   enforced by `scripts/arch_fitness.py`.
 - **State** is JSON records and content-addressed files under one root, with atomic writes and
   `flock` around read-modify-write — no database, because there is no daemon to own one. The
-  record *types* are foundation types (`Container`/`Vm` in `delonix-runtime-core`; `Status` and the
-  firewall records in `delonix-model`); the *files* are opened only through the `delonix-state`
+  record *types* are defined apart from them (`Container`/`Vm` in the `delonix-compute` context; `Status`
+  and the firewall records in the `delonix-model` foundation crate); the *files* are opened only through the `delonix-state`
   adapter.
 - **Processes** exist per workload (a supervisor that is the container's parent, the init, a log
   shim) and per node when networking is used (a *pin* that only holds namespaces, a restartable
@@ -163,7 +165,7 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 
 **Where it lives in the code:** `scripts/arch_fitness.py` (`LAYERS`, `ALLOWED`);
 `crates/adapters/delonix-state/src/store.rs` (`Store::update`, `JsonStore::update`,
-`write_atomic`); `crates/foundation/delonix-runtime-core/src/lib.rs` (`Container`, `Vm`);
+`write_atomic`); `crates/contexts/delonix-compute/src/record.rs` (`Container`, `Vm`);
 `crates/foundation/delonix-model/src/records.rs` (`Status`, `ContainerFw`, `FwRule`); `crates/contexts/delonix-compute/src/{ports,launch}.rs`;
 `crates/adapters/delonix-linux/src/supervise.rs` (`run_supervised`).
 
@@ -532,7 +534,7 @@ sequenceDiagram
 
 **Why not add a small daemon for events and restarts?**
 Because every resident process is a failure domain and an attack surface. The event log is an
-append-only file (`delonix_runtime_core::events`), restarts belong to the per-container
+append-only file (`delonix_node::events`), restarts belong to the per-container
 supervisor, and boot persistence is a systemd unit per workload (`delonix system boot`). A daemon
 needs its own ADR with evidence of what the alternatives could not do — see
 [ADR-0034](../adr/0034-csi-daemon-conflict.md) for a case where the question came up, and

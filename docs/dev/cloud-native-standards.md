@@ -241,7 +241,7 @@ exec/attach/port-forward, stats) and an `ImageService`. The kubelet connects to 
   kubelet killed pods in a loop.
 - **Kubelet resource model**: [ADR-0038](../adr/0038-cri-follows-kubelet-resource-model.md). The
   kubelet's `cgroup_parent` is validated by `KubeCgroupParent::parse`
-  (`crates/foundation/delonix-runtime-core/src/lib.rs`) and consumed in
+  (`crates/contexts/delonix-compute/src/record.rs`) and consumed in
   `crates/contexts/delonix-compute/src/run.rs`; `delonix-linux` has `transient_scope_argv` for
   placing a container in a systemd scope under a pod slice.
 - **Capability ceiling**: `CapCeiling` (`src/cap_ceiling.rs`), configured by
@@ -672,7 +672,7 @@ to the calling session.
 
 **How Delonix implements it.** `crates/adapters/delonix-linux/src/lib.rs`:
 
-- Root mode: leaves under `delonix.slice` (`DELONIX_SLICE` in `delonix-runtime-core`).
+- Root mode: leaves under `delonix.slice` (`DELONIX_SLICE` in `delonix-compute`).
 - Rootless: `user_service_base` and `try_delegated_base` place containers under
   `user@<uid>.service/dlx-containers`.
 - `cgroup_limits_apply` answers "will limits apply here?" without starting a container. Rootless,
