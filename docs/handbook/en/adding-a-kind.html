@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Adding a Kind · Delonix Runtime — Contributor handbook</title>
+<script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<style>
+:root{
+  /* The NgolaCloud design system (delonix-web packages/ui/src/tokens.css):
+     light theme by default, dark as the secondary theme. */
+  --bg:#fcfaf8;--surface:#f5f3f1;--surface-2:#eeeae8;--card:#ffffff;--ink:#191513;--ink-2:#524b49;--muted:#675e59;
+  --line:#e1ddda;--line-soft:#ece8e5;
+  --accent:#cc2823;--accent-ink:#b70000;--accent-soft:#ffe2dc;--focus:#cc2823;
+  --code-bg:#1a1614;--code-ink:#ede7e3;--code-line:#2e2825;--code-label:#a39993;
+  --warn-bg:rgba(239,168,49,.16);--warn-line:#c9820f;--warn-ink:#6b4400;
+  --topbar:rgba(255,255,255,.82);
+  --shadow:0 4px 12px rgba(38,28,22,.08),0 1px 3px rgba(38,28,22,.06);
+  --f-display:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
+  --f-body:var(--f-display);
+  --f-mono:"JetBrains Mono",ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
+  --r-sm:4px;--r:6px;--r-lg:8px;
+  --header:60px;color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0b0b0c;--surface:#131315;--surface-2:#19191c;--card:#161618;--ink:#ededee;--ink-2:#b6b6ba;--muted:#87878c;
+  --line:#262629;--line-soft:#1d1d20;
+  --accent:#ee5a24;--accent-ink:#ff6c39;--accent-soft:rgba(238,90,36,.18);--focus:#ee5a24;
+  --code-bg:#101012;--code-ink:#dedee2;--code-line:#26262a;--code-label:#87878c;
+  --warn-bg:rgba(226,161,58,.12);--warn-line:#8a6a2a;--warn-ink:#e2c07a;
+  --topbar:rgba(11,11,12,.82);
+  --shadow:0 8px 24px rgba(0,0,0,.5),0 1px 4px rgba(0,0,0,.4);color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0b0b0c;--surface:#131315;--surface-2:#19191c;--card:#161618;--ink:#ededee;--ink-2:#b6b6ba;--muted:#87878c;
+  --line:#262629;--line-soft:#1d1d20;
+  --accent:#ee5a24;--accent-ink:#ff6c39;--accent-soft:rgba(238,90,36,.18);--focus:#ee5a24;
+  --code-bg:#101012;--code-ink:#dedee2;--code-line:#26262a;--code-label:#87878c;
+  --warn-bg:rgba(226,161,58,.12);--warn-line:#8a6a2a;--warn-ink:#e2c07a;
+  --topbar:rgba(11,11,12,.82);
+  --shadow:0 8px 24px rgba(0,0,0,.5),0 1px 4px rgba(0,0,0,.4);color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-padding-top:calc(var(--header) + 16px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.7 var(--f-body);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+a{color:var(--accent-ink);text-decoration:none}
+a:hover{text-decoration:underline;text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion: reduce){*{scroll-behavior:auto!important;transition:none!important}}
+
+/* Header */
+.top{position:sticky;top:0;z-index:30;height:var(--header);display:flex;align-items:center;gap:16px;
+  padding-inline:20px;background:var(--topbar);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px;color:var(--ink);font:700 16px/1 var(--f-display);white-space:nowrap}
+.brand:hover{text-decoration:none}
+.brand .mark{width:26px;height:26px;border-radius:var(--r);background:var(--accent);display:grid;place-items:center;color:#fff;font:800 13px/1 var(--f-display)}
+.brand .sub{font:500 14px/1 var(--f-body);color:var(--muted)}
+.brand .sep{width:1px;height:18px;background:var(--line)}
+.searchbtn{flex:1;max-width:460px;margin-inline:auto;display:flex;align-items:center;gap:10px;height:38px;padding-inline:12px;
+  border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--muted);font:15px var(--f-body);cursor:pointer;min-width:0}
+.searchbtn:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.searchbtn svg{flex:none}
+.searchbtn .label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.searchbtn kbd{margin-left:auto}
+kbd{font:600 11px/1 var(--f-mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:3px 6px;background:var(--bg);color:var(--muted);white-space:nowrap}
+.actions{display:flex;align-items:center;gap:6px}
+select.lang{height:36px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink);font:14px var(--f-body);padding-inline:8px}
+.iconbtn{height:36px;width:36px;display:grid;place-items:center;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink-2);cursor:pointer}
+.iconbtn:hover{color:var(--accent-ink);border-color:color-mix(in srgb,var(--accent) 45%,var(--line));text-decoration:none}
+.menubtn{display:none}
+
+/* Frame */
+.frame{display:grid;grid-template-columns:280px minmax(0,1fr) 240px}
+nav.side{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:24px 16px 48px 20px;border-right:1px solid var(--line)}
+nav.side,aside.toc,.sres{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+nav.side .group{margin-bottom:18px}
+nav.side .gtitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);padding:0 10px 8px}
+nav.side a{display:flex;gap:10px;align-items:baseline;padding:6px 10px;border-radius:8px;color:var(--ink-2);font-size:15px;line-height:1.35}
+nav.side a:hover{background:var(--surface);text-decoration:none;color:var(--ink)}
+nav.side a .n{flex:none;width:18px;font:500 12px/1.35 var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+nav.side a.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
+nav.side a.on .n{color:var(--accent-ink)}
+main{min-width:0;padding:40px clamp(20px,3.5vw,56px) 80px}
+.content{max-width:1120px;margin-inline:auto}
+
+aside.toc{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:40px 20px 40px 8px;font-size:13.5px}
+aside.toc .ttitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+aside.toc ul{list-style:none;margin:0;padding:0}
+aside.toc ul ul{padding-left:12px}
+aside.toc li{margin:0}
+aside.toc a{display:block;padding:4px 0 4px 12px;border-left:2px solid var(--line);color:var(--muted);line-height:1.4}
+aside.toc a:hover{color:var(--ink);text-decoration:none}
+aside.toc a.active{color:var(--accent-ink);border-left-color:var(--accent);font-weight:600}
+
+/* Type */
+.kicker{font:700 12px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--accent-ink);margin:0 0 12px}
+h1,h2,h3,h4{font-family:var(--f-display);color:var(--ink);text-wrap:balance;letter-spacing:-.01em}
+h1{font-size:2.35rem;line-height:1.15;font-weight:800;margin:0 0 20px}
+h2{font-size:1.55rem;line-height:1.25;font-weight:700;margin:56px 0 14px}
+h3{font-size:1.18rem;line-height:1.3;font-weight:700;margin:36px 0 10px}
+h4{font-size:1rem;margin:28px 0 8px}
+h2 code,h3 code{font-size:.9em}
+.hanchor{margin-left:8px;color:var(--muted);opacity:0;font-weight:500;text-decoration:none}
+h2:hover .hanchor,h3:hover .hanchor,.hanchor:focus-visible{opacity:1}
+p,ul,ol{margin:0 0 16px}
+li{margin:4px 0}li>p{margin:0 0 8px}
+strong{font-weight:650;color:var(--ink)}
+hr{border:0;height:1px;background:var(--line);margin:40px 0}
+code{font:.86em/1.5 var(--f-mono);background:var(--surface-2);border:1px solid var(--line);padding:.08em .38em;border-radius:6px;overflow-wrap:break-word}
+a code{color:inherit}
+a.src code{border-color:color-mix(in srgb,var(--accent) 30%,var(--line));background:var(--accent-soft)}
+a.src:hover{text-decoration:none}a.src:hover code{border-color:var(--accent)}
+.crate-src{margin-left:10px;vertical-align:middle;font:600 11px/1 var(--f-display);letter-spacing:.04em;text-transform:uppercase;
+  border:1px solid var(--line);border-radius:999px;padding:5px 9px;color:var(--muted)}
+.crate-src:hover{color:var(--accent-ink);border-color:var(--accent);text-decoration:none}
+
+/* Blocks */
+blockquote{margin:20px 0;padding:2px 0 2px 18px;border-left:3px solid var(--line);color:var(--ink-2)}
+blockquote p:last-child{margin-bottom:0}
+blockquote.say{border:1px solid var(--line-soft);padding:14px 18px;border-radius:var(--r-lg);background:var(--card);margin:18px 0}
+blockquote.say .speaker{display:inline-block;margin-right:8px;font:700 11px/1 var(--f-display);letter-spacing:.08em;text-transform:uppercase;
+  padding:5px 8px;border-radius:999px;vertical-align:1px}
+blockquote.say-interviewer .speaker{background:var(--surface-2);color:var(--muted);border:1px solid var(--line)}
+blockquote.say-candidate{background:var(--accent-soft)}
+blockquote.say-candidate .speaker{background:var(--accent);color:#fff}
+.notice{display:flex;gap:10px;align-items:baseline;background:var(--warn-bg);border:1px solid var(--warn-line);color:var(--warn-ink);
+  border-radius:12px;padding:12px 16px;margin:0 0 28px;font-size:15px}
+.notice a{color:inherit;font-weight:600;text-decoration:underline}
+.code{margin:18px 0 22px;border-radius:var(--r-lg);background:var(--code-bg);border:1px solid var(--code-line);overflow:hidden}
+.code-head{display:flex;align-items:center;justify-content:space-between;gap:8px;height:36px;padding:0 8px 0 14px;border-bottom:1px solid var(--code-line)}
+.code-head .lang{font:600 11px/1 var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--code-label)}
+.copy{display:flex;align-items:center;gap:6px;height:26px;padding:0 9px;border:1px solid var(--code-line);border-radius:7px;background:transparent;
+  color:var(--code-label);font:600 12px var(--f-body);cursor:pointer}
+.copy:hover{color:#fff;border-color:#3a4555}
+.copy.done{color:#7ee2a8;border-color:#2f5d45}
+.code pre{margin:0;padding:14px 16px 22px;overflow-x:auto;color:var(--code-ink);font:13.5px/1.6 var(--f-mono);
+  scrollbar-width:thin;scrollbar-color:#3a4555 transparent;color-scheme:dark}
+.code pre::-webkit-scrollbar{height:8px}.code pre::-webkit-scrollbar-thumb{background:#3a4555;border-radius:8px}
+.code pre code{background:none;border:0;padding:0;font:inherit;color:inherit;overflow-wrap:normal}
+.code pre code.hljs{background:none;padding:0}
+pre.mermaid{margin:22px 0;padding:18px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--card);text-align:center;overflow-x:auto;font-family:var(--f-body)}
+.tablewrap{margin:18px 0 24px;overflow-x:auto;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:14.5px;line-height:1.5}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+th{background:var(--surface);font:700 12.5px/1.3 var(--f-display);letter-spacing:.02em;color:var(--ink-2);white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:color-mix(in srgb,var(--surface) 60%,transparent)}
+td code{font-size:.82em;overflow-wrap:normal}
+/* A table's first column names the thing (a variable, a crate, a flag): never break it. */
+td:first-child code{white-space:nowrap}
+th:first-child,td:first-child{white-space:nowrap}
+
+/* Pager + footer */
+.pager{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:64px}
+.pager a{display:block;padding:14px 16px;border:1px solid var(--line);border-radius:12px;color:var(--ink);font:600 15px/1.35 var(--f-display)}
+.pager a:hover{border-color:var(--accent);text-decoration:none}
+.pager a span{display:block;font:500 12px/1 var(--f-body);color:var(--muted);margin-bottom:6px}
+.pager .next{text-align:right;grid-column:2}
+.foot{margin-top:28px;padding-top:18px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:8px 16px;font-size:13.5px;color:var(--muted)}
+
+/* Search */
+#search{position:fixed;inset:0;z-index:60;background:rgba(10,13,18,.45);display:flex;align-items:flex-start;justify-content:center;padding:12vh 16px 16px}
+#search[hidden]{display:none}
+.sbox{width:min(680px,100%);background:var(--bg);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
+.sfield{display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--line);color:var(--muted)}
+.sfield input{flex:1;height:56px;border:0;outline:0;background:transparent;color:var(--ink);font:17px var(--f-body)}
+.sres{list-style:none;margin:0;padding:8px;max-height:56vh;overflow-y:auto}
+.sres a{display:block;padding:10px 12px;border-radius:10px;color:var(--ink)}
+.sres a:hover,.sres a.sel{background:var(--accent-soft);text-decoration:none}
+.sres .sp{display:block;font:600 11px/1 var(--f-display);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+.sres .sh{font:600 15px/1.35 var(--f-display)}
+.sres .st{display:block;margin-top:3px;font-size:13.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sres mark{background:none;color:var(--accent-ink);font-weight:700}
+.sempty{padding:18px;color:var(--muted)}
+.shelp{display:flex;gap:16px;padding:10px 16px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+
+/* Narrow screens */
+@media (max-width:1280px){.frame{grid-template-columns:256px minmax(0,1fr)}aside.toc{display:none}}
+@media (max-width:860px){
+  .frame{display:block}.menubtn{display:grid}.brand .sub,.brand .sep{display:none}
+  nav.side{position:fixed;top:var(--header);left:0;bottom:0;width:min(300px,86vw);height:auto;z-index:40;background:var(--bg);
+    transform:translateX(-102%);transition:transform .2s ease;box-shadow:var(--shadow)}
+  body.nav-open nav.side{transform:none}
+  main{padding:28px 16px 64px}
+  h1{font-size:1.9rem}h2{font-size:1.35rem}
+  .searchbtn kbd,.searchbtn .label{display:none}.searchbtn{flex:none;width:38px;justify-content:center;margin-inline:auto 0;padding:0}
+  .pager{grid-template-columns:1fr}.pager .next{grid-column:1}
+  .top{gap:8px;padding-inline:12px}
+  .brand{font-size:15px;min-width:0}
+  select.lang{width:78px;padding-inline:4px;text-overflow:ellipsis}
+}
+@media (max-width:480px){
+  .actions .ghbtn{display:none}
+  .brand .word{display:none}
+}
+</style></head>
+<body>
+<header class="top">
+  <button class="iconbtn menubtn" type="button" aria-label="Menu"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  <a class="brand" href="index.html" aria-label="Handbook home"><span class="mark">D</span><span class="word">Delonix Runtime</span><span class="sep"></span><span class="sub">Contributor handbook</span></a>
+  <button class="searchbtn" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span class="label">Search the handbook…</span><kbd>Ctrl K</kbd></button>
+  <div class="actions">
+    <select class="lang" id="lang" aria-label="Language"><option value="../en/adding-a-kind.html" selected>EN · English</option><option value="../pt-AO/adding-a-kind.html">PT-AO · Português (Angola)</option><option value="../fr-FR/adding-a-kind.html">FR-FR · Français</option><option value="../zh-CN/adding-a-kind.html">ZH-CN · 简体中文</option></select>
+    <button class="iconbtn themebtn" type="button" aria-label="Toggle colour theme" title="Toggle colour theme"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
+    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+  </div>
+</header>
+<div class="frame">
+<nav class="side" aria-label="Contributor handbook"><div class="group"><div class="gtitle">Overview</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">Get started</div><a href="start-here.html"><span class="n">01</span><span>Start here</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">Foundations</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Cloud native primer</span></a><a href="rust-primer.html"><span class="n">05</span><span>Rust primer for this codebase</span></a></div><div class="group"><div class="gtitle">Set up &amp; build</div><a href="environment.html"><span class="n">06</span><span>Preparing your environment</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>The crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images &amp; microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile and VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">Operate &amp; debug</div><a href="troubleshooting.html"><span class="n">14</span><span>Troubleshooting</span></a></div><div class="group"><div class="gtitle">Contributing</div><a href="coding-conventions.html"><span class="n">15</span><span>Coding conventions</span></a><a class="on" aria-current="page" href="adding-a-kind.html"><span class="n">16</span><span>Adding a Kind</span></a><a href="contributing-workflow.html"><span class="n">17</span><span>Contribution workflow</span></a><a href="releases-and-stability.html"><span class="n">18</span><span>Releases and stability</span></a><a href="publishing-docs.html"><span class="n">19</span><span>Publishing the documentation</span></a></div><div class="group"><div class="gtitle">Reference</div><a href="cloud-native-standards.html"><span class="n">20</span><span>Cloud native standards, layer by layer</span></a><a href="environment-variables.html"><span class="n">21</span><span>Environment variables (DELONIX_*)</span></a><a href="glossary.html"><span class="n">22</span><span>Glossary</span></a></div></nav>
+<main><div class="content">
+<p class="kicker">Contributing</p>
+<h1 id="adding-a-kind">Adding a Kind</h1>
+<p><strong>Before you read:</strong> <a href="coding-conventions.html">Coding conventions</a>, <a href="architecture.html">Architecture</a> and <a href="crates.html#delonix-stack">The crates</a> — this page assumes you know what <code>delonix-stack</code> owns and why planning is pure.</p>
+<p>A Kind is a declarative resource this engine understands — <code>Container</code>, <code>Volume</code>, <code>Service</code>,
+and so on (<code>delonix api-resources</code> lists them all). Adding one touches more than a single
+<code>match</code> arm: the table that describes what the Kind IS, the code that applies it, and the
+reconciler wiring that lets <code>stack plan</code>/<code>apply</code> treat it like every other Kind. This page
+walks through that in order, with a real Kind — <strong><code>Service</code></strong> (ADR-0032) — as the worked
+example throughout, because it is the most recently added Kind and every file cited below is
+read from the tree, not from memory of an older layout.</p>
+<h2 id="the-one-table-a-kind-has-to-answer">The one table a Kind has to answer<a class="hanchor" href="#the-one-table-a-kind-has-to-answer" aria-label="#">#</a></h2>
+<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> is the single source of what a Kind is. Its own
+module doc explains why it exists: before this table, the same facts about a Kind lived in six
+separate lists (<code>KINDS</code>, <code>CONVERGING_KINDS</code>, <code>TEARDOWN_KINDS</code>, <code>kind_honors_namespace</code>, the
+<code>DECLARATIVOS</code> of the wait test, and the arms of <code>presence()</code>), and they drifted — <code>Vm</code>,
+<code>FirewallPolicy</code> and <code>ShareVolume</code> once gained a reconciler adapter and stayed <em>out</em> of
+<code>CONVERGING_KINDS</code>, so the converge step silently skipped them while their own <code>apply</code> kept the
+resource looking correct through the wrong path.</p>
+<p>Adding a Kind starts with one <code>KindFacts</code> row:</p>
+<div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-rust">pub const SERVICE: &amp;str = &quot;Service&quot;;
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-rust">KindFacts {
+    kind: SERVICE,
+    plural: &quot;services&quot;,
+    short: &amp;[&quot;svc&quot;],
+    api_version: &quot;networking.delonix.io/v1alpha1&quot;,
+    domain: Domain::NetConnectivity,
+    form: Form::Primary,
+    in_stack: true,
+    converges: true,
+    teardown: true,
+    namespaced: Namespaced::Always,
+    presence: Presence::Registry,
+},
+</code></pre></div>
+<p>Each field is a decision, not a formality:</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Question it answers</th>
+<th>Getting it wrong</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kind</code></td>
+<td>The name, as a <code>const</code> — never a bare string literal. A rename touching every call site was measured at <strong>106 occurrences across ten files</strong> before this table existed; a <code>const</code> makes a typo a compile error instead of a silently unreachable <code>match</code> arm (a mistyped <code>&amp;'static str</code> pattern degrades to a catch-all <em>binding</em>, which the crate's own doc-comment on <code>SECRET</code>/<code>NETWORK</code>/etc. calls out by name).</td>
+<td>A second Kind answering to nobody, or a rename that misses a site with no build error.</td>
+</tr>
+<tr>
+<td><code>plural</code></td>
+<td>The word <code>delonix get &lt;plural&gt;</code> accepts. Its own field, not <code>kind</code> + <code>"s"</code> — <code>Dependency</code>→<code>dependencies</code> and <code>Ingress</code>→<code>ingresses</code> do not follow that rule.</td>
+<td><code>delonix get services</code> (correct) vs. a guessed <code>delonix get servicess</code>.</td>
+</tr>
+<tr>
+<td><code>short</code></td>
+<td>Accepted abbreviations. Sparse on purpose — a test enforces global uniqueness, so a shortname that collides with another Kind's fails the build rather than silently shadowing it.</td>
+<td>Two Kinds answering to the same three letters.</td>
+</tr>
+<tr>
+<td><code>api_version</code></td>
+<td>The <code>apiVersion</code> a manifest writes, split by domain (<code>compute.delonix.io/…</code>, <code>networking.delonix.io/…</code>, …) since ADR-0020. A column, not a shared constant, precisely so Kinds can move to the split scheme one at a time.</td>
+<td>A Kind stuck on the legacy <code>delonix.io/v1</code> string, or the wrong group.</td>
+</tr>
+<tr>
+<td><code>domain</code></td>
+<td>The area of action, shown as the <code>DOMAIN</code> column of <code>stack ls</code>/<code>plan --fields</code>. The three networking ones are split on purpose: <code>NetConnectivity</code> answers "does a path exist", <code>NetPolicy</code> answers "is traffic on it permitted" — merging them would hide that <code>NetworkRoute</code> opens a path while <code>FirewallPolicy</code> decides whether to let traffic through it.</td>
+<td>A domain that answers a different question than the Kind actually acts on.</td>
+</tr>
+<tr>
+<td><code>form</code></td>
+<td>What a document of this Kind becomes: <code>Primary</code> (its own apply, survives the load), <code>Sugar(target)</code> (rewritten into another Kind at load time, disappears), <code>Aggregate</code> (expands into the documents it contains, like <code>Stack</code>), <code>Compat(target)</code> (a foreign schema — <code>Ingress</code> is <code>networking.k8s.io/v1</code> — compiled onto another Kind's mechanism, and unlike <code>Sugar</code> it <em>survives</em> the load), or <code>Sunset(target)</code> (still primary, but a successor is announced; used when rewriting would silently change what the engine <em>does</em> — <code>Container</code> cannot lower into a one-member <code>Pod</code> because a Pod always builds a shared netns, which is a different runtime shape).</td>
+<td>Choosing <code>Sugar</code> for something that must keep its own apply, or vice versa.</td>
+</tr>
+<tr>
+<td><code>in_stack</code></td>
+<td>Whether <code>stack apply</code> handles it at all. <strong>Rows with <code>in_stack: true</code> must stay a contiguous prefix of the table</strong> — <code>destroy</code> derives its teardown order by reversing the stack order, so a row placed after a non-stack Kind changes the apply order with nobody editing an "order" anywhere. A test (<code>os_kinds_do_stack_sao_um_prefixo_contiguo</code>) enforces this.</td>
+<td>A Kind applied out of dependency order, or a remote-procedure Kind like <code>KubernetesCluster</code> (SSH against hosts that already exist, not a local resource) mistakenly wired into the cycle.</td>
+</tr>
+<tr>
+<td><code>converges</code></td>
+<td>Whether a <em>changed</em> field is really applied, versus "ensure present" only. <code>false</code> is legitimate — <code>Secret</code>'s state is encrypted values a plan will not decrypt to compare — but it needs a reason (see <code>not_converged_reason</code> below); a generic excuse fails a test.</td>
+<td>A Kind that reports <code>!</code> on every plan with a reason that reads as "nobody got to it" when the truth is a property of the resource.</td>
+</tr>
+<tr>
+<td><code>teardown</code></td>
+<td>Whether <code>destroy_one</code> can remove it, so <code>--prune</code> and <code>destroy</code> can promise to. A test (<code>so_um_kind_convergente_tem_teardown</code>) refuses a Kind with <code>teardown: true</code> and <code>converges: false</code> — promising to prune something the plan cannot even represent as changed.</td>
+<td><code>--prune</code> promising removal and <code>destroy_one</code> refusing mid-run, after earlier Kinds in the teardown order are already gone.</td>
+</tr>
+<tr>
+<td><code>namespaced</code></td>
+<td><code>Never</code>, <code>Always</code>, or <code>PerDocument</code>. Not a <code>bool</code> — <code>Volume</code> genuinely has three answers: none for a plain volume, real for one with a <code>share:</code> block; modelling that as <code>true</code> would warn "namespace has no effect" on every ordinary volume, and as <code>false</code> it would warn the same, wrongly, on a share whose namespace decides which directory its data lives in.</td>
+<td>A namespace warning that contradicts what the Kind's own <code>apply</code> does with the field.</td>
+</tr>
+<tr>
+<td><code>presence</code></td>
+<td>How <code>stack ls</code>/<code>wait</code> learn whether the resource is there: <code>Registry</code> (a store answers yes/no), <code>Derived</code> (computed from something else — a Pod is its labelled members), <code>Declarative</code> (nothing to read back; the resource is a directive applied to a target, and <code>presence()</code> answers <code>-</code>, which is <em>not</em> "absent"), or <code>NotObservable</code> (never reaches <code>presence()</code> — it does not survive the load, or is not a local resource).</td>
+<td><code>NetworkRoute</code> once had no arm in <code>presence()</code> at all and fell into <code>_ =&gt; ("?", "unsupported kind")</code> — printed by <code>ls</code>/<code>describe</code>, and read by <code>wait</code> as pending forever.</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>Service</code>'s row reads, in one line: applied by the stack, right after the compute Kinds it
+selects; a real path exists (<code>NetConnectivity</code>); primary; converges without recreating; can be
+torn down; always namespaced; and a real registry backs it.</p>
+<h2 id="the-spec-type-and-the-schema">The spec type and the schema<a class="hanchor" href="#the-spec-type-and-the-schema" aria-label="#">#</a></h2>
+<p>A Kind with a typed manifest spec (most of them) needs a <code>#[derive(Deserialize, Serialize,
+JsonSchema)]</code> struct — <code>ServiceSpec</code> for this example, in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/service.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/service.rs</code></a>
+— and a branch in <code>TYPED_KINDS</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/schema.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/schema.rs</code></a>. That constant feeds
+<code>delonix manifest schema</code> and <code>delonix explain &lt;Kind&gt;.&lt;field&gt;</code>, both generated from the same struct
+(ADR-0007) so the published schema cannot drift from what the code actually accepts. Leaving a
+Kind out is a real, allowed state — <code>Storage</code> and <code>ShareVolume</code> have no schema on purpose,
+because they are rewritten into <code>Volume</code> at load and a second struct would just be a
+hand-maintained copy of <code>Volume</code>'s own fields — but it has to be <em>said</em>: <code>untyped_hint(kind)</code>
+gives the specific redirection, and <code>todo_kind_conhecido_tem_schema_ou_dica</code> (in <code>schema.rs</code>)
+fails the build if a Kind the table knows about is neither in <code>TYPED_KINDS</code> nor has a hint. The
+generic message ("no typed schema for X") reads as a manifest bug; the hint says it is a property
+of the Kind.</p>
+<h2 id="wiring-the-kind-into-the-reconciler">Wiring the Kind into the reconciler<a class="hanchor" href="#wiring-the-kind-into-the-reconciler" aria-label="#">#</a></h2>
+<p>The reconciler's plan (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs::plan</code></a>) is pure — it never
+opens a store or runs a command. Everything that touches the machine lives in
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/stack.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/stack.rs</code></a>, re-exported as <code>cmd::kinds</code>/<code>cmd::reconcile</code> from
+<code>delonix-stack</code> (<code>pub use delonix_stack::kinds;</code> in <code>cmd/mod.rs</code>, so nothing that already called
+<code>cmd::kinds::…</code> had to change when the table moved into its own crate). Four functions in
+<code>stack.rs</code> need a branch for a new Kind that converges:</p>
+<ol>
+<li><strong><code>desired_of</code></strong> — one <code>reconcile::Desired</code> per document, with <code>fields</code> keyed by the
+   <strong>manifest</strong> field name (<code>matchLabels</code>, <code>port</code>), never the internal record name, because the
+   diff is read by whoever wrote the YAML. <code>Service::desired</code> builds this from <code>ServiceSpec</code>.</li>
+<li><strong><code>actual_of</code></strong> — every instance of the Kind that exists on the machine, so <code>--prune</code> has
+   something to compare against. <code>Service::actual</code> reads <code>delonix_sdn::infra::service_list()</code>
+   and fills the <em>same</em> field names <code>desired</code> used, or the diff compares apples to oranges.</li>
+<li><strong><code>converge_and_stamp</code></strong> — applies an <code>Action::Update</code> live. <code>Service</code> reuses its own
+   <code>apply_one</code> here (<code>converge_doc</code>), because that function already fully overwrites the
+   registry entry — the same shape <code>FirewallPolicy</code> and <code>NetworkAccessRule</code> use, and the same
+   reasoning: a separate per-field path would be a second way to write the same record, and two
+   ways start to disagree. A Kind with no live update path at all (<code>Pod</code> has no hot field)
+   returns the explicit "no live update path" error rather than falling through silently.</li>
+<li><strong><code>stamp_all</code></strong> — records ownership (<code>delonix.io/stack</code> label) and the applied field map
+   (<code>delonix.io/last-applied</code> annotation) after a successful apply, which is what turns the next
+   plan into a three-way diff instead of a two-way one. <code>Service::stamp</code> writes these directly on
+   the service's own registry entry — unlike <code>NetworkAccessRule</code>, whose rule lives on a
+   <em>container</em> it does not own, a <code>Service</code> has a record entirely its own.</li>
+</ol>
+<p>And <code>destroy_one</code> needs a branch calling <code>remove_for_replace</code> when <code>teardown: true</code> —
+<code>Service::remove_for_replace</code> just calls <code>delonix_sdn::infra::service_remove</code>.</p>
+<p><strong>None of this is invented per Kind.</strong> <code>run_layers</code> (also in <code>stack.rs</code>) is where a document
+actually gets <em>created</em> the first time, one layer per <code>in_stack</code> Kind in table order
+(<code>layers.run(k::SERVICE, "🧭", || super::service::apply(docs))?</code>) — that <code>apply(docs)</code> function is
+the same one the imperative CLI group already has, reused rather than duplicated.</p>
+<h2 id="fields-that-converge-without-recreating">Fields that converge without recreating<a class="hanchor" href="#fields-that-converge-without-recreating" aria-label="#">#</a></h2>
+<p>If <code>converges: true</code>, add an entry to <code>hot_fields</code> in <code>reconcile.rs</code> naming exactly which
+manifest fields can change <em>live</em>. This table is a promise the executor has to keep — listing a
+field the converge step cannot actually apply turns a clean <code>Replace</code> into an <code>Update</code> that fails
+halfway, which the module doc calls "strictly worse than declaring the replace up front".
+<code>Service</code> lists <code>["matchLabels", "port"]</code>, because <code>service::apply_one</code> already fully overwrites
+the record with no restart needed — nothing about a <code>Service</code> is cold. A field left out of
+<code>hot_fields</code> still shows up in the plan; it just forces <code>Action::Replace</code> (refused without
+<code>--replace &lt;Kind&gt;/&lt;name&gt;</code>) instead of <code>Action::Update</code>.</p>
+<p>Three tests in <code>cmd/stack.rs</code> keep this table honest against the <code>kinds.rs</code> table and against
+each other:</p>
+<ul>
+<li><strong><code>as_tres_listas_de_kinds_convergentes_concordam</code></strong> — every Kind marked <code>converges: true</code> has
+  to appear in the <code>--fields</code> output (<code>compared_fields_table</code>), and vice versa; and a converging
+  Kind can never carry <code>not_converged_reason</code>'s generic excuse.</li>
+<li><strong><code>todo_kind_nao_convergente_tem_razao_especifica</code></strong> — the inverse: every Kind that does <em>not</em>
+  converge needs its own concrete sentence in <code>not_converged_reason</code>, not the shared
+  <code>NOT_CONVERGED_GENERIC</code>.</li>
+<li><strong><code>todo_kind_convergente_tem_teardown_ou_razao</code></strong> — a converging Kind is either removable
+  (<code>kinds::has_teardown</code>) or has an entry in <code>no_teardown_reason</code>; never both, never neither.</li>
+</ul>
+<h2 id="presence-for-lsdescribewait">Presence, for <code>ls</code>/<code>describe</code>/<code>wait</code><a class="hanchor" href="#presence-for-lsdescribewait" aria-label="#">#</a></h2>
+<p>Add a branch to <code>presence(kind, doc, containers)</code> in <code>stack.rs</code> that says whether an instance
+exists and, if so, its status string. <code>Service</code>'s branch checks
+<code>delonix_sdn::infra::service_get(namespace, name)</code> and, if found, counts how many live containers
+its selector currently matches (reading the <em>same</em> index the DNS resolver itself reads, so the
+plan can never disagree with what a client asking for the name actually gets). Two tests guard
+this column specifically:</p>
+<ul>
+<li><strong><code>todo_o_kind_declarativo_de_kinds_tem_braco_no_presence</code></strong> — every Kind whose <code>presence</code> is
+  <code>Declarative</code> really does answer <code>-</code> from <code>presence()</code> (not the fallback <code>"?"</code>/"unsupported
+  kind" that <code>NetworkRoute</code> fell into before it gained a registry of its own).</li>
+<li><strong><code>um_kind_declarativo_nao_fica_pendente_para_sempre</code></strong> — <code>is_pending("-", kind, status)</code> is
+  <code>false</code> for every declarative Kind. <code>stack wait</code> used to read <code>present == "yes"</code> as the only
+  sign of readiness, so a manifest with <em>any</em> declarative Kind burned its whole <code>--timeout</code>
+  waiting for a marker that Kind can never produce.</li>
+</ul>
+<p>If the Kind is namespaced (<code>namespaced != Namespaced::Never</code>), it also needs an entry in
+<code>NAMESPACE_SOURCES</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/complete.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/complete.rs</code></a>) — either <code>NsSource::Store(fn)</code>
+reading the Kind's own store, or <code>NsSource::Via("OtherKind — reason")</code> when the namespace travels
+onto another Kind's record instead (a <code>Pod</code>'s namespace is on its member <code>Container</code>s, for
+example). <code>every_namespaced_kind_declares_a_source</code> fails otherwise — the practical effect of
+missing this is that shell completion for <code>--namespace</code> can never offer a tenant whose only
+resource is the new Kind.</p>
+<h2 id="the-checklist">The checklist<a class="hanchor" href="#the-checklist" aria-label="#">#</a></h2>
+<p>For a Kind that behaves like <code>Service</code> (primary, converges, has teardown, namespaced):</p>
+<ol>
+<li><code>kinds.rs</code> — a <code>pub const</code> name and a <code>KindFacts</code> row.</li>
+<li>A spec struct with <code>JsonSchema</code>, and a branch in <code>TYPED_KINDS</code> (<code>schema.rs</code>) — or an entry in
+   <code>untyped_hint</code> explaining why not.</li>
+<li><code>stack.rs</code> — branches in <code>desired_of</code>, <code>actual_of</code>, <code>converge_and_stamp</code>, <code>stamp_all</code>,
+   <code>destroy_one</code>, <code>presence</code>, and a layer in <code>run_layers</code> calling the Kind's own <code>apply(docs)</code>.</li>
+<li><code>reconcile.rs</code> — a <code>hot_fields</code> entry naming the fields that converge live.</li>
+<li>If the Kind does not converge or cannot be torn down: a specific sentence in
+   <code>not_converged_reason</code> / <code>no_teardown_reason</code> (<code>stack.rs</code>).</li>
+<li>If namespaced: an entry in <code>NAMESPACE_SOURCES</code> (<code>complete.rs</code>).</li>
+<li><code>cargo test -p delonix-runtime-bin -p delonix-stack</code> — the tests named above are what catch a
+   skipped step, not a reviewer reading the diff by eye.</li>
+</ol>
+<p>A Kind that is <code>Sugar</code>/<code>Aggregate</code> (rewritten or expanded at load, like <code>Workload</code> or <code>Stack</code>)
+skips most of this: <code>um_kind_que_baixa_para_outro_nao_pertence_ao_ciclo_do_stack</code> requires
+<code>in_stack: false</code> and <code>converges: false</code> for those forms, and the work instead lives in
+<code>manifest::load</code>, where the rewrite happens.</p>
+<hr />
+<p><strong>Next:</strong> <a href="contributing-workflow.html">Contribution workflow</a> — worktrees, version alignment, the language rule, when to write an ADR, and how to send the change.</p>
+<nav class="pager"><a href="coding-conventions.html"><span>← Previous</span>Coding conventions</a><a class="next" href="contributing-workflow.html"><span>Next →</span>Contribution workflow</a></nav>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adding-a-kind.md" target="_blank" rel="noopener">Edit this page</a><code>docs/dev/adding-a-kind.md</code></footer>
+</div></main>
+<aside class="toc"><p class="ttitle">On this page</p><div class="toc">
+<ul>
+<li><a href="#the-one-table-a-kind-has-to-answer">The one table a Kind has to answer</a></li>
+<li><a href="#the-spec-type-and-the-schema">The spec type and the schema</a></li>
+<li><a href="#wiring-the-kind-into-the-reconciler">Wiring the Kind into the reconciler</a></li>
+<li><a href="#fields-that-converge-without-recreating">Fields that converge without recreating</a></li>
+<li><a href="#presence-for-lsdescribewait">Presence, for ls/describe/wait</a></li>
+<li><a href="#the-checklist">The checklist</a></li>
+</ul>
+</div>
+</aside>
+</div>
+<div id="search" hidden><div class="sbox" role="dialog" aria-modal="true" aria-label="Search">
+<div class="sfield"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="search-input" type="search" placeholder="Search the handbook…" autocomplete="off"><kbd>Esc</kbd></div>
+<ul class="sres"></ul>
+<div class="shelp"><span><kbd>↑</kbd> <kbd>↓</kbd></span><span><kbd>Enter</kbd></span></div></div></div>
+<script>window.HANDBOOK_UI={"copy": "Copy", "copied": "Copied", "no_results": "No results"};</script>
+<script src="search-index.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/ini.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/dockerfile.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/protobuf.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/diff.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/makefile.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/xml.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>
+(function(){
+  const ui = window.HANDBOOK_UI;
+  const root = document.documentElement;
+
+  // Theme: system by default; the toggle cycles light/dark and remembers the choice.
+  function effectiveDark(){ const t = root.getAttribute('data-theme'); return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; }
+  document.querySelectorAll('.themebtn').forEach(function(b){
+    b.addEventListener('click', function(){
+      const next = effectiveDark() ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('delonix-handbook-theme', next); } catch (e) {}
+      renderMermaid();
+    });
+  });
+
+  // Mobile navigation drawer.
+  document.querySelectorAll('.menubtn').forEach(function(b){
+    b.addEventListener('click', function(){ document.body.classList.toggle('nav-open'); });
+  });
+  document.querySelectorAll('nav.side a').forEach(function(a){ a.addEventListener('click', function(){ document.body.classList.remove('nav-open'); }); });
+
+  // Copy buttons live in each code block's header; shell blocks drop a leading "$ ".
+  document.querySelectorAll('.code').forEach(function(box){
+    const btn = box.querySelector('.copy'); if (!btn) return;
+    btn.addEventListener('click', function(){
+      let text = box.querySelector('pre code').innerText;
+      if (box.hasAttribute('data-shell')) text = text.split('\n').map(function(l){ return l.replace(/^\$ /, ''); }).join('\n');
+      navigator.clipboard.writeText(text.replace(/\n$/, '')).then(function(){
+        btn.lastChild.textContent = ui.copied; btn.classList.add('done');
+        setTimeout(function(){ btn.lastChild.textContent = ui.copy; btn.classList.remove('done'); }, 1500);
+      });
+    });
+  });
+  if (window.hljs) document.querySelectorAll('.code pre code:not(.nohighlight)').forEach(function(el){ hljs.highlightElement(el); });
+
+  // Mermaid follows the effective theme, and re-renders when it changes.
+  const diagrams = Array.prototype.slice.call(document.querySelectorAll('pre.mermaid'));
+  diagrams.forEach(function(d){ d.setAttribute('data-src', d.textContent); });
+  function renderMermaid(){
+    if (!window.mermaid || !diagrams.length) return;
+    diagrams.forEach(function(d){ d.removeAttribute('data-processed'); d.textContent = d.getAttribute('data-src'); });
+    mermaid.initialize({startOnLoad:false, securityLevel:'strict', theme: effectiveDark() ? 'dark' : 'neutral',
+      fontFamily:getComputedStyle(document.body).fontFamily,
+      themeVariables:{fontSize:'17px'},
+      flowchart:{useMaxWidth:true, nodeSpacing:28, rankSpacing:44, padding:10},
+      sequence:{useMaxWidth:true}});
+    mermaid.run({nodes: diagrams});
+  }
+  renderMermaid();
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(){ if (!root.getAttribute('data-theme')) renderMermaid(); });
+
+  // "On this page": highlight the section being read.
+  const tocLinks = Array.prototype.slice.call(document.querySelectorAll('aside.toc a'));
+  const byId = {}; tocLinks.forEach(function(a){ byId[decodeURIComponent(a.getAttribute('href').slice(1))] = a; });
+  const heads = Array.prototype.slice.call(document.querySelectorAll('.content h2[id], .content h3[id]')).filter(function(h){ return byId[h.id]; });
+  function spy(){
+    let current = heads.length ? heads[0] : null;
+    const line = 120;
+    heads.forEach(function(h){ if (h.getBoundingClientRect().top <= line) current = h; });
+    tocLinks.forEach(function(a){ a.classList.remove('active'); });
+    if (current) byId[current.id].classList.add('active');
+  }
+  if (heads.length){ document.addEventListener('scroll', spy, {passive:true}); spy(); }
+
+  // Search (Ctrl+K / Cmd+K / "/"): a static index of this language, scored in the browser.
+  const modal = document.getElementById('search'), input = modal.querySelector('input'), list = modal.querySelector('.sres');
+  let selected = 0;
+  function norm(s){ return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+  const index = (window.HANDBOOK_INDEX || []).map(function(r){ return Object.assign({nh: norm(r.h), np: norm(r.p), nt: norm(r.t)}, r); });
+  function esc(s){ return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function mark(s, terms){ let out = esc(s); terms.forEach(function(t){ if (t.length > 1) out = out.replace(new RegExp('(' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig'), '<mark>$1</mark>'); }); return out; }
+  function snippet(r, terms){ const i = terms.length ? r.nt.indexOf(terms[0]) : -1; const start = Math.max(0, i - 50); return (start ? '…' : '') + r.t.slice(start, start + 170); }
+  function run(){
+    const terms = norm(input.value).split(/\s+/).filter(Boolean);
+    if (!terms.length){ list.innerHTML = ''; return; }
+    const hits = [];
+    index.forEach(function(r){
+      let score = 0;
+      for (const t of terms){ const s = (r.nh.includes(t) ? 10 : 0) + (r.np.includes(t) ? 3 : 0) + (r.nt.includes(t) ? 1 : 0); if (!s) return; score += s; }
+      hits.push([score, r]);
+    });
+    hits.sort(function(a, b){ return b[0] - a[0]; });
+    selected = 0;
+    list.innerHTML = hits.length ? hits.slice(0, 30).map(function(h, i){
+      const r = h[1];
+      return '<li><a href="' + esc(r.u) + '"' + (i === 0 ? ' class="sel"' : '') + '><span class="sp">' + esc(r.p) + '</span>' +
+        '<span class="sh">' + mark(r.h, terms) + '</span><span class="st">' + mark(snippet(r, terms), terms) + '</span></a></li>';
+    }).join('') : '<li class="sempty">' + esc(ui.no_results) + '</li>';
+  }
+  function open(){ modal.hidden = false; input.value = ''; list.innerHTML = ''; input.focus(); }
+  function close(){ modal.hidden = true; }
+  document.querySelectorAll('.searchbtn').forEach(function(b){ b.addEventListener('click', open); });
+  modal.addEventListener('click', function(e){ if (e.target === modal) close(); });
+  input.addEventListener('input', run);
+  input.addEventListener('keydown', function(e){
+    const links = list.querySelectorAll('a');
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+      e.preventDefault(); if (!links.length) return;
+      links[selected].classList.remove('sel');
+      selected = (selected + (e.key === 'ArrowDown' ? 1 : links.length - 1)) % links.length;
+      links[selected].classList.add('sel'); links[selected].scrollIntoView({block:'nearest'});
+    } else if (e.key === 'Enter' && links.length){ e.preventDefault(); close(); location.href = links[selected].getAttribute('href'); }
+  });
+  document.addEventListener('keydown', function(e){
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k'){ e.preventDefault(); modal.hidden ? open() : close(); }
+    else if (e.key === 'Escape'){ if (!modal.hidden) close(); document.body.classList.remove('nav-open'); }
+    else if (e.key === '/' && modal.hidden && !/input|textarea|select/i.test(document.activeElement.tagName)){ e.preventDefault(); open(); }
+  });
+  document.querySelectorAll('select.lang').forEach(function(s){ s.addEventListener('change', function(){ location.href = s.value + location.hash; }); });
+})();
+</script>
+</body></html>

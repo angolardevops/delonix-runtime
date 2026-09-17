@@ -2957,6 +2957,9 @@ def sidebar(active, depth=0):
             ("guia-vm.html", "Guia de VMs e lab de rede", "VM & network lab guide"),
             ("labs.html", "Laboratórios", "Labs"),
         ]),
+        ("Contribuir", "Contribute", [
+            ("handbook/index.html", "Manual do contribuidor", "Contributor handbook"),
+        ]),
         ("Referência", "Reference", [
             ("estabilidade.html", "Promessa de estabilidade", "Stability promise"),
             ("codigos.html", "Dicionário de códigos", "Code dictionary"),

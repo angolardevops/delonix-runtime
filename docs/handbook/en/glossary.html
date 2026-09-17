@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Glossary · Delonix Runtime — Contributor handbook</title>
+<script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<style>
+:root{
+  /* The NgolaCloud design system (delonix-web packages/ui/src/tokens.css):
+     light theme by default, dark as the secondary theme. */
+  --bg:#fcfaf8;--surface:#f5f3f1;--surface-2:#eeeae8;--card:#ffffff;--ink:#191513;--ink-2:#524b49;--muted:#675e59;
+  --line:#e1ddda;--line-soft:#ece8e5;
+  --accent:#cc2823;--accent-ink:#b70000;--accent-soft:#ffe2dc;--focus:#cc2823;
+  --code-bg:#1a1614;--code-ink:#ede7e3;--code-line:#2e2825;--code-label:#a39993;
+  --warn-bg:rgba(239,168,49,.16);--warn-line:#c9820f;--warn-ink:#6b4400;
+  --topbar:rgba(255,255,255,.82);
+  --shadow:0 4px 12px rgba(38,28,22,.08),0 1px 3px rgba(38,28,22,.06);
+  --f-display:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
+  --f-body:var(--f-display);
+  --f-mono:"JetBrains Mono",ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
+  --r-sm:4px;--r:6px;--r-lg:8px;
+  --header:60px;color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0b0b0c;--surface:#131315;--surface-2:#19191c;--card:#161618;--ink:#ededee;--ink-2:#b6b6ba;--muted:#87878c;
+  --line:#262629;--line-soft:#1d1d20;
+  --accent:#ee5a24;--accent-ink:#ff6c39;--accent-soft:rgba(238,90,36,.18);--focus:#ee5a24;
+  --code-bg:#101012;--code-ink:#dedee2;--code-line:#26262a;--code-label:#87878c;
+  --warn-bg:rgba(226,161,58,.12);--warn-line:#8a6a2a;--warn-ink:#e2c07a;
+  --topbar:rgba(11,11,12,.82);
+  --shadow:0 8px 24px rgba(0,0,0,.5),0 1px 4px rgba(0,0,0,.4);color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0b0b0c;--surface:#131315;--surface-2:#19191c;--card:#161618;--ink:#ededee;--ink-2:#b6b6ba;--muted:#87878c;
+  --line:#262629;--line-soft:#1d1d20;
+  --accent:#ee5a24;--accent-ink:#ff6c39;--accent-soft:rgba(238,90,36,.18);--focus:#ee5a24;
+  --code-bg:#101012;--code-ink:#dedee2;--code-line:#26262a;--code-label:#87878c;
+  --warn-bg:rgba(226,161,58,.12);--warn-line:#8a6a2a;--warn-ink:#e2c07a;
+  --topbar:rgba(11,11,12,.82);
+  --shadow:0 8px 24px rgba(0,0,0,.5),0 1px 4px rgba(0,0,0,.4);color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-padding-top:calc(var(--header) + 16px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.7 var(--f-body);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+a{color:var(--accent-ink);text-decoration:none}
+a:hover{text-decoration:underline;text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion: reduce){*{scroll-behavior:auto!important;transition:none!important}}
+
+/* Header */
+.top{position:sticky;top:0;z-index:30;height:var(--header);display:flex;align-items:center;gap:16px;
+  padding-inline:20px;background:var(--topbar);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px;color:var(--ink);font:700 16px/1 var(--f-display);white-space:nowrap}
+.brand:hover{text-decoration:none}
+.brand .mark{width:26px;height:26px;border-radius:var(--r);background:var(--accent);display:grid;place-items:center;color:#fff;font:800 13px/1 var(--f-display)}
+.brand .sub{font:500 14px/1 var(--f-body);color:var(--muted)}
+.brand .sep{width:1px;height:18px;background:var(--line)}
+.searchbtn{flex:1;max-width:460px;margin-inline:auto;display:flex;align-items:center;gap:10px;height:38px;padding-inline:12px;
+  border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--muted);font:15px var(--f-body);cursor:pointer;min-width:0}
+.searchbtn:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.searchbtn svg{flex:none}
+.searchbtn .label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.searchbtn kbd{margin-left:auto}
+kbd{font:600 11px/1 var(--f-mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:3px 6px;background:var(--bg);color:var(--muted);white-space:nowrap}
+.actions{display:flex;align-items:center;gap:6px}
+select.lang{height:36px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink);font:14px var(--f-body);padding-inline:8px}
+.iconbtn{height:36px;width:36px;display:grid;place-items:center;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink-2);cursor:pointer}
+.iconbtn:hover{color:var(--accent-ink);border-color:color-mix(in srgb,var(--accent) 45%,var(--line));text-decoration:none}
+.menubtn{display:none}
+
+/* Frame */
+.frame{display:grid;grid-template-columns:280px minmax(0,1fr) 240px}
+nav.side{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:24px 16px 48px 20px;border-right:1px solid var(--line)}
+nav.side,aside.toc,.sres{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+nav.side .group{margin-bottom:18px}
+nav.side .gtitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);padding:0 10px 8px}
+nav.side a{display:flex;gap:10px;align-items:baseline;padding:6px 10px;border-radius:8px;color:var(--ink-2);font-size:15px;line-height:1.35}
+nav.side a:hover{background:var(--surface);text-decoration:none;color:var(--ink)}
+nav.side a .n{flex:none;width:18px;font:500 12px/1.35 var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+nav.side a.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
+nav.side a.on .n{color:var(--accent-ink)}
+main{min-width:0;padding:40px clamp(20px,3.5vw,56px) 80px}
+.content{max-width:1120px;margin-inline:auto}
+
+aside.toc{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:40px 20px 40px 8px;font-size:13.5px}
+aside.toc .ttitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+aside.toc ul{list-style:none;margin:0;padding:0}
+aside.toc ul ul{padding-left:12px}
+aside.toc li{margin:0}
+aside.toc a{display:block;padding:4px 0 4px 12px;border-left:2px solid var(--line);color:var(--muted);line-height:1.4}
+aside.toc a:hover{color:var(--ink);text-decoration:none}
+aside.toc a.active{color:var(--accent-ink);border-left-color:var(--accent);font-weight:600}
+
+/* Type */
+.kicker{font:700 12px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--accent-ink);margin:0 0 12px}
+h1,h2,h3,h4{font-family:var(--f-display);color:var(--ink);text-wrap:balance;letter-spacing:-.01em}
+h1{font-size:2.35rem;line-height:1.15;font-weight:800;margin:0 0 20px}
+h2{font-size:1.55rem;line-height:1.25;font-weight:700;margin:56px 0 14px}
+h3{font-size:1.18rem;line-height:1.3;font-weight:700;margin:36px 0 10px}
+h4{font-size:1rem;margin:28px 0 8px}
+h2 code,h3 code{font-size:.9em}
+.hanchor{margin-left:8px;color:var(--muted);opacity:0;font-weight:500;text-decoration:none}
+h2:hover .hanchor,h3:hover .hanchor,.hanchor:focus-visible{opacity:1}
+p,ul,ol{margin:0 0 16px}
+li{margin:4px 0}li>p{margin:0 0 8px}
+strong{font-weight:650;color:var(--ink)}
+hr{border:0;height:1px;background:var(--line);margin:40px 0}
+code{font:.86em/1.5 var(--f-mono);background:var(--surface-2);border:1px solid var(--line);padding:.08em .38em;border-radius:6px;overflow-wrap:break-word}
+a code{color:inherit}
+a.src code{border-color:color-mix(in srgb,var(--accent) 30%,var(--line));background:var(--accent-soft)}
+a.src:hover{text-decoration:none}a.src:hover code{border-color:var(--accent)}
+.crate-src{margin-left:10px;vertical-align:middle;font:600 11px/1 var(--f-display);letter-spacing:.04em;text-transform:uppercase;
+  border:1px solid var(--line);border-radius:999px;padding:5px 9px;color:var(--muted)}
+.crate-src:hover{color:var(--accent-ink);border-color:var(--accent);text-decoration:none}
+
+/* Blocks */
+blockquote{margin:20px 0;padding:2px 0 2px 18px;border-left:3px solid var(--line);color:var(--ink-2)}
+blockquote p:last-child{margin-bottom:0}
+blockquote.say{border:1px solid var(--line-soft);padding:14px 18px;border-radius:var(--r-lg);background:var(--card);margin:18px 0}
+blockquote.say .speaker{display:inline-block;margin-right:8px;font:700 11px/1 var(--f-display);letter-spacing:.08em;text-transform:uppercase;
+  padding:5px 8px;border-radius:999px;vertical-align:1px}
+blockquote.say-interviewer .speaker{background:var(--surface-2);color:var(--muted);border:1px solid var(--line)}
+blockquote.say-candidate{background:var(--accent-soft)}
+blockquote.say-candidate .speaker{background:var(--accent);color:#fff}
+.notice{display:flex;gap:10px;align-items:baseline;background:var(--warn-bg);border:1px solid var(--warn-line);color:var(--warn-ink);
+  border-radius:12px;padding:12px 16px;margin:0 0 28px;font-size:15px}
+.notice a{color:inherit;font-weight:600;text-decoration:underline}
+.code{margin:18px 0 22px;border-radius:var(--r-lg);background:var(--code-bg);border:1px solid var(--code-line);overflow:hidden}
+.code-head{display:flex;align-items:center;justify-content:space-between;gap:8px;height:36px;padding:0 8px 0 14px;border-bottom:1px solid var(--code-line)}
+.code-head .lang{font:600 11px/1 var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--code-label)}
+.copy{display:flex;align-items:center;gap:6px;height:26px;padding:0 9px;border:1px solid var(--code-line);border-radius:7px;background:transparent;
+  color:var(--code-label);font:600 12px var(--f-body);cursor:pointer}
+.copy:hover{color:#fff;border-color:#3a4555}
+.copy.done{color:#7ee2a8;border-color:#2f5d45}
+.code pre{margin:0;padding:14px 16px 22px;overflow-x:auto;color:var(--code-ink);font:13.5px/1.6 var(--f-mono);
+  scrollbar-width:thin;scrollbar-color:#3a4555 transparent;color-scheme:dark}
+.code pre::-webkit-scrollbar{height:8px}.code pre::-webkit-scrollbar-thumb{background:#3a4555;border-radius:8px}
+.code pre code{background:none;border:0;padding:0;font:inherit;color:inherit;overflow-wrap:normal}
+.code pre code.hljs{background:none;padding:0}
+pre.mermaid{margin:22px 0;padding:18px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--card);text-align:center;overflow-x:auto;font-family:var(--f-body)}
+.tablewrap{margin:18px 0 24px;overflow-x:auto;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:14.5px;line-height:1.5}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+th{background:var(--surface);font:700 12.5px/1.3 var(--f-display);letter-spacing:.02em;color:var(--ink-2);white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:color-mix(in srgb,var(--surface) 60%,transparent)}
+td code{font-size:.82em;overflow-wrap:normal}
+/* A table's first column names the thing (a variable, a crate, a flag): never break it. */
+td:first-child code{white-space:nowrap}
+th:first-child,td:first-child{white-space:nowrap}
+
+/* Pager + footer */
+.pager{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:64px}
+.pager a{display:block;padding:14px 16px;border:1px solid var(--line);border-radius:12px;color:var(--ink);font:600 15px/1.35 var(--f-display)}
+.pager a:hover{border-color:var(--accent);text-decoration:none}
+.pager a span{display:block;font:500 12px/1 var(--f-body);color:var(--muted);margin-bottom:6px}
+.pager .next{text-align:right;grid-column:2}
+.foot{margin-top:28px;padding-top:18px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:8px 16px;font-size:13.5px;color:var(--muted)}
+
+/* Search */
+#search{position:fixed;inset:0;z-index:60;background:rgba(10,13,18,.45);display:flex;align-items:flex-start;justify-content:center;padding:12vh 16px 16px}
+#search[hidden]{display:none}
+.sbox{width:min(680px,100%);background:var(--bg);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
+.sfield{display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--line);color:var(--muted)}
+.sfield input{flex:1;height:56px;border:0;outline:0;background:transparent;color:var(--ink);font:17px var(--f-body)}
+.sres{list-style:none;margin:0;padding:8px;max-height:56vh;overflow-y:auto}
+.sres a{display:block;padding:10px 12px;border-radius:10px;color:var(--ink)}
+.sres a:hover,.sres a.sel{background:var(--accent-soft);text-decoration:none}
+.sres .sp{display:block;font:600 11px/1 var(--f-display);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+.sres .sh{font:600 15px/1.35 var(--f-display)}
+.sres .st{display:block;margin-top:3px;font-size:13.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sres mark{background:none;color:var(--accent-ink);font-weight:700}
+.sempty{padding:18px;color:var(--muted)}
+.shelp{display:flex;gap:16px;padding:10px 16px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+
+/* Narrow screens */
+@media (max-width:1280px){.frame{grid-template-columns:256px minmax(0,1fr)}aside.toc{display:none}}
+@media (max-width:860px){
+  .frame{display:block}.menubtn{display:grid}.brand .sub,.brand .sep{display:none}
+  nav.side{position:fixed;top:var(--header);left:0;bottom:0;width:min(300px,86vw);height:auto;z-index:40;background:var(--bg);
+    transform:translateX(-102%);transition:transform .2s ease;box-shadow:var(--shadow)}
+  body.nav-open nav.side{transform:none}
+  main{padding:28px 16px 64px}
+  h1{font-size:1.9rem}h2{font-size:1.35rem}
+  .searchbtn kbd,.searchbtn .label{display:none}.searchbtn{flex:none;width:38px;justify-content:center;margin-inline:auto 0;padding:0}
+  .pager{grid-template-columns:1fr}.pager .next{grid-column:1}
+  .top{gap:8px;padding-inline:12px}
+  .brand{font-size:15px;min-width:0}
+  select.lang{width:78px;padding-inline:4px;text-overflow:ellipsis}
+}
+@media (max-width:480px){
+  .actions .ghbtn{display:none}
+  .brand .word{display:none}
+}
+</style></head>
+<body>
+<header class="top">
+  <button class="iconbtn menubtn" type="button" aria-label="Menu"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  <a class="brand" href="index.html" aria-label="Handbook home"><span class="mark">D</span><span class="word">Delonix Runtime</span><span class="sep"></span><span class="sub">Contributor handbook</span></a>
+  <button class="searchbtn" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span class="label">Search the handbook…</span><kbd>Ctrl K</kbd></button>
+  <div class="actions">
+    <select class="lang" id="lang" aria-label="Language"><option value="../en/glossary.html" selected>EN · English</option><option value="../pt-AO/glossary.html">PT-AO · Português (Angola)</option><option value="../fr-FR/glossary.html">FR-FR · Français</option><option value="../zh-CN/glossary.html">ZH-CN · 简体中文</option></select>
+    <button class="iconbtn themebtn" type="button" aria-label="Toggle colour theme" title="Toggle colour theme"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
+    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+  </div>
+</header>
+<div class="frame">
+<nav class="side" aria-label="Contributor handbook"><div class="group"><div class="gtitle">Overview</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">Get started</div><a href="start-here.html"><span class="n">01</span><span>Start here</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">Foundations</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Cloud native primer</span></a><a href="rust-primer.html"><span class="n">05</span><span>Rust primer for this codebase</span></a></div><div class="group"><div class="gtitle">Set up &amp; build</div><a href="environment.html"><span class="n">06</span><span>Preparing your environment</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>The crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images &amp; microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile and VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">Operate &amp; debug</div><a href="troubleshooting.html"><span class="n">14</span><span>Troubleshooting</span></a></div><div class="group"><div class="gtitle">Contributing</div><a href="coding-conventions.html"><span class="n">15</span><span>Coding conventions</span></a><a href="adding-a-kind.html"><span class="n">16</span><span>Adding a Kind</span></a><a href="contributing-workflow.html"><span class="n">17</span><span>Contribution workflow</span></a><a href="releases-and-stability.html"><span class="n">18</span><span>Releases and stability</span></a><a href="publishing-docs.html"><span class="n">19</span><span>Publishing the documentation</span></a></div><div class="group"><div class="gtitle">Reference</div><a href="cloud-native-standards.html"><span class="n">20</span><span>Cloud native standards, layer by layer</span></a><a href="environment-variables.html"><span class="n">21</span><span>Environment variables (DELONIX_*)</span></a><a class="on" aria-current="page" href="glossary.html"><span class="n">22</span><span>Glossary</span></a></div></nav>
+<main><div class="content">
+<p class="kicker">Reference</p>
+<h1 id="glossary">Glossary</h1>
+<p><strong>Before you read:</strong> nothing — this is a reference. Keep it open next to any other page.</p>
+<p>The words a newcomer meets in this repository, with the meaning they have <strong>in Delonix</strong> — which is
+sometimes narrower than the general cloud-native meaning. Each entry points to where the term is
+explained or implemented. Paths are relative to the repository root; <code>file.rs::symbol</code> names a
+symbol inside that file.</p>
+<p>Terms are in alphabetical order. For the general background, the kernel primitives (processes,
+namespaces, cgroups, file descriptors, signals) are taught in <a href="linux-foundations.html">Linux foundations</a>,
+and OCI, CRI, CNI and KVM as the engine uses them in <a href="cloud-native-primer.html">Cloud native primer</a>.</p>
+<hr />
+<p><strong>Adapter</strong> — A crate in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a> that implements a port against a local mechanism: the
+kernel (<code>delonix-linux</code>), the network dataplane (<code>delonix-sdn</code>), the OCI store (<code>delonix-oci</code>), the
+local VM hypervisors (<code>delonix-vm</code>). An adapter may depend on foundation and context crates, never
+on an interface crate. See: <a href="architecture.html#layers-and-the-allowed-direction">Layers</a>,
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py::LAYERS</code></a>.</p>
+<p><strong>ADR (Architecture Decision Record)</strong> — One Markdown file per structural decision, in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a>,
+named <code>NNNN-title.md</code>, written in English, before the code. An accepted ADR is never rewritten; a
+new ADR supersedes it. See: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a>,
+<a href="contributing-workflow.html#when-to-write-an-adr">When to write an ADR</a>.</p>
+<p><strong>Apply / plan / prune</strong> — The three verbs of declarative convergence. <code>delonix plan</code> shows what an
+apply would change and changes nothing (<code>--detailed-exitcode</code> exits 2 when there are changes);
+<code>delonix apply</code> converges the manifest; <code>--prune</code> also removes what the stack owns and the manifest
+no longer declares, and never runs by default. See: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs::plan</code></a>,
+<a href="cloud-native-primer.html#48-declarative-reconciliation">Declarative reconciliation</a>.</p>
+<p><strong>CAS (content-addressed storage)</strong> — The image blob store: each blob lives under
+<code>blobs/sha256/&lt;hex&gt;</code> in the state root, addressed by its digest, so identical content is stored once.
+Integrity is checked when content <strong>enters</strong> the store, not when it is read: a pull compares the
+manifest, the config and each layer against the expected digest (<code>verify_manifest_digest</code> and the
+digest comparisons in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/registry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/registry.rs</code></a>). <code>Cas::read</code> is a plain file
+read and does not re-hash; <code>Cas::verify</code> re-hashes on demand. See:
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/cas.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/cas.rs::Cas</code></a>,
+<a href="architecture.html#state-on-disk">State on disk</a>.</p>
+<p><strong>CDI (Container Device Interface)</strong> — A CNCF spec describing how to expose a device (typically a
+GPU) to a container. Delonix only <strong>consumes</strong> specs already generated by a vendor tool and turns
+them into the same mounts and device nodes that <code>-v</code>/<code>--device</code> produce; it never discovers drivers
+itself. See: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/cdi.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/cdi.rs</code></a>.</p>
+<p><strong>cgroup delegation</strong> — The cgroup v2 mechanism that lets an unprivileged user manage a subtree of
+cgroups. Without it, rootless resource limits (<code>-m</code>, <code>--cpus</code>) cannot be enforced; the engine
+detects this and refuses a limit it could not apply rather than accepting it silently. A shell
+opened over SSH is often not delegated; <code>systemd-run --user --scope -p Delegate=yes</code> gives one that
+is. <code>delonix system info</code> shows the answer as <code>cgroup2 delegated</code>. See:
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs::cgroup_limits_apply</code></a>,
+<a href="cloud-native-primer.html#42-cgroups-v2-and-delegation">cgroups v2 and delegation</a>,
+<a href="environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">cgroup delegation</a>.</p>
+<p><strong>CNI (Container Network Interface)</strong> — The plugin standard Kubernetes uses to give a pod its
+network. Delonix can run a node's CNI plugin chain against a named network namespace, which is how
+a CRI pod sandbox gets its network. See: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/cni.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/cni.rs::attach_named_netns</code></a>,
+<a href="cloud-native-primer.html#45-container-networking">Container networking</a>.</p>
+<p><strong>Contract (node)</strong> — The API of one node, defined in Protocol Buffers under <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1/</code></a>
+(package <code>delonix.node.v1</code>), with an OpenAPI document <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> generated from it.
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> guards formatting, lint, compatibility with the last tag and the
+generated OpenAPI. It is a published contract; no server implements it yet. See:
+<a href="architecture.html#where-the-restructuring-stands">Where the restructuring stands</a>,
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>.</p>
+<p><strong>Control process</strong> — The restartable half of the rootless network infra: the engine binary started with the internal
+arguments <code>netns control</code> (not a user-facing command) runs inside the namespaces held by the pin, listens on a <code>0600</code> unix control socket (accepting only
+the engine's own uid) and performs attaches, publishes, firewall changes, DNS and DHCP one request
+at a time. Killing it does not disturb running workloads; the next command restarts it. See:
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs::start_control</code></a>, <code>control_loop</code>; <strong>Holder / pin</strong>.</p>
+<p><strong>CRI (Container Runtime Interface)</strong> — The gRPC API the kubelet uses to run pods. The
+<code>delonix-cri</code> crate (binary <code>delonix-cri</code>) implements it on top of the engine, so a Kubernetes node
+can use Delonix instead of another runtime. See: <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-cri" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/</code></a>,
+<a href="cloud-native-primer.html#46-kubernetes-cri-kubelet-kubeadm-and-kind">Kubernetes</a>.</p>
+<p><strong>Daemonless</strong> — No resident process is needed for the engine to work: each CLI command does its
+work and exits. What must persist is owned by systemd (units, timers) or by a per-workload process
+with a clear owner (a container's supervisor, the network pin). A new resident process needs an ADR.
+See: <em>«Identidade e fronteira do motor»</em> in <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>,
+<a href="cloud-native-primer.html#410-daemonless-in-one-paragraph">Daemonless</a>.</p>
+<p><strong>Delegated cgroup</strong> — See <strong>cgroup delegation</strong>.</p>
+<p><strong><code>DX_*</code> exit class</strong> — Every engine error has a stable code string (<code>DX_NOT_FOUND</code>,
+<code>DX_INVALID_ARGUMENT</code>, …) and maps to a process exit code decided from the error's <strong>type</strong>, never
+from its (translated) message: for example 4 = no such resource, 5 = conflict. Scripts and
+reconcilers branch on the number, not on the text. See:
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/error.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/error.rs::Error::code</code></a>,
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/exitcode.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/exitcode.rs::for_error</code></a>,
+<a href="rust-primer.html#32-errors-one-error-and-exit-codes-derived-from-its-type">Errors</a>.</p>
+<p><strong>Fitness function</strong> — An automated check that the architecture still has the shape that was
+decided. Here it is <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (CI job <code>arch</code>): layer direction, directory = layer,
+dependency versions only in the root, no consumer names in code, and the debt ratchets. See:
+<a href="architecture.html#engine-identity-and-boundaries">Engine identity and boundaries</a>,
+<a href="contributing-workflow.html#architecture-rules-the-gates-enforce">Architecture rules</a>.</p>
+<p><strong>Holder / pin</strong> — The long-lived half of the rootless network infra. The engine binary started with the internal
+arguments <code>netns pin</code> creates a user, network and mount namespace and then just sleeps, holding them; its pidfile keeps the
+historical name <code>holder.pid</code>, and every <code>nsenter -t &lt;pid&gt;</code> into the infra targets it. Before the
+split into pin and control process, one "holder" did both jobs, which is why both words appear in
+the code. See: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs::start_pin</code></a>, <code>pin_main</code>,
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/pin_userns.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/pin_userns.rs</code></a>; <strong>Control process</strong>.</p>
+<p><strong>IPAM (IP address management)</strong> — Allocation of workload addresses inside a network's prefix.
+Delonix keeps one lease file per prefix under <code>ipam/</code> in the state root, and a reaper that reclaims
+a lease only after it has been seen orphaned twice across a grace period. <code>delonix network ipam ls</code>
+lists the leases. See: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/ipam.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/ipam.rs::allocate</code></a>, <code>reap_orphan_leases</code>;
+the pure address arithmetic is in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-net-rules/src/lib.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-net-rules/src/lib.rs</code></a>.</p>
+<p><strong>Kind</strong> — The type of a declarative resource in a manifest (<code>kind: Network</code>, <code>kind: Pod</code>,
+<code>kind: VirtualMachine</code>, …), grouped by <code>apiVersion</code> (<code>core</code>, <code>compute</code>, <code>networking</code>, <code>gateway</code>,
+<code>storage</code>, <code>artifact</code>, <code>infrastructure</code>). The facts of every Kind — its group, whether it is
+namespaced, whether it converges, its form — live in one table. <code>delonix api-resources</code> prints it;
+<code>delonix explain &lt;Kind&gt;</code> documents its fields. See:
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs::FACTS</code></a>, <code>KindFacts</code>.</p>
+<p><strong>LANG-01</strong> — The language rule for code: identifiers, comments and user-facing messages are written
+in English; Portuguese reaches the operator only through the translation catalogue
+(<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/data/pt.po" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/data/pt.po</code></a>, selected with <code>--l18n pt</code>). <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a> counts
+the Portuguese still in the code as a ratchet. See:
+<a href="contributing-workflow.html#language-english-in-the-code-lang-01">Language</a>.</p>
+<p><strong>Layer (ADR-0040)</strong> — One of the architectural rings every crate belongs to: foundation, contexts,
+adapters, providers, interfaces, binaries. Dependencies point inward, and the crate's directory
+(<code>crates/&lt;layer&gt;/</code>) must match its declared layer. Not to be confused with an <strong>image layer</strong> (see
+<strong>Overlay / lowerdir</strong>). See: <a href="architecture.html#layers-and-the-allowed-direction">Layers</a>,
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>.</p>
+<p><strong>Lowering (sugar Kinds)</strong> — Rewriting a convenience Kind into the Kind that actually does the work
+while the manifest is loaded, so the rest of the engine never sees it. <code>Workload</code> lowers to
+<code>Container</code>/<code>Pod</code>/<code>VirtualMachine</code>, <code>Dependency</code> to <code>NetworkPolicy</code>. The <code>FORM</code> column of
+<code>delonix api-resources</code> says what each Kind becomes: <code>primary</code>, <code>sugar → X</code> (lowered), <code>compat → X</code>
+(a foreign schema kept but compiled onto X), <code>sunset → X</code> (still applied as itself, successor
+announced), <code>aggregate</code> (expands into the documents it contains, like <code>Stack</code>). See:
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs::Form</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/manifest.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/manifest.rs::load</code></a>.</p>
+<p><strong>MCP (Model Context Protocol)</strong> — A protocol through which an AI client calls tools. <code>delonix mcp
+serve</code> (crate <code>delonix-mcp</code>) is a <strong>local</strong>, tenancy-free control surface over stdio: a foreground
+process started by the client for one session, trusted as the local uid running it — not a remote
+management API. See: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-mcp/src/lib.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp/src/lib.rs</code></a>,
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a>.</p>
+<p><strong>microVM</strong> — A lightweight virtual machine with a minimal device model, booted fast, used where a
+workload needs its own kernel. In Delonix the microVM hypervisor is Cloud Hypervisor; <code>libvirt</code>
+(QEMU/KVM) is the other local backend. A <code>Workload</code> of <code>type: microvm</code> forces the Cloud Hypervisor
+backend. See: <a href="microvm-setup.html">Building microVMs</a>,
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0006-workload-type-microvm.md" target="_blank" rel="noopener">ADR-0006</a>.</p>
+<p><strong>NoCloud seed</strong> — A small ISO carrying cloud-init <code>user-data</code>, <code>meta-data</code>
+and <code>network-config</code>, attached to a VM so its first boot applies hostname, SSH keys and network.
+Delonix generates one per VM unless the image is an appliance that does not run cloud-init. See:
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/cloudinit.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/cloudinit.rs::generate_seed_iso</code></a>,
+<a href="cloud-native-primer.html#47-virtualization-kvm-virtio-cloud-hypervisor-libvirt-cloud-init">Virtualization</a>.</p>
+<p><strong>OCI (Open Container Initiative)</strong> — The standards for container images (image spec), for
+distributing them from registries (distribution spec) and for running them (runtime spec). Delonix
+pulls, builds, stores and pushes OCI images itself. See: <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/</code></a>,
+<a href="cloud-native-primer.html#44-oci-images-content-addressed-storage-and-overlayfs">OCI images</a>.</p>
+<p><strong>Overlay / lowerdir</strong> — overlayfs stacks read-only image layers (the <code>lowerdir</code>s) under a per-container
+writable <code>upper</code> directory. Delonix unpacks each image layer once under <code>layers/</code> and every
+container of that image shares them; the container directory holds <code>upper/</code>, <code>work/</code>, <code>merged/</code> and
+an <code>overlay-lowers</code> file listing the layers. The mount is done inside the container's own user
+namespace with the new mount API, one <code>lowerdir+</code> call per layer, so images with many layers do not
+hit the classic <code>mount(2)</code> option-length limit. See:
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/overlay.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/overlay.rs::prepare_overlay</code></a>,
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs::mount_overlay_if_marked</code></a>,
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a>.</p>
+<p><strong>Port (hexagonal)</strong> — A trait that a use case needs and that an adapter or provider implements, so
+the domain never names a concrete mechanism. Examples: <code>VmBackend</code>, and the compute ports
+<code>ImageStore</code>, <code>StorageProvider</code>, <code>NetworkProvider</code>, <code>WorkloadRuntime</code>. See:
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>, <code>launch.rs</code>,
+<a href="rust-primer.html#33-traits-as-ports-vmbackend-and-the-backend-registry">Traits as ports</a>.</p>
+<p><strong>Provider</strong> — A crate in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a> that implements a port against <strong>one remote management
+API</strong> (today Proxmox VE and TrueNAS), bringing its own HTTP client. A new provider enters as an
+implementation of a port, registered at the composition root — never as <code>if provider == …</code> in the
+code — and needs an ADR. See: <a href="crates.html#providers">Providers</a>,
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>, <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0009-truenas-storage-provisioner.md" target="_blank" rel="noopener">ADR-0009</a>.</p>
+<p><strong>Ratchet</strong> — A gate on a debt counter that fails when the number <strong>rises</strong> and also when it
+<strong>falls</strong> without the committed baseline being lowered in the same commit, so progress is recorded
+and never lost. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a> (Portuguese in code) and the debt ratchets of
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> work this way; both have <code>--list</code> and <code>--update</code>. See:
+<a href="contributing-workflow.html#architecture-rules-the-gates-enforce">Architecture rules</a>.</p>
+<p><strong>Reconcile (3-way)</strong> — How <code>plan</code>/<code>apply</code> decide what to change without a state file. The three
+sides are the manifest (desired), what is observed on the node (actual), and the last spec applied,
+stored on the resource itself in the <code>delonix.io/last-applied</code> annotation. The third side separates
+"you removed this field from the file" (revert it) from "someone set this by hand" (leave it).
+See: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs</code></a>,
+<a href="system-design-interview.html#55-the-declarative-reconciler-without-a-state-file">The declarative reconciler</a>.</p>
+<p><strong>Rootless</strong> — Running as an unprivileged user, with privileges only inside user namespaces the
+engine creates. It is the default path in Delonix ("rootless-first"); root is an explicit opt-in.
+See: <a href="cloud-native-primer.html#41-linux-namespaces-and-rootless-operation">Linux namespaces and rootless operation</a>.</p>
+<p><strong>slirp4netns</strong> — A user-space network stack that connects a rootless network namespace to the
+host's network without privileges, and forwards host ports into it. Delonix runs a single
+<code>slirp4netns</code> for the whole rootless network infra, with NAT and port publishing done by nftables
+inside the infra namespace. See: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>,
+<a href="system-design-interview.html#52-networking-pin-control-slirp-nftables">Networking</a>.</p>
+<p><strong>Stack</strong> — The set of resources one manifest owns. Ownership is a label on each resource,
+<code>delonix.io/stack</code>, not a separate record: <code>apply --prune</code> and <code>stack destroy</code> only touch resources
+carrying it, and a resource created by hand is never removed by them. <code>Stack</code> is also an aggregate
+Kind that groups resources in one document. See:
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs::STACK_LABEL</code></a>.</p>
+<p><strong>State root</strong> — The directory holding all engine state as files (there is no database): <code>DELONIX_ROOT</code>
+when set, otherwise <code>~/.local/share/delonix</code> (or <code>$XDG_DATA_HOME/delonix</code>) for a user and
+<code>/var/lib/delonix</code> for root. Network sockets live in a separate runtime directory
+(<code>DELONIX_NET_RUNTIME_DIR</code>). Always set both when testing. Records under it are read, written and
+locked by the <code>delonix-state</code> adapter. See:
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/util.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/util.rs::state_root</code></a>,
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-state/src/store.rs::Store::default_root</code></a>,
+<a href="architecture.html#state-on-disk">State on disk</a>,
+<a href="build-and-test.html#isolating-the-engines-state">Isolating the engine's state</a>.</p>
+<p><strong>subuid / subgid</strong> — A range of user and group ids delegated to your user in <code>/etc/subuid</code> and
+<code>/etc/subgid</code>. With it, a rootless user namespace maps many ids (written through <code>newuidmap</code> and
+<code>newgidmap</code>); without it, only your own uid is mapped and images that use other users break. Files a
+container writes as a mapped id are not owned by your uid on the host, which is why some operations
+re-enter a mapped namespace. See: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/pin_userns.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/pin_userns.rs</code></a>,
+<a href="environment.html#kernel-requirements">Kernel requirements</a>.</p>
+<p><strong>Supervisor</strong> — The process <code>container run -d</code> forks to be the real parent of the container: it
+waits for the container, records its true exit status (and an <code>OOMKilled</code> reason), and applies the
+<code>--restart</code> policy. Because it <code>fork</code>s, it must be started from a single-threaded process; servers
+re-exec a fresh <code>delonix</code> first. See: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/supervise.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/supervise.rs::run_supervised</code></a>,
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs::wait_and_record</code></a>.</p>
+<p><strong>userns (user namespace)</strong> — The Linux namespace that maps user ids, giving a process root
+privileges only over objects its namespace owns. It is the foundation of rootless operation, and on
+recent Ubuntu it can be blocked by AppArmor for binaries outside the expected paths. See:
+<a href="cloud-native-primer.html#41-linux-namespaces-and-rootless-operation">Linux namespaces</a>,
+<a href="environment.html#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary">AppArmor</a>,
+<code>namespaces(7)</code> and <code>user_namespaces(7)</code>.</p>
+<p><strong>Verdict map</strong> — An nftables map from a key to a verdict (<code>jump</code>, <code>accept</code>, …), used so a packet
+finds its rule in one lookup instead of walking one rule per workload. Delonix uses <code>fwmap</code> (a
+workload address → its firewall chain) and <code>netpair</code> (a pair of bridges → an exemption that opens a
+route between two networks). See: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs::FWMAP</code></a>, <code>NETPAIR_MAP</code>.</p>
+<p><strong>VmBackend</strong> — The port every VM backend implements (<code>boot</code>, <code>stop</code>, <code>destroy</code>, <code>is_running</code>,
+<code>ip</code>, pause and snapshots, …). Cloud Hypervisor and libvirt are registered by default; a remote
+provider registers at the composition root. Registering does no I/O, and auto-detection filters on
+the registration before building anything, so a remote backend only connects when it is chosen. See:
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs::VmBackend</code></a>, <code>register_backend</code>, <code>select_backend</code>,
+<a href="rust-primer.html#33-traits-as-ports-vmbackend-and-the-backend-registry">Traits as ports</a>.</p>
+<p><strong>Workload</strong> — Two related things. <code>kind: Workload</code> is a sugar Kind with <code>spec.type:
+container|pod|vm|microvm</code> that lowers to the matching Kind at load time
+(<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0001-workload-kind-schema.md" target="_blank" rel="noopener">ADR-0001</a>). <code>delonix workload</code> is the day-2 command group
+(<code>ls</code>, <code>describe</code>, <code>stop</code>, <code>rm</code>) that lists and acts on containers and VMs together
+(<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0002-compute-driver-trait.md" target="_blank" rel="noopener">ADR-0002</a>). See:
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs::WORKLOAD_LOWERS_TO</code></a>,
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/workload.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/workload.rs</code></a>.</p>
+<p><strong>Worktree</strong> — A <code>git worktree</code>: a second working directory attached to the same repository, on its
+own branch. Every task here gets its own, created from <code>origin/main</code> in a persistent directory
+outside the repository (never <code>/tmp</code>), and is removed together with its branch at the end. See:
+<a href="contributing-workflow.html#one-worktree-per-task">One worktree per task</a>.</p>
+<hr />
+<p><strong>Next:</strong> <a href="index.html#reading-paths-by-role">Overview and reading paths</a> — that is the end of the course; go back to the reading paths by role to pick what to deepen next.</p>
+<nav class="pager"><a href="environment-variables.html"><span>← Previous</span>Environment variables (DELONIX_*)</a></nav>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/glossary.md" target="_blank" rel="noopener">Edit this page</a><code>docs/dev/glossary.md</code></footer>
+</div></main>
+<aside class="toc"><p class="ttitle">On this page</p><div class="toc">
+<ul></ul>
+</div>
+</aside>
+</div>
+<div id="search" hidden><div class="sbox" role="dialog" aria-modal="true" aria-label="Search">
+<div class="sfield"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="search-input" type="search" placeholder="Search the handbook…" autocomplete="off"><kbd>Esc</kbd></div>
+<ul class="sres"></ul>
+<div class="shelp"><span><kbd>↑</kbd> <kbd>↓</kbd></span><span><kbd>Enter</kbd></span></div></div></div>
+<script>window.HANDBOOK_UI={"copy": "Copy", "copied": "Copied", "no_results": "No results"};</script>
+<script src="search-index.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/ini.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/dockerfile.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/protobuf.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/diff.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/makefile.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/xml.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>
+(function(){
+  const ui = window.HANDBOOK_UI;
+  const root = document.documentElement;
+
+  // Theme: system by default; the toggle cycles light/dark and remembers the choice.
+  function effectiveDark(){ const t = root.getAttribute('data-theme'); return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; }
+  document.querySelectorAll('.themebtn').forEach(function(b){
+    b.addEventListener('click', function(){
+      const next = effectiveDark() ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('delonix-handbook-theme', next); } catch (e) {}
+      renderMermaid();
+    });
+  });
+
+  // Mobile navigation drawer.
+  document.querySelectorAll('.menubtn').forEach(function(b){
+    b.addEventListener('click', function(){ document.body.classList.toggle('nav-open'); });
+  });
+  document.querySelectorAll('nav.side a').forEach(function(a){ a.addEventListener('click', function(){ document.body.classList.remove('nav-open'); }); });
+
+  // Copy buttons live in each code block's header; shell blocks drop a leading "$ ".
+  document.querySelectorAll('.code').forEach(function(box){
+    const btn = box.querySelector('.copy'); if (!btn) return;
+    btn.addEventListener('click', function(){
+      let text = box.querySelector('pre code').innerText;
+      if (box.hasAttribute('data-shell')) text = text.split('\n').map(function(l){ return l.replace(/^\$ /, ''); }).join('\n');
+      navigator.clipboard.writeText(text.replace(/\n$/, '')).then(function(){
+        btn.lastChild.textContent = ui.copied; btn.classList.add('done');
+        setTimeout(function(){ btn.lastChild.textContent = ui.copy; btn.classList.remove('done'); }, 1500);
+      });
+    });
+  });
+  if (window.hljs) document.querySelectorAll('.code pre code:not(.nohighlight)').forEach(function(el){ hljs.highlightElement(el); });
+
+  // Mermaid follows the effective theme, and re-renders when it changes.
+  const diagrams = Array.prototype.slice.call(document.querySelectorAll('pre.mermaid'));
+  diagrams.forEach(function(d){ d.setAttribute('data-src', d.textContent); });
+  function renderMermaid(){
+    if (!window.mermaid || !diagrams.length) return;
+    diagrams.forEach(function(d){ d.removeAttribute('data-processed'); d.textContent = d.getAttribute('data-src'); });
+    mermaid.initialize({startOnLoad:false, securityLevel:'strict', theme: effectiveDark() ? 'dark' : 'neutral',
+      fontFamily:getComputedStyle(document.body).fontFamily,
+      themeVariables:{fontSize:'17px'},
+      flowchart:{useMaxWidth:true, nodeSpacing:28, rankSpacing:44, padding:10},
+      sequence:{useMaxWidth:true}});
+    mermaid.run({nodes: diagrams});
+  }
+  renderMermaid();
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(){ if (!root.getAttribute('data-theme')) renderMermaid(); });
+
+  // "On this page": highlight the section being read.
+  const tocLinks = Array.prototype.slice.call(document.querySelectorAll('aside.toc a'));
+  const byId = {}; tocLinks.forEach(function(a){ byId[decodeURIComponent(a.getAttribute('href').slice(1))] = a; });
+  const heads = Array.prototype.slice.call(document.querySelectorAll('.content h2[id], .content h3[id]')).filter(function(h){ return byId[h.id]; });
+  function spy(){
+    let current = heads.length ? heads[0] : null;
+    const line = 120;
+    heads.forEach(function(h){ if (h.getBoundingClientRect().top <= line) current = h; });
+    tocLinks.forEach(function(a){ a.classList.remove('active'); });
+    if (current) byId[current.id].classList.add('active');
+  }
+  if (heads.length){ document.addEventListener('scroll', spy, {passive:true}); spy(); }
+
+  // Search (Ctrl+K / Cmd+K / "/"): a static index of this language, scored in the browser.
+  const modal = document.getElementById('search'), input = modal.querySelector('input'), list = modal.querySelector('.sres');
+  let selected = 0;
+  function norm(s){ return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+  const index = (window.HANDBOOK_INDEX || []).map(function(r){ return Object.assign({nh: norm(r.h), np: norm(r.p), nt: norm(r.t)}, r); });
+  function esc(s){ return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function mark(s, terms){ let out = esc(s); terms.forEach(function(t){ if (t.length > 1) out = out.replace(new RegExp('(' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig'), '<mark>$1</mark>'); }); return out; }
+  function snippet(r, terms){ const i = terms.length ? r.nt.indexOf(terms[0]) : -1; const start = Math.max(0, i - 50); return (start ? '…' : '') + r.t.slice(start, start + 170); }
+  function run(){
+    const terms = norm(input.value).split(/\s+/).filter(Boolean);
+    if (!terms.length){ list.innerHTML = ''; return; }
+    const hits = [];
+    index.forEach(function(r){
+      let score = 0;
+      for (const t of terms){ const s = (r.nh.includes(t) ? 10 : 0) + (r.np.includes(t) ? 3 : 0) + (r.nt.includes(t) ? 1 : 0); if (!s) return; score += s; }
+      hits.push([score, r]);
+    });
+    hits.sort(function(a, b){ return b[0] - a[0]; });
+    selected = 0;
+    list.innerHTML = hits.length ? hits.slice(0, 30).map(function(h, i){
+      const r = h[1];
+      return '<li><a href="' + esc(r.u) + '"' + (i === 0 ? ' class="sel"' : '') + '><span class="sp">' + esc(r.p) + '</span>' +
+        '<span class="sh">' + mark(r.h, terms) + '</span><span class="st">' + mark(snippet(r, terms), terms) + '</span></a></li>';
+    }).join('') : '<li class="sempty">' + esc(ui.no_results) + '</li>';
+  }
+  function open(){ modal.hidden = false; input.value = ''; list.innerHTML = ''; input.focus(); }
+  function close(){ modal.hidden = true; }
+  document.querySelectorAll('.searchbtn').forEach(function(b){ b.addEventListener('click', open); });
+  modal.addEventListener('click', function(e){ if (e.target === modal) close(); });
+  input.addEventListener('input', run);
+  input.addEventListener('keydown', function(e){
+    const links = list.querySelectorAll('a');
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+      e.preventDefault(); if (!links.length) return;
+      links[selected].classList.remove('sel');
+      selected = (selected + (e.key === 'ArrowDown' ? 1 : links.length - 1)) % links.length;
+      links[selected].classList.add('sel'); links[selected].scrollIntoView({block:'nearest'});
+    } else if (e.key === 'Enter' && links.length){ e.preventDefault(); close(); location.href = links[selected].getAttribute('href'); }
+  });
+  document.addEventListener('keydown', function(e){
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k'){ e.preventDefault(); modal.hidden ? open() : close(); }
+    else if (e.key === 'Escape'){ if (!modal.hidden) close(); document.body.classList.remove('nav-open'); }
+    else if (e.key === '/' && modal.hidden && !/input|textarea|select/i.test(document.activeElement.tagName)){ e.preventDefault(); open(); }
+  });
+  document.querySelectorAll('select.lang').forEach(function(s){ s.addEventListener('change', function(){ location.href = s.value + location.hash; }); });
+})();
+</script>
+</body></html>

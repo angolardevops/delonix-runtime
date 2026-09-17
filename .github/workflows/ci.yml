@@ -51,6 +51,11 @@ jobs:
         run: rustup show
       - name: Layer direction, foundation purity and the debt ratchets
         run: python3 scripts/arch_fitness.py
+      # The contributor handbook's FACTS (crates, layers, dependencies, binaries,
+      # toolchain, CI jobs) are generated from the same sources this job checks.
+      # Hand-written, they rotted twice; generated, a stale page fails here.
+      - name: Contributor handbook facts match the code (docs/dev)
+        run: python3 scripts/dev_docs.py --check
 
   # ---- The node contract: format, lint, compatibility and the generated OpenAPI ----
   # ADR-0040 P1. Tool versions are pinned — a newer buf or generator changing its output
@@ -175,7 +180,7 @@ jobs:
   # não suposto: o `warn_unknown_fields` só corre no apply REAL, e um apply real
   # em CI criaria recursos — a verificação promete o que faz.
   docs:
-    name: docs geradas e exemplos válidos
+    name: generated docs and valid examples
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -192,6 +197,11 @@ jobs:
         run: python3 -m pip install --break-system-packages markdown
       - name: Regenera o site
         run: python3 docs/gen.py
+      # The contributor handbook site (docs/handbook/<lang>/) is generated from
+      # docs/dev/; publishing it hand-edited or stale would show readers pages
+      # that no longer match the Markdown they review.
+      - name: Contributor handbook site matches docs/dev
+        run: python3 scripts/dev_docs_site.py --check
       - name: O site publicado tem de ser o gerado
         run: |
           if ! git diff --quiet -- docs/; then

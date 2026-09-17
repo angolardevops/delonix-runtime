@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rust primer for this codebase · Delonix Runtime — 贡献者手册</title>
+<script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<style>
+:root{
+  /* The NgolaCloud design system (delonix-web packages/ui/src/tokens.css):
+     light theme by default, dark as the secondary theme. */
+  --bg:#fcfaf8;--surface:#f5f3f1;--surface-2:#eeeae8;--card:#ffffff;--ink:#191513;--ink-2:#524b49;--muted:#675e59;
+  --line:#e1ddda;--line-soft:#ece8e5;
+  --accent:#cc2823;--accent-ink:#b70000;--accent-soft:#ffe2dc;--focus:#cc2823;
+  --code-bg:#1a1614;--code-ink:#ede7e3;--code-line:#2e2825;--code-label:#a39993;
+  --warn-bg:rgba(239,168,49,.16);--warn-line:#c9820f;--warn-ink:#6b4400;
+  --topbar:rgba(255,255,255,.82);
+  --shadow:0 4px 12px rgba(38,28,22,.08),0 1px 3px rgba(38,28,22,.06);
+  --f-display:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
+  --f-body:var(--f-display);
+  --f-mono:"JetBrains Mono",ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
+  --r-sm:4px;--r:6px;--r-lg:8px;
+  --header:60px;color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0b0b0c;--surface:#131315;--surface-2:#19191c;--card:#161618;--ink:#ededee;--ink-2:#b6b6ba;--muted:#87878c;
+  --line:#262629;--line-soft:#1d1d20;
+  --accent:#ee5a24;--accent-ink:#ff6c39;--accent-soft:rgba(238,90,36,.18);--focus:#ee5a24;
+  --code-bg:#101012;--code-ink:#dedee2;--code-line:#26262a;--code-label:#87878c;
+  --warn-bg:rgba(226,161,58,.12);--warn-line:#8a6a2a;--warn-ink:#e2c07a;
+  --topbar:rgba(11,11,12,.82);
+  --shadow:0 8px 24px rgba(0,0,0,.5),0 1px 4px rgba(0,0,0,.4);color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0b0b0c;--surface:#131315;--surface-2:#19191c;--card:#161618;--ink:#ededee;--ink-2:#b6b6ba;--muted:#87878c;
+  --line:#262629;--line-soft:#1d1d20;
+  --accent:#ee5a24;--accent-ink:#ff6c39;--accent-soft:rgba(238,90,36,.18);--focus:#ee5a24;
+  --code-bg:#101012;--code-ink:#dedee2;--code-line:#26262a;--code-label:#87878c;
+  --warn-bg:rgba(226,161,58,.12);--warn-line:#8a6a2a;--warn-ink:#e2c07a;
+  --topbar:rgba(11,11,12,.82);
+  --shadow:0 8px 24px rgba(0,0,0,.5),0 1px 4px rgba(0,0,0,.4);color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-padding-top:calc(var(--header) + 16px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.7 var(--f-body);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+a{color:var(--accent-ink);text-decoration:none}
+a:hover{text-decoration:underline;text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion: reduce){*{scroll-behavior:auto!important;transition:none!important}}
+
+/* Header */
+.top{position:sticky;top:0;z-index:30;height:var(--header);display:flex;align-items:center;gap:16px;
+  padding-inline:20px;background:var(--topbar);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px;color:var(--ink);font:700 16px/1 var(--f-display);white-space:nowrap}
+.brand:hover{text-decoration:none}
+.brand .mark{width:26px;height:26px;border-radius:var(--r);background:var(--accent);display:grid;place-items:center;color:#fff;font:800 13px/1 var(--f-display)}
+.brand .sub{font:500 14px/1 var(--f-body);color:var(--muted)}
+.brand .sep{width:1px;height:18px;background:var(--line)}
+.searchbtn{flex:1;max-width:460px;margin-inline:auto;display:flex;align-items:center;gap:10px;height:38px;padding-inline:12px;
+  border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--muted);font:15px var(--f-body);cursor:pointer;min-width:0}
+.searchbtn:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.searchbtn svg{flex:none}
+.searchbtn .label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.searchbtn kbd{margin-left:auto}
+kbd{font:600 11px/1 var(--f-mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:3px 6px;background:var(--bg);color:var(--muted);white-space:nowrap}
+.actions{display:flex;align-items:center;gap:6px}
+select.lang{height:36px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink);font:14px var(--f-body);padding-inline:8px}
+.iconbtn{height:36px;width:36px;display:grid;place-items:center;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink-2);cursor:pointer}
+.iconbtn:hover{color:var(--accent-ink);border-color:color-mix(in srgb,var(--accent) 45%,var(--line));text-decoration:none}
+.menubtn{display:none}
+
+/* Frame */
+.frame{display:grid;grid-template-columns:280px minmax(0,1fr) 240px}
+nav.side{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:24px 16px 48px 20px;border-right:1px solid var(--line)}
+nav.side,aside.toc,.sres{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+nav.side .group{margin-bottom:18px}
+nav.side .gtitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);padding:0 10px 8px}
+nav.side a{display:flex;gap:10px;align-items:baseline;padding:6px 10px;border-radius:8px;color:var(--ink-2);font-size:15px;line-height:1.35}
+nav.side a:hover{background:var(--surface);text-decoration:none;color:var(--ink)}
+nav.side a .n{flex:none;width:18px;font:500 12px/1.35 var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+nav.side a.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
+nav.side a.on .n{color:var(--accent-ink)}
+main{min-width:0;padding:40px clamp(20px,3.5vw,56px) 80px}
+.content{max-width:1120px;margin-inline:auto}
+
+aside.toc{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:40px 20px 40px 8px;font-size:13.5px}
+aside.toc .ttitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+aside.toc ul{list-style:none;margin:0;padding:0}
+aside.toc ul ul{padding-left:12px}
+aside.toc li{margin:0}
+aside.toc a{display:block;padding:4px 0 4px 12px;border-left:2px solid var(--line);color:var(--muted);line-height:1.4}
+aside.toc a:hover{color:var(--ink);text-decoration:none}
+aside.toc a.active{color:var(--accent-ink);border-left-color:var(--accent);font-weight:600}
+
+/* Type */
+.kicker{font:700 12px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--accent-ink);margin:0 0 12px}
+h1,h2,h3,h4{font-family:var(--f-display);color:var(--ink);text-wrap:balance;letter-spacing:-.01em}
+h1{font-size:2.35rem;line-height:1.15;font-weight:800;margin:0 0 20px}
+h2{font-size:1.55rem;line-height:1.25;font-weight:700;margin:56px 0 14px}
+h3{font-size:1.18rem;line-height:1.3;font-weight:700;margin:36px 0 10px}
+h4{font-size:1rem;margin:28px 0 8px}
+h2 code,h3 code{font-size:.9em}
+.hanchor{margin-left:8px;color:var(--muted);opacity:0;font-weight:500;text-decoration:none}
+h2:hover .hanchor,h3:hover .hanchor,.hanchor:focus-visible{opacity:1}
+p,ul,ol{margin:0 0 16px}
+li{margin:4px 0}li>p{margin:0 0 8px}
+strong{font-weight:650;color:var(--ink)}
+hr{border:0;height:1px;background:var(--line);margin:40px 0}
+code{font:.86em/1.5 var(--f-mono);background:var(--surface-2);border:1px solid var(--line);padding:.08em .38em;border-radius:6px;overflow-wrap:break-word}
+a code{color:inherit}
+a.src code{border-color:color-mix(in srgb,var(--accent) 30%,var(--line));background:var(--accent-soft)}
+a.src:hover{text-decoration:none}a.src:hover code{border-color:var(--accent)}
+.crate-src{margin-left:10px;vertical-align:middle;font:600 11px/1 var(--f-display);letter-spacing:.04em;text-transform:uppercase;
+  border:1px solid var(--line);border-radius:999px;padding:5px 9px;color:var(--muted)}
+.crate-src:hover{color:var(--accent-ink);border-color:var(--accent);text-decoration:none}
+
+/* Blocks */
+blockquote{margin:20px 0;padding:2px 0 2px 18px;border-left:3px solid var(--line);color:var(--ink-2)}
+blockquote p:last-child{margin-bottom:0}
+blockquote.say{border:1px solid var(--line-soft);padding:14px 18px;border-radius:var(--r-lg);background:var(--card);margin:18px 0}
+blockquote.say .speaker{display:inline-block;margin-right:8px;font:700 11px/1 var(--f-display);letter-spacing:.08em;text-transform:uppercase;
+  padding:5px 8px;border-radius:999px;vertical-align:1px}
+blockquote.say-interviewer .speaker{background:var(--surface-2);color:var(--muted);border:1px solid var(--line)}
+blockquote.say-candidate{background:var(--accent-soft)}
+blockquote.say-candidate .speaker{background:var(--accent);color:#fff}
+.notice{display:flex;gap:10px;align-items:baseline;background:var(--warn-bg);border:1px solid var(--warn-line);color:var(--warn-ink);
+  border-radius:12px;padding:12px 16px;margin:0 0 28px;font-size:15px}
+.notice a{color:inherit;font-weight:600;text-decoration:underline}
+.code{margin:18px 0 22px;border-radius:var(--r-lg);background:var(--code-bg);border:1px solid var(--code-line);overflow:hidden}
+.code-head{display:flex;align-items:center;justify-content:space-between;gap:8px;height:36px;padding:0 8px 0 14px;border-bottom:1px solid var(--code-line)}
+.code-head .lang{font:600 11px/1 var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--code-label)}
+.copy{display:flex;align-items:center;gap:6px;height:26px;padding:0 9px;border:1px solid var(--code-line);border-radius:7px;background:transparent;
+  color:var(--code-label);font:600 12px var(--f-body);cursor:pointer}
+.copy:hover{color:#fff;border-color:#3a4555}
+.copy.done{color:#7ee2a8;border-color:#2f5d45}
+.code pre{margin:0;padding:14px 16px 22px;overflow-x:auto;color:var(--code-ink);font:13.5px/1.6 var(--f-mono);
+  scrollbar-width:thin;scrollbar-color:#3a4555 transparent;color-scheme:dark}
+.code pre::-webkit-scrollbar{height:8px}.code pre::-webkit-scrollbar-thumb{background:#3a4555;border-radius:8px}
+.code pre code{background:none;border:0;padding:0;font:inherit;color:inherit;overflow-wrap:normal}
+.code pre code.hljs{background:none;padding:0}
+pre.mermaid{margin:22px 0;padding:18px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--card);text-align:center;overflow-x:auto;font-family:var(--f-body)}
+.tablewrap{margin:18px 0 24px;overflow-x:auto;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:14.5px;line-height:1.5}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+th{background:var(--surface);font:700 12.5px/1.3 var(--f-display);letter-spacing:.02em;color:var(--ink-2);white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:color-mix(in srgb,var(--surface) 60%,transparent)}
+td code{font-size:.82em;overflow-wrap:normal}
+/* A table's first column names the thing (a variable, a crate, a flag): never break it. */
+td:first-child code{white-space:nowrap}
+th:first-child,td:first-child{white-space:nowrap}
+
+/* Pager + footer */
+.pager{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:64px}
+.pager a{display:block;padding:14px 16px;border:1px solid var(--line);border-radius:12px;color:var(--ink);font:600 15px/1.35 var(--f-display)}
+.pager a:hover{border-color:var(--accent);text-decoration:none}
+.pager a span{display:block;font:500 12px/1 var(--f-body);color:var(--muted);margin-bottom:6px}
+.pager .next{text-align:right;grid-column:2}
+.foot{margin-top:28px;padding-top:18px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:8px 16px;font-size:13.5px;color:var(--muted)}
+
+/* Search */
+#search{position:fixed;inset:0;z-index:60;background:rgba(10,13,18,.45);display:flex;align-items:flex-start;justify-content:center;padding:12vh 16px 16px}
+#search[hidden]{display:none}
+.sbox{width:min(680px,100%);background:var(--bg);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
+.sfield{display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--line);color:var(--muted)}
+.sfield input{flex:1;height:56px;border:0;outline:0;background:transparent;color:var(--ink);font:17px var(--f-body)}
+.sres{list-style:none;margin:0;padding:8px;max-height:56vh;overflow-y:auto}
+.sres a{display:block;padding:10px 12px;border-radius:10px;color:var(--ink)}
+.sres a:hover,.sres a.sel{background:var(--accent-soft);text-decoration:none}
+.sres .sp{display:block;font:600 11px/1 var(--f-display);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+.sres .sh{font:600 15px/1.35 var(--f-display)}
+.sres .st{display:block;margin-top:3px;font-size:13.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sres mark{background:none;color:var(--accent-ink);font-weight:700}
+.sempty{padding:18px;color:var(--muted)}
+.shelp{display:flex;gap:16px;padding:10px 16px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+
+/* Narrow screens */
+@media (max-width:1280px){.frame{grid-template-columns:256px minmax(0,1fr)}aside.toc{display:none}}
+@media (max-width:860px){
+  .frame{display:block}.menubtn{display:grid}.brand .sub,.brand .sep{display:none}
+  nav.side{position:fixed;top:var(--header);left:0;bottom:0;width:min(300px,86vw);height:auto;z-index:40;background:var(--bg);
+    transform:translateX(-102%);transition:transform .2s ease;box-shadow:var(--shadow)}
+  body.nav-open nav.side{transform:none}
+  main{padding:28px 16px 64px}
+  h1{font-size:1.9rem}h2{font-size:1.35rem}
+  .searchbtn kbd,.searchbtn .label{display:none}.searchbtn{flex:none;width:38px;justify-content:center;margin-inline:auto 0;padding:0}
+  .pager{grid-template-columns:1fr}.pager .next{grid-column:1}
+  .top{gap:8px;padding-inline:12px}
+  .brand{font-size:15px;min-width:0}
+  select.lang{width:78px;padding-inline:4px;text-overflow:ellipsis}
+}
+@media (max-width:480px){
+  .actions .ghbtn{display:none}
+  .brand .word{display:none}
+}
+</style></head>
+<body>
+<header class="top">
+  <button class="iconbtn menubtn" type="button" aria-label="菜单"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  <a class="brand" href="index.html" aria-label="手册首页"><span class="mark">D</span><span class="word">Delonix Runtime</span><span class="sep"></span><span class="sub">贡献者手册</span></a>
+  <button class="searchbtn" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span class="label">搜索手册…</span><kbd>Ctrl K</kbd></button>
+  <div class="actions">
+    <select class="lang" id="lang" aria-label="Language"><option value="../en/rust-primer.html">EN · English</option><option value="../pt-AO/rust-primer.html">PT-AO · Português (Angola)</option><option value="../fr-FR/rust-primer.html">FR-FR · Français</option><option value="../zh-CN/rust-primer.html" selected>ZH-CN · 简体中文</option></select>
+    <button class="iconbtn themebtn" type="button" aria-label="切换配色主题" title="切换配色主题"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
+    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+  </div>
+</header>
+<div class="frame">
+<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>Start here</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Cloud native primer</span></a><a class="on" aria-current="page" href="rust-primer.html"><span class="n">05</span><span>Rust primer for this codebase</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>Preparing your environment</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>The crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile and VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>Troubleshooting</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">15</span><span>Coding conventions</span></a><a href="adding-a-kind.html"><span class="n">16</span><span>Adding a Kind</span></a><a href="contributing-workflow.html"><span class="n">17</span><span>Contribution workflow</span></a><a href="releases-and-stability.html"><span class="n">18</span><span>Releases and stability</span></a><a href="publishing-docs.html"><span class="n">19</span><span>Publishing the documentation</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">20</span><span>Cloud native standards, layer by layer</span></a><a href="environment-variables.html"><span class="n">21</span><span>Environment variables (DELONIX_*)</span></a><a href="glossary.html"><span class="n">22</span><span>Glossary</span></a></div></nav>
+<main><div class="content">
+<p class="kicker">基础</p>
+<div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="rust-primer-for-this-codebase">Rust primer for this codebase</h1>
+<p><strong>Before you read:</strong> <a href="cloud-native-primer.html">Cloud native primer</a>, whose vocabulary the examples use, and basic Rust (<a href="https://doc.rust-lang.org/book/">The Rust Programming Language</a>, chapters 1–10).</p>
+<p>This is not a Rust tutorial. It is the subset of Rust you need to <em>read this repository</em>,
+with each idea pinned to a file you can open. If a concept is new to you, the "Read more"
+links go to the official source; come back here to see how the engine uses it. After it you can
+open any crate in the workspace and follow its error types, its traits, its <code>unsafe</code> blocks and its
+tests without stopping at the language.</p>
+<p>Paths are relative to the repository root. Symbols are named so you can <code>grep</code> for them —
+line numbers are deliberately left out, because they move with every PR.</p>
+<p>The pinned toolchain is in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a> (a fixed <code>channel</code>, plus <code>rustfmt</code> and
+<code>clippy</code>). <code>rustup</code> honours it automatically, so you build with the same compiler CI uses.</p>
+<hr />
+<h2 id="31-the-cargo-workspace">3.1 The Cargo workspace<a class="hanchor" href="#31-the-cargo-workspace" aria-label="#">#</a></h2>
+<p>The repository is one Cargo <strong>workspace</strong>: a root <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> with <code>[workspace] members = [...]</code>
+and one <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> per crate. Three conventions matter here:</p>
+<ol>
+<li><strong>Every path and every version is written once, in the root.</strong> The root has a
+   <code>[workspace.dependencies]</code> table listing both the engine's own crates (by <code>path</code>) and every
+   third-party crate (by <code>version</code>). A member never writes a version; it writes:</li>
+</ol>
+<div class="code"><div class="code-head"><span class="lang">toml</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-toml"># crates/contexts/delonix-node/Cargo.toml
+[dependencies]
+delonix-model = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+libc = { workspace = true }
+</code></pre></div>
+<p>A member may add <code>features = [...]</code>, and that is all. <code>default-features = false</code> lives in
+   the root because a member cannot turn off defaults the workspace turned on.
+   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (function <code>inline_versions</code>) fails the build if a member writes
+   its own version.</p>
+<ol start="2">
+<li>
+<p><strong>The directory is the layer.</strong> Crates live in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>,
+   <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a> and binaries in <code>bins/</code>
+   (ADR-0040). <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> refuses a crate whose directory does not match its
+   declared layer, and a dependency that points against the allowed direction. The layer rules
+   are taught later in the course, in
+   <a href="architecture.html#layers-and-the-allowed-direction">Architecture — Layers and the allowed direction</a>.</p>
+</li>
+<li>
+<p><strong>Lints are inherited.</strong> The root declares <code>[workspace.lints.clippy]</code> with
+   <code>undocumented_unsafe_blocks = "deny"</code>, and each member opts in with <code>[lints] workspace = true</code>.
+   Every <code>unsafe</code> block therefore carries a <code>// SAFETY:</code> comment (see §3.4).</p>
+</li>
+</ol>
+<p>The root also sets <code>[workspace.package]</code> (the shared <code>version</code>, <code>edition</code>, <code>license</code>), which
+members consume as <code>version.workspace = true</code>. The version is not decoration: see
+<a href="contributing-workflow.html#version-alignment">Version alignment</a> for the rule and
+<a href="build-and-test.html#the-gates-ci-runs">The gates CI runs</a> for the version gate.</p>
+<p><strong>Read more:</strong> Cargo Book —
+<a href="https://doc.rust-lang.org/cargo/reference/workspaces.html">Workspaces</a>,
+<a href="https://doc.rust-lang.org/cargo/reference/workspaces.html#the-dependencies-table"><code>[workspace.dependencies]</code></a>,
+<a href="https://doc.rust-lang.org/cargo/reference/manifest.html#the-lints-section"><code>[lints]</code></a>,
+<a href="https://rust-lang.github.io/rustup/overrides.html#the-toolchain-file"><code>rust-toolchain.toml</code></a>.</p>
+<hr />
+<h2 id="32-errors-one-error-and-exit-codes-derived-from-its-type">3.2 Errors: one <code>Error</code>, and exit codes derived from its type<a class="hanchor" href="#32-errors-one-error-and-exit-codes-derived-from-its-type" aria-label="#">#</a></h2>
+<p>Almost every fallible function in the engine returns <code>delonix_model::Result&lt;T&gt;</code>, an alias
+over the shared enum defined in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/error.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/error.rs</code></a>. The enum lives in the
+pure foundation crate <code>delonix-model</code>, which every other engine crate may depend on. Some adapters
+define their own error and convert it into this one (§5.2 of
+<a href="coding-conventions.html">Coding conventions</a>). It is built with
+<a href="https://docs.rs/thiserror"><code>thiserror</code></a>: <code>#[derive(Error)]</code> generates <code>Display</code> from the
+<code>#[error("...")]</code> attribute, and <code>#[from]</code> generates <code>From</code> impls so <code>?</code> converts a lower-level
+error automatically:</p>
+<div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// crates/foundation/delonix-model/src/error.rs
+#[error(&quot;I/O error: {0}&quot;)]
+Io(#[from] std::io::Error),
+</code></pre></div>
+<p>The variants are about <strong>what the caller should do next</strong>, not about which subsystem failed:
+<code>NotFound</code>, <code>NotRunning</code>, <code>Conflict</code>, <code>Unavailable</code> (a missing tool or kernel feature),
+<code>Timeout</code>, <code>Invalid</code>, <code>Registry</code>, <code>Runtime { context, message }</code> for a failed syscall, and so on.
+The doc comments on each variant explain why it exists; read them before adding a variant.</p>
+<p>Those variants become <strong>process exit codes</strong> in one place:
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/exitcode.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/exitcode.rs</code></a>, function <code>for_error</code>. The CLI re-exports the
+module (<code>pub use delonix_model::exitcode;</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/mod.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/mod.rs</code></a>) and
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/main.rs</code></a> calls <code>std::process::exit(cmd::exitcode::for_error(&amp;e))</code>.</p>
+<div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// crates/foundation/delonix-model/src/exitcode.rs
+pub fn for_error(e: &amp;Error) -&gt; i32 {
+    match e {
+        Error::NotFound(_) | Error::VmNotFound(_) =&gt; NOT_FOUND,
+        Error::NotRunning(_) =&gt; NOT_RUNNING,
+        // ...
+</code></pre></div>
+<p>Two things to notice:</p>
+<ul>
+<li>The <code>match</code> is <strong>exhaustive, with no <code>_ =&gt;</code> arm</strong>. Adding a variant to <code>Error</code> stops the build
+  in <code>for_error</code> (and in <code>Error::code</code> in <code>error.rs</code>) until someone decides its class. That is a
+  deliberate use of the compiler as a checklist.</li>
+<li>Messages are translated for the operator, so scripts must branch on the exit code (or the
+  stable machine code from <code>Error::code</code>), never on message text.</li>
+</ul>
+<p><strong>Read more:</strong> The Rust Book —
+<a href="https://doc.rust-lang.org/book/ch09-02-recoverable-errors-with-result.html">Recoverable errors with <code>Result</code></a>,
+<a href="https://doc.rust-lang.org/book/ch09-02-recoverable-errors-with-result.html#a-shortcut-for-propagating-errors-the--operator">the <code>?</code> operator</a>;
+Rust by Example — <a href="https://doc.rust-lang.org/rust-by-example/error/multiple_error_types/define_error_type.html">Defining an error type</a>;
+<a href="https://docs.rs/thiserror"><code>thiserror</code> on docs.rs</a>.</p>
+<hr />
+<h2 id="33-traits-as-ports-vmbackend-and-the-backend-registry">3.3 Traits as ports: <code>VmBackend</code> and the backend registry<a class="hanchor" href="#33-traits-as-ports-vmbackend-and-the-backend-registry" aria-label="#">#</a></h2>
+<p>The engine talks to providers through <strong>traits</strong> ("ports"), and a provider is an implementation
+of one. The clearest example is <code>VmBackend</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>:</p>
+<div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">pub trait VmBackend {
+    fn id(&amp;self) -&gt; &amp;&#x27;static str;
+    fn available(&amp;self) -&gt; bool;
+    fn boot(&amp;self, vmdir: &amp;Path, cfg: &amp;VmConfig, overlay: &amp;str,
+            on: &amp;dyn Fn(CreateStage)) -&gt; Result&lt;Boot&gt;;
+    fn is_running(&amp;self, vm: &amp;Vm) -&gt; bool;
+    fn ip(&amp;self, vm: &amp;Vm) -&gt; Option&lt;String&gt;;
+    // ... more methods, many with default bodies
+}
+</code></pre></div>
+<p>Implementations: <code>CloudHypervisorBackend</code> and <code>LibvirtBackend</code> in the same file, and
+<code>ProxmoxBackend</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/src/lib.rs</code></a>. Methods with a <strong>default
+body</strong> in the trait (for example <code>auto_selectable</code>) let a new backend inherit sensible behaviour
+and override only what differs.</p>
+<p>Backends are chosen at runtime, so they are handled as <strong>trait objects</strong>, <code>Box&lt;dyn VmBackend&gt;</code>.
+They are created through a registry of factories:</p>
+<div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// crates/adapters/delonix-vm/src/lib.rs
+pub type BackendFactory = Box&lt;dyn Fn() -&gt; Result&lt;Box&lt;dyn VmBackend&gt;&gt; + Send + Sync&gt;;
+
+static BACKENDS: std::sync::OnceLock&lt;std::sync::RwLock&lt;Vec&lt;BackendRegistration&gt;&gt;&gt; =
+    std::sync::OnceLock::new();
+</code></pre></div>
+<ul>
+<li>The factory is a <strong>closure</strong> (<code>dyn Fn</code>), because a remote backend needs captured
+  configuration (endpoint, node, credential) that a plain <code>fn()</code> pointer cannot carry.</li>
+<li><code>Send + Sync</code> is required because the table is a process-wide <code>static</code>; the bound constrains
+  the closure, not the <code>VmBackend</code> trait.</li>
+<li><code>OnceLock</code> initialises the table lazily (<code>builtin_backends()</code> seeds the two local backends),
+  and <code>RwLock</code> lets <code>register_backend</code> add a third one at startup. The binary does that in
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs</code></a> (<code>register_configured</code>).</li>
+</ul>
+<p>The decision behind this shape is <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>. The same
+"trait + implementations + one place that picks" pattern appears elsewhere (for example the
+<code>VmNetwork</code> port, held in a <code>OnceLock&lt;Box&lt;dyn VmNetwork&gt;&gt;</code> near the top of the same file).</p>
+<p><strong>Read more:</strong> The Rust Book —
+<a href="https://doc.rust-lang.org/book/ch10-02-traits.html">Traits</a>,
+<a href="https://doc.rust-lang.org/book/ch18-02-trait-objects.html">Trait objects</a>,
+<a href="https://doc.rust-lang.org/book/ch13-01-closures.html">Closures</a>,
+<a href="https://doc.rust-lang.org/book/ch16-04-extensible-concurrency-sync-and-send.html"><code>Send</code> and <code>Sync</code></a>;
+std docs — <a href="https://doc.rust-lang.org/std/sync/struct.OnceLock.html"><code>OnceLock</code></a>.</p>
+<hr />
+<h2 id="34-unsafe-ffi-and-linux-syscalls">3.4 <code>unsafe</code>, FFI and Linux syscalls<a class="hanchor" href="#34-unsafe-ffi-and-linux-syscalls" aria-label="#">#</a></h2>
+<p>A container engine is mostly system calls. This repo reaches the kernel through three crates:</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Crate</th>
+<th>Used for</th>
+<th>Example in this repo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="https://docs.rs/nix"><code>nix</code></a></td>
+<td>Safe-ish wrappers: <code>clone</code>, <code>setns</code>, <code>unshare</code>, <code>pivot_root</code>, <code>fork</code>, <code>mount</code>, signals</td>
+<td><code>use nix::<wbr>sched::<wbr>{clone, setns, unshare, CloneFlags};</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
+</tr>
+<tr>
+<td><a href="https://docs.rs/libc"><code>libc</code></a></td>
+<td>Raw calls <code>nix</code> does not wrap, or where the exact struct matters</td>
+<td><code>libc::<wbr>getsockopt(.<wbr>.<wbr>, SO_PEERCRED, .<wbr>.<wbr>)</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/peer_cred.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>peer_cred.<wbr>rs</code></a> (<code>peer_uid</code>); <code>libc::flock</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-state/<wbr>src/<wbr>store.<wbr>rs</code></a></td>
+</tr>
+<tr>
+<td><a href="https://docs.rs/rustix"><code>rustix</code></a></td>
+<td>The new mount API (<code>fsopen</code>/<code>fsconfig</code>/<code>fsmount</code>/<code>move_mount</code>)</td>
+<td><code>fsopen_overlay</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Every <code>unsafe</code> block states why it is sound</strong>, next to it (the workspace lint enforces the
+comment's presence; reviewers enforce its truth):</p>
+<div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// crates/contexts/delonix-node/src/peer_cred.rs
+// SAFETY: getsockopt on SO_PEERCRED with a correctly-sized ucred buffer.
+let r = unsafe { libc::getsockopt(stream.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, ...) };
+</code></pre></div>
+<h3 id="where-the-container-is-born">Where the container is born<a class="hanchor" href="#where-the-container-is-born" aria-label="#">#</a></h3>
+<p><code>fn spawn</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> ends in:</p>
+<div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// SAFETY: single-threaded; the child mounts the container and does `exec`.
+let cloned = unsafe { clone(cb, &amp;mut stack, flags, Some(Signal::SIGCHLD as i32)) };
+</code></pre></div>
+<p>The child runs <code>container_init</code>, which calls <code>setup_rootfs</code> (bind mounts, then <code>pivot_root</code>),
+<code>drop_capabilities</code>, installs seccomp, and finally <code>execvp</code>. <code>setns</code> is how <code>exec</code> enters an
+existing container's namespaces. The uid/gid maps of a user namespace are written from the
+parent (<code>write_userns_maps</code>, which uses the <code>newuidmap</code>/<code>newgidmap</code> helpers when available).</p>
+<h3 id="why-forkclone-in-a-multi-threaded-process-is-dangerous">Why <code>fork</code>/<code>clone</code> in a multi-threaded process is dangerous<a class="hanchor" href="#why-forkclone-in-a-multi-threaded-process-is-dangerous" aria-label="#">#</a></h3>
+<p>After <code>fork</code> or <code>clone</code>, only the calling thread exists in the child, but the child inherits
+every lock <em>as it was</em> — including locks held by threads that no longer exist. If another thread
+held the allocator lock at that instant, the child's first allocation blocks forever. <code>fork</code>
+mitigates some of this with <code>pthread_atfork</code> handlers; raw <code>clone</code> does not run them.</p>
+<p>This repo has two concrete rules because of it, both explained in comments you should read:</p>
+<ul>
+<li><strong><code>serve docker-api</code> never calls <code>spawn</code> in-process.</strong> The doc comment above the re-exec helper
+  in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/dockerapi.rs</code></a> explains that the server is a multi-threaded
+  tokio runtime, so it re-executes the binary (<code>__apirun &lt;spec.json&gt;</code>) to get a fresh
+  single-threaded process where the <code>clone</code> precondition is true again.</li>
+<li><strong>After a raw <code>fork</code>, only async-signal-safe work.</strong> <code>reexec_mapped</code> and <code>reexec_mapped_hold</code>
+  in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> pre-compute every allocation <em>before</em> the fork.
+  The comment on <code>reexec_mapped_hold</code> also records why they use raw <code>fork</code> instead of
+  <code>std::process::Command</code> + <code>pre_exec</code>: <code>Command::spawn</code> waits for the child to reach <code>exec</code>, and
+  a <code>pre_exec</code> hook that blocks waiting on the parent deadlocks.</li>
+</ul>
+<h3 id="the-new-mount-api-and-why-it-exists-here">The new mount API, and why it exists here<a class="hanchor" href="#the-new-mount-api-and-why-it-exists-here" aria-label="#">#</a></h3>
+<p><code>mount_overlay_if_marked</code> mounts a container's overlay root through <code>rustix::mount::fsopen</code> and
+one <code>fsconfig_set_string(&amp;fs, "lowerdir+", lower)</code> call per layer. The classic <code>mount(2)</code> packs
+all options into a single page-sized <code>data</code> string, which the kernel truncates silently for
+images with many layers. The measurement and decision are in
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a>. This is a good example of the repo's habit:
+the <code>///</code> comment above a non-obvious syscall explains the failure that motivated it.</p>
+<p><strong>Read more:</strong> The Rust Book — <a href="https://doc.rust-lang.org/book/ch20-01-unsafe-rust.html">Unsafe Rust</a>;
+the <a href="https://doc.rust-lang.org/nomicon/">Rustonomicon</a> (especially
+<a href="https://doc.rust-lang.org/nomicon/ffi.html">FFI</a>); man pages
+<a href="https://man7.org/linux/man-pages/man2/clone.2.html"><code>clone(2)</code></a>,
+<a href="https://man7.org/linux/man-pages/man2/setns.2.html"><code>setns(2)</code></a>,
+<a href="https://man7.org/linux/man-pages/man2/pivot_root.2.html"><code>pivot_root(2)</code></a>,
+<a href="https://man7.org/linux/man-pages/man2/fork.2.html"><code>fork(2)</code></a>,
+<a href="https://man7.org/linux/man-pages/man7/signal-safety.7.html"><code>signal-safety(7)</code></a>,
+<a href="https://man7.org/linux/man-pages/man2/fsopen.2.html"><code>fsopen(2)</code></a>.</p>
+<hr />
+<h2 id="35-serialization-serde-yaml-manifests-generated-schema">3.5 Serialization: serde, YAML manifests, generated schema<a class="hanchor" href="#35-serialization-serde-yaml-manifests-generated-schema" aria-label="#">#</a></h2>
+<p>State on disk is JSON; manifests are YAML. Both go through
+<a href="https://serde.rs/"><code>serde</code></a> derives.</p>
+<p><strong>Backward-compatible records.</strong> A record written by an older binary must still load. The rule
+is: a new field gets <code>#[serde(default)]</code>, and when "absent" must mean something different from
+the type's default, it becomes an <code>Option</code>:</p>
+<div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// bins/delonix-runtime-bin/src/cmd/vmimage.rs  (VmImage)
+#[serde(default)]
+pub cloud_init: Option&lt;bool&gt;,
+</code></pre></div>
+<p>Here <code>None</code> (every record written before the field existed) is read as "yes"; a plain <code>bool</code>
+would have defaulted to <code>false</code> and silently changed behaviour for old images. You will see the
+same reasoning in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a>: <code>Mount::propagation</code> is an
+<code>Option</code> (<code>#[serde(default, skip_serializing_if = "Option::is_none")]</code>), and <code>Mount::optional</code> is
+a plain <code>bool</code> with <code>#[serde(default)]</code>, because <code>false</code> is what every older record meant.</p>
+<p><strong>Manifests.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/manifest.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/manifest.rs</code></a> parses multi-document YAML with
+<code>serde_yaml::Deserializer::from_str(text)</code> into <code>ManifestDoc</code>, whose <code>spec</code> stays a raw
+<code>serde_yaml::Value</code> until the owning Kind deserializes it into its typed spec.</p>
+<p><strong>Generated schema.</strong> Spec types derive <code>schemars::JsonSchema</code> (for example <code>PodSpec</code> in
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/pod.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/pod.rs</code></a>), and <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/schema.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/schema.rs</code></a>
+generates the published JSON Schema from them (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener">ADR-0007</a>).
+Note the comment there: schemars honours <code>#[serde(rename)]</code> but not <code>#[serde(alias)]</code>.</p>
+<p><strong>Read more:</strong> <a href="https://serde.rs/">serde.rs</a> —
+<a href="https://serde.rs/field-attrs.html">field attributes</a> (<code>default</code>, <code>skip_serializing_if</code>, <code>alias</code>);
+<a href="https://docs.rs/serde_yaml"><code>serde_yaml</code></a>; <a href="https://docs.rs/schemars"><code>schemars</code></a>.</p>
+<hr />
+<h2 id="36-the-cli-clap-derive-and-translated-output">3.6 The CLI: clap derive and translated output<a class="hanchor" href="#36-the-cli-clap-derive-and-translated-output" aria-label="#">#</a></h2>
+<p>The <code>delonix</code> binary is <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-runtime-bin" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin</code></a>. Its top level is a
+<a href="https://docs.rs/clap"><code>clap</code></a> derive in <code>src/main.rs</code>: <code>#[derive(Parser)] struct Cli</code> holding a
+global <code>--l18n</code> flag and <code>#[command(subcommand)] cmd: Cmd</code>, where <code>enum Cmd</code> is a
+<code>#[derive(Subcommand)]</code>. Each group has its own module and enum in <code>src/cmd/</code> — for example
+<code>pub enum ContainerCmd</code> in <code>src/cmd/container.rs</code>.</p>
+<p>Doc comments (<code>///</code>) on variants and fields become the <code>--help</code> text. You will see
+<code>#[allow(clippy::large_enum_variant)]</code> on command enums, with a comment explaining why: they are
+parsed once per invocation, so boxing variants would buy nothing.</p>
+<p><strong>Source strings are English; Portuguese comes from a catalogue.</strong> <code>src/cmd/po.rs</code> embeds
+<code>data/pt.po</code> with <code>include_str!</code> and exposes:</p>
+<ul>
+<li><code>po::t("already exists, nothing to do")</code> — a fixed string;</li>
+<li><code>po::tf("port {port} is taken by '{owner}'", &amp;[("port", &amp;hp), ("owner", &amp;ow)])</code> — a template
+  with <strong>named</strong> placeholders, because a translation may reorder them;</li>
+<li><code>po::translate_help</code>, which rewrites clap's help text after <code>po::peek_lang</code> has decided the
+  language <em>before</em> parsing.</li>
+</ul>
+<p>A new user-facing string is English in the code plus an entry in <code>data/pt.po</code>. The language
+policy (LANG-01) and its gate are covered in <a href="contributing-workflow.html">Contributing workflow</a>.</p>
+<p><strong>Read more:</strong> <a href="https://docs.rs/clap/latest/clap/_derive/_tutorial/index.html">clap derive tutorial</a>;
+std — <a href="https://doc.rust-lang.org/std/macro.include_str.html"><code>include_str!</code></a>.</p>
+<hr />
+<h2 id="37-async-and-grpc-and-why-most-of-the-engine-is-synchronous">3.7 Async and gRPC — and why most of the engine is synchronous<a class="hanchor" href="#37-async-and-grpc-and-why-most-of-the-engine-is-synchronous" aria-label="#">#</a></h2>
+<p>The core engine is <strong>synchronous</strong>: the CLI starts, does its work with blocking syscalls and
+file I/O, and exits. There is no daemon and no ambient async runtime. Async code appears only in
+the <em>interfaces</em> that serve a protocol:</p>
+<ul>
+<li><strong>CRI server</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-cri" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri</code></a>. The gRPC stubs are generated at build time:
+  <code>build.rs</code> calls <code>tonic_build::configure()...compile_protos(&amp;["proto/api.proto"], &amp;["proto"])</code>.
+  That needs <strong><code>protoc</code></strong> installed (CI installs <code>protobuf-compiler</code>); a missing <code>protoc</code> is the
+  most common first build failure. <code>serve_blocking</code> in <code>src/lib.rs</code> creates its own
+  <code>tokio::runtime::Builder::new_multi_thread()</code> runtime, and handlers push blocking engine work
+  off the async workers through the <code>blocking</code> helper in <code>src/runtime_svc.rs</code> — otherwise a
+  <code>clone</code> or a shell-out to <code>delonix</code> would stall the tokio workers.</li>
+<li><strong>L7 reverse proxy</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/ingress_proxy.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/ingress_proxy.rs</code></a> uses
+  <a href="https://docs.rs/hyper"><code>hyper</code></a> directly (<code>hyper::service::service_fn</code>) on its own tokio
+  runtime.</li>
+<li><strong>MCP server</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mcp" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp</code></a> uses <a href="https://docs.rs/rmcp"><code>rmcp</code></a> over
+  stdio (<code>rmcp::transport::io::stdio</code>).</li>
+<li><strong>Telemetry</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/telemetry.rs</code></a> exports OpenTelemetry spans
+  from a dedicated thread with a <em>blocking</em> HTTP client, precisely so the synchronous CLI does not
+  need a runtime.</li>
+</ul>
+<p>The node contract under <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> is a separate protobuf API with its own gate
+(<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>, <code>buf</code>); see <a href="build-and-test.html">Build and test</a>.</p>
+<p><strong>Read more:</strong> <a href="https://rust-lang.github.io/async-book/">Asynchronous Programming in Rust</a>;
+<a href="https://tokio.rs/tokio/tutorial">Tokio tutorial</a>;
+<a href="https://docs.rs/tonic"><code>tonic</code></a> and <a href="https://docs.rs/tonic-build"><code>tonic-build</code></a>;
+<a href="https://protobuf.dev/installation/">Protocol Buffers install</a>.</p>
+<hr />
+<h2 id="38-concurrency-and-shared-state">3.8 Concurrency and shared state<a class="hanchor" href="#38-concurrency-and-shared-state" aria-label="#">#</a></h2>
+<p>There is no database. State is JSON files under the state root, and <strong>several processes</strong> (two
+CLI invocations, the CRI server, a supervisor) may touch the same record at once. The pattern for
+every read-modify-write is <code>update</code> with a closure, under an exclusive <code>flock</code>:</p>
+<div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// crates/adapters/delonix-state/src/store.rs  (Store::update)
+let id = self.load(id_or_name)?.id;
+let _lock = FileLock::acquire(&amp;self.lock_path(&amp;id))?;
+// Re-read UNDER the lock ...
+let mut c = self.load(&amp;id)?;
+if !f(&amp;mut c) { return Ok(c); }
+self.save(&amp;c)?;
+</code></pre></div>
+<p><code>JsonStore&lt;T&gt;::update</code> in the same file is the generic version for other record types. Both
+<strong>refuse</strong> to run when the lock cannot be taken (<code>Error::Lock</code>) instead of carrying on unlocked.
+(<code>SecretStore::update</code> in <code>secret.rs</code> is the exception: its lock is best-effort.) Rules that
+follow from it:</p>
+<ul>
+<li>Never do <code>load</code> → mutate → <code>save</code> by hand for a record another process can write; you will
+  lose updates. Use <code>update</code>.</li>
+<li>Re-read inside the lock. The value you loaded earlier may already be stale.</li>
+<li><code>FileLock</code> releases the lock in <code>Drop</code> — the RAII pattern.</li>
+</ul>
+<p>Inside a single process, shared state uses the standard types: an
+<code>Arc&lt;std::sync::RwLock&lt;Arc&lt;Vec&lt;Route&gt;&gt;&gt;&gt;</code> holds the proxy's hot-swappable route table
+(<code>SharedRoutes</code> in <code>cmd/ingress_proxy.rs</code>), and the dashboard shares its slow sample through an
+<code>Arc&lt;Mutex&lt;...&gt;&gt;</code> (<code>cmd/dash.rs</code>).</p>
+<p>A related idea you will meet in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/typestate.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/typestate.rs</code></a>: the
+<strong>typestate</strong> pattern, where lifecycle states are types and illegal transitions do not compile
+(its doc tests include <code>compile_fail</code> examples).</p>
+<p><strong>Read more:</strong> The Rust Book —
+<a href="https://doc.rust-lang.org/book/ch16-03-shared-state.html">Shared-state concurrency</a>,
+<a href="https://doc.rust-lang.org/book/ch15-03-drop.html"><code>Drop</code></a>;
+<a href="https://man7.org/linux/man-pages/man2/flock.2.html"><code>flock(2)</code></a>;
+std — <a href="https://doc.rust-lang.org/std/sync/struct.Arc.html"><code>Arc</code></a>,
+<a href="https://doc.rust-lang.org/std/sync/struct.RwLock.html"><code>RwLock</code></a>.</p>
+<hr />
+<h2 id="39-tests">3.9 Tests<a class="hanchor" href="#39-tests" aria-label="#">#</a></h2>
+<ul>
+<li><strong>Unit tests live next to the code</strong>, in a <code>#[cfg(test)] mod tests { ... }</code> at the bottom of
+  the file. Many pure functions exist precisely so a decision can be tested as data (for example
+  <code>reconcile::plan</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs</code></a>).</li>
+<li><strong>Integration tests</strong> live in <code>crates/&lt;layer&gt;/&lt;crate&gt;/tests/*.rs</code> and use only the crate's
+  public API. Example: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/tests/grpc_status.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/tests/grpc_status.rs</code></a> starts the CRI server
+  on a Unix socket and talks to it with the <em>generated gRPC client</em> (which is why <code>build.rs</code> sets
+  <code>build_client(true)</code>). Tests under <code>crates/providers/*/tests/live.rs</code> need a real provider and
+  are opt-in.</li>
+<li><strong>Property tests</strong> use <a href="https://docs.rs/proptest"><code>proptest</code></a>: see
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/tests/ip_invariants.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/tests/ip_invariants.rs</code></a> (<code>proptest! { ... }</code>).</li>
+<li><strong>Doc tests</strong> run too — including <code>compile_fail</code> blocks such as those in <code>typestate.rs</code>.</li>
+<li><strong>Benchmarks</strong> use <a href="https://docs.rs/criterion"><code>criterion</code></a> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci/benches" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/benches/</code></a>).</li>
+<li><strong>Names.</strong> Test names describe the behaviour being proven. Many existing tests have Portuguese
+  names; new identifiers are English (LANG-01, enforced as a ratchet by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a>).</li>
+<li><strong>Tests must not touch the host's real state.</strong> Take a temporary directory and pass it in
+  (the stores take a root path) rather than calling code that resolves the real state root.
+  Anything that needs real namespaces, cgroups or a network holder belongs to the live/E2E
+  validation described in <a href="build-and-test.html">Build and test</a>.</li>
+</ul>
+<p><strong>Read more:</strong> The Rust Book — <a href="https://doc.rust-lang.org/book/ch11-01-writing-tests.html">Writing tests</a>,
+<a href="https://doc.rust-lang.org/book/ch11-03-test-organization.html">Test organization</a>;
+rustdoc — <a href="https://doc.rust-lang.org/rustdoc/write-documentation/documentation-tests.html">Documentation tests</a>.</p>
+<hr />
+<h2 id="310-tooling-the-ci-enforces">3.10 Tooling the CI enforces<a class="hanchor" href="#310-tooling-the-ci-enforces" aria-label="#">#</a></h2>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>CI command (from <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a>)</th>
+<th>What it catches</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>rustfmt</td>
+<td><code>cargo fmt --all --check</code></td>
+<td>formatting drift</td>
+</tr>
+<tr>
+<td>clippy</td>
+<td><code>cargo clippy --workspace --all-targets --locked -- -D warnings</code></td>
+<td>any warning, including <code>undocumented_unsafe_blocks</code></td>
+</tr>
+<tr>
+<td>tests</td>
+<td><code>cargo test --workspace --locked --no-fail-fast</code></td>
+<td>regressions</td>
+</tr>
+<tr>
+<td>cargo-deny</td>
+<td><code>EmbarkStudios/<wbr>cargo-deny-action</code> with <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a></td>
+<td>RUSTSEC advisories, licences, crate sources</td>
+</tr>
+</tbody>
+</table></div>
+<p>The repo also has Python gates (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a> and others).
+The full list and how to run each one locally is in <a href="build-and-test.html">Build and test</a>.</p>
+<p><strong>Read more:</strong> <a href="https://doc.rust-lang.org/clippy/">Clippy</a>,
+<a href="https://rust-lang.github.io/rustfmt/">rustfmt</a>,
+<a href="https://embarkstudios.github.io/cargo-deny/">cargo-deny</a>.</p>
+<hr />
+<p><strong>Next:</strong> <a href="environment.html">Preparing your environment</a> — a host that can build the tree and run the live paths, and the host traps that look like engine bugs.</p>
+<nav class="pager"><a href="cloud-native-primer.html"><span>← 上一页</span>Cloud native primer</a><a class="next" href="environment.html"><span>下一页 →</span>Preparing your environment</a></nav>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/rust-primer.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/rust-primer.md</code></footer>
+</div></main>
+<aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
+<ul>
+<li><a href="#31-the-cargo-workspace">3.1 The Cargo workspace</a></li>
+<li><a href="#32-errors-one-error-and-exit-codes-derived-from-its-type">3.2 Errors: one Error, and exit codes derived from its type</a></li>
+<li><a href="#33-traits-as-ports-vmbackend-and-the-backend-registry">3.3 Traits as ports: VmBackend and the backend registry</a></li>
+<li><a href="#34-unsafe-ffi-and-linux-syscalls">3.4 unsafe, FFI and Linux syscalls</a><ul>
+<li><a href="#where-the-container-is-born">Where the container is born</a></li>
+<li><a href="#why-forkclone-in-a-multi-threaded-process-is-dangerous">Why fork/clone in a multi-threaded process is dangerous</a></li>
+<li><a href="#the-new-mount-api-and-why-it-exists-here">The new mount API, and why it exists here</a></li>
+</ul>
+</li>
+<li><a href="#35-serialization-serde-yaml-manifests-generated-schema">3.5 Serialization: serde, YAML manifests, generated schema</a></li>
+<li><a href="#36-the-cli-clap-derive-and-translated-output">3.6 The CLI: clap derive and translated output</a></li>
+<li><a href="#37-async-and-grpc-and-why-most-of-the-engine-is-synchronous">3.7 Async and gRPC — and why most of the engine is synchronous</a></li>
+<li><a href="#38-concurrency-and-shared-state">3.8 Concurrency and shared state</a></li>
+<li><a href="#39-tests">3.9 Tests</a></li>
+<li><a href="#310-tooling-the-ci-enforces">3.10 Tooling the CI enforces</a></li>
+</ul>
+</div>
+</aside>
+</div>
+<div id="search" hidden><div class="sbox" role="dialog" aria-modal="true" aria-label="搜索">
+<div class="sfield"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="search-input" type="search" placeholder="搜索手册…" autocomplete="off"><kbd>Esc</kbd></div>
+<ul class="sres"></ul>
+<div class="shelp"><span><kbd>↑</kbd> <kbd>↓</kbd></span><span><kbd>Enter</kbd></span></div></div></div>
+<script>window.HANDBOOK_UI={"copy": "复制", "copied": "已复制", "no_results": "没有结果"};</script>
+<script src="search-index.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/ini.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/dockerfile.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/protobuf.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/diff.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/makefile.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/xml.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>
+(function(){
+  const ui = window.HANDBOOK_UI;
+  const root = document.documentElement;
+
+  // Theme: system by default; the toggle cycles light/dark and remembers the choice.
+  function effectiveDark(){ const t = root.getAttribute('data-theme'); return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; }
+  document.querySelectorAll('.themebtn').forEach(function(b){
+    b.addEventListener('click', function(){
+      const next = effectiveDark() ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('delonix-handbook-theme', next); } catch (e) {}
+      renderMermaid();
+    });
+  });
+
+  // Mobile navigation drawer.
+  document.querySelectorAll('.menubtn').forEach(function(b){
+    b.addEventListener('click', function(){ document.body.classList.toggle('nav-open'); });
+  });
+  document.querySelectorAll('nav.side a').forEach(function(a){ a.addEventListener('click', function(){ document.body.classList.remove('nav-open'); }); });
+
+  // Copy buttons live in each code block's header; shell blocks drop a leading "$ ".
+  document.querySelectorAll('.code').forEach(function(box){
+    const btn = box.querySelector('.copy'); if (!btn) return;
+    btn.addEventListener('click', function(){
+      let text = box.querySelector('pre code').innerText;
+      if (box.hasAttribute('data-shell')) text = text.split('\n').map(function(l){ return l.replace(/^\$ /, ''); }).join('\n');
+      navigator.clipboard.writeText(text.replace(/\n$/, '')).then(function(){
+        btn.lastChild.textContent = ui.copied; btn.classList.add('done');
+        setTimeout(function(){ btn.lastChild.textContent = ui.copy; btn.classList.remove('done'); }, 1500);
+      });
+    });
+  });
+  if (window.hljs) document.querySelectorAll('.code pre code:not(.nohighlight)').forEach(function(el){ hljs.highlightElement(el); });
+
+  // Mermaid follows the effective theme, and re-renders when it changes.
+  const diagrams = Array.prototype.slice.call(document.querySelectorAll('pre.mermaid'));
+  diagrams.forEach(function(d){ d.setAttribute('data-src', d.textContent); });
+  function renderMermaid(){
+    if (!window.mermaid || !diagrams.length) return;
+    diagrams.forEach(function(d){ d.removeAttribute('data-processed'); d.textContent = d.getAttribute('data-src'); });
+    mermaid.initialize({startOnLoad:false, securityLevel:'strict', theme: effectiveDark() ? 'dark' : 'neutral',
+      fontFamily:getComputedStyle(document.body).fontFamily,
+      themeVariables:{fontSize:'17px'},
+      flowchart:{useMaxWidth:true, nodeSpacing:28, rankSpacing:44, padding:10},
+      sequence:{useMaxWidth:true}});
+    mermaid.run({nodes: diagrams});
+  }
+  renderMermaid();
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(){ if (!root.getAttribute('data-theme')) renderMermaid(); });
+
+  // "On this page": highlight the section being read.
+  const tocLinks = Array.prototype.slice.call(document.querySelectorAll('aside.toc a'));
+  const byId = {}; tocLinks.forEach(function(a){ byId[decodeURIComponent(a.getAttribute('href').slice(1))] = a; });
+  const heads = Array.prototype.slice.call(document.querySelectorAll('.content h2[id], .content h3[id]')).filter(function(h){ return byId[h.id]; });
+  function spy(){
+    let current = heads.length ? heads[0] : null;
+    const line = 120;
+    heads.forEach(function(h){ if (h.getBoundingClientRect().top <= line) current = h; });
+    tocLinks.forEach(function(a){ a.classList.remove('active'); });
+    if (current) byId[current.id].classList.add('active');
+  }
+  if (heads.length){ document.addEventListener('scroll', spy, {passive:true}); spy(); }
+
+  // Search (Ctrl+K / Cmd+K / "/"): a static index of this language, scored in the browser.
+  const modal = document.getElementById('search'), input = modal.querySelector('input'), list = modal.querySelector('.sres');
+  let selected = 0;
+  function norm(s){ return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+  const index = (window.HANDBOOK_INDEX || []).map(function(r){ return Object.assign({nh: norm(r.h), np: norm(r.p), nt: norm(r.t)}, r); });
+  function esc(s){ return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function mark(s, terms){ let out = esc(s); terms.forEach(function(t){ if (t.length > 1) out = out.replace(new RegExp('(' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig'), '<mark>$1</mark>'); }); return out; }
+  function snippet(r, terms){ const i = terms.length ? r.nt.indexOf(terms[0]) : -1; const start = Math.max(0, i - 50); return (start ? '…' : '') + r.t.slice(start, start + 170); }
+  function run(){
+    const terms = norm(input.value).split(/\s+/).filter(Boolean);
+    if (!terms.length){ list.innerHTML = ''; return; }
+    const hits = [];
+    index.forEach(function(r){
+      let score = 0;
+      for (const t of terms){ const s = (r.nh.includes(t) ? 10 : 0) + (r.np.includes(t) ? 3 : 0) + (r.nt.includes(t) ? 1 : 0); if (!s) return; score += s; }
+      hits.push([score, r]);
+    });
+    hits.sort(function(a, b){ return b[0] - a[0]; });
+    selected = 0;
+    list.innerHTML = hits.length ? hits.slice(0, 30).map(function(h, i){
+      const r = h[1];
+      return '<li><a href="' + esc(r.u) + '"' + (i === 0 ? ' class="sel"' : '') + '><span class="sp">' + esc(r.p) + '</span>' +
+        '<span class="sh">' + mark(r.h, terms) + '</span><span class="st">' + mark(snippet(r, terms), terms) + '</span></a></li>';
+    }).join('') : '<li class="sempty">' + esc(ui.no_results) + '</li>';
+  }
+  function open(){ modal.hidden = false; input.value = ''; list.innerHTML = ''; input.focus(); }
+  function close(){ modal.hidden = true; }
+  document.querySelectorAll('.searchbtn').forEach(function(b){ b.addEventListener('click', open); });
+  modal.addEventListener('click', function(e){ if (e.target === modal) close(); });
+  input.addEventListener('input', run);
+  input.addEventListener('keydown', function(e){
+    const links = list.querySelectorAll('a');
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+      e.preventDefault(); if (!links.length) return;
+      links[selected].classList.remove('sel');
+      selected = (selected + (e.key === 'ArrowDown' ? 1 : links.length - 1)) % links.length;
+      links[selected].classList.add('sel'); links[selected].scrollIntoView({block:'nearest'});
+    } else if (e.key === 'Enter' && links.length){ e.preventDefault(); close(); location.href = links[selected].getAttribute('href'); }
+  });
+  document.addEventListener('keydown', function(e){
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k'){ e.preventDefault(); modal.hidden ? open() : close(); }
+    else if (e.key === 'Escape'){ if (!modal.hidden) close(); document.body.classList.remove('nav-open'); }
+    else if (e.key === '/' && modal.hidden && !/input|textarea|select/i.test(document.activeElement.tagName)){ e.preventDefault(); open(); }
+  });
+  document.querySelectorAll('select.lang').forEach(function(s){ s.addEventListener('change', function(){ location.href = s.value + location.hash; }); });
+})();
+</script>
+</body></html>

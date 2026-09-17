@@ -54,3 +54,12 @@ docs/guia-vm.html	delonix vm snapshots lab-probe	gerado de docs/guia-vm-lab.md
 docs/guia-vm.html	delonix vm restore lab-probe base-limpa	gerado de docs/guia-vm-lab.md
 docs/cli-stability.md	delonix system backup	citação histórica — descreve o estado ANTES do Sprint 4 (system backup/restore -> system snapshot create/restore), não o actual
 docs/estabilidade.html	delonix system backup	gerado de docs/cli-stability.md
+docs/dev/architecture.md	delonix netns	hidden entry point intercepted in main.rs before clap (network pin/control/run of the rootless infra) — named on purpose to explain the processes
+docs/dev/architecture.md	delonix netns pin	hidden entry point intercepted in main.rs before clap (network pin/control/run of the rootless infra) — named on purpose to explain the processes
+docs/dev/architecture.md	delonix netns control	hidden entry point intercepted in main.rs before clap (network pin/control/run of the rootless infra) — named on purpose to explain the processes
+docs/dev/architecture.md	delonix netns run	hidden entry point intercepted in main.rs before clap (network pin/control/run of the rootless infra) — named on purpose to explain the processes
+docs/dev/system-design-interview.md	delonix netns pin	hidden entry point intercepted in main.rs before clap (network pin/control/run of the rootless infra) — named on purpose to explain the processes
+docs/dev/system-design-interview.md	delonix netns control	hidden entry point intercepted in main.rs before clap (network pin/control/run of the rootless infra) — named on purpose to explain the processes
+docs/dev/system-design-interview.md	delonix netns run	hidden entry point intercepted in main.rs before clap (network pin/control/run of the rootless infra) — named on purpose to explain the processes
+docs/dev/delonixfile-and-vmfile.md	delonix vm build	the sentence says this command does NOT exist and points to `image vm build`
+docs/dev/releases-and-stability.md	delonix netns attach	same historical lesson as docs/cli-stability.md — the CRI server kept invoking the removed spelling for months

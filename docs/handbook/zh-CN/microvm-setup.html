@@ -1,0 +1,1097 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Building microVMs · Delonix Runtime — 贡献者手册</title>
+<script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<style>
+:root{
+  /* The NgolaCloud design system (delonix-web packages/ui/src/tokens.css):
+     light theme by default, dark as the secondary theme. */
+  --bg:#fcfaf8;--surface:#f5f3f1;--surface-2:#eeeae8;--card:#ffffff;--ink:#191513;--ink-2:#524b49;--muted:#675e59;
+  --line:#e1ddda;--line-soft:#ece8e5;
+  --accent:#cc2823;--accent-ink:#b70000;--accent-soft:#ffe2dc;--focus:#cc2823;
+  --code-bg:#1a1614;--code-ink:#ede7e3;--code-line:#2e2825;--code-label:#a39993;
+  --warn-bg:rgba(239,168,49,.16);--warn-line:#c9820f;--warn-ink:#6b4400;
+  --topbar:rgba(255,255,255,.82);
+  --shadow:0 4px 12px rgba(38,28,22,.08),0 1px 3px rgba(38,28,22,.06);
+  --f-display:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
+  --f-body:var(--f-display);
+  --f-mono:"JetBrains Mono",ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
+  --r-sm:4px;--r:6px;--r-lg:8px;
+  --header:60px;color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0b0b0c;--surface:#131315;--surface-2:#19191c;--card:#161618;--ink:#ededee;--ink-2:#b6b6ba;--muted:#87878c;
+  --line:#262629;--line-soft:#1d1d20;
+  --accent:#ee5a24;--accent-ink:#ff6c39;--accent-soft:rgba(238,90,36,.18);--focus:#ee5a24;
+  --code-bg:#101012;--code-ink:#dedee2;--code-line:#26262a;--code-label:#87878c;
+  --warn-bg:rgba(226,161,58,.12);--warn-line:#8a6a2a;--warn-ink:#e2c07a;
+  --topbar:rgba(11,11,12,.82);
+  --shadow:0 8px 24px rgba(0,0,0,.5),0 1px 4px rgba(0,0,0,.4);color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0b0b0c;--surface:#131315;--surface-2:#19191c;--card:#161618;--ink:#ededee;--ink-2:#b6b6ba;--muted:#87878c;
+  --line:#262629;--line-soft:#1d1d20;
+  --accent:#ee5a24;--accent-ink:#ff6c39;--accent-soft:rgba(238,90,36,.18);--focus:#ee5a24;
+  --code-bg:#101012;--code-ink:#dedee2;--code-line:#26262a;--code-label:#87878c;
+  --warn-bg:rgba(226,161,58,.12);--warn-line:#8a6a2a;--warn-ink:#e2c07a;
+  --topbar:rgba(11,11,12,.82);
+  --shadow:0 8px 24px rgba(0,0,0,.5),0 1px 4px rgba(0,0,0,.4);color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-padding-top:calc(var(--header) + 16px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.7 var(--f-body);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+a{color:var(--accent-ink);text-decoration:none}
+a:hover{text-decoration:underline;text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion: reduce){*{scroll-behavior:auto!important;transition:none!important}}
+
+/* Header */
+.top{position:sticky;top:0;z-index:30;height:var(--header);display:flex;align-items:center;gap:16px;
+  padding-inline:20px;background:var(--topbar);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px;color:var(--ink);font:700 16px/1 var(--f-display);white-space:nowrap}
+.brand:hover{text-decoration:none}
+.brand .mark{width:26px;height:26px;border-radius:var(--r);background:var(--accent);display:grid;place-items:center;color:#fff;font:800 13px/1 var(--f-display)}
+.brand .sub{font:500 14px/1 var(--f-body);color:var(--muted)}
+.brand .sep{width:1px;height:18px;background:var(--line)}
+.searchbtn{flex:1;max-width:460px;margin-inline:auto;display:flex;align-items:center;gap:10px;height:38px;padding-inline:12px;
+  border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--muted);font:15px var(--f-body);cursor:pointer;min-width:0}
+.searchbtn:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.searchbtn svg{flex:none}
+.searchbtn .label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.searchbtn kbd{margin-left:auto}
+kbd{font:600 11px/1 var(--f-mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:3px 6px;background:var(--bg);color:var(--muted);white-space:nowrap}
+.actions{display:flex;align-items:center;gap:6px}
+select.lang{height:36px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink);font:14px var(--f-body);padding-inline:8px}
+.iconbtn{height:36px;width:36px;display:grid;place-items:center;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink-2);cursor:pointer}
+.iconbtn:hover{color:var(--accent-ink);border-color:color-mix(in srgb,var(--accent) 45%,var(--line));text-decoration:none}
+.menubtn{display:none}
+
+/* Frame */
+.frame{display:grid;grid-template-columns:280px minmax(0,1fr) 240px}
+nav.side{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:24px 16px 48px 20px;border-right:1px solid var(--line)}
+nav.side,aside.toc,.sres{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+nav.side .group{margin-bottom:18px}
+nav.side .gtitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);padding:0 10px 8px}
+nav.side a{display:flex;gap:10px;align-items:baseline;padding:6px 10px;border-radius:8px;color:var(--ink-2);font-size:15px;line-height:1.35}
+nav.side a:hover{background:var(--surface);text-decoration:none;color:var(--ink)}
+nav.side a .n{flex:none;width:18px;font:500 12px/1.35 var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+nav.side a.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
+nav.side a.on .n{color:var(--accent-ink)}
+main{min-width:0;padding:40px clamp(20px,3.5vw,56px) 80px}
+.content{max-width:1120px;margin-inline:auto}
+
+aside.toc{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:40px 20px 40px 8px;font-size:13.5px}
+aside.toc .ttitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+aside.toc ul{list-style:none;margin:0;padding:0}
+aside.toc ul ul{padding-left:12px}
+aside.toc li{margin:0}
+aside.toc a{display:block;padding:4px 0 4px 12px;border-left:2px solid var(--line);color:var(--muted);line-height:1.4}
+aside.toc a:hover{color:var(--ink);text-decoration:none}
+aside.toc a.active{color:var(--accent-ink);border-left-color:var(--accent);font-weight:600}
+
+/* Type */
+.kicker{font:700 12px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--accent-ink);margin:0 0 12px}
+h1,h2,h3,h4{font-family:var(--f-display);color:var(--ink);text-wrap:balance;letter-spacing:-.01em}
+h1{font-size:2.35rem;line-height:1.15;font-weight:800;margin:0 0 20px}
+h2{font-size:1.55rem;line-height:1.25;font-weight:700;margin:56px 0 14px}
+h3{font-size:1.18rem;line-height:1.3;font-weight:700;margin:36px 0 10px}
+h4{font-size:1rem;margin:28px 0 8px}
+h2 code,h3 code{font-size:.9em}
+.hanchor{margin-left:8px;color:var(--muted);opacity:0;font-weight:500;text-decoration:none}
+h2:hover .hanchor,h3:hover .hanchor,.hanchor:focus-visible{opacity:1}
+p,ul,ol{margin:0 0 16px}
+li{margin:4px 0}li>p{margin:0 0 8px}
+strong{font-weight:650;color:var(--ink)}
+hr{border:0;height:1px;background:var(--line);margin:40px 0}
+code{font:.86em/1.5 var(--f-mono);background:var(--surface-2);border:1px solid var(--line);padding:.08em .38em;border-radius:6px;overflow-wrap:break-word}
+a code{color:inherit}
+a.src code{border-color:color-mix(in srgb,var(--accent) 30%,var(--line));background:var(--accent-soft)}
+a.src:hover{text-decoration:none}a.src:hover code{border-color:var(--accent)}
+.crate-src{margin-left:10px;vertical-align:middle;font:600 11px/1 var(--f-display);letter-spacing:.04em;text-transform:uppercase;
+  border:1px solid var(--line);border-radius:999px;padding:5px 9px;color:var(--muted)}
+.crate-src:hover{color:var(--accent-ink);border-color:var(--accent);text-decoration:none}
+
+/* Blocks */
+blockquote{margin:20px 0;padding:2px 0 2px 18px;border-left:3px solid var(--line);color:var(--ink-2)}
+blockquote p:last-child{margin-bottom:0}
+blockquote.say{border:1px solid var(--line-soft);padding:14px 18px;border-radius:var(--r-lg);background:var(--card);margin:18px 0}
+blockquote.say .speaker{display:inline-block;margin-right:8px;font:700 11px/1 var(--f-display);letter-spacing:.08em;text-transform:uppercase;
+  padding:5px 8px;border-radius:999px;vertical-align:1px}
+blockquote.say-interviewer .speaker{background:var(--surface-2);color:var(--muted);border:1px solid var(--line)}
+blockquote.say-candidate{background:var(--accent-soft)}
+blockquote.say-candidate .speaker{background:var(--accent);color:#fff}
+.notice{display:flex;gap:10px;align-items:baseline;background:var(--warn-bg);border:1px solid var(--warn-line);color:var(--warn-ink);
+  border-radius:12px;padding:12px 16px;margin:0 0 28px;font-size:15px}
+.notice a{color:inherit;font-weight:600;text-decoration:underline}
+.code{margin:18px 0 22px;border-radius:var(--r-lg);background:var(--code-bg);border:1px solid var(--code-line);overflow:hidden}
+.code-head{display:flex;align-items:center;justify-content:space-between;gap:8px;height:36px;padding:0 8px 0 14px;border-bottom:1px solid var(--code-line)}
+.code-head .lang{font:600 11px/1 var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--code-label)}
+.copy{display:flex;align-items:center;gap:6px;height:26px;padding:0 9px;border:1px solid var(--code-line);border-radius:7px;background:transparent;
+  color:var(--code-label);font:600 12px var(--f-body);cursor:pointer}
+.copy:hover{color:#fff;border-color:#3a4555}
+.copy.done{color:#7ee2a8;border-color:#2f5d45}
+.code pre{margin:0;padding:14px 16px 22px;overflow-x:auto;color:var(--code-ink);font:13.5px/1.6 var(--f-mono);
+  scrollbar-width:thin;scrollbar-color:#3a4555 transparent;color-scheme:dark}
+.code pre::-webkit-scrollbar{height:8px}.code pre::-webkit-scrollbar-thumb{background:#3a4555;border-radius:8px}
+.code pre code{background:none;border:0;padding:0;font:inherit;color:inherit;overflow-wrap:normal}
+.code pre code.hljs{background:none;padding:0}
+pre.mermaid{margin:22px 0;padding:18px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--card);text-align:center;overflow-x:auto;font-family:var(--f-body)}
+.tablewrap{margin:18px 0 24px;overflow-x:auto;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:14.5px;line-height:1.5}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+th{background:var(--surface);font:700 12.5px/1.3 var(--f-display);letter-spacing:.02em;color:var(--ink-2);white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:color-mix(in srgb,var(--surface) 60%,transparent)}
+td code{font-size:.82em;overflow-wrap:normal}
+/* A table's first column names the thing (a variable, a crate, a flag): never break it. */
+td:first-child code{white-space:nowrap}
+th:first-child,td:first-child{white-space:nowrap}
+
+/* Pager + footer */
+.pager{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:64px}
+.pager a{display:block;padding:14px 16px;border:1px solid var(--line);border-radius:12px;color:var(--ink);font:600 15px/1.35 var(--f-display)}
+.pager a:hover{border-color:var(--accent);text-decoration:none}
+.pager a span{display:block;font:500 12px/1 var(--f-body);color:var(--muted);margin-bottom:6px}
+.pager .next{text-align:right;grid-column:2}
+.foot{margin-top:28px;padding-top:18px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:8px 16px;font-size:13.5px;color:var(--muted)}
+
+/* Search */
+#search{position:fixed;inset:0;z-index:60;background:rgba(10,13,18,.45);display:flex;align-items:flex-start;justify-content:center;padding:12vh 16px 16px}
+#search[hidden]{display:none}
+.sbox{width:min(680px,100%);background:var(--bg);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
+.sfield{display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--line);color:var(--muted)}
+.sfield input{flex:1;height:56px;border:0;outline:0;background:transparent;color:var(--ink);font:17px var(--f-body)}
+.sres{list-style:none;margin:0;padding:8px;max-height:56vh;overflow-y:auto}
+.sres a{display:block;padding:10px 12px;border-radius:10px;color:var(--ink)}
+.sres a:hover,.sres a.sel{background:var(--accent-soft);text-decoration:none}
+.sres .sp{display:block;font:600 11px/1 var(--f-display);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+.sres .sh{font:600 15px/1.35 var(--f-display)}
+.sres .st{display:block;margin-top:3px;font-size:13.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sres mark{background:none;color:var(--accent-ink);font-weight:700}
+.sempty{padding:18px;color:var(--muted)}
+.shelp{display:flex;gap:16px;padding:10px 16px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+
+/* Narrow screens */
+@media (max-width:1280px){.frame{grid-template-columns:256px minmax(0,1fr)}aside.toc{display:none}}
+@media (max-width:860px){
+  .frame{display:block}.menubtn{display:grid}.brand .sub,.brand .sep{display:none}
+  nav.side{position:fixed;top:var(--header);left:0;bottom:0;width:min(300px,86vw);height:auto;z-index:40;background:var(--bg);
+    transform:translateX(-102%);transition:transform .2s ease;box-shadow:var(--shadow)}
+  body.nav-open nav.side{transform:none}
+  main{padding:28px 16px 64px}
+  h1{font-size:1.9rem}h2{font-size:1.35rem}
+  .searchbtn kbd,.searchbtn .label{display:none}.searchbtn{flex:none;width:38px;justify-content:center;margin-inline:auto 0;padding:0}
+  .pager{grid-template-columns:1fr}.pager .next{grid-column:1}
+  .top{gap:8px;padding-inline:12px}
+  .brand{font-size:15px;min-width:0}
+  select.lang{width:78px;padding-inline:4px;text-overflow:ellipsis}
+}
+@media (max-width:480px){
+  .actions .ghbtn{display:none}
+  .brand .word{display:none}
+}
+</style></head>
+<body>
+<header class="top">
+  <button class="iconbtn menubtn" type="button" aria-label="菜单"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  <a class="brand" href="index.html" aria-label="手册首页"><span class="mark">D</span><span class="word">Delonix Runtime</span><span class="sep"></span><span class="sub">贡献者手册</span></a>
+  <button class="searchbtn" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span class="label">搜索手册…</span><kbd>Ctrl K</kbd></button>
+  <div class="actions">
+    <select class="lang" id="lang" aria-label="Language"><option value="../en/microvm-setup.html">EN · English</option><option value="../pt-AO/microvm-setup.html">PT-AO · Português (Angola)</option><option value="../fr-FR/microvm-setup.html">FR-FR · Français</option><option value="../zh-CN/microvm-setup.html" selected>ZH-CN · 简体中文</option></select>
+    <button class="iconbtn themebtn" type="button" aria-label="切换配色主题" title="切换配色主题"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
+    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+  </div>
+</header>
+<div class="frame">
+<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>Start here</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Cloud native primer</span></a><a href="rust-primer.html"><span class="n">05</span><span>Rust primer for this codebase</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>Preparing your environment</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>The crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile and VMfile</span></a><a class="on" aria-current="page" href="microvm-setup.html"><span class="n">13</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>Troubleshooting</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">15</span><span>Coding conventions</span></a><a href="adding-a-kind.html"><span class="n">16</span><span>Adding a Kind</span></a><a href="contributing-workflow.html"><span class="n">17</span><span>Contribution workflow</span></a><a href="releases-and-stability.html"><span class="n">18</span><span>Releases and stability</span></a><a href="publishing-docs.html"><span class="n">19</span><span>Publishing the documentation</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">20</span><span>Cloud native standards, layer by layer</span></a><a href="environment-variables.html"><span class="n">21</span><span>Environment variables (DELONIX_*)</span></a><a href="glossary.html"><span class="n">22</span><span>Glossary</span></a></div></nav>
+<main><div class="content">
+<p class="kicker">镜像与 microVM</p>
+<div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="building-microvms">Building microVMs</h1>
+<p><strong>Before you read:</strong> <a href="environment.html">Preparing your environment</a>, <a href="build-and-test.html">Clone, build and test</a>, the <a href="cloud-native-primer.html#47-virtualization-kvm-virtio-cloud-hypervisor-libvirt-cloud-init">virtualization section of the Cloud native primer</a>, and Part 2 of <a href="delonixfile-and-vmfile.html#part-2-vmfile">Delonixfile and VMfile</a>.</p>
+<p>This page takes a contributor from a bare Linux host to building, booting and testing VMs with
+Delonix, and shows where the code lives when something needs changing. After it you can prepare a
+host for Cloud Hypervisor and libvirt, predict which backend a VM gets, and test a VM change through
+the CLI. It assumes you have
+already read <a href="environment.html">Preparing your environment</a> and can build the tree
+(<a href="build-and-test.html">Clone, build and test</a>).</p>
+<blockquote>
+<p><strong>What was verified for this page.</strong> Every command and flag below was checked against
+<code>delonix &lt;group&gt; --help</code> of a binary built from this tree, and the read-only / configuration
+commands (<code>vm ls</code>, <code>vm reach</code>, <code>vm default-backend</code>, <code>image vm ls</code>, <code>manifest validate</code>,
+<code>stack apply --dry-run</code>, the backend-selection errors) were <strong>run</strong> with <code>DELONIX_ROOT</code> and
+<code>DELONIX_NET_RUNTIME_DIR</code> pointed at a scratch directory. <strong>Booting a VM, building an image and
+pulling from the registry were not executed in this review</strong> — behaviour for those comes from
+the code, the ADRs and the scripted tests referenced below.</p>
+</blockquote>
+<p>Always use the binary you built (<code>./target/debug/delonix</code>), not one on your <code>PATH</code>, and always
+isolate <strong>both</strong> state roots while experimenting — see <a href="#isolation-first">Isolation</a>.</p>
+<hr />
+<h2 id="1-host-prerequisites">1. Host prerequisites<a class="hanchor" href="#1-host-prerequisites" aria-label="#">#</a></h2>
+<h3 id="kvm">KVM<a class="hanchor" href="#kvm" aria-label="#">#</a></h3>
+<p>Both local backends need hardware virtualization:</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">ls -l /dev/kvm            # must exist; missing = VT-x/AMD-V off in firmware, or no nested virt
+id -nG | tr &#x27; &#x27; &#x27;\n&#x27; | grep -x kvm   # your user must be in the kvm group
+</code></pre></div>
+<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (default, i.e. without <code>--no-vm</code>) adds you to the <code>kvm</code> and <code>libvirt</code> groups
+and warns when <code>/dev/kvm</code> is missing. Group changes need a new login session.</p>
+<h3 id="cloud-hypervisor-and-its-firmware">Cloud Hypervisor and its firmware<a class="hanchor" href="#cloud-hypervisor-and-its-firmware" aria-label="#">#</a></h3>
+<p>The backend is available when <code>cloud-hypervisor</code> is on <code>PATH</code>
+(<code>CloudHypervisorBackend::available</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>). Where the
+distribution does not package it, the installer downloads the <strong>static</strong> upstream binary to
+<code>/usr/local/bin/cloud-hypervisor</code>, pinned to a version <strong>and</strong> a SHA-256 in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>.</p>
+<p>To boot a cloud image without <code>--kernel</code>, CH needs UEFI firmware. <code>default_ch_firmware</code> uses
+<code>$DELONIX_HYPERVISOR_FW</code> if set, otherwise the first file that exists in <code>DEFAULT_CH_FIRMWARES</code>:</p>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-text">/usr/local/share/delonix/CLOUDHV.fd       ← EDK2 build from cloud-hypervisor/edk2 (preferred)
+/usr/share/delonix/CLOUDHV.fd
+/usr/local/share/delonix/hypervisor-fw    ← rust-hypervisor-firmware (fallback)
+/usr/share/delonix/hypervisor-fw
+</code></pre></div>
+<p><strong>The order matters.</strong> Measured and recorded in the constant's doc comment: under
+<code>rust-hypervisor-fw</code> none of the images this project builds boot in CH; with EDK2 <code>CLOUDHV.fd</code> they
+do. <code>hypervisor-fw</code> stays as a fallback for hosts that only have it. The installer fetches both
+(each pinned by tag and SHA-256). The unit test <code>o_edk2_vem_antes_do_hypervisor_fw_na_procura_de_firmware</code>
+guards the order.</p>
+<h3 id="libvirt-qemu">libvirt / QEMU<a class="hanchor" href="#libvirt-qemu" aria-label="#">#</a></h3>
+<p>The libvirt backend is available when both <code>virsh</code> and <code>qemu-system-x86_64</code> are on <code>PATH</code>
+(<code>LibvirtBackend::available</code>). The installer installs QEMU and a libvirt daemon package and
+enables <code>libvirtd</code> (socket-activated where supported).</p>
+<p>Which libvirt connection is used matters more than it looks (<code>libvirt_uri_for</code>):</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Connection</th>
+<th>Consequence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--net-mode nat</code> or <code>bridge</code></td>
+<td><code>qemu:///system</code></td>
+<td>reachable IP; needs the <code>libvirt</code> group (or root)</td>
+</tr>
+<tr>
+<td>no <code>--net-mode</code>, system connection usable</td>
+<td><code>qemu:///system</code>, <strong><code>nat</code> chosen automatically</strong></td>
+<td>IP by DHCP from the libvirt network (<code>virbr0</code>)</td>
+</tr>
+<tr>
+<td>no <code>--net-mode</code>, system connection <strong>not</strong> usable, rootless</td>
+<td><code>qemu:///session</code>, user-mode</td>
+<td><strong>no visible or reachable IP</strong>; <code>vm create</code> warns</td>
+</tr>
+</tbody>
+</table></div>
+<p>On <code>qemu:///system</code> QEMU runs as the libvirt service user, which cannot read a disk under a 0700
+home. For a rootless caller the domain XML gets a static DAC <code>seclabel</code> pinning QEMU to your
+uid/gid with <code>relabel='no'</code>, so your own overlay boots without being chowned away.</p>
+<h3 id="tools-the-vm-code-shells-out-to">Tools the VM code shells out to<a class="hanchor" href="#tools-the-vm-code-shells-out-to" aria-label="#">#</a></h3>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Package (Debian / Fedora)</th>
+<th>Used by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>qemu-img</code></td>
+<td><code>qemu-utils</code> / <code>qemu-img</code></td>
+<td>per-VM overlays, <code>vm convert</code>, snapshots on CH, image builds</td>
+</tr>
+<tr>
+<td><code>cloud-localds</code></td>
+<td><code>cloud-image-utils</code> / <code>cloud-utils</code></td>
+<td>NoCloud seed ISO — generated on <strong>every</strong> <code>vm create</code> of a cloud-init image unless <code>--seed</code> is given (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/cloudinit.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>cloudinit.<wbr>rs</code></a>)</td>
+</tr>
+<tr>
+<td><code>virsh</code></td>
+<td><code>libvirt-clients</code> / <code>libvirt-client</code></td>
+<td>libvirt backend</td>
+</tr>
+<tr>
+<td><code>virt-customize</code>, <code>virt-sparsify</code>, <code>virt-copy-out</code></td>
+<td><code>libguestfs-tools</code> / <code>guestfs-tools</code></td>
+<td><code>image vm build</code> only</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>vmimage::tool_package</code> maps a missing binary to its package, so a missing tool is reported by
+name rather than as a bare <code>No such file or directory</code>.</p>
+<h3 id="only-for-building-images-with-image-build">Only for building images: <code>--with-image-build</code><a class="hanchor" href="#only-for-building-images-with-image-build" aria-label="#">#</a></h3>
+<p><code>image vm build</code> runs <code>virt-customize</code>, which builds a small appliance with supermin. Three host
+problems break it in ways that do not look like host problems; <code>scripts/install.sh --with-image-build</code>
+handles them, and <code>tool_failure_hint</code> (<code>cmd/vmimage.rs</code>) names them when a build fails:</p>
+<ol>
+<li><strong>No DHCP client on the host.</strong> supermin <em>copies</em> host packages into the appliance; without
+   <code>isc-dhcp-client</code> the appliance has no network and the build dies on
+   <code>Temporary failure resolving …</code>. The installer installs it.</li>
+<li><strong><code>/boot/vmlinuz-*</code> is 0600</strong> (Debian/Ubuntu). supermin copies the host kernel and fails with
+   <code>Permission denied</code>. The installer runs <code>chmod 0644 /boot/vmlinuz-*</code> — this <strong>lowers a host
+   security boundary</strong> (any local user can read the kernel image), so it is opt-in and prints how to
+   revert (<code>sudo chmod 0600 /boot/vmlinuz-*</code>). The failure hint also shows how to make it survive
+   kernel updates.</li>
+<li><strong>passt</strong>, only with <code>image vm build --network</code>. libguestfs gives the appliance a network through
+   passt. Its AppArmor profile (Debian/Ubuntu) forbids the runtime directory libguestfs uses, and the
+   passt packaged in Ubuntu 24.04 starts but never hands out a lease — <code>dhclient</code> waits ~300 s and the
+   build continues <strong>without</strong> network, failing later on a package mirror. Remedies:</li>
+</ol>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">mkdir -p /tmp/delonix-run &amp;&amp; chmod 700 /tmp/delonix-run
+XDG_RUNTIME_DIR=/tmp/delonix-run ./target/debug/delonix image vm build --network …
+</code></pre></div>
+<p>and, if it still fails, a current passt <strong>first on <code>PATH</code></strong> (the installer builds one into
+   <code>/usr/local/bin</code>). Do not "disable" passt with a failing stub: libguestfs then uses the stub and
+   dies on it.</p>
+<p>The golden recipe's <code>--offline</code> mode avoids trap 3 entirely: it fetches and verifies packages on the
+host and runs the guest with <code>--no-network</code>.</p>
+<h3 id="isolation-first">Isolation first<a class="hanchor" href="#isolation-first" aria-label="#">#</a></h3>
+<p>This machine may run other workloads. Before any <code>vm</code> command beyond <code>--help</code>:</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">export DELONIX_ROOT=$HOME/dlx-dev/root
+export DELONIX_NET_RUNTIME_DIR=/tmp/dlx-dev-run     # keep it SHORT (AF_UNIX sun_path is 108 bytes)
+export TMPDIR=$HOME/dlx-dev/tmp                     # VMfile builds put whole disks here
+mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot; &quot;$TMPDIR&quot;
+</code></pre></div>
+<p>Both roots, always: isolating only <code>DELONIX_ROOT</code> leaves the network sockets shared with the real
+state and has restarted real workloads before (see <a href="build-and-test.html">Clone, build and test</a>). A Cloud Hypervisor
+VM also refuses up front when <code>&lt;root&gt;/vms/&lt;name&gt;.sock</code> would not fit in <code>sun_path</code>
+(<code>ch_socket_paths_fit</code>), so avoid very deep <code>DELONIX_ROOT</code> paths.</p>
+<hr />
+<h2 id="2-backends-and-how-one-is-chosen">2. Backends and how one is chosen<a class="hanchor" href="#2-backends-and-how-one-is-chosen" aria-label="#">#</a></h2>
+<h3 id="the-port-and-the-registry">The port and the registry<a class="hanchor" href="#the-port-and-the-registry" aria-label="#">#</a></h3>
+<p><code>VmBackend</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>) is the port every hypervisor implements:
+<code>id</code>, <code>available</code>, <code>boot</code>, <code>is_running</code>, <code>ip</code>, <code>stop</code>, plus defaulted methods (<code>destroy</code>, <code>pause</code>,
+<code>unpause</code>, <code>resume</code>, <code>snapshot</code>/<code>restore</code>/<code>snapshots</code>/<code>delete_snapshot</code>, <code>preserve_snapshots</code>,
+<code>ip_is_predicted</code>, <code>manages_own_storage</code>, <code>auto_selectable</code>, <code>disk_health</code>). A default that cannot
+be honoured <strong>fails closed</strong> with a message, never a silent no-op.</p>
+<p>Backends live in a registry (<code>BACKENDS</code>), not a <code>match</code>:</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Backend</th>
+<th>Crate</th>
+<th>Aliases</th>
+<th>Auto-selectable</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cloud-hypervisor</code></td>
+<td><code>delonix-vm</code> (built in)</td>
+<td><code>ch</code>, <code>cloudhypervisor</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>libvirt</code></td>
+<td><code>delonix-vm</code> (built in)</td>
+<td><code>kvm</code>, <code>qemu</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>proxmox</code></td>
+<td><code>delonix-proxmox</code> (registered by the CLI)</td>
+<td>—</td>
+<td><strong>no</strong> — selected by name only</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>register_backend</code> refuses an id/alias that belongs to another backend, and refuses
+<code>auto_selectable: true</code> for anything that is not built in: auto-detection asks every candidate
+<code>available()</code>, and a remote backend can only answer that over the network. Registering does no I/O;
+the factory runs the first time the backend is selected. <code>backend_for</code> on an existing VM resolves the
+recorded backend and an unknown name is an <strong>error</strong> (it used to fall back to CH).</p>
+<h3 id="selection-precedence-for-a-new-vm">Selection precedence for a new VM<a class="hanchor" href="#selection-precedence-for-a-new-vm" aria-label="#">#</a></h3>
+<p>From <code>delonix_vm::create_with</code> and <code>resolve_vm_defaults</code> (<code>cmd/vm.rs</code>), first match wins:</p>
+<ol>
+<li><code>--backend</code> (or <code>backend:</code> in the manifest).</li>
+<li>The image's <code>HYPERVISOR</code> (recorded by a VMfile build), when <code>--disk</code> names a local image.</li>
+<li><code>DELONIX_VM_BACKEND</code> (session-wide).</li>
+<li><code>delonix vm default-backend --set &lt;backend&gt;</code> (machine-wide, stored in
+   <code>&lt;DELONIX_ROOT&gt;/vm-default-backend</code>).</li>
+<li>Capability heuristic: <code>volumes</code> present ⇒ <code>libvirt</code> (only libvirt does virtio-9p); a cloud image
+   with no <code>--kernel</code> ⇒ <code>libvirt</code> <strong>if libvirt is available</strong>; otherwise auto-detection — the first
+   auto-selectable registered backend that is installed (CH, then libvirt).</li>
+</ol>
+<p>So on a host with both hypervisors, a plain <code>vm create</code> of a cloud image lands on <strong>libvirt</strong>; pass
+<code>--backend cloud-hypervisor</code> (or set a default) to get a microVM on the SDN.</p>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-text">$ delonix vm default-backend
+none (auto-detection: cloud-hypervisor if installed, else libvirt)
+$ delonix vm default-backend --set ch
+default backend set to cloud-hypervisor
+$ delonix vm default-backend --set bogus
+error invalid argument: unknown VM backend: &#x27;bogus&#x27; (use &#x27;cloud-hypervisor&#x27;, &#x27;libvirt&#x27;)
+$ delonix vm default-backend --clear
+default backend cleared (falls back to auto-detection)
+</code></pre></div>
+<h3 id="proxmox-ve-remote">Proxmox VE (remote)<a class="hanchor" href="#proxmox-ve-remote" aria-label="#">#</a></h3>
+<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs::register_configured</code></a> registers the Proxmox backend
+at startup when configured through the environment (a misconfiguration is a warning, never fatal
+for unrelated commands):</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DELONIX_PROXMOX_URL</code></td>
+<td>API base URL, e.g. <code>https:/<wbr>/<wbr>pve.<wbr>example:8006</code>. Unset = backend not registered.</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_NODE</code></td>
+<td>Required. The one node this backend addresses (as <code>GET /nodes</code> names it).</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_SECRET</code></td>
+<td>Preferred credential: name of a <code>kind: Secret</code> with <code>tokenId</code>+<code>tokenSecret</code> (or <code>username</code>+<code>password</code>).</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TOKEN_ID</code> + <code>DELONIX_PROXMOX_TOKEN</code></td>
+<td>API token from the environment.</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_USER</code> + <code>DELONIX_PROXMOX_PASSWORD</code></td>
+<td>Password login (ticket, re-authenticated on 401).</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_INSECURE_TLS</code></td>
+<td><code>1</code>/<code>true</code>/<code>yes</code> to skip certificate verification. Opt-in, never a fallback.</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_BRIDGE</code></td>
+<td>Default bridge on the node (a per-VM <code>bridge</code> wins).</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_VLAN</code></td>
+<td>Default VLAN tag, 1–4094; out of range is an error, not a silently untagged NIC.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Without configuration, <code>--backend proxmox</code> answers that the backend "is not available in this build"
+and says what to set (<em>run</em>). The backend owns its storage (<code>manages_own_storage</code>), so no local
+overlay or NoCloud seed is made; <code>--hostname</code>/<code>--ssh-key</code> go to the node's cloud-init, and
+<code>--user-data</code> is refused. Design and limits: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>. An
+OpenStack backend is <strong>proposed only</strong> (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0039-openstack-vm-backend.md" target="_blank" rel="noopener">ADR-0039</a>); there is no
+code for it.</p>
+<hr />
+<h2 id="3-images">3. Images<a class="hanchor" href="#3-images" aria-label="#">#</a></h2>
+<p>VM images live in <code>VmImageStore</code> (<code>cmd/vmimage.rs</code>) under <code>&lt;DELONIX_ROOT&gt;/vm-images/</code>: one qcow2 plus
+a JSON metadata record (<code>VmImage</code>) per image. <code>delonix image vm ls</code> lists them with <code>TYPE</code>
+(cloud-init / appliance) and <code>DEFAULTS</code> (recorded vCPU/memory).</p>
+<h3 id="official-images">Official images<a class="hanchor" href="#official-images" aria-label="#">#</a></h3>
+<p><code>OFFICIAL_REPOS</code> in <code>cmd/vmimage.rs</code>:</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Repository</th>
+<th>Content</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>k8s</code></td>
+<td><code>ghcr.<wbr>io/<wbr>angolardevops/<wbr>delonix-vm-k8s</code></td>
+<td>Kubernetes node (kubeadm/kubelet/kubectl + <code>delonix-cri</code>)</td>
+</tr>
+<tr>
+<td><code>base</code></td>
+<td><code>ghcr.<wbr>io/<wbr>angolardevops/<wbr>delonix-vm-base</code></td>
+<td>base OS with the <code>delonix</code> engine, no Kubernetes (e.g. <code>ubuntu-24.04</code>)</td>
+</tr>
+<tr>
+<td><code>appliances</code></td>
+<td><code>ghcr.<wbr>io/<wbr>angolardevops/<wbr>delonix-vm-appliances</code></td>
+<td>vendor appliances, no cloud-init</td>
+</tr>
+</tbody>
+</table></div>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">delonix vm ls-remote                 # tags of the Kubernetes golden repo
+delonix vm ls-remote --no-k8s        # tags of the base repo
+delonix vm pull                      # the official Kubernetes golden
+delonix vm pull --no-k8s             # the official base image
+delonix vm pull &lt;oci-ref&gt; --name &lt;local-name&gt;
+</code></pre></div>
+<p>Images are single-blob OCI artifacts; the pull verifies the manifest and blob digests and restores
+the metadata from manifest annotations. The same verbs exist as <code>delonix image vm pull/ls-remote/push</code>.
+<strong>Note:</strong> <code>vm create</code> with no <code>--disk</code> and no local image downloads the official golden image, so it
+needs network.</p>
+<h3 id="building-the-golden-recipe">Building the golden recipe<a class="hanchor" href="#building-the-golden-recipe" aria-label="#">#</a></h3>
+<p><code>delonix image vm build -t &lt;tag&gt;</code> with no <code>VMfile</code> in the context runs the built-in recipe:</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash"># Kubernetes node, packages fetched and verified on the HOST, guest offline
+delonix image vm build --offline --k8s-version 1.34 -t delonix-vm-k8s:1.34
+# no Kubernetes: just the engine, rootless-ready
+delonix image vm build --no-k8s --distro debian --debian-release bookworm -t delonix-vm-base:debian-bookworm
+</code></pre></div>
+<p>Relevant flags (check <code>image vm build --help</code> for defaults): <code>--distro ubuntu|debian|rocky|fedora</code>,
+<code>--ubuntu-release</code>, <code>--debian-release</code>, <code>--rocky-release</code>, <code>--fedora-release</code> (release <strong>and</strong> build,
+e.g. <code>42-1.1</code>), <code>--k8s-version</code>, <code>--offline</code>, <code>--no-k8s</code>, <code>--extra-package</code>, <code>--extra-run</code>,
+<code>--cri-bin</code>, <code>--delonix-bin</code>, <code>--root-password</code> (without it no account has a password),
+<code>--node-exporter[=&lt;addr&gt;]</code>, <code>--no-compress</code>. Your own recipe is a <code>VMfile</code> — see
+<a href="delonixfile-and-vmfile.html">Delonixfile and VMfile</a>. Image builds are amd64 only
+(<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0018-vm-images-stay-amd64.md" target="_blank" rel="noopener">ADR-0018</a>).</p>
+<h3 id="converting-and-importing">Converting and importing<a class="hanchor" href="#converting-and-importing" aria-label="#">#</a></h3>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">delonix vm convert &lt;image-or-path&gt; --to raw|qcow2|vmdk|vdi|vhdx|vhd [-o out] [--compress]
+delonix image vm import disk.qcow2 -t opnsense:26.1 --appliance --default-vcpus 2 --default-memory 2G
+</code></pre></div>
+<p><code>vm convert</code> flattens (no backing chain); <code>--compress</code> is accepted only for <code>qcow2</code> and <code>vmdk</code>.
+<code>import --appliance</code> records <code>cloud_init: false</code>: <code>vm create</code> then attaches <strong>no</strong> seed and refuses
+<code>--hostname</code>/<code>--ssh-key</code>/<code>--user-data</code> by name, because the guest would never read them. Appliance
+build scripts live in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/scripts/appliances" target="_blank" rel="noopener"><code>scripts/appliances/</code></a>.</p>
+<hr />
+<h2 id="4-create-and-run">4. Create and run<a class="hanchor" href="#4-create-and-run" aria-label="#">#</a></h2>
+<h3 id="vm-create"><code>vm create</code><a class="hanchor" href="#vm-create" aria-label="#">#</a></h3>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">delonix vm create dev --disk delonix-vm-base:ubuntu-24.04 \
+  --backend cloud-hypervisor --vcpus 2 --memory 2G \
+  --ssh-key @$HOME/.ssh/id_ed25519.pub --hostname dev --wait
+</code></pre></div>
+<p>What happens (<code>cmd/vm.rs</code> → <code>delonix_vm::create_with</code>):</p>
+<ol>
+<li><strong>Node policy</strong> is enforced before any image is resolved (<code>policy::enforce</code>).</li>
+<li><strong>Disk resolution</strong> (<code>resolve_image_ref</code>): <code>--url-img</code> wins (downloaded, cached, verified against
+   <code>&lt;url&gt;.sha256</code> when offered); else <code>--disk</code> is looked up as a local image name, then as a path to a
+   stored image's qcow2; else it is used as a plain path; with no <code>--disk</code>, the single local golden
+   image, or the official one is pulled.</li>
+<li><strong>Defaults</strong> from the image metadata fill <code>--vcpus</code>/<code>--memory</code>/<code>--backend</code> only where unset.</li>
+<li><strong>Seed</strong>: a NoCloud ISO (network config by MAC, hostname, keys) is generated unless <code>--seed</code> is
+   given, the image is an appliance, or the backend is remote. <code>--user-data</code> replaces the generated
+   user-data.</li>
+<li><strong>Backend</strong> chosen (section 2); an admission check refuses when the host lacks RAM;
+   <code>--namespace</code> other than <code>default</code> is refused on libvirt (the VM lives on <code>virbr0</code>, outside the
+   Delonix SDN).</li>
+<li><strong>Overlay</strong>: <code>&lt;root&gt;/vms/&lt;name&gt;.qcow2</code>, a thin qcow2 over the base (<code>prepare_local_overlay</code>);
+   <code>--disk-size &lt;GiB&gt;</code> grows it and cannot be smaller than the base.</li>
+<li><strong>Boot</strong>: the backend's <code>boot</code>. <code>create</code> is idempotent: an existing, running VM is returned as is.</li>
+</ol>
+<p>The published images set no password on any account (see <code>--root-password</code> above), so pass
+<code>--ssh-key</code> if you want to log in over SSH.</p>
+<p><strong><code>--wait</code> and the predicted IP.</strong> On libvirt the IP comes from a real DHCP lease, so having one is
+evidence the guest booted. On Cloud Hypervisor the IP is <strong>computed from the MAC</strong> before the guest
+runs (<code>ip_is_predicted</code>), so <code>--wait</code> also probes the address by ARP from inside the network holder
+(<code>delonix_sdn::infra::sdn_reachable</code>) until <code>--boot-timeout</code> (default 120 s). Three outcomes: up;
+"which could not be verified from here" (the probe could not be asked); "is running but never
+answered … computed from the MAC, not observed". Use <code>vm console</code> to see why.</p>
+<h3 id="day-2-verbs">Day-2 verbs<a class="hanchor" href="#day-2-verbs" aria-label="#">#</a></h3>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>delonix vm ls [--namespace &lt;ns&gt;] [--ports] [-o json]</code></td>
+<td>lists VMs</td>
+</tr>
+<tr>
+<td><code>delonix describe vm &lt;name&gt;</code> / <code>delonix delete vm &lt;name&gt;</code></td>
+<td>there is no <code>vm describe</code>/<code>vm rm</code>; the generic verbs replace them</td>
+</tr>
+<tr>
+<td><code>delonix vm console &lt;name&gt; [-e ^X]</code></td>
+<td>serial console; detach with <code>Ctrl-]</code> by default (<code>$DELONIX_CONSOLE_ESCAPE</code>). libvirt: <code>virsh console</code> as a child process; CH: the console socket <code>&lt;root&gt;/<wbr>vms/<wbr>&lt;name&gt;.<wbr>console</code></td>
+</tr>
+<tr>
+<td><code>delonix vm ssh &lt;name|ip&gt; [-l user] [-i key] [-- cmd]</code></td>
+<td>IP from the record; default user <code>delonix</code> on cloud-init images, <code>root</code> on appliances</td>
+</tr>
+<tr>
+<td><code>delonix vm vnc &lt;name&gt;</code></td>
+<td>only for libvirt VMs created with <code>--vnc</code> (CH has no display)</td>
+</tr>
+<tr>
+<td><code>delonix vm stop &lt;name&gt;</code></td>
+<td>keeps disk, record and snapshots. libvirt: the domain is undefined (snapshot metadata is preserved first)</td>
+</tr>
+<tr>
+<td><code>delonix vm start &lt;name&gt;</code> / <code>restart &lt;name&gt;</code></td>
+<td>rebuild the boot from the record and reuse the overlay; <code>start</code> on a running VM is a no-op, <code>restart</code> always reboots</td>
+</tr>
+<tr>
+<td><code>delonix vm pause</code> / <code>unpause &lt;name&gt;</code></td>
+<td>suspend vCPUs, memory kept in RAM; CH and libvirt</td>
+</tr>
+<tr>
+<td><code>delonix vm migrate &lt;name&gt; --host &lt;h&gt; --network &lt;n&gt;</code></td>
+<td>stop-copy-start over SSH to another host; real downtime (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0031-live-vm-migration-no-go.md" target="_blank" rel="noopener">ADR-0031</a> explains why live migration is out of scope)</td>
+</tr>
+<tr>
+<td><code>delonix vm prune</code></td>
+<td>reclaims state no VM record accounts for</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="snapshots">Snapshots<a class="hanchor" href="#snapshots" aria-label="#">#</a></h3>
+<p><code>delonix vm snapshot create|ls|rm|restore &lt;vm&gt; [&lt;snapshot&gt;]</code>:</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Backend</th>
+<th>Running VM</th>
+<th>Stopped VM</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>libvirt</td>
+<td><code>create</code> is a system checkpoint (memory + disk)</td>
+<td>disk-only; the four verbs define the domain just for the command</td>
+</tr>
+<tr>
+<td>cloud-hypervisor</td>
+<td><code>ls</code> only (<code>qemu-img info -U</code>); <code>create</code>/<code>restore</code>/<code>rm</code> <strong>refused</strong> — the running VMM locks the disk and CH has no live disk-snapshot API</td>
+<td>all four, via <code>qemu-img snapshot</code></td>
+</tr>
+<tr>
+<td>proxmox</td>
+<td><code>create</code> (with VM state), <code>ls</code>, <code>restore</code></td>
+<td>same; <code>rm</code> not implemented (fails closed)</td>
+</tr>
+</tbody>
+</table></div>
+<p>libvirt snapshots survive <code>vm stop</code>/<code>vm start</code>: <code>undefine --snapshots-metadata</code> removes only
+libvirt's bookkeeping, so <code>preserve_snapshots</code> dumps each snapshot's XML to
+<code>&lt;root&gt;/vms/&lt;vm&gt;/snapshots/</code> before stopping and <code>boot</code> redefines them (rewriting the domain uuid,
+which changes on every define).</p>
+<h3 id="declarative">Declarative<a class="hanchor" href="#declarative" aria-label="#">#</a></h3>
+<p><code>kind: VirtualMachine</code> (<code>compute.delonix.io/v1alpha1</code>) mirrors <code>vm create</code>; a full annotated example is
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/examples/vm.yaml" target="_blank" rel="noopener"><code>examples/vm.yaml</code></a>. <code>kind: Workload</code> with <code>type: microvm</code> lowers to a <code>VirtualMachine</code> with the backend
+<strong>forced</strong> to <code>cloud-hypervisor</code>; asking for another backend is an error
+(<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0006-workload-type-microvm.md" target="_blank" rel="noopener">ADR-0006</a>). Both <em>run</em> in a scratch root:</p>
+<div class="code"><div class="code-head"><span class="lang">yaml</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-yaml">apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata: { name: dev }
+spec:
+  disk: delonix-vm-base:ubuntu-24.04
+  resources: { vcpus: 2, memory: 2G }
+  cloudInit:
+    hostname: dev
+    sshKeys: [&quot;@~/.ssh/id_ed25519.pub&quot;]
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Workload
+metadata: { name: fast }
+spec:
+  type: microvm
+  microvm: { disk: delonix-vm-base:ubuntu-24.04, vcpus: 1, memory: 1G }
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-text">$ delonix manifest validate -f vm.yaml
+stack validate: OK — 2 document(s), all references resolved
+$ delonix stack apply -f vm.yaml --dry-run | grep backend
+  backend: null
+  backend: cloud-hypervisor
+</code></pre></div>
+<p>Apply with <code>delonix vm apply -f vm.yaml</code> or <code>delonix stack apply -f vm.yaml</code> (not executed here).</p>
+<hr />
+<h2 id="5-networking-for-vms">5. Networking for VMs<a class="hanchor" href="#5-networking-for-vms" aria-label="#">#</a></h2>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th></th>
+<th>Cloud Hypervisor</th>
+<th>libvirt</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Where the NIC lives</td>
+<td>a tap on a Delonix network (<code>--network</code>, default <code>ingress</code>) <strong>inside the network holder</strong> — the same SDN as containers</td>
+<td><code>virbr0</code> (nat) or a host bridge, in the host's network namespace</td>
+</tr>
+<tr>
+<td>IP</td>
+<td>leased by the holder's DHCP, deterministic from the MAC</td>
+<td>libvirt DHCP; <code>--ip</code> reserves one (nat only)</td>
+</tr>
+<tr>
+<td>Namespace isolation</td>
+<td>yes (<code>--namespace</code>)</td>
+<td>refused</td>
+</tr>
+<tr>
+<td>VM ↔ container by IP</td>
+<td>direct</td>
+<td>container → VM works through the host; VM → container needs a published port or <code>vm bridge</code></td>
+</tr>
+</tbody>
+</table></div>
+<p><strong><code>vm reach</code></strong> (read-only, no privilege) lists the libvirt gateways and, for each port published by a
+running container, whether a VM can reach it. A port published on the default <code>127.0.0.1</code> is
+invisible to VMs; the command prints the exact re-publish, e.g.
+<code>DELONIX_PUBLISH_ADDR=&lt;gateway&gt; delonix net ingress publish &lt;c&gt; &lt;port&gt;</code> — reachable from VMs on that
+network, not from the external LAN.</p>
+<p><strong><code>vm bridge &lt;network&gt; [--vm-subnet &lt;cidr&gt;] [--apply]</code></strong> is <strong>experimental and needs root</strong>: a veth
+from the host into the holder plus routes, giving libvirt VMs direct IP reachability to one container
+network. Without <code>--apply</code> it only prints the plan. <code>vm unbridge &lt;network&gt;</code> tears it down (also a
+dry-run without <code>--apply</code>). This is the one deliberate exception to rootless in the VM code
+(<code>cmd/vmbridge.rs</code>).</p>
+<hr />
+<h2 id="6-troubleshooting">6. Troubleshooting<a class="hanchor" href="#6-troubleshooting" aria-label="#">#</a></h2>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/dev/kvm does not exist</code> / VM fails to start</td>
+<td>virtualization disabled, or no nested virt</td>
+<td>enable VT-x/AMD-V; in a VM, enable nested virtualization</td>
+</tr>
+<tr>
+<td><code>no VM backend available</code></td>
+<td>neither <code>cloud-hypervisor</code> nor <code>virsh</code>+<code>qemu-system-x86_64</code> on <code>PATH</code></td>
+<td>install one; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> does</td>
+</tr>
+<tr>
+<td>CH VM "running" but never answers; overlay stays tiny</td>
+<td>firmware cannot boot the image (e.g. only <code>hypervisor-fw</code> installed)</td>
+<td>install EDK2 <code>CLOUDHV.fd</code> to <code>/<wbr>usr/<wbr>local/<wbr>share/<wbr>delonix/<wbr></code>, or set <code>DELONIX_HYPERVISOR_FW</code>, or use <code>--backend libvirt</code></td>
+</tr>
+<tr>
+<td><code>vm ls</code> shows no IP on a libvirt VM</td>
+<td>fell back to <code>qemu:///session</code> user-mode</td>
+<td>join the <code>libvirt</code> group and re-login, or <code>--net-mode nat</code></td>
+</tr>
+<tr>
+<td><code>warning: cannot reach qemu:/<wbr>/<wbr>/<wbr>system for NAT networking</code></td>
+<td>not in the <code>libvirt</code> group</td>
+<td><code>sudo usermod -aG libvirt $USER</code>, new session</td>
+</tr>
+<tr>
+<td><code>vm console</code> on libvirt: "Active console session exists"</td>
+<td>a previous session died uncleanly</td>
+<td>current code passes <code>--force</code> to <code>virsh console</code>; update your binary</td>
+</tr>
+<tr>
+<td>CH VM refused before boot mentioning the socket path</td>
+<td><code>&lt;root&gt;/<wbr>vms/<wbr>&lt;name&gt;.<wbr>sock</code> exceeds 108 bytes</td>
+<td>shorter <code>DELONIX_ROOT</code> or VM name</td>
+</tr>
+<tr>
+<td><code>namespace '…' is not enforceable on the 'libvirt' backend</code></td>
+<td>libvirt VMs are outside the SDN</td>
+<td><code>--backend cloud-hypervisor</code>, or drop <code>--namespace</code></td>
+</tr>
+<tr>
+<td><code>vm snapshot create</code> refused on a running CH VM</td>
+<td>CH has no live disk snapshot</td>
+<td><code>vm stop</code> first, or use libvirt</td>
+</tr>
+<tr>
+<td><code>--hostname</code>/<code>--ssh-key</code> refused</td>
+<td>the image is an appliance (<code>cloud_init: false</code>)</td>
+<td>configure the appliance through its own console/UI</td>
+</tr>
+<tr>
+<td><code>cloud-localds not found</code></td>
+<td>missing <code>cloud-image-utils</code></td>
+<td>install it (needed for every cloud-init <code>vm create</code>)</td>
+</tr>
+<tr>
+<td><code>image vm build</code>: <code>cp: cannot open '/<wbr>boot/<wbr>vmlinuz-…'</code></td>
+<td>host kernel is 0600</td>
+<td><code>install.<wbr>sh --with-image-build</code>, or <code>sudo chmod 0644 /<wbr>boot/<wbr>vmlinuz-*</code> (lowers a boundary)</td>
+</tr>
+<tr>
+<td><code>image vm build</code>: <code>Temporary failure resolving …</code></td>
+<td>appliance has no network: missing host DHCP client, or passt</td>
+<td>install <code>isc-dhcp-client</code>; for <code>--network</code> use <code>XDG_RUNTIME_DIR=/<wbr>tmp/<wbr>delonix-run</code> and a current passt first on <code>PATH</code>; or build <code>--offline</code></td>
+</tr>
+<tr>
+<td>a step pauses ~300 s, then package installs fail</td>
+<td>passt never leased; <code>dhclient</code> timed out</td>
+<td>same as above</td>
+</tr>
+<tr>
+<td><code>--offline belong to the built-in golden recipe …</code></td>
+<td>golden-recipe flag used with a VMfile</td>
+<td>remove it; the VMfile describes the build</td>
+</tr>
+<tr>
+<td><code>`--network` is for VMfile builds</code></td>
+<td><code>--network</code> without a VMfile</td>
+<td>use <code>--offline</code> for the golden recipe</td>
+</tr>
+<tr>
+<td>VMfile build fills <code>/tmp</code></td>
+<td>each stage is a full flattened disk under <code>$TMPDIR</code></td>
+<td>set <code>TMPDIR</code> to a large filesystem; remove leftover <code>delonix-vmfile-*</code> dirs after failures</td>
+</tr>
+<tr>
+<td><code>VM backend 'proxmox' is not available in this build</code></td>
+<td>the backend is not configured</td>
+<td>set the <code>DELONIX_PROXMOX_*</code> variables (section 2)</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="7-for-contributors">7. For contributors<a class="hanchor" href="#7-for-contributors" aria-label="#">#</a></h2>
+<h3 id="where-the-code-lives">Where the code lives<a class="hanchor" href="#where-the-code-lives" aria-label="#">#</a></h3>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Path</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Port, registry, CH and libvirt backends, <code>create_with</code>, snapshots, firmware lookup</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
+</tr>
+<tr>
+<td>NoCloud seed generation</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/cloudinit.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>cloudinit.<wbr>rs</code></a></td>
+</tr>
+<tr>
+<td>Proxmox backend</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-proxmox" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr></code></a></td>
+</tr>
+<tr>
+<td><code>vm</code> CLI, <code>kind: VirtualMachine</code>, <code>vm reach</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vm.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vm.<wbr>rs</code></a></td>
+</tr>
+<tr>
+<td>Image store, golden recipe, pull/push/import/convert, failure hints</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmimage.<wbr>rs</code></a></td>
+</tr>
+<tr>
+<td>VMfile</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmfile.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmfile.<wbr>rs</code></a></td>
+</tr>
+<tr>
+<td>Backend registration from the environment</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmbackends.<wbr>rs</code></a></td>
+</tr>
+<tr>
+<td><code>vm bridge</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbridge.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmbridge.<wbr>rs</code></a></td>
+</tr>
+<tr>
+<td><code>kind: Workload</code> lowering</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/workload.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>workload.<wbr>rs</code></a></td>
+</tr>
+<tr>
+<td>Appliance builds</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/scripts/appliances" target="_blank" rel="noopener"><code>scripts/appliances/</code></a></td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="adding-a-backend">Adding a backend<a class="hanchor" href="#adding-a-backend" aria-label="#">#</a></h3>
+<p>Read <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a> first; it is the template. In short:</p>
+<ul>
+<li>Implement <code>VmBackend</code> in <strong>its own crate</strong> if it talks to a remote API (the engine crate stays free
+  of HTTP clients), placed in the directory of its layer and listed in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>
+  (see <a href="architecture.html">Architecture</a>).</li>
+<li>Register it with <code>register_backend</code> from the process that knows its configuration, with
+  <code>auto_selectable: false</code> unless it is a local, zero-configuration backend built into <code>delonix-vm</code>.</li>
+<li>Override <code>manages_own_storage</code>, <code>destroy</code>, <code>resume</code> and <code>ip_is_predicted</code> deliberately: for a remote
+  backend <code>stop</code> and <code>destroy</code> are <strong>not</strong> the same operation, and <code>boot</code> on a stopped VM must not
+  create a second one.</li>
+<li>Leave unsupported verbs on their fail-closed defaults; refuse unsupported <code>VmConfig</code> fields by name
+  before creating anything.</li>
+<li>Do not publish a backend that has never been seen booting a VM. New backends and hypervisor
+  boundaries go through an ADR (<a href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener">docs/adr/</a>).</li>
+</ul>
+<h3 id="testing">Testing<a class="hanchor" href="#testing" aria-label="#">#</a></h3>
+<ul>
+<li><strong>Pure unit tests</strong> — argv and XML builders are pure functions so they test without a hypervisor:
+  e.g. <code>libvirt_snapshot_argv_uses_flags_not_positional</code>, <code>snapshot_xml_with_uuid</code>,
+  <code>libvirt_domain_xml</code>, the firmware-order test above, the registry and <code>auto_detect</code> tests, and the
+  parser/scaffold tests in <code>cmd/vmfile.rs</code>. Run <code>cargo test -p delonix-vm</code> and
+  <code>cargo test -p delonix-runtime-bin vmfile</code> (see <a href="build-and-test.html">Clone, build and test</a> for <code>protoc</code> and the
+  target directory).</li>
+<li><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a></strong> — the <code>vm</code> sections run without a hypervisor (listing, refusals) and, when
+  available, exercise snapshots across stop/start on libvirt (needs <code>virsh</code>, <code>qemu-img</code> and a usable
+  <code>qemu:///system</code>) and on Cloud Hypervisor. It isolates both state roots by default; the CH section
+  refuses to run if only <code>DELONIX_ROOT</code> is isolated. Sections without their hypervisor are reported
+  as skipped, not passed.</li>
+<li><strong>Proxmox live test</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/tests/live.rs</code></a> creates and destroys one
+  VM against a real node and is skipped unless <code>DELONIX_PROXMOX_TEST_URL</code> (plus <code>_NODE</code>, <code>_USER</code>,
+  <code>_PASS</code>) is set: <code>cargo test -p delonix-proxmox --test live -- --nocapture</code>. Use a disposable node.</li>
+<li><strong>Provider lifecycle</strong> — when changing <code>delonix-vm</code> or a provider, prove the whole lifecycle
+  (create, stop, start, snapshot, destroy) <strong>through the <code>delonix</code> CLI only</strong>, observing the
+  hypervisor read-only (<code>virsh -r</code>, API <code>GET</code>s), never repairing it by hand between steps.</li>
+<li><strong>Look, do not guess.</strong> When a guest does not come up, the serial console (<code>vm console</code>) or a
+  libvirt screenshot answers in seconds what hypotheses take hours to find — and validate with the
+  command a user would type, not the flags that are convenient for debugging (<code>--vnc</code> once masked a
+  boot failure that only happened without a video device).</li>
+</ul>
+<hr />
+<p><strong>Next:</strong> <a href="troubleshooting.html">Troubleshooting</a> — a symptom-first index for the gates and host traps you may hit while building and testing.</p>
+<nav class="pager"><a href="delonixfile-and-vmfile.html"><span>← 上一页</span>Delonixfile and VMfile</a><a class="next" href="troubleshooting.html"><span>下一页 →</span>Troubleshooting</a></nav>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/microvm-setup.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/microvm-setup.md</code></footer>
+</div></main>
+<aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
+<ul>
+<li><a href="#1-host-prerequisites">1. Host prerequisites</a><ul>
+<li><a href="#kvm">KVM</a></li>
+<li><a href="#cloud-hypervisor-and-its-firmware">Cloud Hypervisor and its firmware</a></li>
+<li><a href="#libvirt-qemu">libvirt / QEMU</a></li>
+<li><a href="#tools-the-vm-code-shells-out-to">Tools the VM code shells out to</a></li>
+<li><a href="#only-for-building-images-with-image-build">Only for building images: --with-image-build</a></li>
+<li><a href="#isolation-first">Isolation first</a></li>
+</ul>
+</li>
+<li><a href="#2-backends-and-how-one-is-chosen">2. Backends and how one is chosen</a><ul>
+<li><a href="#the-port-and-the-registry">The port and the registry</a></li>
+<li><a href="#selection-precedence-for-a-new-vm">Selection precedence for a new VM</a></li>
+<li><a href="#proxmox-ve-remote">Proxmox VE (remote)</a></li>
+</ul>
+</li>
+<li><a href="#3-images">3. Images</a><ul>
+<li><a href="#official-images">Official images</a></li>
+<li><a href="#building-the-golden-recipe">Building the golden recipe</a></li>
+<li><a href="#converting-and-importing">Converting and importing</a></li>
+</ul>
+</li>
+<li><a href="#4-create-and-run">4. Create and run</a><ul>
+<li><a href="#vm-create">vm create</a></li>
+<li><a href="#day-2-verbs">Day-2 verbs</a></li>
+<li><a href="#snapshots">Snapshots</a></li>
+<li><a href="#declarative">Declarative</a></li>
+</ul>
+</li>
+<li><a href="#5-networking-for-vms">5. Networking for VMs</a></li>
+<li><a href="#6-troubleshooting">6. Troubleshooting</a></li>
+<li><a href="#7-for-contributors">7. For contributors</a><ul>
+<li><a href="#where-the-code-lives">Where the code lives</a></li>
+<li><a href="#adding-a-backend">Adding a backend</a></li>
+<li><a href="#testing">Testing</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</aside>
+</div>
+<div id="search" hidden><div class="sbox" role="dialog" aria-modal="true" aria-label="搜索">
+<div class="sfield"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="search-input" type="search" placeholder="搜索手册…" autocomplete="off"><kbd>Esc</kbd></div>
+<ul class="sres"></ul>
+<div class="shelp"><span><kbd>↑</kbd> <kbd>↓</kbd></span><span><kbd>Enter</kbd></span></div></div></div>
+<script>window.HANDBOOK_UI={"copy": "复制", "copied": "已复制", "no_results": "没有结果"};</script>
+<script src="search-index.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/ini.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/dockerfile.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/protobuf.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/diff.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/makefile.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/xml.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>
+(function(){
+  const ui = window.HANDBOOK_UI;
+  const root = document.documentElement;
+
+  // Theme: system by default; the toggle cycles light/dark and remembers the choice.
+  function effectiveDark(){ const t = root.getAttribute('data-theme'); return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; }
+  document.querySelectorAll('.themebtn').forEach(function(b){
+    b.addEventListener('click', function(){
+      const next = effectiveDark() ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('delonix-handbook-theme', next); } catch (e) {}
+      renderMermaid();
+    });
+  });
+
+  // Mobile navigation drawer.
+  document.querySelectorAll('.menubtn').forEach(function(b){
+    b.addEventListener('click', function(){ document.body.classList.toggle('nav-open'); });
+  });
+  document.querySelectorAll('nav.side a').forEach(function(a){ a.addEventListener('click', function(){ document.body.classList.remove('nav-open'); }); });
+
+  // Copy buttons live in each code block's header; shell blocks drop a leading "$ ".
+  document.querySelectorAll('.code').forEach(function(box){
+    const btn = box.querySelector('.copy'); if (!btn) return;
+    btn.addEventListener('click', function(){
+      let text = box.querySelector('pre code').innerText;
+      if (box.hasAttribute('data-shell')) text = text.split('\n').map(function(l){ return l.replace(/^\$ /, ''); }).join('\n');
+      navigator.clipboard.writeText(text.replace(/\n$/, '')).then(function(){
+        btn.lastChild.textContent = ui.copied; btn.classList.add('done');
+        setTimeout(function(){ btn.lastChild.textContent = ui.copy; btn.classList.remove('done'); }, 1500);
+      });
+    });
+  });
+  if (window.hljs) document.querySelectorAll('.code pre code:not(.nohighlight)').forEach(function(el){ hljs.highlightElement(el); });
+
+  // Mermaid follows the effective theme, and re-renders when it changes.
+  const diagrams = Array.prototype.slice.call(document.querySelectorAll('pre.mermaid'));
+  diagrams.forEach(function(d){ d.setAttribute('data-src', d.textContent); });
+  function renderMermaid(){
+    if (!window.mermaid || !diagrams.length) return;
+    diagrams.forEach(function(d){ d.removeAttribute('data-processed'); d.textContent = d.getAttribute('data-src'); });
+    mermaid.initialize({startOnLoad:false, securityLevel:'strict', theme: effectiveDark() ? 'dark' : 'neutral',
+      fontFamily:getComputedStyle(document.body).fontFamily,
+      themeVariables:{fontSize:'17px'},
+      flowchart:{useMaxWidth:true, nodeSpacing:28, rankSpacing:44, padding:10},
+      sequence:{useMaxWidth:true}});
+    mermaid.run({nodes: diagrams});
+  }
+  renderMermaid();
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(){ if (!root.getAttribute('data-theme')) renderMermaid(); });
+
+  // "On this page": highlight the section being read.
+  const tocLinks = Array.prototype.slice.call(document.querySelectorAll('aside.toc a'));
+  const byId = {}; tocLinks.forEach(function(a){ byId[decodeURIComponent(a.getAttribute('href').slice(1))] = a; });
+  const heads = Array.prototype.slice.call(document.querySelectorAll('.content h2[id], .content h3[id]')).filter(function(h){ return byId[h.id]; });
+  function spy(){
+    let current = heads.length ? heads[0] : null;
+    const line = 120;
+    heads.forEach(function(h){ if (h.getBoundingClientRect().top <= line) current = h; });
+    tocLinks.forEach(function(a){ a.classList.remove('active'); });
+    if (current) byId[current.id].classList.add('active');
+  }
+  if (heads.length){ document.addEventListener('scroll', spy, {passive:true}); spy(); }
+
+  // Search (Ctrl+K / Cmd+K / "/"): a static index of this language, scored in the browser.
+  const modal = document.getElementById('search'), input = modal.querySelector('input'), list = modal.querySelector('.sres');
+  let selected = 0;
+  function norm(s){ return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+  const index = (window.HANDBOOK_INDEX || []).map(function(r){ return Object.assign({nh: norm(r.h), np: norm(r.p), nt: norm(r.t)}, r); });
+  function esc(s){ return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function mark(s, terms){ let out = esc(s); terms.forEach(function(t){ if (t.length > 1) out = out.replace(new RegExp('(' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig'), '<mark>$1</mark>'); }); return out; }
+  function snippet(r, terms){ const i = terms.length ? r.nt.indexOf(terms[0]) : -1; const start = Math.max(0, i - 50); return (start ? '…' : '') + r.t.slice(start, start + 170); }
+  function run(){
+    const terms = norm(input.value).split(/\s+/).filter(Boolean);
+    if (!terms.length){ list.innerHTML = ''; return; }
+    const hits = [];
+    index.forEach(function(r){
+      let score = 0;
+      for (const t of terms){ const s = (r.nh.includes(t) ? 10 : 0) + (r.np.includes(t) ? 3 : 0) + (r.nt.includes(t) ? 1 : 0); if (!s) return; score += s; }
+      hits.push([score, r]);
+    });
+    hits.sort(function(a, b){ return b[0] - a[0]; });
+    selected = 0;
+    list.innerHTML = hits.length ? hits.slice(0, 30).map(function(h, i){
+      const r = h[1];
+      return '<li><a href="' + esc(r.u) + '"' + (i === 0 ? ' class="sel"' : '') + '><span class="sp">' + esc(r.p) + '</span>' +
+        '<span class="sh">' + mark(r.h, terms) + '</span><span class="st">' + mark(snippet(r, terms), terms) + '</span></a></li>';
+    }).join('') : '<li class="sempty">' + esc(ui.no_results) + '</li>';
+  }
+  function open(){ modal.hidden = false; input.value = ''; list.innerHTML = ''; input.focus(); }
+  function close(){ modal.hidden = true; }
+  document.querySelectorAll('.searchbtn').forEach(function(b){ b.addEventListener('click', open); });
+  modal.addEventListener('click', function(e){ if (e.target === modal) close(); });
+  input.addEventListener('input', run);
+  input.addEventListener('keydown', function(e){
+    const links = list.querySelectorAll('a');
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+      e.preventDefault(); if (!links.length) return;
+      links[selected].classList.remove('sel');
+      selected = (selected + (e.key === 'ArrowDown' ? 1 : links.length - 1)) % links.length;
+      links[selected].classList.add('sel'); links[selected].scrollIntoView({block:'nearest'});
+    } else if (e.key === 'Enter' && links.length){ e.preventDefault(); close(); location.href = links[selected].getAttribute('href'); }
+  });
+  document.addEventListener('keydown', function(e){
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k'){ e.preventDefault(); modal.hidden ? open() : close(); }
+    else if (e.key === 'Escape'){ if (!modal.hidden) close(); document.body.classList.remove('nav-open'); }
+    else if (e.key === '/' && modal.hidden && !/input|textarea|select/i.test(document.activeElement.tagName)){ e.preventDefault(); open(); }
+  });
+  document.querySelectorAll('select.lang').forEach(function(s){ s.addEventListener('change', function(){ location.href = s.value + location.hash; }); });
+})();
+</script>
+</body></html>
