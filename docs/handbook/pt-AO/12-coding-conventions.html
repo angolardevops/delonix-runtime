@@ -61,7 +61,7 @@ select.lang{height:36px;border:1px solid var(--line);border-radius:9px;backgroun
 .menubtn{display:none}
 
 /* Frame */
-.frame{display:grid;grid-template-columns:272px minmax(0,1fr) 232px;max-width:1440px;margin-inline:auto}
+.frame{display:grid;grid-template-columns:280px minmax(0,1fr) 240px}
 nav.side{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:24px 16px 48px 20px;border-right:1px solid var(--line)}
 nav.side,aside.toc,.sres{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
 nav.side .group{margin-bottom:18px}
@@ -71,8 +71,10 @@ nav.side a:hover{background:var(--surface);text-decoration:none;color:var(--ink)
 nav.side a .n{flex:none;width:18px;font:500 12px/1.35 var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums}
 nav.side a.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
 nav.side a.on .n{color:var(--accent-ink)}
-main{min-width:0;padding:40px 56px 80px}
-.content{max-width:760px;margin-inline:auto}
+main{min-width:0;padding:40px clamp(20px,3.5vw,56px) 80px}
+.content{max-width:1180px;margin-inline:auto}
+/* Prose keeps a reading measure; tables, code and diagrams take the whole column. */
+.content>p,.content>ul,.content>ol,.content>h1,.content>h2,.content>h3,.content>h4,.content>blockquote,.content>.notice,.content>.kicker{max-width:76ch}
 aside.toc{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:40px 20px 40px 8px;font-size:13.5px}
 aside.toc .ttitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
 aside.toc ul{list-style:none;margin:0;padding:0}
@@ -96,7 +98,7 @@ p,ul,ol{margin:0 0 16px}
 li{margin:4px 0}li>p{margin:0 0 8px}
 strong{font-weight:650;color:var(--ink)}
 hr{border:0;height:1px;background:var(--line);margin:40px 0}
-code{font:.86em/1.5 var(--f-mono);background:var(--surface-2);border:1px solid var(--line);padding:.08em .38em;border-radius:6px;overflow-wrap:anywhere}
+code{font:.86em/1.5 var(--f-mono);background:var(--surface-2);border:1px solid var(--line);padding:.08em .38em;border-radius:6px;overflow-wrap:break-word}
 a code{color:inherit}
 a.src code{border-color:color-mix(in srgb,var(--accent) 30%,var(--line));background:var(--accent-soft)}
 a.src:hover{text-decoration:none}a.src:hover code{border-color:var(--accent)}
@@ -135,7 +137,10 @@ th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px sol
 th{background:var(--surface);font:700 12.5px/1.3 var(--f-display);letter-spacing:.02em;color:var(--ink-2);white-space:nowrap}
 tbody tr:last-child td{border-bottom:0}
 tbody tr:hover td{background:color-mix(in srgb,var(--surface) 60%,transparent)}
-td code{font-size:.82em}
+td code{font-size:.82em;overflow-wrap:normal}
+/* A table's first column names the thing (a variable, a crate, a flag): never break it. */
+td:first-child code{white-space:nowrap}
+th:first-child,td:first-child{white-space:nowrap}
 
 /* Pager + footer */
 .pager{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:64px}
@@ -162,7 +167,7 @@ td code{font-size:.82em}
 .shelp{display:flex;gap:16px;padding:10px 16px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
 
 /* Narrow screens */
-@media (max-width:1200px){.frame{grid-template-columns:256px minmax(0,1fr)}aside.toc{display:none}main{padding:36px 40px 72px}}
+@media (max-width:1280px){.frame{grid-template-columns:256px minmax(0,1fr)}aside.toc{display:none}}
 @media (max-width:860px){
   .frame{display:block}.menubtn{display:grid}.brand .sub,.brand .sep{display:none}
   nav.side{position:fixed;top:var(--header);left:0;bottom:0;width:min(300px,86vw);height:auto;z-index:40;background:var(--bg);
@@ -233,7 +238,7 @@ o que cada crate contém em <a href="06-crates.html">06 — Crates</a>, os idiom
 <tr>
 <td><strong>rustfmt</strong></td>
 <td>Formatação. <strong>Sem ficheiro de configuração</strong>: não há <code>rustfmt.toml</code> nem <code>.rustfmt.toml</code> na raiz, por isso aplicam-se as omissões.</td>
-<td><strong>Imposto (gate)</strong>: o job de CI <code>fmt</code> corre <code>cargo fmt --all --check</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a>). <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> § Style: «<code>cargo fmt</code> defaults, no custom config».</td>
+<td><strong>Imposto (gate)</strong>: o job de CI <code>fmt</code> corre <code>cargo fmt --all --check</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.<wbr>github/<wbr>workflows/<wbr>ci.<wbr>yml</code></a>). <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> § Style: «<code>cargo fmt</code> defaults, no custom config».</td>
 </tr>
 <tr>
 <td><strong>clippy</strong></td>
@@ -242,7 +247,7 @@ o que cada crate contém em <a href="06-crates.html">06 — Crates</a>, os idiom
 </tr>
 <tr>
 <td><strong><code>[workspace.lints]</code></strong></td>
-<td>O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> raiz declara exactamente um lint de workspace: <code>[workspace.lints.clippy] undocumented_unsafe_blocks = "deny"</code>. Todo o manifesto de membro tem <code>[lints] workspace = true</code>.</td>
+<td>O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> raiz declara exactamente um lint de workspace: <code>[workspace.<wbr>lints.<wbr>clippy] undocumented_unsafe_blocks = "deny"</code>. Todo o manifesto de membro tem <code>[lints] workspace = true</code>.</td>
 <td><strong>Imposto (gate)</strong>: clippy. Foi introduzido pela fase P0 do ADR-0040 («<code>[workspace.lints]</code> (<code>undocumented_unsafe_blocks = deny</code>)»), um ADR que ainda está <strong>Proposto</strong>; o gate vale na mesma.</td>
 </tr>
 <tr>
@@ -253,15 +258,15 @@ o que cada crate contém em <a href="06-crates.html">06 — Crates</a>, os idiom
 <tr>
 <td><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a></strong></td>
 <td>Português em identificadores, comentários e strings visíveis ao utilizador (LANG-01, vê <a href="#2-language-of-the-code">§2</a>).</td>
-<td><strong>Imposto (gate)</strong>: job de CI <code>lang</code>, linha de base em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_baseline.json" target="_blank" rel="noopener"><code>scripts/lang_baseline.json</code></a>.</td>
+<td><strong>Imposto (gate)</strong>: job de CI <code>lang</code>, linha de base em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>lang_baseline.<wbr>json</code></a>.</td>
 </tr>
 <tr>
 <td><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a></strong></td>
 <td>Direcção das camadas, directório do crate = camada, versões só na raiz, nomes de consumidores, e os ratchets de dívida listados em <a href="05-architecture.html#layers-and-the-allowed-direction">05</a> (vê <a href="#4-structure-where-code-goes">§4</a> e <a href="#5-internal-api-and-boundaries">§5</a>).</td>
-<td><strong>Imposto (gate)</strong>: job de CI <code>arch</code>, linha de base em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_baseline.json" target="_blank" rel="noopener"><code>scripts/arch_baseline.json</code></a>.</td>
+<td><strong>Imposto (gate)</strong>: job de CI <code>arch</code>, linha de base em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>arch_baseline.<wbr>json</code></a>.</td>
 </tr>
 <tr>
-<td><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a></strong></td>
+<td><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a></strong></td>
 <td>O contrato de nó em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> (vê <a href="#54-the-node-contract">§5.4</a>).</td>
 <td><strong>Imposto (gate)</strong>: job de CI <code>contract</code>.</td>
 </tr>
@@ -618,9 +623,19 @@ crates que descrevem já existam.</p>
 <td>ADR-0040 D1</td>
 </tr>
 <tr>
-<td>Um tipo de registo persistido, um store, o store de segredos, os helpers <code>write_atomic*</code></td>
-<td><code>delonix-runtime-core</code> (foundation) — a ser dividido pelo ADR-0040 P3. Acrescenta aqui só o que pertence a registos e stores, nunca helpers gerais</td>
+<td>Um tipo de registo persistido (<code>Container</code>, <code>Vm</code>, …)</td>
+<td><code>delonix-runtime-core</code> (foundation) — o que sobrou da divisão da P3 do ADR-0040. Acrescenta aqui só o que pertence a registos, nunca helpers gerais</td>
 <td>ADR-0040 D2.1 «no <code>-core</code>»</td>
+</tr>
+<tr>
+<td>Uma regra pura do modelo de segredos (<code>Secret</code>, nomes e chaves válidos, análise de env-file)</td>
+<td><code>delonix-model</code> (foundation): <code>secret.rs</code></td>
+<td>ADR-0040 P3 (o PR que moveu os stores)</td>
+</tr>
+<tr>
+<td>Um store, o lock de ficheiro, <code>write_atomic*</code>/<code>write_private_temp</code>, o store de segredos cifrado ou o cofre de credenciais</td>
+<td><code>delonix-state</code> (adapter)</td>
+<td>ADR-0040 D2.3</td>
 </tr>
 <tr>
 <td>Factos de Kind, o planeador/diff, condições, revisões</td>
@@ -689,7 +704,7 @@ crates que descrevem já existam.</p>
 </tr>
 <tr>
 <td>Um comando da CLI, a sua apresentação e traduções</td>
-<td><code>bins/delonix-runtime-bin/src/cmd/&lt;group&gt;.rs</code> + <code>data/pt.po</code></td>
+<td><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>&lt;group&gt;.<wbr>rs</code> + <code>data/pt.po</code></td>
 <td>AGENTS.md § CLI</td>
 </tr>
 <tr>
@@ -914,15 +929,15 @@ let rc = unsafe {
   devolver.</strong> O <code>Command::spawn</code> só devolve depois do <code>exec</code>, por isso os dois processos esperam um
   pelo outro para sempre. Usa um <code>fork</code> cru para handshakes. <strong>Decidido</strong>: AGENTS.md § «A classe
   «X não é Y»» (a entrada do <code>reexec_mapped_hold</code>).
-- <strong>Ficheiros temporários: usa <code>delonix_runtime_core::write_private_temp</code>.</strong> Abre com um nome
+- <strong>Ficheiros temporários: usa <code>delonix_state::write_private_temp</code>.</strong> Abre com um nome
   único, <code>O_EXCL</code> e modo <code>0600</code>, por isso nunca segue um symlink plantado. Não uses um nome fixo ou
   derivado do pid em <code>/tmp</code>. <strong>Decidido</strong>: AGENTS.md § «Auditoria de segurança #3», passagem 2; doc
-  comment em <code>store.rs</code>. <strong>Convenção (observada)</strong>: <code>delonix-sdn/src/bpf.rs</code>,
+  comment em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-state/src/store.rs</code></a>. <strong>Convenção (observada)</strong>: <code>delonix-sdn/src/bpf.rs</code>,
   <code>delonix-linux/src/run_host.rs</code>.
 - <strong>Ficheiros que têm de ser privados ou atómicos: usa <code>write_atomic_mode(path, bytes, Some(0o600))</code>.</strong>
   Define o modo na criação e publica com um rename atómico. Nunca escrevas o ficheiro para depois
   lhe fazer <code>chmod</code>, porque outro utilizador pode abri-lo nesse intervalo. <strong>Decidido</strong>: doc comment
-  de <code>store.rs:write_atomic_mode</code>; AGENTS.md (TOCTOU do kubeconfig).
+  de <code>delonix-state/src/store.rs:write_atomic_mode</code>; AGENTS.md (TOCTOU do kubeconfig).
 - <strong>Antes de sinalizar um pid lido de um ficheiro, confirma que ainda é o mesmo processo.</strong> Usa
   <code>delonix_runtime_core::safe_to_signal(pid, starttime)</code>, que compara o instante de arranque para um
   pid reciclado não ser morto. <strong>Decidido</strong>: AGENTS.md § «A classe «X não é Y»» (as entradas de pid).
@@ -942,7 +957,7 @@ let rc = unsafe {
 <h2 id="8-state-and-concurrency">8. Estado e concorrência<a class="hanchor" href="#8-state-and-concurrency" aria-label="#">#</a></h2>
 <ul>
 <li><strong>Ler–modificar–escrever passa por <code>update</code>, nunca por <code>load</code> → mutar → <code>save</code>.</strong>
-  <code>Store::update</code> e <code>JsonStore::update</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/store.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-runtime-core/src/store.rs</code></a>)
+  <code>Store::update</code> e <code>JsonStore::update</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-state/src/store.rs</code></a>)
   tomam um <code>flock</code>, <strong>voltam a ler debaixo do lock</strong>, aplicam o teu closure e escrevem de forma
   atómica. Um closure que devolve <code>false</code> aborta a escrita. A CLI, o servidor CRI e as actualizações
   em background mexem todos nos mesmos registos em concorrência, e sem o lock uma escrita perde-se
@@ -973,7 +988,11 @@ let c = store.update(id_or_name, |c| match f(c) {
   usa com o que o registo guarda. <strong>Decidido</strong>: AGENTS.md § «BUG GRAVE corrigido… <code>-v</code> nunca era
   persistido» (listado aí como o terceiro bug da mesma família).</li>
 <li><strong>Os ficheiros de lock nunca são apagados.</strong> Apagar um abre uma janela em que dois processos
-  bloqueiam inodes diferentes. <strong>Decidido</strong>: doc comment de <code>store.rs:lock_path</code>.</li>
+  bloqueiam inodes diferentes. <strong>Decidido</strong>: doc comment de <code>store.rs:lock_path</code> (<code>delonix-state</code>).</li>
+<li><strong>O <code>SecretStore::update</code> é o único <code>update</code> cujo lock é best-effort.</strong> O seu <code>FileLock::acquire</code>
+  devolve <code>Option</code> e avança sem lock se o ficheiro de lock não puder ser aberto, ao contrário do <code>Store</code> e
+  do <code>JsonStore</code>. <strong>Não decidido</strong>: se deve recusar como os outros; segue o código à volta e
+  di-lo no PR se lhe tocares.</li>
 </ul>
 <hr />
 <h2 id="9-tests">9. Testes<a class="hanchor" href="#9-tests" aria-label="#">#</a></h2>
@@ -991,7 +1010,7 @@ let c = store.update(id_or_name, |c| match f(c) {
   <a href="#41-the-layers-and-the-direction">§4.1</a>).
   <strong>Decidido</strong>: AGENTS.md § «IaC nativo», a nota da fusão do <code>ShareVolume</code> («Nota de método: um
   teste que chamasse <code>apply_share</code> … escreveria no estado REAL da máquina»). <strong>Convenção
-  (observada)</strong>: os testes de <code>delonix-runtime-core/src/store.rs</code> usam um helper <code>tmp_dir(tag)</code>.
+  (observada)</strong>: os testes de <code>delonix-state/src/store.rs</code> usam um helper <code>tmp_dir(tag)</code>.
   Para corridas manuais e E2E, isola <strong>os dois</strong>, <code>DELONIX_ROOT</code> e <code>DELONIX_NET_RUNTIME_DIR</code>. Isolar
   só um é pior que nenhum (AGENTS.md § «Meia-isolação é pior que nenhuma»;
   <a href="02-build-and-test.html#isolating-the-engines-state">02</a>).</li>
@@ -1005,7 +1024,7 @@ let c = store.update(id_or_name, |c| match f(c) {
   caminhos relativos. Um teste pode codificar o bug. <strong>Decidido</strong>: AGENTS.md § «Auditoria
   sistemática dos 208 subcomandos» (<code>default_project_name</code>).</li>
 <li><strong>Os bugs de concorrência levam uma corrida real.</strong> Usa threads e um sleep explícito dentro da
-  janela crítica. <strong>Convenção (observada)</strong>: <code>store.rs:jsonstore_update_concorrente_nao_perde_escritas</code>.</li>
+  janela crítica. <strong>Convenção (observada)</strong>: <code>delonix-state/src/store.rs:jsonstore_update_concorrente_nao_perde_escritas</code>.</li>
 <li><strong>Prefere propriedades a tempos amostrados.</strong> Quando uma corrida só pode ser amostrada, gera carga
   e repete. <strong>Decidido</strong>: AGENTS.md § «Um <code>exec</code> logo a seguir ao <code>run -d</code> corria no HOST».</li>
 <li><strong>As regiões geradas não levam contagens voláteis</strong> (linhas, testes, commits). <strong>Decidido</strong>:
@@ -1025,7 +1044,7 @@ let c = store.update(id_or_name, |c| match f(c) {
   docs de módulo em <code>exitcode.rs</code> e <code>reconcile.rs</code> são o modelo. <strong>Convenção (observada)</strong>.</li>
 <li><strong>Os doc comments (<code>///</code>, <code>//!</code>) em itens públicos e cabeçalhos de módulo</strong> dizem o que o item
   promete e porque existe. <strong>Convenção (observada)</strong>: todas as portas em
-  <code>delonix-compute/src/ports.rs</code>, <code>store.rs:write_private_temp</code>, <code>exitcode.rs</code>. <strong>Não decidido</strong>:
+  <code>delonix-compute/src/ports.rs</code>, <code>delonix-state/src/store.rs:write_private_temp</code>, <code>exitcode.rs</code>. <strong>Não decidido</strong>:
   nenhum lint <code>missing_docs</code> está activo.</li>
 <li><strong>Os comentários estão em inglês e não nomeiam nenhum consumidor.</strong> O ratchet de língua e o gate
   de consumidores percorrem ambos os comentários. <strong>Imposto (gate)</strong>.</li>

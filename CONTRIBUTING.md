@@ -4,7 +4,8 @@ Thanks for considering a contribution. This is a systems project (namespaces, cg
 raw `clone()`/`unshare()`) — small mistakes here can have real security or stability consequences,
 so we lean on tests, live validation, and careful review more than most projects.
 
-**Contributor handbook:** [docs/dev/README.md](docs/dev/README.md) — host requirements, building,
+**Contributor handbook:** <https://angolardevops.github.io/delonix-runtime/handbook/> (English,
+Português de Angola, Français; source in [docs/dev/README.md](docs/dev/README.md)) — host requirements, building,
 every CI gate as a local command, the architecture, the crates, and the contribution workflow. This
 file is the short version.
 

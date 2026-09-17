@@ -1,4 +1,4 @@
-<!-- translated-from: 07-system-design-interview.md sha256:11b5c2d21ae7be9b05ae54f148b67e7fd71ab43e5b17b5fc375f698b8d8df861 -->
+<!-- translated-from: 07-system-design-interview.md sha256:82e60401931d13ace0fff6c55ecefba78fbfb502e651a789047bc998fdf7ec62 -->
 # 7. Entretien de conception de système — le Delonix Engine
 
 > **Recruteur :** Concevez un moteur de containers et de microVMs pour un seul nœud Linux. Il doit
@@ -160,7 +160,7 @@ graph TB
   reste actif.
 
 **Où cela se trouve dans le code :** `scripts/arch_fitness.py` (`LAYERS`, `ALLOWED`) ;
-`crates/foundation/delonix-runtime-core/src/store.rs` (`Store::update`, `JsonStore::update`,
+`crates/adapters/delonix-state/src/store.rs` (`Store::update`, `JsonStore::update`,
 `write_atomic`) ; `crates/contexts/delonix-compute/src/{ports,launch}.rs` ;
 `crates/adapters/delonix-linux/src/supervise.rs` (`run_supervised`).
 

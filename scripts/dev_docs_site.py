@@ -323,6 +323,15 @@ def group_of(name: str) -> str:
     return key
 
 
+def soften_table_paths(body: str) -> str:
+    """Let a long path in a table cell wrap after `/`, `::` or `.`, instead of forcing the
+    table wider than the column or breaking a name in the middle."""
+    def cell(m: re.Match) -> str:
+        return re.sub(r"<code>([^<]{24,})</code>",
+                      lambda c: "<code>" + re.sub(r"(/|::|\.)", r"\1<wbr>", c.group(1)) + "</code>", m.group(0))
+    return re.sub(r"<td>.*?</td>", cell, body, flags=re.S)
+
+
 def decorate(body: str) -> str:
     """Heading anchors, interview dialogue and the code-block header — the shape of the
     content, added after Markdown so the source stays plain."""
@@ -409,7 +418,7 @@ select.lang{height:36px;border:1px solid var(--line);border-radius:9px;backgroun
 .menubtn{display:none}
 
 /* Frame */
-.frame{display:grid;grid-template-columns:272px minmax(0,1fr) 232px;max-width:1440px;margin-inline:auto}
+.frame{display:grid;grid-template-columns:280px minmax(0,1fr) 240px}
 nav.side{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:24px 16px 48px 20px;border-right:1px solid var(--line)}
 nav.side,aside.toc,.sres{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
 nav.side .group{margin-bottom:18px}
@@ -419,8 +428,10 @@ nav.side a:hover{background:var(--surface);text-decoration:none;color:var(--ink)
 nav.side a .n{flex:none;width:18px;font:500 12px/1.35 var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums}
 nav.side a.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
 nav.side a.on .n{color:var(--accent-ink)}
-main{min-width:0;padding:40px 56px 80px}
-.content{max-width:760px;margin-inline:auto}
+main{min-width:0;padding:40px clamp(20px,3.5vw,56px) 80px}
+.content{max-width:1180px;margin-inline:auto}
+/* Prose keeps a reading measure; tables, code and diagrams take the whole column. */
+.content>p,.content>ul,.content>ol,.content>h1,.content>h2,.content>h3,.content>h4,.content>blockquote,.content>.notice,.content>.kicker{max-width:76ch}
 aside.toc{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:40px 20px 40px 8px;font-size:13.5px}
 aside.toc .ttitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
 aside.toc ul{list-style:none;margin:0;padding:0}
@@ -444,7 +455,7 @@ p,ul,ol{margin:0 0 16px}
 li{margin:4px 0}li>p{margin:0 0 8px}
 strong{font-weight:650;color:var(--ink)}
 hr{border:0;height:1px;background:var(--line);margin:40px 0}
-code{font:.86em/1.5 var(--f-mono);background:var(--surface-2);border:1px solid var(--line);padding:.08em .38em;border-radius:6px;overflow-wrap:anywhere}
+code{font:.86em/1.5 var(--f-mono);background:var(--surface-2);border:1px solid var(--line);padding:.08em .38em;border-radius:6px;overflow-wrap:break-word}
 a code{color:inherit}
 a.src code{border-color:color-mix(in srgb,var(--accent) 30%,var(--line));background:var(--accent-soft)}
 a.src:hover{text-decoration:none}a.src:hover code{border-color:var(--accent)}
@@ -483,7 +494,10 @@ th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px sol
 th{background:var(--surface);font:700 12.5px/1.3 var(--f-display);letter-spacing:.02em;color:var(--ink-2);white-space:nowrap}
 tbody tr:last-child td{border-bottom:0}
 tbody tr:hover td{background:color-mix(in srgb,var(--surface) 60%,transparent)}
-td code{font-size:.82em}
+td code{font-size:.82em;overflow-wrap:normal}
+/* A table's first column names the thing (a variable, a crate, a flag): never break it. */
+td:first-child code{white-space:nowrap}
+th:first-child,td:first-child{white-space:nowrap}
 
 /* Pager + footer */
 .pager{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:64px}
@@ -510,7 +524,7 @@ td code{font-size:.82em}
 .shelp{display:flex;gap:16px;padding:10px 16px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
 
 /* Narrow screens */
-@media (max-width:1200px){.frame{grid-template-columns:256px minmax(0,1fr)}aside.toc{display:none}main{padding:36px 40px 72px}}
+@media (max-width:1280px){.frame{grid-template-columns:256px minmax(0,1fr)}aside.toc{display:none}}
 @media (max-width:860px){
   .frame{display:block}.menubtn{display:grid}.brand .sub,.brand .sep{display:none}
   nav.side{position:fixed;top:var(--header);left:0;bottom:0;width:min(300px,86vw);height:auto;z-index:40;background:var(--bg);
@@ -679,7 +693,7 @@ def render_site(out: Path) -> None:
             body = link_sources(body, crates).replace("{SOURCE}", html.escape(ui["source"]))
             url = out_name(page.name)
             index_records += sections(body, title, url)
-            body = decorate(body).replace("{COPY}", html.escape(ui["copy"]))
+            body = soften_table_paths(decorate(body)).replace("{COPY}", html.escape(ui["copy"]))
 
             notice = ""
             if state == "missing":
@@ -758,9 +772,15 @@ def render_site(out: Path) -> None:
         (lang_out / "search-index.js").write_text(
             "window.HANDBOOK_INDEX=" + json.dumps(index_records, ensure_ascii=False, separators=(",", ":")) + ";\n"
         )
+    # The entry page picks the reader's language; without JavaScript it links all three.
     (out / "index.html").write_text(
-        '<!doctype html><meta charset="utf-8"><title>Delonix Runtime — Contributor handbook</title>'
-        '<meta http-equiv="refresh" content="0; url=en/index.html"><a href="en/index.html">Contributor handbook</a>\n'
+        '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<title>Delonix Runtime — Contributor handbook</title>'
+        '<script>var l=(navigator.languages||[navigator.language||""]).join(",").toLowerCase();'
+        'location.replace(/(^|,)pt/.test(l)?"pt-AO/index.html":/(^|,)fr/.test(l)?"fr-FR/index.html":"en/index.html");</script>'
+        '<body style="font:16px/1.6 system-ui,sans-serif;padding:24px">'
+        '<p><a href="en/index.html">Contributor handbook (English)</a> · <a href="pt-AO/index.html">Manual do contribuidor (Português de Angola)</a> · '
+        '<a href="fr-FR/index.html">Guide du contributeur (Français)</a></p></body></html>\n'
     )
 
 

@@ -1,4 +1,4 @@
-<!-- translated-from: 14-glossary.md sha256:7caf94c82b2e576dcd787dd4594be1d382ecad6b35f708384817dbe9993fd1a5 -->
+<!-- translated-from: 14-glossary.md sha256:85df5f59de41a5c32d067967e5582acbf27515f5ba6012949b87ee49d0319964 -->
 # 14. Glossaire
 
 Les mots qu’un nouveau venu rencontre dans ce dépôt, avec le sens qu’ils ont **dans Delonix** — qui est
@@ -213,8 +213,10 @@ agrégat qui regroupe des ressources dans un seul document. Voir :
 **State root** — Le répertoire qui contient tout l’état du moteur sous forme de fichiers (il n’y a pas de base de données) : `DELONIX_ROOT`
 lorsqu’elle est définie, sinon `~/.local/share/delonix` (ou `$XDG_DATA_HOME/delonix`) pour un utilisateur et
 `/var/lib/delonix` pour root. Les sockets réseau vivent dans un répertoire d’exécution séparé
-(`DELONIX_NET_RUNTIME_DIR`). Définissez toujours les deux lorsque vous testez. Voir :
+(`DELONIX_NET_RUNTIME_DIR`). Définissez toujours les deux lorsque vous testez. Les enregistrements qu’il contient sont lus, écrits et
+verrouillés par l’adaptateur `delonix-state`. Voir :
 `bins/delonix-runtime-bin/src/cmd/util.rs::state_root`,
+`crates/adapters/delonix-state/src/store.rs::Store::default_root`,
 [05 — L’état sur disque](05-architecture.md#state-on-disk),
 [02 — Isoler l’état du moteur](02-build-and-test.md#isolating-the-engines-state).
 

@@ -1,4 +1,4 @@
-<!-- translated-from: 03-rust-primer.md sha256:39cb8bb96e2ceebaa2fe9b9d6ac6f0ae7f5b7c67f764f33aea9b319a9b5f7d00 -->
+<!-- translated-from: 03-rust-primer.md sha256:dd6253c8cdac5303088447fbb92e95dbaf879d687b06fbd24391c45de9887aeb -->
 # 3. Introdução ao Rust para esta base de código
 
 Isto não é um tutorial de Rust. É o subconjunto de Rust de que precisas para *ler este repositório*,
@@ -170,7 +170,7 @@ Um motor de containers é sobretudo chamadas de sistema. Este repo chega ao kern
 | Crate | Usado para | Exemplo neste repo |
 |---|---|---|
 | [`nix`](https://docs.rs/nix) | Wrappers mais ou menos seguros: `clone`, `setns`, `unshare`, `pivot_root`, `fork`, `mount`, sinais | `use nix::sched::{clone, setns, unshare, CloneFlags};` em `crates/adapters/delonix-linux/src/lib.rs` |
-| [`libc`](https://docs.rs/libc) | Chamadas cruas que o `nix` não embrulha, ou onde a struct exacta importa | `libc::getsockopt(.., SO_PEERCRED, ..)` em `crates/foundation/delonix-runtime-core/src/peer_cred.rs` (`peer_uid`); `libc::flock` em `store.rs` |
+| [`libc`](https://docs.rs/libc) | Chamadas cruas que o `nix` não embrulha, ou onde a struct exacta importa | `libc::getsockopt(.., SO_PEERCRED, ..)` em `crates/foundation/delonix-runtime-core/src/peer_cred.rs` (`peer_uid`); `libc::flock` em `crates/adapters/delonix-state/src/store.rs` |
 | [`rustix`](https://docs.rs/rustix) | A nova API de mount (`fsopen`/`fsconfig`/`fsmount`/`move_mount`) | `fsopen_overlay` em `crates/adapters/delonix-linux/src/lib.rs` |
 
 **Todos os blocos `unsafe` dizem porque são correctos**, ao lado deles (o lint do workspace impõe a
@@ -340,7 +340,7 @@ padrão para qualquer leitura-modificação-escrita é o `update` com uma closur
 exclusivo:
 
 ```rust
-// crates/foundation/delonix-runtime-core/src/store.rs  (Store::update)
+// crates/adapters/delonix-state/src/store.rs  (Store::update)
 let id = self.load(id_or_name)?.id;
 let _lock = FileLock::acquire(&self.lock_path(&id))?;
 // Re-read UNDER the lock ...
@@ -349,8 +349,10 @@ if !f(&mut c) { return Ok(c); }
 self.save(&c)?;
 ```
 
-O `JsonStore<T>::update` no mesmo ficheiro é a versão genérica para outros tipos de registo. Regras
-que daí decorrem:
+O `JsonStore<T>::update` no mesmo ficheiro é a versão genérica para outros tipos de registo. Ambos
+**recusam** correr quando o lock não pode ser obtido (`Error::Lock`), em vez de continuarem sem lock.
+(O `SecretStore::update` em `secret.rs` é a excepção: o lock dele é best-effort.) Regras que
+daí decorrem:
 
 - Nunca faças `load` → mutar → `save` à mão para um registo que outro processo possa escrever; vais
   perder actualizações. Usa o `update`.

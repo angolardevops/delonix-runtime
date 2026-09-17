@@ -1,4 +1,4 @@
-<!-- translated-from: 12-coding-conventions.md sha256:f30fdfe39037814e7d3cb5ab1de684b3fbeafb30b15fa30a586d64130f69fcb3 -->
+<!-- translated-from: 12-coding-conventions.md sha256:43d981abb9a2261c0d996d221aa5ef0d44c29b0f981f6310e2696432ee29c195 -->
 # 12. Conventions de code
 
 Cette page vous indique comment écrire du code qui passe la revue dans ce dépôt, afin que vous
@@ -349,7 +349,9 @@ Proposed, même si les crates qu'ils décrivent existent déjà.
 |---|---|---|
 | Une règle pure sur les CIDR, les noms de bridge ou l'arithmétique IPAM que les deux côtés doivent calculer à l'identique | `delonix-net-rules` (foundation) | 06 ; AGENTS.md § Arquitetura |
 | Une nouvelle classe d'erreur, un code de sortie ou un code `DX_*` ; les noms générés | `delonix-model` (foundation) | ADR-0040 D1 |
-| Un type d'enregistrement persisté, un store, le store de secrets, les helpers `write_atomic*` | `delonix-runtime-core` (foundation) — en cours de découpage par l'ADR-0040 P3. N'y ajoutez que ce qui relève des enregistrements et des stores, jamais des helpers généraux | ADR-0040 D2.1 « no `-core` » |
+| Un type d'enregistrement persisté (`Container`, `Vm`, …) | `delonix-runtime-core` (foundation) — le reliquat du découpage de l'ADR-0040 P3. N'y ajoutez que ce qui relève des enregistrements, jamais des helpers généraux | ADR-0040 D2.1 « no `-core` » |
+| Une règle pure du modèle des secrets (`Secret`, noms et clés valides, analyse de fichiers env) | `delonix-model` (foundation) : `secret.rs` | ADR-0040 P3 (la PR qui a déplacé les stores) |
+| Un store, le verrou de fichier, `write_atomic*`/`write_private_temp`, le store de secrets chiffré ou le coffre d'identifiants | `delonix-state` (adapter) | ADR-0040 D2.3 |
 | Les faits des Kinds, le planificateur/diff, les conditions, les révisions | `delonix-stack` (context) | AGENTS.md § Arquitetura |
 | La spécification d'exécution, sa validation pure, un port dont le cas d'utilisation run a besoin | `delonix-compute` (context) : `run_opts.rs`, `preflight.rs`, `ports.rs` | ADR-0040 D2.2 |
 | Politique de sécurité, admission, score, masquage (redaction) | `delonix-security-runtime` (context) | ADR-0026 |
@@ -600,15 +602,15 @@ confiance à un appelant pour refuser ce qu'il ne prend pas en charge.
   `spawn`.** `Command::spawn` ne revient qu'après `exec`, donc les deux processus s'attendent
   mutuellement pour toujours. Utilisez un `fork` brut pour les poignées de main (handshakes).
   **Décidé** : AGENTS.md § « A classe «X não é Y» » (l'entrée `reexec_mapped_hold`).
-- **Fichiers temporaires : utilisez `delonix_runtime_core::write_private_temp`.** Il ouvre avec un nom
+- **Fichiers temporaires : utilisez `delonix_state::write_private_temp`.** Il ouvre avec un nom
   unique, `O_EXCL` et le mode `0600`, et ne suit donc jamais un lien symbolique piégé. N'utilisez pas
   un nom fixe ou dérivé du pid dans `/tmp`. **Décidé** : AGENTS.md § « Auditoria de segurança #3 »,
-  passagem 2 ; commentaire de documentation dans `store.rs`. **Convention (observée)** :
+  passagem 2 ; commentaire de documentation dans `crates/adapters/delonix-state/src/store.rs`. **Convention (observée)** :
   `delonix-sdn/src/bpf.rs`, `delonix-linux/src/run_host.rs`.
 - **Fichiers qui doivent être privés ou atomiques : utilisez `write_atomic_mode(path, bytes, Some(0o600))`.**
   Il fixe le mode à la création et publie par un renommage atomique. N'écrivez jamais le fichier pour
   ensuite faire un `chmod`, car un autre utilisateur peut l'ouvrir entre-temps. **Décidé** :
-  commentaire de documentation de `store.rs:write_atomic_mode` ; AGENTS.md (TOCTOU du kubeconfig).
+  commentaire de documentation de `delonix-state/src/store.rs:write_atomic_mode` ; AGENTS.md (TOCTOU du kubeconfig).
 - **Avant de signaler un pid lu dans un fichier, vérifiez qu'il s'agit toujours du même processus.**
   Utilisez `delonix_runtime_core::safe_to_signal(pid, starttime)`, qui compare l'heure de démarrage
   afin qu'un pid recyclé ne soit pas tué. **Décidé** : AGENTS.md § « A classe «X não é Y» » (les
@@ -631,7 +633,7 @@ confiance à un appelant pour refuser ce qu'il ne prend pas en charge.
 ## 8. État et concurrence
 
 - **La séquence lire–modifier–écrire passe par `update`, jamais par `load` → mutation → `save`.**
-  `Store::update` et `JsonStore::update` (`crates/foundation/delonix-runtime-core/src/store.rs`)
+  `Store::update` et `JsonStore::update` (`crates/adapters/delonix-state/src/store.rs`)
   prennent un `flock`, **relisent sous le verrou**, appliquent votre closure et écrivent de manière
   atomique. Une closure qui renvoie `false` annule l'écriture. La CLI, le serveur CRI et les
   rafraîchissements en arrière-plan touchent tous les mêmes enregistrements en parallèle, et sans le
@@ -666,7 +668,11 @@ confiance à un appelant pour refuser ce qu'il ne prend pas en charge.
   corrigido… `-v` nunca era persistido » (listé là comme le troisième bug de la même famille).
 - **Les fichiers de verrou ne sont jamais supprimés.** En supprimer un ouvre une fenêtre où deux
   processus verrouillent des inodes différents. **Décidé** : commentaire de documentation de
-  `store.rs:lock_path`.
+  `store.rs:lock_path` (`delonix-state`).
+- **`SecretStore::update` est le seul `update` dont le verrou est au mieux (best-effort).** Son `FileLock::acquire`
+  renvoie `Option` et continue sans verrou si le fichier de verrou ne peut pas être ouvert, contrairement à `Store` et
+  `JsonStore`. **Non décidé** : s'il devrait refuser comme les autres ; suivez le code environnant
+  et signalez-le dans la PR si vous y touchez.
 
 ---
 
@@ -686,7 +692,7 @@ confiance à un appelant pour refuser ce qu'il ne prend pas en charge.
   `env_writes`, [§4.1](#41-the-layers-and-the-direction)).
   **Décidé** : AGENTS.md § « IaC nativo », la note sur la fusion de `ShareVolume` (« Nota de método: um
   teste que chamasse `apply_share` … escreveria no estado REAL da máquina »). **Convention
-  (observée)** : les tests de `delonix-runtime-core/src/store.rs` utilisent un helper `tmp_dir(tag)`.
+  (observée)** : les tests de `delonix-state/src/store.rs` utilisent un helper `tmp_dir(tag)`.
   Pour les exécutions manuelles et E2E, isolez **à la fois** `DELONIX_ROOT` et
   `DELONIX_NET_RUNTIME_DIR`. N'en isoler qu'un est pire que n'en isoler aucun (AGENTS.md §
   « Meia-isolação é pior que nenhuma » ; [02](02-build-and-test.md#isolating-the-engines-state)).
@@ -701,7 +707,7 @@ confiance à un appelant pour refuser ce qu'il ne prend pas en charge.
   sistemática dos 208 subcomandos » (`default_project_name`).
 - **Les bugs de concurrence ont droit à une vraie course.** Utilisez des threads plus une attente
   explicite (sleep) à l'intérieur de la fenêtre critique. **Convention (observée)** :
-  `store.rs:jsonstore_update_concorrente_nao_perde_escritas`.
+  `delonix-state/src/store.rs:jsonstore_update_concorrente_nao_perde_escritas`.
 - **Préférez les propriétés au timing échantillonné.** Lorsqu'une course ne peut être
   qu'échantillonnée, générez de la charge et répétez. **Décidé** : AGENTS.md § « Um `exec` logo a
   seguir ao `run -d` corria no HOST ».
@@ -725,7 +731,7 @@ confiance à un appelant pour refuser ce qu'il ne prend pas en charge.
   **Convention (observée)**.
 - **Les commentaires de documentation (`///`, `//!`) sur les éléments publics et en tête de module**
   disent ce que l'élément promet et pourquoi il existe. **Convention (observée)** : chaque port de
-  `delonix-compute/src/ports.rs`, `store.rs:write_private_temp`, `exitcode.rs`. **Non décidé** : aucun
+  `delonix-compute/src/ports.rs`, `delonix-state/src/store.rs:write_private_temp`, `exitcode.rs`. **Non décidé** : aucun
   lint `missing_docs` n'est activé.
 - **Les commentaires sont en anglais et ne nomment aucun consommateur.** Le ratchet de langue et le gate
   des consommateurs analysent tous deux les commentaires. **Imposé (gate)**.

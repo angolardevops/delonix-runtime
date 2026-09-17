@@ -61,7 +61,7 @@ select.lang{height:36px;border:1px solid var(--line);border-radius:9px;backgroun
 .menubtn{display:none}
 
 /* Frame */
-.frame{display:grid;grid-template-columns:272px minmax(0,1fr) 232px;max-width:1440px;margin-inline:auto}
+.frame{display:grid;grid-template-columns:280px minmax(0,1fr) 240px}
 nav.side{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:24px 16px 48px 20px;border-right:1px solid var(--line)}
 nav.side,aside.toc,.sres{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
 nav.side .group{margin-bottom:18px}
@@ -71,8 +71,10 @@ nav.side a:hover{background:var(--surface);text-decoration:none;color:var(--ink)
 nav.side a .n{flex:none;width:18px;font:500 12px/1.35 var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums}
 nav.side a.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
 nav.side a.on .n{color:var(--accent-ink)}
-main{min-width:0;padding:40px 56px 80px}
-.content{max-width:760px;margin-inline:auto}
+main{min-width:0;padding:40px clamp(20px,3.5vw,56px) 80px}
+.content{max-width:1180px;margin-inline:auto}
+/* Prose keeps a reading measure; tables, code and diagrams take the whole column. */
+.content>p,.content>ul,.content>ol,.content>h1,.content>h2,.content>h3,.content>h4,.content>blockquote,.content>.notice,.content>.kicker{max-width:76ch}
 aside.toc{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:40px 20px 40px 8px;font-size:13.5px}
 aside.toc .ttitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
 aside.toc ul{list-style:none;margin:0;padding:0}
@@ -96,7 +98,7 @@ p,ul,ol{margin:0 0 16px}
 li{margin:4px 0}li>p{margin:0 0 8px}
 strong{font-weight:650;color:var(--ink)}
 hr{border:0;height:1px;background:var(--line);margin:40px 0}
-code{font:.86em/1.5 var(--f-mono);background:var(--surface-2);border:1px solid var(--line);padding:.08em .38em;border-radius:6px;overflow-wrap:anywhere}
+code{font:.86em/1.5 var(--f-mono);background:var(--surface-2);border:1px solid var(--line);padding:.08em .38em;border-radius:6px;overflow-wrap:break-word}
 a code{color:inherit}
 a.src code{border-color:color-mix(in srgb,var(--accent) 30%,var(--line));background:var(--accent-soft)}
 a.src:hover{text-decoration:none}a.src:hover code{border-color:var(--accent)}
@@ -135,7 +137,10 @@ th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px sol
 th{background:var(--surface);font:700 12.5px/1.3 var(--f-display);letter-spacing:.02em;color:var(--ink-2);white-space:nowrap}
 tbody tr:last-child td{border-bottom:0}
 tbody tr:hover td{background:color-mix(in srgb,var(--surface) 60%,transparent)}
-td code{font-size:.82em}
+td code{font-size:.82em;overflow-wrap:normal}
+/* A table's first column names the thing (a variable, a crate, a flag): never break it. */
+td:first-child code{white-space:nowrap}
+th:first-child,td:first-child{white-space:nowrap}
 
 /* Pager + footer */
 .pager{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:64px}
@@ -162,7 +167,7 @@ td code{font-size:.82em}
 .shelp{display:flex;gap:16px;padding:10px 16px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
 
 /* Narrow screens */
-@media (max-width:1200px){.frame{grid-template-columns:256px minmax(0,1fr)}aside.toc{display:none}main{padding:36px 40px 72px}}
+@media (max-width:1280px){.frame{grid-template-columns:256px minmax(0,1fr)}aside.toc{display:none}}
 @media (max-width:860px){
   .frame{display:block}.menubtn{display:grid}.brand .sub,.brand .sep{display:none}
   nav.side{position:fixed;top:var(--header);left:0;bottom:0;width:min(300px,86vw);height:auto;z-index:40;background:var(--bg);
@@ -228,17 +233,17 @@ cargo build --release -p delonix-runtime-bin   # what the docs generator and the
 <tr>
 <td><code>delonix-cri</code></td>
 <td><code>delonix-cri</code></td>
-<td><code>target/&lt;profile&gt;/delonix-cri</code></td>
+<td><code>target/<wbr>&lt;profile&gt;/<wbr>delonix-cri</code></td>
 </tr>
 <tr>
 <td><code>delonix-mcp</code></td>
 <td><code>delonix-mcp-bin</code></td>
-<td><code>target/&lt;profile&gt;/delonix-mcp</code></td>
+<td><code>target/<wbr>&lt;profile&gt;/<wbr>delonix-mcp</code></td>
 </tr>
 <tr>
 <td><code>delonix-mgmt</code></td>
 <td><code>delonix-mgmt-bin</code></td>
-<td><code>target/&lt;profile&gt;/delonix-mgmt</code></td>
+<td><code>target/<wbr>&lt;profile&gt;/<wbr>delonix-mgmt</code></td>
 </tr>
 </tbody>
 </table></div>
@@ -371,7 +376,7 @@ pgrep -a delonix
 </tr>
 <tr>
 <td>Ancien Debian</td>
-<td><code>kernel.unprivileged_userns_clone=1</code> lorsqu’il vaut <code>0</code></td>
+<td><code>kernel.<wbr>unprivileged_userns_clone=1</code> lorsqu’il vaut <code>0</code></td>
 <td>toujours (lorsque nécessaire)</td>
 </tr>
 <tr>
@@ -381,7 +386,7 @@ pgrep -a delonix
 </tr>
 <tr>
 <td>Réglage du noyau</td>
-<td><code>/etc/modules-load.d/delonix.conf</code>, <code>/etc/sysctl.d/99-delonix.conf</code></td>
+<td><code>/<wbr>etc/<wbr>modules-load.<wbr>d/<wbr>delonix.<wbr>conf</code>, <code>/<wbr>etc/<wbr>sysctl.<wbr>d/<wbr>99-delonix.<wbr>conf</code></td>
 <td>sautée avec <code>--no-tune</code></td>
 </tr>
 <tr>
@@ -519,37 +524,37 @@ avez touché avant de pousser ; exécutez-les tous avant de demander une revue.
 </tr>
 <tr>
 <td><code>lang</code></td>
-<td><code>python3 scripts/lang_ratchet.py</code></td>
-<td>les identifiants, commentaires ou messages en portugais <strong>augmentent</strong> — ou diminuent sans abaisser <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_baseline.json" target="_blank" rel="noopener"><code>scripts/lang_baseline.json</code></a> dans le même commit (<code>--list</code> les affiche, <code>--update</code> abaisse la ligne de base)</td>
+<td><code>python3 scripts/<wbr>lang_ratchet.<wbr>py</code></td>
+<td>les identifiants, commentaires ou messages en portugais <strong>augmentent</strong> — ou diminuent sans abaisser <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>lang_baseline.<wbr>json</code></a> dans le même commit (<code>--list</code> les affiche, <code>--update</code> abaisse la ligne de base)</td>
 </tr>
 <tr>
 <td><code>arch</code></td>
-<td><code>python3 scripts/arch_fitness.py</code></td>
+<td><code>python3 scripts/<wbr>arch_fitness.<wbr>py</code></td>
 <td>une dépendance va à l’encontre de la direction des couches, un crate se trouve dans le mauvais répertoire, un crate membre épingle une version de dépendance, un nom de consommateur apparaît dans le code, ou un ratchet (cliquet) de dette bouge (<code>--list</code>, <code>--update</code>)</td>
 </tr>
 <tr>
 <td><code>arch</code></td>
-<td><code>python3 scripts/dev_docs.py --check</code></td>
-<td>un fait généré dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> est obsolète — exécutez <code>python3 scripts/dev_docs.py</code> et commitez</td>
+<td><code>python3 scripts/<wbr>dev_docs.<wbr>py --check</code></td>
+<td>un fait généré dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> est obsolète — exécutez <code>python3 scripts/<wbr>dev_docs.<wbr>py</code> et commitez</td>
 </tr>
 <tr>
 <td><code>contract</code></td>
-<td><code>python3 scripts/contract_gate.py</code></td>
+<td><code>python3 scripts/<wbr>contract_gate.<wbr>py</code></td>
 <td>le contrat de nœud dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> n’est pas propre au sens de <code>buf format</code>, échoue à <code>buf lint</code>, rompt la compatibilité avec le dernier tag, n’a pas de mapping HTTP, ou <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> n’est pas celui généré (<code>--update</code> le réécrit). Nécessite <code>protoc</code>, <code>buf</code> v1.73.0 et <code>protoc-gen-openapi</code> v0.7.1 dans le <code>PATH</code>, ainsi que les tags</td>
 </tr>
 <tr>
 <td><code>version</code></td>
-<td><code>python3 scripts/version_gate.py</code></td>
+<td><code>python3 scripts/<wbr>version_gate.<wbr>py</code></td>
 <td>la version du workspace n’est pas le tag le plus récent que contient le commit (voir <a href="10-contributing-workflow.html#version-alignment">10</a>) ou la branch ne contient pas le tag le plus récent. Nécessite les tags</td>
 </tr>
 <tr>
 <td><code>cli-surface</code></td>
-<td><code>cargo build --release -p delonix-runtime-bin &amp;&amp; scripts/cli-tree.sh --gate</code></td>
-<td>une feuille de la CLI a été ajoutée, supprimée ou reclassée sans mise à jour de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli_baseline.tsv" target="_blank" rel="noopener"><code>scripts/cli_baseline.tsv</code></a> dans le même commit (<code>scripts/cli-tree.sh --update</code>)</td>
+<td><code>cargo build --release -p delonix-runtime-bin &amp;&amp; scripts/<wbr>cli-tree.<wbr>sh --gate</code></td>
+<td>une feuille de la CLI a été ajoutée, supprimée ou reclassée sans mise à jour de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli_baseline.tsv" target="_blank" rel="noopener"><code>scripts/<wbr>cli_baseline.<wbr>tsv</code></a> dans le même commit (<code>scripts/<wbr>cli-tree.<wbr>sh --update</code>)</td>
 </tr>
 <tr>
 <td><code>cli-surface</code></td>
-<td><code>python3 scripts/docs_cli_gate.py</code></td>
+<td><code>python3 scripts/<wbr>docs_cli_gate.<wbr>py</code></td>
 <td>une commande <code>delonix …</code> citée dans la documentation actuelle n’existe pas dans l’arbre du binaire</td>
 </tr>
 <tr>
@@ -569,12 +574,12 @@ avez touché avant de pousser ; exécutez-les tous avant de demander une revue.
 </tr>
 <tr>
 <td><code>docs</code></td>
-<td><code>cargo build --release -p delonix-runtime-bin &amp;&amp; python3 docs/gen.py &amp;&amp; git diff --exit-code -- docs/</code></td>
+<td><code>cargo build --release -p delonix-runtime-bin &amp;&amp; python3 docs/<wbr>gen.<wbr>py &amp;&amp; git diff --exit-code -- docs/<wbr></code></td>
 <td>le site commité n’est pas ce que le générateur produit à partir de ce binaire</td>
 </tr>
 <tr>
 <td><code>docs</code></td>
-<td><code>./target/release/delonix stack apply -f examples/&lt;file&gt;.yaml --dry-run</code> et <code>./target/release/delonix stack validate -f examples/&lt;file&gt;.yaml</code></td>
+<td><code>.<wbr>/<wbr>target/<wbr>release/<wbr>delonix stack apply -f examples/<wbr>&lt;file&gt;.<wbr>yaml --dry-run</code> et <code>.<wbr>/<wbr>target/<wbr>release/<wbr>delonix stack validate -f examples/<wbr>&lt;file&gt;.<wbr>yaml</code></td>
 <td>un exemple publié utilise une forme dépréciée ou a des références non résolues</td>
 </tr>
 </tbody>
