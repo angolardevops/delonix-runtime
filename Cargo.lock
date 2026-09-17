@@ -840,6 +840,7 @@ dependencies = [
 name = "delonix-net"
 version = "3.1.0"
 dependencies = [
+ "delonix-compute",
  "delonix-net-rules",
  "delonix-runtime-core",
  "libc",
