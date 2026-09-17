@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="fr-FR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Project structure · Delonix Runtime — Guide du contributeur</title>
+<title>Structure du projet · Delonix Runtime — Guide du contributeur</title>
 <script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
@@ -206,35 +206,36 @@ th:first-child,td:first-child{white-space:nowrap}
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="Guide du contributeur"><div class="group"><div class="gtitle">Vue d&#x27;ensemble</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manuel du contributeur</span></a></div><div class="group"><div class="gtitle">Démarrer</div><a href="start-here.html"><span class="n">01</span><span>Commencer ici</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS et cloud native — où s’inscrit le moteur</span></a></div><div class="group"><div class="gtitle">Fondamentaux</div><a href="linux-foundations.html"><span class="n">03</span><span>Fondations Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Initiation au cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Initiation à Rust pour cette base de code</span></a></div><div class="group"><div class="gtitle">Préparer et compiler</div><a href="environment.html"><span class="n">06</span><span>Préparer votre environnement</span></a><a href="build-and-test.html"><span class="n">07</span><span>Cloner, compiler et tester</span></a></div><div class="group"><div class="gtitle">Architecture</div><a class="on" aria-current="page" href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>Les crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>Entretien de conception de système — le Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images et microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile et VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construire des microVMs</span></a></div><div class="group"><div class="gtitle">Exploiter et diagnostiquer</div><a href="troubleshooting.html"><span class="n">14</span><span>Dépannage</span></a></div><div class="group"><div class="gtitle">Contribuer</div><a href="coding-conventions.html"><span class="n">15</span><span>Conventions de code</span></a><a href="adding-a-kind.html"><span class="n">16</span><span>Ajouter un Kind</span></a><a href="contributing-workflow.html"><span class="n">17</span><span>Flux de contribution</span></a><a href="releases-and-stability.html"><span class="n">18</span><span>Releases et stabilité</span></a><a href="publishing-docs.html"><span class="n">19</span><span>Publier la documentation</span></a></div><div class="group"><div class="gtitle">Référence</div><a href="cloud-native-standards.html"><span class="n">20</span><span>Standards cloud native, couche par couche</span></a><a href="environment-variables.html"><span class="n">21</span><span>Variables d’environnement (DELONIX_*)</span></a><a href="glossary.html"><span class="n">22</span><span>Glossaire</span></a></div></nav>
+<nav class="side" aria-label="Guide du contributeur"><div class="group"><div class="gtitle">Vue d&#x27;ensemble</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manuel du contributeur</span></a></div><div class="group"><div class="gtitle">Démarrer</div><a href="start-here.html"><span class="n">01</span><span>Commencer ici</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS et cloud native — où s’inscrit le moteur</span></a></div><div class="group"><div class="gtitle">Fondamentaux</div><a href="linux-foundations.html"><span class="n">03</span><span>Fondations Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Initiation au cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Initiation à Rust pour cette base de code</span></a></div><div class="group"><div class="gtitle">Préparer et compiler</div><a href="environment.html"><span class="n">06</span><span>Préparer votre environnement</span></a><a href="build-and-test.html"><span class="n">07</span><span>Cloner, compiler et tester</span></a></div><div class="group"><div class="gtitle">Architecture</div><a class="on" aria-current="page" href="project-structure.html"><span class="n">08</span><span>Structure du projet</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>Les crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>Entretien de conception de système — le Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images et microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile et VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construire des microVMs</span></a></div><div class="group"><div class="gtitle">Exploiter et diagnostiquer</div><a href="troubleshooting.html"><span class="n">14</span><span>Dépannage</span></a></div><div class="group"><div class="gtitle">Contribuer</div><a href="coding-conventions.html"><span class="n">15</span><span>Conventions de code</span></a><a href="adding-a-kind.html"><span class="n">16</span><span>Ajouter un Kind</span></a><a href="contributing-workflow.html"><span class="n">17</span><span>Flux de contribution</span></a><a href="releases-and-stability.html"><span class="n">18</span><span>Releases et stabilité</span></a><a href="publishing-docs.html"><span class="n">19</span><span>Publier la documentation</span></a></div><div class="group"><div class="gtitle">Référence</div><a href="cloud-native-standards.html"><span class="n">20</span><span>Standards cloud native, couche par couche</span></a><a href="environment-variables.html"><span class="n">21</span><span>Variables d’environnement (DELONIX_*)</span></a><a href="glossary.html"><span class="n">22</span><span>Glossaire</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Architecture</p>
-<div class="notice" role="note">Cette page n&#x27;est pas encore traduite en Français — la version anglaise est affichée.</div><h1 id="project-structure">Project structure</h1>
-<p><strong>Before you read:</strong> <a href="build-and-test.html">Clone, build and test</a> — you have a checkout that builds, and know which gates exist.</p>
-<p>This page is the map of the repository: what each top-level file and directory is, who changes it
-and when, and which parts are <strong>generated</strong> and must never be edited by hand. Read it after
-<a href="build-and-test.html">Clone, build and test</a> and before <a href="architecture.html">Architecture</a> — the
-architecture explains <em>why</em> the code is split the way it is; this page tells you <em>where</em> things
-are. After it you can place any path in the repository, say who changes it, and know whether you
-may edit it by hand or must regenerate it.</p>
-<p>A CI gate keeps it honest: <code>python3 scripts/dev_docs.py --check</code> fails when a tracked top-level
-path (or a second-level directory of <code>crates/</code>, <code>bins/</code> or <code>docs/</code>) is missing from the tables
-below, or when a table names a path that no longer exists.</p>
-<h2 id="reading-the-repository-in-five-minutes">Reading the repository in five minutes<a class="hanchor" href="#reading-the-repository-in-five-minutes" aria-label="#">#</a></h2>
-<p>Start at the root and follow the dependencies inward:</p>
+<h1 id="project-structure">Structure du projet</h1>
+<p><strong>Avant de lire :</strong> <a href="build-and-test.html">Cloner, compiler et tester</a> — vous avez un checkout qui compile, et vous savez quels gates existent.</p>
+<p>Cette page est la carte du dépôt : ce qu’est chaque fichier et répertoire de premier niveau, qui le
+modifie et quand, et quelles parties sont <strong>générées</strong> et ne doivent jamais être éditées à la main.
+Lisez-la après <a href="build-and-test.html">Cloner, compiler et tester</a> et avant
+<a href="architecture.html">Architecture</a> — l’architecture explique <em>pourquoi</em> le code est découpé ainsi ;
+cette page vous dit <em>où</em> se trouvent les choses. Après elle, vous pourrez situer n’importe quel
+chemin du dépôt, dire qui le modifie, et savoir si vous pouvez l’éditer à la main ou devez le
+régénérer.</p>
+<p>Un gate de CI la garde honnête : <code>python3 scripts/dev_docs.py --check</code> échoue quand un chemin de
+premier niveau suivi (ou un répertoire de second niveau de <code>crates/</code>, <code>bins/</code> ou <code>docs/</code>) manque
+dans les tableaux ci-dessous, ou quand un tableau nomme un chemin qui n’existe plus.</p>
+<h2 id="reading-the-repository-in-five-minutes">Lire le dépôt en cinq minutes<a class="hanchor" href="#reading-the-repository-in-five-minutes" aria-label="#">#</a></h2>
+<p>Commencez à la racine et suivez les dépendances vers l’intérieur :</p>
 <ol>
-<li><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a></strong> — the workspace: every member crate, and every dependency version (members
-   only write <code>{ workspace = true }</code>).</li>
-<li><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/main.rs</code></a></strong> — the <code>delonix</code> CLI. Each command group is one
-   module under <code>src/cmd/</code>; follow the group you care about.</li>
-<li><strong><code>crates/&lt;layer&gt;/&lt;crate&gt;/src/lib.rs</code></strong> — the engine. The directory <em>is</em> the layer
-   (foundation → contexts → adapters / providers → interfaces), and every <code>lib.rs</code> opens with a
-   <code>//!</code> comment saying what the crate does. <a href="crates.html">The crates</a> has one section per crate.</li>
-<li><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a></strong> — this handbook. <strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a></strong> — the decisions behind the structure.</li>
+<li><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a></strong> — le workspace : chaque crate membre, et chaque version de dépendance (les
+   membres n’écrivent que <code>{ workspace = true }</code>).</li>
+<li><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/main.rs</code></a></strong> — la CLI <code>delonix</code>. Chaque groupe de commandes est
+   un module sous <code>src/cmd/</code> ; suivez le groupe qui vous intéresse.</li>
+<li><strong><code>crates/&lt;couche&gt;/&lt;crate&gt;/src/lib.rs</code></strong> — le moteur. Le répertoire <em>est</em> la couche
+   (foundation → contexts → adapters / providers → interfaces), et chaque <code>lib.rs</code> s’ouvre sur un
+   commentaire <code>//!</code> disant ce que fait le crate. <a href="crates.html">Les crates</a> a une section par crate.</li>
+<li><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a></strong> — ce manuel. <strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a></strong> — les décisions derrière la structure.</li>
 </ol>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> is the long, Portuguese working journal of the project. It is useful for finding
-<em>where</em> to look, but parts of it are out of date; confirm anything it says in the code.</p>
-<h2 id="annotated-tree">Annotated tree<a class="hanchor" href="#annotated-tree" aria-label="#">#</a></h2>
+<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> est le long journal de travail du projet, en portugais. Il est utile pour trouver <em>où</em>
+chercher, mais certaines parties sont obsolètes ; vérifiez dans le code ce qu’il affirme.</p>
+<h2 id="annotated-tree">Arborescence annotée<a class="hanchor" href="#annotated-tree" aria-label="#">#</a></h2>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-text">.
 ├── Cargo.toml, Cargo.lock        workspace members, shared dependency versions, lock file
 ├── rust-toolchain.toml           pinned Rust toolchain (clippy + rustfmt)
@@ -279,389 +280,389 @@ below, or when a table names a path that no longer exists.</p>
 ├── editors/                      VMfile syntax for Vim and VS Code
 └── reports/                      dated audit reports (historical)
 </code></pre></div>
-<h2 id="top-level-files">Top-level files<a class="hanchor" href="#top-level-files" aria-label="#">#</a></h2>
+<h2 id="top-level-files">Fichiers de premier niveau<a class="hanchor" href="#top-level-files" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Path</th>
-<th>What it is</th>
-<th>Who changes it / when</th>
-<th>Read more</th>
+<th>Chemin</th>
+<th>Ce que c’est</th>
+<th>Qui le modifie / quand</th>
+<th>Pour aller plus loin</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a></td>
-<td>Workspace root: the member list, <code>[workspace.package]</code>, <code>[workspace.<wbr>dependencies]</code> (every crate path and every external version) and <code>[workspace.<wbr>lints.<wbr>clippy]</code>. Its <code>version</code> is the published tag.</td>
-<td>Anyone adding a crate or dependency; the <code>version</code> changes <strong>only in a release commit</strong> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/version_gate.py" target="_blank" rel="noopener"><code>scripts/version_gate.py</code></a>).</td>
-<td><a href="coding-conventions.html">Coding conventions</a>, <a href="contributing-workflow.html">Contribution workflow</a></td>
+<td>Racine du workspace : la liste des membres, <code>[workspace.package]</code>, <code>[workspace.<wbr>dependencies]</code> (chaque chemin de crate et chaque version externe) et <code>[workspace.<wbr>lints.<wbr>clippy]</code>. Sa <code>version</code> est la tag publiée.</td>
+<td>Quiconque ajoute un crate ou une dépendance ; la <code>version</code> ne change <strong>que dans un commit de release</strong> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/version_gate.py" target="_blank" rel="noopener"><code>scripts/version_gate.py</code></a>).</td>
+<td><a href="coding-conventions.html">Conventions de code</a>, <a href="contributing-workflow.html">Flux de contribution</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.lock" target="_blank" rel="noopener"><code>Cargo.lock</code></a></td>
-<td>Resolved dependency graph for the whole workspace; builds use <code>--locked</code>.</td>
-<td>Updated by cargo when dependencies change; commit it with that change.</td>
-<td><a href="build-and-test.html">Clone, build and test</a></td>
+<td>Graphe de dépendances résolu pour tout le workspace ; les builds utilisent <code>--locked</code>.</td>
+<td>Mis à jour par cargo quand les dépendances changent ; commitez-le avec ce changement.</td>
+<td><a href="build-and-test.html">Cloner, compiler et tester</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a></td>
-<td>Pins the Rust channel with <code>rustfmt</code> and <code>clippy</code>, so dev and CI build with the same compiler.</td>
-<td>Maintainers, in a dedicated commit.</td>
-<td><a href="environment.html">Preparing your environment</a></td>
+<td>Épingle le canal Rust avec <code>rustfmt</code> et <code>clippy</code>, pour que le dev et la CI compilent avec le même compilateur.</td>
+<td>Les mainteneurs, dans un commit dédié.</td>
+<td><a href="environment.html">Préparer votre environnement</a></td>
 </tr>
 <tr>
 <td><code>buf.yaml</code></td>
-<td><code>buf</code> v2 configuration: the <code>proto/</code> module (linted) and the vendored <code>third_party/googleapis</code> module (not linted), with the written lint exceptions.</td>
-<td>Whoever changes the node contract rules.</td>
+<td>Configuration <code>buf</code> v2 : le module <code>proto/</code> (vérifié par lint) et le module vendorisé <code>third_party/googleapis</code> (non vérifié), avec les exceptions de lint écrites.</td>
+<td>Quiconque modifie les règles du contrat de nœud.</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0040-engine-restructuring-layers-ports-node-contract.<wbr>md</code></a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a></td>
-<td><code>cargo-deny</code> policy: advisories (each ignore with a reason), licences, sources. Run by the <code>cargo-deny</code> CI job.</td>
-<td>Anyone adding a dependency that trips it — with a written justification.</td>
-<td><a href="build-and-test.html">Clone, build and test</a></td>
+<td>Politique <code>cargo-deny</code> : avis (chaque ignoré avec une raison), licences, sources. Exécuté par le job de CI <code>cargo-deny</code>.</td>
+<td>Quiconque ajoute une dépendance qui le déclenche — avec une justification écrite.</td>
+<td><a href="build-and-test.html">Cloner, compiler et tester</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Makefile" target="_blank" rel="noopener"><code>Makefile</code></a></td>
-<td>Convenience targets: <code>binaries</code> (release <code>delonix</code> + <code>delonix-cri</code>, the primary artefact), <code>image</code>, <code>ghcr-push</code>, <code>bench</code>, <code>coverage</code>.</td>
-<td>Maintainers.</td>
-<td><a href="build-and-test.html">Clone, build and test</a></td>
+<td>Cibles de commodité : <code>binaries</code> (release de <code>delonix</code> + <code>delonix-cri</code>, l’artefact principal), <code>image</code>, <code>ghcr-push</code>, <code>bench</code>, <code>coverage</code>.</td>
+<td>Les mainteneurs.</td>
+<td><a href="build-and-test.html">Cloner, compiler et tester</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a></td>
-<td>Multi-stage build of the secondary CLI container image (builds <code>delonix</code> + <code>delonix-cri</code> from source).</td>
-<td>Maintainers, when the image build changes.</td>
-<td><a href="delonixfile-and-vmfile.html">Delonixfile and VMfile</a></td>
+<td>Build multi-étapes de l’image de container secondaire de la CLI (construit <code>delonix</code> + <code>delonix-cri</code> depuis les sources).</td>
+<td>Les mainteneurs, quand le build d’image change.</td>
+<td><a href="delonixfile-and-vmfile.html">Delonixfile et VMfile</a></td>
 </tr>
 <tr>
 <td><code>.dockerignore</code></td>
-<td>Keeps <code>target/</code>, <code>dist/</code> and <code>.git</code> out of the <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> build context.</td>
-<td>Rarely.</td>
+<td>Garde <code>target/</code>, <code>dist/</code> et <code>.git</code> hors du contexte de build du <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a>.</td>
+<td>Rarement.</td>
 <td>—</td>
 </tr>
 <tr>
 <td><code>.gitignore</code></td>
-<td>Ignores <code>target/</code>, <code>__pycache__/</code> and local agent-tool files.</td>
-<td>Rarely.</td>
+<td>Ignore <code>target/</code>, <code>__pycache__/</code> et les fichiers locaux d’outils d’agent.</td>
+<td>Rarement.</td>
 <td>—</td>
 </tr>
 <tr>
 <td><code>.git-blame-ignore-revs</code></td>
-<td>Commits <code>git blame</code> should skip (the workspace-wide <code>rustfmt</code> run). Enable with <code>git config blame.<wbr>ignoreRevsFile .<wbr>git-blame-ignore-revs</code>.</td>
-<td>Whoever lands a mass reformatting commit.</td>
+<td>Commits que <code>git blame</code> doit sauter (l’exécution <code>rustfmt</code> sur tout le workspace). Activez avec <code>git config blame.<wbr>ignoreRevsFile .<wbr>git-blame-ignore-revs</code>.</td>
+<td>Quiconque fait atterrir un commit de reformatage massif.</td>
 <td>—</td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a></td>
-<td>Project journal and agent rules, in Portuguese: the engine's identity and boundary (canonical), the gates, and a long history per feature. Some sections are out of date.</td>
-<td>Maintainers and contributors recording decisions and findings; conflicts are resolved by keeping both sides.</td>
-<td><a href="start-here.html">Start here</a></td>
+<td>Journal du projet et règles d’agent, en portugais : l’identité et la frontière du moteur (canonique), les gates, et un long historique par fonctionnalité. Certaines sections sont obsolètes.</td>
+<td>Les mainteneurs et contributeurs qui consignent décisions et constats ; les conflits se résolvent en gardant les deux côtés.</td>
+<td><a href="start-here.html">Commencer ici</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener"><code>ARCHITECTURE.md</code></a></td>
-<td>C4 model (context, containers, components) and functional system design, in Portuguese, rendered into the user site.</td>
-<td>Hand-written, kept in step with the code on structural changes.</td>
+<td>Modèle C4 (contexte, containers, composants) et conception fonctionnelle du système, en portugais, rendu sur le site utilisateur.</td>
+<td>Écrit à la main, tenu synchronisé avec le code lors de changements structurels.</td>
 <td><a href="architecture.html">Architecture</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/README.rst" target="_blank" rel="noopener"><code>README.rst</code></a></td>
-<td>The user-facing entry point: what Delonix is, installation, first commands.</td>
-<td>Changed with user-visible features and releases.</td>
-<td><a href="publishing-docs.html">Publishing the documentation</a></td>
+<td>Le point d’entrée visible de l’utilisateur : ce qu’est Delonix, l’installation, les premières commandes.</td>
+<td>Modifié avec les fonctionnalités visibles à l’utilisateur et les releases.</td>
+<td><a href="publishing-docs.html">Publier la documentation</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a></td>
-<td>Short contributor entry point that points into <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a>.</td>
-<td>Handbook maintainers.</td>
-<td><a href="contributing-workflow.html">Contribution workflow</a></td>
+<td>Courte porte d’entrée du contributeur qui renvoie vers <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a>.</td>
+<td>Les mainteneurs du manuel.</td>
+<td><a href="contributing-workflow.html">Flux de contribution</a></td>
 </tr>
 <tr>
 <td><code>GOVERNANCE.md</code></td>
-<td>How decisions are made (single-maintainer model, ADRs for structural decisions).</td>
-<td>Maintainers.</td>
+<td>Comment les décisions sont prises (modèle à mainteneur unique, ADR pour les décisions structurelles).</td>
+<td>Les mainteneurs.</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a></td>
 </tr>
 <tr>
 <td><code>MAINTAINERS.md</code></td>
-<td>Who maintains which area (one maintainer today).</td>
-<td>Maintainers.</td>
+<td>Qui maintient quelle zone (un seul mainteneur aujourd’hui).</td>
+<td>Les mainteneurs.</td>
 <td><code>GOVERNANCE.md</code></td>
 </tr>
 <tr>
 <td><code>CODE_OF_CONDUCT.md</code></td>
 <td>Contributor Covenant.</td>
-<td>Maintainers.</td>
+<td>Les mainteneurs.</td>
 <td>—</td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a></td>
-<td>How to report a vulnerability privately (GitHub Private Vulnerability Reporting).</td>
-<td>Maintainers.</td>
+<td>Comment signaler une vulnérabilité en privé (GitHub Private Vulnerability Reporting).</td>
+<td>Les mainteneurs.</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/SECURITY-RELEASES.md" target="_blank" rel="noopener"><code>docs/<wbr>SECURITY-RELEASES.<wbr>md</code></a></td>
 </tr>
 <tr>
 <td><code>LICENSE</code></td>
-<td>Apache-2.0 licence of the project.</td>
-<td>Never, in practice.</td>
+<td>Licence Apache-2.0 du projet.</td>
+<td>Jamais, en pratique.</td>
 <td>—</td>
 </tr>
 <tr>
 <td><code>.clinerules</code></td>
-<td>Pointer file for the Cline assistant: "the rules are in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>". Its crate count is stale; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> and <a href="crates.html">The crates</a> are authoritative.</td>
-<td>Rarely.</td>
+<td>Fichier pointeur pour l’assistant Cline : « les règles sont dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> ». Son décompte de crates est obsolète ; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> et <a href="crates.html">Les crates</a> font autorité.</td>
+<td>Rarement.</td>
 <td>—</td>
 </tr>
 <tr>
 <td><code>.cursorrules</code></td>
-<td>Same pointer, for Cursor.</td>
-<td>Rarely.</td>
+<td>Le même pointeur, pour Cursor.</td>
+<td>Rarement.</td>
 <td>—</td>
 </tr>
 </tbody>
 </table></div>
-<h2 id="source-code-crates-bins-proto-tests">Source code (crates/, bins/, proto/, tests/)<a class="hanchor" href="#source-code-crates-bins-proto-tests" aria-label="#">#</a></h2>
-<p>The crate list, each crate's layer and who depends on whom are generated facts in
-<a href="architecture.html">Architecture</a> and <a href="crates.html">The crates</a>; they are not repeated here.</p>
+<h2 id="source-code-crates-bins-proto-tests">Code source (crates/, bins/, proto/, tests/)<a class="hanchor" href="#source-code-crates-bins-proto-tests" aria-label="#">#</a></h2>
+<p>La liste des crates, la couche de chacun et qui dépend de qui sont des faits générés dans
+<a href="architecture.html">Architecture</a> et <a href="crates.html">Les crates</a> ; ils ne sont pas répétés ici.</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Path</th>
-<th>What it is</th>
-<th>Who changes it / when</th>
-<th>Read more</th>
+<th>Chemin</th>
+<th>Ce que c’est</th>
+<th>Qui le modifie / quand</th>
+<th>Pour aller plus loin</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>crates/</code></td>
-<td>All library crates, one directory per layer (ADR-0040). <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> fails a crate whose directory is not the layer declared in its <code>LAYERS</code> table, and any dependency against the allowed direction.</td>
-<td>Every engine feature.</td>
+<td>Tous les crates de bibliothèque, un répertoire par couche (ADR-0040). <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> refuse un crate dont le répertoire n’est pas la couche déclarée dans sa table <code>LAYERS</code>, et toute dépendance allant contre la direction autorisée.</td>
+<td>Toute fonctionnalité du moteur.</td>
 <td><a href="architecture.html">Architecture</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a></td>
-<td>Pure foundation: the data-only model — errors, plain-data records (<code>Status</code>, the firewall records), the secret model, generated names, exit-code and <code>DX_*</code> classes (<code>delonix-model</code>), and zero-dependency network rules (<code>delonix-net-rules</code>). Depends only on the foundation.</td>
-<td>Changes that add a shared type or pure rule.</td>
-<td><a href="crates.html">The crates</a></td>
+<td>Fondation pure : le modèle uniquement-données — erreurs, enregistrements de données simples (<code>Status</code>, les enregistrements de pare-feu), le modèle de secrets, les noms générés, les classes de code de sortie et <code>DX_*</code> (<code>delonix-model</code>), et des règles réseau sans dépendance (<code>delonix-net-rules</code>). Ne dépend que de la fondation.</td>
+<td>Changements qui ajoutent un type partagé ou une règle pure.</td>
+<td><a href="crates.html">Les crates</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a></td>
-<td>Bounded contexts with the use cases: Compute, with the <code>Container</code> and <code>Vm</code> records (<code>delonix-compute</code>), the node's own helpers — event log, host and process checks, server dispatch (<code>delonix-node</code>) —, Stack — Kinds, reconciler, revisions (<code>delonix-stack</code>) — and the node's security decisions (<code>delonix-security-runtime</code>).</td>
-<td>Features that change what the engine decides.</td>
-<td><a href="crates.html">The crates</a></td>
+<td>Contextes bornés avec les cas d’usage : Compute, avec les enregistrements <code>Container</code> et <code>Vm</code> (<code>delonix-compute</code>), les propres assistants du nœud — journal d’événements, vérifications d’hôte et de processus, répartition serveur (<code>delonix-node</code>) —, Stack — Kinds, réconciliateur, révisions (<code>delonix-stack</code>) — et les décisions de sécurité du nœud (<code>delonix-security-runtime</code>).</td>
+<td>Fonctionnalités qui changent ce que le moteur décide.</td>
+<td><a href="crates.html">Les crates</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a></td>
-<td>Mechanisms on this node: Linux namespaces/cgroups (<code>delonix-linux</code>), OCI images (<code>delonix-oci</code>), networking and firewall (<code>delonix-sdn</code>), microVMs (<code>delonix-vm</code>), volumes (<code>delonix-volume</code>), persisted state and the secret vault (<code>delonix-state</code>), vulnerability scanning (<code>delonix-scanner</code>), logging/metrics/tracing (<code>delonix-telemetry</code>).</td>
-<td>Features that touch the kernel, disk or a local tool.</td>
-<td><a href="crates.html">The crates</a>, <a href="cloud-native-primer.html">Cloud native primer</a></td>
+<td>Mécanismes sur ce nœud : namespaces/cgroups Linux (<code>delonix-linux</code>), images OCI (<code>delonix-oci</code>), réseau et pare-feu (<code>delonix-sdn</code>), microVM (<code>delonix-vm</code>), volumes (<code>delonix-volume</code>), état persisté et coffre de secrets (<code>delonix-state</code>), analyse de vulnérabilités (<code>delonix-scanner</code>), logging/métriques/traçage (<code>delonix-telemetry</code>).</td>
+<td>Fonctionnalités qui touchent le noyau, le disque ou un outil local.</td>
+<td><a href="crates.html">Les crates</a>, <a href="cloud-native-primer.html">Initiation au cloud native</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a></td>
-<td>Remote systems behind a port: a Proxmox VE node as a <code>VmBackend</code> (<code>delonix-proxmox</code>) and TrueNAS provisioning (<code>delonix-truenas</code>).</td>
-<td>Changes to a provider integration; a new provider enters here as a port implementation.</td>
+<td>Systèmes distants derrière un port : un nœud Proxmox VE en tant que <code>VmBackend</code> (<code>delonix-proxmox</code>) et le provisionnement TrueNAS (<code>delonix-truenas</code>).</td>
+<td>Changements à une intégration de provider ; un nouveau provider entre ici comme implémentation d’un port.</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0008-proxmox-vm-backend.<wbr>md</code></a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a></td>
-<td>Servers that expose the engine: the Kubernetes CRI (<code>delonix-cri</code>, which also ships the <code>delonix-cri</code> binary), the local management API (<code>delonix-mgmt</code>) and the MCP server (<code>delonix-mcp</code>).</td>
-<td>Changes to one of those protocols.</td>
-<td><a href="cloud-native-standards.html">Cloud native standards</a></td>
+<td>Serveurs qui exposent le moteur : le CRI de Kubernetes (<code>delonix-cri</code>, qui livre aussi le binaire <code>delonix-cri</code>), l’API de gestion locale (<code>delonix-mgmt</code>) et le serveur MCP (<code>delonix-mcp</code>).</td>
+<td>Changements à l’un de ces protocoles.</td>
+<td><a href="cloud-native-standards.html">Standards cloud native</a></td>
 </tr>
 <tr>
 <td><code>bins/</code></td>
-<td>Binary crates. Each composes one interface (enforced by <code>arch_fitness.py</code>).</td>
-<td>Every CLI-visible feature.</td>
+<td>Crates binaires. Chacun compose une interface (imposé par <code>arch_fitness.py</code>).</td>
+<td>Toute fonctionnalité visible dans la CLI.</td>
 <td><a href="architecture.html">Architecture</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-runtime-bin" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr></code></a></td>
-<td>The <code>delonix</code> CLI: <code>src/main.rs</code>, one module per command group in <code>src/cmd/</code>, the Portuguese message catalogue <code>data/pt.po</code>, the <code>init</code> project templates in <code>templates/</code>, <code>build.rs</code>, and <code>tests/architecture.rs</code>.</td>
-<td>Every feature with a command, flag or message.</td>
-<td><a href="coding-conventions.html">Coding conventions</a></td>
+<td>La CLI <code>delonix</code> : <code>src/main.rs</code>, un module par groupe de commandes dans <code>src/cmd/</code>, le catalogue de messages en portugais <code>data/pt.po</code>, les modèles de projet <code>init</code> dans <code>templates/</code>, <code>build.rs</code>, et <code>tests/architecture.rs</code>.</td>
+<td>Toute fonctionnalité avec une commande, une option ou un message.</td>
+<td><a href="coding-conventions.html">Conventions de code</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-mgmt-bin" target="_blank" rel="noopener"><code>bins/delonix-mgmt-bin/</code></a></td>
-<td>The <code>delonix-mgmt</code> binary: a thin <code>main.rs</code> over <code>delonix-mgmt</code>.</td>
-<td>Rarely; the logic lives in the interface crate.</td>
-<td><a href="crates.html">The crates</a></td>
+<td>Le binaire <code>delonix-mgmt</code> : un <code>main.rs</code> mince au-dessus de <code>delonix-mgmt</code>.</td>
+<td>Rarement ; la logique vit dans le crate d’interface.</td>
+<td><a href="crates.html">Les crates</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-mcp-bin" target="_blank" rel="noopener"><code>bins/delonix-mcp-bin/</code></a></td>
-<td>The <code>delonix-mcp</code> binary: a thin <code>main.rs</code> over <code>delonix-mcp</code>.</td>
-<td>Rarely; the logic lives in the interface crate.</td>
+<td>Le binaire <code>delonix-mcp</code> : un <code>main.rs</code> mince au-dessus de <code>delonix-mcp</code>.</td>
+<td>Rarement ; la logique vit dans le crate d’interface.</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0025-mcp-local-ai-control-surface.<wbr>md</code></a></td>
 </tr>
 <tr>
 <td><code>proto/</code></td>
-<td>The node contract <code>delonix.node.v1</code> (<code>proto/<wbr>delonix/<wbr>node/<wbr>v1/<wbr>*.<wbr>proto</code>), marked draft; source of truth for gRPC and HTTP/JSON and of <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a>. Checked by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a> (format, lint, breaking changes, HTTP mappings, OpenAPI).</td>
-<td>Contract changes, reviewed carefully — breaking changes against the last tag fail.</td>
+<td>Le contrat de nœud <code>delonix.node.v1</code> (<code>proto/<wbr>delonix/<wbr>node/<wbr>v1/<wbr>*.<wbr>proto</code>), marqué brouillon ; source de vérité pour le gRPC et le HTTP/JSON et pour <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a>. Vérifié par <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a> (format, lint, changements cassants, mappages HTTP, OpenAPI).</td>
+<td>Changements de contrat, relus avec soin — les changements cassants contre la dernière tag échouent.</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/proto/README.md" target="_blank" rel="noopener"><code>proto/README.md</code></a>, ADR-0040</td>
 </tr>
 <tr>
 <td><code>tests/</code></td>
-<td>Out-of-tree compatibility checks, not cargo tests: <code>tests/<wbr>compat/<wbr>cri-conformance.<wbr>sh</code> (the <code>critest</code> suite) and <code>tests/<wbr>compat/<wbr>docker_api_smoke.<wbr>py</code>. Cargo integration tests live in each crate's own <code>tests/</code>.</td>
-<td>Whoever works on CRI or Docker API compatibility.</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cri-conformance.md" target="_blank" rel="noopener"><code>docs/cri-conformance.md</code></a>, <a href="build-and-test.html">Clone, build and test</a></td>
+<td>Vérifications de compatibilité hors arborescence cargo, pas des tests cargo : <code>tests/<wbr>compat/<wbr>cri-conformance.<wbr>sh</code> (la suite <code>critest</code>) et <code>tests/<wbr>compat/<wbr>docker_api_smoke.<wbr>py</code>. Les tests d’intégration cargo vivent dans le propre <code>tests/</code> de chaque crate.</td>
+<td>Quiconque travaille sur la compatibilité CRI ou API Docker.</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cri-conformance.md" target="_blank" rel="noopener"><code>docs/cri-conformance.md</code></a>, <a href="build-and-test.html">Cloner, compiler et tester</a></td>
 </tr>
 </tbody>
 </table></div>
 <h2 id="documentation-docs">Documentation (docs/…)<a class="hanchor" href="#documentation-docs" aria-label="#">#</a></h2>
-<p><code>docs/</code> is also the GitHub Pages root. Its top-level files are a mix: the HTML pages
-(<code>index.html</code>, <code>cheatsheet.html</code>, <code>estrutura.html</code>, …) and <code>.nojekyll</code> are <strong>generated</strong> by
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a>; <code>gen.py</code> itself and Markdown such as <code>cli-stability.md</code>, <code>gitops.md</code>,
-<code>estrutura.md</code>, <code>guia-vm-lab.md</code> are hand-written sources that it renders; <code>RELEASES.md</code> is
-<strong>generated</strong> by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/gen-releases.sh" target="_blank" rel="noopener"><code>scripts/gen-releases.sh</code></a>; and dated reports (<code>AUDITORIA-E2E.md</code>,
+<p><code>docs/</code> est aussi la racine de GitHub Pages. Ses fichiers de premier niveau sont un mélange : les
+pages HTML (<code>index.html</code>, <code>cheatsheet.html</code>, <code>estrutura.html</code>, …) et <code>.nojekyll</code> sont <strong>générés</strong>
+par <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> ; <code>gen.py</code> lui-même et du Markdown comme <code>cli-stability.md</code>, <code>gitops.md</code>,
+<code>estrutura.md</code>, <code>guia-vm-lab.md</code> sont des sources écrites à la main qu’il rend ; <code>RELEASES.md</code> est
+<strong>généré</strong> par <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/gen-releases.sh" target="_blank" rel="noopener"><code>scripts/gen-releases.sh</code></a> ; et des rapports datés (<code>AUDITORIA-E2E.md</code>,
 <code>RELATORIO-PRE-PRODUCAO.md</code>, <code>paridade-docker-podman.md</code>, <code>comparacao-medida.md</code>,
-<code>sovereignty-engine.md</code>) record what was measured on a given date.</p>
+<code>sovereignty-engine.md</code>) consignent ce qui a été mesuré à une date donnée.</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Path</th>
-<th>What it is</th>
-<th>Who changes it / when</th>
-<th>Read more</th>
+<th>Chemin</th>
+<th>Ce que c’est</th>
+<th>Qui le modifie / quand</th>
+<th>Pour aller plus loin</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>docs/</code></td>
-<td>Documentation root and user site (see the paragraph above).</td>
-<td>User-visible changes regenerate the site with <code>python3 docs/gen.py</code>; CI fails if the committed <code>docs/</code> differs from the regenerated one.</td>
-<td><a href="publishing-docs.html">Publishing the documentation</a></td>
+<td>Racine de la documentation et site utilisateur (voir le paragraphe ci-dessus).</td>
+<td>Les changements visibles de l’utilisateur régénèrent le site avec <code>python3 docs/gen.py</code> ; la CI échoue si le <code>docs/</code> commité diffère du régénéré.</td>
+<td><a href="publishing-docs.html">Publier la documentation</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a></td>
-<td>Architecture Decision Records, <code>NNNN-title.md</code>, with an index in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a>. Accepted ADRs are never rewritten — a new ADR supersedes.</td>
-<td>A contributor proposing a structural decision.</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a>, <a href="contributing-workflow.html">Contribution workflow</a></td>
+<td>Architecture Decision Records, <code>NNNN-title.md</code>, avec un index dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a>. Les ADR acceptés ne sont jamais réécrits — un nouvel ADR les remplace.</td>
+<td>Un contributeur proposant une décision structurelle.</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a>, <a href="contributing-workflow.html">Flux de contribution</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/api" target="_blank" rel="noopener"><code>docs/api/</code></a></td>
-<td><code>openapi.yaml</code>, <strong>generated</strong> from <code>proto/</code> by <code>protoc-gen-openapi</code>. Never edit it.</td>
-<td><code>python3 scripts/<wbr>contract_gate.<wbr>py --update</code> after a <code>proto/</code> change.</td>
+<td><code>openapi.yaml</code>, <strong>généré</strong> depuis <code>proto/</code> par <code>protoc-gen-openapi</code>. Ne jamais l’éditer.</td>
+<td><code>python3 scripts/<wbr>contract_gate.<wbr>py --update</code> après un changement dans <code>proto/</code>.</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/proto/README.md" target="_blank" rel="noopener"><code>proto/README.md</code></a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/comandos" target="_blank" rel="noopener"><code>docs/comandos/</code></a></td>
-<td>One HTML page per CLI command group, <strong>generated</strong> by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> from the release binary's real <code>--help</code> plus editorial text in the generator.</td>
-<td>Never by hand: edit <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a>, rebuild the binary, regenerate.</td>
-<td><a href="publishing-docs.html">Publishing the documentation</a></td>
+<td>Une page HTML par groupe de commandes de la CLI, <strong>générée</strong> par <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> à partir du vrai <code>--help</code> du binaire de release plus du texte éditorial dans le générateur.</td>
+<td>Jamais à la main : éditez <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a>, recompilez le binaire, régénérez.</td>
+<td><a href="publishing-docs.html">Publier la documentation</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a></td>
-<td>This contributor handbook: English Markdown source, with <code>pt-AO/</code> and <code>fr-FR/</code> translations that carry a <code>translated-from</code> hash. Regions between <code>dev-docs:begin</code>/<code>dev-docs:end</code> markers are <strong>generated</strong> by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a>; the rest is hand-written.</td>
-<td>Handbook maintainers; generated regions follow the code and are refreshed at release time.</td>
-<td><a href="publishing-docs.html">Publishing the documentation</a></td>
+<td>Ce manuel du contributeur : source Markdown en anglais, avec des traductions <code>pt-AO/</code> et <code>fr-FR/</code> portant un hash <code>translated-from</code>. Les régions entre marqueurs <code>dev-docs:begin</code>/<code>dev-docs:end</code> sont <strong>générées</strong> par <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a> ; le reste est écrit à la main.</td>
+<td>Les mainteneurs du manuel ; les régions générées suivent le code et sont rafraîchies au moment de la release.</td>
+<td><a href="publishing-docs.html">Publier la documentation</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/discovery" target="_blank" rel="noopener"><code>docs/discovery/</code></a></td>
-<td>Numbered, dated investigations and plans (inventories, spikes with their raw result files). Historical records — do not rewrite; write a new one.</td>
-<td>Whoever runs an investigation before a structural change.</td>
+<td>Investigations et plans numérotés et datés (inventaires, spikes avec leurs fichiers de résultat bruts). Archives historiques — ne pas réécrire ; en écrire une nouvelle.</td>
+<td>Quiconque mène une investigation avant un changement structurel.</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/handbook" target="_blank" rel="noopener"><code>docs/handbook/</code></a></td>
-<td>This handbook as a website (<code>en/</code>, <code>pt-AO/</code>, <code>fr-FR/</code>, <code>zh-CN/</code>, <code>index.html</code>), <strong>generated</strong> by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs_site.py" target="_blank" rel="noopener"><code>scripts/<wbr>dev_docs_site.<wbr>py</code></a> from <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a>. Never edit the HTML.</td>
-<td>Regenerated with <code>python3 scripts/<wbr>dev_docs_site.<wbr>py</code> after a <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> change, and at release time.</td>
-<td><a href="publishing-docs.html">Publishing the documentation</a></td>
+<td>Ce manuel sous forme de site (<code>en/</code>, <code>pt-AO/</code>, <code>fr-FR/</code>, <code>zh-CN/</code>, <code>index.html</code>), <strong>généré</strong> par <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs_site.py" target="_blank" rel="noopener"><code>scripts/<wbr>dev_docs_site.<wbr>py</code></a> depuis <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a>. Ne jamais éditer le HTML.</td>
+<td>Régénéré avec <code>python3 scripts/<wbr>dev_docs_site.<wbr>py</code> après un changement dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a>, et au moment de la release.</td>
+<td><a href="publishing-docs.html">Publier la documentation</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/releases" target="_blank" rel="noopener"><code>docs/releases/</code></a></td>
-<td>Release notes, one <code>v&lt;version&gt;.md</code> per release. A release commit must add its own (<code>version_gate.py</code>). Historical — do not rewrite past notes.</td>
-<td>The release commit.</td>
-<td><a href="contributing-workflow.html">Contribution workflow</a></td>
+<td>Notes de release, un <code>v&lt;version&gt;.md</code> par release. Un commit de release doit ajouter la sienne (<code>version_gate.py</code>). Historique — ne pas réécrire les notes passées.</td>
+<td>Le commit de release.</td>
+<td><a href="contributing-workflow.html">Flux de contribution</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/roadmap" target="_blank" rel="noopener"><code>docs/roadmap/</code></a></td>
-<td>Traceability matrix of an improvement programme, where every cell cites a measurement or says "not measured".</td>
-<td>Maintainers, as items are measured or closed.</td>
+<td>Matrice de traçabilité d’un programme d’amélioration, où chaque cellule cite une mesure ou dit « non mesuré ».</td>
+<td>Les mainteneurs, au fur et à mesure que les éléments sont mesurés ou clos.</td>
 <td>—</td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/runtime" target="_blank" rel="noopener"><code>docs/runtime/</code></a></td>
-<td>Dated discovery of the runtime (current state, crate dependency map, target-vs-reality). Historical: crate names in it predate later renames.</td>
-<td>Not updated; superseded by <a href="architecture.html">Architecture</a> and <a href="crates.html">The crates</a>.</td>
+<td>Découverte datée du runtime (état actuel, carte de dépendances de crates, cible-vs-réalité). Historique : les noms de crate qui s’y trouvent précèdent des renommages ultérieurs.</td>
+<td>Non mis à jour ; remplacé par <a href="architecture.html">Architecture</a> et <a href="crates.html">Les crates</a>.</td>
 <td><a href="architecture.html">Architecture</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/schema" target="_blank" rel="noopener"><code>docs/schema/</code></a></td>
-<td><code>v1/delonix.json</code>, the manifest JSON Schema, <strong>generated</strong> from the code (ADR-0007).</td>
-<td><code>delonix manifest schema &gt; docs/<wbr>schema/<wbr>v1/<wbr>delonix.<wbr>json</code> when a manifest type changes.</td>
+<td><code>v1/delonix.json</code>, le JSON Schema du manifeste, <strong>généré</strong> depuis le code (ADR-0007).</td>
+<td><code>delonix manifest schema &gt; docs/<wbr>schema/<wbr>v1/<wbr>delonix.<wbr>json</code> quand un type de manifeste change.</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0007-generated-manifest-schema.<wbr>md</code></a></td>
 </tr>
 </tbody>
 </table></div>
-<h2 id="tooling-ci-and-packaging-scripts-github-dist-editors-examples-reports-third_party-ai">Tooling, CI and packaging (scripts/, .github/, dist/, editors/, examples/, reports/, third_party/, .ai/)<a class="hanchor" href="#tooling-ci-and-packaging-scripts-github-dist-editors-examples-reports-third_party-ai" aria-label="#">#</a></h2>
+<h2 id="tooling-ci-and-packaging-scripts-github-dist-editors-examples-reports-third_party-ai">Outillage, CI et empaquetage (scripts/, .github/, dist/, editors/, examples/, reports/, third_party/, .ai/)<a class="hanchor" href="#tooling-ci-and-packaging-scripts-github-dist-editors-examples-reports-third_party-ai" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Path</th>
-<th>What it is</th>
-<th>Who changes it / when</th>
-<th>Read more</th>
+<th>Chemin</th>
+<th>Ce que c’est</th>
+<th>Qui le modifie / quand</th>
+<th>Pour aller plus loin</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>scripts/</code></td>
-<td>Gates (<code>arch_fitness.py</code>, <code>lang_ratchet.py</code>, <code>contract_gate.py</code>, <code>version_gate.py</code>, <code>docs_cli_gate.py</code>, <code>cli-tree.sh</code>, <code>dev_docs.py</code>) with their baselines (<code>arch_baseline.json</code>, <code>lang_baseline.json</code>, <code>cli_baseline.tsv</code>), generators (<code>dev_docs_site.py</code>, <code>gen-releases.sh</code>, <code>sbom.py</code>), harnesses (<code>e2e.sh</code>, <code>chaos.sh</code>, <code>critest.sh</code>, <code>bench.sh</code>, <code>coverage.sh</code>), the installer <code>install.sh</code>, appliance image builds in <code>appliances/</code>, and spike probes in <code>spikes/</code>.</td>
-<td>Anyone whose change moves a ratchet (lower the baseline in the same commit); maintainers for the rest.</td>
-<td><a href="build-and-test.html">Clone, build and test</a></td>
+<td>Gates (<code>arch_fitness.py</code>, <code>lang_ratchet.py</code>, <code>contract_gate.py</code>, <code>version_gate.py</code>, <code>docs_cli_gate.py</code>, <code>cli-tree.sh</code>, <code>dev_docs.py</code>) avec leurs bases de référence (<code>arch_baseline.json</code>, <code>lang_baseline.json</code>, <code>cli_baseline.tsv</code>), des générateurs (<code>dev_docs_site.py</code>, <code>gen-releases.sh</code>, <code>sbom.py</code>), des harnais (<code>e2e.sh</code>, <code>chaos.sh</code>, <code>critest.sh</code>, <code>bench.sh</code>, <code>coverage.sh</code>), l’installateur <code>install.sh</code>, des builds d’images d’appliance dans <code>appliances/</code>, et des sondes de spike dans <code>spikes/</code>.</td>
+<td>Quiconque a un changement qui déplace un ratchet (abaisse la base de référence dans le même commit) ; les mainteneurs pour le reste.</td>
+<td><a href="build-and-test.html">Cloner, compiler et tester</a></td>
 </tr>
 <tr>
 <td><code>.github/</code></td>
-<td><code>workflows/ci.yml</code> (every gate on push and PR to <code>main</code>), <code>chaos.yml</code> (chaos harness), <code>release.yml</code> (on <code>v*</code> tags), <code>vm-image.yml</code> and <code>vm-appliances.yml</code> (manual image publishing), plus <code>CODEOWNERS</code>, issue and PR templates and a pointer file for GitHub Copilot.</td>
-<td>Maintainers; a new gate is added here and documented in the handbook.</td>
-<td><a href="build-and-test.html">Clone, build and test</a>, <a href="publishing-docs.html">Publishing the documentation</a></td>
+<td><code>workflows/ci.yml</code> (chaque gate au push et PR vers <code>main</code>), <code>chaos.yml</code> (harnais de chaos), <code>release.yml</code> (sur les tags <code>v*</code>), <code>vm-image.yml</code> et <code>vm-appliances.yml</code> (publication manuelle d’images), plus <code>CODEOWNERS</code>, des modèles d’issue et de PR et un fichier pointeur pour GitHub Copilot.</td>
+<td>Les mainteneurs ; un nouveau gate est ajouté ici et documenté dans le manuel.</td>
+<td><a href="build-and-test.html">Cloner, compiler et tester</a>, <a href="publishing-docs.html">Publier la documentation</a></td>
 </tr>
 <tr>
 <td><code>dist/</code></td>
-<td><code>delonix-cri.service</code>, the systemd unit for the CRI server (also embedded in the binary).</td>
-<td>Whoever changes how <code>delonix-cri</code> runs under systemd.</td>
-<td><a href="cloud-native-standards.html">Cloud native standards</a></td>
+<td><code>delonix-cri.service</code>, l’unité systemd du serveur CRI (aussi embarquée dans le binaire).</td>
+<td>Quiconque change la façon dont <code>delonix-cri</code> s’exécute sous systemd.</td>
+<td><a href="cloud-native-standards.html">Standards cloud native</a></td>
 </tr>
 <tr>
 <td><code>editors/</code></td>
-<td>VMfile syntax highlighting: <code>vim/</code> (ftdetect + syntax) and <code>vscode/</code> (language configuration + TextMate grammar).</td>
-<td>Whoever changes the VMfile grammar.</td>
-<td><a href="delonixfile-and-vmfile.html">Delonixfile and VMfile</a></td>
+<td>Coloration syntaxique du VMfile : <code>vim/</code> (ftdetect + syntax) et <code>vscode/</code> (configuration de langage + grammaire TextMate).</td>
+<td>Quiconque change la grammaire du VMfile.</td>
+<td><a href="delonixfile-and-vmfile.html">Delonixfile et VMfile</a></td>
 </tr>
 <tr>
 <td><code>examples/</code></td>
-<td>Example manifests per Kind, a multi-file network lab (<code>lab-rede/</code>) and a small complete project (<code>delonix-temp/</code>). The CI <code>docs</code> job dry-runs every <code>examples/*.yaml</code>, so a deprecated or broken example fails the build.</td>
-<td>Every feature that adds or changes a Kind.</td>
-<td><a href="delonixfile-and-vmfile.html">Delonixfile and VMfile</a></td>
+<td>Manifestes d’exemple par Kind, un labo réseau multi-fichiers (<code>lab-rede/</code>) et un petit projet complet (<code>delonix-temp/</code>). Le job <code>docs</code> de la CI fait un dry-run de chaque <code>examples/*.yaml</code>, donc un exemple obsolète ou cassé fait échouer le build.</td>
+<td>Toute fonctionnalité qui ajoute ou change un Kind.</td>
+<td><a href="delonixfile-and-vmfile.html">Delonixfile et VMfile</a></td>
 </tr>
 <tr>
 <td><code>reports/</code></td>
-<td>Dated audit reports: <code>code-quality/</code> and <code>production-readiness/<wbr>&lt;version&gt;/<wbr></code> (inventory, gap matrix, backlog). Historical records of an audit at a commit — do not rewrite; nothing in them is implemented by being listed.</td>
-<td>Whoever runs a new audit (new files).</td>
+<td>Rapports d’audit datés : <code>code-quality/</code> et <code>production-readiness/<wbr>&lt;version&gt;/<wbr></code> (inventaire, matrice d’écarts, backlog). Archives historiques d’un audit à un commit — ne pas réécrire ; rien n’y est implémenté du seul fait d’y être listé.</td>
+<td>Quiconque mène un nouvel audit (nouveaux fichiers).</td>
 <td>—</td>
 </tr>
 <tr>
 <td><code>third_party/</code></td>
-<td>Vendored <code>googleapis</code> protos (<code>google/<wbr>api/<wbr>annotations.<wbr>proto</code>, <code>http.proto</code>) used for the HTTP mapping of the node contract. Apache-2.0, licence headers kept; the source commit is recorded in its <code>README.md</code>. Never edited here.</td>
-<td>Whoever updates the vendored protos, both files from one upstream commit.</td>
+<td>Protos <code>googleapis</code> vendorisés (<code>google/<wbr>api/<wbr>annotations.<wbr>proto</code>, <code>http.proto</code>) utilisés pour le mappage HTTP du contrat de nœud. Apache-2.0, en-têtes de licence conservés ; le commit source est consigné dans son <code>README.md</code>. Jamais édité ici.</td>
+<td>Quiconque met à jour les protos vendorisés, les deux fichiers depuis un même commit amont.</td>
 <td><code>third_party/<wbr>googleapis/<wbr>README.<wbr>md</code></td>
 </tr>
 <tr>
 <td><code>.ai/</code></td>
-<td>Tool-neutral skills for AI assistants: <code>skills/<wbr>delonix-runtime-e2e-quality/<wbr></code> (test taxonomy, provider contract, security checks, report templates).</td>
-<td>Maintainers.</td>
+<td>Skills neutres vis-à-vis de l’outil pour les assistants d’IA : <code>skills/<wbr>delonix-runtime-e2e-quality/<wbr></code> (taxonomie de tests, contrat de provider, vérifications de sécurité, modèles de rapport).</td>
+<td>Les mainteneurs.</td>
 <td>—</td>
 </tr>
 </tbody>
 </table></div>
-<h2 id="generated-vs-hand-written">Generated vs hand-written<a class="hanchor" href="#generated-vs-hand-written" aria-label="#">#</a></h2>
-<p>Everything below is produced by a command. Edit the source, run the generator, commit both — and
-expect CI to fail if you edit the output by hand.</p>
+<h2 id="generated-vs-hand-written">Généré vs écrit à la main<a class="hanchor" href="#generated-vs-hand-written" aria-label="#">#</a></h2>
+<p>Tout ce qui suit est produit par une commande. Éditez la source, exécutez le générateur, commitez
+les deux — et attendez-vous à ce que la CI échoue si vous éditez la sortie à la main.</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Path</th>
-<th>Generated file(s)</th>
-<th>Generator command</th>
-<th>CI gate that checks it</th>
+<th>Chemin</th>
+<th>Fichier(s) généré(s)</th>
+<th>Commande de génération</th>
+<th>Gate de CI qui le vérifie</th>
 </tr>
 </thead>
 <tbody>
@@ -669,94 +670,98 @@ expect CI to fail if you edit the output by hand.</p>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/api" target="_blank" rel="noopener"><code>docs/api/</code></a></td>
 <td><code>openapi.yaml</code></td>
 <td><code>python3 scripts/<wbr>contract_gate.<wbr>py --update</code></td>
-<td><code>contract gate</code> job (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a>)</td>
+<td>job <code>contract gate</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a>)</td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/schema" target="_blank" rel="noopener"><code>docs/schema/</code></a></td>
 <td><code>v1/delonix.json</code></td>
 <td><code>delonix manifest schema &gt; docs/<wbr>schema/<wbr>v1/<wbr>delonix.<wbr>json</code></td>
-<td><code>test</code> job, test <code>o_schema_publicado_esta_em_dia_com_o_codigo</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/schema.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>schema.<wbr>rs</code></a></td>
+<td>job <code>test</code>, test <code>o_schema_publicado_esta_em_dia_com_o_codigo</code> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/schema.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>schema.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/comandos" target="_blank" rel="noopener"><code>docs/comandos/</code></a></td>
-<td>every page</td>
-<td><code>python3 docs/gen.py</code> (needs <code>cargo build --release -p delonix-runtime-bin</code>)</td>
-<td><code>generated docs and valid examples</code> job, step "O site publicado tem de ser o gerado" (<code>git diff</code> on <code>docs/</code>)</td>
+<td>chaque page</td>
+<td><code>python3 docs/gen.py</code> (nécessite <code>cargo build --release -p delonix-runtime-bin</code>)</td>
+<td>job <code>generated docs and valid examples</code>, étape « O site publicado tem de ser o gerado » (<code>git diff</code> sur <code>docs/</code>)</td>
 </tr>
 <tr>
 <td><code>docs/</code></td>
-<td>top-level <code>*.html</code>, <code>.nojekyll</code></td>
+<td><code>*.html</code> de premier niveau, <code>.nojekyll</code></td>
 <td><code>python3 docs/gen.py</code></td>
-<td>same step as above</td>
+<td>la même étape que ci-dessus</td>
 </tr>
 <tr>
 <td><code>docs/</code></td>
 <td><code>RELEASES.md</code></td>
 <td><code>bash scripts/<wbr>gen-releases.<wbr>sh</code></td>
-<td>none in CI: <code>release.yml</code> regenerates and commits it after each release</td>
+<td>aucun en CI : <code>release.yml</code> le régénère et le commite après chaque release</td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a></td>
-<td>the <code>dev-docs</code> regions only</td>
+<td>uniquement les régions <code>dev-docs</code></td>
 <td><code>python3 scripts/<wbr>dev_docs.<wbr>py</code></td>
-<td><code>arch fitness</code> job, step <code>python3 scripts/<wbr>dev_docs.<wbr>py --check</code>; also refreshed by <code>release.yml</code></td>
+<td>job <code>arch fitness</code>, étape <code>python3 scripts/<wbr>dev_docs.<wbr>py --check</code> ; aussi rafraîchi par <code>release.yml</code></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/handbook" target="_blank" rel="noopener"><code>docs/handbook/</code></a></td>
-<td>every page</td>
+<td>chaque page</td>
 <td><code>python3 scripts/<wbr>dev_docs_site.<wbr>py</code></td>
-<td><code>generated docs and valid examples</code> job, <code>python3 scripts/<wbr>dev_docs_site.<wbr>py --check</code>; also refreshed by <code>release.yml</code></td>
+<td>job <code>generated docs and valid examples</code>, <code>python3 scripts/<wbr>dev_docs_site.<wbr>py --check</code> ; aussi rafraîchi par <code>release.yml</code></td>
 </tr>
 <tr>
 <td><code>scripts/</code></td>
 <td><code>cli_baseline.tsv</code>, <code>arch_baseline.json</code>, <code>lang_baseline.json</code></td>
 <td><code>scripts/<wbr>cli-tree.<wbr>sh --update</code>, <code>arch_fitness.<wbr>py --update</code>, <code>lang_ratchet.<wbr>py --update</code></td>
-<td><code>cli surface</code> (<code>cli-tree.sh --gate</code>), <code>arch fitness</code>, <code>lang ratchet</code> jobs</td>
+<td>jobs <code>cli surface</code> (<code>cli-tree.sh --gate</code>), <code>arch fitness</code>, <code>lang ratchet</code></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.lock" target="_blank" rel="noopener"><code>Cargo.lock</code></a></td>
-<td>the lock file</td>
+<td>le fichier de verrouillage</td>
 <td><code>cargo</code></td>
-<td>every cargo job builds with <code>--locked</code></td>
+<td>chaque job cargo compile avec <code>--locked</code></td>
 </tr>
 </tbody>
 </table></div>
-<p>Not committed at all: the manpages (<code>delonix man --dir</code>, checked with <code>groff</code> in CI) and <code>target/</code>.</p>
-<h2 id="where-does-a-new-file-go">Where does a new file go?<a class="hanchor" href="#where-does-a-new-file-go" aria-label="#">#</a></h2>
+<p>Pas du tout commité : les pages de manuel (<code>delonix man --dir</code>, vérifiées avec <code>groff</code> en CI) et
+<code>target/</code>.</p>
+<h2 id="where-does-a-new-file-go">Où va un nouveau fichier ?<a class="hanchor" href="#where-does-a-new-file-go" aria-label="#">#</a></h2>
 <ul>
-<li><strong>A type or rule every layer can name, with no I/O</strong> → <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a>. Pure network math
-  goes in <code>delonix-net-rules</code>; data-only records and names in <code>delonix-model</code>.</li>
-<li><strong>A decision or use case</strong> (what to run, what a Kind means, a plan) → <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>.</li>
-<li><strong>Code that calls the kernel, the disk or a local tool</strong> (<code>ip</code>, <code>nft</code>, <code>qemu-img</code>) →
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a>, in the crate that owns that mechanism.</li>
-<li><strong>An integration with a remote system</strong> → a new port implementation in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>,
-  never an <code>if provider == …</code> in existing code.</li>
-<li><strong>A new protocol server</strong> → <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a>, composed by exactly one binary in <code>bins/</code>.</li>
-<li><strong>A CLI command or flag</strong> → a module in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-runtime-bin/src/cmd" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/</code></a>, with its
-  Portuguese translation in <code>data/pt.po</code>.</li>
-<li><strong>A new crate</strong> → the directory of its layer <strong>and</strong> the <code>LAYERS</code> table in
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> and <code>[workspace.dependencies]</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>, in the same commit.</li>
-<li><strong>An example manifest</strong> → <code>examples/</code> (CI dry-runs it). <strong>A structural decision</strong> →
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a>. <strong>Contributor documentation</strong> → <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a>.</li>
+<li><strong>Un type ou une règle que n’importe quelle couche peut nommer, sans E/S</strong> →
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a>. Les mathématiques réseau pures vont dans <code>delonix-net-rules</code> ; les
+  enregistrements uniquement-données et les noms vont dans <code>delonix-model</code>.</li>
+<li><strong>Une décision ou un cas d’usage</strong> (quoi exécuter, ce que signifie un Kind, un plan) →
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>.</li>
+<li><strong>Du code qui appelle le noyau, le disque ou un outil local</strong> (<code>ip</code>, <code>nft</code>, <code>qemu-img</code>) →
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a>, dans le crate qui possède ce mécanisme.</li>
+<li><strong>Une intégration avec un système distant</strong> → une nouvelle implémentation de port dans
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>, jamais un <code>if provider == …</code> dans du code existant.</li>
+<li><strong>Un nouveau serveur de protocole</strong> → <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a>, composé par exactement un binaire
+  dans <code>bins/</code>.</li>
+<li><strong>Une commande ou une option de la CLI</strong> → un module dans
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-runtime-bin/src/cmd" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/</code></a>, avec sa traduction portugaise dans <code>data/pt.po</code>.</li>
+<li><strong>Un nouveau crate</strong> → le répertoire de sa couche <strong>et</strong> la table <code>LAYERS</code> dans
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> et <code>[workspace.dependencies]</code> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>, dans le même commit.</li>
+<li><strong>Un manifeste d’exemple</strong> → <code>examples/</code> (la CI en fait un dry-run). <strong>Une décision
+  structurelle</strong> → <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a>. <strong>Documentation pour contributeurs</strong> → <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a>.</li>
 </ul>
-<p>The rules behind this list, with examples, are in
-<a href="coding-conventions.html">Coding conventions — Structure: where code goes</a> and
-<a href="crates.html">The crates</a>.</p>
+<p>Les règles derrière cette liste, avec des exemples, se trouvent dans
+<a href="coding-conventions.html">Conventions de code — Structure : où va le code</a> et
+<a href="crates.html">Les crates</a>.</p>
 <hr />
-<p><strong>Next:</strong> <a href="architecture.html">Architecture</a> — why the code is split that way: the layers, the processes at runtime, the crate graph and the state on disk.</p>
+<p><strong>Suivant :</strong> <a href="architecture.html">Architecture</a> — pourquoi le code est découpé ainsi : les couches, les processus en exécution, le graphe des crates et l’état sur disque.</p>
 <nav class="pager"><a href="build-and-test.html"><span>← Précédent</span>Cloner, compiler et tester</a><a class="next" href="architecture.html"><span>Suivant →</span>Architecture</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/project-structure.md" target="_blank" rel="noopener">Modifier cette page</a><code>docs/dev/project-structure.md</code></footer>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/fr-FR/project-structure.md" target="_blank" rel="noopener">Modifier cette page</a><code>docs/dev/fr-FR/project-structure.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">Sur cette page</p><div class="toc">
 <ul>
-<li><a href="#reading-the-repository-in-five-minutes">Reading the repository in five minutes</a></li>
-<li><a href="#annotated-tree">Annotated tree</a></li>
-<li><a href="#top-level-files">Top-level files</a></li>
-<li><a href="#source-code-crates-bins-proto-tests">Source code (crates/, bins/, proto/, tests/)</a></li>
+<li><a href="#reading-the-repository-in-five-minutes">Lire le dépôt en cinq minutes</a></li>
+<li><a href="#annotated-tree">Arborescence annotée</a></li>
+<li><a href="#top-level-files">Fichiers de premier niveau</a></li>
+<li><a href="#source-code-crates-bins-proto-tests">Code source (crates/, bins/, proto/, tests/)</a></li>
 <li><a href="#documentation-docs">Documentation (docs/…)</a></li>
-<li><a href="#tooling-ci-and-packaging-scripts-github-dist-editors-examples-reports-third_party-ai">Tooling, CI and packaging (scripts/, .github/, dist/, editors/, examples/, reports/, third_party/, .ai/)</a></li>
-<li><a href="#generated-vs-hand-written">Generated vs hand-written</a></li>
-<li><a href="#where-does-a-new-file-go">Where does a new file go?</a></li>
+<li><a href="#tooling-ci-and-packaging-scripts-github-dist-editors-examples-reports-third_party-ai">Outillage, CI et empaquetage (scripts/, .github/, dist/, editors/, examples/, reports/, third_party/, .ai/)</a></li>
+<li><a href="#generated-vs-hand-written">Généré vs écrit à la main</a></li>
+<li><a href="#where-does-a-new-file-go">Où va un nouveau fichier ?</a></li>
 </ul>
 </div>
 </aside>
