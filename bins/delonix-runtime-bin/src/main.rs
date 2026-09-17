@@ -170,8 +170,11 @@ enum Cmd {
     ///
     /// `delonix explain Container` · `delonix explain Container.ports` ·
     /// `delonix explain Pod.containers.image`
+    ///
+    /// A numbered code is explained too: `delonix explain DX-4501` says what it
+    /// means and what to do, and `delonix explain codes` lists the dictionary.
     Explain {
-        /// `<Kind>[.field[.field…]]`.
+        /// `<Kind>[.field[.field…]]`, a code (`DX-4501`), or `codes`.
         path: String,
     },
     /// Every Kind this engine serves: plural, shortnames, apiVersion and form.

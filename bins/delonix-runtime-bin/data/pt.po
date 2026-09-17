@@ -4068,8 +4068,8 @@ msgstr "Imprime o JSON Schema do manifesto (todos os Kinds, ou um só)."
 msgid "Only this Kind's spec (e.g. `Container`)."
 msgstr "Só o spec deste Kind (ex.: `Container`)."
 
-msgid "`<Kind>[.field[.field…]]`."
-msgstr "`<Kind>[.campo[.campo…]]`."
+msgid "`<Kind>[.field[.field…]]`, a code (`DX-4501`), or `codes`."
+msgstr "`<Kind>[.campo[.campo…]]`, um código (`DX-4501`), ou `codes`."
 
 # fusao Egress -> FirewallPolicy (fase A1)
 
@@ -7751,6 +7751,9 @@ msgid ""
 "\n"
 "\n"
 "`delonix explain Container` · `delonix explain Container.ports` · `delonix explain Pod.containers.image`"
+"\n"
+"\n"
+"A numbered code is explained too: `delonix explain DX-4501` says what it means and what to do, and `delonix explain codes` lists the dictionary."
 msgstr ""
 "Referência de campos de um Kind, ao estilo do `kubectl explain`."
 "\n"
@@ -7759,6 +7762,9 @@ msgstr ""
 "\n"
 "\n"
 "`delonix explain Container` · `delonix explain Container.ports` · `delonix explain Pod.containers.image`"
+"\n"
+"\n"
+"Também explica um código numerado: `delonix explain DX-4501` diz o que significa e o que fazer, e `delonix explain codes` lista o dicionário."
 
 msgid "Stack detail in `kubectl describe` style."
 msgstr "Detalhe da stack ao estilo do `kubectl describe`."
@@ -11050,3 +11056,230 @@ msgstr "Interno: o cgroup do kubelet para este pod (`cgroup_parent` do CRI, ADR 
 
 msgid "'{name}' is not installed next to delonix nor on the PATH — install it with `{hint}`"
 msgstr "'{name}' não está instalado ao lado do delonix nem no PATH — instala-o com `{hint}`"
+
+# dicionário de códigos DX-CDNN (ADR-0043)
+msgid "Code"
+msgstr "Código"
+
+msgid "Id"
+msgstr "Id"
+
+msgid "Class"
+msgstr "Classe"
+
+msgid "Domain"
+msgstr "Domínio"
+
+msgid "Message"
+msgstr "Mensagem"
+
+msgid "Meaning"
+msgstr "Significado"
+
+msgid "What to do"
+msgstr "O que fazer"
+
+msgid "CODE"
+msgstr "CÓDIGO"
+
+msgid "CLASS"
+msgstr "CLASSE"
+
+msgid "DOMAIN"
+msgstr "DOMÍNIO"
+
+msgid "EXIT"
+msgstr "SAÍDA"
+
+msgid "MESSAGE"
+msgstr "MENSAGEM"
+
+msgid "code {code} (the dictionary: `delonix explain codes`)"
+msgstr "código {code} (o dicionário: `delonix explain codes`)"
+
+msgid "success"
+msgstr "sucesso"
+
+msgid "invalid argument"
+msgstr "argumento inválido"
+
+msgid "invalid usage"
+msgstr "uso inválido"
+
+msgid "not running"
+msgstr "não está a correr"
+
+msgid "not found"
+msgstr "não existe"
+
+msgid "conflict"
+msgstr "conflito"
+
+msgid "unavailable"
+msgstr "indisponível"
+
+msgid "permission denied"
+msgstr "permissão negada"
+
+msgid "timeout"
+msgstr "prazo esgotado"
+
+msgid "system failure"
+msgstr "falha do sistema"
+
+msgid "engine"
+msgstr "motor"
+
+msgid "container"
+msgstr "container"
+
+msgid "volume"
+msgstr "volume"
+
+msgid "network"
+msgstr "rede"
+
+msgid "image"
+msgstr "imagem"
+
+msgid "vm"
+msgstr "vm"
+
+msgid "stack"
+msgstr "stack"
+
+msgid "cluster"
+msgstr "cluster"
+
+msgid "security"
+msgstr "segurança"
+
+msgid "The command did what it was asked."
+msgstr "O comando fez o que lhe foi pedido."
+
+msgid "Nothing."
+msgstr "Nada."
+
+msgid "An argument, a flag value or a manifest field is not acceptable. The message names which."
+msgstr "Um argumento, o valor de uma flag ou um campo do manifesto não é aceitável. A mensagem diz qual."
+
+msgid "Correct the argument the message names and run the command again."
+msgstr "Corrige o argumento que a mensagem nomeia e corre o comando outra vez."
+
+msgid "The command line does not parse: an unknown subcommand, a missing argument or a flag this command does not take."
+msgstr "A linha de comando não se lê: um subcomando desconhecido, um argumento em falta ou uma flag que este comando não aceita."
+
+msgid "Run the command with --help and follow its usage line."
+msgstr "Corre o comando com --help e segue a linha de uso."
+
+msgid "the plan has changes"
+msgstr "o plano tem alterações"
+
+msgid "`stack plan --detailed-exitcode` found differences between the manifest and what is running. Not a failure."
+msgstr "O `stack plan --detailed-exitcode` encontrou diferenças entre o manifesto e o que está a correr. Não é uma falha."
+
+msgid "Review the plan, then run `delonix stack apply` if the changes are wanted."
+msgstr "Revê o plano e corre `delonix stack apply` se as alterações forem desejadas."
+
+msgid "The resource exists but is not running, and the operation needs it running."
+msgstr "O recurso existe mas não está a correr, e a operação precisa dele a correr."
+
+msgid "Start it (`delonix container start <name>`, `delonix vm start <name>`) and try again."
+msgstr "Arranca-o (`delonix container start <nome>`, `delonix vm start <nome>`) e tenta outra vez."
+
+msgid "no such resource"
+msgstr "esse recurso não existe"
+
+msgid "Nothing with that name or id exists in this scope."
+msgstr "Não existe nada com esse nome ou id neste âmbito."
+
+msgid "Check the name and the namespace with the matching `ls`, or create the resource first."
+msgstr "Confirma o nome e o namespace com o `ls` correspondente, ou cria primeiro o recurso."
+
+msgid "no such VM"
+msgstr "essa VM não existe"
+
+msgid "There is no virtual machine with that name in this state root."
+msgstr "Não existe nenhuma máquina virtual com esse nome neste state root."
+
+msgid "List them with `delonix vm ls`, or create it with `delonix vm create`."
+msgstr "Lista-as com `delonix vm ls`, ou cria-a com `delonix vm create`."
+
+msgid "conflict: already exists"
+msgstr "conflito: já existe"
+
+msgid "The name is already taken, or the desired state conflicts with what is there."
+msgstr "O nome já está tomado, ou o estado pedido entra em conflito com o que lá está."
+
+msgid "Pick another name, remove the existing resource, or use the command's --force/--replace if it has one."
+msgstr "Escolhe outro nome, remove o recurso existente, ou usa o --force/--replace do comando, se o tiver."
+
+msgid "unavailable on this host"
+msgstr "indisponível neste host"
+
+msgid "A tool, a backend or a kernel feature the operation needs is not present. Nothing about the arguments is wrong."
+msgstr "Falta uma ferramenta, um backend ou uma funcionalidade do kernel de que a operação precisa. Os argumentos estão certos."
+
+msgid "Install what the message names (`delonix system info` shows what this host has) and run the command again."
+msgstr "Instala o que a mensagem nomeia (o `delonix system info` mostra o que este host tem) e corre o comando outra vez."
+
+msgid "The operating system refused on a permission: a file, a directory or a capability."
+msgstr "O sistema operativo recusou por uma permissão: um ficheiro, um directório ou uma capability."
+
+msgid "Fix the permission on the path the message names, or run from a session that has it, and repeat."
+msgstr "Corrige a permissão no caminho que a mensagem nomeia, ou corre a partir de uma sessão que a tenha, e repete."
+
+msgid "timed out"
+msgstr "prazo esgotado"
+
+msgid "The deadline passed with the work unfinished. Nothing said no; it may still be finishing."
+msgstr "O prazo passou com o trabalho por acabar. Nada recusou; pode ainda estar a terminar."
+
+msgid "Wait and ask again, or raise the --timeout. Do not recreate the resource on top of one still coming up."
+msgstr "Espera e volta a perguntar, ou aumenta o --timeout. Não recries o recurso por cima de um que ainda está a subir."
+
+msgid "a system call failed"
+msgstr "uma chamada de sistema falhou"
+
+msgid "The kernel refused an operation (clone, mount, setns…). The message carries the operation and the errno."
+msgstr "O kernel recusou uma operação (clone, mount, setns…). A mensagem traz a operação e o errno."
+
+msgid "Read the errno in the message; `delonix system info` checks the host requirements (user namespaces, cgroup delegation)."
+msgstr "Lê o errno na mensagem; o `delonix system info` verifica os requisitos do host (user namespaces, delegação de cgroup)."
+
+msgid "I/O error"
+msgstr "erro de I/O"
+
+msgid "The filesystem said no on a path the engine needs: a full disk, a missing directory, a bad mount."
+msgstr "O sistema de ficheiros recusou num caminho de que o motor precisa: disco cheio, directório em falta, montagem avariada."
+
+msgid "Check the path in the message and the free space of the state root (`delonix system df`)."
+msgstr "Verifica o caminho na mensagem e o espaço livre do state root (`delonix system df`)."
+
+msgid "invalid state record"
+msgstr "registo de estado inválido"
+
+msgid "A state record on disk could not be read or written as JSON: it is corrupt or from an incompatible version."
+msgstr "Um registo de estado em disco não pôde ser lido ou escrito como JSON: está corrompido ou é de uma versão incompatível."
+
+msgid "Inspect the record the message names; restore it from a snapshot (`delonix system snapshot restore`) if it is corrupt."
+msgstr "Inspecciona o registo que a mensagem nomeia; repõe-no a partir de um snapshot (`delonix system snapshot restore`) se estiver corrompido."
+
+msgid "registry error"
+msgstr "erro do registo"
+
+msgid "An OCI registry answered with an error, or could not be reached."
+msgstr "Um registo OCI respondeu com um erro, ou não foi possível alcançá-lo."
+
+msgid "Check the image reference, your login (`delonix image login`) and the network path to the registry."
+msgstr "Verifica a referência da imagem, o teu login (`delonix image login`) e o caminho de rede até ao registo."
+
+msgid "{class} (exit {exit})"
+msgstr "{class} (saída {exit})"
+
+msgid "what a numbered code in an error means, and what to do about it"
+msgstr "o que significa um código numerado num erro, e o que fazer"
+
+msgid "the whole dictionary of codes"
+msgstr "o dicionário completo de códigos"
+
