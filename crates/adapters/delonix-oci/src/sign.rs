@@ -126,7 +126,7 @@ pub fn verify_signature(store: &ImageStore, reference: &str, pubkey_pem: &str) -
     // artifact is unsigned and goes to re-sign it, when the registry was simply
     // unreachable. Absence of the `.sig` tag is a verdict; anything else is an
     // "I could not tell", and the two must not wear the same sentence.
-    let sig_bytes = c.get_manifest(&sig_tag).map_err(|e| match e {
+    let sig_bytes = c.get_manifest(&sig_tag).map_err(|e| match e.into_root() {
         // A 404 on the `.sig` tag is the VERDICT: the artifact is not there.
         Error::NotFound(_) => Error::Invalid(format!(
             "image not signed: no cosign signature for {reference} ({digest})"
@@ -307,7 +307,7 @@ pub fn sign_image(
                 )))
             }
             // A real 404 on the `.sig` tag is the verdict: nothing signed it yet.
-            Err(Error::NotFound(_)) => {}
+            Err(e) if e.is_not_found() => {}
             // Anything else is "could not tell", and must not read as either verdict —
             // the same distinction `verify_signature` makes on this same read.
             Err(other) => {

@@ -403,8 +403,8 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("dlx-sec-traversal-{}", std::process::id()));
         let s = SecretStore::open(&dir).unwrap();
         let evil = "../../../etc/passwd";
-        assert!(matches!(s.load(evil), Err(Error::Invalid(_))));
-        assert!(matches!(s.remove(evil), Err(Error::Invalid(_))));
+        assert!(s.load(evil).is_err_and(|e| e.is_invalid_argument()));
+        assert!(s.remove(evil).is_err_and(|e| e.is_invalid_argument()));
         // resolve_env funnels through load() and is best-effort (ignores
         // failures) — must NOT silently include a file read from outside root.
         assert!(s.resolve_env(&[evil.to_string()]).is_empty());

@@ -353,7 +353,7 @@ fn invalid_name() -> Response {
 fn err_response(e: Error) -> Response {
     // Read BEFORE the match: it destructures `e` by value.
     let dx = e.code();
-    let (code, msg) = match e {
+    let (code, msg) = match e.into_root() {
         Error::NotFound(m) => (StatusCode::NOT_FOUND, m),
         Error::Invalid(m) => (StatusCode::BAD_REQUEST, m),
         Error::Conflict(m) => (StatusCode::CONFLICT, m),

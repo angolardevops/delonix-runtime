@@ -476,15 +476,18 @@ fn ok_json(v: serde_json::Value) -> (StatusCode, Vec<u8>) {
 /// a client «the server is broken» when the request was the problem. The same
 /// classes the exit codes publish, in the transport that has words for them.
 fn error_status(e: &Error) -> StatusCode {
-    match e {
-        Error::NotFound(_) | Error::VmNotFound(_) => StatusCode::NOT_FOUND,
-        Error::Invalid(_) => StatusCode::BAD_REQUEST,
+    use delonix_model::codes::Class;
+    match e.class() {
+        Class::NotFound => StatusCode::NOT_FOUND,
+        Class::InvalidArgument => StatusCode::BAD_REQUEST,
         // Docker answers 409 both for a name in use and for acting on a
         // container that is not running (`kill`).
-        Error::Conflict(_) | Error::NotRunning(_) => StatusCode::CONFLICT,
-        Error::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
-        Error::Timeout(_) => StatusCode::GATEWAY_TIMEOUT,
-        _ => StatusCode::INTERNAL_SERVER_ERROR,
+        Class::Conflict | Class::NotRunning => StatusCode::CONFLICT,
+        Class::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
+        Class::Timeout => StatusCode::GATEWAY_TIMEOUT,
+        Class::Success | Class::Usage | Class::PermissionDenied | Class::SystemFailure => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     }
 }
 
@@ -1791,22 +1794,22 @@ mod error_tests {
     fn a_child_error_keeps_its_class_and_loses_the_tracing() {
         let stderr = "\x1b[2m2026-09-17T04:34:56Z\x1b[0m INFO pulling\n\
                       delonix: conflict: the name 's1' is already in use\n";
-        match child_error(Some(5), stderr, "fallback".into()) {
+        match child_error(Some(5), stderr, "fallback".into()).into_root() {
             Error::Conflict(m) => assert_eq!(m, "the name 's1' is already in use"),
             other => panic!("expected a conflict, got {other:?}"),
         }
         assert!(matches!(
-            child_error(Some(4), "error no such container: zz", String::new()),
+            child_error(Some(4), "error no such container: zz", String::new()).into_root(),
             Error::NotFound(m) if m == "container: zz"
         ));
         // Class 1 is split by the template: an invalid argument is the request's
         assert!(matches!(
-            child_error(Some(1), "error s1: invalid argument: s1 is already running", String::new()),
+            child_error(Some(1), "error s1: invalid argument: s1 is already running", String::new()).into_root(),
             Error::Invalid(m) if m == "s1 is already running"
         ));
         // fault, anything else is the runtime's.
         assert!(matches!(
-            child_error(Some(1), "delonix: invalid argument: web is already running", String::new()),
+            child_error(Some(1), "delonix: invalid argument: web is already running", String::new()).into_root(),
             Error::Invalid(m) if m == "web is already running"
         ));
         assert!(matches!(
@@ -1814,11 +1817,12 @@ mod error_tests {
                 Some(1),
                 "delonix: system call `clone` failed: EPERM",
                 String::new()
-            ),
+            )
+            .into_root(),
             Error::Runtime { .. }
         ));
         assert!(matches!(
-            child_error(Some(1), "   \n", "container start failed (exit 1)".into()),
+            child_error(Some(1), "   \n", "container start failed (exit 1)".into()).into_root(),
             Error::Runtime { message, .. } if message == "container start failed (exit 1)"
         ));
     }

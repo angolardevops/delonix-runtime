@@ -1617,15 +1617,13 @@ mod tests {
         assert_eq!(v2.name, "app_data");
         assert_eq!(vs.list().unwrap().len(), 1);
         // invalid name → Error::Invalid
-        assert!(matches!(
-            vs.create_with("bad name!", "local", None, None),
-            Err(Error::Invalid(_))
-        ));
+        assert!(vs
+            .create_with("bad name!", "local", None, None)
+            .is_err_and(|e| e.is_invalid_argument()));
         // nfs without device → Error::Invalid
-        assert!(matches!(
-            vs.create_with("nas", "nfs", None, None),
-            Err(Error::Invalid(_))
-        ));
+        assert!(vs
+            .create_with("nas", "nfs", None, None)
+            .is_err_and(|e| e.is_invalid_argument()));
         fs::remove_dir_all(&base).ok();
     }
 

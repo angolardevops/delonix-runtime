@@ -1551,7 +1551,7 @@ pub(crate) fn converge_doc(doc: &ManifestDoc) -> Result<()> {
 /// OPEN, across a tenant boundary, without a word — the qualified
 /// `<namespace>/<name>` form is the way to say which one you meant.
 fn workload_cidr(store: &Store, name: &str) -> Result<String> {
-    let c = store.load(name).map_err(|e| match e {
+    let c = store.load(name).map_err(|e| match e.into_root() {
         // The store says "no such container"; here the useful sentence names
         // the ROLE the missing thing was playing, so keep it.
         Error::NotFound(_) => Error::Invalid(super::po::tf(
