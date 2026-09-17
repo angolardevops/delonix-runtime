@@ -58,13 +58,16 @@ members consume as `version.workspace = true`. The version is not decoration: se
 ## 3.2 Errors: one `Error`, and exit codes derived from its type
 
 Almost every fallible function in the engine returns `delonix_runtime_core::Result<T>`, an alias
-over the shared enum in `crates/foundation/delonix-runtime-core/src/error.rs`. It is built with
+over the shared enum defined in `crates/foundation/delonix-model/src/error.rs`. The enum lives in the
+pure foundation crate `delonix-model`; `delonix-runtime-core` re-exports `Error` and `Result`
+(`pub use delonix_model::{Error, Result};`), so the `delonix_runtime_core::` path most call sites
+use still works. It is built with
 [`thiserror`](https://docs.rs/thiserror): `#[derive(Error)]` generates `Display` from the
 `#[error("...")]` attribute, and `#[from]` generates `From` impls so `?` converts a lower-level
 error automatically:
 
 ```rust
-// crates/foundation/delonix-runtime-core/src/error.rs
+// crates/foundation/delonix-model/src/error.rs
 #[error("I/O error: {0}")]
 Io(#[from] std::io::Error),
 ```
@@ -164,9 +167,9 @@ A container engine is mostly system calls. This repo reaches the kernel through 
 
 | Crate | Used for | Example in this repo |
 |---|---|---|
-| [`nix`](https://docs.rs/nix) | Safe-ish wrappers: `clone`, `setns`, `unshare`, `pivot_root`, `fork`, `mount`, signals | `use nix::sched::{clone, setns, unshare, CloneFlags};` in `crates/adapters/delonix-runtime/src/lib.rs` |
+| [`nix`](https://docs.rs/nix) | Safe-ish wrappers: `clone`, `setns`, `unshare`, `pivot_root`, `fork`, `mount`, signals | `use nix::sched::{clone, setns, unshare, CloneFlags};` in `crates/adapters/delonix-linux/src/lib.rs` |
 | [`libc`](https://docs.rs/libc) | Raw calls `nix` does not wrap, or where the exact struct matters | `libc::getsockopt(.., SO_PEERCRED, ..)` in `crates/foundation/delonix-runtime-core/src/peer_cred.rs` (`peer_uid`); `libc::flock` in `store.rs` |
-| [`rustix`](https://docs.rs/rustix) | The new mount API (`fsopen`/`fsconfig`/`fsmount`/`move_mount`) | `fsopen_overlay` in `crates/adapters/delonix-runtime/src/lib.rs` |
+| [`rustix`](https://docs.rs/rustix) | The new mount API (`fsopen`/`fsconfig`/`fsmount`/`move_mount`) | `fsopen_overlay` in `crates/adapters/delonix-linux/src/lib.rs` |
 
 **Every `unsafe` block states why it is sound**, next to it (the workspace lint enforces the
 comment's presence; reviewers enforce its truth):
@@ -179,7 +182,7 @@ let r = unsafe { libc::getsockopt(stream.as_raw_fd(), libc::SOL_SOCKET, libc::SO
 
 ### Where the container is born
 
-`fn spawn` in `crates/adapters/delonix-runtime/src/lib.rs` ends in:
+`fn spawn` in `crates/adapters/delonix-linux/src/lib.rs` ends in:
 
 ```rust
 // SAFETY: single-threaded; the child mounts the container and does `exec`.
@@ -205,7 +208,7 @@ This repo has two concrete rules because of it, both explained in comments you s
   tokio runtime, so it re-executes the binary (`__apirun <spec.json>`) to get a fresh
   single-threaded process where the `clone` precondition is true again.
 - **After a raw `fork`, only async-signal-safe work.** `reexec_mapped` and `reexec_mapped_hold`
-  in `crates/adapters/delonix-runtime/src/lib.rs` pre-compute every allocation *before* the fork.
+  in `crates/adapters/delonix-linux/src/lib.rs` pre-compute every allocation *before* the fork.
   The comment on `reexec_mapped_hold` also records why they use raw `fork` instead of
   `std::process::Command` + `pre_exec`: `Command::spawn` waits for the child to reach `exec`, and
   a `pre_exec` hook that blocks waiting on the parent deadlocks.
@@ -380,9 +383,9 @@ std — [`Arc`](https://doc.rust-lang.org/std/sync/struct.Arc.html),
   `build_client(true)`). Tests under `crates/providers/*/tests/live.rs` need a real provider and
   are opt-in.
 - **Property tests** use [`proptest`](https://docs.rs/proptest): see
-  `crates/adapters/delonix-net/tests/ip_invariants.rs` (`proptest! { ... }`).
+  `crates/adapters/delonix-sdn/tests/ip_invariants.rs` (`proptest! { ... }`).
 - **Doc tests** run too — including `compile_fail` blocks such as those in `typestate.rs`.
-- **Benchmarks** use [`criterion`](https://docs.rs/criterion) (`crates/adapters/delonix-image/benches/`).
+- **Benchmarks** use [`criterion`](https://docs.rs/criterion) (`crates/adapters/delonix-oci/benches/`).
 - **Names.** Test names describe the behaviour being proven. Many existing tests have Portuguese
   names; new identifiers are English (LANG-01, enforced as a ratchet by `scripts/lang_ratchet.py`).
 - **Tests must not touch the host's real state.** Take a temporary directory and pass it in
