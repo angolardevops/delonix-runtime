@@ -20,7 +20,29 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use delonix_net::infra;
+use delonix_compute::ports::VmNetwork;
+
+/// The network a Cloud Hypervisor VM is attached through, registered once by the
+/// composition root ([`set_network`]).
+static NETWORK: std::sync::OnceLock<Box<dyn VmNetwork>> = std::sync::OnceLock::new();
+
+/// Registers the node's [`VmNetwork`]. The first registration wins: the network
+/// is a fact of the process, not something to swap between two VMs.
+pub fn set_network(network: Box<dyn VmNetwork>) {
+    let _ = NETWORK.set(network);
+}
+
+/// The registered network, or the reason there is none — a VM on the SDN cannot
+/// be attached without one, and saying so beats a VM with no network.
+fn network() -> Result<&'static dyn VmNetwork> {
+    NETWORK
+        .get()
+        .map(|n| n.as_ref())
+        .ok_or_else(|| Error::Runtime {
+            context: "vm",
+            message: "no VM network provider is registered in this process".into(),
+        })
+}
 use delonix_runtime_core::{Error, JsonStore, Result, Status, Vm, VmBootSpec};
 
 /// The VM shapes that [`Vm`] persists. They are DEFINED in
@@ -486,7 +508,7 @@ pub fn vm_namespace_supported(backend_id: &str) -> bool {
 /// day the vendor prefix changed, and the symptom would be a guest configuring
 /// a NIC that is not there.
 pub fn mac_for(name: &str) -> String {
-    let h = infra::name_hash(name);
+    let h = delonix_net_rules::fnv32(name);
     format!(
         "52:54:00:{:02x}:{:02x}:{:02x}",
         (h >> 16) & 0xff,
@@ -1403,27 +1425,28 @@ impl VmBackend for CloudHypervisorBackend {
         // isolated bridge + DHCP before the attach. The VMs' SDN lives here.
         on(CreateStage::Network);
         if !matches!(cfg.network.as_str(), "" | "ingress" | "bridge" | "default") {
-            let _ = infra::network_create(&cfg.network);
+            let _ = network()?.ensure_network(&cfg.network);
         }
         // The MAC is needed BEFORE the attach now, not after: it is what makes
         // the guest's future DHCP address computable, and that address is what
         // the attach registers in the namespace sets.
         let mac = mac_for(&cfg.name);
         let ns = vm_namespace_of(cfg);
-        let tap = infra::vm_attach(&cfg.name, &cfg.network, &mac, &ns)?;
-        let lease = infra::dhcp_ip_for_mac(&cfg.network, &mac);
+        let net = network()?;
+        let tap = net.attach_tap(&cfg.name, &cfg.network, &mac, &ns)?;
+        let lease = net.lease_ip(&cfg.network, &mac);
         on(CreateStage::Start);
         let pid = match boot_ch(vmdir, cfg, overlay, &tap, &mac) {
             Ok(p) => p,
             Err(e) => {
-                infra::vm_detach(&cfg.name, lease.as_deref());
+                net.detach_tap(&cfg.name, lease.as_deref());
                 return Err(e);
             }
         };
         let sock = vmdir.join(format!("{}.sock", cfg.name));
         Ok(Boot {
             pid: Some(pid),
-            ip: infra::dhcp_ip_for_mac(&cfg.network, &mac),
+            ip: net.lease_ip(&cfg.network, &mac),
             tap,
             mac,
             api_socket: sock.to_string_lossy().into_owned(),
@@ -1437,11 +1460,11 @@ impl VmBackend for CloudHypervisorBackend {
     }
 
     fn ip(&self, vm: &Vm) -> Option<String> {
-        infra::dhcp_ip_for_mac(&vm.network, &vm.mac)
+        network().ok()?.lease_ip(&vm.network, &vm.mac)
     }
 
     /// Computed from the MAC, and available before the guest has booted — see
-    /// [`infra::dhcp_lease_ip`], and [`VmBackend::ip_is_predicted`] for why
+    /// `delonix_net::infra::dhcp_lease_ip`, and [`VmBackend::ip_is_predicted`] for why
     /// anyone waiting on a boot needs to be told.
     fn ip_is_predicted(&self) -> bool {
         true
@@ -1495,11 +1518,9 @@ impl VmBackend for CloudHypervisorBackend {
         }
         // The record's own address if it learned one; otherwise the lease its MAC
         // maps to — so a VM stopped before it ever DHCP'd still gives up its chain.
-        let ip = vm
-            .ip
-            .clone()
-            .or_else(|| infra::dhcp_ip_for_mac(&vm.network, &vm.mac));
-        infra::vm_detach(&vm.name, ip.as_deref());
+        let net = network()?;
+        let ip = vm.ip.clone().or_else(|| net.lease_ip(&vm.network, &vm.mac));
+        net.detach_tap(&vm.name, ip.as_deref());
         Ok(())
     }
 
@@ -1884,7 +1905,7 @@ fn ch_serial_dest(capture: bool, serial: &Path, console: &Path) -> String {
 }
 
 fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) -> Result<i32> {
-    let join = infra::infra_join_argv().ok_or_else(|| Error::Runtime {
+    let join = network()?.join_argv().ok_or_else(|| Error::Runtime {
         context: "vm",
         message: "the ingress (rootless infra) is not up".into(),
     })?;
@@ -4215,8 +4236,13 @@ fn remove_inner(base: &Path, name: &str, force: bool) -> Result<()> {
                 }
             }
             // No record, so no address to trust — the tap goes, the firewall
-            // teardown is skipped rather than guessed at.
-            infra::vm_detach(name, None);
+            // teardown is skipped rather than guessed at. Best effort, as it
+            // always was: a process with no network registered has no tap to
+            // remove, and the answer to an `rm` of a name that does not exist
+            // stays «no such VM», not a complaint about the network.
+            if let Ok(net) = network() {
+                net.detach_tap(name, None);
+            }
             orphan
         }
     };
