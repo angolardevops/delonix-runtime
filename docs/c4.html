@@ -149,7 +149,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <h1>Arquitectura — Delonix Engine</h1>
 <p>Modelo C4 (Contexto → Contentores → Componentes) e system design funcional do
 <strong>Delonix Engine</strong>: motor de containers e microVMs <strong>daemonless, rootless-first,
-kernel-native</strong>, em Rust (15 crates, workspace <code>crates/</code>). Este documento é canónico
+kernel-native</strong>, em Rust (21 crates, workspace <code>crates/</code>). Este documento é canónico
 e mantido contra o código — cada afirmação estrutural tem a referência do
 crate/ficheiro onde foi confirmada. Onde há limites, eles aparecem nos diagramas,
 não escondidos em rodapés.</p>
@@ -301,7 +301,7 @@ leitura — <code>reconcile_status</code> (<code>crates/adapters/delonix-linux/s
 de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused</code>. O CRI chama-o em
 <code>load_reconciled</code> antes de responder ao kubelet.</p>
 <hr />
-<h2>C4 — Nível 3: Componentes (os 15 crates)</h2>
+<h2>C4 — Nível 3: Componentes (os 21 crates)</h2>
 <p>Setas = dependências <strong>reais</strong>, confirmadas nos <code>Cargo.toml</code> de <code>crates/*/</code> e nos
 <code>use delonix_*</code> dos <code>src/</code>. Não há ciclos; <code>delonix-runtime-core</code> é a raiz comum.</p>
 <pre class="mermaid">graph TB
@@ -313,12 +313,18 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     VM2[&quot;delonix-vm&lt;br&gt;microVMs declarativas: trait VmBackend —&lt;br&gt;Cloud Hypervisor ou libvirt&quot;]
     VOL[&quot;delonix-volume&lt;br&gt;volumes nomeados e bind mounts, sintaxe -v Docker,&lt;br&gt;driver local ou nfs&quot;]
     CORE[&quot;delonix-runtime-core&lt;br&gt;Container, Vm, Status, Store e JsonStore, Mount,&lt;br&gt;typestate, virt, secret e cred_vault — Secret Manager&quot;]
-    MGMT[&quot;delonix-mgmt&lt;br&gt;API de gestao LOCAL (HTTP+JSON num socket unix, so o proprio uid)&lt;br&gt;registo Prometheus partilhado e spans OpenTelemetry&quot;]
+    MGMT[&quot;delonix-mgmt&lt;br&gt;API de gestao LOCAL (HTTP+JSON num socket unix, so o proprio uid)&lt;br&gt;expoe as metricas partilhadas em /metrics&quot;]
+    TEL[&quot;delonix-telemetry&lt;br&gt;observabilidade: logging estruturado, spans OpenTelemetry/OTLP&lt;br&gt;e o registo Prometheus partilhado (saiu do core na P3)&quot;]
     SCAN[&quot;delonix-scanner&lt;br&gt;SBOM e varredura de CVE — image scan&lt;br&gt;e a imposicao de scan-on-pull&quot;]
     SEC[&quot;delonix-security-runtime&lt;br&gt;decisoes de seguranca do no: politica, admissao&lt;br&gt;unica (container E VM), evento, score, redaccao&lt;br&gt;(ADR-0026) — puro, sem sensores e sem inquilino&quot;]
     RULES[&quot;delonix-net-rules&lt;br&gt;regras de rede PURAS, ZERO dependencias — Cidr, nome de bridge,&lt;br&gt;IPAM dentro de um prefixo, leitura de taxas; partilhado com o PaaS&quot;]
     PVE[&quot;delonix-proxmox&lt;br&gt;backend VmBackend REMOTO contra a API de UM no Proxmox VE&lt;br&gt;(ADR-0008) — fora do delonix-vm por trazer cliente HTTP&quot;]
     NAS[&quot;delonix-truenas&lt;br&gt;provisiona dataset, quota, permissoes e export numa NAS&lt;br&gt;pela API do TrueNAS (ADR-0009) — mesma razao de crate a parte&quot;]
+    MODEL[&quot;delonix-model&lt;br&gt;modelo partilhado PURO (foundation, ADR-0040) —&lt;br&gt;o Error partilhado com os codigos DX_*,&lt;br&gt;e os nomes gerados de containers e clusters&quot;]
+    STACK[&quot;delonix-stack&lt;br&gt;contexto Stack (ADR-0040): tabela de Kinds,&lt;br&gt;reconciliador de 3 vias, Condition, revisões&quot;]
+    COMPUTE[&quot;delonix-compute&lt;br&gt;contexto Compute (ADR-0040): a especificacao&lt;br&gt;de execucao unica (RunOpts) que as entradas traduzem&quot;]
+    MGMTBIN[&quot;delonix-mgmt-bin&lt;br&gt;o executavel delonix-mgmt, que `delonix serve api` executa (P3m)&quot;]
+    MCPBIN[&quot;delonix-mcp-bin&lt;br&gt;o executavel delonix-mcp, que `delonix mcp` executa (P3l)&quot;]
     MCP[&quot;delonix-mcp&lt;br&gt;servidor MCP (ADR-0025) — superficie de IA LOCAL, sem inquilino&lt;br&gt;stdio-only; tools chamam Store/dominio, nunca shell arbitrario&quot;]
 
     BIN --&gt; RT
@@ -333,7 +339,14 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     BIN --&gt; SEC
     BIN --&gt; PVE
     BIN --&gt; NAS
-    BIN --&gt; MCP
+    MCPBIN --&gt; MCP
+    MGMTBIN --&gt; MGMT
+    BIN --&gt; MODEL
+    BIN --&gt; STACK
+    BIN --&gt; COMPUTE
+    BIN --&gt; TEL
+    COMPUTE --&gt; CORE
+    STACK --&gt; CORE
 
     MGMT --&gt; RT
     MGMT --&gt; IMG
@@ -342,6 +355,7 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     MGMT --&gt; NET
     MGMT --&gt; SCAN
     MGMT --&gt; CORE
+    MGMT --&gt; TEL
 
     SCAN --&gt; IMG
     SCAN --&gt; CORE
@@ -350,8 +364,9 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     CRI --&gt; IMG
     CRI --&gt; NET
     CRI --&gt; CORE
+    CRI --&gt; TEL
 
-    VM2 --&gt; NET
+    VM2 --&gt; COMPUTE
     VM2 --&gt; CORE
 
     RT --&gt; CORE
@@ -387,9 +402,12 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
 <li><strong><code>delonix-linux</code> só depende de <code>core</code></strong> — o motor de containers não conhece
   rede: a integração faz-se por inversão de controlo, com o hook <code>on_started</code> do
   <code>RunSpec</code> (a CLI passa closures que chamam <code>delonix-sdn</code>).</li>
-<li><strong><code>delonix-vm</code> → <code>delonix-sdn</code></strong> existe porque o backend Cloud Hypervisor liga o
-  <code>tap</code> da VM à bridge do ingress (<code>infra::vm_attach</code>, doc-comment de
-  <code>crates/adapters/delonix-vm/src/lib.rs</code>).</li>
+<li><strong><code>delonix-vm</code> já não depende de <code>delonix-sdn</code></strong> (P3i): o backend Cloud Hypervisor liga o
+  <code>tap</code> da VM à bridge do ingress pela porta <code>VmNetwork</code> do <code>delonix-compute</code>, que o
+  <code>delonix-sdn</code> implementa (<code>vm_network::HostVmNetwork</code>) e o binário regista.</li>
+<li><strong><code>delonix-telemetry</code></strong> (P3j) tem o logging estruturado, os spans OTLP e o registo
+  Prometheus partilhado, que saíram do <code>delonix-runtime-core</code>: a fundação deixou de
+  carregar um exportador que todo o crate compilava só por precisar de um <code>Container</code>.</li>
 <li><strong><code>delonix-net-rules</code> não tem UMA dependência</strong> — nem interna nem externa, e é isso
   que o torna atravessável: é o que o <code>delonix-sdn</code> e o control-plane do <code>delonix-paas</code>
   compilam os dois para responderem o MESMO nome de bridge, o mesmo IP dentro de um

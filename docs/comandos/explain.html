@@ -168,7 +168,7 @@ promise</a>. To see what changed between two versions there is
 
 Arguments:
   &lt;PATH&gt;
-          `&lt;Kind&gt;[.field[.field…]]`
+          `&lt;Kind&gt;[.field[.field…]]`, a code (`DX-4501`), or `codes`
 
 Options:
       --l18n &lt;en|pt&gt;
@@ -187,6 +187,12 @@ EXAMPLES:
 
   # a nested field of a pod member
   delonix explain Pod.containers.image
+
+  # what a numbered code in an error means, and what to do about it
+  delonix explain DX-4501
+
+  # the whole dictionary of codes
+  delonix explain codes
 
 SEE ALSO:
   delonix manifest schema · delonix stack validate · delonix stack apply
