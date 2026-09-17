@@ -146,7 +146,7 @@ graph TB
   *control* process, one `slirp4netns` uplink). Nothing else stays up.
 
 **Where it lives in the code:** `scripts/arch_fitness.py` (`LAYERS`, `ALLOWED`);
-`crates/foundation/delonix-runtime-core/src/store.rs` (`Store::update`, `JsonStore::update`,
+`crates/adapters/delonix-state/src/store.rs` (`Store::update`, `JsonStore::update`,
 `write_atomic`); `crates/contexts/delonix-compute/src/{ports,launch}.rs`;
 `crates/adapters/delonix-linux/src/supervise.rs` (`run_supervised`).
 

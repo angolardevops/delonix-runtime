@@ -96,9 +96,14 @@ The layer each crate belongs to, and the direction it may depend in:
 
 Declared exceptions (each one names the ADR-0040 phase that removes it):
 
+- `delonix-linux` → `delonix-state` — removed in **P4**
 - `delonix-mcp` → `delonix-mgmt` — removed in **P5**
+- `delonix-oci` → `delonix-state` — removed in **P4**
 - `delonix-proxmox` → `delonix-vm` — removed in **P4**
 - `delonix-scanner` → `delonix-oci` — removed in **P4**
+- `delonix-sdn` → `delonix-state` — removed in **P4**
+- `delonix-vm` → `delonix-state` — removed in **P4**
+- `delonix-volume` → `delonix-state` — removed in **P4**
 <!-- dev-docs:end layers -->
 
 ### Where the restructuring stands
@@ -122,8 +127,12 @@ binaries → P4 providers → P5 node API → P6 CRI → P7 observability). What
   through the `VmNetwork` port, and the CRI, management API and MCP servers became their own
   executables. Four adapters carry their ADR-0040 names: `delonix-scanner` (was `delonix-scan`),
   `delonix-oci` (was `delonix-image`), `delonix-sdn` (was `delonix-net`) and `delonix-linux` (was
-  `delonix-runtime`, the container engine crate). `delonix-runtime-core` still exists and still
-  carries the stores, but the shared `Error` moved down to `delonix-model` and is re-exported.
+  `delonix-runtime`, the container engine crate). `delonix-runtime-core` still exists, but the
+  shared `Error` moved down to `delonix-model` (re-exported), and the stores, atomic writes and
+  the encrypted secret store moved out to the `delonix-state` adapter (the pure secret model
+  went to `delonix-model`). The adapters that open records or write files through it
+  (`delonix-linux`, `delonix-vm`, `delonix-sdn`, `delonix-oci`, `delonix-volume`) are declared
+  exceptions until P4 gives them a `StateRepository` port (`scripts/arch_fitness.py`).
 - **P4–P7 have not started.** The remaining exceptions in the table above name those phases.
 
 The crate graph, as `Cargo.toml` declares it:
@@ -146,6 +155,7 @@ graph TB
     delonix_oci["delonix-oci"]
     delonix_scanner["delonix-scanner"]
     delonix_sdn["delonix-sdn"]
+    delonix_state["delonix-state"]
     delonix_telemetry["delonix-telemetry"]
     delonix_vm["delonix-vm"]
     delonix_volume["delonix-volume"]
@@ -164,19 +174,23 @@ graph TB
     delonix_mgmt_bin["delonix-mgmt-bin"]
     delonix_runtime_bin["delonix-runtime-bin"]
   end
+  delonix_compute --> delonix_model
   delonix_compute --> delonix_runtime_core
   delonix_cri --> delonix_compute
   delonix_cri --> delonix_linux
   delonix_cri --> delonix_oci
   delonix_cri --> delonix_runtime_core
   delonix_cri --> delonix_sdn
+  delonix_cri --> delonix_state
   delonix_cri --> delonix_telemetry
   delonix_linux --> delonix_compute
   delonix_linux --> delonix_runtime_core
+  delonix_linux --> delonix_state
   delonix_mcp --> delonix_linux
   delonix_mcp --> delonix_mgmt
   delonix_mcp --> delonix_runtime_core
   delonix_mcp --> delonix_sdn
+  delonix_mcp --> delonix_state
   delonix_mcp --> delonix_vm
   delonix_mcp --> delonix_volume
   delonix_mcp_bin --> delonix_mcp
@@ -187,6 +201,7 @@ graph TB
   delonix_mgmt --> delonix_runtime_core
   delonix_mgmt --> delonix_scanner
   delonix_mgmt --> delonix_sdn
+  delonix_mgmt --> delonix_state
   delonix_mgmt --> delonix_telemetry
   delonix_mgmt --> delonix_vm
   delonix_mgmt --> delonix_volume
@@ -195,6 +210,7 @@ graph TB
   delonix_mgmt_bin --> delonix_telemetry
   delonix_oci --> delonix_compute
   delonix_oci --> delonix_runtime_core
+  delonix_oci --> delonix_state
   delonix_proxmox --> delonix_runtime_core
   delonix_proxmox --> delonix_vm
   delonix_runtime_bin --> delonix_compute
@@ -208,6 +224,7 @@ graph TB
   delonix_runtime_bin --> delonix_sdn
   delonix_runtime_bin --> delonix_security_runtime
   delonix_runtime_bin --> delonix_stack
+  delonix_runtime_bin --> delonix_state
   delonix_runtime_bin --> delonix_telemetry
   delonix_runtime_bin --> delonix_truenas
   delonix_runtime_bin --> delonix_vm
@@ -218,15 +235,20 @@ graph TB
   delonix_sdn --> delonix_compute
   delonix_sdn --> delonix_net_rules
   delonix_sdn --> delonix_runtime_core
+  delonix_sdn --> delonix_state
   delonix_security_runtime --> delonix_runtime_core
   delonix_stack --> delonix_runtime_core
+  delonix_state --> delonix_model
+  delonix_state --> delonix_runtime_core
   delonix_truenas --> delonix_runtime_core
   delonix_vm --> delonix_compute
   delonix_vm --> delonix_net_rules
   delonix_vm --> delonix_runtime_core
+  delonix_vm --> delonix_state
   delonix_volume --> delonix_compute
   delonix_volume --> delonix_model
   delonix_volume --> delonix_runtime_core
+  delonix_volume --> delonix_state
 ```
 <!-- dev-docs:end crates-graph -->
 
@@ -356,13 +378,14 @@ There is no database. State is files under one **state root**:
 
 | Path under the root | What | Code |
 |---|---|---|
-| `containers/<id>.json` | one JSON record per container | `delonix_runtime_core::Store` (`store.rs`) |
+| `containers/<id>.json` | one JSON record per container | `delonix_state::Store` (`delonix-state/src/store.rs`) |
 | `containers/<id>/{upper,work,merged}` + `overlay-lowers` | the container's writable layer and the list of shared image layers it mounts | `ImageStore::prepare_overlay` (`delonix-oci/src/overlay.rs`) |
 | `images/<id>.json`, `layers/<hex>/`, `blobs/sha256/<hex>` | image metadata, unpacked layers shared by every container, content-addressed blobs | `ImageStore::open` (`image.rs`), `Cas` (`cas.rs`) |
 | `volumes/<name>/_data`, `volumes/.ns/<ns>/` | named volumes, namespace-scoped volumes | `VolumeStore` (`delonix-volume/src/lib.rs`) |
 | `vms/` | VM records (`JsonStore`) and per-VM files | `delonix-vm` |
 | `vm-images/` | VM images (`.qcow2` + `.json`) | `cmd/vmimage.rs::VmImageStore` |
-| `secrets/` | encrypted secrets | `SecretStore` (`delonix-runtime-core/src/secret.rs`) |
+| `secrets/` | encrypted secrets | `SecretStore` (`delonix-state/src/secret.rs`) |
+| `tunnels/keyring.key`, `tunnels/cred/` | the host master key and encrypted credentials | `CredVault` (`delonix-state/src/cred_vault.rs`) |
 | `ingress/` | pidfiles (`holder.pid` is the pin), `refs/` markers, network and route definitions, logs | `delonix-sdn/src/infra.rs` |
 | `ipam/` | per-prefix address leases | `delonix-sdn/src/ipam.rs` |
 | `cri/{sandboxes,containers}/` | the CRI's own records | `delonix-cri/src/runtime_svc/lifecycle.rs` (`sb_dir`, `ct_dir`) |
@@ -371,8 +394,10 @@ There is no database. State is files under one **state root**:
 
 Concurrency is handled by the file system, because several processes (the CLI, the CRI server,
 a supervisor) mutate the same records: writes are atomic (temporary file + `rename`,
-`store.rs::write_atomic`), and read-modify-write goes through `Store::update` /
-`JsonStore::update`, which take an exclusive `flock` and **refuse** to proceed without it. The
+`delonix_state::write_atomic`), and read-modify-write goes through `Store::update` /
+`JsonStore::update`, which take an exclusive `flock` and **refuse** to proceed without it. All
+of that lives in the `delonix-state` adapter; the record types it stores stay in
+`delonix-runtime-core`. The
 network infra has its own `FileLock` around `ensure_up`, `teardown`, `acquire`, `release` and the
 reapers.
 

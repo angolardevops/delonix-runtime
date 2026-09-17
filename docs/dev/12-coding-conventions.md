@@ -336,7 +336,9 @@ already exist.
 |---|---|---|
 | A pure rule on CIDRs, bridge names or IPAM arithmetic that both sides must compute identically | `delonix-net-rules` (foundation) | 06; AGENTS.md § Arquitetura |
 | A new error class, exit code or `DX_*` code; generated names | `delonix-model` (foundation) | ADR-0040 D1 |
-| A persisted record type, a store, the secret store, `write_atomic*` helpers | `delonix-runtime-core` (foundation) — being split by ADR-0040 P3. Add here only what belongs to records and stores, never general helpers | ADR-0040 D2.1 "no `-core`" |
+| A persisted record type (`Container`, `Vm`, …) | `delonix-runtime-core` (foundation) — the leftover of the ADR-0040 P3 split. Add here only what belongs to records, never general helpers | ADR-0040 D2.1 "no `-core`" |
+| A pure rule of the secret model (`Secret`, valid names and keys, env-file parsing) | `delonix-model` (foundation): `secret.rs` | ADR-0040 P3 (the PR that moved the stores) |
+| A store, the file lock, `write_atomic*`/`write_private_temp`, the encrypted secret store or credential vault | `delonix-state` (adapter) | ADR-0040 D2.3 |
 | Kind facts, the planner/diff, conditions, revisions | `delonix-stack` (context) | AGENTS.md § Arquitetura |
 | The run specification, its pure validation, a port the run use case needs | `delonix-compute` (context): `run_opts.rs`, `preflight.rs`, `ports.rs` | ADR-0040 D2.2 |
 | Security policy, admission, score, redaction | `delonix-security-runtime` (context) | ADR-0026 |
@@ -579,15 +581,15 @@ doesn't support.
   `Command::spawn` only returns after `exec`, so the two processes wait for each other forever.
   Use a raw `fork` for handshakes. **Decided**: AGENTS.md § "A classe «X não é Y»" (the
   `reexec_mapped_hold` entry).
-- **Temporary files: use `delonix_runtime_core::write_private_temp`.** It opens with a unique name,
+- **Temporary files: use `delonix_state::write_private_temp`.** It opens with a unique name,
   `O_EXCL` and mode `0600`, so it never follows a planted symlink. Don't use a fixed or pid-derived
   name in `/tmp`. **Decided**: AGENTS.md § "Auditoria de segurança #3", passagem 2; doc comment in
-  `store.rs`. **Convention (observed)**: `delonix-sdn/src/bpf.rs`,
+  `crates/adapters/delonix-state/src/store.rs`. **Convention (observed)**: `delonix-sdn/src/bpf.rs`,
   `delonix-linux/src/run_host.rs`.
 - **Files that must be private or atomic: use `write_atomic_mode(path, bytes, Some(0o600))`.** It
   sets the mode at creation and publishes with an atomic rename. Never write the file and then
   `chmod` it, because another user can open it in between. **Decided**: doc comment of
-  `store.rs:write_atomic_mode`; AGENTS.md (kubeconfig TOCTOU).
+  `delonix-state/src/store.rs:write_atomic_mode`; AGENTS.md (kubeconfig TOCTOU).
 - **Before signalling a pid read from a file, check that it is still the same process.** Use
   `delonix_runtime_core::safe_to_signal(pid, starttime)`, which compares the start time so a
   recycled pid isn't killed. **Decided**: AGENTS.md § "A classe «X não é Y»" (the pid entries).
@@ -608,7 +610,7 @@ doesn't support.
 ## 8. State and concurrency
 
 - **Read–modify–write goes through `update`, never `load` → mutate → `save`.**
-  `Store::update` and `JsonStore::update` (`crates/foundation/delonix-runtime-core/src/store.rs`)
+  `Store::update` and `JsonStore::update` (`crates/adapters/delonix-state/src/store.rs`)
   take a `flock`, **re-read under the lock**, apply your closure and write atomically. A closure
   that returns `false` aborts the write. The CLI, the CRI server and background refreshes all touch
   the same records concurrently, and without the lock one write is silently lost. **Decided**: doc
@@ -640,7 +642,11 @@ doesn't support.
   stores. **Decided**: AGENTS.md § "BUG GRAVE corrigido… `-v` nunca era persistido" (listed there as
   the third bug of the same family).
 - **Lock files are never deleted.** Deleting one opens a window where two processes lock different
-  inodes. **Decided**: doc comment of `store.rs:lock_path`.
+  inodes. **Decided**: doc comment of `store.rs:lock_path` (`delonix-state`).
+- **`SecretStore::update` is the one `update` whose lock is best-effort.** Its `FileLock::acquire`
+  returns `Option` and proceeds unlocked if the lock file cannot be opened, unlike `Store` and
+  `JsonStore`. **Not decided**: whether it should refuse like the others; follow the surrounding
+  code and say so in the PR if you touch it.
 
 ---
 
@@ -658,7 +664,7 @@ doesn't support.
   resolves the real state root. Don't `set_var` (the `env_writes` ratchet, [§4.1](#41-the-layers-and-the-direction)).
   **Decided**: AGENTS.md § "IaC nativo", the `ShareVolume` fusion note ("Nota de método: um teste que
   chamasse `apply_share` … escreveria no estado REAL da máquina"). **Convention (observed)**:
-  `delonix-runtime-core/src/store.rs` tests use a `tmp_dir(tag)` helper. For manual and E2E runs,
+  `delonix-state/src/store.rs` tests use a `tmp_dir(tag)` helper. For manual and E2E runs,
   isolate **both** `DELONIX_ROOT` and `DELONIX_NET_RUNTIME_DIR`. Isolating only one is worse than
   none (AGENTS.md § "Meia-isolação é pior que nenhuma"; [02](02-build-and-test.md#isolating-the-engines-state)).
 - **A regression test must fail with the fix reverted.** Revert the fix, watch the test fail, then
@@ -670,7 +676,7 @@ doesn't support.
   paths. A test can encode the bug. **Decided**: AGENTS.md § "Auditoria sistemática dos 208
   subcomandos" (`default_project_name`).
 - **Concurrency bugs get a real race.** Use threads plus an explicit sleep inside the critical
-  window. **Convention (observed)**: `store.rs:jsonstore_update_concorrente_nao_perde_escritas`.
+  window. **Convention (observed)**: `delonix-state/src/store.rs:jsonstore_update_concorrente_nao_perde_escritas`.
 - **Prefer properties over sampled timing.** When a race can only be sampled, generate load and
   repeat. **Decided**: AGENTS.md § "Um `exec` logo a seguir ao `run -d` corria no HOST".
 - **Generated regions carry no volatile counts** (lines, tests, commits). **Decided**:
@@ -691,7 +697,7 @@ doesn't support.
   module docs in `exitcode.rs` and `reconcile.rs` are the model. **Convention (observed)**.
 - **Doc comments (`///`, `//!`) on public items and module headers** say what the item promises and
   why it exists. **Convention (observed)**: every port in `delonix-compute/src/ports.rs`,
-  `store.rs:write_private_temp`, `exitcode.rs`. **Not decided**: no `missing_docs` lint is enabled.
+  `delonix-state/src/store.rs:write_private_temp`, `exitcode.rs`. **Not decided**: no `missing_docs` lint is enabled.
 - **Comments are English and name no consumer.** The language ratchet and the consumer gate both
   scan comments. **Enforced (gate)**.
 - **Don't add abstractions, config flags or error handling for cases that can't happen.**

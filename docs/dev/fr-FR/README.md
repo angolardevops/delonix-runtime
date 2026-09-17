@@ -7,7 +7,7 @@ aujourd’hui et vous voulez envoyer une première pull request sans casser votr
 [site de documentation utilisateur](https://angolardevops.github.io/delonix-runtime/).
 
 <!-- dev-docs:begin crate-count -->
-Le workspace compte **21 crates** et livre **4 binaires** (`delonix`, `delonix-cri`, `delonix-mcp`, `delonix-mgmt`).
+Le workspace compte **22 crates** et livre **4 binaires** (`delonix`, `delonix-cri`, `delonix-mcp`, `delonix-mgmt`).
 <!-- dev-docs:end crate-count -->
 
 ## Ce qu’est le moteur — et ce qu’il n’est pas

@@ -168,7 +168,7 @@ A container engine is mostly system calls. This repo reaches the kernel through 
 | Crate | Used for | Example in this repo |
 |---|---|---|
 | [`nix`](https://docs.rs/nix) | Safe-ish wrappers: `clone`, `setns`, `unshare`, `pivot_root`, `fork`, `mount`, signals | `use nix::sched::{clone, setns, unshare, CloneFlags};` in `crates/adapters/delonix-linux/src/lib.rs` |
-| [`libc`](https://docs.rs/libc) | Raw calls `nix` does not wrap, or where the exact struct matters | `libc::getsockopt(.., SO_PEERCRED, ..)` in `crates/foundation/delonix-runtime-core/src/peer_cred.rs` (`peer_uid`); `libc::flock` in `store.rs` |
+| [`libc`](https://docs.rs/libc) | Raw calls `nix` does not wrap, or where the exact struct matters | `libc::getsockopt(.., SO_PEERCRED, ..)` in `crates/foundation/delonix-runtime-core/src/peer_cred.rs` (`peer_uid`); `libc::flock` in `crates/adapters/delonix-state/src/store.rs` |
 | [`rustix`](https://docs.rs/rustix) | The new mount API (`fsopen`/`fsconfig`/`fsmount`/`move_mount`) | `fsopen_overlay` in `crates/adapters/delonix-linux/src/lib.rs` |
 
 **Every `unsafe` block states why it is sound**, next to it (the workspace lint enforces the
@@ -337,7 +337,7 @@ CLI invocations, the CRI server, a supervisor) may touch the same record at once
 every read-modify-write is `update` with a closure, under an exclusive `flock`:
 
 ```rust
-// crates/foundation/delonix-runtime-core/src/store.rs  (Store::update)
+// crates/adapters/delonix-state/src/store.rs  (Store::update)
 let id = self.load(id_or_name)?.id;
 let _lock = FileLock::acquire(&self.lock_path(&id))?;
 // Re-read UNDER the lock ...
@@ -346,8 +346,10 @@ if !f(&mut c) { return Ok(c); }
 self.save(&c)?;
 ```
 
-`JsonStore<T>::update` in the same file is the generic version for other record types. Rules
-that follow from it:
+`JsonStore<T>::update` in the same file is the generic version for other record types. Both
+**refuse** to run when the lock cannot be taken (`Error::Lock`) instead of carrying on unlocked.
+(`SecretStore::update` in `secret.rs` is the exception: its lock is best-effort.) Rules that
+follow from it:
 
 - Never do `load` → mutate → `save` by hand for a record another process can write; you will
   lose updates. Use `update`.
