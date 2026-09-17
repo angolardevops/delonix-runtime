@@ -232,6 +232,30 @@ pub static CATALOG: &[Code] = &[
         "invalid argument",
         "An argument, a flag value or a manifest field is not acceptable. The message names which.",
         "Correct the argument the message names and run the command again."),
+    code!(1401, "image.empty_sbom", InvalidArgument, Image, 1,
+        "empty SBOM",
+        "The image has no apk or dpkg package database, so there is nothing to scan for vulnerabilities.",
+        "Scan an image built on a distribution with a package manager, or scan its base image instead."),
+    code!(1402, "image.advisory_db_invalid", InvalidArgument, Image, 1,
+        "invalid advisory database",
+        "The advisory database the scanner loaded is not valid JSON.",
+        "Sync it again with `delonix image scan --update --feed <url>`."),
+    code!(1403, "image.osv_feed_not_json", InvalidArgument, Image, 1,
+        "OSV feed is not JSON",
+        "The feed given to the scanner could not be parsed as JSON.",
+        "Check the --feed URL points at an OSV JSON export, not an HTML page."),
+    code!(1404, "image.osv_feed_shape", InvalidArgument, Image, 1,
+        "OSV feed has the wrong shape",
+        "The feed is JSON but neither an array of advisories nor an object with a vulns array.",
+        "Point --feed at an OSV export: an array of advisories, or an object with a vulns array."),
+    code!(1405, "image.not_an_odoo_module", InvalidArgument, Image, 1,
+        "not an Odoo module",
+        "The directory named as a module has no __manifest__.py.",
+        "Point the scan at the module's own directory, the one holding __manifest__.py."),
+    code!(1406, "image.no_odoo_module", InvalidArgument, Image, 1,
+        "no Odoo module found",
+        "No directory under the path given has a __manifest__.py.",
+        "Point the scan at the directory that contains the modules."),
     code!(2000, "usage", Usage, Engine, 2,
         "invalid usage",
         "The command line does not parse: an unknown subcommand, a missing argument or a flag this command does not take.",
@@ -284,6 +308,10 @@ pub static CATALOG: &[Code] = &[
         "registry error",
         "An OCI registry answered with an error, or could not be reached.",
         "Check the image reference, your login (`delonix image login`) and the network path to the registry."),
+    code!(9402, "image.module_scan_failed", SystemFailure, Image, 1,
+        "a module tree could not be read",
+        "Reading the module directory failed: a permission, a missing path or an I/O error.",
+        "Check the path in the message is readable by this user."),
 ];
 
 impl Error {
@@ -305,6 +333,28 @@ impl Error {
             Error::Json(_) => 9002,
             Error::Io(e) if e.kind() == std::io::ErrorKind::PermissionDenied => 7000,
             Error::Io(_) => 9001,
+            Error::Coded { number, .. } => *number,
+        }
+    }
+
+    /// `inner`, carrying its specific dictionary number (ADR-0043 D4).
+    ///
+    /// # Panics
+    ///
+    /// When the number's class digit is not `inner`'s class: a code that says
+    /// «not found» on a failure that exits as «invalid argument» would make the
+    /// number and the exit code tell two stories. Every crate's conversion has a
+    /// test that walks all its variants through here, so this fires in tests,
+    /// not in front of an operator.
+    pub fn coded(number: u16, inner: Error) -> Error {
+        assert_eq!(
+            number / 1000,
+            inner.class().digit(),
+            "DX-{number:04} does not belong to the class of «{inner}»"
+        );
+        Error::Coded {
+            number,
+            inner: Box::new(inner),
         }
     }
 
@@ -315,12 +365,18 @@ impl Error {
     /// carrier — so a `match e.root()` keeps matching where a `match e` would not.
     /// For «which class is this», ask [`Error::class`] instead.
     pub fn root(&self) -> &Error {
-        self
+        match self {
+            Error::Coded { inner, .. } => inner.root(),
+            e => e,
+        }
     }
 
     /// [`Error::root`] by value, to move a payload out.
     pub fn into_root(self) -> Error {
-        self
+        match self {
+            Error::Coded { inner, .. } => inner.into_root(),
+            e => e,
+        }
     }
 
     /// The class of this failure — what the caller does next.
@@ -330,7 +386,8 @@ impl Error {
     /// `Err(Error::NotFound(_))` stops matching it without a word from the
     /// compiler. A class question keeps its answer.
     pub fn class(&self) -> Class {
-        Class::ALL[usize::from(self.number() / 1000)]
+        let root = self.root();
+        Class::ALL[usize::from(root.number() / 1000)]
     }
 
     /// «No such resource» — the caller creates it or reports it missing.
@@ -494,6 +551,30 @@ mod tests {
                 "{e}"
             );
         }
+    }
+
+    /// The carrier changes the number and nothing else: same message, same class,
+    /// same exit code, same `DX_*` identity — and a `root()` match still matches.
+    #[test]
+    fn a_coded_error_is_its_inner_error_with_a_finer_number() {
+        let plain = Error::NotFound("volume db".into());
+        let coded = Error::coded(4201, Error::NotFound("volume db".into()));
+        assert_eq!(coded.number(), 4201);
+        assert_eq!(coded.to_string(), plain.to_string());
+        assert_eq!(coded.class(), plain.class());
+        assert_eq!(coded.code(), plain.code());
+        assert_eq!(
+            crate::exitcode::for_error(&coded),
+            crate::exitcode::for_error(&plain)
+        );
+        assert!(coded.is_not_found());
+        assert!(matches!(coded.root(), Error::NotFound(m) if m == "volume db"));
+    }
+
+    #[test]
+    #[should_panic(expected = "does not belong to the class")]
+    fn a_number_from_another_class_is_refused() {
+        let _ = Error::coded(1201, Error::NotFound("volume db".into()));
     }
 
     #[test]
