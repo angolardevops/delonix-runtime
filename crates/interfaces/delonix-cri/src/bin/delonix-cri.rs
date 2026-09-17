@@ -16,10 +16,17 @@ use std::path::PathBuf;
 /// kubelet with a server the user never installed alongside their `delonix`.
 const DISPATCH_VERSION_ENV: &str = "DELONIX_DISPATCH_VERSION";
 
-fn fail(message: &str) -> ! {
-    tracing::error!(error = %message, "delonix-cri: refused to start");
+/// Ends the process with `code`, saying why on stderr and in the log. The one
+/// place this binary writes to the terminal.
+fn exit_with(code: i32, message: &str) -> ! {
+    tracing::error!(error = %message, code, "delonix-cri: exiting");
     eprintln!("delonix-cri: {message}");
-    std::process::exit(2);
+    std::process::exit(code);
+}
+
+/// Refuses to start: a bad argument, ceiling or version.
+fn fail(message: &str) -> ! {
+    exit_with(2, message)
 }
 
 /// The value of `--name <v>` or `--name=<v>` in `args`, if given.
@@ -79,8 +86,6 @@ fn main() {
 
     tracing::info!(%addr, root = %base.display(), "delonix-cri starting");
     if let Err(e) = delonix_cri::serve_blocking(base, &addr, ceiling) {
-        tracing::error!(error = %e, "delonix-cri exited with error");
-        eprintln!("delonix-cri: {e}");
-        std::process::exit(1);
+        exit_with(1, &e.to_string());
     }
 }
