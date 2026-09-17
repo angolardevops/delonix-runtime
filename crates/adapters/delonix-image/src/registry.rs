@@ -115,6 +115,11 @@ pub fn parse_reference(input: &str) -> (String, String, String) {
 }
 
 /// Extracts `key="value"` from a `WWW-Authenticate` header.
+/// A read the registry refuses to authorise (401/403).
+fn is_denied(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN
+}
+
 fn extract(header: &str, key: &str) -> Option<String> {
     let pat = format!("{key}=\"");
     let start = header.find(&pat)? + pat.len();
@@ -296,7 +301,19 @@ impl Client {
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("")
                 .to_string();
-            self.token = Some(self.get_token(&www, None)?);
+            self.token = Some(match self.request_token(&www, None)? {
+                Ok(token) => token,
+                // A read the registry will not authorise: it answers this way for
+                // a repository that does not exist as well as for one these
+                // credentials cannot see (ghcr: 403 on the token), and it will
+                // not say which. The same answer as a 404 on a private one.
+                Err(status) if is_denied(status) => return Err(self.not_visible()),
+                Err(status) => {
+                    return Err(Error::Registry(format!(
+                        "failed to obtain token: HTTP {status}"
+                    )))
+                }
+            });
             let resp = self.send_once(url, accept, from).map_err(reg_err)?;
             return self.check(resp, url);
         }
@@ -335,9 +352,22 @@ impl Client {
                     url.rsplit('/').next().unwrap_or("")
                 )))
             }
+        } else if is_denied(status) {
+            // Reached only with the token already obtained: Docker Hub answers
+            // 401 here for a repository that does not exist.
+            Err(self.not_visible())
         } else {
             Err(Error::Registry(format!("HTTP {status} at {url}")))
         }
+    }
+
+    /// The honest answer to a read the registry refuses to authorise.
+    fn not_visible(&self) -> Error {
+        Error::NotFound(format!(
+            "image {} — it does not exist, or it is private and these credentials \
+             cannot see it (`delonix image login <registry>`)",
+            self.repo
+        ))
     }
 
     /// Requests a token from the authentication service indicated in the 401. With
@@ -345,6 +375,17 @@ impl Client {
     /// of the one indicated by the server — the server grants it if the credentials
     /// allow it.
     fn get_token(&self, www: &str, force_scope: Option<&str>) -> Result<String> {
+        self.request_token(www, force_scope)?
+            .map_err(|status| Error::Registry(format!("failed to obtain token: HTTP {status}")))
+    }
+
+    /// [`Self::get_token`], with a refused token request kept as its HTTP status
+    /// so a read can tell «not allowed» from a broken registry.
+    fn request_token(
+        &self,
+        www: &str,
+        force_scope: Option<&str>,
+    ) -> Result<std::result::Result<String, reqwest::StatusCode>> {
         let realm = extract(www, "realm")
             .ok_or_else(|| Error::Registry("authentication without `realm`".into()))?;
         let scope = match force_scope {
@@ -364,16 +405,13 @@ impl Client {
         }
         let resp = req.send().map_err(reg_err)?;
         if !resp.status().is_success() {
-            return Err(Error::Registry(format!(
-                "failed to obtain token: HTTP {}",
-                resp.status()
-            )));
+            return Ok(Err(resp.status()));
         }
         let v: serde_json::Value = resp.json().map_err(reg_err)?;
         v.get("token")
             .or_else(|| v.get("access_token"))
             .and_then(|t| t.as_str())
-            .map(String::from)
+            .map(|t| Ok(t.to_string()))
             .ok_or_else(|| Error::Registry("authentication response without token".into()))
     }
 
@@ -2036,6 +2074,53 @@ mod tests {
             drop(s2);
             auth_header
         })
+    }
+
+    fn pull_with_token_answer(answer: &'static str) -> delonix_runtime_core::Error {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let handle = serve_one(tx, answer);
+        let port = rx.recv().unwrap();
+        let tmp = std::env::temp_dir().join(format!(
+            "delonix-image-denied-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let store = crate::ImageStore::open(&tmp).unwrap();
+        let err =
+            pull_from_registry_with_creds(&store, &format!("127.0.0.1:{port}/repo:tag"), None)
+                .expect_err("the token was not granted");
+        let _ = handle.join();
+        let _ = std::fs::remove_dir_all(&tmp);
+        err
+    }
+
+    /// A registry refusing the token for a read (ghcr answers 403 for a repository
+    /// that does not exist) is «no such image, or not visible to you» — the same
+    /// answer as a 404 — and not a registry failure that exits 1.
+    #[test]
+    fn a_refused_read_token_is_not_found() {
+        let err = pull_with_token_answer(
+            "HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+        );
+        assert!(
+            matches!(err, delonix_runtime_core::Error::NotFound(_)),
+            "{err:?}"
+        );
+    }
+
+    /// A registry that is actually broken keeps saying so.
+    #[test]
+    fn a_failing_token_endpoint_stays_a_registry_error() {
+        let err = pull_with_token_answer(
+            "HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+        );
+        assert!(
+            matches!(err, delonix_runtime_core::Error::Registry(_)),
+            "{err:?}"
+        );
     }
 
     #[test]
