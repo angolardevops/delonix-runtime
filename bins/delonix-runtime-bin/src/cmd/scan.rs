@@ -1,6 +1,6 @@
 //! `delonix image scan` — SBOM + CVE scan, and the admission policy on pull.
 //!
-//! The engine (`delonix-scan`) does the work: it extracts the SBOM by reading the layers
+//! The engine (`delonix-scanner`) does the work: it extracts the SBOM by reading the layers
 //! from the CAS (apk/dpkg, without mounting or running) and cross-references it with an OSV
 //! advisory database. Here that is wired to the CLI and to the decision points (scan-on-pull).
 //!
@@ -11,7 +11,7 @@
 
 use delonix_image::{Image, ImageStore};
 use delonix_runtime_core::{Error, Result};
-use delonix_scan::{AdvisoryDb, Severity};
+use delonix_scanner::{AdvisoryDb, Severity};
 
 use super::output;
 use super::util::{open_stores, resolve_or_pull, state_root};
@@ -19,7 +19,7 @@ use super::util::{open_stores, resolve_or_pull, state_root};
 /// The embedded placeholder database — 5 entries, so the scan doesn't blow up without a
 /// synced feed. It is NEVER presented as definitive (see `Provenance`).
 const EMBEDDED_ADVISORIES: &str =
-    include_str!("../../../../crates/adapters/delonix-scan/data/advisories.json");
+    include_str!("../../../../crates/adapters/delonix-scanner/data/advisories.json");
 
 struct Provenance {
     label: String,
@@ -119,7 +119,7 @@ pub fn cmd_scan(image: &str, sbom: bool, fail_on: Option<&str>) -> Result<()> {
         Err(e) => return Err(e),
     };
     if sbom {
-        let pkgs = delonix_scan::extract_sbom(&images, &img)?;
+        let pkgs = delonix_scanner::extract_sbom(&images, &img)?;
         let mut t = output::Table::new(&["PACKAGE", "VERSION", "ECOSYSTEM"]);
         for p in &pkgs {
             t.row(vec![
@@ -156,7 +156,7 @@ pub fn cmd_scan(image: &str, sbom: bool, fail_on: Option<&str>) -> Result<()> {
 /// Scans an image and prints the dashboard. Returns the worst severity
 /// found (`None` = none). Reusable by scan-on-pull.
 pub fn scan_image(images: &ImageStore, image: &Image) -> Result<Option<Severity>> {
-    let sbom = delonix_scan::extract_sbom(images, image)?;
+    let sbom = delonix_scanner::extract_sbom(images, image)?;
     let (db, prov) = load_advisories()?;
     let findings = db.scan(&sbom);
 
@@ -190,7 +190,7 @@ pub fn scan_image(images: &ImageStore, image: &Image) -> Result<Option<Severity>
 
     // HONEST provenance: without this, a "no vulnerabilities" against the placeholder
     // database looked like a clean bill of health — a false guarantee.
-    let stale = delonix_scan::db_is_stale(prov.synced_unix, now_unix(), 14);
+    let stale = delonix_scanner::db_is_stale(prov.synced_unix, now_unix(), 14);
     println!(
         "  {}",
         output::dim(&super::po::tf(
@@ -289,7 +289,7 @@ pub fn cmd_scan_update(feed: Option<String>) -> Result<()> {
             .map(|e| e.get("affected").is_some())
             .unwrap_or(false);
     let incoming: Vec<serde_json::Value> = if is_osv {
-        let advs = delonix_scan::advisories_from_osv(&text)?;
+        let advs = delonix_scanner::advisories_from_osv(&text)?;
         eprintln!(
             "{}",
             super::po::tf(

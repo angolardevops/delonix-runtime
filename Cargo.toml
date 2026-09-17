@@ -11,7 +11,7 @@ members = [
     "crates/adapters/delonix-volume",
     "crates/interfaces/delonix-cri",
     "crates/interfaces/delonix-mgmt",
-    "crates/adapters/delonix-scan",
+    "crates/adapters/delonix-scanner",
     "crates/contexts/delonix-security-runtime",
     "crates/providers/delonix-truenas",
     "crates/providers/delonix-proxmox",
@@ -46,7 +46,7 @@ delonix-vm = { path = "crates/adapters/delonix-vm" }
 delonix-volume = { path = "crates/adapters/delonix-volume" }
 delonix-cri = { path = "crates/interfaces/delonix-cri" }
 delonix-mgmt = { path = "crates/interfaces/delonix-mgmt" }
-delonix-scan = { path = "crates/adapters/delonix-scan" }
+delonix-scanner = { path = "crates/adapters/delonix-scanner" }
 delonix-security-runtime = { path = "crates/contexts/delonix-security-runtime" }
 delonix-truenas = { path = "crates/providers/delonix-truenas" }
 delonix-proxmox = { path = "crates/providers/delonix-proxmox" }
