@@ -21,6 +21,25 @@ pub struct Supervision<'a> {
     pub silent_death: &'a str,
 }
 
+/// The operation a failed detached start is reported as.
+const START_CONTEXT: &str = "container start";
+
+/// What the supervisor sends the caller when the first start fails: the error's
+/// MESSAGE, with its own operation in front when that is not a container start.
+///
+/// The caller reports it as one `container start` failure. Sending the error's
+/// full text made the caller wrap it a second time — measured: «system call
+/// `supervisor` failed: system call `container start` failed: nb: …». The class
+/// of the error does not survive the pipe either way; every class that reaches
+/// here exits 1.
+fn handshake_reason(e: &Error) -> String {
+    match e {
+        Error::Runtime { context, message } if *context == START_CONTEXT => message.clone(),
+        Error::Runtime { context, message } => format!("{context}: {message}"),
+        other => other.to_string(),
+    }
+}
+
 /// `--restart` with `-d`: creates the container inside a **detached supervisor**
 /// (one per container, ephemeral — there's still no daemon) and enforces the
 /// restart policy.
@@ -101,7 +120,7 @@ pub fn run_supervised(
                 unsafe {
                     libc::write(wr, b.as_ptr() as *const libc::c_void, 1);
                     if let Err(e) = &started {
-                        let msg = e.to_string();
+                        let msg = handshake_reason(e);
                         let bytes = msg.as_bytes();
                         libc::write(wr, bytes.as_ptr() as *const libc::c_void, bytes.len());
                     }
@@ -187,7 +206,7 @@ pub fn run_supervised(
         unsafe { libc::close(rd) };
         let reason = String::from_utf8_lossy(&reason).trim().to_string();
         return Err(Error::Runtime {
-            context: "supervisor",
+            context: START_CONTEXT,
             message: if reason.is_empty() {
                 sup.silent_death.to_string()
             } else {
@@ -198,4 +217,39 @@ pub fn run_supervised(
     // SAFETY: `rd` is the read end created above; the parent closes its copy once on this path.
     unsafe { libc::close(rd) };
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_start_failure_is_said_once() {
+        let e = Error::Runtime {
+            context: START_CONTEXT,
+            message: "nb: the container's command did not start".into(),
+        };
+        assert_eq!(
+            handshake_reason(&e),
+            "nb: the container's command did not start"
+        );
+        let rebuilt = Error::Runtime {
+            context: START_CONTEXT,
+            message: handshake_reason(&e),
+        };
+        assert_eq!(rebuilt.to_string().matches("system call").count(), 1);
+    }
+
+    #[test]
+    fn another_operation_keeps_its_name() {
+        let e = Error::Runtime {
+            context: "clone",
+            message: "EPERM".into(),
+        };
+        assert_eq!(handshake_reason(&e), "clone: EPERM");
+        assert_eq!(
+            handshake_reason(&Error::Invalid("bad".into())),
+            Error::Invalid("bad".into()).to_string()
+        );
+    }
 }
