@@ -1224,7 +1224,7 @@ fn presence(
                 s.resolve(super::image::image_ref(doc).as_deref().unwrap_or(name))
                     .is_ok(),
             ),
-            Err(e) => ("?".into(), e.to_string()),
+            Err(e) => ("?".into(), delonix_model::Error::from(e).to_string()),
         },
         // An App's identity is its OUTPUT image's ref, same reasoning as Image.
         k::APP => match delonix_oci::ImageStore::open(&root) {
@@ -1232,7 +1232,7 @@ fn presence(
                 s.resolve(super::app::image_ref(doc).as_deref().unwrap_or(name))
                     .is_ok(),
             ),
-            Err(e) => ("?".into(), e.to_string()),
+            Err(e) => ("?".into(), delonix_model::Error::from(e).to_string()),
         },
         k::SECRET => match delonix_state::SecretStore::open(&root) {
             Ok(s) => yes_no(s.list().iter().any(|sec| sec.name == name)),

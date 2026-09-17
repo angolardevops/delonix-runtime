@@ -19,8 +19,8 @@ use crate::registry::{
     parse_reference, push_oci_artifact_with_layer_annotations, registry_client, RegistryClient,
 };
 use crate::ImageStore;
+use crate::{Error, Result};
 use base64::Engine;
-use delonix_model::{Error, Result};
 use delonix_state::write_atomic_mode;
 use ring::rand::SystemRandom;
 use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_ASN1_SIGNING};
@@ -84,15 +84,15 @@ fn p256_point_from_pem(pem: &str) -> Result<Vec<u8>> {
         }
     }
     if b64.is_empty() {
-        return Err(Error::Invalid(
+        return Err(Error::SigningKey(
             "invalid PEM public key (no PUBLIC KEY block)".into(),
         ));
     }
     let der = base64::engine::general_purpose::STANDARD
         .decode(&b64)
-        .map_err(|e| Error::Invalid(format!("invalid base64 public key: {e}")))?;
+        .map_err(|e| Error::SigningKey(format!("invalid base64 public key: {e}")))?;
     if der.len() < 65 || der[der.len() - 65] != 0x04 {
-        return Err(Error::Invalid(
+        return Err(Error::SigningKey(
             "public key does not look like an uncompressed P-256 point".into(),
         ));
     }
@@ -127,9 +127,9 @@ pub fn verify_signature(store: &ImageStore, reference: &str, pubkey_pem: &str) -
     // artifact is unsigned and goes to re-sign it, when the registry was simply
     // unreachable. Absence of the `.sig` tag is a verdict; anything else is an
     // "I could not tell", and the two must not wear the same sentence.
-    let sig_bytes = c.get_manifest(&sig_tag).map_err(|e| match e.into_root() {
+    let sig_bytes = c.get_manifest(&sig_tag).map_err(|e| match e {
         // A 404 on the `.sig` tag is the VERDICT: the artifact is not there.
-        Error::NotFound(_) => Error::Invalid(format!(
+        e if e.is_not_found() => Error::NotSigned(format!(
             "image not signed: no cosign signature for {reference} ({digest})"
         )),
         // Everything else is an "I could not tell", and it used to wear the
@@ -138,13 +138,14 @@ pub fn verify_signature(store: &ImageStore, reference: &str, pubkey_pem: &str) -
         // THE IMAGE, so the operator concludes the artifact is unsigned and
         // goes to re-sign it. On a signature check that is the worst confusion
         // available: absence of proof presented as proof of absence.
-        other => Error::Invalid(format!(
+        other => Error::SignatureUnknown(format!(
             "could not determine whether {reference} ({digest}) is signed — the \
-registry did not answer for {sig_tag}: {other}"
+registry did not answer for {sig_tag}: {}",
+            delonix_model::Error::from(other)
         )),
     })?;
     let sig_manifest: SigManifest = serde_json::from_slice(&sig_bytes)
-        .map_err(|e| Error::Invalid(format!("invalid signature manifest: {e}")))?;
+        .map_err(|e| Error::Signature(format!("invalid signature manifest: {e}")))?;
 
     // 3) + 4) for each layer: payload + signature in the annotation.
     for layer in &sig_manifest.layers {
@@ -160,12 +161,12 @@ registry did not answer for {sig_tag}: {other}"
         }
         // bind the signature to THIS image (anti-reuse).
         let parsed: Payload = serde_json::from_slice(&payload)
-            .map_err(|e| Error::Invalid(format!("invalid signature payload: {e}")))?;
+            .map_err(|e| Error::Signature(format!("invalid signature payload: {e}")))?;
         if strip(&parsed.critical.image.docker_manifest_digest) == hex {
             return Ok(digest);
         }
     }
-    Err(Error::Invalid(format!(
+    Err(Error::Signature(format!(
         "invalid signature: no signature for {reference} matches the given key"
     )))
 }
@@ -201,11 +202,11 @@ fn pem_unwrap(pem: &str, label: &str) -> Result<Vec<u8>> {
         }
     }
     if b64.is_empty() {
-        return Err(Error::Invalid(format!("invalid PEM (no {label} block)")));
+        return Err(Error::SigningKey(format!("invalid PEM (no {label} block)")));
     }
     base64::engine::general_purpose::STANDARD
         .decode(&b64)
-        .map_err(|e| Error::Invalid(format!("invalid base64 in PEM: {e}")))
+        .map_err(|e| Error::SigningKey(format!("invalid base64 in PEM: {e}")))
 }
 
 /// The inverse of [`p256_point_from_pem`]: wraps a 65-byte uncompressed P-256
@@ -215,7 +216,7 @@ fn pem_unwrap(pem: &str, label: &str) -> Result<Vec<u8>> {
 /// framing is exactly the part a visual check would not catch a mistake in.
 fn p256_point_to_pem(point: &[u8]) -> Result<String> {
     if point.len() != 65 || point[0] != 0x04 {
-        return Err(Error::Invalid(
+        return Err(Error::SigningKey(
             "not an uncompressed P-256 point (expected 65 bytes starting with 0x04)".into(),
         ));
     }
@@ -245,11 +246,11 @@ fn ensure_signing_key(path: &Path) -> Result<EcdsaKeyPair> {
     if let Ok(pem) = std::fs::read_to_string(path) {
         let pkcs8 = pem_unwrap(&pem, "PRIVATE KEY")?;
         return EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &pkcs8, &rng).map_err(
-            |e| Error::Invalid(format!("invalid signing key at {}: {e}", path.display())),
+            |e| Error::SigningKey(format!("invalid signing key at {}: {e}", path.display())),
         );
     }
     let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &rng)
-        .map_err(|e| Error::Invalid(format!("could not generate a signing key: {e}")))?;
+        .map_err(|e| Error::SigningKey(format!("could not generate a signing key: {e}")))?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -259,7 +260,7 @@ fn ensure_signing_key(path: &Path) -> Result<EcdsaKeyPair> {
         Some(0o600),
     )?;
     EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, pkcs8.as_ref(), &rng)
-        .map_err(|e| Error::Invalid(format!("just-generated signing key rejected itself: {e}")))
+        .map_err(|e| Error::SigningKey(format!("just-generated signing key rejected itself: {e}")))
 }
 
 /// Builds the cosign-compatible signature target for `reference`: the SAME
@@ -303,7 +304,7 @@ pub fn sign_image(
         match c.get_manifest(&sig_tag) {
             // The tag exists — a signature is already there.
             Ok(_) => {
-                return Err(Error::Invalid(format!(
+                return Err(Error::AlreadySigned(format!(
                     "{reference} ({digest}) is already signed — pass --force to sign it again"
                 )))
             }
@@ -312,9 +313,10 @@ pub fn sign_image(
             // Anything else is "could not tell", and must not read as either verdict —
             // the same distinction `verify_signature` makes on this same read.
             Err(other) => {
-                return Err(Error::Invalid(format!(
+                return Err(Error::SignatureUnknown(format!(
                     "could not determine whether {reference} ({digest}) is already signed — \
-the registry did not answer for {sig_tag}: {other}"
+the registry did not answer for {sig_tag}: {}",
+                    delonix_model::Error::from(other)
                 )))
             }
         }
@@ -345,7 +347,7 @@ the registry did not answer for {sig_tag}: {other}"
     let rng = SystemRandom::new();
     let sig = key_pair
         .sign(&rng, &payload_bytes)
-        .map_err(|e| Error::Invalid(format!("could not sign: {e}")))?;
+        .map_err(|e| Error::Signing(format!("could not sign: {e}")))?;
     let sig_b64 = base64::engine::general_purpose::STANDARD.encode(sig.as_ref());
 
     let mut annotations = BTreeMap::new();
