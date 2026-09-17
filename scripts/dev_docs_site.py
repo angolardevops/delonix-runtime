@@ -471,7 +471,7 @@ blockquote.say-candidate .speaker{background:var(--accent);color:#fff}
   color:var(--code-label);font:600 12px var(--f-body);cursor:pointer}
 .copy:hover{color:#fff;border-color:#3a4555}
 .copy.done{color:#7ee2a8;border-color:#2f5d45}
-.code pre{margin:0;padding:14px 16px 16px;overflow-x:auto;color:var(--code-ink);font:13.5px/1.6 var(--f-mono);
+.code pre{margin:0;padding:14px 16px 22px;overflow-x:auto;color:var(--code-ink);font:13.5px/1.6 var(--f-mono);
   scrollbar-width:thin;scrollbar-color:#3a4555 transparent;color-scheme:dark}
 .code pre::-webkit-scrollbar{height:8px}.code pre::-webkit-scrollbar-thumb{background:#3a4555;border-radius:8px}
 .code pre code{background:none;border:0;padding:0;font:inherit;color:inherit;overflow-wrap:normal}
@@ -520,6 +520,13 @@ td code{font-size:.82em}
   h1{font-size:1.9rem}h2{font-size:1.35rem}
   .searchbtn kbd,.searchbtn .label{display:none}.searchbtn{flex:none;width:38px;justify-content:center;margin-inline:auto 0;padding:0}
   .pager{grid-template-columns:1fr}.pager .next{grid-column:1}
+  .top{gap:8px;padding-inline:12px}
+  .brand{font-size:15px;min-width:0}
+  select.lang{width:78px;padding-inline:4px;text-overflow:ellipsis}
+}
+@media (max-width:480px){
+  .actions .ghbtn{display:none}
+  .brand .word{display:none}
 }
 """
 
@@ -718,12 +725,12 @@ def render_site(out: Path) -> None:
 <body>
 <header class="top">
   <button class="iconbtn menubtn" type="button" aria-label="{html.escape(chrome["menu"])}">{ICON_MENU}</button>
-  <a class="brand" href="index.html" aria-label="{html.escape(chrome["home"])}"><span class="mark">D</span>Delonix Runtime<span class="sep"></span><span class="sub">{html.escape(ui["title"])}</span></a>
+  <a class="brand" href="index.html" aria-label="{html.escape(chrome["home"])}"><span class="mark">D</span><span class="word">Delonix Runtime</span><span class="sep"></span><span class="sub">{html.escape(ui["title"])}</span></a>
   <button class="searchbtn" type="button">{ICON_SEARCH}<span class="label">{html.escape(ui["search_ph"])}</span><kbd>Ctrl K</kbd></button>
   <div class="actions">
     <select class="lang" id="lang" aria-label="Language">{options}</select>
     <button class="iconbtn themebtn" type="button" aria-label="{html.escape(chrome["theme"])}" title="{html.escape(chrome["theme"])}">{ICON_THEME}</button>
-    <a class="iconbtn" href="{REPO}" target="_blank" rel="noopener" aria-label="{chrome["github"]}" title="{chrome["github"]}">{ICON_GITHUB}</a>
+    <a class="iconbtn ghbtn" href="{REPO}" target="_blank" rel="noopener" aria-label="{chrome["github"]}" title="{chrome["github"]}">{ICON_GITHUB}</a>
   </div>
 </header>
 <div class="frame">
