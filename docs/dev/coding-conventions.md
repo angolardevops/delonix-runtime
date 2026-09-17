@@ -786,4 +786,4 @@ Before you open the PR, go through the list:
 
 ---
 
-**Next:** [Contribution workflow](contributing-workflow.md) — how a change is sent: worktrees, version alignment, language rule, ADRs, commits and pull requests.
+**Next:** [Adding a Kind](adding-a-kind.md) — the table, the schema and the reconciler wiring a new declarative Kind needs, worked through a real one.

@@ -491,4 +491,4 @@ Read [ADR-0008](../adr/0008-proxmox-vm-backend.md) first; it is the template. In
 
 ---
 
-**Next:** [Coding conventions](coding-conventions.md) — how code in this repository must be written, each rule tagged with the gate or decision behind it.
+**Next:** [Troubleshooting](troubleshooting.md) — a symptom-first index for the gates and host traps you may hit while building and testing.

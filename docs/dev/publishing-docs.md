@@ -1,6 +1,6 @@
 # Publishing the documentation
 
-**Before you read:** [Contribution workflow](contributing-workflow.md) and the [generated vs hand-written table](project-structure.md#generated-vs-hand-written) in Project structure.
+**Before you read:** [Contribution workflow](contributing-workflow.md), [Releases and stability](releases-and-stability.md) (what a pushed tag does — this page's § *What happens at release time* is its documentation half) and the [generated vs hand-written table](project-structure.md#generated-vs-hand-written) in Project structure.
 
 Documentation in this repository is either **generated from the code** (and then checked by a gate)
 or **written by hand** (and then reviewed). This page explains which is which, how each is

@@ -109,7 +109,9 @@ PAGES = [
     ("setup", ["environment.md", "build-and-test.md"]),
     ("architecture", ["project-structure.md", "architecture.md", "crates.md", "system-design-interview.md"]),
     ("images", ["delonixfile-and-vmfile.md", "microvm-setup.md"]),
-    ("contributing", ["coding-conventions.md", "contributing-workflow.md", "publishing-docs.md"]),
+    ("operate", ["troubleshooting.md"]),
+    ("contributing", ["coding-conventions.md", "adding-a-kind.md", "contributing-workflow.md",
+                      "releases-and-stability.md", "publishing-docs.md"]),
     ("reference", ["cloud-native-standards.md", "environment-variables.md", "glossary.md"]),
 ]
 
@@ -316,13 +318,13 @@ def sections(body: str, title: str, url: str) -> list[dict]:
 
 GROUP_NAMES = {
     "en": {"overview": "Overview", "start": "Get started", "foundations": "Foundations", "setup": "Set up & build",
-           "architecture": "Architecture", "images": "Images & microVMs", "contributing": "Contributing", "reference": "Reference"},
+           "architecture": "Architecture", "images": "Images & microVMs", "operate": "Operate & debug", "contributing": "Contributing", "reference": "Reference"},
     "pt-AO": {"overview": "Visão geral", "start": "Começar", "foundations": "Fundamentos", "setup": "Preparar e compilar",
-              "architecture": "Arquitectura", "images": "Imagens e microVMs", "contributing": "Contribuir", "reference": "Referência"},
+              "architecture": "Arquitectura", "images": "Imagens e microVMs", "operate": "Operar e diagnosticar", "contributing": "Contribuir", "reference": "Referência"},
     "fr-FR": {"overview": "Vue d'ensemble", "start": "Démarrer", "foundations": "Fondamentaux", "setup": "Préparer et compiler",
-              "architecture": "Architecture", "images": "Images et microVM", "contributing": "Contribuer", "reference": "Référence"},
+              "architecture": "Architecture", "images": "Images et microVM", "operate": "Exploiter et diagnostiquer", "contributing": "Contribuer", "reference": "Référence"},
     "zh-CN": {"overview": "概览", "start": "入门", "foundations": "基础", "setup": "环境与构建",
-              "architecture": "架构", "images": "镜像与 microVM", "contributing": "贡献", "reference": "参考"},
+              "architecture": "架构", "images": "镜像与 microVM", "operate": "运维与排障", "contributing": "贡献", "reference": "参考"},
 }
 CHROME = {
     "en": {"theme": "Toggle colour theme", "menu": "Menu", "github": "GitHub", "home": "Handbook home"},

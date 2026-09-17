@@ -202,4 +202,4 @@ injection, path traversal — do not open a public issue or PR. Follow [`SECURIT
 
 ---
 
-**Next:** [Publishing the documentation](publishing-docs.md) — how the site and this handbook are generated, gated and published, and what your PR must regenerate.
+**Next:** [Releases and stability](releases-and-stability.md) — what a pushed tag does, and what the CLI and manifest schema promise not to break.
