@@ -40,6 +40,20 @@ fn handshake_reason(e: &Error) -> String {
     }
 }
 
+/// Whether a policy restart should go ahead, given the container's record as it
+/// is NOW.
+///
+/// It stops when the record is gone (`rm -f`), when the user asked for `stop`,
+/// and when the container is already live — a `container start` in the backoff
+/// window brought up its own incarnation with its own supervisor, and restarting
+/// here too would run the command twice in one container.
+fn resume_restart(current: Option<&Container>) -> bool {
+    match current {
+        None => false,
+        Some(cur) => !cur.stopped_by_user && !cur.is_live(),
+    }
+}
+
 /// `--restart` with `-d`: creates the container inside a **detached supervisor**
 /// (one per container, ephemeral — there's still no daemon) and enforces the
 /// restart policy.
@@ -166,10 +180,8 @@ pub fn run_supervised(
             }
             // Desired state trumps the policy: if the record disappeared (`rm -f`)
             // or the user asked for `stop`, don't resurrect — that's docker's semantics.
-            match store.load(&c.id) {
-                Err(_) => std::process::exit(0),
-                Ok(cur) if cur.stopped_by_user => std::process::exit(0),
-                Ok(_) => {}
+            if !resume_restart(store.load(&c.id).ok().as_ref()) {
+                std::process::exit(0);
             }
             restarts += 1;
             // The previous incarnation's port frees itself on `stop`; if it's
@@ -178,6 +190,16 @@ pub fn run_supervised(
             // crash-loops can't burn the node.
             let backoff = std::cmp::min(1u64 << std::cmp::min(restarts, 5), 32);
             std::thread::sleep(std::time::Duration::from_secs(backoff));
+            // Ask again after the wait. The desired state is most likely to change
+            // DURING it — a crash-looping container spends nearly all its time
+            // here — and asking only before made `stop` a no-op (measured: RESTARTS
+            // kept climbing after the stop, because `create_with` saved this copy of
+            // the record over the flag the stop had just written). A `start` in the
+            // same window left TWO incarnations running, one of them surviving
+            // `rm -f`.
+            if !resume_restart(store.load(&c.id).ok().as_ref()) {
+                std::process::exit(0);
+            }
         }
     }
 
@@ -238,6 +260,36 @@ mod tests {
             message: handshake_reason(&e),
         };
         assert_eq!(rebuilt.to_string().matches("system call").count(), 1);
+    }
+
+    #[test]
+    fn a_restart_goes_ahead_only_for_a_record_nobody_has_claimed() {
+        let base = Container::new(
+            "id1".into(),
+            "c".into(),
+            "alpine".into(),
+            vec!["true".into()],
+            "64M".into(),
+        );
+        assert!(
+            resume_restart(Some(&base)),
+            "a dead, unstopped container restarts"
+        );
+        assert!(!resume_restart(None), "a removed container stays removed");
+
+        let mut stopped = base.clone();
+        stopped.stopped_by_user = true;
+        assert!(!resume_restart(Some(&stopped)), "a stop is honoured");
+
+        // A `start` in the backoff window: the record now points at a live
+        // process. This test process is one.
+        let mut started = base.clone();
+        started.pid = Some(std::process::id() as i32);
+        started.pid_starttime = delonix_runtime_core::proc_starttime(std::process::id() as i32);
+        assert!(
+            !resume_restart(Some(&started)),
+            "a live incarnation is not doubled"
+        );
     }
 
     #[test]
